@@ -18,6 +18,7 @@ from .delegate import (
     _multi_agent_worker_process_timeline,
     _multi_agent_worker_tool,
 )
+from .delivery import _multi_agent_delivery_status_partial
 from .escalation import (
     _multi_agent_blocking_escalate,
     _multi_agent_blocking_escalate_multi,
@@ -72,6 +73,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_coordinate": (
         "刷新重建（P2）：协调模式 team_synthesis_preview DURABLE → teamSynthesisPreview（同 key 保最新）",
         _multi_agent_coordinate,
+    ),
+    "multi_agent_delivery_status_partial": (
+        "交付状态结构化：delivery_status DURABLE → deliveryStatus（同 execution_id 保最新；"
+        "已交付文件 + 缺口 + bind_local_folder 行动项随卡重建）",
+        _multi_agent_delivery_status_partial,
     ),
     "multi_agent_team_notes": (
         "多 Agent·通·便签墙：并行队员贴 decision/heads_up/claim 便签，折到 teamNotes（按序去重，与图节点正交）",

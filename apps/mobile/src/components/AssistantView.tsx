@@ -60,6 +60,11 @@ export interface TeamProjection {
    *  (`team_note_posted`), in post order — rendered by {@link TeamView}. Optional so the promo
    *  still (which builds team from a truncated vector) and legacy callers keep compiling. */
   teamNotes?: ProjectedTeamNote[];
+  /** 交付状态（`delivery_status`，能力闸门与交付诚实性）：delegate 收尾的结构化交付对账，
+   *  由 {@link TeamView} 在 partial / blocked 时渲染。Optional（旧调用方 / promo 兼容）。 */
+  deliveryStatus?:
+    | import("@agentcore/contract-types").DeliveryStatusPayload
+    | null;
   /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
   status?: TurnStatus | null;
   /** 阻塞式求决策 (②): forwarded straight to {@link TeamView} via the `{...team}` spread so a

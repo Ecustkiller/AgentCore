@@ -4,7 +4,7 @@
 1. 匹配器契约：写法差异不误杀（宽松匹配）、凭空来源拦截（严格兜底）、短出处 / 3-gram 概括
    写法 / 待核实标记不参检；
 2. 管线契约：opening / 续辩 / 质询作答成稿的【已核实·X】对不上检索语料 → 回炉一次
-   （reset + [系统提示] 反馈）；二次违规放行；本方 assistant 旧发言不算语料（不能自我洗白）；
+   （reset + [系统提示] 反馈）；二次违规剥离降级为【待核实·推断】；本方 assistant 旧发言不算语料（不能自我洗白）；
 3. 装配契约：debater_task payload 携 ``source_grounding_check=True``（opening 经 RunSpec 链路）。
 """
 
@@ -18,6 +18,8 @@ from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, LLMResponse, TokenUsage
 from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
 from agentcore.runtime.debate.evidence_guard import (
+    demote_verified_tags,
+    extract_verified_tags,
     format_source_grounding_steer,
     is_source_grounded,
     normalize_evidence_text,
@@ -72,6 +74,24 @@ def test_ungrounded_verified_tags_ignores_pending_markers():
     speech = "主张 A【待核实·推断】；主张 B【已核实·街访数据】。"
     out = ungrounded_verified_tags(speech, "笔记里没有那个出处")
     assert out == ["【已核实·街访数据】"]
+
+
+def test_extract_and_demote_unclosed_verified_tags():
+    """残缺未闭合标签（无】）可被抽取，并降级为【待核实·推断】。"""
+    speech = "结辩胜负手【已核实·新黄河/腾讯新闻、商标"
+    found = extract_verified_tags(speech)
+    assert any(t.startswith("【已核实·") and not t.endswith("】") for t in found)
+    demoted = demote_verified_tags(speech, sorted(found))
+    assert "【已核实·" not in demoted
+    assert demoted.endswith("【待核实·推断】") or "【待核实·推断】" in demoted
+
+
+def test_unclosed_tag_is_ungrounded():
+    """未闭合残缺一律视为违规（无法解析可靠出处）。"""
+    speech = "主张【已核实·街访"
+    out = ungrounded_verified_tags(speech, "街访数据在笔记里")
+    assert len(out) == 1
+    assert out[0].startswith("【已核实·")
 
 
 def test_source_grounding_steer_copy():
@@ -207,8 +227,8 @@ def test_fabricated_source_reworks_once_then_passes():
     assert "【已核实·街访数据】" in llm.last_user
 
 
-def test_second_violation_passes_through():
-    """回炉后仍违规 → 放行第二稿（不第三次调用）。"""
+def test_second_violation_demotes_verified_tags():
+    """回炉后仍违规 → 剥离【已核实】降级为【待核实·推断】后放行（O2）。"""
     bad = "### 民意支持\n38% 受访者认同【已核实·街访数据】。"
     llm = _SequenceDraftLLM([bad, bad])
     sink = _FakeSink()
@@ -219,8 +239,9 @@ def test_second_violation_passes_through():
     speech, rounds = _run_pipeline(llm, sink, messages)
     assert llm.stream_calls == 2
     assert rounds == 2
-    assert speech == bad
-    assert len(_resets(sink)) == 1
+    assert "【已核实·街访数据】" not in speech
+    assert "【待核实·推断】" in speech
+    assert len(_resets(sink)) >= 2
 
 
 def test_own_prior_speech_does_not_self_whitelist():

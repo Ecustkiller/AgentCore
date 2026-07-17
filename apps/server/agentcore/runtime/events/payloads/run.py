@@ -193,6 +193,45 @@ class TeamSynthesisPreviewPayload(WirePayload):
     in_progress: bool
 
 
+DeliveryState = Literal["delivered", "partial", "blocked"]
+
+
+class DeliveryGap(WirePayload):
+    """One undelivered piece in the wrap-up reconciliation (交付诚实性): the worker
+    ``role`` it belongs to (or a batch-level label like「验收」) + a one-line
+    ``description`` of what never landed (contract shortfall / degraded handoff /
+    completion criteria unmet / failed worker)."""
+
+    role: str
+    description: str
+
+
+class DeliveryAction(WirePayload):
+    """One user action that would close a delivery gap. ``kind`` is a widened string
+    on the wire (like ``ToolPhase``) so the backend can add kinds without a client
+    bump — known: ``bind_local_folder`` (云端无执行环境 → 绑定本地文件夹后可运行生成);
+    unknown kinds render as a plain hint."""
+
+    kind: str
+    description: str
+
+
+class DeliveryStatusPayload(WirePayload):
+    """交付状态（能力闸门与交付诚实性）: the structured delivery reconciliation a
+    delegate batch emits at wrap-up — 已交付文件 / 缺口 / 待用户操作 — so the client
+    renders an honest delivery card instead of mining the CEO's prose. Folds keep the
+    LATEST per ``execution_id`` (reflects the most recent batch's reconciliation).
+    ``state``: delivered = 无缺口且有落盘产物; partial = 有产物也有缺口;
+    blocked = 有缺口且无落盘产物."""
+
+    execution_id: str
+    state: DeliveryState
+    summary: str
+    delivered_files: list[str]
+    gaps: list[DeliveryGap]
+    actions: list[DeliveryAction]
+
+
 class UserInterjectionAttachment(WirePayload):
     """Attachment metadata on a mid-flight interjection (no inline text body)."""
 

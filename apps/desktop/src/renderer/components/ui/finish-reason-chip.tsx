@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertTriangle,
   CircleOff,
   CircleSlash,
   type LucideIcon,
@@ -34,6 +35,11 @@ export const FINISH_REASON_META: Record<
   unproductive: {
     label: "无有效进展 · 提前收尾",
     Icon: CircleOff,
+    tone: "muted",
+  },
+  error: {
+    label: "调用失败",
+    Icon: AlertTriangle,
     tone: "muted",
   },
 };

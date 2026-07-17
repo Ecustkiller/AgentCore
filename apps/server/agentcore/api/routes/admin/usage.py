@@ -13,6 +13,7 @@ from agentcore.api.schemas import (
     AdminUsageSummary,
     AdminUserCostLine,
     DailyCost,
+    ModelCostLine,
     RoleCostLine,
     UsageWindow,
 )
@@ -48,6 +49,7 @@ async def usage_summary(
     month = await repo.aggregate_for_window(since=month_start)
     month_by_user = await repo.aggregate_by_user_for_window(since=month_start, limit=_TOP_USERS)
     month_by_role = await repo.aggregate_by_role_for_window(since=month_start)
+    month_by_model = await repo.aggregate_by_model_for_window(since=month_start)
 
     # 近 7 日趋势: zero-fill the daily map into a fixed, oldest-first series ending
     # today so the sparkline is a stable length even for sparse spend.
@@ -89,6 +91,16 @@ async def usage_summary(
                 turns=int(row["turns"]),
             )
             for row in month_by_role
+        ],
+        month_by_model=[
+            ModelCostLine(
+                model=row["model"],
+                calls=int(row["calls"]),
+                tokens_total=int(row["tokens_total"]),
+                cost_total=int(row["cost_total"]),
+                cost_estimated_total=int(row.get("cost_estimated_total", 0) or 0),
+            )
+            for row in month_by_model
         ],
         recent_daily_cost=recent_daily_cost,
         cny_per_usd=settings.cny_per_usd,

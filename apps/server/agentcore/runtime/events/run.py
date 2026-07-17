@@ -405,6 +405,39 @@ def team_synthesis_preview(
     )
 
 
+def delivery_status(
+    *,
+    execution_id: str,
+    state: str,
+    summary: str,
+    delivered_files: list[str],
+    gaps: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+) -> SSEEvent:
+    """交付状态（能力闸门与交付诚实性）：delegate 批次收尾的结构化交付对账。
+
+    Deterministic (template-only, no LLM), built from the wrap-up signals the engine
+    already has — worker ``files_touched``, contract / handoff gaps (含 degraded 交接、
+    artifacts 对账缺口、completion_criteria 未满足), and derived user actions (如云端无
+    执行环境 → ``bind_local_folder``). ``state`` ∈ delivered / partial / blocked.
+    ``gaps`` items are ``{role, description}``; ``actions`` items are
+    ``{kind, description}`` (kind 当前含 ``bind_local_folder``，前端未知 kind 按普通提示
+    渲染). DURABLE：落 journal；folds 同 ``execution_id`` 保最新，交付状态卡刷新后重建。
+    Must NOT ride ``content_delta``（终稿正文与交付对账分离——终稿纪律的结构化搭档）。
+    """
+    return SSEEvent(
+        type=EventType.DELIVERY_STATUS,
+        payload={
+            "execution_id": execution_id,
+            "state": state,
+            "summary": summary,
+            "delivered_files": delivered_files,
+            "gaps": gaps,
+            "actions": actions,
+        },
+    )
+
+
 def user_interjection(
     *,
     interjection_id: str,

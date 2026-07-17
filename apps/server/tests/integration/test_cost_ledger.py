@@ -150,3 +150,105 @@ async def test_record_runs_empty_is_noop(session_factory):
             user_id=new_id(), conversation_id=new_id(), message_id=new_id(), runs=[]
         )
     assert written == 0
+
+
+def _call(
+    call_id: str,
+    *,
+    run_id: str,
+    model: str,
+    total: int = 1000,
+    estimated: int = 0,
+    input_tokens: int = 100,
+    output_tokens: int = 50,
+) -> dict:
+    return {
+        "call_id": call_id,
+        "run_id": run_id,
+        "parent_run_id": None,
+        "agent_id": run_id,
+        "role": "captain",
+        "model": model,
+        "tokens": {
+            "input": input_tokens,
+            "output": output_tokens,
+            "reasoning": 0,
+            "cache_hit": 0,
+            "cache_miss": input_tokens,
+        },
+        "cost": {"input": total // 2, "cached": 0, "output": total // 2, "total": total},
+        "cost_total_nano": total,
+        "cost_estimated_nano": estimated,
+        "currency": "USD",
+        "duration_ms": 100,
+    }
+
+
+async def test_aggregate_by_model_groups_cost_calls(session_factory):
+    """Per-model payroll must GROUP BY ``cost_calls.model`` (not ``cost_events``).
+
+    A single run with two models must attribute each call to its own model — the
+    reason we forbid aggregating ``cost_events.model`` (first-call only).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    user_id, conv_id, msg_id = new_id(), new_id(), new_id()
+    run_id = new_id()
+    other_user = new_id()
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        await repo.record_calls(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            calls=[
+                _call(new_id(), run_id=run_id, model="deepseek-v4-pro", total=5000, input_tokens=200),
+                _call(
+                    new_id(),
+                    run_id=run_id,
+                    model="deepseek-v4-flash",
+                    total=1000,
+                    input_tokens=80,
+                    output_tokens=20,
+                ),
+                _call(new_id(), run_id=run_id, model="deepseek-v4-pro", total=3000, input_tokens=100),
+            ],
+        )
+        # Another account's spend must not leak into a scoped aggregate.
+        await repo.record_calls(
+            user_id=other_user,
+            conversation_id=new_id(),
+            message_id=new_id(),
+            calls=[_call(new_id(), run_id=new_id(), model="deepseek-v4-pro", total=99999)],
+        )
+
+    since = datetime.now(UTC) - timedelta(days=1)
+    async with session_factory() as session:
+        rows = await CostEventRepository(session).aggregate_by_model_for_window(
+            user_id=user_id, since=since
+        )
+
+    assert [r["model"] for r in rows] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+    by_model = {r["model"]: r for r in rows}
+    assert by_model["deepseek-v4-pro"] == {
+        "model": "deepseek-v4-pro",
+        "calls": 2,
+        "tokens_total": 400,  # (200+50) + (100+50)
+        "cost_total": 8000,
+        "cost_estimated_total": 0,
+    }
+    assert by_model["deepseek-v4-flash"] == {
+        "model": "deepseek-v4-flash",
+        "calls": 1,
+        "tokens_total": 100,  # 80+20
+        "cost_total": 1000,
+        "cost_estimated_total": 0,
+    }
+
+    # Platform-wide includes the other user's pro spend.
+    async with session_factory() as session:
+        platform = await CostEventRepository(session).aggregate_by_model_for_window(since=since)
+    platform_by = {r["model"]: r for r in platform}
+    assert platform_by["deepseek-v4-pro"]["cost_total"] == 8000 + 99999
+    assert platform_by["deepseek-v4-pro"]["calls"] == 3

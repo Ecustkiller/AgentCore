@@ -108,18 +108,18 @@ describe("isRetriableStreamError", () => {
 describe("errorActionForCode", () => {
   it("routes missing and invalid keys to the model-config page", () => {
     expect(errorActionForCode("LLM_KEY_REQUIRED")).toEqual({
-      label: "去配置",
+      label: "去设置",
       href: "/more/model",
     });
     expect(errorActionForCode("LLM_KEY_INVALID")).toEqual({
-      label: "去配置",
+      label: "去设置",
       href: "/more/model",
     });
   });
 
   it("routes FREE_TIER_EXHAUSTED to model config (conversion CTA)", () => {
     expect(errorActionForCode("FREE_TIER_EXHAUSTED")).toEqual({
-      label: "去配置",
+      label: "去设置",
       href: "/more/model",
     });
     const err = new StreamError("http", 429, {
@@ -131,13 +131,16 @@ describe("errorActionForCode", () => {
     );
     expect(isRetriableStreamError(err)).toBe(false);
     expect(streamErrorAction(err)).toEqual({
-      label: "去配置",
+      label: "去设置",
       href: "/more/model",
     });
   });
 
-  it("offers no config action for codes fixed by retry / off-app", () => {
-    expect(errorActionForCode("LLM_INSUFFICIENT_BALANCE")).toBeNull();
+  it("routes balance errors to settings; quota stays null", () => {
+    expect(errorActionForCode("LLM_INSUFFICIENT_BALANCE")).toEqual({
+      label: "去设置",
+      href: "/more/model",
+    });
     expect(errorActionForCode("QUOTA_EXCEEDED")).toBeNull();
     expect(errorActionForCode(undefined)).toBeNull();
   });
@@ -147,7 +150,7 @@ describe("errorActionForCode", () => {
       streamErrorAction(
         new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" }),
       ),
-    ).toEqual({ label: "去配置", href: "/more/model" });
+    ).toEqual({ label: "去设置", href: "/more/model" });
     expect(streamErrorAction(new Error("boom"))).toBeNull();
   });
 });

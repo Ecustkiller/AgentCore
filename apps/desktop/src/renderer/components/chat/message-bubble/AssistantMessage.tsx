@@ -1,3 +1,4 @@
+import { DeliveryStatusCard } from "@/components/chat/DeliveryStatusCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { SourceCards } from "@/components/chat/SourceCards";
@@ -16,9 +17,12 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
 import {
+  connectivityEscalationSuffix,
   degradedFinishChipLabel,
   errorActionForCode,
   formatAssistantErrorMessage,
+  isConnectivityErrorCode,
+  syntheticErrorForEmptyFailure,
 } from "@/lib/errors";
 import {
   fileArtifactsFromExecution,
@@ -35,7 +39,11 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { ExecutionScopeContext, useMessageExecution } from "@/stores/execution";
+import {
+  ExecutionScopeContext,
+  useExecutionStore,
+  useMessageExecution,
+} from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
@@ -58,6 +66,11 @@ function MultiAgentFileArtifacts({
 }) {
   const execution = useMessageExecution(messageId);
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 交付状态（能力闸门与交付诚实性）：delegate 收尾的结构化交付对账（同 execution_id
+  // 保最新）。缺口/待操作卡渲染在产出文件卡上方——诚实缺口先于清单。
+  const deliveryStatus = useExecutionStore(
+    (s) => s.byId[messageId]?.deliveryStatus ?? null,
+  );
   const artifacts = useMemo(
     () =>
       mergeArtifacts(
@@ -67,11 +80,19 @@ function MultiAgentFileArtifacts({
     [process, execution],
   );
   return (
-    <FileArtifactsCard
-      artifacts={artifacts}
-      conversationId={conversationId}
-      turnKey={messageId}
-    />
+    <>
+      {deliveryStatus && (
+        <DeliveryStatusCard
+          status={deliveryStatus}
+          conversationId={conversationId}
+        />
+      )}
+      <FileArtifactsCard
+        artifacts={artifacts}
+        conversationId={conversationId}
+        turnKey={messageId}
+      />
+    </>
   );
 }
 
@@ -104,9 +125,20 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const cachedTurn = useUsageStore((s) => s.messageCosts[message.id] ?? null);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
-  const errorAction = message.error
-    ? errorActionForCode(message.error.code)
+  const finishReason = !message.isStreaming
+    ? (message.finishReason ?? message.runs?.finishReason)
+    : undefined;
+  const displayError =
+    message.error ??
+    (!message.isStreaming && !(message.content ?? "").trim()
+      ? syntheticErrorForEmptyFailure(finishReason)
+      : null);
+  const errorAction = displayError
+    ? errorActionForCode(displayError.code)
     : null;
+  const showRetry =
+    !!displayError &&
+    (isConnectivityErrorCode(displayError.code) || !errorAction);
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const captainContext = message.captainContext ?? [];
@@ -148,9 +180,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         : [],
     [message.executionId, message.process],
   );
-  const finishReason = !message.isStreaming
-    ? (message.finishReason ?? message.runs?.finishReason)
-    : undefined;
   const money =
     pickCostMoney(message.cost) ??
     (cachedTurn
@@ -279,7 +308,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         reason={finishReason}
         diagnosisLabel={degradedFinishChipLabel(
           message.error?.context?.empty_diagnosis,
-          message.error?.message,
+          displayError?.message ?? message.error?.message,
         )}
       />
       {message.turnWarning && (
@@ -287,11 +316,12 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       )}
       {turnBody}
       <EmptyInterruptedRecovery message={message} />
-      {message.error && (
+      {displayError && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-            {formatAssistantErrorMessage(message.error)}
+            {formatAssistantErrorMessage(displayError)}
+            {connectivityEscalationSuffix(displayError.code, message.id)}
           </p>
           {errorAction && (
             <Button
@@ -303,14 +333,16 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
               {errorAction.label}
             </Button>
           )}
-          <Button
-            variant="danger"
-            className="shrink-0 border border-destructive/40"
-            icon={<RefreshCw size={13} />}
-            onClick={handleRegenerate}
-          >
-            重新生成
-          </Button>
+          {showRetry && (
+            <Button
+              variant="danger"
+              className="shrink-0 border border-destructive/40"
+              icon={<RefreshCw size={13} />}
+              onClick={handleRegenerate}
+            >
+              重试
+            </Button>
+          )}
         </div>
       )}
       {message.executionId === null ? (

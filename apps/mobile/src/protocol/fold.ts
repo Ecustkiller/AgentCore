@@ -26,6 +26,7 @@ import type {
   DebateRoundStartedPayload,
   DelegationAuthorizationRequiredPayload,
   DelegationAuthorizationResolvedPayload,
+  DeliveryStatusPayload,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
   FollowupsGeneratedPayload,
@@ -281,6 +282,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let crossExamEnabled = false;
   let debateOpening: string | null = null;
   let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+  let deliveryStatus: DeliveryStatusPayload | null = null;
   let turnWarning: string | null = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
   const teamNotes: ProjectedTeamNote[] = [];
@@ -872,6 +874,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
         break;
       }
+      case "delivery_status": {
+        // 交付状态：同 execution_id 保最新（后写覆盖），镜像 oracle / 桌面 fold。
+        deliveryStatus = ev.payload as DeliveryStatusPayload;
+        break;
+      }
       case "user_interjection": {
         const p = ev.payload as {
           interjection_id?: string;
@@ -979,6 +986,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     crossExamEnabled,
     debateOpening,
     teamSynthesisPreview,
+    deliveryStatus,
     turnWarning,
     teamNotes,
     userInterjections,

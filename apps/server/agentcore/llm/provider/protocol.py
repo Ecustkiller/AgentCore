@@ -9,6 +9,11 @@ from typing import Literal, Protocol
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 2.0
 BACKOFF_MULTIPLIER = 2.0
+# Connect-class failures (ConnectTimeout / ConnectError): fail fast — 1 retry,
+# 1s backoff (worst case ≈ connect_timeout + 1s + connect_timeout ≈ 21s with
+# the 10s connect ceiling). Read timeout / 5xx keep MAX_RETRIES above.
+CONNECT_MAX_RETRIES = 2
+CONNECT_INITIAL_BACKOFF = 1.0
 
 
 @dataclass

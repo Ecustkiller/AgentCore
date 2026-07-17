@@ -410,6 +410,7 @@
       "workers": [],
       "in_progress": true
     },
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": [

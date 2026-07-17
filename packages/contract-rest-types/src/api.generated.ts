@@ -438,14 +438,16 @@ export interface paths {
         };
         /**
          * User Detail
-         * @description 用户详情下钻 (用户管理 P0): one account's record + its own usage (today / month
-         *     / 7-day trend / by-role) + recent conversations + recent turn activity.
+         * @description 用户详情下钻 (用户管理 P0): one account's record + configured model names +
+         *     its own usage (today / month / 7-day trend / by-role / by-model) + recent
+         *     conversations + recent turn activity.
          *
          *     The per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped
-         *     to one account (``cost_events.user_id``) — composed with the account's recent
-         *     conversation roster (message counts batched, no N+1) and its recent turns (each
-         *     carries ``conversation_id`` to drill into 会话复盘). Admin cross-user; 404 for an
-         *     unknown id. Reuses the per-user cost aggregates already serving ``/v1/usage/summary``.
+         *     to one account — composed with the account's recent conversation roster (message
+         *     counts batched, no N+1) and its recent turns (each carries ``conversation_id`` to
+         *     drill into 会话复盘). Configured models come from ``user_llm_keys`` (names only —
+         *     never the API key). Per-model stats scan ``cost_calls`` (last 30 days). Admin
+         *     cross-user; 404 for an unknown id.
          */
         get: operations["user_detail_v1_admin_users__user_id__detail_get"];
         put?: never;
@@ -4520,6 +4522,8 @@ export interface components {
             /** Cny Per Usd */
             cny_per_usd: number;
             month: components["schemas"]["UsageWindow"];
+            /** Month By Model */
+            month_by_model: components["schemas"]["ModelCostLine"][];
             /** Month By Role */
             month_by_role: components["schemas"]["RoleCostLine"][];
             /** Month By User */
@@ -4552,22 +4556,29 @@ export interface components {
          * @description One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).
          *
          *     Stitches the per-user views an operator needs to understand an account: the
-         *     full record (``user``), this account's usage (today/month/trend/by-role — the
-         *     per-user counterpart of ``AdminUsageSummary``, scoped via ``cost_events.user_id``),
+         *     full record (``user``), configured chat/background model names (from
+         *     ``user_llm_keys`` — never the API key), this account's usage (today/month/
+         *     trend/by-role/by-model — the per-user counterpart of ``AdminUsageSummary``),
          *     its recent conversations, and its recent turn activity (``turn_metrics``, each
          *     drillable into 会话复盘). Money is integer nano-USD; the client folds the single
          *     ``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).
          */
         AdminUserDetail: {
+            /** Background Model */
+            background_model?: string | null;
             /** Billing Mode */
             billing_mode: string;
             /** Cny Per Usd */
             cny_per_usd: number;
             /** Conversations */
             conversations: components["schemas"]["AdminConversationLine"][];
+            /** Default Model */
+            default_model?: string | null;
             month: components["schemas"]["UsageWindow"];
             /** Month By Role */
             month_by_role: components["schemas"]["RoleCostLine"][];
+            /** Recent By Model */
+            recent_by_model: components["schemas"]["ModelCostLine"][];
             /** Recent Daily Cost */
             recent_daily_cost: components["schemas"]["DailyCost"][];
             /** Recent Turns */
@@ -6606,6 +6617,31 @@ export interface components {
             required: boolean;
         };
         /**
+         * ModelCostLine
+         * @description One model's call-level spend over a window — admin per-model payroll.
+         *
+         *     Aggregated from ``cost_calls`` (``GROUP BY model``), never from
+         *     ``cost_events.model`` (that column only records the run's first call; multi-model
+         *     runs would mis-attribute). Money is integer nano-USD; ``tokens_total`` is
+         *     ``SUM(input + output + reasoning)``. The client formats ¥ from the summary's
+         *     single ``cny_per_usd``.
+         */
+        ModelCostLine: {
+            /** Calls */
+            calls: number;
+            /**
+             * Cost Estimated Total
+             * @default 0
+             */
+            cost_estimated_total: number;
+            /** Cost Total */
+            cost_total: number;
+            /** Model */
+            model: string;
+            /** Tokens Total */
+            tokens_total: number;
+        };
+        /**
          * MountSharedSpaceRequest
          * @description Mount a shared space into a cloud conversation as ``shared/<alias>/``.
          */
@@ -7419,8 +7455,11 @@ export interface components {
          * @description Store the user's OpenAI-compatible LLM configuration (BYOK).
          */
         SetLlmKeyRequest: {
-            /** Api Key */
-            api_key: string;
+            /**
+             * Api Key
+             * @description Plaintext API key. Omit or leave empty when updating an existing config to keep the stored ciphertext; required for first-time setup.
+             */
+            api_key?: string | null;
             /**
              * Background Model
              * @description Optional cheaper model for title/memory/compaction/followups

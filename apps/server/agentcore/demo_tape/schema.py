@@ -107,6 +107,33 @@ def event_type(ev: dict[str, Any]) -> str:
     return str(ev.get("type") or ev.get("kind") or "")
 
 
+def persisted_captain_content_from_events(events: list[dict[str, Any]]) -> str:
+    """Rebuild ``messages.content`` the way live finish does across durable pauses.
+
+    Live SSE never emits the pause-boundary paragraph joiner — ``join_segments``
+    inserts it only when persisting (and when the tape player assembles
+    ``result[\"content\"]``). Raw ``content_delta`` concat therefore under-counts
+    vs the DB oracle by that seam; this helper applies the same join at each
+    wired cold-path pause so tape / replay can be compared to product truth.
+    """
+    from agentcore.runtime.engine.segments import join_segments
+
+    acc = ""
+    buf: list[str] = []
+    for ev in events:
+        et = event_type(ev)
+        if et in TAPE_WIRED_PAUSE_KINDS:
+            acc = join_segments(acc, "".join(buf))
+            buf = []
+            continue
+        if et != "content_delta":
+            continue
+        delta = (ev.get("payload") or {}).get("delta") or ""
+        if delta:
+            buf.append(str(delta))
+    return join_segments(acc, "".join(buf))
+
+
 def event_timestamp(ev: dict[str, Any]) -> str | None:
     """Wall-clock ISO timestamp; prefer ``timestamp``, fall back to legacy ``ts``."""
     raw = ev.get("timestamp")

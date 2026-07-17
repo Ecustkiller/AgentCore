@@ -172,6 +172,20 @@ async def finalize_stopped(
         # Graceful stop (replan stop / dispose): un-run tail → run_skipped(abort).
         agent_id = node.agent_id or node.run_id
         tool._sink.emit(run_skipped(node.run_id, agent_id, reason="abort"))
+    # 交付状态（诚实对账）：主动收口（replan stop / dispose）也是收尾——已落盘的照实列、
+    # 未执行的尾巴照实标缺口。开工卡上直接停止（seed 为空、一步没跑）不发：用户主动叫停
+    # 于开工前，无「交付对账」可言。生产 base context 恒带本回合 execution_id（与 drive
+    # 同值），空值只出现在裸测试装配——同样跳过。
+    if seed_completed and getattr(tool._base_tool_context, "execution_id", ""):
+        from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
+
+        maybe_emit_delivery_status(
+            tool._sink,
+            plan,
+            results,
+            execution_id=tool._base_tool_context.execution_id,
+            backend=tool._base_tool_context.backend,
+        )
     accumulate_usage(tool, results)
     collect_ledger(tool, plan, results)
     collect_citations(tool, results)

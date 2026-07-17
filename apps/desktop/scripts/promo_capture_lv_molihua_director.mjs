@@ -78,7 +78,6 @@ const HEADED = process.env.PROMO_HEADED === "1";
 const VIEWPORT = { width: 1920, height: 1080 };
 
 const QUOTE = "不是四叶草不能用，而是用得太像";
-const QUOTE_ALT = "不是四叶草不能用，而是用得太像";
 const QUOTE_T_MS = 495900;
 
 function nowIso() {
@@ -956,7 +955,7 @@ async function main() {
           path,
           label: "协作图终态全貌（四轮打完）",
           usage: "第七幕收尾",
-          tape_t_ms: 1118000,
+          tape_t_ms: 907528,
           clean: true,
           new: true,
           matched_text: ui.nodeText.slice(0, 200),

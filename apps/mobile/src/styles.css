@@ -1343,6 +1343,76 @@ button.link {
 /* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their concurrent
    siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat).
    Collapsible via the same <details> fold idiom as 思考 (.reasoning) / 工具组 (.tool-group). */
+/* 交付状态（能力闸门与交付诚实性）：delegate 收尾的缺口 / 待操作对账区块。 */
+.delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.delivery-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.delivery-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+.delivery-state.is-partial {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.delivery-state.is-blocked {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+}
+
+.delivery-summary {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delivery-row {
+  display: flex;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.delivery-role {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.delivery-desc {
+  min-width: 0;
+  color: var(--fg);
+}
+
+.delivery-action {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.delivery-action .delivery-desc {
+  color: var(--accent);
+}
+
 .team-notes {
   display: flex;
   flex-direction: column;

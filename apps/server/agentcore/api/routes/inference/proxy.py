@@ -287,16 +287,9 @@ async def inference_chat_completions(
             )
 
         creds = _credentials_from_config(cfg, conversation_id=conversation_id, trace_id=trace_id)
-        from agentcore.core.log_context import bind_log_context
+        from agentcore.llm.credentials import bind_credential_pricing_context
 
-        bind_kwargs: dict = {"credential_source": creds.source}
-        if getattr(creds, "price_cache_hit", None):
-            bind_kwargs["user_price_cache_hit"] = creds.price_cache_hit
-        if getattr(creds, "price_cache_miss", None):
-            bind_kwargs["user_price_cache_miss"] = creds.price_cache_miss
-        if getattr(creds, "price_output", None):
-            bind_kwargs["user_price_output"] = creds.price_output
-        bind_log_context(**bind_kwargs)
+        bind_credential_pricing_context(creds)
         provider = build_provider(creds)
         llm_request = _llm_request_from_payload(payload, cfg)
 

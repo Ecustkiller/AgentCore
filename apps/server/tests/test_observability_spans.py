@@ -14,6 +14,7 @@ from agentcore.runtime.spans import (
     NoopSpanExporter,
     Span,
     export_turn_spans,
+    infer_gen_ai_system,
     spans_from_entries,
 )
 
@@ -401,3 +402,25 @@ def test_noop_exporter_returns_none():
         ]
     )
     assert NoopSpanExporter().export(root, trace_id="t", conversation_id="c", turn_id="m") is None
+
+
+def test_infer_gen_ai_system_from_model_and_base_url():
+    assert infer_gen_ai_system("deepseek-v4-flash") == "deepseek"
+    assert infer_gen_ai_system("gpt-4o") == "openai"
+    assert infer_gen_ai_system("kimi/moonshot-v1") == "moonshot"
+    assert infer_gen_ai_system("glm-4", base_url="https://open.bigmodel.cn/api/paas/v4") == "zhipu"
+    assert infer_gen_ai_system(None, base_url="https://api.deepseek.com") == "deepseek"
+    assert infer_gen_ai_system("my-custom-model") == "openai_compatible"
+
+
+def test_spans_gen_ai_system_follows_run_model():
+    entries = [
+        _started("deepseek-v4-flash"),
+        _run_started("cap", "cap", kind="captain", ts="t0"),
+        _run_completed("cap", "cap", model="deepseek-v4-pro", ts="t1"),
+        _fact("turn_end", {"finish_reason": "end_turn"}),
+    ]
+    root = spans_from_entries(entries)
+    spans = _by_id(root)
+    assert root.attributes["gen_ai.system"] == "deepseek"
+    assert spans["run:cap"].attributes["gen_ai.system"] == "deepseek"

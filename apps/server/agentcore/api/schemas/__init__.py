@@ -208,6 +208,7 @@ from .usage import (
     ConversationCost,
     CostBreakdown,
     DailyCost,
+    ModelCostLine,
     QuotaStatus,
     RoleCostLine,
     TurnCost,
@@ -433,6 +434,7 @@ __all__ = [
     "UsageWindow",
     "QuotaStatus",
     "RoleCostLine",
+    "ModelCostLine",
     "DailyCost",
     "UsageSummary",
     # messaging (IM)

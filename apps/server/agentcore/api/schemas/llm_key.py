@@ -15,7 +15,14 @@ class SetBillingPreferenceRequest(BaseModel):
 class SetLlmKeyRequest(BaseModel):
     """Store the user's OpenAI-compatible LLM configuration (BYOK)."""
 
-    api_key: str = Field(..., min_length=1, max_length=400)
+    api_key: str | None = Field(
+        default=None,
+        max_length=400,
+        description=(
+            "Plaintext API key. Omit or leave empty when updating an existing "
+            "config to keep the stored ciphertext; required for first-time setup."
+        ),
+    )
     base_url: str | None = Field(
         default=None,
         max_length=500,

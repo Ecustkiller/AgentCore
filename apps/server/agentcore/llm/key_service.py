@@ -198,7 +198,7 @@ class LlmKeyService:
     async def set_key(
         self,
         user_id: str,
-        api_key: str,
+        api_key: str | None = None,
         *,
         base_url: str | None = None,
         default_model: str | None = None,
@@ -212,12 +212,26 @@ class LlmKeyService:
         ``base_url`` / ``default_model`` default to platform / BYOK legacy values so
         old clients that only send ``api_key`` keep working.
 
-        Refuses (503) when no usable master key is configured — the plaintext key
-        never lands on disk unencrypted (fail-safe).
+        When ``api_key`` is omitted/empty and the user already has a stored key,
+        the existing ciphertext is kept and only endpoint/model/price fields update.
+        First-time setup still requires a non-empty key.
+
+        Refuses (503) when encrypting a new key and no usable master key is
+        configured — the plaintext key never lands on disk unencrypted (fail-safe).
         """
-        api_key = api_key.strip()
+        api_key = (api_key or "").strip()
+        existing = await self._repo.get_by_user_id(user_id)
         if not api_key:
-            raise ValidationError("API Key 不能为空")
+            if existing is None or not existing.api_key_enc:
+                raise ValidationError("API Key 不能为空")
+            ciphertext = existing.api_key_enc
+        else:
+            enc = self._encryptor()
+            if enc is None:
+                raise KeyStorageUnavailableError(
+                    "服务端未配置加密主密钥，暂时无法保存 API Key，请联系管理员"
+                )
+            ciphertext = enc.encrypt(api_key.encode())
         resolved_base_url = (base_url or settings.platform_base_url).strip()
         if not resolved_base_url:
             raise ValidationError("Base URL 不能为空")
@@ -237,12 +251,6 @@ class LlmKeyService:
             cache_hit=price_cache_hit, cache_miss=price_cache_miss, output=price_output
         ) is None:
             raise ValidationError("单价须为非负十进制数字（USD per 1M tokens）")
-        enc = self._encryptor()
-        if enc is None:
-            raise KeyStorageUnavailableError(
-                "服务端未配置加密主密钥，暂时无法保存 API Key，请联系管理员"
-            )
-        ciphertext = enc.encrypt(api_key.encode())
         await self._repo.upsert(
             user_id=user_id,
             api_key_enc=ciphertext,

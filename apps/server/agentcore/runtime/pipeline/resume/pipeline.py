@@ -112,6 +112,11 @@ async def resume_chat_pipeline(
     message_id = suspension.message_id
     conversation_id = suspension.conversation_id
     captain_run_id = suspension.captain_run_id or new_id()
+    # Same ambient pricing bind as prepare_chat_turn — resume must not lose BYOK
+    # ``credential_source`` or calculate_cost falls through to platform billing.
+    from agentcore.llm.credentials import bind_credential_pricing_context
+
+    bind_credential_pricing_context(llm_credentials)
     # 真·多模型辩手：同 run.py，回合 llm = DeepSeek 默认外包一层 ProviderRouter（resume 也可能
     # 续跑含多模型辩手的辩论）。无前缀照走默认、零行为变化；路由器生命周期由下方 llm.close() 释放。
     llm = pipeline_pkg.build_router_around(pipeline_pkg.build_provider(llm_credentials))

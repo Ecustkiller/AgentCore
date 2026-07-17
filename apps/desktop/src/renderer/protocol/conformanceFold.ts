@@ -50,6 +50,7 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  DeliveryStatusPayload,
   MessageEndPayload,
   ReasoningDeltaPayload,
   RunContextPayload,
@@ -135,6 +136,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let crossExamEnabled = false;
   let debateOpening: string | null = null;
   let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+  let deliveryStatus: DeliveryStatusPayload | null = null;
   let turnWarning: string | null = null;
   const userInterjections: {
     interjectionId: string;
@@ -410,6 +412,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
         break;
       }
+      case "delivery_status": {
+        // 交付状态：同 execution_id 保最新（后写覆盖），镜像 oracle。
+        deliveryStatus = ev.payload as DeliveryStatusPayload;
+        break;
+      }
       case "user_interjection": {
         const p = ev.payload as {
           interjection_id?: string;
@@ -567,6 +574,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     crossExamEnabled,
     debateOpening,
     teamSynthesisPreview,
+    deliveryStatus,
     turnWarning,
     // 团队便签墙 (§2.2 通): single source = projectExecution's frame fold (above), mapped to the
     // golden's ProjectedTeamNote shape — the same single-source pattern as `escalations`.

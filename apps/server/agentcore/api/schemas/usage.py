@@ -109,6 +109,24 @@ class RoleCostLine(BaseModel):
     turns: int
 
 
+class ModelCostLine(BaseModel):
+    """One model's call-level spend over a window — admin per-model payroll.
+
+    Aggregated from ``cost_calls`` (``GROUP BY model``), never from
+    ``cost_events.model`` (that column only records the run's first call; multi-model
+    runs would mis-attribute). Money is integer nano-USD; ``tokens_total`` is
+    ``SUM(input + output + reasoning)``. The client formats ¥ from the summary's
+    single ``cny_per_usd``.
+    """
+
+    model: str
+    # LLM call rows in the window (``cost_calls`` row count).
+    calls: int
+    tokens_total: int
+    cost_total: int
+    cost_estimated_total: int = 0
+
+
 class DailyCost(BaseModel):
     """One UTC day's total spend — a point in the dashboard 7-day trend (§7.3D)."""
 

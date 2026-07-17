@@ -40,10 +40,64 @@ from agentcore.runtime.runs.types import RunKind
 
 logger = get_logger(__name__)
 
-# The single LLM provider today (see 平台LLM接入). Surfaced as the OTel ``gen_ai.system``
-# attribute so an OTLP exporter needs no extra lookup; a second provider (远期规划
-# §2.2) would set this per-run from the model when that lands.
-_GEN_AI_SYSTEM = "deepseek"
+# OTel ``gen_ai.system`` — derived from model id / optional base_url host (not a
+# hardcoded vendor). Unknown OpenAI-compatible endpoints fall back to
+# ``openai_compatible`` so exporters still get a stable non-empty value.
+_DEFAULT_GEN_AI_SYSTEM = "openai_compatible"
+
+
+def infer_gen_ai_system(
+    model: str | None = None,
+    *,
+    base_url: str | None = None,
+) -> str:
+    """Map a model id and/or base_url to an OTel ``gen_ai.system`` value.
+
+    Precedence: vendor prefix on ``provider/model`` → base_url host cues →
+    model-name cues → ``openai_compatible``.
+    """
+    raw_model = (model or "").strip()
+    if "/" in raw_model:
+        prefix, _, rest = raw_model.partition("/")
+        prefix_l = prefix.lower()
+        if prefix_l in ("kimi", "moonshot"):
+            return "moonshot"
+        if prefix_l in ("zhipu", "glm"):
+            return "zhipu"
+        if prefix_l in ("doubao", "volcengine", "ark"):
+            return "doubao"
+        if prefix_l in ("openai", "openrouter"):
+            return prefix_l
+        if prefix_l == "deepseek":
+            return "deepseek"
+        # Fall through to rest for bare model cues.
+        raw_model = rest or raw_model
+
+    host = ""
+    if base_url:
+        try:
+            from urllib.parse import urlparse
+
+            host = (urlparse(base_url).hostname or "").lower()
+        except Exception:  # noqa: BLE001 — never let URL parse break spans
+            host = base_url.lower()
+
+    haystack = f"{host} {raw_model.lower()}"
+    model_l = raw_model.lower()
+    if "deepseek" in haystack:
+        return "deepseek"
+    if "moonshot" in haystack or "kimi" in haystack:
+        return "moonshot"
+    if "bigmodel" in haystack or "zhipu" in haystack or model_l.startswith("glm"):
+        return "zhipu"
+    if "doubao" in haystack or "volces" in haystack or "volcengine" in haystack:
+        return "doubao"
+    if "openrouter" in haystack:
+        return "openrouter"
+    if "openai" in haystack or model_l.startswith("gpt-"):
+        return "openai"
+    return _DEFAULT_GEN_AI_SYSTEM
+
 
 # A run-final ``message_final`` fact carries a serialized RunState (it has a ``phase``
 # key); the captain's plain ``message_final`` (content/reasoning only) does not. Used
@@ -203,7 +257,9 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
             label = "captain" if run_kind == RunKind.CAPTAIN.value else (agent_id or rid[:8])
             attrs: dict[str, Any] = {
                 "gen_ai.operation.name": "invoke_agent",
-                "gen_ai.system": _GEN_AI_SYSTEM,
+                "gen_ai.system": infer_gen_ai_system(
+                    (started or {}).get("model_profile") if started else None
+                ),
                 "gen_ai.agent.id": agent_id,
                 "agentcore.run.id": rid,
                 "agentcore.run.kind": run_kind,
@@ -232,6 +288,7 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
             model = payload.get("model") or ""
             if model:
                 span.attributes["gen_ai.request.model"] = model
+                span.attributes["gen_ai.system"] = infer_gen_ai_system(model)
             role = payload.get("role") or ""
             if role:
                 span.attributes["agentcore.run.role"] = role
@@ -293,12 +350,22 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
 
     # Synthetic root: the turn. Carries turn-level totals (summed from the runs) so the
     # one line answers「这回合花了多少 / 谁参与 / 怎么收的尾」at a glance.
+    root_model = (started or {}).get("model_profile") if started else None
+    # Prefer a completed run's model when available (more specific than profile).
+    for span in runs.values():
+        m = span.attributes.get("gen_ai.request.model")
+        if m:
+            root_model = m
+            break
     root = Span(
         span_id="turn",
         parent_span_id=None,
         name="chat",
         operation="chat",
-        attributes={"gen_ai.operation.name": "chat", "gen_ai.system": _GEN_AI_SYSTEM},
+        attributes={
+            "gen_ai.operation.name": "chat",
+            "gen_ai.system": infer_gen_ai_system(root_model),
+        },
     )
     if started is not None:
         profile = started.get("model_profile") or ""

@@ -393,6 +393,7 @@
     "crossExamEnabled": true,
     "debateOpening": "这场要定的是该不该上四天工作制，先从产出与休息的权衡切入。",
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

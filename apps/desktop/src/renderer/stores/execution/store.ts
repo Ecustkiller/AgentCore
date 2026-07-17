@@ -3,6 +3,7 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  DeliveryStatusPayload,
   ProcessStep,
   RunPlanPayload,
   TeamSynthesisPreviewPayload,
@@ -57,6 +58,10 @@ export interface ExecutionRuntime {
    * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。驱动 StatusStrip
    * 「团队进展」预览行。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
+  /** 交付状态（`delivery_status`，同 execution_id 保最新）：delegate 批次收尾的结构化交付
+   * 对账（已交付/缺口/待用户操作）。DURABLE：重载由 hydrateFromJournal 取最后一条重建，
+   * 驱动答复下方的交付状态卡。null = 本回合无对账（纯 prose 成功批次无声）。 */
+  deliveryStatus: DeliveryStatusPayload | null;
   /** 协调中用户插话（`user_interjection`，同 interjectionId 保最新）。DURABLE。 */
   userInterjections: UserInterjection[];
 }
@@ -113,6 +118,9 @@ interface ExecutionState {
     preview: TeamSynthesisPreviewPayload,
     messageId: string,
   ) => void;
+  /** Stamp the latest delivery reconciliation (`delivery_status`, 同 execution_id 保最新).
+   * Live stamp; journal is DURABLE — hydrateFromJournal rebuilds it. */
+  setDeliveryStatus: (status: DeliveryStatusPayload, messageId: string) => void;
   /** Upsert a mid-flight user interjection (`user_interjection`, same id keeps latest). */
   upsertUserInterjection: (item: UserInterjection, messageId: string) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
@@ -146,6 +154,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   workerToolPhases: {},
   runProcesses: null,
   teamSynthesisPreview: null,
+  deliveryStatus: null,
   userInterjections: [],
 };
 
@@ -204,6 +213,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         workerToolPhases: {},
         runProcesses: null,
         teamSynthesisPreview: null,
+        deliveryStatus: null,
         userInterjections: [],
       })),
 
@@ -290,6 +300,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         cur.plan ? { teamSynthesisPreview: preview } : null,
       ),
 
+    setDeliveryStatus: (status, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan ? { deliveryStatus: status } : null,
+      ),
+
     upsertUserInterjection: (item, messageId) =>
       patchExec(messageId, (cur) => {
         if (!cur.plan) return null;
@@ -320,6 +335,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let crossExamEnabled = false;
         let debateOpening: string | null = null;
         let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
+        let deliveryStatus: DeliveryStatusPayload | null = null;
         const userInterjections: UserInterjection[] = [];
         const interjectionIndex = new Map<string, number>();
         for (const event of journal.events) {
@@ -409,6 +425,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (event.type === "team_synthesis_preview") {
             // P2 DURABLE：同 key 保最新（后写覆盖）；刷新后 StatusStrip 可重建。
             teamSynthesisPreview = event.payload as TeamSynthesisPreviewPayload;
+          } else if (event.type === "delivery_status") {
+            // DURABLE：同 execution_id 保最新（后写覆盖）；刷新后交付状态卡可重建。
+            deliveryStatus = event.payload as DeliveryStatusPayload;
           } else {
             const frame = frameFromEvent(event);
             if (frame) frames.push(frame);
@@ -431,6 +450,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               workerToolPhases: {},
               runProcesses: journal.runProcesses ?? null,
               teamSynthesisPreview,
+              deliveryStatus,
               userInterjections,
             },
           },

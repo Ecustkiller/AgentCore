@@ -26,10 +26,10 @@ from .outcome import RoundOutcome
 
 logger = get_logger(__name__)
 
-# Soft team-gate (协作优先阶段 3): cheap captain-only counters, one shot per run.
+# Soft team-gate (协作优先阶段 3): investigation-only, captain-only, one shot per run.
+# long_content 事后丢稿闸门已撤：改由 CEO 提示词「路由自检」在展开前显式表态
+# （见 prompt._CEO_CORE_HINT）。
 TEAM_GATE_INVESTIGATION_THRESHOLD = 2
-TEAM_GATE_EARLY_ROUNDS = 2  # round_idx 0..1
-TEAM_GATE_LONG_CONTENT_CHARS = 400
 
 
 def team_gate_nudge_prompt() -> str:
@@ -48,15 +48,12 @@ def maybe_inject_team_gate(
     run_id: str,
     round_idx: int,
     role: str,
-    trigger: Literal["investigation", "long_content"],
+    trigger: Literal["investigation"] = "investigation",
 ) -> bool:
     """Inject the soft team-gate nudge once for the CEO captain. Returns True if injected."""
     if role != "captain" or controller.team_gate_fired or controller.has_delegated:
         return False
-    if (
-        trigger == "investigation"
-        and controller.investigation_calls < TEAM_GATE_INVESTIGATION_THRESHOLD
-    ):
+    if controller.investigation_calls < TEAM_GATE_INVESTIGATION_THRESHOLD:
         return False
 
     controller.mark_team_gate_fired()
@@ -72,24 +69,6 @@ def maybe_inject_team_gate(
         NoteFact(role="user", content=nudge, reason="team_gate", run_id=run_id).to_fact()
     )
     return True
-
-
-def should_team_gate_long_content(
-    controller: LoopController,
-    *,
-    role: str,
-    round_idx: int,
-    content: str,
-) -> bool:
-    """Whether a no-tool answer round should trip the soft team-gate (cheap heuristic)."""
-    if role != "captain" or controller.team_gate_fired or controller.has_delegated:
-        return False
-    if len(content) < TEAM_GATE_LONG_CONTENT_CHARS:
-        return False
-    # (b) early round, zero-tool long prose; or long prose after ≥2 investigation probes.
-    if round_idx < TEAM_GATE_EARLY_ROUNDS:
-        return True
-    return controller.investigation_calls >= TEAM_GATE_INVESTIGATION_THRESHOLD
 
 
 def audit_gate_nudge_prompt() -> str:

@@ -85,6 +85,7 @@ export function degradedFinishChipLabel(
 /** Assistant bubble error text; in dev, append upstream body preview when present. */
 export function formatAssistantErrorMessage(error: {
   message: string;
+  code?: string;
   context?: DescribedError["context"];
 }): string {
   const { message, context } = error;
@@ -96,9 +97,87 @@ export function formatAssistantErrorMessage(error: {
     text = `${message}\n诊断：${context.sub2api_diagnosis}`;
   }
   if (import.meta.env.DEV && context?.upstream_body_preview) {
-    return `${text} — ${context.upstream_body_preview}`;
+    text = `${text} — ${context.upstream_body_preview}`;
   }
   return text;
+}
+
+/**
+ * Codes whose primary remedy is opening 设置·模型配置 (auth / balance / key missing).
+ * Extends {@link KEY_CONFIG_ERROR_CODES} with balance so the bubble offers「去设置」.
+ */
+const SETTINGS_ERROR_CODES: readonly string[] = [
+  ...(KEY_CONFIG_ERROR_CODES as readonly string[]),
+  "LLM_INSUFFICIENT_BALANCE",
+];
+
+/** Connectivity / transport-ish codes — bubble offers「重试」, not settings. */
+const CONNECTIVITY_ERROR_CODES: readonly string[] = [
+  "LLM_TIMEOUT",
+  "LLM_ERROR",
+  "LLM_UPSTREAM_ERROR",
+];
+
+/** Session-scoped counter for connectivity failures (resets on full page reload). */
+const _sessionConnectivityCounts = new Map<string, number>();
+/** Message ids already counted — format/render must not double-increment. */
+const _countedErrorMessageIds = new Set<string>();
+
+export function isConnectivityErrorCode(code: string | undefined): boolean {
+  return (
+    code !== undefined &&
+    (CONNECTIVITY_ERROR_CODES as readonly string[]).includes(code)
+  );
+}
+
+/** Increment once per message id; return the session count for that code. */
+export function noteSessionConnectivityFailure(
+  code: string,
+  messageId: string,
+): number {
+  if (!_countedErrorMessageIds.has(messageId)) {
+    _countedErrorMessageIds.add(messageId);
+    _sessionConnectivityCounts.set(
+      code,
+      (_sessionConnectivityCounts.get(code) ?? 0) + 1,
+    );
+  }
+  return _sessionConnectivityCounts.get(code) ?? 0;
+}
+
+/**
+ * Escalation copy for the 2nd+ connectivity failure in this session.
+ * Side-effect: counts this message id at most once.
+ */
+export function connectivityEscalationSuffix(
+  code: string | undefined,
+  messageId: string,
+): string | null {
+  if (!code || !isConnectivityErrorCode(code)) return null;
+  const n = noteSessionConnectivityFailure(code, messageId);
+  if (n < 2) return null;
+  return "\n\n多次连接失败。请到「设置 · 模型配置」检查 Base URL / API Key 与网络后重试。";
+}
+
+/** Test helper — clear session connectivity counters. */
+export function resetSessionConnectivityFailures(): void {
+  _sessionConnectivityCounts.clear();
+  _countedErrorMessageIds.clear();
+}
+
+/**
+ * When reload lost the error payload but left an empty error-finished bubble,
+ * synthesize a minimal card so the user still sees an explanation + retry.
+ */
+export function syntheticErrorForEmptyFailure(finishReason: string | undefined): {
+  code: string;
+  message: string;
+} | null {
+  if (finishReason !== "error") return null;
+  return {
+    code: "LLM_ERROR",
+    message: "模型调用失败，请重试。",
+  };
 }
 
 /**
@@ -132,22 +211,14 @@ export interface DescribedError {
 }
 
 /**
- * Map a backend error `code` to a config remedy. The set of codes whose remedy is
- * the model-config page comes from the shared {@link KEY_CONFIG_ERROR_CODES} catalog
- * (contract-types — includes `FREE_TIER_EXHAUSTED`), so desktop and mobile offer
- * the "去配置" route on exactly the same codes.
+ * Map a backend error `code` to a config remedy. Auth / key / balance →「去设置」;
+ * connectivity codes return null (the bubble shows「重试」instead).
  */
 export function errorActionForCode(
   code: string | undefined,
 ): ErrorAction | null {
-  // No key configured (preflight 402) / a configured key rejected mid-stream
-  // (401/403) / monthly free tier spent (429): all fixed in 设置·模型配置.
-  // QUOTA_EXCEEDED stays null (wait for window reset; no config CTA).
-  if (
-    code !== undefined &&
-    (KEY_CONFIG_ERROR_CODES as readonly string[]).includes(code)
-  ) {
-    return { label: "去配置", href: "/more/model" };
+  if (code !== undefined && SETTINGS_ERROR_CODES.includes(code)) {
+    return { label: "去设置", href: "/more/model" };
   }
   return null;
 }

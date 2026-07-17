@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from .usage import (
     CostBreakdown,
     DailyCost,
+    ModelCostLine,
     QuotaStatus,
     RoleCostLine,
     UsageWindow,
@@ -150,6 +151,9 @@ class AdminUsageSummary(BaseModel):
     # 含 vision 读图子调用), spend-desc, >0 only — the platform-wide counterpart of
     # ``UsageSummary.month_by_role``.
     month_by_role: list[RoleCostLine]
+    # This month's spend split by model across *every* account (from ``cost_calls``,
+    # never ``cost_events.model``), spend-desc.
+    month_by_model: list[ModelCostLine]
     # Last 7 UTC days incl today, oldest-first, zero-filled — the platform trend.
     recent_daily_cost: list[DailyCost]
     cny_per_usd: float
@@ -410,18 +414,24 @@ class AdminUserDetail(BaseModel):
     """One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).
 
     Stitches the per-user views an operator needs to understand an account: the
-    full record (``user``), this account's usage (today/month/trend/by-role — the
-    per-user counterpart of ``AdminUsageSummary``, scoped via ``cost_events.user_id``),
+    full record (``user``), configured chat/background model names (from
+    ``user_llm_keys`` — never the API key), this account's usage (today/month/
+    trend/by-role/by-model — the per-user counterpart of ``AdminUsageSummary``),
     its recent conversations, and its recent turn activity (``turn_metrics``, each
     drillable into 会话复盘). Money is integer nano-USD; the client folds the single
     ``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).
     """
 
     user: AdminUserResponse
+    # Configured models from ``user_llm_keys`` (names only; null when unset / no row).
+    default_model: str | None = None
+    background_model: str | None = None
     today: UsageWindow
     month: UsageWindow
     # This month's spend split by role (团队工资单 by role), spend-desc, >0 only.
     month_by_role: list[RoleCostLine]
+    # Last 30 days' call-level spend split by model (from ``cost_calls``), spend-desc.
+    recent_by_model: list[ModelCostLine]
     # Last 7 UTC days incl today, oldest-first, zero-filled — the trend sparkline.
     recent_daily_cost: list[DailyCost]
     # Recent conversations (newest-activity first, capped).

@@ -134,6 +134,56 @@ async def test_set_key_stores_and_masks(client, make_invite, byok):
     assert again["default_model"] == "gpt-4o"
 
 
+async def test_set_key_omits_api_key_keeps_ciphertext_and_updates_model(
+    client, make_invite, byok
+):
+    """已配置后省略 api_key 仍可更新 model；masked_key 不变。"""
+    code = await make_invite("INV-KEY-OMIT")
+    await register_and_login(client, code, "keyuser-omit")
+
+    first = await client.put(
+        "/v1/users/me/llm-key",
+        json={
+            "api_key": "sk-keep-me-4242",
+            "base_url": "https://api.deepseek.com",
+            "default_model": "deepseek-v4-flash",
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["masked_key"] == "••••4242"
+
+    r = await client.put(
+        "/v1/users/me/llm-key",
+        json={
+            "base_url": "https://api.deepseek.com",
+            "default_model": "deepseek-v4-pro",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["configured"] is True
+    assert body["masked_key"] == "••••4242"
+    assert body["default_model"] == "deepseek-v4-pro"
+    assert body["base_url"] == "https://api.deepseek.com"
+
+    again = (await client.get("/v1/users/me/llm-key")).json()
+    assert again["masked_key"] == "••••4242"
+    assert again["default_model"] == "deepseek-v4-pro"
+
+
+async def test_set_key_empty_api_key_without_existing_returns_422(
+    client, make_invite, byok
+):
+    code = await make_invite("INV-KEY-EMPTY")
+    await register_and_login(client, code, "keyuser-empty")
+
+    r = await client.put(
+        "/v1/users/me/llm-key",
+        json={"default_model": "deepseek-v4-flash"},
+    )
+    assert r.status_code == 422, r.text
+
+
 async def test_set_key_key_only_uses_defaults(client, make_invite, byok):
     code = await make_invite("INV-KEY-DEF")
     await register_and_login(client, code, "keyuser2b")

@@ -178,6 +178,32 @@ class DebateClash:
     point: str
 
 
+class LedgerEventKind(StrEnum):
+    """对局台账事件种类（P0 对局记忆）——只收发言里【显式】发生的状态变化，宁缺勿滥。
+
+    服务端内部流转；不上 ``debate_round`` / ``debate_result`` wire。
+    """
+
+    WITHDRAWAL = "withdrawal"  # 撤回：明确收回某论据 / 数据
+    CORRECTION = "correction"  # 更正：用新值替换旧主张
+    DISPUTED_FACT = "disputed_fact"  # 争议事实：双方对同一事实给出冲突的【已核实】或明确分歧
+    CONCESSION = "concession"  # 关键让步：正面承认弱点 / 抗辩不成立等
+
+
+@dataclass(frozen=True)
+class LedgerEvent:
+    """对局台账一条事件 —— 裁判从本轮立论 + 质询问答中提取。
+
+    ``side`` 为当事方 ``side_key``；争议事实可为空（描述双方分歧时）。``content`` 一句话。
+    ``round_no`` 由主持人写入累积时标注来源轮。不上 SSE 契约。
+    """
+
+    kind: LedgerEventKind
+    side: str
+    content: str
+    round_no: int = 0
+
+
 @dataclass
 class CrossExamQa:
     """质询环节的一条 Q↔A（质询回合 P1 最小单元）。
@@ -323,6 +349,10 @@ class JudgeVerdict:
     ``scores`` 是本轮【记分裁判】的各方得分（side_key → :class:`RoundScore`，记分裁判 P2）：与收敛
     判定同一遍推理产出，逐轮累计后驱动收场倾向。空 dict = 未开启记分（快速对碰 / 坏 JSON 容错 /
     未升级路径），此时行为逐字回退到「只判交锋与收敛」，零变化。
+
+    ``ledger_events`` 是本轮提取的【对局台账】事件（P0 对局记忆）：撤回 / 更正 / 争议事实 /
+    关键让步。主持人跨轮累积后注入下一轮辩手 brief/feedback；**不上 wire**（``to_event_payload``
+    不带）。缺省 / 坏 JSON → 空列表。
     """
 
     real_clash: bool
@@ -333,6 +363,7 @@ class JudgeVerdict:
     rationale: str = ""
     clashes: list[DebateClash] = field(default_factory=list)
     scores: dict[str, RoundScore] = field(default_factory=dict)
+    ledger_events: list[LedgerEvent] = field(default_factory=list)
 
 
 # 终止条件词表（辩论编排设计.md §五）——裁判判收敛时给出的归因，前端可据此呈现「为何收场」。

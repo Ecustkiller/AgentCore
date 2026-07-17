@@ -151,6 +151,18 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(run.TeamNotePostedPayload),
     TsInterface(run.TeamSynthesisWorkerPreview),
     TsInterface(run.TeamSynthesisPreviewPayload),
+    TsAlias(
+        "DeliveryState",
+        run.DeliveryState,
+        doc=(
+            "Overall verdict of a delegate batch's delivery reconciliation (交付诚实性):\n"
+            "delivered = 无缺口且有落盘产物; partial = 有产物也有缺口; blocked = 有缺口且\n"
+            "无落盘产物."
+        ),
+    ),
+    TsInterface(run.DeliveryGap),
+    TsInterface(run.DeliveryAction),
+    TsInterface(run.DeliveryStatusPayload),
     TsInterface(run.UserInterjectionAttachment),
     TsInterface(run.UserInterjectionPayload),
 
@@ -328,6 +340,7 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.INTERACTION_ORPHANED: interaction.InteractionOrphanedPayload,
     EventType.TEAM_NOTE_POSTED: run.TeamNotePostedPayload,
     EventType.TEAM_SYNTHESIS_PREVIEW: run.TeamSynthesisPreviewPayload,
+    EventType.DELIVERY_STATUS: run.DeliveryStatusPayload,
     EventType.USER_INTERJECTION: run.UserInterjectionPayload,
     EventType.DEBATE_RESULT: debate.DebateResultPayload,
     EventType.DEBATE_ROUND_STARTED: debate.DebateRoundStartedPayload,

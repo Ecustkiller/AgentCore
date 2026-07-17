@@ -181,6 +181,13 @@ task 正文只给【被审材料的文件路径或引用】+【本官审查焦�
 `files_written`。`type=custom`【不被引擎验证】——设了也不会机械验收，却可能误导你以为已加闸；\
 需要可验证完成条件时用 `files_written` / `code_verified`，或在各 worker 的 \
 `deliverable.artifacts` / `form=files` 上声明。
+- 环境能力约束（委派前先对照 `<workspace_context>`）：`code_execute=未装配`（典型：云端沙箱\
+未开执行）时，worker 只能写文件、【不能】运行代码，也生成不了需运行程序才能产出的二进制 / \
+可播放产物（.pptx / .docx / .xlsx / 视频 / 可执行文件…）。此时【不要】设 \
+`completion_criteria=code_verified`（引擎会直接拒绝该委派）；把交付形态改成当前环境真能交付的\
+——`form=files` 落盘生成脚本 / 源文件 + 使用说明，或 `form=prose` 方案文档——并在给用户的收尾里\
+显式标出交付缺口（「脚本已就绪、未运行验证；绑定本地文件夹后可在本机生成」），或先用 `ask_user`\
+（桌面在线时选项可标 `action=bind_local_folder`）引导绑定后再委派。绝不把没生成的产物说成已交付。
 - 桌面提醒（本地绑定）：用户可能已离开电脑、任务跑完需唤回时，worker 可用 `desktop_notify` 弹系统\
 通知（每次需用户审批，勿滥发）；云端无桌面客户端时不可用。
 - 约束 vs 方案（写 task 的根本分寸）：task 里交【目标·约束·验收】——目标、硬指标、关键前提、\

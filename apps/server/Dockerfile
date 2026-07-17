@@ -35,6 +35,20 @@ COPY scripts ./scripts
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# ---- runsc：gVisor 沙箱二进制（云端 code_execute 灰度，安全权限与治理.md §五）----
+# 官方发布只在 storage.googleapis.com；大陆构建不通时用 RUNSC_URL 指镜像源，
+# 或 INSTALL_RUNSC=0 跳过（镜像可用但 GVISOR_ENABLED=true 启动会因健康检查拒启）。
+# 校验：默认取 ${RUNSC_URL}.sha512；镜像源无校验文件时 RUNSC_SHA512=skip 显式跳过。
+FROM python:3.12-slim AS runsc
+ARG INSTALL_RUNSC=1
+ARG RUNSC_URL=https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
+ARG RUNSC_SHA512=""
+COPY scripts/fetch_runsc.py /fetch_runsc.py
+RUN mkdir -p /out \
+    && if [ "$INSTALL_RUNSC" = "1" ]; then \
+         python /fetch_runsc.py /out/runsc && chmod 0755 /out/runsc; \
+       fi
+
 # ---- runtime：精简镜像，只带 venv + 源码 ----
 FROM python:3.12-slim AS runtime
 
@@ -47,6 +61,25 @@ ENV GIT_SHA=${GIT_SHA} \
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
+
+# ── 沙箱运行环境（gVisor 云端 code_execute）──
+# 沙箱经 ro bind 看到本镜像的 /usr /bin /etc：解释器 = 系统 python3（/usr/local/bin，
+# 与 venv 隔离，不污染 uv.lock 管的应用依赖）、node、bash。
+# ① 中文字体：文档/图表产物（pptx、matplotlib 图）没有 CJK 字体会全是豆腐块。
+# ② nodejs：code_execute 声明支持 javascript，补齐承诺（随基础镜像 Debian 版本，当前 trixie ≈ node 20）。
+ARG PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ③ 文档/数据常用库装进【系统 site-packages】（沙箱 python3 可见；按大众文档场景选型：
+#    pptx/docx/xlsx 生成 + 数据分析 + 图表 + PDF）。装最新版即可——沙箱库不是应用依赖，
+#    不进 uv.lock；升级随镜像重建。
+RUN pip install --no-cache-dir -i "${PYPI_INDEX}" \
+    python-pptx python-docx openpyxl pandas numpy matplotlib reportlab pypdf pillow
+
+# ④ runsc 二进制（INSTALL_RUNSC=0 时该层只拷到一个空目录占位）。
+COPY --from=runsc /out/ /usr/local/bin/
 
 WORKDIR /app
 

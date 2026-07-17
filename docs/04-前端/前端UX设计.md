@@ -71,8 +71,8 @@ skip_if:
 - **本地回合同步态 `synced_pending` ✅**：sidecar 回合按「**静默成功、显式失败**」显示同步态——宽限期（~5s）内不渲染提示，超期未获云确认才挂「待同步」。**纯本机指示、不进 SSE / 跨端契约**。→ 见代码 `message-bubble/SyncStatusHint.tsx`；回写链路见 [双模式 §10.3](/docs/02-架构/双模式工作区.md)。
 - **保序持久化**：时间线在语义边界渐进落 `turn_journal`（`process_*` / `run_process_*`），读取投影为 `runs.process` / `run_processes`；**运行中刷新与终态重载**均 fold journal（+ live tail）保序回放——见 [执行引擎 §8.3](/docs/03-AI核心/执行引擎架构设计.md)。纯散文回合（无 process 车道）不扩展 `process_*`，仍走 `turn_stream_state` / 本地 segment 加速。
 - **实时行与等待态 ✅**：`ComposingToolLine`（「正在生成 {工具} · N 字」补 `tool_use_start` 前空白）与慢工具**诚实阶段**文案（消费 `tool_use_progress`）均为 **transport-only、不进 journal**，重载不保留；过程工具完成后**统一默认折叠**（折叠态保留 inlineCount / peek / 运行中骨架；手动开合仍走 `usePersistentDisclosure`）。→ 见代码 `ToolLine.tsx`。
-- **回合结束原因 chip ✅**：非正常收尾（`max_rounds` / `degraded` / `unproductive` / `cancelled` / `interrupted`）在气泡顶挂中性灰 chip（事后记录非警报；原「降级琥珀」已废除）；`end_turn` 不显、`error` 归错误卡。**回放接缝**：多 Agent 从 `runs.finishReason`、单 Agent 从 `turn_end` 回落——非正常收尾即便无图/无进程也由后端补写最小 `turn_end` 兜底；`interrupted` 提供「重试」（复用 regenerate）。
-- **回合内联错误卡 ✅**：直播走纯传输 `error` SSE；**重载**从 `turn_end.error` 投影回放同一张卡（空正文报错回合后端补写空正文行 + 最小 journal，空正文被 history 过滤）；`code` 走 `lib/errors.ts` 单点翻译。
+- **回合结束原因 chip ✅**：非正常收尾（`max_rounds` / `degraded` / `unproductive` / `cancelled` / `interrupted` / `error`）在气泡顶挂中性灰 chip（事后记录非警报；原「降级琥珀」已废除）；`end_turn` 不显；`error` 显「调用失败」chip 并同时渲染错误卡。**回放接缝**：多 Agent 从 `runs.finishReason`、单 Agent 从 `turn_end` 回落——非正常收尾即便无图/无进程也由后端补写最小 `turn_end` 兜底；`interrupted` 提供「重试」（复用 regenerate）。
+- **回合内联错误卡 ✅**：直播走纯传输 `error` SSE；**重载**从 `turn_end.error` 投影回放同一张卡——软失败（CEO `raise_on_error=False` 收口）也由 settle 落 `turn_end.error` + `usage.error_code`（原先仅 salvage 路径落，软失败刷新后只剩空气泡）；缺错误载荷的历史行由前端按「空正文 + `finish_reason=error`」合成兜底卡。卡内动作按错误类型分流：鉴权/余额类 →「去设置」、连通性类 →「重试」，同类连通性失败会话内第 2 次起升级为配置引导文案；空正文失败轮在下一轮 prompt 折叠为失败注记（见 [执行引擎 §历史重建](/docs/03-AI核心/执行引擎架构设计.md)）。`code` 走 `lib/errors.ts` 单点翻译。
 
 | 形态 | 何时 | 职责 |
 |------|------|------|
@@ -90,7 +90,7 @@ skip_if:
 
 ## 二、新用户首启与空态引导 ✅ 已落地
 
-新用户激活 = **首次成功跑完一个真实回合**（不是注册完成、不是配置完成）；产品的差异化 aha = 第一次亲眼看到团队分工协作。**每月免费额度生效时（`free_tier_active`）新用户可跳过配 key 直接开聊**（后端语义见 [成本配额与计费 §〇·五](/docs/05-平台与运维/成本配额与计费.md)）；BYOK 下「配 Key」仍是发首条消息前的硬门槛，引导从「错误驱动」（发消息 → 402 → 横幅「去配置」，仍保留为兜底）前移为「主动引导」。
+新用户激活 = **首次成功跑完一个真实回合**（不是注册完成、不是配置完成）；产品的差异化 aha = 第一次亲眼看到团队分工协作。**每月免费额度生效时（`free_tier_active`）新用户可跳过配 key 直接开聊**（后端语义见 [成本配额与计费 §〇·五](/docs/05-平台与运维/成本配额与计费.md)）；BYOK 下「配 Key」仍是发首条消息前的硬门槛，引导从「错误驱动」（发消息 → 402 → 横幅「去设置」，仍保留为兜底）前移为「主动引导」。
 
 **一次性首启流程 `OnboardingFlow`**（`AppShell` 挂 `OnboardingGate`）：满足「无模型接入（`hasModelAccess`=false）∧ 0 对话 ∧ 未跳过」自动全屏接管——价值一屏（团队心智，对比提示者/指令者/领导者）→ 模型接入 → 测连通等待期轮播产品能力（等待期也讲产品故事，**否决**裸 spinner）。右上可跳过；配完 Key 或产生对话后永不再现。
 
@@ -102,7 +102,7 @@ skip_if:
 
 **草稿空态三态 `DraftEmptyState`**：无模型接入（`hasModelAccess`=false，免费档生效不算）→「先连接你的模型」+ 主 CTA（重开接入流程）+ 产品手册副链接（输入框**不**居中，仍在底栏）；有接入（含免费档）∧ 0 对话 →「今天想解决什么问题？」+ 3 枚**首启任务 chips**（内容设计为天然触发多 Agent 分工的真实任务，点击仅填入**居中**输入框、不自动发送）+ 输入框与引导合成中央块；老用户 → 单句问候 + 居中输入框。发出首条消息后输入框过渡落底（见 §一「对话输入框落点」）。
 
-**免费额度耗尽（429 `FREE_TIER_EXHAUSTED`）**：转化语义而非「等重置」——错误条展示后端文案（「本月免费额度已用完——接入自己的模型即可不限量继续」，后端 `message` 单一来源）+「去配置」CTA 直达模型配置（`errorActionForCode` 按共享 `KEY_CONFIG_ERROR_CODES` 目录分流，两端一致）；既有 `QUOTA_EXCEEDED`（等窗口重置、不给重试）语义不动。Composer 模型角标 `CurrentModelBadge` 在免费档下显「**免费额度**」（绝不显「未配置」、也不把平台 model id 冒充用户配置）。
+**免费额度耗尽（429 `FREE_TIER_EXHAUSTED`）**：转化语义而非「等重置」——错误条展示后端文案（「本月免费额度已用完——接入自己的模型即可不限量继续」，后端 `message` 单一来源）+「去设置」CTA 直达模型配置（手机端文案仍为「去配置」；`errorActionForCode` 按共享 `KEY_CONFIG_ERROR_CODES` 目录分流）；既有 `QUOTA_EXCEEDED`（等窗口重置、不给重试）语义不动。Composer 模型角标 `CurrentModelBadge` 在免费档下显「**免费额度**」（绝不显「未配置」、也不把平台 model id 冒充用户配置）。
 
 - **决策修订（2026-07）**：原「空态只留一句提问；场景模板卡片否决（与手机端、宣传素材对齐）」修订为**仅新用户可见的首启 chips**——空白画布冻结是 Agent 产品激活的头号杀手，chips 让首跑直达多 Agent 差异化时刻；原否决的关切（日常噪音）由「产生第一个对话后永久消失」保住，老用户与宣传素材所见空态不变。
 - Composer 模型角标 `CurrentModelBadge`「未配置」由只读改为可点、直达模型配置（§十三）。
@@ -551,7 +551,7 @@ skip_if:
 质量档 UI 已永久移除（`经济档`/`高质量档` 预设、设置页质量档、`ModeSelector`、相关词表/缓存）。用户改为在 **More → 模型配置** 配一个 OpenAI 兼容端点：
 
 - **三字段**：API Key、Base URL（含 `/v1` 前缀）、默认模型名
-- **测试连接**：probe 连通性 + `supports_tools` 能力标记（✅ 支持工具调用 / ⚠️ 仅对话）
+- **测试连接**：probe 连通性 + `supports_tools` 能力标记（✅ 支持工具调用 / ⚠️ 仅对话）；保存 Key 成功后**自动触发一次**（既有 `POST /users/me/llm-key/test`，卡片状态徽标显「测试中…」，失败落徽标、不阻断保存）
 - **输入区**：`CurrentModelBadge` 展示当前模型；未配置时可点直达「设置 · 模型配置」，已配置点击同样进入该页
 - **工具门禁（软提示）**：`supports_tools=false` 时委派/辩论工具卡保留可展开交互，仅附不确定提示（连接测试未确认工具调用支持、可能降级、以运行为准；可在模型设置重新测试）——与后端 preflight warning 对齐，**不**硬禁用入口或绝对断言「不支持」
 

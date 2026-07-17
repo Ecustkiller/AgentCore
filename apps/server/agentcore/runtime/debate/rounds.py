@@ -22,6 +22,7 @@ from agentcore.runtime.debate.cross_exam_parse import (
     merge_cx_continuation,
     parse_cross_exam_response,
 )
+from agentcore.runtime.debate.match_ledger import accumulate_match_ledger
 from agentcore.runtime.debate.prompt import (
     closing_context_blocks,
     closing_task,
@@ -278,6 +279,7 @@ async def next_round(
 
     sides = list(sides)
     last_round: RoundResult = history[-1]
+    match_ledger = accumulate_match_ledger(history)
     worker_gate = (
         tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
     )
@@ -290,10 +292,24 @@ async def next_round(
             return None, 0
         revision_run_id = f"{moderator_run_id}_r{round_no}_{side.key}"
         research_fb = round_feedback(
-            config, side, round_no, focus, last_round, interjections
+            config,
+            side,
+            round_no,
+            focus,
+            last_round,
+            interjections,
+            match_ledger=match_ledger,
+            history=history,
         )
         speech_brief = round_draft_brief(
-            config, side, round_no, focus, last_round, interjections
+            config,
+            side,
+            round_no,
+            focus,
+            last_round,
+            interjections,
+            match_ledger=match_ledger,
+            history=history,
         )
         # 收到的上下文：task 块展示成稿 brief（用户看见的发言任务）；检索指令另喂 LLM。
         context_blocks = round_context_blocks(

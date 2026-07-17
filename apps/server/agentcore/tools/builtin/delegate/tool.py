@@ -295,7 +295,9 @@ class DelegateTool:
             logger.info("delegate.rejected", errors=errors)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
         from agentcore.runtime.delegate.completion import (
+            execution_capability_warning,
             validate_completion_against_forms,
+            validate_execution_capability,
         )
 
         form_conflict = validate_completion_against_forms(
@@ -309,6 +311,36 @@ class DelegateTool:
                 success=False,
                 output=form_conflict,
                 error=form_conflict,
+            )
+        # 委派前能力闸（分级，能力闸门与交付诚实性）：显式 code_verified 撞上「无执行环境」
+        # 硬拒（错误信息给出路）；仅任务文案启发命中的只软警告、不拦截。能力判定复用
+        # code_execution_enabled_for 单一真相源（与 worker registry 同一谓词）。
+        capability_error = validate_execution_capability(
+            arguments.get("completion_criteria"),
+            plan,
+            self._base_tool_context.backend,
+        )
+        if capability_error:
+            logger.info(
+                "delegate.capability_rejected",
+                criteria="code_verified",
+                backend_location=getattr(self._base_tool_context.backend, "location", None),
+            )
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output=capability_error,
+                error=capability_error,
+            )
+        capability_warning = execution_capability_warning(
+            arguments.get("completion_criteria"),
+            plan,
+            self._base_tool_context.backend,
+        )
+        if capability_warning:
+            logger.info(
+                "delegate.capability_warning",
+                backend_location=getattr(self._base_tool_context.backend, "location", None),
             )
         if self._depth >= 1:
             self._sub_workers_spawned += len(plan.nodes)
@@ -442,6 +474,10 @@ class DelegateTool:
                 else True
             ),
         )
+        # 软警告注入（能力闸分级·启发命中不拦截）：把能力提示挂在委派结果尾部回给 CEO。
+        # SUSPEND（开工卡挂起）无 output 可挂，跳过——软警告 best-effort、不改挂起语义。
+        if capability_warning and result.output and result.effect is ToolEffect.CONTINUE:
+            result.output = f"{result.output}\n\n{capability_warning}"
         return annotate_batch_meta(
             result,
             node_count=len(plan.nodes),

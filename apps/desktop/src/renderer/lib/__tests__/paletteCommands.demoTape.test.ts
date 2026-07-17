@@ -44,6 +44,7 @@ describe("paletteCommands demo tape gate", () => {
           id: "lv-molihua-trademark",
           title: "LV诉茉莉奶白商标侵权案",
           user_prompt: "搜索下…",
+          turn_count: 1,
         },
       ],
     });

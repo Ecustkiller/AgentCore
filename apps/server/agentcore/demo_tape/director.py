@@ -395,17 +395,16 @@ async def seek(
     transport.arm_burst(target, auto_resolve=will_cross_pause)
     transport.resume()
 
-    if was_awaiting and target > current:
-        # Hot approval keeps the turn running — wake via registry. Cold durable
-        # cards need claim+resume. Try hot first; fall through to cold.
-        if not _auto_resolve_hot_approvals(conversation_id):
-            await _auto_resume_durable_pause(
-                conversation_id=conversation_id,
-                user_id=user_id,
-                llm_credentials=llm_credentials,
-                llm_supports_tools=llm_supports_tools,
-                setup_sink=setup_sink,
-            )
+    # Hot approval keeps the turn running — wake via registry. Cold durable
+    # cards need claim+resume. Try hot first; fall through to cold.
+    if was_awaiting and target > current and not _auto_resolve_hot_approvals(conversation_id):
+        await _auto_resume_durable_pause(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            llm_credentials=llm_credentials,
+            llm_supports_tools=llm_supports_tools,
+            setup_sink=setup_sink,
+        )
 
     logger.info(
         "demo_tape.director_seek",

@@ -35,6 +35,7 @@ export function ModelSettings() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [postSaveTesting, setPostSaveTesting] = useState(false);
   const queryClient = useQueryClient();
 
   const syncStatus = useCallback(
@@ -82,6 +83,7 @@ export function ModelSettings() {
           {status.configured && !editing && (
             <ConfiguredCard
               status={status}
+              testing={postSaveTesting}
               onChanged={syncStatus}
               onReplace={() => setEditing(true)}
             />
@@ -95,9 +97,17 @@ export function ModelSettings() {
               initialPriceCacheMiss={status.price_cache_miss}
               initialPriceOutput={status.price_output}
               initialBackgroundModel={status.background_model}
+              hideTestHint
               onSaved={(s) => {
                 syncStatus(s);
                 setEditing(false);
+                setPostSaveTesting(true);
+                void testLlmKey()
+                  .then(syncStatus)
+                  .catch(() => {
+                    /* 保存已成功；测连失败不阻断，错误态由卡片 StatusBadge 展示 */
+                  })
+                  .finally(() => setPostSaveTesting(false));
               }}
               onCancel={status.configured ? () => setEditing(false) : undefined}
             />
@@ -111,7 +121,21 @@ export function ModelSettings() {
   );
 }
 
-function StatusBadge({ status }: { status: LlmKeyStatus }) {
+function StatusBadge({
+  status,
+  testing,
+}: {
+  status: LlmKeyStatus;
+  testing?: boolean;
+}) {
+  if (testing) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 size={14} className="animate-spin" />
+        测试中…
+      </span>
+    );
+  }
   if (status.status === "active") {
     return (
       <span className="flex items-center gap-1.5 text-xs text-success">
@@ -250,16 +274,20 @@ function SourceOption({
 
 function ConfiguredCard({
   status,
+  testing: testingFromParent = false,
   onChanged,
   onReplace,
 }: {
   status: LlmKeyStatus;
+  /** Parent-driven auto-test after save. */
+  testing?: boolean;
   onChanged: (s: LlmKeyStatus) => void;
   onReplace: () => void;
 }) {
   const [testing, setTesting] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const busyTesting = testing || testingFromParent;
 
   const test = async () => {
     setTesting(true);
@@ -334,7 +362,7 @@ function ConfiguredCard({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3 pt-1">
-            <StatusBadge status={status} />
+            <StatusBadge status={status} testing={busyTesting} />
             <ToolsCapabilityBadge supportsTools={status.supports_tools} />
           </div>
         </div>
@@ -342,9 +370,9 @@ function ConfiguredCard({
           <Button
             variant="neutral"
             size="md"
-            disabled={testing || removing}
+            disabled={busyTesting || removing}
             icon={
-              testing ? (
+              busyTesting ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : undefined
             }
@@ -355,7 +383,7 @@ function ConfiguredCard({
           <Button
             variant="neutral"
             size="md"
-            disabled={testing || removing}
+            disabled={busyTesting || removing}
             onClick={onReplace}
           >
             更换
@@ -363,7 +391,7 @@ function ConfiguredCard({
           <Button
             variant="danger"
             size="md"
-            disabled={testing || removing}
+            disabled={busyTesting || removing}
             icon={
               removing ? (
                 <Loader2 size={14} className="animate-spin" />

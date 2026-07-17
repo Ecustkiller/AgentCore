@@ -20,6 +20,7 @@ import type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  DeliveryStatusPayload,
   PlanRevisionKind,
   ProcessStep,
   RunDebrief,
@@ -34,6 +35,7 @@ export type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  DeliveryStatusPayload,
   PlanRevisionKind,
   ProcessStep,
   RunDebrief,
@@ -336,6 +338,10 @@ export interface ProjectedTurn {
   debateOpening: string | null;
   /** 协调模式团队进展预览（`team_synthesis_preview`，同 key 保最新）：P2 DURABLE。null 当无。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
+  /** 交付状态（`delivery_status`，同 execution_id 保最新）：delegate 批次收尾的结构化交付
+   * 对账——已交付文件 / 缺口 / 待用户操作（能力闸门与交付诚实性）。DURABLE，刷新后交付状态卡
+   * 重建。null 当无（纯 prose 成功批次保持无声）。 */
+  deliveryStatus: DeliveryStatusPayload | null;
   /** 预检警告（`turn_warning`）：P2 DURABLE；刷新后横幅重建。null 当无。 */
   turnWarning: string | null;
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their siblings this turn (`team_note_posted`),

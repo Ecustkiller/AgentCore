@@ -955,6 +955,13 @@
           "month": {
             "$ref": "#/components/schemas/UsageWindow"
           },
+          "month_by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ModelCostLine"
+            },
+            "title": "Month By Model",
+            "type": "array"
+          },
           "month_by_role": {
             "items": {
               "$ref": "#/components/schemas/RoleCostLine"
@@ -985,6 +992,7 @@
           "month",
           "month_by_user",
           "month_by_role",
+          "month_by_model",
           "recent_daily_cost",
           "cny_per_usd",
           "billing_mode"
@@ -1027,8 +1035,19 @@
         "type": "object"
       },
       "AdminUserDetail": {
-        "description": "One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).\n\nStitches the per-user views an operator needs to understand an account: the\nfull record (``user``), this account's usage (today/month/trend/by-role — the\nper-user counterpart of ``AdminUsageSummary``, scoped via ``cost_events.user_id``),\nits recent conversations, and its recent turn activity (``turn_metrics``, each\ndrillable into 会话复盘). Money is integer nano-USD; the client folds the single\n``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).",
+        "description": "One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).\n\nStitches the per-user views an operator needs to understand an account: the\nfull record (``user``), configured chat/background model names (from\n``user_llm_keys`` — never the API key), this account's usage (today/month/\ntrend/by-role/by-model — the per-user counterpart of ``AdminUsageSummary``),\nits recent conversations, and its recent turn activity (``turn_metrics``, each\ndrillable into 会话复盘). Money is integer nano-USD; the client folds the single\n``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).",
         "properties": {
+          "background_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Model"
+          },
           "billing_mode": {
             "title": "Billing Mode",
             "type": "string"
@@ -1044,6 +1063,17 @@
             "title": "Conversations",
             "type": "array"
           },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
           "month": {
             "$ref": "#/components/schemas/UsageWindow"
           },
@@ -1052,6 +1082,13 @@
               "$ref": "#/components/schemas/RoleCostLine"
             },
             "title": "Month By Role",
+            "type": "array"
+          },
+          "recent_by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ModelCostLine"
+            },
+            "title": "Recent By Model",
             "type": "array"
           },
           "recent_daily_cost": {
@@ -1080,6 +1117,7 @@
           "today",
           "month",
           "month_by_role",
+          "recent_by_model",
           "recent_daily_cost",
           "conversations",
           "recent_turns",
@@ -5818,6 +5856,40 @@
         "title": "MfaStatusResponse",
         "type": "object"
       },
+      "ModelCostLine": {
+        "description": "One model's call-level spend over a window — admin per-model payroll.\n\nAggregated from ``cost_calls`` (``GROUP BY model``), never from\n``cost_events.model`` (that column only records the run's first call; multi-model\nruns would mis-attribute). Money is integer nano-USD; ``tokens_total`` is\n``SUM(input + output + reasoning)``. The client formats ¥ from the summary's\nsingle ``cny_per_usd``.",
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "cost_estimated_total": {
+            "default": 0,
+            "title": "Cost Estimated Total",
+            "type": "integer"
+          },
+          "cost_total": {
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "tokens_total": {
+            "title": "Tokens Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "calls",
+          "tokens_total",
+          "cost_total"
+        ],
+        "title": "ModelCostLine",
+        "type": "object"
+      },
       "MountSharedSpaceRequest": {
         "description": "Mount a shared space into a cloud conversation as ``shared/<alias>/``.",
         "properties": {
@@ -7446,10 +7518,17 @@
         "description": "Store the user's OpenAI-compatible LLM configuration (BYOK).",
         "properties": {
           "api_key": {
-            "maxLength": 400,
-            "minLength": 1,
-            "title": "Api Key",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plaintext API key. Omit or leave empty when updating an existing config to keep the stored ciphertext; required for first-time setup.",
+            "title": "Api Key"
           },
           "background_model": {
             "anyOf": [
@@ -7536,9 +7615,6 @@
             "title": "Price Output"
           }
         },
-        "required": [
-          "api_key"
-        ],
         "title": "SetLlmKeyRequest",
         "type": "object"
       },
@@ -11833,7 +11909,7 @@
     },
     "/v1/admin/users/{user_id}/detail": {
       "get": {
-        "description": "用户详情下钻 (用户管理 P0): one account's record + its own usage (today / month\n/ 7-day trend / by-role) + recent conversations + recent turn activity.\n\nThe per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped\nto one account (``cost_events.user_id``) — composed with the account's recent\nconversation roster (message counts batched, no N+1) and its recent turns (each\ncarries ``conversation_id`` to drill into 会话复盘). Admin cross-user; 404 for an\nunknown id. Reuses the per-user cost aggregates already serving ``/v1/usage/summary``.",
+        "description": "用户详情下钻 (用户管理 P0): one account's record + configured model names +\nits own usage (today / month / 7-day trend / by-role / by-model) + recent\nconversations + recent turn activity.\n\nThe per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped\nto one account — composed with the account's recent conversation roster (message\ncounts batched, no N+1) and its recent turns (each carries ``conversation_id`` to\ndrill into 会话复盘). Configured models come from ``user_llm_keys`` (names only —\nnever the API key). Per-model stats scan ``cost_calls`` (last 30 days). Admin\ncross-user; 404 for an unknown id.",
         "operationId": "user_detail_v1_admin_users__user_id__detail_get",
         "parameters": [
           {

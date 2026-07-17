@@ -2235,6 +2235,7 @@
     "crossExamEnabled": true,
     "debateOpening": "多轮对抗开场：先把收益与风险敞口摆上台面。",
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

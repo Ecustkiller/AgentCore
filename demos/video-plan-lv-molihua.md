@@ -1,5 +1,7 @@
 # LV 诉茉莉奶白 · 产品演示视频规划
 
+> **通读拍摄脚本**（分镜表 + 口播逐字稿）：[`video-script-lv-molihua.md`](./video-script-lv-molihua.md)
+
 ## 1. 视频定位
 
 | 项 | 值 |

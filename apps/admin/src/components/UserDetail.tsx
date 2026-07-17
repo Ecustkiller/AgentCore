@@ -23,6 +23,7 @@ import type { TurnMetricLine } from "@/services/adminObservability";
 import {
   type AdminConversationLine,
   type AdminUserDetail,
+  type ModelCostLine,
   type RoleCostLine,
   fetchUserDetail,
 } from "@/services/adminUsers";
@@ -159,6 +160,11 @@ export function UserDetail({
             <p className="mt-3 text-muted-foreground text-xs">
               配额：{quotaSummary(user)}
             </p>
+            <p className="mt-1.5 text-muted-foreground text-xs">
+              对话模型：{data.default_model ?? "未配置"}
+              {" · 后台模型："}
+              {data.background_model ?? "未配置"}
+            </p>
           </header>
 
           {byok && (
@@ -245,6 +251,70 @@ export function UserDetail({
               </table>
             </section>
           )}
+
+          <section className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="border-border border-b px-5 py-3.5">
+              <h2 className="text-base font-semibold text-foreground">
+                近 30 日各模型用量
+              </h2>
+              <p className="mt-0.5 text-muted-foreground text-xs">
+                按 call 明细聚合（cost_calls · 成本降序）
+                {byok ? ` · ${COST_ESTIMATE_HINT}` : ""}
+              </p>
+            </div>
+            {data.recent_by_model.length === 0 ? (
+              <p className="px-5 py-8 text-center text-muted-foreground text-sm">
+                近 30 日暂无模型调用记录
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                    <th className="px-5 py-2.5 font-medium">模型</th>
+                    <th className="px-5 py-2.5 text-right font-medium">调用次数</th>
+                    <th className="px-5 py-2.5 text-right font-medium">Tokens</th>
+                    <th className="px-5 py-2.5 text-right font-medium">成本</th>
+                    <th className="px-5 py-2.5 text-right font-medium">估算</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recent_by_model.map((row: ModelCostLine) => (
+                    <tr
+                      key={row.model}
+                      className="border-border border-b last:border-0"
+                    >
+                      <td className="px-5 py-3 font-medium text-foreground">
+                        {row.model || "（未标注）"}
+                      </td>
+                      <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                        {fmtInt(row.calls)}
+                      </td>
+                      <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                        {fmtCompact(row.tokens_total)}
+                      </td>
+                      <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
+                        {fmtNanoCny(row.cost_total, data.cny_per_usd)}
+                      </td>
+                      <td
+                        className="px-5 py-3 text-right text-muted-foreground tabular-nums"
+                        title={
+                          row.cost_estimated_total > 0
+                            ? COST_ESTIMATE_HINT
+                            : undefined
+                        }
+                      >
+                        {fmtNanoCny(
+                          row.cost_estimated_total,
+                          data.cny_per_usd,
+                          true,
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
 
           <ConversationsTable
             rows={data.conversations}

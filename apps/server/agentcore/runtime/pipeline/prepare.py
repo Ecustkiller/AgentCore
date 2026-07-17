@@ -133,20 +133,10 @@ async def prepare_fresh_turn(
     # 外包一层 ProviderRouter。无前缀模型（CEO / 委派 / 主持人）照走默认，仅辩论辩手 side
     # 带 ``provider/model`` 前缀的调用路由到对应厂商。无厂商 key 时只是空包一层，零行为变化。
     # 路由器接管默认 + 厂商 client 的生命周期，由下方 finally 的 ``await llm.close()`` 释放。
-    from agentcore.core.log_context import bind_log_context
+    from agentcore.llm.credentials import bind_credential_pricing_context
 
     # Call-level pricing + optional user unit card (同路贯穿 calculate_cost).
-    if llm_credentials is not None:
-        bind_kwargs: dict = {"credential_source": llm_credentials.source}
-        if llm_credentials.price_cache_hit:
-            bind_kwargs["user_price_cache_hit"] = llm_credentials.price_cache_hit
-        if llm_credentials.price_cache_miss:
-            bind_kwargs["user_price_cache_miss"] = llm_credentials.price_cache_miss
-        if llm_credentials.price_output:
-            bind_kwargs["user_price_output"] = llm_credentials.price_output
-        bind_log_context(**bind_kwargs)
-    else:
-        bind_log_context(credential_source="platform")
+    bind_credential_pricing_context(llm_credentials)
     llm = pipeline_pkg.build_router_around(pipeline_pkg.build_provider(llm_credentials))
 
     # AI 协作白板 (§六 M2): a board-bound turn gets a BoardChannel so ``board_ops`` can

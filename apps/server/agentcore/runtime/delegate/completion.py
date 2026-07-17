@@ -24,6 +24,16 @@ _EXECUTION_TASK_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+# Task text hints that the DELIVERABLE itself needs a program run to materialise —
+# binary / playable artifacts (a .pptx via python-pptx, a rendered video, an exe…).
+# Heuristic-only (能力闸分级): a hit NEVER blocks, it just rides a soft warning on the
+# delegate result when the turn has no execution class (宁可漏不可错杀).
+_BINARY_ARTIFACT_HINTS = re.compile(
+    r"(python-pptx|openpyxl|ffmpeg|可播放|可直接播放|二进制|可执行文件|"
+    r"\.pptx|\.docx|\.xlsx|\.exe|\.apk|\.mp4|\.mp3|\.wav|\.avi|\.mov)",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class CompletionCriteria:
@@ -106,6 +116,84 @@ def validate_completion_against_forms(
         "但本批全部 worker 均为 deliverable.form=prose（纯文字、不授写文件工具）。"
         "改法：① 纯文字交付请省略 completion_criteria，或改用 code_verified（若需跑通验证）；"
         "② 若确需落盘，把对应 worker 的 deliverable.form 改为 files。"
+    )
+
+
+def plan_mentions_binary_artifact(plan: RunPlan) -> bool:
+    """True when any worker task/objective reads like a binary / playable deliverable."""
+    for node in plan.nodes:
+        text = f"{node.task}\n{node.objective}".strip()
+        if text and _BINARY_ARTIFACT_HINTS.search(text):
+            return True
+    return False
+
+
+def _explicit_code_verified(raw: Any) -> bool:
+    """Whether the CEO EXPLICITLY declared ``code_verified`` (str or dict form).
+
+    Auto-inference from task text is deliberately excluded — the hard gate fires only
+    on an explicit contract (分级闸门：显式契约硬拒，启发命中只软警告，宁可漏不可错杀).
+    """
+    if raw is None:
+        return False
+    criteria = parse_completion_criteria(raw)
+    return criteria is not None and criteria.kind == "code_verified"
+
+
+def validate_execution_capability(
+    raw: Any,
+    plan: RunPlan,  # noqa: ARG001 — plan reserved for future per-node capability checks
+    backend: Any,
+) -> str | None:
+    """Hard gate: explicit ``code_verified`` on a workspace with NO execution class.
+
+    Capability truth is ``code_execution_enabled_for`` (the SAME predicate the worker
+    registry uses — single source, never a second fact source). Returns the CEO-facing
+    rejection message (with concrete ways out), or ``None`` when the combination is fine.
+    """
+    if not _explicit_code_verified(raw):
+        return None
+    from agentcore.tools.builtin import code_execution_enabled_for
+
+    if code_execution_enabled_for(backend):
+        return None
+    return (
+        "无法按 code_verified 验收：本回合工作区为云端沙箱、未装配 code_execute / test_run"
+        "（执行环境不可用），worker 写得了文件但运行不了代码，这条委派会空跑。出路："
+        "① 需要真跑通 → 先用 ask_user（桌面在线时选项标 action=bind_local_folder）"
+        "引导用户绑定本地文件夹，绑定完成后再委派；"
+        "② 改为当前环境可交付的形态 → 落盘生成脚本 / 源文件 + 使用说明"
+        "（deliverable.form=files，completion_criteria=files_written），"
+        "并在收尾向用户显式标出「未运行验证」的交付缺口；"
+        "③ 交付形态拿不准 → 先 ask_user 与用户对齐再委派。"
+    )
+
+
+def execution_capability_warning(
+    raw: Any,
+    plan: RunPlan,
+    backend: Any,
+) -> str | None:
+    """Soft warning: task text smells like run / binary-artifact work with no execution class.
+
+    Fires only when the hard gate did NOT (no explicit ``code_verified``) and either the
+    run/open/install hints or the binary-artifact hints match. Never blocks — the caller
+    appends it to the delegate tool result so the CEO plans an honest deliverable
+    (启发式只软警告，误报宁可漏不可错杀).
+    """
+    if _explicit_code_verified(raw):
+        return None  # hard gate owns this case
+    if not (plan_suggests_code_verification(plan) or plan_mentions_binary_artifact(plan)):
+        return None
+    from agentcore.tools.builtin import code_execution_enabled_for
+
+    if code_execution_enabled_for(backend):
+        return None
+    return (
+        "[能力提示] 本回合执行环境未装配（云端沙箱，无 code_execute / test_run / terminal）："
+        "任务文案涉及「运行 / 启动 / 生成二进制或可播放产物」，worker 只能写脚本 / 文件，"
+        "无法真正运行或生成此类产物。收尾时请把交付缺口如实标给用户"
+        "（如「脚本已落盘、未运行验证」），或引导绑定本地文件夹（bind_local_folder）后重派。"
     )
 
 

@@ -105,10 +105,8 @@ describe("parseSpeechArguments", () => {
   });
 
   it("keeps full long ### titles (LV tape semantics; no data-layer ellipsis)", () => {
-    const t1 =
-      "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
-    const t2 =
-      "论点二：LV四叶花图案经长期使用已获得“第二含义”";
+    const t1 = "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+    const t2 = "论点二：LV四叶花图案经长期使用已获得“第二含义”";
     const speech = [
       `### ${t1}`,
       "正文说明公共元素与独创作品的界限。",
@@ -176,9 +174,7 @@ describe("rehydrateArgumentTitles", () => {
   });
 
   it("keeps structured titles when output is empty", () => {
-    const structured = [
-      { id: "a", title: "截断标题…", body: "body" },
-    ];
+    const structured = [{ id: "a", title: "截断标题…", body: "body" }];
     expect(rehydrateArgumentTitles(structured, "")).toEqual(structured);
     expect(rehydrateArgumentTitles(structured, "   ")).toEqual(structured);
   });

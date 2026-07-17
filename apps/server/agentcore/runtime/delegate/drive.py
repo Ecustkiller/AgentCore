@@ -17,6 +17,7 @@ from agentcore.runtime.delegate.accumulate import (
 from agentcore.runtime.delegate.boundary import boundary_hook, checkpoint_active
 from agentcore.runtime.delegate.ceo_format import direct_result, format_for_ceo
 from agentcore.runtime.delegate.nesting import absorb_children
+from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
 from agentcore.runtime.delegate.supervised import (
     SupervisedRun,
     format_boundary_for_ceo,
@@ -813,6 +814,15 @@ async def drive(
             failed=[n.run_id for n in failed_nodes],
             completed=len(results),
         )
+        # 交付状态（诚实对账）：部分失败也是一次收尾——把已落盘 / 缺口如实发给用户；
+        # CEO 若 replan 补跑，补跑后的收尾会以同 execution_id 覆盖为最新对账。
+        maybe_emit_delivery_status(
+            tool._sink,
+            plan,
+            results,
+            execution_id=execution_id,
+            backend=tool._base_tool_context.backend,
+        )
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -856,6 +866,16 @@ async def drive(
                 gaps=gaps,
                 execution_id=execution_id,
             )
+            # 交付状态（诚实对账）：验收未满足即是用户可见的交付缺口，连同批次级
+            # criteria 缺口一起结构化发出（含可推导的 bind_local_folder 行动项）。
+            maybe_emit_delivery_status(
+                tool._sink,
+                plan,
+                results,
+                execution_id=execution_id,
+                backend=tool._base_tool_context.backend,
+                criteria_gaps=gaps,
+            )
             return ToolResult(
                 tool_call_id="",
                 success=True,
@@ -864,6 +884,17 @@ async def drive(
                 metadata=usage_metadata(call_usage),
                 citations=new_citations or None,
             )
+
+    # 交付状态（诚实对账）：正常收尾（含 finalize 单人直出）——有落盘文件或缺口才发，
+    # 纯 prose 成功批次保持无声。放在 direct_result / format_for_ceo 分叉之前，两条
+    # 收尾路径共用这一次发射。
+    maybe_emit_delivery_status(
+        tool._sink,
+        plan,
+        results,
+        execution_id=execution_id,
+        backend=tool._base_tool_context.backend,
+    )
 
     if finalize and len(plan.nodes) == 1:
         only = results.get(plan.nodes[0].run_id)

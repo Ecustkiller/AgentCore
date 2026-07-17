@@ -148,7 +148,7 @@ async def settle_successful_turn(
     # 回合收口前 boundary flush (P1) — segments cleared after finalize snapshot.
     with contextlib.suppress(Exception):
         await sink.flush_stream_state()
-    return {
+    result: dict = {
         "message_id": message_id,
         "content": final_content,
         "reasoning_content": final_reasoning,
@@ -168,6 +168,14 @@ async def settle_successful_turn(
         "collab": collab,
         "audit_drops": audit_recorder.drops,
     }
+    # Soft-fail path (raise_on_error=False → settle_successful_turn): the live
+    # ``error`` SSE must also land on the settle result so cloud persist stamps
+    # turn_end.error / usage.status=failed (reload error card).
+    turn_error = sink.last_turn_error()
+    if turn_error is not None:
+        result["error"] = turn_error.get("message") or ""
+        result["error_code"] = turn_error.get("code") or ErrorCode.LLM_ERROR
+    return result
 
 
 async def salvage_failed_captain(

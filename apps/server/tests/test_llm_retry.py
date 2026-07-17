@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from agentcore.core.errors import LLMError, LLMUpstreamError
+from agentcore.core.errors import LLMError, LLMTimeoutError, LLMUpstreamError
 from agentcore.llm.errors import is_non_retryable_client_status, is_retryable_upstream_status
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider.openai_compatible import (
+    _CONNECT_INITIAL_BACKOFF,
+    _CONNECT_MAX_RETRIES,
     _INITIAL_BACKOFF,
     _MAX_RETRIES,
     OpenAICompatibleProvider,
@@ -138,7 +140,55 @@ async def test_complete_retries_connect_error_then_succeeds(monkeypatch):
         result = await provider.complete(_req())
         assert result.content == "ok"
         assert calls["n"] == 2
-        assert sleeps == [_INITIAL_BACKOFF]
+        assert sleeps == [_CONNECT_INITIAL_BACKOFF]
+    finally:
+        await provider.close()
+
+
+async def test_complete_connect_timeout_fails_fast(monkeypatch):
+    """ConnectTimeout: only 1 retry (2 attempts) with 1s backoff — not the 5xx budget."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectTimeout("connect timed out")
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await provider.complete(_req())
+        assert calls["n"] == _CONNECT_MAX_RETRIES
+        assert sleeps == [_CONNECT_INITIAL_BACKOFF]
+        assert calls["n"] < _MAX_RETRIES
+    finally:
+        await provider.close()
+
+
+async def test_complete_read_timeout_keeps_full_retry_budget(monkeypatch):
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadTimeout("read timed out")
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await provider.complete(_req())
+        assert calls["n"] == _MAX_RETRIES
+        assert sleeps == [_INITIAL_BACKOFF, _INITIAL_BACKOFF * 2]
     finally:
         await provider.close()
 

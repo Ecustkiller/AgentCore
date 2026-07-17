@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, replace
 
+from agentcore.config import settings
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
@@ -101,6 +102,7 @@ async def continue_run(
     检索→成稿；``allow_research=False``（结辩）退化为单次成稿。
     成稿【已核实】标签闸（见 speech_pipeline）：``evidence_tag_whitelist`` 仅结辩传入
     （白名单闸）；``check_source_grounding`` 续辩 / 质询作答传入（出处软校验闸）。
+    辩论检索 token 顶取 ``settings.engine_debate_token_ceiling``（与 worker 通用顶独立）。
     """
     with log_context(
         run_id=continuation_run_id,
@@ -226,6 +228,11 @@ async def _continue_run_scoped(
             else:
                 # 结辩等无检索 beat：transcript 仍记任务，成稿走干净上下文。
                 messages.append(LLMMessage(role="user", content=feedback))
+            debate_budget = (
+                settings.engine_debate_token_ceiling
+                if settings.engine_debate_token_ceiling > 0
+                else 0
+            )
             content, reasoning, round_usage, round_rounds = await research_then_draft(
                 messages,
                 llm=llm,
@@ -250,6 +257,7 @@ async def _continue_run_scoped(
                 finish_override_sink=finish_override,
                 evidence_tag_whitelist=evidence_tag_whitelist,
                 check_source_grounding=check_source_grounding,
+                token_budget=debate_budget if do_research else 0,
             )
         else:
             messages.append(_continuation_message(feedback))

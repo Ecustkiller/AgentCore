@@ -1,7 +1,10 @@
 """Soft team-gate nudge for the CEO captain ReAct loop.
 
-Covers trigger conditions, one-shot latch, worker isolation, and nudge copy
+Covers investigation trigger, one-shot latch, worker isolation, and nudge copy
 (threshold keywords). Scripted fake provider — zero LLM.
+
+long_content post-hoc discard was removed; solo-collapse defense for early long
+answers is prompt-side「路由自检」（see test_prompt / _CEO_CORE_HINT）.
 """
 
 from __future__ import annotations
@@ -13,10 +16,7 @@ import pytest
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
-from agentcore.runtime.engine.governance import (
-    TEAM_GATE_LONG_CONTENT_CHARS,
-    team_gate_nudge_prompt,
-)
+from agentcore.runtime.engine.governance import team_gate_nudge_prompt
 from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -96,10 +96,6 @@ def _context() -> ToolContext:
     )
 
 
-def _long_prose() -> str:
-    return "甲" * TEAM_GATE_LONG_CONTENT_CHARS
-
-
 def _team_gate_msgs(messages: list[LLMMessage]) -> list[LLMMessage]:
     return [
         m
@@ -177,22 +173,18 @@ async def test_below_investigation_threshold_no_gate():
 
 
 @pytest.mark.asyncio
-async def test_early_long_content_no_tools_fires_and_continues():
-    # Round 0, zero tools, long prose → gate + discard draft; next round answers short.
-    provider = _ScriptedProvider(
-        [
-            [_content_chunk(_long_prose())],
-            [_content_chunk("闲聊：好的")],
-        ]
-    )
+async def test_no_tool_long_answer_does_not_fire_team_gate():
+    """long_content post-hoc discard removed: early long prose is kept as-is."""
+    long = "甲" * 500
+    provider = _ScriptedProvider([[_content_chunk(long)]])
     content, messages = await _run_captain(provider, _registry())
 
-    assert content == "闲聊：好的"
-    assert len(_team_gate_msgs(messages)) == 1
+    assert content == long
+    assert _team_gate_msgs(messages) == []
 
 
 @pytest.mark.asyncio
-async def test_early_short_content_no_gate():
+async def test_no_tool_short_answer_no_gate():
     provider = _ScriptedProvider([[_content_chunk("嗯，好的")]])
     content, messages = await _run_captain(provider, _registry())
 
@@ -208,7 +200,7 @@ async def test_worker_role_never_fires():
             [_tool_chunk("search", '{"q": "1"}')],
             [_tool_chunk("search", '{"q": "2"}')],
             [_tool_chunk("search", '{"q": "3"}')],
-            [_content_chunk(_long_prose())],
+            [_content_chunk("甲" * 500)],
         ]
     )
     content, messages = await _run_captain(
@@ -240,14 +232,15 @@ async def test_after_delegate_no_gate():
 
 
 @pytest.mark.asyncio
-async def test_fires_at_most_once_across_triggers():
-    # Investigation gate first; a later long-content round must not inject again.
+async def test_investigation_fires_at_most_once():
+    # Investigation gate first; further investigation rounds must not inject again.
     search = _StubTool(name="search")
     provider = _ScriptedProvider(
         [
             [_tool_chunk("search", '{"q": "1"}')],
             [_tool_chunk("search", '{"q": "2"}')],
-            [_content_chunk(_long_prose())],
+            [_tool_chunk("search", '{"q": "3"}')],
+            [_content_chunk("甲" * 500)],
         ]
     )
     _content, messages = await _run_captain(provider, _registry(search))

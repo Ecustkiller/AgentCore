@@ -20,12 +20,13 @@ logger = get_logger(__name__)
 
 
 def _should_persist_journal(sink: EventSink) -> bool:
-    """True when this turn has replayable display surface (team graph / process / context)."""
+    """True when this turn has replayable display surface (team graph / process / context / error)."""
     return not (
         sink.execution_journal() is None
         and sink.process_timeline() is None
         and sink.run_process_timelines() is None
         and sink.captain_context() is None
+        and sink.last_turn_error() is None
     )
 
 
@@ -42,6 +43,7 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any]
     process = sink.process_timeline()
     run_processes = sink.run_process_timelines()
     captain_context = sink.captain_context()
+    turn_error = sink.last_turn_error()
     payload: dict[str, Any] = {
         "events": journal or [],
         "finish_reason": finish.value,
@@ -52,6 +54,17 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any]
         payload["run_processes"] = run_processes
     if captain_context is not None:
         payload["captain_context"] = captain_context
+    if turn_error is not None:
+        # Durable home for the transport-only ``error`` SSE (Tier 2 a).
+        payload["error"] = {
+            "code": turn_error.get("code") or "",
+            "message": turn_error.get("message") or "",
+            **(
+                {"context": turn_error["context"]}
+                if isinstance(turn_error.get("context"), dict)
+                else {}
+            ),
+        }
     return payload
 
 
@@ -94,6 +107,8 @@ def _journal_entries_for_turn(
     if runs is None:
         return None
 
+    turn_error = runs.get("error")
+
     # Close open text / markers into the ambient log before composing the tail.
     sink.flush_process_to_journal()
 
@@ -108,11 +123,12 @@ def _journal_entries_for_turn(
                     "process": runs.get("process"),
                     "run_processes": runs.get("run_processes"),
                     "finish_reason": runs.get("finish_reason"),
+                    **({"error": turn_error} if turn_error is not None else {}),
                 }
             )
             return entries + (tail or [])
         if not _entries_already_have_turn_end(entries):
-            return entries + [_turn_end_entry(finish)]
+            return entries + [_turn_end_entry(finish, error=turn_error)]
         return entries
 
     return journal_entries_from_display_runs(runs)

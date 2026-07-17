@@ -21,17 +21,23 @@ const { chromium } = require("playwright");
 const OUT = path.join(os.tmpdir(), "demo-tape-director");
 const HTML_PATH = path.join(OUT, "director.html");
 
+// Derived from demos/tapes/lv-molihua-trademark.json via build_chapters (2026-07-17 take).
 const CHAPTERS = [
   { id: "opening", label: "开场检索", t_ms: 0, event_index: 0 },
-  { id: "team_preview", label: "组队授权", t_ms: 32000, event_index: 113 },
-  { id: "r1_argument", label: "第1轮·立论", t_ms: 52000, event_index: 117 },
-  { id: "r1_cross", label: "第1轮·质询", t_ms: 188000, event_index: 839 },
-  { id: "r1_score", label: "第1轮·打分", t_ms: 319000, event_index: 1638 },
-  { id: "r2_argument", label: "第2轮·立论", t_ms: 319000, event_index: 1639 },
-  { id: "r2_cross", label: "第2轮·质询", t_ms: 478000, event_index: 2626 },
-  { id: "r2_score", label: "第2轮·打分", t_ms: 598000, event_index: 3216 },
-  { id: "r3_argument", label: "第3轮·立论", t_ms: 598000, event_index: 3217 },
-  { id: "verdict", label: "终审", t_ms: 1118000, event_index: 5455 },
+  { id: "team_preview", label: "组队授权", t_ms: 29287, event_index: 1797 },
+  { id: "r1_argument", label: "第1轮·立论", t_ms: 37800, event_index: 1801 },
+  { id: "r1_cross", label: "第1轮·质询", t_ms: 157638, event_index: 8684 },
+  { id: "r1_score", label: "第1轮·打分", t_ms: 275180, event_index: 15742 },
+  { id: "r2_argument", label: "第2轮·立论", t_ms: 275180, event_index: 15743 },
+  { id: "r2_cross", label: "第2轮·质询", t_ms: 401725, event_index: 21401 },
+  { id: "r2_score", label: "第2轮·打分", t_ms: 495918, event_index: 25777 },
+  { id: "r3_argument", label: "第3轮·立论", t_ms: 495918, event_index: 25778 },
+  { id: "r3_cross", label: "第3轮·质询", t_ms: 621310, event_index: 31763 },
+  { id: "r3_score", label: "第3轮·打分", t_ms: 714497, event_index: 35026 },
+  { id: "r4_argument", label: "第4轮·立论", t_ms: 714497, event_index: 35027 },
+  { id: "r4_cross", label: "第4轮·质询", t_ms: 796526, event_index: 39261 },
+  { id: "r4_score", label: "第4轮·打分", t_ms: 878121, event_index: 43177 },
+  { id: "verdict", label: "终审", t_ms: 907528, event_index: 45893 },
 ];
 
 const CID = "c63a1188-20ac-48d4-9c0a-9ede68bc17f3";
@@ -43,10 +49,10 @@ let status = {
   state: "playing",
   speed: 4,
   max_gap_ms: 2000,
-  event_index: 840,
-  event_count: 5513,
-  t_ms: 188000,
-  duration_ms: 1180000,
+  event_index: 8684,
+  event_count: 46678,
+  t_ms: 157638,
+  duration_ms: 917190,
   message_id: "msg-demo",
   burst_until_index: null,
   soft_paused: false,
@@ -190,7 +196,7 @@ async function main() {
     state: "awaiting_interaction",
     soft_paused: true,
     chapter_label: "组队授权",
-    t_ms: 32000,
+    t_ms: 29287,
   };
   await page.waitForTimeout(500);
   const shotAwait = path.join(OUT, "director-03-awaiting-paused.png");

@@ -211,10 +211,7 @@ export function GraphTeamPreview({
           {summary}
         </Button>
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="w-80 p-3 [&>*:first-child]:mt-0"
-      >
+      <PopoverContent align="end" className="w-80 p-3 [&>*:first-child]:mt-0">
         {isDebate(preview) ? (
           <DebateBody preview={preview} />
         ) : (

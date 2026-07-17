@@ -27,7 +27,7 @@ from sqlalchemy import text
 
 from agentcore.db.base import async_session_factory
 from agentcore.demo_tape.export import load_tape
-from agentcore.demo_tape.schema import event_type
+from agentcore.demo_tape.schema import event_type, persisted_captain_content_from_events
 
 DEFAULT_ORACLE_MID = "69262466-c868-4f53-a6a2-6d626c5c0c19"
 DEFAULT_TAPE = (
@@ -39,8 +39,10 @@ OUT_DIR = Path(__file__).resolve().parents[3] / "apps" / "desktop" / "demo-tape-
 async def _oracle(message_id: str) -> tuple[str, str]:
     """Captain content + reasoning truth from the source conversation.
 
-    Reasoning oracle = concat of captain ``process_reasoning`` bursts (differs from
-    ``messages.reasoning_content`` only by the pause-boundary joiner).
+    Content oracle = ``messages.content`` (persist applies ``join_segments`` at the
+    durable-pause seam). Reasoning oracle = concat of captain ``process_reasoning``
+    bursts (differs from ``messages.reasoning_content`` only by the pause-boundary
+    joiner).
     """
     async with async_session_factory() as s:
         msg = (
@@ -295,11 +297,9 @@ async def main() -> int:
         "errors": [],
     }
 
-    tape_content = "".join(
-        (e.get("payload") or {}).get("delta") or ""
-        for e in events
-        if event_type(e) == "content_delta"
-    )
+    # Persist-shaped: live finish joins segments at durable pauses; raw delta concat
+    # omits that joiner (never present on the wire). Match messages.content oracle.
+    tape_content = persisted_captain_content_from_events(events)
     ok_content = tape_content == oracle_content
     report["checks"]["captain_content_byte_equal"] = ok_content
     if not ok_content:

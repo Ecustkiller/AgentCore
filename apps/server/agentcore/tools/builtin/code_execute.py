@@ -37,6 +37,10 @@ def code_execute_description(location: Literal["server", "local"] | None = None)
         where = (
             "在【服务端云端沙箱】工作区目录中执行代码（支持 Python、JavaScript、Bash），"
             "可访问工作区内的文件。沙箱触达不了用户的电脑、本机应用与本机文件。"
+            "沙箱 Python 已预装常用文档 / 数据库：python-pptx、python-docx、openpyxl、"
+            "pandas、numpy、matplotlib、reportlab、pypdf、Pillow（画图含中文时先设置"
+            "字体如 Noto Sans CJK SC）。代码写到工作区相对路径的文件会在执行结束后"
+            "保存进工作区（结果会列出写回的文件），用户可直接预览 / 下载。"
         )
     else:
         # Catalog / unknown backend: stay honest without the old two-way hedge.
@@ -161,6 +165,17 @@ class CodeExecuteTool:
         if result.exit_code != 0:
             output += f"\n\n退出码：{result.exit_code}"
 
+        # 产物写回 (gVisor copy-out): tell the model exactly which files landed in
+        # the workspace so it can reference them (and never claim an artifact that
+        # was skipped by the write-back caps).
+        if result.written_files:
+            output += "\n\n已写回工作区：" + "、".join(result.written_files)
+        if result.write_back_skipped:
+            output += (
+                f"\n注意：另有 {result.write_back_skipped} 个文件超出写回限额未保存"
+                "（单次执行的产物总量/文件数有限制，可分次生成）。"
+            )
+
         # Render-oriented twin of ``output`` (工具结果富渲染): the client shows a
         # terminal-style view (stdout, stderr in red, exit-code badge) instead of
         # the flattened "stdout:\n…\nstderr:\n…" text. Kept structured so failures
@@ -171,6 +186,10 @@ class CodeExecuteTool:
             "exit_code": result.exit_code,
             "language": language,
         }
+        if result.written_files:
+            # Additive key (only when present) — desktop renders known keys and
+            # ignores extras, so old fixtures/tests stay byte-identical.
+            display["written_files"] = result.written_files
         return ToolResult(
             tool_call_id="",
             success=result.success,

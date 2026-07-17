@@ -33,6 +33,8 @@ from agentcore.llm.errors import (
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import (
     BACKOFF_MULTIPLIER,
+    CONNECT_INITIAL_BACKOFF,
+    CONNECT_MAX_RETRIES,
     INITIAL_BACKOFF,
     MAX_RETRIES,
     LLMChunk,
@@ -65,6 +67,8 @@ def _request_attribution_headers() -> dict[str, str]:
 _MAX_RETRIES = MAX_RETRIES
 _INITIAL_BACKOFF = INITIAL_BACKOFF
 _BACKOFF_MULTIPLIER = BACKOFF_MULTIPLIER
+_CONNECT_MAX_RETRIES = CONNECT_MAX_RETRIES
+_CONNECT_INITIAL_BACKOFF = CONNECT_INITIAL_BACKOFF
 # Unary completions can run 150s+ for long-form writing; streaming read timeout is
 # per-chunk idle, so a generous ceiling avoids false positives on slow generations.
 _REQUEST_TIMEOUT = 300.0
@@ -451,17 +455,21 @@ class OpenAICompatibleProvider:
                     )
                     yield LLMChunk(aborted=True)
                     return
-                if not self._can_retry_attempt(attempt):
+                is_connect = isinstance(e, httpx.ConnectTimeout)
+                max_attempts = _CONNECT_MAX_RETRIES if is_connect else _MAX_RETRIES
+                if not self._can_retry_attempt(attempt, max_attempts=max_attempts):
                     raise last_error from e
                 if yielded_ephemeral:
                     yield LLMChunk(stream_reset=True)
                     yielded_ephemeral = False
+                retry_backoff = _CONNECT_INITIAL_BACKOFF if is_connect else backoff
                 backoff = await self._sleep_before_retry(
                     attempt=attempt,
-                    backoff=backoff,
+                    backoff=retry_backoff,
                     stream=True,
-                    reason="timeout",
+                    reason="connect_timeout" if is_connect else "timeout",
                     partial_sse_lines=lines_seen,
+                    max_attempts=max_attempts,
                 )
             except httpx.HTTPError as e:
                 last_error = self._network_error_to_llm(e)
@@ -475,20 +483,24 @@ class OpenAICompatibleProvider:
                     )
                     yield LLMChunk(aborted=True)
                     return
+                is_connect = self._is_connect_failure(e)
+                max_attempts = _CONNECT_MAX_RETRIES if is_connect else _MAX_RETRIES
                 if (
                     not last_error.retryable
-                    or not self._can_retry_attempt(attempt)
+                    or not self._can_retry_attempt(attempt, max_attempts=max_attempts)
                 ):
                     raise last_error from e
                 if yielded_ephemeral:
                     yield LLMChunk(stream_reset=True)
                     yielded_ephemeral = False
+                retry_backoff = _CONNECT_INITIAL_BACKOFF if is_connect else backoff
                 backoff = await self._sleep_before_retry(
                     attempt=attempt,
-                    backoff=backoff,
+                    backoff=retry_backoff,
                     stream=True,
                     reason=type(e).__name__,
                     partial_sse_lines=lines_seen,
+                    max_attempts=max_attempts,
                 )
 
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
@@ -620,8 +632,14 @@ class OpenAICompatibleProvider:
             body=detail.encode(),
         )
 
-    def _can_retry_attempt(self, attempt: int) -> bool:
-        return attempt < _MAX_RETRIES - 1
+    @staticmethod
+    def _is_connect_failure(exc: BaseException) -> bool:
+        """True for httpx connect-class failures (not read / write timeouts)."""
+        return isinstance(exc, (httpx.ConnectTimeout, httpx.ConnectError))
+
+    def _can_retry_attempt(self, attempt: int, *, max_attempts: int | None = None) -> bool:
+        limit = _MAX_RETRIES if max_attempts is None else max_attempts
+        return attempt < limit - 1
 
     async def _sleep_before_retry(
         self,
@@ -631,13 +649,14 @@ class OpenAICompatibleProvider:
         stream: bool,
         reason: str,
         partial_sse_lines: int = 0,
+        max_attempts: int | None = None,
     ) -> float:
         wait = backoff
         logger.info(
             "llm.call_retried",
             provider=self._name,
             attempt=attempt + 1,
-            max_attempts=_MAX_RETRIES,
+            max_attempts=max_attempts if max_attempts is not None else _MAX_RETRIES,
             wait_sec=wait,
             stream=stream,
             reason=reason,
@@ -701,23 +720,33 @@ class OpenAICompatibleProvider:
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
                 last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
-                if not self._can_retry_attempt(attempt):
+                is_connect = isinstance(e, httpx.ConnectTimeout)
+                max_attempts = _CONNECT_MAX_RETRIES if is_connect else _MAX_RETRIES
+                if not self._can_retry_attempt(attempt, max_attempts=max_attempts):
                     raise last_error from e
+                retry_backoff = _CONNECT_INITIAL_BACKOFF if is_connect else backoff
                 backoff = await self._sleep_before_retry(
                     attempt=attempt,
-                    backoff=backoff,
+                    backoff=retry_backoff,
                     stream=False,
-                    reason="timeout",
+                    reason="connect_timeout" if is_connect else "timeout",
+                    max_attempts=max_attempts,
                 )
             except httpx.HTTPError as e:
                 last_error = self._network_error_to_llm(e)
-                if not last_error.retryable or not self._can_retry_attempt(attempt):
+                is_connect = self._is_connect_failure(e)
+                max_attempts = _CONNECT_MAX_RETRIES if is_connect else _MAX_RETRIES
+                if not last_error.retryable or not self._can_retry_attempt(
+                    attempt, max_attempts=max_attempts
+                ):
                     raise last_error from e
+                retry_backoff = _CONNECT_INITIAL_BACKOFF if is_connect else backoff
                 backoff = await self._sleep_before_retry(
                     attempt=attempt,
-                    backoff=backoff,
+                    backoff=retry_backoff,
                     stream=False,
                     reason=type(e).__name__,
+                    max_attempts=max_attempts,
                 )
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 

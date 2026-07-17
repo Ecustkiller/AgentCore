@@ -26,7 +26,6 @@ from agentcore.runtime.engine.governance import (
     create_loop_controller,
     maybe_inject_team_gate,
     note_delegate_batches,
-    should_team_gate_long_content,
 )
 from agentcore.runtime.engine.loop import (
     CaptainLoopMirror,
@@ -122,15 +121,8 @@ def test_seed_blocks_team_gate_reinjection():
         "audit_gate_fired": False,
         "first_batch_substantial": True,
     }
-    controller = create_loop_controller(frozenset(), seed=seed)
+    controller = create_loop_controller(frozenset({"search"}), seed=seed)
     messages: list[LLMMessage] = []
-    long = "x" * 500
-    assert (
-        should_team_gate_long_content(
-            controller, role="captain", round_idx=0, content=long
-        )
-        is False
-    )
     assert (
         maybe_inject_team_gate(
             controller,
@@ -138,7 +130,7 @@ def test_seed_blocks_team_gate_reinjection():
             run_id="r",
             round_idx=0,
             role="captain",
-            trigger="long_content",
+            trigger="investigation",
         )
         is False
     )
@@ -334,7 +326,7 @@ async def test_captain_mirror_updates_after_prose_join():
 
 @pytest.mark.asyncio
 async def test_react_loop_controller_seed_skips_team_gate():
-    """Seeded has_delegated + team_gate_fired → long captain answer is not rewritten."""
+    """Seeded has_delegated + audit latch → long captain answer is not rewritten."""
     long = "直答" + ("字" * 400)
     seed = {
         "post_delegate": True,

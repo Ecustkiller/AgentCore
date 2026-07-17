@@ -32,6 +32,25 @@ if ! docker pull "$IMAGE" 2>/dev/null; then
 fi
 
 COMPOSE=( docker compose -p agentcore -f "$DEPLOY/docker-compose.server.yml" -f "$DEPLOY/docker-compose.app.yml" --env-file "$ENVF" )
+# gVisor 灰度：env 开了就叠 sandbox 层。活栈若仍指向 deploy_f6d1637 快照且缺
+# sandbox.yml，回退到仓库 live deploy/（remote-build-deploy 已 checkout 的 tree）。
+if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|True|TRUE)[[:space:]]*$' "$ENVF"; then
+  _sandbox_yml=""
+  for _cand in \
+    "$DEPLOY/docker-compose.sandbox.yml" \
+    "${AGENTCORE_HOME:-/opt/agentcore}/repo/deploy/docker-compose.sandbox.yml"; do
+    if [[ -f "$_cand" ]]; then
+      _sandbox_yml="$_cand"
+      break
+    fi
+  done
+  if [[ -z "$_sandbox_yml" ]]; then
+    echo "ERROR: GVISOR_ENABLED=true 但找不到 docker-compose.sandbox.yml"
+    exit 1
+  fi
+  COMPOSE+=(-f "$_sandbox_yml")
+  echo "gVisor sandbox overlay: $_sandbox_yml"
+fi
 
 echo "== [4/7] 确认基础设施在线 + 等 postgres =="
 "${COMPOSE[@]}" up -d postgres redis searxng

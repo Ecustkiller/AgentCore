@@ -69,6 +69,35 @@ async def test_set_key_rejects_empty_key(service):
 
 
 @pytest.mark.asyncio
+async def test_set_key_keeps_ciphertext_when_api_key_omitted(service):
+    """已配置用户省略 api_key 时保留原 ciphertext，只更新其它字段。"""
+    service._repo.get_by_user_id = AsyncMock(
+        return_value=_row(api_key_enc=b"existing-cipher")
+    )
+    with patch.object(service, "_encryptor") as enc_mock:
+        enc_mock.return_value.decrypt.return_value.decode.return_value = "sk-keep"
+        status = await service.set_key(
+            "u1",
+            None,
+            base_url="https://api.deepseek.com",
+            default_model="deepseek-v4-pro",
+        )
+
+    enc_mock.return_value.encrypt.assert_not_called()
+    service._repo.upsert.assert_awaited_once_with(
+        user_id="u1",
+        api_key_enc=b"existing-cipher",
+        base_url="https://api.deepseek.com",
+        default_model="deepseek-v4-pro",
+        price_cache_hit=None,
+        price_cache_miss=None,
+        price_output=None,
+        background_model=None,
+    )
+    assert status.configured is True
+
+
+@pytest.mark.asyncio
 async def test_get_status_platform_mode_ignores_stored_byok_model(service, monkeypatch):
     """Platform billing runs on PLATFORM_LLM_MODEL, not a dormant BYOK row."""
     monkeypatch.setattr(settings, "billing_mode", "byok")

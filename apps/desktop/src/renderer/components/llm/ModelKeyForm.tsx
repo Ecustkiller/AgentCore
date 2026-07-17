@@ -11,10 +11,12 @@ import {
 import { ApiError } from "@/services/api";
 import { type LlmKeyStatus, setLlmKey } from "@/services/llmKey";
 import { ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 export const MODEL_CONFIG_INPUT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+
+const MODEL_OTHER_VALUE = "__other__";
 
 export function modelConfigApiErrorMessage(
   e: unknown,
@@ -68,7 +70,6 @@ export function ModelKeyForm({
   hideTestHint = false,
   savingLabel = "保存中…",
 }: ModelKeyFormProps) {
-  const modelListId = useId();
   const [apiKey, setApiKey] = useState("");
   const [providerId, setProviderId] = useState<ByokProviderId>(() =>
     resolveByokProviderFromConfig(initialBaseUrl),
@@ -93,9 +94,24 @@ export function ModelKeyForm({
   const [backgroundModel, setBackgroundModel] = useState(
     () => initialBackgroundModel?.trim() ?? "",
   );
+  const [customModelMode, setCustomModelMode] = useState(() => {
+    const model = initialModel.trim();
+    if (!model) return false;
+    const provider = resolveByokProviderFromConfig(initialBaseUrl);
+    if (isCustomByokProvider(provider)) return false;
+    return !getByokProviderPreset(provider).models.includes(model);
+  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hasInitialAdvanced = Boolean(
+    initialPriceCacheHit?.trim() ||
+      initialPriceCacheMiss?.trim() ||
+      initialPriceOutput?.trim() ||
+      initialBackgroundModel?.trim(),
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(hasInitialAdvanced);
 
   const preset = !isCustomByokProvider(providerId)
     ? getByokProviderPreset(providerId)
@@ -103,6 +119,7 @@ export function ModelKeyForm({
   const modelSuggestions = preset?.models ?? [];
   const keyHelpUrl =
     preset?.keyHelpUrl ?? "https://platform.openai.com/api-keys";
+  const useModelSelect = modelSuggestions.length > 0;
 
   const selectProvider = (next: ByokProviderId) => {
     setProviderId(next);
@@ -110,10 +127,27 @@ export function ModelKeyForm({
       const p = getByokProviderPreset(next);
       setBaseUrl(p.baseUrl);
       setDefaultModel(p.defaultModel);
+      setCustomModelMode(false);
+    } else {
+      setCustomModelMode(false);
     }
   };
 
-  const canSave = apiKey.trim().length > 0 && !saving;
+  const selectModelOption = (value: string) => {
+    if (value === MODEL_OTHER_VALUE) {
+      setCustomModelMode(true);
+      return;
+    }
+    setCustomModelMode(false);
+    setDefaultModel(value);
+  };
+
+  const keyOk = configured || apiKey.trim().length > 0;
+  const canSave =
+    keyOk &&
+    baseUrl.trim().length > 0 &&
+    defaultModel.trim().length > 0 &&
+    !saving;
   const cta = submitLabel ?? (configured ? "保存" : "保存");
 
   const save = async () => {
@@ -125,9 +159,10 @@ export function ModelKeyForm({
       const hit = priceCacheHit.trim();
       // 输入+输出成对；全空=清除价卡。只填一侧时仍原样提交，由后端校验报错。
       const pricesEmpty = !miss && !out && !hit;
+      const trimmedKey = apiKey.trim();
       onSaved(
         await setLlmKey({
-          api_key: apiKey.trim(),
+          api_key: trimmedKey || null,
           base_url: baseUrl.trim() || null,
           default_model: defaultModel.trim() || null,
           price_cache_miss: pricesEmpty ? null : miss || null,
@@ -142,6 +177,13 @@ export function ModelKeyForm({
       setSaving(false);
     }
   };
+
+  const modelSelectValue =
+    useModelSelect &&
+    !customModelMode &&
+    modelSuggestions.includes(defaultModel)
+      ? defaultModel
+      : MODEL_OTHER_VALUE;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
@@ -169,13 +211,15 @@ export function ModelKeyForm({
           )}
         </label>
         <label className="block">
-          <span className="text-xs text-muted-foreground">API Key</span>
+          <span className="text-xs text-muted-foreground">
+            API Key{configured ? "（可选）" : ""}
+          </span>
           <div className="relative mt-1">
             <input
               type={reveal ? "text" : "password"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
+              placeholder={configured ? "留空则保留已保存的 Key" : "sk-..."}
               autoComplete="off"
               spellCheck={false}
               className={`${MODEL_CONFIG_INPUT_CLASS} pl-2 pr-9`}
@@ -207,97 +251,130 @@ export function ModelKeyForm({
             className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
           />
         </label>
-        <label className="block">
-          <span className="text-xs text-muted-foreground">默认模型名</span>
-          <input
-            type="text"
-            value={defaultModel}
-            onChange={(e) => setDefaultModel(e.target.value)}
-            placeholder={
-              isCustomByokProvider(providerId)
-                ? "model-name"
-                : preset?.defaultModel
-            }
-            list={modelSuggestions.length > 0 ? modelListId : undefined}
-            autoComplete="off"
-            spellCheck={false}
-            className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
-          />
-          {modelSuggestions.length > 0 && (
-            <datalist id={modelListId}>
-              {modelSuggestions.map((model) => (
-                <option key={model} value={model} />
-              ))}
-            </datalist>
+        <div>
+          {useModelSelect ? (
+            <label className="block">
+              <span className="text-xs text-muted-foreground">默认模型名</span>
+              <select
+                value={modelSelectValue}
+                onChange={(e) => selectModelOption(e.target.value)}
+                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS} font-sans`}
+              >
+                {modelSuggestions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+                <option value={MODEL_OTHER_VALUE}>其他…</option>
+              </select>
+            </label>
+          ) : (
+            <label className="block">
+              <span className="text-xs text-muted-foreground">默认模型名</span>
+              <input
+                type="text"
+                value={defaultModel}
+                onChange={(e) => setDefaultModel(e.target.value)}
+                placeholder="model-name"
+                autoComplete="off"
+                spellCheck={false}
+                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+              />
+            </label>
           )}
-        </label>
-        <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-          <p className="text-xs font-medium text-foreground">单价卡（可选）</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            USD / 1M tokens。输入与输出成对填写后，用量页与回合成本可显示 ≈¥
-            估算；全空则清除价卡。
-          </p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            <label className="block">
-              <span className="text-xs text-muted-foreground">输入价</span>
+          {useModelSelect &&
+            (customModelMode || modelSelectValue === MODEL_OTHER_VALUE) && (
               <input
                 type="text"
-                inputMode="decimal"
-                value={priceCacheMiss}
-                onChange={(e) => setPriceCacheMiss(e.target.value)}
-                placeholder="如 0.28"
+                value={defaultModel}
+                onChange={(e) => setDefaultModel(e.target.value)}
+                placeholder={preset?.defaultModel ?? "model-name"}
                 autoComplete="off"
                 spellCheck={false}
-                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+                className={`mt-2 ${MODEL_CONFIG_INPUT_CLASS}`}
               />
-            </label>
-            <label className="block">
-              <span className="text-xs text-muted-foreground">输出价</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={priceOutput}
-                onChange={(e) => setPriceOutput(e.target.value)}
-                placeholder="如 0.42"
-                autoComplete="off"
-                spellCheck={false}
-                className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
-              />
-            </label>
+            )}
+        </div>
+        <details
+          className="rounded-lg border border-border/60 bg-muted/20 p-3"
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-xs font-medium text-foreground">
+            高级选项
+          </summary>
+          <div className="mt-3 space-y-3">
+            <div>
+              <p className="text-xs font-medium text-foreground">
+                单价卡（可选）
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                USD / 1M tokens。输入与输出成对填写后，用量页与回合成本可显示 ≈¥
+                估算；全空则清除价卡。
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <label className="block">
+                  <span className="text-xs text-muted-foreground">输入价</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={priceCacheMiss}
+                    onChange={(e) => setPriceCacheMiss(e.target.value)}
+                    placeholder="如 0.28"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs text-muted-foreground">输出价</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={priceOutput}
+                    onChange={(e) => setPriceOutput(e.target.value)}
+                    placeholder="如 0.42"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs text-muted-foreground">
+                    缓存命中价（可选）
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={priceCacheHit}
+                    onChange={(e) => setPriceCacheHit(e.target.value)}
+                    placeholder="缺省=输入价"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+                  />
+                </label>
+              </div>
+            </div>
             <label className="block">
               <span className="text-xs text-muted-foreground">
-                缓存命中价（可选）
+                后台模型（可选）
               </span>
               <input
                 type="text"
-                inputMode="decimal"
-                value={priceCacheHit}
-                onChange={(e) => setPriceCacheHit(e.target.value)}
-                placeholder="缺省=输入价"
+                value={backgroundModel}
+                onChange={(e) => setBackgroundModel(e.target.value)}
+                placeholder="留空跟随默认模型"
                 autoComplete="off"
                 spellCheck={false}
                 className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
               />
+              <p className="mt-1 text-xs text-muted-foreground">
+                用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
+              </p>
             </label>
           </div>
-        </div>
-        <label className="block">
-          <span className="text-xs text-muted-foreground">
-            后台模型（可选）
-          </span>
-          <input
-            type="text"
-            value={backgroundModel}
-            onChange={(e) => setBackgroundModel(e.target.value)}
-            placeholder="留空跟随默认模型"
-            autoComplete="off"
-            spellCheck={false}
-            className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
-          </p>
-        </label>
+        </details>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button

@@ -1,4 +1,5 @@
 import {
+  BYOK_PROVIDER_PRESETS,
   DEFAULT_BYOK_PROVIDER_ID,
   getByokProviderPreset,
   normalizeByokBaseUrl,
@@ -15,8 +16,9 @@ describe("normalizeByokBaseUrl", () => {
 });
 
 describe("resolveByokProviderFromConfig", () => {
-  it("defaults empty base_url to OpenAI preset", () => {
+  it("defaults empty base_url to DeepSeek preset", () => {
     expect(resolveByokProviderFromConfig("")).toBe(DEFAULT_BYOK_PROVIDER_ID);
+    expect(DEFAULT_BYOK_PROVIDER_ID).toBe("deepseek");
   });
 
   it("matches canonical preset base_url", () => {
@@ -51,10 +53,15 @@ describe("resolveByokProviderFromConfig", () => {
 });
 
 describe("getByokProviderPreset", () => {
-  it("returns preset metadata for known ids", () => {
+  it("returns DeepSeek flash-first metadata", () => {
     const preset = getByokProviderPreset("deepseek");
     expect(preset.baseUrl).toBe("https://api.deepseek.com");
-    expect(preset.models).toContain("deepseek-v4-pro");
+    expect(preset.defaultModel).toBe("deepseek-v4-flash");
+    expect(preset.models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
     expect(preset.models).not.toContain("deepseek-chat");
+  });
+
+  it("lists DeepSeek first among vendor presets", () => {
+    expect(BYOK_PROVIDER_PRESETS[0]?.id).toBe("deepseek");
   });
 });

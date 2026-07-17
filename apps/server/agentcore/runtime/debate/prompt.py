@@ -22,7 +22,13 @@ from agentcore.runtime.debate.constants import (
     QUICK_DEBATER_HINT,
 )
 from agentcore.runtime.debate.evidence_guard import extract_verified_tags
+from agentcore.runtime.debate.match_ledger import (
+    accumulate_match_ledger,
+    format_match_ledger_block,
+    format_own_argument_titles,
+)
 from agentcore.runtime.debate.speech_parse import parse_speech_arguments
+from agentcore.runtime.debate.types import LedgerEvent
 from agentcore.runtime.runs.types import ContextBlock
 
 # 后续轮把【对手上一轮发言】喂回本辩手时，每份的头尾截断上限。多方圆桌每轮要塞 N-1 份对手
@@ -337,6 +343,29 @@ def _round_engage_and_opponents(
     return engage, opp_block
 
 
+def _ledger_and_own_blocks(
+    config: DebateConfig,
+    side: DebateSide,
+    *,
+    match_ledger: Sequence[LedgerEvent] = (),
+    history: Sequence[RoundResult] = (),
+    include_own_titles: bool = False,
+) -> str:
+    """台账摘要 +（可选）己方论点标题一览，供 feedback / brief / 结辩拼接。"""
+    names = {s.key: s.name for s in config.sides}
+    parts: list[str] = []
+    ledger_block = format_match_ledger_block(match_ledger, side_names=names)
+    if ledger_block:
+        parts.append(ledger_block.rstrip())
+    if include_own_titles:
+        own = format_own_argument_titles(history, side)
+        if own:
+            parts.append(own.rstrip())
+    if not parts:
+        return ""
+    return "\n\n".join(parts) + "\n\n"
+
+
 def round_feedback(
     config: DebateConfig,
     side: DebateSide,
@@ -344,14 +373,19 @@ def round_feedback(
     focus: str,
     last_round: RoundResult,
     interjections: Sequence[UserInterjection] = (),
+    *,
+    match_ledger: Sequence[LedgerEvent] = (),
+    history: Sequence[RoundResult] = (),
 ) -> str:
-    """后续轮【检索阶段】feedback：情境 + 对方论点 + 证据笔记交付物。"""
+    """后续轮【检索阶段】feedback：情境 + 对方论点 + 对局台账 + 证据笔记交付物。"""
     engage, opp_block = _round_engage_and_opponents(config, side, last_round)
     challenged = _challenged_block(config, side, last_round)
     ask_block = _interjection_block(side, interjections)
+    extra = _ledger_and_own_blocks(config, side, match_ledger=match_ledger, history=history)
     return (
         f"## 第 {round_no} 轮 · 本轮焦点：{focus}\n"
         f"{role_directive(config, side)}{ask_block}\n\n"
+        f"{extra}"
         f"对方上一轮的论点如下（成稿时需{engage}）：\n"
         f"{opp_block}{challenged}\n\n"
         f"请为本轮续辩做必要检索取证，然后产出【证据笔记】："
@@ -368,14 +402,25 @@ def round_draft_brief(
     focus: str,
     last_round: RoundResult,
     interjections: Sequence[UserInterjection] = (),
+    *,
+    match_ledger: Sequence[LedgerEvent] = (),
+    history: Sequence[RoundResult] = (),
 ) -> str:
-    """后续轮【成稿】brief。"""
+    """后续轮【成稿】brief（含对局台账 + 己方历轮论点标题一览）。"""
     engage, opp_block = _round_engage_and_opponents(config, side, last_round)
     challenged = _challenged_block(config, side, last_round)
     ask_block = _interjection_block(side, interjections)
+    extra = _ledger_and_own_blocks(
+        config,
+        side,
+        match_ledger=match_ledger,
+        history=history,
+        include_own_titles=True,
+    )
     return (
         f"## 第 {round_no} 轮 · 本轮焦点：{focus}\n"
         f"{role_directive(config, side)}{ask_block}\n\n"
+        f"{extra}"
         f"对方上一轮的论点如下，{engage}：\n"
         f"{opp_block}{challenged}\n\n"
         f"直接输出你本轮的【完整发言】：**只补本轮焦点下的新论点 / 新回应**，用具体证据 / 例子 / "
@@ -658,10 +703,16 @@ def closing_task(
     """结辩成稿 brief（结辩禁新论据 → 退化为单次成稿，无检索阶段）。
 
     与 :func:`round_draft_brief` 同构：指令 + 本场材料（本方历轮论点 / 质询让步 /
-    对方对本方 clash）。成稿走干净上下文，材料只经本 brief 携带，不读 session transcript。
+    对方对本方 clash / 对局台账）。成稿走干净上下文，材料只经本 brief 携带，不读 session transcript。
     """
     own_args, concessions, clashes = _closing_materials(config, side, rounds)
     material_parts: list[str] = []
+    ledger = accumulate_match_ledger(rounds)
+    ledger_block = format_match_ledger_block(
+        ledger, side_names={s.key: s.name for s in config.sides}
+    )
+    if ledger_block:
+        material_parts.append(ledger_block.rstrip())
     if own_args:
         material_parts.append(f"【本方历轮论点（标题+要点，结辩只准收束这些）】\n{own_args}")
     if concessions:
@@ -680,7 +731,8 @@ def closing_task(
         "- 对方针对你最关键的那条反驳，为何【不成立 / 已被你回应】。\n"
         "【不得引入任何新论据 / 新事实 / 新案例】、不复述你之前的全文、不逐条罗列改动；"
         "结辩里引用的既有事实沿用你此前的证据状态标记（不把待核实的东西临门包装成已核实当胜负手）；"
-        "【已核实·出处】只能使用上方材料 / 本场已出现过的标签，禁止临门新造核实标签。"
+        "【已核实·出处】只能使用上方材料 / 本场已出现过的标签，禁止临门新造核实标签；"
+        "已撤回论据禁止再当胜负手。"
         f"{CLOSING_LENGTH_HINT}\n\n"
         "直接输出你的结辩陈词。"
     )

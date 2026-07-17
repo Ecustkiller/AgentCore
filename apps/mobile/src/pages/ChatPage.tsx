@@ -322,6 +322,7 @@ function AssistantBubble({
         runs: p.runs,
         progress: p.progress,
         teamNotes: p.teamNotes,
+        deliveryStatus: p.deliveryStatus,
         status: p.status,
         conversationId,
         pendingEscalations,
@@ -416,6 +417,7 @@ function HistoryAssistant({
             runs: p.runs,
             progress: p.progress,
             teamNotes: p.teamNotes,
+            deliveryStatus: p.deliveryStatus,
             status: p.status,
             runToolCalls: extractRunToolCalls(events),
           }

@@ -52,6 +52,13 @@ class ExecutionResult:
     exit_code: int
     duration_ms: int
     truncated: bool = False
+    # 产物写回 (gVisor copy-out): workspace-relative paths the execution created or
+    # modified that were persisted into the real workspace. Empty for sandboxes that
+    # write the workspace directly (SubprocessSandbox) or when nothing changed.
+    written_files: list[str] | None = None
+    # Files that changed but were NOT persisted (write-back caps / guards) — reported
+    # so the failure mode is explainable instead of silent.
+    write_back_skipped: int = 0
 
     _MAX_OUTPUT_LEN = 8000
 

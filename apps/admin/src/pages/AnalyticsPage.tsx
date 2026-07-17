@@ -26,6 +26,7 @@ import {
 } from "@/services/adminObservability";
 import {
   type AdminUsageSummary,
+  type ModelCostLine,
   type UsageWindow,
   fetchUsageSummary,
 } from "@/services/adminUsage";
@@ -78,7 +79,7 @@ export function AnalyticsPage() {
   const activeLoading = segment === "cost" ? costLoading : healthLoading;
   const subtitle =
     segment === "cost"
-      ? "跨用户聚合 · 今日 / 本月成本、Top 花销用户、近 7 日趋势"
+      ? "跨用户聚合 · 今日 / 本月成本、按模型 / 角色拆分、Top 花销用户、近 7 日趋势"
       : "跨用户聚合 · 回合健康（错误率 / P95 延迟 / 委派率 / 协作质量）、近 7 日趋势、近期错误";
 
   return (
@@ -313,6 +314,70 @@ function CostPanel({
           </table>
         </section>
       )}
+
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="border-border border-b px-5 py-3.5">
+          <h2 className="text-base font-semibold text-foreground">
+            本月各模型用量
+          </h2>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            全站按 call 明细聚合（cost_calls · 成本降序）
+            {byok ? ` · ${COST_ESTIMATE_HINT}` : ""}
+          </p>
+        </div>
+        {data.month_by_model.length === 0 ? (
+          <p className="px-5 py-8 text-center text-muted-foreground text-sm">
+            本月暂无模型调用记录
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-5 py-2.5 font-medium">模型</th>
+                <th className="px-5 py-2.5 text-right font-medium">调用次数</th>
+                <th className="px-5 py-2.5 text-right font-medium">Tokens</th>
+                <th className="px-5 py-2.5 text-right font-medium">本月成本</th>
+                <th className="px-5 py-2.5 text-right font-medium">估算</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.month_by_model.map((row: ModelCostLine) => (
+                <tr
+                  key={row.model}
+                  className="border-border border-b last:border-0 hover:bg-accent/40"
+                >
+                  <td className="px-5 py-3 font-medium text-foreground">
+                    {row.model || "（未标注）"}
+                  </td>
+                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                    {fmtInt(row.calls)}
+                  </td>
+                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                    {fmtCompact(row.tokens_total)}
+                  </td>
+                  <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
+                    {fmtNanoCny(row.cost_total, data.cny_per_usd)}
+                  </td>
+                  <td
+                    className="px-5 py-3 text-right text-muted-foreground tabular-nums"
+                    title={
+                      row.cost_estimated_total > 0
+                        ? COST_ESTIMATE_HINT
+                        : undefined
+                    }
+                  >
+                    {fmtNanoCny(
+                      row.cost_estimated_total,
+                      data.cny_per_usd,
+                      true,
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
 
       <section className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="border-border border-b px-5 py-3.5">

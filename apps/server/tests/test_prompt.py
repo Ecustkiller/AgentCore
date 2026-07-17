@@ -237,6 +237,10 @@ def test_core_teaches_split_criterion_over_count():
     assert "拿不准也组队" in hint
     assert "可分解" in hint and "质量面" in hint
     assert "finalize=true" in hint and "机械单步" in hint
+    # 路由前置自检（替代 long_content 事后丢稿闸门）：展开前显式表态直答/委派。
+    assert "路由自检" in hint
+    assert "开写正文或调用工具之前" in hint
+    assert "禁止先写成长文再回头补路由理由" in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "形状词汇" in skill
     assert "实质任务默认组队" in skill
@@ -320,6 +324,38 @@ def test_core_teaches_execution_and_recall_routing():
     assert "【回忆 / 核实产出】" in hint
     assert "file_list" in hint
     assert "口头拒绝" in hint
+
+
+def test_core_worker_capability_follows_workspace_facts():
+    # Prompt 事实对齐（能力闸门与交付诚实性）：不再宣称 worker「持全套工具」；以
+    # <workspace_context> 的「本回合执行能力」行为准——code_execute=未装配 时 worker
+    # 同样没有执行环境（能写文件、不能运行 / 生成二进制产物）。
+    hint = _CEO_CORE_HINT
+    assert "持全套工具" not in hint
+    assert "本回合执行能力" in hint
+    assert "code_execute=未装配" in hint
+    assert "能写文件、不能运行" in hint
+
+
+def test_core_teaches_delivery_honesty_when_no_execution():
+    # 云端无执行环境时的交付形态对齐：不设 code_verified（引擎拒绝）、三条出路、
+    # 收尾显式标交付缺口。
+    hint = _CEO_CORE_HINT
+    assert "交付本身依赖执行" in hint
+    assert "引擎会拒绝" in hint
+    assert "未运行验证" in hint
+    assert "交付缺口" in hint
+
+
+def test_skill_teaches_environment_capability_constraint():
+    # 编排 skill 的环境能力约束：委派前对照 workspace_context；无执行环境时改交付形态、
+    # 显式标缺口、或先 bind_local_folder，绝不假交付。
+    skill = _TEAM_ORCHESTRATION_ADVANCED
+    assert "环境能力约束" in skill
+    assert "code_execute=未装配" in skill
+    assert "引擎会直接拒绝" in skill
+    assert "交付缺口" in skill
+    assert "bind_local_folder" in skill
 
 
 def test_core_guides_out_of_workspace_absolute_paths():

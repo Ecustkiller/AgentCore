@@ -58,6 +58,77 @@ async def _seed_spend(session_factory, *, user_id: str, total: int, role: str = 
         )
 
 
+async def _seed_calls(
+    session_factory,
+    *,
+    user_id: str,
+    model: str,
+    total: int,
+    calls: int = 1,
+    input_tokens: int = 100,
+    output_tokens: int = 50,
+    estimated: int = 0,
+) -> None:
+    """Seed ``cost_calls`` rows (authority for per-model aggregates).
+
+    Used by platform ``month_by_model`` and per-user ``recent_by_model`` — both
+    must scan ``cost_calls``, never ``cost_events.model``.
+    """
+    async with session_factory() as session:
+        await CostEventRepository(session).record_calls(
+            user_id=user_id,
+            conversation_id=new_id(),
+            message_id=new_id(),
+            calls=[
+                {
+                    "call_id": new_id(),
+                    "run_id": new_id(),
+                    "parent_run_id": None,
+                    "agent_id": new_id(),
+                    "role": "captain",
+                    "model": model,
+                    "tokens": {
+                        "input": input_tokens,
+                        "output": output_tokens,
+                        "reasoning": 0,
+                        "cache_hit": 0,
+                        "cache_miss": input_tokens,
+                    },
+                    "cost": {
+                        "input": total // 2,
+                        "cached": 0,
+                        "output": total - total // 2,
+                        "total": total,
+                    },
+                    "cost_total_nano": total,
+                    "cost_estimated_nano": estimated,
+                    "currency": "USD",
+                    "duration_ms": 100,
+                }
+                for _ in range(calls)
+            ],
+        )
+
+
+async def _seed_llm_key(
+    session_factory,
+    *,
+    user_id: str,
+    default_model: str = "deepseek-v4-pro",
+    background_model: str | None = "deepseek-v4-flash",
+) -> None:
+    """Seed a BYOK config row (ciphertext stub — admin detail only reads model names)."""
+    from agentcore.db.repositories import UserLlmKeyRepository
+
+    async with session_factory() as session:
+        await UserLlmKeyRepository(session).upsert(
+            user_id=user_id,
+            api_key_enc=b"test-cipher-not-a-real-key",
+            default_model=default_model,
+            background_model=background_model,
+        )
+
+
 async def _seed_user(
     session_factory, username: str, *, role: str = "user", status: str = "active"
 ) -> str:
@@ -660,6 +731,74 @@ async def test_admin_usage_summary_splits_month_by_role(client, make_admin, sess
     }
 
 
+async def test_admin_usage_summary_splits_month_by_model(client, make_admin, session_factory):
+    """全站看板 splits this month's spend by model from ``cost_calls`` (GROUP BY model),
+    never ``cost_events.model`` — multi-model runs would otherwise mis-attribute."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # cost_events alone must NOT produce month_by_model rows (wrong source).
+    await _seed_spend(session_factory, user_id=alice, total=9999)
+
+    # Two models across two accounts; pro outspends flash; tokens sum per model.
+    await _seed_calls(
+        session_factory,
+        user_id=alice,
+        model="deepseek-v4-pro",
+        total=5000,
+        input_tokens=100,
+        output_tokens=100,
+    )
+    await _seed_calls(
+        session_factory,
+        user_id=bob,
+        model="deepseek-v4-pro",
+        total=3000,
+        input_tokens=50,
+        output_tokens=50,
+    )
+    await _seed_calls(
+        session_factory,
+        user_id=alice,
+        model="deepseek-v4-flash",
+        total=400,
+        input_tokens=25,
+        output_tokens=25,
+    )
+    await _seed_calls(
+        session_factory,
+        user_id=bob,
+        model="deepseek-v4-flash",
+        total=200,
+        input_tokens=15,
+        output_tokens=15,
+        estimated=50,
+    )
+
+    r = await client.get("/v1/admin/usage/summary")
+    assert r.status_code == 200, r.text
+    rows = r.json()["month_by_model"]
+
+    assert [row["model"] for row in rows] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+    by_model = {row["model"]: row for row in rows}
+    assert by_model["deepseek-v4-pro"] == {
+        "model": "deepseek-v4-pro",
+        "calls": 2,
+        "tokens_total": 300,
+        "cost_total": 8000,
+        "cost_estimated_total": 0,
+    }
+    assert by_model["deepseek-v4-flash"] == {
+        "model": "deepseek-v4-flash",
+        "calls": 2,
+        "tokens_total": 80,
+        "cost_total": 600,
+        "cost_estimated_total": 50,
+    }
+
+
 async def test_admin_usage_summary_empty_is_zero(client, make_admin):
     username, password = await make_admin()
     await login_admin(client, username, password)
@@ -670,6 +809,7 @@ async def test_admin_usage_summary_empty_is_zero(client, make_admin):
     assert b["today"]["cost"]["total"] == 0
     assert b["month_by_user"] == []
     assert b["month_by_role"] == []
+    assert b["month_by_model"] == []
     assert [p["cost_total"] for p in b["recent_daily_cost"]] == [0] * 7
 
 
@@ -1197,6 +1337,68 @@ async def test_admin_user_detail_composes_account_view(client, make_admin, sessi
 
     assert b["cny_per_usd"] == settings.cny_per_usd
     assert b["billing_mode"] == settings.billing_mode
+    # No BYOK config / no cost_calls → model fields empty.
+    assert b["default_model"] is None
+    assert b["background_model"] is None
+    assert b["recent_by_model"] == []
+
+
+async def test_admin_user_detail_exposes_models_and_by_model_usage(
+    client, make_admin, session_factory
+):
+    """User detail surfaces configured model names (never the key) + 30d by-model
+    payroll from ``cost_calls``."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_models")
+    bob = await _seed_user(session_factory, "bob_models")
+
+    await _seed_llm_key(
+        session_factory,
+        user_id=alice,
+        default_model="deepseek-v4-pro",
+        background_model="deepseek-v4-flash",
+    )
+    await _seed_calls(
+        session_factory,
+        user_id=alice,
+        model="deepseek-v4-pro",
+        total=3500,
+        calls=2,
+        input_tokens=75,
+        output_tokens=75,
+    )
+    await _seed_calls(
+        session_factory,
+        user_id=alice,
+        model="deepseek-v4-flash",
+        total=500,
+        input_tokens=25,
+        output_tokens=25,
+    )
+    # bob's calls must not appear in alice's by-model table.
+    await _seed_calls(session_factory, user_id=bob, model="deepseek-v4-pro", total=99999)
+
+    r = await client.get(f"/v1/admin/users/{alice}/detail")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    assert b["default_model"] == "deepseek-v4-pro"
+    assert b["background_model"] == "deepseek-v4-flash"
+    # Response must never leak any key ciphertext / plaintext fields.
+    assert "api_key" not in b
+    assert "api_key_enc" not in b
+    assert "base_url" not in b
+
+    rows = b["recent_by_model"]
+    assert [row["model"] for row in rows] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+    by_model = {row["model"]: row for row in rows}
+    assert by_model["deepseek-v4-pro"]["calls"] == 2
+    assert by_model["deepseek-v4-pro"]["cost_total"] == 7000
+    assert by_model["deepseek-v4-pro"]["tokens_total"] == 300
+    assert by_model["deepseek-v4-flash"]["calls"] == 1
+    assert by_model["deepseek-v4-flash"]["cost_total"] == 500
+    assert by_model["deepseek-v4-flash"]["tokens_total"] == 50
 
 
 # --- 控制台概览 (landing dashboard) ---

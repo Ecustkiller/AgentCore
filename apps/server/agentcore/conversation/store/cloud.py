@@ -82,6 +82,13 @@ def _usage_metadata(
         "cache_miss_tokens": result.get("cache_miss_tokens", 0),
         "rounds": result.get("rounds", 0),
     }
+    finish = result.get("finish_reason")
+    finish_value = getattr(finish, "value", finish)
+    if finish_value is not None:
+        meta["finish_reason"] = finish_value
+    error_code = result.get("error_code")
+    if error_code:
+        meta["error_code"] = error_code
     collab = result.get("collab")
     if collab:
         meta["collab"] = collab

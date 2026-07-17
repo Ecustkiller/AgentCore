@@ -8,7 +8,7 @@ type Schemas = components["schemas"];
 export type LlmKeyStatus = Schemas["LlmKeyStatusResponse"];
 
 export interface SetLlmKeyInput {
-  api_key: string;
+  api_key?: string | null;
   base_url?: string | null;
   default_model?: string | null;
   price_cache_hit?: string | null;

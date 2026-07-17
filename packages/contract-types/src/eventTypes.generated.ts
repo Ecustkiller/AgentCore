@@ -17,6 +17,7 @@ export type SSEEventType =
   | "debate_round_started"
   | "delegation_authorization_required"
   | "delegation_authorization_resolved"
+  | "delivery_status"
   | "desktop_notify_required"
   | "error"
   | "escalation_required"

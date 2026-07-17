@@ -477,6 +477,7 @@
     "crossExamEnabled": false,
     "debateOpening": null,
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

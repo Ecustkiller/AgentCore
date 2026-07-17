@@ -23,7 +23,10 @@ import {
   toolPhaseText,
 } from "@/components/assistantLabels";
 import type { RunToolCall } from "@/protocol/fold";
-import type { ContextBlockWire } from "@agentcore/contract-types";
+import type {
+  ContextBlockWire,
+  DeliveryStatusPayload,
+} from "@agentcore/contract-types";
 import type {
   ProjectedAgent,
   ProjectedRun,
@@ -122,6 +125,7 @@ export function TeamView({
   runs,
   progress,
   teamNotes = [],
+  deliveryStatus = null,
   status,
   conversationId: _conversationId = null,
   pendingEscalations: _pendingEscalations,
@@ -134,6 +138,9 @@ export function TeamView({
   progress: { completed: number; total: number };
   /** 团队便签墙 (§2.2 通): notes workers broadcast to their concurrent siblings this turn. */
   teamNotes?: ProjectedTeamNote[];
+  /** 交付状态（`delivery_status`，能力闸门与交付诚实性）：delegate 收尾的结构化交付对账。
+   *  只在有诚实缺口要交代（partial / blocked）时渲染；delivered 由产出文件卡承载。 */
+  deliveryStatus?: DeliveryStatusPayload | null;
   /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
   status?: TurnStatus | null;
   /** 阻塞式求决策 (②): present on a live multi-agent turn so a worker's pending escalation
@@ -210,6 +217,12 @@ export function TeamView({
           order. Empty (the common case) renders nothing. Collapsible like 思考/工具组 (<details>):
           running + active note → default open; finished/stopped → collapsed「团队便签 N」. Remount
           via key when the default flips so turn completion re-applies the collapsed default. */}
+      {/* 交付状态（能力闸门与交付诚实性）：缺口 / 待用户操作的诚实对账，镜像桌面
+          DeliveryStatusCard 的渲染裁决（delivered 不出卡、由产出文件卡承载）。手机为云瘦
+          客户端，bind_local_folder 行动项按提示行如实呈现（无本地绑定通道）。 */}
+      {deliveryStatus && deliveryStatus.state !== "delivered" && (
+        <DeliverySection status={deliveryStatus} />
+      )}
       {teamNotes.length > 0 && (
         <TeamNotesWall
           key={notesDefaultOpen ? "open" : "shut"}
@@ -230,6 +243,42 @@ export function TeamView({
           onClose={() => setSelectedRunId(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** 交付状态区块（partial / blocked）：状态徽 + 一行 summary + 缺口清单 + 待操作提示。 */
+function DeliverySection({ status }: { status: DeliveryStatusPayload }) {
+  const blocked = status.state === "blocked";
+  return (
+    <div className="delivery">
+      <div className="delivery-head">
+        <span
+          className={`delivery-state ${blocked ? "is-blocked" : "is-partial"}`}
+        >
+          {blocked ? "未交付" : "部分交付"}
+        </span>
+        <span className="delivery-summary">{status.summary}</span>
+      </div>
+      {(status.gaps ?? []).map((gap, i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: 对账快照整体替换（同 execution_id 保最新），行不重排
+          key={`gap-${i}`}
+          className="delivery-row"
+        >
+          <span className="delivery-role">{gap.role}</span>
+          <span className="delivery-desc">{gap.description}</span>
+        </div>
+      ))}
+      {(status.actions ?? []).map((action, i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: 同上，快照整体替换
+          key={`act-${i}`}
+          className="delivery-row delivery-action"
+        >
+          <span className="delivery-desc">{action.description}</span>
+        </div>
+      ))}
     </div>
   );
 }

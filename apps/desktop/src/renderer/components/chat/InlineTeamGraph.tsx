@@ -171,6 +171,12 @@ export function InlineTeamGraph({
 
   const graphHeight = measured?.height ?? fallbackHeight;
   const hostPreview = shouldHostPreviewInGraph(resolvedPreview, execution.runs);
+  // 推进线（认知轨迹）位置随辩论状态分治：进行中留在标题下方，让用户不点开也能瞥当前轮焦点；
+  // 收场后标题已给出结论，推进线降权下移到协作图之后，头部只留一条结论行（前端UX设计.md §三）。
+  const debateLive =
+    isDebate(execution) &&
+    (execution.status === "running" || execution.status === "paused");
+  const debateSettled = isDebate(execution) && !debateLive;
 
   return (
     <ExecutionScopeContext.Provider value={messageId}>
@@ -190,7 +196,7 @@ export function InlineTeamGraph({
             collabSummary={collabSummary}
             teamPreview={hostPreview ? resolvedPreview : null}
           />
-          {isDebate(execution) && (
+          {debateLive && (
             <DebateProgressLine
               execution={execution}
               disclosureKey={`${messageId}:debate-progress`}
@@ -202,6 +208,12 @@ export function InlineTeamGraph({
               messageId={messageId}
               height={graphHeight}
               onMeasure={onMeasure}
+            />
+          )}
+          {debateSettled && (
+            <DebateProgressLine
+              execution={execution}
+              disclosureKey={`${messageId}:debate-progress`}
             />
           )}
           {/* 协调中用户插话：轻量徽标「已传达给团队」/「已排队」。 */}

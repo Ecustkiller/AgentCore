@@ -216,6 +216,10 @@ async def execute_agent_node(
             has_dependents=node_has_dependents(env.plan, spec.run_id),
             captain=is_captain,
             form=deliverable_form,
+            # 能写≠能跑 (能力闸门与交付诚实性): the registry is the capability truth —
+            # execution class absent (cloud without sandbox) ⇒ the identity says so,
+            # instead of the generic wording implying the worker can run code.
+            can_execute=env.tools.get_optional("code_execute") is not None,
         )
         if not env.collaboration:
             identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")
@@ -330,11 +334,20 @@ async def execute_agent_node(
         # Worker 累计 token 硬顶 (loose backstop · 真执行): 统一可配置上限。compaction
         # (tool_clear) 挑大梁做上下文瘦身,这只在失控时收口。≤0 = 关闭。
         # react_loop 每轮末比对累计 usage。CEO / solo 路径不经此分支,保持 0。
-        token_ceiling = (
-            settings.engine_worker_token_ceiling
-            if settings.engine_worker_token_ceiling > 0
-            else 0
-        )
+        # 辩论辩手两阶段检索：独立 ``engine_debate_token_ceiling``（默认高于通用 worker 顶），
+        # 避免长取证与 worker 80k 合用导致首轮检索过早 ceiling_finalize。
+        if spec.research_then_draft:
+            token_ceiling = (
+                settings.engine_debate_token_ceiling
+                if settings.engine_debate_token_ceiling > 0
+                else 0
+            )
+        else:
+            token_ceiling = (
+                settings.engine_worker_token_ceiling
+                if settings.engine_worker_token_ceiling > 0
+                else 0
+            )
 
         # 团队便签墙 推增量 (§2.2 通): pull the notes siblings posted since this worker last
         # looked and hand them to react_loop as one user message before each of its NEXT

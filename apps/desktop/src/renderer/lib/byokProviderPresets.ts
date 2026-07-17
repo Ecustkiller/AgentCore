@@ -29,21 +29,21 @@ export const BYOK_CUSTOM_PROVIDER_ID = "custom" as const;
 
 export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
   {
+    id: "deepseek",
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    baseUrlAliases: ["https://api.deepseek.com/v1"],
+    defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    keyHelpUrl: "https://platform.deepseek.com/api_keys",
+  },
+  {
     id: "openai",
     label: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     defaultModel: "gpt-4o",
     models: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
     keyHelpUrl: "https://platform.openai.com/api-keys",
-  },
-  {
-    id: "deepseek",
-    label: "DeepSeek",
-    baseUrl: "https://api.deepseek.com",
-    baseUrlAliases: ["https://api.deepseek.com/v1"],
-    defaultModel: "deepseek-v4-pro",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
-    keyHelpUrl: "https://platform.deepseek.com/api_keys",
   },
   {
     id: "moonshot",
@@ -86,7 +86,7 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
 ] as const;
 
 export const DEFAULT_BYOK_PROVIDER_ID: Exclude<ByokProviderId, "custom"> =
-  "openai";
+  "deepseek";
 
 const PRESET_BY_ID = new Map(
   BYOK_PROVIDER_PRESETS.map((preset) => [preset.id, preset]),

@@ -968,6 +968,7 @@
     "crossExamEnabled": true,
     "debateOpening": "红队开场：先压测凭证存储与会话固定。",
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

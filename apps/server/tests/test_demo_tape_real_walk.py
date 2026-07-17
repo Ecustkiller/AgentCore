@@ -16,7 +16,7 @@ from agentcore.config.paths import PROJECT_ROOT
 from agentcore.demo_tape.binding import TapeBinding
 from agentcore.demo_tape.pacing import sleep_ms_for_gap
 from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
-from agentcore.demo_tape.schema import DEMO_TAPE_FRAME_KEY
+from agentcore.demo_tape.schema import DEMO_TAPE_FRAME_KEY, event_type
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.journal.writer import TurnJournalWriter
@@ -53,7 +53,7 @@ async def test_real_tape_double_replay_mints_distinct_checkpoints(monkeypatch):
     recorded = next(
         str((e.get("payload") or {}).get("checkpoint_id") or "")
         for e in events
-        if e["kind"] == "team_preview_required"
+        if event_type(e) == "team_preview_required"
     )
     assert recorded  # the tape faithfully keeps its recorded id
 
@@ -115,9 +115,9 @@ async def test_real_tape_pause_resume_and_pacing(monkeypatch, tmp_path: Path):
 
     data = json.loads(TAPE.read_text(encoding="utf-8"))
     events = list(data["events"])
-    assert any(e["kind"] == "team_preview_required" for e in events)
-    assert any(e["kind"] == "debate_round_started" for e in events)
-    assert any(e["kind"] == "debate_result" for e in events)
+    assert any(event_type(e) == "team_preview_required" for e in events)
+    assert any(event_type(e) == "debate_round_started" for e in events)
+    assert any(event_type(e) == "debate_result" for e in events)
 
     # Pacing math: every original gap must compress under speed/cap.
     speed, max_gap = 8.0, 500

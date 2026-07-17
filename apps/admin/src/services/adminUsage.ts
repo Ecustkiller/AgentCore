@@ -3,6 +3,7 @@ import type { components } from "@/types/api.generated";
 
 export type AdminUsageSummary = components["schemas"]["AdminUsageSummary"];
 export type AdminUserCostLine = components["schemas"]["AdminUserCostLine"];
+export type ModelCostLine = components["schemas"]["ModelCostLine"];
 export type UsageWindow = components["schemas"]["UsageWindow"];
 export type DailyCost = components["schemas"]["DailyCost"];
 

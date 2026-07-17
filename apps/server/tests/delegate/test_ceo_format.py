@@ -252,6 +252,21 @@ def test_direct_result_answers_with_deliverable_and_footers_next_steps():
     assert "**建议下一步**：可考虑加单测" in res.final_text  # next-step relayed as a footer
 
 
+def test_format_for_ceo_includes_final_synthesis_discipline():
+    # 终稿纪律（能力闸门与交付诚实性 B4）：交付物在前、过程简述至多一段、禁止把
+    # escalation 原文 / 中间合成草稿粘进终稿、未交付承诺产物显式列出。纯 prompt 层，
+    # 落在 format_for_ceo 的收尾合成指引里。
+    t = tool(Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="做课件", role="课件工程师")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="脚本已写好")}
+    out = format_for_ceo(t, plan, results)
+    assert "【终稿纪律】" in out
+    assert "写在最前" in out
+    assert "至多一段" in out
+    assert "中间合成草稿" in out and "escalation 原文" in out
+    assert "未交付 / 需你操作" in out
+
+
 def test_format_for_ceo_emits_uncapped_synthesis_metric():
     t = tool(Provider([]))
     nodes = [RunSpec(run_id=f"w{i}", task="分析", role=f"分析{i}") for i in range(8)]

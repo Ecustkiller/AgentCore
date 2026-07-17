@@ -148,6 +148,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     debate_rounds: list[dict[str, Any]] = []
     # 协调模式团队进展预览（team_synthesis_preview）：同 key 保最新。P2 DURABLE。
     team_synthesis_preview: dict[str, Any] | None = None
+    # 交付状态（delivery_status，能力闸门与交付诚实性）：同 execution_id 保最新。DURABLE。
+    delivery_status: dict[str, Any] | None = None
     # 预检警告（turn_warning）：P2 DURABLE。
     turn_warning: str | None = None
     # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
@@ -759,6 +761,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # 同 key 保最新（后写覆盖）。
             team_synthesis_preview = p
 
+        elif etype == "delivery_status":
+            # 交付状态：同 execution_id 保最新（后写覆盖，反映最近一批委派的对账）。
+            delivery_status = p
+
         elif etype == "user_interjection":
             iid = str(p.get("interjection_id") or "").strip()
             if not iid:
@@ -876,6 +882,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "crossExamEnabled": cross_exam_enabled,
         "debateOpening": debate_opening,
         "teamSynthesisPreview": team_synthesis_preview,
+        # 交付状态（delivery_status）：结构化交付对账（已交付/缺口/待操作），null 当无。
+        "deliveryStatus": delivery_status,
         "turnWarning": turn_warning,
         # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.
         "teamNotes": team_notes,

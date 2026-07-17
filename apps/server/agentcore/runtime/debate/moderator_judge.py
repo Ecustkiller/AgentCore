@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.debate.match_ledger import as_ledger_events
 from agentcore.runtime.debate.moderator_agenda import _form_guidance
 from agentcore.runtime.debate.moderator_common import (
     _LEDGER_CLASHES_PER_ROUND,
@@ -277,7 +278,9 @@ async def judge_and_summarize(
         '"point": "这条反驳的命门（一句话、锋利具体、抓住要害）"}], '
         f'"scores": {{"<side_key∈[{sides_keys}]>": {{"argument": 0, "engagement": 0, '
         '"evidence": 0, "penalties": ["谬误/无据主张，一句话"], "note": "一句话记分理由"}}}, '
-        '"summary": "本轮小结（≤80 字）"}\n'
+        '"summary": "本轮小结（≤80 字）", '
+        '"ledger_events": [{"kind": "withdrawal|correction|disputed_fact|concession", '
+        '"side": "<side_key 或争议事实可空>", "content": "一句话"}]}\n'
         "- real_clash：各方是否真针锋相对回应了彼此（而非各说各话）。\n"
         "- new_arguments：本轮相比【前几轮已辩论点账本】是否还在产生【跨轮新论点】——把账本里"
         "已有的论点换措辞 / 换例子重述【不算】新论点（=false），只有出现账本里没有、且会推进交锋"
@@ -302,7 +305,16 @@ async def judge_and_summarize(
         "计入、别手软；但【诚实标注待核实】本身【不是】罚项（只罚硬拗成事实，不罚诚实存疑）；"
         "note 一句话理由。记分只对【论证有效性 / 证据 / 是否回应】，不因发言更长 / 文采更好给高分。\n"
         f"- summary：本轮交锋推进了什么、达成了什么共识、仍存什么分歧。{summary_touch}"
-        f"面向速读者、串起认知推进线。"
+        "面向速读者、串起认知推进线。\n"
+        "- ledger_events：【对局台账·宁缺勿滥】只收录本轮发言 / 质询问答里【显式发生】的事件，"
+        "不收推断、不收你替辩手脑补的意图。四类 kind：\n"
+        "  · withdrawal（撤回）——某方明确收回某论据 / 数据 / 主张；\n"
+        "  · correction（更正）——某方用新值替换旧主张（如错误数字→正确数字）；\n"
+        "  · disputed_fact（争议事实）——双方对同一关键事实给出冲突的【已核实】标注或明确各执一词；\n"
+        "  · concession（关键让步）——某方正面承认弱点 / 某抗辩不成立 / 认输某点"
+        "（诚实认输算让步，答非所问不算）。\n"
+        "  side 用发言标题里的 [side_key]（争议事实可空）；content 一句话、锋利具体；"
+        "本轮无显式事件则给 []——宁可空也不要灌水。"
     )
     data = await complete_json(_ASSESS_SYSTEM, user, "assess")
     if not data:
@@ -334,6 +346,10 @@ async def judge_and_summarize(
         clashes=_as_clashes(data.get("clashes"), side_keys, limit=clash_limit),
         # 记分裁判（P2）：缺省 / 坏 JSON → 空 dict（tally 据此退化、简报零变化）。
         scores=_as_scores(data.get("scores"), side_keys),
+        # 对局台账（P0）：缺省 / 坏 JSON → []；宁缺勿滥由 as_ledger_events 过滤。
+        ledger_events=as_ledger_events(
+            data.get("ledger_events"), side_keys, round_no=round_no
+        ),
     )
     # 边际递减断路器（收敛校准 P1，辩论编排设计.md §五）：连续两轮都判不出【跨轮新论点】
     # ⇒ 交锋已进入复述、再打只是换措辞。即便裁判本轮仍给 converged=false 也机械收场——这落的正是

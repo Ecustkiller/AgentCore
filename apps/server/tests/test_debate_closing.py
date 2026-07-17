@@ -4,7 +4,7 @@
 1. 阶段角色契约（胜负手 / 禁新论据 / CLOSING_LENGTH_HINT）仍在场；
 2. brief 携带三类材料（历轮论点 / 质询让步 / clash 命门）且裁剪封顶；
 3. closing_context_blocks 投喂==展示（task.body 逐字）+ 材料孪生块；
-4. 【已核实】白名单闸：新标签触发回炉文案；二次违规放行路径由 speech_pipeline 覆盖。
+4. 【已核实】白名单闸：新标签触发回炉文案；二次违规剥离降级由 speech_pipeline 覆盖。
 """
 
 from __future__ import annotations
@@ -321,8 +321,8 @@ def test_closing_evidence_guard_rewrites_once_on_novel_tag():
     assert rounds == 2
 
 
-def test_closing_evidence_guard_pass_through_after_second_violation():
-    """回炉后仍违规 → 放行第二次成稿（仅警告，不第三次调用）。"""
+def test_closing_evidence_guard_demotes_after_second_violation():
+    """回炉后仍违规 → 剥离违规【已核实】降级为【待核实·推断】后放行（O2）。"""
     bad = "结辩：配方秘密【已核实·街访数据】。"
     llm = _SequenceDraftLLM([bad, bad])
     sink = _FakeSink()
@@ -347,5 +347,8 @@ def test_closing_evidence_guard_pass_through_after_second_violation():
         )
     )
     assert llm.stream_calls == 2
-    assert speech == bad
+    assert "【已核实·街访数据】" not in speech
+    assert "【待核实·推断】" in speech
     assert n_rounds == 2
+    resets = [e for e in sink.events if e.type is EventType.RUN_OUTPUT_RESET]
+    assert len(resets) >= 2

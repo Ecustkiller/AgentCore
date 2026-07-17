@@ -384,6 +384,51 @@ class CostEventRepository:
             for row in rows
         ]
 
+    async def aggregate_by_model_for_window(
+        self, *, user_id: str | None = None, since: datetime
+    ) -> list[dict]:
+        """Per-model call spend since a cutoff (各模型调用次数 / tokens / 成本).
+
+        **Must** scan ``cost_calls`` (``GROUP BY model``). Do **not** aggregate
+        ``cost_events.model`` — that column only records the run's first call, so
+        multi-model runs would mis-attribute spend. ``user_id`` scopes to one
+        account; ``None`` is platform-wide (admin 全站看板).
+        """
+        total = _sum_int(CostCall.cost_total_nano)
+        estimated = _sum_int(CostCall.cost_estimated_nano)
+        tokens_per_call = (
+            func.coalesce(_json_int(CostCall.tokens, "input"), 0)
+            + func.coalesce(_json_int(CostCall.tokens, "output"), 0)
+            + func.coalesce(_json_int(CostCall.tokens, "reasoning"), 0)
+        )
+        calls = func.count().label("calls")
+        conditions: list[ColumnElement] = [CostCall.created_at >= since]
+        if user_id is not None:
+            conditions.append(CostCall.user_id == user_id)
+        stmt = (
+            select(
+                CostCall.model.label("model"),
+                calls,
+                _sum_int(tokens_per_call).label("tokens_total"),
+                total.label("c_total"),
+                estimated.label("c_estimated"),
+            )
+            .where(*conditions)
+            .group_by(CostCall.model)
+            .order_by(total.desc(), estimated.desc(), calls.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {
+                "model": row.model,
+                "calls": int(row.calls),
+                "tokens_total": int(row.tokens_total),
+                "cost_total": int(row.c_total),
+                "cost_estimated_total": int(row.c_estimated),
+            }
+            for row in rows
+        ]
+
     async def aggregate_daily_for_window(
         self, *, user_id: str | None = None, since: datetime
     ) -> dict[str, int]:

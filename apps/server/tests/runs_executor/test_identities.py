@@ -227,6 +227,43 @@ async def test_handoff_prompt_splits_by_topology():
     assert "不必为交而交" in desc
 
 
+def test_worker_identity_states_no_execution_capability():
+    """能写≠能跑（能力闸门与交付诚实性）：执行类未装配时 identity 自述能力边界。
+
+    can_execute=False（云端无沙箱 → registry 扣掉执行类）追加「执行环境未装配」块：
+    能写脚本落盘、不能运行、不能生成需运行程序才产出的二进制文件、禁止谎称已运行/已生成；
+    can_execute=True（默认）保持原样，本地/沙箱路径字节不变。
+    """
+    from agentcore.runtime.runs.executor_identities import build_worker_identity
+
+    no_exec = build_worker_identity(has_dependents=False, can_execute=False)
+    assert "本回合执行环境未装配" in no_exec
+    assert "能】用写文件工具" in no_exec
+    assert "不能】运行" in no_exec
+    assert "二进制" in no_exec
+    assert "已运行 / 已验证 / 已生成" in no_exec
+    assert "未运行验证" in no_exec
+
+    with_exec = build_worker_identity(has_dependents=False, can_execute=True)
+    assert "本回合执行环境未装配" not in with_exec
+    # 默认参数与显式 True 字节一致（不惊扰既有路径）。
+    assert with_exec == build_worker_identity(has_dependents=False)
+
+
+async def test_executor_passes_registry_capability_into_identity():
+    """Executor 把 registry 能力事实接进 identity：空 registry（无 code_execute）→
+    worker system prompt 带「执行环境未装配」自述。"""
+    plan, _ = build_run_plan(
+        [{"role": "工程师", "task": "写脚本", "can_delegate": False}],
+        id_prefix="cap",
+    )
+    provider = _ContentProvider(["OUT"])
+    await _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())(
+        plan.nodes[0], {}
+    )
+    assert "本回合执行环境未装配" in provider.system_messages[0]
+
+
 async def test_worker_escalation_is_harvested_and_nonblocking():
     plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
     reg = ToolRegistry()

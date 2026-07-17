@@ -51,3 +51,23 @@ class WorkspaceSettings(BaseModel):
     gvisor_runsc_path: str = "runsc"
     # runsc runtime state directory (containers, sandboxes).
     gvisor_runtime_root: str = "/tmp/agentcore-sandbox"
+
+    # ── gVisor 灰度护栏（部署与运维.md §云端执行灰度 / 安全权限与治理.md §五）──
+    # Global cap on concurrently RUNNING cloud sandbox executions per API process
+    # (single-uvicorn production ⇒ effectively per host). Sized for the 2C8G box.
+    gvisor_max_concurrent_executions: int = 2
+    # Bounded grace queue: how long one call may wait for a free slot before it
+    # fails fast with an explainable "busy" result. Budget check: slot wait (15)
+    # + exec cap (60) stays under the engine EXECUTION backstop (90s).
+    gvisor_slot_wait_seconds: float = 15.0
+    # Per-execution hard resource caps enforced by the OCI spec. Authoritative for
+    # cloud runs: an ExecutionRequest cannot exceed them. Memory default sized for
+    # document/data workloads (pandas + matplotlib comfortably above 256MB).
+    gvisor_memory_limit_mb: int = 512
+    gvisor_timeout_max_seconds: int = 60
+    # 产物写回 (copy-in/copy-out): the workspace is COPIED into a per-execution
+    # staging dir (mounted rw at /workspace), and new/changed regular files are
+    # copied back after the run. Caps bound both legs.
+    gvisor_stage_max_bytes: int = 512 * 1024 * 1024
+    gvisor_write_back_max_bytes: int = 128 * 1024 * 1024
+    gvisor_write_back_max_files: int = 200

@@ -196,7 +196,7 @@ def _format_captain_history(history: list[dict]) -> str:
     """Render the prior-turn messages the captain carries into「用户：… / CEO：…」prose for
     its ``history`` context block — the SAME turns fed to the LLM, made legible to the user
     (单一源: what the user sees == what the LLM eats). Empty for a first turn."""
-    label = {"user": "用户", "assistant": "CEO"}
+    label = {"user": "用户", "assistant": "CEO", "system": "系统"}
     parts = [
         f"{label.get(m.get('role', ''), m.get('role') or '')}：{m.get('content') or ''}"
         for m in history

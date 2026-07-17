@@ -3,14 +3,117 @@
 Loads conversation history from the database for LLM context injection.
 Only user/assistant text messages are replayed — tool I/O is not included
 to avoid burning tokens on cross-turn accumulated tool output.
+
+Failed assistant turns (empty content + failed status) are folded into a short
+system-framed note so the next turn can attribute prior failures correctly
+instead of inventing causes.
 """
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
+from agentcore.core.error_codes import ErrorCode
 from agentcore.db.repositories import ConversationRepository, MessageRepository
+
+# Error codes → short zh category labels for the next-turn failure note.
+_FAILURE_CATEGORY_LABELS: dict[str, str] = {
+    ErrorCode.LLM_TIMEOUT: "连接超时",
+    ErrorCode.LLM_KEY_INVALID: "鉴权失败（API Key 无效或无权限）",
+    ErrorCode.LLM_KEY_REQUIRED: "未配置 API Key",
+    ErrorCode.LLM_INSUFFICIENT_BALANCE: "上游账户余额不足",
+    ErrorCode.LLM_RATE_LIMIT: "上游限流",
+    ErrorCode.LLM_ERROR: "模型调用失败",
+    ErrorCode.PIPELINE_ERROR: "管线执行失败",
+    ErrorCode.QUOTA_EXCEEDED: "额度已用尽",
+    ErrorCode.FREE_TIER_EXHAUSTED: "免费额度已用尽",
+    ErrorCode.KEY_STORAGE_UNAVAILABLE: "密钥存储不可用",
+}
+
+
+def _usage_of(msg: Any) -> dict:
+    usage = getattr(msg, "usage", None)
+    return usage if isinstance(usage, dict) else {}
+
+
+def _is_failed_empty_assistant(msg: Any) -> bool:
+    """True when an assistant row is a soft/hard failure with no deliverable text."""
+    if getattr(msg, "role", None) != "assistant":
+        return False
+    if (getattr(msg, "content", None) or "").strip():
+        return False
+    usage = _usage_of(msg)
+    if usage.get("status") == "failed":
+        return True
+    finish = usage.get("finish_reason")
+    return finish in ("error", "degraded")
+
+
+def _failure_category_label(msg: Any) -> str:
+    usage = _usage_of(msg)
+    code = usage.get("error_code") or ""
+    if isinstance(code, str) and code in _FAILURE_CATEGORY_LABELS:
+        return _FAILURE_CATEGORY_LABELS[code]
+    finish = usage.get("finish_reason")
+    if finish == "degraded":
+        return "模型空响应（降级收尾）"
+    return "模型调用失败"
+
+
+def _failure_note(categories: list[str]) -> dict:
+    """Merge consecutive failed turns into one short assistant-framed system note.
+
+    Assistant role (not bare system) mirrors the compaction summary block — slots
+    cleanly between real turns without stacking multiple system messages mid-chat.
+    """
+    # Preserve order, drop duplicates for a compact label list.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in categories:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    n = len(categories)
+    cats = "、".join(unique)
+    if n == 1:
+        body = (
+            f"（系统注记：上一轮 AI 调用失败，未产生有效回复。"
+            f"失败原因类别：{cats}。请据此如实说明，不要编造其它原因。）"
+        )
+    else:
+        body = (
+            f"（系统注记：此前连续 {n} 轮 AI 调用失败，均未产生有效回复。"
+            f"失败原因类别：{cats}。请据此如实说明，不要编造其它原因。）"
+        )
+    return {"role": "assistant", "content": body}
+
+
+def _fold_history_messages(messages: list[Any]) -> list[dict]:
+    """Fold ORM message rows into ``[{role, content}]``, merging consecutive failures."""
+    history: list[dict] = []
+    pending_failures: list[str] = []
+
+    def flush_failures() -> None:
+        if pending_failures:
+            history.append(_failure_note(pending_failures))
+            pending_failures.clear()
+
+    for msg in messages:
+        role = getattr(msg, "role", None)
+        content = getattr(msg, "content", None) or ""
+        if role == "user" and content:
+            flush_failures()
+            history.append({"role": "user", "content": content})
+        elif role == "assistant" and content:
+            flush_failures()
+            history.append({"role": "assistant", "content": content})
+        elif _is_failed_empty_assistant(msg):
+            pending_failures.append(_failure_category_label(msg))
+        # else: empty non-failed assistant / other roles — skip
+    flush_failures()
+    return history
 
 
 async def load_recent_history(
@@ -18,6 +121,7 @@ async def load_recent_history(
     conversation_id: str,
     *,
     max_messages: int = 40,
+    fold_failures: bool = False,
 ) -> list[dict]:
     """Load the MOST RECENT ``max_messages``, in chronological order.
 
@@ -30,15 +134,20 @@ async def load_recent_history(
     conversation silently dropped every recent turn). Shared by two readers:
     the per-turn LLM context (conversation/service.py) and the offline long-term
     memory consolidation window (memory/consolidation.py).
+
+    ``fold_failures``: when True (chat prompt path), consecutive empty failed
+    assistant turns become one short system note. When False (memory
+    consolidation), empty assistants stay dropped so synthetic notes never
+    enter the memory file.
     """
     repo = MessageRepository(session)
     messages = await repo.list_recent(conversation_id, limit=max_messages)
-
+    if fold_failures:
+        return _fold_history_messages(messages)
     history = []
     for msg in messages:
         if msg.role in ("user", "assistant") and msg.content:
             history.append({"role": msg.role, "content": msg.content})
-
     return history
 
 
@@ -88,12 +197,12 @@ async def load_chat_context(
             limit=settings.compaction_context_max_messages,
         )
         history: list[dict] = [_summary_block(conv.compaction_summary)]
-        for msg in rows:
-            if msg.role in ("user", "assistant") and msg.content:
-                history.append({"role": msg.role, "content": msg.content})
+        history.extend(_fold_history_messages(rows))
         return history
 
-    return await load_recent_history(session, conversation_id, max_messages=max_messages)
+    return await load_recent_history(
+        session, conversation_id, max_messages=max_messages, fold_failures=True
+    )
 
 
 async def load_history_for_turn(
@@ -130,9 +239,7 @@ async def load_history_for_turn(
     ):
         items.append(_summary_block(conv.compaction_summary))
 
-    for msg in rows:
-        if msg.role in ("user", "assistant") and msg.content:
-            items.append({"role": msg.role, "content": msg.content})
+    items.extend(_fold_history_messages(rows))
 
     if len(items) > history_len:
         return items[-history_len:]

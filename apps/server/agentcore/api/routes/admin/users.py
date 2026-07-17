@@ -41,6 +41,7 @@ from agentcore.api.schemas import (
     AdminUserListResponse,
     AdminUserResponse,
     DailyCost,
+    ModelCostLine,
     RoleCostLine,
     StatusResponse,
     TurnMetricLine,
@@ -271,15 +272,18 @@ async def user_detail(
     conversations: ConversationRepository = Depends(get_conversation_repo),
     messages_repo: MessageRepository = Depends(get_message_repo),
     metrics_repo: TurnMetricsRepository = Depends(get_turn_metrics_repo),
+    llm_keys: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
 ) -> AdminUserDetail:
-    """用户详情下钻 (用户管理 P0): one account's record + its own usage (today / month
-    / 7-day trend / by-role) + recent conversations + recent turn activity.
+    """用户详情下钻 (用户管理 P0): one account's record + configured model names +
+    its own usage (today / month / 7-day trend / by-role / by-model) + recent
+    conversations + recent turn activity.
 
     The per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped
-    to one account (``cost_events.user_id``) — composed with the account's recent
-    conversation roster (message counts batched, no N+1) and its recent turns (each
-    carries ``conversation_id`` to drill into 会话复盘). Admin cross-user; 404 for an
-    unknown id. Reuses the per-user cost aggregates already serving ``/v1/usage/summary``.
+    to one account — composed with the account's recent conversation roster (message
+    counts batched, no N+1) and its recent turns (each carries ``conversation_id`` to
+    drill into 会话复盘). Configured models come from ``user_llm_keys`` (names only —
+    never the API key). Per-model stats scan ``cost_calls`` (last 30 days). Admin
+    cross-user; 404 for an unknown id.
     """
     user = await users.get_by_id(user_id)
     if user is None:
@@ -288,10 +292,18 @@ async def user_detail(
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = day_start.replace(day=1)
+    since_30d = now - timedelta(days=30)
+
+    llm_row = await llm_keys.get_by_user_id(user_id)
+    default_model = llm_row.default_model if llm_row is not None else None
+    background_model = llm_row.background_model if llm_row is not None else None
 
     today = await cost_repo.aggregate_for_window(user_id=user_id, since=day_start)
     month = await cost_repo.aggregate_for_window(user_id=user_id, since=month_start)
     month_by_role = await cost_repo.aggregate_by_role_for_window(user_id=user_id, since=month_start)
+    recent_by_model = await cost_repo.aggregate_by_model_for_window(
+        user_id=user_id, since=since_30d
+    )
 
     # 近 7 日趋势: zero-fill into a fixed, oldest-first series ending today (same
     # shape as /v1/usage/summary) so the sparkline is stable even for sparse spend.
@@ -321,6 +333,8 @@ async def user_detail(
 
     return AdminUserDetail(
         user=_admin_user_response(user),
+        default_model=default_model,
+        background_model=background_model,
         today=UsageWindow(
             usage=usage_breakdown(today["usage"]),
             cost=cost_breakdown(today["cost"]),
@@ -341,6 +355,16 @@ async def user_detail(
                 turns=int(row["turns"]),
             )
             for row in month_by_role
+        ],
+        recent_by_model=[
+            ModelCostLine(
+                model=row["model"],
+                calls=int(row["calls"]),
+                tokens_total=int(row["tokens_total"]),
+                cost_total=int(row["cost_total"]),
+                cost_estimated_total=int(row.get("cost_estimated_total", 0) or 0),
+            )
+            for row in recent_by_model
         ],
         recent_daily_cost=recent_daily_cost,
         conversations=conversation_lines,

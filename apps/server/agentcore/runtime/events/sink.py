@@ -194,6 +194,9 @@ class EventSink:
         # G6: after content_reset, display-only reinject this text into history + SSE
         # (skip process / checkpointer). None = hook unset (status-quo behaviour).
         self._content_reset_reinjection: str | None = None
+        # Soft-fail error (ERROR is history-skipped / not journaled): keep the latest
+        # payload so settle can stamp turn_end + result.error for reload.
+        self._last_error: dict[str, Any] | None = None
         if conversation_id and message_id:
             self._try_start_stream_checkpointer()
 
@@ -285,6 +288,8 @@ class EventSink:
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
+            if event.type is EventType.ERROR:
+                self._last_error = dict(event.payload)
             # Accumulate FIRST: closed process_* / run_process_* schedule before the
             # DURABLE fact that closed them (journal interleave == live timeline).
             process_futures = self._accumulate_process(event)
@@ -687,6 +692,14 @@ class EventSink:
             return out or None
         out = {rid: steps for rid, steps in self._run_processes.items() if steps}
         return out or None
+
+    def last_turn_error(self) -> dict[str, Any] | None:
+        """Latest ``error`` SSE payload (code/message[/context]), or None.
+
+        ERROR events are transport-only (not journaled / not in ``_history``); this
+        is the durable hand-off into ``turn_end`` + settle result for reload.
+        """
+        return self._last_error
 
     def streamed_content(self) -> str:
         """The CEO bubble's currently-streamed text — concatenated ``content``-kind

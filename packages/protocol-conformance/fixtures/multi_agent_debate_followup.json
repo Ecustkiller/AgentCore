@@ -1704,6 +1704,7 @@
     "crossExamEnabled": true,
     "debateOpening": "这场可追问辩论：先把方案 A 的收益与风险敞口说清。",
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

@@ -67,6 +67,45 @@ async def test_code_execute_emits_executing_phase():
     assert phases == ["executing"]
 
 
+async def test_code_execute_surfaces_written_back_files():
+    # 产物写回 (gVisor copy-out): the model must see exactly which files landed in
+    # the workspace (so it references real paths), and the display carries them for
+    # the client. Skipped-by-cap files are disclosed, never silent.
+    backend = _FakeBackend(
+        ExecutionResult(
+            success=True,
+            stdout="done\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=5,
+            written_files=["out/course.pptx", "out/chart.png"],
+            write_back_skipped=1,
+        )
+    )
+    result = await CodeExecuteTool(location="server").execute(
+        {"code": "make()", "language": "python"}, _ctx(backend)
+    )
+
+    assert result.success is True
+    assert "已写回工作区：out/course.pptx、out/chart.png" in result.output
+    assert "1 个文件超出写回限额" in result.output
+    assert result.display is not None
+    assert result.display["written_files"] == ["out/course.pptx", "out/chart.png"]
+
+
+async def test_code_execute_display_unchanged_without_write_back():
+    # No written files → no extra display key (old fixtures stay byte-identical).
+    backend = _FakeBackend(
+        ExecutionResult(success=True, stdout="ok\n", stderr="", exit_code=0, duration_ms=5)
+    )
+    result = await CodeExecuteTool().execute(
+        {"code": "print('ok')", "language": "python"}, _ctx(backend)
+    )
+    assert result.display is not None
+    assert "written_files" not in result.display
+    assert "已写回工作区" not in result.output
+
+
 async def test_code_execute_display_on_failure_keeps_stderr_and_exit():
     backend = _FakeBackend(
         ExecutionResult(

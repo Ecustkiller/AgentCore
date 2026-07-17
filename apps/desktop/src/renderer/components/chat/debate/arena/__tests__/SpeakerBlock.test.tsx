@@ -167,8 +167,7 @@ describe("SpeakerBlock 展开全文", () => {
 });
 
 describe("SpeakerBlock 论点行标题", () => {
-  const LONG_TITLE =
-    "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+  const LONG_TITLE = "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
   const LONG_SPEECH = [
     `### ${LONG_TITLE}`,
     "正文说明公共元素与独创作品的界限。",
@@ -199,10 +198,8 @@ describe("SpeakerBlock 论点行标题", () => {
   });
 
   it("结构化 title 已截断时，用 output 重水合大纲完整标题", () => {
-    const full1 =
-      "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
-    const full2 =
-      "论点二：LV四叶花图案经长期使用已获得“第二含义”";
+    const full1 = "论点一：四叶花卉是公共元素，但LV的Monogram是独创作品";
+    const full2 = "论点二：LV四叶花图案经长期使用已获得“第二含义”";
     const output = [
       `### ${full1}`,
       "正文甲。",

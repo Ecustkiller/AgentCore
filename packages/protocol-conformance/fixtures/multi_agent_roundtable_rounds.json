@@ -997,6 +997,7 @@
     "crossExamEnabled": false,
     "debateOpening": "圆桌开场：先问 AI 治理的风险从何而来。",
     "teamSynthesisPreview": null,
+    "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
     "userInterjections": []

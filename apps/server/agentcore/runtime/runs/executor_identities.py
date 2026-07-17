@@ -237,6 +237,19 @@ ref 填那条便签的编号（post_note 成功时返回的 N 编号），\
 必须【先】用 post_note（kind=heads_up）贴一行警示（如「方向偏书面，建议叫停重写」），【再】写你的详细\
 审查——让并行队友先看到重大信号，别各自闷头修标点。方向没问题、只有局部建议时，不必为每条小事贴便签。"""
 
+# 环境能力自述（能写 ≠ 能跑）: appended ONLY when the turn's worker registry carries no
+# execution class (cloud location=server without sandbox — see
+# ``tools.builtin.code_execution_enabled_for``). Distinguishes「能写脚本落盘」from「能运行」
+# so a worker in a no-exec workspace neither fabricates「已运行 / 已生成」nor burns rounds
+# escalating for a tool that will never appear this turn. Kept OFF the local / sandboxed
+# paths (byte-identical identities there).
+_WORKER_NO_EXECUTION_POLICY = """\
+【本回合执行环境未装配】你没有 code_execute / test_run / terminal 这类执行工具：\
+你【能】用写文件工具把脚本 / 源码 / 配置 / 文档落盘，但【不能】运行它们，也无法生成\
+需要运行程序才能产出的二进制 / 可播放文件（如 .pptx / .xlsx / 图片 / 可执行文件）。\
+不要为等一个本回合不会出现的执行工具反复升级或空转；也绝不要谎称「已运行 / 已验证 / 已生成」。\
+如实交付你真正落盘的内容，并在正文与交接简报里注明「未运行验证，需在有执行环境的机器上运行生成」。"""
+
 # Shared by every delegated worker (leaf + captain): the environment-mutation caution
 # (按角色 right-size, 反向). It used to live in the SHARED base prompt, so the CEO carried
 # it too — but the coordinator CEO holds only read-only tools (build_ceo_tool_registry):
@@ -302,6 +315,7 @@ def build_worker_identity(
     has_dependents: bool,
     captain: bool = False,
     form: DeliverableForm | None = None,
+    can_execute: bool = True,
 ) -> str:
     """Assemble a worker's identity preamble (topology-split handoff + leaf/captain).
 
@@ -309,12 +323,17 @@ def build_worker_identity(
     upstream nodes get the imperative handoff relay; leaves get the conditional
    「有增量才写」wording. ``captain`` selects the nested-delegation intro.
     ``form`` selects the deliverable-form block (omit = legacy two-way guidance).
+    ``can_execute`` mirrors whether the execution class (code_execute / test_run) is in
+    this turn's worker registry — False layers the 能写≠能跑 self-description in so the
+    prompt never over-claims capability the toolset withheld (能力闸门与交付诚实性).
     """
     intro = _WORKER_CAPTAIN_INTRO if captain else _WORKER_LEAF_INTRO
+    no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
     return (
         f"{intro}\n\n"
         f"{_WORKER_TEAM_NOTE_POLICY}\n\n"
-        f"{_deliverable_policy(has_dependents=has_dependents, form=form)}\n\n"
+        f"{_deliverable_policy(has_dependents=has_dependents, form=form)}"
+        f"{no_exec}\n\n"
         f"{_WORKER_TOOL_SAFETY_POLICY}"
     )
 

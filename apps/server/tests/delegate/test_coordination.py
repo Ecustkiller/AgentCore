@@ -876,6 +876,28 @@ def test_all_completed_inject_carries_output_and_audit_hint():
     assert "先派审计再收尾" in text
 
 
+def test_inject_carries_final_synthesis_discipline():
+    # 终稿纪律（B4·协调出口）：footer 与 all_completed 都提醒——交付物在前、过程简述
+    # 至多一段、协调事件 / escalation 原文 / 合成草稿不整段进终稿、未交付产物显式列出。
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    text = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 2, "total": 2},
+            )
+        ],
+    )
+    assert "【终稿纪律】" in text  # footer（每次注入都带）
+    assert "交付物在前" in text
+    assert "禁止整段粘进终稿" in text
+    assert "未交付的承诺产物" in text
+    assert "终稿纪律】写" in text  # all_completed 分支的强化提醒
+
+
 def test_all_completed_inject_without_output_still_has_audit_hint():
     from agentcore.runtime.coordination.inject import format_coordination_events
 

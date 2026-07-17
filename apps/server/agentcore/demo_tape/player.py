@@ -35,6 +35,7 @@ from agentcore.replay import (
 )
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.runtime.engine.segments import join_segments
 from agentcore.runtime.events import (
     EventSink,
     EventType,
@@ -50,9 +51,9 @@ from agentcore.runtime.events import (
     team_preview_required,
     team_preview_resolved,
 )
-from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.facts import TurnFactLog, current_fact_log, pre_pause_from_journal
+from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.journal.entries import journal_entries_from_display_runs
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.finalize import _build_runs_payload
@@ -726,8 +727,16 @@ async def play_tape_events(
     )
     assert_sink_consumer(source)
     events = list(source.events)
-    content_parts: list[str] = [content_seed] if content_seed else []
+    # Content mirrors live finish: ``join_segments`` at each durable pause seam.
+    # Reasoning stays raw-concat (fidelity oracle = journal process_reasoning bursts).
+    content_acc = content_seed or ""
+    content_buf: list[str] = []
     reasoning_parts: list[str] = [reasoning_seed] if reasoning_seed else []
+
+    def _flush_content_seam() -> None:
+        nonlocal content_acc, content_buf
+        content_acc = join_segments(content_acc, "".join(content_buf))
+        content_buf = []
 
     if transport is not None:
         transport.begin_play(message_id=message_id, start_index=start_index)
@@ -813,6 +822,8 @@ async def play_tape_events(
                     payload=payload,
                     ts=ts,
                 )
+                # Same persist seam as cold resume: joiner lands between segments.
+                _flush_content_seam()
                 i += 1
                 continue
 
@@ -852,12 +863,14 @@ async def play_tape_events(
 
         await _emit(sink, et_name, payload, ts=ts)
         if et_name == "content_delta":
-            _accumulate_text(content_parts, et_name, payload)
+            delta = payload.get("delta") or ""
+            if delta:
+                content_buf.append(str(delta))
         elif et_name == "reasoning_delta":
             _accumulate_text(reasoning_parts, et_name, payload)
         i += 1
 
-    content = "".join(content_parts)
+    content = join_segments(content_acc, "".join(content_buf))
     reasoning = "".join(reasoning_parts)
     sink.emit(message_end(FinishReason.END_TURN))
     logger.info(

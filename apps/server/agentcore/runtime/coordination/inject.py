@@ -31,6 +31,9 @@ def format_coordination_events(
         "queue_user_message(interjection_id, reason) 把无关插话转入对话级排队（下一回合）；"
         "ask_user 向用户请示（偏好/授权/费用类须先问用户再 resolve）。"
         "全部完成后做最终合成（走 content_delta），然后退出协调。"
+        "【终稿纪律】最终合成是给用户的交付、不是协调日志：交付物在前，过程简述至多一段；"
+        "以上协调事件、escalation 原文与合成草稿是你的工作输入，禁止整段粘进终稿"
+        "——草稿要用也须重写成交付口吻；未交付的承诺产物须显式列出，不得含糊带过。"
     )
     if session.budget_remaining <= 0:
         lines.append(
@@ -106,6 +109,10 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
             lines.append(f"团队成品：\n{output.strip()}")
         lines.append(
             "质量面敏感成品（成篇/构建/审查类）若未经独立审计，先派审计再收尾。"
+        )
+        lines.append(
+            "最终合成按【终稿纪律】写：交付物在前、过程简述至多一段，"
+            "不粘贴协调事件 / escalation 原文 / 中间合成草稿；未交付的承诺产物显式列出。"
         )
         return "\n".join(lines)
     if ev.kind is CoordinationEventKind.BOUNDARY_YIELD:

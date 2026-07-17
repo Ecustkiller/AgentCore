@@ -1,5 +1,5 @@
-import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
 import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
+import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
 import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
 import {
   isTeamSynthesizing,

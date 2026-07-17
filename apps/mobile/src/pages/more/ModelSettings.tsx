@@ -9,8 +9,105 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
 
-const DEFAULT_BASE_URL = "https://api.deepseek.com";
-const DEFAULT_MODEL = "deepseek-v4-flash";
+/** Mobile-local BYOK presets (no shared package with desktop). */
+type ProviderId =
+  | "deepseek"
+  | "openai"
+  | "moonshot"
+  | "zhipu"
+  | "doubao"
+  | "openrouter"
+  | "custom";
+
+type ProviderPreset = {
+  id: Exclude<ProviderId, "custom">;
+  label: string;
+  baseUrl: string;
+  baseUrlAliases?: readonly string[];
+  defaultModel: string;
+  models: readonly string[];
+};
+
+const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    baseUrlAliases: ["https://api.deepseek.com/v1"],
+    defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-4o",
+    models: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+  },
+  {
+    id: "moonshot",
+    label: "Kimi (Moonshot)",
+    baseUrl: "https://api.moonshot.cn/v1",
+    baseUrlAliases: ["https://api.moonshot.ai/v1"],
+    defaultModel: "kimi-k2.5",
+    models: ["kimi-k2.5", "kimi-k2", "moonshot-v1-8k", "moonshot-v1-32k"],
+  },
+  {
+    id: "zhipu",
+    label: "智谱 GLM",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    defaultModel: "glm-4-plus",
+    models: ["glm-4-plus", "glm-4-flash", "glm-4-air"],
+  },
+  {
+    id: "doubao",
+    label: "豆包 (火山方舟)",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    defaultModel: "doubao-pro-32k",
+    models: ["doubao-pro-32k", "doubao-lite-32k"],
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "openrouter/auto",
+    models: [
+      "openrouter/auto",
+      "anthropic/claude-sonnet-4",
+      "google/gemini-2.5-pro",
+    ],
+  },
+];
+
+const DEFAULT_PROVIDER_ID: Exclude<ProviderId, "custom"> = "deepseek";
+const MODEL_OTHER_VALUE = "__other__";
+
+function normalizeBaseUrl(url: string): string {
+  let normalized = url.trim().toLowerCase();
+  while (normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function resolveProvider(baseUrl: string): ProviderId {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return DEFAULT_PROVIDER_ID;
+  const normalized = normalizeBaseUrl(trimmed);
+  for (const preset of PROVIDER_PRESETS) {
+    const candidates = [preset.baseUrl, ...(preset.baseUrlAliases ?? [])];
+    if (candidates.some((c) => normalizeBaseUrl(c) === normalized)) {
+      return preset.id;
+    }
+  }
+  return "custom";
+}
+
+function getPreset(id: Exclude<ProviderId, "custom">): ProviderPreset {
+  const preset = PROVIDER_PRESETS.find((p) => p.id === id);
+  if (!preset) throw new Error(`Unknown provider: ${id}`);
+  return preset;
+}
 
 function capabilityLabel(supportsTools: boolean | null | undefined): string {
   if (supportsTools === true) return "支持工具调用";
@@ -85,6 +182,11 @@ export function ModelSettings() {
                 onSaved={(s) => {
                   setStatus(s);
                   setEditing(false);
+                  void testLlmKey()
+                    .then(setStatus)
+                    .catch(() => {
+                      /* 保存已成功；测连失败不阻断 */
+                    });
                 }}
                 onCancel={
                   status?.configured ? () => setEditing(false) : undefined
@@ -252,20 +354,79 @@ function KeyForm({
   onSaved: (s: LlmKeyStatus) => void;
   onCancel?: () => void;
 }) {
+  const defaultPreset = getPreset(DEFAULT_PROVIDER_ID);
   const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
-  const [defaultModel, setDefaultModel] = useState(initialModel);
+  const [providerId, setProviderId] = useState<ProviderId>(() =>
+    resolveProvider(initialBaseUrl),
+  );
+  const [baseUrl, setBaseUrl] = useState(
+    () => initialBaseUrl.trim() || defaultPreset.baseUrl,
+  );
+  const [defaultModel, setDefaultModel] = useState(
+    () => initialModel.trim() || defaultPreset.defaultModel,
+  );
   const [priceCacheMiss, setPriceCacheMiss] = useState(initialPriceCacheMiss);
   const [priceOutput, setPriceOutput] = useState(initialPriceOutput);
   const [priceCacheHit, setPriceCacheHit] = useState(initialPriceCacheHit);
   const [backgroundModel, setBackgroundModel] = useState(
     initialBackgroundModel,
   );
+  const [customModelMode, setCustomModelMode] = useState(() => {
+    const model = initialModel.trim();
+    if (!model) return false;
+    const provider = resolveProvider(initialBaseUrl);
+    if (provider === "custom") return false;
+    return !getPreset(provider).models.includes(model);
+  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = apiKey.trim().length > 0 && !saving;
+  const hasInitialAdvanced = Boolean(
+    initialPriceCacheHit.trim() ||
+      initialPriceCacheMiss.trim() ||
+      initialPriceOutput.trim() ||
+      initialBackgroundModel.trim(),
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(hasInitialAdvanced);
+
+  const preset = providerId === "custom" ? null : getPreset(providerId);
+  const modelSuggestions = preset?.models ?? [];
+  const useModelSelect = modelSuggestions.length > 0;
+  const keyOk = configured || apiKey.trim().length > 0;
+  const canSave =
+    keyOk &&
+    baseUrl.trim().length > 0 &&
+    defaultModel.trim().length > 0 &&
+    !saving;
+
+  const modelSelectValue =
+    useModelSelect &&
+    !customModelMode &&
+    modelSuggestions.includes(defaultModel)
+      ? defaultModel
+      : MODEL_OTHER_VALUE;
+
+  function selectProvider(next: ProviderId) {
+    setProviderId(next);
+    if (next !== "custom") {
+      const p = getPreset(next);
+      setBaseUrl(p.baseUrl);
+      setDefaultModel(p.defaultModel);
+      setCustomModelMode(false);
+    } else {
+      setCustomModelMode(false);
+    }
+  }
+
+  function selectModelOption(value: string) {
+    if (value === MODEL_OTHER_VALUE) {
+      setCustomModelMode(true);
+      return;
+    }
+    setCustomModelMode(false);
+    setDefaultModel(value);
+  }
 
   async function save() {
     setSaving(true);
@@ -275,9 +436,10 @@ function KeyForm({
       const out = priceOutput.trim();
       const hit = priceCacheHit.trim();
       const pricesEmpty = !miss && !out && !hit;
+      const trimmedKey = apiKey.trim();
       onSaved(
         await setLlmKey({
-          api_key: apiKey.trim(),
+          api_key: trimmedKey || null,
           base_url: baseUrl.trim() || null,
           default_model: defaultModel.trim() || null,
           price_cache_miss: pricesEmpty ? null : miss || null,
@@ -298,8 +460,30 @@ function KeyForm({
       <span className="section-title">
         {configured ? "更换模型配置" : "填写模型配置"}
       </span>
-      <label className="field-label" htmlFor="llm-api-key">
-        API Key
+
+      <label className="field-label" htmlFor="llm-provider">
+        厂商
+      </label>
+      <select
+        id="llm-provider"
+        value={providerId}
+        onChange={(e) => selectProvider(e.target.value as ProviderId)}
+        className="text-input"
+      >
+        {PROVIDER_PRESETS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+        <option value="custom">自定义</option>
+      </select>
+
+      <label
+        className="field-label"
+        htmlFor="llm-api-key"
+        style={{ marginTop: 12 }}
+      >
+        API Key{configured ? "（可选）" : ""}
       </label>
       <div className="key-input-wrap">
         <input
@@ -307,7 +491,7 @@ function KeyForm({
           type={reveal ? "text" : "password"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-..."
+          placeholder={configured ? "留空则保留已保存的 Key" : "sk-..."}
           autoComplete="off"
           spellCheck={false}
         />
@@ -319,6 +503,7 @@ function KeyForm({
           {reveal ? "隐藏" : "显示"}
         </button>
       </div>
+
       <label
         className="field-label"
         htmlFor="llm-base-url"
@@ -331,11 +516,16 @@ function KeyForm({
         type="text"
         value={baseUrl}
         onChange={(e) => setBaseUrl(e.target.value)}
-        placeholder={DEFAULT_BASE_URL}
+        placeholder={
+          providerId === "custom"
+            ? "https://your-endpoint.example/v1"
+            : preset?.baseUrl
+        }
         autoComplete="off"
         spellCheck={false}
         className="text-input"
       />
+
       <label
         className="field-label"
         htmlFor="llm-default-model"
@@ -343,92 +533,132 @@ function KeyForm({
       >
         默认模型名
       </label>
-      <input
-        id="llm-default-model"
-        type="text"
-        value={defaultModel}
-        onChange={(e) => setDefaultModel(e.target.value)}
-        placeholder={DEFAULT_MODEL}
-        autoComplete="off"
-        spellCheck={false}
-        className="text-input"
-      />
-      <p className="field-label" style={{ marginTop: 12 }}>
-        单价卡（可选，USD / 1M）
-      </p>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        输入与输出成对填写后可显示 ≈¥ 估算；全空清除价卡。
-      </p>
-      <label className="field-label" htmlFor="llm-price-miss">
-        输入价
-      </label>
-      <input
-        id="llm-price-miss"
-        type="text"
-        inputMode="decimal"
-        value={priceCacheMiss}
-        onChange={(e) => setPriceCacheMiss(e.target.value)}
-        placeholder="如 0.28"
-        autoComplete="off"
-        spellCheck={false}
-        className="text-input"
-      />
-      <label
-        className="field-label"
-        htmlFor="llm-price-out"
-        style={{ marginTop: 8 }}
-      >
-        输出价
-      </label>
-      <input
-        id="llm-price-out"
-        type="text"
-        inputMode="decimal"
-        value={priceOutput}
-        onChange={(e) => setPriceOutput(e.target.value)}
-        placeholder="如 0.42"
-        autoComplete="off"
-        spellCheck={false}
-        className="text-input"
-      />
-      <label
-        className="field-label"
-        htmlFor="llm-price-hit"
-        style={{ marginTop: 8 }}
-      >
-        缓存命中价（可选）
-      </label>
-      <input
-        id="llm-price-hit"
-        type="text"
-        inputMode="decimal"
-        value={priceCacheHit}
-        onChange={(e) => setPriceCacheHit(e.target.value)}
-        placeholder="缺省=输入价"
-        autoComplete="off"
-        spellCheck={false}
-        className="text-input"
-      />
-      <label
-        className="field-label"
-        htmlFor="llm-bg-model"
+      {useModelSelect ? (
+        <select
+          id="llm-default-model"
+          value={modelSelectValue}
+          onChange={(e) => selectModelOption(e.target.value)}
+          className="text-input"
+        >
+          {modelSuggestions.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+          <option value={MODEL_OTHER_VALUE}>其他…</option>
+        </select>
+      ) : (
+        <input
+          id="llm-default-model"
+          type="text"
+          value={defaultModel}
+          onChange={(e) => setDefaultModel(e.target.value)}
+          placeholder="model-name"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+      )}
+      {useModelSelect &&
+        (customModelMode || modelSelectValue === MODEL_OTHER_VALUE) && (
+          <input
+            type="text"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            placeholder={preset?.defaultModel ?? "model-name"}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-input"
+            style={{ marginTop: 8 }}
+          />
+        )}
+
+      <details
         style={{ marginTop: 12 }}
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
       >
-        后台模型（可选）
-      </label>
-      <input
-        id="llm-bg-model"
-        type="text"
-        value={backgroundModel}
-        onChange={(e) => setBackgroundModel(e.target.value)}
-        placeholder="留空跟随默认模型"
-        autoComplete="off"
-        spellCheck={false}
-        className="text-input"
-      />
-      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
-      </p>
+        <summary className="field-label" style={{ cursor: "pointer" }}>
+          高级选项
+        </summary>
+        <p className="field-label" style={{ marginTop: 12 }}>
+          单价卡（可选，USD / 1M）
+        </p>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          输入与输出成对填写后可显示 ≈¥ 估算；全空清除价卡。
+        </p>
+        <label className="field-label" htmlFor="llm-price-miss">
+          输入价
+        </label>
+        <input
+          id="llm-price-miss"
+          type="text"
+          inputMode="decimal"
+          value={priceCacheMiss}
+          onChange={(e) => setPriceCacheMiss(e.target.value)}
+          placeholder="如 0.28"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+        <label
+          className="field-label"
+          htmlFor="llm-price-out"
+          style={{ marginTop: 8 }}
+        >
+          输出价
+        </label>
+        <input
+          id="llm-price-out"
+          type="text"
+          inputMode="decimal"
+          value={priceOutput}
+          onChange={(e) => setPriceOutput(e.target.value)}
+          placeholder="如 0.42"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+        <label
+          className="field-label"
+          htmlFor="llm-price-hit"
+          style={{ marginTop: 8 }}
+        >
+          缓存命中价（可选）
+        </label>
+        <input
+          id="llm-price-hit"
+          type="text"
+          inputMode="decimal"
+          value={priceCacheHit}
+          onChange={(e) => setPriceCacheHit(e.target.value)}
+          placeholder="缺省=输入价"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+        <label
+          className="field-label"
+          htmlFor="llm-bg-model"
+          style={{ marginTop: 12 }}
+        >
+          后台模型（可选）
+        </label>
+        <input
+          id="llm-bg-model"
+          type="text"
+          value={backgroundModel}
+          onChange={(e) => setBackgroundModel(e.target.value)}
+          placeholder="留空跟随默认模型"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          用于标题、记忆等后台任务的便宜模型，留空跟随默认模型
+        </p>
+      </details>
+
       <div className="field-actions">
         {onCancel && (
           <button

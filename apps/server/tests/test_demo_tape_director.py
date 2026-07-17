@@ -234,7 +234,7 @@ async def test_player_burst_auto_resolves_team_preview(monkeypatch):
         transport=transport,
     )
     assert result["finish_reason"] is FinishReason.END_TURN
-    assert result["content"] == "开场辩论中"
+    assert result["content"] == "开场\n\n辩论中"
     types = [e.type for e in sink._history]
     assert EventType.TEAM_PREVIEW_REQUIRED in types
     assert EventType.TEAM_PREVIEW_RESOLVED in types
@@ -397,7 +397,7 @@ async def test_player_burst_auto_resolves_cold_path_pauses(
         transport=transport,
     )
     assert result["finish_reason"] is FinishReason.END_TURN
-    assert result["content"] == "开场后续"
+    assert result["content"] == "开场\n\n后续"
     types = [e.type for e in sink._history]
     assert required_et in types
     assert resolved_type in types
@@ -486,6 +486,7 @@ async def test_player_burst_auto_resolves_approval(monkeypatch):
         transport=transport,
     )
     assert result["finish_reason"] is FinishReason.END_TURN
+    # Hot-path approval is not a durable content seam — no join_segments joiner.
     assert result["content"] == "开场后续"
     types = [e.type for e in sink._history]
     assert EventType.APPROVAL_REQUIRED in types

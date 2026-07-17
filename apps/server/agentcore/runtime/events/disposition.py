@@ -109,6 +109,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "协调模式团队进展预览——同 key 保最新由前端 fold 保证；刷新后 StatusStrip 可重建（P2）",
     ),
+    EventType.DELIVERY_STATUS: (
+        Disposition.DURABLE,
+        "交付状态结构化对账（已交付/缺口/待操作）——同 execution_id 保最新；刷新后交付状态卡重建",
+    ),
     EventType.USER_INTERJECTION: (
         Disposition.DURABLE,
         "协调中用户插话——同 interjection_id 保最新 status；team 块徽标重放",

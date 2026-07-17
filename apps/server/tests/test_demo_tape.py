@@ -53,6 +53,7 @@ from agentcore.demo_tape.schema import (
     event_type,
     is_demo_tape_frame,
     normalize_tape_event,
+    persisted_captain_content_from_events,
 )
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, FinishReason
@@ -992,7 +993,8 @@ async def test_recording_to_tape_to_replay_closed_loop(monkeypatch, tmp_path: Pa
         trace_id="c" * 32,
     )
     assert result2["finish_reason"] is FinishReason.END_TURN
-    assert result2["content"] == "案情简介。最终汇总。"
+    # Persist-shaped: live finish joins at the durable-pause seam.
+    assert result2["content"] == "案情简介。\n\n最终汇总。"
     assert result2["followups"] == chips
     # Player does not emit followups_generated — persist_turn_result does.
     assert EventType.FOLLOWUPS_GENERATED not in [e.type for e in sink2._history]
@@ -1445,6 +1447,126 @@ async def test_resume_keeps_pre_pause_content_visible_across_collab_graph(
         if e.type is EventType.CONTENT_DELTA
     ]
     assert any(pre_pause_body in str(d) for d in reinjected if d)
+
+
+def test_persisted_captain_content_joins_at_durable_pause_seam():
+    """暂停接缝：流内无 joiner，持久化正文须经 join_segments（对齐 messages.content）。
+
+    回归：正反对决。|team_preview|--- 不得粘成「。---」；须为「。\\n\\n---」。
+    """
+    from agentcore.runtime.engine.segments import join_segments
+
+    pre = "展开正反对决。"
+    post = "---\n\n## 模拟庭审辩论结果"
+    events = [
+        {"type": "content_delta", "payload": {"delta": pre}, "t_ms": 0},
+        {
+            "type": "team_preview_required",
+            "payload": {"checkpoint_id": "cp-seam"},
+            "t_ms": 10,
+        },
+        {"type": "content_delta", "payload": {"delta": post}, "t_ms": 20},
+    ]
+    raw = pre + post
+    persisted = persisted_captain_content_from_events(events)
+    assert raw == "展开正反对决。---\n\n## 模拟庭审辩论结果"
+    assert persisted == join_segments(pre, post)
+    assert persisted == "展开正反对决。\n\n---\n\n## 模拟庭审辩论结果"
+    assert len(persisted) == len(raw) + 2
+
+
+@pytest.mark.asyncio
+async def test_player_result_content_joins_at_pause_seam(monkeypatch, tmp_path: Path):
+    """player result[\"content\"] 跨 team_preview 须用 join_segments，对齐 live finish。"""
+    from agentcore.demo_tape import player as player_mod
+    from agentcore.demo_tape.binding import TapeBinding
+    from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
+    from agentcore.runtime.engine.segments import join_segments
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.journal.writer import TurnJournalWriter
+
+    saved: list = []
+
+    async def fake_save(suspension):
+        saved.append(suspension)
+
+    monkeypatch.setattr(player_mod, "save_paused_turn", fake_save)
+
+    async def noop_flush(self):
+        return None
+
+    monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
+
+    pre = "展开正反对决。"
+    post = "---\n\n## 模拟庭审辩论结果"
+    events = [
+        {"kind": "run_started", "payload": {"run_id": "c1", "kind": "captain"}, "t_ms": 0},
+        {"kind": "content_delta", "payload": {"delta": pre}, "t_ms": 50},
+        {
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "cp-seam",
+                "form": "debate",
+                "sides": [{"key": "a", "name": "A"}],
+                "workers": [],
+                "tools": [],
+                "primitive": "debate",
+                "motion": "m",
+                "max_rounds": 2,
+                "thorough": True,
+            },
+            "t_ms": 100,
+        },
+        {"kind": "team_preview_resolved", "payload": {"decision": "continue"}, "t_ms": 150},
+        {"kind": "content_delta", "payload": {"delta": post}, "t_ms": 400},
+    ]
+    tape_path = tmp_path / "seam.json"
+    tape_path.write_text(
+        json.dumps({"version": 1, "meta": {}, "events": events}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    binding = TapeBinding(
+        conversation_id="conv-seam",
+        tape_path=tape_path,
+        speed=100.0,
+        max_gap_ms=50,
+    )
+    sink = EventSink(conversation_id="conv-seam", message_id="msg-seam")
+    writer = TurnJournalWriter(
+        turn_id="msg-seam", conversation_id="conv-seam", trace_id="s" * 32
+    )
+    fact_token = current_fact_log.set(TurnFactLog())
+    try:
+        result = await play_tape_events(
+            sink=sink,
+            events=events,
+            start_index=0,
+            binding=binding,
+            message_id="msg-seam",
+            conversation_id="conv-seam",
+            user_id="u",
+            user_message="go",
+            folder_id=None,
+            journal_writer=writer,
+        )
+    finally:
+        current_fact_log.reset(fact_token)
+
+    assert result["finish_reason"] is FinishReason.PAUSED
+
+    sink2 = EventSink(conversation_id="conv-seam", message_id="msg-seam")
+    result2 = await continue_tape_turn(
+        suspension=saved[0],
+        response=CheckpointResponse(decision=CheckpointDecision.CONTINUE, note=""),
+        sink=sink2,
+        folder_id=None,
+        trace_id="s" * 32,
+    )
+    assert result2["finish_reason"] is FinishReason.END_TURN
+    expected = join_segments(pre, post)
+    assert result2.get("content") == expected
+    assert "。\n\n---" in (result2.get("content") or "")
+
 
 @pytest.mark.asyncio
 async def test_replaying_same_tape_twice_remints_distinct_checkpoints(
@@ -2901,7 +3023,6 @@ async def test_multi_act_advances_cursor_and_unbinds_on_last(
 ):
     from agentcore.demo_tape import binding as binding_mod
     from agentcore.demo_tape.binding import (
-        TapeBinding,
         peek_binding,
         write_binding,
     )

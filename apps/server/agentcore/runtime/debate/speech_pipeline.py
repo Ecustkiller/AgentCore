@@ -15,6 +15,7 @@ from agentcore.llm.profiles import ProfileParams, build_request
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate.evidence_guard import (
+    demote_verified_tags,
     format_closing_evidence_steer,
     format_source_grounding_steer,
     novel_verified_tags,
@@ -100,9 +101,10 @@ async def research_then_draft(
     笔记正文不追加为产品消息——只经 journal 的 llm_call fact 可见。
 
     成稿后过【已核实】标签闸（二选一装配，违规 ``run_output_reset`` 后回炉一次；再违规
-    放行并记警告）：``evidence_tag_whitelist`` 非 None = 结辩白名单闸（新标签即违规）；
-    ``check_source_grounding`` = 出处软校验闸（opening / 续辩 / 质询作答：出处须与本方
-    检索语料——user/tool 消息 + 成稿 brief + 当轮笔记——宽松对应，拦凭空来源不拦写法差异）。
+    剥离违规标签降级为【待核实·推断】后放行并记警告）：``evidence_tag_whitelist`` 非 None =
+    结辩白名单闸（新标签即违规）；``check_source_grounding`` = 出处软校验闸（opening / 续辩 /
+    质询作答：出处须与本方检索语料——user/tool 消息 + 成稿 brief + 当轮笔记——宽松对应，
+    拦凭空来源不拦写法差异）。
     """
     total_usage = TokenUsage()
     total_reasoning_parts: list[str] = []
@@ -237,12 +239,20 @@ async def research_then_draft(
                 total_reasoning_parts.append(retry_reasoning)
             still_guard, still_tags, _ = _guard_issues(speech)
             if still_guard:
+                demoted = demote_verified_tags(speech, still_tags)
                 logger.warning(
-                    "debate.speech.evidence_guard_pass_through",
+                    "debate.speech.evidence_guard_demote",
                     run_id=run_id,
                     guard=still_guard,
                     tags=still_tags,
                 )
+                if demoted != speech:
+                    sink.emit(run_output_reset(run_id, agent_id, "finish_guard"))
+                    if streamed_content is not None:
+                        streamed_content.clear()
+                        streamed_content.append(demoted)
+                    sink.emit(run_output_delta(run_id, agent_id, demoted))
+                    speech = demoted
 
     if usage_sink is not None:
         usage_sink.clear()

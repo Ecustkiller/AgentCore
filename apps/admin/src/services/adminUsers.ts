@@ -17,6 +17,7 @@ export type AdminUserDetail = components["schemas"]["AdminUserDetail"];
 export type AdminConversationLine =
   components["schemas"]["AdminConversationLine"];
 export type RoleCostLine = components["schemas"]["RoleCostLine"];
+export type ModelCostLine = components["schemas"]["ModelCostLine"];
 export type AdminResetPasswordResponse =
   components["schemas"]["AdminResetPasswordResponse"];
 export type AdminSetPasswordRequest =

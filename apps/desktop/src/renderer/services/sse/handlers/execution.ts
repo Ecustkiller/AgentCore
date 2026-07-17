@@ -14,6 +14,7 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  DeliveryStatusPayload,
   EscalationRequiredPayload,
   RunContextPayload,
   RunEscalationPayload,
@@ -189,6 +190,18 @@ export function handleExecutionEvent(
             event.payload as TeamSynthesisPreviewPayload,
             mid,
           );
+      }
+      return true;
+    }
+    // 交付状态（能力闸门与交付诚实性）：delegate 批次收尾的结构化交付对账。DURABLE——
+    // 入 journal；live 另 stamp 到 execution runtime（同 execution_id 保最新），
+    // hydrateFromJournal 取最后一条重建，驱动答复下方的交付状态卡。
+    case "delivery_status": {
+      const mid = execMessageId(conversationId);
+      if (mid) {
+        useExecutionStore
+          .getState()
+          .setDeliveryStatus(event.payload as DeliveryStatusPayload, mid);
       }
       return true;
     }
