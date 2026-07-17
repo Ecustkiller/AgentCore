@@ -2,6 +2,7 @@ import { DraftEmptyState } from "@/components/onboarding/DraftEmptyState";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useComposerDockFlip } from "@/hooks/useComposerDockFlip";
+import { useConversations } from "@/hooks/useConversations";
 import { useLlmKey } from "@/hooks/useLlmKey";
 import { hasModelAccess, shouldCenterDraftComposer } from "@/lib/onboarding";
 import { useChatScroll } from "@/lib/useChatScroll";
@@ -37,13 +38,21 @@ export function ChatView() {
   const isGenerating = useActiveGenerating();
   const hasMessages = messages.length > 0;
   const { data: llm } = useLlmKey();
+  const conversations = useConversations();
   // 草稿态（未落库对话）才可能进居中欢迎态。已落库对话切换时会先经历一个「历史尚未
   // 异步加载完」的空窗口，用 isDraft 把它挡在居中判定外，避免输入框「弹到中间再飞回底栏」。
   const isDraft = conversationId === null;
+  // 例外：已落库但确定 0 消息的会话（演示磁带 prepare 绑定的空会话）也应像草稿一样居中欢迎——
+  // 元数据 messageCount===0 = 确定为空（有消息的会话>0；历史加载中未入列表的会话查不到），
+  // 故不会重蹈切会话抖动。
+  const knownEmptyPersisted =
+    !isDraft &&
+    conversations.find((c) => c.id === conversationId)?.messageCount === 0;
   const centerComposer = shouldCenterDraftComposer({
     isDraft,
     hasMessages,
     hasModelAccess: hasModelAccess(llm),
+    knownEmptyPersisted,
   });
   const composerFlipRef = useRef<HTMLDivElement>(null);
   // 落地动画只由首发信号触发（草稿 promote 成新对话），而非被动的居中→底栏翻转——
