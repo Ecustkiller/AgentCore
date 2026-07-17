@@ -39,8 +39,8 @@ from agentcore.runtime.debate.prompt import (
     closing_task,
     closing_verified_whitelist,
 )
-from agentcore.runtime.debate.types import DebateClash
 from agentcore.runtime.debate.speech_pipeline import research_then_draft
+from agentcore.runtime.debate.types import DebateClash
 from agentcore.runtime.events.types import EventType
 from agentcore.tools.builtin.debate.schema import CLOSING_LENGTH_HINT, LENGTH_HINT
 from agentcore.tools.protocol import ToolContext
@@ -191,7 +191,6 @@ def test_closing_task_clips_oversized_argument_bodies():
     assert "中段略" in fb or len(fb) < len(long_body)
     # 总预算硬顶：材料段不应接近未裁全文量级
     assert "本方历轮论点" in fb
-    material_start = fb.index("本方历轮论点")
     # 粗上界：单段论点裁后远小于原文
     clipped = _clip(long_body, _CLOSING_POINT_CLIP)
     assert len(clipped) <= _CLOSING_POINT_CLIP + 40

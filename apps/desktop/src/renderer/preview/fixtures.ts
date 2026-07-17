@@ -1,6 +1,10 @@
 import type { SSEEvent } from "@/types/events";
 import { isTurnFixture } from "@agentcore/protocol-conformance/fixtureKind";
-import { openEventDocument, prepareFoldSource, type FoldReplaySource } from "./source";
+import {
+  type FoldReplaySource,
+  openEventDocument,
+  prepareFoldSource,
+} from "./source";
 
 export interface PreviewFixture {
   name: string;

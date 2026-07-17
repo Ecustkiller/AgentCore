@@ -12,7 +12,7 @@ import {
   fetchLatestReleaseArtifacts,
 } from "../functions/_lib/releaseArtifacts.mjs";
 
-const FALLBACK_VERSION = "0.6.0";
+const FALLBACK_VERSION = "0.6.1";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 

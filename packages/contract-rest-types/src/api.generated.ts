@@ -2244,6 +2244,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/demo-tape/director/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Director List Sessions */
+        get: operations["director_list_sessions_v1_demo_tape_director_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Director Chapters */
+        get: operations["director_chapters_v1_demo_tape_director__conversation_id__chapters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Director Pause */
+        post: operations["director_pause_v1_demo_tape_director__conversation_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Director Resume */
+        post: operations["director_resume_v1_demo_tape_director__conversation_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/seek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Director Seek */
+        post: operations["director_seek_v1_demo_tape_director__conversation_id__seek_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/speed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Director Speed */
+        post: operations["director_speed_v1_demo_tape_director__conversation_id__speed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo-tape/director/{conversation_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Director Status */
+        get: operations["director_status_v1_demo_tape_director__conversation_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/demo-tape/prepare": {
         parameters: {
             query?: never;
@@ -5424,6 +5543,99 @@ export interface components {
             enabled: boolean;
             /** Tapes */
             tapes: components["schemas"]["DemoTapeSummary"][];
+        };
+        /** DemoTapeDirectorChapter */
+        DemoTapeDirectorChapter: {
+            /** Event Index */
+            event_index: number;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** T Ms */
+            t_ms: number;
+        };
+        /** DemoTapeDirectorChaptersResponse */
+        DemoTapeDirectorChaptersResponse: {
+            /** Chapters */
+            chapters: components["schemas"]["DemoTapeDirectorChapter"][];
+            /** Conversation Id */
+            conversation_id: string;
+        };
+        /**
+         * DemoTapeDirectorSeekRequest
+         * @description Seek by timeline ms (snapped), absolute event index, or chapter id.
+         */
+        DemoTapeDirectorSeekRequest: {
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /** Event Index */
+            event_index?: number | null;
+            /** T Ms */
+            t_ms?: number | null;
+        };
+        /** DemoTapeDirectorSessionsResponse */
+        DemoTapeDirectorSessionsResponse: {
+            /** Sessions */
+            sessions: components["schemas"]["DemoTapeDirectorStatus"][];
+        };
+        /** DemoTapeDirectorSpeedRequest */
+        DemoTapeDirectorSpeedRequest: {
+            /** Speed */
+            speed: number;
+        };
+        /**
+         * DemoTapeDirectorStatus
+         * @description Live playback status for one bound conversation.
+         */
+        DemoTapeDirectorStatus: {
+            /** Burst Until Index */
+            burst_until_index?: number | null;
+            /**
+             * Chapter Label
+             * @default
+             */
+            chapter_label: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Error */
+            error?: string | null;
+            /** Event Count */
+            event_count: number;
+            /** Event Index */
+            event_index: number;
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
+            /** Max Gap Ms */
+            max_gap_ms: number;
+            /** Message Id */
+            message_id?: string | null;
+            /**
+             * Soft Paused
+             * @default false
+             */
+            soft_paused: boolean;
+            /** Speed */
+            speed: number;
+            /** State */
+            state: string;
+            /** T Ms */
+            t_ms: number;
+            /**
+             * Tape Id
+             * @default
+             */
+            tape_id: string;
+            /**
+             * Tape Path
+             * @default
+             */
+            tape_path: string;
         };
         /**
          * DemoTapePrepareRequest
@@ -12766,6 +12978,257 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DemoTapeCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_list_sessions_v1_demo_tape_director_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorSessionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_chapters_v1_demo_tape_director__conversation_id__chapters_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorChaptersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_pause_v1_demo_tape_director__conversation_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_resume_v1_demo_tape_director__conversation_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_seek_v1_demo_tape_director__conversation_id__seek_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoTapeDirectorSeekRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_speed_v1_demo_tape_director__conversation_id__speed_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoTapeDirectorSpeedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    director_status_v1_demo_tape_director__conversation_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoTapeDirectorStatus"];
                 };
             };
             /** @description Validation Error */

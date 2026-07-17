@@ -4,7 +4,7 @@ import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
-import { foldEventsFrom, type FoldReplaySource } from "./source";
+import { type FoldReplaySource, foldEventsFrom } from "./source";
 
 /**
  * Replay a recorded SSE event stream into a conversation slice so the real chat UI

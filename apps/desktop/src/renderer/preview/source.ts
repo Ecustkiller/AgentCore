@@ -16,7 +16,11 @@ import { isTurnFixture } from "@agentcore/protocol-conformance/fixtureKind";
 
 export type ConsumerKind = "fold" | "sink";
 
-export type DocumentKind = "turn_fixture" | "tape" | "recording" | "bare_events";
+export type DocumentKind =
+  | "turn_fixture"
+  | "tape"
+  | "recording"
+  | "bare_events";
 
 export interface EventDocument {
   kind: DocumentKind;
@@ -107,13 +111,16 @@ export function openEventDocument(raw: unknown): EventDocument {
       kind: "recording",
       events,
       name: typeof doc.name === "string" ? doc.name : undefined,
-      description: typeof doc.description === "string" ? doc.description : undefined,
+      description:
+        typeof doc.description === "string" ? doc.description : undefined,
       hasPacing: eventsHavePacing(events),
     };
   }
 
   if (!Array.isArray(doc.events)) {
-    throw new Error("event document requires events[] (or recording segments[])");
+    throw new Error(
+      "event document requires events[] (or recording segments[])",
+    );
   }
   const events = doc.events.map(normalizeReplayEvent);
   const hasPacing = eventsHavePacing(events);
@@ -129,12 +136,20 @@ export function openEventDocument(raw: unknown): EventDocument {
     return { kind: "turn_fixture", events, name, description, hasPacing };
   }
   if ("version" in doc || (typeof doc.meta === "object" && doc.meta !== null)) {
-    return { kind: "tape", events, name: name ?? description, description, hasPacing };
+    return {
+      kind: "tape",
+      events,
+      name: name ?? description,
+      description,
+      hasPacing,
+    };
   }
   return { kind: "bare_events", events, name, description, hasPacing };
 }
 
-function brandFold(source: Omit<FoldReplaySource, typeof foldBrand>): FoldReplaySource {
+function brandFold(
+  source: Omit<FoldReplaySource, typeof foldBrand>,
+): FoldReplaySource {
   return source as FoldReplaySource;
 }
 
@@ -163,17 +178,20 @@ export function isFoldReplaySource(raw: unknown): raw is FoldReplaySource {
 }
 
 /** 运行时门闩：拒绝非 FOLD 源（防误把 SINK 准备结果直灌）。 */
-export function assertFoldSource(source: { consumer: ConsumerKind }): asserts source is FoldReplaySource {
+export function assertFoldSource(source: {
+  consumer: ConsumerKind;
+}): asserts source is FoldReplaySource {
   if (source.consumer !== "fold") {
     throw new Error(
-      `A/B mutual exclusion: cannot fold-inject consumer=${source.consumer} ` +
-        "(FOLD and SINK must not dual-inject the same session)",
+      `A/B mutual exclusion: cannot fold-inject consumer=${source.consumer} (FOLD and SINK must not dual-inject the same session)`,
     );
   }
 }
 
 /** 从已打开文档或事件数组得到 fold 可播事件（兼容旧 `SSEEvent[]` 调用点）。 */
-export function foldEventsFrom(input: FoldReplaySource | SSEEvent[] | unknown): SSEEvent[] {
+export function foldEventsFrom(
+  input: FoldReplaySource | SSEEvent[] | unknown,
+): SSEEvent[] {
   if (Array.isArray(input)) {
     return prepareFoldSource({ events: input }).events;
   }

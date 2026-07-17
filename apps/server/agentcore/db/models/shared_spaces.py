@@ -1,4 +1,5 @@
-"""Shared space models (多人共享空间, docs/02-架构/双模式工作区.md §十一): space / members / change events.
+"""Shared space models (多人共享空间, docs/02-架构/双模式工作区.md §十一):
+space / members / change events.
 
 Independent of Folder (项目) and IM chats — a file-only collaboration container
 addressed as ``shared:<space_id>``. Member roles are their own enum (owner /

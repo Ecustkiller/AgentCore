@@ -646,8 +646,18 @@ async def test_admin_usage_summary_splits_month_by_role(client, make_admin, sess
     # (600, 2 turns); each role merges both accounts' spend.
     assert [row["role"] for row in rows] == ["captain", "vision"]
     by_role = {row["role"]: row for row in rows}
-    assert by_role["captain"] == {"role": "captain", "cost_total": 8000, "turns": 2}
-    assert by_role["vision"] == {"role": "vision", "cost_total": 600, "turns": 2}
+    assert by_role["captain"] == {
+        "role": "captain",
+        "cost_total": 8000,
+        "cost_estimated_total": 0,
+        "turns": 2,
+    }
+    assert by_role["vision"] == {
+        "role": "vision",
+        "cost_total": 600,
+        "cost_estimated_total": 0,
+        "turns": 2,
+    }
 
 
 async def test_admin_usage_summary_empty_is_zero(client, make_admin):

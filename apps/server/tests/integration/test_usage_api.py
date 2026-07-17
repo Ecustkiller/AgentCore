@@ -170,7 +170,9 @@ async def test_usage_summary_windows_and_quota(client, make_invite, session_fact
     assert body["today"]["requests"] == 1
     assert body["today"]["usage"]["input"] == 100
     # The single captain row also lands in this month's per-role payroll.
-    assert body["month_by_role"] == [{"role": "captain", "cost_total": 2500, "turns": 1}]
+    assert body["month_by_role"] == [
+        {"role": "captain", "cost_total": 2500, "cost_estimated_total": 0, "turns": 1}
+    ]
     # The 7-day trend is a fixed-length series; today's spend is its last point.
     trend = body["recent_daily_cost"]
     assert len(trend) == 7
@@ -241,8 +243,8 @@ async def test_usage_summary_groups_month_by_role(client, make_invite, session_f
 
     # Ranked by spend desc: member (1500) > captain (600); the 0-spend title is out.
     assert rows == [
-        {"role": "member", "cost_total": 1500, "turns": 1},
-        {"role": "captain", "cost_total": 600, "turns": 2},
+        {"role": "member", "cost_total": 1500, "cost_estimated_total": 0, "turns": 1},
+        {"role": "captain", "cost_total": 600, "cost_estimated_total": 0, "turns": 2},
     ]
 
 

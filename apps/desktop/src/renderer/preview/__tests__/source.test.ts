@@ -53,7 +53,12 @@ describe("preview source adapter (consumer A / FOLD)", () => {
         },
         {
           events: [
-            { kind: "content_delta", payload: { delta: "a" }, ts: null, t_ms: 5 },
+            {
+              kind: "content_delta",
+              payload: { delta: "a" },
+              ts: null,
+              t_ms: 5,
+            },
           ],
         },
       ],
@@ -76,11 +81,15 @@ describe("preview source adapter (consumer A / FOLD)", () => {
       projected: { status: "paused" },
     });
     expect(source.consumer).toBe("fold");
-    expect(source.events[0]?.payload).toMatchObject({ checkpoint_id: "cp-fixed" });
+    expect(source.events[0]?.payload).toMatchObject({
+      checkpoint_id: "cp-fixed",
+    });
   });
 
   it("assertFoldSource rejects sink consumer at the API boundary", () => {
-    expect(() => assertFoldSource({ consumer: "sink" })).toThrow(/mutual exclusion/);
+    expect(() => assertFoldSource({ consumer: "sink" })).toThrow(
+      /mutual exclusion/,
+    );
   });
 
   it("foldEventsFrom accepts SSEEvent[] and FoldReplaySource", () => {

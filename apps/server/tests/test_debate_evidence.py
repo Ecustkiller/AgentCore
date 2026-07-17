@@ -24,13 +24,13 @@ from agentcore.runtime.debate import (
     SideTurn,
     normalize_handoff_kind,
 )
+from agentcore.runtime.debate.constants import CX_LENGTH_HINT
 from agentcore.runtime.debate.moderator import (
     _ASSESS_SYSTEM,
     _BRIEF_SYSTEM,
     _CROSS_EXAM_SYSTEM,
 )
 from agentcore.runtime.debate.moderator_brief import _as_handoffs
-from agentcore.runtime.debate.constants import CX_LENGTH_HINT
 from agentcore.runtime.debate.prompt import (
     ARGUMENT_SKELETON_RULE,
     EVIDENCE_NOTES_SPEC,

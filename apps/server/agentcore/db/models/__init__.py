@@ -40,8 +40,8 @@ from .runs import (
     TurnMetricsRow,
     TurnStreamStateRow,
 )
-from .simulation import SimAgent, SimEvent, SimTick, SimulationRun
 from .shared_spaces import SharedSpace, SharedSpaceEvent, SharedSpaceMember
+from .simulation import SimAgent, SimEvent, SimTick, SimulationRun
 from .users import User, UserBlock, UserDirectorySettings
 
 __all__ = [
