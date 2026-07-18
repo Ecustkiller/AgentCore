@@ -3,10 +3,10 @@
 # 非 root 运行。GIT_SHA / BUILT_AT 构建期注入并经 GET /version 暴露。
 #
 # 构建示例：
-#   生产机（默认清华镜像）：
+#   生产机（默认清华 PyPI + 阿里云 apt）：
 #     docker buildx build -t agentcore-api --build-arg GIT_SHA=... --build-arg BUILT_AT=... apps/server
 #   GHA / 境外 / 本地 Windows：
-#     docker buildx build ... --build-arg PYPI_INDEX=https://pypi.org/simple/ apps/server
+#     docker buildx build ... --build-arg PYPI_INDEX=https://pypi.org/simple/ --build-arg APT_MIRROR= apps/server
 
 # ---- builder：按 uv.lock 解析依赖到 /app/.venv ----
 FROM python:3.12-slim AS builder
@@ -67,10 +67,23 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # 与 venv 隔离，不污染 uv.lock 管的应用依赖）、node、bash。
 # ① 中文字体：文档/图表产物（pptx、matplotlib 图）没有 CJK 字体会全是豆腐块。
 # ② nodejs：code_execute 声明支持 javascript，补齐承诺（随基础镜像 Debian 版本，当前 trixie ≈ node 20）。
+# APT_MIRROR：生产机默认阿里云（fonts-noto-cjk ~57MB，官方 deb.debian.org 跨境可到几十 KB/s）；
+# GHA/境外传空字符串保留官方源。与 PYPI_INDEX 对称。
+ARG APT_MIRROR=mirrors.aliyun.com
 ARG PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    if [ -n "$APT_MIRROR" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+          /etc/apt/sources.list.d/debian.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+          /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs; \
+    rm -rf /var/lib/apt/lists/*
 
 # ③ 文档/数据常用库装进【系统 site-packages】（沙箱 python3 可见；按大众文档场景选型：
 #    pptx/docx/xlsx 生成 + 数据分析 + 图表 + PDF）。装最新版即可——沙箱库不是应用依赖，
