@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate, DelegationAuthorizationDecision
 from agentcore.runtime.events import EventSink
@@ -21,18 +19,13 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 
-@pytest.fixture(autouse=True)
-def _isolate_coordination_registry():
-    """The coordination session registry is module-global and tests share
-    execution_id="e" — a leaked active session makes later delegates silently
-    MERGE into it (队员追加) instead of starting fresh. Clear on both sides.
-    """
-    from agentcore.runtime.coordination.session import clear_active_coordination
-
-    clear_active_coordination()
-    yield
-    clear_active_coordination()
-
+# NOTE: the coordination-registry isolation fixture lives in the ROOT tests/conftest.py
+# (``_isolate_coordination_registry``). It used to live here, but a directory-level
+# autouse fixture silently DROPS when the same directory's files are passed on the CLI
+# non-contiguously (delegate file → tests-root file → delegate file): pytest collects
+# the directory as two Package nodes and the second one loses this conftest's autouse
+# binding — leaking coordination sessions across tests (delegates merge into a stale
+# team, 「队员已追加」). Root-conftest autouse survives any argument order.
 
 CKPT_DAG = [
     {"id": "s1", "role": "研究员", "task": "调研", "checkpoint_after": True},

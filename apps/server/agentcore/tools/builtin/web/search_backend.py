@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -50,6 +51,43 @@ DEFAULT_MAX_RESULTS = 5
 # went search-blind, retrying via Tavily). Lets the tool layer surface a live waiting state; the
 # backend stays off the event vocabulary — it only names phases (引擎纯化). ``None`` = no live sink.
 PhaseCallback = Callable[[str], None]
+
+
+def track_phase_durations(
+    on_phase: PhaseCallback | None,
+) -> tuple[PhaseCallback, Callable[[], None]]:
+    """A6: wrap the existing ``on_phase`` channel to emit structured phase durations.
+
+    Returns ``(wrapped_callback, finish)``. Each phase transition (and ``finish``) logs
+    ``search.phase_duration`` with ``phase`` + ``duration_ms``. Still forwards to the
+    UI callback when present — no parallel phase channel.
+    """
+    state: dict[str, Any] = {"phase": None, "t0": None}
+
+    def _close_current() -> None:
+        prev = state["phase"]
+        t0 = state["t0"]
+        if prev is None or t0 is None:
+            return
+        logger.info(
+            "search.phase_duration",
+            phase=prev,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+        )
+        state["phase"] = None
+        state["t0"] = None
+
+    def _wrapped(phase: str) -> None:
+        _close_current()
+        state["phase"] = phase
+        state["t0"] = time.monotonic()
+        if on_phase is not None:
+            on_phase(phase)
+
+    def _finish() -> None:
+        _close_current()
+
+    return _wrapped, _finish
 
 # Cap concurrent in-flight requests to the single self-hosted SearXNG instance. A
 # parallel team (A/B/C unlocked multi-worker research) can otherwise fire dozens of
@@ -91,12 +129,42 @@ class SearchResult:
     snippet: str
 
 
+# Map ISO-ish language codes → Tavily ``country`` boost (general topic only).
+# Omit when unknown: do not invent a geo bias for every language.
+_TAVILY_COUNTRY_BY_LANG: dict[str, str] = {
+    "zh": "china",
+    "zh-cn": "china",
+    "zh-tw": "china",
+    "ja": "japan",
+    "ko": "south korea",
+    "en": "united states",
+}
+
+
+def infer_search_language(query: str) -> str:
+    """Infer search UI/result language from the query script (task-language proxy).
+
+    Avoids SearXNG ``default_lang=auto`` / IP-locale hijacking Chinese research into
+    Japanese SERPs (trace 2f52c042: ja.wikipedia / google.co.jp on 中文盘点).
+    """
+    text = query or ""
+    if re.search(r"[\u3040-\u309f\u30a0-\u30ff]", text):
+        return "ja"
+    if re.search(r"[\uac00-\ud7af]", text):
+        return "ko"
+    if re.search(r"[\u4e00-\u9fff]", text):
+        return "zh"
+    return "en"
+
+
 class SearchBackend(Protocol):
     async def search(
         self,
         query: str,
         max_results: int = DEFAULT_MAX_RESULTS,
         on_phase: PhaseCallback | None = None,
+        *,
+        language: str | None = None,
     ) -> list[SearchResult]: ...
 
 
@@ -244,6 +312,8 @@ class SearXNGBackend:
         query: str,
         max_results: int = DEFAULT_MAX_RESULTS,
         on_phase: PhaseCallback | None = None,
+        *,
+        language: str | None = None,
     ) -> list[SearchResult]:
         host = _searxng_host(self.base_url)
         remaining = circuit_remaining(host)
@@ -273,7 +343,10 @@ class SearXNGBackend:
             on_phase("queued")
         await bucket.acquire()
 
-        params = {"q": query, "format": "json", "safesearch": "0"}
+        lang = (language or infer_search_language(query)).strip() or "en"
+        # Explicit language pins result locale — never rely on SearXNG default_lang=auto /
+        # server IP (that path produced ja.* pollution on Chinese research queries).
+        params = {"q": query, "format": "json", "safesearch": "0", "language": lang}
         client = self._get_client()
         async with sem:  # throttle the parallel-team burst (see _SEARCH_CONCURRENCY)
             # 工具执行阶段进度: a slot is held and the request is about to fly — the main wait.
@@ -361,6 +434,8 @@ class TavilyBackend:
         query: str,
         max_results: int = DEFAULT_MAX_RESULTS,
         on_phase: PhaseCallback | None = None,
+        *,
+        language: str | None = None,
     ) -> list[SearchResult]:
         # Guard: only reached if mis-wired without a key (get_search_backend builds
         # this backend only when a key is set). Honest, model-facing reason.
@@ -371,11 +446,16 @@ class TavilyBackend:
         # fallback leg right after the wrapper signalled「改用备用引擎」).
         if on_phase:
             on_phase("querying")
-        payload = {
+        lang = (language or infer_search_language(query)).strip().lower() or "en"
+        payload: dict[str, Any] = {
             "query": query,
             "max_results": max(1, min(max_results, _TAVILY_MAX_RESULTS_CAP)),
             "search_depth": "basic",
         }
+        # Tavily has no language param; ``country`` is the supported geo/locale boost.
+        country = _TAVILY_COUNTRY_BY_LANG.get(lang) or _TAVILY_COUNTRY_BY_LANG.get(lang[:2])
+        if country:
+            payload["country"] = country
         headers = {"Authorization": f"Bearer {self.api_key}"}
         client = self._get_client()
         # No retry / no breaker here: Tavily is the fallback leg, called per-query
@@ -413,10 +493,12 @@ class FallbackSearchBackend:
         query: str,
         max_results: int = DEFAULT_MAX_RESULTS,
         on_phase: PhaseCallback | None = None,
+        *,
+        language: str | None = None,
     ) -> list[SearchResult]:
         try:
             return await self.primary.search(
-                query, max_results=max_results, on_phase=on_phase
+                query, max_results=max_results, on_phase=on_phase, language=language
             )
         except Exception as primary_exc:  # noqa: BLE001 - any primary failure → try fallback
             logger.warning(
@@ -430,7 +512,7 @@ class FallbackSearchBackend:
                 on_phase("fallback")
             try:
                 results = await self.fallback.search(
-                    query, max_results=max_results, on_phase=on_phase
+                    query, max_results=max_results, on_phase=on_phase, language=language
                 )
             except Exception as fb_exc:  # noqa: BLE001 - both down → surface primary's reason
                 logger.warning(

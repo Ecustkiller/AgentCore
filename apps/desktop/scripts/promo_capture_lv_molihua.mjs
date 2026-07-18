@@ -89,78 +89,78 @@ const VIEWPORT = { width: 1920, height: 1080 };
 
 process.env.VITE_API_URL = API;
 
-const QUOTE = "不是四叶草不能用，而是用得太像";
+/** B 场金句（交锋1 · 公共元素）：与磁带立论原文一致 */
+const QUOTE = "任何经营者都不能垄断自然界公共资源的基本表达";
 
 const OPENING_PROMPT =
-  "搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论";
+  "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论";
 
-/** UI text markers → promo shot ids. match(text, probe). Prefer 辩论室 view. */
+/** UI text markers → promo shot ids. match(text, probe). Prefer 辩论室 view.
+ *  File ids kept stable for Remotion/manifest continuity; labels follow B-field storyboard. */
 const SHOT_MARKERS = [
   {
     id: "03-debate-opening",
-    label: "辩论开场：双方与辩题",
+    label: "辩论开场：双方与辩题（显著性）",
     match: (t, p) =>
       (!p.roundNo || Number(p.roundNo) === 1) &&
       /正方|原告/.test(t) &&
       /反方|被告/.test(t) &&
-      /立论|辩题|四叶花卉|主持人/.test(t),
+      /立论|辩题|四叶花卉|主持人|显著性/.test(t),
     preferDebateRoom: true,
-    tapeHint: "debate_round_started r1 @ t_ms≈37800 (post-authorize)",
+    tapeHint: "debate_round_started r1 @ t_ms≈164533 (post-authorize)",
   },
   {
     id: "04-r2-diamond-square",
-    label: "第2轮 LV「公共纹样 vs 具体设计」",
+    label: "交锋1 · 公共元素 vs 获得显著性",
     match: (t, p) =>
-      Number(p.roundNo) >= 2 &&
-      (/偷换概念|具体设计|公共纹样|四叶草不能用|中心菱形/.test(t)),
+      Number(p.roundNo) >= 1 &&
+      (/垄断自然界公共资源|固有显著性|获得显著性|唯一关联|第二含义/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r2_lv / debate_round @ t_ms≈495918",
+    tapeHint: "r1 focus 商标显著性 @ t_ms≈164533–563065",
   },
   {
     id: "05-r3-logo-swap",
-    label: "第3轮 驳回后换更近似 Logo",
+    label: "交锋2 · 跨类标准与真实使用",
     match: (t, p) =>
-      Number(p.roundNo) >= 3 &&
-      (/惩罚性赔偿|驳回后|更近似|故意|恶意/.test(t)) &&
-      (/Logo|换标|更换/.test(t) || /惩罚性/.test(t)),
+      Number(p.roundNo) >= 2 &&
+      (/跨类|第43类|真实商业使用|防御注册|茶饮消费者|认知链断裂/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r3 focus 惩罚性赔偿 @ t_ms≈495918–714497",
+    tapeHint: "r2 focus 跨类保护 @ t_ms≈563065–861441",
   },
   {
     id: "05b-r4-logo-defense",
-    label: "第4轮 贡献率 / 举证责任",
+    label: "交锋3 · 无茶饮消费者混淆调查",
     match: (t, p) =>
-      Number(p.roundNo) >= 4 &&
-      (/贡献率|举证责任|量化证据|未提交任何量化/.test(t)),
+      Number(p.roundNo) >= 3 &&
+      (/消费者调查|茶饮消费者.*联想|反稀释|相当程度的联系|实证门槛/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r4 @ t_ms≈714497–878121",
+    tapeHint: "r3 focus 跨类边界 @ t_ms≈861441–1130562",
   },
   {
     id: "06-r5-burden",
-    label: "第4轮终局 · 贡献率举证决胜",
+    label: "交锋3 决胜 · R4 再钉实证门槛",
     match: (t, p) =>
       Number(p.roundNo) >= 4 &&
-      (/贡献率|举证责任|量化|合理信赖/.test(t)),
+      (/确实无法提供茶饮消费者|实证调查|反稀释|实际使用前提|罚分/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "r4 debate_round @ t_ms≈878121（本盘仅 4 轮）",
+    tapeHint: "r4 debate_round @ t_ms≈1130562–1309596",
   },
   {
     id: "07-evidence-gap-admit",
-    label: "交叉质询：承认证据/抗辩缺口",
+    label: "质询高光 · LV 承认无消费者调查",
     match: (t) =>
-      /证据缺口/.test(t) ||
-      (/承认/.test(t) && /量化|贡献率|合理信赖/.test(t)),
+      /我承认没有消费者调查|没有消费者调查数据支撑|确实无法提供茶饮消费者/.test(t),
     preferDebateRoom: true,
-    tapeHint: "r4 cross-exam admits @ t_ms≈878121",
+    tapeHint: "r3/r4 cross-exam admit @ t_ms≈1130562+",
   },
   {
     id: "08-final-verdict",
-    label: "最终裁决（倾向支持一审 · 70%）",
+    label: "最终裁决（微弱倾向茉莉奶白 · 55%）",
     match: (t) =>
-      (/倾向支持一审|支持一审判决|倾向.*一审|LV 方胜出|倾向支持 LV/.test(t)) &&
-      (/70\s*%|置信度\s*70|70%|置信度|置信\s*高|置信/.test(t)),
+      (/微弱倾向茉莉奶白|倾向茉莉奶白/.test(t)) &&
+      (/55\s*%|中等偏低|置信度|符号独占|需要你定夺|定夺/.test(t)),
     preferDebateRoom: true,
-    tapeHint: "debate_result @ t_ms≈907528",
+    tapeHint: "debate_result @ t_ms≈1330177",
   },
 ];
 const CLIP_MARKERS = [
@@ -256,15 +256,15 @@ async function probe(page) {
       nodeText: nodeText.slice(0, 600),
       openDebate: /打开辩论室/.test(full),
       verdict:
-        (/倾向支持一审|支持一审判决|LV 方胜出|倾向支持 LV/.test(text)) &&
-        /置信度|70\s*%|70%/.test(text),
+        (/微弱倾向茉莉奶白|倾向茉莉奶白/.test(text)) &&
+        /55\s*%|中等偏低|置信度|符号独占|定夺/.test(text),
       hasDevBadge: /\bDEV\b/.test(full.slice(0, 500)),
       hasQuote:
-        text.includes("不是四叶草不能用") ||
-        (text.includes("四叶草") && text.includes("用得太像")),
+        text.includes("垄断自然界公共资源") ||
+        text.includes("任何经营者都不能垄断"),
       quoteContext:
-        text.match(/.{0,24}不是四叶草不能用.{0,40}/)?.[0] ??
-        text.match(/.{0,20}四叶草.{0,30}用得太像.{0,20}/)?.[0] ??
+        text.match(/.{0,24}垄断自然界公共资源.{0,40}/)?.[0] ??
+        text.match(/.{0,20}任何经营者都不能垄断.{0,40}/)?.[0] ??
         null,
       // UI often keeps「第1轮」chip visible; take the highest round mentioned.
       roundNo: (() => {
@@ -309,7 +309,8 @@ async function main() {
   } catch {
     /* none */
   }
-  if (process.env.PROMO_WIPE !== "0") {
+  // Default: do NOT wipe the asset tree. Opt-in: PROMO_WIPE=1
+  if (process.env.PROMO_WIPE === "1") {
     await rm(outRoot, { recursive: true, force: true });
   }
   await mkdir(stillsDir, { recursive: true });
@@ -657,35 +658,34 @@ async function main() {
           clean: true,
           matched_text:
             t.match(
-              /.{0,40}(?:偷换概念|四叶草|换标|贡献率|举证|证据缺口|倾向支持一审|辩题|置信度|惩罚性).{0,40}/,
+              /.{0,40}(?:垄断自然界|获得显著性|唯一关联|跨类|第43类|消费者调查|微弱倾向|辩题|置信度|防御注册).{0,40}/,
             )?.[0] ?? t.slice(0, 100),
           wall_ms: Date.now() - wall0,
         });
         captured.add(m.id);
-        // R2 quote close-up when the exact line is on screen
-        if (
-          m.id === "04-r2-diamond-square" &&
-          !captured.has("04b-r2-quote-closeup") &&
-          (p.hasQuote ||
-            (/四叶草/.test(t) && /用得太像|不能用/.test(t)) ||
-            /偷换概念|具体设计/.test(t))
-        ) {
-          const qp = resolve(stillsDir, "04b-r2-quote-closeup.png");
-          await shot(page, qp);
-          markAsset({
-            id: "04b-r2-quote-closeup",
-            file: "stills/04b-r2-quote-closeup.png",
-            path: qp,
-            label: "R2 金句定点特写",
-            usage: "交锋1 金句；须可见「不是四叶草不能用，而是用得太像」",
-            clean: true,
-            new: true,
-            quote_required: QUOTE,
-            quote_visible: true,
-            matched_text: p.quoteContext || QUOTE,
-          });
-          captured.add("04b-r2-quote-closeup");
-        }
+      }
+
+      // 交锋1 金句特写（独立轮询——勿绑在 04 首次命中上，否则易早拍错过金句）
+      if (
+        !captured.has("04b-r2-quote-closeup") &&
+        (p.hasQuote || /垄断自然界公共资源的基本表达/.test(t))
+      ) {
+        await ensureDebateRoom(page);
+        const qp = resolve(stillsDir, "04b-r2-quote-closeup.png");
+        await shot(page, qp);
+        markAsset({
+          id: "04b-r2-quote-closeup",
+          file: "stills/04b-r2-quote-closeup.png",
+          path: qp,
+          label: "交锋1 金句定点特写",
+          usage: `交锋1 金句；须可见「${QUOTE}」`,
+          clean: true,
+          new: true,
+          quote_required: QUOTE,
+          quote_visible: true,
+          matched_text: p.quoteContext || QUOTE,
+        });
+        captured.add("04b-r2-quote-closeup");
       }
 
       // Dense still sequences (pause polling so frames stay coherent)
@@ -762,16 +762,16 @@ async function main() {
     // Final wrap still if verdict missed mid-stream but text present
     if (!captured.has("08-final-verdict")) {
       const p = await probe(page);
-      if (/倾向支持一审|支持一审判决|LV 方胜出|70\s*%/.test(p.text)) {
+      if (/微弱倾向茉莉奶白|倾向茉莉奶白/.test(p.text) && /55\s*%|中等偏低|置信|定夺|符号独占/.test(p.text)) {
         const path = resolve(stillsDir, "08-final-verdict.png");
         await shot(page, path);
         markAsset({
           id: "08-final-verdict",
           file: "stills/08-final-verdict.png",
           path,
-          label: "最终裁决（倾向支持一审 · 70%）",
+          label: "最终裁决（微弱倾向茉莉奶白 · 55%）",
           shot: "第六幕 · 裁决出炉",
-          tape_hint: "debate_result @ t_ms≈907528",
+          tape_hint: "debate_result @ t_ms≈1330177",
           usage: "冷开场画面4 / 第六幕特写",
           matched_text: p.snippet.slice(0, 160),
         });

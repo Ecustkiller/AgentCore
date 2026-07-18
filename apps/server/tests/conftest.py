@@ -39,6 +39,44 @@ def _mark_test_traffic():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_coordination_registry():
+    """Clear the module-global coordination session registry around every test.
+
+    Delegate tests share ``execution_id="e"`` — a leaked active session makes later
+    delegates silently MERGE into the stale team (「队员已追加」) instead of starting
+    fresh. Lives in the ROOT conftest (not tests/delegate/conftest.py) deliberately:
+    a directory-level autouse fixture silently drops when that directory's files are
+    passed on the CLI non-contiguously (delegate file → tests-root file → delegate
+    file — pytest collects the directory as two Package nodes and the second loses
+    the directory conftest's autouse binding). Root autouse survives any order.
+    """
+    from agentcore.runtime.coordination.session import clear_active_coordination
+
+    clear_active_coordination()
+    yield
+    clear_active_coordination()
+
+
+@pytest.fixture(autouse=True)
+def _pin_cloud_execution_posture_to_defaults(monkeypatch):
+    """Pin the cloud code-execution flags to their production defaults for every test.
+
+    The machine-local ``apps/server/.env`` may enable the dev escape hatch
+    (``CODE_EXECUTE_CLOUD_ENABLED`` + ack — 安全权限与治理 §5.4) so the dev server can run
+    code on cloud workspaces; the suite must stay deterministic and keep asserting the
+    default posture (cloud withheld). Tests that exercise the enabled chain opt in
+    explicitly via ``monkeypatch.setattr(settings, ...)`` — same .env-isolation idiom as
+    ``_disarm_demo_tape_recorder`` below.
+    """
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "code_execute_cloud_enabled", False)
+    monkeypatch.setattr(settings, "code_execute_cloud_unsafe_ack", False)
+    monkeypatch.setattr(settings, "gvisor_enabled", False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _disarm_demo_tape_recorder():
     """Clear the process-wide EventSink emit tap after every test.
 

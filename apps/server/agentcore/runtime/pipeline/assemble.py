@@ -213,6 +213,12 @@ async def assemble_ceo_turn(
         .render()
     )
 
+    # COST-004 tools 面: 补工具 schema JSON chars / 约算 token（原先只观测系统提示，编排工具
+    # ~10k 字符盲区）。纯 structlog，不改 SSE / API 契约。
+    from agentcore.runtime.resolve.ceo_surface import observe_tools_offered
+
+    observe_tools_offered(chat_tools, scope="ceo_turn")
+
     return AssembledTurn(
         approval_gate=approval_gate,
         autonomy_policy=autonomy_policy,

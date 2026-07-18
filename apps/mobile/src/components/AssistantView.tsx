@@ -39,6 +39,7 @@ import type {
   ContextBlockWire,
   DebateNarrativeRound,
   DebateResultPayload,
+  EvidenceLedgerEntry,
   ProcessStep,
   ToolPhase,
 } from "@agentcore/contract-types";
@@ -82,6 +83,8 @@ export interface TeamProjection {
   /** Worker `tool_use_progress` (run_id): runId → live EXECUTION phase (transport-only sibling
    *  {@link import("@/protocol/fold").extractWorkerToolPhases}). */
   workerToolPhases?: Map<string, { phase: string; toolName: string }>;
+  /** 场级证据台账（`extractEvidenceLedger`）：辩论徽章 `#eN` 解析。 */
+  evidenceLedger?: EvidenceLedgerEntry[];
 }
 
 export function AssistantContent({
@@ -89,6 +92,7 @@ export function AssistantContent({
   content,
   reasoning,
   citations,
+  evidenceLedger,
   captainContext,
   team,
   debate,
@@ -103,6 +107,8 @@ export function AssistantContent({
   content: string;
   reasoning?: string;
   citations?: Citation[];
+  /** 回合调研台账（`#rN` 角标回退）；与 team.evidenceLedger 同源时可复用。 */
+  evidenceLedger?: EvidenceLedgerEntry[];
   /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): what the CEO captain actually read this
    *  turn (系统提示 / 对话历史 / 原始请求), rendered turn-level on its bubble — present even on a
    *  pure-chat turn (no team). */
@@ -129,6 +135,7 @@ export function AssistantContent({
   onFill?: (text: string) => void;
 }) {
   const hasTeam = !!team && team.runs.length > 0;
+  const turnLedger = evidenceLedger ?? team?.evidenceLedger;
   return (
     <>
       {debate ? (
@@ -142,6 +149,7 @@ export function AssistantContent({
         <ProcessTimeline
           steps={process}
           citations={citations}
+          evidenceLedger={turnLedger}
           team={hasTeam ? team : undefined}
           asks={asks}
           escalationSlots={escalationSlots}
@@ -154,7 +162,11 @@ export function AssistantContent({
           {hasTeam ? <TeamView {...team} /> : null}
           {reasoning ? <Reasoning text={reasoning} /> : null}
           {content ? (
-            <Markdown content={content} citations={citations} />
+            <Markdown
+              content={content}
+              citations={citations}
+              evidenceLedger={turnLedger}
+            />
           ) : null}
         </>
       )}
@@ -354,6 +366,7 @@ function toolGroupSummary(tools: ToolStepData[]): string {
 function ProcessTimeline({
   steps,
   citations,
+  evidenceLedger,
   team,
   asks,
   escalationSlots,
@@ -363,6 +376,7 @@ function ProcessTimeline({
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
+  evidenceLedger?: EvidenceLedgerEntry[];
   team?: TeamProjection;
   asks?: NonBlockingAsk[];
   escalationSlots?: Map<string, EscalationSlot>;
@@ -380,7 +394,14 @@ function ProcessTimeline({
       {nodes.map((node, i) => {
         if (node.kind === "content")
           // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
-          return <Markdown key={i} content={node.text} citations={citations} />;
+          return (
+            <Markdown
+              key={i}
+              content={node.text}
+              citations={citations}
+              evidenceLedger={evidenceLedger}
+            />
+          );
         if (node.kind === "reasoning")
           // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return <Reasoning key={i} text={node.text} />;
@@ -466,7 +487,7 @@ function ProcessTimeline({
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
             <span key={`rework-${i}`} className="rework-chip">
-              已按交付规范重写
+              引用/格式核验后已重写
             </span>
           );
         if (node.kind !== "tool") return null;
@@ -596,26 +617,51 @@ function ToolStep({
   );
 }
 
+const CITATION_TIER_LABEL: Record<string, string> = {
+  official: "官方",
+  media: "媒体",
+  unknown: "待评",
+  weak: "弱源",
+};
+
 /** The web sources consulted for this message (citations event / persisted citations). */
 function Citations({ items }: { items: Citation[] }) {
   return (
     <div className="cites">
       <div className="cites-title">来源</div>
-      {items.map((c, i) => (
-        <a
-          key={`${c.url}-${i}`}
-          className="cite"
-          href={c.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span className="cite-n">{i + 1}</span>
-          <span className="cite-text">
-            <span className="cite-title">{c.title || c.url}</span>
-            {c.site && <span className="cite-site">{c.site}</span>}
-          </span>
-        </a>
-      ))}
+      {items.map((c, i) => {
+        const tierLabel = c.tier ? CITATION_TIER_LABEL[c.tier] : null;
+        return (
+          <a
+            key={`${c.url}-${i}`}
+            className="cite"
+            href={c.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="cite-n">{i + 1}</span>
+            <span className="cite-text">
+              <span className="cite-title-row">
+                <span className="cite-title">{c.title || c.url}</span>
+                {c.id ? (
+                  <span className="cite-id" title={`台账 ${c.id}`}>
+                    {c.id}
+                  </span>
+                ) : null}
+                {tierLabel && (
+                  <span
+                    className={`cite-tier cite-tier-${c.tier}`}
+                    title={`来源可信度：${tierLabel}`}
+                  >
+                    {tierLabel}
+                  </span>
+                )}
+              </span>
+              {c.site && <span className="cite-site">{c.site}</span>}
+            </span>
+          </a>
+        );
+      })}
     </div>
   );
 }

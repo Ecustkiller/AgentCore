@@ -841,6 +841,8 @@
         "site": "court.gov.cn"
       }
     ],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "w_draft",

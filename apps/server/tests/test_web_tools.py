@@ -50,18 +50,26 @@ from agentcore.tools.builtin.web.read_url import (
     _extract_text,
     _make_snippet,
 )
-from agentcore.tools.builtin.web.search import WebSearchTool
+from agentcore.tools.builtin.web.search import (
+    WebSearchTool,
+    validate_search_query,
+    _QUERY_CJK_CHAR_LIMIT,
+    _QUERY_LATIN_WORD_LIMIT,
+)
 from agentcore.tools.builtin.web.search_backend import (
     FallbackSearchBackend,
     SearchResult,
     SearXNGBackend,
     TavilyBackend,
     _parse_results,
+    infer_search_language,
+    track_phase_durations,
 )
 from agentcore.tools.builtin.web.search_cache import (
     ConversationSearchCache,
     SearchCacheEntry,
     SearchCacheRegistry,
+    _query_key,
 )
 from agentcore.tools.builtin.web.url_cache import (
     ConversationUrlCache,
@@ -73,10 +81,12 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 
-def _ctx(conversation_id: str = "", on_phase=None) -> ToolContext:
+def _ctx(
+    conversation_id: str = "", on_phase=None, *, run_id: str = "s"
+) -> ToolContext:
     return ToolContext(
         execution_id="e",
-        run_id="s",
+        run_id=run_id,
         agent_id="a",
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
@@ -354,6 +364,7 @@ async def test_read_url_emits_citation_snippet_from_description(monkeypatch):
     assert cite["url"] == "https://weather.example.com/sz"
     assert cite["title"] == "深圳天气"
     assert cite["site"] == "weather.example.com"
+    assert cite["deep_read"] is True
     assert cite["snippet"] == "今天多云转晴，气温 20-28 度。"
     # 工具结果富渲染: display carries the same source fields + body so the client
     # never parses the model-facing JSON output.
@@ -748,7 +759,7 @@ async def test_probe_search_results_reports_ok(monkeypatch):
     # The real-search canary (D5): a query that returns ≥1 result confirms the engine
     # pool actually works, not just that /healthz is 200.
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return [SearchResult("t", "https://a.com", "s")]
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -760,7 +771,7 @@ async def test_probe_search_results_flags_empty(monkeypatch):
     # → real search returns empty. The canary must surface this (ok=False), unlike the
     # reachability probe which would still report healthy.
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return []
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -770,7 +781,7 @@ async def test_probe_search_results_flags_empty(monkeypatch):
 async def test_probe_search_results_never_raises(monkeypatch):
     # Best-effort like the reachability probe: a failing search must never break startup.
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             raise httpx.ConnectError("down")
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -840,6 +851,34 @@ async def test_tavily_backend_parses_results_and_sends_bearer(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer tvly-test"
     assert captured["json"]["query"] == "深圳天气"
     assert captured["json"]["max_results"] == 2
+    # Chinese query → country boost (Tavily has no language param).
+    assert captured["json"]["country"] == "china"
+
+
+async def test_searxng_backend_sends_explicit_language(monkeypatch):
+    """Pin language on the wire so default_lang=auto / IP locale cannot hijack locale."""
+    from agentcore.tools.builtin.web.search_backend import infer_search_language
+
+    assert infer_search_language("OpenAI 股权 融资") == "zh"
+    assert infer_search_language("Anthropic funding round") == "en"
+    assert infer_search_language("東京の天気を調べる") == "ja"
+
+    host = "localhost"
+    _net._states.pop(host, None)
+    captured: dict = {}
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    class _Client:
+        async def get(self, url, params=None):
+            captured["params"] = dict(params or {})
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = SearXNGBackend("http://localhost:18888")
+    await backend.search("OpenAI 股权分析", max_results=3, language="zh")
+    assert captured["params"]["language"] == "zh"
+    assert captured["params"]["q"] == "OpenAI 股权分析"
 
 
 async def test_tavily_backend_requires_api_key():
@@ -886,7 +925,7 @@ class _StubBackend:
         self._exc = exc
         self.calls = 0
 
-    async def search(self, query, max_results=5, on_phase=None):
+    async def search(self, query, max_results=5, on_phase=None, *, language=None):
         self.calls += 1
         if on_phase:
             on_phase("querying")
@@ -1147,7 +1186,7 @@ async def test_web_search_caches_within_conversation(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             calls["n"] += 1
             return [SearchResult("标题", "https://a.com", "摘要")]
 
@@ -1169,7 +1208,7 @@ async def test_web_search_skips_cache_without_conversation(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             calls["n"] += 1
             return [SearchResult("t", "https://a.com", "s")]
 
@@ -1190,7 +1229,7 @@ async def test_web_search_empty_result_negatively_cached(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             calls["n"] += 1
             return []
 
@@ -1206,7 +1245,11 @@ async def test_web_search_empty_result_negatively_cached(monkeypatch):
     assert r2.metadata.get("result_count") == 0
 
     # once the negative marker ages past its TTL, the same query genuinely re-searches
-    reg.get_or_create("conv-empty")._empty["q"] = time.time() - 10_000
+    # Cache keys include inferred language (``en|q`` for ASCII queries).
+    from agentcore.tools.builtin.web.search_cache import _query_key
+
+    empty_key = _query_key("q", "en")
+    reg.get_or_create("conv-empty")._empty[empty_key] = time.time() - 10_000
     await tool.execute({"query": "q"}, ctx)
     assert calls["n"] == 2
 
@@ -1216,7 +1259,7 @@ async def test_web_search_empty_result_is_honest(monkeypatch):
     # explicit note + ``empty`` flag so the model doesn't read silence as "this doesn't
     # exist" — a CAPTCHA-suspended engine returns HTTP 200 + zero results all the same.
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return []
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
@@ -1236,7 +1279,7 @@ async def test_web_search_empty_short_query_does_not_flag_verbose(monkeypatch):
     """Short empty query: honest miss + general tip; must NOT claim the query is too long."""
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return []
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
@@ -1254,7 +1297,7 @@ async def test_web_search_empty_long_query_suggests_trim_to_core_words(monkeypat
     """Long empty query (>4 tokens): explicitly tip trim-to-2–4 core words at the miss site."""
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return []
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
@@ -1274,7 +1317,7 @@ async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             calls["n"] += 1
             # always return exactly max_results (capped) → "more may exist"
             return [SearchResult(f"t{i}", f"https://a.com/{i}", "s") for i in range(max_results)]
@@ -1290,6 +1333,271 @@ async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
     # now 8 are cached → a <=8 request hits without re-searching
     await tool.execute({"query": "q", "max_results": 5}, ctx)
     assert calls["n"] == 2
+
+
+# --- A3: query contract at the tool boundary ---
+
+
+def test_validate_search_query_rejects_latin_over_word_limit():
+    words = " ".join(f"w{i}" for i in range(_QUERY_LATIN_WORD_LIMIT + 1))
+    err = validate_search_query(words)
+    assert err is not None
+    assert "查询词过多" in err
+    assert "2–4 个核心词" in err
+    assert str(_QUERY_LATIN_WORD_LIMIT) in err
+
+
+def test_validate_search_query_allows_latin_at_limit():
+    words = " ".join(f"w{i}" for i in range(_QUERY_LATIN_WORD_LIMIT))
+    assert validate_search_query(words) is None
+
+
+def test_validate_search_query_quote_exemption():
+    # Long quoted phrase + few free words stays under the Latin budget.
+    q = f'"this is a long verbatim error message with many words" {" ".join(f"k{i}" for i in range(3))}'
+    assert validate_search_query(q) is None
+    # Unquoted overflow still rejects even when a quote is present.
+    overflow = (
+        f'"short quote" {" ".join(f"w{i}" for i in range(_QUERY_LATIN_WORD_LIMIT + 1))}'
+    )
+    assert validate_search_query(overflow) is not None
+
+
+def test_validate_search_query_rejects_cjk_over_char_limit():
+    # Pure CJK over the character ceiling (whitespace ignored in the count).
+    chars = "研" * (_QUERY_CJK_CHAR_LIMIT + 1)
+    err = validate_search_query(chars)
+    assert err is not None
+    assert "查询过长" in err
+    assert "2–4 个核心词" in err
+
+
+def test_validate_search_query_allows_cjk_at_limit():
+    assert validate_search_query("研" * _QUERY_CJK_CHAR_LIMIT) is None
+
+
+async def test_web_search_rejects_oversized_latin_query_without_backend(monkeypatch):
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            calls["n"] += 1
+            return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    long_q = " ".join(f"term{i}" for i in range(8))
+    result = await WebSearchTool().execute({"query": long_q}, _ctx())
+    assert result.success is False
+    assert "查询词过多" in (result.error or "")
+    assert "2–4 个核心词" in (result.error or "")
+    assert calls["n"] == 0  # no silent rewrite, no network
+
+
+# --- A4: cache key casefold + Latin word-order; debate exact keys ---
+
+
+def test_query_key_latin_word_order_normalized():
+    assert _query_key("Anthropic Funding Round") == _query_key("round funding anthropic")
+    assert _query_key("  Hello   World ") == _query_key("world hello")
+
+
+def test_query_key_exact_skips_word_order_sort():
+    # Debate carve-out: exact keys keep token order (still casefold + collapse).
+    assert _query_key("funding anthropic", exact=True) != _query_key(
+        "anthropic funding", exact=True
+    )
+    assert _query_key("Funding  Anthropic", exact=True) == _query_key(
+        "funding anthropic", exact=True
+    )
+
+
+def test_query_key_cjk_keeps_order():
+    # Mixed / CJK queries are not word-order sorted (order is semantic).
+    assert _query_key("OpenAI 股权 融资") == "openai 股权 融资"
+    assert _query_key("融资 股权 OpenAI") != _query_key("OpenAI 股权 融资")
+
+
+def test_search_cache_word_order_hit():
+    cache = ConversationSearchCache()
+    cache.put(_sentry("Anthropic funding round", [_sresult("https://a.com")]))
+    assert cache.get("round funding Anthropic", min_results=1) is not None
+
+
+def test_search_cache_debate_exact_misses_reordered():
+    cache = ConversationSearchCache()
+    cache.put(
+        _sentry("funding anthropic round", [_sresult("https://a.com")]), exact=True
+    )
+    assert cache.get("round funding anthropic", min_results=1, exact=True) is None
+    assert cache.get("funding anthropic round", min_results=1, exact=True) is not None
+
+
+async def test_web_search_debate_run_uses_exact_cache_key(monkeypatch):
+    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            calls["n"] += 1
+            return [SearchResult("t", "https://a.com", "s")]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    tool = WebSearchTool()
+    debate_ctx = _ctx(conversation_id="conv-debate", run_id="debate_abc_r1_pro")
+    await tool.execute({"query": "funding anthropic round"}, debate_ctx)
+    # Same words, different order → exact key miss → second live search.
+    await tool.execute({"query": "round funding anthropic"}, debate_ctx)
+    assert calls["n"] == 2
+    # Non-debate run shares via word-order normalisation.
+    normal_ctx = _ctx(conversation_id="conv-normal", run_id="worker_1")
+    await tool.execute({"query": "funding anthropic round"}, normal_ctx)
+    await tool.execute({"query": "round funding anthropic"}, normal_ctx)
+    assert calls["n"] == 3  # only one extra live search for the normal conversation
+
+
+# --- A5: locale pin end-to-end (Latin→en; mixed CN/EN→zh) ---
+
+
+def test_infer_search_language_latin_pins_en():
+    assert infer_search_language("Anthropic funding round 2024") == "en"
+    assert infer_search_language("OpenAI GPT API pricing") == "en"
+
+
+def test_infer_search_language_mixed_cjk_latin_pins_zh():
+    # 中英混排 must stay zh-pinned (not fall through to en / IP locale).
+    assert infer_search_language("OpenAI 股权 融资") == "zh"
+    assert infer_search_language("LV 商标 近似 驳回") == "zh"
+    assert infer_search_language("AI 产业 报告 2024") == "zh"
+
+
+async def test_web_search_passes_inferred_language_to_backend(monkeypatch):
+    captured: dict = {}
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            captured["language"] = language
+            captured["query"] = query
+            return [SearchResult("t", "https://en.example.com", "s")]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    await WebSearchTool().execute({"query": "Anthropic funding round"}, _ctx())
+    assert captured["language"] == "en"
+    await WebSearchTool().execute({"query": "OpenAI 股权分析"}, _ctx())
+    assert captured["language"] == "zh"
+
+
+async def test_searxng_latin_query_sends_language_en_not_auto(monkeypatch):
+    """Wire pin: pure Latin → language=en; never omit / never default_lang=auto."""
+    host = "localhost"
+    _net._states.pop(host, None)
+    captured: dict = {}
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    class _Client:
+        async def get(self, url, params=None):
+            captured["params"] = dict(params or {})
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = SearXNGBackend("http://localhost:18888")
+    lang = infer_search_language("Anthropic funding round")
+    assert lang == "en"
+    await backend.search("Anthropic funding round", max_results=3, language=lang)
+    assert captured["params"]["language"] == "en"
+    assert "default_lang" not in captured["params"]
+    assert captured["params"]["q"] == "Anthropic funding round"
+
+
+async def test_searxng_mixed_query_sends_language_zh(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+    captured: dict = {}
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    class _Client:
+        async def get(self, url, params=None):
+            captured["params"] = dict(params or {})
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = SearXNGBackend("http://localhost:18888")
+    q = "OpenAI 股权 融资"
+    lang = infer_search_language(q)
+    assert lang == "zh"
+    await backend.search(q, max_results=3, language=lang)
+    assert captured["params"]["language"] == "zh"
+    assert "default_lang" not in captured["params"]
+
+
+async def test_tavily_latin_query_country_united_states(monkeypatch):
+    captured: dict = {}
+    req = httpx.Request("POST", "https://api.tavily.com/search")
+
+    class _Client:
+        async def post(self, url, *, json=None, headers=None):
+            captured["json"] = dict(json or {})
+            return httpx.Response(200, json={"results": []}, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
+    await backend.search("Anthropic funding", language="en")
+    assert captured["json"]["country"] == "united states"
+
+
+# --- A6: structured phase-duration logging via on_phase ---
+
+
+def test_track_phase_durations_logs_each_phase(monkeypatch):
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(search_backend_mod, "logger", spy)
+    forwarded: list[str] = []
+    on_phase, finish = track_phase_durations(forwarded.append)
+    on_phase("queued")
+    time.sleep(0.01)
+    on_phase("querying")
+    time.sleep(0.01)
+    on_phase("fallback")
+    time.sleep(0.01)
+    finish()
+    assert forwarded == ["queued", "querying", "fallback"]
+    events = [name for name, _ in spy.events if name == "search.phase_duration"]
+    assert events == ["search.phase_duration"] * 3
+    phases = [kw["phase"] for name, kw in spy.events if name == "search.phase_duration"]
+    assert phases == ["queued", "querying", "fallback"]
+    for _name, kw in spy.events:
+        if _name == "search.phase_duration":
+            assert isinstance(kw["duration_ms"], int)
+            assert kw["duration_ms"] >= 0
+
+
+async def test_web_search_logs_phase_duration_fields(monkeypatch):
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(search_backend_mod, "logger", spy)
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            if on_phase:
+                on_phase("querying")
+                time.sleep(0.01)
+            return [SearchResult("t", "https://a.com", "s")]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    phases: list[str] = []
+    result = await WebSearchTool().execute(
+        {"query": "weather"}, _ctx(on_phase=phases.append)
+    )
+    assert result.success is True
+    assert "querying" in phases
+    dur = spy.get("search.phase_duration")
+    assert dur["phase"] == "querying"
+    assert isinstance(dur["duration_ms"], int)
+    assert dur["duration_ms"] >= 0
 
 
 # --- ToolResult.output_limit ---
@@ -1330,7 +1638,7 @@ def test_site_of_strips_www_and_lowercases():
 
 async def test_web_search_emits_structured_citations(monkeypatch):
     class _FakeBackend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return [
                 SearchResult("标题一", "https://www.example.com/a", "摘要一"),
                 SearchResult("标题二", "https://b.cn/p", "摘要二"),
@@ -1346,8 +1654,17 @@ async def test_web_search_emits_structured_citations(monkeypatch):
             "title": "标题一",
             "snippet": "摘要一",
             "site": "example.com",
+            "query": "深圳天气",
+            "tier": "unknown",
         },
-        {"url": "https://b.cn/p", "title": "标题二", "snippet": "摘要二", "site": "b.cn"},
+        {
+            "url": "https://b.cn/p",
+            "title": "标题二",
+            "snippet": "摘要二",
+            "site": "b.cn",
+            "query": "深圳天气",
+            "tier": "unknown",
+        },
     ]
 
 
@@ -1355,7 +1672,7 @@ async def test_web_search_emits_structured_display(monkeypatch):
     # 工具结果富渲染: the client renders the hits as cards from ``display`` (not the
     # JSON output), so it carries each hit's title/url/snippet + parsed site.
     class _FakeBackend:
-        async def search(self, query, max_results=5, on_phase=None):
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
             return [
                 SearchResult("标题一", "https://www.example.com/a", "摘要一"),
                 SearchResult("标题二", "https://b.cn/p", "摘要二"),
@@ -1397,7 +1714,7 @@ def test_merge_citations_dedups_across_rounds_by_normalized_url():
     assert second == {"https://a.com/p": 1, "https://b.com": 2}
 
 
-def test_merge_citations_skips_blank_url_and_caps():
+def test_merge_citations_skips_blank_url_no_hard_cap():
     sink: list[dict] = []
     blank = merge_citations(sink, [{"url": "", "title": "blank"}])
     assert sink == []
@@ -1405,12 +1722,12 @@ def test_merge_citations_skips_blank_url_and_caps():
     numbers = merge_citations(
         sink, [{"url": f"https://s{i}.com", "title": str(i)} for i in range(50)]
     )
-    assert len(sink) == 24  # _CITATION_CAP
-    # only the 24 that fit the cap get a number; the rest are uncitable (no card)
-    assert len(numbers) == 24
+    # P2：池帽 24 退役；mid-turn sink 无硬帽（卡片投影另按 cited_ids）
+    assert len(sink) == 50
+    assert len(numbers) == 50
     assert numbers["https://s0.com"] == 1
     assert numbers["https://s23.com"] == 24
-    assert "https://s24.com" not in numbers
+    assert numbers["https://s49.com"] == 50
 
 
 def test_annotate_tool_citations_appends_assigned_numbers():

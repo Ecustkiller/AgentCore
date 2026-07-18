@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-16T23:25:52.649Z",
+  "generated_at": "2026-07-18T04:18:21.204Z",
   "tape": "lv-molihua-trademark",
   "tape_path": "demos/tapes/lv-molihua-trademark.json",
   "video_plan": "demos/video-plan-lv-molihua.md",
@@ -63,7 +63,7 @@
     "width": 1920,
     "height": 1080
   },
-  "opening_prompt": "搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论",
+  "opening_prompt": "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论",
   "assets": [
     {
       "id": "01-user-prompt",
@@ -73,7 +73,7 @@
       "shot": "第二幕 · 一句话发起",
       "tape_t_ms": 0,
       "usage": "冷开场前 / 第二幕：展示「只打了这么一句话」",
-      "matched_text": "搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论"
+      "matched_text": "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论"
     },
     {
       "id": "02-team-preview",
@@ -83,7 +83,7 @@
       "shot": "第四幕 · 组队 + 授权",
       "tape_t_ms": 32000,
       "usage": "冷开场 / 第四幕：team_preview 双方立场",
-      "matched_text": " 搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论复制编辑删除07:25Thought 3 steps · Used 4 toolsLV 诉茉莉奶白案 · 简介 案件进程： 2026年6月29日，苏州中院作出一审判决，"
+      "matched_text": " 搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论复制编辑删除12:18Thought 9 steps · Used 15 tools信息已足够，我来推进。先简要介绍案情，再启动模拟庭审辩论。 LV 诉茉莉奶白商标侵权案"
     },
     {
       "id": "09-collab-graph",
@@ -93,103 +93,106 @@
       "shot": "冷开场画面1 / 第七幕回看",
       "tape_t_ms": 45000,
       "usage": "冷开场快闪；收尾拉远",
-      "matched_text": " | 主主持人执行中 · 1s主持正反辩论：茉莉奶白使用的四叶花卉图形，是否构成对LV注册商标专用权的侵权 | 原原告方（LV）正方执行中 · 1s…icitly rejected in the trial **What I still need:** - The 人民锐评 article content -▋ | 被"
+      "matched_text": " | 主主持人执行中 · 1s主持正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视） | LLV方（原告）正方执行中 · 1s…。非常好，这些文章提供了丰富的材料。让我再搜索一些更具体的证据——LV四叶花商标的注册号、驰名商标认定情况，以及广东高院那个2008年关于\"四花瓣\""
     },
     {
       "id": "03-debate-opening",
       "file": "stills/03-debate-opening.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\03-debate-opening.png",
-      "label": "辩论开场：双方与辩题",
-      "shot": "辩论开场：双方与辩题",
-      "tape_hint": "debate_round_started r1 @ t_ms≈52000 (post-authorize)",
+      "label": "辩论开场：双方与辩题（显著性）",
+      "shot": "辩论开场：双方与辩题（显著性）",
+      "tape_hint": "debate_round_started r1 @ t_ms≈164533 (post-authorize)",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": " 返回正反辩论：茉莉奶白使用的四叶花卉图形，是否构成对LV注册商标专用权的侵权协作图辩论室四叶花卉是公共领域通用元素吗？正方正在立论这场怎么读布局并排单栏第1轮主持人先帮你把最要紧的一件事说清楚：茉莉",
-      "wall_ms": 11476
-    },
-    {
-      "id": "07-evidence-gap-admit",
-      "file": "stills/07-evidence-gap-admit.png",
-      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07-evidence-gap-admit.png",
-      "label": "交叉质询：双方承认证据缺口",
-      "shot": "交叉质询：双方承认证据缺口",
-      "tape_hint": "debate_round r1 digest @ t_ms≈319000",
-      "usage": "第五幕精剪 / 冷开场",
-      "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 35424
+      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）协作图辩论室四叶花图形的商标显著性正方正在立论这场怎么读布局并排单栏第1轮主持人本场围绕茉莉奶白使用",
+      "wall_ms": 22228
     },
     {
       "id": "04-r2-diamond-square",
       "file": "stills/04-r2-diamond-square.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04-r2-diamond-square.png",
-      "label": "第2轮 LV「公共纹样 vs 具体设计」",
-      "shot": "第2轮 LV「公共纹样 vs 具体设计」",
-      "tape_hint": "r2 @ t_ms≈495918",
+      "label": "交锋1 · 公共元素 vs 获得显著性",
+      "shot": "交锋1 · 公共元素 vs 获得显著性",
+      "tape_hint": "r1 focus 商标显著性 @ t_ms≈164533–563065",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 51150
+      "matched_text": "作为商标注册——四叶花卉的简化写实图形正属于此类。LV即便通过上百年使用获得了“获得显著性”，也仅能证明其**整体Monogram组合图案**（四叶花+LV字母+四角星+",
+      "wall_ms": 40567
     },
     {
       "id": "04b-r2-quote-closeup",
       "file": "stills/04b-r2-quote-closeup.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04b-r2-quote-closeup.png",
-      "label": "R2 金句定点特写",
-      "usage": "交锋1 金句；须可见「不是四叶草不能用，而是用得太像」",
+      "label": "交锋1 金句定点特写",
+      "usage": "交锋1 金句；须可见「任何经营者都不能垄断自然界公共资源的基本表达」",
       "clean": true,
       "new": true,
-      "quote_required": "不是四叶草不能用，而是用得太像",
+      "quote_required": "任何经营者都不能垄断自然界公共资源的基本表达",
       "quote_visible": true,
-      "matched_text": "含“LV字母+菱形底纹+特定曲线弧度的组合”——对方在拿“菱形”论证“正方形”，以抽象类别否定具体保护。 ### 人民锐评≠现行法律：正"
+      "matched_text": "的“仅有本商品的通用图形”。**任何经营者都不能垄断自然界公共资源的基本表达**。LV四叶花图形本身 "
     },
     {
       "id": "05-r3-logo-swap",
       "file": "stills/05-r3-logo-swap.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\05-r3-logo-swap.png",
-      "label": "第3轮 驳回后换更近似 Logo",
-      "shot": "第3轮 驳回后换更近似 Logo",
-      "tape_hint": "r3 @ t_ms≈600000",
+      "label": "交锋2 · 跨类标准与真实使用",
+      "shot": "交锋2 · 跨类标准与真实使用",
+      "tape_hint": "r2 focus 跨类保护 @ t_ms≈563065–861441",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 66363
+      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
+      "wall_ms": 97216
     },
     {
       "id": "05b-r4-logo-defense",
       "file": "stills/05b-r4-logo-defense.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\05b-r4-logo-defense.png",
-      "label": "第4轮 贡献率 / 举证责任",
-      "shot": "第4轮 贡献率 / 举证责任",
-      "tape_hint": "r4 @ t_ms≈800000",
+      "label": "交锋3 · 无茶饮消费者混淆调查",
+      "shot": "交锋3 · 无茶饮消费者混淆调查",
+      "tape_hint": "r3 focus 跨类边界 @ t_ms≈861441–1130562",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 87130
+      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
+      "wall_ms": 155276
+    },
+    {
+      "id": "07-evidence-gap-admit",
+      "file": "stills/07-evidence-gap-admit.png",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07-evidence-gap-admit.png",
+      "label": "质询高光 · LV 承认无消费者调查",
+      "shot": "质询高光 · LV 承认无消费者调查",
+      "tape_hint": "r3/r4 cross-exam admit @ t_ms≈1130562+",
+      "usage": "交锋3 质询高光",
+      "clean": true,
+      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。",
+      "wall_ms": 198856,
+      "tape_t_ms": 1130562,
+      "new": false,
+      "quote_required": "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张"
     },
     {
       "id": "06-r5-burden",
       "file": "stills/06-r5-burden.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\06-r5-burden.png",
-      "label": "第4轮终局 · 贡献率举证决胜",
-      "shot": "第4轮终局 · 贡献率举证决胜",
-      "tape_hint": "r4 @ t_ms≈878121（本盘仅4轮）",
+      "label": "交锋3 决胜 · R4 再钉实证门槛",
+      "shot": "交锋3 决胜 · R4 再钉实证门槛",
+      "tape_hint": "r4 debate_round @ t_ms≈1130562–1309596",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 100138
+      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
+      "wall_ms": 211068
     },
     {
       "id": "08-final-verdict",
       "file": "stills/08-final-verdict.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\08-final-verdict.png",
-      "label": "最终裁决（倾向支持一审 · 70%）",
-      "shot": "最终裁决（倾向支持一审 · 70%）",
-      "tape_hint": "debate_result @ t_ms≈907528",
+      "label": "最终裁决（微弱倾向茉莉奶白 · 55%）",
+      "shot": "最终裁决（微弱倾向茉莉奶白 · 55%）",
+      "tape_hint": "debate_result @ t_ms≈1330177",
       "usage": "第五幕精剪 / 冷开场",
       "clean": true,
-      "matched_text": "称‘茉莉奶白’本身的识别力、加盟体系）”之间的因果关系。待核实·推断若茉莉奶白更换标识后营收仍增长，说明标识对利润的贡献微乎其微——此为二审中可直接举证的关键事实。",
-      "wall_ms": 113131
+      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
+      "wall_ms": 258145
     },
     {
       "id": "09b-collab-graph-final",
@@ -199,9 +202,20 @@
       "usage": "第七幕收尾",
       "clean": true,
       "new": true,
-      "matched_text": " | 主主持人已完成 · 17m54s主持正反辩论：茉莉奶白使用的四叶花卉图形，是否构成对LV注册商标专用权的侵权 | 原原告方（LV）正方含质询已完成 · 2m43s…局的审查结论已直接证明：在内行人眼中，两者的图形构成近似。对方若坚称“四叶花是公共元素、谁都能用”，为何茉莉奶白自己都无法通过商标注册审查？这正是最有力的反证。 | 被被告方（茉莉奶白）反方含质询已完成 · 3m19s…系）”之间",
-      "nodes": 14,
-      "shot": "协作图终态全貌（四轮打完）"
+      "matched_text": " | 主主持人已完成 · 19m36s主持正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视） | LLV方（原告）正方含质询已完成 · 4m46s…门店招牌、包装、线上平台全面使用高度相似的图案，足以让消费者产生联想或混淆。综上，不论从获得显著性、主观故意还是法律保护层级，四叶花图形的商标显著性均无可争议。 | 茉茉莉奶白方（被告）反方含质询已完成 · ",
+      "nodes": 12
+    },
+    {
+      "id": "07b-admit-closeup",
+      "file": "stills/07b-admit-closeup.png",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07b-admit-closeup.png",
+      "label": "质询承认句特写",
+      "usage": "交锋3 全片最强镜头；须可读承认句原话",
+      "tape_t_ms": 1130562,
+      "clean": true,
+      "new": true,
+      "quote_required": "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
+      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
     }
   ],
   "clips": [
@@ -212,16 +226,6 @@
       "label": "整场回放（Playwright recordVideo）",
       "usage": "可按 wall 时间码剪「流式发言」「轮次推进」5–15s；未自动切片（需本机 ffmpeg）",
       "note": "整段录制；短片段请按 manifest.assets[].wall_ms 裁切"
-    },
-    {
-      "id": "clip-streaming-debate-speed1",
-      "file": "clips/clip-streaming-debate-speed1.webm",
-      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\clip-streaming-debate-speed1.webm",
-      "label": "SPEED=1 原速双列流式（冷开场镜头2 备选）",
-      "speed": 1,
-      "new": true,
-      "clean": true,
-      "note": "导演台 speed=1 期间录制；含进辩论前后文，可再裁 5–15s"
     }
   ],
   "sequences": [
@@ -245,37 +249,14 @@
       "interval_ms": 900,
       "usage": "短视频片段的密集截图替代（可补帧/剪辑）",
       "tape_hint": "round transition / scoreboard"
-    },
-    {
-      "id": "clip-streaming-debate-speed1",
-      "dir": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1",
-      "files": [
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-00.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-01.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-02.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-03.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-04.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-05.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-06.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-07.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-08.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-09.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-10.png",
-        "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-streaming-debate-speed1\\frame-11.png"
-      ],
-      "interval_ms": 1000,
-      "speed": 1,
-      "usage": "冷开场镜头2 备选 · SPEED=1",
-      "new": true
     }
   ],
   "missing": [],
   "notes": [
-    "cleaned 0 prior conversations",
+    "cleaned 1 prior conversations",
     "DEV badge absent (production build)",
     "短视频：已产出 full-session.webm；未做自动裁切。若需 5–15s 片段，用 ffmpeg 按 assets 的 wall_ms 裁切，或使用 sequences/ 密集帧。",
-    "fixup 2026-07-16T23:31:08.708Z: quote=true verdict=true",
-    "speed1 clip 2026-07-16T23:32:12.659Z ok=true"
+    "admit-capture 2026-07-18T04:27:27.565Z: ok=true"
   ],
   "ok": true,
   "captured_ids": [
@@ -283,39 +264,15 @@
     "02-team-preview",
     "09-collab-graph",
     "03-debate-opening",
-    "07-evidence-gap-admit",
     "04-r2-diamond-square",
     "04b-r2-quote-closeup",
     "05-r3-logo-swap",
     "05b-r4-logo-defense",
+    "07-evidence-gap-admit",
     "06-r5-burden",
     "08-final-verdict",
     "09b-collab-graph-final"
   ],
-  "elapsed_wall_ms": 117358,
-  "full_video": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\full-session.webm",
-  "fixup": {
-    "ok": true,
-    "shots": [
-      {
-        "id": "04b-r2-quote-closeup",
-        "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04b-r2-quote-closeup.png",
-        "ctx": "### 公共传统≠注册商标：茉莉奶白混淆了抽象类别与具体图形\n\n对方将“四瓣花卉”这一抽象类别等同于LV注册的具体、独创图形组合，是本案最根本的逻辑错误。LV的Monogram四叶花图形并非简单照搬柿蒂纹或宝相花——它在1896年由乔治·威登基于日本家纹与新艺术运动风格独立设计，包含卷曲细长花瓣、LV字母组合、菱形钻石底纹及金色圆圈等独创元素【已核实·LV官网及历史档案】。**对方专家自己也承认这"
-      },
-      {
-        "id": "04-r2-diamond-square",
-        "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04-r2-diamond-square.png",
-        "ctx": "### 公共传统≠注册商标：茉莉奶白混淆了抽象类别与具体图形\n\n对方将“四瓣花卉”这一抽象类别等同于LV注册的具体、独创图形组合，是本案最根本的逻辑错误。LV的Monogram四叶花图形并非简单照搬柿蒂纹或宝相花——它在1896年由乔治·威登基于日本家纹与新艺术运动风格独立设计，包含卷曲细长花瓣、LV字母组合、菱形钻石底纹及金色圆圈等独创元素【已核实·LV官网及历史档案】。**对方专家自己也承认这"
-      },
-      {
-        "id": "08-final-verdict",
-        "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\08-final-verdict.png",
-        "ctx": "AgentCore\n搜索或运行命令…\nCtrl+K\n新对话\n文件\n消息\n工具箱\nLV诉茉莉奶白商标侵权案\n查看全部对话\n演\n演示\n返回\n正反辩论：茉莉奶白使用的四叶花卉图形，是否构成对LV注册商标专用权的侵权\n协作图\n辩论室\n\n茉莉奶白使用的四叶花卉图形，是否构成对LV注册商标专用权的侵权\n\n已收敛\n这场怎么读\n原告方（LV）\nDeepSeek\n49\n：\n54\n被告方（茉莉奶白）\nDeepSeek"
-      }
-    ],
-    "notes": [
-      "quoteDone=true verdictDone=true"
-    ]
-  },
-  "note": "2026-07-17 tape refreshed (4 rounds, lean first-instance 70%). PNG stills still from prior take until reshot."
+  "elapsed_wall_ms": 262421,
+  "full_video": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\full-session.webm"
 }

@@ -10,7 +10,7 @@
 //
 // Mirror of the desktop lib/remarkEvidence.ts semantics (regex + verified/unverified
 // mapping), written independently for mobile — no desktop import. Unlike remarkCitations
-// (which encodes into a `cite:n` link url), this carries its payload on `data.hProperties`
+// (which also uses `data.hProperties` / `citemark`), this carries its payload on `data.hProperties`
 // so react-markdown's urlTransform can't strip it. Markers inside code / links stay
 // verbatim. No mdast/unist dependency — a small hand-rolled tree walk, mirroring
 // remarkCitations.

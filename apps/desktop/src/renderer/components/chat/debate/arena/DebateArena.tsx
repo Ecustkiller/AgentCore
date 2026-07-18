@@ -1,5 +1,7 @@
+import { EvidenceLedgerProvider } from "@/components/chat/EvidenceLedgerContext";
+import { buildLedgerMap } from "@/lib/evidenceLedger";
 import type { Execution } from "@/stores/execution";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toDebateModel } from "../model";
 import { ClosingBlocks } from "./ClosingBlocks";
 import { FinaleStage } from "./FinaleStage";
@@ -29,6 +31,10 @@ export function DebateArena({
 }) {
   const model = toDebateModel(execution);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const ledgerMap = useMemo(
+    () => (model ? buildLedgerMap(model.evidenceLedger) : null),
+    [model],
+  );
 
   const scrollToAnchor = useCallback((anchorId: string) => {
     const root = scrollRef.current;
@@ -52,43 +58,48 @@ export function DebateArena({
   const showSteerShortcut = interactive && !model.settled && !!conversationId;
 
   return (
-    <div ref={scrollRef} className={`mx-auto w-full ${DEBATE_ARENA_PAGE_MAX}`}>
-      <Scoreboard
-        model={model}
-        messageId={messageId}
-        hasPendingSteering={showSteerShortcut}
-        onScrollTo={scrollToAnchor}
-        canSplit={canSplit}
-        layoutMode={effectiveLayout}
-        onLayoutChange={handleLayoutChange}
-      />
+    <EvidenceLedgerProvider ledger={ledgerMap}>
       <div
-        className={`px-1 py-4 ${effectiveLayout === "split" ? "w-full" : "mx-auto max-w-3xl"}`}
+        ref={scrollRef}
+        className={`mx-auto w-full ${DEBATE_ARENA_PAGE_MAX}`}
       >
-        <Transcript
+        <Scoreboard
           model={model}
-          execution={execution}
           messageId={messageId}
-          conversationId={conversationId}
-          interactive={interactive}
+          hasPendingSteering={showSteerShortcut}
+          onScrollTo={scrollToAnchor}
+          canSplit={canSplit}
           layoutMode={effectiveLayout}
+          onLayoutChange={handleLayoutChange}
         />
-        {model.settled && model.closings.length > 0 && (
-          <ClosingBlocks
-            closings={model.closings}
-            execution={execution}
-            messageId={messageId}
-            layoutMode={effectiveLayout}
-          />
-        )}
-        {model.settled && (
-          <FinaleStage
+        <div
+          className={`px-1 py-4 ${effectiveLayout === "split" ? "w-full" : "mx-auto max-w-3xl"}`}
+        >
+          <Transcript
             model={model}
             execution={execution}
             messageId={messageId}
+            conversationId={conversationId}
+            interactive={interactive}
+            layoutMode={effectiveLayout}
           />
-        )}
+          {model.settled && model.closings.length > 0 && (
+            <ClosingBlocks
+              closings={model.closings}
+              execution={execution}
+              messageId={messageId}
+              layoutMode={effectiveLayout}
+            />
+          )}
+          {model.settled && (
+            <FinaleStage
+              model={model}
+              execution={execution}
+              messageId={messageId}
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </EvidenceLedgerProvider>
   );
 }

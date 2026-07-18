@@ -104,6 +104,7 @@ class OutboxStore:
             "content": "",
             "reasoning_content": None,
             "citations": [],
+            "evidence_ledger": [],
             "runs": None,
             "journal": {},  # seq(str) → entry — idempotent append
             # channel → {text, generation} — StreamCheckpointer mid-stream snapshots (D6)
@@ -369,6 +370,8 @@ class OutboxStore:
                 record["reasoning_content"] = kwargs.get("assistant_reasoning")
             if kwargs.get("citations") is not None:
                 record["citations"] = list(kwargs["citations"] or [])
+            if kwargs.get("evidence_ledger") is not None:
+                record["evidence_ledger"] = list(kwargs["evidence_ledger"] or [])
             if kwargs.get("runs") is not None:
                 record["runs"] = kwargs["runs"]
             for key in (
@@ -616,6 +619,7 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         "content": record.get("content") or "",
         "reasoning_content": record.get("reasoning_content"),
         "citations": record.get("citations") or [],
+        "evidence_ledger": record.get("evidence_ledger") or [],
         "runs": record.get("runs"),
         "message_id": record.get("message_id"),
         "input_tokens": int(record.get("input_tokens") or 0),

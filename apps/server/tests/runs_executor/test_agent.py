@@ -783,8 +783,15 @@ async def test_worker_collects_web_citations_onto_runstate():
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
-    # the worker's sources are aggregated onto RunState for the shared card
-    assert state.citations == cites
+    # the worker's sources are aggregated onto RunState for the shared card.
+    # Citation contract may stamp optional ``tier`` (M1 证据台账) — assert core fields.
+    assert len(state.citations) == 1
+    got = state.citations[0]
+    assert got["url"] == "https://a.com"
+    assert got["title"] == "A"
+    assert got["snippet"] == ""
+    assert got["site"] == "a.com"
+    assert got.get("tier") in (None, "unknown", "official", "media", "weak")
     # the worker's own answer text is clean (un-numbered — annotation is CEO-only)
     assert state.content == "FINAL"
 

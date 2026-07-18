@@ -234,6 +234,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "debate_mod1",

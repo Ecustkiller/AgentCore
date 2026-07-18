@@ -12,6 +12,7 @@ from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import EventSink, FinishReason, citations_event, message_end
 from agentcore.runtime.facts import current_fact_log
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
+from agentcore.runtime.ledger_channel import emit_turn_evidence_ledger
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 
@@ -70,15 +71,37 @@ def finish_resume_turn(
     turn_cost = aggregate_cost(cost_runs)
     merge_citations(citations, delegate_tool.citations)
     merge_citations(citations, debate_tool.citations)
-    # Mirror run_chat_pipeline: observe then strip dangling markers before persist.
-    final_content, citations, stray_markers = reconcile_citations(final_content, citations)
-    if stray_markers:
+    # Mirror run_chat_pipeline: observe then strip dangling [n] / #rN before persist.
+    led = None
+    citable_ids = None
+    try:
+        from agentcore.runtime.suspension import turn_evidence_ledger
+
+        led = turn_evidence_ledger.get()
+        if led is not None:
+            citable_ids = led.citable_ids()
+    except Exception:
+        logger.warning("citations.ledger_lookup_failed", message_id=message_id, exc_info=True)
+    final_content, citations, stray_n, stray_r = reconcile_citations(
+        final_content, citations, citable_ids=citable_ids
+    )
+    if stray_n:
         logger.warning(
             "citations.out_of_range",
             message_id=message_id,
-            markers=stray_markers,
+            markers=stray_n,
             citation_count=len(citations),
         )
+    if stray_r:
+        logger.warning(
+            "citations.invalid_ledger_ref",
+            message_id=message_id,
+            markers=stray_r,
+            citable_count=len(citable_ids or ()),
+        )
+    citations, evidence_ledger, cited_ids = emit_turn_evidence_ledger(
+        sink, ledger=led, content=final_content, citations=citations
+    )
     if citations:
         sink.emit(citations_event(citations))
     collab = {
@@ -112,6 +135,8 @@ def finish_resume_turn(
         "rounds": rounds,
         "finish_reason": finish,
         "citations": citations,
+        "evidence_ledger": evidence_ledger,
+        "cited_ids": cited_ids,
         "cost_runs": cost_runs,
         "journal_entries": journal_entries,
         # 协作质量 (学·度量 §2.5): same turn-level signals as the fresh-turn path.

@@ -352,6 +352,9 @@ async def test_empty_tasks_rejected():
     assert result.success is False
     assert result.is_terminal is False
     assert result.error
+    # Error text lives only in ``error`` — duplicate fill into ``output`` made
+    # tool_exec join the same string twice for the model / UI.
+    assert result.output == ""
 
 
 async def test_all_invalid_tasks_rejected():
@@ -464,8 +467,9 @@ def test_task_description_matches_what_worker_actually_receives():
     task_desc = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["task"][
         "description"
     ]
-    assert "原始用户请求" in task_desc
-    assert "只收到这段" not in task_desc
+    # Schema 瘦身：task 描述强调自包含 + worker 看不到完整历史（细节进 skill）。
+    assert "自包含" in task_desc
+    assert "看不到完整历史" in task_desc
 
 
 async def test_playbook_instantiates_whole_team_and_runs():
@@ -534,6 +538,7 @@ def test_strict_description_separates_rework_from_disposition():
     assert "硬退" in strict_desc
     assert "软" in strict_desc
     assert "必须返工" not in strict_desc
+    # Schema 瘦身：deliverable 总述指向 skill；硬退/软接受语义留在 strict 字段。
     deliverable_desc = deliverable_props["description"]
-    assert "自动返工一次" in deliverable_desc
-    assert "硬退" in deliverable_desc
+    assert "form" in deliverable_desc
+    assert "team_orchestration_advanced" in deliverable_desc

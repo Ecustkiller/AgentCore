@@ -201,6 +201,9 @@ function settledModel(
     opening: debate.opening || null,
     settled: true,
     crossExamEnabled: execution.crossExamEnabled,
+    evidenceLedger: Array.isArray(debate.evidence_ledger)
+      ? debate.evidence_ledger
+      : (execution.evidenceLedger ?? []),
   };
 }
 
@@ -227,6 +230,7 @@ function liveModel(execution: Execution): DebateModel | null {
     opening: execution.debateOpening,
     settled: false,
     crossExamEnabled: execution.crossExamEnabled,
+    evidenceLedger: execution.evidenceLedger ?? [],
   };
 }
 

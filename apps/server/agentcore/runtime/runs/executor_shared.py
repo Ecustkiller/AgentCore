@@ -21,6 +21,7 @@ from agentcore.runtime.events import (
     run_tool_progress,
 )
 from agentcore.runtime.runs.contract import synthesize_debrief
+from agentcore.runtime.runs.cutoff import warning_for_reason
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunState
 from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -33,6 +34,20 @@ _FINISH_INTERRUPT_REASONS = frozenset({FinishReason.ERROR, FinishReason.DEGRADED
 FINISH_INTERRUPT_WARNING = (
     "LLM 流在收尾时中断：产物可能已落盘，但交接简报缺失或不完整"
 )
+
+
+def _apply_cutoff_reasons(
+    cutoff_reasons: list[str],
+    *,
+    warnings: list[str],
+) -> list[str]:
+    """Merge structured cutoff reason codes into RunState.warnings (idempotent)."""
+    out = list(warnings)
+    for reason in cutoff_reasons:
+        text = warning_for_reason(reason)
+        if text and text not in out:
+            out.append(text)
+    return out
 
 
 def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
@@ -171,6 +186,9 @@ async def _react_and_capture(
     gate_escalation_sink: list[dict] | None = None,
     token_budget: int = 0,
     finish_override_sink: list[FinishReason] | None = None,
+    cutoff_reason_sink: list[str] | None = None,
+    turn_evidence_ledger: object | None = None,
+    ledger_registrant: str = "",
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -199,6 +217,9 @@ async def _react_and_capture(
     non-default terminal (ERROR / DEGRADED from an aborted LLM stream, …) the
     reason is appended so the worker executor can surface a soft warning instead of
     silently treating the run as a clean COMPLETED.
+
+    ``cutoff_reason_sink`` collects structured pinch codes (e.g. ``token_budget``)
+    for delivery_status / CEO gap transparency — orthogonal to DEGRADED thrashing.
     """
     def _on_content(delta: str) -> None:
         sink.emit(run_output_delta(run_id, agent_id, delta))
@@ -222,7 +243,10 @@ async def _react_and_capture(
         on_reset=lambda reason: sink.emit(run_output_reset(run_id, agent_id, reason)),
         raise_on_error=True,
         citation_sink=citation_sink,
+        # [n] 造引用查仍关；#rN id 存在闸由 turn_evidence_ledger + 正文标记启用（Q5）。
         annotate_citations=False,
+        turn_evidence_ledger=turn_evidence_ledger,  # type: ignore[arg-type]
+        ledger_registrant=ledger_registrant,
         approval_gate=approval_gate,
         usage_sink=usage_sink,
         on_round_begin=on_round_begin,
@@ -239,6 +263,7 @@ async def _react_and_capture(
         gate_escalation_sink=gate_escalation_sink,
         token_budget=token_budget,
         finish_override_sink=finish_override_sink,
+        cutoff_reason_sink=cutoff_reason_sink,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, reasoning, usage, rounds

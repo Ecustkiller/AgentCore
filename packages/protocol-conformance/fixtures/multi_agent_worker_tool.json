@@ -176,6 +176,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "w1",

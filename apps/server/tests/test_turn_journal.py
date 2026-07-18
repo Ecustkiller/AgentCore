@@ -570,6 +570,23 @@ def _started(system_prompt="S", user_message="go", history_len=0) -> dict:
     )
 
 
+def _run_head(
+    run_id: str,
+    system_prompt="WSYS",
+    user_message="## task\ndo it",
+    user_origin="context_blocks",
+) -> dict:
+    return _fact(
+        "run_head",
+        {
+            "run_id": run_id,
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "user_origin": user_origin,
+        },
+    )
+
+
 def _boundary(run_id="cap", round_idx=0, role="captain") -> dict:
     return _fact("round_boundary", {"round_idx": round_idx, "run_id": run_id, "role": role})
 
@@ -735,10 +752,11 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
         ),
         LLMMessage(role="tool", content="team product", tool_call_id="d1"),
     ]
-    # And scoping to the worker run folds ITS rounds (head still turn_started — a
-    # worker's own task-prompt head is Phase 2; here we only assert run isolation).
+    # Worker without ``run_head`` (legacy journal): rounds-only — never the false
+    # CEO ``turn_started`` head. Run isolation still holds.
     worker_window = window_from_journal(entries, run_id="w1")
-    assert worker_window[2] == LLMMessage(
+    assert worker_window is not None
+    assert worker_window[0] == LLMMessage(
         role="assistant",
         content=None,
         tool_calls=[
@@ -750,7 +768,49 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
         ],
         reasoning_content=None,
     )
-    assert worker_window[3] == LLMMessage(role="tool", content="written", tool_call_id="fw")
+    assert worker_window[1] == LLMMessage(role="tool", content="written", tool_call_id="fw")
+    assert all(m.role != "system" for m in worker_window)
+
+
+def test_window_worker_run_head_not_turn_started():
+    # Worker with ``run_head``: window anchors on the worker task-prompt, never the
+    # CEO ``turn_started`` (SYS / "build it").
+    entries = [
+        _started(system_prompt="SYS", user_message="build it"),
+        _boundary(run_id="cap", round_idx=0, role="captain"),
+        _llm(run_id="cap", round_idx=0, tool_calls=[_tc("d1", "delegate", "{}")]),
+        _run_head(
+            "w1",
+            system_prompt="WORKER-SYS",
+            user_message="## 你的任务\n写文件",
+        ),
+        _boundary(run_id="w1", round_idx=0, role="worker"),
+        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "file_write", "{}")]),
+        _tool_call("fw", "written", run_id="w1"),
+        _tool_call("d1", "team product"),
+    ]
+    worker_window = window_from_journal(entries, run_id="w1")
+    assert worker_window == [
+        LLMMessage(role="system", content="WORKER-SYS"),
+        LLMMessage(role="user", content="## 你的任务\n写文件"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="fw",
+                    type="function",
+                    function=ToolCallFunction(name="file_write", arguments="{}"),
+                )
+            ],
+            reasoning_content=None,
+        ),
+        LLMMessage(role="tool", content="written", tool_call_id="fw"),
+    ]
+    # Captain fold unchanged.
+    captain = window_from_journal(entries, run_id="cap")
+    assert captain[0] == LLMMessage(role="system", content="SYS")
+    assert captain[1] == LLMMessage(role="user", content="build it")
 
 
 def test_window_captain_note_mid_delegate_attributed_by_run_id():

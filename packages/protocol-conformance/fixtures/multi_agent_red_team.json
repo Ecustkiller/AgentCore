@@ -528,6 +528,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "redteam_mod1",

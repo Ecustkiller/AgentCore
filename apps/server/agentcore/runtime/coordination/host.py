@@ -63,6 +63,60 @@ def _drop_all_completed_events(session: CoordinationSession) -> int:
     return dropped
 
 
+def _has_all_completed_in_flight(session: CoordinationSession) -> bool:
+    """True when ALL_COMPLETED is already queued / pending / injected."""
+    if session.all_completed_injected:
+        return True
+    if any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in session._pending):
+        return True
+    queued: list[CoordinationEvent] = []
+    while True:
+        try:
+            queued.append(session._queue.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    has = any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in queued)
+    for ev in queued:
+        session._queue.put_nowait(ev)
+    return has
+
+
+def _ensure_terminal_all_completed(
+    session: CoordinationSession,
+    *,
+    output: str = "",
+) -> bool:
+    """Invariant guard: backfill ALL_COMPLETED only when drive leaked a terminal miss.
+
+    Normal paths post inside ``drive`` (success / criteria-gap / partial-fail).
+    Triggering this means a *new* early-return forgot the terminal post — keep the
+    CEO unblocked, but warn so the leak is visible.
+    """
+    if _has_all_completed_in_flight(session):
+        return False
+    payload: dict[str, Any] = {
+        "completed": len(session.completed_run_ids),
+        "total": session.total_workers,
+    }
+    if output.strip():
+        payload["output"] = output.strip()[:4000]
+    session.post(
+        CoordinationEvent(kind=CoordinationEventKind.ALL_COMPLETED, payload=payload)
+    )
+    logger.warning(
+        "coordination.all_completed_backfill",
+        execution_id=session.execution_id,
+        completed=len(session.completed_run_ids),
+        total=session.total_workers,
+        has_output=bool(output.strip()),
+        detail=(
+            "不变量护栏触发：drive 终态未投递 ALL_COMPLETED，host 已回填。"
+            "本不应发生——说明有新路径漏投终态，请追查 drive 提前返回。"
+        ),
+    )
+    return True
+
+
 def _merge_into_active_coordination(
     tool: DelegateTool,
     plan: RunPlan,
@@ -401,8 +455,11 @@ async def _background_drive(
                 )
             )
         elif result is not None and result.success:
-            # Terminal batch — all_completed already posted inside drive_coordinated.
-            pass
+            # Invariant: drive should already have posted; backfill only on leak.
+            _ensure_terminal_all_completed(
+                session,
+                output=(result.output if result is not None else "") or "",
+            )
     except asyncio.CancelledError:
         logger.info("delegate.coordinate_cancelled", execution_id=execution_id)
         raise

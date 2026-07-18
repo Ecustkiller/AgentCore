@@ -47,6 +47,7 @@ import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
   extractAsks,
   extractEscalationSlots,
+  extractEvidenceLedger,
   extractFollowups,
   extractHotDecisionTraces,
   extractRunToolCalls,
@@ -314,6 +315,10 @@ function AssistantBubble({
     () => extractRunToolCalls(turn.events),
     [turn.events],
   );
+  const evidenceLedger = useMemo(
+    () => extractEvidenceLedger(turn.events),
+    [turn.events],
+  );
   const meta = summarize(p);
   const isMulti = p.runs.length > 0;
   const team = isMulti
@@ -329,6 +334,7 @@ function AssistantBubble({
         escalationsInteractive: live,
         runToolCalls,
         workerToolPhases,
+        evidenceLedger,
       }
     : undefined;
   const empty =
@@ -356,6 +362,7 @@ function AssistantBubble({
           content={p.content}
           reasoning={p.reasoning}
           citations={p.citations}
+          evidenceLedger={evidenceLedger}
           captainContext={p.captainContext}
           team={team}
           debate={p.debate}
@@ -420,6 +427,7 @@ function HistoryAssistant({
             deliveryStatus: p.deliveryStatus,
             status: p.status,
             runToolCalls: extractRunToolCalls(events),
+            evidenceLedger: extractEvidenceLedger(events),
           }
         : undefined;
     return {
@@ -430,6 +438,10 @@ function HistoryAssistant({
     };
   }, [m.runs]);
   const process = m.runs?.process ?? undefined;
+  const historyEvidenceLedger = useMemo(
+    () => extractEvidenceLedger(m.runs?.events ?? []),
+    [m.runs],
+  );
   // 本回合产出文件：单聊读 runs.process，多 Agent 读 runs.events 日志；合并去重（另一支为空）。
   const artifacts = useMemo(
     () =>
@@ -492,6 +504,7 @@ function HistoryAssistant({
           content={m.content ?? ""}
           reasoning={m.reasoning_content ?? undefined}
           citations={m.citations}
+          evidenceLedger={historyEvidenceLedger}
           captainContext={m.runs?.captain_context ?? undefined}
           team={team}
           debate={debate}

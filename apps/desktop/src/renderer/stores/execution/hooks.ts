@@ -135,8 +135,9 @@ function computeProjection(
   const entry = liveFolds.get(plan);
   // Scrubbing (fixed playhead) or a stale rt whose fold has already advanced PAST this
   // prefix → cold full-fold of the prefix; never rewind the shared live accumulator.
+  let base: Execution;
   if (rt.playhead !== null || (entry && entry.count > upto)) {
-    return projectExecution(
+    base = projectExecution(
       plan,
       rt.frames.slice(0, upto),
       rt.status,
@@ -145,21 +146,28 @@ function computeProjection(
       rt.crossExamEnabled,
       rt.debateOpening,
     );
+  } else {
+    // Live tail: advance the incremental accumulator to the current frame count, applying
+    // ONLY the newly-appended frames.
+    const fold = entry ?? { count: 0, state: initFold(plan) };
+    for (let i = fold.count; i < upto; i++) applyFrame(fold.state, rt.frames[i]);
+    fold.count = upto;
+    liveFolds.set(plan, fold);
+    base = finalizeFold(
+      fold.state,
+      rt.status,
+      rt.debate,
+      rt.debateRounds,
+      rt.crossExamEnabled,
+      rt.debateOpening,
+    );
   }
-  // Live tail: advance the incremental accumulator to the current frame count, applying
-  // ONLY the newly-appended frames.
-  const fold = entry ?? { count: 0, state: initFold(plan) };
-  for (let i = fold.count; i < upto; i++) applyFrame(fold.state, rt.frames[i]);
-  fold.count = upto;
-  liveFolds.set(plan, fold);
-  return finalizeFold(
-    fold.state,
-    rt.status,
-    rt.debate,
-    rt.debateRounds,
-    rt.crossExamEnabled,
-    rt.debateOpening,
-  );
+  // 证据台账是 runtime 槽位态（非 frame 折叠）：投影时挂上；收场权威优先。
+  const evidenceLedger =
+    rt.debate && Array.isArray(rt.debate.evidence_ledger)
+      ? rt.debate.evidence_ledger
+      : rt.evidenceLedger;
+  return { ...base, evidenceLedger };
 }
 
 /** Project a specific message's execution at its current playhead — live tail

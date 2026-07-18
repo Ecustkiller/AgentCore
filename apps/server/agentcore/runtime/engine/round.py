@@ -14,6 +14,11 @@ from agentcore.llm.profiles import ProfileParams, build_request
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.tools_gate import TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
+from agentcore.runtime.citations import (
+    invalid_ledger_ref_ids,
+    strip_invalid_ledger_refs,
+)
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact
 from agentcore.runtime.loop_controller import Intervention, LoopController
@@ -210,6 +215,26 @@ async def run_llm_round(
     )
 
 
+def _citable_ids(
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+) -> frozenset[str] | None:
+    """``None`` = 未接通台账（不做 #rN 闸）；空 frozenset = 台账空（任何 #rN 均非法）。"""
+    if turn_evidence_ledger is None:
+        return None
+    return turn_evidence_ledger.citable_ids()
+
+
+def finish_guard_max_reworks(
+    *,
+    annotate_citations: bool,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+) -> int:
+    """分路径回炉上限：调研 worker（有台账且不开 [n] 查）对齐辩论 O2 = 1；CEO 跟配置。"""
+    if turn_evidence_ledger is not None and not annotate_citations:
+        return 1
+    return settings.engine_finish_guard_max_reworks
+
+
 def decide_no_tool_round(
     outcome: RoundOutcome,
     *,
@@ -220,6 +245,7 @@ def decide_no_tool_round(
     finish_guard_reworks: int,
     tools_offered: bool = False,
     supports_tools: bool | None = None,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
 ) -> LoopDirective:
     """Pick the directive for a round with no tool calls.
 
@@ -233,8 +259,13 @@ def decide_no_tool_round(
             final_content,
             citation_count=len(citation_sink or []),
             check_citations=annotate_citations,
+            citable_ids=_citable_ids(turn_evidence_ledger),
         )
-        if reworks and finish_guard_reworks < settings.engine_finish_guard_max_reworks:
+        max_reworks = finish_guard_max_reworks(
+            annotate_citations=annotate_citations,
+            turn_evidence_ledger=turn_evidence_ledger,
+        )
+        if reworks and finish_guard_reworks < max_reworks:
             return Rework()
         return Return()
 
@@ -261,6 +292,7 @@ def apply_finish_guard_rework(
     annotate_citations: bool,
     citation_sink: list[dict[str, Any]] | None,
     finish_guard_reworks: int,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
 ) -> tuple[str, int]:
     """Discard rejected content, inject steer, return updated content and rework count.
 
@@ -272,6 +304,7 @@ def apply_finish_guard_rework(
         final_content,
         citation_count=len(citation_sink or []),
         check_citations=annotate_citations,
+        citable_ids=_citable_ids(turn_evidence_ledger),
     )
     steer = format_guard_steer(reworks)
     logger.info(
@@ -291,3 +324,33 @@ def apply_finish_guard_rework(
         ).to_fact()
     )
     return content_before_round, finish_guard_reworks + 1
+
+
+def apply_exit_ledger_ref_strip(
+    content: str,
+    *,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+    emit_reset: Callable[[str], None],
+    emit_content: Callable[[str], None],
+    run_id: str = "",
+) -> str:
+    """回炉耗尽后剥离非法 ``#rN``（Q3：放行 + 必发观测，禁止静默）。
+
+    若正文被改写：``finish_guard`` reset 清空已流式草稿，再把剥离后正文作为新 delta
+    推上对应表面（对齐辩论 evidence demote）。
+    """
+    citable = _citable_ids(turn_evidence_ledger)
+    bad = invalid_ledger_ref_ids(content, citable)
+    if not bad:
+        return content
+    cleaned = strip_invalid_ledger_refs(content, set(bad))
+    logger.warning(
+        "citations.invalid_ledger_ref",
+        run_id=run_id or None,
+        markers=bad,
+        citable_count=len(citable or ()),
+    )
+    if cleaned != content:
+        emit_reset("finish_guard")
+        emit_content(cleaned)
+    return cleaned

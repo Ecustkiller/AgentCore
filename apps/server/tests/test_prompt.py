@@ -237,10 +237,12 @@ def test_core_teaches_split_criterion_over_count():
     assert "拿不准也组队" in hint
     assert "可分解" in hint and "质量面" in hint
     assert "finalize=true" in hint and "机械单步" in hint
-    # 路由前置自检（替代 long_content 事后丢稿闸门）：展开前显式表态直答/委派。
+    # 路由前置自检（替代 long_content 事后丢稿闸门）：思考通道完成判断，正文禁内部术语。
     assert "路由自检" in hint
-    assert "开写正文或调用工具之前" in hint
+    assert "先在思考里" in hint
     assert "禁止先写成长文再回头补路由理由" in hint
+    assert "内部编排术语" in hint
+    assert "先提案卡对齐" in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "形状词汇" in skill
     assert "实质任务默认组队" in skill
@@ -279,6 +281,14 @@ def test_core_teaches_delegating_parallel_research():
     assert "探路" in hint
 
 
+def test_core_forbids_silent_worker_count_discount():
+    # 用户点名 N 个 worker 时不得静默缩成更少（trace 2f52c042: 点名盘点却派 7 调研员）。
+    # 撞上限须分批追加或向用户明示取舍。
+    hint = _CEO_CORE_HINT
+    assert "静默打折" in hint
+    assert "向用户明示" in hint
+
+
 def test_core_reminds_pass_hidden_context_to_worker():
     # A worker never sees the conversation history, so the CEO must write the
     # decision's key assumptions / constraints into the task itself.
@@ -314,13 +324,14 @@ def test_core_teaches_delegate_point_dont_answer():
 
 def test_core_teaches_execution_and_recall_routing():
     # 环境事实驱动：本机任务在云端时先 ask_user（bind_local_folder），已在本机则委派验收；
-    # 「刚才产出」须先核实工作区。
+    # 「刚才产出」须先核实工作区。真运行类必须显式 code_verified。
     hint = _CEO_CORE_HINT
     assert "【执行 / 运行 / 打开】" in hint
     assert "workspace_context" in hint
     assert "不要先委派" in hint
     assert "bind_local_folder" in hint
     assert "completion_criteria=code_verified" in hint
+    assert "必须】显式声明" in hint or "必须】显式设" in hint or "【必须】显式" in hint
     assert "【回忆 / 核实产出】" in hint
     assert "file_list" in hint
     assert "口头拒绝" in hint
@@ -338,24 +349,34 @@ def test_core_worker_capability_follows_workspace_facts():
 
 
 def test_core_teaches_delivery_honesty_when_no_execution():
-    # 云端无执行环境时的交付形态对齐：不设 code_verified（引擎拒绝）、三条出路、
-    # 收尾显式标交付缺口。
+    # 云端无执行环境时的交付形态对齐：不设 code_verified、三条出路、收尾显式标交付缺口。
     hint = _CEO_CORE_HINT
     assert "交付本身依赖执行" in hint
-    assert "引擎会拒绝" in hint
+    assert "不要设 `code_verified`" in hint or "不要设 code_verified" in hint
     assert "未运行验证" in hint
     assert "交付缺口" in hint
+    assert "引擎不从文案绑定验收" in hint or "不从任务文案推断" in hint
 
 
 def test_skill_teaches_environment_capability_constraint():
-    # 编排 skill 的环境能力约束：委派前对照 workspace_context；无执行环境时改交付形态、
-    # 显式标缺口、或先 bind_local_folder，绝不假交付。
+    # 编排 skill：无执行环境时不设 code_verified（显式会被硬拒）、改交付形态、显式标缺口。
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "环境能力约束" in skill
     assert "code_execute=未装配" in skill
-    assert "引擎会直接拒绝" in skill
+    assert "显式声明会被硬拒" in skill
     assert "交付缺口" in skill
     assert "bind_local_folder" in skill
+    assert "硬要求" in skill
+    assert "不】从任务文案推断" in skill or "不从任务文案推断" in skill
+
+
+def test_shared_base_teaches_delivery_baseline():
+    # B3 一期：共享基座前置「交付底线」（围栏闭合 + #rN ∈ 台账）。
+    from agentcore.runtime.resolve.prompt import _DEFAULT_SYSTEM_PROMPT
+
+    assert "<delivery_baseline>" in _DEFAULT_SYSTEM_PROMPT
+    assert "围栏必须成对闭合" in _DEFAULT_SYSTEM_PROMPT
+    assert "#rN" in _DEFAULT_SYSTEM_PROMPT
 
 
 def test_core_guides_out_of_workspace_absolute_paths():
@@ -391,11 +412,10 @@ def test_core_drops_advanced_mechanism_detail():
 
 
 def test_citation_hint_teaches_multi_source_anchoring():
-    # When several sources back one claim, the CEO anchors all of them ([1][2]), not
+    # When several sources back one claim, the CEO anchors all of them (#r1#r2), not
     # only the source tied to the final conclusion — every contributing source must
-    # stay traceable from the prose (UI 引用卡 already lists them; this adds the
-    # inline anchor). citation stays inline (not a skill — short + only relevant when
-    # web results were used).
+    # stay traceable from the prose via turn-ledger ids. citation stays inline (not a
+    # skill — short + only relevant when web results were used).
     hint = CHAT_CITATION_HINT
     assert "一并标注" in hint
-    assert "[1][2]" in hint
+    assert "#r1#r2" in hint

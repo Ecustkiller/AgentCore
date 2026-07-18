@@ -664,6 +664,9 @@ export function finalizeFold(
     debateRounds,
     crossExamEnabled,
     debateOpening,
+    evidenceLedger: Array.isArray(debate?.evidence_ledger)
+      ? debate.evidence_ledger
+      : [],
     teamNotes: s.teamNotes,
   };
 }

@@ -1,5 +1,8 @@
 /**
- * Fixup stills that need scroll-into-view: R2 quote close-up + final verdict.
+ * Fixup stills that need scroll-into-view:
+ *   - 交锋1 金句（垄断自然界公共资源）
+ *   - 交锋3 质询承认句特写 07b（我承认没有消费者调查数据支撑…）
+ *   - 终审 / 结辩
  * Uses production webapp + live tape replay (same clean env as main capture).
  *
  * ``--tape`` / ``--out`` (or PROMO_TAPE / PROMO_OUT) mirror the main capture script.
@@ -45,7 +48,9 @@ const USER = process.env.PROMO_USER ?? "promo_lv";
 const PASS = process.env.PROMO_PASS ?? "promopass";
 const SPEED = Number(process.env.PROMO_SPEED ?? 16);
 const GAP = Number(process.env.PROMO_GAP ?? 500);
-const QUOTE = "不是四叶草不能用，而是用得太像";
+const QUOTE = "任何经营者都不能垄断自然界公共资源的基本表达";
+/** B 场全片最强镜头：LV 质询承认句（磁带 debate_round r3 @ t_ms≈1130562） */
+const ADMIT = "我承认没有消费者调查数据支撑";
 process.env.VITE_API_URL = API;
 
 async function dismissOnboarding(page) {
@@ -78,7 +83,7 @@ async function scrollQuoteIntoView(page) {
       if (
         node.textContent &&
         (node.textContent.includes(quote) ||
-          (node.textContent.includes("四叶草") && node.textContent.includes("用得太像")))
+          node.textContent.includes("垄断自然界公共资源"))
       ) {
         const el = node.parentElement;
         if (el) {
@@ -90,7 +95,7 @@ async function scrollQuoteIntoView(page) {
     const all = [...document.querySelectorAll("p, li, div, span")];
     for (const el of all) {
       const t = el.innerText || "";
-      if (t.includes(quote) || (t.includes("四叶草") && t.includes("用得太像"))) {
+      if (t.includes(quote) || t.includes("垄断自然界公共资源")) {
         el.scrollIntoView({ block: "center" });
         return t.slice(0, 200);
       }
@@ -104,15 +109,19 @@ async function scrollVerdictIntoView(page) {
     const all = [...document.querySelectorAll("p, li, div, span, h1, h2, h3")];
     for (const el of all) {
       const t = el.innerText || "";
-      if (t.includes("倾向支持一审") || t.includes("支持一审判决") || (t.includes("70%") && t.includes("倾向"))) {
+      if (
+        t.includes("微弱倾向茉莉奶白") ||
+        t.includes("倾向茉莉奶白") ||
+        (t.includes("55%") && t.includes("倾向"))
+      ) {
         el.scrollIntoView({ block: "center" });
         return t.slice(0, 200);
       }
     }
     for (const el of all) {
       if (
-        (el.innerText || "").includes("倾向支持一审") ||
-        (el.innerText || "").includes("支持一审判决")
+        (el.innerText || "").includes("微弱倾向茉莉奶白") ||
+        (el.innerText || "").includes("倾向茉莉奶白")
       ) {
         el.scrollIntoView({ block: "center" });
         return el.innerText.slice(0, 200);
@@ -120,6 +129,31 @@ async function scrollVerdictIntoView(page) {
     }
     return null;
   });
+}
+
+async function scrollAdmitIntoView(page) {
+  return page.evaluate((needle) => {
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walk.nextNode())) {
+      if (node.textContent && node.textContent.includes(needle)) {
+        const el = node.parentElement;
+        if (el) {
+          el.scrollIntoView({ block: "center", inline: "nearest" });
+          return el.innerText.slice(0, 240);
+        }
+      }
+    }
+    const all = [...document.querySelectorAll("p, li, div, span")];
+    for (const el of all) {
+      const t = el.innerText || "";
+      if (t.includes(needle)) {
+        el.scrollIntoView({ block: "center" });
+        return t.slice(0, 240);
+      }
+    }
+    return null;
+  }, ADMIT);
 }
 
 async function main() {
@@ -184,7 +218,9 @@ async function main() {
     });
     await composer.waitFor({ state: "visible", timeout: 20_000 });
     await dismissOnboarding(page);
-    await composer.fill(prompt || "搜索下最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论");
+    await composer.fill(
+      prompt || "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论",
+    );
     await composer.press("Enter");
 
     // wait authorize + click
@@ -198,17 +234,17 @@ async function main() {
     }
 
     let quoteDone = false;
+    let admitDone = false;
     let verdictDone = false;
     const deadline = Date.now() + 12 * 60_000;
 
-    while (Date.now() < deadline && (!quoteDone || !verdictDone)) {
+    while (Date.now() < deadline && (!quoteDone || !admitDone || !verdictDone)) {
       await ensureDebateRoom(page);
       const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
 
       if (
         !quoteDone &&
-        (body.includes("不是四叶草不能用") ||
-          (body.includes("四叶草") && body.includes("用得太像")))
+        (body.includes("垄断自然界公共资源") || body.includes("任何经营者都不能垄断"))
       ) {
         const ctx = await scrollQuoteIntoView(page);
         await page.waitForTimeout(400);
@@ -229,12 +265,34 @@ async function main() {
         console.log("SHOT 04b", ctx?.slice(0, 80));
       }
 
-      if (!verdictDone && /倾向支持一审|支持一审判决|LV 方胜出/.test(body) && /置信|70/.test(body)) {
-        // click 终审 chip if present
-        const verdictChip = page.getByRole("button", { name: /终审|裁决/ });
+      if (!admitDone && body.includes(ADMIT)) {
+        const r3 = page.getByRole("button", { name: /第\s*3\s*轮/ });
+        if (await r3.first().isVisible().catch(() => false)) {
+          await r3.first().click().catch(() => {});
+          await page.waitForTimeout(500);
+        }
+        const ctx = await scrollAdmitIntoView(page);
+        await page.waitForTimeout(400);
+        const path07 = resolve(stillsDir, "07-evidence-gap-admit.png");
+        await page.screenshot({ path: path07, type: "png" });
+        const path07b = resolve(stillsDir, "07b-admit-closeup.png");
+        await page.screenshot({ path: path07b, type: "png" });
+        report.shots.push({ id: "07-evidence-gap-admit", path: path07, ctx });
+        report.shots.push({ id: "07b-admit-closeup", path: path07b, ctx });
+        admitDone = true;
+        console.log("SHOT 07/07b", ctx?.slice(0, 100));
+      }
+
+      if (
+        !verdictDone &&
+        /微弱倾向茉莉奶白|倾向茉莉奶白/.test(body) &&
+        /置信|55|定夺|符号独占/.test(body)
+      ) {
+        // click 结辩 / 终审 chip if present (B-field UI uses 结辩)
+        const verdictChip = page.getByRole("button", { name: /结辩|终审|裁决|决策简报/ });
         if (await verdictChip.first().isVisible().catch(() => false)) {
           await verdictChip.first().click().catch(() => {});
-          await page.waitForTimeout(600);
+          await page.waitForTimeout(800);
         }
         const ctx = await scrollVerdictIntoView(page);
         await page.waitForTimeout(400);
@@ -248,8 +306,10 @@ async function main() {
       await page.waitForTimeout(500);
     }
 
-    report.ok = quoteDone && verdictDone;
-    report.notes.push(`quoteDone=${quoteDone} verdictDone=${verdictDone}`);
+    report.ok = quoteDone && admitDone && verdictDone;
+    report.notes.push(
+      `quoteDone=${quoteDone} admitDone=${admitDone} verdictDone=${verdictDone}`,
+    );
 
     // patch MANIFEST notes
     try {
@@ -258,7 +318,7 @@ async function main() {
       man.fixup = report;
       man.notes = man.notes || [];
       man.notes.push(
-        `fixup ${new Date().toISOString()}: quote=${quoteDone} verdict=${verdictDone}`,
+        `fixup ${new Date().toISOString()}: quote=${quoteDone} admit=${admitDone} verdict=${verdictDone}`,
       );
       await writeFile(manPath, JSON.stringify(man, null, 2), "utf8");
     } catch (e) {

@@ -260,6 +260,37 @@ def test_circuit_breaker_tally_survives_nudge_window_clear():
     assert cb.disabled == ("t",)
 
 
+def test_circuit_breaker_parse_failures_get_typed_warn_message():
+    """Parse failures still trip warn@2, but must not say「换不同的输入」."""
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    parse = ToolAttempt("a", "delegate", success=False, parse_failure=True)
+    c.record([parse])
+    assert not c.tool_circuit_breaker()
+    c.record([ToolAttempt("b", "delegate", success=False, parse_failure=True)])
+    cb = c.tool_circuit_breaker()
+    assert cb.warned == ("delegate",)
+    assert "delegate" in cb.parse_only
+    msg = cb.message() or ""
+    assert "不是合法 JSON" in msg or "原样重发" in msg
+    assert "换不同的输入" not in msg
+    # Threshold behaviour unchanged: one more parse failure still disables.
+    c.record([ToolAttempt("c", "delegate", success=False, parse_failure=True)])
+    cb2 = c.tool_circuit_breaker()
+    assert cb2.disabled == ("delegate",)
+    assert c.tool_failure_count("delegate") == 3
+
+
+def test_circuit_breaker_mixed_failures_keep_generic_warn():
+    """If any non-parse failure contributed, keep the generic「换不同的输入」steer."""
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    c.record([ToolAttempt("a", "delegate", success=False, parse_failure=True)])
+    c.record([ToolAttempt("b", "delegate", success=False, parse_failure=False)])
+    cb = c.tool_circuit_breaker()
+    assert cb.warned == ("delegate",)
+    assert "delegate" not in cb.parse_only
+    assert "换不同的输入" in (cb.message() or "")
+
+
 # --- B2: no-output early stop (unproductive rounds) ---
 
 

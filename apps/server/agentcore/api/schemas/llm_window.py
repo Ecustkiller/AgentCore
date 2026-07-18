@@ -22,6 +22,10 @@ class LlmWindowMessageLine(BaseModel):
     tool_calls: list[LlmWindowToolCall] | None = None
     tool_call_id: str | None = None
     reasoning_content: str | None = None
+    # Diagnostic merge tag: ``context_blocks`` = opening user was rendered from the
+    # structured ``run_context`` ContextBlock list (UI substitutes those segments and
+    # offers「查看原始拼接」for this full ``content``). Absent / null for other messages.
+    origin: str | None = None
 
 
 class RunLlmWindowResponse(BaseModel):

@@ -420,9 +420,10 @@ def delivery_status(
     already has — worker ``files_touched``, contract / handoff gaps (含 degraded 交接、
     artifacts 对账缺口、completion_criteria 未满足), and derived user actions (如云端无
     执行环境 → ``bind_local_folder``). ``state`` ∈ delivered / partial / blocked.
-    ``gaps`` items are ``{role, description}``; ``actions`` items are
-    ``{kind, description}`` (kind 当前含 ``bind_local_folder``，前端未知 kind 按普通提示
-    渲染). DURABLE：落 journal；folds 同 ``execution_id`` 保最新，交付状态卡刷新后重建。
+    ``gaps`` items are ``{role, description}`` plus optional ``reason``
+    （``token_budget`` / ``worker_timeout`` / ``degraded_handoff``）；``actions`` items
+    are ``{kind, description}`` (kind 当前含 ``bind_local_folder``，前端未知 kind 按普通
+    提示渲染). DURABLE：落 journal；folds 同 ``execution_id`` 保最新，交付状态卡刷新后重建。
     Must NOT ride ``content_delta``（终稿正文与交付对账分离——终稿纪律的结构化搭档）。
     """
     return SSEEvent(

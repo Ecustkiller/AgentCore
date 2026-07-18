@@ -148,6 +148,8 @@
         "site": "a.example"
       }
     ],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [],
     "runs": [],
     "progress": {

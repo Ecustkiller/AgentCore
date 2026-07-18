@@ -56,6 +56,78 @@ _UPSTREAM_HINTS = re.compile(
 logger = get_logger(__name__)
 
 
+def _nonempty_str(value: Any) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _is_complete_task(item: Any) -> bool:
+    """A real task node: object with both role and task (the delegate schema required pair)."""
+    if not isinstance(item, dict):
+        return False
+    return bool(_nonempty_str(item.get("role")) and _nonempty_str(item.get("task")))
+
+
+def _is_pure_stub(item: dict[str, Any]) -> bool:
+    """Metadata-only row (id / depends_on / …) with neither role nor task."""
+    return not _nonempty_str(item.get("role")) and not _nonempty_str(item.get("task"))
+
+
+def _merge_task_fragments(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """Merge two adjacent fragments the model split across array slots (id 行 + task 行)."""
+    merged = dict(left)
+    for key, value in right.items():
+        if value is None or value == "":
+            continue
+        # Keep left's id / role / task when already set; fill only the missing halves.
+        if key in ("id", "role", "task") and _nonempty_str(merged.get(key)):
+            continue
+        merged[key] = value
+    return merged
+
+
+def coalesce_split_tasks(tasks_raw: list[Any]) -> list[dict[str, Any]]:
+    """Collapse model-emitted split rows into real task nodes before counting / planning.
+
+    Some models put DAG ``id`` (or role-only / task-only halves) in a separate ``tasks[]``
+    element from the ``role``+``task`` payload. That inflates ``len(tasks)`` past the
+    single-call cap even when the intended node count is within budget (trace
+    2f52c042: 10 intended → counted as 15). Merge only:
+    - adjacent incompletes that together supply role+task; or
+    - a pure id/metadata stub immediately before a complete task.
+    A role-only hole between two complete tasks is NOT folded away — validation must
+    still reject it. Non-dict slots are dropped (they cannot become nodes).
+    """
+    out: list[dict[str, Any]] = []
+    i = 0
+    n = len(tasks_raw)
+    while i < n:
+        cur = tasks_raw[i]
+        if not isinstance(cur, dict):
+            i += 1
+            continue
+        if _is_complete_task(cur):
+            out.append(dict(cur))
+            i += 1
+            continue
+        nxt = tasks_raw[i + 1] if i + 1 < n else None
+        # role-only + task-only (or id+role + task) → one node.
+        if isinstance(nxt, dict) and not _is_complete_task(nxt):
+            merged = _merge_task_fragments(cur, nxt)
+            if _is_complete_task(merged):
+                out.append(merged)
+                i += 2
+                continue
+        # Pure id stub right before a complete task → fold id/depends_on in.
+        if isinstance(nxt, dict) and _is_complete_task(nxt) and _is_pure_stub(cur):
+            out.append(_merge_task_fragments(cur, nxt))
+            i += 2
+            continue
+        # Keep the incomplete row so later validation can report a precise field error.
+        out.append(dict(cur))
+        i += 1
+    return out
+
+
 def build_run_plan(
     tasks_raw: list[dict[str, Any]],
     *,
@@ -82,6 +154,10 @@ def build_run_plan(
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
+    # Count / plan against real task nodes (coalesce id/task 拆行), not raw array length.
+    tasks_raw = coalesce_split_tasks(list(tasks_raw))
+    if not tasks_raw:
+        return RunPlan(), ["'tasks' array is required and cannot be empty"]
     for item in tasks_raw:
         deps = item.get("depends_on")
         if deps is not None:
@@ -101,6 +177,9 @@ def build_run_plan(
     # partial).
     if not errors:
         _apply_sibling_summaries(plan)
+        from agentcore.runtime.runs.retrieval_budget import apply_retrieval_budgets
+
+        apply_retrieval_budgets(plan, valid_tools=valid_tools)
     return plan, errors
 
 
@@ -130,6 +209,9 @@ def build_added_nodes(
     - role/task are required (like a DAG node); an unknown ``depends_on`` ref, a dup id,
       an over-cap batch, or a cycle introduced among the new nodes is a rejected error.
     """
+    if not adds:
+        return [], []
+    adds = coalesce_split_tasks(list(adds))
     if not adds:
         return [], []
     if len(adds) > max_tasks:
@@ -211,6 +293,9 @@ def build_added_nodes(
         RunPlan(nodes=[*plan.nodes, *specs], origin=plan.origin).waves()
     except RunPlanError as e:
         return [], [f"add 拓扑无效：{e}"]
+    from agentcore.runtime.runs.retrieval_budget import apply_retrieval_budgets_to_specs
+
+    apply_retrieval_budgets_to_specs(specs, valid_tools=valid_tools)
     return specs, []
 
 
@@ -369,7 +454,12 @@ def _inline_spec(
         objective=item.get("objective", "") or "",
         system_prompt_supplement=item.get("system_prompt_supplement") or None,
         research_then_draft=bool(item.get("research_then_draft")),
-        source_grounding_check=bool(item.get("source_grounding_check")),
+        evidence_ledger_check=bool(item.get("evidence_ledger_check")),
+        side_key=(
+            item["side_key"].strip()
+            if isinstance(item.get("side_key"), str)
+            else ""
+        ),
         draft_brief=(
             item["draft_brief"].strip()
             if isinstance(item.get("draft_brief"), str)
@@ -411,6 +501,7 @@ def _inline_spec(
         can_delegate=_parse_can_delegate(item.get("can_delegate")),
         replaces_run_id=_parse_replaces_run_id(item.get("replaces_run_id")),
         continue_from_run_id=_parse_continue_from_run_id(item.get("continue_from_run_id")),
+        retrieval_budget=_parse_retrieval_budget(item.get("retrieval_budget")),
         policy=policy,
     )
 
@@ -429,6 +520,13 @@ def _parse_continue_from_run_id(raw: Any) -> str | None:
         return None
     cleaned = raw.strip()
     return cleaned or None
+
+
+def _parse_retrieval_budget(raw: Any) -> int | None:
+    """Normalise optional CEO-explicit ``retrieval_budget``; None → structured default."""
+    from agentcore.runtime.runs.retrieval_budget import parse_retrieval_budget
+
+    return parse_retrieval_budget(raw)
 
 
 def _parse_can_delegate(raw: Any) -> bool:

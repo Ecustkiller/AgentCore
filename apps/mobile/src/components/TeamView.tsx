@@ -14,6 +14,7 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/api/interaction";
+import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
 import {
@@ -22,10 +23,12 @@ import {
   toolLabel,
   toolPhaseText,
 } from "@/components/assistantLabels";
+import { buildLedgerMap } from "@/lib/evidenceLedger";
 import type { RunToolCall } from "@/protocol/fold";
 import type {
   ContextBlockWire,
   DeliveryStatusPayload,
+  EvidenceLedgerEntry,
 } from "@agentcore/contract-types";
 import type {
   ProjectedAgent,
@@ -36,7 +39,7 @@ import type {
   RunStatus,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 type CheckpointDecision = NonNullable<ProjectedRun["checkpoint"]>["decision"];
 
@@ -132,6 +135,7 @@ export function TeamView({
   escalationsInteractive: _escalationsInteractive = false,
   runToolCalls,
   workerToolPhases,
+  evidenceLedger = [],
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -156,12 +160,18 @@ export function TeamView({
   /** Worker `tool_use_progress` (run_id): runId → live EXECUTION phase + tool name (transport-only
    *  sibling {@link import("@/protocol/fold").extractWorkerToolPhases}). */
   workerToolPhases?: Map<string, { phase: string; toolName: string }>;
+  /** 场级证据台账（`extractEvidenceLedger`）：辩论发言徽章 `#eN` 解析（O7）。 */
+  evidenceLedger?: EvidenceLedgerEntry[];
 }) {
   // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
   // list is the same ProjectedTurn slice whether live or replayed.
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const workers = runs.filter((r) => r.kind !== "captain");
+  const ledgerMap = useMemo(
+    () => (evidenceLedger.length ? buildLedgerMap(evidenceLedger) : null),
+    [evidenceLedger],
+  );
   if (workers.length === 0) return null;
   const selectedRun = selectedRunId
     ? (runs.find((r) => r.id === selectedRunId) ?? null)
@@ -188,6 +198,7 @@ export function TeamView({
   };
 
   return (
+    <EvidenceLedgerProvider ledger={ledgerMap}>
     <div className="team">
       <div className="team-head">
         <span className="team-count">
@@ -244,32 +255,51 @@ export function TeamView({
         />
       )}
     </div>
+    </EvidenceLedgerProvider>
   );
 }
 
-/** 交付状态区块（partial / blocked）：状态徽 + 一行 summary + 缺口清单 + 待操作提示。 */
+/** 完成条件区块（批次验收 / completion_criteria；partial / blocked）：
+ *  与 finish_guard「引用/格式核验后已重写」chip 分流——此处是完成条件未满足、团队可能重派。 */
 function DeliverySection({ status }: { status: DeliveryStatusPayload }) {
   const blocked = status.state === "blocked";
   return (
     <div className="delivery">
       <div className="delivery-head">
+        <span className="delivery-title">完成条件</span>
         <span
           className={`delivery-state ${blocked ? "is-blocked" : "is-partial"}`}
         >
-          {blocked ? "未交付" : "部分交付"}
+          {blocked ? "未满足" : "部分未满足"}
         </span>
         <span className="delivery-summary">{status.summary}</span>
+        <span className="delivery-hint">团队可能重派</span>
       </div>
-      {(status.gaps ?? []).map((gap, i) => (
-        <div
-          // biome-ignore lint/suspicious/noArrayIndexKey: 对账快照整体替换（同 execution_id 保最新），行不重排
-          key={`gap-${i}`}
-          className="delivery-row"
-        >
-          <span className="delivery-role">{gap.role}</span>
-          <span className="delivery-desc">{gap.description}</span>
-        </div>
-      ))}
+      {(status.gaps ?? []).map((gap, i) => {
+        const reasonLabel =
+          gap.reason === "token_budget"
+            ? "预算触顶"
+            : gap.reason === "worker_timeout"
+              ? "运行超时"
+              : gap.reason === "degraded_handoff"
+                ? "降级交接"
+                : null;
+        return (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: 对账快照整体替换（同 execution_id 保最新），行不重排
+            key={`gap-${i}`}
+            className="delivery-row"
+          >
+            <span className="delivery-role">{gap.role}</span>
+            <span className="delivery-desc">
+              {reasonLabel ? (
+                <span className="delivery-reason">{reasonLabel} </span>
+              ) : null}
+              {gap.description}
+            </span>
+          </div>
+        );
+      })}
       {(status.actions ?? []).map((action, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: 同上，快照整体替换

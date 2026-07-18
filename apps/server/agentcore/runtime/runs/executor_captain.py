@@ -22,6 +22,7 @@ from agentcore.runtime.events import (
     run_started,
     tool_progress,
 )
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.executor_context import (
     _build_captain_context_blocks,
@@ -50,6 +51,7 @@ def build_captain_executor(
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None = None,
     supports_tools: bool | None = None,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
 ) -> Callable[[RunSpec], Awaitable[RunState]]:
     """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
 
@@ -94,6 +96,7 @@ def build_captain_executor(
             citation_sink=citation_sink,
             approval_gate=approval_gate,
             supports_tools=supports_tools,
+            turn_evidence_ledger=turn_evidence_ledger,
         )
 
     return execute
@@ -111,6 +114,7 @@ def build_captain_resumer(
     approval_gate: ApprovalGate | None = None,
     supports_tools: bool | None = None,
     controller_seed: dict | None = None,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
 ) -> Callable[[RunSpec, list[LLMMessage]], Awaitable[RunState]]:
     """Build the captain executor for a RESUMED turn (结构化挂起 2b).
 
@@ -145,6 +149,7 @@ def build_captain_resumer(
             approval_gate=approval_gate,
             supports_tools=supports_tools,
             controller_seed=controller_seed,
+            turn_evidence_ledger=turn_evidence_ledger,
         )
 
     return execute
@@ -165,6 +170,7 @@ async def _drive_captain_loop(
     approval_gate: ApprovalGate | None,
     supports_tools: bool | None = None,
     controller_seed: dict | None = None,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
 ) -> RunState:
     """Run the CEO captain ReAct loop over ``messages`` and fold it into a RunState.
 
@@ -218,6 +224,8 @@ async def _drive_captain_loop(
                 on_tool_progress=lambda tool, chars: sink.emit(tool_progress(tool, chars)),
                 citation_sink=citation_sink,
                 annotate_citations=True,
+                turn_evidence_ledger=turn_evidence_ledger,
+                ledger_registrant="ceo",
                 approval_gate=approval_gate,
                 usage_sink=inflight,
                 finish_override_sink=finish_override,

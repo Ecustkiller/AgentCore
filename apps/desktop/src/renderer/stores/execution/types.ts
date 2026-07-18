@@ -5,6 +5,7 @@ import type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  EvidenceLedgerEntry,
   PlanRevisionKind,
   ProcessStep,
   RunDebrief,
@@ -178,7 +179,7 @@ export interface AgentState {
    * the tool ends. Drives the node/detail honest waiting line (Queued/Searching/…). */
   toolExecutionLive: { toolName: string; phase: string } | null;
   /** 交付前核验回炉：本 worker 曾发过 reason=finish_guard 的 `run_output_reset`
-   * （节点轻 chip「已按交付规范重写」）。retry / narration 等 reset 不置位。 */
+   * （节点轻 chip「引用/格式核验后已重写」）。retry / narration 等 reset 不置位。 */
   didRework?: boolean;
 }
 
@@ -411,6 +412,10 @@ export interface Execution {
   /** 主持人开场白（`debate_round_started.opening`）：仅首轮携带；sticky 取第一个非空。
    * 收场 {@link debate}.opening 仍是权威。缺字段 / 老 journal → null。 */
   debateOpening: string | null;
+  /** 场级证据台账（`debate_round.evidence_ledger_delta` 累积 / `debate_result.evidence_ledger`
+   * 权威覆盖）：辩论徽章 `#eN` 溯源。桌面 UI 态——不进 conformance ProjectedTurn（oracle 经
+   * `debate.evidence_ledger` 承载收场权威；live delta 同路径累积）。非辩论 / 旧 fixture 可缺省。 */
+  evidenceLedger?: EvidenceLedgerEntry[];
   /** 团队便签墙 (§2.2 通): the notes workers broadcast to their concurrent siblings this turn
    * (`team_note_posted`), in post order, deduped by noteId — folded from the frame stream by
    * {@link projectExecution}. Journaled, so it replays on reload (hydrateFromJournal). Empty for

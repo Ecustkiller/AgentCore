@@ -117,8 +117,10 @@ class DebateTool:
         # 每个 side 的可续写 session（跨轮带记忆）：首轮执行后留人，后续轮 continue_run 取用。
         self._debater_sessions: dict[str, RunSession] = {}
         from agentcore.runtime.costing import WorkerResultAccumulator
+        from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 
         self._acc = WorkerResultAccumulator()
+        self._evidence_ledger = EvidenceLedger()
 
     def _kickoff_system_prompt(self) -> str:
         return self._system_prompt
@@ -277,6 +279,14 @@ class DebateTool:
         return None
 
     async def _run_moderator(self, config: DebateConfig, usage_metadata) -> ToolResult:
+        # 底料预登记：【已核实·出处】→ 台账条目 + 改写为 #eN（咬合点 1）
+        from agentcore.runtime.debate.evidence_ledger import preregister_background
+
+        if (config.background or "").strip():
+            config.background = preregister_background(
+                self._evidence_ledger, config.background
+            )
+
         execution_id = self._base_tool_context.execution_id or new_id()
         moderator_run_id = f"debate_{new_id()}"
         moderator_model = self._profile_set.model_for(
@@ -328,11 +338,13 @@ class DebateTool:
             )
 
         async def _emit_round(rr: RoundResult) -> None:
+            payload = rr.to_event_payload()
+            payload["evidence_ledger_delta"] = self._evidence_ledger.drain_delta()
             self._sink.emit(
                 debate_round(
                     execution_id=execution_id,
                     moderator_run_id=moderator_run_id,
-                    payload=rr.to_event_payload(),
+                    payload=payload,
                 )
             )
 
@@ -379,11 +391,13 @@ class DebateTool:
 
         duration_ms = int((time.monotonic() - started_at) * 1000)
         account_moderator(self, moderator, moderator_run_id, moderator_model, result, duration_ms)
+        result_payload = result.to_event_payload()
+        result_payload["evidence_ledger"] = self._evidence_ledger.all_entries()
         self._sink.emit(
             debate_result(
                 execution_id=execution_id,
                 moderator_run_id=moderator_run_id,
-                payload=result.to_event_payload(),
+                payload=result_payload,
             )
         )
         logger.info("debate.done", rounds=len(result.rounds), stop=result.stop_reason)

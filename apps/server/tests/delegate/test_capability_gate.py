@@ -1,5 +1,6 @@
-"""委派前能力闸（能力闸门与交付诚实性）：显式 code_verified × 无执行环境 硬拒；
-任务文案启发（运行 / 生成二进制、可播放产物）仅软警告不拦截。
+"""委派前能力闸（能力闸门与交付诚实性）：resolved code_verified × 无执行环境 硬拒——
+显式声明与结构化 form/artifacts 共用 ``resolve_completion_criteria`` 同一谓词（闸门与收尾
+验收对齐；B1 后文案不再绑定 code_verified）。运行 / 二进制文案启发只软警告不拦截。
 
 能力判定复用 ``code_execution_enabled_for`` 单一真相源（与 worker registry 同一谓词）：
 云端 location=server 且未开 gVisor / 云执行逃生口 ⇒ 执行类不可用；local ⇒ 可用。
@@ -19,7 +20,6 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs import build_run_plan
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.registry import ToolRegistry
-
 from tests.delegate.conftest import LocalBackend, Provider, ctx, local_ctx, tool
 
 
@@ -61,10 +61,44 @@ def test_hard_gate_passes_on_local():
     assert msg is None
 
 
-def test_hard_gate_ignores_task_heuristics():
-    # 仅任务文案像「要运行」而没有显式 code_verified → 硬闸不触发（分级：启发只软警告）。
+def test_hard_gate_no_longer_binds_run_text_without_explicit_criteria():
+    # B1：任务文案像「要运行」但未显式声明 → resolve 不绑定 code_verified，硬闸静默。
     backend = ctx().backend
     plan = _plan("运行 python 脚本生成 course.pptx 并跑通")
+    assert validate_execution_capability(None, plan, backend) is None
+
+
+def test_hard_gate_run_text_passes_on_local():
+    plan = _plan("运行 python 脚本生成 course.pptx 并跑通")
+    assert validate_execution_capability(None, plan, LocalBackend()) is None
+
+
+def test_hard_gate_explicit_other_criteria_beats_inference():
+    # 显式 files_written → 硬闸不触发，走软警告。
+    backend = ctx().backend
+    plan = _plan("运行 python 脚本生成 course.pptx 并跑通")
+    assert validate_execution_capability("files_written", plan, backend) is None
+
+
+def test_hard_gate_form_files_beats_run_open_text_on_cloud():
+    # form=files 结构化信号 → resolve=files_written，硬闸不触发。
+    from agentcore.runtime.runs import build_run_plan
+
+    backend = ctx().backend
+    plan, errors = build_run_plan(
+        [
+            {
+                "role": "前端",
+                "task": "写静态宣传官网，完成后打开页面看效果",
+                "deliverable": {"form": "files"},
+            }
+        ],
+        valid_tools=set(),
+        id_prefix="cap",
+        parent_run_id="CEO",
+        depth=1,
+    )
+    assert not errors
     assert validate_execution_capability(None, plan, backend) is None
 
 
@@ -72,6 +106,8 @@ def test_hard_gate_passes_other_criteria_on_cloud():
     backend = ctx().backend
     assert validate_execution_capability("files_written", _plan(), backend) is None
     assert validate_execution_capability("custom", _plan(), backend) is None
+    # 无显式契约 → resolve 不出 code_verified，闸门静默。
+    assert validate_execution_capability(None, _plan(), backend) is None
 
 
 # ── 函数级：软警告 ───────────────────────────────────────────────────────────
@@ -87,11 +123,22 @@ def test_soft_warning_on_cloud_binary_artifact_task():
     assert "bind_local_folder" in warn
 
 
-def test_soft_warning_on_cloud_execution_hint_task():
+def test_soft_warning_on_run_text_without_explicit_criteria():
+    # B1：运行类文案 + 无显式契约 → 不再硬闸，改走软警告。
     backend = ctx().backend
     plan = _plan("启动开发服务器并跑通冒烟测试")
     warn = execution_capability_warning(None, plan, backend)
     assert warn is not None
+    assert warn.startswith("[能力提示]")
+
+
+def test_soft_warning_on_explicit_files_written_with_run_text():
+    # 显式 files_written（硬闸不触发），运行文案仍值得提醒交付诚实 → 软警告。
+    backend = ctx().backend
+    plan = _plan("启动开发服务器并跑通冒烟测试")
+    warn = execution_capability_warning("files_written", plan, backend)
+    assert warn is not None
+    assert warn.startswith("[能力提示]")
 
 
 def test_soft_warning_silent_on_local():
@@ -128,6 +175,46 @@ async def test_execute_rejects_code_verified_on_cloud():
     assert result.success is False
     assert "bind_local_folder" in (result.error or "")
     assert "files_written" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_soft_warns_inferred_run_text_on_cloud():
+    # B1：云端派「运行 demo.py」且未显式声明 → 放行 + 软警告 + 验收回显「未启用」。
+    t = tool(Provider(["X"]))
+    result = await t.execute(
+        {
+            "tasks": [{"role": "Python 运行员", "task": "运行工作区的 demo.py 并贴出输出"}],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert "[能力提示]" in result.output
+    assert "本批验收：未启用" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_echoes_explicit_acceptance():
+    t = DelegateTool(
+        llm=Provider(["X"]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=local_ctx(),
+        autonomy_policy=AutonomyPolicy.FULL_AUTO,
+    )
+    result = await t.execute(
+        {
+            "tasks": [{"role": "工程师", "task": "修好构建脚本"}],
+            "completion_criteria": "code_verified",
+            "coordinate": False,
+        },
+        local_ctx(),
+    )
+    assert result.success is True
+    assert "本批验收：code_verified（显式声明）" in result.output
 
 
 @pytest.mark.asyncio
@@ -170,3 +257,43 @@ async def test_execute_soft_warns_on_cloud_binary_artifact_task():
     )
     assert result.success is True
     assert "[能力提示]" in result.output
+    assert "本批验收：" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_hoists_task_nested_completion_criteria():
+    # task 内层 files_written 提升后按显式 files_written 放行（软警告可有）。
+    t = tool(Provider(["X"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {
+                    "role": "前端",
+                    "task": "写 index.html，打开浏览器验收",
+                    "completion_criteria": "files_written",
+                }
+            ],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert "无法按 code_verified 验收" not in (result.error or "")
+    assert "本批验收：files_written（显式声明）" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_conflicting_task_completion_criteria():
+    t = tool(Provider(["X"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {"role": "A", "task": "写文件", "completion_criteria": "files_written"},
+                {"role": "B", "task": "跑测试", "completion_criteria": "code_verified"},
+            ],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is False
+    assert "冲突" in (result.error or "")

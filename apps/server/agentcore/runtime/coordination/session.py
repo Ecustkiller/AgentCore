@@ -31,6 +31,9 @@ def coordination_budget_for_batch(node_count: int) -> int:
 # Default per-worker wall-clock before a timeout *notification* (CEO decides; no auto-cancel).
 # Overridden by plan node ``timeout_ms`` → ``RunPolicy.timeout_s`` when present.
 DEFAULT_WORKER_TIMEOUT_S = 120.0
+# Fraction of threshold at which the worker gets a wind-down warn (handoff-in-1-round)
+# before the CEO-facing TIMEOUT notification. Overridden by engine settings at arm time.
+DEFAULT_TIMEOUT_WARN_RATIO = 0.75
 
 # Registry keyed by root-turn ``execution_id`` (captain + all workers share one id).
 # Module-level dict — not a ContextVar holding the session — because ``execute_tools``
@@ -190,6 +193,9 @@ class CoordinationSession:
     _worker_started_at: dict[str, float] = field(default_factory=dict, repr=False)
     _timeout_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict, repr=False)
     _timeout_notified: set[str] = field(default_factory=set, repr=False)
+    # B·超时预警：先于 CEO TIMEOUT 通知，供 worker react_loop 消费进入收尾窗口。
+    _timeout_warned: set[str] = field(default_factory=set, repr=False)
+    _timeout_wind_down_pending: set[str] = field(default_factory=set, repr=False)
     # Dedupe escalation injections (live escalate + completion harvest + SCOPE boundary).
     _escalation_keys: set[str] = field(default_factory=set, repr=False)
     # D1: blocking escalate → CEO arbitration. run_id → live bridge metadata.
@@ -288,7 +294,12 @@ class CoordinationSession:
         role: str = "",
         timeout_s: float | int | None = None,
     ) -> None:
-        """Start a notify-only timer for ``run_id``. Idempotent per run_id."""
+        """Start a notify-only timer for ``run_id``. Idempotent per run_id.
+
+        Two-phase (B·掐断前收尾窗口): at ``threshold × warn_ratio`` mark the worker
+        for wind-down (``consume_timeout_wind_down``); at full ``threshold`` post the
+        CEO-facing TIMEOUT event. Never auto-cancels.
+        """
         if not self.active or run_id in self.completed_run_ids:
             return
         if run_id in self._timeout_tasks and not self._timeout_tasks[run_id].done():
@@ -298,14 +309,50 @@ class CoordinationSession:
             if timeout_s and float(timeout_s) > 0
             else DEFAULT_WORKER_TIMEOUT_S
         )
+        try:
+            from agentcore.config import settings
+
+            warn_ratio = float(settings.engine_worker_timeout_warn_ratio or 0.0)
+        except Exception:  # noqa: BLE001 — settings optional in unit stubs
+            warn_ratio = DEFAULT_TIMEOUT_WARN_RATIO
         self._worker_started_at[run_id] = time.monotonic()
         self._timeout_notified.discard(run_id)
+        self._timeout_warned.discard(run_id)
+        self._timeout_wind_down_pending.discard(run_id)
 
         async def _fire() -> None:
-            try:
-                await asyncio.sleep(threshold)
-            except asyncio.CancelledError:
-                return
+            warn_at = (
+                threshold * warn_ratio if 0.0 < warn_ratio < 1.0 else 0.0
+            )
+            if warn_at > 0.0:
+                try:
+                    await asyncio.sleep(warn_at)
+                except asyncio.CancelledError:
+                    return
+                if not self.active or run_id in self.completed_run_ids:
+                    return
+                if run_id not in self._timeout_warned:
+                    self._timeout_warned.add(run_id)
+                    self._timeout_wind_down_pending.add(run_id)
+                    logger.info(
+                        "coordination.worker_timeout_warn",
+                        run_id=run_id,
+                        elapsed_s=round(warn_at, 1),
+                        threshold_s=threshold,
+                        warn_ratio=warn_ratio,
+                        execution_id=self.execution_id,
+                    )
+                remaining = max(0.0, threshold - warn_at)
+                if remaining > 0.0:
+                    try:
+                        await asyncio.sleep(remaining)
+                    except asyncio.CancelledError:
+                        return
+            else:
+                try:
+                    await asyncio.sleep(threshold)
+                except asyncio.CancelledError:
+                    return
             if not self.active or run_id in self.completed_run_ids:
                 return
             if run_id in self._timeout_notified:
@@ -343,6 +390,17 @@ class CoordinationSession:
         self._timeout_tasks[run_id] = asyncio.create_task(
             _fire(), name=f"coord-timeout-{run_id[:12]}"
         )
+
+    def consume_timeout_wind_down(self, run_id: str) -> bool:
+        """True once when a timeout warn is pending for ``run_id`` (worker loop arms wind-down)."""
+        if run_id in self._timeout_wind_down_pending:
+            self._timeout_wind_down_pending.discard(run_id)
+            return True
+        return False
+
+    def was_timeout_notified(self, run_id: str) -> bool:
+        """Whether the CEO-facing TIMEOUT notification already fired for ``run_id``."""
+        return run_id in self._timeout_notified
 
     def disarm_worker_timeout(self, run_id: str) -> None:
         task = self._timeout_tasks.pop(run_id, None)

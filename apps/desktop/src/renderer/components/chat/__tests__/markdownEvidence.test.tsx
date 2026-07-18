@@ -1,27 +1,24 @@
 // @vitest-environment jsdom
 
+import { EvidenceLedgerProvider } from "@/components/chat/EvidenceLedgerContext";
 import { Markdown } from "@/components/chat/Markdown";
+import { buildLedgerMap } from "@/lib/evidenceLedger";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 /**
- * 10 P3-4: end-to-end guard for the evidence-badge seam (举证责任 P3). The chip only
- * appears if a whole chain holds: remarkEvidence rewrites `【已核实·出处】` into an
+ * 10 P3-4: end-to-end guard for the evidence-badge seam (举证责任 P3 + 证据台账 M1).
+ * The chip only appears if a whole chain holds: remarkEvidence rewrites markers into an
  * `evidencemark` node → react-markdown maps that custom element to {@link EvidenceBadge}
- * → the node's `data.hProperties.dataKind` survives react-markdown's property pass as a
- * `data-kind` prop. That last hop is a third-party conversion detail that a react-markdown
- * bump could silently break — dropping every claim to the "待核实" (unverified) rendering
- * with no unit failure. The mdast-level tests (remarkEvidence.test.ts) can't see it; this
- * renders the real component and asserts the verified/unverified split reaches the DOM.
+ * → the node's `data.hProperties.dataKind` survives as `data-kind`. Ledger-resolved `#eN`
+ * badges become clickable; unresolved / legacy free-text stay plain.
  */
 describe("Markdown evidence badges (render seam)", () => {
   it("renders 【已核实·出处】 as a verified badge carrying the source", () => {
     render(<Markdown content="降本【已核实·2024报表】约 18%" evidence />);
-    // The source note + verified tone only appear when data-kind arrived as "verified".
     const verified = screen.getByTitle(/有据可查/);
     expect(verified.textContent).toContain("已核实");
     expect(verified.textContent).toContain("2024报表");
-    // No unverified badge should exist for a purely-verified claim.
     expect(screen.queryByTitle(/暂无出处/)).toBeNull();
   });
 
@@ -42,5 +39,42 @@ describe("Markdown evidence badges (render seam)", () => {
     render(<Markdown content="降本【已核实·2024报表】约 18%" />);
     expect(screen.queryByTitle(/有据可查/)).toBeNull();
     expect(screen.getByText(/【已核实·2024报表】/)).toBeTruthy();
+  });
+
+  it("resolves #eN badge label from ledger context", () => {
+    const ledger = buildLedgerMap([
+      {
+        id: "#e3",
+        url: "https://court.gov.cn/x",
+        title: "判决书",
+        site: "court.gov.cn",
+        date: "2024-01-01",
+        tier: "official",
+        side_key: "pro",
+      },
+    ]);
+    render(
+      <EvidenceLedgerProvider ledger={ledger}>
+        <Markdown content="降本【已核实·#e3】约 18%" evidence />
+      </EvidenceLedgerProvider>,
+    );
+    const verified = screen.getByRole("button", {
+      name: /已核实 · court.gov.cn/,
+    });
+    expect(verified.textContent).toContain("court.gov.cn");
+    expect(verified.textContent).not.toContain("#e3");
+  });
+
+  it("falls back to plain text badge when #eN is unresolved", () => {
+    render(<Markdown content="降本【已核实·#e99】约 18%" evidence />);
+    const verified = screen.getByTitle(/有据可查/);
+    expect(verified.textContent).toContain("#e99");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("leaves legacy free-text markers as non-interactive badges", () => {
+    render(<Markdown content="降本【已核实·2024报表】约 18%" evidence />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByTitle(/有据可查/).textContent).toContain("2024报表");
   });
 });

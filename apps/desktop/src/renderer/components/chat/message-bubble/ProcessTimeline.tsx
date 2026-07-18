@@ -19,7 +19,11 @@ import type {
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { ExecutionJournal } from "@/stores/execution";
 import { renderTimelineInteractionCard } from "@/stores/interactions/registryUi";
-import type { Citation, ProcessStep } from "@/types/events";
+import type {
+  Citation,
+  ProcessStep,
+  TurnEvidenceLedgerEntry,
+} from "@/types/events";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment } from "react";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";
@@ -98,6 +102,8 @@ function ProcessRow({
   streaming,
   citations,
   citationToDisplay,
+  knownLedgerIds,
+  evidenceLedger,
   turnKey,
   rowKey,
 }: {
@@ -105,6 +111,8 @@ function ProcessRow({
   streaming: boolean;
   citations: Citation[];
   citationToDisplay?: ReadonlyMap<number, number>;
+  knownLedgerIds?: ReadonlySet<string> | null;
+  evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   /** 回合作用域（= messageId）：给了才持久化本行的折叠态；缺省走会话态。 */
   turnKey?: string;
   /** 本行的稳定标识（{@link timelineNodeKeys}）——标记中段插入不再位移它。 */
@@ -125,6 +133,8 @@ function ProcessRow({
         content={step.text}
         citations={citations}
         citationToDisplay={citationToDisplay}
+        knownLedgerIds={knownLedgerIds}
+        evidenceLedger={evidenceLedger}
         isStreaming={streaming}
       />
     );
@@ -132,7 +142,7 @@ function ProcessRow({
   if (step.kind === "rework") {
     return (
       <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-        已按交付规范重写
+        引用/格式核验后已重写
       </span>
     );
   }
@@ -147,6 +157,8 @@ export function ProcessTimeline({
   isStreaming,
   citations,
   citationToDisplay,
+  knownLedgerIds = null,
+  evidenceLedger = null,
   composingTool,
   fallbackContent,
   messageId,
@@ -164,6 +176,8 @@ export function ProcessTimeline({
   isStreaming: boolean;
   citations: Citation[];
   citationToDisplay?: ReadonlyMap<number, number>;
+  knownLedgerIds?: ReadonlySet<string> | null;
+  evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   composingTool: { toolName: string; chars: number } | null;
   fallbackContent: string;
   messageId?: string;
@@ -262,6 +276,8 @@ export function ProcessTimeline({
         streaming={live}
         citations={citations}
         citationToDisplay={citationToDisplay}
+        knownLedgerIds={knownLedgerIds}
+        evidenceLedger={evidenceLedger}
         turnKey={messageId}
         rowKey={nodeKey}
       />
@@ -315,6 +331,8 @@ export function ProcessTimeline({
           content={fallbackContent}
           citations={citations}
           citationToDisplay={citationToDisplay}
+          knownLedgerIds={knownLedgerIds}
+          evidenceLedger={evidenceLedger}
           isStreaming={isStreaming}
         />
       )}

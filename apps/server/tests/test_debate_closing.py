@@ -1,10 +1,11 @@
-﻿"""结辩收束（P4·阶段化发言角色）prompt / 材料注入 / 标签闸自测（per-PR 零 LLM）。
+﻿"""结辩收束（P4·阶段化发言角色）prompt / 材料注入 / 台账 id 闸自测（per-PR 零 LLM）。
 
 验收面：
 1. 阶段角色契约（胜负手 / 禁新论据 / CLOSING_LENGTH_HINT）仍在场；
 2. brief 携带三类材料（历轮论点 / 质询让步 / clash 命门）且裁剪封顶；
 3. closing_context_blocks 投喂==展示（task.body 逐字）+ 材料孪生块；
-4. 【已核实】白名单闸：新标签触发回炉文案；二次违规剥离降级由 speech_pipeline 覆盖。
+4. 证据台账 id 闸：结辩引用不存在 id → 回炉；二次违规降级（与立论同闸，见
+   test_debate_evidence_ledger）。
 """
 
 from __future__ import annotations
@@ -26,18 +27,13 @@ from agentcore.runtime.debate import (
     RoundResult,
     SideTurn,
 )
-from agentcore.runtime.debate.evidence_guard import (
-    extract_verified_tags,
-    format_closing_evidence_steer,
-    novel_verified_tags,
-)
+from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 from agentcore.runtime.debate.prompt import (
     _CLOSING_ARGS_TOTAL,
     _CLOSING_POINT_CLIP,
     _clip,
     closing_context_blocks,
     closing_task,
-    closing_verified_whitelist,
 )
 from agentcore.runtime.debate.speech_pipeline import research_then_draft
 from agentcore.runtime.debate.types import DebateClash
@@ -221,28 +217,6 @@ def test_closing_context_blocks_shows_closing_framing_and_materials():
     assert "熔断触发成本未入账" in challenge.body
 
 
-def test_closing_verified_whitelist_from_own_speech_and_cx():
-    """白名单 = 本方历轮发言 + 质询作答中的【已核实】标签。"""
-    wl = closing_verified_whitelist(_rounds_with_materials(), _two_sides()[0])
-    assert "【已核实·2024成本审计】" in wl
-    assert "【已核实·灰度预案】" in wl
-    # 对方发言里的标签不进本方白名单（本场 con 未标已核实）
-    assert extract_verified_tags("对方【已核实·街访数据】") == {"【已核实·街访数据】"}
-    assert "【已核实·街访数据】" not in wl
-
-
-def test_novel_verified_tags_and_steer_copy():
-    """新标签检出 + [系统提示] 回炉文案口径。"""
-    wl = frozenset({"【已核实·2024成本审计】"})
-    speech = "结辩：降本可核实【已核实·2024成本审计】，街访【已核实·街访数据】支持。"
-    novel = novel_verified_tags(speech, wl)
-    assert novel == ["【已核实·街访数据】"]
-    steer = format_closing_evidence_steer(novel)
-    assert steer.startswith("[系统提示]")
-    assert "【已核实·街访数据】" in steer
-    assert "白名单" in steer or "材料" in steer
-
-
 @dataclass
 class _FakeSink:
     events: list = field(default_factory=list)
@@ -282,12 +256,14 @@ def _ctx() -> ToolContext:
     )
 
 
-def test_closing_evidence_guard_rewrites_once_on_novel_tag():
-    """白名单外【已核实】→ reset + 回炉一次；第二次干净则放行。"""
+def test_closing_evidence_guard_rewrites_once_on_unknown_id():
+    """结辩引用不在台账的 id → reset + 回炉一次；第二次引用合法 id 则放行。"""
+    led = EvidenceLedger()
+    led.register(url="https://ex.com/audit", title="2024成本审计", side_key="pro")
     llm = _SequenceDraftLLM(
         [
-            "结辩：街访支持【已核实·街访数据】。",
-            "结辩：降本可核实【已核实·2024成本审计】，应有条件采用。",
+            "结辩：街访支持【已核实·#e99】。",
+            "结辩：降本可核实【已核实·#e1】，应有条件采用。",
         ]
     )
     sink = _FakeSink()
@@ -308,12 +284,15 @@ def test_closing_evidence_guard_rewrites_once_on_novel_tag():
             draft_system="成稿",
             draft_brief="请结辩。",
             allow_research=False,
-            evidence_tag_whitelist=frozenset({"【已核实·2024成本审计】"}),
+            evidence_ledger=led,
+            side_key="pro",
+            check_evidence_ledger=True,
+            allowed_ledger_ids=frozenset({"#e1"}),
         )
     )
     assert llm.stream_calls == 2
-    assert "【已核实·2024成本审计】" in speech
-    assert "【已核实·街访数据】" not in speech
+    assert "【已核实·#e1】" in speech
+    assert "【已核实·#e99】" not in speech
     assert "[系统提示]" in llm.last_user
     resets = [e for e in sink.events if e.type is EventType.RUN_OUTPUT_RESET]
     assert len(resets) == 1
@@ -323,6 +302,8 @@ def test_closing_evidence_guard_rewrites_once_on_novel_tag():
 
 def test_closing_evidence_guard_demotes_after_second_violation():
     """回炉后仍违规 → 剥离违规【已核实】降级为【待核实·推断】后放行（O2）。"""
+    led = EvidenceLedger()
+    led.register(url="https://ex.com/audit", title="2024成本审计", side_key="pro")
     bad = "结辩：配方秘密【已核实·街访数据】。"
     llm = _SequenceDraftLLM([bad, bad])
     sink = _FakeSink()
@@ -343,7 +324,10 @@ def test_closing_evidence_guard_demotes_after_second_violation():
             draft_system="成稿",
             draft_brief="请结辩。",
             allow_research=False,
-            evidence_tag_whitelist=frozenset({"【已核实·2024成本审计】"}),
+            evidence_ledger=led,
+            side_key="pro",
+            check_evidence_ledger=True,
+            allowed_ledger_ids=frozenset({"#e1"}),
         )
     )
     assert llm.stream_calls == 2

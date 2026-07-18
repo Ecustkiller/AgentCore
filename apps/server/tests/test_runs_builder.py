@@ -258,10 +258,18 @@ def test_empty_tasks_is_error():
 
 
 def test_all_invalid_flat_is_error():
-    # First item lacks task, second lacks role → no valid flat node.
-    plan, errs = build_run_plan([{"role": "A"}, {"task": "x"}], id_prefix="t")
+    # Two role-only rows cannot coalesce into a node (no task anywhere).
+    plan, errs = build_run_plan([{"role": "A"}, {"role": "B"}], id_prefix="t")
     assert errs
     assert not plan.nodes
+
+
+def test_role_only_plus_task_only_coalesces_to_one_node():
+    # The former "all invalid" fixture is exactly the split the model emits — coalesce it.
+    plan, errs = build_run_plan([{"role": "A"}, {"task": "x"}], id_prefix="t")
+    assert errs == []
+    assert len(plan.nodes) == 1
+    assert plan.nodes[0].role == "A" and plan.nodes[0].task == "x"
 
 
 def test_dag_missing_role_collects_error():
@@ -602,28 +610,74 @@ def test_can_delegate_parsed_per_task_with_explicit_opt_out():
 
 
 def test_over_max_tasks_rejects_entire_batch():
-    tasks = [{"role": f"R{i}", "task": f"t{i}"} for i in range(11)]
+    from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
+
+    n = MAX_DELEGATION_TASKS + 1
+    tasks = [{"role": f"R{i}", "task": f"t{i}"} for i in range(n)]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs
     # 拒绝回执要给出可照做的分批指引（本次传上限个、其余下次 delegate 再传），而非只报一句超限
     # ——否则 CEO 撞上限后得整轮重规划（trace 4d715ea0 的浪费来源）。
     msg = errs[0]
-    assert "11" in msg and "超过" in msg
+    assert str(n) in msg and "超过" in msg
     assert "delegate" in msg and "分" in msg
     assert not plan.nodes
 
 
 def test_over_max_tasks_dag_batch_gives_dependency_aware_guidance():
     # 有依赖批超限：不能按数量硬切，回执须给依赖感知的分批指引（提到 depends_on 跨批衔接）。
+    from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
+
+    n = MAX_DELEGATION_TASKS + 1
     tasks = [
         {"id": f"n{i}", "role": f"R{i}", "task": f"t{i}", "depends_on": ["n0"] if i else []}
-        for i in range(11)
+        for i in range(n)
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs
     msg = errs[0]
     assert "超过" in msg and "depends_on" in msg
     assert not plan.nodes
+
+
+def test_coalesce_split_id_task_rows_counts_real_nodes():
+    """Models sometimes emit id 与 role/task 拆成两条 → 计数翻倍撞上限；须按真实节点计。"""
+    from agentcore.runtime.runs.builder import coalesce_split_tasks
+    from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
+
+    # 10 intended workers as 15 raw rows (5 id-stubs + 10 complete) — classic inflate.
+    raw: list = []
+    for i in range(5):
+        raw.append({"id": f"w{i}"})
+        raw.append({"role": f"调研{i}", "task": f"查{i}", "depends_on": []})
+    for i in range(5, 10):
+        raw.append({"id": f"w{i}", "role": f"调研{i}", "task": f"查{i}", "depends_on": []})
+    assert len(raw) == 15
+    coalesced = coalesce_split_tasks(raw)
+    assert len(coalesced) == 10
+    assert all(c.get("id") and c.get("role") and c.get("task") for c in coalesced)
+
+    plan, errs = build_run_plan(raw, id_prefix="t")
+    assert errs == []
+    assert len(plan.nodes) == 10
+    # Still under the raised cap; the point is we did not reject as「15 > 10」.
+    assert len(plan.nodes) <= MAX_DELEGATION_TASKS
+
+
+def test_coalesce_role_only_then_task_only_pair():
+    from agentcore.runtime.runs.builder import coalesce_split_tasks
+
+    raw = [
+        {"id": "a", "role": "研究员"},
+        {"task": "调研 OpenAI", "depends_on": []},
+        {"id": "b", "role": "写手", "task": "汇总", "depends_on": ["a"]},
+    ]
+    out = coalesce_split_tasks(raw)
+    assert len(out) == 2
+    assert out[0]["id"] == "a" and out[0]["role"] == "研究员" and "OpenAI" in out[0]["task"]
+    plan, errs = build_run_plan(raw, id_prefix="t")
+    assert errs == []
+    assert len(plan.nodes) == 2
 
 
 def test_flat_invalid_task_rejects_entire_batch():

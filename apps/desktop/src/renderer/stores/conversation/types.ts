@@ -157,6 +157,8 @@ export interface Message {
   composingTool?: { toolName: string; chars: number } | null;
   attachments?: MessageAttachmentMeta[];
   citations?: Citation[];
+  /** 回合调研台账（`evidence_ledger` SSE / Message.evidence_ledger）；缺省 []。 */
+  evidenceLedger?: import("@/types/events").TurnEvidenceLedgerEntry[];
   cost?: CostBreakdown;
   usage?: UsageBreakdown;
   rounds?: number;

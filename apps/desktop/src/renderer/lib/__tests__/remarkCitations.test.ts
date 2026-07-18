@@ -46,6 +46,40 @@ describe("splitCitationText", () => {
       { type: "text", value: "no markers [0] [9]" },
     ]);
   });
+
+  it("rewrites known #rN ledger ids and leaves unknown as text", () => {
+    const known = new Set(["#r1"]);
+    const ledgerCite = (id: string): MdNode => ({
+      type: "cite",
+      data: {
+        hName: "citemark",
+        hProperties: { dataLedgerId: id },
+      },
+      children: [{ type: "text", value: id }],
+    });
+    expect(splitCitationText("见 #r1 与 #r9", 0, known)).toEqual([
+      { type: "text", value: "见 " },
+      ledgerCite("#r1"),
+      { type: "text", value: " 与 #r9" },
+    ]);
+  });
+
+  it("rewrites consecutive #rN markers without spaces", () => {
+    const known = new Set(["#r5", "#r3", "#r11"]);
+    const ledgerCite = (id: string): MdNode => ({
+      type: "cite",
+      data: {
+        hName: "citemark",
+        hProperties: { dataLedgerId: id },
+      },
+      children: [{ type: "text", value: id }],
+    });
+    expect(splitCitationText("#r5#r3#r11", 0, known)).toEqual([
+      ledgerCite("#r5"),
+      ledgerCite("#r3"),
+      ledgerCite("#r11"),
+    ]);
+  });
 });
 
 describe("remarkCitations attacher", () => {

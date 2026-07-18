@@ -108,11 +108,11 @@ def test_body_enforces_anti_hallucination_floor():
 
 
 def test_body_teaches_inline_final_brief_with_citation_markers():
-    # §十一 方案① (来源卡接入)：终稿走 CEO 收口正文（非仅落盘文件），已核验法条带 [n] 角标连到
-    # 来源卡（玻璃箱可审计 / 可溯源），且 [待核验] 法条不得编角标（交付前核验拦截编造引用）。
+    # 引用即出处：终稿走 CEO 收口正文（非仅落盘文件），已核验法条带台账 id #rN
+    #（玻璃箱可审计 / 可溯源），且 [待核验] 法条不得编引用（交付前核验拦截编造）。
     body = _body()
     assert "终稿" in body
-    assert "[n]" in body and "来源卡" in body
+    assert "#rN" in body and "台账" in body
     assert "[待核验]" in body
 
 

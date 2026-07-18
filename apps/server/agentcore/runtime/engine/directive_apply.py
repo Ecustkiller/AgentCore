@@ -14,6 +14,7 @@ from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, FinishReason, error_event
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -29,7 +30,7 @@ from .governance import (
     resolve_openai_tool_defs,
 )
 from .outcome import RoundOutcome
-from .round import apply_finish_guard_rework
+from .round import apply_exit_ledger_ref_strip, apply_finish_guard_rework
 from .segments import join_segments
 from .tool_exec import execute_tools
 
@@ -80,6 +81,8 @@ async def apply_loop_directive(
     approval_gate: ApprovalGate | None,
     citation_sink: list[dict[str, Any]] | None,
     annotate_citations: bool,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+    ledger_registrant: str,
     gate_escalation_sink: list[dict[str, Any]] | None,
     controller: LoopController,
     content_before_round: str,
@@ -115,6 +118,15 @@ async def apply_loop_directive(
             if fr is not None and finish_override_sink is not None:
                 finish_override_sink.append(fr)
             content = join_segments(final_content, extra) if extra else final_content
+            # Q3：回炉耗尽后仍非法的 #rN —— 剥离放行 + 观测（禁止静默）。
+            if content and turn_evidence_ledger is not None:
+                content = apply_exit_ledger_ref_strip(
+                    content,
+                    turn_evidence_ledger=turn_evidence_ledger,
+                    emit_reset=emit_reset,
+                    emit_content=emit_content,
+                    run_id=run_id,
+                )
             return DirectiveApplyResult(
                 action="return",
                 content=content,
@@ -179,6 +191,8 @@ async def apply_loop_directive(
                     approval_gate=approval_gate,
                     citation_sink=citation_sink,
                     annotate_citations=annotate_citations,
+                    turn_evidence_ledger=turn_evidence_ledger,
+                    ledger_registrant=ledger_registrant,
                     run_id=run_id,
                     role=role,
                 )
@@ -272,6 +286,7 @@ async def apply_loop_directive(
                 annotate_citations=annotate_citations,
                 citation_sink=citation_sink,
                 finish_guard_reworks=finish_guard_reworks,
+                turn_evidence_ledger=turn_evidence_ledger,
             )
             return DirectiveApplyResult(
                 action="rework",

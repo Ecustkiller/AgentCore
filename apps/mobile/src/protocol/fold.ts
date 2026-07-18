@@ -27,6 +27,7 @@ import type {
   DelegationAuthorizationRequiredPayload,
   DelegationAuthorizationResolvedPayload,
   DeliveryStatusPayload,
+  EvidenceLedgerEntry,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
   FollowupsGeneratedPayload,
@@ -56,19 +57,23 @@ import type {
   TeamSynthesisPreviewPayload,
   ToolPhase,
   ToolUseEndPayload,
+  EvidenceLedgerPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
+  TurnEvidenceLedgerEntry,
   TurnWarningPayload,
 } from "@agentcore/contract-types";
 import type {
   ProcessStep,
   ProjectedAgent,
   ProjectedCitation,
+  ProjectedEvidenceLedgerEntry,
   ProjectedRun,
   ProjectedTeamNote,
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
+import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 const FINISH_TO_STATUS: Record<string, TurnStatus> = {
@@ -272,6 +277,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let captainContext: ContextBlockWire[] = [];
   const process: ProcessStep[] = [];
   let citations: ProjectedCitation[] = [];
+  let evidenceLedger: ProjectedEvidenceLedgerEntry[] = [];
+  let citedIds: string[] = [];
   const agents: ProjectedAgent[] = [];
   const runs: ProjectedRun[] = [];
   let planId: string | null = null;
@@ -321,7 +328,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // 草稿丢弃信号：引擎丢弃已流式的这一版正文、发 content_reset（reason 说明为何）。该事件
       // 进 _history（重连回放会重发），故 fold 必须镜像后端 oracle 与 desktop fold：清正文标量 +
       // 弹掉 process 尾部连续 content 步（reasoning/tool 是真实过程，保留），让重写版从干净态重
-      // 累积。仅 reason=finish_guard（交付前核验回炉）折出「已按交付规范重写」rework chip；
+      // 累积。仅 reason=finish_guard（交付前核验回炉）折出「引用/格式核验后已重写」rework chip；
       // retry / soft_gate / ask_user 等只清正文、不留痕（误报根治）。
       case "content_reset": {
         content = "";
@@ -411,6 +418,21 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "citations": {
         citations = (ev.payload as CitationsPayload).citations ?? [];
+        break;
+      }
+      case "evidence_ledger": {
+        const p = ev.payload as EvidenceLedgerPayload;
+        if (Array.isArray(p.entries)) {
+          evidenceLedger = p.entries as ProjectedEvidenceLedgerEntry[];
+        } else if (p.delta?.length) {
+          evidenceLedger = mergeTurnLedger(
+            evidenceLedger,
+            p.delta as TurnEvidenceLedgerEntry[],
+          );
+        }
+        if (Array.isArray(p.cited_ids)) {
+          citedIds = p.cited_ids.map(String);
+        }
         break;
       }
       case "run_plan": {
@@ -973,6 +995,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     // graph slots at the `delegate` step on a delegating turn.
     process,
     citations,
+    evidenceLedger,
+    citedIds,
     agents,
     runs,
     progress: {
@@ -1019,6 +1043,48 @@ export function extractFollowups(events: SSEEvent[]): string[] {
     return p.followups;
   }
   return [];
+}
+
+/** Merge turn-ledger delta by id (append-order; later write wins). */
+function mergeTurnLedger(
+  existing: ProjectedEvidenceLedgerEntry[],
+  delta: TurnEvidenceLedgerEntry[],
+): ProjectedEvidenceLedgerEntry[] {
+  if (delta.length === 0) return existing;
+  const order: string[] = [];
+  const byId = new Map<string, ProjectedEvidenceLedgerEntry>();
+  for (const e of existing) {
+    if (!byId.has(e.id)) order.push(e.id);
+    byId.set(e.id, e);
+  }
+  for (const e of delta) {
+    if (!byId.has(e.id)) order.push(e.id);
+    byId.set(e.id, e as ProjectedEvidenceLedgerEntry);
+  }
+  return order.map((id) => byId.get(id)!);
+}
+
+/**
+ * 场级证据台账（证据台账 M1）：从 `debate_round.evidence_ledger_delta` 累积、
+ * `debate_result.evidence_ledger` 权威覆盖。Transport-only sibling of {@link fold}——
+ * 刻意不进 {@link ProjectedTurn}（conformance golden 经 `debate.evidence_ledger` 承载
+ * 收场权威；live delta 供徽章 `#eN` 解析，O7）。
+ */
+export function extractEvidenceLedger(
+  events: SSEEvent[],
+): EvidenceLedgerEntry[] {
+  let ledger: EvidenceLedgerEntry[] = [];
+  for (const ev of events) {
+    if (ev.type === "debate_round") {
+      const delta =
+        (ev.payload as DebateRoundPayload).evidence_ledger_delta ?? [];
+      if (delta.length) ledger = mergeEvidenceLedger(ledger, delta);
+    } else if (ev.type === "debate_result") {
+      const full = (ev.payload as DebateResultPayload).evidence_ledger;
+      if (Array.isArray(full)) ledger = full;
+    }
+  }
+  return ledger;
 }
 
 /**

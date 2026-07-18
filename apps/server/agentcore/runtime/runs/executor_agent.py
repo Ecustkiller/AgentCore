@@ -50,6 +50,9 @@ def build_agent_executor(
     note_wall: NoteWall | None = None,
     collaboration: bool = True,
     team_brief: str | None = None,
+    evidence_ledger: object | None = None,
+    turn_evidence_ledger: object | None = None,
+    batch_completion_criteria: object | None = None,
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
 
@@ -99,6 +102,9 @@ def build_agent_executor(
         conversation_id=base_tool_context.conversation_id,
         preexisting_files=_preexisting_files,
         shared_workspace=bool(base_tool_context.shared_workspace),
+        evidence_ledger=evidence_ledger,
+        turn_evidence_ledger=turn_evidence_ledger,
+        batch_completion_criteria=batch_completion_criteria,  # type: ignore[arg-type]
     )
 
     async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:

@@ -4,11 +4,13 @@ import type {
   DebateRoundPayload,
   DebateRoundStartedPayload,
   DeliveryStatusPayload,
+  EvidenceLedgerEntry,
   ProcessStep,
   RunPlanPayload,
   TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
+import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import { create } from "zustand";
 import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
@@ -48,6 +50,9 @@ export interface ExecutionRuntime {
   crossExamEnabled: boolean;
   /** 主持人开场白（`debate_round_started.opening`，sticky 首个非空）。缺字段 → null。 */
   debateOpening: string | null;
+  /** 场级证据台账（`debate_round.evidence_ledger_delta` 累积；收场由 `debate.evidence_ledger`
+   * 权威覆盖）。驱动辩论徽章 `#eN` 溯源；不进 ProjectedTurn。 */
+  evidenceLedger: EvidenceLedgerEntry[];
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
   workerToolPhases: Record<string, { phase: string; toolName: string }>;
@@ -100,6 +105,11 @@ interface ExecutionState {
    * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
    * before {@link recordDebateResult}'s 收场 product lands. */
   recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
+  /** Merge one `debate_round.evidence_ledger_delta` into the slot's live evidence ledger. */
+  recordEvidenceLedgerDelta: (
+    delta: EvidenceLedgerEntry[],
+    messageId: string,
+  ) => void;
   /** Sticky-OR 本场质询开关（`debate_round_started.cross_exam_enabled`）。 */
   recordCrossExamEnabled: (enabled: boolean, messageId: string) => void;
   /** Sticky 首个非空主持人开场白（`debate_round_started.opening`）；后续空串不覆盖。 */
@@ -151,6 +161,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   debateRounds: [],
   crossExamEnabled: false,
   debateOpening: null,
+  evidenceLedger: [],
   workerToolPhases: {},
   runProcesses: null,
   teamSynthesisPreview: null,
@@ -210,6 +221,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         debateRounds: [],
         crossExamEnabled: false,
         debateOpening: null,
+        evidenceLedger: [],
         workerToolPhases: {},
         runProcesses: null,
         teamSynthesisPreview: null,
@@ -250,12 +262,31 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       ),
 
     recordDebateResult: (debate, messageId) =>
-      patchExec(messageId, (cur) => (cur.plan ? { debate } : null)),
+      patchExec(messageId, (cur) =>
+        cur.plan
+          ? {
+              debate,
+              // 收场全量权威；缺字段（老 journal）保留 live 累积。
+              ...(Array.isArray(debate.evidence_ledger)
+                ? { evidenceLedger: debate.evidence_ledger }
+                : {}),
+            }
+          : null,
+      ),
 
     recordDebateRound: (round, messageId) =>
       patchExec(messageId, (cur) =>
         cur.plan
           ? { debateRounds: upsertDebateRound(cur.debateRounds, round) }
+          : null,
+      ),
+
+    recordEvidenceLedgerDelta: (delta, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan && delta.length
+          ? {
+              evidenceLedger: mergeEvidenceLedger(cur.evidenceLedger, delta),
+            }
           : null,
       ),
 
@@ -334,6 +365,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let debateRounds: DebateNarrativeRound[] = [];
         let crossExamEnabled = false;
         let debateOpening: string | null = null;
+        let evidenceLedger: EvidenceLedgerEntry[] = [];
         let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
         let deliveryStatus: DeliveryStatusPayload | null = null;
         const userInterjections: UserInterjection[] = [];
@@ -347,6 +379,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (event.type === "debate_result") {
             // 回合级单事件（非 frame）：直接捕获，回放与直播经同一 slot 渲染辩论视图。
             debate = event.payload as DebateResultPayload;
+            if (Array.isArray(debate.evidence_ledger)) {
+              evidenceLedger = debate.evidence_ledger;
+            }
           } else if (event.type === "user_interjection") {
             const p = event.payload as {
               interjection_id?: string;
@@ -422,6 +457,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               clashes: p.clashes,
               cross_exam: p.cross_exam ?? [],
             });
+            if (p.evidence_ledger_delta?.length) {
+              evidenceLedger = mergeEvidenceLedger(
+                evidenceLedger,
+                p.evidence_ledger_delta,
+              );
+            }
           } else if (event.type === "team_synthesis_preview") {
             // P2 DURABLE：同 key 保最新（后写覆盖）；刷新后 StatusStrip 可重建。
             teamSynthesisPreview = event.payload as TeamSynthesisPreviewPayload;
@@ -447,6 +488,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               debateRounds,
               crossExamEnabled,
               debateOpening,
+              evidenceLedger,
               workerToolPhases: {},
               runProcesses: journal.runProcesses ?? null,
               teamSynthesisPreview,

@@ -95,7 +95,7 @@
   border: none;
 }
 
-/* --- Inline citation chips ([n] → cite:n link from remarkCitations). --- */
+/* --- Inline citation chips ([n] / #rN → citemark from remarkCitations). --- */
 .cite-chip {
   display: inline-flex;
   align-items: center;

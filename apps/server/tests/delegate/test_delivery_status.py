@@ -69,6 +69,7 @@ def test_partial_with_worker_gaps_and_degraded_debrief():
     assert any("course.pptx" in d for d in descriptions)
     assert any("降级合成" in d for d in descriptions)
     assert all(g["role"] == "课件工程师" for g in payload["gaps"])
+    assert any(g.get("reason") == "degraded_handoff" for g in payload["gaps"])
 
 
 def test_blocked_with_criteria_gap_and_bind_action_on_cloud():

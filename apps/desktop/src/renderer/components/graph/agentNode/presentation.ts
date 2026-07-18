@@ -122,7 +122,7 @@ export function buildAgentNodePresentation(
   }
   if (d.revised) peekTags.push(revisedBadge(d.revised).label);
   if (d.replacesRunId) peekTags.push("接手");
-  if (d.didRework) peekTags.push("已按交付规范重写");
+  if (d.didRework) peekTags.push("引用/格式核验后已重写");
   if (d.modelPreference)
     peekTags.push(MODEL_TIER_META[d.modelPreference].label);
   if (d.checkpoint) peekTags.push(checkpointBadge(d.checkpoint).label);

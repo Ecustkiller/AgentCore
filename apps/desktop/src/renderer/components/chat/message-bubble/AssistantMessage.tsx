@@ -16,6 +16,7 @@ import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
+import { copyText } from "@/lib/clipboard";
 import {
   connectivityEscalationSuffix,
   degradedFinishChipLabel,
@@ -31,6 +32,8 @@ import {
 } from "@/lib/fileArtifacts";
 import { formatDisplayCost, pickCostMoney } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
+import { formatSupportDiagnosticText } from "@/lib/supportDiagnostics";
+import { notifySuccess } from "@/lib/toast";
 import { runRegenerate } from "@/services/turns";
 import {
   type Message,
@@ -139,11 +142,36 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const showRetry =
     !!displayError &&
     (isConnectivityErrorCode(displayError.code) || !errorAction);
+  const supportDiagnosticText = formatSupportDiagnosticText({
+    conversationId,
+    traceId: message.traceId,
+    messageId: message.id,
+  });
+  const copySupportDiagnostics = () => {
+    if (!supportDiagnosticText) return;
+    void copyText(supportDiagnosticText).then((ok) => {
+      if (ok) notifySuccess("已复制诊断信息");
+    });
+  };
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const captainContext = message.captainContext ?? [];
   const hasProcess = (message.process?.length ?? 0) > 0;
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
+  const evidenceLedger = useMemo(
+    () => message.evidenceLedger ?? [],
+    [message.evidenceLedger],
+  );
+  const knownLedgerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of evidenceLedger) {
+      if (e.id) ids.add(e.id);
+    }
+    for (const c of citations) {
+      if (c.id) ids.add(c.id);
+    }
+    return ids;
+  }, [evidenceLedger, citations]);
   // Display renumbering: append-only across stream frames so assigned numbers
   // never jump. Reset when the message identity changes (component remounts per
   // bubble; also guard via message.id in case of reuse).
@@ -158,10 +186,11 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       message.content,
       citations.length,
       prevDisplayRef.current,
+      citations,
     );
     prevDisplayRef.current = next.stableCited;
     return next;
-  }, [message.content, citations.length]);
+  }, [message.content, citations]);
   // Execution / graph slot key = server turn id when stamped (pause/resume share it).
   // ALSO the interaction lookup key: SSE / journal hydration writes interaction
   // entries keyed by `serverMessageId ?? id` (execMessageId), so the query MUST use
@@ -236,6 +265,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       isStreaming={message.isStreaming}
       citations={citations}
       citationToDisplay={citationDisplay.toDisplay}
+      knownLedgerIds={knownLedgerIds}
+      evidenceLedger={evidenceLedger}
       composingTool={
         message.executionId === null ? (message.composingTool ?? null) : null
       }
@@ -268,6 +299,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           content={message.content}
           citations={citations}
           citationToDisplay={citationDisplay.toDisplay}
+          knownLedgerIds={knownLedgerIds}
+          evidenceLedger={evidenceLedger}
           isStreaming={message.isStreaming}
         />
       ) : hideContentForCheckpoint ? null : (
@@ -281,6 +314,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             content={message.content}
             citations={citations}
             citationToDisplay={citationDisplay.toDisplay}
+            knownLedgerIds={knownLedgerIds}
+            evidenceLedger={evidenceLedger}
             isStreaming={false}
           />
         </CollapsibleSpeech>
@@ -323,6 +358,16 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             {formatAssistantErrorMessage(displayError)}
             {connectivityEscalationSuffix(displayError.code, message.id)}
           </p>
+          {supportDiagnosticText && (
+            <Button
+              variant="ghost"
+              className="shrink-0 text-destructive hover:bg-destructive/15"
+              icon={<Copy size={13} />}
+              onClick={copySupportDiagnostics}
+            >
+              复制诊断信息
+            </Button>
+          )}
           {errorAction && (
             <Button
               variant="destructive"
@@ -364,6 +409,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           citations={citations}
           displayMap={citationDisplay}
           turnKey={projectionId}
+          evidenceLedger={evidenceLedger}
         />
       )}
       {/* 底部堆叠回退已废除（时间线一期）：交互卡只在 ProcessTimeline 标记槽渲染。

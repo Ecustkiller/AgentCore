@@ -161,6 +161,8 @@ class DelegateTool:
         self._team_brief: str | None = None
         # Last resolved note-wall coordination mode (wall|none); resume/replan reuse it.
         self._coordination: str = "none"
+        # Same-gap streak for completion_criteria_unmet (同缺口收敛护栏).
+        self._completion_gap_streak: tuple[tuple[str, ...], int] | None = None
 
     def spawn_lead_subteam(self, captain_run_id: str, captain_depth: int):
         """Mint a nested lead handle (阶段2); construction stays in the tools package."""
@@ -198,6 +200,20 @@ class DelegateTool:
         """Record a successful CEO-side continuation for turn_metrics.revises."""
         self._continuation_ids.append(run_id)
 
+    def note_completion_gap(self, fingerprint: tuple[str, ...]) -> int:
+        """Record an unmet completion gap; return consecutive count for this fingerprint."""
+        prev = self._completion_gap_streak
+        if prev is not None and prev[0] == fingerprint:
+            count = prev[1] + 1
+        else:
+            count = 1
+        self._completion_gap_streak = (fingerprint, count)
+        return count
+
+    def clear_completion_gap_streak(self) -> None:
+        """Reset same-gap streak after criteria are met (or unrelated success)."""
+        self._completion_gap_streak = None
+
     @property
     def collab(self) -> dict[str, int]:
         """Turn-level 协作质量 tally (学·度量 §2.5): boundary_yields / scope_signals /
@@ -226,24 +242,24 @@ class DelegateTool:
 
             if not isinstance(playbook, str) or not playbook.strip():
                 msg = "playbook 必须是非空字符串（playbook 名）。"
-                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+                return ToolResult(tool_call_id="", success=False, output="", error=msg)
             if arguments.get("tasks"):
                 msg = (
                     "playbook 与 tasks 二选一：用 playbook 时把槽位放进 "
                     "playbook_args，别同时传 tasks。"
                 )
-                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+                return ToolResult(tool_call_id="", success=False, output="", error=msg)
             tasks_raw, pb_errors = expand_playbook(playbook.strip(), arguments.get("playbook_args"))
             if pb_errors:
                 msg = "playbook 实例化失败：" + "；".join(pb_errors)
                 logger.info("delegate.playbook_rejected", playbook=playbook, errors=pb_errors)
-                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+                return ToolResult(tool_call_id="", success=False, output="", error=msg)
             logger.info("delegate.playbook", playbook=playbook.strip(), nodes=len(tasks_raw))
         else:
             tasks_raw = arguments.get("tasks")
             if not isinstance(tasks_raw, list) or not tasks_raw:
                 msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
-                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+                return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
         valid_tools = {s.name for s in self._tools.list_all()}
         complexity_hint = arguments.get("complexity_hint", "standard")
@@ -276,7 +292,7 @@ class DelegateTool:
                     requested=new_nodes,
                     cap=MAX_WORKER_SUBDELEGATIONS,
                 )
-                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+                return ToolResult(tool_call_id="", success=False, output="", error=msg)
         self._calls += 1
         # 冻结本次委派调用的序号：同回合并发的多个 delegate 调用共享 self._calls，若在完成侧
         # 惰性读取会把每个批次的 completed / synthesis 日志都错记到「最后自增到的序号」。这里
@@ -293,15 +309,32 @@ class DelegateTool:
         if errors:
             msg = "委派任务无效：" + "；".join(errors)
             logger.info("delegate.rejected", errors=errors)
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            return ToolResult(tool_call_id="", success=False, output="", error=msg)
         from agentcore.runtime.delegate.completion import (
             execution_capability_warning,
+            format_resolved_acceptance_echo,
+            hoist_task_completion_criteria,
+            resolve_completion_with_source,
             validate_completion_against_forms,
             validate_execution_capability,
         )
 
-        form_conflict = validate_completion_against_forms(
+        # 顶层缺失时，容错提升 task 内误放的 completion_criteria（不改 schema 契约）。
+        completion_criteria, hoist_err = hoist_task_completion_criteria(
             arguments.get("completion_criteria"),
+            tasks_raw,
+        )
+        if hoist_err:
+            logger.info("delegate.rejected", errors=[hoist_err])
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=hoist_err,
+            )
+
+        form_conflict = validate_completion_against_forms(
+            completion_criteria,
             plan,
         )
         if form_conflict:
@@ -309,14 +342,16 @@ class DelegateTool:
             return ToolResult(
                 tool_call_id="",
                 success=False,
-                output=form_conflict,
+                output="",
                 error=form_conflict,
             )
-        # 委派前能力闸（分级，能力闸门与交付诚实性）：显式 code_verified 撞上「无执行环境」
-        # 硬拒（错误信息给出路）；仅任务文案启发命中的只软警告、不拦截。能力判定复用
-        # code_execution_enabled_for 单一真相源（与 worker registry 同一谓词）。
+        # 委派前能力闸（能力闸门与交付诚实性）：resolved code_verified（显式 / 结构化，
+        # 与收尾验收同一解析；文案不再绑定）撞上「无执行环境」硬拒；剩余启发命中
+        # （运行/二进制文案）只软警告、不拦截。能力判定复用 code_execution_enabled_for。
+        resolved_acceptance = resolve_completion_with_source(completion_criteria, plan)
+        acceptance_echo = format_resolved_acceptance_echo(resolved_acceptance)
         capability_error = validate_execution_capability(
-            arguments.get("completion_criteria"),
+            completion_criteria,
             plan,
             self._base_tool_context.backend,
         )
@@ -324,16 +359,17 @@ class DelegateTool:
             logger.info(
                 "delegate.capability_rejected",
                 criteria="code_verified",
+                explicit=completion_criteria is not None,
                 backend_location=getattr(self._base_tool_context.backend, "location", None),
             )
             return ToolResult(
                 tool_call_id="",
                 success=False,
-                output=capability_error,
+                output="",
                 error=capability_error,
             )
         capability_warning = execution_capability_warning(
-            arguments.get("completion_criteria"),
+            completion_criteria,
             plan,
             self._base_tool_context.backend,
         )
@@ -342,6 +378,13 @@ class DelegateTool:
                 "delegate.capability_warning",
                 backend_location=getattr(self._base_tool_context.backend, "location", None),
             )
+        logger.info(
+            "delegate.acceptance_resolved",
+            criteria=(
+                resolved_acceptance.criteria.kind if resolved_acceptance.criteria else None
+            ),
+            source=resolved_acceptance.source,
+        )
         if self._depth >= 1:
             self._sub_workers_spawned += len(plan.nodes)
 
@@ -353,12 +396,12 @@ class DelegateTool:
 
         seed_notes, seed_err = parse_seed_notes(arguments.get("seed_notes"))
         if seed_err:
-            return ToolResult(tool_call_id="", success=False, output=seed_err, error=seed_err)
+            return ToolResult(tool_call_id="", success=False, output="", error=seed_err)
         brief_raw = arguments.get("team_brief")
         if brief_raw is not None:
             brief, brief_err = parse_team_brief(brief_raw)
             if brief_err:
-                return ToolResult(tool_call_id="", success=False, output=brief_err, error=brief_err)
+                return ToolResult(tool_call_id="", success=False, output="", error=brief_err)
             self._team_brief = brief
 
         playbook_name = playbook.strip() if isinstance(playbook, str) and playbook.strip() else None
@@ -412,6 +455,7 @@ class DelegateTool:
         if is_plan_only():
             summary = (
                 f"[plan-only] 已记录计划（{len(plan.nodes)} 节点），跳过执行。"
+                f"\n\n{acceptance_echo}"
             )
             logger.info("delegate.plan_only", nodes=len(plan.nodes), call=call_idx)
             from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
@@ -465,7 +509,7 @@ class DelegateTool:
             complexity_hint=complexity_hint,
             coordination=coordination,
             call_idx=call_idx,
-            completion_criteria=arguments.get("completion_criteria"),
+            completion_criteria=completion_criteria,
             # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
             # 否则缺省会落成 False，与 schema default 不一致。
             coordinate=(
@@ -474,10 +518,13 @@ class DelegateTool:
                 else True
             ),
         )
-        # 软警告注入（能力闸分级·启发命中不拦截）：把能力提示挂在委派结果尾部回给 CEO。
-        # SUSPEND（开工卡挂起）无 output 可挂，跳过——软警告 best-effort、不改挂起语义。
-        if capability_warning and result.output and result.effect is ToolEffect.CONTINUE:
-            result.output = f"{result.output}\n\n{capability_warning}"
+        # 验收回显（提案 B1 补偿②）+ 软警告：挂在委派结果尾部，CEO 当轮可见可改。
+        # SUSPEND（开工卡挂起）无 output 可挂，跳过——不改挂起语义。
+        if result.output and result.effect is ToolEffect.CONTINUE:
+            tails: list[str] = [acceptance_echo]
+            if capability_warning:
+                tails.append(capability_warning)
+            result.output = f"{result.output}\n\n" + "\n\n".join(tails)
         return annotate_batch_meta(
             result,
             node_count=len(plan.nodes),
@@ -577,7 +624,7 @@ class DelegateTool:
                 "当前没有待续跑的受监督计划。replan 仅在 delegate 让出边界（输出『计划已"
                 "让出』）或部分队员失败/跳过后可用；要发起新任务请用 delegate。"
             )
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
         binds = arguments.get("binds") or []
         steers = arguments.get("steers") or []
@@ -589,13 +636,13 @@ class DelegateTool:
             or not isinstance(adds, list)
         ):
             msg = "replan 的 binds / steers / add 必须是数组。"
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            return ToolResult(tool_call_id="", success=False, output="", error=msg)
         if sup.reason is BoundaryReason.BIND and not stop and not binds:
             msg = (
                 "replan 需要 binds 定稿至少一个『待定稿』步骤，或设 stop=true 收口"
                 "（仅 steers / add 不能让待定稿步骤运行起来）。"
             )
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
         # Snapshot the pre-add node ids so we can tell which nodes apply_replan appended
         # (it mutates the plan in place) — those drive the re-emitted run_plan below.
@@ -604,7 +651,7 @@ class DelegateTool:
         if errors:
             msg = "replan 无效：" + "；".join(errors)
             logger.info("replan.rejected", errors=errors)
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
         self._supervised = None
         record_plan_snapshot(sup.plan)

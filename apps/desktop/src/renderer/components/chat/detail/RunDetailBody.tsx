@@ -1,6 +1,5 @@
 import { TurnSecurityLedger } from "@/components/audit/TurnSecurityLedger";
 import { Markdown } from "@/components/chat/Markdown";
-import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
 import { planCapabilities } from "@/components/graph/planCapabilities";
@@ -34,7 +33,6 @@ import { RunCausalInjectBlock } from "./sections/RunCausalInject";
 import { DebriefSection } from "./sections/RunDebrief";
 import { DiagnosticSection } from "./sections/RunDiagnostics";
 import { EscalationSection } from "./sections/RunEscalations";
-import { LlmWindowSection } from "./sections/RunLlmWindow";
 import { RunModeratorLedger } from "./sections/RunModeratorLedger";
 import { RunOutcomeAcceptSection } from "./sections/RunOutcomeAccept";
 import {
@@ -48,6 +46,7 @@ import {
   revisionComparePair,
 } from "./sections/RunRevisionChain";
 import { Section, StatusBadge } from "./sections/shared";
+import { WorkerContextSection } from "./WorkerContextSection";
 
 export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
 
@@ -320,10 +319,17 @@ export function RunDetailBody({
         />
       )}
 
-      {contextBlocks.length > 0 && (
-        <ReceivedContextSection
+      {(contextBlocks.length > 0 ||
+        (diagnosticMode && conversationId != null)) && (
+        <WorkerContextSection
           blocks={contextBlocks}
-          defaultExpanded={false}
+          diagnosticMode={diagnosticMode && conversationId != null}
+          diagnostic={{
+            messages: llmWindow.data?.messages ?? [],
+            available: llmWindow.data?.available ?? false,
+            loading: llmWindow.loading,
+            error: llmWindow.error,
+          }}
           keyBase={`run:${runId}`}
           onNavigate={(rid) => {
             const target = execution.runs.find((r) => r.id === rid);
@@ -333,16 +339,6 @@ export function RunDetailBody({
             )?.role;
             showRunDetail(messageId, rid, role);
           }}
-        />
-      )}
-
-      {diagnosticMode && conversationId != null && (
-        <LlmWindowSection
-          messages={llmWindow.data?.messages ?? []}
-          available={llmWindow.data?.available ?? false}
-          loading={llmWindow.loading}
-          error={llmWindow.error}
-          keyBase={`run:${runId}`}
         />
       )}
 

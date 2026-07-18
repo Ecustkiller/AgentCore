@@ -206,15 +206,27 @@ def wrap_executor_with_timeouts(
     executor: Callable[..., Awaitable[RunState]],
     session: CoordinationSession,
 ) -> Callable[..., Awaitable[RunState]]:
-    """Arm per-worker timeout timers around the real executor (notify only, no cancel)."""
+    """Arm per-worker timeout timers around the real executor (notify only, no cancel).
+
+    When the CEO-facing TIMEOUT already fired, stamp ``worker_timeout`` onto the
+    completed RunState.warnings so delivery_status / CEO gaps stay honest.
+    """
 
     async def coordinated_executor(spec: RunSpec, completed: dict[str, RunState]) -> RunState:
         role = spec.role or spec.agent_name or spec.run_id
         timeout_s = spec.policy.timeout_s
         session.arm_worker_timeout(spec.run_id, role=role, timeout_s=timeout_s)
         try:
-            return await executor(spec, completed)
+            state = await executor(spec, completed)
         finally:
             session.disarm_worker_timeout(spec.run_id)
+        if session.was_timeout_notified(spec.run_id):
+            from agentcore.runtime.runs.cutoff import WORKER_TIMEOUT_WARNING
+
+            warnings = list(state.warnings or [])
+            if WORKER_TIMEOUT_WARNING not in warnings:
+                warnings.append(WORKER_TIMEOUT_WARNING)
+                state.warnings = warnings
+        return state
 
     return coordinated_executor

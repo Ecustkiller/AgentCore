@@ -33,6 +33,7 @@ from .interjection import (
     _multi_agent_user_interjection_queued,
     _multi_agent_user_interjection_with_attachments,
 )
+from .research_ledger import _multi_agent_research_ledger
 from .revision import (
     _multi_agent_lead_subplan_bind_replan,
     _multi_agent_lead_subplan_scope_steer,
@@ -70,6 +71,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_user_interjection_with_attachments,
     ),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
+    "multi_agent_research_ledger": (
+        "多 Agent·调研台账 P2：worker 引 #rN → evidence_ledger 全量；"
+        "citations_event=仅引用集（含 weak+tier 徽标）；未引用命中只留台账痕迹",
+        _multi_agent_research_ledger,
+    ),
     "multi_agent_coordinate": (
         "刷新重建（P2）：协调模式 team_synthesis_preview DURABLE → teamSynthesisPreview（同 key 保最新）",
         _multi_agent_coordinate,

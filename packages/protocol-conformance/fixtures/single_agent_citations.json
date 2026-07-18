@@ -60,13 +60,17 @@
             "url": "https://a.example/x",
             "title": "来源 A",
             "snippet": "片段 A",
-            "site": "a.example"
+            "site": "a.example",
+            "id": "#r1",
+            "tier": "unknown"
           },
           {
-            "url": "https://b.example/y",
-            "title": "来源 B",
+            "url": "https://www.bjnews.com.cn/detail/1.html",
+            "title": "来源 B · 新京报",
             "snippet": "片段 B",
-            "site": "b.example"
+            "site": "bjnews.com.cn",
+            "id": "#r2",
+            "tier": "media"
           }
         ]
       },
@@ -127,15 +131,21 @@
         "url": "https://a.example/x",
         "title": "来源 A",
         "snippet": "片段 A",
-        "site": "a.example"
+        "site": "a.example",
+        "id": "#r1",
+        "tier": "unknown"
       },
       {
-        "url": "https://b.example/y",
-        "title": "来源 B",
+        "url": "https://www.bjnews.com.cn/detail/1.html",
+        "title": "来源 B · 新京报",
         "snippet": "片段 B",
-        "site": "b.example"
+        "site": "bjnews.com.cn",
+        "id": "#r2",
+        "tier": "media"
       }
     ],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [],
     "runs": [],
     "progress": {

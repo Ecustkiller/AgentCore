@@ -7,8 +7,11 @@ strips dangling markers so the persisted body stays self-consistent.
 """
 
 from agentcore.runtime.citations import (
+    extract_ledger_ref_ids,
+    invalid_ledger_ref_ids,
     out_of_range_markers,
     reconcile_citations,
+    strip_invalid_ledger_refs,
     strip_out_of_range_markers,
 )
 
@@ -84,8 +87,11 @@ def test_strip_preserves_code_and_links():
 
 def test_reconcile_strips_and_reports_stray():
     citations = [{"url": "https://a.example"}, {"url": "https://b.example"}]
-    cleaned, out_citations, stray = reconcile_citations("Claim [1] then [5].", citations)
-    assert stray == [5]
+    cleaned, out_citations, stray_n, stray_r = reconcile_citations(
+        "Claim [1] then [5].", citations
+    )
+    assert stray_n == [5]
+    assert stray_r == []
     assert cleaned == "Claim [1] then."
     assert out_citations is citations  # list identity preserved (cards stay)
     assert out_of_range_markers(cleaned, len(out_citations)) == []
@@ -93,7 +99,49 @@ def test_reconcile_strips_and_reports_stray():
 
 def test_reconcile_noop_when_clean():
     citations = [{"url": "https://a.example"}]
-    cleaned, out_citations, stray = reconcile_citations("Only [1].", citations)
-    assert stray == []
+    cleaned, out_citations, stray_n, stray_r = reconcile_citations("Only [1].", citations)
+    assert stray_n == []
+    assert stray_r == []
     assert cleaned == "Only [1]."
     assert out_citations is citations
+
+
+def test_extract_ledger_ref_ids_first_appearance_unique():
+    # P2：首次出现序（来源卡投影序）；去重保留先见
+    assert extract_ledger_ref_ids("见 #r2 与 #r1，再 #r2。") == ["#r2", "#r1"]
+
+
+def test_ledger_ref_in_code_ignored():
+    content = "正文 #r1。\n```python\nx = '#r9'\n```\n"
+    assert extract_ledger_ref_ids(content) == ["#r1"]
+
+
+def test_invalid_ledger_ref_q5_no_markers():
+    # Q5：无约定标记 → 闸不启用
+    assert invalid_ledger_ref_ids("无引用的正文。", frozenset()) == []
+
+
+def test_invalid_ledger_ref_forgery_and_uncitable():
+    assert invalid_ledger_ref_ids("见 #r1 与 #r9。", frozenset({"#r1"})) == ["#r9"]
+    assert invalid_ledger_ref_ids("弱源 #r2。", frozenset({"#r1"})) == ["#r2"]
+
+
+def test_strip_invalid_ledger_refs():
+    cleaned = strip_invalid_ledger_refs("结论 #r1 与 #r9。", {"#r9"})
+    assert cleaned == "结论 #r1 与。"
+    assert invalid_ledger_ref_ids(cleaned, frozenset({"#r1"})) == []
+
+
+def test_reconcile_dual_track():
+    citations = [{"url": "https://a.example"}]
+    cleaned, _, stray_n, stray_r = reconcile_citations(
+        "池序 [1] 与 [3]；台账 #r1 与 #r9。",
+        citations,
+        citable_ids=frozenset({"#r1"}),
+    )
+    assert stray_n == [3]
+    assert stray_r == ["#r9"]
+    assert "[3]" not in cleaned
+    assert "#r9" not in cleaned
+    assert "[1]" in cleaned
+    assert "#r1" in cleaned

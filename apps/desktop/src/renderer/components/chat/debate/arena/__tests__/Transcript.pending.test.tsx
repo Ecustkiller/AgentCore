@@ -69,6 +69,7 @@ function model(overrides: Partial<DebateModel> = {}): DebateModel {
     opening: null,
     settled: false,
     crossExamEnabled: false,
+    evidenceLedger: [],
     ...overrides,
   };
 }

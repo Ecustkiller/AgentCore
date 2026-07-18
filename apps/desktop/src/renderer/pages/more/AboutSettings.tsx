@@ -117,8 +117,8 @@ function DiagnosticModeSection() {
             开发者 / 诊断模式
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            显示运行 / 追踪 ID 等底层诊断信息（运行详情面板、消息的 trace
-            复制），便于排查问题。普通使用无需开启。
+            显示运行 / 追踪 ID 等底层诊断信息（运行详情面板、消息的
+            conversation / trace / message id 复制），便于排查问题。普通使用无需开启；报障可直接用错误卡「复制诊断信息」。
           </p>
         </div>
         <Switch

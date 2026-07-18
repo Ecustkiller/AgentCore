@@ -1,6 +1,7 @@
 import type { ConversationSummary } from "@/api/conversations";
 import type { SearchSection } from "@/api/search";
 import { Modal } from "@/components/Modal";
+import { copyText } from "@/lib/messageExport";
 // Shared conversation-management UI primitives (对话管理 · 复用于历史抽屉).
 //
 // Extracted from the old ConversationsPage so the 历史 drawer (ConversationDrawer) and any
@@ -115,6 +116,7 @@ export function ActionSheet({
   onArchive: () => void;
   onDelete: () => void;
 }) {
+  const [copiedId, setCopiedId] = useState(false);
   return (
     <Modal className="sheet" onClose={onClose} label="对话操作">
       <div className="sheet-title">{conv.title || "新对话"}</div>
@@ -123,6 +125,19 @@ export function ActionSheet({
       </button>
       <button type="button" className="sheet-item" onClick={onArchive}>
         {archivedView ? "恢复" : "归档"}
+      </button>
+      <button
+        type="button"
+        className="sheet-item"
+        onClick={() => {
+          void copyText(conv.id).then((ok) => {
+            if (!ok) return;
+            setCopiedId(true);
+            window.setTimeout(() => setCopiedId(false), 1500);
+          });
+        }}
+      >
+        {copiedId ? "已复制对话 ID" : "复制对话 ID"}
       </button>
       <button
         type="button"

@@ -22,6 +22,7 @@ export type SSEEventType =
   | "error"
   | "escalation_required"
   | "escalation_resolved"
+  | "evidence_ledger"
   | "followups_generated"
   | "handoff_apply_done"
   | "handoff_job_started"

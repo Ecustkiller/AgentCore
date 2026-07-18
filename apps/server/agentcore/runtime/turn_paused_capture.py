@@ -107,6 +107,22 @@ def build_turn_paused_fact(
             exc_info=True,
         )
 
+    evidence_ledger: list[dict[str, Any]] = []
+    try:
+        from agentcore.runtime.suspension import turn_evidence_ledger
+
+        led = turn_evidence_ledger.get()
+        if led is not None:
+            all_entries = getattr(led, "all_entries", None)
+            if callable(all_entries):
+                evidence_ledger = list(all_entries())
+    except Exception:
+        logger.warning(
+            "turn_paused.evidence_ledger_failed",
+            checkpoint_id=checkpoint_id,
+            exc_info=True,
+        )
+
     controller = _controller_seed()
 
     return TurnPausedFact(
@@ -117,6 +133,7 @@ def build_turn_paused_fact(
         process=process,
         run_processes=run_processes,
         citations=citations,
+        evidence_ledger=evidence_ledger,
         controller=controller,
         extras=dict(extras) if extras else None,
     )

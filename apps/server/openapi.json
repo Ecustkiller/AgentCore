@@ -2717,8 +2717,74 @@
         "type": "string"
       },
       "Citation": {
-        "description": "A web source consulted for an assistant message (source-card data).",
+        "description": "A web source consulted for an assistant message (source-card data).\n\nOptional ``id`` / ``date`` / ``tier`` / ``query`` / ``deep_read`` / ``registrant`` /\n``citable`` support the debate evidence ledger (M1), source-card credibility\nbadges, and 引用即出处 P1 台账溯源。``tier`` is forward-compatible\n(``official`` / ``media`` / ``unknown`` / ``weak``; ``blocked`` never reaches the\nwire). Absent fields on legacy cards → client degrades.",
         "properties": {
+          "citable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citable"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "deep_read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Read"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "registrant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registrant"
+          },
           "site": {
             "default": "",
             "title": "Site",
@@ -2728,6 +2794,17 @@
             "default": "",
             "title": "Snippet",
             "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
           },
           "title": {
             "default": "",
@@ -3933,6 +4010,70 @@
         "title": "DispatchHandoffRequest",
         "type": "object"
       },
+      "EvidenceLedgerEntryRest": {
+        "description": "回合调研台账条目（REST / 落库；与 SSE ``TurnEvidenceLedgerEntry`` 同形）。",
+        "properties": {
+          "citable": {
+            "default": true,
+            "title": "Citable",
+            "type": "boolean"
+          },
+          "date": {
+            "default": "",
+            "title": "Date",
+            "type": "string"
+          },
+          "deep_read": {
+            "default": false,
+            "title": "Deep Read",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "registrant": {
+            "default": "",
+            "title": "Registrant",
+            "type": "string"
+          },
+          "site": {
+            "default": "",
+            "title": "Site",
+            "type": "string"
+          },
+          "snippet": {
+            "default": "",
+            "title": "Snippet",
+            "type": "string"
+          },
+          "tier": {
+            "default": "unknown",
+            "title": "Tier",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "EvidenceLedgerEntryRest",
+        "type": "object"
+      },
       "ExternalGrantItem": {
         "properties": {
           "alias": {
@@ -5033,6 +5174,17 @@
             ],
             "title": "Content"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "reasoning_content": {
             "anyOf": [
               {
@@ -5631,6 +5783,13 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "evidence_ledger": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceLedgerEntryRest"
+            },
+            "title": "Evidence Ledger",
+            "type": "array"
           },
           "feedback": {
             "anyOf": [
@@ -6278,6 +6437,14 @@
             "maxLength": 500000,
             "title": "Content",
             "type": "string"
+          },
+          "evidence_ledger": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceLedgerEntryRest"
+            },
+            "maxItems": 200,
+            "title": "Evidence Ledger",
+            "type": "array"
           },
           "finish_reason": {
             "anyOf": [

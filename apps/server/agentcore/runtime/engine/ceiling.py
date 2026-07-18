@@ -45,11 +45,14 @@ async def ceiling_finalize(
     sink: EventSink,
     finish_override_sink: list[FinishReason] | None,
     gate_escalation_sink: list[dict[str, Any]] | None,
+    cutoff_reason_sink: list[str] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Force-finalize after the round loop exits on a hard ceiling.
 
     Routes the finish by run health so an on-track worker delivers while a
     thrashing one is flagged DEGRADED + escalated (signal only — no auto replan).
+    On-track ``token_budget`` still stamps ``cutoff_reason_sink`` so delivery_status
+    / CEO gaps stay honest (不标 DEGRADED、不自动 replan).
     """
     # Hard-ceiling termination: the token backstop broke the loop, or max_rounds
     # exhausted. Always force-finalize (杜绝死循环); route the finish by run health so an
@@ -67,6 +70,14 @@ async def ceiling_finalize(
         token_budget=token_budget,
         run_id=run_id,
     )
+    # C·掐断透明化：正轨 token 撞顶也要结构化原因码（与打转 DEGRADED 分流正交）。
+    if (
+        ceiling_reason == "token_budget"
+        and role == "worker"
+        and cutoff_reason_sink is not None
+        and "token_budget" not in cutoff_reason_sink
+    ):
+        cutoff_reason_sink.append("token_budget")
     if thrashing:
         if finish_override_sink is not None:
             finish_override_sink.append(FinishReason.DEGRADED)

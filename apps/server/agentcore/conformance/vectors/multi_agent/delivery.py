@@ -107,6 +107,7 @@ def _multi_agent_delivery_status_partial() -> list[SSEEvent]:
                 {
                     "role": "课件工程师",
                     "description": "course.pptx 未生成（云端无执行环境，脚本未运行）",
+                    "reason": "token_budget",
                 }
             ],
             actions=[

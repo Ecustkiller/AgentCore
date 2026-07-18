@@ -51,6 +51,7 @@ import type {
   DebateRoundPayload,
   DebateRoundStartedPayload,
   DeliveryStatusPayload,
+  EvidenceLedgerPayload,
   MessageEndPayload,
   ReasoningDeltaPayload,
   RunContextPayload,
@@ -60,12 +61,14 @@ import type {
   TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
+  TurnEvidenceLedgerEntry,
   TurnWarningPayload,
 } from "@/types/events";
 import type {
   CostBreakdown,
   ProjectedAgent,
   ProjectedCitation,
+  ProjectedEvidenceLedgerEntry,
   ProjectedRun,
   ProjectedTurn,
   TurnStatus,
@@ -129,6 +132,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     process: [],
     citations: [],
   };
+  let evidenceLedger: ProjectedEvidenceLedgerEntry[] = [];
+  let citedIds: string[] = [];
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
@@ -209,6 +214,21 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           (ev.payload as CitationsPayload).citations ?? [],
         );
         break;
+      case "evidence_ledger": {
+        const p = ev.payload as EvidenceLedgerPayload;
+        if (Array.isArray(p.entries)) {
+          evidenceLedger = p.entries as ProjectedEvidenceLedgerEntry[];
+        } else if (p.delta?.length) {
+          evidenceLedger = mergeTurnLedger(
+            evidenceLedger,
+            p.delta as TurnEvidenceLedgerEntry[],
+          );
+        }
+        if (Array.isArray(p.cited_ids)) {
+          citedIds = p.cited_ids.map(String);
+        }
+        break;
+      }
       case "run_plan": {
         const next = planFromRunPlan(ev.payload as RunPlanPayload);
         plan = plan && plan.id === next.id ? mergePlanInto(plan, next) : next;
@@ -564,6 +584,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     captainContext,
     process: messageLane.process,
     citations: messageLane.citations as ProjectedCitation[],
+    evidenceLedger,
+    citedIds,
     agents,
     runs,
     progress: execution ? execution.progress : { completed: 0, total: 0 },
@@ -592,4 +614,23 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     })),
     userInterjections,
   };
+}
+
+/** Merge turn-ledger delta by id (append-order; later write wins). */
+function mergeTurnLedger(
+  existing: ProjectedEvidenceLedgerEntry[],
+  delta: TurnEvidenceLedgerEntry[],
+): ProjectedEvidenceLedgerEntry[] {
+  if (delta.length === 0) return existing;
+  const order: string[] = [];
+  const byId = new Map<string, ProjectedEvidenceLedgerEntry>();
+  for (const e of existing) {
+    if (!byId.has(e.id)) order.push(e.id);
+    byId.set(e.id, e);
+  }
+  for (const e of delta) {
+    if (!byId.has(e.id)) order.push(e.id);
+    byId.set(e.id, e as ProjectedEvidenceLedgerEntry);
+  }
+  return order.map((id) => byId.get(id)!);
 }

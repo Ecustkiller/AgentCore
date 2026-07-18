@@ -52,7 +52,8 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
     eventType === "turn_saved" ||
     eventType === "title_generated" ||
     eventType === "followups_generated" ||
-    eventType === "citations"
+    eventType === "citations" ||
+    eventType === "evidence_ledger"
   );
 }
 

@@ -1,5 +1,9 @@
 """Resolve prepare phase: CEO toolset assembly and attachment context."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
@@ -26,9 +30,7 @@ from agentcore.tools.builtin import (
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
-from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
-from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.attachment_parse import truncate_for_prompt
@@ -80,7 +82,7 @@ def _assemble_ceo_toolset(
     folder_id: str | None = None,
     autonomy_policy=None,
     advertise_bind_local_folder: bool = False,
-) -> tuple[DelegateTool, DebateTool, ToolRegistry]:
+) -> tuple[DelegateTool, Any, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + read/retrieval +
     consult_skill + an optional consult_memory + an optional ask_user), shared by a
     fresh turn and a 2b resume.
@@ -94,6 +96,7 @@ def _assemble_ceo_toolset(
     suspension closures arm durable plan_review pauses (结构化挂起 2b) on the
     top-level delegate. Returns ``(delegate_tool, debate_tool, chat_tools)`` — the
     tools whose accumulated usage/ledger/citations the caller folds into the turn totals.
+    ``debate_tool`` is always constructed and registered (same always-on tier as ``delegate``).
     """
     delegate_tool = DelegateTool(
         llm=llm,
@@ -122,29 +125,13 @@ def _assemble_ceo_toolset(
     )
     chat_tools = build_ceo_tool_registry()
     chat_tools.register(delegate_tool)
-    # 受监督的波循环 (replan): delegate 的伴生工具——在波边界把晚绑定步骤定稿并续跑同一张
-    # 暂停的计划。共享当回合的 DelegateTool 实例（其 ``_supervised`` 暂停态 + 累加器），故
-    # 自身无用量面；恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
-    # 否则返回友好错误。→ docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语
-    chat_tools.register(ReplanTool(delegate=delegate_tool))
-    # CEO 协调模式：update_synthesis / cancel_worker / resolve_escalation /
-    # queue_user_message — only effective while a coordination session is active
-    # (tools self-gate otherwise).
-    from agentcore.runtime.coordination.tools import (
-        CancelWorkerTool,
-        QueueUserMessageTool,
-        ResolveEscalationTool,
-        UpdateSynthesisTool,
-    )
+    # debate (辩论编排原语): the CEO's对抗性多视角思考 primitive, sibling to delegate —
+    # ALWAYS registered (拍板: 模型须能从闲聊开辩), schema 只留短触发 (长文在
+    # debate_and_review skill). 非终结且把辩手/主持人的 usage/ledger/citations 累加
+    # 在实例上, 由本回合折回总账。→ docs/03-AI核心/辩论编排设计.md
+    # Lazy import: debate package may be mid-edit by a parallel agent.
+    from agentcore.tools.builtin.debate import DebateTool
 
-    chat_tools.register(UpdateSynthesisTool(sink=sink))
-    chat_tools.register(CancelWorkerTool())
-    chat_tools.register(ResolveEscalationTool())
-    chat_tools.register(QueueUserMessageTool(sink=sink))
-    # debate (辩论编排原语): the CEO's对抗性多视角思考 primitive, sibling to delegate. A
-    # Moderator hosts an adaptive多轮 debate内部 and returns双产物 (决策简报 + 交锋叙事线);
-    # like delegate它非终结且把辩手/主持人的 usage/ledger/citations累加在实例上，由本回合
-    # 折回总账。→ docs/03-AI核心/辩论编排设计.md
     debate_tool = DebateTool(
         llm=llm,
         sink=sink,
@@ -168,6 +155,23 @@ def _assemble_ceo_toolset(
         registry=default_interaction_registry(),
     )
     chat_tools.register(debate_tool)
+    from agentcore.runtime.resolve.ceo_surface import (
+        coordination_surface_active,
+        register_coordination_surface,
+    )
+
+    # Injection == execution gate for the coord tools (active_coordination):
+    # idle chat drops replan + the coordination suite; they come back mid-turn
+    # via promote_coordination_surface_if_needed (tool_round) when a session
+    # starts or a supervised wave yield arms replan.
+    register_coordination_surface(
+        chat_tools,
+        delegate_tool=delegate_tool,
+        sink=sink,
+        include=coordination_surface_active(
+            execution_id=base_tool_context.execution_id
+        ),
+    )
     # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
     # pull any advanced-mechanism guidance on demand; the always-on 能力目录 in the
     # prompt lists the skills whose required tools are actually wired this turn.

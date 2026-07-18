@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 def _should_persist_journal(sink: EventSink) -> bool:
-    """True when this turn has replayable display surface (team graph / process / context / error)."""
+    """True when turn has replayable surface (team/process/context/error)."""
     return not (
         sink.execution_journal() is None
         and sink.process_timeline() is None

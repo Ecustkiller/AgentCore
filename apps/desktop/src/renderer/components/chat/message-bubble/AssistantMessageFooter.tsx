@@ -253,6 +253,16 @@ function MessageMoreMenu({
           {(showTrace || showDiagnosticIds) && (
             <>
               <DropdownMenuSeparator />
+              {showDiagnosticIds && conversationId && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void copyDiagnostic("conversation id", conversationId)
+                  }
+                >
+                  <Copy size={14} className="shrink-0 text-muted-foreground" />
+                  复制 conversation id
+                </DropdownMenuItem>
+              )}
               {showTrace && message.traceId && (
                 <DropdownMenuItem
                   onSelect={() => {

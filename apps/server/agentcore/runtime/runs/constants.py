@@ -15,8 +15,10 @@ from __future__ import annotations
 # concurrency — the binding resource is the local machine, not the API.
 MAX_PARALLEL_DELEGATIONS = 8
 
-# Most worker tasks one delegate call may spawn. Excess tasks are dropped.
-MAX_DELEGATION_TASKS = 10
+# Most worker tasks one delegate call may spawn. Excess tasks are rejected
+# (整批拒绝 + 分批指引). Sized for「多实体盘点 + 汇总员」一类常见扇出（如 10–14
+# 调研员 + 写手）仍能一次成图，避免撞旧上限 10 后 CEO 静默打折或空转重组。
+MAX_DELEGATION_TASKS = 16
 
 # Hard ceiling on delegation nesting across one turn's Run tree. The CEO's direct
 # workers are depth 1; a worker may itself delegate (开一层子团队) ONLY while its own
@@ -110,7 +112,7 @@ DEP_POINTER_MAX_FILES = 20
 # (digested — their full product is on disk + shown in the UI) don't draw on this pool.
 # Sized BELOW DEP_CONTEXT_BUDGET / DELEGATE_OUTPUT_LIMIT (16000) so digests + per-worker
 # boilerplate + the closing instructions all fit under the output_limit net, i.e. it
-# effectively never fires for a normal (≤10-worker) batch.
+# effectively never fires for a normal (≤16-worker) batch.
 CEO_SYNTHESIS_BUDGET = 10000
 
 # 工作区产物清单: peer products (role-attributed) + sparse pre-existing paths

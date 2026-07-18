@@ -535,9 +535,9 @@ class DebateResult:
     rounds: list[RoundResult]
     brief: DebateBrief
     stop_reason: str = STOP_CONVERGED
-    # 主持人开场白（第 1 轮 :meth:`Moderator._frame` 顺带产出）：主持人口吻的一句定调，供前端顶部
-    # 「会说话的主持人」气泡渲染。空（未产出 / 解析失败）时前端回落到模板开场白，故是锦上添花、
-    # 非硬依赖。
+    # 主持人开场白（第 1 轮 :meth:`Moderator._frame` 顺带产出）：辩论赛主持人口吻的全场宣告，
+    # 供前端「会说话的主持人」入场气泡渲染。空（未产出 / 解析失败）时前端不渲染入场气泡（开场
+    # 由第 1 轮焦点标题承担），故是锦上添花、非硬依赖。
     opening: str = ""
     # 各方【结辩陈词】（阶段化发言角色 P4）：辩已辩尽后各方的收尾 advocacy，全文随 run_id 走执行事件
     # （不塞 payload）。仅认真辩透 + 对抗形态开启；未开启 / 快速对碰 / 圆桌 / 全员失败恒空。详见
@@ -576,6 +576,9 @@ class DebateResult:
             "【收尾铁律·别抹平证据状态】简报里凡标了【待核实】/【需一手核实】、或注明仅【二手来源】的"
             "关键事实，你转述时【必须保留这份保留语】（如「据多家媒体报道、尚待一手核实」），"
             "绝不写成板上钉钉的既定事实——宁可诚实存疑，不可拿未核实的事实给用户当定论。"
+            "【收尾铁律·不引入场外量化】据简报收尾时【不得引入辩论中未出现的数字 / 金额 / 比例 / "
+            "量化估算】——只能转述辩手发言与简报里已有的量化，并保留其证据状态语；禁止自行补算、"
+            "外推或「约 X 亿 / 约占 Y%」之类场外推算。"
         )
         return head + "\n\n".join(p for p in body if p.strip()) + tail
 
@@ -590,7 +593,7 @@ class DebateResult:
             "form": self.config.form.value,
             "motion": self.config.motion,
             "stop_reason": self.stop_reason,
-            # 主持人开场白：前端顶部「会说话的主持人」气泡；空则回落模板开场白。
+            # 主持人开场白：前端「会说话的主持人」入场气泡；空则不渲染入场。
             "opening": self.opening,
             "narrative_first": self.narrative_first,
             "sides": [

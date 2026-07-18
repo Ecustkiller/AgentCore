@@ -419,8 +419,8 @@ async def test_worker_captain_rejects_sub_fanout_over_cap():
     tasks = [{"role": f"子{i}", "task": f"任务{i}"} for i in range(5)]
     result = await t.execute({"tasks": tasks}, ctx())
     assert result.success is False
-    assert "子团队扇出已达上限" in (result.output or "")
-    assert "4" in (result.output or "")
+    assert "子团队扇出已达上限" in (result.error or "")
+    assert "4" in (result.error or "")
 
 
 async def test_worker_captain_rejects_cumulative_sub_fanout():
@@ -438,4 +438,4 @@ async def test_worker_captain_rejects_cumulative_sub_fanout():
     t._sub_workers_spawned = 4
     result = await t.execute({"tasks": [{"role": "子5", "task": "收尾"}]}, ctx())
     assert result.success is False
-    assert "子团队扇出已达上限" in (result.output or "")
+    assert "子团队扇出已达上限" in (result.error or "")

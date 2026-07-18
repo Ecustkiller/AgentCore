@@ -177,6 +177,195 @@ async def test_begin_turn_creates_placeholder(monkeypatch):
     ]
 
 
+async def test_begin_turn_propagates_placeholder_failure(monkeypatch):
+    """Placeholder insert must not be swallowed — turn must not proceed without a row."""
+
+    class Repo:
+        def __init__(self, _s):
+            pass
+
+        async def create_assistant_placeholder(self, **_kw):
+            raise RuntimeError("db down")
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", Repo)
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await CloudStore().begin_turn(
+            conversation_id="c1", message_id="m1", trace_id="t" * 32
+        )
+
+
+async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
+    """First-turn / soft-fail: empty content ERROR still upserts failed + error_code."""
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+    class CostRepo:
+        def __init__(self, _s):
+            pass
+
+        async def record_runs(self, **_kw):
+            return None
+
+    class MetricsRepo:
+        def __init__(self, _s):
+            pass
+
+        async def record(self, **_kw):
+            return None
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(cloud_mod, "CostEventRepository", CostRepo)
+    monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction", lambda *_a, **_k: None)
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    sink = SimpleNamespace(emit=lambda *_a, **_k: None)
+
+    await CloudStore().finalize(
+        mode="cloud",
+        result={
+            "message_id": "m-first",
+            "content": "",
+            "error": "连接超时",
+            "error_code": ErrorCode.LLM_TIMEOUT,
+            "finish_reason": FinishReason.ERROR,
+            "rounds": 0,
+            "journal_entries": [
+                {
+                    "kind": "turn_end",
+                    "payload": {
+                        "finish_reason": "error",
+                        "error": {"code": ErrorCode.LLM_TIMEOUT, "message": "连接超时"},
+                    },
+                    "ts": None,
+                }
+            ],
+        },
+        conversation_id="c1",
+        user_id="u1",
+        folder_id=None,
+        backend=SimpleNamespace(location="cloud"),
+        sink=sink,
+        user_message="hi",
+        llm_credentials=None,
+        trace_id="a" * 32,
+        turn_id="turn1",
+        duration_ms=10,
+    )
+
+    assert upserted["message_id"] == "m-first"
+    assert upserted["content"] == ""
+    meta = upserted["metadata"]
+    assert meta["status"] == MESSAGE_STATUS_FAILED
+    assert meta["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert meta["finish_reason"] == FinishReason.ERROR.value
+
+
+async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
+    """Local write-back: empty ERROR must settle (was gated on non-empty content)."""
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def create(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def user_message_for_assistant(self, **_k):
+            return None
+
+        async def set_followups(self, *_a, **_k):
+            pass
+
+    class ConvRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="t")
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(
+        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
+    )
+    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
+    monkeypatch.setattr(cloud_mod, "mint_followups", AsyncMock(return_value=[]))
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    result = await CloudStore().finalize(
+        mode="local",
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        runs={
+            "events": [],
+            "finish_reason": "error",
+            "error": {"code": ErrorCode.LLM_TIMEOUT, "message": "超时"},
+        },
+        user_message_id="u1m",
+        message_id="m-err",
+        trace_id="b" * 32,
+        finish_reason=FinishReason.ERROR.value,
+    )
+    assert result is not None
+    assert result["assistant_message_id"] == "m-err"
+    assert upserted["message_id"] == "m-err"
+    meta = upserted["metadata"]
+    assert meta["status"] == MESSAGE_STATUS_FAILED
+    assert meta["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert meta["finish_reason"] == FinishReason.ERROR.value
+
+
 async def test_checkpoint_delegates_to_message_repo(monkeypatch):
     calls: list[dict] = []
 

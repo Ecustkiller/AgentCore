@@ -10,6 +10,7 @@ from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, FinishReason
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -54,6 +55,8 @@ async def handle_tool_calls_round(
     approval_gate: ApprovalGate | None,
     citation_sink: list[dict[str, Any]] | None,
     annotate_citations: bool,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+    ledger_registrant: str,
     run_id: str,
     role: str,
     gate_escalation_sink: list[dict[str, Any]] | None,
@@ -90,6 +93,8 @@ async def handle_tool_calls_round(
         approval_gate=approval_gate,
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
+        turn_evidence_ledger=turn_evidence_ledger,
+        ledger_registrant=ledger_registrant,
         run_id=run_id,
         role=role,
     )
@@ -167,6 +172,11 @@ async def handle_tool_calls_round(
     controller.record(outcome.attempts)
     # Mark post-delegate mode if delegate was called
     note_delegate_batches(controller, tool_calls, outcome.attempts)
+    # 工具面瘦身: after tools run, coordination / supervised yield may have appeared —
+    # promote gated tools onto the registry before re-resolving OpenAI defs.
+    from agentcore.runtime.resolve.ceo_surface import promote_coordination_surface_if_needed
+
+    surface_changed = promote_coordination_surface_if_needed(tools)
     tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     breaker = apply_circuit_breaker(
         controller,
@@ -175,7 +185,7 @@ async def handle_tool_calls_round(
         round_idx=round_idx,
         disabled_tools=disabled_tools,
     )
-    if breaker.refresh_tool_defs:
+    if breaker.refresh_tool_defs or surface_changed:
         tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     directive = govern_after_tools(
         outcome,

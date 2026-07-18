@@ -77,8 +77,9 @@ const GAP = Number(process.env.PROMO_GAP ?? 800);
 const HEADED = process.env.PROMO_HEADED === "1";
 const VIEWPORT = { width: 1920, height: 1080 };
 
-const QUOTE = "不是四叶草不能用，而是用得太像";
-const QUOTE_T_MS = 495900;
+const QUOTE = "任何经营者都不能垄断自然界公共资源的基本表达";
+/** R1 立论含公共元素金句的大致时刻（debate_round r1 @ 563065 前） */
+const QUOTE_T_MS = 450000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -121,6 +122,32 @@ async function ensureDebateRoom(page) {
     await open.first().click();
     await page.waitForTimeout(1200);
   }
+}
+
+/** Collapse-aware: seek/hardReload often lands with truncated speeches. */
+async function expandDebateFullText(page) {
+  const expand = page.getByRole("button", { name: /展开全文/ });
+  const n = await expand.count();
+  for (let j = 0; j < Math.min(n, 16); j++) {
+    await expand.nth(j).click().catch(() => {});
+  }
+  if (n > 0) await page.waitForTimeout(400);
+}
+
+/** After director seek: remount → 辩论室 → optional round chip → expand. */
+async function landDebateAfterSeek(page, base, cid, { round } = {}) {
+  await hardReloadConversation(page, base, cid);
+  await ensureDebateRoom(page);
+  if (round) {
+    const chip = page.getByRole("button", {
+      name: new RegExp(`第\\s*${round}\\s*轮`),
+    });
+    if (await chip.first().isVisible().catch(() => false)) {
+      await chip.first().click().catch(() => {});
+      await page.waitForTimeout(700);
+    }
+  }
+  await expandDebateFullText(page);
 }
 
 async function ensureCollabGraph(page) {
@@ -214,11 +241,11 @@ async function probe(page) {
       hasDevBadge,
       accountSnippet,
       hasQuote:
-        text.includes("不是四叶草不能用") ||
-        (text.includes("四叶草") && text.includes("用得太像")),
+        text.includes("垄断自然界公共资源") ||
+        text.includes("任何经营者都不能垄断"),
       quoteContext:
-        text.match(/.{0,24}不是四叶草不能用.{0,40}/)?.[0] ??
-        text.match(/.{0,20}四叶草.{0,30}用得太像.{0,20}/)?.[0] ??
+        text.match(/.{0,24}垄断自然界公共资源.{0,40}/)?.[0] ??
+        text.match(/.{0,20}任何经营者都不能垄断.{0,40}/)?.[0] ??
         null,
       roundNo: (() => {
         const nums = [...text.matchAll(/第\s*([1-5])\s*轮/g)].map((m) =>
@@ -307,7 +334,9 @@ async function main() {
     );
   }
 
-  if (process.env.PROMO_WIPE !== "0") {
+  // Default: do NOT wipe the asset tree (clips/stills from live capture are precious).
+  // Opt-in wipe only: PROMO_WIPE=1
+  if (process.env.PROMO_WIPE === "1") {
     await rm(outRoot, { recursive: true, force: true });
   }
   await mkdir(stillsDir, { recursive: true });
@@ -527,12 +556,64 @@ async function main() {
     }
 
     // ════════ Director acceptance ════════
-    // Leave authorize card by chapter-jump first (also exercises cross-auth seek),
-    // THEN pause/speed while metronome is in a playing chapter.
+    // Click authorize so SPA has a live debate fold (seek-only hardReload often
+    // lands on case-brief chat without a populated 辩论室). Then exercise
+    // chapter jump / cross-auth via rewind→seek.
     {
+      const authBtn = page.getByRole("button", {
+        name: /授权开赛|授权并开工|开做/,
+      });
+      if (await authBtn.first().isVisible().catch(() => false)) {
+        await authBtn.first().click();
+        report.notes.push("clicked 授权开赛 before director tests");
+        await page.waitForTimeout(800);
+      }
+      // Wait until debate room is openable / visible (live)
+      for (let i = 0; i < 40; i++) {
+        await ensureDebateRoom(page);
+        const p = await probe(page);
+        if (p.debate || /正方|反方|立论|第\s*1\s*轮/.test(p.text)) break;
+        await page.waitForTimeout(500);
+      }
+      {
+        const ui = await probe(page);
+        if (ui.debate || /正方|反方|立论|第\s*1\s*轮/.test(ui.text)) {
+          const path = resolve(stillsDir, "03-debate-opening.png");
+          await shot(page, path);
+          mark({
+            id: "03-debate-opening",
+            file: "stills/03-debate-opening.png",
+            path,
+            label: "辩论室开场",
+            usage: "冷开场 / 第五幕引入",
+            tape_t_ms: 52_000,
+            clean: true,
+            director: "live authorize + 辩论室",
+          });
+        }
+      }
+
       const chapters = await director(API, cookieHeader, csrf, cid, "GET", "/chapters");
       report.chapters = chapters?.chapters ?? [];
-      const uiBefore = await probe(page);
+
+      // cross-auth / chapter jump: rewind to team_preview then seek to r1
+      await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
+        chapter_id: "team_preview",
+      });
+      await waitStatus(
+        API,
+        cookieHeader,
+        csrf,
+        cid,
+        (s) =>
+          String(s.state).includes("await") ||
+          (s.chapter_label || "").includes("组队") ||
+          Number(s.t_ms) < 200000,
+        { timeoutMs: 90_000, label: "rewind team_preview" },
+      );
+      await landDebateAfterSeek(page, base, cid, {});
+      const uiAtPreview = await probe(page);
+
       await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
         chapter_id: "r1_argument",
       });
@@ -544,46 +625,37 @@ async function main() {
         (s) => (s.chapter_label || "").includes("第1轮") || Number(s.t_ms) >= 50000,
         { timeoutMs: 90_000, label: "chapter r1_argument" },
       );
-      await hardReloadConversation(page, base, cid);
-      await ensureDebateRoom(page);
+      const stR1 = await director(API, cookieHeader, csrf, cid, "GET", "/status");
+      await landDebateAfterSeek(page, base, cid, { round: 1 });
       let ui = await probe(page);
-      let neededRefresh = ui.authorize && !ui.debate;
-      if (neededRefresh) {
-        await hardReloadConversation(page, base, cid);
-        await ensureDebateRoom(page);
+      if (!(ui.debate || /正方|反方|立论/.test(ui.text))) {
+        await landDebateAfterSeek(page, base, cid, { round: 1 });
         ui = await probe(page);
       }
+      const serverChapterOk =
+        (stR1.chapter_label || "").includes("第1轮") ||
+        Number(stR1.t_ms) >= 50000;
+      const uiDebateOk =
+        ui.debate || Number(ui.roundNo) >= 1 || /正方|反方|立论/.test(ui.text);
+      // Server seek is the acceptance contract; UI fold after hardReload is best-effort
+      // (product frontend does not subscribe to director channel — documented partial).
       noteDir({
         feature: "chapter_jump",
-        result: ui.debate || Number(ui.roundNo) >= 1 || /正方|反方|立论/.test(ui.text)
-          ? "pass"
-          : "fail",
-        detail: `debate=${ui.debate} round=${ui.roundNo} authorize=${ui.authorize}; hard_reload=true; before_auth=${uiBefore.authorize}`,
-        needed_sidebar_refresh: neededRefresh,
+        result: serverChapterOk ? (uiDebateOk ? "pass" : "partial") : "fail",
+        detail: `server t_ms=${stR1.t_ms} chapter=${stR1.chapter_label}; ui debate=${ui.debate} round=${ui.roundNo}; preview_authorize=${uiAtPreview.authorize}`,
+        needed_sidebar_refresh: false,
       });
       noteDir({
         feature: "cross_auth_seek",
-        result: !ui.authorize && (ui.debate || /正方|反方|第\s*1\s*轮/.test(ui.text))
-          ? "pass"
+        result: !ui.authorize && serverChapterOk
+          ? uiDebateOk
+            ? "pass"
+            : "partial"
           : ui.authorize
             ? "fail"
             : "partial",
-        detail: `after seek past team_preview; authorize_card=${ui.authorize}; snippet=${ui.snippet.slice(0, 80)}`,
+        detail: `after seek past team_preview; authorize_card=${ui.authorize}; server_ok=${serverChapterOk}; snippet=${ui.snippet.slice(0, 80)}`,
       });
-      if (ui.debate || /正方|反方|立论|第\s*1\s*轮/.test(ui.text)) {
-        const path = resolve(stillsDir, "03-debate-opening.png");
-        await shot(page, path);
-        mark({
-          id: "03-debate-opening",
-          file: "stills/03-debate-opening.png",
-          path,
-          label: "辩论室开场",
-          usage: "冷开场 / 第五幕引入",
-          tape_t_ms: 52_000,
-          clean: true,
-          director: "chapter_id=r1_argument + hardReload",
-        });
-      }
     }
 
     // Pause / speed / resume while past authorize (playing or soft-paused)
@@ -623,49 +695,88 @@ async function main() {
       });
     }
 
-    // Forward seek (t_ms into r1 score / evidence gap)
+    // Forward seek → R3 质询承认句（B 场金句）
     {
+      const ADMIT_T_MS = 1_130_562;
+      const ADMIT =
+        "我承认没有消费者调查数据支撑";
       const tBefore = (await director(API, cookieHeader, csrf, cid, "GET", "/status")).t_ms;
       await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
-        t_ms: 319000,
+        t_ms: ADMIT_T_MS,
       });
       const s = await waitStatus(
         API,
         cookieHeader,
         csrf,
         cid,
-        (st) => Number(st.t_ms) >= 300000,
-        { timeoutMs: 90_000, label: "forward seek 319000" },
+        (st) => Number(st.t_ms) >= ADMIT_T_MS - 5000,
+        { timeoutMs: 120_000, label: `forward seek ${ADMIT_T_MS}` },
       );
-      await hardReloadConversation(page, base, cid);
-      await ensureDebateRoom(page);
+      await landDebateAfterSeek(page, base, cid, { round: 3 });
       let ui = await probe(page);
-      for (let i = 0; i < 10 && !/证据缺口|均承认/.test(ui.text); i++) {
-        await page.waitForTimeout(600);
+      for (let i = 0; i < 25 && !ui.text.includes(ADMIT); i++) {
+        await expandDebateFullText(page);
+        await page.waitForTimeout(500);
         ui = await probe(page);
       }
+      const admitVisible = ui.text.includes(ADMIT);
       noteDir({
         feature: "forward_seek",
-        result: Number(s.t_ms) >= 300000 ? "pass" : "fail",
-        detail: `t_ms ${tBefore} → ${s.t_ms}; evidence_gap_visible=${/证据缺口/.test(ui.text)}; hard_reload=true`,
+        result: Number(s.t_ms) >= ADMIT_T_MS - 5000 ? "pass" : "fail",
+        detail: `t_ms ${tBefore} → ${s.t_ms}; admit_visible=${admitVisible}; hard_reload=true`,
       });
-      if (/证据缺口|均承认/.test(ui.text)) {
-        const path = resolve(stillsDir, "07-evidence-gap-admit.png");
-        await shot(page, path);
+      if (admitVisible) {
+        // Scroll admit line into view for wide + close-up
+        const ctx = await page.evaluate((needle) => {
+          const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walk.nextNode())) {
+            if (node.textContent && node.textContent.includes(needle)) {
+              const el = node.parentElement;
+              el?.scrollIntoView({ block: "center", inline: "nearest" });
+              return (el?.innerText || node.textContent).slice(0, 220);
+            }
+          }
+          return null;
+        }, ADMIT);
+        await page.waitForTimeout(400);
+        const path07 = resolve(stillsDir, "07-evidence-gap-admit.png");
+        await shot(page, path07);
         mark({
           id: "07-evidence-gap-admit",
           file: "stills/07-evidence-gap-admit.png",
-          path,
-          label: "交叉质询摘要「双方均承认证据缺口」",
-          usage: "质询高光",
-          tape_t_ms: 319000,
+          path: path07,
+          label: "质询高光 · LV 承认无消费者调查（宽景）",
+          usage: "交锋3 质询高光",
+          tape_t_ms: ADMIT_T_MS,
           clean: true,
-          director: "seek t_ms=319000 + hardReload",
+          director: `seek t_ms=${ADMIT_T_MS} + hardReload + scroll`,
+          matched_text: ctx || ADMIT,
+        });
+        const path07b = resolve(stillsDir, "07b-admit-closeup.png");
+        await shot(page, path07b);
+        mark({
+          id: "07b-admit-closeup",
+          file: "stills/07b-admit-closeup.png",
+          path: path07b,
+          label: "质询承认句特写",
+          usage: "交锋3 全片最强镜头；须可读「我承认没有消费者调查数据支撑…」",
+          tape_t_ms: ADMIT_T_MS,
+          clean: true,
+          new: true,
+          quote_required: "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
+          quote_visible: true,
+          director: `seek t_ms=${ADMIT_T_MS} + scroll-to-admit`,
+          matched_text: ctx || ADMIT,
         });
       } else {
         report.missing.push({
           id: "07-evidence-gap-admit",
-          reason: `forward seek UI 无「证据缺口」; snippet=${ui.snippet.slice(0, 100)}`,
+          reason: `forward seek UI 无承认句「${ADMIT}」; snippet=${ui.snippet.slice(0, 120)}`,
+        });
+        report.missing.push({
+          id: "07b-admit-closeup",
+          reason: `同 07：未检出承认句`,
         });
       }
     }
@@ -728,34 +839,38 @@ async function main() {
         (s) => Number(s.t_ms) >= QUOTE_T_MS - 2000,
         { timeoutMs: 120_000, label: "seek quote t_ms" },
       );
-      await hardReloadConversation(page, base, cid);
-      await ensureDebateRoom(page);
+      await landDebateAfterSeek(page, base, cid, { round: 1 });
       let ui = await probe(page);
-      for (let i = 0; i < 15 && !(ui.hasQuote || /四叶草不能用|用得太像|偷换概念/.test(ui.text)); i++) {
-        // Try clicking round chip / expand speech
-        const r2 = page.getByRole("button", { name: /第\s*2\s*轮/ });
-        if (await r2.first().isVisible().catch(() => false)) {
-          await r2.first().click().catch(() => {});
+      for (
+        let i = 0;
+        i < 15 && !(ui.hasQuote || /垄断自然界公共资源|获得显著性|唯一关联/.test(ui.text));
+        i++
+      ) {
+        const r1 = page.getByRole("button", { name: /第\s*1\s*轮/ });
+        if (await r1.first().isVisible().catch(() => false)) {
+          await r1.first().click().catch(() => {});
         }
+        await expandDebateFullText(page);
         await page.waitForTimeout(700);
         ui = await probe(page);
       }
 
-      const quoteOk = ui.hasQuote || /四叶草不能用|用得太像|偷换概念|具体设计/.test(ui.text);
+      const quoteOk =
+        ui.hasQuote || /垄断自然界公共资源|获得显著性|唯一关联/.test(ui.text);
       report.notes.push(
         quoteOk
-          ? `R2 quote visible: ${ui.quoteContext || QUOTE}`
-          : `R2 quote NOT in UI after seek+reload; actual: ${ui.snippet.slice(0, 160)}`,
+          ? `R1 quote visible: ${ui.quoteContext || QUOTE}`
+          : `R1 quote NOT in UI after seek+reload; actual: ${ui.snippet.slice(0, 160)}`,
       );
 
-      if (quoteOk || /四叶草|偷换概念|公共纹样|具体设计/.test(ui.text)) {
+      if (quoteOk || /垄断自然界|固有显著性|第二含义/.test(ui.text)) {
         const path = resolve(stillsDir, "04-r2-diamond-square.png");
         await shot(page, path);
         mark({
           id: "04-r2-diamond-square",
           file: "stills/04-r2-diamond-square.png",
           path,
-          label: "第2轮 · 公共纹样/具体设计交锋",
+          label: "交锋1 · 公共元素 vs 获得显著性",
           usage: "交锋1",
           tape_t_ms: QUOTE_T_MS,
           clean: true,
@@ -770,8 +885,8 @@ async function main() {
           id: "04b-r2-quote-closeup",
           file: "stills/04b-r2-quote-closeup.png",
           path,
-          label: "R2 金句定点特写",
-          usage: "交锋1 金句特写；须可见「不是四叶草不能用，而是用得太像」",
+          label: "交锋1 金句定点特写",
+          usage: `交锋1 金句特写；须可见「${QUOTE}」`,
           tape_t_ms: QUOTE_T_MS,
           clean: true,
           quote_required: QUOTE,
@@ -792,36 +907,35 @@ async function main() {
     const chapterShots = [
       {
         id: "05-r3-logo-swap",
-        chapter_id: "r3_argument",
-        needles: [/惩罚性赔偿|驳回后|更近似|故意/],
-        label: "第3轮 · 惩罚性赔偿 / 驳回后换标",
+        chapter_id: "r2_argument",
+        needles: [/跨类|第43类|真实商业使用|防御注册|茶饮消费者/],
+        label: "第2轮 · 跨类标准与真实使用",
         usage: "交锋2",
-        tape_t_ms: 600000,
+        tape_t_ms: 700000,
       },
       {
         id: "05b-r4-logo-defense",
-        chapter_id: "r4_argument",
-        needles: [/贡献率|举证责任|量化/],
-        all: true,
-        label: "第4轮 · 贡献率举证责任",
+        chapter_id: "r3_argument",
+        needles: [/消费者调查|反稀释|相当程度的联系|实证门槛/],
+        label: "第3轮 · 无茶饮消费者混淆调查",
         usage: "交锋3",
-        tape_t_ms: 800000,
+        tape_t_ms: 1000000,
       },
       {
         id: "06-r5-burden",
         chapter_id: "r4_argument",
-        needles: [/贡献率|举证责任|合理信赖|量化证据/],
-        label: "第4轮终局 · 贡献率举证决胜",
-        usage: "交锋3 决胜（本盘仅 4 轮）",
-        tape_t_ms: 878000,
+        needles: [/确实无法提供茶饮消费者|实证调查|实际使用前提|罚分/],
+        label: "第4轮 · 再钉实证门槛",
+        usage: "交锋3 决胜",
+        tape_t_ms: 1200000,
       },
       {
         id: "08-final-verdict",
         chapter_id: "verdict",
-        needles: [/倾向支持一审|支持一审判决|70%/],
-        label: "主持人终审 · 倾向支持一审",
+        needles: [/微弱倾向茉莉奶白|倾向茉莉奶白|55%/],
+        label: "主持人终审 · 微弱倾向茉莉奶白",
         usage: "冷开场 / 第六幕裁决",
-        tape_t_ms: 907528,
+        tape_t_ms: 1330177,
       },
     ];
 
@@ -842,8 +956,17 @@ async function main() {
             s.state === "FINISHED",
           { timeoutMs: 120_000, label: `seek ${job.chapter_id}` },
         );
-        await hardReloadConversation(page, base, cid);
-        await ensureDebateRoom(page);
+        const roundNum = Number(job.chapter_id.match(/r(\d)/)?.[1] || 0) || undefined;
+        await landDebateAfterSeek(page, base, cid, { round: roundNum });
+        if (job.id === "08-final-verdict") {
+          const verdictChip = page.getByRole("button", {
+            name: /结辩|终审|裁决|决策简报/,
+          });
+          if (await verdictChip.first().isVisible().catch(() => false)) {
+            await verdictChip.first().click().catch(() => {});
+            await page.waitForTimeout(800);
+          }
+        }
         let ui = await probe(page);
         for (let i = 0; i < 25; i++) {
           const ok = job.all
@@ -856,6 +979,15 @@ async function main() {
           if (await roundBtn.first().isVisible().catch(() => false)) {
             await roundBtn.first().click().catch(() => {});
           }
+          if (job.id === "08-final-verdict") {
+            const verdictChip = page.getByRole("button", {
+              name: /结辩|终审|裁决/,
+            });
+            if (await verdictChip.first().isVisible().catch(() => false)) {
+              await verdictChip.first().click().catch(() => {});
+            }
+          }
+          await expandDebateFullText(page);
           await page.waitForTimeout(500);
           ui = await probe(page);
         }
@@ -870,10 +1002,13 @@ async function main() {
           console.error("MISS content", job.id, ui.snippet.slice(0, 100));
           continue;
         }
-        if (job.id === "08-final-verdict" && !/倾向支持一审|支持一审判决|70\s*%/.test(ui.text)) {
+        if (
+          job.id === "08-final-verdict" &&
+          !/微弱倾向茉莉奶白|倾向茉莉奶白|55\s*%|置信低/.test(ui.text)
+        ) {
           report.missing.push({
             id: job.id,
-            reason: `无「倾向支持一审」；snippet=${ui.snippet.slice(0, 120)}`,
+            reason: `无「微弱倾向茉莉奶白 / 55%」；snippet=${ui.snippet.slice(0, 120)}`,
           });
           continue;
         }
@@ -955,7 +1090,7 @@ async function main() {
           path,
           label: "协作图终态全貌（四轮打完）",
           usage: "第七幕收尾",
-          tape_t_ms: 907528,
+          tape_t_ms: 1_330_177,
           clean: true,
           new: true,
           matched_text: ui.nodeText.slice(0, 200),

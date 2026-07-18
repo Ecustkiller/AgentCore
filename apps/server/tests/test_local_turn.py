@@ -7,6 +7,7 @@ Covered:
 
 * a full turn persists the user + assistant messages AND the turn journal;
 * an empty reply persists only the user row;
+* an empty ERROR still settles the assistant row (failed + error_code);
 * **no cost ledger is ever written**;
 * the user row is pinned to the client-minted id;
 * a retried write-back is an idempotent D7 merge upsert (no early-return abandon);
@@ -201,6 +202,36 @@ async def test_record_local_turn_empty_reply_skips_assistant_and_journal(monkeyp
     assert not any(e[0] == "title" for e in events)  # no title mint
     assert result["assistant_message_id"] is None
     assert result["title"] == "已有标题"  # echo existing title (D7 merge response)
+
+
+async def test_record_local_turn_empty_error_settles_assistant(monkeypatch):
+    """Empty ERROR still upserts failed + error_code (normal empty end_turn still skips)."""
+    from agentcore.core.error_codes import ErrorCode
+
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        runs={
+            "events": [],
+            "finish_reason": "error",
+            "error": {"code": ErrorCode.LLM_TIMEOUT, "message": "超时"},
+        },
+        user_message_id=_USER_MSG_ID,
+        message_id="m-err",
+        trace_id=_TRACE,
+        finish_reason="error",
+    )
+
+    assert ("upsert", "assistant", "c1") in events
+    usage = next(e for e in events if e[0] == "usage")
+    assert usage[2]["status"] == "failed"
+    assert usage[2]["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert result["assistant_message_id"] == "assistant-id"
 
 
 async def test_record_local_turn_records_no_cost_ledger(monkeypatch):

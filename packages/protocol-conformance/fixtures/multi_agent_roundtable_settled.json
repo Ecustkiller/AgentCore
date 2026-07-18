@@ -445,6 +445,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "rts_mod1",

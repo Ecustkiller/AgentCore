@@ -103,6 +103,14 @@ turn_citations: ContextVar[list[dict[str, Any]] | None] = ContextVar(
     "turn_citations", default=None
 )
 
+# 回合共享调研台账（引用即出处 P1 · ``EvidenceLedgerCore`` id_prefix=``#r``）。
+# 与 :data:`turn_citations` 同级：pipeline 回合入口创建并 bind；captain / 调研 worker
+# 经显式参数注入同一对象（并行登记不撞号）。辩论场级台账仍走 ``debate.EvidenceLedger``
+# （``#e``），不读本 ContextVar。挂起快照 / 再水化见提案 §十第 4 步。
+turn_evidence_ledger: ContextVar[Any | None] = ContextVar(
+    "turn_evidence_ledger", default=None
+)
+
 
 # InteractionKind members that persist to ``paused_turns`` (设计 §4.7). Single source
 # for the durable set — :class:`SuspensionKind` values are taken from these members

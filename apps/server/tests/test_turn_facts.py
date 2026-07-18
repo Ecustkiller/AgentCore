@@ -180,6 +180,7 @@ def test_turn_paused_fact_round_trip():
         process=process,
         run_processes=run_processes,
         citations=citations,
+        evidence_ledger=[],
         controller=controller,
     )
     entry = fact.to_fact().entry()
@@ -192,6 +193,7 @@ def test_turn_paused_fact_round_trip():
         "process": process,
         "run_processes": run_processes,
         "citations": citations,
+        "evidence_ledger": [],
         "controller": controller,
     }
     rebuilt = TurnPausedFact.from_payload(entry["payload"])
@@ -210,6 +212,7 @@ def test_turn_paused_fact_defaults_empty_collections():
     assert payload["process"] == []
     assert payload["run_processes"] == {}
     assert payload["citations"] == []
+    assert payload["evidence_ledger"] == []
     assert payload["controller"] == {}
 
 

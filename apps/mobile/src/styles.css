@@ -919,11 +919,54 @@ button.link {
   min-width: 0;
 }
 
+.cite-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .cite-title {
   overflow: hidden;
   font-size: 13px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.cite-id {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.cite-tier {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: 999px;
+}
+
+.cite-tier-official {
+  color: var(--success);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+}
+
+.cite-tier-media {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+.cite-tier-unknown {
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.cite-tier-weak {
+  color: var(--warning);
+  background: color-mix(in oklch, var(--warning) 12%, transparent);
 }
 
 .cite-site {
@@ -1343,7 +1386,7 @@ button.link {
 /* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their concurrent
    siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat).
    Collapsible via the same <details> fold idiom as 思考 (.reasoning) / 工具组 (.tool-group). */
-/* 交付状态（能力闸门与交付诚实性）：delegate 收尾的缺口 / 待操作对账区块。 */
+/* 完成条件（批次验收）：缺口 / 待操作对账；与 finish_guard 核验重写 chip 分流。 */
 .delivery {
   display: flex;
   flex-direction: column;
@@ -1359,6 +1402,13 @@ button.link {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.delivery-title {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .delivery-state {
@@ -1380,11 +1430,19 @@ button.link {
 }
 
 .delivery-summary {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.delivery-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .delivery-row {
@@ -1402,6 +1460,17 @@ button.link {
 .delivery-desc {
   min-width: 0;
   color: var(--fg);
+}
+
+.delivery-reason {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--destructive-fg, var(--destructive));
+  background: color-mix(in oklch, var(--destructive) 14%, transparent);
 }
 
 .delivery-action {

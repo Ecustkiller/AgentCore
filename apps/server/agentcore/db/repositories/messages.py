@@ -35,6 +35,7 @@ class MessageRepository:
         metadata: dict | None = None,
         attachments: list | None = None,
         citations: list | None = None,
+        evidence_ledger: list | None = None,
         message_id: str | None = None,
         trace_id: str | None = None,
     ) -> Message:
@@ -56,6 +57,8 @@ class MessageRepository:
             msg.attachments = attachments
         if citations is not None:
             msg.citations = citations
+        if evidence_ledger is not None:
+            msg.evidence_ledger = evidence_ledger
         self._session.add(msg)
         await self._session.commit()
         await self._session.refresh(msg)
@@ -91,6 +94,7 @@ class MessageRepository:
         reasoning_content: str | None = None,
         metadata: dict | None = None,
         citations: list | None = None,
+        evidence_ledger: list | None = None,
         trace_id: str | None = None,
         merge: bool = False,
     ) -> Message:
@@ -138,6 +142,8 @@ class MessageRepository:
         }
         if citations is not None:
             values["citations"] = citations
+        if evidence_ledger is not None:
+            values["evidence_ledger"] = evidence_ledger
         update_set: dict = {
             "content": write_content,
             "reasoning_content": write_reasoning,
@@ -146,6 +152,8 @@ class MessageRepository:
         }
         if citations is not None:
             update_set["citations"] = citations
+        if evidence_ledger is not None:
+            update_set["evidence_ledger"] = evidence_ledger
         await self._session.execute(
             pg_insert(Message)
             .values(**values)
@@ -262,6 +270,7 @@ class MessageRepository:
                 usage=r.usage,
                 attachments=list(r.attachments or []),
                 citations=list(r.citations or []),
+                evidence_ledger=list(r.evidence_ledger or []),
                 followups=list(r.followups or []),
                 cost=dict(r.cost) if r.cost else None,
                 created_at=r.created_at,

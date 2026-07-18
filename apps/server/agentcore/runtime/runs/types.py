@@ -169,9 +169,11 @@ class RunSpec:
     research_then_draft: bool = False
     draft_brief: str = ""
     draft_system: str = ""
-    # A2 出处软校验（仅辩手两阶段成稿消费）：成稿中每个【已核实·X】的出处须与本方检索
-    # 语料宽松对应，凭空来源回炉一次。普通 worker 默认 False，零行为变化。
-    source_grounding_check: bool = False
+    # 证据台账 id 闸（仅辩手两阶段成稿）：成稿【已核实·#eN】须 ∈ 场级台账。
+    # 普通 worker 默认 False。台账对象经 AgentExecutorEnv / continue_run 注入，不进 RunSpec。
+    evidence_ledger_check: bool = False
+    # 辩论方键（登记 evidence_ledger.side_key）；非辩手恒空。
+    side_key: str = ""
     # Allowed-tools restriction for this worker, or ``None`` = no restriction (the
     # worker is offered ALL team tools). ``None`` is the fail-safe default: a task
     # that omits ``tools`` must not be silently stranded tool-less. The engine reads
@@ -230,13 +232,18 @@ class RunSpec:
     # ``depth < MAX_DELEGATION_DEPTH`` (executor enforces the cap). depth-2
     # sub-workers never delegate regardless of this flag; explicit ``False`` opts out.
     can_delegate: bool = True
-    # 回落换人 (多轮编排 P-3): when the CEO re-delegates after a continue miss / cap,
-    # this points at the original worker run the new node is taking over. Display-only
-    # for the graph「接手」badge +「接替」edge; the scheduler never reads it.
+    # 回落换人 / 协调补派 (多轮编排 P-3): the failed (or cancelled) run this node
+    # takes over. Graph shows「接手」/「接替」; ``RunPlan.add`` also rewrites other
+    # nodes' ``depends_on`` that named the old id so downstream waits on this run.
     replaces_run_id: str | None = None
     # 同人续派：目标 run 的现场根（RunSession 键）。设了则执行走 continue_run 而非冷开局；
     # wire 的 continues_run_id 恒等于该值（星型）。校验与闸在驱动层，调度器不读。
     continue_from_run_id: str | None = None
+    # 检索预算（提案 A1）：本 run ``web_search``+``read_url`` 合计次数上限。
+    # ``None`` = 未解析（手工构造的 spec / 测试）；经 ``build_run_plan`` /
+    # ``apply_retrieval_budgets`` 后恒为 ``>=0`` 的 int。CEO 显式声明优先于结构化默认。
+    # Enforce 在 engine ``tool_exec``（有 run 身份处），与 LoopController 正交。
+    retrieval_budget: int | None = None
     policy: RunPolicy = field(default_factory=RunPolicy)
     # Fan-out awareness: a concise list of the *other* nodes that fanned out from
     # the same point — those sharing this node's exact ``depends_on`` set, i.e. the

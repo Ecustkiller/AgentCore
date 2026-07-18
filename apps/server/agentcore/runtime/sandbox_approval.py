@@ -33,6 +33,10 @@ def execution_approval_posture(backend: WorkspaceBackend | None) -> ExecutionApp
         return ExecutionApprovalPosture.REQUIRES_AUTH
     # Cloud (location=server): no real sandbox → tools withheld at registry;
     # gVisor on → true isolation, execution auto-passes.
+    # Dev escape hatch (CODE_EXECUTE_CLOUD_ENABLED, 安全权限与治理 §5.4): tools ARE
+    # registered despite UNAVAILABLE here — the posture only feeds auto-pass, and cloud
+    # workers carry no per-call gate anyway (worker_gate_applies is False), so the
+    # escape hatch executes ungated without touching this table.
     if settings.gvisor_enabled:
         return ExecutionApprovalPosture.AUTO_PASS
     return ExecutionApprovalPosture.UNAVAILABLE

@@ -31,10 +31,12 @@ from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F40
 from agentcore.runtime.runs import RunKind, RunSpec, build_captain_executor
 from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,
     turn_citations,
+    turn_evidence_ledger,
     turn_history,
 )
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -170,6 +172,10 @@ async def run_chat_pipeline(
     # 单一权威). The loop mutates this same list via ``citation_sink``. Reset in finally.
     citations: list[dict] = []
     citations_token = turn_citations.set(citations)
+    # 回合共享调研台账（引用即出处 P1）：与引用池同入口创建；captain / 调研 worker
+    # 注入同一对象，并行登记原子拿 ``#rN``。辩论场级 ``#e`` 台账不经此路径。
+    evidence_ledger = EvidenceLedgerCore(id_prefix="#r")
+    ledger_token = turn_evidence_ledger.set(evidence_ledger)
     # CEO 协调模式: turn-level execution_id for registry lookup (captain wait path).
     # Bound after base_tool_context is minted (inside try); reset in finally.
     execution_id_token = None
@@ -263,6 +269,7 @@ async def run_chat_pipeline(
             citation_sink=citations,
             approval_gate=assembled.approval_gate,
             supports_tools=llm_supports_tools,
+            turn_evidence_ledger=evidence_ledger,
         )
         captain_state = await run_captain(captain_spec)
 
@@ -325,6 +332,7 @@ async def run_chat_pipeline(
         current_audit_recorder.reset(audit_token)
         turn_history.reset(history_token)
         turn_citations.reset(citations_token)
+        turn_evidence_ledger.reset(ledger_token)
         if execution_id_token is not None:
             from agentcore.runtime.coordination.session import (
                 clear_active_coordination,

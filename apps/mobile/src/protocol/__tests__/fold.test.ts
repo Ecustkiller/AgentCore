@@ -3,13 +3,60 @@
 // ProjectedTurn) so the mobile waiting UI shows 正在检索 / 排队中 / 改用备用引擎 instead of a
 // static 进行中 — and clears a tool's phase the moment it ends.
 
-import { extractToolPhases, extractWorkerToolPhases } from "@/protocol/fold";
+import {
+  extractToolPhases,
+  extractWorkerToolPhases,
+  fold,
+} from "@/protocol/fold";
 import type { SSEEvent } from "@agentcore/contract-types";
 import { describe, expect, it } from "vitest";
 
 function ev(type: SSEEvent["type"], payload: unknown): SSEEvent {
   return { type, timestamp: "", payload } as SSEEvent;
 }
+
+describe("fold · replaces_run_id", () => {
+  it("透传 plan.replaces_run_id 与 run_started.replaces_run_id", () => {
+    const turn = fold([
+      ev("message_start", {
+        message_id: "m1",
+        conversation_id: "c1",
+      }),
+      ev("run_plan", {
+        execution_id: "e1",
+        plan_type: "multi_agent",
+        task_summary: "补派",
+        agents: [
+          { id: "a1", role: "写手", model_preference: "fast", thinking: false },
+          {
+            id: "a1b",
+            role: "写手",
+            model_preference: "fast",
+            thinking: false,
+          },
+        ],
+        runs: [
+          { id: "r1", agent_id: "a1", task: "写", depends_on: [] },
+          {
+            id: "r1b",
+            agent_id: "a1b",
+            task: "写（补派）",
+            depends_on: [],
+            replaces_run_id: "r1",
+          },
+        ],
+      }),
+      ev("run_started", {
+        run_id: "r1b",
+        agent_id: "a1b",
+        parent_run_id: null,
+        kind: "agent",
+        replaces_run_id: "r1",
+      }),
+    ]);
+    expect(turn.runs.find((r) => r.id === "r1b")?.replacesRunId).toBe("r1");
+  });
+});
 
 describe("extractToolPhases", () => {
   it("keeps the LATEST phase per running tool_call_id", () => {

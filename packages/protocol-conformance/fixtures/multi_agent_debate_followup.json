@@ -896,6 +896,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [
       {
         "id": "debate_fu_mod1",

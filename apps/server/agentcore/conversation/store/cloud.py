@@ -107,7 +107,12 @@ class CloudStore:
         message_id: str,
         trace_id: str,
     ) -> None:
-        """Create the running assistant row at turn start (progressive persistence)."""
+        """Create the running assistant row at turn start (progressive persistence).
+
+        Failures propagate: a turn must not run SSE / pipeline without a durable
+        assistant row. Finalize only settles that row (content / error / status) —
+        it is not a create-on-failure fallback.
+        """
         try:
             async with async_session_factory() as session:
                 await MessageRepository(session).create_assistant_placeholder(
@@ -116,12 +121,13 @@ class CloudStore:
                     trace_id=trace_id,
                 )
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "chat.assistant_placeholder_failed",
                 conversation_id=conversation_id,
                 message_id=message_id,
                 error=str(e),
             )
+            raise
 
     async def checkpoint(
         self,
@@ -307,6 +313,7 @@ class CloudStore:
         assistant_reply = result.get("content") or ""
         assistant_reasoning = result.get("reasoning_content") or None
         assistant_citations = result.get("citations") or None
+        assistant_evidence_ledger = result.get("evidence_ledger") or None
         journal_entries = result.get("journal_entries")
         cost_runs = result.get("cost_runs") or []
 
@@ -328,6 +335,7 @@ class CloudStore:
                             content=assistant_reply,
                             reasoning_content=assistant_reasoning,
                             citations=assistant_citations,
+                            evidence_ledger=assistant_evidence_ledger,
                             trace_id=trace_id,
                             metadata=_usage_metadata(
                                 result,
@@ -385,6 +393,7 @@ class CloudStore:
                     content=assistant_reply,
                     reasoning_content=assistant_reasoning,
                     citations=assistant_citations,
+                    evidence_ledger=assistant_evidence_ledger,
                     trace_id=trace_id,
                     metadata=_usage_metadata(result, status=terminal_status),
                     merge=True,
@@ -584,6 +593,7 @@ class CloudStore:
         assistant_content: str,
         assistant_reasoning: str | None = None,
         citations: list[dict] | None = None,
+        evidence_ledger: list[dict] | None = None,
         runs: dict | None = None,
         journal: list[dict] | None = None,
         user_message_id: str,
@@ -598,7 +608,7 @@ class CloudStore:
         finish_reason: str | None = None,
         llm_credentials: LLMCredentials | None = None,
     ) -> dict[str, Any]:
-        """Local write-back via finalize(mode=local): content + status + journal, no ledger."""
+        """Local write-back via finalize(mode=local): content + status + journal."""
         finish_value = finish_reason
         is_paused = finish_value == FinishReason.PAUSED.value
         is_incomplete = finish_value == FinishReason.CANCELLED.value
@@ -674,12 +684,31 @@ class CloudStore:
         }
         if is_paused:
             usage_metadata["paused"] = True
-        if is_incomplete:
+        elif is_incomplete:
             usage_metadata["incomplete"] = True
             usage_metadata["finish_reason"] = FinishReason.CANCELLED.value
+        elif finish_value is not None:
+            usage_metadata["finish_reason"] = finish_value
+        run_error = runs.get("error") if isinstance(runs, dict) else None
+        if isinstance(run_error, dict):
+            err_code = run_error.get("code")
+            if err_code:
+                usage_metadata["error_code"] = err_code
 
-        # Cancelled salvage may have empty streamed text but still needs the incomplete note.
-        if message_id and (content_to_write or is_paused or is_incomplete):
+        # Settle whenever the turn has a terminal/pause surface — including empty
+        # ERROR (soft-fail / first-turn crash). Happy-path empty end_turn still skips
+        # (no orphan row for a no-op reply). Cancelled salvage may have empty streamed
+        # text but still needs the incomplete note.
+        should_settle = bool(
+            message_id
+            and (
+                content_to_write
+                or is_paused
+                or is_incomplete
+                or terminal_status == MESSAGE_STATUS_FAILED
+            )
+        )
+        if should_settle:
             async with async_session_factory() as session:
                 # D7: idempotent merge upsert (no early-return when rows already exist).
                 existing = await MessageRepository(session).get_by_id(
@@ -698,6 +727,7 @@ class CloudStore:
                     content=content,
                     reasoning_content=assistant_reasoning,
                     citations=citations,
+                    evidence_ledger=evidence_ledger,
                     trace_id=trace_id,
                     metadata=merged_usage,
                     merge=True,

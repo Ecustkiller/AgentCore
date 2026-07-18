@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import Field
+
 from agentcore.runtime.events.payloads._base import WirePayload, absent
 
 
@@ -53,10 +55,47 @@ class Citation(WirePayload):
     title: str
     snippet: str | None = absent()
     site: str | None = absent()
+    # 证据台账 / 引用即出处：缺字段（老 wire）→ 前端忽略。
+    id: str | None = absent()
+    date: str | None = absent()
+    tier: str | None = absent()  # official | media | unknown | weak
+    query: str | None = absent()
+    deep_read: bool | None = absent()
+    registrant: str | None = absent()
+    citable: bool | None = absent()
 
 
 class CitationsPayload(WirePayload):
     citations: list[Citation]
+
+
+class TurnEvidenceLedgerEntry(WirePayload):
+    """回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集；``registrant`` ↔ 辩论 ``side_key``）。"""
+
+    id: str  # #r1, #r2, …
+    url: str = ""
+    title: str = ""
+    snippet: str = ""
+    site: str = ""
+    date: str = ""
+    tier: str = "unknown"  # official | media | unknown | weak
+    query: str = ""
+    deep_read: bool = False
+    registrant: str = ""
+    citable: bool = True
+
+
+class EvidenceLedgerPayload(WirePayload):
+    """Turn 级台账通道（引用即出处 P1 · Q4）。
+
+    - ``delta``：自上次 drain 以来的增量（live mid-turn）
+    - ``entries``：全量快照（settle 权威覆盖；与 delta 可同发，客户端以 entries 为准）
+    - ``cited_ids``：成稿实际引用的 id 集（P2：``citations_event`` 投影权威；通常仅 settle 携带）
+    """
+
+    delta: list[TurnEvidenceLedgerEntry] = Field(default_factory=list)
+    entries: list[TurnEvidenceLedgerEntry] | None = absent()
+    cited_ids: list[str] | None = absent()
 
 
 # Opaque alias — emitted as `export type ToolDisplay = Record<string, unknown>`.

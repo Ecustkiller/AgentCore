@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 交付状态卡（能力闸门与交付诚实性）：delivery_status 的缺口 / 待操作渲染契约。
+// 完成条件卡（批次验收 / completion_criteria）：delivery_status 的缺口 / 待操作渲染契约。
 import type { DeliveryStatusPayload } from "@/types/events";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,8 +31,9 @@ const partial: DeliveryStatusPayload = {
 describe("DeliveryStatusCard", () => {
   it("renders partial state with gaps and bind action button", () => {
     render(<DeliveryStatusCard status={partial} conversationId="c1" />);
-    expect(screen.getByText("交付状态")).toBeTruthy();
-    expect(screen.getByText("部分交付")).toBeTruthy();
+    expect(screen.getByText("完成条件")).toBeTruthy();
+    expect(screen.getByText("部分未满足")).toBeTruthy();
+    expect(screen.getByText("团队可能重派")).toBeTruthy();
     expect(screen.getByText("已交付 2 个文件；1 项缺口")).toBeTruthy();
     expect(screen.getByText(/course\.pptx 未生成/)).toBeTruthy();
     // 已知 bind_local_folder 行动项 → 真按钮（复用 ask_user 卡的绑定通路）。
@@ -55,7 +56,8 @@ describe("DeliveryStatusCard", () => {
         conversationId="c1"
       />,
     );
-    expect(screen.getByText("未交付")).toBeTruthy();
+    expect(screen.getByText("未满足")).toBeTruthy();
+    expect(screen.getByText("团队可能重派")).toBeTruthy();
     expect(screen.getByText("未来的提示行")).toBeTruthy();
     // 未知 kind 不渲染按钮（向前兼容：按普通提示行呈现）。
     expect(screen.queryByRole("button")).toBeNull();
@@ -81,5 +83,29 @@ describe("DeliveryStatusCard", () => {
   it("hides bind button without a conversation id (预览/离线回放)", () => {
     render(<DeliveryStatusCard status={partial} conversationId={null} />);
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("badges known cutoff reason codes on gaps", () => {
+    render(
+      <DeliveryStatusCard
+        status={{
+          execution_id: "exec-4",
+          state: "partial",
+          summary: "已交付 1 个文件；1 项缺口",
+          delivered_files: ["大纲.md"],
+          gaps: [
+            {
+              role: "课件工程师",
+              description: "队员因 token 预算触顶被迫收口，产出可能不完整",
+              reason: "token_budget",
+            },
+          ],
+          actions: [],
+        }}
+        conversationId="c1"
+      />,
+    );
+    expect(screen.getByText("预算触顶")).toBeTruthy();
+    expect(screen.getByText(/token 预算触顶/)).toBeTruthy();
   });
 });

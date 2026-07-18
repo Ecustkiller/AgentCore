@@ -450,12 +450,42 @@ class TurnRecoveryResponse(BaseModel):
 
 
 class Citation(BaseModel):
-    """A web source consulted for an assistant message (source-card data)."""
+    """A web source consulted for an assistant message (source-card data).
+
+    Optional ``id`` / ``date`` / ``tier`` / ``query`` / ``deep_read`` / ``registrant`` /
+    ``citable`` support the debate evidence ledger (M1), source-card credibility
+    badges, and 引用即出处 P1 台账溯源。``tier`` is forward-compatible
+    (``official`` / ``media`` / ``unknown`` / ``weak``; ``blocked`` never reaches the
+    wire). Absent fields on legacy cards → client degrades.
+    """
 
     url: str
     title: str = ""
     snippet: str = ""
     site: str = ""
+    id: str | None = None
+    date: str | None = None
+    tier: str | None = None
+    query: str | None = None
+    deep_read: bool | None = None
+    registrant: str | None = None
+    citable: bool | None = None
+
+
+class EvidenceLedgerEntryRest(BaseModel):
+    """回合调研台账条目（REST / 落库；与 SSE ``TurnEvidenceLedgerEntry`` 同形）。"""
+
+    id: str
+    url: str = ""
+    title: str = ""
+    snippet: str = ""
+    site: str = ""
+    date: str = ""
+    tier: str = "unknown"
+    query: str = ""
+    deep_read: bool = False
+    registrant: str = ""
+    citable: bool = True
 
 
 class RunError(BaseModel):
@@ -533,6 +563,9 @@ class MessageDetail(BaseModel):
     trace_id: str | None = None
     attachments: list[StoredAttachment] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    # 回合调研台账（引用即出处 P1, DERIVED）：live 走 ``evidence_ledger`` SSE；落库
+    # ``messages.evidence_ledger``。缺字段 / [] = legacy。不含辩论场级台账。
+    evidence_ledger: list[EvidenceLedgerEntryRest] = Field(default_factory=list)
     # 回合级「下一步推荐」chips (下一步推荐, DERIVED 持久化): the assistant row's persisted
     # quick-reply suggestions (messages.followups column), surfaced so reopening a
     # conversation replays the last turn's chips — live they ride followups_generated.
@@ -682,6 +715,8 @@ class RecordTurnRequest(BaseModel):
     content: str = Field("", max_length=500_000)
     reasoning_content: str | None = Field(None, max_length=500_000)
     citations: list[Citation] = Field(default_factory=list, max_length=50)
+    # 引用即出处 P1 · Q9：与云路径同形落盘；缺字段 legacy 降级。
+    evidence_ledger: list[EvidenceLedgerEntryRest] = Field(default_factory=list, max_length=200)
     runs: RunsPayload | None = None
     # Progressive outbox journal facts (``{kind, payload, ts}``), ordered by seq.
     # Optional + backward-compatible: crash/cancel salvage often has no ``runs``

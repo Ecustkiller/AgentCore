@@ -19,7 +19,7 @@ import { useGraphStore } from "@/stores/graph";
 import type { EndpointKind } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
 import { Background, type Node, ReactFlow } from "@xyflow/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { DebateStageBands } from "./DebateStageBands";
@@ -306,10 +306,42 @@ export function GraphView({
     ],
   );
 
-  const flowNodes = useMemo(
-    () => (projectionBase ? projectFlowNodes(projectionBase) : []),
-    [projectionBase],
-  );
+  // 结构换坐标时短暂 morph（与画布一致）；流式内容更新不改 positions → 不触发。
+  const [morphing, setMorphing] = useState(false);
+  const morphTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevLayoutSigRef = useRef("");
+  const layoutSig = useMemo(() => {
+    if (!layoutReady || !bbox) return "";
+    const ids = Object.keys(positions).sort();
+    return ids
+      .map((id) => {
+        const p = positions[id];
+        return `${id}:${p?.x ?? 0},${p?.y ?? 0}`;
+      })
+      .join("|");
+  }, [layoutReady, bbox, positions]);
+  useEffect(() => {
+    if (!layoutSig || layoutSig === prevLayoutSigRef.current) return;
+    const hadPrev = prevLayoutSigRef.current.length > 0;
+    prevLayoutSigRef.current = layoutSig;
+    if (!hadPrev) return;
+    setMorphing(true);
+    if (morphTimerRef.current) clearTimeout(morphTimerRef.current);
+    morphTimerRef.current = setTimeout(() => setMorphing(false), 320);
+    return () => {
+      if (morphTimerRef.current) clearTimeout(morphTimerRef.current);
+    };
+  }, [layoutSig]);
+
+  const flowNodes = useMemo(() => {
+    if (!projectionBase) return [];
+    const nodes = projectFlowNodes(projectionBase);
+    if (!morphing) return nodes;
+    return nodes.map((n) => ({
+      ...n,
+      className: [n.className, "graph-layout-morphing"].filter(Boolean).join(" "),
+    }));
+  }, [projectionBase, morphing]);
 
   const hoverState = useMemo(() => {
     const injectRelated = injectOverlay?.dimUnrelatedEdges

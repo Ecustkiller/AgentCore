@@ -550,4 +550,50 @@ describe("buildGraphStructure · bookend sink edges", () => {
     );
     expect(sinkTargets(rawEdges)).toEqual(["mod"]);
   });
+
+  it("补派 replaces_run_id：接替边 + 失败节点不再汇入 CEO + 补派不挂 input", () => {
+    const { rawEdges } = buildGraphStructure(
+      [
+        captain(),
+        run("w1"),
+        run("w2"),
+        run("w1b", [], { replacesRunId: "w1" }),
+      ],
+      "__input__",
+    );
+    expect(
+      rawEdges.some(
+        (e) =>
+          e.kind === "handoff" && e.source === "w1" && e.target === "w1b",
+      ),
+    ).toBe(true);
+    expect(sinkTargets(rawEdges)).toEqual(["w1b", "w2"]);
+    expect(
+      rawEdges.some((e) => e.source === "__input__" && e.target === "w1b"),
+    ).toBe(false);
+    expect(
+      rawEdges.some((e) => e.source === "__input__" && e.target === "w1"),
+    ).toBe(true);
+  });
+
+  it("补派后下游 depends_on 改写指向新 run：主干依赖边自然成立", () => {
+    const { rawEdges } = buildGraphStructure(
+      [
+        captain(),
+        run("w1"),
+        run("w1b", [], { replacesRunId: "w1" }),
+        run("w2", ["w1b"]),
+      ],
+      "__input__",
+    );
+    expect(
+      rawEdges.some(
+        (e) => e.kind === "dep" && e.source === "w1b" && e.target === "w2",
+      ),
+    ).toBe(true);
+    expect(sinkTargets(rawEdges)).toEqual(["w2"]);
+    expect(
+      rawEdges.some((e) => e.source === "w1" && e.target === "captain"),
+    ).toBe(false);
+  });
 });

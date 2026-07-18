@@ -544,10 +544,17 @@ export type DeliveryState = "delivered" | "partial" | "blocked";
 /** One undelivered piece in the wrap-up reconciliation (交付诚实性): the worker
  * ``role`` it belongs to (or a batch-level label like「验收」) + a one-line
  * ``description`` of what never landed (contract shortfall / degraded handoff /
- * completion criteria unmet / failed worker). */
+ * completion criteria unmet / failed worker).
+ * 
+ * Optional ``reason`` is a machine-readable cutoff / shortfall code when the gap
+ * comes from a structured engine signal — known:
+ * ``token_budget`` / ``worker_timeout`` / ``degraded_handoff``. Absent for
+ * ordinary contract / criteria prose gaps. Clients may badge known codes and
+ * ignore unknown ones (forward-compatible). */
 export interface DeliveryGap {
   role: string;
   description: string;
+  reason?: string;
 }
 
 /** One user action that would close a delivery gap. ``kind`` is a widened string
@@ -756,6 +763,44 @@ export interface DebateRoundScore {
   total: number;
 }
 
+/** 场级证据台账条目（Citation ⊃ 台账字段 + 登记方 side_key）。 */
+export interface EvidenceLedgerEntry {
+  id: string;
+  url?: string;
+  title?: string;
+  snippet?: string;
+  site?: string;
+  date?: string;
+  tier?: string;
+  side_key?: string;
+}
+
+/** 回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集；``registrant`` ↔ 辩论 ``side_key``）。 */
+export interface TurnEvidenceLedgerEntry {
+  id: string;
+  url?: string;
+  title?: string;
+  snippet?: string;
+  site?: string;
+  date?: string;
+  tier?: string;
+  query?: string;
+  deep_read?: boolean;
+  registrant?: string;
+  citable?: boolean;
+}
+
+/** Turn 级台账通道（引用即出处 P1 · Q4）。
+ * 
+ * - ``delta``：自上次 drain 以来的增量（live mid-turn）
+ * - ``entries``：全量快照（settle 权威覆盖；与 delta 可同发，客户端以 entries 为准）
+ * - ``cited_ids``：成稿实际引用的 id 集（P2 投影钩子；通常仅 settle 携带） */
+export interface EvidenceLedgerPayload {
+  delta?: TurnEvidenceLedgerEntry[];
+  entries?: TurnEvidenceLedgerEntry[];
+  cited_ids?: string[];
+}
+
 export interface DebateRoundInfo {
   round_no: number;
   focus: string;
@@ -766,6 +811,7 @@ export interface DebateRoundInfo {
   user_interjections?: DebateUserInterjection[];
   cross_exam?: DebateCrossExam[];
   scores?: Record<string, DebateRoundScore>;
+  evidence_ledger_delta?: EvidenceLedgerEntry[];
 }
 
 export interface DebateNarrativeRound {
@@ -807,6 +853,7 @@ export interface DebateResultPayload {
   rounds: DebateRoundInfo[];
   closings?: DebateClosing[];
   brief: DebateBriefInfo;
+  evidence_ledger?: EvidenceLedgerEntry[];
 }
 
 export interface DebateRoundStartedPayload {
@@ -1112,6 +1159,13 @@ export interface Citation {
   title: string;
   snippet?: string;
   site?: string;
+  id?: string;
+  date?: string;
+  tier?: string;
+  query?: string;
+  deep_read?: boolean;
+  registrant?: string;
+  citable?: boolean;
 }
 
 export interface CitationsPayload {
@@ -1272,6 +1326,7 @@ export type SSEPayloadMap = {
   followups_generated: FollowupsGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
+  evidence_ledger: EvidenceLedgerPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
   board_op_required: BoardOpRequiredPayload;
   board_read_required: BoardReadRequiredPayload;

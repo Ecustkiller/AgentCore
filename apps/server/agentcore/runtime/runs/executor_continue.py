@@ -25,7 +25,7 @@ from agentcore.runtime.events import (
     run_failed,
     run_started,
 )
-from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
+from agentcore.runtime.facts import MessageFinalFact, RunHeadFact, record_turn_fact
 from agentcore.runtime.runs.contract import check_contract
 from agentcore.runtime.runs.executor_context import (
     _context_block_payloads,
@@ -33,6 +33,7 @@ from agentcore.runtime.runs.executor_context import (
     _safe_index_files,
 )
 from agentcore.runtime.runs.executor_shared import (
+    _apply_cutoff_reasons,
     _apply_finish_interrupt,
     _continuation_message,
     _priced_failure,
@@ -66,6 +67,39 @@ def _strip_historical_reasoning(transcript: list[LLMMessage]) -> list[LLMMessage
     return out
 
 
+def _record_continuation_run_head(
+    run_id: str,
+    messages: list[LLMMessage],
+    *,
+    from_context_blocks: bool,
+) -> None:
+    """Journal this continuation beat's window head (system + just-appended user).
+
+    Diagnostic ``window_from_journal(run_id=…)`` uses this instead of the turn-level
+    CEO ``turn_started``. When the beat's user was assembled from structured
+    ``context_blocks``, tag ``user_origin=context_blocks`` so the UI can substitute
+    those segments for the concatenated body.
+    """
+    system_prompt = ""
+    for msg in messages:
+        if msg.role == "system":
+            system_prompt = msg.content or ""
+            break
+    user_message = ""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            user_message = msg.content or ""
+            break
+    record_turn_fact(
+        RunHeadFact(
+            run_id=run_id,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            user_origin="context_blocks" if from_context_blocks else "",
+        ).to_fact()
+    )
+
+
 async def continue_run(
     *,
     session: RunSession,
@@ -85,8 +119,9 @@ async def continue_run(
     draft_brief: str | None = None,
     draft_system: str | None = None,
     allow_research: bool | None = None,
-    evidence_tag_whitelist: frozenset[str] | None = None,
-    check_source_grounding: bool = False,
+    evidence_ledger: object | None = None,
+    check_evidence_ledger: bool = False,
+    allowed_ledger_ids: frozenset[str] | None = None,
 ) -> RunState:
     """续写 a saved worker session under the continuation's log scope.
 
@@ -100,8 +135,8 @@ async def continue_run(
 
     辩手两阶段：当 ``session.spec.research_then_draft`` 且提供 ``draft_brief`` 时走
     检索→成稿；``allow_research=False``（结辩）退化为单次成稿。
-    成稿【已核实】标签闸（见 speech_pipeline）：``evidence_tag_whitelist`` 仅结辩传入
-    （白名单闸）；``check_source_grounding`` 续辩 / 质询作答传入（出处软校验闸）。
+    成稿证据台账 id 闸（见 speech_pipeline）：``check_evidence_ledger`` + ``evidence_ledger``
+    在立论续写 / 质询 / 结辩全 beat 启用；结辩经 ``allowed_ledger_ids`` 传入本方历轮已引用并集。
     辩论检索 token 顶取 ``settings.engine_debate_token_ceiling``（与 worker 通用顶独立）。
     """
     with log_context(
@@ -134,8 +169,9 @@ async def continue_run(
             draft_brief=draft_brief,
             draft_system=draft_system,
             allow_research=allow_research,
-            evidence_tag_whitelist=evidence_tag_whitelist,
-            check_source_grounding=check_source_grounding,
+            evidence_ledger=evidence_ledger,
+            check_evidence_ledger=check_evidence_ledger,
+            allowed_ledger_ids=allowed_ledger_ids,
         )
 
 
@@ -158,8 +194,9 @@ async def _continue_run_scoped(
     draft_brief: str | None = None,
     draft_system: str | None = None,
     allow_research: bool | None = None,
-    evidence_tag_whitelist: frozenset[str] | None = None,
-    check_source_grounding: bool = False,
+    evidence_ledger: object | None = None,
+    check_evidence_ledger: bool = False,
+    allowed_ledger_ids: frozenset[str] | None = None,
 ) -> RunState:
     """续写 a saved worker session: same author, extended transcript, new run id."""
     profiles = profile_set or default_profile_set()
@@ -197,11 +234,19 @@ async def _continue_run_scoped(
         )
         profile = profiles.agent(spec.model_preference)
         priced_model = spec.model or profiles.model_for(f"agent.{pref}")
+        from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
+        from agentcore.tools.protocol import RetrievalBudgetState
+
         tool_ctx = replace(
             base_tool_context,
             run_id=continuation_run_id,
             agent_id=agent_id,
             execution_id=execution_id,
+            retrieval_budget=(
+                RetrievalBudgetState(limit=spec.retrieval_budget)
+                if spec.retrieval_budget is not None
+                else None
+            ),
         )
         messages = _strip_historical_reasoning(session.transcript)
         citations: list[dict] = []
@@ -217,7 +262,14 @@ async def _continue_run_scoped(
             if allowed_tools is not None:
                 withheld = set(PROSE_WITHHELD_WRITE_TOOLS)
                 allowed_tools = [t for t in allowed_tools if t not in withheld]
+        if spec.retrieval_budget == 0:
+            from agentcore.runtime.runs.executor_shared import _registry_without
+
+            worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
+            if allowed_tools is not None:
+                allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
         finish_override: list[FinishReason] = []
+        cutoff_reasons: list[str] = []
         use_two_phase = bool(
             spec.research_then_draft and (draft_brief or "").strip()
         )
@@ -228,6 +280,9 @@ async def _continue_run_scoped(
             else:
                 # 结辩等无检索 beat：transcript 仍记任务，成稿走干净上下文。
                 messages.append(LLMMessage(role="user", content=feedback))
+            _record_continuation_run_head(
+                continuation_run_id, messages, from_context_blocks=bool(context_blocks)
+            )
             debate_budget = (
                 settings.engine_debate_token_ceiling
                 if settings.engine_debate_token_ceiling > 0
@@ -255,12 +310,20 @@ async def _continue_run_scoped(
                 allow_research=do_research,
                 usage_sink=inflight,
                 finish_override_sink=finish_override,
-                evidence_tag_whitelist=evidence_tag_whitelist,
-                check_source_grounding=check_source_grounding,
+                cutoff_reason_sink=cutoff_reasons,
+                evidence_ledger=evidence_ledger,  # type: ignore[arg-type]
+                side_key=side_key or "",
+                check_evidence_ledger=check_evidence_ledger,
+                allowed_ledger_ids=allowed_ledger_ids,
                 token_budget=debate_budget if do_research else 0,
             )
         else:
             messages.append(_continuation_message(feedback))
+            _record_continuation_run_head(
+                continuation_run_id, messages, from_context_blocks=bool(context_blocks)
+            )
+            from agentcore.runtime.suspension import turn_evidence_ledger as _turn_ledger_var
+
             content, reasoning, round_usage, round_rounds = await _react_and_capture(
                 messages,
                 llm=llm,
@@ -276,6 +339,9 @@ async def _continue_run_scoped(
                 approval_gate=approval_gate,
                 usage_sink=inflight,
                 finish_override_sink=finish_override,
+                cutoff_reason_sink=cutoff_reasons,
+                turn_evidence_ledger=_turn_ledger_var.get(),
+                ledger_registrant=f"worker:{agent_id}",
             )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage = round_usage.as_dict()
@@ -317,6 +383,7 @@ async def _continue_run_scoped(
             files_touched=touched,
             run_id=continuation_run_id,
         )
+        warnings = _apply_cutoff_reasons(cutoff_reasons, warnings=warnings)
         sink.emit(
             run_completed(
                 continuation_run_id,

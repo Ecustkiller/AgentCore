@@ -169,7 +169,9 @@ export function resetSessionConnectivityFailures(): void {
  * When reload lost the error payload but left an empty error-finished bubble,
  * synthesize a minimal card so the user still sees an explanation + retry.
  */
-export function syntheticErrorForEmptyFailure(finishReason: string | undefined): {
+export function syntheticErrorForEmptyFailure(
+  finishReason: string | undefined,
+): {
   code: string;
   message: string;
 } | null {

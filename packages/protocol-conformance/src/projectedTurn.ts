@@ -70,6 +70,30 @@ export interface ProjectedCitation {
   title: string;
   snippet?: string;
   site?: string;
+  /** Stable ledger id (`#rN`); P1 required when ledger channel is present. */
+  id?: string;
+  date?: string;
+  /** Credibility tier (official / media / unknown / weak); optional, forward-compatible. */
+  tier?: string;
+  query?: string;
+  deep_read?: boolean;
+  registrant?: string;
+  citable?: boolean;
+}
+
+/** Turn-level research evidence ledger entry (SSE `evidence_ledger` channel). */
+export interface ProjectedEvidenceLedgerEntry {
+  id: string;
+  url?: string;
+  title?: string;
+  snippet?: string;
+  site?: string;
+  date?: string;
+  tier?: string;
+  query?: string;
+  deep_read?: boolean;
+  registrant?: string;
+  citable?: boolean;
 }
 
 /** A delegated worker's live state (mirrors desktop AgentState, with the streamed
@@ -309,6 +333,10 @@ export interface ProjectedTurn {
    * returning None once run_plan fired). */
   process: ProcessStep[];
   citations: ProjectedCitation[];
+  /** 回合调研台账（`evidence_ledger` 通道）：delta 累积 / entries 权威覆盖。非调研恒 `[]`。 */
+  evidenceLedger: ProjectedEvidenceLedgerEntry[];
+  /** 成稿实际引用的台账 id 集（P2 投影钩子；settle 旁路字段）。 */
+  citedIds: string[];
   /** Team graph (empty for a single-agent turn). */
   agents: ProjectedAgent[];
   runs: ProjectedRun[];

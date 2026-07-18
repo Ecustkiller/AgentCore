@@ -5261,8 +5261,26 @@ export interface components {
         /**
          * Citation
          * @description A web source consulted for an assistant message (source-card data).
+         *
+         *     Optional ``id`` / ``date`` / ``tier`` / ``query`` / ``deep_read`` / ``registrant`` /
+         *     ``citable`` support the debate evidence ledger (M1), source-card credibility
+         *     badges, and 引用即出处 P1 台账溯源。``tier`` is forward-compatible
+         *     (``official`` / ``media`` / ``unknown`` / ``weak``; ``blocked`` never reaches the
+         *     wire). Absent fields on legacy cards → client degrades.
          */
         Citation: {
+            /** Citable */
+            citable?: boolean | null;
+            /** Date */
+            date?: string | null;
+            /** Deep Read */
+            deep_read?: boolean | null;
+            /** Id */
+            id?: string | null;
+            /** Query */
+            query?: string | null;
+            /** Registrant */
+            registrant?: string | null;
             /**
              * Site
              * @default
@@ -5273,6 +5291,8 @@ export interface components {
              * @default
              */
             snippet: string;
+            /** Tier */
+            tier?: string | null;
             /**
              * Title
              * @default
@@ -5794,6 +5814,64 @@ export interface components {
             /** Task */
             task: string;
         };
+        /**
+         * EvidenceLedgerEntryRest
+         * @description 回合调研台账条目（REST / 落库；与 SSE ``TurnEvidenceLedgerEntry`` 同形）。
+         */
+        EvidenceLedgerEntryRest: {
+            /**
+             * Citable
+             * @default true
+             */
+            citable: boolean;
+            /**
+             * Date
+             * @default
+             */
+            date: string;
+            /**
+             * Deep Read
+             * @default false
+             */
+            deep_read: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /**
+             * Registrant
+             * @default
+             */
+            registrant: string;
+            /**
+             * Site
+             * @default
+             */
+            site: string;
+            /**
+             * Snippet
+             * @default
+             */
+            snippet: string;
+            /**
+             * Tier
+             * @default unknown
+             */
+            tier: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+        };
         /** ExternalGrantItem */
         ExternalGrantItem: {
             /** Alias */
@@ -6231,6 +6309,8 @@ export interface components {
         LlmWindowMessageLine: {
             /** Content */
             content?: string | null;
+            /** Origin */
+            origin?: string | null;
             /** Reasoning Content */
             reasoning_content?: string | null;
             /**
@@ -6534,6 +6614,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Evidence Ledger */
+            evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
             /** Feedback */
             feedback?: string | null;
             /** Followups */
@@ -6873,6 +6955,8 @@ export interface components {
              * @default
              */
             content: string;
+            /** Evidence Ledger */
+            evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
             /** Finish Reason */
             finish_reason?: string | null;
             /**

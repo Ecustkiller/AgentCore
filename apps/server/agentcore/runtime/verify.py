@@ -11,8 +11,11 @@
 
 轻层现覆盖两类**纯机械、近零误报**的校验：
 
-1. **造引用拦截**——正文角标 ``[n]`` 指向不存在的来源卡（编号 < 1 或 > 来源数）。真实事故是
-   CEO 直答用了 [25][27] 而实际仅 24 源，违反基座提示词「绝不编造引用」却不自知。
+1. **造引用拦截**——双轨：
+   - 池序角标 ``[n]`` 指向不存在的来源卡（编号 < 1 或 > 来源数）；仅 CEO 路径开
+     （``check_citations``）。
+   - 台账 id ``#rN`` 必须 ∈ 本回合可引用台账（``citable=true``）；仅当正文出现约定
+     ``#rN`` 标记时启用（Q5）；CEO / 调研 worker 在接通 ``citable_ids`` 时均查。
 2. **结构完整性**——代码围栏未闭合（``` 开了没收尾、后文整片被当代码渲染）、或声明了语言却
    空体（标了 ``python`` 却没有任何内容，等于「答应给代码却没给」）。都是「交付不完整」的
    机械信号，最终交付里几乎不会有意为之，故误报率近零。
@@ -22,18 +25,25 @@
 受限的 JSON 可解析）与重层（要跑 / 要重算 / 换眼睛找漏 / 回源对照）在此扩展。
 
 **统一底线**：结构完整性两查对 CEO 与 worker 同样成立，二者收尾都过这道关（worker 回炉经
-``run_output_reset`` 干净重写其卡片）；造引用查仅 CEO 路径开（见 ``finish_guard`` 的
-``check_citations``）。
+``run_output_reset`` 干净重写其卡片）；``[n]`` 造引用查仅 CEO 路径开；``#rN`` id 存在闸按
+Q5 条件启用（见上）。
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md（ReAct 循环 · 交付前核验）
+→ 见提案: docs/06-规划/引用即出处提案.md §四 / §七
 """
 
 from __future__ import annotations
 
-from agentcore.runtime.citations import out_of_range_markers
+from agentcore.runtime.citations import invalid_ledger_ref_ids, out_of_range_markers
 
 
-def finish_guard(content: str, *, citation_count: int, check_citations: bool = True) -> list[str]:
+def finish_guard(
+    content: str,
+    *,
+    citation_count: int,
+    check_citations: bool = True,
+    citable_ids: frozenset[str] | set[str] | None = None,
+) -> list[str]:
     """模型宣布 done 时的轻层守卫：返回「待修正项」列表，空列表 = 放行交付。
 
     每条都是一句锚定具体事实的修正指令（镜像 ``loop_controller`` 的注入风格——锚到可观测
@@ -43,14 +53,10 @@ def finish_guard(content: str, *, citation_count: int, check_citations: bool = T
     这是**所有 react_loop 收尾共过的统一底线**——CEO captain 与 worker 都在 done 点过此关。
     现查两类，二者的适用面不同：
 
-    1. **造引用**（仅 ``check_citations``）：
-       :func:`~agentcore.runtime.citations.out_of_range_markers` 抓正文里指向不存在来源卡的角标
-       ``[n]``（编号 < 1 或 > ``citation_count``）。``citation_count``
-       是本回合实际收集到的来源卡数；为 0 时正文里任何 ``[n]`` 都视为编造（与客户端「越界角标
-       降级为纯文本」同义）。仅 CEO 路径开（``check_citations=annotate_citations``）：worker 文本
-       未编号、其本地 ``[n]`` 汇入回合卡时会重排，角标校验语义不适用，故 worker 关此查。
-    2. **结构完整性**（始终查）：:func:`_code_fence_reworks` 抓代码围栏未闭合 / 声明语言却空体。
-       与角标无关、对 CEO 与 worker 同样成立，故是真正的统一底线。
+    1. **造引用**：
+       - ``[n]``（仅 ``check_citations``）：越界角标 → 编造引用。
+       - ``#rN``（``citable_ids`` 非 None 且正文出现标记）：id ∉ 可引用台账 → 回炉项。
+    2. **结构完整性**（始终查）：:func:`_code_fence_reworks`。
     """
     reworks: list[str] = []
     if check_citations:
@@ -62,6 +68,14 @@ def finish_guard(content: str, *, citation_count: int, check_citations: bool = T
                 "它们指向不存在的来源卡，属于编造引用（违反「绝不编造引用」）。请删除这些角标、"
                 "改成真实存在的来源编号，或为该论断补上可检索到的来源；没有依据就直接去掉这处引用。"
             )
+    bad_refs = invalid_ledger_ref_ids(content, citable_ids)
+    if bad_refs:
+        marks = "、".join(bad_refs)
+        reworks.append(
+            f"正文用了 {marks} 这些台账引用来源，但它们不在本回合已登记且可引用的来源台账中"
+            "（伪造、越界或弱源不可引用）。请改成提示中「已登记来源」列出的 #rN，"
+            "或删除这些引用标记；没有依据就直接去掉这处引用。"
+        )
     reworks.extend(_code_fence_reworks(content))
     return reworks
 

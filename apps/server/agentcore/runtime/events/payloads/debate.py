@@ -9,6 +9,19 @@ from pydantic import Field
 from agentcore.runtime.events.payloads._base import WirePayload, absent
 
 
+class EvidenceLedgerEntry(WirePayload):
+    """场级证据台账条目（Citation ⊃ 台账字段 + 登记方 side_key）。"""
+
+    id: str  # #e1, #e2, …
+    url: str = ""
+    title: str = ""
+    snippet: str = ""
+    site: str = ""
+    date: str = ""
+    tier: str = "unknown"  # official | media | unknown | weak | blocked
+    side_key: str = ""  # 登记方；主持人底料 = moderator
+
+
 class DebateSideInfo(WirePayload):
     key: str
     name: str
@@ -96,6 +109,8 @@ class DebateRoundInfo(WirePayload):
     user_interjections: list[DebateUserInterjection] = Field(default_factory=list)
     cross_exam: list[DebateCrossExam] = Field(default_factory=list)
     scores: dict[str, DebateRoundScore] = Field(default_factory=dict)
+    # 本轮新登记的证据台账增量（live 徽章可溯源）；缺字段（老事件）→ []。
+    evidence_ledger_delta: list[EvidenceLedgerEntry] = Field(default_factory=list)
 
 
 class DebateNarrativeRound(WirePayload):
@@ -138,6 +153,8 @@ class DebateResultPayload(WirePayload):
     rounds: list[DebateRoundInfo]
     closings: list[DebateClosing] = Field(default_factory=list)
     brief: DebateBriefInfo
+    # 全场证据台账（权威）；缺字段（老事件）→ []。不动 citations_event。
+    evidence_ledger: list[EvidenceLedgerEntry] = Field(default_factory=list)
 
 
 class DebateRoundStartedPayload(WirePayload):

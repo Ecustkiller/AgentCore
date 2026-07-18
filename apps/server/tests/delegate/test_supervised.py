@@ -118,7 +118,7 @@ async def test_replan_without_supervised_run_errors():
     t = tool(Provider([]))
     result = await t.replan({"binds": [{"run_id": "x", "role": "r", "task": "t"}]})
     assert result.success is False
-    assert "没有待续跑" in result.output
+    assert "没有待续跑" in (result.error or "")
 
 
 async def test_replan_requires_binds_or_stop():
@@ -134,7 +134,7 @@ async def test_replan_rejects_unknown_bind_and_keeps_run_open():
     await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
     result = await t.replan({"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]})
     assert result.success is False
-    assert "不在当前计划" in result.output
+    assert "不在当前计划" in (result.error or "")
     assert t._supervised is not None
 
 

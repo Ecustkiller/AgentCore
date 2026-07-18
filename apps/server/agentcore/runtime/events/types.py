@@ -34,6 +34,9 @@ class EventType(StrEnum):
     FOLLOWUPS_GENERATED = "followups_generated"
     TURN_SAVED = "turn_saved"
     CITATIONS = "citations"
+    # 引用即出处：独立 turn 级台账通道（对称辩论 O1；不占 citations_event）。
+    # DERIVED → Message.evidence_ledger；payload 可带 delta / entries + cited_ids（P2 投影权威）。
+    EVIDENCE_LEDGER = "evidence_ledger"
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_RESOLVED = "approval_resolved"
     # 委派级授权: suspend before workers start — user grants medium-risk tools for

@@ -70,9 +70,9 @@ export function foldContentDelta(
 }
 
 /** 草稿丢弃（`content_reset`）：清正文标量 + 弹掉尾部 content 步。仅
- * `reason === "finish_guard"`（交付前核验回炉）折出「已按交付规范重写」rework chip；
+ * `reason === "finish_guard"`（交付前核验回炉）折出「引用/格式核验后已重写」rework chip；
  * 其余 reason（retry / soft_gate / ask_user / …）只清正文、不留痕——LLM 网络重试、
- * 软门控打回等基础设施信号不是「按交付规范重写」（误报根治，镜像后端 oracle）。 */
+ * 软门控打回等基础设施信号不是核验重写（误报根治，镜像后端 oracle）。 */
 export function foldContentReset(
   state: MessageLaneState,
   reason: ResetReason,

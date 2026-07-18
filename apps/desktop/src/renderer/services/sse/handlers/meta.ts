@@ -2,6 +2,7 @@ import { patchConversationCache } from "@/hooks/useConversations";
 import { useConversationStore } from "@/stores/conversation";
 import type {
   CitationsPayload,
+  EvidenceLedgerPayload,
   FollowupsGeneratedPayload,
   SSEEvent,
   TitleGeneratedPayload,
@@ -42,6 +43,13 @@ export function handleMetaEvent(
       useConversationStore
         .getState()
         .attachCitationsToLastMessage(payload.citations, conversationId);
+      return true;
+    }
+    case "evidence_ledger": {
+      const payload = event.payload as EvidenceLedgerPayload;
+      useConversationStore
+        .getState()
+        .attachEvidenceLedgerToLastMessage(payload, conversationId);
       return true;
     }
     default:

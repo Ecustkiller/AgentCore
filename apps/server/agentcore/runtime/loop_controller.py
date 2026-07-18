@@ -99,6 +99,10 @@ class ToolAttempt:
     # honest tool failures for the model but must not trip the run-scoped circuit
     # breaker — the tool itself is fine; the call was refused upstream.
     policy_failure: bool = False
+    # Arguments string failed ``json.loads`` before the tool ran — still counts toward
+    # the run-scoped breaker, but steers must not say「换不同的输入」(that pushes the
+    # model to shorten/rewrite a DAG that only needed quote-escaping).
+    parse_failure: bool = False
     # Optional tool-result metadata forwarded for governance (e.g. delegate batch shape).
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -144,10 +148,14 @@ class CircuitBreak:
     ``disabled`` hit the disable threshold (the engine removes them from the
     toolset for the rest of the run). Each is a tuple of tool names; both empty
     means nothing tripped this round.
+
+    ``parse_only`` names tools whose failures so far are *all* argument-JSON parse
+    failures — their steer text must guide「修复格式、原样重发」, never「换不同的输入」.
     """
 
     warned: tuple[str, ...] = ()
     disabled: tuple[str, ...] = ()
+    parse_only: frozenset[str] = frozenset()
 
     def __bool__(self) -> bool:
         return bool(self.warned or self.disabled)
@@ -157,20 +165,41 @@ class CircuitBreak:
 
         Anchored to the concrete fact (which tool, what now happens) like the
         nudge messages — disable first (the stronger action), then warn.
+        Parse-only failures get a typed steer so the model fixes JSON escaping
+        instead of rewriting/shortening the payload.
         """
         parts: list[str] = []
         if self.disabled:
-            names = "、".join(f"`{n}`" for n in self.disabled)
-            parts.append(
-                f"工具 {names} 已多次失败，本回合起停用，无法再调用——"
-                "请改用其他工具或基于已有信息推进。"
-            )
+            parse_d = tuple(n for n in self.disabled if n in self.parse_only)
+            other_d = tuple(n for n in self.disabled if n not in self.parse_only)
+            if other_d:
+                names = "、".join(f"`{n}`" for n in other_d)
+                parts.append(
+                    f"工具 {names} 已多次失败，本回合起停用，无法再调用——"
+                    "请改用其他工具或基于已有信息推进。"
+                )
+            if parse_d:
+                names = "、".join(f"`{n}`" for n in parse_d)
+                parts.append(
+                    f"工具 {names} 因参数不是合法 JSON 已多次失败，本回合起停用，无法再调用——"
+                    "请改用其他工具或基于已有信息推进。"
+                )
         if self.warned:
-            names = "、".join(f"`{n}`" for n in self.warned)
-            parts.append(
-                f"工具 {names} 已多次失败，请不要再以相同方式调用它："
-                "换不同的输入、换一个工具，或基于已有信息直接推进。"
-            )
+            parse_w = tuple(n for n in self.warned if n in self.parse_only)
+            other_w = tuple(n for n in self.warned if n not in self.parse_only)
+            if other_w:
+                names = "、".join(f"`{n}`" for n in other_w)
+                parts.append(
+                    f"工具 {names} 已多次失败，请不要再以相同方式调用它："
+                    "换不同的输入、换一个工具，或基于已有信息直接推进。"
+                )
+            if parse_w:
+                names = "、".join(f"`{n}`" for n in parse_w)
+                parts.append(
+                    f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败："
+                    "请修复 JSON 格式（尤其是字符串内引号转义）后原样重发全部参数，"
+                    "不要改写、缩短或删减内容；也可换一个工具或基于已有信息直接推进。"
+                )
         if not parts:
             return None
         return "[系统提示] " + " ".join(parts)
@@ -241,8 +270,10 @@ class LoopController:
         self._consecutive_empty = 0
         # B2 tool circuit breaker: cumulative per-tool failure counts (run-scoped,
         # never cleared by the nudge window reset) + one-shot latches so each tool
-        # fires its warn / disable transition at most once.
+        # fires its warn / disable transition at most once. ``_tool_parse_failures``
+        # tracks the parse-only subset so steers can be typed without changing thresholds.
         self._tool_failures: Counter[str] = Counter()
+        self._tool_parse_failures: Counter[str] = Counter()
         self._tool_warned: set[str] = set()
         self._tool_disabled: set[str] = set()
         # B2 no-output early stop: consecutive unproductive rounds (all tools failed,
@@ -364,6 +395,8 @@ class LoopController:
             self._recent.append(attempt)
             if not attempt.success and not attempt.policy_failure:
                 self._tool_failures[attempt.tool_name] += 1
+                if attempt.parse_failure:
+                    self._tool_parse_failures[attempt.tool_name] += 1
             # Over-investigation bookkeeping (收敛治理): tally read-only investigation
             # breadth. Counts every call (incl. failures) — a wide scan is breadth
             # regardless of per-call success.
@@ -428,7 +461,18 @@ class LoopController:
             elif count >= self._tool_failure_warn and name not in self._tool_warned:
                 self._tool_warned.add(name)
                 newly_warned.append(name)
-        return CircuitBreak(warned=tuple(newly_warned), disabled=tuple(newly_disabled))
+        tripped = (*newly_warned, *newly_disabled)
+        parse_only = frozenset(
+            name
+            for name in tripped
+            if self._tool_failures[name] > 0
+            and self._tool_parse_failures.get(name, 0) == self._tool_failures[name]
+        )
+        return CircuitBreak(
+            warned=tuple(newly_warned),
+            disabled=tuple(newly_disabled),
+            parse_only=parse_only,
+        )
 
     def tool_failure_count(self, tool_name: str) -> int:
         """Cumulative failure count for one tool in this run (circuit breaker input)."""

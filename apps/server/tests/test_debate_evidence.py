@@ -381,6 +381,18 @@ def test_ceo_output_preserves_unverified_reservations():
     assert "既定事实" in out
 
 
+def test_ceo_output_bans_off_brief_quantification():
+    """CEO 收尾折算文本带【不引入场外量化】铁律：不得补辩手/简报未出现的数字估算。"""
+    result = DebateResult(
+        config=_config(),
+        rounds=[_last_round()],
+        brief=DebateBrief(crux="赔偿合理性"),
+    )
+    out = result.to_ceo_output()
+    assert "不引入场外量化" in out
+    assert "未出现的数字" in out or "量化估算" in out
+
+
 def test_as_handoffs_maps_three_keys_and_normalizes_bad_kind():
     """LLM 三键 → handoffs；坏 kind 归 question，不丢内容。"""
     items = _as_handoffs(
@@ -431,12 +443,19 @@ def test_cx_draft_brief_carries_output_budget():
 
 
 def test_background_schema_requires_source_date_and_bans_inference_as_fact():
-    """debate 工具 background：schema/描述硬化——每条须附来源与日期，未决不得写成既定事实。"""
+    """background：schema 短触发留来源/日期/未决；硬化反例在 debate_and_review skill。"""
+    from agentcore.runtime.skills import build_system_skill_registry
+
     bg_desc = DEBATE_PARAMETERS["properties"]["background"]["description"]
     assert "来源" in bg_desc and "日期" in bg_desc
-    assert "二审" in bg_desc  # 反例：表示将上诉 ≠ 已进入二审
     assert "未决" in bg_desc or "推断" in bg_desc
-    assert "来源与日期" in DEBATE_DESCRIPTION or "来源与日期" in bg_desc
+    assert "debate_and_review" in bg_desc or "debate_and_review" in DEBATE_DESCRIPTION
+
+    skill = build_system_skill_registry().get("debate_and_review")
+    assert skill is not None
+    body = skill.body
+    assert "二审" in body  # 反例：表示将上诉 ≠ 已进入二审
+    assert "来源" in body and "日期" in body
 
 
 def test_background_block_prompt_bans_rewriting_pending_as_fact():

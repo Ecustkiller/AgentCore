@@ -1,5 +1,6 @@
 import { CostTrendBars, TurnTrendBars } from "@/components/charts";
 import { AuditSummaryWidget } from "@/components/AuditSummaryWidget";
+import { CopyableId } from "@/components/CopyableId";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -633,12 +634,16 @@ function ErrorsTable({
                 {fmtMs(row.duration_ms)}
               </td>
               <td className="px-5 py-3">
-                <code
-                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-muted-foreground text-xs"
-                  title={row.trace_id ?? undefined}
-                >
-                  {row.trace_id ? row.trace_id.slice(0, 8) : "—"}
-                </code>
+                {row.trace_id ? (
+                  <CopyableId
+                    value={row.trace_id}
+                    label="trace_id"
+                    display={row.trace_id.slice(0, 8)}
+                    titleHint={`${row.trace_id}（点击复制，用于 grep logs/dev.jsonl）`}
+                  />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </td>
             </tr>
           ))}

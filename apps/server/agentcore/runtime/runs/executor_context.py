@@ -13,6 +13,11 @@ from agentcore.runtime.runs.constants import (
     WORKSPACE_MANIFEST_CHAR_BUDGET,
     WORKSPACE_MANIFEST_MAX_FILES,
 )
+from agentcore.runtime.delegate.completion import (
+    CompletionCriteria,
+    format_batch_acceptance_for_worker,
+    should_inject_batch_acceptance,
+)
 from agentcore.runtime.runs.contract import describe_deliverable
 from agentcore.runtime.runs.executor_identities import (
     _WORKER_IDENTITY,
@@ -63,6 +68,7 @@ def _build_messages(
     blocks_sink: list[ContextBlock] | None = None,
     team_brief: str | None = None,
     shared_workspace: bool = False,
+    batch_completion_criteria: CompletionCriteria | None = None,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -95,6 +101,7 @@ def _build_messages(
         index_paths or [],
         team_brief,
         shared_workspace=shared_workspace,
+        batch_completion_criteria=batch_completion_criteria,
     )
     if blocks_sink is not None:
         blocks_sink.extend(blocks)
@@ -115,6 +122,7 @@ def _build_context_blocks(
     team_brief: str | None = None,
     *,
     shared_workspace: bool = False,
+    batch_completion_criteria: CompletionCriteria | None = None,
 ) -> list[ContextBlock]:
     """The ordered :class:`ContextBlock` list a worker's opening user message is rendered
     FROM — the structured single source behind both the prompt and the ``run_context``
@@ -174,6 +182,19 @@ def _build_context_blocks(
         )
     blocks.append(ContextBlock(channel="task", heading="你的任务", body=spec.task))
     deliverable_text = describe_deliverable(deliverable or spec.deliverable)
+    if should_inject_batch_acceptance(spec, batch_completion_criteria):
+        assert batch_completion_criteria is not None  # narrowed by should_inject
+        acceptance_line = format_batch_acceptance_for_worker(batch_completion_criteria)
+        deliverable_text = (
+            f"{deliverable_text}\n{acceptance_line}" if deliverable_text else acceptance_line
+        )
+    from agentcore.runtime.runs.retrieval_budget import format_retrieval_budget_line
+
+    budget_line = format_retrieval_budget_line(spec.retrieval_budget)
+    if budget_line:
+        deliverable_text = (
+            f"{deliverable_text}\n{budget_line}" if deliverable_text else budget_line
+        )
     if deliverable_text:
         blocks.append(
             ContextBlock(channel="deliverable", heading="交付物规格", body=deliverable_text)

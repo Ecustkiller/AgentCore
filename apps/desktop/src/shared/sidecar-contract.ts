@@ -66,13 +66,35 @@ export interface SidecarHistoryEntry {
   content: string;
 }
 
-/** 一条 web 来源（**严格**对齐服务端 `Citation` schema：四字段恒在，缺省为空串）。
+/** 一条 web 来源（对齐服务端 `Citation`：url/title/snippet/site 恒在；台账加宽字段可选）。
  *  主进程 writebacker 原样写入 `POST .../local-turns`，故须与生成类型逐字段同形。 */
 export interface SidecarCitation {
   url: string;
   title: string;
   snippet: string;
   site: string;
+  id?: string | null;
+  date?: string | null;
+  tier?: string | null;
+  query?: string | null;
+  deep_read?: boolean | null;
+  registrant?: string | null;
+  citable?: boolean | null;
+}
+
+/** 回合调研台账条目（对齐服务端 `EvidenceLedgerEntryRest` / SSE TurnEvidenceLedgerEntry）。 */
+export interface SidecarEvidenceLedgerEntry {
+  id: string;
+  url?: string;
+  title?: string;
+  snippet?: string;
+  site?: string;
+  date?: string;
+  tier?: string;
+  query?: string;
+  deep_read?: boolean;
+  registrant?: string;
+  citable?: boolean;
 }
 
 /** 回合回放载荷（**严格**对齐服务端 `RunsPayload` schema：多 Agent 团队图事件 + 单 Agent
@@ -109,6 +131,8 @@ export interface SidecarTurnResult {
   };
   /** 助手回复的 web 来源（落库到 assistant 消息）。 */
   citations: SidecarCitation[];
+  /** 回合调研台账（引用即出处 P1 · Q9）；缺省 []，不得丢 id。 */
+  evidence_ledger?: SidecarEvidenceLedgerEntry[];
   /** 回放载荷（团队图 / 思考·工具时间线）；纯聊天回合为 null。 */
   runs: SidecarRunsPayload | null;
   error: string | null;
@@ -290,6 +314,7 @@ export interface SidecarUnsyncedTurnSummary {
   content: string;
   reasoning_content: string | null;
   citations: SidecarCitation[];
+  evidence_ledger?: SidecarEvidenceLedgerEntry[];
   runs: SidecarRunsPayload | null;
   finish_reason: string | null;
   input_tokens: number;

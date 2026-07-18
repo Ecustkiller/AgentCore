@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
+import { CopyableId } from "@/components/CopyableId";
 import {
   cn,
   fmtCny,
@@ -38,7 +39,6 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
@@ -636,20 +636,12 @@ function TurnsPanel({
                     </td>
                     <td className="px-5 py-3">
                       {t.trace_id ? (
-                        <button
-                          type="button"
-                          title={`${t.trace_id}（点击复制，用于 grep logs/dev.jsonl）`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void navigator.clipboard.writeText(t.trace_id!).then(
-                              () => toast.success("trace_id 已复制"),
-                              () => toast.error("复制失败"),
-                            );
-                          }}
-                          className="max-w-[7rem] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {t.trace_id}
-                        </button>
+                        <CopyableId
+                          value={t.trace_id}
+                          label="trace_id"
+                          className="max-w-[7rem]"
+                          titleHint={`${t.trace_id}（点击复制，用于 grep logs/dev.jsonl）`}
+                        />
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}

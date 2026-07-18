@@ -95,45 +95,29 @@ class AskUserTool:
                 ),
             },
         }
+        # Schema layer (工具面瘦身): short trigger. HOW → ask_user_kickoff / ask_user_midtask.
         questions_desc = (
-            "可选：真正要用户拍板的问题（最多 5 个）。途中岔路通常就一个；"
-            "开场可摊开数个高杠杆决策（含影响大的技术选择，如是否响应式 / "
-            "双语 / 带后台）。开场的问题应尽量预填 default，让想省事的用户一键"
-            "全默认通过；途中的关键岔路通常不填 default（就是要 ta 选）。choice "
-            "选项可给每项配一行 detail（权衡/代价），并把你最建议的一项标 "
-            "recommended，帮用户看懂取舍、快速拍板。"
+            "可选：要用户拍板的问题（最多 5）。开场预填 default；途中关键岔路通常不填。"
+            "choice 可配 detail / recommended。用法见 consult_skill。"
         )
         tool_desc = (
-            "向用户发问。默认【暂停回合】等 ta 回应后回到你的循环继续（用户选「停止」则结束"
-            "本回合）；也可设 blocking=false 做【非阻塞发问】——抛出问题但你按既定默认继续、"
-            "不等待，用户答复会作为新消息在后续轮次并入。这是你唯一的「问用户」原语，开场引导"
-            "与执行途中拍板共用。对「能做但没说全」的产出类请求，开工提案卡是首选开场（预填默认、"
-            "可一键通过，不是问题墙）；要克制的是【执行途中为能自行决定的小事打断用户】，"
-            "不是【开工前对齐】。何时该问 / 该不该阻塞、"
-            "开工提案卡怎么分档、途中拍板怎么给选项，"
-            "见 consult_skill（开场用 ask_user_kickoff、途中用 ask_user_midtask）。"
+            "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；blocking=false 非阻塞按默认继续。"
+            "开场用开工提案卡；途中克制打断。详见 consult_skill"
+            "（ask_user_kickoff / ask_user_midtask）。"
         )
         if self.advertise_bind_local_folder:
             option_properties["action"] = {
                 "type": "string",
                 "enum": ["bind_local_folder", "grant_readonly_folder"],
                 "description": (
-                    "可选。bind_local_folder：桌面端把该选项渲染为「选择本地文件夹」并绑定本对话"
-                    "工作区（任务需本机而执行位置仍是云端时用）。"
-                    "grant_readonly_folder：授权一个区外目录在**本次对话内只读**可用"
-                    "（分析整文件夹；卡片须说明只读/仅本次对话/可撤销；不改变工作区绑定）。"
+                    "可选。bind_local_folder=绑定本机工作区；"
+                    "grant_readonly_folder=授权区外目录只读（仅本对话）。"
                 ),
             }
             questions_desc += (
-                " 当任务需要用户本机而执行位置仍是云端时，给 choice 选项加 "
-                "action=bind_local_folder，引导绑定本地文件夹（不要先空跑委派）。"
-                " 当用户要分析工作区外的整个目录时，加 action=grant_readonly_folder"
-                "（只读、仅本次对话、可撤销）。"
+                " 本机需求可标 action=bind_local_folder；区外目录分析标 grant_readonly_folder。"
             )
-            tool_desc += (
-                " 本回合桌面端在线：choice 选项可标 action=bind_local_folder 或 "
-                "grant_readonly_folder。"
-            )
+            tool_desc += " 桌面在线时可标 bind_local_folder / grant_readonly_folder。"
 
         return ToolSchema(
             name="ask_user",
@@ -143,34 +127,25 @@ class AskUserTool:
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description": (
-                            "必填。你这次发问的开场白 / 框架：用自己的口吻说清你在问什么、"
-                            "为什么需要 ta 定夺（开场时复述你理解的目标与起步计划，途中时"
-                            "说明现状与岔路）。这是卡片顶部展示给用户的文字。"
-                        ),
+                        "description": "必填。卡片顶部开场白 / 框架（问什么、为何需拍板）。",
                     },
                     "context": {
                         "type": "string",
-                        "description": "可选：帮助用户判断的背景补充。",
+                        "description": "可选：背景补充。",
                     },
                     "assumptions": {
                         "type": "array",
-                        "description": (
-                            "可选（多用于开场）：起步计划——你替用户定好的低影响、可逆、"
-                            "用户多半不关心的决策（技术栈 / 目录 / 部署 / 命名等），以"
-                            "「项 + 值」陈列让用户知情即可（只读）。影响大、用户可能真有偏好的"
-                            "决策放进 questions，别放这里。"
-                        ),
+                        "description": "可选（开场）：低影响默认可逆决策（只读陈列）。高杠杆放 questions。",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "label": {
                                     "type": "string",
-                                    "description": "决策项，如「部署」「目录结构」。",
+                                    "description": "决策项。",
                                 },
                                 "value": {
                                     "type": "string",
-                                    "description": "你定的默认值，如「纯静态，可直接打开」。",
+                                    "description": "默认值。",
                                 },
                             },
                             "required": ["label", "value"],
@@ -184,18 +159,16 @@ class AskUserTool:
                             "properties": {
                                 "prompt": {
                                     "type": "string",
-                                    "description": "问题本身，简洁清楚。",
+                                    "description": "问题正文。",
                                 },
                                 "kind": {
                                     "type": "string",
                                     "enum": ["choice", "text"],
-                                    "description": (
-                                        "choice=从 options 里选；text=让用户填一句。默认 choice。"
-                                    ),
+                                    "description": "choice 或 text，默认 choice。",
                                 },
                                 "options": {
                                     "type": "array",
-                                    "description": "kind=choice 时的候选项（最多 6 个）。",
+                                    "description": "kind=choice 候选项（最多 6）。",
                                     "items": {
                                         "type": "object",
                                         "properties": option_properties,
@@ -204,17 +177,11 @@ class AskUserTool:
                                 },
                                 "multiple": {
                                     "type": "boolean",
-                                    "description": (
-                                        "可选：options 是否允许多选，默认 false。互斥的"
-                                        "二选一/多选一保持 false；可同时挑多个才设 true。"
-                                    ),
+                                    "description": "可选：允许多选，默认 false。",
                                 },
                                 "default": {
                                     "type": "string",
-                                    "description": (
-                                        "可选：你的默认答案（开场强烈建议填）。choice 时应是 "
-                                        "options 中某一项的 label，text 时是预填文本。"
-                                    ),
+                                    "description": "可选默认答案（开场建议填；choice=某 label）。",
                                 },
                             },
                             "required": ["prompt"],
@@ -222,16 +189,13 @@ class AskUserTool:
                     },
                     "style_options": {
                         "type": "array",
-                        "description": (
-                            "可选：仅当产物是视觉类（网站 / 海报 / 幻灯…）时给出风格预设，"
-                            "供用户挑选基调。非视觉类省略。"
-                        ),
+                        "description": "可选：视觉类产物的风格预设。",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "label": {
                                     "type": "string",
-                                    "description": "风格名，如「深色科技」「简约商务」。",
+                                    "description": "风格名。",
                                 },
                             },
                             "required": ["label"],
@@ -240,28 +204,15 @@ class AskUserTool:
                     "blocking": {
                         "type": "boolean",
                         "description": (
-                            "可选，默认 true。true=【暂停回合】等用户答复再继续——高风险 / 不可逆"
-                            "的岔路、或你没有合理默认时用。false=【非阻塞】——你已有合理默认、"
-                            "只是想给用户一个纠偏机会时用：抛出问题后你【立刻按默认继续、不等待】，"
-                            "用户回复会在后续轮次并入。设 false 时必须在 assumptions 或某个 "
-                            "question 的 default 里写明你将先采用的默认，否则该调用会被拒。"
+                            "可选，默认 true。false=非阻塞（须在 assumptions/default 写明默认）。"
                         ),
                     },
                     "card": {
                         "type": "string",
                         "enum": ["proposal_pick", "risk_ack", "organize_plan"],
                         "description": (
-                            "可选：显式确认卡类型（会覆盖转录推导的 intent，并校验 "
-                            "questions 形状）。"
-                            "proposal_pick=方案挑选卡：恰好 1 个 choice 单选问题、options 2–6，"
-                            "让用户从候选方案里挑一个。"
-                            "risk_ack=风险确认卡：恰好 1 个 choice 多选问题、options 1–10，"
-                            "让用户勾选要处理哪些风险/问题。"
-                            "organize_plan=整理方案卡：恰好 1 个 choice 多选问题、options 1–50，"
-                            "每项带 op/source/destination（或 path），默认全选、取消勾选即剔除；"
-                            "确认后即该批次能力授权（file_batch 带 organize_plan_id "
-                            "不再二次弹卡）。"
-                            "三种 card 都要求 blocking=true（或缺省）；不可与 blocking=false 同用。"
+                            "可选卡型：proposal_pick / risk_ack / organize_plan"
+                            "（须 blocking；形状见 ask_user_* skill）。"
                         ),
                     },
                 },

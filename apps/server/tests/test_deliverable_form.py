@@ -128,15 +128,14 @@ def test_schema_exposes_form_enum():
     props = TASK_DELIVERABLE_SCHEMA["properties"]
     assert "form" in props
     assert props["form"]["enum"] == ["prose", "files"]
-    assert "【看】" in DELEGATE_DESCRIPTION or "prose" in DELEGATE_DESCRIPTION
+    assert "prose" in props["form"]["description"]
     assert "才用本工具" not in DELEGATE_DESCRIPTION
-    # 纠正「一次只能 / 同步阻塞到全队完成」误述
-    assert "一回合一张协作图" in DELEGATE_DESCRIPTION
+    # 纠正「一次只能 / 同步阻塞到全队完成」误述（协调默认立即返回、可同回合追加）
     assert "立即返回" in DELEGATE_DESCRIPTION
-    assert "不必" in DELEGATE_DESCRIPTION
+    assert "一张图" in DELEGATE_DESCRIPTION
     coord = DELEGATE_PARAMETERS["properties"]["coordinate"]["description"]
-    assert "同一张协作图" in coord
-    assert "不必等全队完成" in coord
+    assert "协调" in coord
+    assert "阻塞" in coord
 
 def test_resolve_infers_files_written_from_form_files():
     plan, _ = build_run_plan(

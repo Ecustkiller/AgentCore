@@ -210,6 +210,8 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "coordinate" in body and "coordinate=false" in body
     assert "depends_on" in body and "同一层" in body
     assert "嵌套委派" in body and "大模块" in body
+    # 协调补派失败节点须标 replaces_run_id，引擎改写下游 depends_on
+    assert "replaces_run_id" in body and "补派" in body
     # 纠正「一次只能一个 delegate / 同步阻塞到全队完成」误述：一回合一张图 + 同回合可再追加
     assert "一回合一张协作图" in body
     assert "再调" in body and "delegate" in body
@@ -284,6 +286,10 @@ def test_debate_skill_teaches_debate_tool_forms_and_dual_products():
     assert "决策简报" in body and "交锋叙事线" in body
     # 边界：并行调研仍用 delegate；收尾价值之争交 ask_user
     assert "delegate" in body and "ask_user" in body
+    # 收尾铁律：别抹平证据状态 + 不引入场外量化（与 to_ceo_output 尾部同口径）
+    assert "别抹平证据状态" in body or "既定事实" in body
+    assert "不引入场外量化" in body
+    assert "量化估算" in body
 
 
 def test_debate_skill_teaches_intent_alignment_before_opening():
@@ -301,6 +307,28 @@ def test_debate_skill_teaches_intent_alignment_before_opening():
     assert "ask_user" in body
 
 
+def test_debate_skill_teaches_thin_stance():
+    # stance 薄约束：CEO 只写一句立场倾向，禁预写论点大纲 / 论证角度指令。
+    # schema + Skill 对称于 background 的硬边界；防「开辩前替辩手写论证剧本」回退。
+    from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS
+
+    body = _body("debate_and_review")
+    assert "立场倾向" in body
+    assert "约 30" in body or "30 字" in body
+    assert "支持一审判决正确" in body or "判赔过重" in body
+    assert "核心论点" in body or "系统论证" in body
+    assert "background" in body
+    assert "剧本" in body or "工作产出" in body
+
+    stance_desc = DEBATE_PARAMETERS["properties"]["sides"]["items"]["properties"]["stance"][
+        "description"
+    ]
+    assert "一句立场倾向" in stance_desc
+    assert "约 30" in stance_desc or "30 字" in stance_desc
+    assert "background" in stance_desc
+    assert "核心论点" in stance_desc or "系统论证" in stance_desc
+
+
 def test_debate_skill_teaches_background_for_concrete_cases():
     # 赛前底料引导：具体案件 / 真实事件类命题建议传 background（3–5 条客观事实），
     # 纯价值观命题不必——避免双方重复检索同一批底料。Pins the引导措辞。
@@ -315,8 +343,9 @@ def test_revise_skill_teaches_recall_and_delegate_fallback():
     body = _body("revising_a_product")
     assert "continue_from_run_id" in body
     assert "delegate" in body
-    # The fallback boundary: 换角色 / 救失败稿 / 合并 → 冷委派.
-    assert "冷委派" in body or "replaces_run_id" in body
+    # The fallback boundary: 换角色 / 救失败稿 / 合并 → 冷委派 + replaces_run_id.
+    assert "冷委派" in body and "replaces_run_id" in body
+    assert "补派" in body or "接手" in body
 
 
 def test_ask_user_kickoff_skill_teaches_impact_tiered_proposal_card():

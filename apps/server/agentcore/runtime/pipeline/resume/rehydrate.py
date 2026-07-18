@@ -57,6 +57,7 @@ class RehydratedTurnState:
     pre_pause_reasoning: str = ""
     controller_seed: dict[str, Any] | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
+    evidence_ledger: list[dict[str, Any]] = field(default_factory=list)
     from_turn_paused: bool = False
     fact: TurnPausedFact | None = None
 
@@ -92,6 +93,7 @@ def rehydrate_from_turn_paused(
 
     # G2: fact is authoritative; frame.citations is the fallback.
     citations = list(fact.citations or suspension.citations or [])
+    evidence_ledger = list(fact.evidence_ledger or [])
     controller = dict(fact.controller) if fact.controller else {}
 
     logger.info(
@@ -101,6 +103,7 @@ def rehydrate_from_turn_paused(
         process_steps=len(process),
         run_process_keys=len(run_processes),
         citations=len(citations),
+        evidence_ledger=len(evidence_ledger),
         has_controller=bool(controller),
     )
     return RehydratedTurnState(
@@ -108,6 +111,7 @@ def rehydrate_from_turn_paused(
         pre_pause_reasoning=fact.reasoning or "",
         controller_seed=controller,
         citations=citations,
+        evidence_ledger=evidence_ledger,
         from_turn_paused=True,
         fact=fact,
     )

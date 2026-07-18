@@ -1,6 +1,6 @@
 import { remarkCitations } from "@/lib/remarkCitations";
 import { remarkEvidence } from "@/lib/remarkEvidence";
-import type { Citation } from "@/types/events";
+import type { Citation, TurnEvidenceLedgerEntry } from "@/types/events";
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -21,6 +21,24 @@ import { faviconUrl } from "./Favicon";
 import { SourceTooltip } from "./SourcePreview";
 import { rehypeCodeMeta } from "./rehypeCodeMeta";
 import { splitMarkdownBlocks } from "./streamingMarkdown";
+
+function ledgerEntryAsCitation(entry: TurnEvidenceLedgerEntry): Citation | null {
+  const url = (entry.url ?? "").trim();
+  if (!url) return null;
+  return {
+    url,
+    title: entry.title ?? "",
+    snippet: entry.snippet ?? "",
+    site: entry.site ?? "",
+    id: entry.id,
+    date: entry.date,
+    tier: entry.tier,
+    query: entry.query,
+    deep_read: entry.deep_read,
+    registrant: entry.registrant,
+    citable: entry.citable,
+  };
+}
 
 type ReactMarkdownProps = ComponentPropsWithoutRef<typeof ReactMarkdown>;
 
@@ -97,20 +115,91 @@ function ChipFavicon({ site }: { site?: string }) {
 }
 
 /**
+ * Resolve a `#rN` chip target: prefer ``citations[].id`` (P2 引用集), else fall
+ * back to the turn evidence ledger entry (same URL / meta). Mid-turn ledger can
+ * arrive before ``citations_event``; without this fallback the remark rewrite
+ * leaves raw ``#rN`` visible.
+ */
+function resolveLedgerCitation(
+  ledgerId: string,
+  citations: Citation[],
+  evidenceLedger: readonly TurnEvidenceLedgerEntry[] | null | undefined,
+): { citation: Citation; poolIndex: number; displayFallback: number } | null {
+  const byId = citations.findIndex((c) => c.id === ledgerId);
+  if (byId >= 0) {
+    const citation = citations[byId];
+    if (citation?.url) {
+      return { citation, poolIndex: byId, displayFallback: byId + 1 };
+    }
+  }
+  const entry = evidenceLedger?.find((e) => e.id === ledgerId);
+  if (!entry) return null;
+  const asCite = ledgerEntryAsCitation(entry);
+  if (!asCite) return null;
+  // Prefer a pool row with the same URL so display numbers stay aligned with SourceCards.
+  const byUrl = citations.findIndex((c) => c.url === asCite.url);
+  if (byUrl >= 0) {
+    return {
+      citation: citations[byUrl]!,
+      poolIndex: byUrl,
+      displayFallback: byUrl + 1,
+    };
+  }
+  const n = Number(/^#r(\d+)$/.exec(ledgerId)?.[1]);
+  return {
+    citation: asCite,
+    poolIndex: -1,
+    displayFallback: Number.isFinite(n) && n > 0 ? n : 1,
+  };
+}
+
+/**
  * Inline citation marker: display number + optional favicon, linked to the real
  * source URL (system browser via target=_blank). Hover reuses SourceTooltip.
  * Props arrive from remark's `citemark` via `data.hProperties` (`data-n`).
  */
 function CitationChip({
   "data-n": dataN,
+  "data-ledger-id": dataLedgerId,
   citations,
+  evidenceLedger,
   toDisplay,
 }: {
   "data-n"?: string;
+  "data-ledger-id"?: string;
   children?: ReactNode;
   citations: Citation[];
+  evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   toDisplay: ReadonlyMap<number, number>;
 }) {
+  // `#rN` 台账角标：citations.id → 台账条目；都未命中则原样文本（不炸）。
+  if (dataLedgerId) {
+    const hit = resolveLedgerCitation(dataLedgerId, citations, evidenceLedger);
+    if (!hit) return <>{dataLedgerId}</>;
+    const { citation, poolIndex, displayFallback } = hit;
+    const display =
+      poolIndex >= 0
+        ? (toDisplay.get(poolIndex + 1) ?? displayFallback)
+        : displayFallback;
+    const chip = (
+      <a
+        href={citation.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`来源 ${display}（${dataLedgerId}）`}
+        className="mx-0.5 inline-flex h-auto items-center gap-0.5 rounded-full bg-primary/10 px-1.5 align-middle text-xs font-medium leading-none text-primary no-underline hover:bg-primary/20"
+      >
+        <ChipFavicon site={citation.site} />
+        {display}
+      </a>
+    );
+    return (
+      <SourceTooltip citation={citation} index={display}>
+        {chip}
+      </SourceTooltip>
+    );
+  }
+
   const canonical = Number(dataN);
   if (!Number.isFinite(canonical) || canonical < 1) {
     return <>{dataN != null ? `[${dataN}]` : null}</>;
@@ -159,6 +248,11 @@ interface Props {
    * evidence-status markers as {@link EvidenceBadge} chips. Off everywhere else so the
    * marker convention never leaks into ordinary assistant markdown. */
   evidence?: boolean;
+  /** Known turn-ledger ids (`#rN`) for inline rewrite; unknown ids stay plain text.
+   * When omitted, derived from ``evidenceLedger`` + ``citations[].id``. */
+  knownLedgerIds?: ReadonlySet<string> | null;
+  /** Turn research ledger — `#rN` chip URL fallback when citations lag or omit id. */
+  evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
 }
 
 /**
@@ -174,8 +268,22 @@ export const Markdown = memo(function Markdown({
   isStreaming = false,
   muted = false,
   evidence = false,
+  knownLedgerIds = null,
+  evidenceLedger = null,
 }: Props) {
   const citationCount = citations?.length ?? 0;
+  const resolvedLedgerIds = useMemo(() => {
+    if (knownLedgerIds && knownLedgerIds.size > 0) return knownLedgerIds;
+    const ids = new Set<string>();
+    for (const e of evidenceLedger ?? []) {
+      if (e.id) ids.add(e.id);
+    }
+    for (const c of citations ?? []) {
+      if (c.id) ids.add(c.id);
+    }
+    return ids.size > 0 ? ids : null;
+  }, [knownLedgerIds, evidenceLedger, citations]);
+  const ledgerIdCount = resolvedLedgerIds?.size ?? 0;
   const toDisplay = useMemo(() => {
     if (citationToDisplay) return citationToDisplay;
     // Fallback: identity map so chips still render without a parent map.
@@ -184,17 +292,19 @@ export const Markdown = memo(function Markdown({
     return m;
   }, [citationToDisplay, citationCount]);
 
-  // Only enrich once sources exist (they arrive at end-of-turn), so streaming
+  // Only enrich once sources / ledger ids exist (they arrive at end-of-turn), so streaming
   // deltas keep using the stable module-level remark plugins. `evidence` (debate
   // speech) appends remarkEvidence; deps-memoized so it stays a stable ref across deltas.
   const remarks = useMemo(() => {
-    if (citationCount <= 0 && !evidence) return remarkPlugins;
+    if (citationCount <= 0 && ledgerIdCount <= 0 && !evidence) return remarkPlugins;
     return [
       ...remarkPlugins,
-      ...(citationCount > 0 ? [remarkCitations(citationCount)] : []),
+      ...(citationCount > 0 || ledgerIdCount > 0
+        ? [remarkCitations(citationCount, resolvedLedgerIds)]
+        : []),
       ...(evidence ? [remarkEvidence()] : []),
     ];
-  }, [citationCount, evidence]);
+  }, [citationCount, ledgerIdCount, resolvedLedgerIds, evidence]);
 
   const comps = useMemo<Components>(() => {
     // Route ```mermaid / ```markmap / ```vega-lite fences to the diagram
@@ -266,14 +376,19 @@ export const Markdown = memo(function Markdown({
           };
     // Citation chips: remarkCitations emits `citemark` via data.hProperties (not a
     // cite: link url — urlTransform would strip that). Same seam as evidencemark.
-    if (citationCount > 0 && citations) {
+    // Register whenever pool or ledger ids exist — chips may resolve URL from ledger alone.
+    if (citationCount > 0 || ledgerIdCount > 0) {
+      const pool = citations ?? [];
       const CiteMark = (props: {
         "data-n"?: string;
+        "data-ledger-id"?: string;
         children?: ReactNode;
       }) => (
         <CitationChip
           data-n={props["data-n"]}
-          citations={citations}
+          data-ledger-id={props["data-ledger-id"]}
+          citations={pool}
+          evidenceLedger={evidenceLedger}
           toDisplay={toDisplay}
         >
           {props.children}
@@ -287,7 +402,15 @@ export const Markdown = memo(function Markdown({
       (base as Record<string, unknown>).evidencemark = EvidenceBadge;
     }
     return base;
-  }, [citationCount, citations, toDisplay, isStreaming, evidence]);
+  }, [
+    citationCount,
+    ledgerIdCount,
+    citations,
+    evidenceLedger,
+    toDisplay,
+    isStreaming,
+    evidence,
+  ]);
 
   // While streaming, split into per-block memoized chunks so each finished block
   // parses exactly once (逐块记忆化·Stage 4) — only the live tail re-parses per

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolCategory, ToolEffect
@@ -273,6 +274,47 @@ async def test_captain_role_strips_run_id_from_sse_but_facts_keep_it(
     ]
     assert wrk_events
     assert all(e.payload.get("run_id") == "w-run" for e in wrk_events)
+
+
+async def test_illegal_json_args_return_explicit_error_not_empty_dict():
+    """Illegal tool-call JSON must not silently become ``args={}`` (trace accident chain)."""
+    tracked = _OkTool("ok_a", output="alpha")
+    reg = ToolRegistry()
+    reg.register(tracked)
+    # Unescaped quote inside a string — classic model-emitted illegal JSON.
+    bad = '{"tasks":[{"role":"研究员","task":"查 "foo" 资料"}]}'
+    sink = EventSink()
+    with capture_logs() as logs:
+        messages, terminal, attempts = await execute_tools(
+            [_call("c1", "ok_a", bad)],
+            reg,
+            _ctx(),
+            sink,
+            run_id="r1",
+        )
+
+    assert terminal is None
+    assert tracked.executed is False
+    assert len(messages) == 1
+    content = messages[0].content or ""
+    assert "不是合法 JSON" in content
+    assert "失败位置" in content
+    assert "原样重发全部参数" in content
+    assert "禁止改写" in content
+    assert attempts[0].success is False
+    assert attempts[0].parse_failure is True
+    assert attempts[0].policy_failure is False
+
+    starts = [e for e in sink._history if e.type == EventType.TOOL_USE_START]  # noqa: SLF001
+    ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
+    assert len(starts) == 1
+    assert starts[0].payload.get("arguments") != {}
+    assert starts[0].payload.get("arguments", {}).get("__args_parse_failed__") is True
+    assert len(ends) == 1
+    assert ends[0].payload["status"] == "error"
+    assert "不是合法 JSON" in (ends[0].payload.get("result") or "")
+
+    assert any(entry.get("event") == "tool.args_parse_failed" for entry in logs)
 
 
 async def test_code_execute_maps_sandbox_error_to_failed_result():

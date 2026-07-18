@@ -22,7 +22,23 @@ def _history_len(entries: list[dict[str, Any]]) -> int:
     return 0
 
 
-def _llm_message_to_wire(msg: LLMMessage) -> LlmWindowMessageLine:
+def _run_head_user_origin(entries: list[dict[str, Any]], run_id: str) -> str | None:
+    """Return ``user_origin`` from this run's ``run_head`` fact, if any."""
+    for entry in entries:
+        if (entry.get("kind") or "") != FactKind.RUN_HEAD.value:
+            continue
+        payload = entry.get("payload") or {}
+        if payload.get("run_id") == run_id:
+            origin = payload.get("user_origin") or ""
+            return str(origin) if origin else None
+    return None
+
+
+def _llm_message_to_wire(
+    msg: LLMMessage,
+    *,
+    origin: str | None = None,
+) -> LlmWindowMessageLine:
     tool_calls = None
     if msg.tool_calls:
         tool_calls = [
@@ -42,6 +58,7 @@ def _llm_message_to_wire(msg: LLMMessage) -> LlmWindowMessageLine:
         tool_calls=tool_calls,
         tool_call_id=msg.tool_call_id,
         reasoning_content=msg.reasoning_content,
+        origin=origin,
     )
 
 
@@ -62,10 +79,26 @@ def project_run_llm_window(
     if not window:
         return RunLlmWindowResponse(run_id=run_id, available=False, messages=[])
 
+    # Opening user composed from ContextBlocks → tag for the diagnostic UI merge.
+    head_origin = _run_head_user_origin(entries, run_id)
+    messages: list[LlmWindowMessageLine] = []
+    saw_opening_user = False
+    for msg in window:
+        origin: str | None = None
+        if (
+            head_origin
+            and not saw_opening_user
+            and msg.role == "user"
+            and not msg.tool_call_id
+        ):
+            origin = head_origin
+            saw_opening_user = True
+        messages.append(_llm_message_to_wire(msg, origin=origin))
+
     return RunLlmWindowResponse(
         run_id=run_id,
         available=True,
-        messages=[_llm_message_to_wire(msg) for msg in window],
+        messages=messages,
     )
 
 

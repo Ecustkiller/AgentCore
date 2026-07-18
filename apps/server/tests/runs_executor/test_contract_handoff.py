@@ -65,6 +65,16 @@ async def test_file_write_handoff_empty_content_passes_without_retry():
     assert state.debrief == {"summary": "done writing"}
 
 
+def _is_handoff_gate_feedback(messages) -> bool:  # noqa: ANN001
+    """True only for contract handoff-gate retry text (not upstream 交接结论 injection)."""
+    joined = "\n".join(m.content or "" for m in messages if m.role == "user")
+    return (
+        "尚未调用 handoff" in joined
+        or "重新调用 handoff" in joined
+        or "handoff 交接简报信息量不足" in joined
+    )
+
+
 class _HandoffOnFeedbackProvider:
     """Content first; on handoff-gate feedback, emit a qualifying handoff call."""
 
@@ -77,8 +87,7 @@ class _HandoffOnFeedbackProvider:
     async def stream(self, request):  # noqa: ANN001
         self.calls += 1
         self.requests.append([(m.role, m.content or "") for m in request.messages])
-        joined = "\n".join(m.content or "" for m in request.messages if m.role == "user")
-        if "handoff" in joined.lower() or "交接" in joined:
+        if _is_handoff_gate_feedback(request.messages):
             args = json.dumps(
                 {
                     "summary": "这是一段足够长的合格交接结论，涵盖方案要点与下游接手注意。",
@@ -132,6 +141,8 @@ async def test_upstream_missing_handoff_forced_then_accepted_on_rework():
     arch = res["t_arch"]
     impl = res["t_impl"]
     assert arch.phase is RunPhase.COMPLETED
+    # Correction pass only called handoff — prior prose must not be wiped.
+    assert arch.content == "架构草案初版"
     assert arch.debrief is not None
     assert not arch.debrief.get("degraded")
     assert debrief_meets_minimum(arch.debrief)
@@ -142,6 +153,66 @@ async def test_upstream_missing_handoff_forced_then_accepted_on_rework():
     )
     assert impl.phase is RunPhase.COMPLETED
     assert impl.debrief is None
+
+
+class _EmptyHandoffOnFeedbackProvider:
+    """Good prose first; on handoff-gate feedback, call handoff with empty summary."""
+
+    def __init__(self, body: str) -> None:
+        self._body = body
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001
+        self.calls += 1
+        if _is_handoff_gate_feedback(request.messages):
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id=f"h{self.calls}",
+                        function_name="handoff",
+                        arguments_delta="{}",
+                    )
+                ]
+            )
+            return
+        yield LLMChunk(delta_content=self._body)
+
+
+async def test_handoff_retry_preserves_prior_content_avoids_empty_false_fail():
+    """Bug A: handoff-only correction must not drop ~合格正文 →「产出为空」."""
+    plan, _ = build_run_plan(
+        [
+            {"id": "arch", "role": "架构师", "task": "出方案"},
+            {"id": "impl", "role": "实现", "task": "落地", "depends_on": ["arch"]},
+        ],
+        id_prefix="t",
+    )
+    reg = ToolRegistry()
+    reg.register(HandoffTool())
+    body = "这是一段已经写好的合格调研正文，篇幅足够，不应在纠正轮被清空。"
+    provider = _EmptyHandoffOnFeedbackProvider(body)
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="req",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    arch = res["t_arch"]
+    assert arch.phase is RunPhase.COMPLETED
+    assert arch.content == body
+    assert not arch.error
+    # arch: prose + empty-handoff correction (≥2); impl may add more on shared provider
+    assert provider.calls >= 2
+    # Thin/empty handoff → engine synth; body still available for synth/downstream.
+    assert arch.debrief is not None
+    assert arch.debrief.get("degraded") is True
+    assert res["t_impl"].phase is RunPhase.COMPLETED
 
 
 async def test_upstream_without_handoff_tool_synthesizes_degraded_without_rework():

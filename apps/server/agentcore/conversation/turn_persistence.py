@@ -49,7 +49,10 @@ async def create_assistant_placeholder(
     message_id: str,
     trace_id: str,
 ) -> None:
-    """Create the running assistant row at turn start (progressive persistence)."""
+    """Create the running assistant row at turn start (progressive persistence).
+
+    Propagates store errors — callers must not start the pipeline without a row.
+    """
     await get_cloud_store().begin_turn(
         conversation_id=conversation_id,
         message_id=message_id,

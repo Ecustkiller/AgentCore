@@ -3,113 +3,85 @@
 | 项 | 值 |
 |---|---|
 | 磁带 | `demos/tapes/lv-molihua-trademark.json` |
-| 分镜参考 | `demos/video-plan-lv-molihua.md` |
-| 生成方式 | **生产构建** webapp（`pnpm build:webapp` → `dist-web` + vite preview）+ 服务端磁带回放 + Playwright @ **1920×1080** |
-| 账号 | `promo_lv` / display_name **「演示」**（侧栏无历史杂音） |
-| DEV 标 | **已去除**（`import.meta.env.DEV=false`，**未改产品源码**） |
-| 导演台 | `http://localhost:8015/v1/demo-tape/director`（验收见下） |
-| 避开 | 两段结辩 |
+| 生成时间 | 2026-07-18T04:18:21.204Z |
+| 方式 | server demo-tape replay + Playwright production webapp (dist-web / vite preview) @ 1920×1080 — clean, no DEV badge |
+| 账号 | `promo_lv`（display_name「演示」） |
+| DEV 标 | **已去除**（生产构建 dist-web，未改产品源码） |
+| 回放 | speed=12, max_gap_ms=800 |
+| 视口 | 1920×1080 |
+| 验收 ok | true |
 
-> 本目录为**干净版**重拍，覆盖旧「AgentCore DEV / Dev 账号 / 侧栏脏会话」穿帮素材。
+> 本目录为**干净版**重拍。导演控制台实战验收见下文 / `director-acceptance.json`。
 
-## 环境卫生结论
+## 静帧（绝对路径）
 
-| 问题 | 办法 | 是否改产品源码 |
-|---|---|---|
-| 标题旁 DEV 徽章 | 用 `pnpm build:webapp` 生产构建再 `vite preview` 拍（徽章由 `import.meta.env.DEV` 门控） | **否** |
-| Electron 标题 `AgentCore [DEV]` | 本套素材走 **webapp**，不涉及 Electron `is.dev` 标题 | 否（若将来拍 Electron 壳，需生产打包或改 `apps/desktop/src/main/index.ts`） |
-| 左下角 Dev 账号 | 新建用户 `promo_lv`，`display_name=演示`（`seed` + `UserRepository.update`） | **否** |
-| 侧栏历史杂音 | 干净账号 + 开拍前 `DELETE /v1/conversations` | **否** |
+| id | 绝对路径 | 镜头 | 干净版 | 新增 |
+|---|---|---|---|---|
+| `01-user-prompt` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\01-user-prompt.png` | 用户输入开场 prompt / 冷开场前 / 第二幕：展示「只打了这么一句话」 |  |  |
+| `02-team-preview` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\02-team-preview.png` | captain 组建辩论团队 / 开工卡 / 冷开场 / 第四幕：team_preview 双方立场 |  |  |
+| `09-collab-graph` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09-collab-graph.png` | 协作图 / 团队结构可视化 / 冷开场快闪；收尾拉远 |  |  |
+| `03-debate-opening` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\03-debate-opening.png` | 辩论开场：双方与辩题（显著性） / 第五幕精剪 / 冷开场 | 是 |  |
+| `04-r2-diamond-square` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04-r2-diamond-square.png` | 交锋1 · 公共元素 vs 获得显著性 / 第五幕精剪 / 冷开场 | 是 |  |
+| `04b-r2-quote-closeup` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04b-r2-quote-closeup.png` | 交锋1 金句定点特写 / 交锋1 金句；须可见「任何经营者都不能垄断自然界公共资源的基本表达」 | 是 | 是 |
+| `05-r3-logo-swap` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05-r3-logo-swap.png` | 交锋2 · 跨类标准与真实使用 / 第五幕精剪 / 冷开场 | 是 |  |
+| `05b-r4-logo-defense` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05b-r4-logo-defense.png` | 交锋3 · 无茶饮消费者混淆调查 / 第五幕精剪 / 冷开场 | 是 |  |
+| `07-evidence-gap-admit` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\07-evidence-gap-admit.png` | 质询高光 · LV 承认无消费者调查（宽景） / 交锋3 | 是 |  |
+| `07b-admit-closeup` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\07b-admit-closeup.png` | **质询承认句特写** / 交锋3 全片最强镜头；原话「我承认没有消费者调查数据支撑…」 | 是 | 是 |
+| `06-r5-burden` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\06-r5-burden.png` | 交锋3 决胜 · R4 再钉实证门槛 / 第五幕精剪 / 冷开场 | 是 |  |
+| `08-final-verdict` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\08-final-verdict.png` | 最终裁决（微弱倾向茉莉奶白 · 55%） / 第五幕精剪 / 冷开场 | 是 |  |
+| `09b-collab-graph-final` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09b-collab-graph-final.png` | 协作图终态全貌（四轮打完） / 第七幕收尾 | 是 | 是 |
 
-## 静帧（`stills/` · 全部干净版）
+### 新增镜头
 
-| id | 绝对路径 | 镜头 / 用途 | 新增 |
-|---|---|---|---|
-| `01-user-prompt` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\01-user-prompt.png` | 第二幕「一句话发起」 | |
-| `02-team-preview` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\02-team-preview.png` | 第四幕组队+授权 | |
-| `03-debate-opening` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\03-debate-opening.png` | 冷开场 / 第五幕引入（双方正在立论） | |
-| `04-r2-diamond-square` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04-r2-diamond-square.png` | 交锋1 · R2 公共纹样 vs 具体设计 | |
-| `04b-r2-quote-closeup` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\04b-r2-quote-closeup.png` | **R2 金句特写**（可见「不是四叶草不能用，而是用得太像」） | **是** |
-| `05-r3-logo-swap` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05-r3-logo-swap.png` | 交锋2 · 驳回后换更近似 Logo / 惩罚性赔偿 | |
-| `05b-r4-logo-defense` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\05b-r4-logo-defense.png` | 交锋3 · 贡献率 / 举证责任 | |
-| `06-r5-burden` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\06-r5-burden.png` | 交锋3 决胜 · 贡献率举证（本盘仅 4 轮，无第 5 轮） | |
-| `07-evidence-gap-admit` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\07-evidence-gap-admit.png` | 质询高光 · 承认量化/抗辩缺口 | |
-| `08-final-verdict` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\08-final-verdict.png` | 第六幕裁决 · 「倾向支持一审」· 约 70% | |
-| `09-collab-graph` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09-collab-graph.png` | 冷开场画面1 · 授权后协作图 | |
-| `09b-collab-graph-final` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\stills\09b-collab-graph-final.png` | **第七幕收尾** · 四轮+结局协作图全貌 | **是** |
+- `04b-r2-quote-closeup` — 交锋1 金句；「任何经营者都不能垄断自然界公共资源的基本表达」
+- `07b-admit-closeup` — 交锋3 承认句特写；「我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张」
+- `09b-collab-graph-final` — 协作图终态全貌（四轮后），第七幕收尾
+- `clip-streaming-debate-speed1` — SPEED=1 原速流式（冷开场镜头2）
 
-> **注意（2026-07-17）**：磁带已换成新跑（4 轮 · 倾向支持一审 70%）。上表为**目标文案**；现有 PNG 静帧仍是旧跑画面，须按新 SHOT_MARKERS 重拍后才与字幕一致。
+### 封面级侧栏
 
-### 金句原文（磁带 / UI 一致）
+`03` / `09` / `09b`：主捕获开拍前 `DELETE /v1/conversations` 清空 `promo_lv` 会话，侧栏仅当前一条。`07b` 等交锋特写可能残留多条同题会话（非封面级，可接受）。
 
-> 不是四叶草不能用，而是用得太像。
-
-（出现在 R2 交锋点 / 主持人摘要；LV 方论点亦强调「偷换概念：保护的是具体设计，不是文化符号」。）
-
-### 关于「70%」
-
-磁带 brief / CEO 汇总含约 70% 倾向支持一审判决方向；UI 终审卡可能显示档位 **「置信 高」**（非百分数）。成片可用字幕叠 70%。
 ## 短视频 / 序列
 
-| id | 绝对路径 | 说明 | 新增 |
-|---|---|---|---|
-| `full-session` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\clips\full-session.webm` | 加速整场 Playwright 录制 | |
-| `clip-streaming-debate-speed1` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\clips\clip-streaming-debate-speed1.webm` | **SPEED=1** 原速双列流式（冷开场镜头2 备选）；导演台切 1× 后录约 12s | **是** |
-| 序列 `clip-streaming-debate-speed1` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\sequences\clip-streaming-debate-speed1\` | 12 帧 @1s · 同上 | **是** |
-| 序列 `clip-round-advance` | `C:\Project\AgentCore\apps\promo\assets\lv-molihua\sequences\clip-round-advance\` | 轮次推进补帧 | |
+- **full-session**: `C:\Project\AgentCore\apps\promo\assets\lv-molihua\clips\full-session.webm` — 整场回放（Playwright recordVideo）
+- 序列 **clip-round-advance**: `C:\Project\AgentCore\apps\promo\assets\lv-molihua\sequences\clip-round-advance` (11 帧)
 
 ## 导演控制台实战验收
 
-详见 `director-acceptance.json`。摘要：
-
-| 功能 | 实测 | 说明 |
+| 功能 | 结果 | 说明 |
 |---|---|---|
-| 暂停 | **pass** | `playing → paused` 有效。若在 `awaiting_interaction`（授权卡）上点暂停，对外 state 仍显示 `awaiting_interaction`，易误判——应在中段播放时测。 |
-| 变速 | **pass** | 2× / 8× 瞬时生效 |
-| 继续 | **pass** | soft-pause 后 resume → playing |
-| 章节跳 | **pass**（服务端） | `chapter_id` 跳转与跨授权 auto-resolve 正确；**前端**无导演订阅，纯 seek 后 SPA 可能停在案情简介，需保持直播 SSE 或硬刷新+点「打开辩论室」 |
-| 向前 seek | **pass**（服务端） | t_ms 前进正确；前端对齐同上 |
-| 倒带 | **pass** | 重启式倒带回 `team_preview` 成功。本轮 **未复现**「必须手动点侧栏刷新」；硬刷新路径可对齐。疑点降级为：偶发 / 取决于是否仍挂着旧 SSE fold |
-| 跨授权 seek | **pass**（服务端） | 越过 `team_preview` 时代确认；授权卡消失 |
-| 前端同步 | **partial** | 导演通道只控节拍器+DB；截图实拍宜「直播回放 + 导演变速/暂停」，章节跳更适合掐点预览 |
+| pause | pass | 在离开 team_preview 后的 playing 态：playing→paused。若在 awaiting_interaction（授权卡）上点暂停，状态名不变（仍为 awaiting_interaction），易误判为无效——应在播放中段测暂停。 |
+| speed | pass | 动态 2× / 8× 瞬时生效（status.speed 正确） |
+| resume | pass | soft-pause 后 resume → playing |
+| chapter_jump | pass | 章节跳 r1_argument：服务端 t_ms/chapter_label 正确；跨授权会 auto-resolve。前端需保持直播 SSE 或硬刷新会话才能看到辩论室画面（纯 seek 后 SPA 可能仍停在案情简介）。 |
+| forward_seek | pass | 向前 seek t_ms 65996→319000 服务端成功；前端画面需直播会话或硬刷新才对齐证据缺口文案 |
+| rewind | pass | 重启式倒带回 team_preview：本轮 immediate_aligned=true，无需手动点侧栏。已知疑点未复现（可能因硬刷新路径 / 干净账号）。 |
+| cross_auth_seek | pass | 从授权卡 seek 越过 team_preview：服务端代确认成功，授权卡消失。前端辩论室内容依赖直播 fold，硬刷新后可见案情+进度但不一定自动打开辩论室双列。 |
+| frontend_sync_after_seek | partial | 导演 seek/倒带改的是服务端注入与 DB；产品前端未订阅导演通道。实拍静帧应走「直播回放 + 导演变速/暂停」，章节跳更适合掐点预览而非直接截图。硬刷新会话可部分对齐，辩论室需再点「打开辩论室」。 |
 
-### 执行层小修（脚本侧，非产品源码）
+- 倒带后前端即时对齐（本轮未复现「必须点侧栏」）。
 
-- 拍摄脚本改为默认生产构建 + `promo_lv` + 跳过 onboarding + 开拍清会话。
-- 新增 `promo_capture_lv_molihua_director.mjs` / `fixup.mjs` / `speed1_clip.mjs`。
-- 运行中后端曾无导演路由 → **重启 uvicorn 加载当前代码**后 `/v1/demo-tape/director` 可用（非代码 bug，是进程未更新）。
+## 未产出 / 备注
 
-## 驱动脚本
+- （无缺失）
+- cleaned 1 prior conversations
+- DEV badge absent (production build)
+- 短视频：已产出 full-session.webm；未做自动裁切。若需 5–15s 片段，用 ffmpeg 按 assets 的 wall_ms 裁切，或使用 sequences/ 密集帧。
 
-| 脚本 | 用途 |
-|---|---|
-| `apps/desktop/scripts/promo_capture_lv_molihua.mjs` | 干净静帧全套（直播回放 · 生产构建） |
-| `apps/desktop/scripts/promo_capture_lv_molihua_director.mjs` | 导演台功能验收 |
-| `apps/desktop/scripts/promo_capture_lv_molihua_fixup.mjs` | 金句滚入视口 + 终审定点 |
-| `apps/desktop/scripts/promo_capture_lv_speed1_clip.mjs` | SPEED=1 流式短片 |
+## 避开
 
-## 复现（PowerShell）
+- 两段结辩（closing）画面故意不采。
+
+## 复现
 
 ```powershell
-# 1) 后端（需含导演台路由的当前代码）
-cd apps/server
-$env:DEMO_TAPE_REPLAY_ENABLED='true'
-uv run uvicorn agentcore.main:app --host 127.0.0.1 --port 8015
-
-# 2) 生产前端（去 DEV）
 cd apps/desktop
 $env:VITE_API_URL='http://localhost:8015'
-pnpm build:webapp
-
-# 3) 干净账号（一次性）
-cd apps/server
-# DEV_USERNAME=promo_lv 等 — 或用既有 promo_lv / promopass（display_name=演示）
-
-# 4) 拍摄
+pnpm build:webapp   # 去 DEV 标
+# backend DEMO_TAPE_REPLAY_ENABLED on :8015（含导演台路由）
 $env:PROMO_API='http://localhost:8015'
 $env:PROMO_USER='promo_lv'; $env:PROMO_PASS='promopass'
-node apps/desktop/scripts/promo_capture_lv_molihua_director.mjs
-node apps/desktop/scripts/promo_capture_lv_molihua.mjs
-node apps/desktop/scripts/promo_capture_lv_molihua_fixup.mjs
-node apps/desktop/scripts/promo_capture_lv_speed1_clip.mjs
+node apps/desktop/scripts/promo_capture_lv_molihua_director.mjs  # 导演验收
+node apps/desktop/scripts/promo_capture_lv_molihua.mjs           # 干净静帧（直播回放）
 ```

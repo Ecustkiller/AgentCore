@@ -10,7 +10,13 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
-from agentcore.runtime.citations import annotate_tool_citations, merge_citations
+from agentcore.runtime.citations import (
+    annotate_ledger_ids,
+    annotate_tool_citations,
+    merge_citations,
+    normalize_citation_url,
+)
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.events import (
     EventSink,
     tool_use_end,
@@ -19,6 +25,7 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.facts import ToolCallFact, record_turn_fact
 from agentcore.runtime.loop_controller import ToolAttempt, fingerprint_tool_call
+from agentcore.runtime.ledger_channel import emit_ledger_delta
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.registry import ToolRegistry
 
@@ -26,6 +33,29 @@ from .constants import MAX_PARALLEL_TOOLS
 from .timeout import resolve_tool_timeout
 
 logger = get_logger(__name__)
+
+# Marker in tool_use_start.arguments when JSON parse failed — must not look like a
+# successfully parsed empty object ``{}`` (journal / UI 假象).
+_ARGS_PARSE_FAILED_MARKER: dict[str, Any] = {"__args_parse_failed__": True}
+
+
+def _format_args_parse_error(tool_name: str, raw: str, exc: json.JSONDecodeError) -> str:
+    """Model-facing Chinese error for illegal tool-call arguments JSON."""
+    pos = exc.pos if isinstance(exc.pos, int) else 0
+    # Window around the failure so the model can spot unescaped quotes without a full dump.
+    left = max(0, pos - 24)
+    right = min(len(raw), pos + 24)
+    snippet = raw[left:right].replace("\n", "\\n").replace("\r", "\\r")
+    if left > 0:
+        snippet = "…" + snippet
+    if right < len(raw):
+        snippet = snippet + "…"
+    detail = (exc.msg or "JSON decode error").strip()
+    return (
+        f"工具 '{tool_name}' 的参数不是合法 JSON（{detail}；失败位置 {pos}，附近片段："
+        f"{snippet}）。请修复转义（尤其是字符串内的引号）后，原样重发全部参数；"
+        "禁止改写、缩短或删减内容。"
+    )
 
 
 async def execute_tools(
@@ -37,6 +67,8 @@ async def execute_tools(
     approval_gate: ApprovalGate | None = None,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
+    ledger_registrant: str = "",
     run_id: str = "",
     role: str = "",
 ) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
@@ -51,13 +83,11 @@ async def execute_tools(
     warning is logged; normal agent toolsets never hold both classes.
 
     When ``citation_sink`` is provided, web sources surfaced by successful research
-    tools are merged into it (arrival order, deduped, capped). With
-    ``annotate_citations`` (CEO chat path) each source's assigned canonical number
-    is also folded back into that tool message's model-facing output (A2); merge
-    happens in deterministic call order, not completion order, so card numbering is
-    reproducible. Workers pass ``annotate_citations=False`` — sources are collected
-    but the worker text is left un-numbered (its local numbers would be re-ordered
-    when merged into the turn card).
+    tools are merged into it (arrival order, deduped, capped) — **池语义不变**。
+    When ``turn_evidence_ledger`` is set, the same hits are also registered into the
+    turn-shared ledger (except ``blocked``); tool messages get ``#rN=url`` stable-id
+    annotation for both CEO and workers (引用即出处 P1). Without a ledger,
+    ``annotate_citations`` keeps the legacy ``[n]=url`` CEO path.
 
     Display/trace split for ``role == "captain"``: SSE tool events omit ``run_id``
     so the UI renders them as turn-level inline steps (same as captain
@@ -71,11 +101,43 @@ async def execute_tools(
         tc: ToolCall,
     ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt, list[dict[str, Any]]]:
         name = tc.function.name
-        fingerprint = fingerprint_tool_call(name, tc.function.arguments or "")
+        raw_args = tc.function.arguments or ""
+        fingerprint = fingerprint_tool_call(name, raw_args)
         try:
-            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-        except json.JSONDecodeError:
-            args = {}
+            args = json.loads(raw_args) if raw_args else {}
+        except json.JSONDecodeError as exc:
+            error_msg = _format_args_parse_error(name, raw_args, exc)
+            # Honest wire pair: marker args (not ``{}``) + error end — never run the tool.
+            sink.emit(
+                tool_use_start(
+                    tc.id, name, dict(_ARGS_PARSE_FAILED_MARKER), run_id=event_run_id
+                )
+            )
+            sink.emit(
+                tool_use_end(
+                    tc.id, name, success=False, output=error_msg, run_id=event_run_id
+                )
+            )
+            logger.info(
+                "tool.args_parse_failed",
+                tool=name,
+                tool_call_id=tc.id,
+                pos=exc.pos,
+                msg=exc.msg,
+                args_preview=raw_args[:200],
+            )
+            logger.info(
+                "tool.execute_end",
+                tool=name,
+                status="args_parse_failed",
+                duration_ms=0,
+            )
+            return (
+                LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False, parse_failure=True),
+                [],
+            )
 
         sink.emit(tool_use_start(tc.id, name, args, run_id=event_run_id))
         logger.debug("tool.execute_start", tool=name)
@@ -219,6 +281,41 @@ async def execute_tools(
                         [],
                     )
 
+        # 检索预算 (提案 A1): reserve a per-run slot immediately before execute so
+        # approval / breaker denials never consume budget. Orthogonal to
+        # LoopController.investigation_calls / team_gate.
+        from agentcore.runtime.runs.retrieval_budget import (
+            RETRIEVAL_TOOL_NAMES,
+            budget_exhausted_output,
+            charges_retrieval_budget,
+        )
+
+        budget_state = context.retrieval_budget
+        budget_reserved = False
+        if name in RETRIEVAL_TOOL_NAMES and budget_state is not None:
+            if not await budget_state.try_reserve():
+                exhausted = budget_exhausted_output()
+                sink.emit(
+                    tool_use_end(
+                        tc.id, name, success=False, output=exhausted, run_id=event_run_id
+                    )
+                )
+                logger.info(
+                    "tool.execute_end",
+                    tool=name,
+                    status="retrieval_budget_exhausted",
+                    duration_ms=0,
+                    retrieval_budget_limit=budget_state.limit,
+                    retrieval_budget_used=budget_state.used,
+                )
+                return (
+                    LLMMessage(role="tool", content=exhausted, tool_call_id=tc.id),
+                    None,
+                    ToolAttempt(fingerprint, name, success=False),
+                    [],
+                )
+            budget_reserved = True
+
         # 工具执行阶段进度 (联网搜索前端展示优化): inject a per-call phase callback so a
         # long-running tool (web_search) can report a coarse EXECUTION phase mid-flight. The
         # executor owns event shape (引擎纯化) — the tool passes only a phase token; we close
@@ -244,6 +341,8 @@ async def execute_tools(
             # turn — e.g. the sandbox kills its subprocess); surface a model-facing
             # error so the loop adapts instead of hanging, and count it as a failed
             # attempt so a tool that keeps timing out trips convergence governance.
+            if budget_reserved and budget_state is not None:
+                await budget_state.refund()
             duration_ms = int((time.monotonic() - started) * 1000)
             timeout_msg = (
                 f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
@@ -266,6 +365,8 @@ async def execute_tools(
             # must not cancel its siblings via asyncio.gather. Convert to a failed tool
             # result so the loop can adapt; SUSPEND terminals are unaffected (they return
             # normally, never raise).
+            if budget_reserved and budget_state is not None:
+                await budget_state.refund()
             duration_ms = int((time.monotonic() - started) * 1000)
             error_msg = (
                 f"工具 '{name}' 执行时发生内部错误：{e}。"
@@ -287,6 +388,10 @@ async def execute_tools(
                 [],
             )
         result.tool_call_id = tc.id
+
+        # 缓存命中 / A3 拒绝等不计预算：reserved slot refunded when not charged.
+        if budget_reserved and budget_state is not None and not charges_retrieval_budget(result):
+            await budget_state.refund()
 
         if result.success:
             output = result.output
@@ -318,12 +423,21 @@ async def execute_tools(
                     run_id=event_run_id,
                 )
             )
-        logger.info(
-            "tool.execute_end",
-            tool=name,
-            status="ok" if result.success else "error",
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+        # 检索观测：web_search 把 query / hosts 放进 metadata，转发到 execute_end
+        # 以便从统一工具结束事件还原「搜了什么 / 命中哪些域」。
+        end_fields: dict[str, Any] = {
+            "tool": name,
+            "status": "ok" if result.success else "error",
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        meta = result.metadata or {}
+        if isinstance(meta.get("query"), str) and meta["query"]:
+            end_fields["query"] = meta["query"]
+        if isinstance(meta.get("hosts"), list):
+            end_fields["hosts"] = meta["hosts"]
+        if isinstance(meta.get("blocked_hosts"), list) and meta["blocked_hosts"]:
+            end_fields["blocked_hosts"] = meta["blocked_hosts"]
+        logger.info("tool.execute_end", **end_fields)
 
         citations = result.citations if (result.success and result.citations) else []
         message = LLMMessage(role="tool", content=output, tool_call_id=tc.id)
@@ -377,22 +491,33 @@ async def execute_tools(
         terminal = terminals[0]
     attempts = [a for _, _, a, _ in quads]
 
-    # Merge web sources into the sink in deterministic call order (not completion
-    # order) so card numbering is reproducible. With annotate_citations (CEO chat
-    # path) the assigned canonical number (= source-card index) is also folded into
-    # each tool message's model-facing output so the model cites a number that
-    # lines up with the card (A2). Workers collect-only (annotate_citations=False):
-    # their sources still reach the turn card via the executor → DelegateTool →
-    # pipeline, but the worker text stays un-numbered.
-    if citation_sink is not None:
+    # Merge web sources into mid-turn sink (deterministic call order) for pause /
+    # legacy ``[n]``；台账登记 ``#rN`` 并 annotate。P2：用户可见卡由 settle 按
+    # ``cited_ids`` 投影，不在此发射 ``citations_event``。
+    if citation_sink is not None or turn_evidence_ledger is not None:
         for message, _terminal, _attempt, message_citations in quads:
             if not message_citations:
                 continue
-            numbers = merge_citations(citation_sink, message_citations)
-            if annotate_citations:
+            if citation_sink is not None:
+                numbers = merge_citations(citation_sink, message_citations)
+            else:
+                numbers = {}
+            if turn_evidence_ledger is not None and ledger_registrant:
+                id_map = await _register_message_citations(
+                    turn_evidence_ledger,
+                    message_citations,
+                    registrant=ledger_registrant,
+                )
+                message.content = annotate_ledger_ids(
+                    message.content or "", message_citations, id_map
+                )
+            elif annotate_citations:
                 message.content = annotate_tool_citations(
                     message.content or "", message_citations, numbers
                 )
+        # Live 台账增量：本轮登记后 drain → 独立通道（不占 citations_event）。
+        if turn_evidence_ledger is not None:
+            emit_ledger_delta(sink, turn_evidence_ledger)
 
     # 执行级事件溯源 (§8.3 / Phase 2 边界①): record each completed call's FINAL
     # model-facing result as a tool_call fact — captured HERE, after the citation
@@ -418,3 +543,21 @@ async def execute_tools(
         )
 
     return messages, terminal, attempts
+
+
+async def _register_message_citations(
+    ledger: EvidenceLedgerCore,
+    citations: list[dict[str, Any]],
+    *,
+    registrant: str,
+) -> dict[str, str]:
+    """向回合共享台账登记本条工具结果的来源；返回 ``{归一化url: #rN}``。"""
+    id_map: dict[str, str] = {}
+    for c in citations:
+        eid = await ledger.register_citation(c, registrant=registrant)
+        if eid is None:
+            continue
+        key = normalize_citation_url(str(c.get("url") or ""))
+        if key:
+            id_map[key] = eid
+    return id_map

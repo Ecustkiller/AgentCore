@@ -10,9 +10,10 @@ import { AlertTriangle, FolderOpen, PackageOpen } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 「交付状态」卡（能力闸门与交付诚实性）—— 渲染 `delivery_status` 事件的结构化交付对账：
- * 缺口（谁的什么没交付）+ 待用户操作（如绑定本地文件夹）。挂在答复正文下方、
- * 「本回合产出文件」卡上方，与 FileArtifactsCard 共用同一卡片语言（回合级清单卡）。
+ * 「完成条件」卡（批次验收 / completion_criteria）—— 渲染 `delivery_status` 的结构化对账：
+ * 完成条件缺口 + 待用户操作（如绑定本地文件夹）。与 finish_guard 的
+ * 「引用/格式核验后已重写」chip 是两回事——本卡表示批次验收未过，团队可能重派。
+ * 挂在答复正文下方、「本回合产出文件」卡上方。
  *
  * `state=delivered`（有产物、无缺口）不渲染——已交付清单由 FileArtifactsCard 承载，
  * 本卡只在有诚实缺口要交代（partial / blocked）时出现，避免重复噪音。
@@ -24,8 +25,15 @@ const STATE_META: Record<
   "partial" | "blocked",
   { label: string; tone: StatusTone }
 > = {
-  partial: { label: "部分交付", tone: "primary" },
-  blocked: { label: "未交付", tone: "destructive" },
+  partial: { label: "部分未满足", tone: "primary" },
+  blocked: { label: "未满足", tone: "destructive" },
+};
+
+/** Known cutoff / shortfall reason codes on ``DeliveryGap.reason`` (forward-compatible). */
+const GAP_REASON_LABEL: Record<string, string> = {
+  token_budget: "预算触顶",
+  worker_timeout: "运行超时",
+  degraded_handoff: "降级交接",
 };
 
 function BindActionRow({
@@ -109,7 +117,7 @@ export function DeliveryStatusCard({
           size={15}
           className={`shrink-0 ${statusAccentText[meta.tone]}`}
         />
-        <span className="text-sm font-medium text-foreground">交付状态</span>
+        <span className="text-sm font-medium text-foreground">完成条件</span>
         <span
           className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none ${statusPillSoft[meta.tone]}`}
         >
@@ -118,24 +126,40 @@ export function DeliveryStatusCard({
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {status.summary}
         </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          团队可能重派
+        </span>
       </div>
       {gaps.length > 0 && (
         <ul className="divide-y divide-border border-t border-border">
-          {gaps.map((gap, i) => (
-            <li
-              key={`${gap.role}:${i}`}
-              className="flex items-start gap-2 px-3 py-2"
-            >
-              <AlertTriangle
-                size={14}
-                className={`mt-0.5 shrink-0 ${statusAccentText[meta.tone]}`}
-              />
-              <p className="min-w-0 flex-1 text-sm text-foreground">
-                <span className="text-muted-foreground">{gap.role}：</span>
-                {gap.description}
-              </p>
-            </li>
-          ))}
+          {gaps.map((gap, i) => {
+            const reasonLabel =
+              gap.reason && GAP_REASON_LABEL[gap.reason]
+                ? GAP_REASON_LABEL[gap.reason]
+                : null;
+            return (
+              <li
+                key={`${gap.role}:${i}`}
+                className="flex items-start gap-2 px-3 py-2"
+              >
+                <AlertTriangle
+                  size={14}
+                  className={`mt-0.5 shrink-0 ${statusAccentText[meta.tone]}`}
+                />
+                <p className="min-w-0 flex-1 text-sm text-foreground">
+                  <span className="text-muted-foreground">{gap.role}：</span>
+                  {reasonLabel && (
+                    <span
+                      className={`mr-1.5 inline-block shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none ${statusPillSoft[meta.tone]}`}
+                    >
+                      {reasonLabel}
+                    </span>
+                  )}
+                  {gap.description}
+                </p>
+              </li>
+            );
+          })}
         </ul>
       )}
       {actions.length > 0 && (

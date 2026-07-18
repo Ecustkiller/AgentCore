@@ -867,10 +867,18 @@ export function buildGraphStructure(
     for (const r of topWorkers) {
       for (const dep of r.dependsOn) dependedOn.add(unitOf.get(dep) ?? dep);
     }
+    // 补派/接手：被 replaces_run_id 指向的失败节点不再作 CEO 汇入；补派节点本身
+    // 也不是从用户输入扇出的新根（depends_on=[] 时勿画 input→补派）。
+    const replacedUnits = new Set<string>();
+    for (const r of topWorkers) {
+      const from = r.replacesRunId;
+      if (!from) continue;
+      replacedUnits.add(unitOf.get(from) ?? from);
+    }
     nodeIds.push(inputId, captainId);
     for (const r of topWorkers) {
       const unit = unitOf.get(r.id) ?? r.id;
-      if (r.dependsOn.length === 0) {
+      if (r.dependsOn.length === 0 && !r.replacesRunId) {
         addEdge({
           id: `${inputId}->${unit}`,
           source: inputId,
@@ -878,7 +886,7 @@ export function buildGraphStructure(
           kind: "dep",
         });
       }
-      if (!dependedOn.has(unit)) {
+      if (!dependedOn.has(unit) && !replacedUnits.has(unit)) {
         addEdge({
           id: `${unit}->${captainId}`,
           source: unit,

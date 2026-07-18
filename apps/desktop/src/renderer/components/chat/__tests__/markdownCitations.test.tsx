@@ -15,18 +15,21 @@ const CITATIONS: Citation[] = [
     title: "Source A",
     snippet: "snip A",
     site: "a.example",
+    tier: "unknown",
   },
   {
     url: "https://b.example/two",
     title: "Source B",
     snippet: "snip B",
     site: "b.example",
+    tier: "media",
   },
   {
     url: "https://c.example/three",
     title: "Source C",
     snippet: "snip C",
     site: "c.example",
+    tier: "official",
   },
 ];
 
@@ -75,6 +78,119 @@ describe("Markdown citation chips (render seam)", () => {
     expect(screen.queryByRole("link", { name: /来源/ })).toBeNull();
     expect(screen.getByText(/\[1\]/)).toBeTruthy();
   });
+
+  it("renders consecutive #rN ledger chips when knownLedgerIds + citation.id match", () => {
+    const ledgerCites: Citation[] = [
+      {
+        url: "https://a.example/one",
+        title: "Source A",
+        snippet: "snip A",
+        site: "a.example",
+        id: "#r5",
+        tier: "media",
+      },
+      {
+        url: "https://b.example/two",
+        title: "Source B",
+        snippet: "snip B",
+        site: "b.example",
+        id: "#r3",
+        tier: "unknown",
+      },
+      {
+        url: "https://c.example/three",
+        title: "Source C",
+        snippet: "snip C",
+        site: "c.example",
+        id: "#r11",
+        tier: "unknown",
+      },
+    ];
+    const known = new Set(["#r5", "#r3", "#r11"]);
+    renderWithTooltip(
+      <Markdown
+        content="争议 **粗体** #r5#r3#r11"
+        citations={ledgerCites}
+        knownLedgerIds={known}
+      />,
+    );
+    expect(screen.queryByText(/#r5#r3#r11/)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: /来源 .*（#r5）/ }).getAttribute("href"),
+    ).toBe("https://a.example/one");
+    expect(
+      screen.getByRole("link", { name: /来源 .*（#r3）/ }).getAttribute("href"),
+    ).toBe("https://b.example/two");
+    expect(
+      screen.getByRole("link", { name: /来源 .*（#r11）/ }).getAttribute("href"),
+    ).toBe("https://c.example/three");
+  });
+
+  it("renders #rN from evidenceLedger when citations[].id is missing (timing fallback)", () => {
+    renderWithTooltip(
+      <Markdown
+        content="见 #r5"
+        citations={CITATIONS}
+        evidenceLedger={[
+          {
+            id: "#r5",
+            url: "https://ledger.example/r5",
+            title: "Ledger R5",
+            site: "ledger.example",
+            tier: "media",
+          },
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/#r5/)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: /来源 .*（#r5）/ }).getAttribute("href"),
+    ).toBe("https://ledger.example/r5");
+  });
+
+  it("renders #rN after a GFM table + bold (debate brief shape)", () => {
+    const ledgerCites: Citation[] = [
+      {
+        url: "https://a.example/5",
+        title: "R5",
+        snippet: "",
+        site: "a.example",
+        id: "#r5",
+      },
+      {
+        url: "https://b.example/3",
+        title: "R3",
+        snippet: "",
+        site: "b.example",
+        id: "#r3",
+      },
+      {
+        url: "https://c.example/11",
+        title: "R11",
+        snippet: "",
+        site: "c.example",
+        id: "#r11",
+      },
+    ];
+    const content = [
+      "| 要素 | 内容 |",
+      "|---|---|",
+      "| **当事人** | 原告 |",
+      "",
+      "核心法律争议：**四瓣花显著性？** #r5#r3#r11",
+    ].join("\n");
+    renderWithTooltip(
+      <Markdown
+        content={content}
+        citations={ledgerCites}
+        knownLedgerIds={new Set(["#r5", "#r3", "#r11"])}
+      />,
+    );
+    expect(screen.queryByText(/#r5#r3#r11/)).toBeNull();
+    expect(screen.getByRole("link", { name: /#r5/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /#r3/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /#r11/ })).toBeTruthy();
+  });
 });
 
 describe("SourceCards display numbers", () => {
@@ -91,5 +207,12 @@ describe("SourceCards display numbers", () => {
     expect(links[1].textContent).toMatch(/^2/);
     expect(links[2].getAttribute("href")).toBe("https://b.example/two");
     expect(links[2].textContent).toMatch(/^3/);
+  });
+
+  it("renders credibility tier badges on source pills", () => {
+    renderWithTooltip(<SourceCards citations={CITATIONS} />);
+    expect(screen.getByText("官方")).toBeTruthy();
+    expect(screen.getByText("媒体")).toBeTruthy();
+    expect(screen.getByText("待评")).toBeTruthy();
   });
 });

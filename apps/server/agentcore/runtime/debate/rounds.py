@@ -22,11 +22,11 @@ from agentcore.runtime.debate.cross_exam_parse import (
     merge_cx_continuation,
     parse_cross_exam_response,
 )
+from agentcore.runtime.debate.evidence_ledger import side_cited_ledger_ids
 from agentcore.runtime.debate.match_ledger import accumulate_match_ledger
 from agentcore.runtime.debate.prompt import (
     closing_context_blocks,
     closing_task,
-    closing_verified_whitelist,
     cx_answer_feedback,
     cx_completion_brief,
     cx_completion_feedback,
@@ -204,6 +204,7 @@ async def first_round(
         # 辩手是对手不是协作团队：不配团队便签墙（否则正反方会经便签互读对方立论、面板还冒出
         # 莫名的「团队便签」）。跨方信息由主持人按轮喂 round_feedback，才是辩论正当的跨方通道。
         collaboration=False,
+        evidence_ledger=tool._evidence_ledger,
     )
     scheduler = WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL)
     batch_metrics: list[BatchMetrics] = []
@@ -338,8 +339,8 @@ async def next_round(
                 draft_brief=speech_brief,
                 draft_system=draft_system(config, side, beat="continue"),
                 allow_research=True,
-                # A2 出处软校验：续辩成稿的【已核实·X】须与本方检索语料宽松对应。
-                check_source_grounding=True,
+                evidence_ledger=tool._evidence_ledger,
+                check_evidence_ledger=True,
             )
             return state, int((time.monotonic() - t0) * 1000)
 
@@ -437,8 +438,8 @@ def make_cross_exam_runner(
                     draft_brief=speech_brief,
                     draft_system=draft_system(config, side, beat="cross_exam"),
                     allow_research=True,
-                    # A2 出处软校验：质询作答成稿同受「凭空来源」闸约束。
-                    check_source_grounding=True,
+                    evidence_ledger=tool._evidence_ledger,
+                    check_evidence_ledger=True,
                 )
                 repair_state = None
                 # 生成端停写悬垂（冒号 / 未闭合列表）：装配前自动续写补全一次（禁再检索）。
@@ -577,7 +578,7 @@ def make_closing_runner(
 
     辩论收场后主持人请各方做结辩：本 runner 让每个仍有 session 的方用 ``continue_run`` 走【干净
     成稿】（``allow_research=False``），brief 携带本场材料（历轮论点 / 质询让步 / clash 命门，见
-    :func:`closing_task`），并启用【已核实】标签闸（白名单同源材料）。受 ``max_parallel`` 并发约束，
+    :func:`closing_task`），并启用证据台账 id 闸。受 ``max_parallel`` 并发约束，
     折算进账目，返回各方 :class:`ClosingStatement`（全文进该方 run 事件）。对称于
     :func:`make_cross_exam_runner`；未成功立论 / 无 session 的方不参与结辩。仅在主持人判定开启结辩时被调。"""
 
@@ -606,7 +607,10 @@ def make_closing_runner(
             feedback = closing_task(config, side, rounds)
             # 收到的上下文：task 块 body 逐字复用 feedback；材料孪生块与 brief 同源。
             context_blocks = closing_context_blocks(config, side, feedback, rounds)
-            whitelist = closing_verified_whitelist(rounds, side)
+            # 结辩无检索：闸基准 = 本方历轮发言 / 质询 / transcript 已引用 #eN 并集。
+            prior_cited = side_cited_ledger_ids(
+                rounds, side.key, transcript=session.transcript
+            )
             async with semaphore:
                 t0 = time.monotonic()
                 state = await continue_run(
@@ -627,7 +631,9 @@ def make_closing_runner(
                     draft_brief=feedback,
                     draft_system=draft_system(config, side, beat="closing"),
                     allow_research=False,
-                    evidence_tag_whitelist=whitelist,
+                    evidence_ledger=tool._evidence_ledger,
+                    check_evidence_ledger=True,
+                    allowed_ledger_ids=prior_cited,
                 )
                 return state, int((time.monotonic() - t0) * 1000)
 

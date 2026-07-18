@@ -226,17 +226,14 @@ def test_single_agent_citations(projected):
     p = projected["single_agent_citations"]
     assert p["status"] == "completed"
     assert [s["kind"] for s in p["process"]] == ["reasoning", "tool", "content"]
-    # citations ride verbatim (full {url,title,snippet,site} dicts), in order.
+    # citations ride verbatim (full dicts + optional id/tier), in order.
     assert [c["url"] for c in p["citations"]] == [
         "https://a.example/x",
-        "https://b.example/y",
+        "https://www.bjnews.com.cn/detail/1.html",
     ]
-    assert p["citations"][0] == {
-        "url": "https://a.example/x",
-        "title": "来源 A",
-        "snippet": "片段 A",
-        "site": "a.example",
-    }
+    assert p["citations"][0]["url"] == "https://a.example/x"
+    assert p["citations"][0]["id"] == "#r1"
+    assert p["citations"][1]["tier"] == "media"
 
 
 def test_multi_agent_worker_tool(projected):

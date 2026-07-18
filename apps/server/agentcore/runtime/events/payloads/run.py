@@ -200,10 +200,17 @@ class DeliveryGap(WirePayload):
     """One undelivered piece in the wrap-up reconciliation (交付诚实性): the worker
     ``role`` it belongs to (or a batch-level label like「验收」) + a one-line
     ``description`` of what never landed (contract shortfall / degraded handoff /
-    completion criteria unmet / failed worker)."""
+    completion criteria unmet / failed worker).
+
+    Optional ``reason`` is a machine-readable cutoff / shortfall code when the gap
+    comes from a structured engine signal — known:
+    ``token_budget`` / ``worker_timeout`` / ``degraded_handoff``. Absent for
+    ordinary contract / criteria prose gaps. Clients may badge known codes and
+    ignore unknown ones (forward-compatible)."""
 
     role: str
     description: str
+    reason: str | None = absent()
 
 
 class DeliveryAction(WirePayload):

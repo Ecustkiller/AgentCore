@@ -256,10 +256,14 @@ def window_from_journal(
     Correct-by-construction — only outputs are journaled, so the window is the fold of
     all prior facts (no quadratic input duplication):
 
-    - ``turn_started`` → the head: a ``system`` message (the verbatim captured prompt)
-      + the ``user`` message, with ``history`` (prior turns — supplied by the caller,
-      since the facts carry only its length: history is itself a projection of earlier
-      turns) spliced between them exactly as the executor builds it.
+    - ``run_head`` (per ``run_id``) → a **worker / continuation** head: ``system`` +
+      opening ``user`` captured when that run assembled its task-prompt. Preferred
+      whenever present so a worker is never falsely headed by the CEO turn prompt.
+    - ``turn_started`` → the **captain** head: a ``system`` message (the verbatim
+      captured prompt) + the ``user`` message, with ``history`` (prior turns —
+      supplied by the caller, since the facts carry only its length) spliced between
+      them exactly as the executor builds it. Used only when the target has no
+      ``run_head`` (captain / legacy unscoped fold).
     - each ``llm_call`` of the target run that carried ``tool_calls`` → the ``assistant``
       message (``content`` / ``reasoning_content`` echoed verbatim — DeepSeek thinking
       mode 400s without the reasoning on a tool-call turn, see DeepSeek-V4-API参考 — plus the
@@ -277,36 +281,54 @@ def window_from_journal(
 
     ``run_id`` scopes a multi-agent turn to one run; ``None`` infers the captain (the
     run of the first ``role="captain"`` round_boundary — the resume target, whose head
-    is ``turn_started``). Returns ``None`` when there is no ``turn_started`` to anchor
-    the head (a display-only journal): only the captain window is reconstructed,
-    whose head is a fact; a worker's task-prompt head is not yet journaled.
+    is ``turn_started``). Returns ``None`` when neither a usable head nor any folded
+    rounds exist (a display-only journal).
     """
     if not entries:
         return None
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 
-    # Head anchor + (when unscoped) the captain run to fold: one pass for both.
+    # Head anchors + (when unscoped) the captain run to fold: one pass for both.
     started: dict[str, Any] | None = None
+    run_heads: dict[str, dict[str, Any]] = {}
+    run_roles: dict[str, str] = {}
+    captain_id: str | None = None
     target = run_id
     for entry in entries:
         kind = entry.get("kind") or ""
         payload = entry.get("payload") or {}
         if kind == FactKind.TURN_STARTED.value and started is None:
             started = payload
-        elif (
-            kind == FactKind.ROUND_BOUNDARY.value
-            and target is None
-            and payload.get("role") == "captain"
-        ):
-            target = payload.get("run_id") or ""
-    if started is None:
-        return None
+        elif kind == FactKind.RUN_HEAD.value:
+            rid = payload.get("run_id") or ""
+            if rid and rid not in run_heads:
+                run_heads[rid] = payload
+        elif kind == FactKind.ROUND_BOUNDARY.value:
+            rid = payload.get("run_id") or ""
+            role = payload.get("role") or ""
+            if rid and rid not in run_roles:
+                run_roles[rid] = role
+            if role == "captain" and captain_id is None:
+                captain_id = rid
+                if target is None:
+                    target = rid
     if target is None:
         # No captain round_boundary (degenerate / single-run) → fold the first run.
         for entry in entries:
             if (entry.get("kind") or "") == FactKind.ROUND_BOUNDARY.value:
                 target = (entry.get("payload") or {}).get("run_id") or ""
                 break
+
+    run_head = run_heads.get(target) if target else None
+    target_role = run_roles.get(target or "") if target else None
+    # Captain head (turn_started) only when this fold is the captain / unscoped path.
+    # A worker without ``run_head`` (legacy journal) must NOT inherit the CEO prompt.
+    use_turn_started = run_head is None and started is not None and (
+        run_id is None
+        or (captain_id is not None and target == captain_id)
+        or target_role == "captain"
+        or (target_role is None and captain_id is None and started is not None)
+    )
 
     # Index each tool result by tool_call_id from the execution ``tool_call`` fact (the
     # FULL post-annotation result the round actually carried — NOT the forwarded display
@@ -321,14 +343,21 @@ def window_from_journal(
             if tcid:
                 tool_results[tcid] = payload.get("result") or ""
 
-    # Head: system + history (caller-supplied prior turns) + user — the executor's
-    # exact build (runs/executor.build_captain_executor).
-    window: list[LLMMessage] = [
-        LLMMessage(role="system", content=started.get("system_prompt") or "")
-    ]
-    if history:
-        window.extend(history)
-    window.append(LLMMessage(role="user", content=started.get("user_message") or ""))
+    # Head selection:
+    #   1. ``run_head`` for the target → worker / continuation (no conversation history)
+    #   2. else ``turn_started`` → captain (or unscoped) head + caller history
+    #   3. else empty head (legacy worker journal without run_head — honest rounds-only)
+    window: list[LLMMessage] = []
+    if run_head is not None:
+        window.append(LLMMessage(role="system", content=run_head.get("system_prompt") or ""))
+        window.append(LLMMessage(role="user", content=run_head.get("user_message") or ""))
+    elif use_turn_started and started is not None:
+        window.append(LLMMessage(role="system", content=started.get("system_prompt") or ""))
+        if history:
+            window.extend(history)
+        window.append(LLMMessage(role="user", content=started.get("user_message") or ""))
+    elif started is None and run_head is None and not target:
+        return None
 
     # Fold the target run's rounds in stream order: assistant (+ its tool results),
     # then any active-run note, mirroring how react_loop mutates ``messages``.
@@ -394,6 +423,8 @@ def window_from_journal(
                         content=payload.get("content") or "",
                     )
                 )
+    if not window:
+        return None
     return window
 
 

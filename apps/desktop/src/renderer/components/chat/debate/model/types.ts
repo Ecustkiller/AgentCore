@@ -6,6 +6,7 @@ import type {
   DebateSideInfo,
   DebateUserInterjection,
   DebateVerdict,
+  EvidenceLedgerEntry,
 } from "@/types/events";
 
 export type DebateForm = DebateResultPayload["form"];
@@ -171,6 +172,8 @@ export interface DebateModel {
   /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）。缺字段 / 老会话 → false，
    *  pending 文案回退「正在小结…」。 */
   crossExamEnabled: boolean;
+  /** 场级证据台账（live delta 累积 / 收场权威）：徽章 `#eN` 溯源。 */
+  evidenceLedger: EvidenceLedgerEntry[];
 }
 
 /** 参辩名册的一方：语义 `sideKey` + 展示名 + 身份色——站队 / 拍板按 `sideKey` 记录用户取舍。 */

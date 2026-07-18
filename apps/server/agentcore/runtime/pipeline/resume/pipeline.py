@@ -39,11 +39,13 @@ from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_res
 from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.settlement import seed_settlement_dedupe_from_entries
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,
     TurnSuspension,
     turn_citations,
+    turn_evidence_ledger,
     turn_history,
 )
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -192,6 +194,7 @@ async def resume_chat_pipeline(
     pre_pause = ""
     pre_pause_reasoning = ""
     citations_token = None
+    ledger_token = None
     try:
         wired = await wire_resume_turn(
             suspension=suspension,
@@ -224,6 +227,11 @@ async def resume_chat_pipeline(
         citations: list[dict] = list(hydrated.citations)
         # G2 dual落点: citation_sink list + turn_citations contextvar (same list).
         citations_token = turn_citations.set(citations)
+        # P1 第 3 步：resume 再水化 turn_paused 台账快照（空快照 = 空台账，新登记续号）。
+        resume_ledger = EvidenceLedgerCore(id_prefix="#r")
+        if hydrated.evidence_ledger:
+            resume_ledger.load_entries(hydrated.evidence_ledger)
+        ledger_token = turn_evidence_ledger.set(resume_ledger)
         controller_seed = hydrated.controller_seed
 
         recovered = await recover_and_rebuild_window(
@@ -295,6 +303,7 @@ async def resume_chat_pipeline(
             approval_gate=wired.approval_gate,
             supports_tools=llm_supports_tools,
             controller_seed=controller_seed,
+            turn_evidence_ledger=turn_evidence_ledger.get(),
         )
         captain_state = await run_captain(captain_spec, messages)
 
@@ -439,6 +448,8 @@ async def resume_chat_pipeline(
         turn_history.reset(history_token)
         if citations_token is not None:
             turn_citations.reset(citations_token)
+        if ledger_token is not None:
+            turn_evidence_ledger.reset(ledger_token)
         if execution_id_token is not None:
             from agentcore.runtime.coordination.session import (
                 clear_active_coordination,

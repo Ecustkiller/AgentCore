@@ -90,7 +90,7 @@ export function formatProcessExport(
         lines.push(formatToolLine(step));
         break;
       case "rework":
-        lines.push("· （核验回炉，重写交付）");
+        lines.push("· （引用/格式核验后已重写）");
         break;
       case "team":
         lines.push("· （团队协作）");

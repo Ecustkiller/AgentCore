@@ -962,3 +962,154 @@ async def test_snapshot_drain_wakes_waiter_with_all_completed():
     events = await asyncio.wait_for(wait_task, timeout=1.0)
     assert any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in events)
     clear_active_coordination()
+
+
+def test_host_backfill_guard_still_posts_when_queue_empty():
+    """Invariant guard unit: if somehow nothing is in-flight, host still backfills once."""
+    from agentcore.runtime.coordination.host import (
+        _ensure_terminal_all_completed,
+        _has_all_completed_in_flight,
+    )
+
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="exec-backfill", total_workers=2)
+    session.completed_run_ids = {"w1", "w2"}
+    assert not _has_all_completed_in_flight(session)
+    assert _ensure_terminal_all_completed(session, output="缺口说明") is True
+    assert _has_all_completed_in_flight(session)
+    # Idempotent — second call must not double-post.
+    assert _ensure_terminal_all_completed(session, output="again") is False
+    events = session.drain_nowait()
+    kinds = [e.kind for e in events]
+    assert kinds.count(CoordinationEventKind.ALL_COMPLETED) == 1
+    assert "缺口说明" in (events[0].payload.get("output") or "")
+    clear_active_coordination()
+
+
+async def test_wait_shortcircuit_guard_when_terminal_missing(monkeypatch):
+    """Invariant guard: empty queue after team done must not idle-wait 120s."""
+    import agentcore.runtime.coordination.wait as coord_wait
+    from agentcore.runtime.coordination.session import (
+        current_execution_id,
+        set_active_coordination,
+    )
+    from agentcore.runtime.coordination.wait import await_coordination_injection
+
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 30.0)
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="exec-short", total_workers=2)
+    session.completed_run_ids = {"w1", "w2"}
+    session.drive_task = asyncio.get_running_loop().create_future()
+    session.drive_task.set_result(None)
+    set_active_coordination(session)
+    token = current_execution_id.set("exec-short")
+    try:
+        t0 = asyncio.get_running_loop().time()
+        msgs = await asyncio.wait_for(await_coordination_injection([]), timeout=2.0)
+        elapsed = asyncio.get_running_loop().time() - t0
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination()
+
+    assert elapsed < 2.0
+    assert len(msgs) == 1
+    assert "all_completed" in (msgs[0].content or "")
+    assert session.active is False
+    assert session.all_completed_injected is True
+
+
+async def test_criteria_unmet_posts_all_completed_without_host_backfill(monkeypatch):
+    """Source fix: unmet path posts ALL_COMPLETED; host ensure must be a no-op."""
+    import agentcore.runtime.coordination.host as coord_host
+
+    backfill_results: list[bool] = []
+    original = coord_host._ensure_terminal_all_completed
+
+    def _spy(session, *, output: str = "") -> bool:
+        posted = original(session, output=output)
+        backfill_results.append(posted)
+        return posted
+
+    monkeypatch.setattr(coord_host, "_ensure_terminal_all_completed", _spy)
+    clear_active_coordination()
+    t = tool(Provider(["AOUT", "BOUT"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {"role": "工程师", "task": "写代码"},
+                {"role": "测试", "task": "跑通验证"},
+            ],
+            "coordinate": True,
+            # files_written: server 能力闸放行；Provider 纯文本不出文件 → drive unmet。
+            "completion_criteria": "files_written",
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert "团队已启动" in result.output
+    session = active_coordination("e")
+    assert session is not None
+    assert session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    events = session.drain_nowait()
+    kinds = [e.kind for e in events]
+    assert CoordinationEventKind.ALL_COMPLETED in kinds
+    all_done = next(e for e in events if e.kind is CoordinationEventKind.ALL_COMPLETED)
+    assert "完成条件未满足" in (all_done.payload.get("output") or "")
+    # Drive already posted — host invariant guard must not backfill.
+    assert backfill_results == [False]
+    clear_active_coordination("e")
+
+
+async def test_criteria_unmet_wait_drains_without_shortcircuit(monkeypatch):
+    """Unmet path leaves ALL_COMPLETED in queue — wait drains it, no shortcircuit."""
+    import agentcore.runtime.coordination.wait as coord_wait
+    from agentcore.runtime.coordination.session import (
+        current_execution_id,
+        set_active_coordination,
+    )
+    from agentcore.runtime.coordination.wait import await_coordination_injection
+
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 30.0)
+    clear_active_coordination()
+    t = tool(Provider(["AOUT", "BOUT"]))
+    await t.execute(
+        {
+            "tasks": [
+                {"role": "工程师", "task": "写代码"},
+                {"role": "测试", "task": "跑通验证"},
+            ],
+            "coordinate": True,
+            "completion_criteria": "files_written",
+        },
+        ctx(),
+    )
+    session = active_coordination("e")
+    assert session is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    # Precondition: terminal event already queued by drive (not via wait shortcircuit).
+    pending = session.drain_nowait()
+    assert any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in pending)
+    # Re-queue so await_coordination_injection can drain normally.
+    for ev in pending:
+        session.post(ev)
+    set_active_coordination(session)
+    token = current_execution_id.set(session.execution_id)
+    try:
+        # Non-empty drain must never consult the shortcircuit arm.
+        monkeypatch.setattr(
+            coord_wait,
+            "_drive_exhausted",
+            lambda s: (_ for _ in ()).throw(
+                AssertionError("shortcircuit arm must not run when ALL_COMPLETED queued")
+            ),
+        )
+        msgs = await asyncio.wait_for(await_coordination_injection([]), timeout=2.0)
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination("e")
+
+    assert len(msgs) == 1
+    assert "all_completed" in (msgs[0].content or "")
+    assert "完成条件未满足" in (msgs[0].content or "")
+    assert session.active is False

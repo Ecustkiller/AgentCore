@@ -15,7 +15,13 @@ from agentcore.llm.credentials import LLMCredentials, bind_credential_pricing_co
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.pricing import calculate_cost, resolve_credential_source
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
-from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import (
+    LLMChunk,
+    LLMMessage,
+    TokenUsage,
+    ToolCall,
+    ToolCallFunction,
+)
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType, FinishReason

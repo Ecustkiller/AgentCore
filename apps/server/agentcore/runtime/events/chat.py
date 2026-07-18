@@ -102,6 +102,21 @@ def citations_event(citations: list[dict[str, Any]]) -> SSEEvent:
     return SSEEvent(type=EventType.CITATIONS, payload={"citations": citations})
 
 
+def evidence_ledger_event(
+    *,
+    delta: list[dict[str, Any]] | None = None,
+    entries: list[dict[str, Any]] | None = None,
+    cited_ids: list[str] | None = None,
+) -> SSEEvent:
+    """Turn 级台账通道（引用即出处）——独立于 ``citations_event``（P2 主卡=引用集）。"""
+    payload: dict[str, Any] = {"delta": list(delta or [])}
+    if entries is not None:
+        payload["entries"] = list(entries)
+    if cited_ids is not None:
+        payload["cited_ids"] = list(cited_ids)
+    return SSEEvent(type=EventType.EVIDENCE_LEDGER, payload=payload)
+
+
 def _cap_display_value(value: Any) -> Any:
     if isinstance(value, str):
         return value[:_DISPLAY_STR_CAP] + "…" if len(value) > _DISPLAY_STR_CAP else value

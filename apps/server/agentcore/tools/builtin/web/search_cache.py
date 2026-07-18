@@ -62,10 +62,26 @@ SEARCH_CACHE_CONVERSATION_TTL_SECONDS = 30 * 60.0
 SEARCH_EMPTY_TTL_SECONDS = 45.0
 
 
-def _query_key(query: str) -> str:
-    """Normalised cache key: trimmed, lowercased, whitespace-collapsed query so
-    trivially-different spellings of the same search collapse to one entry."""
-    return re.sub(r"\s+", " ", (query or "").strip().lower())
+# Latin-script token (letters / digits / common ASCII punct inside a word). Used to
+# decide whether A4 word-order sorting applies — CJK / mixed queries keep order.
+_LATIN_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9_\-./]*$", re.IGNORECASE)
+
+
+def _query_key(query: str, language: str | None = None, *, exact: bool = False) -> str:
+    """Normalised cache key (A4): casefold + whitespace-collapse; Latin word-order sort.
+
+    Phase-1 normalisation only — **no stopword removal** (negation words must stay).
+    ``exact=True`` skips word-order sorting (debate carve-out: independent evidence
+    discipline). ``language`` is part of the key so a zh-pinned result set never
+    serves an en (or ja) request for the same ASCII query string.
+    """
+    base = re.sub(r"\s+", " ", (query or "").strip().casefold())
+    if not exact and base:
+        tokens = base.split(" ")
+        if len(tokens) > 1 and all(_LATIN_TOKEN_RE.fullmatch(t) for t in tokens):
+            base = " ".join(sorted(tokens))
+    lang = (language or "").strip().casefold()
+    return f"{lang}|{base}" if lang else base
 
 
 def _entry_bytes(results: list[SearchResult]) -> int:
@@ -86,6 +102,7 @@ class SearchCacheEntry:
     results: list[SearchResult]
     max_results: int
     stored_at: float
+    language: str = ""
 
 
 class ConversationSearchCache:
@@ -116,7 +133,14 @@ class ConversationSearchCache:
         self._empty_ttl = empty_ttl_seconds
         self.last_access: float = time.time()
 
-    def get(self, query: str, *, min_results: int) -> SearchCacheEntry | None:
+    def get(
+        self,
+        query: str,
+        *,
+        min_results: int,
+        language: str | None = None,
+        exact: bool = False,
+    ) -> SearchCacheEntry | None:
         """The fresh entry for ``query`` that can satisfy a request needing
         ``min_results`` results, or ``None`` (caller then searches).
 
@@ -124,10 +148,10 @@ class ConversationSearchCache:
         many as it was asked for, so MORE may exist) and the caller now wants more
         than we captured — re-searching with the larger budget is then correct. A set
         that returned fewer than its cap is everything the backend had, so it serves
-        any request.
+        any request. ``exact`` selects the A4 debate carve-out key (no word-order share).
         """
         self.last_access = time.time()
-        key = _query_key(query)
+        key = _query_key(query, language, exact=exact)
         entry = self._entries.get(key)
         if entry is None:
             return None
@@ -139,17 +163,19 @@ class ConversationSearchCache:
         self._entries.move_to_end(key)
         return entry
 
-    def put(self, entry: SearchCacheEntry) -> None:
+    def put(self, entry: SearchCacheEntry, *, exact: bool = False) -> None:
         """Cache (or refresh) a successful search as most-recently-used, then enforce
         the TTL + count + byte caps."""
         self.last_access = time.time()
-        key = _query_key(entry.query)
+        key = _query_key(entry.query, entry.language or None, exact=exact)
         self._empty.pop(key, None)  # a real result supersedes any stale "recently empty" marker
         self._entries[key] = entry
         self._entries.move_to_end(key)
         self._prune()
 
-    def is_recently_empty(self, query: str) -> bool:
+    def is_recently_empty(
+        self, query: str, *, language: str | None = None, exact: bool = False
+    ) -> bool:
         """Whether ``query`` returned empty within the negative-cache window.
 
         True means "serve empty without hitting the network" — it suppresses an
@@ -158,7 +184,7 @@ class ConversationSearchCache:
         the shared SearXNG. An expired marker is pruned and misses (a genuine retry).
         """
         self.last_access = time.time()
-        key = _query_key(query)
+        key = _query_key(query, language, exact=exact)
         stored = self._empty.get(key)
         if stored is None:
             return False
@@ -168,10 +194,12 @@ class ConversationSearchCache:
         self._empty.move_to_end(key)
         return True
 
-    def note_empty(self, query: str) -> None:
+    def note_empty(
+        self, query: str, *, language: str | None = None, exact: bool = False
+    ) -> None:
         """Record that ``query`` just returned empty (negative cache), bounded LRU + TTL."""
         self.last_access = time.time()
-        key = _query_key(query)
+        key = _query_key(query, language, exact=exact)
         self._empty[key] = time.time()
         self._empty.move_to_end(key)
         self._prune_empty()

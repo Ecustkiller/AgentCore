@@ -51,7 +51,7 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **委派判据：活的规模与结构，而非「产出是不是文件」也非「有没有工具」✅ 已落地**：轻量 / 单点的只读请求 CEO 直答；一旦是**有规模或多角度**的活——实质交付物，**或成规模的广度只读调查**——就 `delegate` 交团队，哪怕答复只是一段话。关键转变：判据看**活的形态**，不看**答复形态**；一个只读调查（「项目哪些功能没完善」「X 怎么实现」「对比这几个模块」）也是团队的活，CEO 自己逐个读既慢（串行）又把大量正文堆进回合内上下文。**运行期收敛护栏**：CEO「该委派却自己埋头只读」主要靠系统提示词从第 0 轮立框约束——曾在 `loop_controller` 试过「累计 N 次只读即注入软提醒」的代码侧软护栏，**A/B 实测被模型忽略且净负（成本↑、调用未降），已移除**；代码侧只保留对**失控暴走**的硬兜底（`loop_controller.convergence_action`：只读轮数越过高阈值才 `FINALIZE`，默认关）。配套防泄漏铁律：CEO 绝不为省委派把整份代码/文件贴进正文。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/loop_controller.py`。
 
-> **团队形态判据：实质任务默认组队、判据双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 实质任务默认组队**：门槛 = **可分解**（多对象 / 多角度 / 多阶段 / 多部件 / 多风格备选）**或质量面敏感**（成篇、构建、决策、对既有材料审查诊断）→ 组队；`finalize=true` 单 worker 直出只留给机械单步（改一句话、转格式）。对比 / 盘点 ≥2 个并列实体 = 广度调查（每实体一员 + 横向汇总员）；用户点名要 N 个风格 / 方案 = 发散挑选（每方案一员——独立人设才出真差异，禁止一人分饰 N 角）。（曾定「默认不拆、单 coherent worker 优先」，后被协作优先重设计推翻：协作是产品第一性，塌缩成单人是偏差而非节俭，协调税由 gate 度量而非预先回避。）**② 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；先想形状再拆任务（形状词汇与组合见 `team_orchestration_advanced` skill），拿不准先 `consult_skill`。**③ 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。**④ 对抗 solo 塌缩的两道防线**：（a）提示词【路由自检·回合第一动作】——开写正文 / 调工具前先显式表态直答或委派并附一句门槛理由，禁止先写长文再补理由；（b）引擎 `team_gate` **仅保留**调查工具累计 ≥2 仍欲继续时的软闸门（`engine.team_gate_nudge` `trigger=investigation`）。曾有的「早期无工具长正文 → 丢弃草稿复核」`long_content` 分支已撤——阈值过低会误伤正当长直答，且复核常空转（仍直答），体验上像回复被打断。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/engine/governance.py`（`team_gate_*`）。
+> **团队形态判据：实质任务默认组队、判据双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 实质任务默认组队**：门槛 = **可分解**（多对象 / 多角度 / 多阶段 / 多部件 / 多风格备选）**或质量面敏感**（成篇、构建、决策、对既有材料审查诊断）→ 组队；`finalize=true` 单 worker 直出只留给机械单步（改一句话、转格式）。对比 / 盘点 ≥2 个并列实体 = 广度调查（每实体一员 + 横向汇总员）；用户点名要 N 个风格 / 方案 = 发散挑选（每方案一员——独立人设才出真差异，禁止一人分饰 N 角）。（曾定「默认不拆、单 coherent worker 优先」，后被协作优先重设计推翻：协作是产品第一性，塌缩成单人是偏差而非节俭，协调税由 gate 度量而非预先回避。）**② 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；先想形状再拆任务（形状词汇与组合见 `team_orchestration_advanced` skill），拿不准先 `consult_skill`。**③ 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。**④ 对抗 solo 塌缩的两道防线**：（a）提示词【路由自检·回合第一动作】——动笔 / 调工具前先在思考里对照门槛线完成直答或委派判断并附一句理由，正文禁止暴露内部编排术语，禁止先写长文再补理由；（b）引擎 `team_gate` **仅保留**调查工具累计 ≥2 仍欲继续时的软闸门（`engine.team_gate_nudge` `trigger=investigation`）。曾有的「早期无工具长正文 → 丢弃草稿复核」`long_content` 分支已撤——阈值过低会误伤正当长直答，且复核常空转（仍直答），体验上像回复被打断。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`runtime/engine/governance.py`（`team_gate_*`）。
 
 > **认知分工判据：约束归 CEO、专业方案归专家；派单「指路不代答」 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 只写【目标·约束·验收】——分工范围（条款 / 模块定位）、案情事实（自包含）、全局立场、硬指标与验收规格；交付物的【专业方案】（章节结构、模块划分、设计布局）与【专业判断】（审查类的风险结论、法条适用、数值评估）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。**审查 / 评估 / 研究类越界形态**：仅禁「贴代码 / 列实施步骤」打不到这类任务——模型会把编号「重点关注」清单（含风险预判、引导性问题、法条引用 / 数值假设）误当成「约束 / 验收」写进 task，worker 遂退化成 CEO 初审结论的扩写器，产品塌缩回「单 Agent + 子任务派发」。CEO 探路时的初审观察正确去处是 `seed_notes`(kind=heads_up) 便签墙作线索，不写进 task 替 worker 作答。**worker 侧对称**：task 里的关注点 / 重点清单是起点线索不是答题边界，领到范围内的全面审查与自主发现是 worker 职责（与「专业结构只当起点建议」同构）。→ 见代码：`runtime/resolve/prompt.py`、`runtime/runs/executor_identities.py`、`runtime/skills.py`、`tools/builtin/delegate/schema.py`。
 
@@ -67,6 +67,10 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 
 > **委派后不重复调查 ✅ 已落地**：CEO 委派后，收尾续轮中不 redo 已委派的工作——系统提示强化「用团队产出写综述，不要重复调查」，而非硬禁只读工具（CEO 收尾仍须偶尔读 worker 产出验证）。→ 见代码：`runtime/resolve/prompt.py`。
 
+> **调研引用：worker 引回合台账 `#rN` ✅ 已落地**：并行调研 worker 与 CEO 共用**回合级共享台账**（登记即拿全局 stable id）；成稿只引 `#rN`，handoff / Delegate 汇入**禁止重写**正文 id（否则重排病复发）。worker 仍 `annotate_citations=False`（不注入会重排的池序号 `[n]`），但经台账拿 stable id 注解 + id 存在闸。CEO 汇总继承同一台账、不得对同一 URL「重新编号」；用户可见角标可用展示层 `[n]`（display map），**n 是展示、id 是真理**。→ 见 [工具与能力 · 引用质量闸](/docs/03-AI核心/工具与能力系统.md)、[执行引擎 · finish_guard](/docs/03-AI核心/执行引擎架构设计.md)。
+>
+> **撤销「worker 不编号」**：旧决策因各 worker 本地列表汇入时按到达序重排、正文 `[n]` 会对错卡——根因是「本地起编 + 事后合并」，不是「worker 不该引用」。现状改为共享台账原子 id 后根因消失；**不是**简单打开旧 `annotate_citations=True`。**被否**：handoff 时重写正文 id「对齐」全局编号（等同重排病）。
+
 > **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/resolve/prompt.py`、`runtime/skills.py`。
 
 > **落盘契约门 `requires_files` / 声明式 `artifacts` ✅ 已落地**：CEO 可设 `deliverable.requires_files=true`（任意落盘）或 `deliverable.artifacts=[路径…]`（具体文件 / 目录 / 通配）声明文件交付；收尾 `check_contract` 对工作区做存在性对账，未达标自动返工一次；非 strict 时矫正后仍缺则软接受并在 delegate 汇总「契约缺口」段结构化上报。声明了 `artifacts` 的批次自动启用对应完工验收（省略仍=不强制）。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate/schema.py`、`runtime/delegate/completion.py`。
@@ -74,6 +78,8 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 > **否决悬空预留 `Deliverable.output_schema`**：曾作阶段 2 JSON Schema 预留位，无 schema 入口、不校验——假能力已删除；路径级验收由 `artifacts` 清单承载。
 
 > **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/resolve/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
+
+> **CEO 工具面瘦身（schema 短触发 + 条件注入）✅ 已落地**：① `delegate` / `replan` / `ask_user` / `debate` 的长描述迁入 `consult_skill` 渐进披露（与 `team_orchestration_advanced` / `ask_user_*` / `debate_and_review` 同构），schema 只留短触发句 + 关键参数；② **闲聊态**不向 LLM 注入 `replan` + 协调四件套——注入闸与协调工具执行闸对齐（`active_coordination`）；`delegate` / `ask_user` / `debate` **常驻**（模型可从闲聊直接开辩 / 组团）；进入协调或经典波边界让出（`_supervised`）时回合内补注册闸内工具（态切换一次性 cache miss 可接受）。③ COST-004 补 `cost.tools_offered`（tools JSON chars / 约算 token）。→ 见代码：`runtime/resolve/ceo_surface.py`、`runtime/resolve/prepare.py`。
 
 **为什么是档2.5（结构取档2；档1「全能 CEO」、档3「纯编排 CEO」被否决）：**
 
@@ -139,10 +145,12 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 | 追加队员 | 协调进行中 → 再调 `delegate`；收到『计划已让出』波边界 → `replan(add=…)` |
 | 合成通道 | 草稿走 `team_synthesis_preview`（`in_progress`）；终稿仍 `content_delta` |
 | 挂起 | **`team_preview` 在 coordinate fork 之前**挂起即收口（开做后续跑再臂后台）。协调中 `ask_user` 软挂起即收口；状态入 journal，续跑重建（不保活后台调度器）。`checkpoint_after` 波边界**不** durable `plan_review` 收口——只发 `BOUNDARY_YIELD` 协调事件（正常路径已由启用门排除，仅 replan 中途加把关节点等残留场景走到，注入文案强制 CEO 转 `ask_user` 拍板）；经典阻塞（`coordinate=false`）仍挂起即收口 |
-| Phase 3 | 超时只通知不自动取消；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
+| Phase 3 | 超时只通知不自动取消（先 warn 收尾窗口、再 TIMEOUT 通知）；非阻塞 escalate / 便签冲突进事件队列；SCOPE 边界 PROCEED 由 CEO 仲裁；**阻塞 escalate 改 CEO 仲裁**（`resolve_escalation`；偏好/授权/费用类先 ask_user 再 resolve） |
 | 用户插话 | 协调运行中用户新消息进 session 队列（必要决策点，必唤醒）；CEO 智能路由——**相关入图**（`update_synthesis` / 再 `delegate` 追加 / `cancel_worker`），**无关转排队**（`queue_user_message` → 对话级队列，下一回合处理）。插话可带附件：到达即落盘工作区，简报只给「名字 + 路径 + 二进制标记」，CEO 自己 `file_read` 或把路径写进 steer 指令递给队员。经典阻塞路径无协调窗口，消息一律排队（实时改向用既有 `run_redirect`），**否决**「为插话把单 worker 升格协调」（改动大收益小） |
 
 **不变量 B（CEO 仲裁 ⇔ 协调存活）**：`resolve_escalation` **仅**在协调 session 活跃时可用。单 worker / `finalize` / 嵌套 lead / 显式 `coordinate=false` 走经典阻塞——CEO 卡在 `delegate` await 上、波内无活着的 CEO，阻塞 escalate **直挂用户**（`awaiting=user`），**绝不**改挂 CEO（否则 worker↔CEO 死锁，只能靠超时回落）。测 `resolve_escalation` 必须 ≥2 worker 进协调。否决「单人也 awaiting=ceo」除非先改 drive 让单人亦保 CEO 存活（真·A，未做）。
+
+**不变量 C（终态必达）✅**：`drive` 的**所有**终态路径（成功收尾 / finalize 直出 / `completion_criteria_unmet` / partial-failure 提前返回）都必须投递 `ALL_COMPLETED`——漏投曾致 CEO 下一轮协调等待空烧满 120s idle 超时（trace `b56d5b89…` 实证，占该回合活跃耗时 ~40%）。host 终态回填与 wait team-done 短路保留为 **warning 级不变量护栏**（触发即「有新路径漏投终态」的漂移告警，非修复本体）；等待耗时观测 `coordination.wait_end`（`waited_ms` / `wait_reason`）。→ 见代码：`runtime/delegate/drive.py` `_post_session_all_completed`、`runtime/coordination/host.py`、`runtime/coordination/wait.py`。
 
 **决策（为何 CEO 自协调）**：通用协调走 **CEO ReAct + 事件队列**，不引入独立协调 / 合成 Agent（延续上文否决 SYNTHESIS），也不复用辩论 Moderator 的确定性循环——CEO 已持完整用户意图与元权限（`replan` / `cancel` / `ask_user`），独立协调者只会多一层意图损失；Moderator 继续专管辩论。成本纪律见 [执行引擎 §协调模式例外](/docs/03-AI核心/执行引擎架构设计.md)。
 
@@ -288,17 +296,24 @@ CEO 不指定具体模型，只表达能力需求（快/强），由运行时映
 
 > 设计理由：worker 能不能干活属正确性、工具收窄属优化，故安全默认必须是「有能力」，least-privilege 由 CEO 主动 opt-in。被否决：要求 CEO 必填 `tools`（依赖 LLM 自觉、脆弱，正是此前 worker 静默不落盘的翻车点）。→ 见代码：`runtime/runs/builder.py` `_tools`、`runtime/runs/types.py` `RunSpec.tools`、`runtime/runs/executor.py`（`None`→offer 全部）。
 
-### 2.6 `completion_criteria` — worker 完工判据（省略不强制，运行/打开类自动推断 `code_verified`；声明 `artifacts` 自动启用）✅
+### 2.6 `completion_criteria` — worker 完工判据（省略不强制；绑定性禁止文案推断，误放 task 层自动提升）✅
 
 批次「怎样算干完」的验收契约，档位：`files_written`（有 worker 产物落盘）/ `code_verified`（须真跑通——校验确有 `code_execute` / `test_run` 成功记录）/ `custom`（描述性，机械校验不了即报缺口）。
 
-- **省略 = 不强制 + 按 task / artifacts 自动推断**：CEO 未显式声明时**不启用批次验收**（单测钉死该语义）；例外：① task 含「运行 / 打开 / 安装 / 启动」类语义 → 推断 `code_verified`；② 任一 worker 声明了 `deliverable.artifacts` → 推断 `files_written`（路径级对账另由 per-worker 契约门执行）。**为何不默认强制**：写文档 / 改文案 / 纯讨论类批次本无落盘或跑通语义，强制只会平白加一轮返工；落盘要求由 per-worker 的 `deliverable.requires_files` / `artifacts` 承载。
-- **评估口径（vacuous pass 已修）**：显式 criteria 针对**全部 COMPLETED worker** 的真实信号（落盘记录 / transcript 工具结果 / handoff / 正文）评估——纯落盘、纯 handoff 的空正文完成态同样计入；无任何证据 = 缺口，绝不空过。
-- **收敛强制收尾与缺口上报**：治理 `convergence_finalize` 仍禁写文件（只读收口），但收尾后契约缺口以 per-worker gaps 段写入 delegate 汇总，让 CEO 补派有据、不靠自觉扫清单。
-- **对治「写了但跑不起来」**：触发案例（trace `d1bc76f3…`）worker 写出软件却没跑通、CEO 凭记忆答「在 mini-claw/」并口头让用户自己去终端跑；`code_verified` 自动推断 + 收尾校验直接堵住。这是「打开软件」双路径的**路径 A·工作区内验收**（路径 B·本机 OS 启动走 sidecar / Client Tools，见 [`双模式工作区.md` §十](/docs/02-架构/双模式工作区.md)、[`安全权限与治理.md` §三](/docs/05-平台与运维/安全权限与治理.md)）。
-- **委派前能力闸（分级）✅**：显式 `code_verified` 撞上「本回合无执行环境」（能力判定复用 worker registry 同一谓词 `code_execution_enabled_for`，云端默认无沙箱即 False）→ `delegate` **硬拒绝**，错误信息给三条出路（先 `bind_local_folder` / 改交付形态 `files_written` / 先 `ask_user` 对齐）；仅任务文案启发命中「运行 / 生成二进制、可播放产物」而非显式 `code_verified` 的 → 工具结果尾部注入**软警告**不拦截（宁漏不错杀）。触发案例：云端 scratch 派「python-pptx 生成 .pptx」空跑 5.7 分钟。→ 见代码：`completion.py` `validate_execution_capability` / `execution_capability_warning`。
-- **交付状态结构化（`delivery_status` 事件）✅**：批次收尾把已有信号（worker `files_touched` / 契约与 degraded 交接缺口 / criteria 未满足 / 失败·未执行节点）汇成面向用户的结构化交付对账——`state`（delivered / partial / blocked）+ 已交付文件 + 缺口 + 待用户操作（可推导的 `bind_local_folder` 行动项）。DURABLE、同 `execution_id` 保最新；纯 prose 成功批次无声。前端：桌面 `DeliveryStatusCard`（partial / blocked 才出卡，delivered 由产出文件卡承载）、手机 TeamView 交付区块。→ 见代码：`runtime/delegate/delivery_status.py`、`runtime/events/payloads/run.py`、conformance 向量 `multi_agent_delivery_status_partial`。
-- → 见代码：`runtime/delegate/completion.py`（解析 / 推断 / 校验 / gaps 汇总）、`tools/builtin/delegate/schema.py`、`runtime/delegate/drive.py`、`runtime/delegate/ceo_format.py`。
+- **省略 = 不强制 + 仅结构化补全（废除文案推断）✅**：CEO 未显式声明时默认**不启用批次验收**；仅当任一 worker 声明 `deliverable.artifacts` 或 `form=files` 时自动解析为 `files_written`（结构化信号；路径级对账另由 per-worker 契约门执行）。task 含「运行 / 打开 / 安装 / 启动」类语义**不再**绑定 `code_verified`——真运行类任务须由 CEO **显式**声明（skill / CEO 提示词已升为硬要求；eval `delegate_run_app` 棘轮守住）。非绑定软警告（运行 / 二进制产物启发）仍随 delegate 结果返回。delegate 工具结果**始终回显** resolved 验收（含「本批验收：未启用」），CEO 当轮可见可改。**为何废除文案推断**（2026-07-18 提案 B1）：静态产物文案天然带「打开页面」类字眼，误推后 unmet → 无限重派；「打开软件」路径 A 改由显式声明 + 三项补偿兜住。**为何不默认强制**：写文档 / 纯讨论类本无落盘或跑通语义；落盘要求由 per-worker `deliverable` 承载。→ 提案：见 `docs/06-规划/检索与交付约束前置提案.md`。
+- **验收标准注入 worker（B2）✅**：resolved criteria 写入持**执行类工具**（`tools is None` 或 allow-list 含 `code_execute` / `test_run` / `terminal`）且 `form=files` 的节点的「交付物规格」块——避免调研 / prose 全员冗余跑验证。禁止按 role 字符串圈定。
+- **误放 task 层自动提升（hoist）+ 同缺口收敛**：正式契约位置在 delegate **顶层**（与 tasks 同级）；顶层缺失且单 task / 多 task 值一致 → 自动提升并打 `delegate.completion_criteria_hoisted`；多 task 值冲突 → 参数校验报错。验收 unmet 的 gap 消息**必标 criteria 来源**（显式 / 结构化）；同一委派**连续 2 次相同缺口** → 升级收口。→ 见代码：`completion.py` `hoist_task_completion_criteria` / `resolve_completion_with_source` / `format_completion_gap_message` / `format_resolved_acceptance_echo`。
+- **评估口径（vacuous pass 已修）**：criteria 针对**全部 COMPLETED worker** 的真实信号评估——纯落盘、纯 handoff 的空正文完成态同样计入；无任何证据 = 缺口，绝不空过。
+- **收敛强制收尾与缺口上报**：治理 `convergence_finalize` 仍禁写文件（只读收口），但收尾后契约缺口以 per-worker gaps 段写入 delegate 汇总。
+- **对治「写了但跑不起来」**：路径 A·工作区内验收靠**显式** `code_verified` + 收尾校验（不再文案推断）；路径 B·本机 OS 启动走 sidecar / Client Tools，见 [`双模式工作区.md` §十](/docs/02-架构/双模式工作区.md)、[`安全权限与治理.md` §三](/docs/05-平台与运维/安全权限与治理.md)。
+- **委派前能力闸 ✅**：**resolved `code_verified`**（显式声明，与收尾验收共用同一 resolver；文案启发不进硬闸）撞上「本回合无执行环境」→ `delegate` **硬拒绝**，给三条出路（`bind_local_folder` / 改 `files_written` / 先 `ask_user`）。剩余软警告：resolved 非 `code_verified` 但文案含运行 / 二进制产物暗示 → 工具结果尾部注入不拦截（宁漏不错杀）。→ 见代码：`completion.py` `validate_execution_capability` / `execution_capability_warning`。
+- **交付底线前置（finish_guard B3 一期）✅**：共享基座提示词含 `<delivery_baseline>`（围栏须闭合、`#rN` 须在台账内）；命中频率靠既有 `engine.finish_guard_rework` 日志可统计。自动规范化 / 新 reset reason 属二期，本批不做。
+- **交付状态结构化（`delivery_status` 事件）✅**：批次收尾把已有信号汇成面向用户的结构化交付对账——`state` + 已交付文件 + 缺口 + 待用户操作。DURABLE、同 `execution_id` 保最新；纯 prose 成功批次无声。→ 见代码：`runtime/runs/cutoff.py`、`runtime/delegate/delivery_status.py`、conformance 向量 `multi_agent_delivery_status_partial`。
+- → 见代码：`runtime/delegate/completion.py`、`tools/builtin/delegate/`、`runtime/runs/executor_context.py`、`runtime/resolve/prompt.py`。
+
+### 2.6.1 `retrieval_budget` — 检索预算（契约字段 + 结构化默认）✅
+
+task 级可选字段：该 worker 本 run 的检索额度（`web_search` / `read_url`）。**结构化默认**（禁止按 role 字符串判定）：无上游依赖节点 → 8；有上游依赖 ∧ `form=prose`（合成波）→ 0 且**不装配检索工具**；其余下游节点 → 3（默认值均标「待 phase 观测校准」）；CEO 显式声明恒优先。enforce 在 engine 工具执行层（缓存命中与被拒调用不计费；与 `LoopController` / `team_gate` **正交**，禁止挂接）。预算用尽 → 结构化反馈「基于台账现有证据交付 + 交接标注检索缺口」，缺口经契约缺口块上浮，CEO 以 `continue_from_run_id` 续派显式提额——**无 mid-run 追加通道**（`escalate` 语义不扩，`kind=resource` 属后置另案）。设计理由与取舍 → 见 [检索与交付约束前置提案 §三 A1](/docs/06-规划/检索与交付约束前置提案.md)。→ 见代码：`runtime/runs/retrieval_budget.py`、`tools/builtin/delegate/schema.py`、`runtime/engine/tool_exec.py`。
 
 ### 2.7 `continue_from_run_id` — 带现场续派（同人接续）✅
 

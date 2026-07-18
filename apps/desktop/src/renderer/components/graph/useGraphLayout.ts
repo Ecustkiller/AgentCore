@@ -129,9 +129,7 @@ export function useGraphLayout(
 
   const structuralKey = useMemo(() => {
     if (!execution) return "";
-    const struct = execution.runs
-      .map((s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`)
-      .join("|");
+    const struct = graphStructureKey(execution.runs);
     const expandKey = [...expandedUnits].sort().join(",");
     return `${struct}::${expandKey}`;
   }, [execution, expandedUnits]);
@@ -148,8 +146,13 @@ export function useGraphLayout(
       .foldInfo;
   }, [execution, expandedUnits]);
 
+  // 结构重算：保留上一帧 layoutReady/positions，勿置 false（否则 GraphView 会卸载
+  // 整棵 ReactFlow → 追加委派时整图闪烁）。首帧或清空仍走 layoutReady=false。
+  const hasShownLayoutRef = useRef(false);
+
   useEffect(() => {
     if (!structuralKey) {
+      hasShownLayoutRef.current = false;
       setLayout({}, []);
       setBbox(null);
       setNodeSizes({});
@@ -168,7 +171,10 @@ export function useGraphLayout(
     const sizeMap = buildNodeSizeMap(nodeIds);
 
     let cancelled = false;
-    setLayoutReady(false);
+    // 仅首帧 blank；已有成图时保持 ReactFlow 挂载，等 ELK 就绪后换坐标。
+    if (!hasShownLayoutRef.current) {
+      setLayoutReady(false);
+    }
     setLayoutError(null);
     const elkLayout = layoutKind as ElkGraphLayout;
     const nodeSpacing = nodeSpacingForFitMode(fitMode);
@@ -186,6 +192,7 @@ export function useGraphLayout(
     )
       .then((result) => {
         if (cancelled) return;
+        hasShownLayoutRef.current = true;
         setLayout(result.positions, rawEdges);
         setBbox({ width: result.width, height: result.height });
         setNodeSizes(sizeMap);
@@ -196,17 +203,22 @@ export function useGraphLayout(
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = logLayoutFailure(err, { fitMode, layoutKind });
-        setLayout({}, []);
-        setBbox(null);
-        setNodeSizes({});
-        setGroups([]);
-        setLayoutReady(false);
-        setLayoutError(message);
+        // 重算失败：保留旧图（已日志）；首帧失败才 blank + 错误面。
+        if (!hasShownLayoutRef.current) {
+          setLayout({}, []);
+          setBbox(null);
+          setNodeSizes({});
+          setGroups([]);
+          setLayoutReady(false);
+          setLayoutError(message);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, fitMode, setLayout, expandedUnits]);
+    // expandedUnits 已编入 structuralKey；勿再依赖其引用（调用方偶发 new Set() 会死循环）。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: structuralKey encodes expandedUnits
+  }, [structuralKey, layoutKind, fitMode, setLayout]);
 
   return {
     positions,
@@ -255,11 +267,7 @@ export function useMultiTurnLayouts(
           ]
             .sort()
             .join(",");
-          const struct = t.execution.runs
-            .map(
-              (r) => `${r.id}:${r.dependsOn.join(",")}:${r.parentRunId ?? ""}`,
-            )
-            .join("|");
+          const struct = graphStructureKey(t.execution.runs);
           return `${t.turnId}#${struct}#${units}`;
         })
         .join("||"),
@@ -400,6 +408,26 @@ export function useMultiTurnLayouts(
   }, []);
 
   return { layouts, onNodesChange };
+}
+
+/**
+ * Structural fingerprint for ELK re-layout. Content/streaming fields are
+ * intentionally excluded so delta floods do not tear down the graph.
+ */
+export function graphStructureKey(
+  runs: ReadonlyArray<{
+    id: string;
+    dependsOn: readonly string[];
+    parentRunId?: string | null;
+    replacesRunId?: string | null;
+  }>,
+): string {
+  return runs
+    .map(
+      (s) =>
+        `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}:${s.replacesRunId ?? ""}`,
+    )
+    .join("|");
 }
 
 export { expandedUnitsFromFold, buildNodeSizeMap };

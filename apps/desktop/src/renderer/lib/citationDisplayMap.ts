@@ -13,6 +13,7 @@
  */
 
 const MARKER = /\[(\d+)\]/g;
+const LEDGER_MARKER = /#r(\d+)\b/g;
 
 export interface CitationDisplayMap {
   /**
@@ -40,11 +41,14 @@ export interface CitationDisplayMap {
  * @param content Reply body (or growing stream prefix).
  * @param citationCount Pool length; markers outside `1..count` are ignored.
  * @param previous Prior `stableCited` from an earlier stream frame (append-only).
+ * @param citations Optional pool rows — when present, inline `#rN` markers that
+ *   match ``citations[].id`` also count as cited (same first-appearance order).
  */
 export function buildCitationDisplayMap(
   content: string,
   citationCount: number,
   previous?: ReadonlyMap<number, number> | null,
+  citations?: ReadonlyArray<{ id?: string | null }> | null,
 ): CitationDisplayMap {
   const stableCited = new Map<number, number>(previous ?? undefined);
 
@@ -57,6 +61,23 @@ export function buildCitationDisplayMap(
       if (canonical < 1 || canonical > citationCount) continue;
       if (stableCited.has(canonical)) continue;
       stableCited.set(canonical, stableCited.size + 1);
+    }
+    if (citations?.length) {
+      const idToCanonical = new Map<string, number>();
+      for (let i = 0; i < citations.length; i++) {
+        const id = citations[i]?.id;
+        if (id) idToCanonical.set(id, i + 1);
+      }
+      LEDGER_MARKER.lastIndex = 0;
+      // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex scan
+      while ((m = LEDGER_MARKER.exec(content)) !== null) {
+        const canonical = idToCanonical.get(`#r${m[1]}`);
+        if (canonical == null || canonical < 1 || canonical > citationCount) {
+          continue;
+        }
+        if (stableCited.has(canonical)) continue;
+        stableCited.set(canonical, stableCited.size + 1);
+      }
     }
   }
 

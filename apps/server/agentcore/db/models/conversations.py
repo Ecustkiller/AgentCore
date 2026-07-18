@@ -167,6 +167,11 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # 回合调研台账（引用即出处 P1, DERIVED）：除 blocked 外全量登记条目（含 id/tier/
+    # query/deep_read/registrant/citable）。与 citations 池正交；[] = legacy / 无台账。
+    evidence_ledger: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # 回合级「下一步推荐」chips (下一步推荐, DERIVED 持久化): the post-turn World B narrow
     # task's 2-4 quick-reply suggestions, minted alongside the title AFTER message_end and
     # written back onto THIS assistant row. Persisted as the twin of Conversation.title

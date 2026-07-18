@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "shots": [
+    {
+      "id": "07-evidence-gap-admit",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07-evidence-gap-admit.png",
+      "ctx": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
+    },
+    {
+      "id": "07b-admit-closeup",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07b-admit-closeup.png",
+      "ctx": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
+    }
+  ],
+  "notes": [
+    "cid=5358e84f-cfc8-46df-9d5f-e2fb85b1bbaa",
+    "authorized",
+    "seek ok t_ms=1130562",
+    "quote_visible=true; ctx=部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
+  ]
+}

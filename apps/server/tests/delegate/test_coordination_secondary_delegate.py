@@ -129,3 +129,55 @@ async def test_secondary_delegate_preserves_arbitration_state():
     assert after.total_workers == 3
     await asyncio.wait_for(session.drive_task, timeout=15)
     clear_active_coordination("e")
+
+
+async def test_secondary_delegate_replaces_rewrites_downstream_depends_on():
+    """Bug B: 协调补派带 replaces_run_id → 下游 depends_on 改写为新 run。"""
+    clear_active_coordination()
+    t = tool(_SlowWorkers(["R", "W", "R2"], delay=0.5))
+    first = await t.execute(
+        {
+            "tasks": [
+                {"id": "r1", "role": "调研", "task": "做R", "depends_on": []},
+                {"id": "w", "role": "写手", "task": "做W", "depends_on": ["r1"]},
+            ],
+            "coordinate": True,
+        },
+        ctx(),
+    )
+    assert first.success is True
+    session = active_coordination("e")
+    assert session is not None and session.live_plan is not None
+    r1 = next(n for n in session.live_plan.nodes if n.run_id.endswith("_r1"))
+    writer = next(n for n in session.live_plan.nodes if n.run_id.endswith("_w"))
+    assert r1.run_id in writer.depends_on
+
+    second = await t.execute(
+        {
+            "tasks": [
+                {
+                    "id": "r1b",
+                    "role": "调研",
+                    "task": "补跑R",
+                    "depends_on": [],
+                    "replaces_run_id": r1.run_id,
+                }
+            ],
+            "coordinate": True,
+        },
+        ctx(),
+    )
+    assert second.success is True
+    assert "队员已追加" in second.output
+    after = active_coordination("e")
+    assert after is session and after.live_plan is not None
+    replacement = next(
+        n for n in after.live_plan.nodes if n.replaces_run_id == r1.run_id
+    )
+    writer_after = after.live_plan.by_id(writer.run_id)
+    assert writer_after is not None
+    assert replacement.run_id in writer_after.depends_on
+    assert r1.run_id not in writer_after.depends_on
+
+    await asyncio.wait_for(session.drive_task, timeout=15)
+    clear_active_coordination("e")

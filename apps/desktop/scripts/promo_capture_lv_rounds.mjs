@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { createServer } from "vite";
+import { preview } from "vite";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
@@ -22,26 +22,32 @@ process.env.VITE_API_URL = API;
 const JOBS = [
   {
     id: "04-r2-diamond-square",
-    round: 2,
-    needles: ["偷换概念", "具体设计", "公共纹样", "四叶草"],
+    round: 1,
+    needles: ["垄断自然界公共资源", "获得显著性", "唯一关联", "固有显著性"],
     anyOf: true,
   },
   {
     id: "05-r3-logo-swap",
-    round: 3,
-    needles: ["惩罚性赔偿", "驳回后", "更近似", "故意"],
+    round: 2,
+    needles: ["跨类", "第43类", "真实商业使用", "防御注册", "茶饮消费者"],
     anyOf: true,
   },
   {
     id: "05b-r4-logo-defense",
-    round: 4,
-    needles: ["贡献率", "举证责任", "量化"],
+    round: 3,
+    needles: ["消费者调查", "反稀释", "相当程度的联系", "实证门槛"],
     anyOf: true,
   },
   {
     id: "06-r5-burden",
     round: 4,
-    needles: ["贡献率", "举证责任", "合理信赖"],
+    needles: ["确实无法提供茶饮消费者", "实证调查", "实际使用前提", "罚分"],
+    anyOf: true,
+  },
+  {
+    id: "07-evidence-gap-admit",
+    round: 3,
+    needles: ["我承认没有消费者调查", "没有消费者调查数据支撑", "确实无法提供茶饮消费者"],
     anyOf: true,
   },
 ];
@@ -49,12 +55,10 @@ const JOBS = [
 async function main() {
   process.chdir(desktopDir);
   await mkdir(stillsDir, { recursive: true });
-  const server = await createServer({
+  const server = await preview({
     configFile: resolve(desktopDir, "vite.webapp.config.ts"),
-    logLevel: "warn",
-    server: { port: PORT, strictPort: true },
+    preview: { port: PORT, strictPort: true },
   });
-  await server.listen();
   const base = server.resolvedUrls.local[0];
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
@@ -78,8 +82,8 @@ async function main() {
       composer.waitFor({ state: "visible", timeout: 20000 }).catch(() => {}),
     ]);
     if (await userBox.isVisible().catch(() => false)) {
-      await userBox.fill("dev");
-      await page.getByPlaceholder(/密码/).first().fill("devpassword");
+      await userBox.fill(process.env.PROMO_USER ?? "promo_lv");
+      await page.getByPlaceholder(/密码/).first().fill(process.env.PROMO_PASS ?? "promopass");
       await page.locator('button[type="submit"]').click();
     }
     await composer.waitFor({ state: "visible", timeout: 30000 });

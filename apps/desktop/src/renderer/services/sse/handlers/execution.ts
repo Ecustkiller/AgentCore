@@ -353,7 +353,8 @@ export function handleExecutionEvent(
       const mid = execMessageId(conversationId);
       if (mid) {
         const p = event.payload as DebateRoundPayload;
-        useExecutionStore.getState().recordDebateRound(
+        const store = useExecutionStore.getState();
+        store.recordDebateRound(
           {
             round_no: p.round_no,
             focus: p.focus,
@@ -365,6 +366,9 @@ export function handleExecutionEvent(
           },
           mid,
         );
+        if (p.evidence_ledger_delta?.length) {
+          store.recordEvidenceLedgerDelta(p.evidence_ledger_delta, mid);
+        }
       }
       return true;
     }

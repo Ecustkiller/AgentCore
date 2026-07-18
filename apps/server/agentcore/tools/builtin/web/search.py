@@ -1,13 +1,21 @@
 """Built-in tool: web_search (via the configured search backend)."""
 
 import json
+import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from agentcore.core.logging import get_logger
 from agentcore.core.net import describe_net_error, site_of
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin.web.search_backend import SearchResult, get_search_backend
+from agentcore.core.citation_tier import citation_tier_for_url, stamp_citation_tier
+from agentcore.tools.builtin.web.search_backend import (
+    SearchResult,
+    get_search_backend,
+    infer_search_language,
+    track_phase_durations,
+)
 from agentcore.tools.builtin.web.search_cache import (
     SearchCacheEntry,
     default_search_cache_registry,
@@ -26,10 +34,60 @@ _OUTPUT_LIMIT = 8000
 # tokens get an explicit "trim to 2–4 core words" tip (mirrors debate SEARCH_QUERY_RULE).
 _VERBOSE_QUERY_WORD_THRESHOLD = 4
 
+# A3 query contract (检索与交付约束前置提案): mechanical limits at the tool boundary.
+# Tunable constants — calibrated near log P95; not silent-rewritten on overflow.
+_QUERY_LATIN_WORD_LIMIT = 6
+_QUERY_CJK_CHAR_LIMIT = 32
+# Quoted phrases (error strings / citations) are exempt from the word/char budget.
+_QUOTED_PHRASE_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
 
 def _query_word_count(query: str) -> int:
     """Count whitespace-separated tokens in a search query (no NLP / rewrite)."""
     return len(query.split())
+
+
+def _unquoted_span(query: str) -> str:
+    """Query text with quoted phrases removed (A3 quote exemption)."""
+    return _QUOTED_PHRASE_RE.sub(" ", query or "")
+
+
+def validate_search_query(query: str) -> str | None:
+    """A3: deterministic query-contract check. Returns an error message, or None if ok.
+
+    Latin (no CJK in the unquoted span): core-word count ≤ ``_QUERY_LATIN_WORD_LIMIT``.
+    CJK / mixed: non-whitespace character count ≤ ``_QUERY_CJK_CHAR_LIMIT``.
+    Quoted phrases are exempt. Never rewrites the query — reject + tip only.
+    """
+    unquoted = _unquoted_span(query).strip()
+    if not unquoted:
+        # Entire query was quoted phrases — always allowed.
+        return None
+    tip = (
+        "请删去最具体的限定词（如案号/机构名/年份/金额），"
+        "改用 2–4 个核心词重试；需要搜原文/报错时请用引号包住短语。"
+    )
+    if _CJK_RE.search(unquoted):
+        char_count = sum(1 for ch in unquoted if not ch.isspace())
+        if char_count > _QUERY_CJK_CHAR_LIMIT:
+            return (
+                f"查询过长（未加引号部分 {char_count} 字，上限 "
+                f"{_QUERY_CJK_CHAR_LIMIT}）。{tip}"
+            )
+        return None
+    word_count = _query_word_count(unquoted)
+    if word_count > _QUERY_LATIN_WORD_LIMIT:
+        return (
+            f"查询词过多（未加引号部分 {word_count} 个词，上限 "
+            f"{_QUERY_LATIN_WORD_LIMIT}）。{tip}"
+        )
+    return None
+
+
+def _is_debate_run(run_id: str) -> bool:
+    """Debate carve-out seam: moderator/debater run_ids are ``debate_*`` (existing convention)."""
+    return (run_id or "").startswith("debate_")
 
 
 def _empty_result_note(query: str) -> str:
@@ -91,6 +149,18 @@ class WebSearchTool:
                 duration_ms=0,
             )
 
+        # A3: reject oversized queries at the tool boundary (no silent rewrite).
+        contract_err = validate_search_query(query)
+        if contract_err is not None:
+            logger.info("tool.web_search_query_rejected", query=query, reason="query_contract")
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=contract_err,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+
         try:
             raw = int(arguments.get("max_results", _DEFAULT_MAX_RESULTS))
             max_results = max(1, min(raw, _MAX_RESULTS_CAP))
@@ -102,13 +172,21 @@ class WebSearchTool:
         # which share the conversation_id — is served from memory instead of re-hitting
         # SearXNG/Tavily, cutting duplicate searches that pressure the shared instance.
         # Unscoped call sites (conversation_id == "") skip the cache entirely.
+        # Task-language proxy: pin SearXNG/Tavily locale so IP / default_lang=auto
+        # cannot hijack 中文调研 into Japanese SERPs.
+        language = infer_search_language(query)
+        # A4 debate carve-out: debate runs keep exact keys (no Latin word-order share).
+        exact_cache = _is_debate_run(context.run_id)
+
         cache = (
             default_search_cache_registry().get_or_create(context.conversation_id)
             if context.conversation_id
             else None
         )
         if cache is not None:
-            hit = cache.get(query, min_results=max_results)
+            hit = cache.get(
+                query, min_results=max_results, language=language, exact=exact_cache
+            )
             if hit is not None:
                 logger.info("tool.web_search_cache_hit", query=query, result_count=len(hit.results))
                 self._record_source_domains(context.conversation_id, hit.results)
@@ -116,20 +194,27 @@ class WebSearchTool:
             # 负缓存（案例1 防重搜风暴）：同一查询刚返回空（常见于引擎 CAPTCHA 后 HTTP 200 +
             # 空结果），短时内直接回空、不再打网，避免降级 worker 对同一空查询反复重搜把共享
             # SearXNG 再次打爆。空结果会自然过期，CAPTCHA 大概率解除后才真正重搜。
-            if cache.is_recently_empty(query):
+            if cache.is_recently_empty(query, language=language, exact=exact_cache):
                 logger.info("tool.web_search_negative_cache_hit", query=query)
                 return self._success_result(query, [], start, cached=True)
 
+        # A6: wrap the existing on_phase channel to emit structured phase durations.
+        on_phase, finish_phases = track_phase_durations(context.on_phase)
         try:
             backend = get_search_backend()
             # 工具执行阶段进度 (联网搜索前端展示优化): thread the engine-injected phase
             # callback so the backend can surface「排队中 / 正在检索 / 改用备用引擎」live
             # while this blocking request is in flight. ``None`` on unscoped call
-            # sites (tests / evals) — the backend skips it.
+            # sites (tests / evals) — the backend skips it; duration logging still runs
+            # when phases fire.
             results = await backend.search(
-                query, max_results=max_results, on_phase=context.on_phase
+                query,
+                max_results=max_results,
+                on_phase=on_phase,
+                language=language,
             )
         except Exception as e:
+            finish_phases()
             reason = describe_net_error(e)
             logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))
             return ToolResult(
@@ -139,6 +224,7 @@ class WebSearchTool:
                 error=f"搜索失败：{reason}",
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
+        finish_phases()
 
         if not results:
             # Observability (D5): a LIVE search returned zero results — the passive signal
@@ -163,10 +249,12 @@ class WebSearchTool:
                         results=results,
                         max_results=max_results,
                         stored_at=time.time(),
-                    )
+                        language=language,
+                    ),
+                    exact=exact_cache,
                 )
             else:
-                cache.note_empty(query)
+                cache.note_empty(query, language=language, exact=exact_cache)
         self._record_source_domains(context.conversation_id, results)
         return self._success_result(query, results, start, cached=False)
 
@@ -194,8 +282,24 @@ class WebSearchTool:
         *,
         cached: bool,
     ) -> ToolResult:
-        """Build the (identical-shape) success ToolResult for a live or cached hit."""
-        items = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
+        """Build the (identical-shape) success ToolResult for a live or cached hit.
+
+        硬拦（``blocked``）域名在检索出口剔除，不进模型可见结果与 citations；低质
+        （``weak``）仍回模型；可被 ``#rN`` 显式引用并带弱源徽标（P2）。
+        """
+        kept: list[SearchResult] = []
+        blocked_hosts: list[str] = []
+        for r in results:
+            tier = citation_tier_for_url(r.url)
+            if tier == "blocked":
+                host = site_of(r.url) or _host_hint(r.url)
+                if host:
+                    blocked_hosts.append(host)
+                continue
+            kept.append(r)
+
+        items = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in kept]
+        hosts = [site_of(r.url) for r in kept if site_of(r.url)]
         payload: dict[str, Any] = {"query": query, "results": items}
         if not items:
             # Honesty (D5): an empty set is a *success* (HTTP 200, no transport failure),
@@ -208,8 +312,16 @@ class WebSearchTool:
             payload["note"] = _empty_result_note(query)
         output = json.dumps(payload, ensure_ascii=False)
         citations = [
-            {"url": r.url, "title": r.title, "snippet": r.snippet, "site": site_of(r.url)}
-            for r in results
+            stamp_citation_tier(
+                {
+                    "url": r.url,
+                    "title": r.title,
+                    "snippet": r.snippet,
+                    "site": site_of(r.url),
+                    "query": query,
+                }
+            )
+            for r in kept
         ]
         # Render-oriented twin of ``output`` (工具结果富渲染): the client shows the
         # hits as source-style cards (favicon · title · snippet) instead of raw
@@ -219,14 +331,29 @@ class WebSearchTool:
             "query": query,
             "results": [
                 {"title": r.title, "url": r.url, "snippet": r.snippet, "site": site_of(r.url)}
-                for r in results
+                for r in kept
             ],
         }
-        metadata: dict[str, Any] = {"result_count": len(items)}
+        metadata: dict[str, Any] = {
+            "result_count": len(items),
+            "query": query,
+            "hosts": hosts,
+        }
+        if blocked_hosts:
+            metadata["blocked_hosts"] = blocked_hosts
         if cached:
             metadata["cached"] = True
         if not items:
             metadata["empty"] = True
+        # 检索观测：query + 命中域名（含被硬拦剔除的），便于还原「搜了什么 / 拿回什么」。
+        logger.info(
+            "tool.web_search",
+            query=query,
+            hosts=hosts,
+            result_count=len(items),
+            blocked_count=len(blocked_hosts),
+            cached=cached,
+        )
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -237,3 +364,8 @@ class WebSearchTool:
             citations=citations or None,
             display=display,
         )
+
+
+def _host_hint(url: str) -> str:
+    """Best-effort host for blocked-hit logging when ``site_of`` is empty."""
+    return urlparse(url if "://" in url else f"https://{url}").netloc.removeprefix("www.")

@@ -1,5 +1,6 @@
 """ReAct main loop: turn control, LLM rounds, tool execution, governance."""
 
+import time
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from agentcore.runtime.events import (
     content_reset,
     reasoning_delta,
 )
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -101,6 +103,8 @@ async def react_loop(
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
+    turn_evidence_ledger: EvidenceLedgerCore | None = None,
+    ledger_registrant: str = "",
     approval_gate: ApprovalGate | None = None,
     usage_sink: list[TokenUsage] | None = None,
     finish_override_sink: list[FinishReason] | None = None,
@@ -110,6 +114,7 @@ async def react_loop(
     supports_tools: bool | None = None,
     gate_escalation_sink: list[dict[str, Any]] | None = None,
     token_budget: int = 0,
+    cutoff_reason_sink: list[str] | None = None,
     controller_seed: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
@@ -145,12 +150,12 @@ async def react_loop(
     ``[]`` = none). Tool execution events always go to the sink. When
     ``citation_sink`` is provided, web sources consulted by research tools are
     aggregated into it (de-duped, capped) for the caller to surface/persist.
-    ``annotate_citations`` (default True, CEO chat path) also folds each source's
-    assigned number back into the tool output so the model cites by a card-aligned
-    number (A2). Delegated workers pass ``annotate_citations=False``: their sources
-    are still collected (for the turn's shared source card — see DelegateTool /
-    pipeline) but NOT numbered into the worker's text, since a worker's local
-    numbering would be re-ordered when merged into the turn card and would mislead.
+    ``turn_evidence_ledger`` (调研路径) registers hits into the turn-shared ledger
+    and annotates tool output with stable ``#rN=url`` for CEO and workers alike
+    (引用即出处 P1). ``annotate_citations`` gates finish_guard's legacy ``[n]`` check
+    (CEO True / worker False)；``#rN`` id 存在闸在台账接通且正文出现约定标记时启用
+    （Q5；worker 回炉 1 次 / CEO 跟配置）。without a ledger the old ``[n]=url``
+    annotate path still applies. Debate speakers omit the turn ledger (场级 ``#e``).
     ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
     the model as a tool result so it can adapt.
@@ -222,11 +227,21 @@ async def react_loop(
         usage_sink.clear()
     if finish_override_sink is not None:
         finish_override_sink.clear()
+    if cutoff_reason_sink is not None:
+        cutoff_reason_sink.clear()
 
     disabled_tools: set[str] = set()
+    # B·收尾窗口：预算软顶 / 超时预警后收窄到落盘+handoff（不改硬顶语义）。
+    wind_down_active = False
+    wind_down_effective_allowed: list[str] | None = None
+
+    def _effective_allowed() -> list[str] | None:
+        if wind_down_effective_allowed is not None:
+            return wind_down_effective_allowed
+        return allowed_tool_names
 
     def _resolve_tool_defs() -> list[dict[str, Any]] | None:
-        return resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
+        return resolve_openai_tool_defs(tools, _effective_allowed(), disabled_tools)
 
     tool_defs = _resolve_tool_defs()
 
@@ -263,6 +278,54 @@ async def react_loop(
     if role == "captain":
         captain_token = current_captain_loop.set(CaptainLoopMirror(controller=controller))
 
+    def _enter_wind_down(reason: str, instruction: str) -> None:
+        nonlocal wind_down_active, wind_down_effective_allowed, tool_defs
+        if wind_down_active or role != "worker":
+            return
+        from agentcore.runtime.runs.cutoff import narrow_tools_for_wind_down
+
+        wind_down_active = True
+        narrowed = narrow_tools_for_wind_down(
+            set(tools.names), allowed=allowed_tool_names
+        )
+        wind_down_effective_allowed = narrowed
+        tool_defs = _resolve_tool_defs()
+        messages.append(LLMMessage(role="user", content=instruction))
+        logger.info(
+            "engine.wind_down_enter",
+            reason=reason,
+            run_id=run_id,
+            role=role,
+            tokens=total_usage.total_tokens,
+            token_budget=token_budget,
+            allowed_tools=narrowed,
+        )
+
+    def _maybe_arm_wind_down() -> None:
+        """Budget soft-top or timeout warn → one-shot wind-down (handoff/persist)."""
+        if wind_down_active or role != "worker":
+            return
+        from agentcore.config import settings
+        from agentcore.runtime.runs.cutoff import (
+            WIND_DOWN_INSTRUCTION_TIMEOUT,
+            WIND_DOWN_INSTRUCTION_TOKEN,
+            should_enter_token_wind_down,
+        )
+
+        ratio = float(settings.engine_worker_token_wind_down_ratio or 0.0)
+        if should_enter_token_wind_down(
+            total_usage.total_tokens, token_budget, ratio
+        ):
+            _enter_wind_down("token_budget", WIND_DOWN_INSTRUCTION_TOKEN)
+            return
+        if not run_id:
+            return
+        from agentcore.runtime.coordination.session import active_coordination
+
+        session = active_coordination()
+        if session is not None and session.consume_timeout_wind_down(run_id):
+            _enter_wind_down("worker_timeout", WIND_DOWN_INSTRUCTION_TIMEOUT)
+
     try:
         for round_idx in range(profile.max_rounds):
             # Loose token backstop (Worker 硬顶): stop BEFORE starting a round once the run's
@@ -281,6 +344,8 @@ async def react_loop(
                     round=round_idx,
                 )
                 break
+            # B·收尾窗口：硬顶前先收窄工具面（软顶 / 超时预警），给合格 handoff 一次机会。
+            _maybe_arm_wind_down()
             if round_sink is not None:
                 round_sink[:] = [round_idx + 1]
             logger.debug("react.round_start", round=round_idx, messages=len(messages))
@@ -308,7 +373,16 @@ async def react_loop(
             if role == "captain":
                 from agentcore.runtime.coordination.wait import await_coordination_injection
 
+                coord_t0 = time.perf_counter()
                 coord_msgs = await await_coordination_injection(messages)
+                coord_ms = int((time.perf_counter() - coord_t0) * 1000)
+                if coord_ms >= 50 or coord_msgs:
+                    logger.info(
+                        "engine.coord_inject",
+                        round=round_idx,
+                        waited_ms=coord_ms,
+                        injected=len(coord_msgs),
+                    )
                 if coord_msgs:
                     messages.extend(coord_msgs)
                     # Soft audit-gate (all_completed): remind before synthesis / wrap-up
@@ -410,6 +484,7 @@ async def react_loop(
                         finish_guard_reworks=finish_guard_reworks,
                         tools_offered=tool_defs is not None,
                         supports_tools=supports_tools,
+                        turn_evidence_ledger=turn_evidence_ledger,
                     )
                     # Soft team-gate (b) / Soft audit-gate: captain wrap-up without
                     # delegate — discard the draft, inject nudge, continue.
@@ -436,6 +511,8 @@ async def react_loop(
                         approval_gate=approval_gate,
                         citation_sink=citation_sink,
                         annotate_citations=annotate_citations,
+                        turn_evidence_ledger=turn_evidence_ledger,
+                        ledger_registrant=ledger_registrant,
                         run_id=run_id,
                         role=role,
                         gate_escalation_sink=gate_escalation_sink,
@@ -447,7 +524,7 @@ async def react_loop(
                         round_result_content=round_result.content,
                         total_usage=total_usage,
                         controller=controller,
-                        allowed_tool_names=allowed_tool_names,
+                        allowed_tool_names=_effective_allowed(),
                         disabled_tools=disabled_tools,
                         round_idx=round_idx,
                     )
@@ -469,7 +546,7 @@ async def react_loop(
                 profile=profile,
                 active_model=active_model,
                 base_model=base_model,
-                allowed_tool_names=allowed_tool_names,
+                allowed_tool_names=_effective_allowed(),
                 disabled_tools=disabled_tools,
                 emit_content=emit_content,
                 emit_reasoning=emit_reasoning,
@@ -484,6 +561,8 @@ async def react_loop(
                 approval_gate=approval_gate,
                 citation_sink=citation_sink,
                 annotate_citations=annotate_citations,
+                turn_evidence_ledger=turn_evidence_ledger,
+                ledger_registrant=ledger_registrant,
                 gate_escalation_sink=gate_escalation_sink,
                 controller=controller,
                 content_before_round=content_before_round,
@@ -512,7 +591,7 @@ async def react_loop(
             active_model=active_model,
             base_model=base_model,
             tools=tools,
-            allowed_tool_names=allowed_tool_names,
+            allowed_tool_names=_effective_allowed(),
             disabled_tools=disabled_tools,
             emit_content=emit_content,
             emit_reasoning=emit_reasoning,
@@ -530,6 +609,7 @@ async def react_loop(
             sink=sink,
             finish_override_sink=finish_override_sink,
             gate_escalation_sink=gate_escalation_sink,
+            cutoff_reason_sink=cutoff_reason_sink,
         )
     finally:
         if captain_token is not None:

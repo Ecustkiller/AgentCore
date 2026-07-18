@@ -100,6 +100,26 @@ describe("AssistantContent", () => {
     expect(screen.getByText("a.com")).toBeTruthy();
   });
 
+  it("renders citation tier badges when tier is present", () => {
+    const citations: Citation[] = [
+      {
+        url: "https://www.bjnews.com.cn/detail/1.html",
+        title: "新京报",
+        site: "bjnews.com.cn",
+        tier: "media",
+      },
+      {
+        url: "https://example.com/x",
+        title: "待评源",
+        site: "example.com",
+        tier: "unknown",
+      },
+    ];
+    render(<AssistantContent content="" citations={citations} />);
+    expect(screen.getByText("媒体")).toBeTruthy();
+    expect(screen.getByText("待评")).toBeTruthy();
+  });
+
   it("shows 收到的上下文 but hides the verbatim system prompt (决策②)", () => {
     render(
       <AssistantContent

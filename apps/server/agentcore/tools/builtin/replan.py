@@ -45,18 +45,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Schema layer (工具面瘦身): short trigger. HOW → team_orchestration_advanced（晚绑定段）。
 _REPLAN_DESCRIPTION = (
-    "在 delegate 让出的波边界续跑同一计划。两种让出都会把控制权交回你（delegate 输出"
-    "『计划已让出』）：①某步声明「依赖完成后再定稿」(bind_after_deps)、其上游跑完后交回你"
-    "定稿——用 binds 据上游产出补全该步的职责 / 任务；②队员报告「职责偏离」(escalate "
-    "kind=scope)、发现真正要做的与初始计划不符、交回你校准——用 steers 操舵【尚未运行】的"
-    "下游步骤。还可用 add 追加初始计划没预见到的【全新】步骤（接到现有步骤或彼此之后）。"
-    "binds + steers + add 可同时用；定稿 / 校准 / 追加后续跑同一张 DAG，确认无需改动可直接"
-    "续跑，确无需继续则 stop=true 收口。本工具非终结：续跑结果（下一个边界简报或最终团队结"
-    "果）回到你的循环，由你照常收尾。"
-    "仅在收到『计划已让出』后可用。"
-    "协调进行中要动态追加队员：再调 delegate（合并进同一张协作图），不要等本工具；"
-    "本工具不是『等全队完成后再开下一团』的闸——那不是不变量。"
+    "在 delegate 让出『计划已让出』后续跑同一计划（非终结）。"
+    "binds=定稿 bind_after_deps 步；steers=操舵未跑步；add=追加新步；stop=true 收口。"
+    "协调中追加队员请再调 delegate，勿等本工具。"
+    "细节见 consult_skill(team_orchestration_advanced)。"
 )
 
 _REPLAN_PARAMETERS = {
@@ -64,42 +58,36 @@ _REPLAN_PARAMETERS = {
     "properties": {
         "binds": {
             "type": "array",
-            "description": (
-                "把『待定稿』(bind_after_deps) 步骤定稿。每个元素 run_id 必填（取自『计划"
-                "已让出』简报里每个待定稿步骤标注的 run_id），并据上游产出补全 role / task "
-                "等——定稿后该步即可运行。"
-            ),
+            "description": "定稿待定稿步：run_id 必填（取自让出简报），可补 role/task 等。",
             "items": {
                 "type": "object",
                 "properties": {
                     "run_id": {
                         "type": "string",
-                        "description": "要定稿的待定稿步骤 run_id（取自『计划已让出』简报）。",
+                        "description": "待定稿步骤 run_id。",
                     },
                     "role": {
                         "type": "string",
-                        "description": "定稿该步的角色名；省略则沿用占位角色。",
+                        "description": "定稿角色；省略沿用占位。",
                     },
                     "task": {
                         "type": "string",
-                        "description": (
-                            "定稿该步的子任务（据上游产出写全、自包含）；省略则沿用占位任务。"
-                        ),
+                        "description": "定稿子任务（自包含）；省略沿用占位。",
                     },
                     "objective": {
                         "type": "string",
-                        "description": "可选：该角色的职责 / 目标，用于设定其系统提示。",
+                        "description": "可选：职责 / 目标。",
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "model_preference": {
                         "type": "string",
                         "enum": ["fast", "strong"],
-                        "description": "可选：模型档位，默认沿用占位值。",
+                        "description": "可选：模型档位。",
                     },
                     "tools": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "可选：允许该步使用的工具名（取自可用工具）。",
+                        "description": "可选：允许的工具名。",
                     },
                 },
                 "required": ["run_id"],
@@ -107,20 +95,17 @@ _REPLAN_PARAMETERS = {
         },
         "steers": {
             "type": "array",
-            "description": (
-                "可选：给其它【尚未运行】的步骤追加一条操舵说明（同 plan_review adjust 的机"
-                "制——把指令注入该步，运行前生效）。已完成的步骤无法操舵。"
-            ),
+            "description": "可选：给未跑步骤追加操舵说明。",
             "items": {
                 "type": "object",
                 "properties": {
                     "run_id": {
                         "type": "string",
-                        "description": "要操舵的未跑步骤 run_id。",
+                        "description": "未跑步骤 run_id。",
                     },
                     "note": {
                         "type": "string",
-                        "description": "具体、可执行的操舵说明——改什么 / 怎么改。",
+                        "description": "可执行的操舵说明。",
                     },
                 },
                 "required": ["run_id", "note"],
@@ -128,42 +113,30 @@ _REPLAN_PARAMETERS = {
         },
         "add": {
             "type": "array",
-            "description": (
-                "可选：追加初始计划没预见到的【全新】步骤。每个元素必填 role + task；可选 id"
-                "（本批内引用用，缺省自动编号）、depends_on（可指向现有步骤的 run_id 或本批内"
-                "其它新步骤的 id，据此接到现有 DAG 或彼此之后）。新步骤按依赖在后续波次运行；"
-                "若某新步骤无依赖或依赖均已完成，则下一波立即就绪。仅用于【新增】——要改已有步"
-                "骤用 binds / steers。"
-            ),
+            "description": "可选：追加全新步骤（role+task 必填；可 depends_on 现有 run_id 或本批 id）。",
             "items": {
                 "type": "object",
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": (
-                            "可选：本批内的临时标识，供其它新步骤 depends_on 引用；缺省按序"
-                            "自动编号。最终 run_id 由系统生成、保证不冲突。"
-                        ),
+                        "description": "可选：本批临时 id，供其它新步 depends_on。",
                     },
                     "role": {
                         "type": "string",
-                        "description": "新步骤的角色名（必填）。",
+                        "description": "角色名。",
                     },
                     "task": {
                         "type": "string",
-                        "description": "新步骤的子任务（必填，写全、自包含）。",
+                        "description": "子任务（自包含）。",
                     },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": (
-                            "可选：该步依赖的上游——现有步骤的 run_id，或本批内其它新步骤的 "
-                            "id。留空则不依赖任何步骤。"
-                        ),
+                        "description": "可选：上游 run_id 或本批 id。",
                     },
                     "objective": {
                         "type": "string",
-                        "description": "可选：该角色的职责 / 目标，用于设定其系统提示。",
+                        "description": "可选：职责 / 目标。",
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "model_preference": {
@@ -174,7 +147,7 @@ _REPLAN_PARAMETERS = {
                     "tools": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "可选：允许该步使用的工具名（取自可用工具）。",
+                        "description": "可选：允许的工具名。",
                     },
                 },
                 "required": ["role", "task"],
@@ -182,10 +155,7 @@ _REPLAN_PARAMETERS = {
         },
         "stop": {
             "type": "boolean",
-            "description": (
-                "可选，默认 false。确认无需继续跑剩余步骤时设 true：未跑步骤记为跳过，已完"
-                "成产出交回你收尾。设 true 时 binds 可省略。"
-            ),
+            "description": "可选：true=跳过未跑步并收口（binds 可省略）。",
         },
     },
     "required": [],

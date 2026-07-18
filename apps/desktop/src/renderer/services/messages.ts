@@ -47,6 +47,27 @@ export interface BackendMessage {
     title: string;
     snippet?: string;
     site?: string;
+    id?: string | null;
+    date?: string | null;
+    tier?: string | null;
+    query?: string | null;
+    deep_read?: boolean | null;
+    registrant?: string | null;
+    citable?: boolean | null;
+  }[];
+  /** 回合调研台账（引用即出处 P1, DERIVED）：messages.evidence_ledger。 */
+  evidence_ledger?: {
+    id: string;
+    url?: string;
+    title?: string;
+    snippet?: string;
+    site?: string;
+    date?: string;
+    tier?: string;
+    query?: string;
+    deep_read?: boolean;
+    registrant?: string;
+    citable?: boolean;
   }[];
   /** 下一步推荐 chips (下一步推荐, DERIVED 持久化): the assistant row's persisted quick-reply
    * suggestions (messages.followups column, twin of the title). Replayed onto
@@ -259,7 +280,22 @@ export function toMessage(m: BackendMessage): Message {
           conversationId: a.conversation_id ?? undefined,
         }))
       : undefined,
-    citations: m.citations?.length ? m.citations : undefined,
+    citations: m.citations?.length
+      ? m.citations.map((c) => ({
+          url: c.url,
+          title: c.title,
+          snippet: c.snippet,
+          site: c.site,
+          id: c.id ?? undefined,
+          date: c.date ?? undefined,
+          tier: c.tier ?? undefined,
+          query: c.query ?? undefined,
+          deep_read: c.deep_read ?? undefined,
+          registrant: c.registrant ?? undefined,
+          citable: c.citable ?? undefined,
+        }))
+      : undefined,
+    evidenceLedger: m.evidence_ledger?.length ? m.evidence_ledger : undefined,
   };
 }
 

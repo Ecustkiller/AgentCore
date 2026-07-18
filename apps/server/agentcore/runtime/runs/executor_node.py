@@ -33,6 +33,8 @@ from agentcore.runtime.runs.constants import (
     POST_NOTE_TOOL_NAME,
     READ_NOTES_TOOL_NAME,
 )
+from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
+from agentcore.tools.protocol import RetrievalBudgetState
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
     check_contract,
@@ -42,6 +44,7 @@ from agentcore.runtime.runs.contract import (
     node_has_dependents,
     synthesize_debrief,
 )
+from agentcore.runtime.facts import RunHeadFact, record_turn_fact
 from agentcore.runtime.runs.executor_context import (
     _build_messages,
     _context_block_payloads,
@@ -56,6 +59,7 @@ from agentcore.runtime.runs.executor_identities import (
     build_worker_identity,
 )
 from agentcore.runtime.runs.executor_shared import (
+    _apply_cutoff_reasons,
     _apply_finish_interrupt,
     _is_hard_failure,
     _priced_failure,
@@ -182,6 +186,12 @@ async def execute_agent_node(
                     supersede_mode=note.supersede_mode,
                 )
             ),
+            # 检索预算 (提案 A1): per-run counter for tool_exec; None = no enforce.
+            retrieval_budget=(
+                RetrievalBudgetState(limit=spec.retrieval_budget)
+                if spec.retrieval_budget is not None
+                else None
+            ),
         )
         # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
         worker_tools = env.tools
@@ -235,6 +245,12 @@ async def execute_agent_node(
             if allowed_tools is not None:
                 withheld = set(PROSE_WITHHELD_WRITE_TOOLS)
                 allowed_tools = [t for t in allowed_tools if t not in withheld]
+        # 检索预算 0 (提案 A1): strip web_search/read_url even for unrestricted workers
+        # (builder already tightens tasks[].tools when valid_tools is known).
+        if spec.retrieval_budget == 0:
+            worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
+            if allowed_tools is not None:
+                allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
         # 非协作批次 (env.collaboration=False, e.g. debate): strip the 团队便签 tools from the
         # offered registry so even an UNRESTRICTED worker (allowed_tools=None → "offer all
         # team tools") is never handed post/read/amend — "no env.collaboration" means no channel
@@ -287,6 +303,10 @@ async def execute_agent_node(
         # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
         # different questions and must not be conflated.
         content = ""
+        # Keep the last non-empty prose across contract retries. A handoff-gate
+        # correction often only calls ``handoff`` (empty streamed content); without
+        # retention the prior ~合格正文 is wiped and check_contract mis-fires「产出为空」.
+        retained_content = ""
         # The worker's full thinking from the LAST attempt (parallel to
         # ``content``, which each attempt overwrites): carried onto the terminal
         # RunState → its ``message_final`` fact so resume / reload rebuild the
@@ -295,11 +315,11 @@ async def execute_agent_node(
         reasoning = ""
         verdict = ContractVerdict(ok=True)
         # Web sources this worker consults, de-duped across contract retries.
-        # Collect-only (annotate_citations=False): the worker text stays
-        # un-numbered; the DelegateTool folds these into the turn's shared
-        # source card so the user sees the WHOLE team's research, not just the
-        # CEO's own searches.
+        # Pool merge still collect-only into this list → DelegateTool → turn card.
+        # Stable ``#rN`` annotation (when ``env.turn_evidence_ledger`` is set) is
+        # separate — not the old ``[n]`` annotate path (引用即出处 P1).
         worker_citations: list[dict] = []
+        ledger_registrant = f"worker:{agent_id}"
         # Pre-existing workspace files (uploads / prior turns) for the worker's
         # opening manifest — a per-turn snapshot walked once and shared by the whole
         # batch (see ``env.preexisting_files``); peer products are layered on per worker
@@ -325,6 +345,20 @@ async def execute_agent_node(
             blocks_sink=received_blocks,
             team_brief=env.team_brief,
             shared_workspace=env.shared_workspace,
+            batch_completion_criteria=env.batch_completion_criteria,
+        )
+        # Worker window head (§8.3): journal the opening task-prompt so
+        # ``window_from_journal(run_id=…)`` anchors on THIS run's system+user, not the
+        # turn-level CEO ``turn_started``. ``user_origin=context_blocks`` marks the
+        # opening user as the ContextBlock join (diagnostic UI replaces it with the
+        # structured ``run_context`` segments).
+        record_turn_fact(
+            RunHeadFact(
+                run_id=spec.run_id,
+                system_prompt=messages[0].content or "",
+                user_message=messages[1].content or "",
+                user_origin="context_blocks",
+            ).to_fact()
         )
         # 上下文传递可视化: emit the received context right after assembly (before the
         # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
@@ -379,9 +413,12 @@ async def execute_agent_node(
         # Accepted react pass's finish override (cleared each attempt so a clean
         # rework after an interrupted first pass does not keep the interrupt warning).
         finish_override: list[FinishReason] = []
+        # C·掐断透明化：正轨 token 撞顶等结构化原因码（与 DEGRADED 分流正交）。
+        cutoff_reasons: list[str] = []
         for attempt in range(attempts):
             streamed_content.clear()
             finish_override.clear()
+            cutoff_reasons.clear()
             if spec.research_then_draft and (spec.draft_brief or "").strip():
                 content, reasoning, round_usage, round_rounds = await research_then_draft(
                     messages,
@@ -399,13 +436,16 @@ async def execute_agent_node(
                     draft_system=spec.draft_system or (spec.system_prompt_supplement or ""),
                     draft_brief=spec.draft_brief,
                     allow_research=True,
-                    check_source_grounding=spec.source_grounding_check,
+                    evidence_ledger=env.evidence_ledger,
+                    side_key=spec.side_key,
+                    check_evidence_ledger=spec.evidence_ledger_check,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
                     streamed_content=streamed_content,
                     gate_escalation_sink=gate_escalations,
                     token_budget=token_ceiling,
                     finish_override_sink=finish_override,
+                    cutoff_reason_sink=cutoff_reasons,
                 )
             else:
                 content, reasoning, round_usage, round_rounds = await _react_and_capture(
@@ -420,6 +460,8 @@ async def execute_agent_node(
                     run_id=spec.run_id,
                     agent_id=agent_id,
                     citation_sink=worker_citations,
+                    turn_evidence_ledger=env.turn_evidence_ledger,
+                    ledger_registrant=ledger_registrant,
                     approval_gate=env.approval_gate,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
@@ -427,12 +469,20 @@ async def execute_agent_node(
                     gate_escalation_sink=gate_escalations,
                     token_budget=token_ceiling,
                     finish_override_sink=finish_override,
+                    cutoff_reason_sink=cutoff_reasons,
                 )
             run_usage = run_usage + round_usage
             run_rounds += round_rounds
             # This pass's usage is now folded into run_usage via its return value;
             # drop the mirror so a later non-react raise can't double-count it.
             inflight.clear()
+            # Handoff-only / tool-only correction passes often stream no prose —
+            # keep the prior non-empty body so contract checks and the terminal
+            # RunState still see the already-qualified product.
+            if (content or "").strip():
+                retained_content = content
+            elif retained_content:
+                content = retained_content
             # files_written backs the contract's requires_files gate; workspace_paths
             # reconciles declarative artifacts against the live workspace (+ this
             # run's own writes). Handoff gate: nodes with downstream dependents must
@@ -570,6 +620,7 @@ async def execute_agent_node(
             files_touched=touched,
             run_id=spec.run_id,
         )
+        warnings = _apply_cutoff_reasons(cutoff_reasons, warnings=warnings)
         # The worker's terminal RunState is journaled at the ``execute`` choke point
         # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
         # re-seeds it from facts not the旁路 frame (执行级事件溯源 Phase 2 ⑥).

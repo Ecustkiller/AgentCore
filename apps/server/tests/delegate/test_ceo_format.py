@@ -265,6 +265,31 @@ def test_format_for_ceo_includes_final_synthesis_discipline():
     assert "至多一段" in out
     assert "中间合成草稿" in out and "escalation 原文" in out
     assert "未交付 / 需你操作" in out
+    assert "队员终态名册" in out
+
+
+def test_format_for_ceo_roster_forbids_all_delivered_when_partial_failure():
+    """Partial failure + replaces_run_id must surface; CEO must not invent 全部交付."""
+    t = tool(Provider([]))
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="w_ms", task="调研微软", role="Microsoft 调研员"),
+            RunSpec(run_id="w_ms2", task="补调研微软", role="Microsoft 补派", replaces_run_id="w_ms"),
+            RunSpec(run_id="w_ok", task="调研 OpenAI", role="OpenAI 调研员"),
+        ]
+    )
+    results = {
+        "w_ms": RunState(phase=RunPhase.FAILED, content="", error="timeout"),
+        "w_ms2": RunState(phase=RunPhase.COMPLETED, content="补派完成"),
+        "w_ok": RunState(phase=RunPhase.COMPLETED, content="OpenAI 完成"),
+    }
+    out = format_for_ceo(t, plan, results)
+    assert "队员终态名册" in out
+    assert "失败" in out and "w_ms" in out
+    assert "接替" in out and "replaces_run_id" in out
+    assert "禁止编造" in out or "全部交付" in out
+    assert "【接替】" in out
+    assert "有队员失败/被跳过/被接替" in out
 
 
 def test_format_for_ceo_emits_uncapped_synthesis_metric():

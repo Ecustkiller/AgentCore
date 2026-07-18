@@ -133,7 +133,12 @@ class ConversationStore(Protocol):
         conversation_id: str,
         message_id: str,
         trace_id: str,
-    ) -> None: ...
+    ) -> None:
+        """Insert the running assistant row before pipeline / SSE.
+
+        Must succeed or abort the turn — failures must not be swallowed.
+        """
+        ...
 
     async def checkpoint(
         self,

@@ -174,8 +174,9 @@ export function ReceivedContextDialog({
 /** One「收到的上下文」block: a click-to-expand card. Collapsed shows the channel origin +
  * a peek; expanded reveals the full body the LLM read (head+tail capped on the wire, flagged
  * when 截断). A dependency block adds a provenance line (来自 {role} · 保真度 · 截断) and the
- * artifact files it pointed at. Worker 侧默认折叠；CEO 弹窗内亦默认折叠。 */
-function ContextBlockCard({
+ * artifact files it pointed at. Worker 侧默认折叠；CEO 弹窗内亦默认折叠。
+ * Exported for the worker diagnostic skeleton ({@link WorkerContextSection}). */
+export function ContextBlockCard({
   block,
   defaultOpen,
   onNavigate,

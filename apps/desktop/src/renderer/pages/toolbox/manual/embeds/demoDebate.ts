@@ -107,6 +107,7 @@ export const DEMO_DEBATE_MODEL: DebateModel = {
   moderatorRunId: "moderator",
   narrativeFirst: true,
   crossExamEnabled: false,
+  evidenceLedger: [],
   rounds: DEMO_ROUNDS,
   brief: {
     leaning: "倾向加速派",

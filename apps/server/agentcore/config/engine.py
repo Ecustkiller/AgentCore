@@ -33,6 +33,12 @@ class EngineSettings(BaseModel):
     # 这只是防失控的安全阀,不是紧箍咒。每轮末比对累计 input+output tokens,到顶即收口。
     # 统一可配置上限；≤0 关闭 (CEO/solo 路径不传此上限,保持 0)。
     engine_worker_token_ceiling: int = 80_000
+    # 预算收尾窗口：累计 token ≥ ceiling × ratio 时强制进入落盘/handoff-only 轮，
+    # 降低硬顶后 degraded_synth。须 ∈ (0, 1)；≤0 或 ≥1 关闭软窗（只留硬顶）。
+    engine_worker_token_wind_down_ratio: float = 0.85
+    # 墙钟超时两段式：先在 threshold × ratio 处警告 worker「限一轮内交接」，
+    # 再到硬阈值才向 CEO 发 TIMEOUT 通知（仍不自动取消）。须 ∈ (0, 1)；≤0 关闭预警。
+    engine_worker_timeout_warn_ratio: float = 0.75
     # 辩论辩手检索阶段累计 token 硬顶（与 worker 通用顶独立）。辩手取证常需读多篇长文，
     # 与 80k worker 顶合用会导致首轮过早 ceiling_finalize。≤0 关闭。
     engine_debate_token_ceiling: int = 120_000

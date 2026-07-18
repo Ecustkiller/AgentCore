@@ -277,7 +277,7 @@ describe("conversation store", () => {
     });
 
     // 非 finish_guard 的 reset（如 LLM 流式透明重试）：清正文照旧，但【不】折 rework chip
-    // ——基础设施重试不是「按交付规范重写」（误报根治）。
+    // ——基础设施重试不是「引用/格式核验后已重写」（误报根治）。
     it("resetStreamingContent with reason=retry leaves no rework chip", () => {
       store().createAssistantMessage();
       store().appendReasoningToLastMessage("先想一下");

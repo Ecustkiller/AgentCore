@@ -1,17 +1,24 @@
 import { Button } from "@/components/ui";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { CitationDisplayMap } from "@/lib/citationDisplayMap";
 import { cleanSourceTitle } from "@/lib/citations";
+import { ledgerDateLabel, ledgerTierLabel } from "@/lib/evidenceLedger";
 import { usePersistentDisclosure } from "@/stores/disclosure";
-import type { Citation } from "@/types/events";
-import { ChevronDown, ChevronUp, Globe } from "lucide-react";
+import type { Citation, TurnEvidenceLedgerEntry } from "@/types/events";
+import { ChevronDown, ChevronUp, Globe, Info } from "lucide-react";
+import { CitationTierBadge } from "./CitationTierBadge";
 import { Favicon } from "./Favicon";
 import { SourceTooltip } from "./SourcePreview";
 
 /**
- * Source cards under an assistant reply: the web pages the agent searched /
- * read this turn (from the backend `citations` event + persisted on the
- * message). Each card opens its URL in the system browser — the Electron main
- * process routes target=_blank through shell.openExternal.
+ * Source cards under an assistant reply: pages the deliverable actually cited
+ * this turn (P2: backend `citations` event = cited subset; uncited hits stay on
+ * the evidence ledger). Each card opens its URL in the system browser — the
+ * Electron main process routes target=_blank through shell.openExternal.
  *
  * Layout follows the Perplexity / ChatGPT pattern. Collapsed: a single row of
  * compact favicon pills (index + favicon + domain) with a matching overflow pill
@@ -31,12 +38,15 @@ export function SourceCards({
   citations,
   displayMap,
   turnKey,
+  evidenceLedger,
 }: {
   citations: Citation[];
   /** Shared renumbering with inline chips; when omitted, pool order + 1-based. */
   displayMap?: CitationDisplayMap | null;
   /** 回合作用域（= messageId）：给了才把「展开全部」跨卸载/刷新记住。 */
   turnKey?: string;
+  /** 回合调研台账：来源卡 id 溯源面板（query / deep_read / tier / registrant）。 */
+  evidenceLedger?: TurnEvidenceLedgerEntry[] | null;
 }) {
   const [expanded, setExpanded] = usePersistentDisclosure(
     turnKey ? `${turnKey}:sources` : null,
@@ -60,6 +70,11 @@ export function SourceCards({
   const hidden = rows.length - COLLAPSED_COUNT;
   const collapsed = rows.slice(0, COLLAPSED_COUNT);
   const stack = rows.slice(COLLAPSED_COUNT, COLLAPSED_COUNT + STACK_PREVIEW);
+
+  const ledgerById = new Map<string, TurnEvidenceLedgerEntry>();
+  for (const e of evidenceLedger ?? []) {
+    if (e?.id) ledgerById.set(e.id, e);
+  }
 
   // Dim sources the answer retrieved but never cited inline, so the cited ones
   // stand out; hover restores full opacity so muted sources stay inspectable.
@@ -113,39 +128,50 @@ export function SourceCards({
               const c = citations[poolIndex];
               if (!c) return null;
               return (
-                <a
+                <div
                   key={`${c.url}-${display}`}
-                  href={c.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`来源 ${display}：${cleanSourceTitle(c.title) || c.site || c.url}`}
                   className={`flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-accent ${dimClass(cited)}`}
                 >
-                  <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {display}
-                  </span>
-                  <Favicon
-                    site={c.site}
-                    title={c.title}
-                    size={18}
-                    className="mt-0.5"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">
-                      {cleanSourceTitle(c.title) || c.site || c.url}
+                  <a
+                    href={c.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`来源 ${display}：${cleanSourceTitle(c.title) || c.site || c.url}`}
+                    className="flex min-w-0 flex-1 items-start gap-2.5"
+                  >
+                    <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                      {display}
                     </span>
-                    {c.site && (
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {c.site}
+                    <Favicon
+                      site={c.site}
+                      title={c.title}
+                      size={18}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="block min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                          {cleanSourceTitle(c.title) || c.site || c.url}
+                        </span>
+                        <CitationTierBadge tier={c.tier} />
                       </span>
-                    )}
-                    {c.snippet && (
-                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                        {c.snippet}
-                      </p>
-                    )}
-                  </span>
-                </a>
+                      {c.site && (
+                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                          {c.site}
+                        </span>
+                      )}
+                      {c.snippet && (
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                          {c.snippet}
+                        </p>
+                      )}
+                    </span>
+                  </a>
+                  <SourceLedgerTrace
+                    citation={c}
+                    entry={c.id ? (ledgerById.get(c.id) ?? null) : null}
+                  />
+                </div>
               );
             })}
           </div>
@@ -187,6 +213,7 @@ export function SourceCards({
                   <span className="max-w-[140px] truncate text-xs text-foreground">
                     {c.site || c.url}
                   </span>
+                  <CitationTierBadge tier={c.tier} />
                 </a>
               </SourceTooltip>
             );
@@ -220,5 +247,71 @@ export function SourceCards({
         </div>
       )}
     </div>
+  );
+}
+
+/** 来源卡 id 溯源面板：优先台账条目，其次 Citation 加宽字段；legacy 无字段则隐藏。 */
+function SourceLedgerTrace({
+  citation,
+  entry,
+}: {
+  citation: Citation;
+  entry: TurnEvidenceLedgerEntry | null;
+}) {
+  const id = entry?.id || citation.id;
+  if (!id) return null;
+  const query = (entry?.query ?? citation.query ?? "").trim();
+  const deepRead = entry?.deep_read ?? citation.deep_read ?? false;
+  const registrant = (entry?.registrant ?? citation.registrant ?? "").trim();
+  const tier = entry?.tier ?? citation.tier;
+  const date = entry?.date ?? citation.date;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="inline-flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={`查看来源台账 ${id}`}
+        >
+          <Info size={13} aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-72 space-y-1.5 p-3 text-sm"
+        align="end"
+        side="top"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span className="min-w-0 truncate font-medium tabular-nums text-foreground">
+            {id}
+          </span>
+          <span className="shrink-0">{ledgerTierLabel(tier)}</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {ledgerDateLabel(date)}
+        </div>
+        {query ? (
+          <div className="text-xs">
+            <span className="text-muted-foreground">检索 </span>
+            <span className="text-foreground">{query}</span>
+          </div>
+        ) : null}
+        <div className="text-xs">
+          <span className="text-muted-foreground">深读 </span>
+          <span className="text-foreground">{deepRead ? "是" : "否"}</span>
+        </div>
+        {registrant ? (
+          <div className="text-xs">
+            <span className="text-muted-foreground">登记者 </span>
+            <span className="text-foreground">{registrant}</span>
+          </div>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }

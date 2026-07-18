@@ -24,6 +24,7 @@ from agentcore.core.net import (
     classify_url as _classify_url,
 )
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.core.citation_tier import stamp_citation_tier
 from agentcore.tools.builtin.web._net import (
     circuit_remaining,
     note_failure,
@@ -362,12 +363,15 @@ class ReadUrlTool:
                         "cached": True,
                     },
                     citations=[
-                        {
-                            "url": url,
-                            "title": cached.title,
-                            "snippet": cached.snippet,
-                            "site": cached.site,
-                        }
+                        stamp_citation_tier(
+                            {
+                                "url": url,
+                                "title": cached.title,
+                                "snippet": cached.snippet,
+                                "site": cached.site,
+                                "deep_read": True,
+                            }
+                        )
                     ],
                     display=_make_display(
                         url=url,
@@ -478,7 +482,17 @@ class ReadUrlTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
-            citations=[{"url": url, "title": title, "snippet": snippet, "site": site}],
+            citations=[
+                stamp_citation_tier(
+                    {
+                        "url": url,
+                        "title": title,
+                        "snippet": snippet,
+                        "site": site,
+                        "deep_read": True,
+                    }
+                )
+            ],
             display=_make_display(
                 url=url,
                 title=title,

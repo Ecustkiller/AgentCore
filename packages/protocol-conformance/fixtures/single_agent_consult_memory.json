@@ -109,6 +109,8 @@
       }
     ],
     "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
     "agents": [],
     "runs": [],
     "progress": {

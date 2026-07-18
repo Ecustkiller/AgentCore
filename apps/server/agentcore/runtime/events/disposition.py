@@ -121,6 +121,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.CONTENT_DELTA: (Disposition.DERIVED, "正文流——最终态落 Message.content 列"),
     EventType.REASONING_DELTA: (Disposition.DERIVED, "思考流——最终态落 Message.reasoning_content 列"),
     EventType.CITATIONS: (Disposition.DERIVED, "联网来源——落 Message.citations 列"),
+    EventType.EVIDENCE_LEDGER: (
+        Disposition.DERIVED,
+        "回合调研台账/检索痕迹——落 Message.evidence_ledger 列（不占 citations_event；对称辩论 O1）",
+    ),
     EventType.MESSAGE_END: (
         Disposition.DERIVED,
         "收尾（token/finish/cost）——落 Message.usage + journal turn_end；cost 回写 Message.cost 列",

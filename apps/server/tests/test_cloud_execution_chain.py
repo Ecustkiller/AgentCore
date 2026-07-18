@@ -59,6 +59,26 @@ def test_cloud_default_off_chain_stays_withheld(tmp_path: Path):
     assert execution_tool_auto_passes(backend, "code_execute") is False
 
 
+def test_cloud_escape_hatch_registers_execution_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Dev 逃生口（CODE_EXECUTE_CLOUD_ENABLED，安全权限与治理 §5.4）：无 gVisor 时同样
+    翻开注册闸 / 能力自述 / 委派闸——但审批姿态保持 UNAVAILABLE（姿态表只喂 auto-pass，
+    云端 worker 本就无 per-call 闸，逃生口不改姿态表）。"""
+    monkeypatch.setattr(settings, "code_execute_cloud_enabled", True)
+    backend = _cloud_backend(tmp_path)
+
+    assert code_execution_enabled_for(backend) is True
+    names = build_worker_registry(backend=backend).names
+    assert "code_execute" in names
+    assert "test_run" in names
+    assert "code_execute=已装配" in build_workspace_context(backend, desktop_online=True)
+    plan = _pptx_plan()
+    assert validate_execution_capability("code_verified", plan, backend) is None
+    assert execution_capability_warning(None, plan, backend) is None
+    assert execution_approval_posture(backend) is ExecutionApprovalPosture.UNAVAILABLE
+
+
 def test_cloud_gvisor_on_chain_flips_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "gvisor_enabled", True)
     backend = _cloud_backend(tmp_path)

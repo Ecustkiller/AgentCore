@@ -62,6 +62,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
       "AssistantView · 工具步执行阶段 (CEO, extractToolPhases) + TeamView · 队员节点 (worker run_id, extractWorkerToolPhases)",
   },
   citations: { verdict: "ported", surface: "AssistantView · 来源" },
+  evidence_ledger: {
+    verdict: "ported",
+    surface:
+      "fold → ProjectedTurn.evidenceLedger / citedIds；Citation.id 透传；来源卡 id 溯源完整面板桌面先行（对齐 O7）",
+  },
 
   // —— 多 Agent 团队 ——
   run_plan: { verdict: "ported", surface: "TeamView" },
@@ -137,7 +142,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   delivery_status: {
     verdict: "ported",
     surface:
-      "TeamView · 交付状态（缺口/待操作；fold 对齐桌面 DeliveryStatusCard）",
+      "TeamView · 完成条件（批次验收缺口/待操作；fold 对齐桌面 DeliveryStatusCard）",
   },
   user_interjection: {
     verdict: "internal",
@@ -337,7 +342,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   DeliveryStatusCard: {
     verdict: "ported",
     surface:
-      "TeamView · 交付状态（缺口/待操作清单；无绑定按钮，云瘦客户端如实提示）",
+      "TeamView · 完成条件（批次验收缺口/待操作；无绑定按钮，云瘦客户端如实提示）",
   },
   UserInterjectionsPanel: {
     verdict: "simplified",
@@ -345,6 +350,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
       "协调插话徽标：desktop team 块渲染；手机本切片仅 fold → userInterjections（parity 最小同步）",
   },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
+  CitationTierBadge: { verdict: "ported", surface: "AssistantView · 来源可信度徽标" },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
   DebateProgressLine: {
     verdict: "ported",
@@ -435,8 +441,15 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   EvidenceBadge: {
     verdict: "ported",
     surface:
-      "RunDetail · 输出（辩手发言全文）—— 手机独立 remarkEvidence 把【已核实·出处】/【待核实·推断】渲成 EvidenceBadge 徽章（同挂结论/本轮焦点/交接简报等 run 正文 Markdown）",
+      "RunDetail · 输出（辩手发言全文）—— 手机独立 remarkEvidence 把【已核实·出处】/【待核实·推断】渲成 EvidenceBadge 徽章（同挂结论/本轮焦点/交接简报等 run 正文 Markdown）；`#eN` 台账解析同期（O7），溯源面板桌面先行",
   },
+  EvidenceLedgerContext: {
+    verdict: "ported",
+    surface:
+      "EvidenceLedgerContext（手机自有）—— 场级台账 map 注入徽章解析 `#eN`；溯源 Popover 桌面先行",
+  },
+  // 引用即出处 P1：回合调研台账通道 fold 进 ProjectedTurn.evidenceLedger / citedIds；
+  // Citation.id 透传。来源卡 id 溯源完整面板桌面先行（对齐 O7）。
 };
 
 /** 锚 C · 桌面页面（apps/desktop/src/renderer/pages 下每个 .tsx，含子目录）→ 手机对等裁决。

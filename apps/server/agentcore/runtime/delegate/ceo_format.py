@@ -190,6 +190,11 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
             body = f"（失败：{state.error}）"
         else:
             body = "（无输出）"
+        if node.replaces_run_id:
+            body = (
+                f"【接替】本节点 replaces_run_id=`{node.replaces_run_id}`"
+                f"（接手原失败/取消队员）\n\n{body}"
+            )
         # Lead the CEO's per-worker view with the author's own 结论 (cheapest, trim-proof).
         if author_summary and mode in ("pointer", "pass_through"):
             body = f"交接结论：{author_summary}\n\n{body}"
@@ -215,6 +220,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
                 "truncated": truncated,
                 "files": files,
                 "next_steps": next_steps,
+                "replaces_run_id": node.replaces_run_id,
             }
         )
     return products
@@ -239,6 +245,70 @@ def team_notes_block(tool: DelegateTool) -> str:
     return "\n" + format_notes_for_synthesis(notes)
 
 
+def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) -> str:
+    """Deterministic per-run roster so CEO synthesis cannot invent「全部交付」."""
+    from agentcore.runtime.runs.types import RunPhase
+
+    replaced_ids = {n.replaces_run_id for n in plan.nodes if n.replaces_run_id}
+    replace_by: dict[str, str] = {
+        n.replaces_run_id: (n.role or n.run_id)
+        for n in plan.nodes
+        if n.replaces_run_id
+    }
+    completed = failed = skipped = cancelled = other = 0
+    failed_lines: list[str] = []
+    replaced_lines: list[str] = []
+    for node in plan.nodes:
+        st = results.get(node.run_id)
+        label = node.role or node.run_id
+        phase = st.phase if st is not None else None
+        if node.replaces_run_id:
+            replaced_lines.append(
+                f"- {label}（`{node.run_id}`）接替失败/取消节点 `{node.replaces_run_id}`"
+            )
+        if phase is RunPhase.COMPLETED:
+            completed += 1
+        elif phase is RunPhase.FAILED:
+            failed += 1
+            err = (st.error or "").strip() if st else ""
+            successor = replace_by.get(node.run_id)
+            note = f"；已被 {successor} 接替" if successor else ""
+            failed_lines.append(
+                f"- {label}（`{node.run_id}`）失败{('：' + err) if err else ''}{note}"
+            )
+        elif phase is RunPhase.SKIPPED:
+            skipped += 1
+        elif phase is RunPhase.CANCELLED:
+            # Cold handoff originals that a replaces_run_id took over stay cancelled —
+            # count them as replaced, not as open cancellations.
+            if node.run_id in replaced_ids:
+                continue
+            cancelled += 1
+        else:
+            other += 1
+    # Surface product-level status (hot-redirect may mark completed even if original cancelled).
+    product_failed = sum(1 for p in products if p.get("status") not in ("completed",))
+    lines = [
+        "\n### 队员终态名册（地面真相——写终稿必须对照，禁止编造「全部交付」）\n"
+        f"计划节点：完成 {completed} · 失败 {failed} · 跳过 {skipped} · 取消 {cancelled}"
+        + (f" · 其他 {other}" if other else "")
+        + f"；综述可见产物 {len(products)} 条"
+        + (f"（其中非完成 {product_failed}）" if product_failed else "")
+        + "。"
+    ]
+    if failed_lines:
+        lines.append("失败节点：\n" + "\n".join(failed_lines))
+    if replaced_lines:
+        lines.append("接替关系（replaces_run_id）：\n" + "\n".join(replaced_lines))
+    if failed or skipped or product_failed or replaced_lines:
+        lines.append(
+            "【叙事铁律】终稿必须如实写清部分失败与接替：点名失败角色/run、是否已被谁接替、"
+            "用户可见影响；禁止「N 位队员全部交付 / 全部完成 / 全员成功」类措辞——"
+            "协作图上的失败节点与此名册不一致时，以名册为准。"
+        )
+    return "\n".join(lines)
+
+
 def format_for_ceo(
     tool: DelegateTool, plan: RunPlan, results: dict, *, call_idx: int | None = None
 ) -> str:
@@ -258,6 +328,7 @@ def format_for_ceo(
         lines.append(gaps_block)
 
     products = worker_products(tool, plan, results)
+    lines.append(_roster_block(plan, results, products))
     emit_captain_readback(tool, products)
     # 完工交接简报: surface each worker's 建议下一步 (proactive, non-blocking — distinct from the
     # escalation block's 待决问题) as ONE advisory section so the CEO can relay the worthwhile
@@ -296,13 +367,18 @@ def format_for_ceo(
         "禁止把上方 escalation 原文、系统提示、协调事件、进度卡叙事或中间合成草稿整段粘进终稿"
         "——升级与缺口只保留【结论与影响】一句话。若有未交付的承诺产物，用一小节显式列出"
         "「未交付 / 需你操作」，不得混在长文里含糊带过。"
+        "对照上方【队员终态名册】：有失败 / 跳过 / 接替时必须写入终稿，"
+        "禁止编造「全部交付 / 全部完成」。"
     )
     output = "\n".join(lines)
-    if any(wp["status"] != "completed" for wp in products):
+    if any(wp["status"] != "completed" for wp in products) or any(
+        n.replaces_run_id for n in plan.nodes
+    ):
         output += (
-            "\n---\n**有队员失败/被跳过。** 如需补跑，请用 `replan(add=[...])` 在同一计划中追加替换节点"
-            "（可引用本批已完成节点的 run_id 作为 depends_on），而非重新调用 delegate。"
-            "若无需补跑，直接回复用户即可。"
+            "\n---\n**有队员失败/被跳过/被接替。** 终稿须点名说明，不得写成全员成功。"
+            "如需补跑，请用 `replan(add=[...])` 在同一计划中追加替换节点"
+            "（设 `replaces_run_id`；可引用本批已完成节点的 run_id 作为 depends_on），"
+            "而非重新调用 delegate。若无需补跑，直接如实回复用户即可。"
         )
     raw_chars = sum(len(s.content) for s in results.values() if s and s.content)
     logger.info(

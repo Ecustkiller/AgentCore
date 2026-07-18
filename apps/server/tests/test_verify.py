@@ -115,3 +115,32 @@ def test_guard_to_steer_roundtrip():
     # finish_guard 命中 → format_guard_steer 出一条非空提示；干净 → 空串。
     assert format_guard_steer(finish_guard("坏引用 [9]", citation_count=1)).startswith("[系统提示]")
     assert format_guard_steer(finish_guard("好引用 [1]", citation_count=1)) == ""
+
+
+def test_ledger_ref_gate_dual_track():
+    # #rN 轨：合法放行；伪造回炉项；无标记不启用（Q5）。
+    assert (
+        finish_guard(
+            "见 #r1。",
+            citation_count=0,
+            check_citations=False,
+            citable_ids=frozenset({"#r1"}),
+        )
+        == []
+    )
+    bad = finish_guard(
+        "见 #r9。",
+        citation_count=0,
+        check_citations=False,
+        citable_ids=frozenset({"#r1"}),
+    )
+    assert bad and "#r9" in bad[0]
+    assert (
+        finish_guard(
+            "无标记正文",
+            citation_count=0,
+            check_citations=False,
+            citable_ids=frozenset(),
+        )
+        == []
+    )

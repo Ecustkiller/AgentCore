@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
+from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import ProfileParams, build_request
@@ -16,10 +17,12 @@ from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate.evidence_guard import (
     demote_verified_tags,
-    format_closing_evidence_steer,
-    format_source_grounding_steer,
-    novel_verified_tags,
-    ungrounded_verified_tags,
+    format_evidence_ledger_steer,
+    invalid_verified_tags,
+)
+from agentcore.runtime.debate.evidence_ledger import (
+    extract_ledger_ids,
+    format_evidence_ledger_hint,
 )
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.engine.stream import stream_llm_round
@@ -33,6 +36,9 @@ from agentcore.runtime.events import (
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 
 logger = get_logger(__name__)
 
@@ -52,16 +58,27 @@ def research_continuation_message(feedback: str) -> LLMMessage:
 
 
 def build_draft_user(
-    draft_brief: str, evidence_notes: str, *, guard_steer: str = ""
+    draft_brief: str,
+    evidence_notes: str,
+    *,
+    guard_steer: str = "",
+    ledger_hint: str = "",
 ) -> str:
-    """成稿调用的 user 正文：任务 + 证据笔记（可选结辩标签闸回炉提示）。"""
+    """成稿调用的 user 正文：任务 + 证据笔记 + 可选台账 id 表（可选回炉提示）。"""
     notes = (evidence_notes or "").strip() or _EMPTY_NOTES_PLACEHOLDER
     brief = (draft_brief or "").strip()
     text = (
         f"## 发言任务\n{brief}\n\n"
         f"## 证据笔记\n{notes}\n\n"
+    )
+    hint = (ledger_hint or "").strip()
+    if hint:
+        text = f"{text}## 证据台账\n{hint}\n\n"
+    text = (
+        f"{text}"
         "请根据发言任务与证据笔记，直接输出【正式发言】全文（自由 markdown）。"
         "证据笔记只作素材，勿整段粘贴笔记标题或复述案件简介；禁止过程叙述与收工汇报。"
+        "【已核实·#eN】只能沿用证据笔记中出现过的 id。"
     )
     steer = (guard_steer or "").strip()
     if steer:
@@ -92,19 +109,21 @@ async def research_then_draft(
     gate_escalation_sink: list[dict] | None = None,
     token_budget: int = 0,
     finish_override_sink: list[FinishReason] | None = None,
-    evidence_tag_whitelist: Collection[str] | None = None,
-    check_source_grounding: bool = False,
+    cutoff_reason_sink: list[str] | None = None,
+    evidence_ledger: EvidenceLedger | None = None,
+    side_key: str = "",
+    check_evidence_ledger: bool = False,
+    allowed_ledger_ids: Collection[str] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """两阶段：可选 ReAct 检索产笔记（不进 run 卡片正文）→ 干净成稿（流式进卡片）。
 
     ``messages`` 就地延展：检索工具往返保留；成稿发言以 assistant 消息追加（供续轮记忆）。
     笔记正文不追加为产品消息——只经 journal 的 llm_call fact 可见。
 
-    成稿后过【已核实】标签闸（二选一装配，违规 ``run_output_reset`` 后回炉一次；再违规
-    剥离违规标签降级为【待核实·推断】后放行并记警告）：``evidence_tag_whitelist`` 非 None =
-    结辩白名单闸（新标签即违规）；``check_source_grounding`` = 出处软校验闸（opening / 续辩 /
-    质询作答：出处须与本方检索语料——user/tool 消息 + 成稿 brief + 当轮笔记——宽松对应，
-    拦凭空来源不拦写法差异）。
+    检索期经 ``evidence_ledger.research_proxy()`` 把工具命中写入共享核并注解 ``#eN``，
+    笔记行尾绑定 id；随后 ``commit_research`` 只提交 deep_read + 笔记引用子集上 wire。
+    成稿闸：``【已核实·#eN】`` 的 id 须 ∈ 本方笔记引用集 ∪ ``allowed_ledger_ids``
+    （结辩传入历轮并集）；违规回炉一次，再违规降级【待核实·推断】。
     """
     total_usage = TokenUsage()
     total_reasoning_parts: list[str] = []
@@ -122,6 +141,10 @@ async def research_then_draft(
 
     if tools_available:
         # 检索阶段：工具进度 / 思考可直播；正文不进 run_output_delta（避免笔记冒充发言）。
+        # 场级核经 proxy 注解 #eN（不发射回合 evidence_ledger SSE）。
+        research_ledger = (
+            evidence_ledger.research_proxy() if evidence_ledger is not None else None
+        )
         notes, research_reasoning, research_usage, research_rounds = await react_loop(
             messages=messages,
             llm=llm,
@@ -140,6 +163,8 @@ async def research_then_draft(
             raise_on_error=True,
             citation_sink=citation_sink,
             annotate_citations=False,
+            turn_evidence_ledger=research_ledger,  # type: ignore[arg-type]
+            ledger_registrant=side_key or "debater",
             approval_gate=approval_gate,
             usage_sink=usage_sink,
             on_round_begin=on_round_begin,
@@ -149,6 +174,7 @@ async def research_then_draft(
             gate_escalation_sink=gate_escalation_sink,
             token_budget=token_budget,
             finish_override_sink=finish_override_sink,
+            cutoff_reason_sink=cutoff_reason_sink,
         )
         total_usage = total_usage + research_usage
         total_rounds += research_rounds
@@ -160,6 +186,25 @@ async def research_then_draft(
             notes_chars=len((notes or "").strip()),
             rounds=research_rounds,
         )
+
+    note_cited = extract_ledger_ids(notes)
+    if evidence_ledger is not None:
+        newly = evidence_ledger.commit_research(note_cited_ids=note_cited)
+        if newly:
+            logger.info(
+                "debate.speech.ledger_commit",
+                run_id=run_id,
+                committed=sorted(newly),
+                note_cited=sorted(note_cited),
+            )
+
+    # 闸 / hint 基准：本方笔记引用 ∪ 显式允许集（结辩 = 历轮并集）。
+    known = frozenset(note_cited) | frozenset(allowed_ledger_ids or ())
+    ledger_hint = (
+        format_evidence_ledger_hint(evidence_ledger, ids=known)
+        if evidence_ledger is not None and known
+        else ""
+    )
 
     def _on_draft_content(delta: str) -> None:
         sink.emit(run_output_delta(run_id, agent_id, delta))
@@ -173,6 +218,7 @@ async def research_then_draft(
         draft_system=draft_system,
         draft_brief=draft_brief,
         evidence_notes=notes,
+        ledger_hint=ledger_hint,
         on_content=_on_draft_content,
         on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),
     )
@@ -181,40 +227,20 @@ async def research_then_draft(
     if draft_reasoning:
         total_reasoning_parts.append(draft_reasoning)
 
-    # ── 成稿【已核实】标签闸（结辩白名单 / 出处软校验，装配互斥、共用一次回炉预算） ──
-    grounding_corpus = ""
-    if check_source_grounding:
-        # 检索语料：transcript 里的 user（任务 brief 含底料 / 历轮材料）与 tool（历轮 + 当轮
-        # 工具取证原文）消息 + 本次成稿 brief + 当轮证据笔记。刻意不含 assistant 消息——
-        # 凭空来源不能靠自己此前的发言自我洗白。
-        parts = [m.content for m in messages if m.role in ("user", "tool") and m.content]
-        parts.append(draft_brief)
-        parts.append(notes)
-        grounding_corpus = "\n".join(parts)
+    # ── 成稿证据台账 id 闸（全 beat：立论 / 续辩 / 质询 / 结辩） ──
+    if check_evidence_ledger and evidence_ledger is not None:
+        def _guard_issues(text: str) -> tuple[list[str], str]:
+            bad = invalid_verified_tags(text, known)
+            if bad:
+                return bad, format_evidence_ledger_steer(bad)
+            return [], ""
 
-    def _guard_issues(text: str) -> tuple[str, list[str], str]:
-        """(闸名, 违规标签, 回炉 steer)；无违规 → ("", [], "")。"""
-        if evidence_tag_whitelist is not None:
-            novel = novel_verified_tags(text, frozenset(evidence_tag_whitelist))
-            if novel:
-                return "closing_whitelist", novel, format_closing_evidence_steer(novel)
-        if check_source_grounding:
-            ungrounded = ungrounded_verified_tags(text, grounding_corpus)
-            if ungrounded:
-                return (
-                    "source_grounding",
-                    ungrounded,
-                    format_source_grounding_steer(ungrounded),
-                )
-        return "", [], ""
-
-    if evidence_tag_whitelist is not None or check_source_grounding:
-        guard, bad_tags, steer = _guard_issues(speech)
-        if guard:
+        bad_tags, steer = _guard_issues(speech)
+        if bad_tags:
             logger.info(
                 "debate.speech.evidence_guard_rework",
                 run_id=run_id,
-                guard=guard,
+                guard="evidence_ledger",
                 tags=bad_tags,
             )
             sink.emit(run_output_reset(run_id, agent_id, "finish_guard"))
@@ -227,6 +253,7 @@ async def research_then_draft(
                 draft_system=draft_system,
                 draft_brief=draft_brief,
                 evidence_notes=notes,
+                ledger_hint=ledger_hint,
                 guard_steer=steer,
                 on_content=_on_draft_content,
                 on_reasoning=lambda d: sink.emit(
@@ -237,13 +264,13 @@ async def research_then_draft(
             total_rounds += 1
             if retry_reasoning:
                 total_reasoning_parts.append(retry_reasoning)
-            still_guard, still_tags, _ = _guard_issues(speech)
-            if still_guard:
+            still_tags, _ = _guard_issues(speech)
+            if still_tags:
                 demoted = demote_verified_tags(speech, still_tags)
                 logger.warning(
                     "debate.speech.evidence_guard_demote",
                     run_id=run_id,
-                    guard=still_guard,
+                    guard="evidence_ledger",
                     tags=still_tags,
                 )
                 if demoted != speech:
@@ -273,6 +300,7 @@ async def _stream_draft(
     on_content: Callable[[str], None],
     on_reasoning: Callable[[str], None],
     guard_steer: str = "",
+    ledger_hint: str = "",
 ) -> tuple[str, str, TokenUsage]:
     """无工具、干净上下文的成稿流式调用。"""
     draft_messages = [
@@ -280,7 +308,10 @@ async def _stream_draft(
         LLMMessage(
             role="user",
             content=build_draft_user(
-                draft_brief, evidence_notes, guard_steer=guard_steer
+                draft_brief,
+                evidence_notes,
+                guard_steer=guard_steer,
+                ledger_hint=ledger_hint,
             ),
         ),
     ]

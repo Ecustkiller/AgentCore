@@ -267,7 +267,7 @@ async def test_research_tool_citations_collected_into_sink():
     )
 
     assert content == "done"
-    assert sink_list == cites
+    assert sink_list == [{**cites[0], "tier": "unknown"}]
 
 
 async def test_terminal_tool_citations_collected_before_handoff():
@@ -284,7 +284,7 @@ async def test_terminal_tool_citations_collected_before_handoff():
     )
 
     assert content == "streamed answer"  # final_text surfaced as the reply
-    assert sink_list == cites
+    assert sink_list == [{**cites[0], "tier": "unknown"}]
 
 
 async def test_citation_numbers_injected_into_tool_output():
@@ -357,10 +357,8 @@ async def test_citation_numbers_stable_across_rounds_with_dedup():
 
 
 async def test_worker_path_collects_citations_without_annotating():
-    # Worker path (annotate_citations=False, 方案 B): the worker's sources are still
-    # aggregated into the sink (so the DelegateTool can fold them into the turn's
-    # shared card) but the worker's tool output is left un-numbered — its local
-    # numbering would be re-ordered when merged into the turn card and would mislead.
+    # 无回合台账时：worker annotate_citations=False 仍只收集、不注入旧 [n]
+    # （兼容路径）。接通 turn_evidence_ledger 后的 #rN 注解见 test_turn_evidence_ledger。
     cites = [
         {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
         {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},

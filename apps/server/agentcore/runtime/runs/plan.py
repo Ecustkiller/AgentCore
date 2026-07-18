@@ -37,11 +37,47 @@ class RunPlan:
 
     def add(self, spec: RunSpec) -> RunSpec:
         """Append one node. A duplicate ``run_id`` is a caller bug (ids are
-        minted by the caller) and raises rather than silently shadowing."""
+        minted by the caller) and raises rather than silently shadowing.
+
+        When ``spec.replaces_run_id`` is set (协调补派 / 冷回落接手), rewrite every
+        other node's ``depends_on`` entry that names the failed run so downstream
+        waits on the replacement instead of treating the failure as terminal.
+        """
         if any(n.run_id == spec.run_id for n in self.nodes):
             raise RunPlanError(f"duplicate run_id: {spec.run_id}")
         self.nodes.append(spec)
+        if spec.replaces_run_id:
+            self.rewrite_depends_for_replace(spec)
         return spec
+
+    def rewrite_depends_for_replace(self, replacement: RunSpec) -> list[str]:
+        """Point dependents of ``replacement.replaces_run_id`` at ``replacement.run_id``.
+
+        Returns the ``run_id``s whose ``depends_on`` changed (stable insertion order).
+        No-op when ``replaces_run_id`` is missing or equals the new id.
+        """
+        old = (replacement.replaces_run_id or "").strip()
+        new = replacement.run_id
+        if not old or old == new:
+            return []
+        touched: list[str] = []
+        for node in self.nodes:
+            if node.run_id == new:
+                continue
+            deps = node.depends_on
+            if old not in deps:
+                continue
+            rewritten: list[str] = []
+            seen: set[str] = set()
+            for dep in deps:
+                mapped = new if dep == old else dep
+                if mapped in seen:
+                    continue
+                seen.add(mapped)
+                rewritten.append(mapped)
+            node.depends_on = rewritten
+            touched.append(node.run_id)
+        return touched
 
     def by_id(self, run_id: str) -> RunSpec | None:
         return next((n for n in self.nodes if n.run_id == run_id), None)

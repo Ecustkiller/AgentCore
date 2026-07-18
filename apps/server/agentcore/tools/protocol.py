@@ -6,6 +6,7 @@ Tools declare their schema (for LLM function calling) and implement execute().
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -86,6 +87,38 @@ class ToolSchema:
     # safety net layered ABOVE a tool's own finer timeout (e.g. ``code_execute``
     # caps its sandbox itself), never a replacement for it.
     timeout_seconds: float | None = None
+
+
+@dataclass
+class RetrievalBudgetState:
+    """Per-run ``web_search`` / ``read_url`` counter (提案 A1).
+
+    Wired onto :class:`ToolContext` by the worker executor. ``used`` is reserved
+    before a live call and refunded on cache hits / uncharged results so parallel
+    tool_exec calls cannot overshoot ``limit``.
+    """
+
+    limit: int
+    used: int = 0
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.used)
+
+    async def try_reserve(self) -> bool:
+        """Reserve one slot. False ⇒ exhausted (caller must not run the tool)."""
+        async with self._lock:
+            if self.used >= self.limit:
+                return False
+            self.used += 1
+            return True
+
+    async def refund(self) -> None:
+        """Return a reserved slot (cache hit / uncharged call)."""
+        async with self._lock:
+            if self.used > 0:
+                self.used -= 1
 
 
 @dataclass
@@ -199,6 +232,11 @@ class ToolContext:
     # by the executor (引擎纯化, twin of ``on_phase``). ``None`` for call sites without a live sink
     # (tests / evals) — the tool simply skips the ping.
     on_progress: Callable[[str, dict[str, Any] | None], None] | None = None
+    # 检索预算 (提案 A1): per-run counter for ``web_search`` / ``read_url``. Wired by the
+    # worker executor from ``RunSpec.retrieval_budget``; ``None`` for CEO / tests without a
+    # budget (no enforcement). Shared by reference across ``replace`` so parallel tool
+    # calls in one run share one reserve/refund lock. Orthogonal to LoopController.
+    retrieval_budget: RetrievalBudgetState | None = None
 
 
 @dataclass

@@ -123,6 +123,14 @@ export interface ConversationState {
     citations: Citation[],
     conversationId?: string | null,
   ) => void;
+  attachEvidenceLedgerToLastMessage: (
+    payload: {
+      delta?: import("@/types/events").TurnEvidenceLedgerEntry[];
+      entries?: import("@/types/events").TurnEvidenceLedgerEntry[] | null;
+      cited_ids?: string[] | null;
+    },
+    conversationId?: string | null,
+  ) => void;
   attachFollowups: (
     followups: string[],
     messageId: string | null | undefined,
@@ -465,6 +473,33 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         if (!last || last.role !== "assistant") return null;
         const lane = foldCitations(messageLaneFromMessage(last), citations);
         messages[messages.length - 1] = { ...last, citations: lane.citations };
+        return { messages };
+      }),
+
+    attachEvidenceLedgerToLastMessage: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        let next = last.evidenceLedger ?? [];
+        if (Array.isArray(payload.entries)) {
+          next = payload.entries;
+        } else if (payload.delta?.length) {
+          const order: string[] = [];
+          const byId = new Map<string, (typeof next)[number]>();
+          for (const e of next) {
+            if (!byId.has(e.id)) order.push(e.id);
+            byId.set(e.id, e);
+          }
+          for (const e of payload.delta) {
+            if (!byId.has(e.id)) order.push(e.id);
+            byId.set(e.id, e);
+          }
+          next = order.map((id) => byId.get(id)!);
+        } else {
+          return null;
+        }
+        messages[messages.length - 1] = { ...last, evidenceLedger: next };
         return { messages };
       }),
 

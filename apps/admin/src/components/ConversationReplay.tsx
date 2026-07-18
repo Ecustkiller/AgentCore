@@ -1,3 +1,4 @@
+import { CopyableId } from "@/components/CopyableId";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -104,12 +105,11 @@ export function ConversationReplay({
                 value={fmtCny(nanoUsdToCny(data.cost_total, data.cny_per_usd))}
               />
             </div>
-            <code
-              className="mt-3 block truncate font-mono text-muted-foreground text-xs"
-              title={data.conversation.id}
-            >
-              {data.conversation.id}
-            </code>
+            <CopyableId
+              className="mt-3 block"
+              value={data.conversation.id}
+              label="conversation_id"
+            />
           </header>
 
           <div className="flex flex-col gap-3">
@@ -203,12 +203,12 @@ function MessageBlock({
             <span className="tabular-nums">委派 {metrics.workers} 队员</span>
           )}
           {metrics.trace_id && (
-            <code
-              className="rounded bg-muted px-1.5 py-0.5 font-mono"
-              title={metrics.trace_id}
-            >
-              {metrics.trace_id.slice(0, 8)}
-            </code>
+            <CopyableId
+              value={metrics.trace_id}
+              label="trace_id"
+              display={metrics.trace_id.slice(0, 8)}
+              titleHint={`${metrics.trace_id}（点击复制，用于 grep logs/dev.jsonl）`}
+            />
           )}
         </div>
       )}

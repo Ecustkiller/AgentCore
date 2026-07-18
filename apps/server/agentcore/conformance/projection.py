@@ -129,6 +129,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     captain_context: list[dict[str, Any]] = []
     process: list[dict[str, Any]] = []
     citations: list[dict[str, Any]] = []
+    evidence_ledger: list[dict[str, Any]] = []
+    cited_ids: list[str] = []
     agents: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
     plan_id: str | None = None
@@ -285,6 +287,29 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "citations":
             citations = list(p.get("citations") or [])
+
+        elif etype == "evidence_ledger":
+            # Turn 级台账通道：entries 权威覆盖；否则 merge delta（按 id）。
+            full = p.get("entries")
+            if isinstance(full, list):
+                evidence_ledger = list(full)
+            else:
+                for entry in p.get("delta") or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    eid = entry.get("id")
+                    if not eid:
+                        continue
+                    replaced = False
+                    for i, existing in enumerate(evidence_ledger):
+                        if existing.get("id") == eid:
+                            evidence_ledger[i] = entry
+                            replaced = True
+                            break
+                    if not replaced:
+                        evidence_ledger.append(entry)
+            if "cited_ids" in p and isinstance(p.get("cited_ids"), list):
+                cited_ids = [str(x) for x in p["cited_ids"]]
 
         elif etype == "run_plan":
             ip = p.get("execution_id")
@@ -869,6 +894,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         # live persist gate then stores no process, matching the fold).
         "process": process,
         "citations": citations,
+        "evidenceLedger": evidence_ledger,
+        "citedIds": cited_ids,
         "agents": agents,
         "runs": runs,
         "progress": {

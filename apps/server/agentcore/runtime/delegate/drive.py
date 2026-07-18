@@ -16,8 +16,8 @@ from agentcore.runtime.delegate.accumulate import (
 )
 from agentcore.runtime.delegate.boundary import boundary_hook, checkpoint_active
 from agentcore.runtime.delegate.ceo_format import direct_result, format_for_ceo
-from agentcore.runtime.delegate.nesting import absorb_children
 from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
+from agentcore.runtime.delegate.nesting import absorb_children
 from agentcore.runtime.delegate.supervised import (
     SupervisedRun,
     format_boundary_for_ceo,
@@ -40,6 +40,34 @@ if TYPE_CHECKING:
 type DelegateTool = Any
 
 logger = get_logger(__name__)
+
+
+def _post_session_all_completed(
+    session: Any,
+    *,
+    output: str,
+    completed: int | None = None,
+    total: int | None = None,
+    output_limit: int = 4000,
+) -> None:
+    """Post the coordination terminal event (happy path + criteria-gap / partial-fail)."""
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={
+                "completed": (
+                    completed if completed is not None else len(session.completed_run_ids)
+                ),
+                "total": total if total is not None else session.total_workers,
+                "output": output[:output_limit],
+            },
+        )
+    )
 
 
 async def _team_preview_before_workers(
@@ -248,6 +276,10 @@ async def drive(
         tool._approval_gate if worker_gate_applies(tool._base_tool_context.backend) else None
     )
 
+    from agentcore.runtime.suspension import turn_evidence_ledger as _turn_ledger_var
+
+    from agentcore.runtime.delegate.completion import resolve_completion_criteria
+
     cold_executor = build_agent_executor(
         plan=plan,
         llm=tool._llm,
@@ -268,6 +300,9 @@ async def drive(
         note_wall=note_wall,
         collaboration=collaboration,
         team_brief=tool._team_brief,
+        # 回合入口绑定的共享台账（与 CEO 同一对象）；辩论 executor 不经此路径。
+        turn_evidence_ledger=_turn_ledger_var.get(),
+        batch_completion_criteria=resolve_completion_criteria(completion_criteria, plan),
     )
 
     async def _continuation_aware_executor(spec: RunSpec, completed: dict) -> RunState:
@@ -823,10 +858,15 @@ async def drive(
             execution_id=execution_id,
             backend=tool._base_tool_context.backend,
         )
+        partial_output = format_for_ceo(tool, plan, results, call_idx=call_idx)
+        # Coordination terminal: workers are all marked done; without ALL_COMPLETED the
+        # CEO idle-waits the full coordination timeout (same class of bug as criteria gap).
+        if session is not None:
+            _post_session_all_completed(session, output=partial_output)
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=format_for_ceo(tool, plan, results, call_idx=call_idx),
+            output=partial_output,
             output_limit=DELEGATE_OUTPUT_LIMIT,
         )
 
@@ -851,19 +891,36 @@ async def drive(
 
     from agentcore.runtime.delegate.completion import (
         check_delegate_completion,
+        collect_delivered_files,
         format_completion_gap_message,
-        resolve_completion_criteria,
+        gap_fingerprint,
+        resolve_completion_with_source,
     )
 
-    criteria = resolve_completion_criteria(completion_criteria, plan)
+    resolved = resolve_completion_with_source(completion_criteria, plan)
+    criteria = resolved.criteria
     if criteria is not None:
         criteria_ok, gaps = check_delegate_completion(criteria, results)
         if not criteria_ok:
-            gap_msg = format_completion_gap_message(gaps)
+            delivered = collect_delivered_files(results)
+            fp = gap_fingerprint(criteria.kind, gaps)
+            streak = tool.note_completion_gap(fp)
+            escalate = streak >= 2
+            gap_msg = format_completion_gap_message(
+                gaps,
+                criteria_kind=criteria.kind,
+                source=resolved.source,
+                escalate=escalate,
+                delivered_files=delivered,
+            )
             logger.info(
                 "delegate.completion_criteria_unmet",
                 criteria=criteria.kind,
+                source=resolved.source,
                 gaps=gaps,
+                streak=streak,
+                escalate=escalate,
+                delivered_files=delivered[:24],
                 execution_id=execution_id,
             )
             # 交付状态（诚实对账）：验收未满足即是用户可见的交付缺口，连同批次级
@@ -876,6 +933,9 @@ async def drive(
                 backend=tool._base_tool_context.backend,
                 criteria_gaps=gaps,
             )
+            # Same terminal post as the success path — criteria gap is still end-of-batch.
+            if session is not None:
+                _post_session_all_completed(session, output=gap_msg)
             return ToolResult(
                 tool_call_id="",
                 success=True,
@@ -884,6 +944,9 @@ async def drive(
                 metadata=usage_metadata(call_usage),
                 citations=new_citations or None,
             )
+        tool.clear_completion_gap_streak()
+    else:
+        tool.clear_completion_gap_streak()
 
     # 交付状态（诚实对账）：正常收尾（含 finalize 单人直出）——有落盘文件或缺口才发，
     # 纯 prose 成功批次保持无声。放在 direct_result / format_for_ceo 分叉之前，两条
@@ -900,40 +963,18 @@ async def drive(
         only = results.get(plan.nodes[0].run_id)
         if only and only.phase is RunPhase.COMPLETED and only.content.strip():
             if session is not None:
-                from agentcore.runtime.coordination.session import (
-                    CoordinationEvent,
-                    CoordinationEventKind,
-                )
-
-                session.post(
-                    CoordinationEvent(
-                        kind=CoordinationEventKind.ALL_COMPLETED,
-                        payload={
-                            "completed": 1,
-                            "total": 1,
-                            "output": only.content[:2000],
-                        },
-                    )
+                _post_session_all_completed(
+                    session,
+                    output=only.content,
+                    completed=1,
+                    total=1,
+                    output_limit=2000,
                 )
             return direct_result(tool, only)
 
     output = format_for_ceo(tool, plan, results, call_idx=call_idx)
     if session is not None:
-        from agentcore.runtime.coordination.session import (
-            CoordinationEvent,
-            CoordinationEventKind,
-        )
-
-        session.post(
-            CoordinationEvent(
-                kind=CoordinationEventKind.ALL_COMPLETED,
-                payload={
-                    "completed": len(session.completed_run_ids),
-                    "total": session.total_workers,
-                    "output": output[:4000],
-                },
-            )
-        )
+        _post_session_all_completed(session, output=output)
     return ToolResult(
         tool_call_id="",
         success=True,

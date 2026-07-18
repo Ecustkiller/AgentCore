@@ -24,6 +24,13 @@ export interface LlmWindowMessage {
   tool_calls?: LlmWindowToolCall[] | null;
   tool_call_id?: string | null;
   reasoning_content?: string | null;
+  /**
+   * Diagnostic merge tag from `run_head.user_origin`.
+   * `context_blocks` = opening user was rendered from the structured `run_context`
+   * ContextBlock list (UI substitutes those segments; full `content` is the
+   * verbatim concat for「查看原始拼接」).
+   */
+  origin?: string | null;
 }
 
 /** `GET .../runs/{run_id}/llm-window` response. */

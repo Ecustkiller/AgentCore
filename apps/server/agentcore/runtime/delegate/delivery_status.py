@@ -89,12 +89,21 @@ def build_delivery_status(
     delivered = _delivered_files(results)
 
     gaps: list[dict[str, str]] = []
-    # ① 契约 / 交接残差（软接受后仍未对齐的声明交付物、degraded 交接简报…）。
-    for role, lines in collect_worker_gaps(plan, results):
-        for line in lines:
-            text = str(line).strip()
-            if text:
-                gaps.append({"role": role, "description": text})
+    # ① 契约 / 交接残差（软接受后仍未对齐的声明交付物、degraded 交接、预算/超时掐断…）。
+    for role, rows in collect_worker_gaps(plan, results):
+        for row in rows:
+            if isinstance(row, dict):
+                text = str(row.get("description") or "").strip()
+                reason = str(row.get("reason") or "").strip()
+            else:
+                text = str(row).strip()
+                reason = ""
+            if not text:
+                continue
+            item: dict[str, str] = {"role": role, "description": text}
+            if reason:
+                item["reason"] = reason
+            gaps.append(item)
     # ② 完成验收未满足（completion_criteria 缺口，批次级）。
     for gap in criteria_gaps or []:
         text = str(gap).strip()

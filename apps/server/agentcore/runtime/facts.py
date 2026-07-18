@@ -2,9 +2,9 @@
 
 The §8.3 Turn Journal is a turn's 唯一事实源: an append-only, per-turn ordered
 stream of facts from which everything replayable / resumable is a projection. The
-conceptual model is nine fact kinds::
+conceptual model is fact kinds including::
 
-    turn_started | round_boundary | llm_call | tool_call | interaction
+    turn_started | run_head | round_boundary | llm_call | tool_call | interaction
                  | note | run_event | message_final | turn_end
 
 Today the journal is **display-level**: it is derived from the SSE stream
@@ -21,8 +21,11 @@ kinds), making the journal lossless so the window / frame become projections of 
 (执行级事件溯源；as-built 见执行引擎 §8.3):
 
 - :class:`TurnStartedFact` — the turn's head: the *verbatim* system prompt, the user
-  message, the model profile. Anchors the window fold (the system prompt is dynamic —
-  date / skill directory — so it is captured, never re-rendered).
+  message, the model profile. Anchors the **captain** window fold (the system prompt is
+  dynamic — date / skill directory — so it is captured, never re-rendered).
+- :class:`RunHeadFact` — one worker (or continuation) run's opening task-prompt head:
+  its *verbatim* system + opening user message. Anchors that run's window fold so a
+  worker is never falsely headed by the turn-level ``turn_started`` (CEO) prompt.
 - :class:`RoundBoundaryFact` — one ReAct round edge (round_idx + run/role), the key
   ``round_boundary.fold`` cuts on to rebuild the pause snapshot per round.
 - :class:`LlmCallFact` — one LLM call's **output** (content / reasoning_content /
@@ -93,6 +96,7 @@ class FactKind(StrEnum):
     """
 
     TURN_STARTED = "turn_started"
+    RUN_HEAD = "run_head"
     ROUND_BOUNDARY = "round_boundary"
     LLM_CALL = "llm_call"
     TOOL_CALL = "tool_call"
@@ -134,12 +138,13 @@ class Fact:
 
 @dataclass(frozen=True, slots=True)
 class TurnStartedFact:
-    """The turn's head fact — the window fold's anchor.
+    """The turn's head fact — the **captain** window fold's anchor.
 
     ``system_prompt`` is captured *verbatim* (it is dynamic — date / skill directory —
     so re-rendering it on resume could drift). ``history_len`` is the number of prior
     conversation messages folded into the opening window (the history itself is a
-    projection of earlier turns, not duplicated here).
+    projection of earlier turns, not duplicated here). Worker windows use
+    :class:`RunHeadFact` instead — never this turn-level head.
     """
 
     system_prompt: str
@@ -156,6 +161,40 @@ class TurnStartedFact:
                 "user_message": self.user_message,
                 "model_profile": self.model_profile,
                 "history_len": self.history_len,
+            },
+            ts=ts,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunHeadFact:
+    """One run's opening task-prompt head — the worker / continuation window anchor.
+
+    Captures the *verbatim* ``system`` + opening ``user`` the executor built for this
+    ``run_id`` (cold-start from ContextBlocks, or a续写 beat's feedback wrapper). The
+    window fold prefers this over ``turn_started`` whenever present, so a worker's
+    diagnostic LLM window is never headed by the CEO turn prompt.
+
+    ``user_origin`` tags the opening user for the diagnostic wire (e.g.
+    ``context_blocks`` when that message was rendered from the structured
+    ``run_context`` block list) — the UI replaces the concatenated body with those
+    segments and offers「查看原始拼接」for the full text stored here.
+    """
+
+    run_id: str
+    system_prompt: str
+    user_message: str
+    user_origin: str = "context_blocks"
+    kind: ClassVar[FactKind] = FactKind.RUN_HEAD
+
+    def to_fact(self, ts: str | None = None) -> Fact:
+        return Fact(
+            kind=self.kind.value,
+            payload={
+                "run_id": self.run_id,
+                "system_prompt": self.system_prompt,
+                "user_message": self.user_message,
+                "user_origin": self.user_origin,
             },
             ts=ts,
         )
@@ -339,6 +378,8 @@ class TurnPausedFact:
     process: list[dict[str, Any]] | None = None
     run_processes: dict[str, list[dict[str, Any]]] | None = None
     citations: list[dict[str, Any]] | None = None
+    # 回合共享调研台账快照（引用即出处 P1 §七 / §十第 3 步提前）：resume 再水化同一内容。
+    evidence_ledger: list[dict[str, Any]] | None = None
     controller: dict[str, Any] | None = None
     # Optional adjuncts that ride the same fact (e.g. demo-tape frame cursor).
     # Unknown to live faces; readers tolerate absence.
@@ -356,6 +397,7 @@ class TurnPausedFact:
                 rid: list(steps) for rid, steps in (self.run_processes or {}).items()
             },
             "citations": list(self.citations) if self.citations else [],
+            "evidence_ledger": list(self.evidence_ledger) if self.evidence_ledger else [],
             "controller": dict(self.controller) if self.controller else {},
         }
         if self.extras:
@@ -372,6 +414,7 @@ class TurnPausedFact:
         process = payload.get("process")
         run_processes = payload.get("run_processes")
         citations = payload.get("citations")
+        evidence_ledger = payload.get("evidence_ledger")
         controller = payload.get("controller")
         extras = payload.get("extras")
         return cls(
@@ -386,6 +429,9 @@ class TurnPausedFact:
                 else {}
             ),
             citations=list(citations) if isinstance(citations, list) else [],
+            evidence_ledger=(
+                list(evidence_ledger) if isinstance(evidence_ledger, list) else []
+            ),
             controller=dict(controller) if isinstance(controller, dict) else {},
             extras=dict(extras) if isinstance(extras, dict) else None,
         )

@@ -2,13 +2,20 @@
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.delegate.completion import (
+    CompletionCriteria,
     check_delegate_completion,
     collect_worker_gaps,
+    format_batch_acceptance_for_worker,
     format_completion_gap_message,
+    format_resolved_acceptance_echo,
     format_worker_gaps_block,
+    gap_fingerprint,
+    hoist_task_completion_criteria,
     parse_completion_criteria,
     plan_suggests_code_verification,
     resolve_completion_criteria,
+    resolve_completion_with_source,
+    should_inject_batch_acceptance,
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
@@ -88,6 +95,31 @@ def test_format_completion_gap_message():
     assert "缺文件" in msg
 
 
+def test_format_gap_names_text_inferred_source_and_decl_hint():
+    msg = format_completion_gap_message(
+        ["尚无 worker 成功运行 code_execute / test_run 验证代码"],
+        criteria_kind="code_verified",
+        source="text_inferred",
+    )
+    assert "任务文案推断" in msg
+    assert "delegate 顶层" in msg
+    assert "completion_criteria=files_written" in msg
+
+
+def test_format_gap_escalates_after_same_gap_streak():
+    msg = format_completion_gap_message(
+        ["尚无 worker 成功运行 code_execute / test_run 验证代码"],
+        criteria_kind="code_verified",
+        source="text_inferred",
+        escalate=True,
+        delivered_files=["index.html", "style.css"],
+    )
+    assert "已交付产物" in msg
+    assert "`index.html`" in msg
+    assert "连续出现 2 次" in msg
+    assert "不要再以相同标准重派" in msg
+
+
 def test_plan_suggests_code_verification_on_run_open_tasks():
     plan = RunPlan(
         nodes=[
@@ -97,11 +129,112 @@ def test_plan_suggests_code_verification_on_run_open_tasks():
     assert plan_suggests_code_verification(plan)
 
 
-def test_resolve_infers_code_verified_when_omitted_and_task_implies_run():
+def test_resolve_never_binds_code_verified_from_task_text():
+    """B1: 文案「跑通」不再绑定 code_verified；省略 = 不强制。"""
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="npm run start 跑通")])
-    criteria = resolve_completion_criteria(None, plan)
-    assert criteria is not None
-    assert criteria.kind == "code_verified"
+    assert plan_suggests_code_verification(plan)  # 软警告启发仍命中
+    resolved = resolve_completion_with_source(None, plan)
+    assert resolved.criteria is None
+    assert resolved.source is None
+    assert format_resolved_acceptance_echo(resolved) == "本批验收：未启用"
+
+
+def test_resolve_form_files_beats_run_open_text_heuristics():
+    """Regression: 宣传站 form=files + 「打开/运行」文案不得推断为 code_verified."""
+    plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="w1",
+                task="写静态宣传官网 index.html，完成后打开页面验收",
+                deliverable=Deliverable(form="files", requires_files=True),
+            )
+        ]
+    )
+    assert plan_suggests_code_verification(plan)  # 文案仍命中启发
+    resolved = resolve_completion_with_source(None, plan)
+    assert resolved.criteria is not None
+    assert resolved.criteria.kind == "files_written"
+    assert resolved.source == "structured"
+
+
+def test_hoist_single_task_completion_criteria():
+    raw, err = hoist_task_completion_criteria(
+        None,
+        [{"role": "前端", "task": "写站", "completion_criteria": "files_written"}],
+    )
+    assert err is None
+    assert raw == "files_written"
+
+
+def test_hoist_unanimous_multi_task_completion_criteria():
+    raw, err = hoist_task_completion_criteria(
+        None,
+        [
+            {"role": "A", "task": "t1", "completion_criteria": "files_written"},
+            {"role": "B", "task": "t2", "completion_criteria": "files_written"},
+        ],
+    )
+    assert err is None
+    assert raw == "files_written"
+
+
+def test_hoist_conflict_multi_task_completion_criteria():
+    raw, err = hoist_task_completion_criteria(
+        None,
+        [
+            {"role": "A", "task": "t1", "completion_criteria": "files_written"},
+            {"role": "B", "task": "t2", "completion_criteria": "code_verified"},
+        ],
+    )
+    assert raw is None
+    assert err is not None
+    assert "冲突" in err
+    assert "顶层" in err
+
+
+def test_hoist_skipped_when_top_level_present():
+    raw, err = hoist_task_completion_criteria(
+        "code_verified",
+        [{"role": "A", "task": "t1", "completion_criteria": "files_written"}],
+    )
+    assert err is None
+    assert raw == "code_verified"
+
+
+def test_gap_fingerprint_stable_for_streak():
+    a = gap_fingerprint("code_verified", ["缺验证"])
+    b = gap_fingerprint("code_verified", ["缺验证"])
+    c = gap_fingerprint("files_written", ["缺验证"])
+    assert a == b
+    assert a != c
+
+
+def test_delegate_tool_same_gap_streak_escalates_at_two():
+    """Consecutive identical unmet gaps: streak 1 → 2 (escalate threshold)."""
+    from agentcore.core.types import AutonomyPolicy
+    from agentcore.runtime.events import EventSink
+    from agentcore.tools.builtin.delegate import DelegateTool
+    from agentcore.tools.registry import ToolRegistry
+    from tests.delegate.conftest import Provider, ctx
+
+    t = DelegateTool(
+        llm=Provider(["X"]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="u",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx(),
+        autonomy_policy=AutonomyPolicy.FULL_AUTO,
+    )
+    fp = gap_fingerprint("code_verified", ["缺验证"])
+    assert t.note_completion_gap(fp) == 1
+    assert t.note_completion_gap(fp) == 2
+    assert t.note_completion_gap(fp) == 3
+    other = gap_fingerprint("files_written", ["缺落盘"])
+    assert t.note_completion_gap(other) == 1
+    t.clear_completion_gap_streak()
+    assert t.note_completion_gap(fp) == 1
 
 
 def test_resolve_keeps_legacy_no_enforcement_for_doc_tasks():
@@ -241,3 +374,105 @@ def test_code_verified_empty_body_without_verify_is_gap():
     ok, gaps = check_delegate_completion(criteria, {"a": _run_empty_body()})
     assert not ok
     assert "code_execute" in gaps[0] or "验证" in gaps[0]
+
+
+def test_format_resolved_acceptance_echo_variants():
+    assert (
+        format_resolved_acceptance_echo(resolve_completion_with_source(None, None))
+        == "本批验收：未启用"
+    )
+    explicit = resolve_completion_with_source("code_verified", None)
+    assert format_resolved_acceptance_echo(explicit) == "本批验收：code_verified（显式声明）"
+    plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="w1",
+                task="建页面",
+                deliverable=Deliverable(form="files", requires_files=True),
+            )
+        ]
+    )
+    structured = resolve_completion_with_source(None, plan)
+    assert (
+        format_resolved_acceptance_echo(structured)
+        == "本批验收：files_written（结构化交付声明）"
+    )
+
+
+def test_should_inject_batch_acceptance_scopes_to_exec_files_nodes():
+    criteria = CompletionCriteria(kind="code_verified")
+    files_unrestricted = RunSpec(
+        run_id="w1",
+        task="写并跑通",
+        deliverable=Deliverable(form="files"),
+        tools=None,
+    )
+    files_exec = RunSpec(
+        run_id="w2",
+        task="写并跑通",
+        deliverable=Deliverable(form="files"),
+        tools=["file_write", "code_execute"],
+    )
+    files_no_exec = RunSpec(
+        run_id="w3",
+        task="只写文件",
+        deliverable=Deliverable(form="files"),
+        tools=["file_write", "file_read"],
+    )
+    prose = RunSpec(
+        run_id="w4",
+        task="调研",
+        deliverable=Deliverable(form="prose"),
+        tools=None,
+    )
+    assert should_inject_batch_acceptance(files_unrestricted, criteria)
+    assert should_inject_batch_acceptance(files_exec, criteria)
+    assert not should_inject_batch_acceptance(files_no_exec, criteria)
+    assert not should_inject_batch_acceptance(prose, criteria)
+    assert not should_inject_batch_acceptance(files_unrestricted, None)
+    line = format_batch_acceptance_for_worker(criteria)
+    assert "本批验收：code_verified" in line
+    assert "code_execute" in line
+
+
+def test_b2_injects_acceptance_into_deliverable_context_block():
+    """B2：持执行工具 ∧ form=files 的节点交付物规格含批次验收行；prose 同伴不注入。"""
+    from agentcore.runtime.runs.executor_context import _build_context_blocks
+
+    criteria = CompletionCriteria(kind="files_written")
+    writer = RunSpec(
+        run_id="w1",
+        task="写站点",
+        deliverable=Deliverable(form="files", requires_files=True),
+        tools=None,
+    )
+    researcher = RunSpec(
+        run_id="w2",
+        task="调研",
+        deliverable=Deliverable(form="prose"),
+        tools=None,
+    )
+    plan = RunPlan(nodes=[writer, researcher])
+    writer_blocks = _build_context_blocks(
+        plan,
+        writer,
+        {},
+        "原始请求",
+        writer.deliverable,
+        [],
+        batch_completion_criteria=criteria,
+    )
+    bodies = {b.channel: b.body for b in writer_blocks}
+    assert "deliverable" in bodies
+    assert "本批验收：files_written" in bodies["deliverable"]
+    research_blocks = _build_context_blocks(
+        plan,
+        researcher,
+        {},
+        "原始请求",
+        researcher.deliverable,
+        [],
+        batch_completion_criteria=criteria,
+    )
+    research_bodies = {b.channel: b.body for b in research_blocks}
+    assert "本批验收" not in (research_bodies.get("deliverable") or "")
