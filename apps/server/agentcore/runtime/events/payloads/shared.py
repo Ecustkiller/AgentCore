@@ -70,7 +70,10 @@ class CitationsPayload(WirePayload):
 
 
 class TurnEvidenceLedgerEntry(WirePayload):
-    """回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集；``registrant`` ↔ 辩论 ``side_key``）。"""
+    """回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集）。
+
+    ``registrant`` ↔ 辩论 ``side_key``。
+    """
 
     id: str  # #r1, #r2, …
     url: str = ""

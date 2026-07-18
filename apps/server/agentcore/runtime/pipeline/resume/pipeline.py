@@ -24,6 +24,7 @@ from agentcore.runtime.events import (
     error_event,
     message_end,
 )
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
@@ -39,7 +40,6 @@ from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_res
 from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.settlement import seed_settlement_dedupe_from_entries
-from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,

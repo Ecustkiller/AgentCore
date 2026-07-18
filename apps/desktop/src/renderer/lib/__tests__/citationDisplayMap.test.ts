@@ -39,17 +39,8 @@ describe("buildCitationDisplayMap", () => {
   });
 
   it("treats #rN as cited when citations[].id matches", () => {
-    const citations = [
-      { id: "#r5" },
-      { id: "#r3" },
-      { id: undefined },
-    ];
-    const map = buildCitationDisplayMap(
-      "争议 #r5#r3",
-      3,
-      null,
-      citations,
-    );
+    const citations = [{ id: "#r5" }, { id: "#r3" }, { id: undefined }];
+    const map = buildCitationDisplayMap("争议 #r5#r3", 3, null, citations);
     expect(map.toDisplay.get(1)).toBe(1); // #r5 → pool index 0 → canonical 1
     expect(map.toDisplay.get(2)).toBe(2); // #r3
     expect(map.referencedDisplay.has(1)).toBe(true);

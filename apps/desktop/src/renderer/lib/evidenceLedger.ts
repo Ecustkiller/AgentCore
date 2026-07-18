@@ -30,7 +30,9 @@ export function mergeEvidenceLedger(
     if (!byId.has(e.id)) order.push(e.id);
     byId.set(e.id, e);
   }
-  return order.map((id) => byId.get(id)!);
+  return order
+    .map((id) => byId.get(id))
+    .filter((e): e is EvidenceLedgerEntry => e !== undefined);
 }
 
 /** id → 条目；供徽章 O(1) 查表。 */

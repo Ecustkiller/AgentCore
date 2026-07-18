@@ -113,7 +113,9 @@ _REPLAN_PARAMETERS = {
         },
         "add": {
             "type": "array",
-            "description": "可选：追加全新步骤（role+task 必填；可 depends_on 现有 run_id 或本批 id）。",
+            "description": (
+                "可选：追加全新步骤（role+task 必填；可 depends_on 现有 run_id 或本批 id）。"
+            ),
             "items": {
                 "type": "object",
                 "properties": {

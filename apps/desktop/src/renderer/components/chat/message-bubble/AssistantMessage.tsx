@@ -15,8 +15,8 @@ import {
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
-import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
 import { copyText } from "@/lib/clipboard";
+import { isEmptyInterruptedAssistant } from "@/lib/composerContinueHint";
 import {
   connectivityEscalationSuffix,
   degradedFinishChipLabel,

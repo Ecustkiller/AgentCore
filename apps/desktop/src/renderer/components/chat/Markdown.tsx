@@ -22,7 +22,9 @@ import { SourceTooltip } from "./SourcePreview";
 import { rehypeCodeMeta } from "./rehypeCodeMeta";
 import { splitMarkdownBlocks } from "./streamingMarkdown";
 
-function ledgerEntryAsCitation(entry: TurnEvidenceLedgerEntry): Citation | null {
+function ledgerEntryAsCitation(
+  entry: TurnEvidenceLedgerEntry,
+): Citation | null {
   const url = (entry.url ?? "").trim();
   if (!url) return null;
   return {
@@ -138,9 +140,10 @@ function resolveLedgerCitation(
   if (!asCite) return null;
   // Prefer a pool row with the same URL so display numbers stay aligned with SourceCards.
   const byUrl = citations.findIndex((c) => c.url === asCite.url);
-  if (byUrl >= 0) {
+  const matchedByUrl = byUrl >= 0 ? citations[byUrl] : undefined;
+  if (matchedByUrl) {
     return {
-      citation: citations[byUrl]!,
+      citation: matchedByUrl,
       poolIndex: byUrl,
       displayFallback: byUrl + 1,
     };
@@ -296,7 +299,8 @@ export const Markdown = memo(function Markdown({
   // deltas keep using the stable module-level remark plugins. `evidence` (debate
   // speech) appends remarkEvidence; deps-memoized so it stays a stable ref across deltas.
   const remarks = useMemo(() => {
-    if (citationCount <= 0 && ledgerIdCount <= 0 && !evidence) return remarkPlugins;
+    if (citationCount <= 0 && ledgerIdCount <= 0 && !evidence)
+      return remarkPlugins;
     return [
       ...remarkPlugins,
       ...(citationCount > 0 || ledgerIdCount > 0

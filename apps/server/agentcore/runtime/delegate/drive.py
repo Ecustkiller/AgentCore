@@ -276,9 +276,8 @@ async def drive(
         tool._approval_gate if worker_gate_applies(tool._base_tool_context.backend) else None
     )
 
-    from agentcore.runtime.suspension import turn_evidence_ledger as _turn_ledger_var
-
     from agentcore.runtime.delegate.completion import resolve_completion_criteria
+    from agentcore.runtime.suspension import turn_evidence_ledger as _turn_ledger_var
 
     cold_executor = build_agent_executor(
         plan=plan,

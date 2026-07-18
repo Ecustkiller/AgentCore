@@ -7,16 +7,16 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.runtime.delegate.completion import (
+    CompletionCriteria,
+    format_batch_acceptance_for_worker,
+    should_inject_batch_acceptance,
+)
 from agentcore.runtime.runs.constants import (
     DEP_CONTEXT_BUDGET,
     DEP_SUMMARY_CHARS,
     WORKSPACE_MANIFEST_CHAR_BUDGET,
     WORKSPACE_MANIFEST_MAX_FILES,
-)
-from agentcore.runtime.delegate.completion import (
-    CompletionCriteria,
-    format_batch_acceptance_for_worker,
-    should_inject_batch_acceptance,
 )
 from agentcore.runtime.runs.contract import describe_deliverable
 from agentcore.runtime.runs.executor_identities import (

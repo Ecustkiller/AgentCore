@@ -84,9 +84,11 @@ function CitationChip({
     );
     if (!source?.url) return <>{dataLedgerId}</>;
     const n =
-      citations.findIndex((c) => c.id === dataLedgerId || c.url === source.url) +
-      1;
-    const label = n > 0 ? n : (Number(/^#r(\d+)$/.exec(dataLedgerId)?.[1]) || dataLedgerId);
+      citations.findIndex(
+        (c) => c.id === dataLedgerId || c.url === source.url,
+      ) + 1;
+    const label =
+      n > 0 ? n : Number(/^#r(\d+)$/.exec(dataLedgerId)?.[1]) || dataLedgerId;
     return (
       <a
         className="cite-chip"

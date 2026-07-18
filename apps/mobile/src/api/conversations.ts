@@ -11,6 +11,7 @@ import type {
   ContextBlockWire,
   ProcessStep,
   SSEEvent,
+  TurnEvidenceLedgerEntry,
 } from "@agentcore/contract-types";
 
 type Schemas = components["schemas"];
@@ -50,6 +51,8 @@ export interface MessageDetail {
   content: string | null;
   reasoning_content: string | null;
   citations: Citation[];
+  /** 回合调研台账（引用即出处 P1, DERIVED）：messages.evidence_ledger；`#rN` 冷启动。 */
+  evidenceLedger?: TurnEvidenceLedgerEntry[];
   runs: RunsPayload | null;
   attachments?: AttachmentMeta[];
   /** Progressive assistant-row lifecycle (``usage.status`` · P4 hydrate). */
@@ -166,7 +169,8 @@ export interface MessageWindow {
   memoryUpdates: MemoryUpdate[];
 }
 
-function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
+/** Map one OpenAPI MessageDetail row → mobile {@link MessageDetail} (incl. evidence_ledger). */
+export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
   const runs = row.runs;
   const status = row.status ?? null;
   // Cold-path pause latch: write keeps status=running + paused=true; hydrate as
@@ -181,6 +185,9 @@ function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
     content: row.content,
     reasoning_content: row.reasoning_content ?? null,
     citations: (row.citations ?? []) as Citation[],
+    evidenceLedger: row.evidence_ledger?.length
+      ? (row.evidence_ledger as TurnEvidenceLedgerEntry[])
+      : undefined,
     runs: runs
       ? {
           events: (runs.events ?? []) as unknown as SSEEvent[],

@@ -3,7 +3,10 @@
  * LLM 消息骨架（系统提示 + 开场用分段替代 + 后续轮次）。双数据管线保留：
  * SSE ``run_context`` → blocks；REST llm-window → messages。
  */
-import { ContextBlockCard, ReceivedContextSection } from "@/components/chat/ReceivedContext";
+import {
+  ContextBlockCard,
+  ReceivedContextSection,
+} from "@/components/chat/ReceivedContext";
 import { Button } from "@/components/ui";
 import {
   Dialog,
@@ -59,9 +62,13 @@ export function WorkerContextSection({
     );
   }
 
-  const hasSkeleton =
-    diagnostic.available && diagnostic.messages.length > 0;
-  if (blocks.length === 0 && !hasSkeleton && !diagnostic.loading && !diagnostic.error) {
+  const hasSkeleton = diagnostic.available && diagnostic.messages.length > 0;
+  if (
+    blocks.length === 0 &&
+    !hasSkeleton &&
+    !diagnostic.loading &&
+    !diagnostic.error
+  ) {
     return null;
   }
 
@@ -197,9 +204,7 @@ function DiagnosticContextSkeleton({
             </p>
           ) : null}
 
-          {!diagnostic.loading &&
-          !diagnostic.available &&
-          blocks.length > 0 ? (
+          {!diagnostic.loading && !diagnostic.available && blocks.length > 0 ? (
             <p className="text-xs text-muted-foreground">
               无法从 journal 重建后续轮次（可能缺少 execution facts）。
             </p>
@@ -223,7 +228,8 @@ function DiagnosticContextSkeleton({
             <DialogHeader>
               <DialogTitle>原始拼接</DialogTitle>
               <DialogDescription>
-                开场 user 消息的全文（喂给模型的逐字拼接；结构化分段在事件侧可能截断）。
+                开场 user
+                消息的全文（喂给模型的逐字拼接；结构化分段在事件侧可能截断）。
               </DialogDescription>
             </DialogHeader>
             <pre className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-xs leading-relaxed text-foreground">
@@ -243,10 +249,7 @@ function SystemPromptRow({
   content: string;
   keyBase: string;
 }) {
-  const [open, setOpen] = usePersistentDisclosure(
-    `${keyBase}:sys`,
-    false,
-  );
+  const [open, setOpen] = usePersistentDisclosure(`${keyBase}:sys`, false);
   const chars = content.length;
   return (
     <div className="rounded-lg border border-border/60 bg-background">

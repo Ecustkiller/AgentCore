@@ -277,13 +277,31 @@ async function probe(page) {
   });
 }
 
-async function shot(page, absPath) {
+/** Default: skip overwrite of existing stills. PROMO_OVERWRITE=1|all|id,id */
+function mayOverwriteStill(id) {
+  const raw = (process.env.PROMO_OVERWRITE || "").trim();
+  if (!raw) return false;
+  if (raw === "1" || raw.toLowerCase() === "all") return true;
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean)).has(id);
+}
+
+async function shot(page, absPath, { id, force = false } = {}) {
+  const stillId = id || absPath.replace(/.*[/\\]/, "").replace(/\.png$/i, "");
+  if (!force && !mayOverwriteStill(stillId)) {
+    try {
+      await access(absPath);
+      console.log("SKIP existing still (set PROMO_OVERWRITE to replace)", stillId);
+      return { path: absPath, skipped: true };
+    } catch {
+      /* write new */
+    }
+  }
   await page.screenshot({
     path: absPath,
     fullPage: false,
     type: "png",
   });
-  return absPath;
+  return { path: absPath, skipped: false };
 }
 
 async function denseSequence(page, dir, prefix, count, intervalMs) {

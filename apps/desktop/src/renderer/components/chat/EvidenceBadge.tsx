@@ -40,8 +40,7 @@ export function EvidenceBadge({
   const note = nodeText(children).trim();
   const ledger = useEvidenceLedgerMap();
   const ledgerId = verified ? extractLedgerId(note) : null;
-  const entry =
-    ledgerId && ledger ? (ledger.get(ledgerId) ?? null) : null;
+  const entry = ledgerId && ledger ? (ledger.get(ledgerId) ?? null) : null;
 
   if (entry) {
     const display = ledgerBadgeLabel(entry);

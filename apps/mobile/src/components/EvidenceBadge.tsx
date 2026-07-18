@@ -1,8 +1,5 @@
 import { useEvidenceLedgerMap } from "@/components/EvidenceLedgerContext";
-import {
-  extractLedgerId,
-  ledgerBadgeLabel,
-} from "@/lib/evidenceLedger";
+import { extractLedgerId, ledgerBadgeLabel } from "@/lib/evidenceLedger";
 import { BadgeCheck, CircleHelp } from "lucide-react";
 import { Children, type ReactNode, isValidElement } from "react";
 
@@ -28,8 +25,7 @@ export function EvidenceBadge({
   const note = nodeText(children).trim();
   const ledger = useEvidenceLedgerMap();
   const ledgerId = verified ? extractLedgerId(note) : null;
-  const entry =
-    ledgerId && ledger ? (ledger.get(ledgerId) ?? null) : null;
+  const entry = ledgerId && ledger ? (ledger.get(ledgerId) ?? null) : null;
   const displayNote = entry ? ledgerBadgeLabel(entry) : note;
   const hint = verified
     ? entry

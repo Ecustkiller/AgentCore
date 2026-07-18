@@ -184,19 +184,20 @@ async function main() {
       }, job.round);
       await page.waitForTimeout(400);
 
-      const path = resolve(stillsDir, `${job.id}.png`);
-      await page.screenshot({ path, fullPage: false });
-      if (blobInfo.hit) {
-        result.ok.push(job.id);
-        console.log("OK", job.id);
-      } else {
+      // Content gate: never overwrite a still with a miss viewport.
+      if (!blobInfo.hit) {
         result.miss.push({
           id: job.id,
-          reason: `needles not in round parent (len=${blobInfo.len})`,
+          reason: `needles not in round parent (len=${blobInfo.len}); left disk untouched`,
           snip: blobInfo.snip,
         });
-        console.log("MISS", job.id);
+        console.log("MISS (no write)", job.id);
+        continue;
       }
+      const path = resolve(stillsDir, `${job.id}.png`);
+      await page.screenshot({ path, fullPage: false });
+      result.ok.push(job.id);
+      console.log("OK", job.id);
     }
   } catch (e) {
     result.fatal = String(e?.stack ?? e);

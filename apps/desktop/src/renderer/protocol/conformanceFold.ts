@@ -632,5 +632,7 @@ function mergeTurnLedger(
     if (!byId.has(e.id)) order.push(e.id);
     byId.set(e.id, e as ProjectedEvidenceLedgerEntry);
   }
-  return order.map((id) => byId.get(id)!);
+  return order
+    .map((id) => byId.get(id))
+    .filter((e): e is ProjectedEvidenceLedgerEntry => e !== undefined);
 }

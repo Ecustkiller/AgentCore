@@ -18,7 +18,6 @@ from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-
 # NOTE: the coordination-registry isolation fixture lives in the ROOT tests/conftest.py
 # (``_isolate_coordination_registry``). It used to live here, but a directory-level
 # autouse fixture silently DROPS when the same directory's files are passed on the CLI

@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 from agentcore.runtime.citations import citation_tier_for_url, normalize_citation_url
 
+
 def _norm_title(title: str) -> str:
     return re.sub(r"\s+", "", (title or "").strip().casefold())
 

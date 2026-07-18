@@ -8,6 +8,7 @@
 // Exhaustive `switch` + `assertNever` (支柱2): a new backend SSE type added to
 // @agentcore/contract-types breaks this build until it is handled here.
 
+import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
@@ -27,9 +28,10 @@ import type {
   DelegationAuthorizationRequiredPayload,
   DelegationAuthorizationResolvedPayload,
   DeliveryStatusPayload,
-  EvidenceLedgerEntry,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
+  EvidenceLedgerEntry,
+  EvidenceLedgerPayload,
   FollowupsGeneratedPayload,
   MessageEndPayload,
   MessageStartPayload,
@@ -57,7 +59,6 @@ import type {
   TeamSynthesisPreviewPayload,
   ToolPhase,
   ToolUseEndPayload,
-  EvidenceLedgerPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
   TurnEvidenceLedgerEntry,
@@ -73,7 +74,6 @@ import type {
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
-import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 const FINISH_TO_STATUS: Record<string, TurnStatus> = {
@@ -1061,7 +1061,9 @@ function mergeTurnLedger(
     if (!byId.has(e.id)) order.push(e.id);
     byId.set(e.id, e as ProjectedEvidenceLedgerEntry);
   }
-  return order.map((id) => byId.get(id)!);
+  return order
+    .map((id) => byId.get(id))
+    .filter((e): e is ProjectedEvidenceLedgerEntry => e !== undefined);
 }
 
 /**

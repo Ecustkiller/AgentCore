@@ -563,8 +563,7 @@ describe("buildGraphStructure · bookend sink edges", () => {
     );
     expect(
       rawEdges.some(
-        (e) =>
-          e.kind === "handoff" && e.source === "w1" && e.target === "w1b",
+        (e) => e.kind === "handoff" && e.source === "w1" && e.target === "w1b",
       ),
     ).toBe(true);
     expect(sinkTargets(rawEdges)).toEqual(["w1b", "w2"]);

@@ -65,7 +65,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   evidence_ledger: {
     verdict: "ported",
     surface:
-      "fold → ProjectedTurn.evidenceLedger / citedIds；Citation.id 透传；来源卡 id 溯源完整面板桌面先行（对齐 O7）",
+      "fold → ProjectedTurn.evidenceLedger → ChatPage/Preview Markdown；history=toMessageDetail(evidence_ledger)；辩论 `#eN` 仍走 extractEvidenceLedger→TeamView（O7 无 Popover）",
   },
 
   // —— 多 Agent 团队 ——
@@ -350,7 +350,10 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
       "协调插话徽标：desktop team 块渲染；手机本切片仅 fold → userInterjections（parity 最小同步）",
   },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
-  CitationTierBadge: { verdict: "ported", surface: "AssistantView · 来源可信度徽标" },
+  CitationTierBadge: {
+    verdict: "ported",
+    surface: "AssistantView · 来源可信度徽标",
+  },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
   DebateProgressLine: {
     verdict: "ported",

@@ -3,10 +3,7 @@
  * 配色走语义 token（color-tokens.mdc）；未知 / 缺字段不渲染（legacy 卡零噪音）。
  */
 
-const TIER_META: Record<
-  string,
-  { label: string; className: string }
-> = {
+const TIER_META: Record<string, { label: string; className: string }> = {
   official: {
     label: "官方",
     className: "bg-success/10 text-success",

@@ -38,8 +38,14 @@ async def test_persist_tail_runs_inside_trace_scope(monkeypatch):
         captured["ctx"] = dict(structlog.contextvars.get_contextvars())
         captured["kwargs"] = kwargs
 
+    async def _fake_placeholder(**_kwargs):
+        return None
+
     monkeypatch.setattr(turn_runner, "run_chat_pipeline", _fake_pipeline)
     monkeypatch.setattr(turn_runner, "persist_turn_result", _spy_persist)
+    # run_and_persist creates the assistant row before the pipeline; stub so this
+    # unit test never hits UUID/DB validation (intent is only the persist-tail scope).
+    monkeypatch.setattr(turn_runner, "create_assistant_placeholder", _fake_placeholder)
 
     await turn_runner.run_and_persist(
         conversation_id="c-scope",

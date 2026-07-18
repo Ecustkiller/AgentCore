@@ -101,7 +101,8 @@ class AskUserTool:
             "choice 可配 detail / recommended。用法见 consult_skill。"
         )
         tool_desc = (
-            "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；blocking=false 非阻塞按默认继续。"
+            "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；"
+            "blocking=false 非阻塞按默认继续。"
             "开场用开工提案卡；途中克制打断。详见 consult_skill"
             "（ask_user_kickoff / ask_user_midtask）。"
         )
@@ -135,7 +136,10 @@ class AskUserTool:
                     },
                     "assumptions": {
                         "type": "array",
-                        "description": "可选（开场）：低影响默认可逆决策（只读陈列）。高杠杆放 questions。",
+                        "description": (
+                            "可选（开场）：低影响默认可逆决策（只读陈列）。"
+                            "高杠杆放 questions。"
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {

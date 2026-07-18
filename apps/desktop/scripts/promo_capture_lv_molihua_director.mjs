@@ -19,12 +19,40 @@
  * Env aliases: PROMO_TAPE / PROMO_OUT.
  */
 
-import { mkdir, rm, writeFile, copyFile, access } from "node:fs/promises";
+import { mkdir, rm, writeFile, copyFile, access, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { preview } from "vite";
 import { spawnSync } from "node:child_process";
+
+/** Known still catalog for MANIFEST merge when this run did not re-capture. */
+const STILL_CATALOG = {
+  "01-user-prompt": { label: "用户输入开场 prompt", usage: "第二幕 · 一句话发起" },
+  "02-team-preview": { label: "开工卡 / 授权开赛", usage: "第四幕组队+授权；冷开场可闪" },
+  "03-debate-opening": { label: "辩论室开场", usage: "冷开场 / 第五幕引入" },
+  "04-r2-diamond-square": { label: "交锋1 · 公共元素 vs 获得显著性", usage: "交锋1" },
+  "04b-r2-quote-closeup": { label: "交锋1 金句定点特写", usage: "交锋1 金句特写", new: true },
+  "05-r3-logo-swap": { label: "第2轮 · 跨类标准与真实使用", usage: "交锋2" },
+  "05b-r4-logo-defense": { label: "第3轮 · 无茶饮消费者混淆调查", usage: "交锋3" },
+  "06-r5-burden": { label: "第4轮 · 再钉实证门槛", usage: "交锋3 决胜" },
+  "07-evidence-gap-admit": {
+    label: "质询高光 · LV 承认无消费者调查（宽景）",
+    usage: "交锋3 质询高光",
+  },
+  "07b-admit-closeup": {
+    label: "质询承认句特写",
+    usage: "交锋3 全片最强镜头；须可读「我承认没有消费者调查数据支撑…」",
+    new: true,
+  },
+  "08-final-verdict": { label: "主持人终审 · 微弱倾向茉莉奶白", usage: "冷开场 / 第六幕裁决" },
+  "09-collab-graph": { label: "协作图 · 授权后团队结构", usage: "冷开场画面1" },
+  "09b-collab-graph-final": {
+    label: "协作图终态全貌（四轮打完）",
+    usage: "第七幕收尾",
+    new: true,
+  },
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
@@ -134,9 +162,22 @@ async function expandDebateFullText(page) {
   if (n > 0) await page.waitForTimeout(400);
 }
 
-/** After director seek: remount → 辩论室 → optional round chip → expand. */
-async function landDebateAfterSeek(page, base, cid, { round } = {}) {
-  await hardReloadConversation(page, base, cid);
+/**
+ * After director seek: remount → 辩论室 → optional round chip → expand.
+ * Prefer direct conversation goto (admit.mjs path); home-bounce often lands on
+ * case-brief chat without a populated 辩论室 fold.
+ */
+async function landDebateAfterSeek(page, base, cid, { round, bounceHome = false } = {}) {
+  if (bounceHome) {
+    await hardReloadConversation(page, base, cid);
+  } else {
+    await page.goto(new URL(`index.webapp.html#/conversations/${cid}`, base).href, {
+      waitUntil: "load",
+      timeout: 30_000,
+    });
+    await page.waitForTimeout(1500);
+    await dismissOnboarding(page);
+  }
   await ensureDebateRoom(page);
   if (round) {
     const chip = page.getByRole("button", {
@@ -260,9 +301,62 @@ async function probe(page) {
   });
 }
 
-async function shot(page, absPath) {
-  await page.screenshot({ path: absPath, fullPage: false, type: "png" });
-  return absPath;
+/**
+ * Still write policy (anti-regression):
+ * - Default: do NOT overwrite an existing still (protects finalized storyboard frames).
+ * - Opt-in: PROMO_OVERWRITE=1 (all) or PROMO_OVERWRITE=id1,id2 (selective).
+ * Callers must still gate on content needles before calling when the frame is
+ * storyboard-critical; this only prevents silent clobber of good files.
+ */
+function mayOverwriteStill(id) {
+  const raw = (process.env.PROMO_OVERWRITE || "").trim();
+  if (!raw) return false;
+  if (raw === "1" || raw.toLowerCase() === "all") return true;
+  const allow = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  return allow.has(id);
+}
+
+async function shot(page, absPath, { id, force = false } = {}) {
+  const stillId = id || absPath.replace(/.*[/\\]/, "").replace(/\.png$/i, "");
+  if (!force && !mayOverwriteStill(stillId)) {
+    try {
+      await access(absPath);
+      console.log("SKIP existing still (set PROMO_OVERWRITE to replace)", stillId);
+      return { path: absPath, skipped: true };
+    } catch {
+      /* not present — write */
+    }
+  }
+  let lastErr;
+  for (let i = 0; i < 5; i++) {
+    try {
+      await page.screenshot({ path: absPath, fullPage: false, type: "png" });
+      return { path: absPath, skipped: false };
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function writeFileRetry(path, data, enc = "utf8") {
+  let lastErr;
+  for (let i = 0; i < 5; i++) {
+    try {
+      await writeFile(path, data, enc);
+      return;
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 function authHeaders(cookieHeader, csrf) {
@@ -519,16 +613,18 @@ async function main() {
     await page.waitForTimeout(300);
     {
       const path = resolve(stillsDir, "01-user-prompt.png");
-      await shot(page, path);
-      mark({
-        id: "01-user-prompt",
-        file: "stills/01-user-prompt.png",
-        path,
-        label: "用户输入开场 prompt",
-        usage: "第二幕 · 一句话发起",
-        tape_t_ms: 0,
-        clean: true,
-      });
+      const wrote = await shot(page, path, { id: "01-user-prompt" });
+      if (!wrote.skipped) {
+        mark({
+          id: "01-user-prompt",
+          file: "stills/01-user-prompt.png",
+          path,
+          label: "用户输入开场 prompt",
+          usage: "第二幕 · 一句话发起",
+          tape_t_ms: 0,
+          clean: true,
+        });
+      }
     }
 
     wall0 = Date.now();
@@ -543,22 +639,23 @@ async function main() {
     );
     {
       const path = resolve(stillsDir, "02-team-preview.png");
-      await shot(page, path);
-      mark({
-        id: "02-team-preview",
-        file: "stills/02-team-preview.png",
-        path,
-        label: "开工卡 / 授权开赛",
-        usage: "第四幕组队+授权；冷开场可闪",
-        tape_t_ms: 32_000,
-        clean: true,
-      });
+      const wrote = await shot(page, path, { id: "02-team-preview" });
+      if (!wrote.skipped) {
+        mark({
+          id: "02-team-preview",
+          file: "stills/02-team-preview.png",
+          path,
+          label: "开工卡 / 授权开赛",
+          usage: "第四幕组队+授权；冷开场可闪",
+          tape_t_ms: 32_000,
+          clean: true,
+        });
+      }
     }
 
     // ════════ Director acceptance ════════
-    // Click authorize so SPA has a live debate fold (seek-only hardReload often
-    // lands on case-brief chat without a populated 辩论室). Then exercise
-    // chapter jump / cross-auth via rewind→seek.
+    // Order matters: authorize + live fold first; seek content while healthy;
+    // rewind/cross-auth LAST (restart-seek can leave SPA on case-brief only).
     {
       const authBtn = page.getByRole("button", {
         name: /授权开赛|授权并开工|开做/,
@@ -568,7 +665,6 @@ async function main() {
         report.notes.push("clicked 授权开赛 before director tests");
         await page.waitForTimeout(800);
       }
-      // Wait until debate room is openable / visible (live)
       for (let i = 0; i < 40; i++) {
         await ensureDebateRoom(page);
         const p = await probe(page);
@@ -579,86 +675,29 @@ async function main() {
         const ui = await probe(page);
         if (ui.debate || /正方|反方|立论|第\s*1\s*轮/.test(ui.text)) {
           const path = resolve(stillsDir, "03-debate-opening.png");
-          await shot(page, path);
-          mark({
-            id: "03-debate-opening",
-            file: "stills/03-debate-opening.png",
-            path,
-            label: "辩论室开场",
-            usage: "冷开场 / 第五幕引入",
-            tape_t_ms: 52_000,
-            clean: true,
-            director: "live authorize + 辩论室",
-          });
+          const wrote = await shot(page, path, { id: "03-debate-opening" });
+          if (!wrote.skipped) {
+            mark({
+              id: "03-debate-opening",
+              file: "stills/03-debate-opening.png",
+              path,
+              label: "辩论室开场",
+              usage: "冷开场 / 第五幕引入",
+              tape_t_ms: 52_000,
+              clean: true,
+              director: "live authorize + 辩论室",
+            });
+          }
         }
       }
 
       const chapters = await director(API, cookieHeader, csrf, cid, "GET", "/chapters");
       report.chapters = chapters?.chapters ?? [];
-
-      // cross-auth / chapter jump: rewind to team_preview then seek to r1
-      await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
-        chapter_id: "team_preview",
-      });
-      await waitStatus(
-        API,
-        cookieHeader,
-        csrf,
-        cid,
-        (s) =>
-          String(s.state).includes("await") ||
-          (s.chapter_label || "").includes("组队") ||
-          Number(s.t_ms) < 200000,
-        { timeoutMs: 90_000, label: "rewind team_preview" },
-      );
-      await landDebateAfterSeek(page, base, cid, {});
-      const uiAtPreview = await probe(page);
-
-      await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
-        chapter_id: "r1_argument",
-      });
-      await waitStatus(
-        API,
-        cookieHeader,
-        csrf,
-        cid,
-        (s) => (s.chapter_label || "").includes("第1轮") || Number(s.t_ms) >= 50000,
-        { timeoutMs: 90_000, label: "chapter r1_argument" },
-      );
-      const stR1 = await director(API, cookieHeader, csrf, cid, "GET", "/status");
-      await landDebateAfterSeek(page, base, cid, { round: 1 });
-      let ui = await probe(page);
-      if (!(ui.debate || /正方|反方|立论/.test(ui.text))) {
-        await landDebateAfterSeek(page, base, cid, { round: 1 });
-        ui = await probe(page);
-      }
-      const serverChapterOk =
-        (stR1.chapter_label || "").includes("第1轮") ||
-        Number(stR1.t_ms) >= 50000;
-      const uiDebateOk =
-        ui.debate || Number(ui.roundNo) >= 1 || /正方|反方|立论/.test(ui.text);
-      // Server seek is the acceptance contract; UI fold after hardReload is best-effort
-      // (product frontend does not subscribe to director channel — documented partial).
-      noteDir({
-        feature: "chapter_jump",
-        result: serverChapterOk ? (uiDebateOk ? "pass" : "partial") : "fail",
-        detail: `server t_ms=${stR1.t_ms} chapter=${stR1.chapter_label}; ui debate=${ui.debate} round=${ui.roundNo}; preview_authorize=${uiAtPreview.authorize}`,
-        needed_sidebar_refresh: false,
-      });
-      noteDir({
-        feature: "cross_auth_seek",
-        result: !ui.authorize && serverChapterOk
-          ? uiDebateOk
-            ? "pass"
-            : "partial"
-          : ui.authorize
-            ? "fail"
-            : "partial",
-        detail: `after seek past team_preview; authorize_card=${ui.authorize}; server_ok=${serverChapterOk}; snippet=${ui.snippet.slice(0, 80)}`,
-      });
     }
 
-    // Pause / speed / resume while past authorize (playing or soft-paused)
+    // Transport suite WHILE binding still alive (seeking to verdict/finished unbinds).
+    // Order: pause/speed/resume → forward chapter_jump → rewind → cross_auth → then
+    // content seeks (admit). Do not put rewind after end-of-tape seeks.
     {
       await director(API, cookieHeader, csrf, cid, "POST", "/resume", {});
       await director(API, cookieHeader, csrf, cid, "POST", "/speed", { speed: 4 });
@@ -669,7 +708,7 @@ async function main() {
       noteDir({
         feature: "pause",
         result: ok ? "pass" : "fail",
-        detail: `before=${before.state} after=${after.state} (tested after leaving team_preview)`,
+        detail: `before=${before.state} after=${after.state} (live post-authorize)`,
       });
     }
     {
@@ -695,7 +734,37 @@ async function main() {
       });
     }
 
-    // Forward seek → R3 质询承认句（B 场金句）
+    // Forward chapter jump (must be before end-of-tape unbind)
+    try {
+      await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
+        chapter_id: "r2_argument",
+      });
+      await waitStatus(
+        API,
+        cookieHeader,
+        csrf,
+        cid,
+        (s) => (s.chapter_label || "").includes("第2轮") || Number(s.t_ms) >= 500000,
+        { timeoutMs: 90_000, label: "chapter r2_argument" },
+      );
+      const stR2 = await director(API, cookieHeader, csrf, cid, "GET", "/status");
+      const serverChapterOk =
+        (stR2.chapter_label || "").includes("第2轮") || Number(stR2.t_ms) >= 500000;
+      noteDir({
+        feature: "chapter_jump",
+        result: serverChapterOk ? "pass" : "fail",
+        detail: `server t_ms=${stR2.t_ms} chapter=${stR2.chapter_label}`,
+        needed_sidebar_refresh: false,
+      });
+    } catch (e) {
+      noteDir({
+        feature: "chapter_jump",
+        result: "fail",
+        detail: String(e.message || e).slice(0, 200),
+      });
+    }
+
+    // Forward seek → R3 质询承认句（B 场金句）— after chapter_jump; before rewind/verdict
     {
       const ADMIT_T_MS = 1_130_562;
       const ADMIT =
@@ -741,48 +810,56 @@ async function main() {
         }, ADMIT);
         await page.waitForTimeout(400);
         const path07 = resolve(stillsDir, "07-evidence-gap-admit.png");
-        await shot(page, path07);
-        mark({
-          id: "07-evidence-gap-admit",
-          file: "stills/07-evidence-gap-admit.png",
-          path: path07,
-          label: "质询高光 · LV 承认无消费者调查（宽景）",
-          usage: "交锋3 质询高光",
-          tape_t_ms: ADMIT_T_MS,
-          clean: true,
-          director: `seek t_ms=${ADMIT_T_MS} + hardReload + scroll`,
-          matched_text: ctx || ADMIT,
-        });
+        const w07 = await shot(page, path07, { id: "07-evidence-gap-admit" });
+        if (!w07.skipped) {
+          mark({
+            id: "07-evidence-gap-admit",
+            file: "stills/07-evidence-gap-admit.png",
+            path: path07,
+            label: "质询高光 · LV 承认无消费者调查（宽景）",
+            usage: "交锋3 质询高光",
+            tape_t_ms: ADMIT_T_MS,
+            clean: true,
+            director: `seek t_ms=${ADMIT_T_MS} + hardReload + scroll`,
+            matched_text: ctx || ADMIT,
+          });
+        }
         const path07b = resolve(stillsDir, "07b-admit-closeup.png");
-        await shot(page, path07b);
-        mark({
-          id: "07b-admit-closeup",
-          file: "stills/07b-admit-closeup.png",
-          path: path07b,
-          label: "质询承认句特写",
-          usage: "交锋3 全片最强镜头；须可读「我承认没有消费者调查数据支撑…」",
-          tape_t_ms: ADMIT_T_MS,
-          clean: true,
-          new: true,
-          quote_required: "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
-          quote_visible: true,
-          director: `seek t_ms=${ADMIT_T_MS} + scroll-to-admit`,
-          matched_text: ctx || ADMIT,
-        });
+        const w07b = await shot(page, path07b, { id: "07b-admit-closeup" });
+        if (!w07b.skipped) {
+          mark({
+            id: "07b-admit-closeup",
+            file: "stills/07b-admit-closeup.png",
+            path: path07b,
+            label: "质询承认句特写",
+            usage: "交锋3 全片最强镜头；须可读「我承认没有消费者调查数据支撑…」",
+            tape_t_ms: ADMIT_T_MS,
+            clean: true,
+            new: true,
+            quote_required: "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
+            quote_visible: true,
+            director: `seek t_ms=${ADMIT_T_MS} + scroll-to-admit`,
+            matched_text: ctx || ADMIT,
+          });
+        }
       } else {
+        // Keep prior 07/07b from promo_capture_lv_admit.mjs if present
+        report.notes.push(
+          `admit UI miss after seek; keeping disk stills if any. snippet=${ui.snippet.slice(0, 120)}`,
+        );
         report.missing.push({
           id: "07-evidence-gap-admit",
           reason: `forward seek UI 无承认句「${ADMIT}」; snippet=${ui.snippet.slice(0, 120)}`,
         });
         report.missing.push({
           id: "07b-admit-closeup",
-          reason: `同 07：未检出承认句`,
+          reason: `同 07：未检出承认句（磁盘既有帧可保留）`,
         });
       }
     }
 
-    // Rewind (restart-style) → team_preview; check whether hard reload needed
-    {
+    // Rewind + cross-auth after admit stills, before verdict seek (finished → unbind)
+    try {
       const uiBefore = await probe(page);
       const textLenBefore = uiBefore.textLen;
       await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
@@ -803,7 +880,8 @@ async function main() {
       const alignedImmediate =
         uiImmediate.authorize ||
         uiImmediate.waitKickoff ||
-        (uiImmediate.textLen < textLenBefore * 0.5 && !/第\s*[2-5]\s*轮/.test(uiImmediate.text));
+        (uiImmediate.textLen < textLenBefore * 0.5 &&
+          !/第\s*[2-5]\s*轮/.test(uiImmediate.text));
 
       let neededRefresh = !alignedImmediate;
       let uiAfterRefresh = uiImmediate;
@@ -823,9 +901,39 @@ async function main() {
         needed_sidebar_refresh: neededRefresh,
         known_issue_confirmed: neededRefresh,
       });
+
+      await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
+        chapter_id: "r1_argument",
+      });
+      await waitStatus(
+        API,
+        cookieHeader,
+        csrf,
+        cid,
+        (s) => (s.chapter_label || "").includes("第1轮"),
+        { timeoutMs: 90_000, label: "cross_auth seek r1" },
+      );
+      const stCross = await director(API, cookieHeader, csrf, cid, "GET", "/status");
+      const crossOk = (stCross.chapter_label || "").includes("第1轮");
+      noteDir({
+        feature: "cross_auth_seek",
+        result: crossOk ? "pass" : "fail",
+        detail: `after rewind→r1; server t_ms=${stCross.t_ms} chapter=${stCross.chapter_label}`,
+      });
+    } catch (e) {
+      report.notes.push(`rewind/cross_auth: ${e.message || e}`);
+      for (const feature of ["rewind", "cross_auth_seek"]) {
+        if (!report.director_acceptance.some((d) => d.feature === feature)) {
+          noteDir({
+            feature,
+            result: "fail",
+            detail: String(e.message || e).slice(0, 200),
+          });
+        }
+      }
     }
 
-    // Seek to R2 quote zone (after rewind — crosses authorize again)
+    // Quote / mid-round stills (best-effort; may truncate after rewind)
     {
       await director(API, cookieHeader, csrf, cid, "POST", "/speed", { speed: 8 });
       await director(API, cookieHeader, csrf, cid, "POST", "/seek", {
@@ -865,41 +973,45 @@ async function main() {
 
       if (quoteOk || /垄断自然界|固有显著性|第二含义/.test(ui.text)) {
         const path = resolve(stillsDir, "04-r2-diamond-square.png");
-        await shot(page, path);
-        mark({
-          id: "04-r2-diamond-square",
-          file: "stills/04-r2-diamond-square.png",
-          path,
-          label: "交锋1 · 公共元素 vs 获得显著性",
-          usage: "交锋1",
-          tape_t_ms: QUOTE_T_MS,
-          clean: true,
-          matched_text: ui.quoteContext || ui.snippet.slice(0, 140),
-          director: `seek t_ms=${QUOTE_T_MS} + hardReload`,
-        });
-      }
-      {
-        const path = resolve(stillsDir, "04b-r2-quote-closeup.png");
-        await shot(page, path);
-        mark({
-          id: "04b-r2-quote-closeup",
-          file: "stills/04b-r2-quote-closeup.png",
-          path,
-          label: "交锋1 金句定点特写",
-          usage: `交锋1 金句特写；须可见「${QUOTE}」`,
-          tape_t_ms: QUOTE_T_MS,
-          clean: true,
-          quote_required: QUOTE,
-          quote_visible: quoteOk,
-          matched_text: ui.quoteContext ?? ui.snippet.slice(0, 160),
-          new: true,
-        });
-        if (!quoteOk) {
-          report.missing.push({
-            id: "04b-r2-quote-closeup",
-            reason: `画面未检出完整金句「${QUOTE}」；磁带有原文。实际 UI: ${ui.quoteContext ?? ui.snippet.slice(0, 120)}`,
+        const wrote = await shot(page, path, { id: "04-r2-diamond-square" });
+        if (!wrote.skipped) {
+          mark({
+            id: "04-r2-diamond-square",
+            file: "stills/04-r2-diamond-square.png",
+            path,
+            label: "交锋1 · 公共元素 vs 获得显著性",
+            usage: "交锋1",
+            tape_t_ms: QUOTE_T_MS,
+            clean: true,
+            matched_text: ui.quoteContext || ui.snippet.slice(0, 140),
+            director: `seek t_ms=${QUOTE_T_MS} + hardReload`,
           });
         }
+      }
+      // Content gate: never write 04b without the full quote visible (anti-regression).
+      if (quoteOk || ui.text.includes(QUOTE)) {
+        const path = resolve(stillsDir, "04b-r2-quote-closeup.png");
+        const wrote = await shot(page, path, { id: "04b-r2-quote-closeup" });
+        if (!wrote.skipped) {
+          mark({
+            id: "04b-r2-quote-closeup",
+            file: "stills/04b-r2-quote-closeup.png",
+            path,
+            label: "交锋1 金句定点特写",
+            usage: `交锋1 金句特写；须可见「${QUOTE}」`,
+            tape_t_ms: QUOTE_T_MS,
+            clean: true,
+            quote_required: QUOTE,
+            quote_visible: true,
+            matched_text: ui.quoteContext ?? ui.snippet.slice(0, 160),
+            new: true,
+          });
+        }
+      } else {
+        report.missing.push({
+          id: "04b-r2-quote-closeup",
+          reason: `画面未检出完整金句「${QUOTE}」；未覆盖磁盘帧。实际 UI: ${ui.quoteContext ?? ui.snippet.slice(0, 120)}`,
+        });
       }
     }
 
@@ -1013,18 +1125,20 @@ async function main() {
           continue;
         }
         const path = resolve(stillsDir, `${job.id}.png`);
-        await shot(page, path);
-        mark({
-          id: job.id,
-          file: `stills/${job.id}.png`,
-          path,
-          label: job.label,
-          usage: job.usage,
-          tape_t_ms: job.tape_t_ms,
-          clean: true,
-          director: `chapter_id=${job.chapter_id} + hardReload`,
-          matched_text: ui.snippet.slice(0, 140),
-        });
+        const wrote = await shot(page, path, { id: job.id });
+        if (!wrote.skipped) {
+          mark({
+            id: job.id,
+            file: `stills/${job.id}.png`,
+            path,
+            label: job.label,
+            usage: job.usage,
+            tape_t_ms: job.tape_t_ms,
+            clean: true,
+            director: `chapter_id=${job.chapter_id} + hardReload`,
+            matched_text: ui.snippet.slice(0, 140),
+          });
+        }
       } catch (e) {
         report.missing.push({ id: job.id, reason: String(e.message || e) });
         console.error("MISS", job.id, e);
@@ -1041,17 +1155,19 @@ async function main() {
       let ui = await probe(page);
       if (ui.reactFlowNodes >= 2) {
         const path = resolve(stillsDir, "09-collab-graph.png");
-        await shot(page, path);
-        mark({
-          id: "09-collab-graph",
-          file: "stills/09-collab-graph.png",
-          path,
-          label: "协作图 · 授权后团队结构",
-          usage: "冷开场画面1",
-          tape_t_ms: 45_000,
-          clean: true,
-          matched_text: ui.nodeText.slice(0, 160),
-        });
+        const wrote = await shot(page, path, { id: "09-collab-graph" });
+        if (!wrote.skipped) {
+          mark({
+            id: "09-collab-graph",
+            file: "stills/09-collab-graph.png",
+            path,
+            label: "协作图 · 授权后团队结构",
+            usage: "冷开场画面1",
+            tape_t_ms: 45_000,
+            clean: true,
+            matched_text: ui.nodeText.slice(0, 160),
+          });
+        }
       } else {
         report.notes.push(`09-collab-graph: nodes=${ui.reactFlowNodes}`);
       }
@@ -1083,19 +1199,21 @@ async function main() {
         });
       } else {
         const path = resolve(stillsDir, "09b-collab-graph-final.png");
-        await shot(page, path);
-        mark({
-          id: "09b-collab-graph-final",
-          file: "stills/09b-collab-graph-final.png",
-          path,
-          label: "协作图终态全貌（四轮打完）",
-          usage: "第七幕收尾",
-          tape_t_ms: 1_330_177,
-          clean: true,
-          new: true,
-          matched_text: ui.nodeText.slice(0, 200),
-          nodes: ui.reactFlowNodes,
-        });
+        const wrote = await shot(page, path, { id: "09b-collab-graph-final" });
+        if (!wrote.skipped) {
+          mark({
+            id: "09b-collab-graph-final",
+            file: "stills/09b-collab-graph-final.png",
+            path,
+            label: "协作图终态全貌（四轮打完）",
+            usage: "第七幕收尾",
+            tape_t_ms: 1_330_177,
+            clean: true,
+            new: true,
+            matched_text: ui.nodeText.slice(0, 200),
+            nodes: ui.reactFlowNodes,
+          });
+        }
       }
     } catch (e) {
       report.missing.push({
@@ -1127,7 +1245,7 @@ async function main() {
       const seqFiles = [];
       for (let i = 0; i < 12; i++) {
         const p = resolve(seqDir, `frame-${String(i).padStart(2, "0")}.png`);
-        await shot(page, p);
+        await shot(page, p, { force: true });
         seqFiles.push(p);
         await page.waitForTimeout(900);
       }
@@ -1150,18 +1268,82 @@ async function main() {
       });
     }
 
-    const required = [
-      "01-user-prompt",
-      "02-team-preview",
-      "03-debate-opening",
-      "08-final-verdict",
+    // Acceptance: transport anchors + key stills on disk (seek UI fold is best-effort).
+    // Do not require every chapter still to be re-captured this run — prior admit/rounds
+    // scripts may have left 07b/08 already on disk; director must not wipe them.
+    async function stillExists(name) {
+      try {
+        await access(resolve(stillsDir, name));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    const requiredDisk = [
+      "01-user-prompt.png",
+      "02-team-preview.png",
+      "03-debate-opening.png",
+      "07b-admit-closeup.png",
+      "08-final-verdict.png",
     ];
+    const diskOk = (
+      await Promise.all(requiredDisk.map((n) => stillExists(n)))
+    ).every(Boolean);
+    const transportMust = [
+      "pause",
+      "speed",
+      "resume",
+      "forward_seek",
+      "rewind",
+      "chapter_jump",
+      "cross_auth_seek",
+    ];
+    const transportOk = transportMust.every((f) => {
+      const d = report.director_acceptance.find((x) => x.feature === f);
+      return d && (d.result === "pass" || d.result === "partial");
+    });
+    const transportFail = transportMust.some((f) => {
+      const d = report.director_acceptance.find((x) => x.feature === f);
+      return !d || d.result === "fail";
+    });
+    report.notes.push(
+      `acceptance diskOk=${diskOk} transportOk=${transportOk} files=${requiredDisk.join(",")}`,
+    );
     report.ok =
-      required.every((id) => report.assets.some((a) => a.id === id)) &&
+      diskOk &&
+      !transportFail &&
       !report.clean_env.has_dev_badge;
+
+    // Merge disk stills into assets so MANIFEST keeps 07b/08 etc. when this run
+    // only re-validated transport (seek UI fold is best-effort).
+    try {
+      const onDisk = await readdir(stillsDir);
+      for (const name of onDisk) {
+        if (!name.endsWith(".png") || name.startsWith("99-")) continue;
+        const id = name.replace(/\.png$/, "");
+        if (report.assets.some((a) => a.id === id)) continue;
+        const meta = STILL_CATALOG[id];
+        if (!meta) continue;
+        report.assets.push({
+          id,
+          file: `stills/${name}`,
+          path: resolve(stillsDir, name),
+          label: meta.label,
+          usage: meta.usage,
+          clean: true,
+          new: Boolean(meta.new),
+          director: "disk-retained (not re-shot this run)",
+        });
+        // Drop "missing" noise for retained files
+        report.missing = report.missing.filter((m) => m.id !== id);
+      }
+      report.assets.sort((a, b) => a.id.localeCompare(b.id, "en"));
+    } catch (e) {
+      report.notes.push(`disk merge: ${e.message || e}`);
+    }
   } catch (err) {
     report.fatal = String(err?.stack ?? err);
-    await shot(page, resolve(stillsDir, "99-fatal.png")).catch(() => {});
+    await shot(page, resolve(stillsDir, "99-fatal.png"), { force: true }).catch(() => {});
     console.error(report.fatal);
   } finally {
     const vid = page.video();
@@ -1211,19 +1393,19 @@ async function main() {
   report.elapsed_wall_ms = Date.now() - wall0;
   report.conversation_id = cid;
 
-  await writeFile(
+  await writeFileRetry(
     resolve(outRoot, "director-acceptance.json"),
     JSON.stringify(report.director_acceptance, null, 2),
     "utf8",
   );
-  await writeFile(
+  await writeFileRetry(
     resolve(outRoot, "manifest.json"),
     JSON.stringify(report, null, 2),
     "utf8",
   );
 
   const md = buildManifestMd(report);
-  await writeFile(resolve(outRoot, "MANIFEST.md"), md, "utf8");
+  await writeFileRetry(resolve(outRoot, "MANIFEST.md"), md, "utf8");
 
   console.log("\nPROMO_DIRECTOR_CAPTURE", JSON.stringify({
     ok: report.ok,
@@ -1270,9 +1452,13 @@ function buildManifestMd(report) {
     "",
     "### 新增镜头说明",
     "",
-    "- `04b-r2-quote-closeup` — R2 金句定点；目标文案：" + QUOTE + "（磁带原文，弯引号）",
+    "- `04b-r2-quote-closeup` — R1 交锋金句定点；目标文案：" + QUOTE,
+    "- `07b-admit-closeup` — 质询承认句特写（全片最强镜头）；须可读「我承认没有消费者调查数据支撑…」；定点脚本 `promo_capture_lv_admit.mjs`",
     "- `09b-collab-graph-final` — 协作图终态全貌（四轮+终审后），第七幕收尾",
     "- `clip-streaming-debate-speed1` — SPEED=1 原速双列流式 5–15s（冷开场镜头2 备选）",
+    "- **勿设 `PROMO_WIPE=1`** 除非有意清空整树素材；默认续跑保留既有 stills/clips",
+    "- **默认不覆盖已有静帧**：需重拍时设 `PROMO_OVERWRITE=1` 或 `PROMO_OVERWRITE=08-final-verdict,04b-…`；无 needle 命中时不写盘",
+    "- 坏帧定点修复：`node apps/desktop/scripts/promo_capture_lv_repair_stills.mjs`",
     "",
     "## 短视频 / 序列",
     "",

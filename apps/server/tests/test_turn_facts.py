@@ -145,6 +145,9 @@ def test_to_fact_accepts_optional_timestamp():
 def test_execution_only_kinds_match_enum():
     assert {
         "turn_started",
+        # Worker / continuation window anchor (RunHeadFact) — per-run head distinct
+        # from turn_started so workers never fold under the CEO prompt.
+        "run_head",
         "round_boundary",
         "llm_call",
         "tool_call",

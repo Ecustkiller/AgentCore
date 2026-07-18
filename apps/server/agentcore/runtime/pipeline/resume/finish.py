@@ -11,8 +11,8 @@ from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_stat
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import EventSink, FinishReason, citations_event, message_end
 from agentcore.runtime.facts import current_fact_log
-from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.ledger_channel import emit_turn_evidence_ledger
+from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 

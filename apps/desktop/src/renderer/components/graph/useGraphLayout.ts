@@ -150,6 +150,8 @@ export function useGraphLayout(
   // 整棵 ReactFlow → 追加委派时整图闪烁）。首帧或清空仍走 layoutReady=false。
   const hasShownLayoutRef = useRef(false);
 
+  // expandedUnits 已编入 structuralKey；勿再依赖其引用（调用方偶发 new Set() 会死循环）。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: structuralKey encodes expandedUnits
   useEffect(() => {
     if (!structuralKey) {
       hasShownLayoutRef.current = false;
@@ -216,8 +218,6 @@ export function useGraphLayout(
     return () => {
       cancelled = true;
     };
-    // expandedUnits 已编入 structuralKey；勿再依赖其引用（调用方偶发 new Set() 会死循环）。
-    // biome-ignore lint/correctness/useExhaustiveDependencies: structuralKey encodes expandedUnits
   }, [structuralKey, layoutKind, fitMode, setLayout]);
 
   return {

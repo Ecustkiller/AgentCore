@@ -22,8 +22,19 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/Markdown", () => ({
-  Markdown: ({ content }: { content: string }) => (
-    <div data-testid="md">{content}</div>
+  Markdown: ({
+    content,
+    evidenceLedger,
+  }: {
+    content: string;
+    evidenceLedger?: { id: string }[];
+  }) => (
+    <div
+      data-testid="md"
+      data-ledger={evidenceLedger?.map((e) => e.id).join(",") ?? ""}
+    >
+      {content}
+    </div>
   ),
 }));
 vi.mock("@/components/DebateView", () => ({
@@ -88,6 +99,45 @@ describe("AssistantContent", () => {
     expect(screen.getByTestId("md").textContent).toBe("你好世界");
     expect(screen.queryByTestId("team")).toBeNull();
     expect(screen.queryByTestId("debate")).toBeNull();
+  });
+
+  it("forwards turn evidenceLedger to Markdown (research #rN channel)", () => {
+    render(
+      <AssistantContent
+        content="见 #r1"
+        evidenceLedger={[
+          {
+            id: "#r1",
+            url: "https://example.com",
+            title: "源",
+            site: "example.com",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("md").getAttribute("data-ledger")).toBe("#r1");
+  });
+
+  it("does not fall back team debate ledger into Markdown turn channel", () => {
+    render(
+      <AssistantContent
+        content="见 #r1"
+        team={{
+          agents: [],
+          runs: [makeRun({ id: "run1" })],
+          progress: { completed: 1, total: 1 },
+          evidenceLedger: [
+            {
+              id: "#e1",
+              url: "https://debate.example",
+              title: "辩",
+              site: "debate.example",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByTestId("md").getAttribute("data-ledger")).toBe("");
   });
 
   it("renders citations as a numbered 来源 list", () => {

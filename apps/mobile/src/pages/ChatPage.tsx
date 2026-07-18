@@ -315,7 +315,9 @@ function AssistantBubble({
     () => extractRunToolCalls(turn.events),
     [turn.events],
   );
-  const evidenceLedger = useMemo(
+  // 两通道：调研回合台账（fold `#rN`）vs 辩论场级台账（extract `#eN`）。
+  const turnEvidenceLedger = p.evidenceLedger;
+  const debateEvidenceLedger = useMemo(
     () => extractEvidenceLedger(turn.events),
     [turn.events],
   );
@@ -334,7 +336,7 @@ function AssistantBubble({
         escalationsInteractive: live,
         runToolCalls,
         workerToolPhases,
-        evidenceLedger,
+        evidenceLedger: debateEvidenceLedger,
       }
     : undefined;
   const empty =
@@ -362,7 +364,7 @@ function AssistantBubble({
           content={p.content}
           reasoning={p.reasoning}
           citations={p.citations}
-          evidenceLedger={evidenceLedger}
+          evidenceLedger={turnEvidenceLedger}
           captainContext={p.captainContext}
           team={team}
           debate={p.debate}
@@ -404,44 +406,48 @@ function HistoryAssistant({
   onRetry?: () => void;
   isLast?: boolean;
 }) {
-  const { team, debate, debateRounds, turnWarning } = useMemo(() => {
-    const events = m.runs?.events;
-    const warning =
-      m.runs?.turn_warning ??
-      (events?.length ? extractTurnWarning(events) : null);
-    if (!events || events.length === 0)
+  const { team, debate, debateRounds, turnWarning, foldEvidenceLedger } =
+    useMemo(() => {
+      const events = m.runs?.events;
+      const warning =
+        m.runs?.turn_warning ??
+        (events?.length ? extractTurnWarning(events) : null);
+      if (!events || events.length === 0)
+        return {
+          team: undefined,
+          debate: null,
+          debateRounds: [] as DebateNarrativeRound[],
+          turnWarning: warning,
+          foldEvidenceLedger: [],
+        };
+      const p = fold(events);
+      const team =
+        p.runs.length > 0
+          ? {
+              agents: p.agents,
+              runs: p.runs,
+              progress: p.progress,
+              teamNotes: p.teamNotes,
+              deliveryStatus: p.deliveryStatus,
+              status: p.status,
+              runToolCalls: extractRunToolCalls(events),
+              // 辩论场级 `#eN`（勿写入 Message.evidence_ledger 语义）
+              evidenceLedger: extractEvidenceLedger(events),
+            }
+          : undefined;
       return {
-        team: undefined,
-        debate: null,
-        debateRounds: [] as DebateNarrativeRound[],
-        turnWarning: warning,
+        team,
+        debate: p.debate,
+        debateRounds: p.debateRounds,
+        turnWarning: warning ?? p.turnWarning,
+        foldEvidenceLedger: p.evidenceLedger,
       };
-    const p = fold(events);
-    const team =
-      p.runs.length > 0
-        ? {
-            agents: p.agents,
-            runs: p.runs,
-            progress: p.progress,
-            teamNotes: p.teamNotes,
-            deliveryStatus: p.deliveryStatus,
-            status: p.status,
-            runToolCalls: extractRunToolCalls(events),
-            evidenceLedger: extractEvidenceLedger(events),
-          }
-        : undefined;
-    return {
-      team,
-      debate: p.debate,
-      debateRounds: p.debateRounds,
-      turnWarning: warning ?? p.turnWarning,
-    };
-  }, [m.runs]);
+    }, [m.runs]);
   const process = m.runs?.process ?? undefined;
-  const historyEvidenceLedger = useMemo(
-    () => extractEvidenceLedger(m.runs?.events ?? []),
-    [m.runs],
-  );
+  // 历史冷启动优先 REST `evidence_ledger`；缺列时回退 journal fold 的回合台账。
+  const historyEvidenceLedger = m.evidenceLedger?.length
+    ? m.evidenceLedger
+    : foldEvidenceLedger;
   // 本回合产出文件：单聊读 runs.process，多 Agent 读 runs.events 日志；合并去重（另一支为空）。
   const artifacts = useMemo(
     () =>

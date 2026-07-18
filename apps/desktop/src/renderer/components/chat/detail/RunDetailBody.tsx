@@ -23,6 +23,7 @@ import { Pencil, RotateCcw, Square } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { WorkerContextSection } from "./WorkerContextSection";
 import {
   buildModeratorLedger,
   isDebateModeratorRun,
@@ -46,7 +47,6 @@ import {
   revisionComparePair,
 } from "./sections/RunRevisionChain";
 import { Section, StatusBadge } from "./sections/shared";
-import { WorkerContextSection } from "./WorkerContextSection";
 
 export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
 

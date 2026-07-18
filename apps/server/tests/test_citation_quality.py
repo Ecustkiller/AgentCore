@@ -62,6 +62,13 @@ def test_citation_tier_allow_list(url: str, tier: str) -> None:
         "https://www.bing.com/",
         "https://www.google.com/search?q=x",
         "https://wenwen.sogou.com/z/q123.htm",
+        # 中日文词典站（根域后缀匹配含子域）
+        "https://www.weblio.jp/content/茉莉花",
+        "https://ejje.weblio.jp/content/jasmine",
+        "https://kotobank.jp/word/茉莉花",
+        "https://www.kotobank.jp/word/x",
+        "https://jitenon.jp/kanji/x",
+        "https://kanji.jitenon.jp/kanji/1",
     ],
 )
 def test_citation_tier_hard_block(url: str) -> None:

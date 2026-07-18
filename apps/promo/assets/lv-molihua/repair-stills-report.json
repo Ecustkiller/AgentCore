@@ -1,0 +1,20 @@
+{
+  "ok": [
+    {
+      "id": "04-r2-diamond-square",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04-r2-diamond-square.png",
+      "ctx": "任何经营者都不能垄断自然界公共资源的基本表达"
+    },
+    {
+      "id": "04b-r2-quote-closeup",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04b-r2-quote-closeup.png",
+      "ctx": "任何经营者都不能垄断自然界公共资源的基本表达"
+    }
+  ],
+  "miss": [],
+  "notes": [
+    "cid=81f893cc-c905-43c4-aa22-07ad289ae595",
+    "authorized"
+  ],
+  "fatal": null
+}

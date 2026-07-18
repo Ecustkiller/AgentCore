@@ -495,7 +495,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             if (!byId.has(e.id)) order.push(e.id);
             byId.set(e.id, e);
           }
-          next = order.map((id) => byId.get(id)!);
+          next = order
+            .map((id) => byId.get(id))
+            .filter((e): e is (typeof next)[number] => e !== undefined);
         } else {
           return null;
         }

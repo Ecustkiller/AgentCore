@@ -18,8 +18,8 @@ from agentcore.runtime.citations import (
     invalid_ledger_ref_ids,
     strip_invalid_ledger_refs,
 )
-from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.events import FinishReason
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact
 from agentcore.runtime.loop_controller import Intervention, LoopController
 from agentcore.runtime.verify import finish_guard, format_guard_steer

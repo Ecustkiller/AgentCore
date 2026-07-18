@@ -10,9 +10,11 @@ describe("formatSupportDiagnosticText", () => {
         messageId: "msg-1",
       }),
     ).toBe(
-      ["conversation_id: conv-1", `trace_id: ${"t".repeat(32)}`, "message_id: msg-1"].join(
-        "\n",
-      ),
+      [
+        "conversation_id: conv-1",
+        `trace_id: ${"t".repeat(32)}`,
+        "message_id: msg-1",
+      ].join("\n"),
     );
   });
 

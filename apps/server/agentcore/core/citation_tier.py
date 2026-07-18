@@ -90,7 +90,7 @@ _MEDIA_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# 硬拦：纯垃圾 / 零引用价值（UGC 问答、搜索引擎首页/壳、浏览器聚合页）。
+# 硬拦：纯垃圾 / 零引用价值（UGC 问答、搜索引擎首页/壳、浏览器聚合页、中日文词典站）。
 # 精确 host（避免 ``baidu.com`` 后缀误伤文库等子域——子域另列 weak/blocked）。
 _BLOCKED_EXACT_HOSTS: frozenset[str] = frozenset(
     {
@@ -111,6 +111,10 @@ _BLOCKED_DOMAINS: frozenset[str] = frozenset(
         "wenwen.sogou.com",
         "iask.sina.com.cn",
         "wenwen.baidu.com",
+        # 中日文检索常见词典站（后缀匹配含 kanji.jitenon.jp 等子域）
+        "weblio.jp",
+        "kotobank.jp",
+        "jitenon.jp",
     }
 )
 

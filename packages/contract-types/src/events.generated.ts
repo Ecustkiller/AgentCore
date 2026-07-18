@@ -775,7 +775,9 @@ export interface EvidenceLedgerEntry {
   side_key?: string;
 }
 
-/** 回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集；``registrant`` ↔ 辩论 ``side_key``）。 */
+/** 回合调研台账条目（辩论 ``EvidenceLedgerEntry`` 超集）。
+ * 
+ * ``registrant`` ↔ 辩论 ``side_key``。 */
 export interface TurnEvidenceLedgerEntry {
   id: string;
   url?: string;
@@ -794,7 +796,7 @@ export interface TurnEvidenceLedgerEntry {
  * 
  * - ``delta``：自上次 drain 以来的增量（live mid-turn）
  * - ``entries``：全量快照（settle 权威覆盖；与 delta 可同发，客户端以 entries 为准）
- * - ``cited_ids``：成稿实际引用的 id 集（P2 投影钩子；通常仅 settle 携带） */
+ * - ``cited_ids``：成稿实际引用的 id 集（P2：``citations_event`` 投影权威；通常仅 settle 携带） */
 export interface EvidenceLedgerPayload {
   delta?: TurnEvidenceLedgerEntry[];
   entries?: TurnEvidenceLedgerEntry[];

@@ -18,10 +18,14 @@ from typing import Any
 
 from agentcore.core.citation_tier import (
     CitationTier as CitationTier,
+)
+from agentcore.core.citation_tier import (
     citation_pool_admissible,
-    citation_tier_for_url as citation_tier_for_url,
     normalize_citation_url,
     stamp_citation_tier,
+)
+from agentcore.core.citation_tier import (
+    citation_tier_for_url as citation_tier_for_url,
 )
 
 # P2：来源卡 = 成稿引用集（无硬帽；旧池帽 24 随池语义退役）。
@@ -362,8 +366,7 @@ def stamp_citations_from_ledger(
             if entry.get("id") and not stamped.get("id"):
                 stamped["id"] = entry["id"]
             for field in ("query", "deep_read", "registrant", "citable", "date", "tier"):
-                if field not in stamped or stamped.get(field) in (None, ""):
-                    if field in entry:
-                        stamped[field] = entry[field]
+                if (field not in stamped or stamped.get(field) in (None, "")) and field in entry:
+                    stamped[field] = entry[field]
         out.append(stamped)
     return out

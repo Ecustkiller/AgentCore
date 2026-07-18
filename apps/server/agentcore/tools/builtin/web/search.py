@@ -6,10 +6,10 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+from agentcore.core.citation_tier import citation_tier_for_url, stamp_citation_tier
 from agentcore.core.logging import get_logger
 from agentcore.core.net import describe_net_error, site_of
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.core.citation_tier import citation_tier_for_url, stamp_citation_tier
 from agentcore.tools.builtin.web.search_backend import (
     SearchResult,
     get_search_backend,

@@ -12,6 +12,7 @@ from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.memory import default_memory_store  # noqa: F401 — test seam
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.events import EventSink, message_start
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import (
     TurnFactLog,
     TurnStartedFact,
@@ -31,7 +32,6 @@ from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F40
 from agentcore.runtime.runs import RunKind, RunSpec, build_captain_executor
 from agentcore.runtime.session_persistence import SessionRosterWriter
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
-from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,

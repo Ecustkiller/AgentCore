@@ -122,7 +122,9 @@ describe("Markdown citation chips (render seam)", () => {
       screen.getByRole("link", { name: /来源 .*（#r3）/ }).getAttribute("href"),
     ).toBe("https://b.example/two");
     expect(
-      screen.getByRole("link", { name: /来源 .*（#r11）/ }).getAttribute("href"),
+      screen
+        .getByRole("link", { name: /来源 .*（#r11）/ })
+        .getAttribute("href"),
     ).toBe("https://c.example/three");
   });
 

@@ -20,8 +20,8 @@ from agentcore.runtime.events import (
     message_end,
 )
 from agentcore.runtime.facts import TurnFactLog
-from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.ledger_channel import emit_turn_evidence_ledger
+from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.runs import RunPhase
 
 logger = get_logger(__name__)

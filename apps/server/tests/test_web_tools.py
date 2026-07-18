@@ -51,10 +51,10 @@ from agentcore.tools.builtin.web.read_url import (
     _make_snippet,
 )
 from agentcore.tools.builtin.web.search import (
-    WebSearchTool,
-    validate_search_query,
     _QUERY_CJK_CHAR_LIMIT,
     _QUERY_LATIN_WORD_LIMIT,
+    WebSearchTool,
+    validate_search_query,
 )
 from agentcore.tools.builtin.web.search_backend import (
     FallbackSearchBackend,

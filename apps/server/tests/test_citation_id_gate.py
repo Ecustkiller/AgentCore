@@ -6,8 +6,8 @@ from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage
 from agentcore.runtime.engine import react_loop
-from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import TurnPausedFact
 from agentcore.runtime.pipeline.resume.rehydrate import rehydrate_from_turn_paused
 from agentcore.runtime.suspension import AskUserSuspension, turn_evidence_ledger
@@ -186,9 +186,8 @@ async def test_worker_forged_rn_reworks_once_then_clean():
 
 
 async def test_worker_second_violation_strips_with_observation(monkeypatch):
-    from tests.conftest import LogSpy
-
     import agentcore.runtime.engine.round as round_mod
+    from tests.conftest import LogSpy
 
     spy = LogSpy()
     monkeypatch.setattr(round_mod, "logger", spy)

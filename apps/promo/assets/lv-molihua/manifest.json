@@ -1,198 +1,184 @@
 {
-  "generated_at": "2026-07-18T04:18:21.204Z",
-  "tape": "lv-molihua-trademark",
-  "tape_path": "demos/tapes/lv-molihua-trademark.json",
-  "video_plan": "demos/video-plan-lv-molihua.md",
-  "method": "server demo-tape replay + Playwright production webapp (dist-web / vite preview) @ 1920×1080 — clean, no DEV badge",
+  "generated_at": "2026-07-18T04:47:17.181Z",
   "clean_env": {
-    "production_webapp": true,
+    "webapp": "production dist-web via vite preview (import.meta.env.DEV=false)",
     "user": "promo_lv",
-    "display_name": "演示",
+    "display_name_expected": "演示",
+    "api": "http://localhost:8015",
     "no_product_source_change": true,
-    "has_dev_badge": false
+    "has_dev_badge": false,
+    "account_snippet": "AgentCore 搜索或运行命令… Ctrl+K 新对话 文件 消息 工具箱 暂无对话 开始第一次对话 → 演 演示",
+    "sidebar_conv_count_before": 0
   },
   "director_acceptance": [
     {
       "feature": "pause",
       "result": "pass",
-      "detail": "在离开 team_preview 后的 playing 态：playing→paused。若在 awaiting_interaction（授权卡）上点暂停，状态名不变（仍为 awaiting_interaction），易误判为无效——应在播放中段测暂停。",
-      "caveat": "awaiting_interaction 期间 soft-pause 不改变对外 state 字段"
+      "detail": "before=playing after=paused (live post-authorize)"
     },
     {
       "feature": "speed",
       "result": "pass",
-      "detail": "动态 2× / 8× 瞬时生效（status.speed 正确）"
+      "detail": "set 2→true; set 8→ speed=8"
     },
     {
       "feature": "resume",
       "result": "pass",
-      "detail": "soft-pause 后 resume → playing"
+      "detail": "state=playing"
     },
     {
       "feature": "chapter_jump",
       "result": "pass",
-      "detail": "章节跳 r1_argument：服务端 t_ms/chapter_label 正确；跨授权会 auto-resolve。前端需保持直播 SSE 或硬刷新会话才能看到辩论室画面（纯 seek 后 SPA 可能仍停在案情简介）。"
+      "detail": "server t_ms=564170 chapter=第2轮·立论",
+      "needed_sidebar_refresh": false
     },
     {
       "feature": "forward_seek",
       "result": "pass",
-      "detail": "向前 seek t_ms 65996→319000 服务端成功；前端画面需直播会话或硬刷新才对齐证据缺口文案"
+      "detail": "t_ms 564251 → 1130562; admit_visible=true; hard_reload=true"
     },
     {
       "feature": "rewind",
       "result": "pass",
-      "detail": "重启式倒带回 team_preview：本轮 immediate_aligned=true，无需手动点侧栏。已知疑点未复现（可能因硬刷新路径 / 干净账号）。",
+      "detail": "immediate_aligned=true; after_hard_reload_aligned=true; needed_manual_reload=false",
       "needed_sidebar_refresh": false,
       "known_issue_confirmed": false
     },
     {
       "feature": "cross_auth_seek",
       "result": "pass",
-      "detail": "从授权卡 seek 越过 team_preview：服务端代确认成功，授权卡消失。前端辩论室内容依赖直播 fold，硬刷新后可见案情+进度但不一定自动打开辩论室双列。"
-    },
-    {
-      "feature": "frontend_sync_after_seek",
-      "result": "partial",
-      "detail": "导演 seek/倒带改的是服务端注入与 DB；产品前端未订阅导演通道。实拍静帧应走「直播回放 + 导演变速/暂停」，章节跳更适合掐点预览而非直接截图。硬刷新会话可部分对齐，辩论室需再点「打开辩论室」。"
+      "detail": "after rewind→r1; server t_ms=165201 chapter=第1轮·立论"
     }
   ],
-  "api": "http://localhost:8015",
-  "speed": 12,
-  "max_gap_ms": 800,
-  "viewport": {
-    "width": 1920,
-    "height": 1080
-  },
-  "opening_prompt": "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论",
   "assets": [
     {
       "id": "01-user-prompt",
       "file": "stills/01-user-prompt.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\01-user-prompt.png",
       "label": "用户输入开场 prompt",
-      "shot": "第二幕 · 一句话发起",
+      "usage": "第二幕 · 一句话发起",
       "tape_t_ms": 0,
-      "usage": "冷开场前 / 第二幕：展示「只打了这么一句话」",
-      "matched_text": "搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论"
+      "clean": true
     },
     {
       "id": "02-team-preview",
       "file": "stills/02-team-preview.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\02-team-preview.png",
-      "label": "captain 组建辩论团队 / 开工卡",
-      "shot": "第四幕 · 组队 + 授权",
+      "label": "开工卡 / 授权开赛",
+      "usage": "第四幕组队+授权；冷开场可闪",
       "tape_t_ms": 32000,
-      "usage": "冷开场 / 第四幕：team_preview 双方立场",
-      "matched_text": " 搜索最新的LV起诉茉莉奶白这个案件、简单向我介绍之后启动模拟庭审辩论复制编辑删除12:18Thought 9 steps · Used 15 tools信息已足够，我来推进。先简要介绍案情，再启动模拟庭审辩论。 LV 诉茉莉奶白商标侵权案"
-    },
-    {
-      "id": "09-collab-graph",
-      "file": "stills/09-collab-graph.png",
-      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\09-collab-graph.png",
-      "label": "协作图 / 团队结构可视化",
-      "shot": "冷开场画面1 / 第七幕回看",
-      "tape_t_ms": 45000,
-      "usage": "冷开场快闪；收尾拉远",
-      "matched_text": " | 主主持人执行中 · 1s主持正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视） | LLV方（原告）正方执行中 · 1s…。非常好，这些文章提供了丰富的材料。让我再搜索一些更具体的证据——LV四叶花商标的注册号、驰名商标认定情况，以及广东高院那个2008年关于\"四花瓣\""
+      "clean": true
     },
     {
       "id": "03-debate-opening",
       "file": "stills/03-debate-opening.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\03-debate-opening.png",
-      "label": "辩论开场：双方与辩题（显著性）",
-      "shot": "辩论开场：双方与辩题（显著性）",
-      "tape_hint": "debate_round_started r1 @ t_ms≈164533 (post-authorize)",
-      "usage": "第五幕精剪 / 冷开场",
+      "label": "辩论室开场",
+      "usage": "冷开场 / 第五幕引入",
+      "tape_t_ms": 52000,
       "clean": true,
-      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）协作图辩论室四叶花图形的商标显著性正方正在立论这场怎么读布局并排单栏第1轮主持人本场围绕茉莉奶白使用",
-      "wall_ms": 22228
+      "director": "live authorize + 辩论室"
     },
     {
       "id": "04-r2-diamond-square",
       "file": "stills/04-r2-diamond-square.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04-r2-diamond-square.png",
       "label": "交锋1 · 公共元素 vs 获得显著性",
-      "shot": "交锋1 · 公共元素 vs 获得显著性",
-      "tape_hint": "r1 focus 商标显著性 @ t_ms≈164533–563065",
-      "usage": "第五幕精剪 / 冷开场",
+      "usage": "交锋1",
+      "tape_t_ms": 450000,
       "clean": true,
-      "matched_text": "作为商标注册——四叶花卉的简化写实图形正属于此类。LV即便通过上百年使用获得了“获得显著性”，也仅能证明其**整体Monogram组合图案**（四叶花+LV字母+四角星+",
-      "wall_ms": 40567
+      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）停止协作图辩论室四叶花图形的商标显著性掌舵正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商标权展开重新审视。正方LV主张其四叶花商",
+      "director": "seek t_ms=450000 + hardReload"
     },
     {
       "id": "04b-r2-quote-closeup",
       "file": "stills/04b-r2-quote-closeup.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\04b-r2-quote-closeup.png",
       "label": "交锋1 金句定点特写",
-      "usage": "交锋1 金句；须可见「任何经营者都不能垄断自然界公共资源的基本表达」",
+      "usage": "交锋1 金句特写；须可见「任何经营者都不能垄断自然界公共资源的基本表达」",
+      "tape_t_ms": 450000,
       "clean": true,
-      "new": true,
       "quote_required": "任何经营者都不能垄断自然界公共资源的基本表达",
-      "quote_visible": true,
-      "matched_text": "的“仅有本商品的通用图形”。**任何经营者都不能垄断自然界公共资源的基本表达**。LV四叶花图形本身 "
+      "quote_visible": false,
+      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）停止协作图辩论室四叶花图形的商标显著性掌舵正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商标权展开重新审视。正方LV主张其四叶花商标经使用已获强显著性，且被告存在攀附故意",
+      "new": true
     },
     {
       "id": "05-r3-logo-swap",
       "file": "stills/05-r3-logo-swap.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\05-r3-logo-swap.png",
-      "label": "交锋2 · 跨类标准与真实使用",
-      "shot": "交锋2 · 跨类标准与真实使用",
-      "tape_hint": "r2 focus 跨类保护 @ t_ms≈563065–861441",
-      "usage": "第五幕精剪 / 冷开场",
+      "label": "第2轮 · 跨类标准与真实使用",
+      "usage": "交锋2",
+      "tape_t_ms": 700000,
       "clean": true,
-      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
-      "wall_ms": 97216
+      "director": "chapter_id=r2_argument + hardReload",
+      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）协作图辩论室四叶花图形的商标显著性正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商标权展开重新审视。正方LV主张其四叶花商标经使用"
     },
     {
       "id": "05b-r4-logo-defense",
       "file": "stills/05b-r4-logo-defense.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\05b-r4-logo-defense.png",
-      "label": "交锋3 · 无茶饮消费者混淆调查",
-      "shot": "交锋3 · 无茶饮消费者混淆调查",
-      "tape_hint": "r3 focus 跨类边界 @ t_ms≈861441–1130562",
-      "usage": "第五幕精剪 / 冷开场",
+      "label": "第3轮 · 无茶饮消费者混淆调查",
+      "usage": "交锋3",
+      "tape_t_ms": 1000000,
       "clean": true,
-      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
-      "wall_ms": 155276
-    },
-    {
-      "id": "07-evidence-gap-admit",
-      "file": "stills/07-evidence-gap-admit.png",
-      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07-evidence-gap-admit.png",
-      "label": "质询高光 · LV 承认无消费者调查",
-      "shot": "质询高光 · LV 承认无消费者调查",
-      "tape_hint": "r3/r4 cross-exam admit @ t_ms≈1130562+",
-      "usage": "交锋3 质询高光",
-      "clean": true,
-      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。",
-      "wall_ms": 198856,
-      "tape_t_ms": 1130562,
-      "new": false,
-      "quote_required": "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张"
+      "director": "chapter_id=r3_argument + hardReload",
+      "matched_text": " 返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）协作图辩论室四叶花图形的商标显著性正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商标权展开重新审视。正方LV主张其四叶花商标经使用"
     },
     {
       "id": "06-r5-burden",
       "file": "stills/06-r5-burden.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\06-r5-burden.png",
-      "label": "交锋3 决胜 · R4 再钉实证门槛",
-      "shot": "交锋3 决胜 · R4 再钉实证门槛",
-      "tape_hint": "r4 debate_round @ t_ms≈1130562–1309596",
-      "usage": "第五幕精剪 / 冷开场",
+      "label": "第4轮 · 再钉实证门槛",
+      "usage": "交锋3 决胜",
       "clean": true,
-      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
-      "wall_ms": 211068
+      "new": false,
+      "director": "disk-retained (not re-shot this run)"
+    },
+    {
+      "id": "07-evidence-gap-admit",
+      "file": "stills/07-evidence-gap-admit.png",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07-evidence-gap-admit.png",
+      "label": "质询高光 · LV 承认无消费者调查（宽景）",
+      "usage": "交锋3 质询高光",
+      "tape_t_ms": 1130562,
+      "clean": true,
+      "director": "seek t_ms=1130562 + hardReload + scroll",
+      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
+    },
+    {
+      "id": "07b-admit-closeup",
+      "file": "stills/07b-admit-closeup.png",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07b-admit-closeup.png",
+      "label": "质询承认句特写",
+      "usage": "交锋3 全片最强镜头；须可读「我承认没有消费者调查数据支撑…」",
+      "tape_t_ms": 1130562,
+      "clean": true,
+      "new": true,
+      "quote_required": "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
+      "quote_visible": true,
+      "director": "seek t_ms=1130562 + scroll-to-admit",
+      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
     },
     {
       "id": "08-final-verdict",
       "file": "stills/08-final-verdict.png",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\08-final-verdict.png",
-      "label": "最终裁决（微弱倾向茉莉奶白 · 55%）",
-      "shot": "最终裁决（微弱倾向茉莉奶白 · 55%）",
-      "tape_hint": "debate_result @ t_ms≈1330177",
-      "usage": "第五幕精剪 / 冷开场",
+      "label": "主持人终审 · 微弱倾向茉莉奶白",
+      "usage": "冷开场 / 第六幕裁决",
       "clean": true,
-      "matched_text": "商标显著性的核心不是图形美不美、像不像传统纹样，而是消费者看到它后是否与特定品牌唯一关联。LV四叶花图案自1896年设计以来已连续使用超过130年待核实·推断，经LV在",
-      "wall_ms": 258145
+      "new": false,
+      "director": "disk-retained (not re-shot this run)"
+    },
+    {
+      "id": "09-collab-graph",
+      "file": "stills/09-collab-graph.png",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\09-collab-graph.png",
+      "label": "协作图 · 授权后团队结构",
+      "usage": "冷开场画面1",
+      "clean": true,
+      "new": false,
+      "director": "disk-retained (not re-shot this run)"
     },
     {
       "id": "09b-collab-graph-final",
@@ -202,20 +188,7 @@
       "usage": "第七幕收尾",
       "clean": true,
       "new": true,
-      "matched_text": " | 主主持人已完成 · 19m36s主持正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视） | LLV方（原告）正方含质询已完成 · 4m46s…门店招牌、包装、线上平台全面使用高度相似的图案，足以让消费者产生联想或混淆。综上，不论从获得显著性、主观故意还是法律保护层级，四叶花图形的商标显著性均无可争议。 | 茉茉莉奶白方（被告）反方含质询已完成 · ",
-      "nodes": 12
-    },
-    {
-      "id": "07b-admit-closeup",
-      "file": "stills/07b-admit-closeup.png",
-      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\stills\\07b-admit-closeup.png",
-      "label": "质询承认句特写",
-      "usage": "交锋3 全片最强镜头；须可读承认句原话",
-      "tape_t_ms": 1130562,
-      "clean": true,
-      "new": true,
-      "quote_required": "我承认没有消费者调查数据支撑「茶饮消费者看到四叶花联想到LV」的主张",
-      "matched_text": "部分成立。我承认没有消费者调查数据支撑“茶饮消费者看到四叶花联想到LV”的主张【待核实·推断】。"
+      "director": "disk-retained (not re-shot this run)"
     }
   ],
   "clips": [
@@ -223,56 +196,132 @@
       "id": "full-session",
       "file": "clips/full-session.webm",
       "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\full-session.webm",
-      "label": "整场回放（Playwright recordVideo）",
-      "usage": "可按 wall 时间码剪「流式发言」「轮次推进」5–15s；未自动切片（需本机 ffmpeg）",
-      "note": "整段录制；短片段请按 manifest.assets[].wall_ms 裁切"
-    }
-  ],
-  "sequences": [
+      "label": "整场（含导演 seek / SPEED=1 片段）",
+      "clean": true
+    },
     {
-      "id": "clip-round-advance",
-      "label": "比分/轮次推进",
-      "dir": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\sequences\\clip-round-advance",
-      "files": [
-        "sequences\\clip-round-advance\\clip-round-advance-00.png",
-        "sequences\\clip-round-advance\\clip-round-advance-01.png",
-        "sequences\\clip-round-advance\\clip-round-advance-02.png",
-        "sequences\\clip-round-advance\\clip-round-advance-03.png",
-        "sequences\\clip-round-advance\\clip-round-advance-04.png",
-        "sequences\\clip-round-advance\\clip-round-advance-05.png",
-        "sequences\\clip-round-advance\\clip-round-advance-06.png",
-        "sequences\\clip-round-advance\\clip-round-advance-07.png",
-        "sequences\\clip-round-advance\\clip-round-advance-08.png",
-        "sequences\\clip-round-advance\\clip-round-advance-09.png",
-        "sequences\\clip-round-advance\\clip-round-advance-10.png"
-      ],
-      "interval_ms": 900,
-      "usage": "短视频片段的密集截图替代（可补帧/剪辑）",
-      "tape_hint": "round transition / scoreboard"
+      "id": "clip-streaming-debate-speed1",
+      "file": "clips/clip-streaming-debate-speed1.webm",
+      "path": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\clip-streaming-debate-speed1.webm",
+      "label": "SPEED=1 流式短片（自 full-session 尾部裁 ~12s）",
+      "usage": "冷开场镜头2 备选",
+      "speed": 1,
+      "new": true,
+      "note": "尾部裁切近似；精确窗口见 sequences/clip-streaming-debate-speed1"
     }
   ],
-  "missing": [],
+  "sequences": [],
+  "missing": [
+    {
+      "id": "04b-r2-quote-closeup",
+      "reason": "画面未检出完整金句「任何经营者都不能垄断自然界公共资源的基本表达」；磁带有原文。实际 UI:  返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）停止协作图辩论室四叶花图形的商标显著性掌舵正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商"
+    },
+    {
+      "id": "clip-streaming-debate-speed1",
+      "reason": "director POST /seek → 404: {\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"会话未绑定演示磁带\"}}"
+    }
+  ],
   "notes": [
     "cleaned 1 prior conversations",
-    "DEV badge absent (production build)",
-    "短视频：已产出 full-session.webm；未做自动裁切。若需 5–15s 片段，用 ffmpeg 按 assets 的 wall_ms 裁切，或使用 sequences/ 密集帧。",
-    "admit-capture 2026-07-18T04:27:27.565Z: ok=true"
+    "DEV badge absent (production build OK)",
+    "clicked 授权开赛 before director tests",
+    "R1 quote NOT in UI after seek+reload; actual:  返回正反辩论：茉莉奶白使用四叶花卉图形是否构成对LV商标权的侵权（基于苏州中院一审判决的重新审视）停止协作图辩论室四叶花图形的商标显著性掌舵正方正在续辩这场怎么读布局并排单栏第1轮第2轮主持人本场围绕茉莉奶白使用四叶花卉图形是否侵犯LV商标权展开重新审视。正方LV主张其四叶花商标经使用已获强显著性，且被告存在攀附故意",
+    "09-collab-graph: director POST /seek → 404: {\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"会话未绑定演示磁带\"}}",
+    "acceptance diskOk=true transportOk=true files=01-user-prompt.png,02-team-preview.png,03-debate-opening.png,07b-admit-closeup.png,08-final-verdict.png"
   ],
   "ok": true,
-  "captured_ids": [
-    "01-user-prompt",
-    "02-team-preview",
-    "09-collab-graph",
-    "03-debate-opening",
-    "04-r2-diamond-square",
-    "04b-r2-quote-closeup",
-    "05-r3-logo-swap",
-    "05b-r4-logo-defense",
-    "07-evidence-gap-admit",
-    "06-r5-burden",
-    "08-final-verdict",
-    "09b-collab-graph-final"
+  "chapters": [
+    {
+      "id": "opening",
+      "label": "开场检索",
+      "t_ms": 0,
+      "event_index": 0
+    },
+    {
+      "id": "team_preview",
+      "label": "组队授权",
+      "t_ms": 141228,
+      "event_index": 2092
+    },
+    {
+      "id": "r1_argument",
+      "label": "第1轮·立论",
+      "t_ms": 164533,
+      "event_index": 2097
+    },
+    {
+      "id": "r1_cross",
+      "label": "第1轮·质询",
+      "t_ms": 354161,
+      "event_index": 10427
+    },
+    {
+      "id": "r1_score",
+      "label": "第1轮·打分",
+      "t_ms": 563065,
+      "event_index": 15222
+    },
+    {
+      "id": "r2_argument",
+      "label": "第2轮·立论",
+      "t_ms": 563065,
+      "event_index": 15223
+    },
+    {
+      "id": "r2_cross",
+      "label": "第2轮·质询",
+      "t_ms": 738576,
+      "event_index": 21887
+    },
+    {
+      "id": "r2_score",
+      "label": "第2轮·打分",
+      "t_ms": 861441,
+      "event_index": 25521
+    },
+    {
+      "id": "r3_argument",
+      "label": "第3轮·立论",
+      "t_ms": 861441,
+      "event_index": 25522
+    },
+    {
+      "id": "r3_cross",
+      "label": "第3轮·质询",
+      "t_ms": 1005431,
+      "event_index": 30160
+    },
+    {
+      "id": "r3_score",
+      "label": "第3轮·打分",
+      "t_ms": 1130562,
+      "event_index": 34552
+    },
+    {
+      "id": "r4_argument",
+      "label": "第4轮·立论",
+      "t_ms": 1130562,
+      "event_index": 34553
+    },
+    {
+      "id": "r4_cross",
+      "label": "第4轮·质询",
+      "t_ms": 1252185,
+      "event_index": 38992
+    },
+    {
+      "id": "r4_score",
+      "label": "第4轮·打分",
+      "t_ms": 1309596,
+      "event_index": 41666
+    },
+    {
+      "id": "verdict",
+      "label": "终审",
+      "t_ms": 1330177,
+      "event_index": 42964
+    }
   ],
-  "elapsed_wall_ms": 262421,
-  "full_video": "C:\\Project\\AgentCore\\apps\\promo\\assets\\lv-molihua\\clips\\full-session.webm"
+  "elapsed_wall_ms": 219701,
+  "conversation_id": "782d7362-a24f-44dd-b859-76b8c621f3f3"
 }

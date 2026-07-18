@@ -199,62 +199,62 @@ export function TeamView({
 
   return (
     <EvidenceLedgerProvider ledger={ledgerMap}>
-    <div className="team">
-      <div className="team-head">
-        <span className="team-count">
-          团队 {progress.completed}/{progress.total}
-        </span>
-        {isDebate && <span className="team-tag">辩论</span>}
-      </div>
-      <div className="team-bar">
-        <span className="team-bar-fill" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="team-runs">
-        {workers.map((run) => (
-          <RunCard
-            key={run.id}
-            run={run}
-            agent={agents.find((a) => a.id === run.agentId)}
-            depth={depthOf(run)}
-            continuationIndex={continuationIndexOf(workers, run)}
-            workerToolPhase={workerToolPhases?.get(run.id)}
-            onOpen={() => setSelectedRunId(run.id)}
-          />
-        ))}
-      </div>
-      {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
+      <div className="team">
+        <div className="team-head">
+          <span className="team-count">
+            团队 {progress.completed}/{progress.total}
+          </span>
+          {isDebate && <span className="team-tag">辩论</span>}
+        </div>
+        <div className="team-bar">
+          <span className="team-bar-fill" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="team-runs">
+          {workers.map((run) => (
+            <RunCard
+              key={run.id}
+              run={run}
+              agent={agents.find((a) => a.id === run.agentId)}
+              depth={depthOf(run)}
+              continuationIndex={continuationIndexOf(workers, run)}
+              workerToolPhase={workerToolPhases?.get(run.id)}
+              onOpen={() => setSelectedRunId(run.id)}
+            />
+          ))}
+        </div>
+        {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
           concurrent siblings this turn — the visible, glass-box face of the note wall (贴事实·
           不要求回应, NOT a chat). Shown attributed (谁贴的) + kind-tagged (我定了 / 提个醒), in post
           order. Empty (the common case) renders nothing. Collapsible like 思考/工具组 (<details>):
           running + active note → default open; finished/stopped → collapsed「团队便签 N」. Remount
           via key when the default flips so turn completion re-applies the collapsed default. */}
-      {/* 交付状态（能力闸门与交付诚实性）：缺口 / 待用户操作的诚实对账，镜像桌面
+        {/* 交付状态（能力闸门与交付诚实性）：缺口 / 待用户操作的诚实对账，镜像桌面
           DeliveryStatusCard 的渲染裁决（delivered 不出卡、由产出文件卡承载）。手机为云瘦
           客户端，bind_local_folder 行动项按提示行如实呈现（无本地绑定通道）。 */}
-      {deliveryStatus && deliveryStatus.state !== "delivered" && (
-        <DeliverySection status={deliveryStatus} />
-      )}
-      {teamNotes.length > 0 && (
-        <TeamNotesWall
-          key={notesDefaultOpen ? "open" : "shut"}
-          notes={teamNotes}
-          defaultOpen={notesDefaultOpen}
-        />
-      )}
-      {/* 深度检视单个队员 (RunDetail): the detail panel for the tapped run — a native <dialog>
+        {deliveryStatus && deliveryStatus.state !== "delivered" && (
+          <DeliverySection status={deliveryStatus} />
+        )}
+        {teamNotes.length > 0 && (
+          <TeamNotesWall
+            key={notesDefaultOpen ? "open" : "shut"}
+            notes={teamNotes}
+            defaultOpen={notesDefaultOpen}
+          />
+        )}
+        {/* 深度检视单个队员 (RunDetail): the detail panel for the tapped run — a native <dialog>
           bottom sheet. Navigating (修订链切换 / 关系跳转) swaps `selectedRunId` so the SAME open
           dialog re-renders in place (no remount flash); unmounting (→ null) closes it. */}
-      {selectedRun && (
-        <RunDetailPanel
-          run={selectedRun}
-          agents={agents}
-          runs={runs}
-          toolCalls={runToolCalls?.get(selectedRun.id) ?? []}
-          onSelect={setSelectedRunId}
-          onClose={() => setSelectedRunId(null)}
-        />
-      )}
-    </div>
+        {selectedRun && (
+          <RunDetailPanel
+            run={selectedRun}
+            agents={agents}
+            runs={runs}
+            toolCalls={runToolCalls?.get(selectedRun.id) ?? []}
+            onSelect={setSelectedRunId}
+            onClose={() => setSelectedRunId(null)}
+          />
+        )}
+      </div>
     </EvidenceLedgerProvider>
   );
 }

@@ -203,10 +203,7 @@ class DelegateTool:
     def note_completion_gap(self, fingerprint: tuple[str, ...]) -> int:
         """Record an unmet completion gap; return consecutive count for this fingerprint."""
         prev = self._completion_gap_streak
-        if prev is not None and prev[0] == fingerprint:
-            count = prev[1] + 1
-        else:
-            count = 1
+        count = prev[1] + 1 if prev is not None and prev[0] == fingerprint else 1
         self._completion_gap_streak = (fingerprint, count)
         return count
 

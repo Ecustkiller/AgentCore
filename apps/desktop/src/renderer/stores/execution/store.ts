@@ -1,3 +1,4 @@
+import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import type {
   DebateNarrativeRound,
   DebateResultPayload,
@@ -10,7 +11,6 @@ import type {
   TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
-import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import { create } from "zustand";
 import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";

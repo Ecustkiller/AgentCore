@@ -145,9 +145,7 @@ def charges_retrieval_budget(result: ToolResult) -> bool:
     if not result.success:
         return False
     meta = result.metadata or {}
-    if meta.get("cached"):
-        return False
-    return True
+    return not meta.get("cached")
 
 
 def budget_exhausted_output() -> str:

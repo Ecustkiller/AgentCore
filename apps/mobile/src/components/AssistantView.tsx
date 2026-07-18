@@ -107,7 +107,8 @@ export function AssistantContent({
   content: string;
   reasoning?: string;
   citations?: Citation[];
-  /** 回合调研台账（`#rN` 角标回退）；与 team.evidenceLedger 同源时可复用。 */
+  /** 回合调研台账（`#rN`）：live=`ProjectedTurn.evidenceLedger`；history=`MessageDetail.evidenceLedger`。
+   *  与 `team.evidenceLedger`（辩论场级 `#eN`）是两通道，勿混用。 */
   evidenceLedger?: EvidenceLedgerEntry[];
   /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): what the CEO captain actually read this
    *  turn (系统提示 / 对话历史 / 原始请求), rendered turn-level on its bubble — present even on a
@@ -135,7 +136,7 @@ export function AssistantContent({
   onFill?: (text: string) => void;
 }) {
   const hasTeam = !!team && team.runs.length > 0;
-  const turnLedger = evidenceLedger ?? team?.evidenceLedger;
+  const turnLedger = evidenceLedger;
   return (
     <>
       {debate ? (
@@ -393,9 +394,9 @@ function ProcessTimeline({
       {team && !hasTeamMarker ? <TeamView {...team} /> : null}
       {nodes.map((node, i) => {
         if (node.kind === "content")
-          // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return (
             <Markdown
+              // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
               key={i}
               content={node.text}
               citations={citations}

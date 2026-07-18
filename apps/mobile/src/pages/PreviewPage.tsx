@@ -5,6 +5,7 @@ import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
   extractAsks,
   extractEscalationSlots,
+  extractEvidenceLedger,
   extractHotDecisionTraces,
   extractRunToolCalls,
   extractToolPhases,
@@ -66,6 +67,10 @@ export function PreviewPage() {
     return map;
   }, [projected.interactions]);
   const runToolCalls = useMemo(() => extractRunToolCalls(events), [events]);
+  const debateEvidenceLedger = useMemo(
+    () => extractEvidenceLedger(events),
+    [events],
+  );
   const artifacts = useMemo(() => fileArtifactsFromEvents(events), [events]);
 
   const isMulti = projected.runs.length > 0;
@@ -82,6 +87,7 @@ export function PreviewPage() {
         escalationsInteractive: false,
         runToolCalls,
         workerToolPhases,
+        evidenceLedger: debateEvidenceLedger,
       }
     : undefined;
 
@@ -153,6 +159,7 @@ export function PreviewPage() {
             content={projected.content}
             reasoning={projected.reasoning}
             citations={projected.citations}
+            evidenceLedger={projected.evidenceLedger}
             captainContext={projected.captainContext}
             team={team}
             debate={projected.debate}

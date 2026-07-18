@@ -150,7 +150,8 @@ function computeProjection(
     // Live tail: advance the incremental accumulator to the current frame count, applying
     // ONLY the newly-appended frames.
     const fold = entry ?? { count: 0, state: initFold(plan) };
-    for (let i = fold.count; i < upto; i++) applyFrame(fold.state, rt.frames[i]);
+    for (let i = fold.count; i < upto; i++)
+      applyFrame(fold.state, rt.frames[i]);
     fold.count = upto;
     liveFolds.set(plan, fold);
     base = finalizeFold(

@@ -237,4 +237,4 @@ async def test_tool_exec_failed_call_does_not_consume_budget():
 
 
 def test_retrieval_tool_names_cover_search_and_read():
-    assert RETRIEVAL_TOOL_NAMES == frozenset({"web_search", "read_url"})
+    assert frozenset({"web_search", "read_url"}) == RETRIEVAL_TOOL_NAMES

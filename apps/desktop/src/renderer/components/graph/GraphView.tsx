@@ -339,7 +339,9 @@ export function GraphView({
     if (!morphing) return nodes;
     return nodes.map((n) => ({
       ...n,
-      className: [n.className, "graph-layout-morphing"].filter(Boolean).join(" "),
+      className: [n.className, "graph-layout-morphing"]
+        .filter(Boolean)
+        .join(" "),
     }));
   }, [projectionBase, morphing]);
 

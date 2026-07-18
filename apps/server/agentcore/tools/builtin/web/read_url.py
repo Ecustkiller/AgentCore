@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from agentcore.config import settings
+from agentcore.core.citation_tier import stamp_citation_tier
 from agentcore.core.logging import get_logger
 from agentcore.core.net import (
     EgressError,
@@ -24,7 +25,6 @@ from agentcore.core.net import (
     classify_url as _classify_url,
 )
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.core.citation_tier import stamp_citation_tier
 from agentcore.tools.builtin.web._net import (
     circuit_remaining,
     note_failure,
