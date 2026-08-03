@@ -22,11 +22,11 @@ dev's default ``LOG_LEVEL=info`` surfaces them without also raising the global l
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.core.secrets import redact_secrets
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 
 logger = get_logger("agentcore.llm.call")
@@ -36,27 +36,14 @@ logger = get_logger("agentcore.llm.call")
 _MSG_MAX_CHARS = 600
 _BODY_MAX_CHARS = 2000
 
-# Defensive secret scrub for captured bodies. Bodies are chat/system prompts, not key
-# stores, but a user could paste a key — never let it land in a log line. Covers the
-# vendor key shapes this project + common providers use, beyond OpenAI-only ``sk-…``:
-# OpenAI/DeepSeek/Anthropic/Moonshot/Stripe ``sk[-_]…``, Tavily ``tvly-…``, Groq
-# ``gsk_…``, xAI ``xai-…``, Google ``AIza…``, GitHub ``gh?_…``, plus ``Bearer <token>``.
-# Defence-in-depth on a default-off debug log — wide, not exhaustive (e.g. opaque
-# prefix-less keys like Zhipu's can't be matched without over-redacting prose) (SEC-001).
-_SECRET_RE = re.compile(
-    r"(?:sk|tvly|gsk|xai)[-_][A-Za-z0-9._-]{8,}"
-    r"|AIza[A-Za-z0-9._-]{16,}"
-    r"|gh[opsru]_[A-Za-z0-9]{16,}"
-    r"|[Bb]earer\s+[A-Za-z0-9._-]{8,}"
-)
-
 
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit})"
 
 
 def _redact(text: str) -> str:
-    return _SECRET_RE.sub("[REDACTED]", text)
+    """SEC-001: scrub pasted keys from debug LLM body capture (shared scrubber)."""
+    return redact_secrets(text)
 
 
 def _format_prompt(messages: list[LLMMessage]) -> str:

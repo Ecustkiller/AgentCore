@@ -142,6 +142,11 @@ def test_cloud_scratch_facts():
     assert "browser=未装配" in out
     assert "勿假装" in out or "勿调用 browser_*" in out
     assert "host_info" in out or "host_audio" in out or "本机 Host 指引" in out
+    # 案 20260803-image-gen-byok-egress-boundary A：云沙箱无任意 HTTPS 出口事实行
+    assert "出站网络" in out
+    assert "--network=none" in out
+    assert "代调" in out and "生图" in out
+    assert "API Key" in out or "密钥" in out or "明文" in out
     # 旧「云端临时空间」短标签已换成诚实草稿口径
     assert "工作区身份：云端临时空间" not in out
     # 案卷布局（始终可见）：三行出口 + 边界

@@ -133,6 +133,29 @@ _DESTRUCTIVE_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ),
 )
 
+# host_shell fuse (tools.builtin.host) already hard-denies these families.
+# Breaker upgrades them to DENY on the host_shell path so approval cards do not
+# promise a run that fuse will still refuse. git force is intentionally absent —
+# fuse does not scan git; shell/terminal text stays FORCE_APPROVAL.
+# Keep this set in lockstep with host fuse overlap (see fuse⊆DENY tests).
+FUSE_ALIGNED_DENY_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "destructive.rm_root",
+        "destructive.format_device",
+        "destructive.shutdown",
+    }
+)
+
+_HOST_SHELL_FUSE_DENY_REASON = (
+    "检测到疑似毁灭性命令，且与 host_shell 执行侧熔断重叠（启发式兜底，并非完整拦截）。"
+    "已硬拒，不可由权限模式或本轮放行放开；请缩小命令范围或改用结构化 host_*。"
+)
+
+
+def fuse_aligned_deny_rule_ids() -> frozenset[str]:
+    """Destructive rule ids that host_shell fuse covers → breaker DENY on host_shell."""
+    return FUSE_ALIGNED_DENY_RULE_IDS
+
 # ── Sensitive path heuristics ────────────────────────────────────────────────
 
 _SENSITIVE_BASENAME_EXACT: frozenset[str] = frozenset(
@@ -181,6 +204,11 @@ _SENSITIVE_PATH_SEGMENTS: frozenset[str] = frozenset(
 _SENSITIVE_DENY_REASON = (
     "该路径疑似包含凭据或密钥类敏感文件，默认拒绝读取（启发式兜底，并非完整拦截）。"
     "请改用用户明示提供的非敏感配置，或请用户在对话中粘贴所需片段。"
+)
+
+_SENSITIVE_WRITE_DENY_REASON = (
+    "该路径疑似凭据/密钥类敏感文件，默认拒绝写入（启发式兜底，并非完整拦截）。"
+    "【禁止】把 API Key 写入工作区明文；请用不含密钥的脚手架 + 用户本机环境变量。"
 )
 
 
@@ -267,6 +295,8 @@ def _command_text_for_tool(tool_name: str, arguments: dict[str, Any]) -> str:
 def _path_args_for_tool(tool_name: str, arguments: dict[str, Any]) -> list[str]:
     if tool_name == "file_read":
         return [str(arguments.get("path") or "")]
+    if tool_name in {"file_write", "file_append", "str_replace", "write_section"}:
+        return [str(arguments.get("path") or "")]
     if tool_name == "grep":
         paths = [str(arguments.get("path") or "")]
         glob = str(arguments.get("glob") or "").strip()
@@ -276,6 +306,15 @@ def _path_args_for_tool(tool_name: str, arguments: dict[str, Any]) -> list[str]:
     if tool_name == "code_search":
         return [str(arguments.get("path_prefix") or "")]
     return []
+
+
+def _write_content_for_secret_scan(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Body about to land on disk (heuristic secret gate; 案 image-gen B)."""
+    if tool_name in {"file_write", "file_append", "write_section"}:
+        return str(arguments.get("content") or "")
+    if tool_name == "str_replace":
+        return str(arguments.get("new_string") or "")
+    return ""
 
 
 def _truthy_flag(value: Any) -> bool:
@@ -345,6 +384,25 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                     reason=_SENSITIVE_DENY_REASON,
                 )
 
+    # Sensitive writes + pasted-key content (案 20260803-image-gen-byok-egress-boundary B).
+    if name in {"file_write", "file_append", "str_replace", "write_section"}:
+        for path in _path_args_for_tool(name, args):
+            if is_sensitive_path(path):
+                return BreakerHit(
+                    verdict=BreakerVerdict.DENY,
+                    rule_id="sensitive.path_write",
+                    reason=_SENSITIVE_WRITE_DENY_REASON,
+                )
+        from agentcore.core.secrets import SECRET_WRITE_DENY_REASON, contains_secret
+
+        body = _write_content_for_secret_scan(name, args)
+        if contains_secret(body):
+            return BreakerHit(
+                verdict=BreakerVerdict.DENY,
+                rule_id="sensitive.secret_write",
+                reason=SECRET_WRITE_DENY_REASON,
+            )
+
     # Git hard-ban at the breaker layer (git_ops still enforces at execute).
     if name == "git":
         sub = str(args.get("subcommand") or "").strip().lower()
@@ -366,8 +424,9 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 return push_hit
 
     # Destructive text on execution / terminal / host_shell surfaces.
-    # host_shell: align force→main|master with terminal (FORCE_APPROVAL); ordinary
-    # git push stays on the Host GRANTABLE axis (not fuse hard-deny).
+    # host_shell: fuse-aligned families → DENY (方案 C); git force→main|master
+    # stays FORCE_APPROVAL (fuse does not scan git). Ordinary push stays on the
+    # Host GRANTABLE axis. terminal / code_execute / test_run keep FORCE_APPROVAL.
     if name in {"terminal", "code_execute", "test_run", "host_shell"}:
         if name == "terminal":
             sub = str(args.get("subcommand") or "").strip().lower()
@@ -375,6 +434,15 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 return None
         hit = scan_destructive_text(_command_text_for_tool(name, args))
         if hit is not None:
+            if (
+                name == "host_shell"
+                and hit.rule_id in FUSE_ALIGNED_DENY_RULE_IDS
+            ):
+                return BreakerHit(
+                    verdict=BreakerVerdict.DENY,
+                    rule_id=hit.rule_id,
+                    reason=_HOST_SHELL_FUSE_DENY_REASON,
+                )
             return hit
 
     return None

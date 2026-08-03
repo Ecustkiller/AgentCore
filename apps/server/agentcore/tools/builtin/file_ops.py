@@ -289,10 +289,16 @@ def format_artifact_manifest(
     action: str = "write",
 ) -> str:
     """Success receipt = artifact manifest（作者以此验真，勿再 file_read 回读正文）。"""
+    from agentcore.core.secrets import redact_secrets
+
     lines = len((content or "").splitlines())
     tree = extract_title_tree(content)
     tree_block = "\n".join(f"  {t}" for t in tree) if tree else "  （无标题）"
-    preview = _tail_preview(content, max_lines=_APPEND_ECHO_LINES, max_chars=_APPEND_ECHO_CHARS)
+    # 案 B：manifest 末段预览 / 标题树不得回显完整 API Key。
+    tree_block = redact_secrets(tree_block)
+    preview = redact_secrets(
+        _tail_preview(content, max_lines=_APPEND_ECHO_LINES, max_chars=_APPEND_ECHO_CHARS)
+    )
     verb = "已写入" if action == "write" else "已追加"
     return (
         f"{verb} {bytes_written} 字节到 {path}\n"
@@ -528,10 +534,13 @@ def _region_slice(
 
 
 def _old_string_preview(old_string: str) -> str:
+    from agentcore.core.secrets import redact_secrets
+
     text = old_string.replace("\r\n", "\n").replace("\r", "\n")
-    if len(text) <= _EDIT_FAIL_OLD_PREVIEW_CHARS:
-        return text
-    return text[:_EDIT_FAIL_OLD_PREVIEW_CHARS] + "…"
+    if len(text) > _EDIT_FAIL_OLD_PREVIEW_CHARS:
+        text = text[:_EDIT_FAIL_OLD_PREVIEW_CHARS] + "…"
+    # 案 B：失败回执不得回显完整 API Key。
+    return redact_secrets(text)
 
 
 def _fuzzy_line_candidates(
@@ -2158,6 +2167,8 @@ class StrReplaceTool:
         # （见本模块顶部说明）。有界：落点前后各 _EDIT_ECHO_CONTEXT 行 + 新增行数，封顶 MAX_LINES。
         echo = ""
         if outcome.first_line is not None:
+            from agentcore.core.secrets import redact_secrets
+
             region = await context.backend.read_lines(
                 rel_path,
                 offset=max(1, outcome.first_line - _EDIT_ECHO_CONTEXT),
@@ -2166,8 +2177,9 @@ class StrReplaceTool:
                     _EDIT_ECHO_MAX_LINES,
                 ),
             )
-            echo = "。改动落点（已落盘，无需再读回确认）：\n" + _format_numbered_lines(
-                region.lines, region.start_line
+            # 案 B：落点回显不得带出完整 API Key。
+            echo = "。改动落点（已落盘，无需再读回确认）：\n" + redact_secrets(
+                _format_numbered_lines(region.lines, region.start_line)
             )
         _mark_landed_files(context, rel_path)
         rename_suffix = f"。{rename_note}" if rename_note else ""

@@ -21,10 +21,12 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.safety_breaker import (
     BreakerVerdict,
     evaluate_tool_call,
+    fuse_aligned_deny_rule_ids,
     git_forbidden_subcommands,
     is_sensitive_path,
     scan_destructive_text,
 )
+from agentcore.tools.builtin.host import shell_fuse_blocks
 from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
 from agentcore.tools.builtin.git_ops import _FORBIDDEN_PATTERNS
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -145,6 +147,53 @@ def test_evaluate_file_read_normal_passes():
     assert evaluate_tool_call("file_read", {"path": "src/app.py"}) is None
 
 
+def test_evaluate_file_write_sensitive_path_denies():
+    """案 image-gen B：敏感路径写盘与读盘同拒。"""
+    hit = evaluate_tool_call("file_write", {"path": ".env", "content": "FOO=1"})
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "sensitive.path_write"
+
+
+def test_evaluate_file_write_secret_content_denies():
+    """案 image-gen B：正文含 API Key 形状 → 拒写入工作区明文。"""
+    hit = evaluate_tool_call(
+        "file_write",
+        {"path": "env", "content": "OPENAI_API_KEY=sk-abcdEFGH1234567890\n"},
+    )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "sensitive.secret_write"
+    assert "明文" in hit.reason or "API Key" in hit.reason
+
+
+def test_evaluate_str_replace_secret_new_string_denies():
+    hit = evaluate_tool_call(
+        "str_replace",
+        {
+            "path": "scripts/generate_image.py",
+            "old_string": 'MODEL = "imega1"',
+            "new_string": 'API_KEY = "sk-abcdEFGH1234567890"',
+        },
+    )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "sensitive.secret_write"
+
+
+def test_evaluate_file_write_safe_scaffold_passes():
+    assert (
+        evaluate_tool_call(
+            "file_write",
+            {
+                "path": "scripts/generate_image.py",
+                "content": "import os\nKEY = os.environ['OPENAI_API_KEY']\n",
+            },
+        )
+        is None
+    )
+
+
 def test_evaluate_terminal_start_destructive_forces():
     hit = evaluate_tool_call(
         "terminal", {"subcommand": "start", "command": "rm -rf /"}
@@ -189,6 +238,7 @@ def test_evaluate_host_shell_force_push_protected_forces():
     assert hit is not None
     assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
     assert hit.rule_id == "destructive.git_force_push_protected"
+    assert "destructive.git_force_push_protected" not in fuse_aligned_deny_rule_ids()
 
 
 def test_evaluate_host_shell_ordinary_push_passes():
@@ -203,6 +253,58 @@ def test_evaluate_host_shell_ordinary_push_passes():
         )
         is None
     )
+
+
+# Samples that both host_shell fuse and breaker destructive rules cover.
+# Maintaining this table = fuse ⊆ DENY drift guard (方案 C).
+_FUSE_SUBSET_DENY_SAMPLES: tuple[tuple[str, str], ...] = (
+    ("rm -rf /", "destructive.rm_root"),
+    ("sudo rm -rf /", "destructive.rm_root"),
+    ("rm -rf /*", "destructive.rm_root"),
+    ("mkfs.ext4 /dev/sda1", "destructive.format_device"),
+    ("dd if=/dev/zero of=/dev/sda bs=1M", "destructive.format_device"),
+    ("format C:", "destructive.format_device"),
+    ("shutdown -h now", "destructive.shutdown"),
+    ("poweroff", "destructive.shutdown"),
+    ("Stop-Computer", "destructive.shutdown"),
+    ("Restart-Computer", "destructive.shutdown"),
+)
+
+
+@pytest.mark.parametrize("command,rule_id", _FUSE_SUBSET_DENY_SAMPLES)
+def test_host_shell_fuse_covered_destructive_denies(command: str, rule_id: str):
+    """方案 C: fuse-covered shapes on host_shell → DENY (no approve-then-fuse-fail)."""
+    assert shell_fuse_blocks(command), f"sample must be fuse-covered: {command!r}"
+    assert rule_id in fuse_aligned_deny_rule_ids()
+    hit = evaluate_tool_call("host_shell", {"command": command})
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == rule_id
+    assert "并非完整拦截" in hit.reason
+    assert "硬拒" in hit.reason or "已硬拒" in hit.reason
+
+
+@pytest.mark.parametrize("command,rule_id", _FUSE_SUBSET_DENY_SAMPLES)
+def test_terminal_fuse_covered_shapes_still_force_approval(command: str, rule_id: str):
+    """terminal has no host fuse — same shapes stay FORCE_APPROVAL."""
+    hit = evaluate_tool_call(
+        "terminal", {"subcommand": "start", "command": command}
+    )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+    assert hit.rule_id == rule_id
+
+
+def test_fuse_aligned_deny_rule_ids_exclude_git():
+    ids = fuse_aligned_deny_rule_ids()
+    assert ids == {
+        "destructive.rm_root",
+        "destructive.format_device",
+        "destructive.shutdown",
+    }
+    assert "destructive.git_force_push_protected" not in ids
+    # Drift guard: every sample rule_id is declared in the shared set.
+    assert {rid for _, rid in _FUSE_SUBSET_DENY_SAMPLES} <= ids
 
 
 def test_git_forbidden_list_shared_with_git_ops():

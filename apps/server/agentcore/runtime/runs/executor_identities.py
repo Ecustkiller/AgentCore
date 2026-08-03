@@ -295,7 +295,9 @@ _WORKER_TOOL_SAFETY_POLICY = """\
 <tool_safety>
 写文件、删除、移动、执行代码等会改动环境的工具，可能需要用户确认后才执行；你放手\
 调用即可，由确认机制处理同意，不必在正文里反复征求许可。对不可逆或破坏性的操作\
-（删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。
+（删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。\
+【第三方 Key】【禁止】把用户粘贴的 API Key 写入工作区明文（含 env）；脚本用环境变量占位，\
+用户本机自备。云端无任意 HTTPS 出口时【禁止】用 code_execute 代调外网生图 API 交差。
 </tool_safety>"""
 
 # Shared problem-handling tiers for leaf + captain workers. Both identities embed
