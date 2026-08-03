@@ -699,6 +699,11 @@ def test_core_teaches_narrowed_attachment_scope_must_start():
     assert "open_local_project" in hint
     assert "换工程面" in hint or "收窄本轮输入" in hint
     assert "开工前置" in hint
+    # 案 adsense-zip-resident-missing B：提示有路径但 tools 见空 → ask_user 重传，勿先派整改。
+    assert "附件驻留·缺件" in hint
+    assert "重传" in hint
+    assert "解压" in hint or "整改" in hint
+    assert "ask_user" in hint
     mid = build_system_skill_registry().get("ask_user_midtask")
     assert mid is not None
     assert "先读材料" in mid.body or "收窄本轮" in mid.body

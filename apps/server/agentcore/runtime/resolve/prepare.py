@@ -382,6 +382,7 @@ async def _build_attachment_context(
     has_office_unparsed = False
     has_preparsed = False
     has_conversation = False
+    has_resident_missing = False
     for att in attachments:
         name = att.get("name") or "untitled"
         kind = att.get("kind") or "file"
@@ -390,6 +391,23 @@ async def _build_attachment_context(
         ws_path = att.get("workspace_path")
         parse_status = att.get("parse_status")
         parsed_path = att.get("parsed_workspace_path")
+
+        if kind == "file" and att.get("resident_missing"):
+            # 验盘失败：元数据有路径、字节未落盘——禁当已交源码 / 禁派解压。
+            has_resident_missing = True
+            claimed = (
+                att.get("claimed_workspace_path")
+                or att.get("path")
+                or name
+            )
+            blocks.append(
+                f"--- File: {name} ({claimed}) [resident missing] ---\n"
+                "Attachment metadata lists this path, but the bytes are NOT in "
+                "the workspace (upload/residency failed or incomplete). "
+                "Do NOT treat this as delivered source. Do NOT delegate unzip/"
+                "edit against this path. Immediately ask_user to re-upload."
+            )
+            continue
 
         if kind == "dir":
             if not text:
@@ -516,6 +534,13 @@ async def _build_attachment_context(
         if has_conversation
         else ""
     )
+    missing_note = (
+        " A [resident missing] block means chip/metadata claimed a workspace "
+        "path but bytes are absent — ask_user to re-upload; never dispatch "
+        "unzip/remediation as if the file were already delivered."
+        if has_resident_missing
+        else ""
+    )
     return (
         "<attached_files>\n"
         "The user attached the following files, directories and past "
@@ -526,7 +551,7 @@ async def _build_attachment_context(
         "them by name when relevant. Directory entries list file paths only "
         "(file contents are not included)."
         f"{conversation_note}"
-        f"{resident_note}{binary_note}{office_note}{preparsed_note}\n\n"
+        f"{resident_note}{binary_note}{office_note}{preparsed_note}{missing_note}\n\n"
         f"{body}\n"
         "</attached_files>"
     )

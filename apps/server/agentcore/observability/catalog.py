@@ -47,6 +47,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='attachment.preparse_read_failed'),
     EventSpec(name='attachment.preparse_scan_note_write_failed'),
     EventSpec(name='attachment.preparse_scanned'),
+    EventSpec(name='attachment.resident_missing'),
     EventSpec(name='audit.degraded'),
     EventSpec(name='audit.permission_axes_change_failed'),
     EventSpec(name='audit.retention_swept'),

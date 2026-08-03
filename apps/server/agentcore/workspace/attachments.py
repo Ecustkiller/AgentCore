@@ -32,6 +32,29 @@ logger = get_logger(__name__)
 ATTACHMENTS_DIR = "attachments"
 
 
+async def _workspace_file_present(backend: WorkspaceBackend, rel: str) -> bool:
+    """True when ``rel`` names an existing file (list only — no content load).
+
+    Large zip / binary residents must not go through ``read_bytes`` (capacity gate +
+    memory). Missing parent dir / PathNotFound-class errors → False.
+    """
+    cleaned = (rel or "").replace("\\", "/").strip("/")
+    parent, _, name = cleaned.rpartition("/")
+    if not parent or not name:
+        return False
+    try:
+        entries = await backend.list(parent, name)
+    except WorkspaceError:
+        return False
+    for entry in entries:
+        if entry.is_dir:
+            continue
+        ep = (entry.path or "").replace("\\", "/").strip("/")
+        if ep == cleaned or ep.endswith("/" + name) or os.path.basename(ep) == name:
+            return True
+    return False
+
+
 def _safe_attachment_name(name: str) -> str:
     """Reduce a user-supplied name to a single safe filename component.
 
@@ -106,9 +129,12 @@ async def persist_attachments(
     """Write file attachments into the workspace; return them enriched in order.
 
     Each returned dict is the input dict plus a ``workspace_path`` key for every
-    file actually written or client-pre-resident (``attachments/<name>``). Only
-    ``kind="file"`` is persisted; directory listings, conversation references and
-    empty-text non-binary files are passed through untouched. A per-file write
+    file actually written or client-pre-resident **and verified on disk**
+    (``attachments/<name>``). Client-claimed paths that fail the residency check
+    clear ``workspace_path``, set ``resident_missing`` + ``claimed_workspace_path``,
+    and log ``attachment.resident_missing`` so prompt assembly stays honest.
+    Only ``kind="file"`` is persisted; directory listings, conversation references
+    and empty-text non-binary files are passed through untouched. A per-file write
     failure is logged and skipped — a bad attachment must never break the turn.
 
     Binary residents in the text-document bucket may also gain ``text``,
@@ -127,12 +153,25 @@ async def persist_attachments(
         pre = _normalize_client_workspace_path(att.get("workspace_path"))
 
         if kind == "file" and pre:
-            # 引用即驻留：桌面（或云端 PUT）已写入字节；登记路径，勿用 truncated text 覆盖。
-            used.add(os.path.basename(pre))
-            item["workspace_path"] = pre
-            item["binary"] = binary
-            if binary:
-                await _enrich_with_preparse(backend, item, workspace_path=pre)
+            # 引用即驻留：桌面（或云端 PUT）声称已写入；写进提示前先验盘，缺则诚实降级。
+            if not await _workspace_file_present(backend, pre):
+                logger.warning(
+                    "attachment.resident_missing",
+                    name=att.get("name"),
+                    workspace_path=pre,
+                )
+                item.pop("workspace_path", None)
+                item["resident_missing"] = True
+                item["claimed_workspace_path"] = pre
+                item["binary"] = binary
+            else:
+                used.add(os.path.basename(pre))
+                item["workspace_path"] = pre
+                item["binary"] = binary
+                item.pop("resident_missing", None)
+                item.pop("claimed_workspace_path", None)
+                if binary:
+                    await _enrich_with_preparse(backend, item, workspace_path=pre)
         elif kind == "file" and text.strip() and not binary:
             item.pop("workspace_path", None)
             rel = f"{ATTACHMENTS_DIR}/{_dedup(_safe_attachment_name(att.get('name') or ''), used)}"

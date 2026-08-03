@@ -56,8 +56,53 @@ async def test_persist_keeps_client_pre_resident_path(tmp_path: Path):
     )
     assert out[0]["workspace_path"] == "attachments/report.xlsx"
     assert out[0]["binary"] is True
+    assert out[0].get("resident_missing") is not True
     # Must not overwrite binary with empty text write.
     assert (tmp_path / "attachments" / "report.xlsx").read_bytes() == b"PK\x03\x04"
+
+
+async def test_persist_clears_missing_client_resident_path(tmp_path: Path):
+    """案 adsense-zip A：client workspace_path 声称驻留但磁盘无字节 → 清路径 + resident_missing。"""
+    ws = _ws(tmp_path)
+    (tmp_path / "attachments").mkdir()
+    # Directory exists but the claimed zip is absent (fc35aece shape).
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "独立站源码（新）.zip",
+                "path": "attachments/独立站源码（新）.zip",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/独立站源码（新）.zip",
+            }
+        ],
+    )
+    assert out[0].get("workspace_path") is None
+    assert out[0]["resident_missing"] is True
+    assert out[0]["claimed_workspace_path"] == "attachments/独立站源码（新）.zip"
+    assert out[0]["binary"] is True
+    assert not (tmp_path / "attachments" / "独立站源码（新）.zip").exists()
+
+
+async def test_persist_clears_resident_when_attachments_dir_absent(tmp_path: Path):
+    """attachments/ 目录本身都不存在时同样验盘失败。"""
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "a.zip",
+                "path": "attachments/a.zip",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/a.zip",
+            }
+        ],
+    )
+    assert out[0].get("workspace_path") is None
+    assert out[0]["resident_missing"] is True
+    assert out[0]["claimed_workspace_path"] == "attachments/a.zip"
 
 
 async def test_persist_rejects_traversal_in_client_workspace_path(tmp_path: Path):

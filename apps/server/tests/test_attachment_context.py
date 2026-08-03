@@ -88,6 +88,31 @@ async def test_binary_resident_has_no_inline_body():
 
 
 @pytest.mark.asyncio
+async def test_resident_missing_honest_block_no_saved_claim():
+    """案 adsense-zip A：验盘失败 → 诚实缺件块，禁「已在工作区」口吻。"""
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "独立站源码（新）.zip",
+                "path": "attachments/独立站源码（新）.zip",
+                "text": "",
+                "binary": True,
+                "resident_missing": True,
+                "claimed_workspace_path": "attachments/独立站源码（新）.zip",
+            }
+        ]
+    )
+    assert out is not None
+    assert "[resident missing]" in out
+    assert "attachments/独立站源码（新）.zip" in out
+    assert "NOT in the workspace" in out or "bytes are NOT" in out
+    assert "ask_user" in out and "re-upload" in out
+    assert "Do NOT delegate unzip" in out or "Do NOT treat this as delivered" in out
+    assert "saved into your workspace" not in out
+    assert "ask_user to re-upload" in out or "never dispatch unzip" in out
+
+
+@pytest.mark.asyncio
 async def test_truncated_note_and_directory_listing():
     out = await _build_attachment_context(
         [
