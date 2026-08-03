@@ -838,6 +838,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   },
 
   // —— 物理做不到（绑桌面画布 / 硬件）——
+  FloatWindowPage: {
+    verdict: "impossible",
+    reason: "真 OS 浮窗路由（#/float）仅 Electron 多窗；手机无独立 OS 窗",
+  },
   WhiteboardPage: {
     verdict: "impossible",
     reason: "协作白板入口，手机无板（与 board_* 事件同裁）",
