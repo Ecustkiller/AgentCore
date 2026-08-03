@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { SidePanelFloatHost } from "@/components/layout/SidePanelFloatHost";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useConversationStore } from "@/stores/conversation";
 import {
   WORKSPACE_TAB_ID,
   runDetailTabId,
@@ -27,6 +28,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  useConversationStore.setState({ currentConversationId: "c1" });
   useSidePanelStore.setState({
     open: true,
     width: 400,
