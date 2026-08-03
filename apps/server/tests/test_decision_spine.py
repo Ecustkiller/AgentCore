@@ -35,7 +35,7 @@ def _events_delegated_ok(trace_id: str = "a" * 32) -> list[dict]:
         },
         {
             "type": "log",
-            "event": "delegate.completion_criteria_unmet",
+            "event": "delegate.completion_criteria_unmet",  # historical/S3 fixture
             "timestamp": "2026-07-31T10:00:05Z",
             "trace_id": trace_id,
             "criteria": "code_verified",
@@ -82,7 +82,7 @@ def test_build_decision_spine_covers_key_decisions() -> None:
     assert "委派" in (spine["head"].get("preview") or "") or spine["head"]["preview"]
     events = {d["event"] for d in spine["decisions"]}
     assert "delegate.started" in events
-    assert "delegate.completion_criteria_unmet" in events
+    assert "delegate.completion_criteria_unmet" in events  # historical still surfaced
     assert spine["llm"]["calls"] == 1
     assert spine["tail"]["source"] == "jsonl_close"
     assert spine["tail"]["finish_reason"] == "stop"
@@ -172,4 +172,5 @@ def test_format_decision_spine_readable() -> None:
     assert "Decision Spine" in text
     assert "delegate.started" in text
     assert "delegate.completion_criteria_unmet" in text
+    assert "historical/S3" in text
     assert "finish=stop" in text

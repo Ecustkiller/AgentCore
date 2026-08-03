@@ -408,7 +408,7 @@ async def _drive_body(
 
     # 同构再委派护栏：活跃协调上角色+任务高度同构 → 结构化拒绝（除非 force）。
     # 触顶换马甲护栏：近期 thrashing worker + 相似 task/artifacts → 拒冷派（除非 force /
-    # continue_from）。与 isomorphic 同层；不挪用 note_completion_gap。
+    # continue_from）。与 isomorphic 同层；不挪用已退役的 completion-gap streak。
     if not force:
         from agentcore.core.logging import get_logger
         from agentcore.core.types import ToolEffect

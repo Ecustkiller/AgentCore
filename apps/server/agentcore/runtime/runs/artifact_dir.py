@@ -8,7 +8,8 @@
 路径 = C3 归属与 sibling 互斥。裸目录**永不**注入 ``artifacts`` 冒充归属键。
 
 **语义收紧**：brief 里引用案卷路径（必读材料）不算调研成文意图；业务向
-``artifacts``（``src/`` · ``site/`` 等）或批次 ``code_verified`` 默认不套案卷目录。
+``artifacts``（``src/`` · ``site/`` 等）或批次 ``skip_dossier_default``
+（kw 名历史遗留 ``code_verified``，**非** criteria kind）默认不套案卷目录。
 显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍优先。
 
 不做：``file_write`` 启发式改写、根目录搬迁、``playbook=none`` 特例。
@@ -110,8 +111,9 @@ def resolve_artifact_dir(
 ) -> str:
     """Resolve the dossier dir for a file deliverable, or ``\"\"`` when not applicable.
 
-    ``code_verified`` retained as kw name for call-site compat; means skip default
-    dossier dir (e.g. ``repair_code`` playbook) — S3 no longer tied to a criteria kind.
+    ``code_verified``：**非 kind**——kw 名历史遗留；语义 = skip default dossier
+    dir（e.g. ``repair_code`` playbook）。S3 不再绑 criteria kind；牵一发动全身
+    故未改名。Call-site compat only.
     """
     if deliverable.form == "prose":
         return ""

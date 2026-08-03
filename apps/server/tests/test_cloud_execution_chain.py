@@ -91,7 +91,7 @@ def test_cloud_gvisor_on_chain_flips_end_to_end(tmp_path: Path, monkeypatch: pyt
     # ② 能力自述：workspace_context 能力行翻「已装配」。
     assert "code_execute=已装配" in build_workspace_context(backend, desktop_online=True)
 
-    # ③ 委派能力闸：显式 code_verified 放行、二进制产物启发不再软警告。
+    # ③ 委派能力闸：S3 后无 code_verified kind 硬放行；二进制产物启发不再软警告。
     plan = _pptx_plan()
     assert execution_capability_warning(plan, backend) is None
 

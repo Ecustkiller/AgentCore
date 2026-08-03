@@ -212,6 +212,17 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     },
 }
 
+# S3-retired names: no emit site, kept so old JSONL still validates against the registry.
+# Descriptions must say 历史兼容 — do not present as current contract.
+HISTORICAL_COMPAT: dict[str, str] = {
+    "delegate.completion_criteria_hoisted": (
+        "历史兼容（S3 前）：criteria hoist；现行不发"
+    ),
+    "delegate.completion_criteria_unmet": (
+        "历史兼容（S3 前）：按 kind 硬判未满足；现行不发"
+    ),
+}
+
 KEY_DESC: dict[str, str] = {
     "chat.turn_start": "回合起点（preview/chars/history）",
     "chat.turn_complete": "回合收尾（含 Phase-0 延迟：prepare/assemble/ttft_*；model/credential_source）",
@@ -219,6 +230,9 @@ KEY_DESC: dict[str, str] = {
     "delegate.started": "编排委派开始（agents/plan/waves）",
     "delegate.completed": "委派批次完成（escalations/scope）",
     "delegate.yielded": "委派中途让出（replan 边界）",
+    "delegate.completion_criteria_ignored": (
+        "S3：CEO 误传已删 completion_criteria 时打点（忽略字段，非硬闸）"
+    ),
     "delegate.run_redirect_hot": "redirect 热修续派（revise 重算桶，与 continuation_ok 同义）",
     "worker.escalate": "worker 升级求决策",
     "tool.execute_end": "工具执行结束（status/duration_ms；error 时带 reason）",
@@ -365,14 +379,20 @@ def write_catalog(events: list[str]) -> None:
 
 
 def main() -> None:
-    events = sorted(scan_events())
+    scanned = scan_events()
+    events = sorted(scanned | set(HISTORICAL_COMPAT))
     # Guard against dead names lingering in the enrichment maps (an event name
     # with no emit site never enters the catalog, so its enrichment is a zombie).
-    dead = sorted((set(KEY_FIELDS) | set(KEY_DESC)) - set(events))
+    # HISTORICAL_COMPAT names are intentionally emit-less — exclude from dead check.
+    known = scanned | set(HISTORICAL_COMPAT)
+    dead = sorted((set(KEY_FIELDS) | set(KEY_DESC)) - known)
     for name in dead:
         print(f"WARNING: enrichment for {name!r} has no emit site (dead name?)")
+    # Merge historical descriptions into KEY_DESC for catalog emit.
+    for name, desc in HISTORICAL_COMPAT.items():
+        KEY_DESC.setdefault(name, desc)
     write_catalog(events)
-    print(f"wrote {OUT} ({len(events)} events)")
+    print(f"wrote {OUT} ({len(events)} events; {len(HISTORICAL_COMPAT)} historical-compat)")
     if dead:
         raise SystemExit(1)
 

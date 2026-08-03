@@ -548,7 +548,7 @@ def delivery_status(
 
     Deterministic (template-only, no LLM), built from the wrap-up signals the engine
     already has — path-level ``file_acceptance`` / ``artifacts``, contract /
-    handoff gaps (含 degraded 交接、artifacts 对账缺口、completion_criteria 未满足),
+    handoff gaps (含 degraded 交接、artifacts 对账缺口、soft overlay notes),
     and derived user actions (如云端无执行环境 → ``bind_local_folder``). ``state`` ∈
     delivered / partial / blocked / notes（仅 soft 待核实 → notes 轻提醒）.
     ``artifacts`` = path acceptance rows；``delivered_files`` = accepted only.

@@ -287,9 +287,8 @@ def build_run_plan(
 
     ``code_verified``：**非 kind**——kw 名历史遗留；修码等批跳过案卷
     ``artifact_dir`` 默认（S3：由 playbook ``repair_code`` 等驱动，不再绑 criteria
-    kind）。显式 ``artifact_dir`` / 案卷路径
-    artifacts 仍优先。未改名以免牵动 builder/artifact_dir 全链。
-    ``artifacts`` 仍尊重。
+    kind）。显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍优先。未改名以免牵动
+    builder/artifact_dir 全链。
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]

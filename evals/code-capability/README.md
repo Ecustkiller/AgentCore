@@ -47,7 +47,7 @@
 
 | Gap | 来源 | 性质 | 状态 |
 |-----|------|------|------|
-| `delegate` 契约拒绝（playbook⊕tasks / 须 hoist `completion_criteria` 等）未标 `contract_failure` → 连拒烧穿熔断；熔断后 CEO 无写盘（**设计如此**） | S5 R1 | 校验归因 + 提示 | **已修**：契约拒绝标 `contract_failure` + 更清晰报错 + schema/CEO 提示防踩坑；**已定案不给 CEO 加 `file_write`**。R2 组队 + GOLDEN Pass |
+| `delegate` 契约拒绝（playbook⊕tasks / 误传已删字段等）未标 `contract_failure` → 连拒烧穿熔断；熔断后 CEO 无写盘（**设计如此**） | S5 R1 | 校验归因 + 提示 | **已修**：契约拒绝标 `contract_failure` + 更清晰报错 + schema/CEO 提示防踩坑；**已定案不给 CEO 加 `file_write`**。R2 组队 + GOLDEN Pass |
 | `GET …/messages/{mid}/files/diff` → 500（`conv` 为 None → `folder_id`） | S6 | 云 diff 接缝 Bug | **已修**：`turn_files_diff.py` 误用 `_require_owned_conversation`（无返回）→ 改为 `_get_owned_conversation`；`test_turn_files_diff` 10 passed |
 | S3 刷新/重进仍见挂起卡 | S3 | U 层 | **待人手 / CDP**（无 RPC 等价；见 runbook） |
 | U 层产物卡按钮未点 | S4 等 | 可选 U | 不挡 D；RPC `turnFilesDiff` / `restoreTurnBaseline` 已通 |

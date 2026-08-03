@@ -5,8 +5,8 @@ and a new cold task matches the old topic / artifacts fingerprint, refuse silent
 rebrand — force ``continue_from_run_id`` or explicit ``force=true``.
 
 Sibling to :mod:`isomorphic` (same drive admission layer). Does **not** auto-replan,
-does not reuse ``note_completion_gap``, and does not expand isomorphic to arbitrary
-same-role fan-out.
+does not track completion-gap streaks (retired with S3 kind), and does not expand
+isomorphic to arbitrary same-role fan-out.
 """
 
 from __future__ import annotations

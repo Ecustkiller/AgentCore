@@ -118,7 +118,7 @@
       "id": "df_pend_08_acceptance_unmet",
       "kind": "pending_label",
       "evidence_tier": "dogfood",
-      "scenario": "委派批次 completion_criteria unmet，交付缺口未收口。",
+      "scenario": "委派批次交付缺口未收口（S3 后看 delivery_status / soft notes；勿再按 completion_criteria unmet 排查）。",
       "intended_coverage": "验收缺口未收口",
       "conversation_id": null,
       "trace_id": null,
@@ -127,7 +127,7 @@
         "deliverable": null,
         "citation": null
       },
-      "notes": "待 logs 补；关注 delegate.completion_criteria_unmet"
+      "notes": "待 logs 补；关注 delivery_status / soft overlays（历史日志或见 completion_criteria_unmet）"
     },
     {
       "id": "df_pend_09_citation_hallucinated_url",

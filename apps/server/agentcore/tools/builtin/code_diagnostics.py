@@ -1,6 +1,6 @@
 """Built-in tool: code_diagnostics — language-service inner verify loop (TS/JS).
 
-Complements outer-loop ``test_run`` (``code_verified`` / 验收员):
+Complements outer-loop ``test_run``（验收员 / typecheck·build·test）:
 
 - **Inner** ``code_diagnostics`` — desktop language service for landed / named paths
 - **Outer** ``test_run`` — project typecheck / build / test exit 0
@@ -71,7 +71,7 @@ def _format_full_output(payload: dict[str, Any], *, paths: list[str]) -> str:
         return (
             f"内环诊断不可用：{detail}\n"
             "说明：云端 / 未装配语言服务时诚实降级；"
-            "验收与 code_verified 请用外环 test_run（typecheck/build/test）。"
+            "验收请用外环 test_run（typecheck/build/test）。"
             + (f"\n请求路径：{', '.join(paths)}" if paths else "")
         )
 
@@ -132,7 +132,7 @@ class CodeDiagnosticsTool:
                 f"{suffixes} 文件拉取 error/warning。"
                 "写盘成功后工具回执常已附带短诊断；本工具用于主动复查。"
                 "云端工作区诚实返回 unavailable——勿用全仓 typecheck 冒充内环；"
-                "code_verified / 验收请走外环 test_run。"
+                "验收请走外环 test_run。"
             ),
             parameters={
                 "type": "object",
