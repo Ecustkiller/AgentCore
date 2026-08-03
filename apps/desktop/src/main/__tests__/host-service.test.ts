@@ -8,8 +8,13 @@ vi.mock("electron", () => ({
   shell: { openExternal: vi.fn(async () => undefined) },
 }));
 
+vi.mock("../log-service", () => ({
+  logDesktop: vi.fn(),
+}));
+
 import { shell } from "electron";
 import { runHostOp } from "../host-service";
+import { logDesktop } from "../log-service";
 
 describe("runHostOp", () => {
   afterEach(() => {
@@ -195,7 +200,14 @@ describe("runHostOp", () => {
       expect(result.value.timed_out).toBe(false);
       expect(result.value.exit_code).toBe(0);
       expect(String(result.value.stdout)).toContain("p3ok");
+      expect(result.value.obs_env).toBeTruthy();
+      expect(result.value.obs_windows).toBeUndefined();
     }
+    expect(logDesktop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "desktop.host_shell_env_fingerprint",
+      }),
+    );
   });
 
   it("host_shell times out and reports honestly", async () => {
@@ -209,6 +221,30 @@ describe("runHostOp", () => {
     if (result.ok) {
       expect(result.value.timed_out).toBe(true);
       expect(result.value.exit_code).toBeNull();
+      expect(result.value.obs_env).toBeTruthy();
     }
   }, 15_000);
+
+  it("host_shell GUI-launch command attaches obs_windows snapshot", async () => {
+    if (process.platform !== "win32") return;
+    // 不真开 GUI：用 Start-Process 跑短暂无窗进程，仍命中 looksLikeGuiLaunch。
+    const result = await runHostOp({
+      op: "host_shell",
+      args: {
+        command:
+          "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c exit 0' -WindowStyle Hidden -Wait",
+        timeout_seconds: 20,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.obs_env).toBeTruthy();
+      expect(Array.isArray(result.value.obs_windows)).toBe(true);
+    }
+    expect(logDesktop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "desktop.host_shell_windows_snapshot",
+      }),
+    );
+  }, 30_000);
 });

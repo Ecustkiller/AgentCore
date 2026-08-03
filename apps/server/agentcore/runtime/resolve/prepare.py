@@ -365,13 +365,14 @@ async def _build_attachment_context(
     Text files carry pre-extracted text; pre-parsed binaries (docx/pdf/…) carry
     inline text (context-capped) plus a pointer to the ``*.md`` workspace copy;
     office/PDF that missed pre-parse steer ``file_read`` (transparent extract);
-    spreadsheet / unknown binaries carry only a workspace path (model must parse
-    via ``code_execute``). Directories carry a recursive file
-    listing (paths only); ``kind=conversation`` is **server deep-read** via
-    ``log_export`` (client shallow ``text`` is ignored). A file with a
-    ``workspace_path`` was persisted into the workspace, so the header points
-    the agent at that durable path. Returns None when there is nothing to inject
-    so the base prompt stays unchanged.
+    spreadsheet / unknown binaries carry only a workspace path (CEO must
+    ``delegate`` → worker ``code_execute``; CEO has no ``code_execute``).
+    Directories carry a recursive file listing (paths only);
+    ``kind=conversation`` is **server deep-read** via ``log_export``
+    (client shallow ``text`` is ignored). A file with a ``workspace_path``
+    was persisted into the workspace, so the header points the agent at that
+    durable path. Returns None when there is nothing to inject so the base
+    prompt stays unchanged.
     """
     if not attachments:
         return None
@@ -485,8 +486,10 @@ async def _build_attachment_context(
                 blocks.append(
                     f"--- File: {name} ({path}) [binary] ---\n"
                     "This is a binary file saved in the workspace (no text inline). "
-                    "Open and parse it with code_execute using the workspace-relative "
-                    f"path above{sheet_hint}. Do NOT use an OS absolute path."
+                    "CEO has no code_execute — delegate a worker to open/parse it "
+                    "with code_execute on the workspace-relative path "
+                    f"above{sheet_hint}. Do NOT use an OS absolute path. "
+                    "Do NOT treat file_list emptiness as missing."
                 )
         elif text:
             path = ws_path or att.get("path") or name
@@ -507,9 +510,10 @@ async def _build_attachment_context(
         else ""
     )
     binary_note = (
-        " Spreadsheet / unknown binary attachments have no inline body: use "
-        "code_execute on the workspace-relative path. Never hard-read an OS "
-        "absolute path outside the workspace (it will fail or hang)."
+        " Spreadsheet / unknown binary attachments have no inline body: "
+        "delegate a worker to code_execute on the workspace-relative path "
+        "(CEO has no code_execute). Never hard-read an OS absolute path "
+        "outside the workspace (it will fail or hang)."
         if has_binary
         else ""
     )

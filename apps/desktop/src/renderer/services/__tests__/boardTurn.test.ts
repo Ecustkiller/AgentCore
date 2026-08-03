@@ -4,6 +4,7 @@ import {
   iterateArtifactPrompt,
   organizeSelectionPrompt,
   partitionSelection,
+  selectionHasImplementBrief,
 } from "@/services/boardTurn";
 import type { SceneElement } from "@/whiteboard";
 import { describe, expect, it } from "vitest";
@@ -106,6 +107,36 @@ describe("organizeSelectionPrompt", () => {
     const prompt = organizeSelectionPrompt(mixedScene, ["d", "img"]);
     expect(prompt).toContain("board_read");
     expect(prompt).not.toContain("结构化元素");
+  });
+});
+
+describe("selectionHasImplementBrief", () => {
+  it("blocks structured-only empty shapes (no text, no visual)", () => {
+    expect(selectionHasImplementBrief(scene, ["b"])).toBe(false);
+    const emptyRect = [el({ id: "r", type: "rectangle", x: 0, y: 0 })];
+    expect(selectionHasImplementBrief(emptyRect, ["r"])).toBe(false);
+  });
+
+  it("allows sticky/text (or any structured) with non-empty text", () => {
+    expect(selectionHasImplementBrief(scene, ["a"])).toBe(true);
+    expect(selectionHasImplementBrief(scene, ["c"])).toBe(true);
+    const sticky = [el({ id: "s", type: "sticky", text: "做登录页" })];
+    expect(selectionHasImplementBrief(sticky, ["s"])).toBe(true);
+  });
+
+  it("allows visual path even without text (does not force vision for text cases)", () => {
+    expect(selectionHasImplementBrief(mixedScene, ["d"])).toBe(true);
+    expect(selectionHasImplementBrief(mixedScene, ["img"])).toBe(true);
+    const emptyPlusVisual: SceneElement[] = [
+      el({ id: "r", type: "rectangle" }),
+      el({ id: "d", type: "freedraw", x: 1, y: 1 }),
+    ];
+    expect(selectionHasImplementBrief(emptyPlusVisual, ["r", "d"])).toBe(true);
+  });
+
+  it("whitespace-only text counts as empty", () => {
+    const blank = [el({ id: "t", type: "text", text: "   " })];
+    expect(selectionHasImplementBrief(blank, ["t"])).toBe(false);
   });
 });
 

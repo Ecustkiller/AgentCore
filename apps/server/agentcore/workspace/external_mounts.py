@@ -31,6 +31,7 @@ ORGANIZE_ALLOWED_OPS: frozenset[str] = frozenset(
         "read_bytes",
         "read_lines",
         "list",
+        "exists",
         "list_tree",
         "index_files",
         "grep",

@@ -196,6 +196,9 @@ class WorkspaceBackend(Protocol):
 
     location: Literal["server", "local"]
     root_label: str  # human-facing root name for relative-path rendering
+    # Turn-scoped paths exempt from AI-noise list hiding (attachments / materials).
+    # Implementations default to empty; prepare/resume stamp before tools run.
+    ai_list_materials: frozenset[str]
 
     @property
     def dirty(self) -> bool:
@@ -252,6 +255,16 @@ class WorkspaceBackend(Protocol):
         """List entries under ``directory`` matching glob ``pattern`` (capped).
 
         Raises ``OutsideWorkspace`` / ``NotADirectory`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def exists(self, path: str) -> bool:
+        """True iff ``path`` is an existing regular file (not a directory).
+
+        Existence must **not** go through AI-noise browse filters — residency
+        checks and similar oracles need truth, not ``file_list`` visibility.
+        Missing path / not a file → ``False``. Raises ``OutsideWorkspace`` /
+        ``WorkspaceIOError``.
         """
         ...
 

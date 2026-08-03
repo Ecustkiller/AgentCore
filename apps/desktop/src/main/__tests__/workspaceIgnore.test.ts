@@ -3,7 +3,9 @@ import {
   AGENTCORE_ROOT,
   INDEX_REL,
   LIST_FILES_SKIP_DIRS,
+  isAttachmentPath,
   isInternalZoneRelPath,
+  shouldSkipAiListEntry,
   shouldSkipAiNoiseFileName,
   shouldSkipDirName,
   shouldSkipFileName,
@@ -73,5 +75,39 @@ describe("workspaceIgnore", () => {
     expect(shouldSkipSystemWorkspaceEntry("code_search.db", false)).toBe(true);
     expect(shouldSkipSystemWorkspaceEntry("hero.png", false)).toBe(false);
     expect(shouldSkipSystemWorkspaceEntry("notes.md", false)).toBe(false);
+  });
+
+  it("AI list exempts attachments/ zip but not elsewhere (index still hides)", () => {
+    expect(isAttachmentPath("attachments/pack.zip")).toBe(true);
+    expect(isAttachmentPath("attachments")).toBe(true);
+    expect(isAttachmentPath("src/attachments/x.zip")).toBe(false);
+
+    expect(shouldSkipAiListEntry("pack.zip", false, "attachments")).toBe(false);
+    expect(shouldSkipAiListEntry("photo.png", false, "attachments")).toBe(
+      false,
+    );
+    expect(shouldSkipAiListEntry("out.zip", false, "")).toBe(true);
+    expect(shouldSkipAiListEntry("out.zip", false, "src")).toBe(true);
+    // System noise never exempt under attachments/
+    expect(shouldSkipAiListEntry("x.db", false, "attachments")).toBe(true);
+    // Index / grep path still hides attachment zip
+    expect(shouldSkipWorkspaceEntry("pack.zip", false, "attachments")).toBe(
+      true,
+    );
+  });
+
+  it("AI list exempts reveal_paths materials outside attachments/", () => {
+    const reveal = new Set(["src/shot.png"]);
+    expect(shouldSkipAiListEntry("shot.png", false, "src", reveal)).toBe(false);
+    expect(shouldSkipAiListEntry("other.png", false, "src", reveal)).toBe(true);
+    expect(shouldSkipAiListEntry("shot.png", false, "src")).toBe(true);
+    // System noise never exempt via reveal
+    expect(
+      shouldSkipAiListEntry("x.db", false, "src", new Set(["src/x.db"])),
+    ).toBe(true);
+    // attachments/ still exempt without reveal
+    expect(
+      shouldSkipAiListEntry("pack.zip", false, "attachments", reveal),
+    ).toBe(false);
   });
 });

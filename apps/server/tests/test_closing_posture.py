@@ -70,6 +70,50 @@ def test_delivery_only_passes_without_verdict():
     )
 
 
+def test_reconcile_drops_ask_pre_pause_when_resume_dispatched():
+    """0cb83288：先问你 pre_pause ∪ 派团队续写 → 只保留续写（禁叠写）。"""
+    pre = (
+        "方向：先问你 — 日程必须基于你的实际情况，否则只能给空模板。\n\n"
+        "要排出真正能用的日程，我需要先了解几个关键点："
+    )
+    new = (
+        "方向：派团队 — 信息已够，按「上班族 + 半天块」的通用模板排，"
+        "按确认默认落盘。"
+    )
+    out = reconcile_resume_closing(pre, new)
+    assert "方向：先问你" not in out
+    assert "方向：派团队" in out
+    assert "按确认默认" in out
+
+
+def test_rewrite_stale_ask_after_dispatch_same_message():
+    """同条叠写「先问你」+「派团队」→ 剥 ask 残留，标已按默认开工。"""
+    from agentcore.runtime.closing_posture import rewrite_stale_ask_after_dispatch
+
+    content = (
+        "方向：先问你 — 日程必须基于你的实际情况。\n\n"
+        "要了解几个关键点：\n\n"
+        "方向：派团队 — 信息已够，按上班族通用节奏排。\n\n"
+        "日程文档已落盘。"
+    )
+    out = rewrite_stale_ask_after_dispatch(content)
+    assert "方向：先问你" not in out
+    assert "方向：派团队" in out
+    assert "已按默认开工" in out or "按确认默认" in out
+    assert "日程文档已落盘" in out
+
+
+def test_resume_continuity_steer_for_confirm_pre_pause():
+    steer = resume_continuity_steer(
+        prior_deliverable="需要先确认一个关键信息：调研对象是什么？"
+    )
+    assert "禁止" in steer
+    assert "请确认" in steer
+    assert "档位" in steer
+    assert "按确认默认" in steer
+    assert "先问你" in steer
+
+
 def test_reconcile_drops_confirm_pre_pause_when_new_delivers():
     """resume 拼接真源：C pre_pause ∪ A 续写 → 只保留续写。"""
     pre = "方向：先问你 / 关键缺口。调研对象未明确——请确认："
@@ -83,15 +127,6 @@ def test_reconcile_keeps_neutral_join():
     out = reconcile_resume_closing(pre, new)
     assert "竞品表" in out
     assert "渠道策略" in out
-
-
-def test_resume_continuity_steer_for_confirm_pre_pause():
-    steer = resume_continuity_steer(
-        prior_deliverable="需要先确认一个关键信息：调研对象是什么？"
-    )
-    assert "禁止" in steer
-    assert "请确认" in steer
-    assert "档位" in steer
 
 
 def test_resume_continuity_steer_falls_back_for_deliverable():

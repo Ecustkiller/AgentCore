@@ -65,8 +65,8 @@ export function conversationSummary(
     permission_axes: partial.permission_axes ?? {
       file_write: "session",
       command: "auto",
-      team_kickoff: "skip",
-      host: "ask",
+      team_kickoff: "rules",
+      host: "session",
     },
     model_profile_id: partial.model_profile_id ?? null,
   };

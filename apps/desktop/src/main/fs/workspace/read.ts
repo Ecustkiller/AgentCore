@@ -9,12 +9,37 @@ import {
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { collectWorkspaceFiles } from "../tree";
-import { shouldSkipWorkspaceEntry } from "../workspaceIgnore";
+import { shouldSkipAiListEntry } from "../workspaceIgnore";
 import { globToRegExp, opErr, opOk, toPosix } from "./result";
 
 function isAccessDeniedError(e: unknown): boolean {
   const code = (e as NodeJS.ErrnoException)?.code;
   return code === "EACCES" || code === "EPERM" || code === "EBUSY";
+}
+
+/** Existence check — not AI-noise filtered (residency / oracles). */
+export async function opExists(
+  root: StoredRoot,
+  relPath: string,
+): Promise<WorkspaceOpResult> {
+  const abs = resolveLexical(root, relPath);
+  if (!abs) return opErr("OutsideWorkspace", relPath);
+  const real = await realInside(root, abs);
+  if (!real.ok) {
+    if (real.code === "out_of_root") {
+      return opErr("OutsideWorkspace", relPath);
+    }
+    return opOk(false);
+  }
+  try {
+    const st = await fs.stat(real.path);
+    return opOk(st.isFile());
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return opOk(false);
+    }
+    return opErr("WorkspaceIOError", toReason(e));
+  }
 }
 
 export async function opRead(
@@ -55,6 +80,7 @@ export async function opList(
   root: StoredRoot,
   directory: string,
   pattern: string,
+  revealPaths?: ReadonlySet<string>,
 ): Promise<WorkspaceOpResult> {
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
@@ -106,8 +132,12 @@ export async function opList(
           : relFromBase
         : listBaseRel;
       // Name-first dir ignore (locked ``.pytest_tmp`` etc.) before trusting type.
-      if (shouldSkipWorkspaceEntry(d.name, true, parentRel)) continue;
-      if (!isDir && shouldSkipWorkspaceEntry(d.name, false, parentRel))
+      // AI list: attachments/ + reveal_paths exempt AI-noise; index/grep unchanged.
+      if (shouldSkipAiListEntry(d.name, true, parentRel, revealPaths)) continue;
+      if (
+        !isDir &&
+        shouldSkipAiListEntry(d.name, false, parentRel, revealPaths)
+      )
         continue;
       const childRel = relFromBase ? `${relFromBase}/${d.name}` : d.name;
       if (re.test(childRel)) {
@@ -198,6 +228,7 @@ export async function opListTree(
   pattern: string,
   maxDepth: number,
   maxEntries: number,
+  revealPaths?: ReadonlySet<string>,
 ): Promise<WorkspaceOpResult> {
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
@@ -247,9 +278,13 @@ export async function opListTree(
     );
     for (const d of dirents) {
       // Name-first ignore prune before descending into locked noise dirs.
-      if (shouldSkipWorkspaceEntry(d.name, true, parentRel)) continue;
+      // AI list_tree: attachments/ + reveal_paths exempt AI-noise; index/grep unchanged.
+      if (shouldSkipAiListEntry(d.name, true, parentRel, revealPaths)) continue;
       const isDir = d.isDirectory() && !d.isSymbolicLink();
-      if (!isDir && shouldSkipWorkspaceEntry(d.name, false, parentRel))
+      if (
+        !isDir &&
+        shouldSkipAiListEntry(d.name, false, parentRel, revealPaths)
+      )
         continue;
       const childAbs = join(absDir, d.name);
       const childRel = parentRel ? `${parentRel}/${d.name}` : d.name;

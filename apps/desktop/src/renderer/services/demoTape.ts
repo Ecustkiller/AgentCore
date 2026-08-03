@@ -63,8 +63,8 @@ function openBoundConversation(
     permissionAxes: {
       file_write: "session",
       command: "auto",
-      team_kickoff: "skip",
-      host: "ask",
+      team_kickoff: "rules",
+      host: "session",
     },
   });
   navigate(`/conversations/${res.conversation_id}`);

@@ -57,8 +57,9 @@ const ASK_CLARIFY_META = {
   resolved: {
     continue: { label: "已按你的决定继续", tone: "success" },
     adjust: { label: "已按你的调整继续", tone: "success" },
-    stop: { label: "已停止本回合", tone: "destructive" },
-    research_first: { label: "已停止本回合", tone: "destructive" },
+    // stop = 用户主动收口，非失败；与 timeout/orphaned、协作图 cancelled 同档 muted。
+    stop: { label: "已停止本回合", tone: "muted" },
+    research_first: { label: "已停止本回合", tone: "muted" },
     timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
     orphaned: {
       label: "已失效（回合已结束或服务已重启）",
@@ -80,8 +81,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已选定方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "destructive" },
-      research_first: { label: "已停止本回合", tone: "destructive" },
+      stop: { label: "已停止本回合", tone: "muted" },
+      research_first: { label: "已停止本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -98,8 +99,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认风险处理项", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "destructive" },
-      research_first: { label: "已停止本回合", tone: "destructive" },
+      stop: { label: "已停止本回合", tone: "muted" },
+      research_first: { label: "已停止本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -116,8 +117,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认整理方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "destructive" },
-      research_first: { label: "已停止本回合", tone: "destructive" },
+      stop: { label: "已停止本回合", tone: "muted" },
+      research_first: { label: "已停止本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -134,8 +135,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认复盘提案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "destructive" },
-      research_first: { label: "已停止本回合", tone: "destructive" },
+      stop: { label: "已停止本回合", tone: "muted" },
+      research_first: { label: "已停止本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",

@@ -31,9 +31,8 @@ describe("decision meta", () => {
     expect(askResolvedOutcome("kickoff", "research_first").label).toBe(
       "已停止本回合",
     );
-    expect(askResolvedOutcome("kickoff", "research_first").tone).toBe(
-      "destructive",
-    );
+    expect(askResolvedOutcome("kickoff", "research_first").tone).toBe("muted");
+    expect(askResolvedOutcome("decision", "stop").tone).toBe("muted");
   });
 
   it("team debate research_first + continue-with-note overrides", () => {

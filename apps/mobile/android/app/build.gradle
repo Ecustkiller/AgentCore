@@ -16,8 +16,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Synced from apps/mobile/package.json by scripts/sync-android-version.mjs
-        versionCode 3021
-        versionName "0.3.21"
+        versionCode 3022
+        versionName "0.3.22"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

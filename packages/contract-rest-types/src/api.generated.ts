@@ -2384,6 +2384,9 @@ export interface paths {
         /**
          * Download Workspace File
          * @description Download a single file from the conversation's scratch workspace.
+         *
+         *     Panel download uses upload-aligned capacity + ``FileResponse`` — not the AI
+         *     ``read_bytes`` 5 MiB gate.
          */
         get: operations["download_workspace_file_v1_conversations__conversation_id__workspace_files__path__get"];
         /**
@@ -4956,6 +4959,9 @@ export interface paths {
         /**
          * Download Workspace File
          * @description Download a single file from a cloud workspace.
+         *
+         *     Uses the panel-download path (upload-aligned ceiling + ``FileResponse``), not
+         *     the AI ``read_bytes`` 5 MiB gate.
          */
         get: operations["download_workspace_file_v1_workspaces__ws_id__files__path__get"];
         /**
@@ -8990,7 +8996,7 @@ export interface components {
             command: components["schemas"]["CommandAxis"];
             /** @default session */
             file_write: components["schemas"]["FileWriteAxis"];
-            /** @default ask */
+            /** @default session */
             host: components["schemas"]["HostAxis"];
             /** @default rules */
             team_kickoff: components["schemas"]["TeamKickoffAxis"];

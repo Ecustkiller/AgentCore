@@ -16,7 +16,7 @@ export const DEFAULT_PERMISSION_AXES: PermissionAxes = {
   file_write: "session",
   command: "auto",
   team_kickoff: "rules",
-  host: "ask",
+  host: "session",
 };
 
 /** Built-in recipes → exact axis tuples (含 host). */
@@ -52,7 +52,7 @@ export const RECIPE_LABELS: Record<
   },
   less_interrupt: {
     short: "少打断",
-    description: "改文件本会话信任 · 自动执行 · 组队按规则 · 本机每次确认",
+    description: "改文件本会话信任 · 自动执行 · 组队按规则 · 本机会话信任",
   },
   managed: {
     short: "托管",

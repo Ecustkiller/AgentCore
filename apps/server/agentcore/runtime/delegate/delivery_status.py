@@ -795,7 +795,9 @@ def maybe_emit_delivery_status(
                 requires_draft_ack=requires_draft_ack,
             )
         )
-        from agentcore.runtime.closing_posture import note_cloud_web_verify_gap_from_delivery
+        from agentcore.runtime.closing_posture import (
+            note_cloud_web_verify_gap_from_delivery,
+        )
 
         note_cloud_web_verify_gap_from_delivery(gaps, criteria_gaps=criteria_gaps)
         from agentcore.runtime.events import delivery_status

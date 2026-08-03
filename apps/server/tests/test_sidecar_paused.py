@@ -411,7 +411,7 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     assert captured["decision"] == "adjust"
     assert captured["note"] == "换个方向"
     assert captured["saver"] is not None
-    # Partial axes (no host) reach the pipeline; missing host defaults to ASK.
+    # Partial axes (no host) reach the pipeline; missing host defaults to SESSION.
     from agentcore.core.types import (
         CommandAxis,
         FileWriteAxis,
@@ -424,7 +424,7 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
         FileWriteAxis.ASK,
         CommandAxis.ASK,
         TeamKickoffAxis.RULES,
-        HostAxis.ASK,
+        HostAxis.SESSION,
     )
     # the reloaded history (from the local frame) is threaded into the resume pipeline so
     # window_from_journal can splice it ahead of the folded rounds (Phase 2 ⑤).

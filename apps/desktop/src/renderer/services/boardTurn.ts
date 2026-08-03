@@ -139,6 +139,33 @@ export function organizeSelectionPrompt(
 }
 
 /**
+ * Whether「照这实现」has a usable brief: non-empty text on a structured element, and/or a
+ * visual path (`freedraw` / `image`). Structured-only empty rectangles/shapes (no sticky/text
+ * citation, no visuals) would otherwise ship a hollow brief — the canvas should tip + block
+ * instead of sending (sample `32b78c65`). Does NOT force vision: sticky/text alone is enough.
+ */
+export function selectionHasImplementBrief(
+  elements: readonly SceneElement[],
+  selectedIds: readonly string[],
+): boolean {
+  const { structuredIds, visualIds } = partitionSelection(
+    elements,
+    selectedIds,
+  );
+  if (visualIds.length > 0) return true;
+  const byId = new Map(elements.map((el) => [el.id, el]));
+  for (const id of structuredIds) {
+    const el = byId.get(id);
+    if (el?.text?.trim()) return true;
+  }
+  return false;
+}
+
+/** Toast copy when {@link selectionHasImplementBrief} is false — tip, don't silent-send. */
+export const EMPTY_IMPLEMENT_BRIEF_HINT =
+  "选区没有文字需求：请先写便签 / 选有文字的元素后再照这实现（手绘/截图可不写字）";
+
+/**
  * Compose the「让团队照这实现」turn prompt (AI协作白板.md §十 M3 发起入口).
  *
  * The board counterpart of a chat brief that kicks off a TEAM run: it hands the selection /
@@ -148,6 +175,9 @@ export function organizeSelectionPrompt(
  * {@link organizeSelectionPrompt} (§九): structured elements go as text the CEO targets by real
  * id; hand-drawn / screenshot ids are flagged for `board_read`. The CEO's progress + products
  * land back on the board (live overlay → crystallized `agentNode` / `artifactCard`).
+ *
+ * Callers must gate with {@link selectionHasImplementBrief} first — this composer still
+ * accepts empty structured selections for unit isolation, but the canvas must not send them.
  */
 export function implementSelectionPrompt(
   elements: readonly SceneElement[],

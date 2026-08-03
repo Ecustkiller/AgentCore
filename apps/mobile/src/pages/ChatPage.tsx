@@ -1162,13 +1162,13 @@ export function ChatPage() {
       .then((c) => {
         if (cancelled) return;
         const axes = c.permission_axes;
-        const host = axes?.host ?? "ask";
+        const host = axes?.host ?? "session";
         const key = axes
           ? `${axes.file_write}/${axes.command}/${axes.team_kickoff}/${host}`
-          : "session/auto/rules/ask";
+          : "session/auto/rules/session";
         const labels: Record<string, string> = {
           "ask/ask/rules/off": "谨慎",
-          "session/auto/rules/ask": "少打断",
+          "session/auto/rules/session": "少打断",
           "session/auto/skip/session": "托管",
         };
         setPermissionLabel(labels[key] ?? "自定义");

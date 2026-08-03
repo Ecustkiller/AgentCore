@@ -1,5 +1,6 @@
 import { apiUrl, authHeader, refreshTokens } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
+import { clientHeaders } from "@/lib/clientBuildInfo";
 import { StreamHttpError } from "@/lib/errors";
 // SSE transport for the mobile client (前端技术与架构 §七).
 //
@@ -160,6 +161,7 @@ export async function streamMessage(
     fetch(apiUrl(path), {
       method: "POST",
       headers: {
+        ...clientHeaders(),
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         ...authHeader(),
@@ -199,6 +201,7 @@ export async function attachStream(
   const path = `/v1/conversations/${conversationId}/stream`;
   const response = await sseFetch(() => {
     const headers: Record<string, string> = {
+      ...clientHeaders(),
       Accept: "text/event-stream",
       // Always present → journal-backed full replay (header value observational).
       "Last-Event-ID": lastEventIds.get(conversationId) ?? "0",
@@ -244,6 +247,7 @@ export async function resumeStream(
     fetch(apiUrl(path), {
       method: "POST",
       headers: {
+        ...clientHeaders(),
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         ...authHeader(),
@@ -271,6 +275,7 @@ export async function regenerateStream(
     fetch(apiUrl(path), {
       method: "POST",
       headers: {
+        ...clientHeaders(),
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         ...authHeader(),

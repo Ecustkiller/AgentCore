@@ -29,6 +29,7 @@ from agentcore.runtime.pipeline.resume import (
 )
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
+from agentcore.tools.builtin.ask_user.result import confirmed_defaults_summary
 
 
 def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
@@ -56,6 +57,40 @@ def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
             }
         ],
     )
+
+
+def test_result_continue_empty_uses_legacy_when_no_defaults():
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[])
+    )
+    assert res.effect is ToolEffect.CONTINUE
+    assert "按你提出的方向继续" in res.output
+
+
+def test_result_continue_empty_injects_confirmed_defaults():
+    """案 0cb83288 · B：空 continue + 卡上 default → 用户确认默认：… + 按确认默认。"""
+    questions = [
+        {
+            "id": "q0",
+            "prompt": "日程粒度",
+            "kind": "choice",
+            "options": ["半天块", "小时级"],
+            "multiple": False,
+            "default": "上班族 + 半天块通用模板",
+        }
+    ]
+    assumptions = [{"id": "a0", "label": "本周=周一至周日", "value": ""}]
+    assert "上班族" in confirmed_defaults_summary(questions, assumptions)
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[]),
+        questions=questions,
+        assumptions=assumptions,
+    )
+    assert res.effect is ToolEffect.CONTINUE
+    assert res.output.startswith("用户确认默认：")
+    assert "按确认默认" in res.output
+    assert "先问你" in res.output  # 禁表出现在注入文案里
+    assert "上班族 + 半天块通用模板" in res.output
 
 
 # --- ask_user_tool_result: the shared answer → ToolResult mapping ------------------

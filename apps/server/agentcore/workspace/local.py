@@ -108,10 +108,30 @@ class LocalWorkspace:
         # channel-reads for ensure — channel CODE_SEARCH is a later slice).
         self._index_manager: IndexManager | None = None
         self._index_maintainer: IndexMaintainer | None = None
+        # Turn material paths for AI list AI-noise reveal (passed as reveal_paths).
+        # Set by prepare/wire from ``collect_turn_material_paths``; default empty.
+        self.ai_list_materials: frozenset[str] = frozenset()
 
     @property
     def dirty(self) -> bool:
         return self._dirty
+
+    def _channel_reveal_paths(self) -> list[str]:
+        """Engine-relative materials → container-relative paths for the desktop."""
+        materials = self.ai_list_materials
+        if not materials:
+            return []
+        base = self._base
+        if not base:
+            return list(materials)
+        out: list[str] = []
+        for p in materials:
+            cleaned = p.replace("\\", "/").strip("/")
+            if not cleaned or cleaned == ".":
+                out.append(base)
+            else:
+                out.append(f"{base}/{cleaned}")
+        return out
 
     def _mark_mutated(self) -> None:
         self._dirty = True
@@ -251,8 +271,12 @@ class LocalWorkspace:
 
     async def list(self, directory: str, pattern: str) -> list[DirEntry]:
         root_id, rel, alias = self._route(directory)
+        payload: dict[str, Any] = {"directory": rel, "pattern": pattern}
+        reveal = self._channel_reveal_paths()
+        if reveal:
+            payload["reveal_paths"] = reveal
         value = await self._channel.request(
-            WorkspaceOp.LIST, {"directory": rel, "pattern": pattern}, root_id=root_id
+            WorkspaceOp.LIST, payload, root_id=root_id
         )
         return [
             DirEntry(
@@ -261,6 +285,13 @@ class LocalWorkspace:
             )
             for e in (value or [])
         ]
+
+    async def exists(self, path: str) -> bool:
+        root_id, rel, _ = self._route(path)
+        value = await self._channel.request(
+            WorkspaceOp.EXISTS, {"path": rel}, root_id=root_id
+        )
+        return bool(value)
 
     async def read_lines(
         self, path: str, *, offset: int = 1, limit: int | None = None
@@ -288,14 +319,18 @@ class LocalWorkspace:
         max_entries: int = 200,
     ) -> TreeResult:
         root_id, rel, alias = self._route(directory)
+        tree_payload: dict[str, Any] = {
+            "directory": rel,
+            "pattern": pattern,
+            "max_depth": max_depth,
+            "max_entries": max_entries,
+        }
+        reveal = self._channel_reveal_paths()
+        if reveal:
+            tree_payload["reveal_paths"] = reveal
         value = await self._channel.request(
             WorkspaceOp.LIST_TREE,
-            {
-                "directory": rel,
-                "pattern": pattern,
-                "max_depth": max_depth,
-                "max_entries": max_entries,
-            },
+            tree_payload,
             root_id=root_id,
         )
         value = value or {}

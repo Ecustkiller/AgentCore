@@ -157,6 +157,10 @@ async def prepare_fresh_turn(
         host_conversation_id=conversation_id,
         conversation_history_access=conversation_history_access,
     )
+    from agentcore.workspace.sparse_listing import collect_turn_material_paths
+
+    material_paths = collect_turn_material_paths(attachments)
+    backend.ai_list_materials = material_paths
     # Workers hold no CEO hints; their base is the shared base + optional simplified
     # 记忆主题目录 + the same attachment block at the end — byte-identical to the old
     # single-call assembly when memory is off and no topics exist.
@@ -261,6 +265,7 @@ async def prepare_fresh_turn(
         vision_reader=build_vision_reader(),
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
+        material_paths=material_paths,
     )
     from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
     from agentcore.runtime.coordination.session import current_execution_id

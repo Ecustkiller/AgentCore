@@ -45,10 +45,10 @@ def test_default_axes_are_less_interrupt():
         FileWriteAxis.SESSION,
         CommandAxis.AUTO,
         TeamKickoffAxis.RULES,
-        HostAxis.ASK,
+        HostAxis.SESSION,
     ) == DEFAULT_PERMISSION_AXES
     assert recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT) == DEFAULT_PERMISSION_AXES
-    assert DEFAULT_PERMISSION_AXES.host is HostAxis.ASK
+    assert DEFAULT_PERMISSION_AXES.host is HostAxis.SESSION
 
 
 def test_builtin_recipes():
@@ -62,7 +62,7 @@ def test_builtin_recipes():
         FileWriteAxis.SESSION,
         CommandAxis.AUTO,
         TeamKickoffAxis.RULES,
-        HostAxis.ASK,
+        HostAxis.SESSION,
     )
     assert recipe_to_axes(AutonomyPolicy.MANAGED) == PermissionAxes(
         FileWriteAxis.SESSION,
@@ -75,12 +75,17 @@ def test_builtin_recipes():
 def test_from_mapping_roundtrip_and_legacy_missing_host():
     axes = recipe_to_axes(AutonomyPolicy.MANAGED)
     assert PermissionAxes.from_mapping(axes.to_dict()) == axes
-    # Partial JSON without host → host defaults to ask (not silently dropped).
+    # Partial JSON without host → host defaults to session (not silently dropped).
     legacy = PermissionAxes.from_mapping(
         {"file_write": "session", "command": "kickoff", "team_kickoff": "rules"}
     )
-    assert legacy == _KICKOFF_RULES
-    assert legacy.host is HostAxis.ASK
+    assert legacy == PermissionAxes(
+        FileWriteAxis.SESSION,
+        CommandAxis.KICKOFF,
+        TeamKickoffAxis.RULES,
+        HostAxis.SESSION,
+    )
+    assert legacy.host is HostAxis.SESSION
     # Cautious seed persists host=off through dict roundtrip.
     cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
     assert cautious.host is HostAxis.OFF
@@ -240,7 +245,7 @@ def test_command_auto_skips_kickoff_and_local_exec_auto_pass():
 
 
 def test_less_interrupt_rules_semantics():
-    """少打断: session/auto/rules/ask — 组队按规则弹卡、静默执行、不蕴含深度研究自治、host=ask."""
+    """少打断: session/auto/rules/session — 组队按规则弹卡、静默执行、不蕴含深度研究自治、host=session."""
     axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
     assert axes == DEFAULT_PERMISSION_AXES
     assert should_kickoff(plan_preview=True, local_gate=True, axes=axes) is True
@@ -249,7 +254,7 @@ def test_less_interrupt_rules_semantics():
     assert axes.honors_kickoff_grant is False
     assert axes.auto_executes is True
     assert axes.implies_deep_research_auto is False
-    assert axes.host is HostAxis.ASK
+    assert axes.host is HostAxis.SESSION
     for tool in (
         "code_execute",
         "test_run",

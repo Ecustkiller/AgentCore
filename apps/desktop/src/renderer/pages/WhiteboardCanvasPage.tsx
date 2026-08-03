@@ -18,9 +18,11 @@ import {
   registerBoardReader,
 } from "@/services/boardRead";
 import {
+  EMPTY_IMPLEMENT_BRIEF_HINT,
   implementSelectionPrompt,
   iterateArtifactPrompt,
   organizeSelectionPrompt,
+  selectionHasImplementBrief,
   sendBoardTurn,
 } from "@/services/boardTurn";
 import {
@@ -347,7 +349,8 @@ export function WhiteboardCanvasPage() {
   // 选区 / frame →「让团队照这实现」(§十 M3 发起入口): hand the selection to the CEO as the
   // requirement brief and let it assemble the team + implement — delegate / debate / 单干 is
   // the CEO's call (提案 A). Same 混合 payload as 整理 (structured as text, 手绘/截图 via
-  // board_read); no selection → a hint, not a turn.
+  // board_read); no selection → a hint, not a turn. Structured-only empty shapes (no text /
+  // sticky citation, no visual) → tip + block so a hollow brief never hits the model.
   const implementSelection = useCallback(() => {
     const api = apiRef.current;
     if (!api || aiBusy) return;
@@ -356,7 +359,12 @@ export function WhiteboardCanvasPage() {
       notifyInfo("请先在白板上选择作为需求的内容");
       return;
     }
-    void runBoardTurn(implementSelectionPrompt(api.getScene(), ids));
+    const scene = api.getScene();
+    if (!selectionHasImplementBrief(scene, ids)) {
+      notifyInfo(EMPTY_IMPLEMENT_BRIEF_HINT);
+      return;
+    }
+    void runBoardTurn(implementSelectionPrompt(scene, ids));
   }, [aiBusy, runBoardTurn]);
 
   // 在产物上迭代 (§十 M3 Slice 4 贴源迭代): feed the selected crystallized artifactCard(s) — plus

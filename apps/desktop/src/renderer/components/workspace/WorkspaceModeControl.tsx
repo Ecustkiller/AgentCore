@@ -6,7 +6,13 @@ import {
 } from "@/components/ui/popover";
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
-import { WORKSPACE_BINDING_CHANGED } from "@/lib/bindLocalFolder";
+import {
+  WORKSPACE_BINDING_CHANGED,
+  pickAndBindLocalFolder,
+} from "@/lib/bindLocalFolder";
+import { hasLocalFiles } from "@/lib/capabilities";
+import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import {
   type EffectiveWorkspace,
   formatWorkspaceChipLabel,
@@ -23,6 +29,7 @@ import {
   Check,
   ChevronDown,
   Cloud,
+  FolderOpen,
   HardDrive,
   Loader2,
   UploadCloud,
@@ -34,11 +41,12 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 
 /**
- * Shared workspace mode control — read-only status for established chats
- * (project inherit / bare scratch). Bind/unbind UI removed (出生定终身);
- * backup/export-style actions remain for local workspaces.
+ * Shared workspace mode control — status for established chats (project inherit /
+ * bare scratch). 出生定终身：不改当前会话 folder；云会话可发现入口 =
+ * 打开本地项目（新会话）/ 裸聊绑定本机执行环境。Local workspaces keep backup.
  */
 
 export interface WorkspaceModeState {
@@ -183,16 +191,21 @@ export function WorkspaceModeTrigger({
   );
 }
 
-/** Read-only status + optional backup for local workspaces. */
+/** Status + local backup, or cloud-session discoverable open/bind actions. */
 export function WorkspaceModeMenu({
   state,
-  onActionDone: _onActionDone,
+  conversationId,
+  onActionDone,
 }: {
   state: WorkspaceModeState;
+  conversationId?: string;
   onActionDone?: () => void;
 }) {
+  const navigate = useNavigate();
   const { effective, busy, error, backingUp, backupDone, backup } = state;
   const { isLocal, rootMissing, rootName, viaProject, projectName } = effective;
+  const desktop = hasLocalFiles();
+  const [actionBusy, setActionBusy] = useState(false);
 
   const title = viaProject
     ? projectName
@@ -212,7 +225,50 @@ export function WorkspaceModeMenu({
         : "本机草稿"
     : viaProject
       ? "云端共享空间"
-      : "快速对话 · 文件随对话保存在云端";
+      : "云端对话";
+
+  const runOpenLocalProject = () => {
+    setActionBusy(true);
+    void pickAndOpenLocalProject(navigate)
+      .then((result) => {
+        if (!result.ok) {
+          if (result.reason === "cancelled") return;
+          if (result.reason === "unavailable") {
+            notifyError("打开本地项目仅桌面端可用");
+            return;
+          }
+          if (result.reason === "error") notifyError(result.message);
+          return;
+        }
+        onActionDone?.();
+      })
+      .finally(() => setActionBusy(false));
+  };
+
+  const runBindLocal = () => {
+    if (!conversationId) {
+      notifyError("请先打开一个对话");
+      return;
+    }
+    setActionBusy(true);
+    void pickAndBindLocalFolder(conversationId)
+      .then((result) => {
+        if (!result.ok) {
+          if (result.reason === "cancelled") return;
+          if (result.reason === "unavailable") {
+            notifyError("绑定本机执行环境仅桌面端可用");
+            return;
+          }
+          if (result.reason === "error") notifyError(result.message);
+          return;
+        }
+        notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
+          description: "仅本会话；≠打开本地项目",
+        });
+        onActionDone?.();
+      })
+      .finally(() => setActionBusy(false));
+  };
 
   return (
     <>
@@ -253,16 +309,42 @@ export function WorkspaceModeMenu({
               icon={<UploadCloud size={14} />}
               label="备份到云"
               onClick={() => void backup()}
-              disabled={busy}
+              disabled={busy || actionBusy}
             />
           )
+        ) : isLocal && rootMissing ? (
+          <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+            目录在本机不可用。可打开本地项目换到可用文件夹（新会话）。
+          </p>
+        ) : desktop ? (
+          <>
+            <ModeAction
+              icon={<FolderOpen size={14} />}
+              label="打开本地项目"
+              hint="选本机文件夹 · 新会话"
+              onClick={runOpenLocalProject}
+              disabled={busy || actionBusy}
+            />
+            {!viaProject && conversationId ? (
+              <ModeAction
+                icon={<HardDrive size={14} />}
+                label="绑定本机执行环境"
+                hint="仅本会话；≠打开项目"
+                onClick={runBindLocal}
+                disabled={busy || actionBusy}
+              />
+            ) : null}
+            <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+              本会话工作区仍是云端；要在本机落盘请用上面入口（不改当前会话绑定）。
+            </p>
+          </>
         ) : (
           <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
             工作区在创建时已确定，会话期间不可改绑。
           </p>
         )}
 
-        {busy && !backingUp && (
+        {(busy || actionBusy) && !backingUp && (
           <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
             处理中…
@@ -279,11 +361,13 @@ export function WorkspaceModeMenu({
 function ModeAction({
   icon,
   label,
+  hint,
   onClick,
   disabled,
 }: {
   icon: ReactNode;
   label: string;
+  hint?: string;
   onClick: () => void;
   disabled?: boolean;
 }) {
@@ -295,7 +379,14 @@ function ModeAction({
       className="h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium"
       icon={<span className="shrink-0 text-muted-foreground">{icon}</span>}
     >
-      {label}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{label}</span>
+        {hint ? (
+          <span className="block truncate text-xs font-normal text-muted-foreground">
+            {hint}
+          </span>
+        ) : null}
+      </span>
     </Button>
   );
 }
@@ -331,7 +422,11 @@ export function WorkspaceModeControl({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">
-        <WorkspaceModeMenu state={state} />
+        <WorkspaceModeMenu
+          state={state}
+          conversationId={conversationId}
+          onActionDone={() => setPop(false)}
+        />
       </PopoverContent>
     </Popover>
   );

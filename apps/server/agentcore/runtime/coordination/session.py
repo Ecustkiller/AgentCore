@@ -1564,9 +1564,27 @@ def release_turn_coordination(execution_id: str | None) -> None:
             total=session.total_workers,
         )
         return
-    # Drive finished (or never armed). Safe to drop — same-turn CEO already
-    # closed via all_completed inject, or append finished before teardown with
-    # nobody left to consume the queue.
+    # Drive finished (or never armed). 案 B：终态已投递却未 inject/harvest 时
+    # 优先补 harvest，勿裸 clear → terminal_unsettled 丢合成路径。
+    if (
+        session.terminal_posted
+        and not session.settled_via
+        and not session.user_stopped
+        and not session.all_completed_injected
+        and not session.harvest_scheduled
+        and (session.conversation_id or "").strip()
+    ):
+        session.turn_attached = False
+        logger.info(
+            "coordination.release_prefers_harvest",
+            execution_id=eid,
+            completed=len(session.completed_run_ids),
+            total=session.total_workers,
+        )
+        finish_detached_coordination(session)
+        return
+    # Safe to drop — same-turn CEO already closed via all_completed inject, or
+    # append finished before teardown with nobody left to consume the queue.
     if session.active:
         session.close()
     clear_active_coordination(eid)

@@ -7,7 +7,9 @@
  *
  * - **系统噪音**：对 AI 与用户文件 UI 都隐藏（目录 + `*.db` / `*.pyc` 等）。
  * - **AI 噪音**：媒体 / 压缩包 / 字体 / 二进制对象——仅从 AI 视角排除
- *  （`collectWorkspaceFiles` / `opIndexFiles` / `opList` / `opListTree` / grep）；
+ *  （`collectWorkspaceFiles` / `opIndexFiles` / grep）；`opList` / `opListTree`
+ *   对 `attachments/` 下的 AI 噪音豁免，并对本回合 `reveal_paths` 材料路径豁免
+ *   （与服务端 `file_list` / `list_tree` 对齐）。
  *   文件 UI（`listDir`）保持可见，避免 AI 生成的图片/压缩包在面板被藏掉。
  *
  * 同树旁路 `AgentCore/{index,trash,baselines}` 为路径感知系统噪音（禁止把裸名
@@ -16,6 +18,9 @@
 
 /** 与服务端 `stage_dirs.AGENTCORE_ROOT` 对齐。 */
 export const AGENTCORE_ROOT = "AgentCore";
+
+/** 与服务端 `attachments.ATTACHMENTS_DIR` / `is_attachment_path` 对齐。 */
+export const ATTACHMENTS_DIR = "attachments";
 
 /** 与服务端 `stage_dirs.INTERNAL_ZONE_NAMES` 对齐。 */
 export const INTERNAL_ZONE_NAMES = new Set(["index", "trash", "baselines"]);
@@ -116,6 +121,15 @@ export function isInternalZoneRelPath(relPath: string): boolean {
   return false;
 }
 
+/** Whether ``path`` lives under the resident ``attachments/`` directory. */
+export function isAttachmentPath(path: string): boolean {
+  const p = path
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/^\/+|\/+$/g, "");
+  return p === ATTACHMENTS_DIR || p.startsWith(`${ATTACHMENTS_DIR}/`);
+}
+
 /**
  * 是否跳过目录名。`parentRel` 为父目录的工作区相对路径（根用 `""`），
  * 用于路径感知内部区；裸名 `index` 等不单独跳过。
@@ -142,7 +156,7 @@ export function shouldSkipFileName(name: string): boolean {
   return shouldSkipSystemFileName(name) || shouldSkipAiNoiseFileName(name);
 }
 
-/** AI 列举 / 索引 / grep：目录系统噪音 + 文件全档。 */
+/** AI 列举 / 索引 / grep：目录系统噪音 + 文件全档（无 attachments 豁免）。 */
 export function shouldSkipWorkspaceEntry(
   name: string,
   isDirectory: boolean,
@@ -151,6 +165,28 @@ export function shouldSkipWorkspaceEntry(
   return isDirectory
     ? shouldSkipDirName(name, parentRel)
     : shouldSkipFileName(name);
+}
+
+/**
+ * AI ``opList`` / ``opListTree``：系统噪音始终隐藏；AI 噪音在 ``attachments/``
+ * 或 ``revealPaths``（本回合材料）下豁免（与服务端 ``is_ai_list_hidden_file`` /
+ * ``should_hide_ai_noise_from_list`` 对齐）。索引 / grep 仍用
+ * {@link shouldSkipWorkspaceEntry}。
+ */
+export function shouldSkipAiListEntry(
+  name: string,
+  isDirectory: boolean,
+  parentRel = "",
+  revealPaths?: ReadonlySet<string>,
+): boolean {
+  if (isDirectory) return shouldSkipDirName(name, parentRel);
+  if (shouldSkipSystemFileName(name)) return true;
+  if (!shouldSkipAiNoiseFileName(name)) return false;
+  const parent = parentRel.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const child = parent && parent !== "." ? `${parent}/${name}` : name;
+  if (isAttachmentPath(child)) return false;
+  if (revealPaths?.has(child)) return false;
+  return true;
 }
 
 /** 用户文件 UI（`listDir`）：仅系统噪音。 */

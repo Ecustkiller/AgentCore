@@ -8955,7 +8955,7 @@
           },
           "host": {
             "$ref": "#/components/schemas/HostAxis",
-            "default": "ask"
+            "default": "session"
           },
           "team_kickoff": {
             "$ref": "#/components/schemas/TeamKickoffAxis",
@@ -14517,7 +14517,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.31"
+    "version": "0.3.34"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24428,7 +24428,7 @@
         ]
       },
       "get": {
-        "description": "Download a single file from the conversation's scratch workspace.",
+        "description": "Download a single file from the conversation's scratch workspace.\n\nPanel download uses upload-aligned capacity + ``FileResponse`` — not the AI\n``read_bytes`` 5 MiB gate.",
         "operationId": "download_workspace_file_v1_conversations__conversation_id__workspace_files__path__get",
         "parameters": [
           {
@@ -36824,7 +36824,7 @@
         ]
       },
       "get": {
-        "description": "Download a single file from a cloud workspace.",
+        "description": "Download a single file from a cloud workspace.\n\nUses the panel-download path (upload-aligned ceiling + ``FileResponse``), not\nthe AI ``read_bytes`` 5 MiB gate.",
         "operationId": "download_workspace_file_v1_workspaces__ws_id__files__path__get",
         "parameters": [
           {

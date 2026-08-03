@@ -33,26 +33,19 @@ ATTACHMENTS_DIR = "attachments"
 
 
 async def _workspace_file_present(backend: WorkspaceBackend, rel: str) -> bool:
-    """True when ``rel`` names an existing file (list only — no content load).
+    """True when ``rel`` names an existing file (stat/exists — no content load).
 
-    Large zip / binary residents must not go through ``read_bytes`` (capacity gate +
-    memory). Missing parent dir / PathNotFound-class errors → False.
+    Must not use AI-noise-filtered ``list``: local ``opList`` hides ``.zip``/media,
+    which would false-negative residency. Large binaries must not go through
+    ``read_bytes`` (capacity gate + memory). Outside / I/O → False.
     """
     cleaned = (rel or "").replace("\\", "/").strip("/")
-    parent, _, name = cleaned.rpartition("/")
-    if not parent or not name:
+    if not cleaned or cleaned.endswith("/"):
         return False
     try:
-        entries = await backend.list(parent, name)
+        return await backend.exists(cleaned)
     except WorkspaceError:
         return False
-    for entry in entries:
-        if entry.is_dir:
-            continue
-        ep = (entry.path or "").replace("\\", "/").strip("/")
-        if ep == cleaned or ep.endswith("/" + name) or os.path.basename(ep) == name:
-            return True
-    return False
 
 
 def _safe_attachment_name(name: str) -> str:

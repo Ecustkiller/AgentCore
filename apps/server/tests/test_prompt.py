@@ -264,9 +264,15 @@ def test_core_teaches_split_criterion_over_count():
     assert "禁止" in hint and "research_report" in hint  # A 禁套 B
     assert "少扇出" in hint or "常 2" in hint
     assert "论文" in hint and ("资料" in hint or "开源" in hint)  # 论文/开源 ≠ 明示成文
-    # 三路/多路调研缺主体：统一硬 ask，禁静默自拟市场/topic
+    # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in hint
     assert "静默自拟" in hint
+    assert "按确认默认" in hint
+    assert "default" in hint
+    assert "不得 continue 派工" in hint or "无 default" in hint
+    # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default；禁空续另拟叠先问你
+    assert "决策/澄清短问" in hint
+    assert "先问你" in hint
     assert "一人包办" in hint or "自搜+成文" in hint
     assert "角 prose" in hint and "仅主笔落盘" in hint
     assert "form=files" in hint
@@ -302,6 +308,11 @@ def test_core_teaches_split_criterion_over_count():
     # 案 ceo-claim-edit-without-write 软Ⅱ′：零写盘禁假已改 + 禁默认整文件手贴。
     assert "诚实落盘" in hint
     assert "整文件自行粘贴" in hint or "整文件" in hint
+    # 案 merge-pipeline-skeleton-busy-claim A′：多源合并→单写手成篇；骨架禁审校清理连环。
+    assert "多源合并" in hint and "成篇优先" in hint
+    assert "CEO 自写" in hint  # 禁表出现在提示里
+    assert "审校" in hint and "清理" in hint
+    assert "流水线已在执行" in hint or "合并进行中" in hint
     # 案 cloud-web-install-deny-claim-verified A：云端不能装包时禁「自检全过/跑绿」。
     assert "绿场 Web" in hint or "云端装包" in hint
     assert "自检全过" in hint or "跑绿" in hint
@@ -715,11 +726,18 @@ def test_core_teaches_narrowed_attachment_scope_must_start():
     assert "open_local_project" in hint
     assert "换工程面" in hint or "收窄本轮输入" in hint
     assert "开工前置" in hint
-    # 案 adsense-zip-resident-missing B：提示有路径但 tools 见空 → ask_user 重传，勿先派整改。
+    # 案 adsense-zip-resident-missing B + AI_NOISE 假空：只认结构化缺件，禁用 list 当 oracle。
     assert "附件驻留·缺件" in hint
+    assert "[resident missing]" in hint
     assert "重传" in hint
     assert "解压" in hint or "整改" in hint
     assert "ask_user" in hint
+    assert "file_list" in hint  # 须点名禁止，不是教用它验盘
+    assert "推断" in hint or "≠ 缺件" in hint or "浏览过滤" in hint
+    assert "[binary]" in hint and "≠ 缺件" in hint
+    # 禁止旧契约：用 file_list/exists「证实」路径不在当缺件触发条件。
+    assert "file_list / exists 证实" not in hint
+    assert "exists 证实" not in hint
     mid = build_system_skill_registry().get("ask_user_midtask")
     assert mid is not None
     assert "先读材料" in mid.body or "收窄本轮" in mid.body

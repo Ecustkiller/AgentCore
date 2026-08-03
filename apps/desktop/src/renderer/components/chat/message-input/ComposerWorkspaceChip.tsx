@@ -12,6 +12,7 @@ import {
 } from "@/components/workspace/WorkspaceModeControl";
 import { useGroupedConversations } from "@/hooks/useConversations";
 import { hasLocalFiles } from "@/lib/capabilities";
+import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import {
   type FolderMeta,
@@ -28,6 +29,7 @@ import {
   Plus,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 /**
  * Always-on「在哪工作」chip in the turn composer.
@@ -60,10 +62,10 @@ function BoundChip({ conversationId }: { conversationId: string }) {
   const boundTitle = state.effective.viaProject
     ? state.effective.isLocal
       ? "本地工作区"
-      : "云端工作区"
+      : "云端对话"
     : state.effective.isLocal
       ? "本机草稿"
-      : "云端草稿";
+      : "云端对话";
 
   return (
     <Popover open={pop} onOpenChange={setPop}>
@@ -72,7 +74,8 @@ function BoundChip({ conversationId }: { conversationId: string }) {
           variant="ghost"
           aria-label={boundTitle}
           title={boundTitle}
-          className="h-auto min-w-0 max-w-[200px] shrink gap-1 px-1.5 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"
+          className="h-auto min-w-0 max-w-[220px] shrink gap-1 px-1.5 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"
+          data-testid="composer-workspace-chip"
         >
           <WorkspaceModeTrigger
             effective={state.effective}
@@ -81,7 +84,11 @@ function BoundChip({ conversationId }: { conversationId: string }) {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">
-        <WorkspaceModeMenu state={state} onActionDone={() => setPop(false)} />
+        <WorkspaceModeMenu
+          state={state}
+          conversationId={conversationId}
+          onActionDone={() => setPop(false)}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -112,6 +119,7 @@ function folderLocationHint(f: FolderMeta): string {
 }
 
 function DraftChip() {
+  const navigate = useNavigate();
   const [pop, setPop] = useState(false);
   const [query, setQuery] = useState("");
   /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
@@ -237,6 +245,17 @@ function DraftChip() {
                   hint="落本机容器；本机执行更快，推理需联网"
                   selected={intent.kind === "quick_local"}
                   onClick={pickQuickLocal}
+                />
+              ) : null}
+              {isDesktop ? (
+                <DraftRow
+                  icon={<FolderOpen size={14} />}
+                  label="打开本地项目…"
+                  hint="选本机文件夹 · 新会话（可发现入口）"
+                  onClick={() => {
+                    closePick();
+                    void pickAndOpenLocalProject(navigate);
+                  }}
                 />
               ) : null}
 

@@ -55,10 +55,16 @@ def honest_ask_user_message(message: str) -> str:
 
 
 def ensure_ask_user_pause_body(content: str) -> str:
-    """After absorb: bubble must surface wait-confirm (forbid silent empty / kickoff)."""
+    """After absorb: bubble must surface wait-confirm (forbid silent empty / kickoff).
+
+    - Empty → fill the constant alone (204dcfda：禁 reply_chars=0).
+    - Already has wait-confirm phrasing → keep.
+    - Any other user-visible prose → **append** the constant; never wholesale-replace
+      (32b78c65：整替会掩盖短问 / 卡面原意).
+    """
     text = (content or "").strip()
+    if not text:
+        return ASK_USER_PAUSE_USER_VISIBLE
     if _already_wait_confirm(text):
         return text
-    if not text or is_process_dispatch_preamble(text) or claims_dispatch_started(text):
-        return ASK_USER_PAUSE_USER_VISIBLE
     return f"{text}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"

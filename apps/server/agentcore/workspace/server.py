@@ -80,6 +80,7 @@ from agentcore.workspace.shared_paths import (
     shared_workspace_root_path,
     shared_workspace_storage_key,
 )
+from agentcore.workspace.sparse_listing import is_ai_list_hidden_file
 from agentcore.workspace.text_replace import (
     TextReplaceAmbiguous,
     TextReplaceNoMatch,
@@ -157,6 +158,9 @@ class ServerWorkspace:
         self._on_shared_mutation: (
             Callable[[str, str, str], Awaitable[None]] | None
         ) = None  # (space_id, action, path)
+        # Turn material paths for AI ``list_tree`` AI-noise reveal (∪ attachments/).
+        # Set by prepare/wire from ``collect_turn_material_paths``; default empty.
+        self.ai_list_materials: frozenset[str] = frozenset()
 
     @property
     def dirty(self) -> bool:
@@ -615,6 +619,17 @@ class ServerWorkspace:
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
 
+    async def exists(self, path: str) -> bool:
+        """True iff ``path`` is an existing regular file (unfiltered by AI-noise)."""
+        if self._external_needs_channel(path):
+            return await self._require_external_bridge().exists(path)
+        await self._gate_shared(path, write=False)
+        target = self._safe(path)
+        try:
+            return target.is_file()
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+
     async def read_lines(
         self, path: str, *, offset: int = 1, limit: int | None = None
     ) -> ReadLinesResult:
@@ -717,7 +732,13 @@ class ServerWorkspace:
                         continue
                     raise WorkspaceIOError(str(e)) from e
 
-                if is_file and is_ignored_file_name(child.name):
+                # AI list_tree: system noise always; AI noise except attachments/
+                # and this-turn material paths.
+                if is_file and is_ai_list_hidden_file(
+                    parent_rel=parent_rel,
+                    name=child.name,
+                    materials=self.ai_list_materials,
+                ):
                     continue
 
                 rel = self._model_path(child, logical=directory)

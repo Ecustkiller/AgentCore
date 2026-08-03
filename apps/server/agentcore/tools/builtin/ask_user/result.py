@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.tools.protocol import ToolEffect, ToolResult
 
 
-def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
+def confirmed_defaults_summary(
+    questions: list[dict[str, Any]] | None = None,
+    assumptions: list[dict[str, Any]] | None = None,
+) -> str:
+    """Join card ``default`` / assumption labels for empty-continue inject (案 B)."""
+    parts: list[str] = []
+    for q in questions or []:
+        if not isinstance(q, dict):
+            continue
+        default = str(q.get("default") or "").strip()
+        if not default:
+            continue
+        prompt = str(q.get("prompt") or "").strip()
+        parts.append(f"{prompt}={default}" if prompt else default)
+    for a in assumptions or []:
+        if not isinstance(a, dict):
+            continue
+        label = str(a.get("label") or "").strip()
+        if not label:
+            continue
+        value = str(a.get("value") or "").strip()
+        parts.append(f"{label}={value}" if value else label)
+    return "；".join(parts)
+
+
+def ask_user_tool_result(
+    response: CheckpointResponse,
+    *,
+    questions: list[dict[str, Any]] | None = None,
+    assumptions: list[dict[str, Any]] | None = None,
+) -> ToolResult:
     """Map the user's ask_user answer to the tool result the CEO loop consumes.
 
     The single source of truth for both the live tool (``AskUserTool.execute``) and
@@ -22,6 +54,10 @@ def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
     free-form note into ONE readable ``note`` string (the picks live in the UI, so the
     answer is composed where the data is — no structured wire payload the only-reader CEO
     would just flatten back to prose anyway).
+
+    Empty continue (no note/picks) with card defaults → inject「用户确认默认：…」so the
+    resumed CEO must honor those defaults and mark「按确认默认」(案 0cb83288 · B)；
+    no card default → legacy「按你提出的方向继续」fallback (Cursor 空 continue ≈ 接受默认).
     """
     decision = response.decision
     if decision is CheckpointDecision.ADJUST:
@@ -37,7 +73,15 @@ def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
         elif picks:
             output = f"用户选择：{picks}。请按此继续。"
         else:
-            output = "用户确认：按你提出的方向继续。"
+            defaults = confirmed_defaults_summary(questions, assumptions)
+            if defaults:
+                output = (
+                    f"用户确认默认：{defaults}。"
+                    "请按确认默认推进派工/正文，并在正文标「按确认默认」；"
+                    "【禁止】借继续另拟一套，也【禁止】再写「先问你 / 请选择 / 方向：先问你」。"
+                )
+            else:
+                output = "用户确认：按你提出的方向继续。"
         return ToolResult(tool_call_id="", success=True, output=output)
     if decision is CheckpointDecision.STOP:
         return ToolResult(

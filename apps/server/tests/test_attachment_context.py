@@ -79,9 +79,14 @@ async def test_binary_resident_has_no_inline_body():
     assert out is not None
     assert "--- File: report.xlsx (attachments/report.xlsx) [binary] ---" in out
     assert "code_execute" in out
+    assert "delegate" in out.lower()
+    assert "CEO has no code_execute" in out
     assert "Do NOT use an OS absolute path" in out
     assert "Never hard-read an OS absolute path" in out
+    assert "Do NOT treat file_list emptiness as missing" in out
     assert "saved into your workspace" in out
+    # Must not imply CEO can call code_execute directly.
+    assert "Open and parse it with code_execute" not in out
     # Prompt must not leak a client OS absolute path for binary residents.
     assert "C:\\" not in out
     assert "/Users/" not in out

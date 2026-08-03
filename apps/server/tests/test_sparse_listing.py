@@ -19,9 +19,12 @@ from agentcore.workspace._paths import (
 from agentcore.workspace.server import ServerWorkspace
 from agentcore.workspace.sparse_listing import (
     PROJECT_RECENT_SUPPLEMENT,
+    collect_turn_material_paths,
     format_remaining_summary,
+    is_ai_list_hidden_file,
     is_attachment_path,
     partition_sparse_paths,
+    should_hide_ai_noise_from_list,
 )
 
 
@@ -129,6 +132,116 @@ def test_is_attachment_path():
     assert is_attachment_path("attachments/a.txt")
     assert is_attachment_path("attachments")
     assert not is_attachment_path("src/attachments/x.txt")
+
+
+def test_attachments_exempt_ai_noise_from_list_helpers():
+    """attachments/ zip/media stay listable; same suffixes elsewhere stay hidden."""
+    assert should_hide_ai_noise_from_list("attachments/pack.zip") is False
+    assert should_hide_ai_noise_from_list("attachments/photo.png") is False
+    assert should_hide_ai_noise_from_list("out.zip") is True
+    assert should_hide_ai_noise_from_list("src/out.zip") is True
+    assert should_hide_ai_noise_from_list("notes.md") is False
+    assert should_hide_ai_noise_from_list("src/attachments/x.zip") is True  # not root attachments/
+
+    assert is_ai_list_hidden_file(parent_rel="attachments", name="pack.zip") is False
+    assert is_ai_list_hidden_file(parent_rel="", name="out.zip") is True
+    assert is_ai_list_hidden_file(parent_rel="src", name="out.zip") is True
+    # System noise never exempt
+    assert is_ai_list_hidden_file(parent_rel="attachments", name="x.db") is True
+
+
+def test_materials_exempt_ai_noise_outside_attachments():
+    """Turn material paths reveal AI-noise even outside attachments/."""
+    materials = frozenset({"src/shot.png"})
+    assert should_hide_ai_noise_from_list("src/shot.png", materials=materials) is False
+    assert should_hide_ai_noise_from_list("src/other.png", materials=materials) is True
+    assert should_hide_ai_noise_from_list("src/shot.png") is True  # no materials → hide
+    assert (
+        is_ai_list_hidden_file(
+            parent_rel="src", name="shot.png", materials=materials
+        )
+        is False
+    )
+    assert (
+        is_ai_list_hidden_file(
+            parent_rel="src", name="other.png", materials=materials
+        )
+        is True
+    )
+    # attachments/ still exempt without being in materials
+    assert should_hide_ai_noise_from_list("attachments/pack.zip", materials=materials) is False
+    # System noise never exempt via materials
+    assert (
+        is_ai_list_hidden_file(
+            parent_rel="src", name="x.db", materials=frozenset({"src/x.db"})
+        )
+        is True
+    )
+
+
+def test_collect_turn_material_paths():
+    paths = collect_turn_material_paths(
+        [
+            {
+                "name": "shot.png",
+                "path": "src/shot.png",
+                "workspace_path": "src/shot.png",
+            },
+            {
+                "name": "doc.docx",
+                "workspace_path": "attachments/doc.docx",
+                "parsed_workspace_path": "attachments/doc.docx.md",
+            },
+            {
+                "name": "gone.zip",
+                "resident_missing": True,
+                "claimed_workspace_path": "attachments/gone.zip",
+                "path": "C:/Users/x/gone.zip",
+            },
+            {
+                "name": "abs.bin",
+                "path": "C:\\Users\\x\\abs.bin",
+            },
+        ]
+    )
+    assert paths == frozenset(
+        {"src/shot.png", "attachments/doc.docx", "attachments/doc.docx.md"}
+    )
+    assert collect_turn_material_paths(None) == frozenset()
+    assert collect_turn_material_paths([]) == frozenset()
+
+
+async def test_list_tree_shows_attachment_zip_hides_elsewhere(tmp_path: Path):
+    (tmp_path / "attachments").mkdir()
+    (tmp_path / "attachments" / "pack.zip").write_bytes(b"PK")
+    (tmp_path / "noise.zip").write_bytes(b"PK")
+    (tmp_path / "ok.txt").write_text("x", encoding="utf-8")
+
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    root_tree = await ws.list_tree(".", max_depth=2)
+    root_paths = {e.path for e in root_tree.entries}
+    assert "ok.txt" in root_paths
+    assert "noise.zip" not in root_paths
+    assert "attachments" in root_paths
+    assert "attachments/pack.zip" in root_paths
+
+    att_tree = await ws.list_tree("attachments", max_depth=1)
+    assert {e.path for e in att_tree.entries} == {"attachments/pack.zip"}
+
+
+async def test_list_tree_reveals_material_png(tmp_path: Path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "shot.png").write_bytes(b"png")
+    (tmp_path / "src" / "other.png").write_bytes(b"png")
+    (tmp_path / "ok.txt").write_text("x", encoding="utf-8")
+
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    ws.ai_list_materials = frozenset({"src/shot.png"})
+    tree = await ws.list_tree(".", max_depth=2)
+    paths = {e.path for e in tree.entries}
+    assert "ok.txt" in paths
+    assert "src/shot.png" in paths
+    assert "src/other.png" not in paths
 
 
 async def test_index_files_skips_internal_zone_db_and_media(tmp_path: Path):

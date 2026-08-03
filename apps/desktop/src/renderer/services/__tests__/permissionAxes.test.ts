@@ -25,7 +25,7 @@ describe("permissionAxes mapping", () => {
       file_write: "session",
       command: "auto",
       team_kickoff: "rules",
-      host: "ask",
+      host: "session",
     });
     expect(RECIPE_AXES.managed.host).toBe("session");
     expect(RECIPE_ORDER).toEqual(["cautious", "less_interrupt", "managed"]);
@@ -116,10 +116,16 @@ describe("permissionAxes mapping", () => {
     ).toBe("托管");
     expect(
       permissionAxesShortLabel(
-        '{"file_write":"session","command":"auto","team_kickoff":"rules","host":"ask"}',
+        '{"file_write":"session","command":"auto","team_kickoff":"rules","host":"session"}',
       ),
     ).toBe("少打断");
-    // Legacy stored axes (auto+skip+ask) no longer match 少打断 → custom chip.
+    // Legacy stored axes (auto+rules+ask) no longer match 少打断 → custom chip.
+    expect(
+      permissionAxesShortLabel(
+        '{"file_write":"session","command":"auto","team_kickoff":"rules","host":"ask"}',
+      ),
+    ).toBe("信任 · 免审 · 规则 · 本机问");
+    // Legacy stored axes (auto+skip+ask) → custom chip.
     expect(
       permissionAxesShortLabel(
         '{"file_write":"session","command":"auto","team_kickoff":"skip","host":"ask"}',
@@ -140,7 +146,7 @@ describe("permissionAxes mapping", () => {
     }
   });
 
-  it("normalize fills defaults including missing host → ask", () => {
+  it("normalize fills defaults including missing host → session", () => {
     const a: PermissionAxes = normalizeAxes({});
     expect(a).toEqual(RECIPE_AXES.less_interrupt);
     expect(

@@ -21,7 +21,7 @@ class PermissionAxesModel(BaseModel):
     file_write: FileWriteAxis = FileWriteAxis.SESSION
     command: CommandAxis = CommandAxis.AUTO
     team_kickoff: TeamKickoffAxis = TeamKickoffAxis.RULES
-    host: HostAxis = HostAxis.ASK
+    host: HostAxis = HostAxis.SESSION
 
     @model_validator(mode="after")
     def _reject_illegal(self) -> "PermissionAxesModel":
@@ -62,7 +62,7 @@ class CreateConversationRequest(BaseModel):
     # binding instead.
     local_container_root_id: str | None = Field(None, max_length=200)
     # Session permission axes. Omit → seed from the user's autonomy recipe
-    # (default recipe = less_interrupt → session/auto/rules/ask).
+    # (default recipe = less_interrupt → session/auto/rules/session).
     permission_axes: PermissionAxesModel | None = None
 
 

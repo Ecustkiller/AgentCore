@@ -13,7 +13,6 @@ import hashlib
 import re
 import time
 from difflib import SequenceMatcher
-from posixpath import basename
 from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
@@ -31,7 +30,6 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
-from agentcore.workspace._paths import is_ai_noise_file_name
 from agentcore.workspace.attachment_parse import (
     MARKITDOWN_EXTENSIONS,
     SKIP_EXTENSIONS,
@@ -62,6 +60,7 @@ from agentcore.workspace.protocol import (
     TreeEntry,
     WorkspaceError,
 )
+from agentcore.workspace.sparse_listing import should_hide_ai_noise_from_list
 
 logger = get_logger(__name__)
 
@@ -1932,7 +1931,10 @@ class FileListTool:
                     bare = [
                         e
                         for e in await context.backend.list(directory, "*")
-                        if e.is_dir or not is_ai_noise_file_name(basename(e.path))
+                        if e.is_dir
+                        or not should_hide_ai_noise_from_list(
+                            e.path, materials=context.material_paths
+                        )
                     ]
                     if bare:
                         empty_message = _no_match_hint(
@@ -1960,15 +1962,16 @@ class FileListTool:
                 )
             else:
                 # ``list`` is shared with user UI (system-noise only); strip AI
-                # noise here so media/archives don't pollute the agent view.
+                # noise here so media/archives don't pollute the agent view —
+                # except under ``attachments/`` or this-turn ``material_paths``.
                 seen: set[str] = set()
                 entries: list[DirEntry] = []
                 for pat in patterns:
                     for dir_entry in await context.backend.list(directory, pat):
                         if dir_entry.path in seen:
                             continue
-                        if dir_entry.is_dir or not is_ai_noise_file_name(
-                            basename(dir_entry.path)
+                        if dir_entry.is_dir or not should_hide_ai_noise_from_list(
+                            dir_entry.path, materials=context.material_paths
                         ):
                             seen.add(dir_entry.path)
                             entries.append(dir_entry)
@@ -1980,7 +1983,10 @@ class FileListTool:
                     bare = [
                         e
                         for e in await context.backend.list(directory, "*")
-                        if e.is_dir or not is_ai_noise_file_name(basename(e.path))
+                        if e.is_dir
+                        or not should_hide_ai_noise_from_list(
+                            e.path, materials=context.material_paths
+                        )
                     ]
                     if bare:
                         output = _no_match_hint(

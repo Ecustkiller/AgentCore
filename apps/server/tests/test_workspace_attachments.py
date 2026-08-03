@@ -61,6 +61,44 @@ async def test_persist_keeps_client_pre_resident_path(tmp_path: Path):
     assert (tmp_path / "attachments" / "report.xlsx").read_bytes() == b"PK\x03\x04"
 
 
+async def test_persist_keeps_ai_noise_zip_via_exists_not_list(tmp_path: Path):
+    """AI-noise ``.zip`` must pass residency via exists — not filtered list."""
+    ws = _ws(tmp_path)
+    (tmp_path / "attachments").mkdir()
+    (tmp_path / "attachments" / "pack.zip").write_bytes(b"PK\x03\x04noise")
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "pack.zip",
+                "path": "attachments/pack.zip",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/pack.zip",
+            }
+        ],
+    )
+    assert out[0]["workspace_path"] == "attachments/pack.zip"
+    assert out[0].get("resident_missing") is not True
+    assert await ws.exists("attachments/pack.zip") is True
+
+
+async def test_workspace_file_present_ignores_empty_list(tmp_path: Path):
+    """Residency oracle must not trust AI-noise-filtered list emptiness."""
+    from agentcore.workspace.attachments import _workspace_file_present
+    from agentcore.workspace.protocol import DirEntry
+
+    class _ListHidesZip:
+        async def exists(self, path: str) -> bool:
+            return path == "attachments/pack.zip"
+
+        async def list(self, directory: str, pattern: str) -> list[DirEntry]:
+            return []  # would false-negative if still used
+
+    assert await _workspace_file_present(_ListHidesZip(), "attachments/pack.zip") is True
+    assert await _workspace_file_present(_ListHidesZip(), "attachments/missing.zip") is False
+
+
 async def test_persist_clears_missing_client_resident_path(tmp_path: Path):
     """案 adsense-zip A：client workspace_path 声称驻留但磁盘无字节 → 清路径 + resident_missing。"""
     ws = _ws(tmp_path)

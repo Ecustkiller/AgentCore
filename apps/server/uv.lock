@@ -14,7 +14,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentcore"
-version = "0.3.32"
+version = "0.3.34"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

@@ -28,8 +28,26 @@ vi.mock("@/lib/capabilities", async (importOriginal) => {
   return { ...actual, hasLocalFiles: vi.fn(() => false) };
 });
 
+vi.mock("@/hooks/useConversations", () => ({
+  getConversations: vi.fn(() => []),
+}));
+
 vi.mock("@/lib/grantReadonlyFolder", () => ({
   pickAndGrantReadonlyFolder: vi.fn(),
+}));
+
+vi.mock("@/lib/openLocalProject", () => ({
+  pickAndOpenLocalProject: vi.fn(),
+}));
+
+vi.mock("@/lib/bindLocalFolder", () => ({
+  pickAndBindLocalFolder: vi.fn(),
+}));
+
+vi.mock("@/stores/conversation", () => ({
+  useConversationStore: {
+    getState: vi.fn(() => ({ currentConversationId: null })),
+  },
 }));
 
 const baseCtx = {
@@ -106,6 +124,8 @@ describe("paletteCommands · 区外只读授权", () => {
     vi.mocked(hasLocalFiles).mockReturnValue(false);
     const cmds = buildPaletteCommands(baseCtx);
     expect(cmds.some((c) => c.id === "grant-readonly-folder")).toBe(false);
+    expect(cmds.some((c) => c.id === "open-local-project")).toBe(false);
+    expect(cmds.some((c) => c.id === "bind-local-folder")).toBe(false);
   });
 
   it("injects grant command on desktop FS", async () => {
@@ -117,5 +137,41 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(grant?.title).toContain("授权本机目录");
     if (!grant) return;
     expect(commandMatches(grant, "zhuomian")).toBe(true);
+  });
+
+  it("injects open-local-project and bind-local-folder on desktop FS", async () => {
+    const { hasLocalFiles } = await import("../capabilities");
+    vi.mocked(hasLocalFiles).mockReturnValue(true);
+    const cmds = buildPaletteCommands(baseCtx);
+    const open = cmds.find((c) => c.id === "open-local-project");
+    const bind = cmds.find((c) => c.id === "bind-local-folder");
+    expect(open?.title).toBe("打开本地项目");
+    expect(bind?.title).toBe("绑定本机执行环境");
+    if (!open || !bind) return;
+    expect(commandMatches(open, "xiangmu")).toBe(true);
+    expect(commandMatches(bind, "bangding")).toBe(true);
+  });
+
+  it("blocks bind on project conversation", async () => {
+    const { hasLocalFiles } = await import("../capabilities");
+    const { getConversations } = await import("@/hooks/useConversations");
+    const { useConversationStore } = await import("@/stores/conversation");
+    const { pickAndBindLocalFolder } = await import("@/lib/bindLocalFolder");
+    const { notifyError } = await import("@/lib/toast");
+    vi.mocked(hasLocalFiles).mockReturnValue(true);
+    vi.mocked(useConversationStore.getState).mockReturnValue({
+      currentConversationId: "c-proj",
+    } as ReturnType<typeof useConversationStore.getState>);
+    vi.mocked(getConversations).mockReturnValue([
+      { id: "c-proj", folderId: "folder-1" } as never,
+    ]);
+    const cmds = buildPaletteCommands(baseCtx);
+    const bind = cmds.find((c) => c.id === "bind-local-folder");
+    expect(bind).toBeTruthy();
+    bind?.run();
+    expect(notifyError).toHaveBeenCalledWith(
+      expect.stringContaining("打开本地项目"),
+    );
+    expect(pickAndBindLocalFolder).not.toHaveBeenCalled();
   });
 });

@@ -307,6 +307,41 @@ def test_mobile_session_omits_bind_nudge():
     assert "授权已确认" in out  # 铁律禁语
     assert "本对话尚无会话级区外目录授权" in out
     assert "本对话已授权区外目录：" not in out  # 无挂载不得声称已授权状态行
+    # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检通道；禁「就好办了」/臆造路径
+    assert "通道复检铁律" in out
+    assert "口述不得覆盖" in out
+    assert "就好办了" in out
+    assert "打开【本对话】" in out or "打开本对话" in out
+    assert "状态栏" in out
+    assert "打开本地项目" in out
+    assert "Folders" in out  # 禁语点名非真源
+    assert "臆造" in out
+
+
+def test_channel_offline_self_claim_desktop_recheck_honesty():
+    """案 A：通道未接时 workspace_context 须钉死口述复检 + b0a9 步骤 + 禁臆造入口。"""
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=False,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "host=未装配" in out
+    assert "local_open=未装配" in out
+    assert "通道复检铁律" in out
+    assert "正在用客户端" in out or "已装桌面" in out
+    assert "口述不得覆盖" in out
+    assert "就好办了" in out
+    assert "桌面就好办" in out
+    assert "①" in out and "②" in out and "③" in out and "④" in out
+    assert "https://fashitianxia.xyz/download" in out
+    assert "打开本地项目" in out
+    assert "Folders" in out
+    assert "设置→Folders" in out or "侧栏授权页" in out
+    assert "授权在哪里" in out
+    # 不得在离线分支广告可履约发卡
+    assert "立即发卡" not in out
+    assert "action=open_local_project" not in out
 
 
 def test_no_mounts_forbids_claiming_grant_confirmed():

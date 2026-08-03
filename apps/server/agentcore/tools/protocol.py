@@ -270,6 +270,10 @@ class ToolContext:
     # Set on the pipeline base context from ``folder_id``; inherited by workers via
     # ``dataclasses.replace``. Defaults False for tests / evals / 裸聊.
     shared_workspace: bool = False
+    # 本回合附件给出的工作区相对路径（``collect_turn_material_paths``）。``file_list``
+    # 对其中 AI_NOISE 后缀不隐藏（∪ ``attachments/`` 豁免）。默认空；workers 经
+    # ``replace`` 继承同一 frozenset。
+    material_paths: frozenset[str] = frozenset()
     # 工具执行阶段进度 (联网搜索前端展示优化): a narrow callback a long-running tool fires to report
     # a coarse EXECUTION phase (web_search → "querying" 正在检索 / "queued" 排队中 / "fallback"
     # 改用备用引擎) so the waiting UI shows a live, honest state instead of a dead spinner. Called

@@ -234,7 +234,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "少打断（推荐）",
-              desc: "本会话信任改文件；自动执行；组团卡按规则；本机每次确认。",
+              desc: "本会话信任改文件；自动执行；组团卡按规则；本机会话信任。",
             },
             {
               title: "托管",

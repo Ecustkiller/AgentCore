@@ -23,7 +23,7 @@ const OPTIONS: AutonomyOption[] = [
     value: "less_interrupt",
     label: "少打断（推荐）",
     description:
-      "新会话默认：本会话信任改文件；自动执行；组团卡按规则；本机每次确认。",
+      "新会话默认：本会话信任改文件；自动执行；组团卡按规则；本机会话信任。",
   },
   {
     value: "managed",

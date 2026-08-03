@@ -16,6 +16,7 @@ from agentcore.runtime.coordination.session import (
     active_coordination,
     clear_active_coordination,
     coordination_budget_for_batch,
+    release_turn_coordination,
     set_active_coordination,
     should_enter_coordination,
 )
@@ -1996,3 +1997,60 @@ async def test_merge_rearm_wakes_ceo_wait_promptly(monkeypatch):
     assert "all_completed" in (msgs[0].content or "")
     assert session.active is False
     assert session.all_completed_injected is True
+
+
+def test_release_prefers_harvest_when_terminal_unsettled(monkeypatch):
+    """drive 已结束 + terminal_posted 未 settle → release 走 harvest，不裸 clear。"""
+    from structlog.testing import capture_logs
+
+    session = CoordinationSession(
+        execution_id="e-harv",
+        total_workers=2,
+        conversation_id="conv-harv",
+    )
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 2, "total": 2},
+        )
+    )
+    assert session.terminal_posted is True
+    set_active_coordination(session)
+
+    called: dict[str, object] = {}
+
+    def _fake_finish(s: CoordinationSession) -> None:
+        called["session"] = s
+        s.harvest_scheduled = True
+        s.mark_settled("harvest")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.session.finish_detached_coordination",
+        _fake_finish,
+    )
+
+    with capture_logs() as logs:
+        release_turn_coordination("e-harv")
+    assert called.get("session") is session
+    assert session.turn_attached is False
+    assert session.harvest_scheduled is True
+    assert session.settled_via == "harvest"
+    assert any(e.get("event") == "coordination.release_prefers_harvest" for e in logs)
+
+
+def test_check_terminal_settlement_logs_unsettled():
+    """终态未 inject/harvest 时 clear 路径打 coordination.terminal_unsettled。"""
+    from structlog.testing import capture_logs
+
+    session = CoordinationSession(execution_id="e-unsettle", total_workers=1)
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1},
+        )
+    )
+    set_active_coordination(session)
+    with capture_logs() as logs:
+        clear_active_coordination("e-unsettle")
+    assert any(e.get("event") == "coordination.terminal_unsettled" for e in logs)
+

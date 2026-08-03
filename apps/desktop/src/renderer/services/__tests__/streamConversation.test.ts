@@ -185,6 +185,7 @@ describe("streamConversation (refused turn)", () => {
       ),
     );
 
+    const fetchMock = vi.mocked(fetch);
     const err = await streamConversation({
       conversationId: "c1",
       content: "hi",
@@ -198,6 +199,12 @@ describe("streamConversation (refused turn)", () => {
     expect(streamErr.code).toBe("RATE_LIMITED");
     expect(streamErr.serverMessage).toBe("操作过于频繁，请约 42 秒后再发送。");
     expect(streamErr.retryAfter).toBe(42);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual(
+      expect.objectContaining({
+        "X-Client-Platform": expect.any(String),
+        "X-Client-Version": expect.any(String),
+      }),
+    );
   });
 });
 
@@ -219,6 +226,12 @@ describe("attachConversation (实时重连续看 1b)", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/v1/conversations/conv-42/stream");
     expect(init?.method).toBe("GET");
+    expect(init?.headers).toEqual(
+      expect.objectContaining({
+        "X-Client-Platform": expect.any(String),
+        "X-Client-Version": expect.any(String),
+      }),
+    );
   });
 
   it("raises a StreamError when the attach is refused (e.g. not owned → 404)", async () => {

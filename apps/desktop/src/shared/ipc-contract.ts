@@ -131,6 +131,7 @@ export type WorkspaceOpName =
   | "read_bytes"
   | "write_bytes"
   | "list"
+  | "exists"
   | "read_lines"
   | "list_tree"
   | "index_files"

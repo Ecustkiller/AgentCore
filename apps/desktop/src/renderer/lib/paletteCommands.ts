@@ -1,6 +1,9 @@
+import { getConversations } from "@/hooks/useConversations";
+import { pickAndBindLocalFolder } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { pickAndGrantReadonlyFolder } from "@/lib/grantReadonlyFolder";
 import { startNewConversation } from "@/lib/newConversation";
+import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { chord } from "@/lib/shortcuts";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
@@ -28,6 +31,7 @@ import {
   Files,
   FlaskConical,
   FolderKey,
+  FolderOpen,
   FolderPlus,
   HardDrive,
   Inbox,
@@ -285,6 +289,85 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     },
     ...(hasLocalFiles()
       ? [
+          {
+            id: "open-local-project",
+            title: "打开本地项目",
+            category: "操作" as const,
+            icon: FolderOpen,
+            keywords: [
+              "open",
+              "local",
+              "project",
+              "folder",
+              "workspace",
+              "dakai",
+              "bendi",
+              "xiangmu",
+              "benji",
+            ],
+            hint: "新会话 · 本机文件夹",
+            run: () => {
+              void pickAndOpenLocalProject(navigate).then((result) => {
+                if (!result.ok) {
+                  if (result.reason === "cancelled") return;
+                  if (result.reason === "unavailable") {
+                    notifyError("打开本地项目仅桌面端可用");
+                    return;
+                  }
+                  if (result.reason === "error") {
+                    notifyError(result.message);
+                  }
+                }
+              });
+            },
+          },
+          {
+            id: "bind-local-folder",
+            title: "绑定本机执行环境",
+            category: "操作" as const,
+            icon: HardDrive,
+            keywords: [
+              "bind",
+              "local",
+              "folder",
+              "sidecar",
+              "scratch",
+              "bangding",
+              "benji",
+              "zhixing",
+            ],
+            hint: "仅当前云端闲聊；项目请用打开本地项目",
+            run: () => {
+              const id = useConversationStore.getState().currentConversationId;
+              if (!id) {
+                notifyError("请先打开一个对话");
+                return;
+              }
+              const conv = getConversations().find((c) => c.id === id);
+              if (conv?.folderId) {
+                notifyError(
+                  "项目会话请用「打开本地项目」开新会话，不能在本会话绑定本机",
+                );
+                return;
+              }
+              void pickAndBindLocalFolder(id).then((result) => {
+                if (!result.ok) {
+                  if (result.reason === "cancelled") return;
+                  if (result.reason === "unavailable") {
+                    notifyError("绑定本机执行环境仅桌面端可用");
+                    return;
+                  }
+                  if (result.reason === "error") {
+                    notifyError(result.message);
+                  }
+                  return;
+                }
+                notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
+                  description: "仅本会话；≠打开本地项目",
+                });
+              });
+            },
+          },
           {
             id: "grant-readonly-folder",
             title: "授权本机目录（只读）",

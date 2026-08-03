@@ -50,7 +50,8 @@ _ATTACHED_BINARY_ONLY_PROMPT = """
 <attached_files>
 --- File: report.xlsx (attachments/report.xlsx) [binary] ---
 This is a binary file saved in the workspace (no text inline).
-Open and parse it with code_execute using the workspace-relative path above.
+CEO has no code_execute — delegate a worker to open/parse it with code_execute
+on the workspace-relative path above.
 </attached_files>
 """
 

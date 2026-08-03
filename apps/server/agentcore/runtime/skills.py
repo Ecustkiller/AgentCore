@@ -154,8 +154,9 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 **默认 A**：用户说调研/摸清/看 gap/看论文与开源，**未**明示「写成报告/成文/交一篇」→ \
 【宜】`parallel_brief`（topic+少扇出 angles，常 2；【禁止】一上来 `research_report` 三路成文；\
 「论文/开源」当资料源 ≠ 明示成文）。\
-**【缺主体先问】**三路/多路调研未点名主体（产品/市场/事件/对象）→ 先 `ask_user`；\
-【禁止】静默自拟 topic/市场占位再派。\
+**【缺主体先问】**三路/多路调研未点名主体（产品/市场/事件/对象）→ 先 `ask_user`\
+（题须预填 `default`）；用户 continue = 确认该 default，派工标「按确认默认」；\
+无 default 不得 continue 派工；【禁止】静默自拟 topic/市场占位再派。\
 **A 对齐推进**（一起弄懂 / 多路摸清 / 未明示成文）→ 同默认 A（方向笔记；CEO 回对话综述；\
 【禁止】套 `research_report`）。\
 **B 成文交付**（**明示**报告/论文/落盘成文）且尚需 ≥2 可并行取证角 → 【宜】`research_report`\
@@ -516,6 +517,11 @@ _ASK_USER_KICKOFF = """\
 【何时问】关键高杠杆没说清、明显会做错/返工 → 短问。小事或有稳妥默认 → 直接干 / `delegate`，\
 可在正文标注假设。意图都复述不出 → 先正文一句澄清，或短 ask——**禁止**开场提案墙、\
 **禁止**「一键开做」仪式（缺信息靠短问，错了再改；建站默认风格由机制软注入 DESIGN）。\
+【决策/澄清短问·default】决策或澄清类短问（含日程/范围/关键缺口，不限三路简报）→ \
+`questions`【必须】预填可确认 `default`（一句话默认方案）；用户 continue = 确认该 default；\
+派工/正文用该 default 并标「按确认默认」；【禁止】借空 continue 另拟一套还叠「先问你」。\
+【缺主体短问】三路/多路调研未点名主体 → `questions`【必须】预填 `default`；用户 continue = \
+确认该 default，派工标「按确认默认」；无 default 不得 continue 派工（再问/停派）；禁借继续另拟 topic。\
 方向 / 方案 choice 的 `label` / `detail` / `message` 写清**本轮交付边界**（如「先出设计契约」/\
 「MVP：仅目标追踪条」）；选完仍立刻派，范围跟选项走——**禁止**暗示「选完即全仓开工」。
 
@@ -599,7 +605,12 @@ _ASK_USER_MIDTASK = """\
 Web/移动端无法履行——如实说明须用桌面客户端，并引导官网下载 \
 https://fashitianxia.xyz/download ；勿发 grant_*/bind/open_local_project 冒充可授权。\
 铁律：仅当 `<workspace_context>` mounts 行写明「本对话已授权区外目录…」才可声称已授权\
-/可访问本机目录；尚无授权时禁止说「授权已确认」。授权须用户显式确认。
+/可访问本机目录；尚无授权时禁止说「授权已确认」。授权须用户显式确认。\
+【通道复检·案 cloud-local-root-auth-where A】用户自称「已装桌面 / 正在用客户端」时仍以\
+`<workspace_context>` 通道行与能力行 `host`/`local_open` 为准复检，口述不得覆盖事实；\
+未装配禁止「就好办了 / 桌面就好办」类话术；对齐步骤：官网下载（若尚未）→ 桌面打开【本对话】→\
+状态栏通道已连 →「打开本地项目」（或按意图 bind/grant）；禁臆造「设置→Folders / 侧栏授权页」\
+等非真源入口；问「授权在哪里」且通道未接时只复述上列步骤与下载链。
 </ask_user_midtask>"""
 
 _VERIFY_AND_FIX = """\
@@ -707,7 +718,8 @@ _DEEP_MULTI_LENS_RESEARCH = """\
 选用 `playbook="multi_lens_research"` + `playbook_args`（槽位 topic / lenses），亦可手写 tasks。\
 ③ 用户明确拒绝调研 → 按 ta 的改口意图走，勿强行挂本 playbook。\
 **【缺主体】**若题材/事件/对象本身未点名（只有「分三路调研 / 决策简报」类模板）→ \
-**必须** `ask_user` 问清主体；【禁止】静默自拟市场或产品占位当 topic。
+**必须** `ask_user` 问清主体且预填可确认 `default`；continue = 确认该 default，\
+派工标「按确认默认」；无 default 不得 continue 派工；【禁止】静默自拟市场或产品占位当 topic。
 
 【一、默认编排形状（4+1）】
 同一次 `delegate` 派出【异质透镜】并行调研 + 一名汇总分析师 `depends_on` 全部透镜：

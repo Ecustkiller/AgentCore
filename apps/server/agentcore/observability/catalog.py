@@ -289,6 +289,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.escalation_stashed_after_miss'),
     EventSpec(name='coordination.event_posted'),
     EventSpec(name='coordination.execution_adopted'),
+    EventSpec(name='coordination.release_prefers_harvest'),
     EventSpec(name='coordination.execution_completed_emitted'),
     EventSpec(name='coordination.execution_detached_emitted'),
     EventSpec(name='coordination.file_ownership_snapshot_failed'),

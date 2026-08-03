@@ -31,12 +31,37 @@ def test_honest_ask_user_message_prefixes_fake_dispatch():
 
 
 def test_ensure_ask_user_pause_body_forbids_silent_empty():
+    # 204dcfda：空泡必须补可见脸（禁 reply_chars=0）
     assert ensure_ask_user_pause_body("") == ASK_USER_PAUSE_USER_VISIBLE
-    assert ensure_ask_user_pause_body("方向：派团队开工") == ASK_USER_PAUSE_USER_VISIBLE
+    assert ensure_ask_user_pause_body("   ") == ASK_USER_PAUSE_USER_VISIBLE
+
+
+def test_ensure_ask_user_pause_body_appends_not_replaces():
+    # 32b78c65：已有短问 / kickoff 文案时追加，禁止整段替换掩盖原意
+    short = "选哪种风格再开工？"
+    out_short = ensure_ask_user_pause_body(short)
+    assert out_short.startswith(short)
+    assert ASK_USER_PAUSE_USER_VISIBLE in out_short
+    assert out_short != ASK_USER_PAUSE_USER_VISIBLE
+
+    kickoff = "方向：派团队开工"
+    out_kick = ensure_ask_user_pause_body(kickoff)
+    assert kickoff in out_kick
+    assert ASK_USER_PAUSE_USER_VISIBLE in out_kick
+    assert out_kick != ASK_USER_PAUSE_USER_VISIBLE
+
+    claim = "好，派 3 个 worker 开工高规格版："
+    out_claim = ensure_ask_user_pause_body(claim)
+    assert claim in out_claim
+    assert ASK_USER_PAUSE_USER_VISIBLE in out_claim
+
     prior = "上一轮已对齐需求。"
     out = ensure_ask_user_pause_body(prior)
     assert prior in out
     assert ASK_USER_PAUSE_USER_VISIBLE in out
+
+    keep = f"先确认再派：{short}"
+    assert ensure_ask_user_pause_body(keep) == keep
 
 
 def test_compose_interrupt_redrive_failed_not_silent():

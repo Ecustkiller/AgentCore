@@ -13,6 +13,13 @@ import {
   type HostOpResult,
 } from "@shared/host-contract";
 import { ipcMain, shell } from "electron";
+import {
+  buildHostShellEnv,
+  fingerprintShellEnv,
+  looksLikeGuiLaunch,
+  snapshotVisibleMainWindows,
+} from "./host-shell-obs";
+import { logDesktop } from "./log-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -680,15 +687,60 @@ async function hostShell(
     args = ["-lc", cmd];
   }
 
+  // 隔离：剥掉 Electron/vite 开发身份，避免 Start-Process 把本产品前端灌进其它 App。
+  const { env: childEnv, stripped_keys } = buildHostShellEnv(process.env);
+  const obs_env_parent = fingerprintShellEnv(process.env);
+  const obs_env = fingerprintShellEnv(childEnv);
+  logDesktop({
+    level: "info",
+    event: "desktop.host_shell_env_fingerprint",
+    fields: {
+      stripped_key_count: stripped_keys.length,
+      stripped_keys,
+      parent_matching_keys: obs_env_parent.matching_keys,
+      parent_safe_values: obs_env_parent.safe_values,
+      parent_electron_renderer_url_set:
+        obs_env_parent.electron_renderer_url_set,
+      child_matching_keys: obs_env.matching_keys,
+      child_safe_values: obs_env.safe_values,
+      child_electron_renderer_url_set: obs_env.electron_renderer_url_set,
+      gui_launch: looksLikeGuiLaunch(cmd),
+    },
+  });
+
   return new Promise((resolve) => {
     const child = spawn(file, args, {
       cwd,
       windowsHide: true,
-      env: process.env,
+      env: childEnv,
     });
     let stdout = "";
     let stderr = "";
     let settled = false;
+
+    const finishOk = (base: Record<string, unknown>) => {
+      void (async () => {
+        const value: Record<string, unknown> = {
+          ...base,
+          obs_env,
+          obs_env_stripped_keys: stripped_keys,
+        };
+        if (looksLikeGuiLaunch(cmd)) {
+          const obs_windows = await snapshotVisibleMainWindows();
+          value.obs_windows = obs_windows;
+          logDesktop({
+            level: "info",
+            event: "desktop.host_shell_windows_snapshot",
+            fields: {
+              count: obs_windows.length,
+              windows: obs_windows,
+            },
+          });
+        }
+        resolve(ok(value));
+      })();
+    };
+
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -697,16 +749,14 @@ async function hostShell(
       } catch {
         /* ignore */
       }
-      resolve(
-        ok({
-          timed_out: true,
-          exit_code: null,
-          stdout: truncateOut(stdout),
-          stderr: truncateOut(stderr),
-          cwd,
-          note: `killed after ${timeoutSeconds}s`,
-        }),
-      );
+      finishOk({
+        timed_out: true,
+        exit_code: null,
+        stdout: truncateOut(stdout),
+        stderr: truncateOut(stderr),
+        cwd,
+        note: `killed after ${timeoutSeconds}s`,
+      });
     }, timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -727,15 +777,13 @@ async function hostShell(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(
-        ok({
-          timed_out: false,
-          exit_code: code ?? null,
-          stdout: truncateOut(stdout),
-          stderr: truncateOut(stderr),
-          cwd,
-        }),
-      );
+      finishOk({
+        timed_out: false,
+        exit_code: code ?? null,
+        stdout: truncateOut(stdout),
+        stderr: truncateOut(stderr),
+        cwd,
+      });
     });
   });
 }

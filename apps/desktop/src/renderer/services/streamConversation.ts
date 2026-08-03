@@ -1,3 +1,4 @@
+import { clientHeaders } from "@/lib/clientBuildInfo";
 import { StreamError } from "@/lib/errors";
 import {
   BASE_URL,
@@ -212,7 +213,10 @@ export async function attachConversation(
   const primaryToken = claimPrimaryStream(conversationId);
 
   const doFetch = (signal: AbortSignal) => {
-    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    const headers: Record<string, string> = {
+      Accept: "text/event-stream",
+      ...clientHeaders(),
+    };
     // Always present → journal-backed full replay (header value observational).
     headers["Last-Event-ID"] = lastEventIds.get(conversationId) ?? "0";
     return fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
@@ -286,6 +290,7 @@ async function runMessageStream(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        ...clientHeaders(),
         ...getCsrfHeaders("POST"),
       },
       body,

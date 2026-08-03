@@ -264,7 +264,11 @@ async def _settle_resume(
                 errors=errors,
             )
         else:
-            result = ask_user_tool_result(response)
+            result = ask_user_tool_result(
+                response,
+                questions=list(suspension.questions or []),
+                assumptions=list(suspension.assumptions or []),
+            )
             # 场面账（style / presentation_format / automation_delivery）已拆除：
             # resume 不再 record_*；DESIGN 默认风格由 design_prompt_block 软注入。
         terminal = result.final_text if result.effect is ToolEffect.INTERACT else None

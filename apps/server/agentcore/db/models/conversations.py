@@ -45,8 +45,8 @@ class Conversation(Base):
     # Permission axes (会话级权限 · 安全权限与治理):
     # {file_write, command, team_kickoff, host}. Runtime gates read THIS column — not
     # users.autonomy_policy (which only seeds new conversations with a recipe).
-    # Default = 少打断: session + auto + skip + ask.
-    # Legacy rows / server_default may omit ``host``; ``PermissionAxes.from_mapping`` fills ask.
+    # Default = 少打断: session + auto + rules + session.
+    # Legacy rows / server_default may omit ``host``; ``PermissionAxes.from_mapping`` fills session.
     permission_axes: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
@@ -54,10 +54,10 @@ class Conversation(Base):
             "file_write": "session",
             "command": "auto",
             "team_kickoff": "rules",
-            "host": "ask",
+            "host": "session",
         },
         server_default=text(
-            "'{\"file_write\":\"session\",\"command\":\"auto\",\"team_kickoff\":\"rules\",\"host\":\"ask\"}'::jsonb"
+            "'{\"file_write\":\"session\",\"command\":\"auto\",\"team_kickoff\":\"rules\",\"host\":\"session\"}'::jsonb"
         ),
     )
     # 深度研究自治（会话级独立旗标）: when True, CEO may auto-adopt worker motion_cards

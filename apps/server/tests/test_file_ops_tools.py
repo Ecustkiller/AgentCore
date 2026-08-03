@@ -1301,6 +1301,72 @@ async def test_file_list_recursive_pattern_miss_hint(tmp_path: Path):
     assert "a.py" in result.output or "目录非空" in result.output
 
 
+async def test_file_list_shows_attachment_zip_hides_elsewhere(tmp_path: Path):
+    """attachments/ only-zip must not render「（空目录）」; root zip stays hidden."""
+    (tmp_path / "attachments").mkdir()
+    (tmp_path / "attachments" / "pack.zip").write_bytes(b"PK\x03\x04")
+    (tmp_path / "noise.zip").write_bytes(b"PK\x03\x04")
+
+    att = await FileListTool().execute(
+        {"directory": "attachments", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert att.success is True
+    assert "空目录" not in att.output
+    assert "pack.zip" in att.output
+
+    root = await FileListTool().execute(
+        {"directory": ".", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert root.success is True
+    assert "noise.zip" not in root.output
+    assert "attachments" in root.output
+
+    tree = await FileListTool().execute(
+        {"directory": ".", "pattern": "*", "recursive": True, "max_depth": 2},
+        _ctx(tmp_path),
+    )
+    assert tree.success is True
+    assert "pack.zip" in tree.output
+    assert "noise.zip" not in tree.output
+
+
+async def test_file_list_reveals_material_png(tmp_path: Path):
+    """Materials path (e.g. src/shot.png) visible; sibling AI-noise still hidden."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "shot.png").write_bytes(b"png")
+    (tmp_path / "src" / "other.png").write_bytes(b"png")
+    (tmp_path / "attachments").mkdir()
+    (tmp_path / "attachments" / "pack.zip").write_bytes(b"PK\x03\x04")
+
+    ctx = _ctx(tmp_path)
+    ctx.material_paths = frozenset({"src/shot.png"})
+    ctx.backend.ai_list_materials = ctx.material_paths
+
+    listed = await FileListTool().execute(
+        {"directory": "src", "pattern": "*"}, ctx
+    )
+    assert listed.success is True
+    assert "shot.png" in listed.output
+    assert "other.png" not in listed.output
+
+    tree = await FileListTool().execute(
+        {"directory": ".", "pattern": "*", "recursive": True, "max_depth": 2},
+        ctx,
+    )
+    assert tree.success is True
+    assert "shot.png" in tree.output
+    assert "other.png" not in tree.output
+    assert "pack.zip" in tree.output  # attachments/ still exempt
+
+    # Without materials, same png stays hidden
+    bare = await FileListTool().execute(
+        {"directory": "src", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert bare.success is True
+    assert "shot.png" not in bare.output
+    assert "空目录" in bare.output or bare.output.strip() == "" or "shot" not in bare.output
+
+
 # --- write_scope (冷启动 explore_memory) ---
 
 

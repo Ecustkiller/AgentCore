@@ -77,14 +77,17 @@ export function resolveEffectiveWorkspace(opts: {
 
 /**
  * Chip / mode-bar label:
- * - project: 「项目名 · 本地|云端」
+ * - project local: 「项目名 · 本地」
+ * - project cloud: 「项目名 · 云端对话」
  * - bare local: 「本机草稿」
- * - bare cloud: 「快速对话」（与 draft chip 对齐）
+ * - bare cloud（已建会话）: 「云端对话」（草稿 chip 仍用「快速对话」）
  */
 export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
   if (ws.viaProject && ws.projectName) {
-    return `${ws.projectName} · ${ws.isLocal ? "本地" : "云端"}`;
+    return ws.isLocal
+      ? `${ws.projectName} · 本地`
+      : `${ws.projectName} · 云端对话`;
   }
   if (ws.isLocal) return "本机草稿";
-  return "快速对话";
+  return "云端对话";
 }

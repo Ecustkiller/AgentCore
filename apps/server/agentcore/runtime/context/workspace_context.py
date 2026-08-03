@@ -197,17 +197,30 @@ def build_workspace_context(
     else:
         # desktop_online=False covers missing header, unknown surface, and true
         # non-desktop clients — never accuse a device form (Web/手机) by default.
+        # 案 20260803-cloud-local-root-auth-where A：用户自称已在桌面时仍以通道事实
+        # 复检（对照 b0a9）；禁「就好办了」与臆造设置/Folders 路径。
         desktop_line = (
             "客户端通道：桌面回填通道未连接——"
             "打开本地项目、本机文件夹绑定、区外目录授权均须官方桌面客户端且通道已连接，"
             "当前会话无法履约；请引导用户在桌面客户端打开本对话，或前往 "
             "https://fashitianxia.xyz/download 下载安装桌面端后再操作；"
             "勿发 grant_* / bind_local_folder / open_local_project 选项卡冒充可授权。"
+            "【通道复检铁律】用户自称「已装桌面 / 正在用客户端 / 现在用的就是」时："
+            "必须以本回合能力行 `host`/`local_open` 与本通道行为准复检，口述不得覆盖结构化事实；"
+            "`host=未装配` 或 `local_open=未装配` 时禁止「就好办了 / 桌面就好办 / "
+            "现在用的是桌面就好办」类话术；应诊断通道仍未接通"
+            "（可能仍在网页、或桌面未打开【本对话】、或状态栏通道未连），并复述固定步骤："
+            "① 官网下载安装桌面端（若尚未）→ ② 在桌面客户端打开【本对话】→ "
+            "③ 确认状态栏桌面回填通道已连接（host/local_open=已装配）→ "
+            "④ 用「打开本地项目」（要本机写根/工程根）或按意图 bind_local_folder / grant_*；"
+            "禁止臆造「设置→Folders / 侧栏授权页」等非产品真源入口路径——"
+            "只指真源入口名（「打开本地项目」等）与官网下载链。"
         )
         grant_line = (
             "区外目录授权仅桌面端可用；当前客户端无法履行。"
             "铁律：仅当 mounts 行写明「本对话已授权区外目录…」时，才可声称已授权"
             "或可访问本机目录；尚无授权时禁止说「授权已确认」。"
+            "用户问「授权在哪里」且通道未接时：复述上列固定步骤，禁臆造设置页路径。"
         )
 
     mounts = getattr(backend, "_mounts", None) or {}

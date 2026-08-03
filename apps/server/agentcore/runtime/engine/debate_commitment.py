@@ -34,7 +34,7 @@ _FORM_DECLINE = (
     "不要辩论",
 )
 
-_ASK_USER_SETTLED_PREFIXES = ("用户答复：", "用户选择：", "用户确认：")
+_ASK_USER_SETTLED_PREFIXES = ("用户答复：", "用户选择：", "用户确认：", "用户确认默认：")
 # 「辩论环节…：不需要辩论环节」style lines in the desktop-composed note.
 _DECLINE_LINE_RE = re.compile(
     r"辩论[^\n：:]{0,24}[：:][^\n]{0,40}(?:" + "|".join(re.escape(d) for d in _FORM_DECLINE) + r")"
@@ -163,7 +163,7 @@ def user_selected_debate_form(messages: list[LLMMessage]) -> bool:
             decided = _text_selects_debate_form(result)
             if decided is not None:
                 return decided
-            # Bare「用户确认」→ honor the card default.
-            if result.startswith("用户确认："):
+            # Bare「用户确认」/「用户确认默认」→ honor the card default.
+            if result.startswith(("用户确认：", "用户确认默认：")):
                 return default_pick
     return False

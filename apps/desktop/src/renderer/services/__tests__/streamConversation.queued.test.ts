@@ -74,7 +74,11 @@ describe("streamConversation — 发送即有流（恒 SSE）", () => {
     expect(body.delivery).toBe("queue");
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
-        headers: expect.objectContaining({ Accept: "text/event-stream" }),
+        headers: expect.objectContaining({
+          Accept: "text/event-stream",
+          "X-Client-Platform": expect.any(String),
+          "X-Client-Version": expect.any(String),
+        }),
       }),
     );
   });

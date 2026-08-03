@@ -143,13 +143,31 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(formatWorkspaceChipLabel(ws)).toBe("本机草稿");
   });
 
-  it("shows 快速对话 when neither bind nor container is set", () => {
+  it("shows 云端对话 when neither bind nor container is set", () => {
     const ws = resolveEffectiveWorkspace({
       binding: cloud,
       localContainerRootId: null,
       roots,
     });
     expect(ws.isLocal).toBe(false);
-    expect(formatWorkspaceChipLabel(ws)).toBe("快速对话");
+    expect(formatWorkspaceChipLabel(ws)).toBe("云端对话");
+  });
+
+  it("labels cloud project as 项目名 · 云端对话", () => {
+    const projectCloud: WorkspaceBinding = {
+      mode: "cloud",
+      scope: "folder",
+      rootId: null,
+      source: null,
+    };
+    const ws = resolveEffectiveWorkspace({
+      binding: projectCloud,
+      localContainerRootId: null,
+      roots,
+      projectName: "Acme",
+    });
+    expect(ws.isLocal).toBe(false);
+    expect(ws.viaProject).toBe(true);
+    expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 云端对话");
   });
 });

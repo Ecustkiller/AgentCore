@@ -74,6 +74,7 @@ class WorkspaceOp(StrEnum):
     READ_BYTES = "read_bytes"
     WRITE_BYTES = "write_bytes"
     LIST = "list"
+    EXISTS = "exists"
     READ_LINES = "read_lines"
     LIST_TREE = "list_tree"
     INDEX_FILES = "index_files"

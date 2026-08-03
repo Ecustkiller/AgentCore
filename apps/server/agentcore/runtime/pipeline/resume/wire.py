@@ -205,6 +205,9 @@ async def _wire_continuation_toolset(
     deep_research_auto, deep_research_auto_debate_count = (
         await load_deep_research_auto_state(conversation_id)
     )
+    # Resume has no turn attachments carrier — materials empty; attachments/
+    # path exemption on the list helpers still applies.
+    backend.ai_list_materials = frozenset()
     base_tool_context = ToolContext(
         execution_id=resume_execution_id,
         run_id=new_id(),
@@ -224,6 +227,7 @@ async def _wire_continuation_toolset(
         vision_reader=build_vision_reader(),
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
+        material_paths=frozenset(),
     )
     from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
     from agentcore.runtime.coordination.session import current_execution_id

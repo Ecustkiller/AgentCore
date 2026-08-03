@@ -75,7 +75,7 @@ class AutonomyPolicy(StrEnum):
     """
 
     CAUTIOUS = "cautious"  # ask / ask / rules / off
-    LESS_INTERRUPT = "less_interrupt"  # session / auto / rules / ask (default)
+    LESS_INTERRUPT = "less_interrupt"  # session / auto / rules / session (default)
     MANAGED = "managed"  # session / auto / skip / session
 
 
@@ -96,7 +96,7 @@ class PermissionAxes:
     file_write: FileWriteAxis = FileWriteAxis.SESSION
     command: CommandAxis = CommandAxis.AUTO
     team_kickoff: TeamKickoffAxis = TeamKickoffAxis.RULES
-    host: HostAxis = HostAxis.ASK
+    host: HostAxis = HostAxis.SESSION
 
     def __post_init__(self) -> None:
         if self.command is CommandAxis.AUTO and self.file_write is FileWriteAxis.ASK:
@@ -116,7 +116,7 @@ class PermissionAxes:
     def from_mapping(cls, raw: Mapping[str, Any] | None) -> PermissionAxes:
         """Parse stored / wire JSON; unknown / missing → less_interrupt defaults.
 
-        Explicitly resolves ``host`` (缺省 = 默认 ``ask``); never silently drop it.
+        Explicitly resolves ``host`` (缺省 = 默认 ``session``); never silently drop it.
         """
         if not raw:
             return DEFAULT_PERMISSION_AXES
@@ -129,7 +129,7 @@ class PermissionAxes:
                 team_kickoff=TeamKickoffAxis(
                     str(raw.get("team_kickoff") or TeamKickoffAxis.RULES.value)
                 ),
-                host=HostAxis(str(raw.get("host") or HostAxis.ASK.value)),
+                host=HostAxis(str(raw.get("host") or HostAxis.SESSION.value)),
             )
         except (ValueError, TypeError, KeyError):
             return DEFAULT_PERMISSION_AXES
@@ -184,7 +184,7 @@ DEFAULT_PERMISSION_AXES = PermissionAxes(
     file_write=FileWriteAxis.SESSION,
     command=CommandAxis.AUTO,
     team_kickoff=TeamKickoffAxis.RULES,
-    host=HostAxis.ASK,
+    host=HostAxis.SESSION,
 )
 
 _RECIPE_TO_AXES: dict[AutonomyPolicy, PermissionAxes] = {
@@ -214,7 +214,7 @@ def validate_permission_axes(
     file_write: str,
     command: str,
     team_kickoff: str,
-    host: str = HostAxis.ASK.value,
+    host: str = HostAxis.SESSION.value,
 ) -> PermissionAxes:
     """Parse + validate axes for API writes; raises ValueError on illegal combo / enum."""
     return PermissionAxes(

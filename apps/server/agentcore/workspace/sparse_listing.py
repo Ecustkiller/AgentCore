@@ -16,17 +16,110 @@ Project mode optionally surfaces a few newest non-attachment paths as
 
 from __future__ import annotations
 
+from pathlib import PureWindowsPath
+from typing import Any
+
+from agentcore.workspace._paths import (
+    is_ai_noise_file_name,
+    is_system_ignored_file_name,
+)
 from agentcore.workspace.attachments import ATTACHMENTS_DIR
 
 # Newest non-attachment paths kept as an explicit supplement in project mode
 # (beyond attachments). The rest collapse into the summary line.
 PROJECT_RECENT_SUPPLEMENT = 5
 
+_MATERIAL_PATH_KEYS = ("workspace_path", "path", "parsed_workspace_path")
+
 
 def is_attachment_path(path: str) -> bool:
     """Whether ``path`` lives under the resident ``attachments/`` directory."""
     p = path.replace("\\", "/").lstrip("./")
     return p == ATTACHMENTS_DIR or p.startswith(f"{ATTACHMENTS_DIR}/")
+
+
+def _is_absolute_os_path(raw: str) -> bool:
+    """True for drive-letter / UNC / leading-slash absolute OS paths."""
+    s = raw.strip()
+    if not s:
+        return False
+    if PureWindowsPath(s).is_absolute():
+        return True
+    return s.replace("\\", "/").startswith("/")
+
+
+def _normalize_material_rel(raw: str) -> str | None:
+    """Return a workspace-relative POSIX path, or None if unusable / absolute."""
+    if _is_absolute_os_path(raw):
+        return None
+    p = raw.replace("\\", "/").strip().lstrip("./")
+    if not p or p == ".":
+        return None
+    if _is_absolute_os_path(p):
+        return None
+    return p
+
+
+def collect_turn_material_paths(attachments: list[dict[str, Any]] | None) -> frozenset[str]:
+    """Workspace-relative paths from this turn's attachments (list AI-noise reveal).
+
+    Collects ``workspace_path`` / relative ``path`` / ``parsed_workspace_path``.
+    Skips ``resident_missing`` items and absolute OS paths. Empty when none.
+    """
+    if not attachments:
+        return frozenset()
+    out: set[str] = set()
+    for att in attachments:
+        if att.get("resident_missing"):
+            continue
+        for key in _MATERIAL_PATH_KEYS:
+            raw = att.get(key)
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            cleaned = _normalize_material_rel(raw)
+            if cleaned is not None:
+                out.add(cleaned)
+    return frozenset(out)
+
+
+def should_hide_ai_noise_from_list(
+    path: str, *, materials: frozenset[str] | None = None
+) -> bool:
+    """True when ``path`` is AI-noise and *not* under ``attachments/`` / materials.
+
+    Used by ``file_list`` tool-layer filtering (``list`` is shared with UI and
+    only strips system noise). Attachment zips/media and this-turn material
+    paths stay visible to the agent; the same suffixes elsewhere remain hidden.
+    """
+    p = path.replace("\\", "/").lstrip("./")
+    name = p.rsplit("/", 1)[-1] if p else ""
+    if not name or not is_ai_noise_file_name(name):
+        return False
+    if is_attachment_path(p):
+        return False
+    return not (materials and p in materials)
+
+
+def is_ai_list_hidden_file(
+    *,
+    parent_rel: str,
+    name: str,
+    materials: frozenset[str] | None = None,
+) -> bool:
+    """Whether a file child should be omitted from AI ``list_tree`` walks.
+
+    System suffixes always hidden. AI-noise suffixes hidden unless the child
+    path lives under ``attachments/`` or is in ``materials``.
+    """
+    if is_system_ignored_file_name(name):
+        return True
+    if not is_ai_noise_file_name(name):
+        return False
+    parent = parent_rel.replace("\\", "/").strip("/")
+    child = name if parent in ("", ".") else f"{parent}/{name}"
+    if is_attachment_path(child):
+        return False
+    return not (materials and child in materials)
 
 
 def partition_sparse_paths(

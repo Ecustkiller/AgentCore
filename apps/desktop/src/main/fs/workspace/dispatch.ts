@@ -13,7 +13,14 @@ import {
   opProcessStart,
   opProcessStop,
 } from "./process";
-import { opIndexFiles, opList, opListTree, opRead, opReadLines } from "./read";
+import {
+  opExists,
+  opIndexFiles,
+  opList,
+  opListTree,
+  opRead,
+  opReadLines,
+} from "./read";
 import { opErr, opOk } from "./result";
 import {
   opAppend,
@@ -30,11 +37,26 @@ import {
 /** Session-root access mode (W3 readonly / organize). Permanent roots have neither. */
 export type SessionRootMode = "readonly" | "organize";
 
+function normalizeRevealPaths(raw: unknown): ReadonlySet<string> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const p = item
+      .replace(/\\/g, "/")
+      .replace(/^\.\/+/, "")
+      .replace(/^\/+|\/+$/g, "");
+    if (p && p !== ".") out.add(p);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
 const ORGANIZE_ALLOWED_OPS = new Set<WorkspaceOpName>([
   "read",
   "read_bytes",
   "read_lines",
   "list",
+  "exists",
   "list_tree",
   "index_files",
   "grep",
@@ -161,7 +183,10 @@ export async function executeWorkspaceOp(
           root,
           String(args.directory ?? "."),
           String(args.pattern ?? "*"),
+          normalizeRevealPaths(args.reveal_paths),
         );
+      case "exists":
+        return await opExists(root, String(args.path ?? ""));
       case "read_lines":
         return await opReadLines(
           root,
@@ -176,6 +201,7 @@ export async function executeWorkspaceOp(
           String(args.pattern ?? "*"),
           Number(args.max_depth ?? 3),
           Number(args.max_entries ?? 200),
+          normalizeRevealPaths(args.reveal_paths),
         );
       case "index_files":
         return await opIndexFiles(

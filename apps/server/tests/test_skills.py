@@ -257,9 +257,12 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "成文交付" in body or "成文专线" in body or "成篇" in body
     assert "默认 A" in body or "少扇出" in body
     assert "材料已齐" in body
-    # 三路/多路调研缺主体：硬 ask，禁静默自拟
+    # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in body
     assert "静默自拟" in body
+    assert "按确认默认" in body
+    assert "default" in body
+    assert "不得 continue 派工" in body or "无 default" in body
     # B 成文：落盘文档 + ≥2 角 → 各角与主笔均 files + 末环独立审校
     assert "角 prose" in body and "仅主笔落盘" in body
     assert "form=files" in body and "artifacts" in body
@@ -569,6 +572,14 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "提案体硬闸" not in body
     assert "一键开做" not in body or "禁止" in body
     assert "checkpoint_after" not in body
+    # 缺主体 continue = 确认卡上 default；无 default 不得派工
+    assert "缺主体" in body
+    assert "按确认默认" in body
+    assert "default" in body
+    assert "不得 continue 派工" in body or "无 default" in body
+    # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default
+    assert "决策/澄清短问" in body
+    assert "先问你" in body
 
 
 def test_ask_user_kickoff_skill_mentions_compat_options_not_ledger():
@@ -611,6 +622,13 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "https://fashitianxia.xyz/download" in body
     assert "授权已确认" in body
     assert "本对话已授权区外目录" in body
+    # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检；禁「就好办了」/臆造 Folders
+    assert "通道复检" in body
+    assert "就好办了" in body
+    assert "口述不得覆盖" in body
+    assert "Folders" in body
+    assert "打开本地项目" in body
+    assert "授权在哪里" in body
 
 
 def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
@@ -701,9 +719,12 @@ def test_deep_multi_lens_research_teaches_parallel_lenses_and_motion_card():
     assert "multi_lens_research" in body
     assert "motion_card" in body
     assert "handoff" in body
-    # 缺主体：禁静默自拟市场/产品占位当 topic
+    # 缺主体：预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in body
     assert "静默自拟" in body
+    assert "按确认默认" in body
+    assert "default" in body
+    assert "不得 continue 派工" in body or "无 default" in body
     # 幕 1 案卷落盘：research/ + form=files / artifacts（叠加 handoff，不替代）
     assert "AgentCore/文档/research/" in body
     assert "透镜报告" in body
