@@ -64,7 +64,8 @@ async def test_complete_maps_401_403_to_auth_error(code):
         with pytest.raises(LLMAuthError) as ei:
             await provider.complete(_req())
         assert "DeepSeek" not in ei.value.message
-        assert "invalid api key" in ei.value.message
+        assert "invalid api key" not in ei.value.message
+        assert "设置 · 模型配置" in ei.value.message
         assert ei.value.details.get("upstream_status") == code
         assert "invalid api key" in (ei.value.details.get("upstream_body_preview") or "")
     finally:
@@ -96,7 +97,8 @@ async def test_inference_proxy_401_maps_to_inference_token_expired(code):
         await provider.close()
 
 
-async def test_complete_maps_key_expired_to_auth_error_with_upstream_text():
+async def test_complete_maps_key_expired_to_auth_error_with_upstream_in_preview():
+    """BYOK expired: product face; upstream / CC Switch only in preview."""
     body = json.dumps(
         {
             "error": {
@@ -111,8 +113,46 @@ async def test_complete_maps_key_expired_to_auth_error_with_upstream_text():
     try:
         with pytest.raises(LLMAuthError) as ei:
             await provider.complete(_req())
-        assert "expired" in ei.value.message.lower()
+        assert "CC Switch" not in ei.value.message
+        assert "expired" not in ei.value.message.lower()
+        assert "设置 · 模型配置" in ei.value.message
         assert ei.value.details.get("upstream_status") == 401
+        assert "expired" in (ei.value.details.get("upstream_body_preview") or "").lower()
+    finally:
+        await provider.close()
+
+
+async def test_byok_auth_uses_product_copy_not_upstream_gateway_text():
+    """BYOK 401 key_revoked (案 9db7bd04): no `user ` prefix / CC Switch on face."""
+    body = json.dumps(
+        {
+            "error": {
+                "message": "This API key has been revoked. 请访问本站查看 CC Switch 配置教程。",
+                "type": "invalid_request_error",
+                "code": "key_revoked",
+            }
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    provider = OpenAICompatibleProvider(
+        name="user", api_key="k", base_url="http://example.invalid/v1"
+    )
+    await provider._client.aclose()
+    provider._client = httpx.AsyncClient(
+        base_url="http://example.invalid/v1",
+        transport=httpx.MockTransport(lambda request: httpx.Response(401, content=body)),
+    )
+    try:
+        with pytest.raises(LLMAuthError) as ei:
+            await provider.complete(_req())
+        assert "CC Switch" not in ei.value.message
+        assert not ei.value.message.startswith("user ")
+        assert "revoked" not in ei.value.message.lower()
+        assert "当前模型" in ei.value.message
+        assert "设置 · 模型配置" in ei.value.message
+        assert ei.value.details.get("upstream_status") == 401
+        assert "revoked" in (ei.value.details.get("upstream_body_preview") or "").lower()
+        assert ei.value.details.get("credential_source") == "user"
     finally:
         await provider.close()
 

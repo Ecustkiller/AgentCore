@@ -738,15 +738,9 @@ class OpenAICompatibleProvider:
                     upstream_body_preview=body_preview(body),
                 )
             if is_auth_rejection(status_code, body):
-                # Platform = operator key: product copy only (never upstream gateway
-                # tutorials like CC Switch). BYOK keeps upstream text for diagnosis.
-                auth_message = (
-                    None
-                    if self._name == "platform"
-                    else client_error_message(self._name, status_code, body)
-                )
+                # Product copy only (platform + BYOK): never echo upstream gateway
+                # tutorials (e.g. CC Switch). Upstream text stays in preview / logs.
                 raise LLMAuthError(
-                    auth_message,
                     provider_name=self._name,
                     upstream_status=status_code,
                     upstream_body_preview=body_preview(body),
