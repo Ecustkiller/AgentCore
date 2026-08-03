@@ -557,7 +557,27 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
     assert not b_errs
     assert plan_is_literature_report_delivery(brief) is False
 
-    # 同等成文：审校 + two_phase 案卷
+    # 同等成文：已声明 reviews/ files 审校座 + two_phase 案卷
+    assert plan_is_literature_report_delivery(
+        [
+            {
+                "role": "撰稿人",
+                "deliverable": {
+                    "form": "files",
+                    "artifacts": ["AgentCore/文档/research/报告.md"],
+                    "citation_mode": "two_phase",
+                },
+            },
+            {
+                "role": "学术审校员",
+                "deliverable": {
+                    "form": "files",
+                    "artifacts": ["AgentCore/文档/reviews/审校报告.md"],
+                },
+            },
+        ]
+    )
+    # 仅角色名叫审校、未声明 reviews files → 不进文献降档
     assert plan_is_literature_report_delivery(
         [
             {
@@ -570,7 +590,7 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
             },
             {"role": "学术审校员", "deliverable": {"name": "审校"}},
         ]
-    )
+    ) is False
     # 仅 long-form 结构信号
     assert plan_is_literature_report_delivery(
         [{"role": "撰稿", "deliverable": {"min_length": 4000}}]
@@ -591,7 +611,7 @@ def test_academic_usable_url_and_citation_count():
 
 def test_collect_evidence_deficit_gaps_combinable_triggers():
     from agentcore.runtime.runs.types import Deliverable, RunPhase, RunState
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
+    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     nodes = [
         RunSpec(
@@ -604,7 +624,15 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
                 citation_mode="two_phase",
             ),
         ),
-        RunSpec(run_id="review", role="学术审校员", task="审"),
+        RunSpec(
+            run_id="review",
+            role="学术审校员",
+            task="审",
+            deliverable=Deliverable(
+                form="files",
+                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
+            ),
+        ),
     ]
     # Adequate → no gap
     ok = {
@@ -715,7 +743,7 @@ def test_stamp_retrieval_evidence_gap_copies_sticky_budget(tmp_path: Path):
 def test_transcript_web_search_evidence_gap_triggers_deficit():
     """web_search tool JSON with evidence_gap + academic_literature → 结构化降档信号。"""
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
+    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     nodes = [
         RunSpec(
@@ -728,7 +756,15 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
                 citation_mode="two_phase",
             ),
         ),
-        RunSpec(run_id="review", role="学术审校员", task="审"),
+        RunSpec(
+            run_id="review",
+            role="学术审校员",
+            task="审",
+            deliverable=Deliverable(
+                form="files",
+                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
+            ),
+        ),
     ]
     transcript = [
         LLMMessage(
@@ -764,19 +800,30 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
     assert "结构化证据差" in gaps[0]["description"]
 
 
-def test_independent_review_role_stamps_files_written_line_report():
-    """案 B：独立复核员须 files_written 带行号短报告；验证员不受影响。"""
+def test_named_review_without_files_not_elevated_playbook_review_lands():
+    """名叫审校但未声明 files 不再被抬契约；playbook 审校默认落盘仍成立。"""
     from agentcore.runtime.runs.builder import build_run_plan
+    from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import (
         INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
-        batch_includes_review_role,
-        is_independent_review_role,
+        batch_declares_review_files,
     )
     from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
-    assert is_independent_review_role("独立复核员")
-    assert batch_includes_review_role([{"role": "独立复核员", "task": "核"}])
-    assert not is_independent_review_role("验证员")
+    assert not batch_declares_review_files(
+        [{"role": "独立复核员", "task": "核"}]
+    )
+    assert batch_declares_review_files(
+        [
+            {
+                "role": "轻量审校",
+                "deliverable": {
+                    "form": "files",
+                    "artifacts": [f"{REVIEWS_DIR}/审校报告.md"],
+                },
+            }
+        ]
+    )
 
     plan, errors = build_run_plan(
         [
@@ -805,15 +852,29 @@ def test_independent_review_role_stamps_files_written_line_report():
     assert errors == []
     by_role = {n.role: n for n in plan.nodes}
     review = by_role["独立复核员"]
-    assert review.deliverable is not None
-    assert review.deliverable.form == "files"
-    assert review.deliverable.requires_files is True
-    assert review.deliverable.artifacts
-    assert review.deliverable.artifacts[0].startswith(f"{REVIEWS_DIR}/复核-")
-    assert review.deliverable.min_length >= 80
-    assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE in review.task
+    # 未声明 files → 不再静默抬 form/artifacts
+    assert review.deliverable is None or (
+        review.deliverable.form != "files"
+        and not review.deliverable.requires_files
+        and not review.deliverable.artifacts
+    )
+    assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in (review.task or "")
 
     verify = by_role["验证员"]
     assert verify.deliverable is not None
     assert verify.deliverable.form == "prose"
     assert verify.deliverable.requires_files is False
+
+    # playbook 审校默认落盘仍成立
+    tasks, pb_errs = expand_playbook(
+        "research_report", {"topic": "X", "angles": ["甲", "乙"]}
+    )
+    assert not pb_errs
+    pb_review = next(t for t in tasks if t["id"] == "review")
+    d = pb_review["deliverable"]
+    assert d["form"] == "files"
+    assert d["requires_files"] is True
+    assert d["artifacts"] == [f"{REVIEWS_DIR}/审校报告.md"]
+    assert d["min_length"] >= 80
+    assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE in pb_review["task"]
+    assert batch_declares_review_files(tasks) is True

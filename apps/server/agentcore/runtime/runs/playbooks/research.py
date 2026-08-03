@@ -14,7 +14,7 @@ from agentcore.runtime.runs.playbooks._common import (
     clean_str_list,
     fold_fanout_slots,
 )
-from agentcore.workspace.stage_dirs import RESEARCH_DIR
+from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
 
 _DEFAULT_MULTI_LENSES = ("法律", "品牌商业", "舆情公关", "文化社会")
 
@@ -24,6 +24,8 @@ _SYNTHESIZER_ARTIFACT = f"{_MULTI_LENS_RESEARCH_DIR}/汇总与命题卡.md"
 
 _RESEARCH_REPORT_OUTLINE_ARTIFACT = f"{RESEARCH_DIR}/提纲.md"
 _RESEARCH_REPORT_DEFAULT_ANGLE_ARTIFACT = f"{RESEARCH_DIR}/调研报告.md"
+# 审校落盘契约写死在 playbook（不靠运行时扫角色名抬 files）。
+_RESEARCH_REPORT_REVIEW_ARTIFACT = f"{REVIEWS_DIR}/审校报告.md"
 
 _SYNTHESIZER_MOTION_CARD_GUIDANCE = (
     "交叉验证时标清共识 / 冲突 / 分歧。"
@@ -185,6 +187,7 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
     ``PAPER_PARALLEL_MERGE_DISCIPLINE``。
     """
     from agentcore.runtime.runs.research_quality import (
+        INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
         MD_PDF_EXPORT_DISCIPLINE,
         PAPER_PARALLEL_MERGE_DISCIPLINE,
         research_report_main_artifact,
@@ -340,10 +343,18 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 "对成稿中的关键法条、司法解释、判例引用，须用 read_url 核对原文后再确认或指出问题，"
                 "勿仅凭搜索摘要放行；"
                 "指出具体问题并给出可操作的修改建议，不重写全文。"
+                f"【主文件】审校短报告落盘到 `{_RESEARCH_REPORT_REVIEW_ARTIFACT}`；"
+                f"{INDEPENDENT_REVIEW_REPORT_DISCIPLINE}"
                 f"{DIRECTED_SEARCH_TASK_HINT}"
             ),
             "depends_on": ["write"],
-            "deliverable": {"name": "审校报告 + 修改建议"},
+            "deliverable": {
+                "name": "审校报告 + 修改建议",
+                "form": "files",
+                "requires_files": True,
+                "artifacts": [_RESEARCH_REPORT_REVIEW_ARTIFACT],
+                "min_length": 80,
+            },
             # 审校为依赖写作的收尾节点：通读长稿 + 核对出处。墙钟显式 300s（优先于统一
             # backstop）；token 顶走 worker_budget 统一回填。真纯丙：不再靠显式 tools
             # 名单收窄；定向检索纪律写在 task 正文（见 DIRECTED_SEARCH_TASK_HINT）。

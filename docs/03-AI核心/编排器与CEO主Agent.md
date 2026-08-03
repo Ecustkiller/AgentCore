@@ -43,7 +43,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 |---|---|
 | **直答** | 单点确认、读已知少量文件、纯问答 / 闲聊、聊天里短文或短改写（未要求存文件）、开工前轻量探路；**本地纯启服 / 重启 / 看长驻是否活着**（`terminal`，勿为此派 `runtime_ready` 批） |
 | **委派** | ① 实质交付物（代码 / 应用 / 要求落盘的成篇文字，哪怕一行）；② 成规模广度调查（横扫多来源、可拆多角度、需对比 / 辩论）——哪怕只读、最终只回一段话。单 worker 能胜任 → `finalize=true`；形状拿不准 → `consult_skill(team_orchestration_advanced)` |
-| **团队形态** | 按活的自然缝拆、能少则少；可独立并行才多派；跨域合成流水线常见 1～2 人，勿默认每人一种专长。广度调查扇出并行调研，task 点明「回报精炼结论」。**结局分层**：先定桌上结果再组队——一起弄懂/多路摸清（未明示成文；「论文/开源」当资料 ≠ 成文）→ `parallel_brief`（方向笔记→CEO 对话综述；少扇出常 2）；明示报告/论文/落盘成文 → `research_report`（提纲→撰稿→审校）；公共事件多维研判 → `multi_lens_research`；点名开辩 → `debate`。「多角度 / 多 Agent」≠成文产线。`result_handling` 只管上游→下游，**不**影响回到 CEO 的内容。**立刻派 ≠ 立刻全量**：方向/方案选定后仍立刻派，默认 MVP 或设计/API 契约切片；强耦合 UI 默认 1 人两段或 wave1=`files_written`（→ 见代码: `runtime/resolve/prompt.py`） |
+| **团队形态** | 按活的自然缝拆、能少则少；可独立并行才多派；跨域合成流水线常见 1～2 人，勿默认每人一种专长。广度调查扇出并行调研，task 点明「回报精炼结论」。**结局分层**：先定桌上结果再组队——一起弄懂/多路摸清（未明示成文；「论文/开源」当资料 ≠ 成文）→ `parallel_brief`（方向笔记→CEO 对话综述；少扇出常 2）；明示报告/论文/落盘成文 → `research_report`（提纲→撰稿→审校）；公共事件多维研判 → `multi_lens_research`；点名开辩 → `debate`。「多角度 / 多 Agent」≠成文产线。`result_handling` 只管上游→下游，**不**影响回到 CEO 的内容。**立刻派 ≠ 立刻全量**：方向/方案选定后仍立刻派，默认 MVP 或设计/API 契约切片；强耦合 UI 默认 1 人两段或 wave1=`form=files`（→ 见代码: `runtime/resolve/prompt.py`） |
 | **认知分工** | 约束归 CEO、专业方案归专家；task 只写【目标·约束·验收】；`contract` 是验收契约非结构蓝图；审查类「重点关注」进 `seed_notes`(kind=heads_up)，勿写进 task 替 worker 作答 |
 
 短文分界：未要求存文件 → 回复直写；明确落盘 → 派 1 人。CEO 绝不为省委派把整份代码贴进正文。
@@ -90,13 +90,34 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述 |
 | `complexity_hint` | `light`/`standard`：编排姿态（如 light 隐含 `coordination=none`），**不**映射 worker token/超时 |
 | `coordination` | 便签墙档；缺省 `none`；权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
-| `deliverable` | `requires_files` / `artifacts` = 落盘契约；否决悬空 `output_schema`。`form=prose` = 纯文字交付（写工具仍装配，靠角色提示自觉勿乱写）；`form=files` / 省略 = 可写盘。`form=prose` 不得同时声明 `requires_files` / 非空 `artifacts`（硬拒）。批次 `files_written` / `code_verified` / `graph_consistent` 须**至少一名**非 prose（可写盘形态）worker（全员 prose 硬拒）；`repair_code` 形（修补 `files` + 诊断/验证 `prose`）合法。仅 `runtime_ready` 允许全员 prose。**`form` 只表交付形态，不再代理探索期「别乱写工程」、也不再硬卸写工具**。案卷中间笔记（`AgentCore/文档/{research,reviews,debate}/`）默认**不**计入 `form=files` 修码产品落盘（零写 / `files_written`），除非 `artifacts` 声明该路径 |
+| `deliverable` | `requires_files` / `artifacts` = 落盘契约；否决悬空 `output_schema`。`form=prose` = 纯文字交付（写工具仍装配，靠角色提示自觉勿乱写）；`form=files` / 省略 = 可写盘。`form=prose` 不得同时声明 `requires_files` / 非空 `artifacts`（硬拒）。**`form` 只表交付形态，不再代理探索期「别乱写工程」、也不再硬卸写工具**。案卷中间笔记（`AgentCore/文档/{research,reviews,debate}/`）默认**不**计入 `form=files` 修码产品落盘（零写 soft），除非 `artifacts` 声明该路径。✅ S3：不再有按 criteria kind 的队形闸 |
 | `write_scope` ✅ | worker 本批可写范围：`none` / `explore_memory`（仅 `AgentCore/` 约定记忆与探索笔记）/ `project`（用户工程树，默认满权限批次）。探索硬挡 pending 时上限 `explore_memory`；越权在**写工具层**拒，不在 `delegate` 入口因 `form=files` 拒整批。否决：explore 专用 playbook 分叉、pending 时静默把 files 改成 prose |
-| `completion_criteria` | 批次验收；省略不强制（含不自动 overlay 挡；落 TS 的 D2/图扫仅为 soft note）；文案推断已废除。`files_written` / `code_verified`（编译·测试·build，**默认走有界验证 `test_run`**）/ `runtime_ready`（terminal 长驻就绪）/ `graph_consistent`（`.ts/.tsx/.vue` import 图闭合；显式声明才 binding，落盘此类文件时自动扫仅为 soft note）互不混用；启动开发服务器用 `runtime_ready`；慢 build/tsc/`npm install` **硬拒**塞进 `code_execute`（改 `test_run`） |
+| ~~`completion_criteria`~~ | ✅ **已删**（S3）——见下节；工具面 `test_run`↔`code_execute` 分流仍在（与 kind 正交） |
 | `continue_from_run_id` | 带现场续派；权威 → [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md) |
 | worker 模型 | CEO **不**选 per-task 模型档；力度用协作结构表达；用户侧「模型组合」可选 Worker 槽 |
 
 嵌套委派：默认开一层（`depth≤2`），无 `can_delegate` 字段。worker 工具集缺省全量（内部装配）；CEO **不必也不应**手填 `tasks[].tools` 收窄（填了也不生效）。
+
+### ✅ S3 · 删除 `completion_criteria` kind 体系
+
+- **目标**：删掉批次验收 kind 枚举与按 kind 的硬挡；引擎不再按验收标签硬判完成。错收工接盘 = CEO 提示词复盘 + 现有 deliverable / contract / 落盘 soft + 人审。
+- **边界**：已退役 `files_written` / `code_verified` / `runtime_ready` / `graph_consistent` / `custom` 等 **kind 枚举与按 kind 的 binding**，以及 `validate_criteria_kind_fit`。schema **已删除** `completion_criteria` 字段。保留 deliverable / contract / 落盘 soft / 人审与工具面 `test_run`↔`code_execute` 分流。省略即常态，无「显式 kind → binding」分叉。
+- **关键取舍**：选删体系（S3）；**否决**领域 kind 扩表（S2a/b）。**禁**边删边加新启发式完成硬闸；**禁**把「验码绿」等再伪装成新 kind。
+- **验收**：schema / 运行时无 kind 枚举与按 kind 批次硬挡；`validate_criteria_kind_fit` 不存在；无替代 kind 的新启发式完成硬闸。→ 见代码: `runtime/delegate/completion.py` + `tools/builtin/delegate/schema.py`
+
+### ✅ 删除角色名启发式改写 deliverable
+
+- **目标**：删除 `is_independent_review_role` 等对 **role 名正则/子串** 的匹配，以及由此触发的**静默改写** deliverable（抬 `form=files` / 塞 `reviews/` artifacts / 追加纪律文案）。
+- **边界**：审校落盘纪律**仅当** playbook 或 deliverable **已声明** `form=files` / 非空 `artifacts`（或等价结构 flag）时施加；`research_report` 等在 playbook **写死**审校员 files 契约，不靠运行时猜角色名。成篇审计硬门路径不变（只认 playbook + 结构字段）。**不加**新 `completion_criteria` kind（遵守 ✅ S3）。
+- **关键取舍**：删猜测入口优于保留误伤面；否决「降软但仍扫角色名」。能力回退用 playbook 结构补，不靠旁路正则。
+- **验收**：无角色名→改写 deliverable 路径；名叫「审校/review」但未声明 files 的轻角色不被抬契约；playbook 审校默认落盘仍成立。→ 见代码: `runtime/runs/research_quality.py`（结构谓词）+ `runtime/runs/playbooks/research.py`（审校 files 契约）
+
+### ✅ 接通 consumer_deps 软提示
+
+- **目标**：`check_consumer_missing_depends` 命中时，软警告进入 **CEO 可见**的委派工具结果（尾巴/note），不再只打日志。
+- **边界**：仍**不拒收、不自动补 `depends_on`、不改图**；一次性软提示，**禁止**因「软无效」升级硬拒或累计计数。cue 保持窄（队友/上游产出指称）；误伤大则收窄正则，不扩面。
+- **关键取舍**：漏边是真 DAG 危害，接通优于半残日志；否决「只留观测日志当终态」。净负则删闸，不加硬闸。
+- **验收**：同批「吃队友」且 `depends_on` 空 → CEO 当轮结果可见告警文案；委派仍成功入图。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/consumer_deps.py`
 
 ## 冷启动探索幕
 
@@ -105,12 +126,12 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 类 | 条件 | 挡当前请求？ |
 |---|---|---|
 | 软幕 | 项目 `画像.md` 空，且非下表硬挡 | **不挡**。注入软提示（可组队摸仓）；**不**置 explore-pending；域外主题 / 纯调研可直接 `parallel_brief` 等 |
-| 硬挡 | `_memory_meta.explore_workspace_key` 与当前绑定不一致（换绑）**或** 用户点名「先了解 / 重新了解 / 刷新项目记忆」**或** 请求带结构化工程信号（点名本仓改/建/继续开发等允许表短语，**不扫长文猜意图**）且画像仍空 | 是 → 先探索再继续原请求；pending 期间 `write_scope≤explore_memory`（**例外**：`code_verified` / `repair_code` 批立刻放开写工程并跳过探路队形闸） |
+| 硬挡 | `_memory_meta.explore_workspace_key` 与当前绑定不一致（换绑）**或** 用户点名「先了解 / 重新了解 / 刷新项目记忆」**或** 请求带结构化工程信号（点名本仓改/建/继续开发等允许表短语，**不扫长文猜意图**）且画像仍空 | 是 → 先探索再继续原请求；pending 期间 `write_scope≤explore_memory`（✅ S3：原 `code_verified` 例外已随 kind 退役） |
 | 指纹漂移 | 相对上次探索，**顶层树 + 关键清单指纹**已变 | **不挡**。一期✅：脏标记 + `<project_nav_stale>` 软提示可点名刷新；二期✅：`schedule_explore_refresh` 旁路静默更新（→ [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)） |
 
 **硬挡流程**：注入 `<cold_start_explore>`（换绑 / 点名刷新 / 空画像+工程信号；指纹与「仅空画像」**不**进此块）→ 先轻量探路（≤5 **轮**；同轮并行多工具只计 1 轮）→ `delegate`（`team_preview`）组调研队（**≥2 角并行**，禁止 1 人包办整仓）→ 收尾经 `update_project_profile` 合并写项目 **画像 + 导航.md**，记录 `workspace_key` 与指纹；主题软顶 5 / 总数受 `memory_max_topic_files` → **立刻继续原请求**。pending 期间允许 `form=files`，但写盘不得出 `explore_memory` 根（修码批除外，见上表）；`文档/项目/` 不在本幕写。点名硬闸（与 pending 同级）✅。**resume 与开场同源**：空画像软降级走 `resolve_hard_explore_reason`，禁止 resume 把「仅空画像」误硬拦。
 
-**强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report` 与 deliverable 结构字段（如 `min_length≥3000`）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；不扫 task/角色自由文。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
+**强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report` 与 deliverable 结构字段（如 `min_length≥3000`）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；硬门**不**扫 task/角色自由文。✅ 已删角色名扫与静默改写 deliverable（审校落盘靠 playbook/结构声明，见上节）。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
 
 **边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚案卷另见 `文档/项目/` 且不在探索 pending 批）。权威分层 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)。
 
@@ -125,6 +146,15 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 无需团队 | 不调 `delegate` = 单 Agent 直答 |
 | 纯路由器替换 CEO / 前置分类器 / Worker 直连 / 取消 CEO 综述 | 规划壁垒、编排税、不可观测、丧失「一个声音」 |
 | 累计 N 次只读软提醒护栏 | A/B 净负已移除；靠提示词边界 + 失控硬兜底 |
+| 默认加硬闸/软闸「优化服从度」 | **否决**；阶梯见 `.cursor/rules/intercept-discipline.mdc`（提示词→观测→一次性软提示→结构化硬拒） |
+| 扩大收口姿势 A / 完成话术正则冒充近零误报 | **否决**；✅ 已收窄撤回 20260803 扩面（非删闸）；书目闸独立保留 → [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md) |
+| 领域 kind 扩表（S2a/b）/ 按任务类型继续加 `completion_criteria` kind | **否决**（种类膨胀）；✅ S3 已删 kind 体系，接盘见上节 |
+| 边删 kind 边加新启发式完成硬闸；「验码绿」等伪装成新 kind | **否决**；与拦截纪律默认否决对齐 |
+| `validate_criteria_kind_fit` 扫 task 拟合硬闸 | ✅ **已随 S3 退役** |
+| `host_shell` fuse 改可批可跑（方案 B） | **否决**；削弱执行侧灾难闸 → [安全权限 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
+| 仅改熔断文案当终案（方案 D） | **否决当终案**（可作过渡）；✅ 方案 C 已落地：fuse 已覆盖形 breaker 直接 `DENY` |
+| 扫角色名静默改写 deliverable（`is_independent_review_role`） | **已删**；改靠 playbook/deliverable 结构；不加新 kind |
+| `consumer_deps` 软警告只打日志 | **已接通** CEO 可见结果尾（不拒收/不改图；禁升级硬拒） |
 
 ## 开场卡 / 检查点
 

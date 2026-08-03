@@ -285,8 +285,11 @@ def build_run_plan(
     Returned plan still contains **only** the new batch nodes; pure new builds leave
     this ``None`` (behavior unchanged).
 
-    ``code_verified``：批次为代码验收时，案卷 ``artifact_dir`` 默认不自动填
-    （显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍尊重）。
+    ``code_verified``：**非 kind**——kw 名历史遗留；修码等批跳过案卷
+    ``artifact_dir`` 默认（S3：由 playbook ``repair_code`` 等驱动，不再绑 criteria
+    kind）。显式 ``artifact_dir`` / 案卷路径
+    artifacts 仍优先。未改名以免牵动 builder/artifact_dir 全链。
+    ``artifacts`` 仍尊重。
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
@@ -336,11 +339,7 @@ def build_run_plan(
 
         apply_light_round_budgets(plan, complexity_hint=complexity_hint)
         from agentcore.runtime.runs.artifact_dir import apply_artifact_dir_to_plan
-        from agentcore.runtime.runs.research_quality import (
-            apply_independent_review_report_deliverables,
-        )
 
-        apply_independent_review_report_deliverables(plan)
         apply_artifact_dir_to_plan(plan, code_verified=code_verified)
     return plan, errors
 
@@ -512,11 +511,7 @@ def build_added_nodes(
     # replan add：token/超时走统一 backstop；检索额度走统一默认 + 硬例外。
     apply_worker_budgets_to_specs(specs)
     from agentcore.runtime.runs.artifact_dir import apply_artifact_dir_to_specs
-    from agentcore.runtime.runs.research_quality import (
-        apply_independent_review_report_deliverables_to_specs,
-    )
 
-    apply_independent_review_report_deliverables_to_specs(specs)
     apply_artifact_dir_to_specs(specs)
     return specs, []
 

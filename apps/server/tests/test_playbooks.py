@@ -162,6 +162,12 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     assert by_id["write"]["depends_on"] == ["outline"]
     assert by_id["review"]["depends_on"] == ["write"]
     assert by_id["review"]["role"] == "学术审校员"
+    # 审校落盘契约写死在 playbook（form=files + reviews/），不靠运行时扫角色名抬契约。
+    review_d = by_id["review"]["deliverable"]
+    assert review_d["form"] == "files"
+    assert review_d["requires_files"] is True
+    assert review_d["artifacts"] == ["AgentCore/文档/reviews/审校报告.md"]
+    assert "复核落盘" in by_id["review"]["task"]
     # 审校节点显式墙钟 300s（CEO 显式 timeout_ms 恒优先于统一 backstop）。
     assert by_id["review"]["timeout_ms"] == 300_000
     # checkpoint flag rides the 提纲 step (成纲后写作前过目); the write step requires file landing.

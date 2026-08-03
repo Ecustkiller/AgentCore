@@ -106,7 +106,7 @@ PLAYBOOKS: dict[str, Playbook] = {
         name="repair_code",
         summary=(
             "【无先验调查批】诊断(短)→修补→验证的单症状修码（runtime 错 / 缺 export；"
-            "短轮次+工具收窄；禁触顶后换马甲；批次 code_verified；"
+            "短轮次+工具收窄；禁触顶后换马甲；playbook_args 须 verify；"
             "已有调查批确认修→手写+continue_from，勿套本 playbook）"
         ),
         slots=(

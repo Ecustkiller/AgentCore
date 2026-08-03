@@ -8,7 +8,8 @@
 
 成篇硬审计**只认结构化成文契约**：``playbook=="research_report"``（入口另判）与
 deliverable 结构字段（如 ``min_length≥3000``）。不扫 task/角色自由文猜意图；
-``parallel_brief`` / 普通多角摸底**不**因多人而进硬门。
+``parallel_brief`` / 普通多角摸底**不**因多人而进硬门。审校落盘**不**靠角色名
+抬 files——只认 playbook / 已声明的 ``form=files``·``reviews/`` artifacts。
 
 调研两阶段引用（块 2）：``citation_mode=="two_phase"``（playbook 盖戳）或
 落盘/声明路径在 ``AgentCore/文档/research/`` / ``AgentCore/文档/reviews/``
@@ -59,100 +60,93 @@ DEFAULT_RESEARCH_REPORT_ARTIFACT = f"{RESEARCH_DIR}/报告.md"
 # 本地改文件 / 广度摸底 / 成篇意图 / 字数承诺：用户·task 文 RE 猜意图腿已撤；
 # team_gate 与成篇硬门不扫自由文分叉；选型靠提示词，硬门只认结构字段。
 
-_REVIEW_ROLE_MARKERS = (
-    "审校",
-    "审计",
-    "审查",
-    "质检",
-    "复核",
-    "review",
-    "audit",
-)
-
-# Playbook 显式声明上游 prose 地板时的默认值（如 repair_code 诊断员）。
-# 不再作为「有下游 → 一律抬 min」的拓扑常量；交接地板只认 deliverable.min_length。
-MIN_UPSTREAM_BODY_CHARS = 80
-
 # 独立复核短报告：案 20260803-longfix-thin-review-claim-pass B——须 files_written，禁薄 handoff。
-_INDEPENDENT_REVIEW_REPORT_MIN_CHARS = 80
+# 纪律文案由 playbook / 已声明 form=files·artifacts 的 task 自带；运行时不再扫角色名抬契约。
 INDEPENDENT_REVIEW_REPORT_DISCIPLINE = (
     "【复核落盘】须将带行号的短复核报告 file_write 到案卷 reviews/；"
     "逐条写清结论与证据指针（文件:行号）；"
     "禁止仅用十余字 handoff 冒充过闸；handoff 只作速览+路径。"
 )
 
+# Playbook 显式声明上游 prose 地板时的默认值（如 repair_code 诊断员）。
+# 不再作为「有下游 → 一律抬 min」的拓扑常量；交接地板只认 deliverable.min_length。
+MIN_UPSTREAM_BODY_CHARS = 80
+
 # 成篇门槛：派单时已知的 min_length（字）。≥ 此值视作成篇报告结构信号。
 _LONG_FORM_MIN_LENGTH = 3_000
 
 
-def is_independent_review_role(role: str) -> bool:
-    """True when the role is an independent review / audit / 复核 seat."""
-    r = (role or "").strip().lower()
-    if not r:
+def _deliverable_files_shaped(deliverable: Any) -> bool:
+    """True when deliverable already declares a files/artifacts contract."""
+    if deliverable is None:
         return False
-    return any(m in r for m in _REVIEW_ROLE_MARKERS)
+    if isinstance(deliverable, dict):
+        return bool(
+            deliverable.get("requires_files")
+            or deliverable.get("form") == "files"
+            or bool(deliverable.get("artifacts"))
+        )
+    return bool(
+        getattr(deliverable, "requires_files", False)
+        or getattr(deliverable, "form", None) == "files"
+        or bool(getattr(deliverable, "artifacts", None))
+    )
 
 
-def _safe_review_artifact_label(role: str) -> str:
-    s = (role or "复核").strip().replace("\\", "_").replace("/", "_").replace("..", "_")
-    return (s[:40] or "复核")
+def _deliverable_candidate_paths(deliverable: Any) -> list[str]:
+    artifacts: list[str] = []
+    artifact_dir = ""
+    if deliverable is None:
+        return []
+    if isinstance(deliverable, dict):
+        raw = deliverable.get("artifacts") or []
+        if isinstance(raw, list):
+            artifacts = [str(a) for a in raw if a]
+        ad = deliverable.get("artifact_dir") or ""
+        artifact_dir = ad if isinstance(ad, str) else ""
+    else:
+        artifacts = [str(a) for a in (getattr(deliverable, "artifacts", None) or []) if a]
+        artifact_dir = str(getattr(deliverable, "artifact_dir", "") or "")
+    out = list(artifacts)
+    if artifact_dir.strip():
+        out.append(artifact_dir.strip())
+    return out
 
 
-def apply_independent_review_report_deliverables(plan: object) -> None:
-    """Stamp files_written short-report deliverable on independent review seats.
-
-    案 B：复核须落带行号短报告；已声明 form=files / requires_files / artifacts 的不覆盖。
-    """
-    nodes = getattr(plan, "nodes", None)
-    if not isinstance(nodes, list):
-        return
-    apply_independent_review_report_deliverables_to_specs(nodes)
+def _path_under_reviews(path: str) -> bool:
+    p = (path or "").strip().lstrip("/")
+    return p == REVIEWS_DIR or p.startswith(REVIEWS_PREFIX)
 
 
-def apply_independent_review_report_deliverables_to_specs(specs: list) -> None:
-    """Same as :func:`apply_independent_review_report_deliverables` for replan adds."""
-    from dataclasses import replace
+def _path_under_research(path: str) -> bool:
+    p = (path or "").strip().lstrip("/")
+    return p == RESEARCH_DIR or p.startswith(RESEARCH_PREFIX)
 
-    from agentcore.runtime.runs.types import Deliverable
 
-    for spec in specs:
-        role = str(getattr(spec, "role", "") or "")
-        if not is_independent_review_role(role):
+def deliverable_declares_reviews_files(deliverable: Any) -> bool:
+    """True when deliverable already declares files under ``reviews/`` (no role scan)."""
+    if not _deliverable_files_shaped(deliverable):
+        return False
+    return any(_path_under_reviews(p) for p in _deliverable_candidate_paths(deliverable))
+
+
+def deliverable_declares_research_files(deliverable: Any) -> bool:
+    """True when deliverable already declares files under ``research/`` (no role scan)."""
+    if not _deliverable_files_shaped(deliverable):
+        return False
+    return any(_path_under_research(p) for p in _deliverable_candidate_paths(deliverable))
+
+
+def batch_declares_review_files(tasks: object) -> bool:
+    """True when any task already declares a reviews/ files deliverable."""
+    if not isinstance(tasks, list):
+        return False
+    for task in tasks:
+        if not isinstance(task, dict):
             continue
-        deliverable = getattr(spec, "deliverable", None)
-        if deliverable is not None and (
-            deliverable.requires_files
-            or deliverable.form == "files"
-            or bool(deliverable.artifacts)
-        ):
-            # Already file-shaped (code_audit etc.) — only ensure task discipline.
-            task = str(getattr(spec, "task", "") or "")
-            if INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in task and "带行号" not in task:
-                spec.task = f"{task.rstrip()}{INDEPENDENT_REVIEW_REPORT_DISCIPLINE}"
-            continue
-        artifact = f"{REVIEWS_DIR}/复核-{_safe_review_artifact_label(role)}.md"
-        name = (
-            deliverable.name.strip()
-            if deliverable is not None and deliverable.name.strip()
-            else "带行号复核短报告"
-        )
-        min_length = max(
-            int(deliverable.min_length) if deliverable is not None else 0,
-            _INDEPENDENT_REVIEW_REPORT_MIN_CHARS,
-        )
-        base = deliverable if deliverable is not None else Deliverable()
-        spec.deliverable = replace(
-            base,
-            name=name,
-            form="files",
-            requires_files=True,
-            artifacts=[artifact],
-            min_length=min_length,
-            artifact_dir=REVIEWS_DIR,
-        )
-        task = str(getattr(spec, "task", "") or "")
-        if INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in task:
-            spec.task = f"{task.rstrip()}{INDEPENDENT_REVIEW_REPORT_DISCIPLINE}"
+        if deliverable_declares_reviews_files(task.get("deliverable")):
+            return True
+    return False
 
 
 def has_landed_prose_artifact(kinds: object) -> bool:
@@ -215,19 +209,6 @@ def promote_brief_to_deliverable(
         return head
     bullets = "\n".join(f"- {p}" for p in points)
     return f"{head}\n\n{bullets}"
-
-
-def batch_includes_review_role(tasks: object) -> bool:
-    """True when hand-written tasks already include an independent review role."""
-    if not isinstance(tasks, list):
-        return False
-    for task in tasks:
-        if not isinstance(task, dict):
-            continue
-        role = str(task.get("role") or "").strip()
-        if is_independent_review_role(role):
-            return True
-    return False
 
 
 def deliverable_signals_long_form(deliverable: Any) -> bool:
@@ -437,10 +418,10 @@ def _node_role(node: Any) -> str:
 def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
     """True for ``research_report`` / 同等成文综述；``parallel_brief`` 默认 False.
 
-    判定（结构字段，不扫 task 自由文）：
+    判定（结构字段，不扫 task/角色自由文）：
     - ``deliverable.min_length≥3000`` 成篇信号；或
-    - 批内含审校/审查角色 **且** 存在 two_phase / research·reviews 案卷 deliverable
-      （``research_report`` 与手写同构；``parallel_brief`` 无审校 → 不进）。
+    - 批内已声明 reviews/ files 审校座 **且** 存在 two_phase / research·reviews 案卷 deliverable
+      （``research_report`` 与手写同构；``parallel_brief`` 无审校落盘 → 不进）。
     """
     if plan_signals_long_form_audit(plan_nodes):
         return True
@@ -449,7 +430,7 @@ def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
     as_tasks = [
         {"role": _node_role(n), "deliverable": _node_deliverable(n)} for n in plan_nodes
     ]
-    if not batch_includes_review_role(as_tasks):
+    if not batch_declares_review_files(as_tasks):
         return False
     for node in plan_nodes:
         deliverable = _node_deliverable(node)
@@ -635,7 +616,7 @@ def _batch_has_no_refs_or_prior_gap(
     writerish_ids: set[str] = set()
     if isinstance(plan_nodes, (list, tuple)):
         for node in plan_nodes:
-            role = _node_role(node).casefold()
+            deliverable = _node_deliverable(node)
             rid = ""
             if isinstance(node, dict):
                 rid = str(node.get("run_id") or node.get("id") or "")
@@ -643,9 +624,9 @@ def _batch_has_no_refs_or_prior_gap(
                 rid = str(getattr(node, "run_id", "") or "")
             if not rid:
                 continue
-            if is_independent_review_role(role):
+            if deliverable_declares_reviews_files(deliverable):
                 reviewish_ids.add(rid)
-            if any(m in role for m in ("撰稿", "写作", "writer", "作者")):
+            if deliverable_declares_research_files(deliverable):
                 writerish_ids.add(rid)
 
     for rid, state in (results or {}).items():

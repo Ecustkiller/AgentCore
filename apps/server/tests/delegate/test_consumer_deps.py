@@ -1,9 +1,17 @@
 """Consumer-missing-depends soft gate unit tests."""
 
+from __future__ import annotations
+
+import pytest
+
 from agentcore.runtime.delegate.consumer_deps import (
     check_consumer_missing_depends,
     task_claims_teammate_output,
 )
+from tests.delegate.conftest import Provider, ctx, tool
+
+
+# ── 纯函数闸 ──────────────────────────────────────────────────────────────────
 
 
 def test_soft_warn_goldbach_style_summarizer_empty_deps():
@@ -136,3 +144,76 @@ def test_english_based_on_previous_triggers():
     assert warn is not None
     assert "B" in warn
     assert "a" in warn
+
+
+# ── DelegateTool：软提示进 CEO 可见结果尾（不拒收）────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_surfaces_consumer_deps_warn_in_output():
+    """吃队友 + 空 depends_on → 委派成功入图，告警文案进工具结果尾。"""
+    t = tool(Provider(["调研甲产出", "调研乙产出", "综述"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {"id": "r1", "role": "调研甲", "task": "调研偶数哥德巴赫猜想相关文献"},
+                {"id": "r2", "role": "调研乙", "task": "调研奇数哥德巴赫猜想相关文献"},
+                {
+                    "id": "s",
+                    "role": "汇总",
+                    "task": "基于前两位队员的产出，整理一份综述报告",
+                },
+            ],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert result.error in (None, "")
+    assert "depends_on" in result.output
+    assert "汇总" in result.output
+    assert "r1" in result.output
+    assert "r2" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_no_consumer_deps_tail_when_depends_declared():
+    """有 depends_on → 成功且结果尾无漏边告警。"""
+    t = tool(Provider(["调研甲产出", "调研乙产出", "综述"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {"id": "r1", "role": "调研甲", "task": "调研 A"},
+                {"id": "r2", "role": "调研乙", "task": "调研 B"},
+                {
+                    "id": "s",
+                    "role": "汇总",
+                    "task": "基于前两位队员的产出写综述",
+                    "depends_on": ["r1", "r2"],
+                },
+            ],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert "depends_on` 为空" not in result.output
+    assert "写明要吃同批队友产出" not in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_no_consumer_deps_tail_without_teammate_cue():
+    """无队友产出 cue → 成功且无漏边尾巴。"""
+    t = tool(Provider(["前端产出", "后端产出"]))
+    result = await t.execute(
+        {
+            "tasks": [
+                {"id": "a", "role": "前端", "task": "实现登录页"},
+                {"id": "b", "role": "后端", "task": "实现鉴权 API"},
+            ],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert "写明要吃同批队友产出" not in result.output

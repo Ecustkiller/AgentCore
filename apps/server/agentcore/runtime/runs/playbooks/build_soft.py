@@ -81,7 +81,7 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     已有多角调查/审查批且用户确认按结论修 → 勿套本 playbook；手写 tasks +
     continue_from_run_id。硬形状禁止「单人包圆触顶后再换马甲从零读」——三角色分波，
-    验证失败应 escalate / 同人续派，勿新开巡读 worker。批次默认 ``code_verified``；
+    验证失败应 escalate / 同人续派，勿新开巡读 worker。须在 playbook_args 写清 verify；
     须带「怎么算修好」命令。
     """
     problem = clean_str(
