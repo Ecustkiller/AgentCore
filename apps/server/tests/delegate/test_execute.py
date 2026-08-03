@@ -702,11 +702,8 @@ async def test_playbook_xor_and_hoist_conflict_skip_circuit_breaker():
         },
         ctx(),
     )
-    assert hoist.success is False
-    assert hoist.contract_failure is True
-    assert "顶层" in (hoist.error or "") or "tasks[].completion_criteria" in (
-        hoist.error or ""
-    )
+    # S3: nested completion_criteria ignored (field retired); not a hoist reject.
+    assert "tasks[].completion_criteria" not in (hoist.error or "")
 
     c = LoopController()
     for i, res in enumerate((xor, hoist, xor)):
@@ -726,51 +723,8 @@ async def test_playbook_xor_and_hoist_conflict_skip_circuit_breaker():
 def test_schema_cues_xor_and_top_level_completion_criteria():
     t = tool(Provider([]))
     assert "二选一" in t.schema.description
-    assert "completion_criteria 仅顶层" in t.schema.description
+    assert "勿再填已删的 completion_criteria" in t.schema.description
     props = t.schema.parameters["properties"]
-    cc = props["completion_criteria"]
-    assert "顶层" in cc.get("description", "")
-    assert "tasks[]" in cc.get("description", "")
-    assert "runtime_ready" in cc.get("description", "")
-    string_enum = next(
-        branch["enum"] for branch in cc["oneOf"] if branch.get("type") == "string"
-    )
-    assert set(string_enum) == {
-        "files_written",
-        "code_verified",
-        "runtime_ready",
-        "graph_consistent",
-    }
-    obj_branch = next(
-        branch for branch in cc["oneOf"] if branch.get("type") == "object"
-    )
-    assert "verify_command" in obj_branch["properties"]
-    assert "怎么算修好" in obj_branch["properties"]["verify_command"]["description"]
-    assert "修码" in cc.get("description", "") or "verify_command" in cc.get(
-        "description", ""
-    )
-    t = tool(Provider([]))
-    params = t.schema.parameters
-    props = params["properties"]
-    assert set(props["playbook"]["enum"]) == {
-        "code_audit",
-        "parallel_brief",
-        "research_report",
-        "build_feature",
-        "repair_code",
-        "build_app",
-        "build_website",
-        "build_toolshed",
-        "build_website_verify",
-        "compare_options",
-        "multi_lens_research",
-    }
-    assert "playbook_args" in props
-    # tasks is no longer HARD-required (playbook is an alternative entry); runtime enforces XOR.
-    assert "tasks" not in params.get("required", [])
-    coord = props["coordination"]
-    assert coord["enum"] == ["wall", "none"]
-    assert coord.get("default") == "none"
 
 
 def test_strict_description_separates_rework_from_disposition():

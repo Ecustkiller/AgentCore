@@ -55,7 +55,7 @@ DELEGATE_DESCRIPTION = (
     "playbook 可选（建站推荐 build_website/build_toolshed；绿场软件/SPA 推荐 "
     "build_app；Agent 选控制台原型才允许 "
     "build_toolshed；可运行自动化/仅方案禁 toolshed；其余可省略直接手写 tasks）；与 tasks 二选一。"
-    "completion_criteria 仅顶层（勿写入 tasks[]）。"
+    "交付靠 deliverable.form/artifacts；勿再填已删的 completion_criteria。"
     "拿不准怎么拆再 consult_skill(team_orchestration_advanced)。"
 )
 
@@ -192,55 +192,6 @@ DELEGATE_PARAMETERS = {
         "parallelism": {
             "type": "string",
             "enum": ["conservative", "balanced", "aggressive"],
-        },
-        "completion_criteria": {
-            "description": (
-                "批次验收（仅 delegate 顶层，与 tasks 同级；勿写入 tasks[]）。"
-                "files_written=落盘；code_verified=编译/测试/build exit 0"
-                "（修码/要验须用对象写清 verify_command，如"
-                '{"type":"code_verified","verify_command":"pytest -q"}；'
-                "裸字符串仅兼容旧行为）；"
-                "runtime_ready=terminal 长驻进程 wait_for 就绪；"
-                "graph_consistent=import 图闭合（.ts/.tsx/.vue 落盘时自动扫）；"
-                "启动开发服务器用 runtime_ready，勿用 code_verified。"
-                "Office/文档（.pptx/.docx/.xlsx 等）默认 files_written；"
-                "禁止对文档类设 code_verified（会被契约闸拒绝）。"
-            ),
-            "oneOf": [
-                {
-                    "type": "string",
-                    "enum": [
-                        "files_written",
-                        "code_verified",
-                        "runtime_ready",
-                        "graph_consistent",
-                    ],
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": [
-                                "files_written",
-                                "code_verified",
-                                "runtime_ready",
-                                "graph_consistent",
-                                "custom",
-                            ],
-                        },
-                        "verify_command": {
-                            "type": "string",
-                            "description": (
-                                "怎么算修好：具体验收命令（code_verified / 修码必填；"
-                                "亦可用 description）"
-                            ),
-                        },
-                        "description": {"type": "string"},
-                    },
-                    "required": ["type"],
-                },
-            ],
         },
     },
 }

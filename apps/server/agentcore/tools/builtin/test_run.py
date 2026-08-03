@@ -99,7 +99,7 @@ TEST_RUN_PARAMETERS: dict[str, Any] = {
             "description": (
                 "验证种类：install=云端受控装包（npm/pnpm/yarn install|ci，需受限出网）；"
                 "test=测试套件；typecheck=类型检查（tsc 等）；build=项目构建；"
-                "command=显式跑 command（用于 completion_criteria / verify_command）。"
+                "command=显式跑 command（用于 playbook_args.verify / task 验收命令）。"
                 "绿场验包优先 check=install 再 build/typecheck。慢 build / 全量 tsc / "
                 "项目测试 / 装包请用本工具，勿用 code_execute。全量 typecheck/build/"
                 "`tsc -b` 仅验收员（外环）；修码自检用内环 code_diagnostics，"
@@ -715,8 +715,8 @@ class TestRunTool:
             name="test_run",
             description=(
                 "有界项目验证：跑工作区声明的检查（受控装包 / 测试 / typecheck / build / "
-                "显式 verify 命令），分钟级预算、可流式输出。适合 completion_criteria="
-                "code_verified 与慢 build、全量 tsc、项目测试、npm/pnpm/yarn install——"
+                "显式 verify 命令），分钟级预算、可流式输出。适合外环验绿与慢 build、"
+                "全量 tsc、项目测试、npm/pnpm/yarn install——"
                 "【不要】用 code_execute 跑这些。云端装包用 check=install（或 "
                 "check=command + npm install），需受限出网；无网时诚实降级，勿空转。"
                 "超预算返回「验证未完成」，不是工具故障。长驻进程请用 terminal。"

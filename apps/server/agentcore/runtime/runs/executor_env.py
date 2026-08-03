@@ -20,7 +20,6 @@ from agentcore.workspace.write_claims import WriteCoordinator
 
 if TYPE_CHECKING:
     from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
-    from agentcore.runtime.delegate.completion import CompletionCriteria
     from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 
 
@@ -56,7 +55,5 @@ class AgentExecutorEnv:
     evidence_ledger: EvidenceLedger | Any | None = None
     # 回合共享调研台账（``#r``）；与辩论 ``evidence_ledger``（``#e``）分前缀、分路径。
     turn_evidence_ledger: EvidenceLedgerCore | Any | None = None
-    # 批次级 resolved completion_criteria（提案 B2：注入持执行工具 ∧ form=files 的交付物规格）。
-    batch_completion_criteria: CompletionCriteria | None = None
     # Structural cost role for log_context + model fallback (member=组队; arena=辩论).
     cost_role: str = "member"

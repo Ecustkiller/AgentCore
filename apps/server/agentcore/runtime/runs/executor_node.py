@@ -646,7 +646,6 @@ async def execute_agent_node(
                 blocks_sink=received_blocks,
                 team_brief=env.team_brief,
                 shared_workspace=env.shared_workspace,
-                batch_completion_criteria=env.batch_completion_criteria,
                 context_inject=context_inject or None,
                 captain_recon=env.captain_recon,
             )

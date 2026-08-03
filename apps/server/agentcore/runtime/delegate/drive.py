@@ -139,7 +139,6 @@ async def drive(
     complexity_hint: str = "standard",
     coordination: str = "none",
     call_idx: int | None = None,
-    completion_criteria: Any = None,
     coordinate: bool = True,
     session: Any = None,
 ) -> ToolResult:
@@ -218,7 +217,6 @@ async def drive(
                     execution_id=execution_id,
                     finalize=finalize,
                     seed_completed=seed_completed,
-                    completion_criteria=completion_criteria,
                     session=session,
                     call_idx=call_idx,
                     complexity_hint=complexity_hint,
@@ -252,7 +250,6 @@ async def drive(
                     execution_id=execution_id,
                     finalize=finalize,
                     seed_completed=seed_completed,
-                    completion_criteria=completion_criteria,
                     session=session,
                     call_idx=call_idx,
                     complexity_hint=complexity_hint,
@@ -278,7 +275,6 @@ async def drive(
                     complexity_hint=complexity_hint,
                     coordination=coordination,
                     call_idx=call_idx,
-                    completion_criteria=completion_criteria,
                     coordinate=coordinate,
                     session=session,
                 )
@@ -316,7 +312,6 @@ async def _drive_body(
     complexity_hint: str,
     coordination: str,
     call_idx: int,
-    completion_criteria: Any,
     coordinate: bool,
     session: Any,
 ) -> ToolResult:
@@ -509,7 +504,6 @@ async def _drive_body(
             complexity_hint=complexity_hint,
             coordination=coordination,
             call_idx=call_idx,
-            completion_criteria=completion_criteria,
             coordinate=coordinate,
         )
         if started is not None:
@@ -538,7 +532,6 @@ async def _drive_body(
         worker_gate=worker_gate,
         note_wall=note_wall,
         collaboration=collaboration,
-        completion_criteria=completion_criteria,
         session=session,
     )
 
@@ -613,7 +606,6 @@ async def _drive_body(
         execution_id=execution_id,
         finalize=finalize,
         seed_completed=seed_completed,
-        completion_criteria=completion_criteria,
         session=session,
         call_idx=call_idx,
         complexity_hint=complexity_hint,
@@ -632,7 +624,6 @@ async def drive_coordinated(
     complexity_hint: str = "standard",
     coordination: str = "none",
     call_idx: int | None = None,
-    completion_criteria: Any = None,
     session: Any,
 ) -> ToolResult:
     """Background entry: same as ``drive`` but with an active coordination session."""
@@ -646,7 +637,6 @@ async def drive_coordinated(
         complexity_hint=complexity_hint,
         coordination=coordination,
         call_idx=call_idx,
-        completion_criteria=completion_criteria,
         coordinate=False,
         session=session,
     )

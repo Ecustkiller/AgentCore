@@ -42,10 +42,10 @@ def test_drive_signature_unchanged():
         "complexity_hint",
         "coordination",
         "call_idx",
-        "completion_criteria",
         "coordinate",
         "session",
     }.issubset(sig.parameters)
+    assert "completion_criteria" not in sig.parameters
 
 
 def test_cold_fallback_mints_unique_redir_ids():

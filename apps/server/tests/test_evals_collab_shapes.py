@@ -322,7 +322,8 @@ def test_delegate_criteria_forbidden_check():
         {"name": "DelegateCriteriaForbidden", "args": {"forbid": ["code_verified"]}}
     )
 
-    ok = check.run(
+    # S3: any completion_criteria key fails (field retired).
+    legacy = check.run(
         case,
         TurnOutcome(
             content="ok",
@@ -336,7 +337,7 @@ def test_delegate_criteria_forbidden_check():
             ],
         ),
     )
-    assert ok.passed is True
+    assert legacy.passed is False
 
     bad = check.run(
         case,
@@ -353,7 +354,6 @@ def test_delegate_criteria_forbidden_check():
         ),
     )
     assert bad.passed is False
-    assert "code_verified" in bad.detail
 
     omit = check.run(
         case,

@@ -260,19 +260,15 @@ async def finalize_successful_drive(
     *,
     execution_id: str,
     finalize: bool,
-    completion_criteria: Any,
     session: Any,
     call_idx: int,
 ) -> ToolResult:
-    """Accumulate products, check criteria, emit delivery, fold CEO ToolResult."""
+    """Accumulate products, soft overlays, emit delivery, fold CEO ToolResult.
+
+    S3: no kind-based completion binding / criteria_unmet hard path.
+    """
     from agentcore.runtime.costing import usage_metadata
-    from agentcore.runtime.delegate.completion import (
-        check_delegate_completion,
-        collect_delivered_files,
-        format_completion_gap_message,
-        gap_fingerprint,
-        resolve_completion_with_source,
-    )
+    from agentcore.runtime.delegate.completion import check_delegate_completion
     from agentcore.runtime.runs import RunPhase
 
     # §十一 来源卡接入 (方案①, 远期规划.md §4.5): snapshot the turn-accumulated sources
@@ -294,15 +290,7 @@ async def finalize_successful_drive(
     absorb_children(tool)
     new_citations = tool._acc.citations[citations_before:]
 
-    resolved = resolve_completion_with_source(
-        completion_criteria,
-        plan,
-        suppress_structured_files_written=bool(
-            tool._base_tool_context.cold_start_explore_pending
-        ),
-    )
-    criteria = resolved.criteria
-    # Preload source texts for graph_consistent (async backend.read).
+    # Soft overlays (D2 / import-graph): preload source texts when TS/Vue landed.
     file_map: dict[str, str] = {}
     backend = tool._base_tool_context.backend
     if backend is not None:
@@ -316,83 +304,17 @@ async def finalize_successful_drive(
         completed = [
             s for s in results.values() if s.phase is _RunPhase.COMPLETED
         ]
-        need_graph = (
-            (criteria is not None and criteria.kind == "graph_consistent")
-            or (
-                (criteria is None or criteria.kind != "runtime_ready")
-                and _batch_landed_graph_sources(completed)
-            )
-        )
-        if need_graph:
+        if _batch_landed_graph_sources(completed):
             file_map = await load_source_file_map(
                 backend, _collect_graph_source_paths(completed)
             )
-    criteria_ok, binding_gaps, soft_notes = check_delegate_completion(
-        criteria, results, backend=backend, file_map=file_map or None
+    _ok, _binding, soft_notes = check_delegate_completion(
+        results, backend=backend, file_map=file_map or None, plan=plan
     )
-    if not criteria_ok:
-        delivered = collect_delivered_files(results)
-        # Binding kind + binding gaps only — soft overlays never streak / escalate.
-        binding_kind = criteria.kind if criteria is not None else None
-        fp = gap_fingerprint(binding_kind, binding_gaps)
-        streak = tool.note_completion_gap(fp)
-        escalate = streak >= 2
-        gap_msg = format_completion_gap_message(
-            binding_gaps,
-            criteria_kind=binding_kind,
-            source=resolved.source or "structured",
-            escalate=escalate,
-            delivered_files=delivered,
-        )
-        logger.info(
-            "delegate.completion_criteria_unmet",
-            criteria=binding_kind,
-            source=resolved.source or "structured",
-            gaps=binding_gaps,
-            streak=streak,
-            escalate=escalate,
-            delivered_files=delivered[:24],
-            execution_id=execution_id,
-        )
-        # 交付状态：binding 缺口 + soft overlay notes（后者 severity=warning）。
-        maybe_emit_delivery_status(
-            tool._sink,
-            plan,
-            results,
-            execution_id=execution_id,
-            backend=tool._base_tool_context.backend,
-            criteria_gaps=[*binding_gaps, *soft_notes],
-        )
-        # Same terminal post as the success path — criteria gap is still end-of-batch,
-        # but must not present as failed=0 success（交付真相）.
-        failed_n = sum(
-            1 for s in results.values() if s.phase is RunPhase.FAILED
-        )
-        if session is not None:
-            post_session_all_completed(
-                session,
-                output=gap_msg,
-                criteria_met=False,
-                failed=failed_n,
-            )
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output=gap_msg,
-            output_limit=DELEGATE_OUTPUT_LIMIT,
-            metadata={
-                **(usage_metadata(call_usage) or {}),
-                "criteria_unmet": True,
-                "failed": failed_n,
-            },
-            citations=new_citations or None,
-        )
-
     tool.clear_completion_gap_streak()
 
     # 交付状态（诚实对账）：正常收尾（含 finalize 单人直出）——有落盘文件或缺口才发，
     # 纯 prose 成功批次保持无声。Soft overlay notes → state=notes（不 blocking）。
-    # 放在 direct_result / format_for_ceo 分叉之前，两条收尾路径共用这一次发射。
     maybe_emit_delivery_status(
         tool._sink,
         plan,
@@ -436,7 +358,6 @@ async def finalize_drive(
     execution_id: str,
     finalize: bool,
     seed_completed: dict[str, RunState] | None,
-    completion_criteria: Any,
     session: Any,
     call_idx: int,
     complexity_hint: str,
@@ -493,7 +414,6 @@ async def finalize_drive(
         results,
         execution_id=execution_id,
         finalize=finalize,
-        completion_criteria=completion_criteria,
         session=session,
         call_idx=call_idx,
     )

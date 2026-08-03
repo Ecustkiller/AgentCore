@@ -745,9 +745,8 @@ def test_qa_deferred_budget_emits_website_verify_action():
 
 
 @pytest.mark.asyncio
-async def test_execute_emits_delivery_status_on_criteria_unmet():
-    # drive 接线（验收未满足路径）：code_verified 未被满足 → gap 消息之外，同回合发出
-    # 结构化 delivery_status（状态 blocked、验收缺口）。本地后端（闸门放行）+ FULL_AUTO。
+async def test_execute_ignores_retired_completion_criteria_kind():
+    # S3：completion_criteria kind 已删；误传字段被忽略，不再走 criteria_unmet 硬路径。
     sink = EventSink()
     t = DelegateTool(
         llm=Provider(["X"]),
@@ -772,11 +771,8 @@ async def test_execute_emits_delivery_status_on_criteria_unmet():
         local_ctx(),
     )
     assert result.success is True
-    assert "完成条件未满足" in result.output
-    events = [e for e in sink._history if e.type is EventType.DELIVERY_STATUS]
-    assert len(events) == 1
-    assert events[0].payload["state"] == "blocked"
-    assert events[0].payload["gaps"][0]["role"] == "验收"
+    assert "完成条件未满足" not in (result.output or "")
+    assert result.metadata is None or not result.metadata.get("criteria_unmet")
 
 
 def _failed_browser_transcript():
@@ -1172,7 +1168,7 @@ def test_two_phase_predicate_and_playbook_stamp():
 def _literature_report_plan() -> RunPlan:
     """Minimal research_report-shaped plan: writer + review + two_phase main file."""
     from agentcore.runtime.runs.types import Deliverable
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
+    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     main = f"{RESEARCH_PREFIX}报告.md"
     return _plan(
@@ -1191,6 +1187,10 @@ def _literature_report_plan() -> RunPlan:
             task="学术审校",
             role="学术审校员",
             depends_on=["write"],
+            deliverable=Deliverable(
+                form="files",
+                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
+            ),
         ),
     )
 

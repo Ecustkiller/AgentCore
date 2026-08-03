@@ -393,7 +393,6 @@ def _merge_into_active_coordination(
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
-    completion_criteria: Any,
     coordination: str,
 ) -> ToolResult:
     """Append ``plan`` workers onto the live session (budget / cancel / arbitration kept)."""
@@ -594,7 +593,6 @@ def _merge_into_active_coordination(
                 complexity_hint=complexity_hint,
                 coordination=coordination,
                 call_idx=call_idx,
-                completion_criteria=completion_criteria,
                 session=session,
             ),
             name=f"coord-drive-merge-{execution_id[:8]}",
@@ -651,7 +649,6 @@ def try_start_coordination(
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
-    completion_criteria: Any,
     coordinate: bool,
     coordination: str = "none",
     session: CoordinationSession | None = None,
@@ -683,7 +680,6 @@ def try_start_coordination(
                 seed_notes=seed_notes,
                 complexity_hint=complexity_hint,
                 call_idx=call_idx,
-                completion_criteria=completion_criteria,
                 coordination=coordination,
             )
 
@@ -821,7 +817,6 @@ def try_start_coordination(
             complexity_hint=complexity_hint,
             coordination=coordination,
             call_idx=call_idx,
-            completion_criteria=completion_criteria,
             session=session,
         ),
         name=f"coord-drive-{execution_id[:8]}",
@@ -873,7 +868,6 @@ async def _background_drive(
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
-    completion_criteria: Any,
     session: CoordinationSession,
     coordination: str = "none",
 ) -> None:
@@ -899,7 +893,6 @@ async def _background_drive(
             complexity_hint=complexity_hint,
             coordination=coordination,
             call_idx=call_idx,
-            completion_criteria=completion_criteria,
             session=session,
         )
         # Boundary / pause results surface as coordination events (CEO still alive).

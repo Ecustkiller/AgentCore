@@ -219,8 +219,6 @@ class DelegateTool:
         # 本批 CEO 预贴便签（execute 解析后暂存）：开工卡挂在 setup_note_wall 之前，
         # 耐久帧从这里捕获（persist_kickoff），否则恢复后 seed 便签永久丢失。
         self._seed_notes: list[dict[str, str]] = []
-        # Same-gap streak for completion_criteria_unmet (同缺口收敛护栏).
-        self._completion_gap_streak: tuple[tuple[str, ...], int] | None = None
         # 当前 execute 展开的 playbook 名（team_preview pre-auth 判定用）。
         self._active_playbook: str | None = None
         # Per-call force flag for isomorphic re-delegation (set in execute).
@@ -266,16 +264,8 @@ class DelegateTool:
         """Record a successful CEO-side continuation for turn_metrics.revises."""
         self._continuation_ids.append(run_id)
 
-    def note_completion_gap(self, fingerprint: tuple[str, ...]) -> int:
-        """Record an unmet completion gap; return consecutive count for this fingerprint."""
-        prev = self._completion_gap_streak
-        count = prev[1] + 1 if prev is not None and prev[0] == fingerprint else 1
-        self._completion_gap_streak = (fingerprint, count)
-        return count
-
     def clear_completion_gap_streak(self) -> None:
-        """Reset same-gap streak after criteria are met (or unrelated success)."""
-        self._completion_gap_streak = None
+        """No-op retained: same-gap streak retired with completion_criteria kind (S3)."""
 
     @property
     def collab(self) -> dict[str, int]:
@@ -609,16 +599,9 @@ class DelegateTool:
         # 立刻定格，透传给 drive → format_for_ceo 用于完成侧日志。
         call_idx = self._calls
         prefix = f"del_{new_id()}"
-        from agentcore.runtime.runs.artifact_dir import (
-            completion_criteria_is_code_verified,
-        )
-
-        # 案卷目录默认：code_verified 批次 / repair_code 不套 RESEARCH_DIR
-        # （完整 hoist 与 repair_code 强制在 build 之后；此处对齐顶层与 playbook）。
+        # 案卷目录默认：repair_code 不套 RESEARCH_DIR（S3：不再绑 criteria kind）。
         playbook_early = arguments.get("playbook")
-        code_verified_batch = completion_criteria_is_code_verified(
-            arguments.get("completion_criteria")
-        ) or (
+        skip_dossier_default = (
             isinstance(playbook_early, str) and playbook_early.strip() == "repair_code"
         )
         plan, errors = build_run_plan(
@@ -629,7 +612,7 @@ class DelegateTool:
             depth=self._depth + 1,
             complexity_hint=complexity_hint,
             existing_plan=host_plan_for_append,
-            code_verified=code_verified_batch,
+            code_verified=skip_dossier_default,
         )
         if errors:
             msg = "委派任务无效：" + "；".join(errors)
@@ -665,7 +648,7 @@ class DelegateTool:
         widen_post_checkpoint_deps(plan, parallelism)
         from agentcore.runtime.delegate.continuation import apply_continuation_tool_merges
         from agentcore.runtime.runs.research_quality import (
-            batch_includes_review_role,
+            batch_declares_review_files,
             plan_signals_long_form_audit,
         )
 
@@ -673,75 +656,31 @@ class DelegateTool:
         await apply_continuation_tool_merges(plan, self)
 
         batch_includes_review = (
-            playbook == "research_report" or batch_includes_review_role(tasks_raw)
+            playbook == "research_report" or batch_declares_review_files(tasks_raw)
         )
         batch_audit_hard = (
             playbook == "research_report"
             or plan_signals_long_form_audit(plan.nodes)
         )
         from agentcore.runtime.delegate.completion import (
-            default_repair_code_criteria,
             execution_capability_warning,
-            format_resolved_acceptance_echo,
-            hoist_task_completion_criteria,
-            resolve_completion_with_source,
-            validate_code_verified_worker_tools,
             validate_cold_start_explore_deliverables,
-            validate_completion_against_forms,
-            validate_criteria_kind_fit,
-            validate_execution_capability,
-            validate_files_worker_tools,
             validate_repair_how_fixed,
         )
 
-        # 顶层缺失时，容错提升 task 内误放的 completion_criteria（不改 schema 契约）。
-        completion_criteria, hoist_err = hoist_task_completion_criteria(
-            arguments.get("completion_criteria"),
-            tasks_raw,
-        )
-        if hoist_err:
-            logger.info("delegate.rejected", errors=[hoist_err])
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=hoist_err,
-                contract_failure=True,
+        # S3: completion_criteria kind 已删；忽略 CEO 误传的遗留字段。
+        if "completion_criteria" in arguments:
+            logger.info(
+                "delegate.completion_criteria_ignored",
+                reason="s3_kind_retired",
             )
 
-        # E1/E2：repair_code 强制 code_verified（不可降到 files_written），写入 how-fixed。
         playbook_name_early = (
             playbook.strip() if isinstance(playbook, str) and playbook.strip() else None
         )
-        if playbook_name_early == "repair_code":
-            completion_criteria = default_repair_code_criteria(
-                arguments.get("playbook_args")
-            )
-            # Prefer richer how-fixed already on an explicit top-level object.
-            from agentcore.runtime.delegate.completion import (
-                how_fixed_text,
-                parse_completion_criteria,
-            )
-
-            prior = parse_completion_criteria(arguments.get("completion_criteria"))
-            prior_how = how_fixed_text(prior)
-            if prior_how and not completion_criteria.get("verify_command"):
-                completion_criteria = {
-                    **completion_criteria,
-                    "verify_command": prior_how,
-                }
-            logger.info(
-                "delegate.repair_code_criteria_forced",
-                criteria="code_verified",
-            )
-
         how_fixed_err = validate_repair_how_fixed(
-            completion_criteria,
             playbook=playbook_name_early,
             playbook_args=arguments.get("playbook_args"),
-            complexity_hint=(
-                complexity_hint if isinstance(complexity_hint, str) else None
-            ),
         )
         if how_fixed_err:
             logger.info(
@@ -757,23 +696,10 @@ class DelegateTool:
                 contract_failure=True,
             )
 
-        # 冷启动探索未完成：探路队须 ≥2 worker（form/artifacts 与写盘闸正交；
-        # worker write_scope=explore_memory 在写工具层限制路径）。旗标在 assemble
-        # 置位、画像写入成功后清除。
-        # code_verified / repair_code：用户定案「真正改代码时放行」——跳过探路队形
-        # 闸，并立刻放开写工程（摸底笔记闸仅约束非修码批）。
+        # 冷启动探索未完成：探路队须 ≥2 worker（S3：不再有 code_verified 例外）。
         explore_pending = bool(self._base_tool_context.cold_start_explore_pending)
-        if explore_pending and code_verified_batch:
-            self._base_tool_context.write_scope = "project"
-            logger.info(
-                "delegate.code_fix_write_scope_lifted",
-                playbook=playbook_early if isinstance(playbook_early, str) else None,
-            )
-        if explore_pending and not code_verified_batch:
-            explore_form_err = validate_cold_start_explore_deliverables(
-                plan,
-                explicit_criteria=completion_criteria,
-            )
+        if explore_pending:
+            explore_form_err = validate_cold_start_explore_deliverables(plan)
             if explore_form_err:
                 logger.info(
                     "delegate.cold_start_explore_rejected",
@@ -787,119 +713,10 @@ class DelegateTool:
                     contract_failure=True,
                 )
 
-        form_conflict = validate_completion_against_forms(
-            completion_criteria,
-            plan,
-        )
-        if form_conflict:
-            logger.info("delegate.rejected", errors=[form_conflict])
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=form_conflict,
-                contract_failure=True,
-            )
-        kind_fit_err = validate_criteria_kind_fit(completion_criteria, plan)
-        if kind_fit_err:
-            logger.info(
-                "delegate.rejected",
-                errors=[kind_fit_err],
-                reason="criteria_kind_fit",
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=kind_fit_err,
-                contract_failure=True,
-            )
-        # 委派前能力闸（能力闸门与交付诚实性）：resolved code_verified / runtime_ready
-        # （显式 / 结构化，与收尾验收同一解析；文案不再绑定）撞上「无执行环境 /
-        # 无本机 terminal」硬拒；剩余启发命中（运行/二进制文案）只软警告、不拦截。
-        # 冷启动探索未完成时抑制 form/artifacts→files_written 推断（仅显式生效）。
-        resolved_acceptance = resolve_completion_with_source(
-            completion_criteria,
-            plan,
-            suppress_structured_files_written=explore_pending and not code_verified_batch,
-        )
-        acceptance_echo = format_resolved_acceptance_echo(resolved_acceptance)
-        capability_error = validate_execution_capability(
-            completion_criteria,
-            plan,
-            self._base_tool_context.backend,
-        )
-        if capability_error:
-            kind = (
-                resolved_acceptance.criteria.kind
-                if resolved_acceptance.criteria is not None
-                else "unknown"
-            )
-            logger.info(
-                "delegate.capability_rejected",
-                criteria=kind,
-                explicit=completion_criteria is not None,
-                backend_location=getattr(self._base_tool_context.backend, "location", None),
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=capability_error,
-                contract_failure=True,
-            )
-        # 与环境能力闸正交：code_verified 须批内至少一人持执行类 tools。
-        tools_surface_error = validate_code_verified_worker_tools(
-            completion_criteria,
-            plan,
-        )
-        if tools_surface_error:
-            kind = (
-                resolved_acceptance.criteria.kind
-                if resolved_acceptance.criteria is not None
-                else "unknown"
-            )
-            logger.info(
-                "delegate.capability_rejected",
-                criteria=kind,
-                reason="no_execution_tools",
-                explicit=completion_criteria is not None,
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=tools_surface_error,
-                contract_failure=True,
-            )
-        # 落盘承诺 / files_written 等须持写盘工具（与执行类闸正交）。
-        write_tools_error = validate_files_worker_tools(
-            completion_criteria,
-            plan,
-        )
-        if write_tools_error:
-            kind = (
-                resolved_acceptance.criteria.kind
-                if resolved_acceptance.criteria is not None
-                else "unknown"
-            )
-            logger.info(
-                "delegate.capability_rejected",
-                criteria=kind,
-                reason="no_write_tools",
-                explicit=completion_criteria is not None,
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=write_tools_error,
-                contract_failure=True,
-            )
         capability_warning = execution_capability_warning(
-            completion_criteria,
             plan,
             self._base_tool_context.backend,
+            self._permission_axes,
         )
         if capability_warning:
             logger.info(
@@ -907,14 +724,11 @@ class DelegateTool:
                 backend_location=getattr(self._base_tool_context.backend, "location", None),
             )
         # execution_id when already known at kickoff (append host / same-turn graph)
-        # so analysts can join acceptance_resolved ↔ completion_criteria_unmet.
         kickoff_execution_id = append_to or self._base_tool_context.execution_id
         logger.info(
             "delegate.acceptance_resolved",
-            criteria=(
-                resolved_acceptance.criteria.kind if resolved_acceptance.criteria else None
-            ),
-            source=resolved_acceptance.source,
+            criteria=None,
+            source=None,
             **(
                 {"execution_id": kickoff_execution_id}
                 if kickoff_execution_id
@@ -1121,10 +935,8 @@ class DelegateTool:
         from agentcore.runtime.plan_only import is_plan_only
 
         if is_plan_only():
-            summary = (
-                f"[plan-only] 已记录计划（{len(plan.nodes)} 节点），跳过执行。"
-                f"\n\n{acceptance_echo}"
-            )
+            # S3: no acceptance_echo (completion_criteria retired).
+            summary = f"[plan-only] 已记录计划（{len(plan.nodes)} 节点），跳过执行。"
             if playbook_notes:
                 summary = summary + "\n\n" + "\n\n".join(playbook_notes)
             logger.info("delegate.plan_only", nodes=len(plan.nodes), call=call_idx)
@@ -1164,7 +976,6 @@ class DelegateTool:
                 complexity_hint=complexity_hint,
                 coordination=coordination,
                 call_idx=call_idx,
-                completion_criteria=completion_criteria,
                 # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
                 # 否则缺省会落成 False，与 schema default 不一致。
                 coordinate=(
@@ -1182,10 +993,10 @@ class DelegateTool:
                 with contextlib.suppress(Exception):
                     await graph_redirect.host_writer.flush()
 
-        # 验收回显（提案 B1 补偿②）+ 软警告：挂在委派结果尾部，CEO 当轮可见可改。
+        # Soft warnings：挂在委派结果尾部，CEO 当轮可见。
         # SUSPEND（开工卡挂起）无 output 可挂，跳过——不改挂起语义。
         if result.output and result.effect is ToolEffect.CONTINUE:
-            tails: list[str] = [acceptance_echo]
+            tails: list[str] = []
             if capability_warning:
                 tails.append(capability_warning)
             if presentation_format_warning:
@@ -1196,6 +1007,8 @@ class DelegateTool:
                 tails.extend(playbook_notes)
             if latest_miss_degraded_note:
                 tails.append(latest_miss_degraded_note)
+            if consumer_deps_warn:
+                tails.append(consumer_deps_warn)
             if append_to:
                 # 口径与产品呈现一致：UI 在追加回合只显示「已往上方协作图追加 N 名成员」
                 # 锚点，生长发生在上方旧图。回显 execution_id 供后续追加显式指定。

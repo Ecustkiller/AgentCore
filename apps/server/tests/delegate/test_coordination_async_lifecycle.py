@@ -198,8 +198,7 @@ async def test_coordinate_cancelled_posts_terminal_to_wake_host(monkeypatch):
             seed_notes=None,
             complexity_hint="standard",
             call_idx=0,
-            completion_criteria=None,
-            session=session,
+                        session=session,
             coordination="wall",
         )
     )
@@ -250,8 +249,7 @@ async def test_soft_stop_cancel_skips_all_completed_wake(monkeypatch):
             seed_notes=None,
             complexity_hint="standard",
             call_idx=0,
-            completion_criteria=None,
-            session=session,
+                        session=session,
             coordination="wall",
         )
     )
@@ -302,8 +300,7 @@ async def test_background_drive_exception_posts_drive_cancelled(monkeypatch):
         seed_notes=None,
         complexity_hint="standard",
         call_idx=0,
-        completion_criteria=None,
-        session=session,
+                session=session,
         coordination="wall",
     )
 
@@ -345,8 +342,7 @@ async def test_coordination_start_echo_counts_and_seeds_completed():
         seed_notes=None,
         complexity_hint="standard",
         call_idx=1,
-        completion_criteria=None,
-        coordinate=True,
+                coordinate=True,
     )
     assert started is not None
     out = started.output or ""

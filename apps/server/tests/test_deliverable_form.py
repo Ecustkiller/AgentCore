@@ -5,10 +5,7 @@ from __future__ import annotations
 from agentcore.runtime.delegate.completion import (
     plan_all_workers_prose,
     plan_declares_files_form,
-    resolve_completion_criteria,
-    resolve_completion_with_source,
     validate_cold_start_explore_deliverables,
-    validate_completion_against_forms,
 )
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.contract import describe_deliverable
@@ -19,7 +16,6 @@ from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_PARAMETERS,
     TASK_DELIVERABLE_SCHEMA,
 )
-
 
 def test_form_parsed_onto_deliverable():
     plan, errs = build_run_plan(
@@ -32,7 +28,6 @@ def test_form_parsed_onto_deliverable():
     assert d.form == "prose"
     assert d.requires_files is False
 
-
 def test_form_files_implies_requires_files():
     plan, errs = build_run_plan(
         [{"role": "A", "task": "建站", "deliverable": {"form": "files"}}],
@@ -44,7 +39,6 @@ def test_form_files_implies_requires_files():
     assert d.form == "files"
     assert d.requires_files is True
 
-
 def test_form_alone_is_enough_content():
     plan, errs = build_run_plan(
         [{"role": "A", "task": "a", "deliverable": {"form": "prose"}}],
@@ -52,7 +46,6 @@ def test_form_alone_is_enough_content():
     )
     assert errs == []
     assert plan.nodes[0].deliverable is not None
-
 
 def test_form_prose_rejects_requires_files_and_artifacts():
     """D1: raw form=prose ∩ requires_files/artifacts must hard-reject (gate before clear)."""
@@ -74,7 +67,6 @@ def test_form_prose_rejects_requires_files_and_artifacts():
     assert any("form=prose" in e and "requires_files" in e for e in errs)
     assert plan.nodes == [] or not plan.nodes
 
-
 def test_form_prose_alone_still_builds():
     plan, errs = build_run_plan(
         [
@@ -93,7 +85,6 @@ def test_form_prose_alone_still_builds():
     assert d.requires_files is False
     assert d.artifacts == []
 
-
 def test_invalid_form_dropped():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "deliverable": {"form": "slides", "name": "x"}}],
@@ -103,7 +94,6 @@ def test_invalid_form_dropped():
     assert d is not None
     assert d.form is None
     assert d.name == "x"
-
 
 def test_identity_form_prose_has_no_file_write_guidance():
     prose = build_worker_identity(has_dependents=False, form="prose")
@@ -153,7 +143,6 @@ def test_requires_files_injects_files_form_identity_block():
     assert "form=prose" in prose_wins
     assert "form=files" not in prose_wins
 
-
 def test_identity_handoff_topology_preserved_with_form():
     up = build_worker_identity(has_dependents=True, form="prose")
     leaf = build_worker_identity(has_dependents=False, form="prose")
@@ -164,7 +153,6 @@ def test_identity_handoff_topology_preserved_with_form():
     assert "不算正文" in up
     assert "不算正文" not in leaf
 
-
 def test_describe_deliverable_form_split():
     prose = describe_deliverable(Deliverable(form="prose", name="问候"))
     assert "纯文字" in prose
@@ -173,7 +161,6 @@ def test_describe_deliverable_form_split():
     files = describe_deliverable(Deliverable(form="files", name="站点"))
     assert "落盘" in files
     assert "file_write" in files
-
 
 def test_schema_exposes_form_enum():
     props = TASK_DELIVERABLE_SCHEMA["properties"]
@@ -208,7 +195,6 @@ def test_schema_exposes_form_enum():
     assert "软提醒" in mc.get("description", "") or "短主题词" in mc.get("description", "")
     assert "细" in mc.get("description", "")  # 勿塞细枚举/细清单
 
-
 def test_schema_depends_on_teaches_when_to_declare_dependency():
     # 工具面瘦身：【何时填】长引导（生产者→消费者 + 正反例）已迁入 CEO core
     # （见 test_core_teaches_dependency_judgment_before_delegating）；schema 只留
@@ -222,122 +208,6 @@ def test_schema_depends_on_teaches_when_to_declare_dependency():
     # 顶层工具描述仍钉判断线索（勿默认全平铺）。
     assert "生产者→消费者" in DELEGATE_DESCRIPTION
     assert "平铺并行" in DELEGATE_DESCRIPTION
-
-
-def test_resolve_infers_files_written_from_form_files():
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "写 index.html", "deliverable": {"form": "files"}}],
-        id_prefix="t",
-    )
-    criteria = resolve_completion_criteria(None, plan)
-    assert criteria is not None
-    assert criteria.kind == "files_written"
-
-
-def test_resolve_never_infers_files_written_for_all_prose():
-    plan, _ = build_run_plan(
-        [
-            {"role": "A", "task": "打招呼", "deliverable": {"form": "prose"}},
-            {"role": "B", "task": "也打招呼", "deliverable": {"form": "prose"}},
-        ],
-        id_prefix="t",
-    )
-    assert plan_all_workers_prose(plan)
-    assert resolve_completion_criteria(None, plan) is None
-
-
-def test_prose_times_files_written_rejected():
-    plan, _ = build_run_plan(
-        [
-            {"role": "A", "task": "打招呼", "deliverable": {"form": "prose"}},
-            {"role": "B", "task": "也打招呼", "deliverable": {"form": "prose"}},
-        ],
-        id_prefix="t",
-    )
-    err = validate_completion_against_forms("files_written", plan)
-    assert err is not None
-    assert "契约矛盾" in err
-    assert "form=files" in err or "可改文件" in err
-
-
-def test_prose_times_code_verified_rejected():
-    plan, _ = build_run_plan(
-        [
-            {"role": "A", "task": "修 tsc", "deliverable": {"form": "prose"}},
-            {"role": "B", "task": "验证", "deliverable": {"form": "prose"}},
-        ],
-        id_prefix="t",
-    )
-    err = validate_completion_against_forms("code_verified", plan)
-    assert err is not None
-    assert "code_verified" in err
-    assert "form=files" in err or "可改文件" in err
-
-
-def test_prose_times_graph_consistent_rejected():
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "建站", "deliverable": {"form": "prose"}}],
-        id_prefix="t",
-    )
-    err = validate_completion_against_forms("graph_consistent", plan)
-    assert err is not None
-    assert "graph_consistent" in err
-
-
-def test_runtime_ready_allows_all_prose():
-    plan, _ = build_run_plan(
-        [
-            {"role": "A", "task": "启服检查", "deliverable": {"form": "prose"}},
-            {"role": "B", "task": "就绪报告", "deliverable": {"form": "prose"}},
-        ],
-        id_prefix="t",
-    )
-    assert validate_completion_against_forms("runtime_ready", plan) is None
-
-
-def test_repair_code_shape_allows_code_verified():
-    """D1: patch form=files + diagnose/verify prose + code_verified must pass."""
-    plan, errs = build_run_plan(
-        [
-            {
-                "id": "diagnose",
-                "role": "诊断员",
-                "task": "短诊断",
-                "deliverable": {"form": "prose"},
-            },
-            {
-                "id": "patch",
-                "role": "修补员",
-                "task": "修补",
-                "deliverable": {"form": "files", "requires_files": True},
-                "depends_on": ["diagnose"],
-            },
-            {
-                "id": "verify",
-                "role": "验证员",
-                "task": "验证",
-                "deliverable": {"form": "prose"},
-                "depends_on": ["patch"],
-            },
-        ],
-        id_prefix="t",
-    )
-    assert errs == []
-    assert validate_completion_against_forms("code_verified", plan) is None
-
-
-def test_mixed_batch_allows_files_written():
-    plan, _ = build_run_plan(
-        [
-            {"role": "A", "task": "分析", "deliverable": {"form": "prose"}},
-            {"role": "B", "task": "写页", "deliverable": {"form": "files"}},
-        ],
-        id_prefix="t",
-    )
-    assert plan_declares_files_form(plan)
-    assert not plan_all_workers_prose(plan)
-    assert validate_completion_against_forms("files_written", plan) is None
-
 
 async def test_prose_worker_still_offered_write_tools():
     """真纯丙·H2：form=prose 仍装配写盘工具；identity 仍提示正文交付。"""
@@ -394,7 +264,6 @@ async def test_prose_worker_still_offered_write_tools():
     assert "form=prose" in id_provider.system_messages[0]
     assert "file_write" not in id_provider.system_messages[0]
 
-
 async def test_files_worker_keeps_write_tools_and_identity():
     from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
     from agentcore.runtime.events import EventSink
@@ -446,7 +315,6 @@ async def test_files_worker_keeps_write_tools_and_identity():
     assert "form=files" in provider.system_messages[0]
     assert "file_write" in provider.system_messages[0]
 
-
 def test_cold_start_rejects_single_worker():
     plan, errs = build_run_plan(
         [{"role": "调研", "task": "摸清项目结构", "deliverable": {"form": "prose"}}],
@@ -457,7 +325,6 @@ def test_cold_start_rejects_single_worker():
     assert err is not None
     assert "≥2" in err or "至少两" in err
     assert "1 人" in err or "包办" in err
-
 
 def test_cold_start_allows_form_files():
     """Pending explore no longer hard-rejects form=files (≥2 workers sufficient)."""
@@ -470,7 +337,6 @@ def test_cold_start_allows_form_files():
     )
     assert errs == []
     assert validate_cold_start_explore_deliverables(plan) is None
-
 
 def test_cold_start_allows_artifacts():
     """Pending explore no longer hard-rejects artifacts (≥2 workers sufficient)."""
@@ -491,7 +357,6 @@ def test_cold_start_allows_artifacts():
     assert plan.nodes[0].deliverable.artifacts == ["AgentCore/文档/research/brief.md"]
     assert validate_cold_start_explore_deliverables(plan) is None
 
-
 def test_cold_start_allows_all_prose():
     plan, errs = build_run_plan(
         [
@@ -503,35 +368,3 @@ def test_cold_start_allows_all_prose():
     assert errs == []
     assert validate_cold_start_explore_deliverables(plan) is None
 
-
-def test_cold_start_allows_form_files_with_explicit_files_written():
-    plan, errs = build_run_plan(
-        [
-            {"role": "调研", "task": "落盘 brief", "deliverable": {"form": "files"}},
-            {"role": "B", "task": "读设计", "deliverable": {"form": "prose"}},
-        ],
-        id_prefix="t",
-    )
-    assert errs == []
-    assert (
-        validate_cold_start_explore_deliverables(
-            plan, explicit_criteria="files_written"
-        )
-        is None
-    )
-
-
-def test_cold_start_suppress_does_not_infer_files_written_from_form():
-    plan, errs = build_run_plan(
-        [{"role": "A", "task": "建站", "deliverable": {"form": "files"}}],
-        id_prefix="t",
-    )
-    assert errs == []
-    assert (
-        resolve_completion_with_source(
-            None, plan, suppress_structured_files_written=True
-        ).criteria
-        is None
-    )
-    # 建站回归：无 suppress 时仍推断.
-    assert resolve_completion_criteria(None, plan).kind == "files_written"

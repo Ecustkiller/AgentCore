@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.delegate.boundary import boundary_hook, checkpoint_active
-from agentcore.runtime.delegate.completion import resolve_completion_criteria
 from agentcore.runtime.events import team_note_posted
 from agentcore.runtime.runs.types import RunSpec, RunState
 
@@ -115,7 +114,6 @@ def build_drive_executor(
     worker_gate: Any,
     note_wall: Any,
     collaboration: bool,
-    completion_criteria: Any,
     session: Any,
 ) -> Callable[[RunSpec, dict], Awaitable[RunState]]:
     """Cold agent executor wrapped with continuation + optional coordination timeouts."""
@@ -156,7 +154,6 @@ def build_drive_executor(
         captain_recon=captain_recon or None,
         # 回合入口绑定的共享台账（与 CEO 同一对象）；辩论 executor 不经此路径。
         turn_evidence_ledger=_turn_ledger_var.get(),
-        batch_completion_criteria=resolve_completion_criteria(completion_criteria, plan),
     )
 
     async def continuation_aware_executor(spec: RunSpec, completed: dict) -> RunState:

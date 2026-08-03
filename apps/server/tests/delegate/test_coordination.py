@@ -1451,7 +1451,6 @@ async def test_coordination_mid_checkpoint_still_boundary_yields(monkeypatch):
         seed_notes=None,
         complexity_hint="standard",
         call_idx=1,
-        completion_criteria=None,
         coordinate=True,
         session=session,
     )
@@ -1712,8 +1711,10 @@ async def test_wait_shortcircuit_guard_when_terminal_missing(monkeypatch):
     assert session.all_completed_injected is True
 
 
-async def test_criteria_unmet_posts_all_completed_without_host_backfill(monkeypatch):
-    """Source fix: unmet path posts ALL_COMPLETED; host ensure must be a no-op."""
+async def test_retired_criteria_kind_still_posts_all_completed_without_host_backfill(
+    monkeypatch,
+):
+    """S3: legacy completion_criteria ignored; ALL_COMPLETED still posts; host ensure no-op."""
     import agentcore.runtime.coordination.host as coord_host
     from agentcore.tools.builtin.delegate import DelegateTool
     from agentcore.tools.registry import ToolRegistry
@@ -1729,7 +1730,6 @@ async def test_criteria_unmet_posts_all_completed_without_host_backfill(monkeypa
 
     monkeypatch.setattr(coord_host, "_ensure_terminal_all_completed", _spy)
     clear_active_coordination()
-    # 本地后端放行 code_verified；甲⁺ 后 files_written 不再 unmet。
     t = DelegateTool(
         llm=Provider(["AOUT", "BOUT"]),
         sink=EventSink(),
@@ -1773,14 +1773,13 @@ async def test_criteria_unmet_posts_all_completed_without_host_backfill(monkeypa
     kinds = [e.kind for e in events]
     assert CoordinationEventKind.ALL_COMPLETED in kinds
     all_done = next(e for e in events if e.kind is CoordinationEventKind.ALL_COMPLETED)
-    assert "完成条件未满足" in (all_done.payload.get("output") or "")
-    # Drive already posted — host invariant guard must not backfill.
+    assert "完成条件未满足" not in (all_done.payload.get("output") or "")
     assert backfill_results == [False]
     clear_active_coordination("e")
 
 
-async def test_criteria_unmet_wait_drains_without_shortcircuit(monkeypatch):
-    """Unmet path leaves ALL_COMPLETED in queue — wait drains it, no shortcircuit."""
+async def test_retired_criteria_kind_wait_drains_without_shortcircuit(monkeypatch):
+    """S3: ignored kind still leaves ALL_COMPLETED in queue — wait drains, no shortcircuit."""
     import agentcore.runtime.coordination.wait as coord_wait
     from agentcore.runtime.coordination.session import (
         current_execution_id,
@@ -1853,7 +1852,7 @@ async def test_criteria_unmet_wait_drains_without_shortcircuit(monkeypatch):
 
     assert len(msgs) == 1
     assert "all_completed" in (msgs[0].content or "")
-    assert "完成条件未满足" in (msgs[0].content or "")
+    assert "完成条件未满足" not in (msgs[0].content or "")
     assert session.active is False
 
 

@@ -16,7 +16,6 @@ from agentcore.config import settings
 from agentcore.runtime.context.workspace_context import build_workspace_context
 from agentcore.runtime.delegate.completion import (
     execution_capability_warning,
-    validate_execution_capability,
 )
 from agentcore.runtime.runs import build_run_plan
 from agentcore.runtime.sandbox_approval import (
@@ -54,7 +53,8 @@ def test_cloud_default_off_chain_stays_withheld(tmp_path: Path):
     assert "code_execute" not in names
     assert "test_run" not in names
     assert "code_execute=未装配" in build_workspace_context(backend, desktop_online=True)
-    assert validate_execution_capability("code_verified", _pptx_plan(), backend) is not None
+    warn = execution_capability_warning(_pptx_plan(), backend)
+    assert warn is not None
     assert execution_approval_posture(backend) is ExecutionApprovalPosture.UNAVAILABLE
     assert execution_tool_auto_passes(backend, "code_execute") is False
 
@@ -74,8 +74,7 @@ def test_cloud_escape_hatch_registers_execution_chain(
     assert "test_run" in names
     assert "code_execute=已装配" in build_workspace_context(backend, desktop_online=True)
     plan = _pptx_plan()
-    assert validate_execution_capability("code_verified", plan, backend) is None
-    assert execution_capability_warning(None, plan, backend) is None
+    assert execution_capability_warning(plan, backend) is None
     assert execution_approval_posture(backend) is ExecutionApprovalPosture.UNAVAILABLE
 
 
@@ -94,8 +93,7 @@ def test_cloud_gvisor_on_chain_flips_end_to_end(tmp_path: Path, monkeypatch: pyt
 
     # ③ 委派能力闸：显式 code_verified 放行、二进制产物启发不再软警告。
     plan = _pptx_plan()
-    assert validate_execution_capability("code_verified", plan, backend) is None
-    assert execution_capability_warning(None, plan, backend) is None
+    assert execution_capability_warning(plan, backend) is None
 
     # ④ 审批姿态：云端 gVisor 真隔离 → 整类 execution_class 自动放行。
     assert execution_approval_posture(backend) is ExecutionApprovalPosture.AUTO_PASS

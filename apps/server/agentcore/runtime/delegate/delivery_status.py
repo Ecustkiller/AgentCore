@@ -2,7 +2,7 @@
 
 把收尾侧引擎已有的信号——路径级验收（``file_acceptance``）、契约 / 交接缺口
 (:func:`~agentcore.runtime.delegate.completion.collect_worker_gaps`，含 degraded
-交接与 artifacts 对账残差)、``completion_criteria`` 未满足、失败 / 未执行
+交接与 artifacts 对账残差)、失败 / 未执行
 节点——汇成一条 ``delivery_status`` 事件（已交付文件 / 缺口 / 待操作元数据 /
 ``artifacts`` 验收行），模板拼接、不调 LLM。事件继续发射，供产物清单与
 ``finish_guard``；**用户面**已否决验收大卡——桌面/手机仅
@@ -14,8 +14,8 @@ FileArtifactsCard）认 ``artifacts``（accepted+rejected），只走 ``file_acc
 不从 ``files_touched`` 合成验收行。
 
 刀1 / 方案 A：声明路径已落盘 → verdict 走交付成功路径；``degraded_handoff`` 仅
-notes/warning 备注，不整单硬失败、不拖文件 rejected。甲⁺：真无落盘 /
-``files_written`` 批次谓词亦 soft（``files_not_landed`` → notes），不挡整批收工 /
+notes/warning 备注，不整单硬失败、不拖文件 rejected。甲⁺：真无落盘 soft
+（``files_not_landed`` → notes），不挡整批收工 /
 CEO finish；写盘通道挂仍可在备注里诚实归因。
 同图已有 continue_from / replaces 补派已跑时，收掉并排「计划收口时跳过」。
 

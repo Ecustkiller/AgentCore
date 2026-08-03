@@ -147,10 +147,10 @@ class NotDelegatedCheck:
 
 @dataclass
 class DelegateCriteriaForbiddenCheck:
-    """任一 ``delegate`` 的顶层 ``completion_criteria.type`` 不得落在 ``forbid``。
+    """S3：``completion_criteria`` 字段已删；任一 ``delegate`` 不得再传该顶层键。
 
-    钉「方向选定 → MVP / 设计契约切片」：第一波禁止顶层 ``code_verified``（实现波再验）。
-    省略验收或 ``files_written`` 等非禁止 kind 通过；无 ``delegate`` 调用则失败。
+    兼容旧 eval 的 ``forbid`` 列表：若仍传了对象且 ``type`` 落在 forbid 也失败；
+    主路径是「键不存在」。无 ``delegate`` 调用则失败。
     """
 
     forbid: list[str] = field(default_factory=list)
@@ -166,24 +166,26 @@ class DelegateCriteriaForbiddenCheck:
                 args = json.loads(raw) if raw else {}
             except json.JSONDecodeError as e:
                 return CheckOutcome(self.name, False, f"delegate: bad JSON ({e})")
+            if "completion_criteria" not in args:
+                continue
             cc = args.get("completion_criteria")
-            kind: str | None
+            kind = None
             if isinstance(cc, str):
-                kind = cc.strip() or None
+                kind = cc
             elif isinstance(cc, dict):
-                raw_kind = cc.get("type") if cc.get("type") is not None else cc.get("kind")
-                kind = str(raw_kind).strip() if raw_kind is not None else None
-            else:
-                kind = None
-            if kind and kind in forbidden:
+                kind = cc.get("type") or cc.get("kind")
+            if forbidden and kind is not None and str(kind) in forbidden:
                 return CheckOutcome(
                     self.name,
                     False,
                     f"completion_criteria.type={kind!r} forbidden ({sorted(forbidden)})",
                 )
-        return CheckOutcome(
-            self.name, True, f"{len(matched)} delegate call(s); none in {sorted(forbidden)}"
-        )
+            return CheckOutcome(
+                self.name,
+                False,
+                "completion_criteria retired (S3); omit the field",
+            )
+        return CheckOutcome(self.name, True, "no completion_criteria")
 
 
 @dataclass

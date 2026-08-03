@@ -108,7 +108,11 @@ def resolve_artifact_dir(
     task: str = "",
     code_verified: bool = False,
 ) -> str:
-    """Resolve the dossier dir for a file deliverable, or ``\"\"`` when not applicable."""
+    """Resolve the dossier dir for a file deliverable, or ``\"\"`` when not applicable.
+
+    ``code_verified`` retained as kw name for call-site compat; means skip default
+    dossier dir (e.g. ``repair_code`` playbook) — S3 no longer tied to a criteria kind.
+    """
     if deliverable.form == "prose":
         return ""
     fileish = (
@@ -131,7 +135,7 @@ def resolve_artifact_dir(
     if any(_looks_like_business_artifact(a) for a in deliverable.artifacts):
         return ""
 
-    # 代码验收批次：默认不套案卷目录（显式 / 案卷 artifacts 已在上面放行）。
+    # 修码等批：默认不套案卷目录（显式 / 案卷 artifacts 已在上面放行）。
     if code_verified:
         return ""
 
@@ -233,21 +237,11 @@ def apply_artifact_dir_to_plan(plan: object, *, code_verified: bool = False) -> 
     apply_artifact_dir_to_specs(list(nodes), code_verified=code_verified)
 
 
-def completion_criteria_is_code_verified(raw: object) -> bool:
-    """True when delegate ``completion_criteria`` is the code_verified kind."""
-    if raw == "code_verified":
-        return True
-    if isinstance(raw, dict):
-        return raw.get("type") == "code_verified"
-    return False
-
-
 __all__ = [
     "apply_artifact_dir_defaults",
     "apply_artifact_dir_to_plan",
     "apply_artifact_dir_to_spec",
     "apply_artifact_dir_to_specs",
-    "completion_criteria_is_code_verified",
     "is_acceptance_only_artifact_pattern",
     "is_file_ownership_path",
     "normalize_artifact_dir",

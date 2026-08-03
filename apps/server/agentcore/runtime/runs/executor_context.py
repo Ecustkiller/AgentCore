@@ -7,11 +7,6 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.delegate.completion import (
-    CompletionCriteria,
-    format_batch_acceptance_for_worker,
-    should_inject_batch_acceptance,
-)
 from agentcore.runtime.runs.constants import (
     CONTEXT_INJECT_CHARS,
     DEP_CONTEXT_BUDGET,
@@ -118,7 +113,6 @@ def _build_messages(
     blocks_sink: list[ContextBlock] | None = None,
     team_brief: str | None = None,
     shared_workspace: bool = False,
-    batch_completion_criteria: CompletionCriteria | None = None,
     context_inject: Mapping[str, str] | None = None,
     captain_recon: str | None = None,
 ) -> list[LLMMessage]:
@@ -153,7 +147,6 @@ def _build_messages(
         index_paths or [],
         team_brief,
         shared_workspace=shared_workspace,
-        batch_completion_criteria=batch_completion_criteria,
         context_inject=context_inject,
         captain_recon=captain_recon,
     )
@@ -176,7 +169,6 @@ def _build_context_blocks(
     team_brief: str | None = None,
     *,
     shared_workspace: bool = False,
-    batch_completion_criteria: CompletionCriteria | None = None,
     context_inject: Mapping[str, str] | None = None,
     captain_recon: str | None = None,
 ) -> list[ContextBlock]:
@@ -275,12 +267,6 @@ def _build_context_blocks(
             )
         )
     deliverable_text = describe_deliverable(deliverable or spec.deliverable)
-    if should_inject_batch_acceptance(spec, batch_completion_criteria):
-        assert batch_completion_criteria is not None  # narrowed by should_inject
-        acceptance_line = format_batch_acceptance_for_worker(batch_completion_criteria)
-        deliverable_text = (
-            f"{deliverable_text}\n{acceptance_line}" if deliverable_text else acceptance_line
-        )
     from agentcore.runtime.runs.retrieval_budget import format_retrieval_budget_line
 
     budget_line = format_retrieval_budget_line(spec.retrieval_budget)

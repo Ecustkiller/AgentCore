@@ -52,7 +52,6 @@ def build_agent_executor(
     captain_recon: str | None = None,
     evidence_ledger: object | None = None,
     turn_evidence_ledger: object | None = None,
-    batch_completion_criteria: object | None = None,
     cost_role: str = "member",
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
@@ -110,7 +109,6 @@ def build_agent_executor(
         shared_workspace=bool(base_tool_context.shared_workspace),
         evidence_ledger=evidence_ledger,
         turn_evidence_ledger=turn_evidence_ledger,
-        batch_completion_criteria=batch_completion_criteria,  # type: ignore[arg-type]
         cost_role=cost_role,
     )
 
