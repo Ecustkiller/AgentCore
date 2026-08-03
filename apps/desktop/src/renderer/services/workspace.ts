@@ -234,6 +234,49 @@ export async function restoreSnapshot(
   );
 }
 
+// --- AgentCore/trash (soft-delete restore; not OS recycle bin) ---
+
+export interface WorkspaceTrashEntry {
+  entryId: string;
+  originalPath: string;
+  name: string;
+  isDir: boolean;
+  deletedAt: string;
+}
+
+type BackendTrashEntry = Schemas["TrashEntrySummary"];
+
+const toTrashEntry = (e: BackendTrashEntry): WorkspaceTrashEntry => ({
+  entryId: e.entry_id,
+  originalPath: e.original_path,
+  name: e.name,
+  isDir: e.is_dir,
+  deletedAt: e.deleted_at,
+});
+
+/** List AgentCore/trash for a cloud conversation workspace (newest first). */
+export async function listTrash(
+  conversationId: string,
+): Promise<{ entries: WorkspaceTrashEntry[]; retentionDays: number }> {
+  const res = await api.get<Schemas["TrashListResponse"]>(
+    `/v1/conversations/${conversationId}/trash`,
+  );
+  return {
+    entries: res.data.map(toTrashEntry),
+    retentionDays: res.retention_days,
+  };
+}
+
+/** Restore one AgentCore/trash entry to its original relative path. */
+export async function restoreTrash(
+  conversationId: string,
+  entryId: string,
+): Promise<void> {
+  await api.post(
+    `/v1/conversations/${conversationId}/trash/${entryId}/restore`,
+  );
+}
+
 /** Download a snapshot's zip archive and save it via the browser. */
 export async function downloadSnapshot(
   conversationId: string,

@@ -40,6 +40,7 @@ _WORKER_ONLY_BUILTINS = {
     "file_batch",
     "md_to_docx",
     "md_to_pdf",
+    "archive_extract",
     "code_execute",
     "test_run",
     "escalate",

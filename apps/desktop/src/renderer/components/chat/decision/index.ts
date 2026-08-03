@@ -3,6 +3,7 @@ export {
   ASK_RESOLVED_DECISION_ICON,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  teamCorrectionSuffix,
   teamPendingMarkerLabel,
   teamResolvedOutcome,
 } from "./meta";

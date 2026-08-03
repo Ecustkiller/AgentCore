@@ -81,8 +81,8 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     已有多角调查/审查批且用户确认按结论修 → 勿套本 playbook；手写 tasks +
     continue_from_run_id。硬形状禁止「单人包圆触顶后再换马甲从零读」——三角色分波，
-    验证失败应 escalate / 同人续派，勿新开巡读 worker。须在 playbook_args 写清 verify；
-    须带「怎么算修好」命令。
+    验证失败应 escalate / 同人续派，勿新开巡读 worker。须在 playbook_args 写清 verify
+    （CLI 命令或页面/UI 复现说明）；白屏/挂载类优先 browser 证据，勿用慢 typecheck 冒充。
     """
     problem = clean_str(
         args.get("problem") or args.get("error") or args.get("bug") or args.get("issue")
@@ -94,9 +94,10 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     )
     if not verify:
         return [], [
-            "repair_code 需要 slot『verify』（怎么算修好：具体命令或等价验收说明；"
+            "repair_code 需要 slot『verify』（怎么算修好：CLI 命令或页面/UI 复现说明；"
             "亦接受 verify_command / acceptance），"
-            "例：verify=\"pytest tests/test_app.py -q\""
+            "例：verify=\"pytest tests/test_app.py -q\" 或 "
+            'verify="打开 /app 白屏消失+snapshot 可见主内容"'
         ]
     target = clean_str(args.get("target") or args.get("file") or args.get("path"))
     target_hint = f"优先路径：`{target}`。" if target else "先定位最小相关文件，禁止全仓通读。"
@@ -117,6 +118,9 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             "role": "诊断员",
             "task": (
                 f"短诊断【{problem}】。{target_hint}"
+                "运行时空白/挂载/渲染复现：先 browser 证据（browser_navigate + "
+                "browser_console + snapshot），再 ≤少数目标文件；无栈时可组件二分，"
+                "勿空等用户 F12。"
                 "最多读少数相关文件 / grep；输出：根因一句话 + 拟改路径与改法；"
                 "禁止全仓 list、禁止大范围通读、禁止在本步改文件。"
                 "多已知问题 / 已有调查批确认要修 → 勿套 repair_code，改用手写 tasks +"
@@ -149,10 +153,14 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             "role": "验证员",
             "task": (
                 f"验证【{problem}】修补是否生效。约定验收：`{verify}`——"
-                "外环用 test_run（check=command，command 填该约定命令；或 "
+                "若约定是 CLI 命令 → 外环用 test_run（check=command，command 填该约定命令；或 "
                 "check=test/typecheck/build）跑通且 exit 0；"
+                "若约定是页面/UI 复现（白屏/挂载/渲染）→ 优先 browser_navigate + snapshot 取证"
+                "（需截图证据才 browser_screenshot）；"
+                "【禁止】用慢 typecheck / 全仓 tsc 冒充白屏修好；"
                 "【不要】把慢 build/全量 tsc 塞进 code_execute；"
-                "全量 typecheck/build/`tsc -b` 由本验收员独占执行（外环），"
+                "全量 typecheck/build/`tsc -b` 仅当约定本就是 CLI 验绿时"
+                "由本验收员独占执行（外环），"
                 "勿与 fix 批并行全仓；内环 code_diagnostics 不能代替本步验绿；"
                 "纯 prose 交卷不算过门。失败则 escalate 说明缺口，"
                 "禁止新开巡读或换马甲从零读仓库；禁止无产出反复空跑同一失败命令。"

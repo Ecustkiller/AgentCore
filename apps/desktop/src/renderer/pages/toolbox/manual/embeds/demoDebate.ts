@@ -154,7 +154,6 @@ export const DEMO_DEBATE_MODEL: DebateModel = {
   closings: [],
   opening: "这场请双方围绕试点节奏交锋；CEO 只收简报，最终由你拍板。",
   settled: true,
-  pretrial: null,
 };
 
 function moderatorRun(): RunNode {

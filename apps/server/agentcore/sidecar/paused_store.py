@@ -47,6 +47,26 @@ from agentcore.runtime.suspension import (
 logger = get_logger(__name__)
 
 
+def _display_runs_for_pause(
+    journal_entries: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Project pause-time journal into client ``runs`` for desktop reopen.
+
+    Cloud ``finish_reason=paused`` writeback deliberately skips ``turn_journal``, so
+    GET messages has ``runs=null`` while paused. The desktop recovery path therefore
+    needs a local display payload; pin it on the paused frame at save time (same
+    ``runs_from_entries`` fold the cloud message window would use).
+    """
+    from agentcore.runtime.journal import runs_from_entries
+
+    runs = runs_from_entries(list(journal_entries or []))
+    if not runs:
+        return None
+    if not runs.get("finish_reason"):
+        return {**runs, "finish_reason": "paused"}
+    return runs
+
+
 def _is_safe_message_id(message_id: str) -> bool:
     """Reject a message_id that could escape the store dir (path traversal guard).
 
@@ -179,8 +199,9 @@ class LocalPausedTurnStore:
             "frame": suspension.to_json(),
             # The §8.3 fact stream (唯一权威载体) + prior-turn history — the window-rebuild inputs
             # the cloud keeps in turn_journal + the message DB. Here they ride inline since the
-            # Sidecar has no DB (this file is self-contained). The display ``journal`` resume seed
-            # is NOT stored: it is a DERIVED property of ``journal_entries`` (P0-B Phase 3).
+            # Sidecar has no DB (this file is self-contained). Resume still DERIVES its journal
+            # seed from ``journal_entries`` (P0-B Phase 3). ``display_runs`` is an extra pin for
+            # desktop reopen collab-graph hydrate (cloud paused writeback skips turn_journal).
             "journal_entries": list(suspension.journal_entries),
             "history": list(suspension.history),
             # The resume-card summary (the wire shape) is computed ONCE here and stored
@@ -189,6 +210,9 @@ class LocalPausedTurnStore:
             "summary": paused_summary(suspension),
             "trace_id": suspension.trace_id,
             "created_at": time.time(),
+            # Desktop reopen collab graph: cloud pause skips turn_journal; pin
+            # display runs here so recovery can hydrate without attach replay.
+            "display_runs": _display_runs_for_pause(suspension.journal_entries),
         }
         try:
             await asyncio.to_thread(self._write_sync, suspension.message_id, record)

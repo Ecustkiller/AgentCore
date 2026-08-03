@@ -67,16 +67,11 @@ _VALIDATION_PATH_STOP_STEER = (
 # no content — it is "working" but getting nowhere. Distinct from an empty round
 # (no tool call at all → degraded ladder).
 DEFAULT_UNPRODUCTIVE_THRESHOLD = 3
-# Periodic progress-review reflection (B2 反思注入): on a long multi-round run, inject
-# a "step back and re-plan" prompt starting at the 4th round (0-indexed 3) and every
-# 3 rounds after (rounds 4 / 7 / 10 …). Cadence-driven and proactive — unlike the
-# event-driven NUDGE, which only fires once a mechanical loop is detected.
-DEFAULT_REFLECTION_START_ROUND = 3
-DEFAULT_REFLECTION_INTERVAL = 3
-# Progress tools that reset investigation spinning and suppress periodic reflection
-# when a recent round succeeded (stage advance / delivery / handoff / ask).
-# ``str_replace`` / ``write_section`` count: coding repair lands via patch, not only
-# whole-file write.
+# Progress tools that reset same-target investigation spin when a recent round
+# succeeded (stage advance / delivery / handoff / ask). ``str_replace`` /
+# ``write_section`` count: coding repair lands via patch, not only whole-file write.
+# (Periodic B2 进度复盘 inject was retired — soft cadence had little effect and
+# false-nagged interactive browser runs.)
 PROGRESS_TOOLS = frozenset(
     {
         "delegate",
@@ -227,42 +222,6 @@ def zero_write_finalize_prompt(*, rounds: int, prose_idle: bool = False) -> str:
     return (
         f"[系统提示] 只读空转强制收口（连续 {rounds} 轮调查且零落盘）："
         "请基于已读内容交接当前缺口，勿再展开新调研。"
-    )
-
-
-def progress_review_prompt(
-    round_number: int, *, role: str = "", form_prose: bool = False
-) -> str:
-    """The periodic progress-review steer (B2 反思注入), anchored to the round count.
-
-    Role-split copy: captain/CEO aligns to the user goal and chooses 派/问/收尾;
-    workers confirm deliverable landing and either fix files or same-round handoff.
-    ``form_prose`` workers must not be told to ``str_replace`` / ``file_write``.
-    Never open-ended self-doubt; never push workers toward「最终答案」or self-readback.
-    """
-    if role == "captain":
-        return (
-            f"[系统提示] 进度复盘（已进行 {round_number} 轮）：请对照用户目标梳理——"
-            "(1) 目前已确认了哪些关键事实？(2) 距离用户的目标还差什么？"
-            "(3) 下一步是再委派、向用户提问，还是基于已有产出收尾？"
-            "避免重复已经做过的尝试；不要为复盘去 file_read 产物正文。"
-        )
-    if form_prose:
-        return (
-            f"[系统提示] 进度复盘（已进行 {round_number} 轮）：请停下来确认——"
-            "(1) 本回合是 form=prose（仅文字报告），交付是否已写完正文？"
-            "(2) 若未写完：继续写正文后 handoff；若任务实际需要改文件，请 escalate "
-            "请主管改 form=files 后重派，或 handoff 诚实说明形态阻塞——"
-            "禁止空转调用 str_replace / file_write（本回合未授）。"
-            "(3) 若已满足：请在本轮调用 handoff 交接，不要再展开新调研。"
-            "禁止直接给最终答案代替交接；禁止为复盘去 file_read 自己刚写的产物。"
-        )
-    return (
-        f"[系统提示] 进度复盘（已进行 {round_number} 轮）：请停下来确认——"
-        "(1) 你的交付是否已按合同落盘（或 prose 正文已写完）？"
-        "(2) 若未满足：下一步用写文件 / str_replace 等具体改法补齐，不要空转；"
-        "(3) 若已满足：请在本轮调用 handoff 交接，不要再展开新调研。"
-        "禁止直接给最终答案代替交接；禁止为复盘去 file_read 自己刚写的产物。"
     )
 
 
@@ -554,8 +513,6 @@ class LoopController:
         path_write_reject_streak: int = DEFAULT_PATH_WRITE_REJECT_STREAK,
         validation_path_streak: int = DEFAULT_VALIDATION_PATH_STREAK,
         unproductive_threshold: int = DEFAULT_UNPRODUCTIVE_THRESHOLD,
-        reflection_start_round: int = DEFAULT_REFLECTION_START_ROUND,
-        reflection_interval: int = DEFAULT_REFLECTION_INTERVAL,
         convergence_finalize_rounds: int = 0,
         convergence_spin_rounds: int = DEFAULT_THRESHOLD,
         zero_write_finalize_rounds: int = 0,
@@ -578,8 +535,6 @@ class LoopController:
         self._path_write_reject_streak = max(1, path_write_reject_streak)
         self._validation_path_streak = max(1, validation_path_streak)
         self._unproductive_threshold = max(1, unproductive_threshold)
-        self._reflection_start_round = max(0, reflection_start_round)
-        self._reflection_interval = max(1, reflection_interval)
         self._recent: deque[ToolAttempt] = deque(maxlen=window)
         self._nudged = False
         self._investigation_tools = investigation_tools
@@ -661,12 +616,6 @@ class LoopController:
         # B2 no-output early stop: consecutive unproductive rounds (all tools failed,
         # no content). Reset by any productive round (content OR a tool success).
         self._consecutive_unproductive = 0
-        # B2 reflection skip: rounds since a successful PROGRESS_TOOLS call (0 = this
-        # round). ``None`` = never had progress. Skip inject when ≤1 (本轮或近轮).
-        self._rounds_since_progress: int | None = None
-        # One soft 进度复盘 per idle streak; further cadence hits defer to zero_write /
-        # convergence instead of re-nagging the same「请落盘/handoff」copy.
-        self._reflection_latched_since_progress: bool = False
         # Post-delegate synthesis mode (优化六): after delegate returns, steer the CEO away
         # from repeating investigation work the team already did.
         self._post_delegate: bool = False
@@ -940,10 +889,6 @@ class LoopController:
         if round_progress:
             self._same_target_investigation_streak = 0
             self._prev_investigation_fps = frozenset()
-            self._rounds_since_progress = 0
-            self._reflection_latched_since_progress = False
-        elif self._rounds_since_progress is not None:
-            self._rounds_since_progress += 1
 
         from agentcore.runtime.tool_failures import cap_error_summary
 
@@ -1368,33 +1313,6 @@ class LoopController:
     def validation_thrash_latched(self) -> bool:
         """True after a stopped validation fingerprint was re-hit (sticky)."""
         return self._validation_thrash_latched
-
-    def has_recent_progress(self) -> bool:
-        """True when this or the previous tool round succeeded a PROGRESS_TOOLS call."""
-        return self._rounds_since_progress is not None and self._rounds_since_progress <= 1
-
-    def reflection_due(self, round_idx: int) -> bool:
-        """Whether to inject a periodic progress-review reflection (B2 反思注入).
-
-        Fires on a fixed cadence — at ``reflection_start_round`` (0-indexed) and every
-        ``reflection_interval`` rounds after (default: round_idx 3 / 6 / 9 …, i.e. the
-        4th / 7th / 10th round). Skipped when this or the previous round already had a
-        successful progress tool (落盘 / 交接 / 委派 / 提问), **or** when a reflection
-        was already injected since the last progress (one soft review per idle streak;
-        zero_write / convergence handle sustained thrashing). The prompt comes from
-        :func:`progress_review_prompt`. Independent of the stuck detector.
-        """
-        if round_idx < self._reflection_start_round:
-            return False
-        if self.has_recent_progress():
-            return False
-        if self._reflection_latched_since_progress:
-            return False
-        return (round_idx - self._reflection_start_round) % self._reflection_interval == 0
-
-    def mark_reflection_injected(self) -> None:
-        """Latch soft 进度复盘 until the next successful PROGRESS_TOOLS call."""
-        self._reflection_latched_since_progress = True
 
     @property
     def investigation_tool_names(self) -> frozenset[str]:

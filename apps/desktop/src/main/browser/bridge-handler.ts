@@ -3,7 +3,7 @@
  * 进程内 HTTP server / LocalHost 接线见 bridge.ts。
  *
  * 动作面：`GET /health`、`POST /navigate`（兼容）、`POST /command`
- * （navigate/click/type/scroll/snapshot/screenshot，与 browser_* 对齐）。
+ * （navigate/click/type/scroll/snapshot/screenshot/console，与 browser_* 对齐）。
  * Local live：server 在 Hub attach 后周期 POST screenshot，帧含 frame_b64+width+height。
  */
 
@@ -19,6 +19,7 @@ export const BRIDGE_ACTIONS = [
   "scroll",
   "snapshot",
   "screenshot",
+  "console",
 ] as const;
 
 export type BridgeAction = (typeof BRIDGE_ACTIONS)[number];

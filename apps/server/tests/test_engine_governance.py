@@ -1138,43 +1138,6 @@ async def test_unproductive_rounds_early_stop_and_salvage_answer():
     assert finish_override == [FinishReason.UNPRODUCTIVE]
 
 
-async def test_reflection_injected_on_long_run_cadence():
-    # Distinct SUCCESSFUL tool calls each round (no repeat / failure / unproductive /
-    # circuit-breaker / over-investigation interference) over a long run → soft
-    # 进度复盘 fires once per idle streak (first cadence hit at round_idx 3), then
-    # latches until progress. A non-investigation tool (EXECUTION, not a read) keeps
-    # the convergence safety net dormant so this stays an isolated reflection check.
-    rounds: list[list[LLMChunk]] = [[_tool_chunk("compute", '{"q": "%d"}' % i)] for i in range(8)]
-    rounds.append([_content_chunk("final")])
-    provider = _ScriptedProvider(rounds)
-    (content, *_), messages = await _run(
-        provider, _StubTool(name="compute", category=ToolCategory.EXECUTION), max_rounds=20
-    )
-
-    assert content == "final"
-    reviews = [m for m in messages if m.role == "user" and m.content and "进度复盘" in m.content]
-    assert len(reviews) == 1  # one soft review per idle streak (round_idx 3)
-    assert any("已进行 4 轮" in (m.content or "") for m in reviews)
-
-
-async def test_reflection_skipped_when_progress_tools_succeed():
-    # Cadence would fire at round_idx 3 / 6, but successful file_write each round is
-    # recent progress → no reflection inject. file_append is also a progress tool;
-    # this pins the skip wiring through govern_after_tools.
-    rounds: list[list[LLMChunk]] = [
-        [_tool_chunk("file_write", '{"p": "%d"}' % i)] for i in range(8)
-    ]
-    rounds.append([_content_chunk("final")])
-    provider = _ScriptedProvider(rounds)
-    (content, *_), messages = await _run(
-        provider, _StubTool(name="file_write", category=ToolCategory.EXECUTION), max_rounds=20
-    )
-
-    assert content == "final"
-    reviews = [m for m in messages if m.role == "user" and m.content and "进度复盘" in m.content]
-    assert reviews == []
-
-
 async def test_productive_round_resets_unproductive_streak():
     # A round that produces content (even alongside a failing tool) breaks the streak,
     # so an intermittent failure run is NOT early-stopped as unproductive.
@@ -1244,15 +1207,13 @@ def _finalizes(messages: list[LLMMessage]) -> list[LLMMessage]:
 
 
 def _convergence_steers(messages: list[LLMMessage]) -> list[LLMMessage]:
-    # Any over-investigation steer at all (the removed soft nudge used to live here);
-    # excludes the periodic reflection ("进度复盘"), which is a separate cadence.
+    # Any over-investigation steer at all (the removed soft nudge used to live here).
     return [
         m
         for m in messages
         if m.role == "user"
         and m.content
         and "[系统提示]" in m.content
-        and "进度复盘" not in m.content
     ]
 
 

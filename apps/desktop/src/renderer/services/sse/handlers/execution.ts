@@ -192,6 +192,7 @@ export function handleExecutionEvent(
         conversationId,
         execMessageId(conversationId, routeHintFromPayload(event.payload)) ??
           "",
+        ctx.source,
       );
       if (event.type === "escalation_required") {
         const eid = (event.payload as EscalationRequiredPayload)?.escalation_id;
@@ -248,6 +249,8 @@ export function handleExecutionEvent(
     }
     // 执行转后台：附着回合已收口，团队继续跑。EPHEMERAL live stamp → StatusStrip
     // 静态「团队后台运行中」；conformanceFold 保持 no-op。
+    // Soft refresh：拉最新 message.runs，配合 hydrate 终态优先，愈合 live 丢的
+    // worker `run_completed`（样本：detach 后图仍 Thinking、journal 已绿）。
     case "execution_detached": {
       const mid = execMessageId(
         conversationId,
@@ -258,6 +261,7 @@ export function handleExecutionEvent(
           .getState()
           .setExecutionDetached(event.payload as ExecutionDetachedPayload, mid);
       }
+      refreshAfterExecutionCompleted(conversationId);
       return true;
     }
     // 后台执行终态：清后台 chrome、按 payload.status 落 execution 终态（缺省 completed），

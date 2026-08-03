@@ -5,8 +5,8 @@ import { isSafeExternalUrl } from "@shared/safe-url";
 import { WINDOW_CHANNELS } from "@shared/window-contract";
 import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
 // `?asset` 让 electron-vite 把图标拷入产物并解析为运行时绝对路径；用作窗口/任务栏图标
-// （dev 与 Linux 主要靠它；打包后 Windows exe / macOS 包图标另由 electron-builder 从
-// build/icon.png 派生）。
+// （resources/icon.png = rounded squircle，Win 任务栏/窗口优先；打包 exe/.app 图标另由
+// electron-builder 按平台分源：build/icon-win.png · build/icon-mac.png）。
 import icon from "../../resources/icon.png?asset";
 import { registerAgentTownIpc } from "./agenttown-service";
 import { registerBrowserIpc, startDesktopBrowserBridge } from "./browser";

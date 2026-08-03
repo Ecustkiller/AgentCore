@@ -462,6 +462,9 @@ async def test_delegate_append_latest_with_active_coord_merges_like_no_append(mo
     assert first.success is True
     session = active_coordination("e")
     assert session is not None and session.active
+    # 同回合二次：message_id ≡ host_turn_id 才 soft-merge。
+    session.host_turn_id = "m1"
+    t._message_id = "m1"
     session_id = id(session)
     drive = session.drive_task
     assert drive is not None and not drive.done()
@@ -529,6 +532,9 @@ async def test_delegate_append_explicit_same_eid_with_active_coord_merges(
     assert first.success is True
     session = active_coordination("e")
     assert session is not None and session.active
+    # 同回合二次：message_id ≡ host_turn_id 才 soft-merge。
+    session.host_turn_id = "m1"
+    t._message_id = "m1"
     session_id = id(session)
     drive = session.drive_task
     assert drive is not None and not drive.done()
@@ -555,6 +561,182 @@ async def test_delegate_append_explicit_same_eid_with_active_coord_merges(
     drive.cancel()
     with pytest.raises(asyncio.CancelledError):
         await drive
+    clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_delegate_append_latest_after_adopt_keeps_graph_append(monkeypatch):
+    """跨回合 adopt：宿主仍活跃 + message_id≠host_turn_id → latest 不 soft-clear，走 graph_append。"""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+
+    clear_active_coordination()
+    host_plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="r1", agent_id="w1", role="研究员", task="做A"),
+            RunSpec(run_id="r2", agent_id="w2", role="写手", task="做B"),
+        ]
+    )
+    seed = {
+        "r1": RunState(phase=RunPhase.COMPLETED, content="a"),
+        "r2": RunState(phase=RunPhase.COMPLETED, content="b"),
+    }
+    latest_calls: list[dict[str, Any]] = []
+
+    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
+        latest_calls.append(
+            {"conversation_id": conversation_id, "exclude_message_id": exclude_message_id}
+        )
+        return "e"
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
+        assert execution_id == "e"
+        return "m-host"
+
+    async def fake_load(host_message_id: str):
+        assert host_message_id == "m-host"
+        return host_plan, seed
+
+    async def fake_open_writer(**kwargs):  # noqa: ANN003
+        return TurnJournalWriter(
+            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
+        )
+
+    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
+        fake_latest,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
+        fake_open_writer,
+    )
+    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
+
+    # 模拟 adopt 后：宿主 session 仍 active，eid 已贴到本回合，但 host_turn_id 仍是首波。
+    session = CoordinationSession(
+        execution_id="e",
+        total_workers=2,
+        conversation_id="c",
+        host_turn_id="m-host",
+    )
+    set_active_coordination(session)
+
+    t = tool(Provider(["X"]))
+    t._message_id = "m-new"
+    t._conversation_id = "c"
+    t._base_tool_context.execution_id = "e"
+
+    result = await t.execute(
+        {
+            "tasks": [{"role": "审查", "task": "做C"}],
+            "append_to_execution_id": "latest",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert latest_calls == [{"conversation_id": "c", "exclude_message_id": "m-new"}]
+    kinds = [e.type for e in t._sink._history]
+    assert EventType.GRAPH_APPEND in kinds
+    ga = next(e for e in t._sink._history if e.type is EventType.GRAPH_APPEND)
+    assert ga.payload["execution_id"] == "e"
+    assert ga.payload["host_message_id"] == "m-host"
+    assert "已往上方协作图追加" in (result.output or "")
+    clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_delegate_append_explicit_same_eid_after_adopt_keeps_graph_append(
+    monkeypatch,
+):
+    """跨回合 adopt：显式 append_to=宿主 eid 也不 soft-clear，须走 graph_append。"""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+
+    clear_active_coordination()
+    host_plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="r1", agent_id="w1", role="研究员", task="做A"),
+            RunSpec(run_id="r2", agent_id="w2", role="写手", task="做B"),
+        ]
+    )
+    seed = {
+        "r1": RunState(phase=RunPhase.COMPLETED, content="a"),
+        "r2": RunState(phase=RunPhase.COMPLETED, content="b"),
+    }
+    resolve_calls: list[str] = []
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
+        resolve_calls.append(execution_id)
+        return "m-host"
+
+    async def fake_load(host_message_id: str):
+        return host_plan, seed
+
+    async def fake_open_writer(**kwargs):  # noqa: ANN003
+        return TurnJournalWriter(
+            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
+        )
+
+    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
+        fake_open_writer,
+    )
+    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
+
+    session = CoordinationSession(
+        execution_id="e",
+        total_workers=2,
+        conversation_id="c",
+        host_turn_id="m-host",
+    )
+    set_active_coordination(session)
+
+    t = tool(Provider(["X"]))
+    t._message_id = "m-new"
+    t._conversation_id = "c"
+    t._base_tool_context.execution_id = "e"
+
+    result = await t.execute(
+        {
+            "tasks": [{"role": "审查", "task": "做C"}],
+            "append_to_execution_id": "e",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert resolve_calls == ["e"]
+    assert EventType.GRAPH_APPEND in [e.type for e in t._sink._history]
+    assert "已往上方协作图追加" in (result.output or "")
     clear_active_coordination("e")
 
 

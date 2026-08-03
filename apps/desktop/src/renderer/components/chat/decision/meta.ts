@@ -57,9 +57,9 @@ const ASK_CLARIFY_META = {
   resolved: {
     continue: { label: "已按你的决定继续", tone: "success" },
     adjust: { label: "已按你的调整继续", tone: "success" },
-    // stop = 用户主动收口，非失败；与 timeout/orphaned、协作图 cancelled 同档 muted。
-    stop: { label: "已停止本回合", tone: "muted" },
-    research_first: { label: "已停止本回合", tone: "muted" },
+    // stop = 用户点「跳过」硬停收口，非失败；与 timeout/orphaned、协作图 cancelled 同档 muted。
+    stop: { label: "已跳过本回合", tone: "muted" },
+    research_first: { label: "已跳过本回合", tone: "muted" },
     timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
     orphaned: {
       label: "已失效（回合已结束或服务已重启）",
@@ -81,8 +81,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已选定方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "muted" },
-      research_first: { label: "已停止本回合", tone: "muted" },
+      stop: { label: "已跳过本回合", tone: "muted" },
+      research_first: { label: "已跳过本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -99,8 +99,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认风险处理项", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "muted" },
-      research_first: { label: "已停止本回合", tone: "muted" },
+      stop: { label: "已跳过本回合", tone: "muted" },
+      research_first: { label: "已跳过本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -117,8 +117,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认整理方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "muted" },
-      research_first: { label: "已停止本回合", tone: "muted" },
+      stop: { label: "已跳过本回合", tone: "muted" },
+      research_first: { label: "已跳过本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -135,8 +135,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认复盘提案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已停止本回合", tone: "muted" },
-      research_first: { label: "已停止本回合", tone: "muted" },
+      stop: { label: "已跳过本回合", tone: "muted" },
+      research_first: { label: "已跳过本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -254,6 +254,27 @@ export function teamResolvedOutcome(
     return table.continueWithNote;
   }
   return table.resolved[decision] ?? table.resolved.continue;
+}
+
+/**
+ * Resolved 对账后缀：已排除 k 岗 / 已收紧写盘。缺省空 → 无后缀（同旧）。
+ * 辩论开赛卡一般无修正字段；有则同样展示。
+ */
+export function teamCorrectionSuffix(args: {
+  excluded_run_ids?: readonly string[] | null;
+  write_capability_overrides?: ReadonlyArray<{
+    run_id: string;
+    capability: string;
+  }> | null;
+}): string {
+  const parts: string[] = [];
+  const excluded = args.excluded_run_ids?.length ?? 0;
+  if (excluded > 0) parts.push(`已排除 ${excluded} 岗`);
+  const tightened =
+    args.write_capability_overrides?.filter((o) => o.capability === "text_only")
+      .length ?? 0;
+  if (tightened > 0) parts.push("已收紧写盘");
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
 }
 
 export function teamPendingMarkerLabel(

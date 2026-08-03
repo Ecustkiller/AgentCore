@@ -41,6 +41,7 @@ _BUILTIN_ORDER = [
     "file_batch",
     "md_to_docx",
     "md_to_pdf",
+    "archive_extract",
     "grep",
     "code_search",
     "code_diagnostics",
@@ -73,6 +74,7 @@ _BROWSER_CEO_ORDER = [
     "browser_type",
     "browser_scroll",
     "browser_snapshot",
+    "browser_console",
 ]
 
 _WORKER_ONLY_ORDER = [
@@ -150,6 +152,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "file_batch": (AVAILABLE_TO_WORKER,),
     "md_to_docx": (AVAILABLE_TO_WORKER,),
     "md_to_pdf": (AVAILABLE_TO_WORKER,),
+    "archive_extract": (AVAILABLE_TO_WORKER,),
     "test_run": (AVAILABLE_TO_WORKER,),
     "code_execute": (AVAILABLE_TO_WORKER,),
     "host_ping": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -266,6 +269,7 @@ def test_tool_registry_grant_sets_snapshot():
             "file_batch",
             "md_to_docx",
             "md_to_pdf",
+            "archive_extract",
         }
     )
     assert approval_class_tool_names() == file_mutation_tool_names() | frozenset({"git"})
@@ -280,6 +284,7 @@ def test_tool_registry_grant_sets_snapshot():
             "browser_type",
             "browser_scroll",
             "browser_snapshot",
+            "browser_console",
             "browser_screenshot",
         }
     )

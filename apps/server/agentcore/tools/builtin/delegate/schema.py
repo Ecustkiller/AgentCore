@@ -52,9 +52,8 @@ DELEGATE_DESCRIPTION = (
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
     "跨回合加人 append_to_execution_id=\"latest\"。"
-    "playbook 可选（建站推荐 build_website/build_toolshed；绿场软件/SPA 推荐 "
-    "build_app；Agent 选控制台原型才允许 "
-    "build_toolshed；可运行自动化/仅方案禁 toolshed；其余可省略直接手写 tasks）；与 tasks 二选一。"
+    "playbook 可选（建站推荐 build_website，控制台 dense 加 playbook_args.style=toolshed；"
+    "绿场软件/SPA 推荐 build_app；其余可省略直接手写 tasks）；与 tasks 二选一。"
     "交付靠 deliverable.form/artifacts；勿再填已删的 completion_criteria。"
     "拿不准怎么拆再 consult_skill(team_orchestration_advanced)。"
 )
@@ -80,9 +79,6 @@ DELEGATE_PARAMETERS = {
                     },
                     "objective": {"type": "string"},
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
-                    "stance": {"type": "string", "enum": ["pro", "con"]},
-                    "group": {"type": "string"},
-                    "round": {"type": "integer"},
                     "id": {"type": "string"},
                     "depends_on": {
                         "type": "array",
@@ -137,8 +133,7 @@ DELEGATE_PARAMETERS = {
             "description": (
                 "可选固化形状名（与 tasks 二选一：传此字段时勿再传 tasks，"
                 "槽位进 playbook_args）。建站/落地页推荐 build_website；"
-                "控制台/工具台 dense 推荐 build_toolshed（Agent 选控制台原型才允许；"
-                "可运行自动化/仅方案禁 toolshed）；"
+                "控制台/工具台 dense 同用 build_website + playbook_args.style=toolshed；"
                 "绿场软件/SPA 完整交付推荐 build_app；其余自由组队可省略，"
                 "直接手写 tasks。亦可用 playbook_id。"
             ),
@@ -147,8 +142,7 @@ DELEGATE_PARAMETERS = {
             "type": "string",
             "description": (
                 "可选 playbook 声明：已知形状名，或字面值 \"none\"（手写 tasks）。"
-                "与 playbook 同义优先。建站/绿场推荐具名 playbook（不硬拒 none/手写）；"
-                "Agent 可运行自动化/仅方案禁 toolshed（仅方案另禁 website）。"
+                "与 playbook 同义优先。建站/绿场推荐具名 playbook（不硬拒 none/手写）。"
             ),
         },
         "playbook_none_reason": {

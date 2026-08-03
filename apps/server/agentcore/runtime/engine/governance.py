@@ -18,7 +18,6 @@ from agentcore.runtime.loop_controller import (
     ToolAttempt,
     delivery_idle_narrow_prompt,
     delivery_idle_nudge_prompt,
-    progress_review_prompt,
 )
 from agentcore.tools.registry import ToolRegistry
 
@@ -565,16 +564,17 @@ def create_loop_controller(
     Orthogonal to token/timeout wind_down and never stamps DEGRADED / FAILED for
     read-idle.
     Delivery pressure otherwise stays on round/token hard ceilings + convergence
-    spin. 真纯丙后不再有「白名单缺写盘 → 补写工具」半成品路径。
+    spin. 真纯丙后不再有「白名单缺写盘 → 补写工具」半成品路径.
 
-    Short ``max_rounds`` also pulls ``reflection_start_round`` earlier so the
-    progress-review inject is not collinear with the hard ceiling.
+    ``short_write_posture`` / ``max_rounds`` remain accepted for call-site
+    compatibility (formerly pulled B2 reflection cadence earlier; inject retired).
 
     ``tighten_verify_exec_thrash`` (repair verify short posture): lower
     unproductive + tool-failure disable thresholds so same-fail / no-output
     ``code_execute`` ladders reach nudge→finalize sooner — still the same
     LoopController paths, not a parallel fuse.
     """
+    _ = (short_write_posture, max_rounds)
     tool_failure_warn = settings.engine_tool_failure_warn
     tool_failure_disable = settings.engine_tool_failure_disable
     unproductive_threshold = settings.engine_unproductive_threshold
@@ -582,11 +582,6 @@ def create_loop_controller(
         # Same ladders, earlier trip for verify-only short posture.
         tool_failure_disable = min(int(tool_failure_disable), 2)
         unproductive_threshold = min(int(unproductive_threshold), 2)
-
-    reflection_start = int(settings.engine_reflection_start_round)
-    if short_write_posture and max_rounds is not None and max_rounds > 0:
-        # Leave ≥1 react round after inject before hard ceiling (max_rounds=4 → start 2).
-        reflection_start = min(reflection_start, max(1, max_rounds - 2))
 
     # Soft read-idle ladder (not the retired zero-write FINALIZE).
     delivery_idle_nudge = 0
@@ -605,8 +600,6 @@ def create_loop_controller(
         tool_failure_warn=tool_failure_warn,
         tool_failure_disable=tool_failure_disable,
         unproductive_threshold=unproductive_threshold,
-        reflection_start_round=reflection_start,
-        reflection_interval=settings.engine_reflection_interval,
         convergence_finalize_rounds=settings.engine_convergence_finalize_rounds,
         convergence_spin_rounds=settings.engine_convergence_spin_rounds,
         # 零写 / prose_idle 整条已退役 — 不开计数与中途 FINALIZE。
@@ -912,17 +905,6 @@ def govern_after_tools(
             investigation_calls=controller.investigation_calls,
         )
         return Finalize(reason="convergence")
-
-    if breaker_message is None and controller.reflection_due(round_idx):
-        review = progress_review_prompt(
-            round_idx + 1, role=role, form_prose=controller.form_prose
-        )
-        logger.info("engine.reflection_inject", round=round_idx, role=role or "")
-        messages.append(LLMMessage(role="user", content=review))
-        record_turn_fact(
-            NoteFact(role="user", content=review, reason="reflection", run_id=run_id).to_fact()
-        )
-        controller.mark_reflection_injected()
 
     maybe_inject_team_gate(
         controller,

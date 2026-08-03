@@ -8,7 +8,14 @@ const config: CapacitorConfig = {
   appId: "com.agentcore.mobile",
   appName: "AgentCore",
   webDir: "dist",
+  // WebView + DecorView fill under transparent system bars (Cap 8 edge-to-edge).
+  // Keep in sync with android `shellBackground` / mobile-light `--panel`.
+  backgroundColor: "#ffffff",
   plugins: {
+    // Dark icons on the light shell (Capacitor SystemBars; not the legacy StatusBar plugin).
+    SystemBars: {
+      style: "DARK",
+    },
     // Show the「需要你」pause push even when the app is in the foreground (iOS otherwise
     // suppresses foreground alerts). Android shows foreground notifications regardless.
     PushNotifications: {

@@ -123,6 +123,20 @@ def build_agent_executor(
             parent_run_id=spec.parent_run_id or None,
         ):
             state = await execute_agent_node(env, spec, completed, agent_id)
+            # Nested terminals may never enter parent completed_run_ids — mark ended
+            # on the shared write ledger so declare/claim can hand off (ghost-lock fix).
+            try:
+                from agentcore.runtime.runs.types import RunPhase
+
+                if state.phase in (
+                    RunPhase.COMPLETED,
+                    RunPhase.FAILED,
+                    RunPhase.CANCELLED,
+                    RunPhase.SKIPPED,
+                ):
+                    env.write_coordinator.mark_ended(spec.run_id)
+            except Exception:  # noqa: BLE001 — never break run finalization
+                pass
             record_turn_fact(run_final_fact(spec.run_id, state))
             return state
 

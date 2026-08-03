@@ -18,7 +18,22 @@
  * - 有 browserApi → store + browserApi.navigate（Local 真画面）；
  * - 无 browserApi（Web）→ sandbox create（若无 sid）+ POST navigate；拒 localhost。
  */
-import { Button, IconButton, Input } from "@/components/ui";
+import {
+  Button,
+  HorizontalTabStrip,
+  IconButton,
+  Input,
+  NO_TAB_DRAG_ATTR,
+  SortableTab,
+  useSortableTabIds,
+} from "@/components/ui";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { BrowserLivePanel } from "@/components/workspace/BrowserLivePanel";
 import { BrowserLocalTakeoverBar } from "@/components/workspace/BrowserLocalTakeoverBar";
 import { isBrowserTool } from "@/lib/browserActivity";
@@ -41,7 +56,12 @@ import {
 } from "@/stores/conversation/runtime";
 import { projectRuntime, useExecutionStore } from "@/stores/execution";
 import { useOverlayStore } from "@/stores/overlay";
-import type { BrowserBounds, BrowserNavState } from "@shared/browser-contract";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import type {
+  BrowserBounds,
+  BrowserNavState,
+  BrowserOpenTabRequest,
+} from "@shared/browser-contract";
 import { isSafeExternalUrl } from "@shared/safe-url";
 import {
   ArrowLeft,
@@ -94,6 +114,7 @@ export function BrowserPanel({
   const closePage = useBrowserSessionsStore((s) => s.closePage);
   const closeServerPage = useBrowserSessionsStore((s) => s.closeServerPage);
   const setActivePage = useBrowserSessionsStore((s) => s.setActivePage);
+  const reorderPages = useBrowserSessionsStore((s) => s.reorderPages);
   const navigatePage = useBrowserSessionsStore((s) => s.navigatePage);
   const syncPageFromHost = useBrowserSessionsStore((s) => s.syncPageFromHost);
   const attachServerSession = useBrowserSessionsStore(
@@ -108,6 +129,17 @@ export function BrowserPanel({
     () => allPages.filter((p) => p.conversationId === conversationId),
     [allPages, conversationId],
   );
+  const pageIds = useMemo(() => pages.map((p) => p.id), [pages]);
+  const onReorderTabs = useCallback(
+    (ids: string[]) => {
+      if (!conversationId) return;
+      reorderPages(conversationId, ids);
+    },
+    [conversationId, reorderPages],
+  );
+  const { getItemProps } = useSortableTabIds(pageIds, onReorderTabs, {
+    disabled: !conversationId,
+  });
   const activePage =
     pages.find((p) => p.id === activePageId) ?? pages[pages.length - 1] ?? null;
 
@@ -335,6 +367,31 @@ export function BrowserPanel({
     });
   }, [browserApi, activePageId, activePage, syncPageFromHost]);
 
+  // Local web target=_blank → 同壳新页签（popup / window.open 走主进程子窗，不经此通道）。
+  useEffect(() => {
+    if (!browserApi?.onOpenTab) return;
+    return browserApi.onOpenTab((req: BrowserOpenTabRequest) => {
+      const cid = req.conversationId?.trim();
+      const url = req.url?.trim();
+      if (!cid || !url) return;
+      useSidePanelStore.getState().showBrowser();
+      const activate = !req.background;
+      const pageId = createPage({
+        conversationId: cid,
+        url,
+        activate,
+        hostKind: "local",
+      });
+      void browserApi
+        .navigate({ pageId, conversationId: cid, url })
+        .then((r) => {
+          if (!r.ok) {
+            notifyError(new Error(r.reason), "无法打开新页签");
+          }
+        });
+    });
+  }, [browserApi, createPage]);
+
   const onSubmitUrl = (e: FormEvent) => {
     e.preventDefault();
     if (!activePage) return;
@@ -451,20 +508,29 @@ export function BrowserPanel({
     closePage(pageId);
   };
 
+  const openExternalUrl = useCallback(
+    (url: string) => {
+      if (!url || !isSafeExternalUrl(url)) {
+        notifyError(
+          new Error("仅支持打开 http(s) 链接"),
+          "无法在系统浏览器打开",
+        );
+        return;
+      }
+      if (!browserApi?.openExternal) {
+        // Web / 无 IPC：走 window.open，由主窗 setWindowOpenHandler 转系统浏览器。
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      void browserApi.openExternal({ url }).then((r) => {
+        if (!r.ok) notifyError(new Error(r.reason), "无法在系统浏览器打开");
+      });
+    },
+    [browserApi],
+  );
+
   const onOpenExternal = () => {
-    const url = draftUrl.trim() || activePage?.url || "";
-    if (!url || !isSafeExternalUrl(url)) {
-      notifyError(new Error("仅支持打开 http(s) 链接"), "无法在系统浏览器打开");
-      return;
-    }
-    if (!browserApi?.openExternal) {
-      // Web / 无 IPC：走 window.open，由主窗 setWindowOpenHandler 转系统浏览器。
-      window.open(url, "_blank", "noopener,noreferrer");
-      return;
-    }
-    void browserApi.openExternal({ url }).then((r) => {
-      if (!r.ok) notifyError(new Error(r.reason), "无法在系统浏览器打开");
-    });
+    openExternalUrl(draftUrl.trim() || activePage?.url || "");
   };
 
   const hostId = activePage ? hostBrowserPageId(activePage) : null;
@@ -496,50 +562,71 @@ export function BrowserPanel({
     <div className="flex h-full flex-col bg-card">
       {/* 页签条 */}
       <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border bg-muted/30 px-1.5 py-1">
-        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+        <HorizontalTabStrip
+          className="min-w-0 flex-1"
+          aria-label="浏览器标签页"
+        >
           {pages.map((page) => {
             const active = page.id === activePage?.id;
             const isAiPage = Boolean(page.serverSessionId);
+            const tabOpenUrl = active ? draftUrl.trim() || page.url : page.url;
+            const tabCanOpenExternal = isSafeExternalUrl(tabOpenUrl);
             return (
-              <div
-                key={page.id}
-                className={`group/btab flex max-w-[140px] shrink-0 items-center rounded-lg ${
-                  active
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-accent/50"
-                }`}
-              >
-                <Button
-                  variant="ghost"
-                  onClick={() => setActivePage(page.id)}
-                  className="h-7 max-w-[110px] truncate rounded-none px-2 py-0 text-xs font-normal"
-                  icon={
-                    isAiPage ? (
-                      <Sparkles
-                        size={12}
-                        className="shrink-0 opacity-60"
-                        aria-hidden
-                      />
-                    ) : (
-                      <Globe size={12} className="shrink-0 opacity-60" />
-                    )
-                  }
-                  title={isAiPage ? "AI 打开的页" : "你打开的页"}
+              <ContextMenu key={page.id}>
+                <SortableTab
+                  id={page.id}
+                  getItemProps={getItemProps}
+                  className={`group/btab flex max-w-[140px] shrink-0 items-center rounded-lg ${
+                    active
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-accent/50"
+                  }`}
                 >
-                  {page.title || "新标签页"}
-                </Button>
-                <IconButton
-                  size="sm"
-                  onClick={() => onClosePage(page.id)}
-                  aria-label={`关闭 ${page.title || "新标签页"}`}
-                  className="mr-0.5 size-5 opacity-0 group-hover/btab:opacity-100"
-                >
-                  <X size={11} />
-                </IconButton>
-              </div>
+                  <ContextMenuTrigger asChild>
+                    <div className="flex min-w-0 flex-1 items-center">
+                      <Button
+                        variant="ghost"
+                        onClick={() => setActivePage(page.id)}
+                        className="h-7 max-w-[110px] truncate rounded-none px-2 py-0 text-xs font-normal"
+                        icon={
+                          isAiPage ? (
+                            <Sparkles
+                              size={12}
+                              className="shrink-0 opacity-60"
+                              aria-hidden
+                            />
+                          ) : (
+                            <Globe size={12} className="shrink-0 opacity-60" />
+                          )
+                        }
+                        title={isAiPage ? "AI 打开的页" : "你打开的页"}
+                      >
+                        {page.title || "新标签页"}
+                      </Button>
+                      <IconButton
+                        size="sm"
+                        onClick={() => onClosePage(page.id)}
+                        aria-label={`关闭 ${page.title || "新标签页"}`}
+                        className="mr-0.5 size-5 opacity-0 group-hover/btab:opacity-100"
+                        {...{ [NO_TAB_DRAG_ATTR]: "" }}
+                      >
+                        <X size={11} />
+                      </IconButton>
+                    </div>
+                  </ContextMenuTrigger>
+                </SortableTab>
+                <ContextMenuContent className="min-w-44">
+                  <ContextMenuItem
+                    disabled={!tabCanOpenExternal}
+                    onSelect={() => openExternalUrl(tabOpenUrl)}
+                  >
+                    在系统浏览器打开
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
-        </div>
+        </HorizontalTabStrip>
         <IconButton
           size="sm"
           onClick={onNewPage}
@@ -588,25 +675,45 @@ export function BrowserPanel({
         >
           <RotateCw size={14} />
         </IconButton>
-        <Input
-          value={draftUrl}
-          onChange={(e) => setDraftUrl(e.target.value)}
-          onKeyDown={onUrlKeyDown}
-          placeholder="输入地址开始浏览"
-          aria-label="地址栏"
-          className="h-7 min-w-0 flex-1 rounded-full px-3 text-xs"
-          spellCheck={false}
-          autoComplete="off"
-        />
-        <IconButton
-          size="sm"
-          disabled={!canOpenExternal}
-          onClick={onOpenExternal}
-          aria-label="在系统浏览器打开"
-          title="在系统浏览器打开"
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="min-w-0 flex-1">
+              <Input
+                value={draftUrl}
+                onChange={(e) => setDraftUrl(e.target.value)}
+                onKeyDown={onUrlKeyDown}
+                placeholder="输入地址开始浏览"
+                aria-label="地址栏"
+                className="h-7 w-full rounded-full px-3 text-xs"
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="min-w-44">
+            <ContextMenuItem
+              disabled={!canOpenExternal}
+              onSelect={onOpenExternal}
+            >
+              在系统浏览器打开
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+        <SimpleTooltip
+          label={canOpenExternal ? "在系统浏览器打开" : "仅支持 http(s) 链接"}
         >
-          <ExternalLink size={14} />
-        </IconButton>
+          {/* span: disabled 按钮不接 pointer events → 仍能悬停出原因 */}
+          <span className="inline-flex">
+            <IconButton
+              size="sm"
+              disabled={!canOpenExternal}
+              onClick={onOpenExternal}
+              aria-label="在系统浏览器打开"
+            >
+              <ExternalLink size={14} />
+            </IconButton>
+          </span>
+        </SimpleTooltip>
       </form>
 
       {/* 内容区 */}

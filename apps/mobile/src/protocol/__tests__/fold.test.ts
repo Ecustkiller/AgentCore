@@ -4,6 +4,7 @@
 // static 进行中 — and clears a tool's phase the moment it ends.
 
 import {
+  extractEscalationSlots,
   extractEvidenceLedger,
   extractGraphAppendActKinds,
   extractGraphAppendAuthorizedBy,
@@ -671,5 +672,75 @@ describe("extractTurnQueued", () => {
     expect(turn.content).toBe("好的");
     expect(turn.status).toBe("completed");
     expect(turn.userInterjections).toEqual([]);
+  });
+});
+
+describe("extractEscalationSlots · browser_login transport", () => {
+  it("maps wire browser_login → esc.browserLogin (transport-only)", () => {
+    const slots = extractEscalationSlots([
+      ev("escalation_required", {
+        escalation_id: "esc-login",
+        run_id: "r1",
+        agent_id: "w1",
+        question: "请在浏览器里登录后再继续",
+        assumption: "用户已登录",
+        browser_login: true,
+      }),
+    ]);
+    const slot = slots.get("esc-login");
+    expect(slot?.esc).toMatchObject({
+      status: "pending",
+      blocking: true,
+      browserLogin: true,
+      question: "请在浏览器里登录后再继续",
+    });
+  });
+
+  it("omits browserLogin when wire flag absent / false", () => {
+    const slots = extractEscalationSlots([
+      ev("escalation_required", {
+        escalation_id: "esc-plain",
+        run_id: "r1",
+        agent_id: "w1",
+        question: "要换方案吗？",
+        assumption: "保持原方案",
+      }),
+    ]);
+    expect(slots.get("esc-plain")?.esc.browserLogin).toBeUndefined();
+  });
+
+  it("does not fold browserLogin onto ProjectedRun.escalations (golden-clean)", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("run_plan", {
+        execution_id: "exec1",
+        plan_type: "multi_agent",
+        task_summary: "t",
+        agents: [{ id: "w1", role: "调研员", thinking: false }],
+        runs: [{ id: "r1", agent_id: "w1", task: "调研", depends_on: [] }],
+      }),
+      ev("run_started", {
+        run_id: "r1",
+        agent_id: "w1",
+        parent_run_id: null,
+        kind: "agent",
+      }),
+      ev("escalation_required", {
+        escalation_id: "esc-login",
+        run_id: "r1",
+        agent_id: "w1",
+        question: "请登录",
+        assumption: "已登录",
+        browser_login: true,
+      }),
+    ]);
+    const esc = turn.runs.find((r) => r.id === "r1")?.escalations[0];
+    expect(esc).toMatchObject({
+      status: "pending",
+      question: "请登录",
+    });
+    expect(
+      (esc as { browserLogin?: boolean } | undefined)?.browserLogin,
+    ).toBeUndefined();
   });
 });

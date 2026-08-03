@@ -409,6 +409,31 @@ async def test_delete_missing_raises_path_not_found(tmp_path: Path):
         await _ws(tmp_path).delete("nope.txt")
 
 
+async def test_delete_agentcore_expands_rules_restorable(tmp_path: Path):
+    """Deleting bare AgentCore/ expands children — no self-nest 500 path."""
+    ac = tmp_path / "AgentCore"
+    (ac / "规则").mkdir(parents=True)
+    (ac / "规则" / "r.md").write_text("keep-me", encoding="utf-8")
+    (ac / "index").mkdir(parents=True)
+    (ac / "index" / "x.db").write_text("db", encoding="utf-8")
+    (ac / "trash").mkdir(parents=True)
+
+    ws = _ws(tmp_path)
+    await ws.delete("AgentCore")
+
+    assert not (ac / "规则").exists()
+    assert not (ac / "index").exists()
+    from agentcore.workspace.trash import list_trash_entries, restore_from_trash
+
+    entries = list_trash_entries(root=tmp_path, retention_days=30)
+    assert len(entries) == 1
+    assert entries[0].original_path == "AgentCore/规则"
+    assert restore_from_trash(root=tmp_path, entry_id=entries[0].entry_id) == (
+        "AgentCore/规则"
+    )
+    assert (ac / "规则" / "r.md").read_text(encoding="utf-8") == "keep-me"
+
+
 async def test_delete_root_raises_outside_workspace(tmp_path: Path):
     # Refuse to nuke the workspace itself, however the root is addressed.
     with pytest.raises(OutsideWorkspace):

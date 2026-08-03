@@ -9,6 +9,23 @@ import { isWorkspaceBrowserUrl } from "./workspace-paths";
 export const LOCAL_BROWSER_BLANK = "about:blank";
 
 /**
+ * `window.open` / target=_blank 分流（web 模式）。
+ * - `popup`：登录类弹窗 / `window.open`（含 features）→ 同 partition 子窗
+ * - `tab`：普通 `target=_blank` / 中键 → 同壳新页签
+ * - `deny`：危险 scheme 或未知 disposition
+ */
+export type WebWindowOpenRoute = "deny" | "popup" | "tab";
+
+/** Chromium WindowOpenDisposition（Electron HandlerDetails.disposition）。 */
+export type WindowOpenDisposition =
+  | "default"
+  | "foreground-tab"
+  | "background-tab"
+  | "new-window"
+  | "other"
+  | string;
+
+/**
  * 外网页模式：是否允许在本机浏览器壳内加载该 URL（顶级导航 / loadURL 前置）。
  * `about:blank` 仅用于空页占位；业务导航须为 http(s)。
  */
@@ -26,6 +43,56 @@ export function isAllowedWebBrowserUrl(url: string): boolean {
   }
   const protocol = parsed.protocol.toLowerCase();
   return protocol === "http:" || protocol === "https:";
+}
+
+/**
+ * web 模式 `setWindowOpenHandler` 分流决策（纯函数）。
+ * 空 URL 视为 `about:blank`（OAuth 常先开空白再导航）。
+ */
+export function resolveWebWindowOpenRoute(input: {
+  url: string;
+  disposition: WindowOpenDisposition;
+}): WebWindowOpenRoute {
+  const raw = typeof input.url === "string" ? input.url.trim() : "";
+  const url = raw === "" ? LOCAL_BROWSER_BLANK : raw;
+  if (!isAllowedWebBrowserUrl(url)) return "deny";
+
+  const d = input.disposition;
+  if (d === "foreground-tab" || d === "background-tab") return "tab";
+  // new-window / default / other：window.open（含 features）与 shift-click 等 → 子窗
+  if (d === "new-window" || d === "default" || d === "other" || !d) {
+    return "popup";
+  }
+  return "deny";
+}
+
+/** 从 window.open features 解析子窗尺寸（缺省 520×720）。 */
+export function parseWindowOpenFeatures(features: string | undefined): {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+} {
+  const defaults = { width: 520, height: 720 };
+  if (typeof features !== "string" || !features.trim()) return defaults;
+  const get = (key: string): number | undefined => {
+    const m = features.match(
+      new RegExp(`(?:^|,)\\s*${key}\\s*=\\s*(\\d+)`, "i"),
+    );
+    if (!m?.[1]) return undefined;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const width = get("width") ?? defaults.width;
+  const height = get("height") ?? defaults.height;
+  const x = get("left") ?? get("screenx");
+  const y = get("top") ?? get("screeny");
+  return {
+    width: Math.min(Math.max(width, 200), 2400),
+    height: Math.min(Math.max(height, 200), 1600),
+    ...(x !== undefined ? { x } : {}),
+    ...(y !== undefined ? { y } : {}),
+  };
 }
 
 /**

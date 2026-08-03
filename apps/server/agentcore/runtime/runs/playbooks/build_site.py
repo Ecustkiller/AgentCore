@@ -1,4 +1,4 @@
-"""建站 / 工具台三串 + 整页验收：website / toolshed / verify."""
+"""建站三串 + 整页验收：build_website（style 气质槽）/ verify."""
 
 from __future__ import annotations
 
@@ -22,6 +22,11 @@ _BUILD_WEBSITE_DESIGN = f"{_BUILD_WEBSITE_DIR}/DESIGN.md"
 _BUILD_WEBSITE_QA = f"{_BUILD_WEBSITE_DIR}/QA.md"
 _DEFAULT_WEBSITE_SECTIONS = ("首屏英雄区", "卖点能力区", "行动号召区")
 _DEFAULT_TOOLSHED_SECTIONS = ("应用外壳", "侧栏导航", "数据表格")
+
+# 气质槽：默认营销/落地页；toolshed = 控制台 dense（旧独立 playbook 行为）。
+STYLE_MARKETING = "marketing"
+STYLE_TOOLSHED = "toolshed"
+_ALLOWED_STYLES = frozenset({STYLE_MARKETING, STYLE_TOOLSHED})
 
 # 文案包结构化板块（验收用 required_sections，替代高 min_length）
 _BUILD_WEBSITE_COPY_SECTIONS = (
@@ -249,8 +254,33 @@ def _build_three_chain_site(
 
 
 def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """文案 → 前端（DESIGN + 整页 + CONTRACT）→ 独立 QA（营销 / 落地页）."""
-    from agentcore.runtime.runs.website_catalog import PACK_MARKETING
+    """文案 → 前端（DESIGN + 整页 + CONTRACT）→ 独立 QA。
+
+    ``style`` 气质槽：默认 marketing（落地页）；``toolshed`` = 控制台 dense /
+    tool pack / 禁营销皮（旧独立 build_toolshed 行为）。
+    """
+    from agentcore.runtime.runs.website_catalog import PACK_MARKETING, PACK_TOOL_DENSE
+
+    raw_style = clean_str(args.get("style"))
+    style = raw_style or STYLE_MARKETING
+    if style not in _ALLOWED_STYLES:
+        return [], [
+            f"build_website 未知 style『{style}』；"
+            f"可选：{STYLE_MARKETING}（默认）/ {STYLE_TOOLSHED}"
+        ]
+
+    if style == STYLE_TOOLSHED:
+        return _build_three_chain_site(
+            args,
+            playbook_name="build_website",
+            pack=PACK_TOOL_DENSE,
+            anti_slop_domain="tool",
+            default_sections=_DEFAULT_TOOLSHED_SECTIONS,
+            visual_thesis=_BUILD_TOOLSHED_VISUAL_THESIS,
+            domain_hint=_BUILD_TOOLSHED_DOMAIN_HINT,
+            copy_sections=_BUILD_TOOLSHED_COPY_SECTIONS,
+            site_slot_hint="要建的控制台 / 工具台简述",
+        )
 
     return _build_three_chain_site(
         args,
@@ -262,23 +292,6 @@ def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
         domain_hint=_BUILD_WEBSITE_DOMAIN_HINT,
         copy_sections=_BUILD_WEBSITE_COPY_SECTIONS,
         site_slot_hint="要建的站点 / 落地页简述",
-    )
-
-
-def build_toolshed(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """同三串；控制台 / 工具台 dense；强制 tool_dense pack + anti-slop domain=tool."""
-    from agentcore.runtime.runs.website_catalog import PACK_TOOL_DENSE
-
-    return _build_three_chain_site(
-        args,
-        playbook_name="build_toolshed",
-        pack=PACK_TOOL_DENSE,
-        anti_slop_domain="tool",
-        default_sections=_DEFAULT_TOOLSHED_SECTIONS,
-        visual_thesis=_BUILD_TOOLSHED_VISUAL_THESIS,
-        domain_hint=_BUILD_TOOLSHED_DOMAIN_HINT,
-        copy_sections=_BUILD_TOOLSHED_COPY_SECTIONS,
-        site_slot_hint="要建的控制台 / 工具台简述",
     )
 
 

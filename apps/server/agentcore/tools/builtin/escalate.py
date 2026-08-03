@@ -315,16 +315,19 @@ class EscalateTool:
                 write_coordinator=context.write_coordinator,
             )
             ownership_paths = ownership_hints.get("ownership_paths")
-            # 用户写权卡仅锁主仍在跑；已完成占位靠同座续派/declare 接手，不直达用户移交。
+            # 用户写权卡仅锁主仍在跑；已完成/已结束占位靠同座续派/declare·claim 接手，
+            # 不直达用户移交。
             user_ownership_card = bool(ownership_paths) and (
                 ownership_hints.get("owner_status") == "running"
             )
             awaiting = "user"
             if not browser_login and not user_ownership_card:
                 try:
-                    from agentcore.runtime.coordination.session import active_coordination
+                    from agentcore.runtime.coordination.session import (
+                        resolve_coordination_session,
+                    )
 
-                    coord = active_coordination(context.execution_id)
+                    coord = resolve_coordination_session(context.execution_id)
                     if coord is not None and coord.active:
                         awaiting = "ceo"
                 except Exception:  # noqa: BLE001

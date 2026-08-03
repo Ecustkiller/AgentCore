@@ -2,7 +2,7 @@
  * DesktopBrowserBridge（L8）——本机 loopback HTTP + 主进程签发短时 token。
  *
  * 仅绑定 127.0.0.1；无 Bearer token / 过期 / 错 token → 401。
- * 动作：`GET /health`、`POST /navigate`、`POST /command`（六动作对齐 browser_*）。
+ * 动作：`GET /health`、`POST /navigate`、`POST /command`（与 browser_* 对齐）。
  * Local live 帧：server Hub attach 后周期 POST screenshot（frame_b64+width+height）。
  * 鉴权/handler 纯逻辑见 bridge-handler.ts（可单测）。
  *

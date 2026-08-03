@@ -66,8 +66,15 @@ class CheckpointResponse:
     several when the ask is ``multiple`` — and is a first-class part of the
     answer (no longer folded into ``note``), so ``CONTINUE`` carries the pick
     too. Empty when the ask offered no options or the user chose none.
+
+    ``excluded_run_ids`` / ``write_capability_overrides`` are delegate
+    ``team_preview`` continue corrections (开工组队有限否决). Ignored for debate /
+    ask_user / plan_review / stop. Override shape: ``{run_id, capability:
+    "text_only"}`` only (tighten write → ``form=prose``; never hard-strip tools).
     """
 
     decision: CheckpointDecision
     note: str = ""
     selected: list[str] = field(default_factory=list)
+    excluded_run_ids: list[str] = field(default_factory=list)
+    write_capability_overrides: list[dict[str, str]] = field(default_factory=list)

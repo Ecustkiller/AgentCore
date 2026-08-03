@@ -265,6 +265,111 @@ async def test_completed_owner_ownership_escalate_goes_to_ceo():
 
 
 @pytest.mark.asyncio
+async def test_ended_owner_ownership_escalate_goes_to_ceo():
+    """锁主 ended（未进 completed_run_ids）：协调活跃时走主管，不弹用户移交卡。"""
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e-own-ended", total_workers=2)
+    set_active_coordination(session)
+    ledger = session.ensure_file_ownership()
+    ledger.declare("docs/plan.md", "author-v1", frozenset())
+    ledger.mark_written("docs/plan.md")
+    ledger.mark_ended("author-v1")
+    # 故意不写入 completed_run_ids（嵌套终态旁路形态）
+    assert "author-v1" not in session.completed_run_ids
+    seen: list[tuple[str, object]] = []
+
+    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+        seen.append((awaiting, kwargs.get("ownership_paths")))
+        return EscalationOutcome(status="resolved", answer="同座续派接手")
+
+    channel = EscalationChannel(armed=True, request=_request)
+    try:
+        result = await EscalateTool().execute(
+            {
+                "question": "写入冲突：`docs/plan.md` 已归队友负责",
+                "assumption": "等主管同座续派",
+                "blocking": True,
+            },
+            _ctx(execution_id="e-own-ended", escalation=channel, run_id="merger"),
+        )
+        assert result.success is True
+        assert "主管就你的升级问题裁决" in result.output
+        assert seen == [("ceo", None)]
+    finally:
+        clear_active_coordination("e-own-ended")
+        clear_active_coordination()
+
+
+@pytest.mark.asyncio
+async def test_nl_transfer_answer_does_not_mutate_ledger():
+    """NL「移交写权」答复不改账本；仅 structured transfer_ownership 才移交。"""
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e-nl", total_workers=2)
+    set_active_coordination(session)
+    ledger = session.ensure_file_ownership()
+    ledger.declare("site/index.html", "assemble", frozenset())
+    session.register_arbitration(
+        "skeleton",
+        escalation_id="esc-nl",
+        conversation_id="c1",
+        question="写入冲突：`site/index.html`",
+        assumption="等移交",
+        ownership_paths=["site/index.html"],
+        lock_owner_run_id="assemble",
+    )
+    tool = ResolveEscalationTool()
+    result = await tool.execute(
+        {
+            "run_id": "skeleton",
+            "answer": "已移交写权，你继续写 site/index.html",
+            # 故意不传 transfer_ownership
+        },
+        _ctx(execution_id="e-nl"),
+    )
+    assert result.success is True
+    assert ledger.owner_of("site/index.html") == "assemble"
+    clear_active_coordination("e-nl")
+    clear_active_coordination()
+
+
+@pytest.mark.asyncio
+async def test_nested_ended_escalate_uses_parent_coordination():
+    """嵌套 eid 无会话：父回退后 ended 锁主仍走 CEO。"""
+    from agentcore.runtime.coordination.session import current_execution_id
+
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="parent-coord", total_workers=2)
+    set_active_coordination(session)
+    ledger = session.ensure_file_ownership()
+    ledger.declare("docs/plan.md", "author-v1", frozenset())
+    ledger.mark_ended("author-v1")
+    seen: list[tuple[str, object]] = []
+
+    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+        seen.append((awaiting, kwargs.get("ownership_paths")))
+        return EscalationOutcome(status="resolved", answer="ok")
+
+    channel = EscalationChannel(armed=True, request=_request)
+    token = current_execution_id.set("parent-coord")
+    try:
+        result = await EscalateTool().execute(
+            {
+                "question": "写入冲突：`docs/plan.md` 已归队友负责",
+                "assumption": "等主管",
+                "blocking": True,
+            },
+            _ctx(execution_id="nested-only", escalation=channel, run_id="merger"),
+        )
+        assert result.success is True
+        assert "主管就你的升级问题裁决" in result.output
+        assert seen == [("ceo", None)]
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination("parent-coord")
+        clear_active_coordination()
+
+
+@pytest.mark.asyncio
 async def test_resolve_escalation_settles_live_bridge():
     clear_active_coordination()
     session = CoordinationSession(execution_id="e-d1", total_workers=2)

@@ -67,6 +67,8 @@ async def recover_turn(
     note: str = "",
     selected: list[str] | None = None,
     debate_tool: DebateTool | None = None,
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> SettledSuspension:
     """Settle a resume decision or CONTINUE-redrive unfinished DAG from ``state``.
 
@@ -76,6 +78,8 @@ async def recover_turn(
       plan nodes with ``seed_completed=state.completed`` (completed nodes skipped).
     - ``debate_tool`` is required when settling a ``team_preview`` with
       ``primitive=debate``.
+    - ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
+      ``team_preview`` continue (开工组队有限否决); ignored otherwise.
     """
     if suspension is not None:
         if decision is None:
@@ -90,6 +94,8 @@ async def recover_turn(
             delegate_tool=delegate_tool,
             debate_tool=debate_tool,
             execution_id=execution_id,
+            excluded_run_ids=excluded_run_ids or [],
+            write_capability_overrides=write_capability_overrides or [],
         )
 
     decision = decision or CheckpointDecision.CONTINUE
@@ -134,6 +140,8 @@ async def _settle_resume(
     delegate_tool: DelegateTool,
     debate_tool: DebateTool | None,
     execution_id: str,
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> SettledSuspension:
     """Kind-specific resume settle, projecting exclusively via ``state``."""
     # research_first 仅辩论开工卡合法；其它挂起点降级为 STOP，不得静默 continue。
@@ -307,11 +315,46 @@ async def _settle_resume(
         return SettledSuspension(delegate_result.output, None, delegate_result.effect)
 
     if isinstance(suspension, TeamPreviewSuspension):
+        from agentcore.runtime.kickoff.team_veto import (
+            apply_team_preview_veto,
+            should_apply_team_veto,
+            validate_team_preview_veto,
+            veto_summary_for_resolved,
+        )
+
+        excl_for_event: list[str] | None = None
+        overrides_for_event: list[dict[str, str]] | None = None
+        apply_veto = should_apply_team_veto(suspension, decision)
+        seed_completed = dict(state.completed) or suspension.completed
+        plan = state.plan or suspension.plan
+        # 开工组队有限否决：validate+apply 必须在 emit resolved 之前——非法修正不得先落事件。
+        # 冷启动 explore≥2 闸只在 delegate.execute，不挡本卡剪枝后的 resume。
+        if apply_veto:
+            validate_team_preview_veto(
+                plan,
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
+            )
+            apply_team_preview_veto(
+                plan,
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
+                seed_completed=seed_completed,
+            )
+            excl_for_event, overrides_for_event = veto_summary_for_resolved(
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
+            )
+            excl_for_event = excl_for_event or None
+            overrides_for_event = overrides_for_event or None
+
         sink.emit(
             team_preview_resolved(
                 checkpoint_id=suspension.checkpoint_id,
                 decision=decision.value,
                 note=note,
+                excluded_run_ids=excl_for_event,
+                write_capability_overrides=overrides_for_event,
             )
         )
         logger.info(
@@ -319,6 +362,8 @@ async def _settle_resume(
             checkpoint_id=suspension.checkpoint_id,
             decision=decision.value,
             primitive=suspension.primitive,
+            excluded=len(excl_for_event or []),
+            write_overrides=len(overrides_for_event or []),
         )
         if suspension.primitive == "debate":
             if debate_tool is None:
@@ -331,8 +376,6 @@ async def _settle_resume(
             # STOP / RESEARCH_FIRST：tool result 回灌 CEO 续跑（terminal_text=None）。
             return SettledSuspension(debate_result.output, None, debate_result.effect)
 
-        seed_completed = dict(state.completed) or suspension.completed
-        plan = state.plan or suspension.plan
         eid = state.execution_id or execution_id
         # Preview hung before the coordinate fork; CONTINUE/ADJUST must arm the
         # background scheduler (product default for ≥2 workers).

@@ -1,0 +1,369 @@
+"""product_help ↔ desktop manual deep-link drift gate.
+
+Parses ``sectionIds.ts`` (+ ``paths.ts`` chapter keys) from the monorepo and
+asserts every ``#/toolbox/manual/...`` / bare ``?s=`` in the ``product_help``
+skill body lands in that registry (canonical ids + aliases). No TS→Python
+export — lightweight regex parse only.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from agentcore.runtime.skills import build_system_skill_registry
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SECTION_IDS_TS = (
+    _REPO_ROOT
+    / "apps"
+    / "desktop"
+    / "src"
+    / "renderer"
+    / "pages"
+    / "toolbox"
+    / "manual"
+    / "sectionIds.ts"
+)
+_PATHS_TS = _SECTION_IDS_TS.with_name("paths.ts")
+
+_FULL_LINK = re.compile(
+    r"#/toolbox/manual/(?P<chapter>[a-z][a-z0-9_]*)"
+    r"(?:\?s=(?P<section>[a-z0-9][a-z0-9_-]*))?"
+)
+_BARE_SECTION = re.compile(r"\?s=(?P<section>[a-z0-9][a-z0-9_-]*)")
+_CHAPTER_HINT = re.compile(r"（(?P<chapter>[a-z][a-z0-9_]*)·")
+
+
+@dataclass(frozen=True)
+class ManualRegistry:
+    chapters: frozenset[str]
+    sections_by_chapter: dict[str, frozenset[str]]
+    aliases: frozenset[str]
+    owner: dict[str, str]  # section id or alias → chapter
+
+    @property
+    def all_section_ids(self) -> frozenset[str]:
+        registered = set(self.aliases)
+        for ids in self.sections_by_chapter.values():
+            registered |= set(ids)
+        return frozenset(registered)
+
+
+@dataclass(frozen=True)
+class LinkHit:
+    kind: str  # "full" | "bare"
+    text: str
+    chapter: str | None
+    section: str | None
+    start: int
+    end: int
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def parse_paths_chapters(src: str) -> frozenset[str]:
+    m = re.search(
+        r"export const MANUAL_CHAPTER_PATHS\s*:\s*[^=]*=\s*\{(.*?)\}\s*;",
+        src,
+        flags=re.DOTALL,
+    )
+    _require(
+        m is not None,
+        f"parse failure: MANUAL_CHAPTER_PATHS not found in {_PATHS_TS.name}",
+    )
+    assert m is not None
+    keys = frozenset(re.findall(r"^\s*([a-z][a-z0-9_]*)\s*:", m.group(1), flags=re.M))
+    _require(
+        bool(keys),
+        f"parse failure: MANUAL_CHAPTER_PATHS has no chapter keys in {_PATHS_TS.name}",
+    )
+    return keys
+
+
+def parse_section_registry(section_src: str, paths_src: str) -> ManualRegistry:
+    chapters_from_paths = parse_paths_chapters(paths_src)
+
+    m = re.search(
+        r"export const MANUAL_SECTION_IDS\s*=\s*\{(.*?)\}\s*as const",
+        section_src,
+        flags=re.DOTALL,
+    )
+    _require(
+        m is not None,
+        f"parse failure: MANUAL_SECTION_IDS not found in {_SECTION_IDS_TS.name}",
+    )
+    assert m is not None
+    block = m.group(1)
+
+    sections_by_chapter: dict[str, frozenset[str]] = {}
+    for ch_m in re.finditer(
+        r"([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}",
+        block,
+    ):
+        chapter = ch_m.group(1)
+        ids = frozenset(re.findall(r':\s*"([a-z0-9][a-z0-9_-]*)"', ch_m.group(2)))
+        _require(
+            bool(ids),
+            f"parse failure: chapter {chapter!r} has no section string literals "
+            f"in {_SECTION_IDS_TS.name}",
+        )
+        sections_by_chapter[chapter] = ids
+
+    _require(
+        bool(sections_by_chapter),
+        f"parse failure: MANUAL_SECTION_IDS has no chapter blocks in {_SECTION_IDS_TS.name}",
+    )
+    chapter_keys = frozenset(sections_by_chapter)
+    _require(
+        chapter_keys == chapters_from_paths,
+        "parse failure: MANUAL_SECTION_IDS chapters "
+        f"{sorted(chapter_keys)} != MANUAL_CHAPTER_PATHS keys "
+        f"{sorted(chapters_from_paths)}",
+    )
+
+    alias_m = re.search(
+        r"export const MANUAL_SECTION_ALIASES\s*:\s*[^=]*=\s*\{(.*?)\}\s*;",
+        section_src,
+        flags=re.DOTALL,
+    )
+    _require(
+        alias_m is not None,
+        f"parse failure: MANUAL_SECTION_ALIASES not found in {_SECTION_IDS_TS.name}",
+    )
+    assert alias_m is not None
+    alias_block = alias_m.group(1)
+    aliases = frozenset(
+        a or b
+        for a, b in re.findall(
+            r'(?:^|[,{])\s*(?:"([^"]+)"|([a-z][a-z0-9_-]*))\s*:',
+            alias_block,
+        )
+    )
+    # Resolve alias → canonical via MANUAL_SECTION_IDS.chapter.section refs
+    alias_owner: dict[str, str] = {}
+    for am in re.finditer(
+        r'(?:"(?P<q>[^"]+)"|(?P<b>[a-z][a-z0-9_-]*))\s*:\s*'
+        r"MANUAL_SECTION_IDS\.(?P<ch>[a-z][a-z0-9_]*)\.(?P<sec>[a-z][a-z0-9_]*)",
+        alias_block,
+    ):
+        alias = am.group("q") or am.group("b")
+        ch = am.group("ch")
+        sec = am.group("sec")
+        _require(
+            ch in sections_by_chapter and sec in sections_by_chapter[ch],
+            f"parse failure: alias {alias!r} targets "
+            f"MANUAL_SECTION_IDS.{ch}.{sec} which is not a registered section",
+        )
+        alias_owner[alias] = ch
+
+    _require(
+        frozenset(alias_owner) == aliases,
+        "parse failure: could not resolve every MANUAL_SECTION_ALIASES entry "
+        f"(keys={sorted(aliases)}, resolved={sorted(alias_owner)})",
+    )
+
+    owner: dict[str, str] = {}
+    for chapter, ids in sections_by_chapter.items():
+        for sid in ids:
+            owner[sid] = chapter
+    owner.update(alias_owner)
+
+    return ManualRegistry(
+        chapters=chapter_keys,
+        sections_by_chapter=sections_by_chapter,
+        aliases=aliases,
+        owner=owner,
+    )
+
+
+def load_manual_registry() -> ManualRegistry:
+    _require(
+        _SECTION_IDS_TS.is_file(),
+        f"parse failure: missing desktop registry {_SECTION_IDS_TS}",
+    )
+    _require(
+        _PATHS_TS.is_file(),
+        f"parse failure: missing desktop paths {_PATHS_TS}",
+    )
+    return parse_section_registry(
+        _SECTION_IDS_TS.read_text(encoding="utf-8"),
+        _PATHS_TS.read_text(encoding="utf-8"),
+    )
+
+
+def extract_manual_links(body: str) -> list[LinkHit]:
+    hits: list[LinkHit] = []
+    covered: list[tuple[int, int]] = []
+    for m in _FULL_LINK.finditer(body):
+        covered.append((m.start(), m.end()))
+        hits.append(
+            LinkHit(
+                kind="full",
+                text=m.group(0),
+                chapter=m.group("chapter"),
+                section=m.group("section"),
+                start=m.start(),
+                end=m.end(),
+            )
+        )
+
+    def _inside_full(start: int, end: int) -> bool:
+        return any(s <= start and end <= e for s, e in covered)
+
+    for m in _BARE_SECTION.finditer(body):
+        if _inside_full(m.start(), m.end()):
+            continue
+        hits.append(
+            LinkHit(
+                kind="bare",
+                text=m.group(0),
+                chapter=None,
+                section=m.group("section"),
+                start=m.start(),
+                end=m.end(),
+            )
+        )
+    return hits
+
+
+def infer_chapter_from_context(
+    body: str,
+    pos: int,
+    chapters: frozenset[str],
+) -> str | None:
+    """Only same-line cues count — cross-bullet lookback misfires in FAQ lists."""
+    line_start = body.rfind("\n", 0, pos) + 1
+    window = body[line_start:pos]
+    chapter_alt = "|".join(sorted(chapters, key=len, reverse=True))
+    fulls = list(
+        re.finditer(rf"#/toolbox/manual/({chapter_alt})\b", window),
+    )
+    if fulls:
+        return fulls[-1].group(1)
+    hints = list(_CHAPTER_HINT.finditer(window))
+    for h in reversed(hints):
+        ch = h.group("chapter")
+        if ch in chapters:
+            return ch
+    return None
+
+
+def collect_manual_link_errors(body: str, registry: ManualRegistry) -> list[str]:
+    errors: list[str] = []
+    for hit in extract_manual_links(body):
+        if hit.kind == "full":
+            assert hit.chapter is not None
+            if hit.chapter not in registry.chapters:
+                errors.append(
+                    "unknown chapter "
+                    f"{hit.chapter!r} in {hit.text!r} "
+                    f"(registered chapters: {sorted(registry.chapters)})"
+                )
+                continue
+            if hit.section is None:
+                continue
+            owner = registry.owner.get(hit.section)
+            if owner is None:
+                errors.append(
+                    "unknown section "
+                    f"{hit.section!r} in {hit.text!r} "
+                    f"(not in {_SECTION_IDS_TS.name} registry, incl. aliases)"
+                )
+            elif owner != hit.chapter:
+                errors.append(
+                    "section "
+                    f"{hit.section!r} is owned by chapter {owner!r}, "
+                    f"not {hit.chapter!r} in {hit.text!r}"
+                )
+            continue
+
+        assert hit.section is not None
+        if hit.section not in registry.all_section_ids:
+            errors.append(
+                "unknown bare section "
+                f"{hit.section!r} in {hit.text!r} "
+                f"(not in {_SECTION_IDS_TS.name} registry, incl. aliases)"
+            )
+            continue
+        inferred = infer_chapter_from_context(body, hit.start, registry.chapters)
+        if inferred is None:
+            continue
+        owner = registry.owner[hit.section]
+        if owner != inferred:
+            errors.append(
+                "bare section "
+                f"{hit.section!r} inferred chapter {inferred!r} from context, "
+                f"but registry owner is {owner!r} (near {hit.text!r})"
+            )
+    return errors
+
+
+def product_help_body() -> str:
+    skill = build_system_skill_registry().get("product_help")
+    _require(skill is not None, "product_help skill missing from system registry")
+    assert skill is not None
+    return skill.body
+
+
+# --- tests -------------------------------------------------------------------
+
+
+def test_desktop_manual_registry_parses_nonempty():
+    reg = load_manual_registry()
+    assert "intro" in reg.chapters
+    assert "what" in reg.sections_by_chapter["intro"]
+    assert "faq" in reg.sections_by_chapter["reference"]
+    # aliases from sectionIds.ts must be registered
+    assert "collab-overview" in reg.aliases
+    assert reg.owner["collab-overview"] == "collaboration"
+    assert reg.owner["turnflow"] == "mechanism"
+
+
+def test_product_help_manual_deeplinks_match_section_registry():
+    reg = load_manual_registry()
+    body = product_help_body()
+    hits = extract_manual_links(body)
+    assert any(h.kind == "full" for h in hits), "expected at least one full manual deep-link"
+    assert any(h.kind == "bare" for h in hits), "expected at least one bare ?s= fragment"
+    errors = collect_manual_link_errors(body, reg)
+    assert not errors, "product_help manual deep-link drift:\n- " + "\n- ".join(errors)
+
+
+def test_intentional_dead_manual_links_fail_gate():
+    reg = load_manual_registry()
+    body = product_help_body()
+    poisoned = (
+        body
+        + "\n深链：`#/toolbox/manual/intro?s=dead_section_xyz`\n"
+        + "坏章：`#/toolbox/manual/nosuchchapter?s=what`\n"
+        + "裸死链：`?s=dead_bare_xyz`\n"
+        + "错章：`#/toolbox/manual/reference?s=what`\n"
+        + "同行错章：`#/toolbox/manual/collaboration?s=briefing` 然后 `?s=faq`\n"
+    )
+    errors = collect_manual_link_errors(poisoned, reg)
+    joined = "\n".join(errors)
+    assert any("dead_section_xyz" in e for e in errors), joined
+    assert any("nosuchchapter" in e for e in errors), joined
+    assert any("dead_bare_xyz" in e for e in errors), joined
+    assert any("owned by chapter 'intro'" in e and "reference" in e for e in errors), joined
+    assert any(
+        "bare section 'faq'" in e and "collaboration" in e and "reference" in e
+        for e in errors
+    ), joined
+
+
+def test_section_ids_parse_failure_message_is_clear():
+    paths = _PATHS_TS.read_text(encoding="utf-8")
+    try:
+        parse_section_registry("export const OTHER = 1;\n", paths)
+    except AssertionError as exc:
+        msg = str(exc)
+        assert "parse failure" in msg
+        assert "MANUAL_SECTION_IDS" in msg
+    else:
+        raise AssertionError("expected parse failure for missing MANUAL_SECTION_IDS")

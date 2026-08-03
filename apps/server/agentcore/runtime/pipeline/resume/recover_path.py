@@ -44,6 +44,8 @@ async def recover_and_rebuild_window(
     execution_id: str,
     captain_run_id: str,
     pre_pause_override: str | None = None,
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> RecoveredResume:
     """Settle the paused frame and rebuild the CEO message window.
 
@@ -77,6 +79,8 @@ async def recover_and_rebuild_window(
             decision=decision,
             note=note,
             selected=selected or [],
+            excluded_run_ids=excluded_run_ids,
+            write_capability_overrides=write_capability_overrides,
         )
         logger.info(
             "pipeline.resume_settled",

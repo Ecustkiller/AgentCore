@@ -21,6 +21,7 @@ from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.research_quality import (
     MIN_UPSTREAM_BODY_CHARS,
     academic_usable_citation_count,
+    brief_may_satisfy_body_floor,
     collect_evidence_deficit_gaps,
     deliverable_signals_long_form,
     has_landed_prose_artifact,
@@ -238,6 +239,14 @@ def test_upstream_body_floor_predicate():
     )
 
 
+def test_brief_may_satisfy_body_floor():
+    """有下游 prose 交接地板禁止 summary 升格；其它 form / 未声明仍可。"""
+    assert not brief_may_satisfy_body_floor(deliverable_form="prose")
+    assert brief_may_satisfy_body_floor(deliverable_form="files")
+    assert brief_may_satisfy_body_floor(deliverable_form=None)
+    assert brief_may_satisfy_body_floor(deliverable_form="")
+
+
 def test_promote_brief_to_deliverable():
     assert promote_brief_to_deliverable("") == ""
     assert promote_brief_to_deliverable("  ") == ""
@@ -253,11 +262,12 @@ def test_promote_brief_to_deliverable():
 
 @pytest.mark.asyncio
 async def test_handoff_promotes_brief_when_empty_body_min0(tmp_path: Path):
-    """有下游 + min=0 + 正文 0 字 + 非空 summary → 升格成功，final_text 含 summary。"""
+    """非 prose + 有下游 + min=0 + 正文 0 字 + 非空 summary → 升格成功。"""
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=0,
+        handoff_deliverable_form=None,
         round_content_chars=0,
     )
     result = await HandoffTool().execute(
@@ -270,12 +280,33 @@ async def test_handoff_promotes_brief_when_empty_body_min0(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_handoff_rejects_promoted_brief_below_floor(tmp_path: Path):
-    """地板>0 且升格正文仍短于地板 → 仍拒。"""
+async def test_handoff_rejects_brief_promote_for_prose_with_dependents(tmp_path: Path):
+    """有下游 prose：body=0 + 仅长 summary → 硬拒（summary 不算正文）。"""
+    summary = "诊断结论：" + ("根因分析充分。" * 20)
+    assert len(summary) >= MIN_UPSTREAM_BODY_CHARS
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
+        handoff_deliverable_form="prose",
+        round_content_chars=0,
+    )
+    result = await HandoffTool().execute({"summary": summary}, ctx)
+    assert result.success is False
+    assert "空交付不得交接" in (result.error or "")
+    assert "summary 不算正文" in (result.error or "")
+    assert result.contract_failure is True
+    assert not (result.final_text or "")
+
+
+@pytest.mark.asyncio
+async def test_handoff_rejects_promoted_brief_below_floor(tmp_path: Path):
+    """非 prose：地板>0 且升格正文仍短于地板 → 仍拒。"""
+    ctx = _ctx(
+        tmp_path,
+        handoff_requires_body=True,
+        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
+        handoff_deliverable_form=None,
         round_content_chars=0,
     )
     result = await HandoffTool().execute({"summary": "太短"}, ctx)
@@ -286,19 +317,35 @@ async def test_handoff_rejects_promoted_brief_below_floor(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_handoff_promotes_brief_when_meets_floor(tmp_path: Path):
-    """地板>0 但升格正文够长 → success，final_text 为升格正文。"""
+async def test_handoff_promotes_brief_when_meets_floor_non_prose(tmp_path: Path):
+    """非 prose + 有下游：地板>0 但升格正文够长 → 仍可升格。"""
     summary = "调研结论：" + ("要点充分。" * 20)
     assert len(summary) >= MIN_UPSTREAM_BODY_CHARS
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
+        handoff_deliverable_form="files",
         round_content_chars=0,
     )
     result = await HandoffTool().execute({"summary": summary}, ctx)
     assert result.success is True
     assert (result.final_text or "") == summary
+
+
+@pytest.mark.asyncio
+async def test_handoff_prose_allows_when_real_body_meets_floor(tmp_path: Path):
+    """有下游 prose：真正文够长 → 放行（不依赖 summary 升格）。"""
+    ctx = _ctx(
+        tmp_path,
+        handoff_requires_body=True,
+        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
+        handoff_deliverable_form="prose",
+        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5,
+    )
+    result = await HandoffTool().execute({"summary": "诊断已写入正文"}, ctx)
+    assert result.success is True
+    assert (result.final_text or "") == ""
 
 
 @pytest.mark.asyncio
@@ -378,11 +425,12 @@ async def test_handoff_allows_short_body_when_no_contract_floor(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_handoff_allows_empty_body_when_prose_landed(tmp_path: Path):
-    """手工 stamp prose kinds（同 ctx）仍应放行；bool 豁免路径已退役。"""
+    """有下游 prose：body=0 但已落盘 prose artifact → 仍放行（summary 升格关闭后仍豁免）。"""
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
+        handoff_deliverable_form="prose",
         round_content_chars=0,
         landed_artifact_kinds={"notes.md": "prose"},
     )

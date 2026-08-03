@@ -1,8 +1,21 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FileArtifactsCard } from "../FileArtifactsCard";
+
+vi.mock("@/api/turnFilesDiff", () => ({
+  getTurnFilesDiff: vi.fn().mockResolvedValue({
+    messageId: "m1",
+    baselineSnapshotId: null,
+    available: false,
+    changes: [],
+    total: 0,
+    added: 0,
+    modified: 0,
+    deleted: 0,
+  }),
+}));
 
 describe("FileArtifactsCard acceptance labels", () => {
   it("shows 已验收/未通过 and never 写入/编辑 on acceptance rows", () => {
@@ -10,6 +23,7 @@ describe("FileArtifactsCard acceptance labels", () => {
       <MemoryRouter>
         <FileArtifactsCard
           conversationId="c1"
+          messageId="m1"
           artifacts={[
             {
               path: "ok.md",
@@ -38,6 +52,7 @@ describe("FileArtifactsCard acceptance labels", () => {
       <MemoryRouter>
         <FileArtifactsCard
           conversationId="c1"
+          messageId="m1"
           artifacts={[
             { path: "src/main.ts", name: "main.ts", op: "write" },
             { path: "src/a.ts", name: "a.ts", op: "edit" },
@@ -56,6 +71,7 @@ describe("FileArtifactsCard stage labels", () => {
       <MemoryRouter>
         <FileArtifactsCard
           conversationId="c1"
+          messageId="m1"
           artifacts={[
             {
               path: "AgentCore/文档/research/brief.md",
@@ -78,5 +94,58 @@ describe("FileArtifactsCard stage labels", () => {
       screen.getByTitle("在文件页查看案卷 AgentCore/文档/research/brief.md"),
     ).toBeTruthy();
     expect(screen.getByTitle("在工作区查看 notes.txt")).toBeTruthy();
+  });
+});
+
+describe("FileArtifactsCard 查看改动", () => {
+  it("shows 查看改动 when conversationId+messageId present and expands review", async () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          messageId="m1"
+          artifacts={[
+            {
+              path: "a.ts",
+              name: "a.ts",
+              op: "write",
+              change: {
+                kind: "write",
+                content: "x",
+                mode: "overwrite",
+              },
+            },
+          ]}
+          reviewArtifacts={[
+            {
+              path: "a.ts",
+              name: "a.ts",
+              op: "write",
+              change: {
+                kind: "write",
+                content: "x",
+                mode: "overwrite",
+              },
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    const btn = screen.getByLabelText("查看改动");
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(await screen.findByText(/工具参数侧预览/)).toBeTruthy();
+  });
+
+  it("hides 查看改动 without messageId and without change previews", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[{ path: "a.ts", name: "a.ts", acceptance: "accepted" }]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByLabelText("查看改动")).toBeNull();
   });
 });

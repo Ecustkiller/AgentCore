@@ -23,9 +23,11 @@ def resume_frame_blob(
     decision: str,
     note: str,
     selected: list[str],
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Settlement control metadata embedded alongside ``*_resolved``."""
-    return {
+    blob: dict[str, Any] = {
         "frame": suspension.to_json(),
         "history": list(suspension.history),
         "journal_entries": list(suspension.journal_entries),
@@ -34,6 +36,11 @@ def resume_frame_blob(
         "note": note,
         "selected": list(selected),
     }
+    if excluded_run_ids:
+        blob["excluded_run_ids"] = list(excluded_run_ids)
+    if write_capability_overrides:
+        blob["write_capability_overrides"] = list(write_capability_overrides)
+    return blob
 
 
 async def prewrite_sidecar_resume_settlement(
@@ -45,6 +52,8 @@ async def prewrite_sidecar_resume_settlement(
     selected: list[str] | None = None,
     user_message_id: str,
     trace_id: str = "",
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Durable-write hang-frame journal then ``*_resolved`` (+ resume_frame).
 
@@ -53,11 +62,16 @@ async def prewrite_sidecar_resume_settlement(
     deleted the file) — seed ``suspension.journal_entries`` at explicit seq
     ``0..n-1`` first so ``process_*`` survive cancel/writeback/refresh.
 
+    ``excluded_run_ids`` / ``write_capability_overrides`` mirror cloud cold resume
+    settlement (开工组队有限否决 → ``team_preview_resolved`` payload).
+
     Raises on write failure so the caller can restore the claimed frame.
     Returns the settlement journal entry that was written (also appended onto
     ``suspension.journal_entries`` for resume-pipeline dedupe seeding).
     """
     picks = list(selected or [])
+    excluded = list(excluded_run_ids or [])
+    overrides = list(write_capability_overrides or [])
     tid = suspension.message_id
     cid = suspension.conversation_id
     tr = trace_id or getattr(suspension, "trace_id", None)
@@ -71,7 +85,12 @@ async def prewrite_sidecar_resume_settlement(
         user_message_id=user_message_id,
     )
     event = cold_resume_settlement_event(
-        suspension, decision=decision, note=note, selected=picks
+        suspension,
+        decision=decision,
+        note=note,
+        selected=picks,
+        excluded_run_ids=excluded,
+        write_capability_overrides=overrides,
     )
     entry = entry_from_sse(event)
     entry["payload"] = {
@@ -82,6 +101,8 @@ async def prewrite_sidecar_resume_settlement(
             decision=decision,
             note=note,
             selected=picks,
+            excluded_run_ids=excluded,
+            write_capability_overrides=overrides,
         ),
     }
     await outbox.append_journal_durable(

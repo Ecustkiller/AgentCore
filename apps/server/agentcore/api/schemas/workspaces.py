@@ -130,6 +130,31 @@ class SnapshotListResponse(BaseModel):
     total: int
 
 
+# --- AgentCore/trash (soft-delete restore; not OS recycle bin) ---
+
+
+class TrashEntrySummary(BaseModel):
+    """One reversible entry under workspace ``AgentCore/trash/<id>/``."""
+
+    entry_id: str
+    original_path: str
+    name: str
+    is_dir: bool
+    deleted_at: datetime
+
+
+class TrashListResponse(BaseModel):
+    """List of AgentCore/trash entries (newest first).
+
+    ``retention_days`` mirrors ``workspace_retention_days`` — product one-click
+    restore only covers this zone; Local OS ``shell.trashItem`` is a separate track.
+    """
+
+    data: list[TrashEntrySummary]
+    total: int
+    retention_days: int
+
+
 # --- Workspace files (bring files in / take results out) ---
 
 

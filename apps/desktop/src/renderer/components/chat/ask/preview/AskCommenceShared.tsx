@@ -34,7 +34,7 @@ export function useCommencePreviewAnswer(content: AskUserContent) {
   return useAskAnswer(content);
 }
 
-/** Sticky / fixed footer: primary CTA + quiet stop + preset hint. */
+/** Sticky / fixed footer: primary CTA + quiet skip (wire stop) + preset hint. */
 export function CommenceFooter({
   answer,
   busy,
@@ -79,7 +79,7 @@ export function CommenceFooter({
           className="text-muted-foreground hover:text-foreground"
           icon={<OctagonX size={14} />}
         >
-          停止
+          跳过
         </Button>
       </div>
       <span className="block text-xs text-muted-foreground">

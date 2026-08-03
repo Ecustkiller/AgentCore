@@ -1,3 +1,4 @@
+import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type {
   InteractionKind,
   InteractionStatus,
@@ -22,6 +23,8 @@ interface InteractionState {
     payload: Record<string, unknown>;
     /** Force status (e.g. recovery hydrate → pending; journal resolved skip). */
     status?: InteractionStatus;
+    /** Live SSE transport (`ctx.source`); omit on journal/recovery hydrate. */
+    origin?: ResumeOrigin;
   }) => void;
   /** Mark resolved from a `*_resolved` SSE / journal. */
   markResolved: (input: {
@@ -69,9 +72,15 @@ interface InteractionState {
       id: string;
       messageId: string;
       payload: Record<string, unknown>;
+      origin?: ResumeOrigin;
     }>,
     opts?: { liveRunning?: boolean },
   ) => void;
+  /**
+   * Re-key entry.messageId after message_start stamps the server id
+   * (cold entries may have been upserted against the client bubble id).
+   */
+  rekeyMessageId: (fromMessageId: string, toMessageId: string) => void;
   get: (id: string) => InteractionEntry | undefined;
   listForConversation: (conversationId: string) => InteractionEntry[];
   listPending: (
@@ -89,7 +98,14 @@ function mapCopy(
 export const useInteractionStore = create<InteractionState>((set, get) => ({
   byId: new Map(),
 
-  upsertRequired: ({ kind, conversationId, messageId, payload, status }) => {
+  upsertRequired: ({
+    kind,
+    conversationId,
+    messageId,
+    payload,
+    status,
+    origin,
+  }) => {
     const id = idFromRequiredPayload(kind, payload);
     if (!id) return;
     set((state) => {
@@ -100,9 +116,16 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
       }
       // Idempotent re-delivery: keep the first pending/submitting payload.
       if (prev && (prev.status === "pending" || prev.status === "submitting")) {
+        let patched = prev;
         if (messageId && !prev.messageId) {
+          patched = { ...patched, messageId };
+        }
+        if (origin && !prev.origin) {
+          patched = { ...patched, origin };
+        }
+        if (patched !== prev) {
           const next = mapCopy(state.byId);
-          next.set(id, { ...prev, messageId });
+          next.set(id, patched);
           return { byId: next };
         }
         return {};
@@ -115,6 +138,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
         conversationId,
         messageId: messageId || "",
         payload,
+        ...(origin ? { origin } : {}),
       });
       return { byId: next };
     });
@@ -269,9 +293,24 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
           conversationId,
           messageId: e.messageId,
           payload: e.payload,
+          ...(e.origin ? { origin: e.origin } : {}),
         });
       }
       return { byId: next };
+    });
+  },
+
+  rekeyMessageId: (fromMessageId, toMessageId) => {
+    if (!fromMessageId || !toMessageId || fromMessageId === toMessageId) return;
+    set((state) => {
+      let changed = false;
+      const next = mapCopy(state.byId);
+      for (const [id, entry] of state.byId) {
+        if (entry.messageId !== fromMessageId) continue;
+        next.set(id, { ...entry, messageId: toMessageId });
+        changed = true;
+      }
+      return changed ? { byId: next } : {};
     });
   },
 
@@ -303,6 +342,7 @@ export function applyInteractionWireEvent(
   payload: Record<string, unknown>,
   conversationId: string,
   messageId: string,
+  origin?: ResumeOrigin,
 ): boolean {
   const store = useInteractionStore.getState();
 
@@ -328,6 +368,7 @@ export function applyInteractionWireEvent(
       conversationId,
       messageId,
       payload,
+      ...(origin ? { origin } : {}),
     });
     return true;
   }

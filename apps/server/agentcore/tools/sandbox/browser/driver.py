@@ -14,8 +14,9 @@ frames ride the same stdout as driver-INITIATED event lines (no request id):
     driver → host (stdout):  {"event": "live_frame", "frame_b64": <b64>, "width", "height"}\\n
 
 The gVisor screencast gate (scripts/poc_browser_gvisor/run_screencast.py) proved this path
-(~57fps @ ~14KB/frame @ q60/1280). The M0 six-command semantics, the ``ready`` handshake,
-inline ``frame_b64`` keyframe replies and the 8MB line limit are all unchanged.
+(~57fps @ ~14KB/frame @ q60/1280). The M0 command semantics (plus ``console``
+evidence), the ``ready`` handshake, inline ``frame_b64`` keyframe replies and the
+8MB line limit are all unchanged.
 
 CRITICAL: only JSON lines go to stdout (fd 1); all Playwright/Chromium chatter goes to
 stderr so the host's reader never desyncs. Frames are emitted from the CDP callback with a
@@ -35,7 +36,9 @@ import asyncio
 import base64
 import json
 import os
+import re
 import sys
+import time
 import traceback
 
 WIDTH = int(os.environ.get("BROWSER_WIDTH", "1280"))
@@ -51,11 +54,45 @@ if PROXY:
 # reaching internal methods). ``input`` (M2 · D17) injects user takeover events via CDP Input.
 _COMMANDS = frozenset(
     {
-        "navigate", "click", "type", "scroll", "snapshot", "screenshot",
+        "navigate", "click", "type", "scroll", "snapshot", "screenshot", "console",
         "set_content", "set_viewport",
         "ping", "start_screencast", "stop_screencast", "input", "close",
     }
 )
+
+# Ring-buffer caps for browser_console evidence (hard limits; never return huge blobs).
+_CONSOLE_MAX_MESSAGES = 80
+_CONSOLE_MAX_ERRORS = 40
+_CONSOLE_MAX_TEXT = 500
+_CONSOLE_MAX_STACK = 1500
+_SECRET_RE = re.compile(
+    r"(password|passwd|pwd|token|secret|authorization)\s*[:=]\s*\S+",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_blob(text: str) -> bool:
+    if len(text) < 400:
+        return False
+    if len(text) > 4000:
+        return True
+    # Base64 / data-URL payloads tend to be long runs without whitespace.
+    sample = text[:240]
+    if any(c.isspace() for c in sample):
+        return False
+    compact = "".join(sample.split())
+    return bool(compact) and len(compact) >= 200 and all(
+        c.isalnum() or c in "+/=_-" for c in compact
+    )
+
+
+def _scrub_console_text(raw, max_len: int = _CONSOLE_MAX_TEXT) -> str:
+    t = _SECRET_RE.sub(lambda m: f"{m.group(1)}=[redacted]", str(raw or ""))
+    if _looks_like_blob(t):
+        return t[:80] + "…[truncated blob]"
+    if len(t) <= max_len:
+        return t
+    return t[: max(0, max_len - 1)] + "…"
 
 # CDP Input event-type maps (M2 接管注入): our compact wire verbs → CDP domain verbs.
 _MOUSE_TYPES = {
@@ -65,10 +102,32 @@ _MOUSE_TYPES = {
     "wheel": "mouseWheel",
 }
 _KEY_TYPES = {"down": "keyDown", "up": "keyUp"}
+# DOM MouseEvent.button 0|1|2 → Playwright/CDP button names (schema also normalizes).
+_MOUSE_BUTTONS = {
+    0: "left",
+    1: "middle",
+    2: "right",
+    "0": "left",
+    "1": "middle",
+    "2": "right",
+    "left": "left",
+    "middle": "middle",
+    "right": "right",
+}
 # CDP dispatchKeyEvent modifier bitmask (Alt=1, Ctrl=2, Meta=4, Shift=8).
 _MODIFIER_BITS = {
     "alt": 1, "control": 2, "ctrl": 2, "meta": 4, "cmd": 4, "command": 4, "shift": 8,
 }
+
+
+def _normalize_mouse_button(button) -> str:
+    """Map DOM 0|1|2 or name strings to CDP left|right|middle; default left."""
+    if button is None or isinstance(button, bool):
+        return "left"
+    if isinstance(button, int):
+        return _MOUSE_BUTTONS.get(button, "left")
+    key = str(button)
+    return _MOUSE_BUTTONS.get(key) or _MOUSE_BUTTONS.get(key.lower()) or "left"
 
 
 def _modifier_bitmask(mods) -> int:
@@ -154,6 +213,50 @@ class Driver:
         # events live in (帧像素空间). Used to rescale input to the viewport (M2).
         self._last_frame_w = WIDTH
         self._last_frame_h = HEIGHT
+        # Read-only runtime evidence for browser_console (page console + pageerror).
+        self._console_messages: list[dict] = []
+        self._console_errors: list[dict] = []
+        self._console_messages_dropped = 0
+        self._console_errors_dropped = 0
+
+    def _push_console_message(self, level: str, text: str) -> None:
+        entry = {
+            "level": (level or "log").lower(),
+            "text": _scrub_console_text(text),
+            "timestamp": time.time(),
+        }
+        if len(self._console_messages) >= _CONSOLE_MAX_MESSAGES:
+            self._console_messages.pop(0)
+            self._console_messages_dropped += 1
+        self._console_messages.append(entry)
+
+    def _push_console_error(self, message: str, stack: str | None = None) -> None:
+        entry: dict = {
+            "message": _scrub_console_text(message),
+            "timestamp": time.time(),
+        }
+        if stack:
+            entry["stack"] = _scrub_console_text(stack, _CONSOLE_MAX_STACK)
+        if len(self._console_errors) >= _CONSOLE_MAX_ERRORS:
+            self._console_errors.pop(0)
+            self._console_errors_dropped += 1
+        self._console_errors.append(entry)
+
+    def _on_page_console(self, msg) -> None:
+        try:
+            level = getattr(msg, "type", None) or "log"
+            text = msg.text if hasattr(msg, "text") else str(msg)
+            self._push_console_message(str(level), text)
+        except Exception as exc:  # noqa: BLE001 - never break the page loop
+            _log(f"console capture failed: {type(exc).__name__}")
+
+    def _on_page_error(self, err) -> None:
+        try:
+            message = getattr(err, "message", None) or str(err)
+            stack = getattr(err, "stack", None)
+            self._push_console_error(str(message), str(stack) if stack else None)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"pageerror capture failed: {type(exc).__name__}")
 
     async def start(self) -> None:
         from playwright.async_api import async_playwright
@@ -162,6 +265,8 @@ class Driver:
         self._browser = await self._pw.chromium.launch(headless=True, args=CHROME_ARGS)
         self._ctx = await self._browser.new_context(viewport={"width": WIDTH, "height": HEIGHT})
         self._page = await self._ctx.new_page()
+        self._page.on("console", self._on_page_console)
+        self._page.on("pageerror", self._on_page_error)
 
     # -- helpers ---------------------------------------------------------------
     async def _keyframe_b64(self) -> str:
@@ -173,10 +278,18 @@ class Driver:
         if capture:
             state["frame_b64"] = await self._keyframe_b64()
         # Any page mutation invalidates prior snapshot refs (防错点).
-        # Return the bumped version so the model can align the next ref call
-        # without a forced re-snapshot (refs themselves still need snapshot).
+        # Bump version and re-stamp refs (Playwright MCP–style) so click/type/scroll/
+        # navigate success already carries a usable elements table — dedicated
+        # browser_snapshot remains available for a fuller ARIA pass.
         self._snapshot_version += 1
         state["snapshot_version"] = self._snapshot_version
+        state["elements"] = await self._page.evaluate(_SNAPSHOT_JS, self._snapshot_version)
+        try:
+            aria = await self._page.locator("body").aria_snapshot()
+        except Exception:  # noqa: BLE001 - aria is best-effort context
+            aria = ""
+        # Slightly tighter than dedicated snapshot (6000) to keep mutation payloads lean.
+        state["aria"] = (aria or "")[:4000]
         return state
 
     def _resolve_ref(self, req: dict):
@@ -211,7 +324,8 @@ class Driver:
         if await loc.evaluate(_IS_PASSWORD_JS):
             raise ValueError(
                 "password_blocked: AI 不得填写密码框；"
-                "请 escalate(blocking=true, browser_login=true) 让用户接管登录"
+                "worker 请 escalate(blocking=true, browser_login=true)；"
+                "CEO 请 ask_user(browser_login=true) 让用户接管登录"
             )
         await loc.fill(req.get("text", ""), timeout=int(req.get("timeout_ms", 8000)))
         return await self._page_state(capture=bool(req.get("capture", True)))
@@ -241,6 +355,19 @@ class Driver:
         if req.get("capture", True):
             state["frame_b64"] = await self._keyframe_b64()
         return state
+
+    async def console(self, _req: dict) -> dict:
+        """Return ring-buffered page console + pageerror (read-only; no keyframe)."""
+        return {
+            "final_url": self._page.url,
+            "title": await self._page.title(),
+            "messages": list(self._console_messages),
+            "errors": list(self._console_errors),
+            "truncated": {
+                "messages_dropped": self._console_messages_dropped,
+                "errors_dropped": self._console_errors_dropped,
+            },
+        }
 
     async def set_viewport(self, req: dict) -> dict:
         """Host-only: resize viewport for multi-breakpoint self-test (P1c critic)."""
@@ -373,11 +500,12 @@ class Driver:
         }
         button = ev.get("button")
         if cdp_type in ("mousePressed", "mouseReleased"):
-            params["button"] = str(button or "left")
+            params["button"] = _normalize_mouse_button(button)
             params["clickCount"] = int(ev.get("click_count") or 1)
         elif cdp_type == "mouseMoved":
-            if button:
-                params["button"] = str(button)
+            # Include button even when DOM sends 0 (falsy) — held-button moves.
+            if button is not None and not isinstance(button, bool):
+                params["button"] = _normalize_mouse_button(button)
         elif cdp_type == "mouseWheel":
             params["deltaX"] = float(ev.get("delta_x") or 0)
             params["deltaY"] = float(ev.get("delta_y") or 0)

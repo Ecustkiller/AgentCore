@@ -65,10 +65,11 @@ apps/desktop/resources/sidecar/
 apps/desktop/resources/rg/
 apps/server/bin/
 # apps/desktop/build/ 是 electron-builder 的 buildResources（应用图标源），不是上面 Python
-# 通用 `build/` 产物——解除目录忽略、再忽略目录内容、只放行 icon.png（仅图标入仓）。
+# 通用 `build/` 产物——解除目录忽略、再忽略目录内容、只放行平台图标入仓（Mac cropped / Win rounded）。
 !apps/desktop/build/
 apps/desktop/build/*
-!apps/desktop/build/icon.png
+!apps/desktop/build/icon-mac.png
+!apps/desktop/build/icon-win.png
 
 # TS build info / lint cache
 *.tsbuildinfo

@@ -12,8 +12,6 @@ class EngineSettings(BaseModel):
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3
     engine_unproductive_threshold: int = 3
-    engine_reflection_start_round: int = 3
-    engine_reflection_interval: int = 3
     # Absolute investigation-round ceiling (safety net). Progress-aware spinning detection
     # normally triggers earlier; this is the hard backstop. Must be ≤ worker agent
     # max_rounds (56) or the cap never fires before the loop exits.
@@ -31,7 +29,7 @@ class EngineSettings(BaseModel):
     engine_delivery_idle_narrow_rounds: int = 6
     # 非交文件（调查/诊断）队员：久读无结论只 soft nudge，不收窄工具、不 FINALIZE。
     # 与 delivery_idle 共用纯调查轮计数器；文案催 handoff/escalate/收敛，不催写盘。
-    # ≤0 关闭。默认 8：在 reflection（~3）之后、绝对顶（48）之前给一次刹车。
+    # ≤0 关闭。默认 8：在绝对顶（48）之前给一次刹车。
     engine_recon_idle_nudge_rounds: int = 8
     engine_finish_guard_max_reworks: int = 2
     # C2 概览契约：本回合已发 delivery_status 时，CEO 终稿超过此字数 → finish_guard 回炉压缩。

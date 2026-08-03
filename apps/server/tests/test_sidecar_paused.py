@@ -121,6 +121,27 @@ def test_store_round_trips_journal_entries_and_history(tmp_path):
     assert claimed.history == history
 
 
+def test_store_save_pins_display_runs_for_desktop_reopen(tmp_path):
+    """Pause frames pin ``display_runs`` so desktop hydrate can rebuild the collab graph
+    while cloud paused writeback still skips ``turn_journal``."""
+    store = LocalPausedTurnStore(tmp_path / "paused")
+    entries = [
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        {"kind": "run_started", "payload": {"run_id": "w1"}, "ts": "t1"},
+    ]
+
+    async def drive() -> None:
+        await store.save(_suspension("m_graph", "c1", journal_entries=entries))
+
+    asyncio.run(drive())
+    raw = json.loads((tmp_path / "paused" / "m_graph.json").read_text(encoding="utf-8"))
+    runs = raw.get("display_runs")
+    assert runs is not None
+    assert runs.get("finish_reason") == "paused"
+    types = [e.get("type") for e in (runs.get("events") or [])]
+    assert "run_plan" in types
+
+
 def test_store_claimed_frame_excluded_from_list_pending(tmp_path):
     """A claimed-but-not-confirmed frame lives as ``.claimed`` and is invisible to list."""
     store = LocalPausedTurnStore(tmp_path / "paused")
@@ -431,6 +452,136 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     assert captured["history"] == history
     assert captured["x_client_platform"] == "desktop"
     assert remaining == []  # the frame was claimed (one-shot), so nothing is left
+
+
+def _team_preview_suspension(
+    message_id: str,
+    conversation_id: str,
+) -> Any:
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.suspension import TeamPreviewSuspension
+
+    susp = TeamPreviewSuspension(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        user_id="u1",
+        captain_run_id="r1",
+        checkpoint_id=f"ck-{message_id}",
+        tool_call_id="tc1",
+        base_system_prompt="sys",
+        user_message="开工",
+        transcript=[],
+        history=[],
+        plan=RunPlan(),
+        workers=[
+            {"run_id": "a", "depends_on": []},
+            {"run_id": "b", "depends_on": []},
+        ],
+        primitive="delegate",
+    )
+    susp.journal_entries = [
+        {
+            "kind": "team_preview_required",
+            "payload": {"checkpoint_id": f"ck-{message_id}"},
+            "ts": None,
+        }
+    ]
+    return susp
+
+
+def test_resume_forwards_team_preview_veto_to_pipeline(tmp_path, monkeypatch):
+    """本机 resume：excluded_run_ids / write_capability_overrides 贯通到 pipeline。"""
+    captured: dict[str, Any] = {}
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        captured["excluded_run_ids"] = kwargs.get("excluded_run_ids")
+        captured["write_capability_overrides"] = kwargs.get("write_capability_overrides")
+        kwargs["sink"].close()
+        return {
+            "finish_reason": "end_turn",
+            "content": "ok",
+            "rounds": 1,
+            "message_id": kwargs["suspension"].message_id,
+        }
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    store = LocalPausedTurnStore(tmp_path / "data" / "paused")
+
+    async def drive() -> None:
+        await _initialize(server, tmp_path, data_dir=str(tmp_path / "data"))
+        await store.save(_team_preview_suspension("m-tp", "c1"))
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "resume",
+                    "params": {
+                        "messageId": "m-tp",
+                        "conversationId": "c1",
+                        "decision": "continue",
+                        "note": "",
+                        "excluded_run_ids": ["b"],
+                        "write_capability_overrides": [
+                            {"run_id": "a", "capability": "text_only"}
+                        ],
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    done = _response(sent, 11)
+    assert done["result"]["content"] == "ok"
+    assert captured["excluded_run_ids"] == ["b"]
+    assert captured["write_capability_overrides"] == [
+        {"run_id": "a", "capability": "text_only"}
+    ]
+
+
+def test_resume_rejects_illegal_team_preview_veto(tmp_path, monkeypatch):
+    """非法否决：resume 在 settlement 前 422 等价（INVALID_PARAMS）并恢复帧。"""
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("pipeline must not run on invalid veto")
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    store = LocalPausedTurnStore(tmp_path / "data" / "paused")
+
+    async def drive() -> list[Any]:
+        await _initialize(server, tmp_path, data_dir=str(tmp_path / "data"))
+        await store.save(_team_preview_suspension("m-bad", "c1"))
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 12,
+                    "method": "resume",
+                    "params": {
+                        "messageId": "m-bad",
+                        "conversationId": "c1",
+                        "decision": "continue",
+                        "note": "",
+                        "excluded_run_ids": ["nope"],
+                    },
+                }
+            )
+        )
+        return await store.list_pending("c1")
+
+    remaining = asyncio.run(drive())
+    err = _response(sent, 12)
+    assert "error" in err
+    assert err["error"]["code"] == protocol.INVALID_PARAMS
+    assert remaining  # frame restored for retry
+    assert remaining[0].message_id == "m-bad"
 
 
 def test_resume_failure_after_settlement_does_not_restore_frame(tmp_path, monkeypatch):

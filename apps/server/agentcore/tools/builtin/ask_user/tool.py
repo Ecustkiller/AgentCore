@@ -124,6 +124,7 @@ class AskUserTool:
         tool_desc = (
             "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；"
             "blocking=false 非阻塞按默认继续。"
+            "浏览器需用户登录时设 browser_login=true（强制阻塞；无 escalate）。"
             "通用短澄清：信息不够时短问，可与检索/读文件等穿插、可连续多次；"
             "Agent 自主决定何时问。详见 consult_skill"
             "（ask_user_kickoff / ask_user_midtask）。"
@@ -234,6 +235,16 @@ class AskUserTool:
                             "可选，默认 true。false=非阻塞（须在 assumptions/default 写明默认）。"
                         ),
                     },
+                    "browser_login": {
+                        "type": "boolean",
+                        "description": (
+                            "可选，默认 false。true=请求用户在右坞浏览器完成登录（密码由用户"
+                            "亲手输入，AI 永不经手）。强制升格 blocking=true；挂起后用户点"
+                            "「已登录，继续」再续跑。典型触发：browser_type 对 password 框硬拒"
+                            "（metadata.code=password_blocked）。CEO 无 escalate——登录请用本字段，"
+                            "勿调 escalate。"
+                        ),
+                    },
                     "card": {
                         "type": "string",
                         "enum": ["proposal_pick", "risk_ack", "organize_plan", "daily_review"],
@@ -331,8 +342,12 @@ class AskUserTool:
 
         # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
         # any suspend / durable-frame machinery — it shares none of it.
+        # browser_login forces blocking (CEO dual of escalate browser_login).
+        browser_login = bool(arguments.get("browser_login"))
         blocking_arg = arguments.get("blocking")
         blocking = True if blocking_arg is None else bool(blocking_arg)
+        if browser_login:
+            blocking = True
 
         if card is not None:
             card_err = validate_card_shape(card, blocking=blocking, questions=questions)
@@ -373,6 +388,7 @@ class AskUserTool:
             assumptions=assumptions,
             questions=questions,
             intent=intent,
+            browser_login=True if browser_login else None,
         )
         # 结构化挂起 2b + D11: persist the durable frame BEFORE finalize. Save success
         # ⇒ 挂起即收口 (②); save failure ⇒ explicit error (no in-memory wait fallback).
@@ -403,6 +419,7 @@ class AskUserTool:
                 questions=questions,
                 required_event=required,
                 intent=intent,
+                browser_login=browser_login,
             )
         except Exception:
             # D11：运行态落帧失败 ⇒ 显式失败终止回合（与配置态不可用同文案）。
@@ -424,6 +441,7 @@ class AskUserTool:
                 checkpoint_id=checkpoint_id,
                 intent=intent,
                 card=card,
+                browser_login=browser_login,
             )
             return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
         logger.error(

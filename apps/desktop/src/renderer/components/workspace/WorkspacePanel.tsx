@@ -15,12 +15,14 @@ import {
   FolderOpen,
   History,
   Loader2,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SharedMountsSection } from "./SharedMountsSection";
 import { SnapshotsSection } from "./SnapshotsSection";
+import { LocalTrashSection, TrashSection } from "./TrashSection";
 import { WorkspaceClientTools } from "./WorkspaceClientTools";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
 
@@ -41,6 +43,7 @@ import { WorkspaceModeBar } from "./WorkspaceModeBar";
 export function WorkspaceMode() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
@@ -112,6 +115,7 @@ export function WorkspaceMode() {
   // D2: shared-space mounts are cloud-execution only (local-bound chats have no
   // cross-runtime dual root).
   const isCloudWorkspace = ws?.location === "cloud";
+  const localRootId = ws?.location === "local" ? ws.rootId : null;
 
   return (
     <div className="relative flex h-full flex-col">
@@ -142,11 +146,27 @@ export function WorkspaceMode() {
                   </IconButton>
                   <IconButton
                     title="快照"
-                    onClick={() => setSnapshotsOpen(true)}
+                    onClick={() => {
+                      setTrashOpen(false);
+                      setSnapshotsOpen(true);
+                    }}
                   >
                     <History size={14} />
                   </IconButton>
+                  <IconButton
+                    title="软删区"
+                    onClick={() => {
+                      setSnapshotsOpen(false);
+                      setTrashOpen(true);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </IconButton>
                 </>
+              ) : localRootId ? (
+                <IconButton title="软删区" onClick={() => setTrashOpen(true)}>
+                  <Trash2 size={14} />
+                </IconButton>
               ) : null}
             </>
           }
@@ -178,6 +198,35 @@ export function WorkspaceMode() {
             </div>
             <div className="min-h-0 flex-1">
               <SnapshotsSection conversationId={conversationId} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {trashOpen && (
+        <div className="absolute inset-0 z-20 flex">
+          <Button
+            variant="ghost"
+            aria-label="关闭软删区"
+            onClick={() => setTrashOpen(false)}
+            className="min-w-0 flex-1 rounded-none bg-overlay/40 p-0"
+          />
+          <div className="flex w-[85%] max-w-[420px] flex-col border-l border-border bg-card shadow-lg animate-dropdown-in">
+            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-3 pr-1">
+              <Trash2 size={13} className="shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                软删区
+              </span>
+              <IconButton title="关闭" onClick={() => setTrashOpen(false)}>
+                <X size={14} />
+              </IconButton>
+            </div>
+            <div className="min-h-0 flex-1">
+              {isCloudWorkspace ? (
+                <TrashSection conversationId={conversationId} />
+              ) : localRootId ? (
+                <LocalTrashSection rootId={localRootId} />
+              ) : null}
             </div>
           </div>
         </div>

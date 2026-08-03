@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { OfficialTemplateGuide } from "./OfficialTemplateGuide";
 import { RunWorkflowDialog } from "./RunWorkflowDialog";
 import { UseTemplateDialog } from "./UseTemplateDialog";
 
@@ -176,6 +177,7 @@ export function WorkflowsPage() {
       {showOfficial && (
         <section className="mt-6 space-y-3">
           <p className="text-xs font-medium text-muted-foreground">官方模板</p>
+          <OfficialTemplateGuide />
           {templatesHint && (
             <p className="text-xs text-muted-foreground">{templatesHint}</p>
           )}

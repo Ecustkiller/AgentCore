@@ -484,12 +484,43 @@ def test_repair_code_diagnose_patch_verify_shape():
     assert "纯 prose" in by_id["verify"]["task"]
     assert "禁止在本步改文件" in by_id["diagnose"]["task"]
     assert "str_replace" in by_id["patch"]["task"]
+    # 白屏/UI 分流：诊断先 browser；验证 CLI vs UI；禁 typecheck 冒充白屏。
+    assert "browser_navigate" in by_id["diagnose"]["task"]
+    assert "snapshot" in by_id["diagnose"]["task"]
+    assert "勿空等用户 F12" in by_id["diagnose"]["task"]
+    assert "CLI" in by_id["verify"]["task"]
+    assert "browser_navigate" in by_id["verify"]["task"]
+    assert "冒充白屏" in by_id["verify"]["task"]
+    assert "verify_policy=inner" not in by_id["verify"]["task"]
+    assert "verify_policy" not in by_id["verify"]
     from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
 
     assert by_id["diagnose"]["deliverable"]["min_length"] == MIN_UPSTREAM_BODY_CHARS
     assert by_id["diagnose"]["deliverable"]["min_length"] >= 80
     # verify 无下游，不抬到 body 地板
     assert by_id["verify"]["deliverable"]["min_length"] == 40
+
+
+def test_repair_code_ui_verify_slot_flows_into_verify_task():
+    """UI 复现形 verify 原样注入验证员约定；slots 并列 CLI 与 UI 例示。"""
+    from agentcore.runtime.runs.playbooks import PLAYBOOKS
+
+    tasks, errors = expand_playbook(
+        "repair_code",
+        {
+            "problem": "Dashboard 白屏",
+            "verify": "打开 /app 白屏消失+snapshot 可见主内容",
+        },
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    assert "打开 /app 白屏消失+snapshot 可见主内容" in by_id["verify"]["task"]
+    assert "页面/UI 复现" in by_id["verify"]["task"]
+    pb = PLAYBOOKS["repair_code"]
+    assert "pytest tests/test_app.py -q" in pb.slots
+    assert "白屏消失" in pb.slots or "snapshot 可见主内容" in pb.slots
+    assert "CLI" in pb.summary or "UI" in pb.summary
+    assert "白屏" in pb.summary
 
 
 def test_repair_code_requires_problem():
@@ -505,6 +536,9 @@ def test_repair_code_requires_verify_how_fixed():
     )
     assert tasks == []
     assert errors and "verify" in errors[0]
+    # 缺 verify 时错误文案并列 CLI 与 UI 例示
+    assert "pytest" in errors[0] or "CLI" in errors[0]
+    assert "白屏" in errors[0] or "snapshot" in errors[0]
 
 
 # ── build_website ─────────────────────────────────────────────────────────────
@@ -621,16 +655,20 @@ def test_build_website_requires_site():
     assert errors and "site" in errors[0]
 
 
-def test_build_toolshed_three_chain_injects_tool_dense():
-    """build_toolshed mirrors website three-chain; forces tool_dense + domain=tool."""
+def test_build_website_style_toolshed_three_chain_injects_tool_dense():
+    """build_website + style=toolshed forces tool_dense + domain=tool."""
     from agentcore.runtime.runs.website_catalog import (
         PACK_TOOL_DENSE,
         TOOL_DENSE_POINTER_PREFIX,
     )
 
     tasks, errors = expand_playbook(
-        "build_toolshed",
-        {"site": "订单运营控制台", "sections": ["应用外壳", "侧栏导航", "数据表格"]},
+        "build_website",
+        {
+            "site": "订单运营控制台",
+            "style": "toolshed",
+            "sections": ["应用外壳", "侧栏导航", "数据表格"],
+        },
     )
     assert errors == []
     by_id = {t["id"]: t for t in tasks}
@@ -662,11 +700,21 @@ def test_build_toolshed_three_chain_injects_tool_dense():
     assert not any(t["id"].startswith("section_") for t in tasks)
 
 
-def test_build_toolshed_requires_site():
-    tasks, errors = expand_playbook("build_toolshed", {})
+def test_build_toolshed_playbook_removed():
+    """旧独立 playbook 名直接未知失败——无别名 / 静默改写。"""
+    tasks, errors = expand_playbook("build_toolshed", {"site": "Ops"})
     assert tasks == []
-    assert errors and "site" in errors[0]
+    assert errors and "未知" in errors[0]
     assert "build_toolshed" in errors[0]
+
+
+def test_build_website_rejects_unknown_style():
+    tasks, errors = expand_playbook(
+        "build_website", {"site": "S", "style": "neon"}
+    )
+    assert tasks == []
+    assert errors and "style" in errors[0]
+    assert "neon" in errors[0]
 
 
 def test_build_website_verify_qa_only_no_rebuild():
@@ -1012,13 +1060,13 @@ def test_available_playbooks_lists_all_registered():
         "repair_code",
         "build_app",
         "build_website",
-        "build_toolshed",
         "build_website_verify",
         "compare_options",
         "multi_lens_research",
     }
     for name in PLAYBOOKS:
         assert name in listing
+    assert "build_toolshed" not in PLAYBOOKS
 
 
 # ── every expansion is a runnable plan (the real builder, not a mock) ──────────
@@ -1037,7 +1085,6 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
         },
         "build_app": {"app": "Ops board", "modules": ["overview", "list"]},
         "build_website": {"site": "Landing", "sections": ["hero", "cta"]},
-        "build_toolshed": {"site": "Ops console", "sections": ["应用外壳", "数据表格"]},
         "build_website_verify": {"site": "Landing"},
         "compare_options": {"question": "Q", "options": ["A", "B", "C"]},
         "multi_lens_research": {"topic": "T"},
@@ -1050,7 +1097,6 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
         "repair_code": 3,
         "build_app": 6,  # scaffold + shared + 2 explicit modules + integrate + smoke
         "build_website": 3,  # copy + frontend + qa
-        "build_toolshed": 3,  # copy + frontend + qa
         "build_website_verify": 1,  # qa only
         "compare_options": 4,
         "multi_lens_research": 5,  # 4 lenses + synthesizer

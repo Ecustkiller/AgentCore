@@ -123,8 +123,9 @@ def validate_repair_how_fixed(
     return (
         "修码收口契约：playbook=repair_code 须写清「怎么算修好」。"
         "在 playbook_args 填 verify（或 verify_command / acceptance），"
-        '例如 verify="pytest tests/test_foo.py -q" 或 '
-        "verify=\"python -c 'from app import foo; assert foo()'\"。"
+        '例如 verify="pytest tests/test_foo.py -q"、'
+        "verify=\"python -c 'from app import foo; assert foo()'\"、或 "
+        'verify="打开 /app 白屏消失+snapshot 可见主内容"。'
     )
 
 def plan_suggests_code_verification(plan: RunPlan) -> bool:

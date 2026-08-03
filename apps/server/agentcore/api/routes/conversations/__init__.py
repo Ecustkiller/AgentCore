@@ -29,6 +29,7 @@ from . import (
     run_redirect,
     shared_mounts,
     snapshots,
+    trash,
     turn_files_diff,
     turns,
 )
@@ -52,6 +53,7 @@ router.include_router(shared_mounts.router)
 router.include_router(handoff.router)
 router.include_router(turns.router)
 router.include_router(snapshots.router)
+router.include_router(trash.router)
 router.include_router(files.router)
 router.include_router(turn_files_diff.router)
 # L3 团队浏览器 M1 直播旁路端点（新增路径追加在末尾，不改既有 OpenAPI 顺序）。

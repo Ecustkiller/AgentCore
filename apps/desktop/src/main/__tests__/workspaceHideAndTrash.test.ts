@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +25,10 @@ import { type StoredRoot, executeWorkspaceOp } from "../fs-service";
 import { setRoot } from "../fs/roots";
 import { trashPath } from "../fs/shell";
 import { listDir } from "../fs/tree";
+import {
+  listWorkspaceTrash,
+  restoreWorkspaceTrash,
+} from "../fs/workspaceTrash";
 
 const valOf = (r: WorkspaceOpResult): unknown => {
   if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r.error)}`);
@@ -116,5 +127,78 @@ describe("trashPath soft-delete", () => {
     const res = await trashPath(root.id, "conversations/missing");
     expect(res.ok).toBe(true);
     expect(shell.trashItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentCore/trash list + restore", () => {
+  let dir: string;
+  let root: StoredRoot;
+
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "ws-ac-trash-")));
+    root = { id: "r-ac-trash", name: "r", absPath: dir };
+    setRoot(root);
+    (shell.trashItem as ReturnType<typeof vi.fn>).mockReset();
+    (shell.trashItem as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("no recycle bin"),
+    );
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("lists and restores workspace-trash fallback entries", async () => {
+    await writeFile(join(dir, "note.md"), "hello");
+    const del = await executeWorkspaceOp(root, "delete", {
+      path: "note.md",
+      permanent: false,
+    });
+    expect(del.ok).toBe(true);
+    expect(shell.trashItem).toHaveBeenCalled();
+
+    const listed = await listWorkspaceTrash(root.id);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data).toHaveLength(1);
+    expect(listed.data[0].originalPath).toBe("note.md");
+
+    const restored = await restoreWorkspaceTrash(
+      root.id,
+      listed.data[0].entryId,
+    );
+    expect(restored.ok).toBe(true);
+    expect(await readFile(join(dir, "note.md"), "utf-8")).toBe("hello");
+    const after = await listWorkspaceTrash(root.id);
+    expect(after.ok && after.data).toEqual([]);
+  });
+
+  it("deletes AgentCore by expanding children; rules restorable", async () => {
+    await mkdir(join(dir, "AgentCore", "规则"), { recursive: true });
+    await writeFile(join(dir, "AgentCore", "规则", "r.md"), "rule-body");
+    await mkdir(join(dir, "AgentCore", "index"), { recursive: true });
+    await writeFile(join(dir, "AgentCore", "index", "x.db"), "db");
+    await mkdir(join(dir, "AgentCore", "trash"), { recursive: true });
+
+    const del = await executeWorkspaceOp(root, "delete", {
+      path: "AgentCore",
+      permanent: false,
+    });
+    expect(del.ok).toBe(true);
+
+    const listed = await listWorkspaceTrash(root.id);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data.map((e) => e.originalPath)).toEqual(["AgentCore/规则"]);
+
+    const restored = await restoreWorkspaceTrash(
+      root.id,
+      listed.data[0].entryId,
+    );
+    expect(restored.ok).toBe(true);
+    expect(
+      await readFile(join(dir, "AgentCore", "规则", "r.md"), "utf-8"),
+    ).toBe("rule-body");
   });
 });

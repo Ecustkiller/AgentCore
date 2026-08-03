@@ -65,7 +65,7 @@ class KickoffSummary:
 
 
 def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
-    """Delegate card rows: role / task excerpt / depends_on / debate / write capability."""
+    """Delegate card rows: role / task excerpt / depends_on / write capability."""
     from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
 
     limit = PLAN_REVIEW_SUMMARY_CHARS
@@ -88,7 +88,6 @@ def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
                 "role": n.role or n.agent_name or n.run_id,
                 "task": task,
                 "depends_on": list(n.depends_on),
-                "debate": bool(n.stance) or int(n.round or 0) > 0,
                 "form": form,
                 "write_capability": write_capability,
                 "write_capability_label": write_capability_label,

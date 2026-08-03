@@ -1033,6 +1033,12 @@ def _claim_write_path(
             run_id=context.run_id,
             owner_run_id=owner,
         )
+        try:
+            from agentcore.runtime.closing_posture import note_unresolved_write_ownership
+
+            note_unresolved_write_ownership(run_id=context.run_id)
+        except Exception:  # noqa: BLE001 — honesty latch must never block the refusal
+            pass
         ownership_kind = "written" if coordinator.is_written(rel_path) else "declared"
         owner_role, owner_status = lookup_owner_status(
             owner, execution_id=context.execution_id
@@ -1862,6 +1868,7 @@ class FileListTool:
                 "列出某个目录下的文件与子目录。路径必须是相对于工作区的相对路径。"
                 "默认只列当前层（recursive=false）：`*.py` 不会进入子目录；"
                 "要搜整棵树请设 recursive=true。支持 `{ts,tsx}` 花括号二选一。"
+                "大 zip 持久展开请用 archive_extract，勿假定仅靠 code_execute 解压即工作区可见。"
             ),
             parameters={
                 "type": "object",
@@ -2419,10 +2426,11 @@ class FileDeleteTool:
             name="file_delete",
             description=(
                 "删除一个文件，或一个目录【及其全部内容】（递归）。默认【可逆】："
-                "本地模式移入系统回收站；云端 / 无回收站环境移入工作区软删除区"
-                "（AgentCore/trash，保留还原所需信息）。仅当 permanent=true 时"
-                "才永久删除。工作区根目录本身不可删除。路径必须是相对于工作区的"
-                "相对路径。"
+                "本地模式移入系统回收站（请在本机系统回收站手动恢复，产品不提供"
+                "一键还原）；云端 / sidecar / 无系统回收站时移入工作区软删除区"
+                "AgentCore/trash（可通过工作区「回收站」一键还原，保留期与"
+                "工作区软删一致）。仅当 permanent=true 时才永久删除。工作区根"
+                "目录本身不可删除。路径必须是相对于工作区的相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -2435,7 +2443,7 @@ class FileDeleteTool:
                         "type": "boolean",
                         "description": (
                             "true = 永久删除（不可恢复）；默认 false = 可逆删除"
-                            "（回收站 / 工作区软删区）。"
+                            "（本地→系统回收站；云端/sidecar→AgentCore/trash）。"
                         ),
                         "default": False,
                     },
@@ -2518,7 +2526,8 @@ class FileDeleteTool:
         else:
             msg = (
                 f"已可逆删除 {rel_path}"
-                "（本地通道→系统回收站；云端/sidecar→工作区 AgentCore/trash）"
+                "（本地通道→系统回收站，请在本机手动恢复；"
+                "云端/sidecar→AgentCore/trash，可工作区一键还原）"
             )
 
         return ToolResult(

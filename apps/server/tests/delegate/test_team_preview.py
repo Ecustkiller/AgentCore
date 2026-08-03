@@ -48,9 +48,11 @@ def test_should_preview_skips_solo_finalize():
     assert should_preview(plan, finalize=False) is False
 
 
-def test_should_preview_debate_marked_solo():
+def test_should_preview_skips_solo_even_with_runtime_tags():
+    """stance/round on RunSpec are runtime display tags — not kickoff hang marks."""
     plan = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="pro", round=1))
-    assert should_preview(plan, finalize=True) is True
+    assert should_preview(plan, finalize=True) is False
+    assert should_preview(plan, finalize=False) is False
 
 
 def test_skip_after_confirmed_ask():
@@ -103,9 +105,9 @@ def test_worker_rows_shape():
     )
     rows = worker_rows(plan)
     assert rows[0]["role"] == "调研"
-    assert rows[0]["debate"] is False
+    assert "debate" not in rows[0]
     assert rows[1]["depends_on"] == ["r1"]
-    assert rows[1]["debate"] is True
+    assert "debate" not in rows[1]
     # D4: omitted form → can write files (legacy)
     assert rows[0]["write_capability"] == "can_write_files"
     assert rows[0]["write_capability_label"] == "可改文件"

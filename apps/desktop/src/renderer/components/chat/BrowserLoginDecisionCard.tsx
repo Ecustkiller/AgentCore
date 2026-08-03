@@ -1,0 +1,145 @@
+import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
+/**
+ * Shared「需要你登录 / 已登录，继续」surface for:
+ * - worker ``escalate(browser_login=true)`` (hot-path EscalationCard)
+ * - CEO ``ask_user(browser_login=true)`` (cold-path ResumePrompt)
+ *
+ * Auto-reveals the right-dock browser shell on mount;「打开浏览器」remains as fallback.
+ */
+import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import {
+  ArrowRight,
+  Check,
+  Loader2,
+  LogIn,
+  OctagonX,
+  Radio,
+} from "lucide-react";
+import { useEffect, useRef } from "react";
+
+export type BrowserLoginSubmitKind = "logged_in" | "use_assumption" | "stop";
+
+export function BrowserLoginDecisionCard({
+  roleLabel,
+  question,
+  assumption,
+  conversationId,
+  revealKey,
+  busy,
+  submitting,
+  onLoggedIn,
+  onUseAssumption,
+  onStop,
+  kindTag,
+}: {
+  roleLabel: string;
+  question: string;
+  assumption?: string;
+  conversationId: string | null;
+  /** Dedup key for auto-reveal (escalation.id / checkpointId). */
+  revealKey: string;
+  busy: boolean;
+  submitting: BrowserLoginSubmitKind | null;
+  onLoggedIn: () => void;
+  onUseAssumption?: () => void;
+  onStop?: () => void;
+  kindTag?: string;
+}) {
+  const revealedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!conversationId) return;
+    if (revealedFor.current === revealKey) return;
+    revealedFor.current = revealKey;
+    useSidePanelStore.getState().showBrowser();
+  }, [conversationId, revealKey]);
+
+  return (
+    <DecisionCard tone="primary" animate>
+      <div className="flex items-start gap-2">
+        <DecisionCardIcon tone="primary">
+          <LogIn size={16} />
+        </DecisionCardIcon>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <p className="min-w-0 flex-1 text-xs font-medium text-primary">
+              {roleLabel} · 需要你登录
+              {kindTag ? ` · ${kindTag}` : ""}
+            </p>
+            <ManualHelpLink to={MANUAL_HELP.control} />
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            在浏览器里完成登录后，点「已登录，继续」
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+            {question}
+          </p>
+          {assumption ? (
+            <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+              未答则按此继续：{assumption}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
+        {conversationId && (
+          <Button
+            variant="neutral"
+            disabled={busy}
+            onClick={() => useSidePanelStore.getState().showBrowser()}
+            icon={<Radio size={13} />}
+          >
+            打开浏览器
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          disabled={busy}
+          onClick={onLoggedIn}
+          icon={
+            submitting === "logged_in" ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Check size={13} />
+            )
+          }
+        >
+          已登录，继续
+        </Button>
+        {onUseAssumption ? (
+          <Button
+            variant="neutral"
+            disabled={busy}
+            onClick={onUseAssumption}
+            icon={
+              submitting === "use_assumption" ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <ArrowRight size={13} />
+              )
+            }
+          >
+            按假设继续
+          </Button>
+        ) : null}
+        {onStop ? (
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={onStop}
+            icon={
+              submitting === "stop" ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <OctagonX size={13} />
+              )
+            }
+          >
+            停止
+          </Button>
+        ) : null}
+      </div>
+    </DecisionCard>
+  );
+}

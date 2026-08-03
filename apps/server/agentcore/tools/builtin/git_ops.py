@@ -2,7 +2,8 @@
 
 Thin shell over subprocess git in the workspace root (``ServerWorkspace.root``).
 Read subcommands (status / diff / log) run without approval; write subcommands
-(add / commit / branch / checkout / push) are refused on the CEO path and
+(add / commit / branch / checkout / push / init_baseline) are refused on the CEO
+path except ``init_baseline`` (one-shot first baseline; still approval-gated) and
 executed on delegated workers (push requires user authorization). Dangerous
 operations (reset / rebase / merge / …) are hard-rejected at the tool boundary.
 Push itself is allowlisted but never force; main/master current branch is hard-
@@ -41,10 +42,29 @@ from agentcore.tools.registration import (
 )
 
 _ALLOWED_SUBCOMMANDS = frozenset(
-    {"status", "diff", "log", "add", "commit", "branch", "checkout", "push"}
+    {
+        "status",
+        "diff",
+        "log",
+        "add",
+        "commit",
+        "branch",
+        "checkout",
+        "push",
+        "init_baseline",
+    }
 )
-_WRITE_SUBCOMMANDS = frozenset({"add", "commit", "branch", "checkout", "push"})
+_WRITE_SUBCOMMANDS = frozenset(
+    {"add", "commit", "branch", "checkout", "push", "init_baseline"}
+)
+# CEO may run this one write: one-shot「初始化并首提交」(user still approves via gate).
+_CEO_ALLOWED_WRITE_SUBCOMMANDS = frozenset({"init_baseline"})
 _NO_REPO_CODE = "no_repo"
+_DIRTY_SKIP_CODE = "dirty_skip"
+_ALREADY_REPO_CODE = "already_repo"
+_INIT_BASELINE_MESSAGE = "Initial commit (AgentCore baseline)"
+_INIT_BASELINE_AUTHOR_NAME = "AgentCore"
+_INIT_BASELINE_AUTHOR_EMAIL = "agentcore@local"
 
 
 def git_write_subcommands() -> frozenset[str]:
@@ -73,6 +93,9 @@ def git_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
     if sub == "push":
         # ensure_repo (~2×20) + remote list (20) + push (60) + slack
         return 2 * _GIT_TIMEOUT + _GIT_TIMEOUT + 60.0 + _GIT_KILL_SLACK
+    if sub == "init_baseline":
+        # init + add -A + commit (+ optional status probe when already a repo)
+        return 4 * _GIT_TIMEOUT + _GIT_KILL_SLACK
     serial = 4 if sub == "commit" else 2
     return serial * _GIT_TIMEOUT + _GIT_KILL_SLACK
 
@@ -91,13 +114,16 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
                 "branch",
                 "checkout",
                 "push",
+                "init_baseline",
             ],
             "description": (
-                "要执行的 git 子命令。前置条件：仅当工作区【根】存在 `.git` 时可用"
-                "（不扫嵌套子仓、不上溯父仓、不自动 init）。"
-                "探路/摸底优先 file_list / grep；本工具用于分支、diff、log 等 VCS 事实。"
-                "只读 status/diff/log：无仓 → success + metadata.code=no_repo；"
-                "写入 add/commit/branch/checkout/push：无仓仍硬错。"
+                "要执行的 git 子命令。"
+                "只读 status/diff/log：需工作区根 `.git`（不扫嵌套、不上溯）；"
+                "无仓 → success + metadata.code=no_repo。"
+                "写入 add/commit/branch/checkout/push：无仓仍硬错；需用户授权；"
+                "CEO 路径拒写（须 delegate）。"
+                "例外 init_baseline：无仓时初始化并首提交（一键基线；CEO 可调、仍需授权）；"
+                "已有仓且工作区脏 → 不代 commit（metadata.code=dirty_skip）。"
                 "push 需用户授权；force / 保护分支仍拒；无凭据会失败。"
             ),
         },
@@ -391,13 +417,15 @@ class GitTool:
         return ToolSchema(
             name="git",
             description=(
-                "在工作区内执行 Git 操作。前置：仅工作区根下的 `.git`"
-                "（不扫嵌套、不上溯、不自动 init；多数会话通常无 Git）。"
-                "探路摸底优先 file_list/grep；本工具补 VCS 事实（分支/diff/log）。"
+                "在工作区内执行 Git 操作。根规则：仅工作区根 `.git`"
+                "（不扫嵌套、不上溯）。探路摸底优先 file_list/grep。"
                 "只读：status / diff / log（无仓 → success + metadata.code=no_repo，"
                 "禁止当成干净仓；status 默认不含未跟踪文件）。"
                 "写入（需用户授权）：add / commit / branch / checkout / push"
-                "（无仓仍硬错）。push 需授权；force / 保护分支仍拒；无凭据会失败。"
+                "（无仓仍硬错；CEO 拒写须 delegate）。"
+                "一键基线：init_baseline（无仓→init+首提交；CEO 可调仍需授权；"
+                "已有仓且脏树不代 commit）。"
+                "push 需授权；force / 保护分支仍拒；无凭据会失败。"
                 "reset / rebase / merge 等危险操作仍硬禁。"
             ),
             parameters=GIT_TOOL_PARAMETERS,
@@ -419,12 +447,19 @@ class GitTool:
         if any(pattern in subcommand for pattern in _FORBIDDEN_PATTERNS):
             return _error(f"子命令 '{subcommand}' 被安全策略拒绝", start)
 
-        if subcommand in _WRITE_SUBCOMMANDS and _is_ceo_context(context):
+        if (
+            subcommand in _WRITE_SUBCOMMANDS
+            and _is_ceo_context(context)
+            and subcommand not in _CEO_ALLOWED_WRITE_SUBCOMMANDS
+        ):
             return _error("Git 写入操作需通过 delegate 委派给 Worker 执行。", start)
 
         cwd = _resolve_git_cwd(context)
         if cwd is None:
             return _error("当前工作区模式不支持 Git 操作（无本地根目录）", start)
+
+        if subcommand == "init_baseline":
+            return await self._cmd_init_baseline(cwd, start, meta=base_meta)
 
         repo_err = await _ensure_git_repo(
             cwd, start, write=subcommand in _WRITE_SUBCOMMANDS
@@ -482,6 +517,71 @@ class GitTool:
             )
 
         return _error(f"子命令 '{subcommand}' 不在允许列表中", start)
+
+    async def _cmd_init_baseline(
+        self,
+        cwd: str,
+        start: float,
+        *,
+        meta: dict[str, Any],
+    ) -> ToolResult:
+        """Init repo + first commit when missing; never force-commit a dirty existing tree."""
+        if _workspace_has_local_git(cwd):
+            porcelain, stderr, code = await _run_git(
+                ["status", "--porcelain"], cwd=cwd
+            )
+            if code != 0:
+                return await _git_failure(porcelain, stderr, code, start, metadata=meta)
+            if porcelain.strip():
+                return _ok(
+                    "已有 Git 仓库且工作区有未提交改动，不代为 commit。"
+                    "请用 status/diff 查看后由用户决定是否提交。",
+                    start,
+                    metadata={**meta, "code": _DIRTY_SKIP_CODE},
+                )
+            return _ok(
+                "已有 Git 仓库且工作区干净，无需 init_baseline。",
+                start,
+                metadata={**meta, "code": _ALREADY_REPO_CODE},
+            )
+
+        init_out, init_err, init_code = await _run_git(["init"], cwd=cwd)
+        if init_code != 0:
+            return await _git_failure(init_out, init_err, init_code, start, metadata=meta)
+
+        add_out, add_err, add_code = await _run_git(["add", "-A"], cwd=cwd)
+        if add_code != 0:
+            return await _git_failure(add_out, add_err, add_code, start, metadata=meta)
+
+        commit_args = [
+            "-c",
+            f"user.name={_INIT_BASELINE_AUTHOR_NAME}",
+            "-c",
+            f"user.email={_INIT_BASELINE_AUTHOR_EMAIL}",
+            "commit",
+            "--allow-empty",
+            "-m",
+            _INIT_BASELINE_MESSAGE,
+        ]
+        commit_out, commit_err, commit_code = await _run_git(commit_args, cwd=cwd)
+        if commit_code != 0:
+            return await _git_failure(
+                commit_out, commit_err, commit_code, start, metadata=meta
+            )
+
+        sha, _, sha_code = await _run_git(["rev-parse", "--short", "HEAD"], cwd=cwd)
+        short = sha.strip() if sha_code == 0 else ""
+        branch = await _current_branch(cwd)
+        bits = ["已初始化 Git 并完成首提交（AgentCore baseline）"]
+        if short:
+            bits.append(f"HEAD={short}")
+        if branch:
+            bits.append(f"分支={branch}")
+        return _ok(
+            "；".join(bits) + "。",
+            start,
+            metadata={**meta, "sha": short or None, "branch": branch or None},
+        )
 
     async def _cmd_status(
         self,

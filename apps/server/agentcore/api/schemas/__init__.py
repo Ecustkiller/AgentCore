@@ -189,6 +189,7 @@ from .messages import (
     SubmitRunRedirectResponse,
     TurnRecoveryResponse,
     WorkspaceOpError,
+    WriteCapabilityOverride,
     interaction_result_from_body,
 )
 from .messaging import (
@@ -318,6 +319,8 @@ from .workspaces import (
     MoveFileRequest,
     SnapshotListResponse,
     SnapshotSummary,
+    TrashEntrySummary,
+    TrashListResponse,
     UploadFileResponse,
     WorkspaceBindingResponse,
     WorkspaceEditDoc,
@@ -454,6 +457,8 @@ __all__ = [
     "CreateSnapshotRequest",
     "SnapshotSummary",
     "SnapshotListResponse",
+    "TrashEntrySummary",
+    "TrashListResponse",
     "WorkspaceFileEntry",
     "WorkspaceFileListResponse",
     "WorkspaceFileIndexResponse",
@@ -503,6 +508,7 @@ __all__ = [
     "ResolveInteractionRequest",
     "interaction_result_from_body",
     "ResumeTurnRequest",
+    "WriteCapabilityOverride",
     "SubmitDebateSteerRequest",
     "SubmitDebateSteerResponse",
     "SubmitRunRedirectRequest",

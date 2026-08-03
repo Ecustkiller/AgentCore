@@ -616,6 +616,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.audit_gate_hard_block'),
     EventSpec(name='engine.audit_gate_nudge'),
     EventSpec(name='engine.availability_status_nudge'),
+    EventSpec(name='engine.browser_snapshot_clear'),
     EventSpec(
         name='engine.ceiling_finalize',
         description='收敛治理：硬顶强制收尾（reason=max_rounds 轮预算耗尽 / token_budget）',
@@ -643,7 +644,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.llm_failed_terminal'),
     EventSpec(name='engine.loop_finalize', description='收敛治理：强制收尾'),
     EventSpec(name='engine.loop_nudge', description='收敛治理：循环提醒'),
-    EventSpec(name='engine.reflection_inject'),
+    EventSpec(
+        name='engine.reflection_inject',
+        description='已退役：B2 进度复盘注入（保留词表供旧日志识别）',
+    ),
     EventSpec(name='engine.retrieval_budget_critical'),
     EventSpec(name='engine.retrieval_budget_wind_down'),
     EventSpec(name='engine.team_gate_nudge'),

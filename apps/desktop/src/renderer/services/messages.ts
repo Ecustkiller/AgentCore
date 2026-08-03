@@ -196,10 +196,10 @@ export function toMessage(m: BackendMessage): Message {
   if (events.length > 0) {
     hydrateInteractionsFromJournal(m.conversation_id, m.id, events);
   }
-  // Cold-path pause latch: InteractionStore alone does not paint ResumePrompt
-  // (it reads pausedTurns). Mirror live message_end → surfaceResume when the
-  // persisted row is still paused, so reopen / offline hydrate shows the card
-  // even if /recovery raced empty.
+  // Cold-path pause latch: InteractionStore is the live ResumePrompt authority.
+  // Mirror recovery shell into pausedTurns when the persisted row is still paused
+  // so reopen / offline hydrate keeps origin routing + shell fallback even if
+  // /recovery raced empty. Live cards no longer require message_end → surface.
   const paused = Boolean(m.paused);
   if (paused && m.role === "assistant" && events.length > 0) {
     const priorUser = [...getRuntime(m.conversation_id).messages]

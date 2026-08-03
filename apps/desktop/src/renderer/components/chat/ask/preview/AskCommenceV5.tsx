@@ -1,6 +1,6 @@
 /**
  * V5 —— 现生产通用澄清卡（{@link AskDecisionBody}）。
- * 原「开工提案」行式壳已退役；本变体对照现产品主路径（提交/停止在预览里是空操作）。
+ * 原「开工提案」行式壳已退役；本变体对照现产品主路径（提交/跳过在预览里是空操作）。
  */
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import { useState } from "react";

@@ -17,8 +17,6 @@ def test_tools_unavailable_message_when_tools_offered_and_empty():
         tool_failure_warn=3,
         tool_failure_disable=5,
         unproductive_threshold=3,
-        reflection_start_round=4,
-        reflection_interval=3,
         convergence_finalize_rounds=3,
         investigation_tools=frozenset(),
     )
@@ -47,8 +45,6 @@ def test_tools_unavailable_not_triggered_when_supports_tools_unknown():
         tool_failure_warn=3,
         tool_failure_disable=5,
         unproductive_threshold=3,
-        reflection_start_round=4,
-        reflection_interval=3,
         convergence_finalize_rounds=3,
         investigation_tools=frozenset(),
     )
@@ -75,8 +71,6 @@ def test_tools_unavailable_not_used_when_model_produced_text():
         tool_failure_warn=3,
         tool_failure_disable=5,
         unproductive_threshold=3,
-        reflection_start_round=4,
-        reflection_interval=3,
         convergence_finalize_rounds=3,
         investigation_tools=frozenset(),
     )

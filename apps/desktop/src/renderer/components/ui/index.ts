@@ -29,6 +29,21 @@ export {
   type IconButtonProps,
   type IconButtonSize,
 } from "./icon-button";
+export {
+  HorizontalTabStrip,
+  SortableTab,
+  moveItem,
+  NO_TAB_DRAG_ATTR,
+  TAB_DRAG_THRESHOLD_PX,
+  useHorizontalTabScroll,
+  useSortableTabIds,
+  type HorizontalTabScrollState,
+  type HorizontalTabStripProps,
+  type ReorderPlace,
+  type SortableTabItemProps,
+  type SortableTabProps,
+  type UseSortableTabIdsOptions,
+} from "./horizontal-tab-strip";
 export { FinishReasonChip } from "./finish-reason-chip";
 export { Input, Textarea } from "./input";
 export {

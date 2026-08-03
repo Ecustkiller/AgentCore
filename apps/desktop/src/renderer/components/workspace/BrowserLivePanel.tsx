@@ -22,6 +22,7 @@ import { useBrowserTakeoverStore } from "@/stores/browserTakeover";
 import { useConversationStore } from "@/stores/conversation";
 import { runtimeOf } from "@/stores/conversation/runtime";
 import { useExecutionStore } from "@/stores/execution";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
   Hand,
   Loader2,
@@ -147,15 +148,24 @@ export function BrowserLivePanel({
   const [takeoverError, setTakeoverError] = useState<string | null>(null);
   /**
    * 用户点「归还控制」后的短提示（不 auto-resume）。文案两态：有 pending
-   * `browserLogin` escalate → 对齐升级卡「已登录，继续」；否则仅「控制已归还」。
+   * `browserLogin`（escalate 或 CEO ask_user）→ 对齐登录卡「已登录，继续」；否则仅「控制已归还」。
    */
   const [returnHint, setReturnHint] = useState(false);
-  const pendingBrowserLogin = useExecutionStore((s) =>
+  const pendingEscalationLogin = useExecutionStore((s) =>
     conversationHasPendingBrowserLogin(
       runtimeOf(useConversationStore.getState(), conversationId).messages,
       s.byId,
     ),
   );
+  const pendingAskUserLogin = usePausedTurnStore((s) =>
+    s.pending.some(
+      (p) =>
+        p.conversationId === conversationId &&
+        p.kind === "ask_user" &&
+        p.browserLogin === true,
+    ),
+  );
+  const pendingBrowserLogin = pendingEscalationLogin || pendingAskUserLogin;
   // Track the live object URL outside React state so the cleanup / next-frame swap can
   // revoke the previous one synchronously (state is async, and a stale closure would leak).
   const frameUrlRef = useRef<string | null>(null);

@@ -326,8 +326,9 @@ class WorkspaceBackend(Protocol):
         """Delete ``path`` (a file, or a directory and its contents).
 
         Default is reversible: local Electron channels move to the OS recycle
-        bin; cloud / sidecar backends move into ``AgentCore/trash/`` with
-        restore metadata. ``permanent=True`` hard-deletes. Refuses to delete
+        bin (system trash — **no** product one-click restore); cloud / sidecar
+        backends move into ``AgentCore/trash/`` with restore metadata (list +
+        restore API). ``permanent=True`` hard-deletes. Refuses to delete
         the workspace root itself. Raises ``OutsideWorkspace`` /
         ``PathNotFound`` / ``WorkspaceIOError``.
         """

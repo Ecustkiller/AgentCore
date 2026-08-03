@@ -5,11 +5,20 @@ import {
   isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import { useConversationStore } from "@/stores/conversation";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachConversation, streamConversation } from "../streamConversation";
+import * as dispatchMod from "../sse/dispatch";
+import {
+  ATTACH_CAUGHT_UP_COMMENT,
+  attachConversation,
+  pumpSseBody,
+  streamConversation,
+} from "../streamConversation";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  useConversationStore.setState({ currentConversationId: null, byId: {} });
 });
 
 describe("describeStreamError", () => {
@@ -214,6 +223,7 @@ describe("attachConversation (实时重连续看 1b)", () => {
       "fetch",
       vi.fn(() => Promise.resolve(new Response(null, { status: 204 }))),
     );
+    useConversationStore.getState().switchConversation("c1");
     await expect(attachConversation("c1")).resolves.toBe("none");
   });
 
@@ -222,6 +232,7 @@ describe("attachConversation (实时重连续看 1b)", () => {
       Promise.resolve(new Response(null, { status: 204 })),
     );
     vi.stubGlobal("fetch", fetchMock);
+    useConversationStore.getState().switchConversation("conv-42");
     await attachConversation("conv-42");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/v1/conversations/conv-42/stream");
@@ -246,8 +257,75 @@ describe("attachConversation (实时重连续看 1b)", () => {
         ),
       ),
     );
+    useConversationStore.getState().switchConversation("c1");
     const err = await attachConversation("c1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(StreamError);
     expect((err as StreamError).status).toBe(404);
+  });
+
+  it("buffers replay until attach-caught-up, then delivers live events", async () => {
+    const seen: string[] = [];
+    vi.spyOn(dispatchMod, "dispatchSSEEvent").mockImplementation((event) => {
+      seen.push(event.type);
+      if (event.type === "message_end") {
+        useConversationStore.getState().setGenerating(false, "c1");
+      }
+    });
+    vi.spyOn(dispatchMod, "flushPendingContent").mockImplementation(() => {});
+    vi.spyOn(dispatchMod, "flushPendingFrames").mockImplementation(() => {});
+
+    const body = [
+      'data: {"type":"run_started","timestamp":"t","payload":{"run_id":"w1","agent_id":"a","kind":"agent"}}\n\n',
+      'data: {"type":"run_completed","timestamp":"t","payload":{"run_id":"w1","agent_id":"a"}}\n\n',
+      `: ${ATTACH_CAUGHT_UP_COMMENT}\n\n`,
+      'data: {"type":"run_output_delta","timestamp":"t","payload":{"run_id":"w2","agent_id":"b","delta":"x"}}\n\n',
+      'data: {"type":"message_end","timestamp":"t","payload":{"finish_reason":"end_turn"}}\n\n',
+    ].join("");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+    useConversationStore.getState().switchConversation("c1");
+    useConversationStore.getState().createAssistantMessage("c1");
+
+    await expect(attachConversation("c1")).resolves.toBe("attached");
+    expect(seen).toEqual([
+      "run_started",
+      "run_completed",
+      "run_output_delta",
+      "message_end",
+    ]);
+  });
+});
+
+describe("pumpSseBody comments", () => {
+  it("surfaces attach-caught-up (and ignores unknown comment text shape)", async () => {
+    const events: string[] = [];
+    const comments: string[] = [];
+    const body = [
+      'data: {"type":"content_delta","timestamp":"t","payload":{"delta":"a"}}\n\n',
+      ": ping\n\n",
+      `: ${ATTACH_CAUGHT_UP_COMMENT}\n\n`,
+      'data: {"type":"content_delta","timestamp":"t","payload":{"delta":"b"}}\n\n',
+    ].join("");
+    await pumpSseBody(
+      new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+      "c1",
+      (e) => events.push(e.type),
+      (c) => comments.push(c),
+    );
+    expect(events).toEqual(["content_delta", "content_delta"]);
+    expect(comments).toEqual(["ping", ATTACH_CAUGHT_UP_COMMENT]);
   });
 });

@@ -154,6 +154,36 @@ describe("browserSessions store", () => {
     expect(store().activePageId).toBe(a);
     expect(store().pagesFor("c1")).toHaveLength(1);
   });
+
+  it("reorderPages permutes conversation pages and preserves other-conv slots", () => {
+    const a = store().createPage({ conversationId: "c1", title: "A" });
+    const other = store().createPage({ conversationId: "c2", title: "Other" });
+    const b = store().createPage({ conversationId: "c1", title: "B" });
+    const c = store().createPage({ conversationId: "c1", title: "C" });
+    // Interleaved: A, other, B, C → reorder c1 to C, A, B → C, other, A, B
+    store().reorderPages("c1", [c, a, b]);
+    expect(store().pages.map((p) => p.id)).toEqual([c, other, a, b]);
+    expect(
+      store()
+        .pagesFor("c1")
+        .map((p) => p.id),
+    ).toEqual([c, a, b]);
+  });
+
+  it("reorderPages is a no-op for incomplete / unknown / duplicate ids", () => {
+    const a = store().createPage({ conversationId: "c1", title: "A" });
+    const b = store().createPage({ conversationId: "c1", title: "B" });
+    const before = store().pages.map((p) => p.id);
+
+    store().reorderPages("c1", [b]); // missing a
+    expect(store().pages.map((p) => p.id)).toEqual(before);
+
+    store().reorderPages("c1", [b, a, "ghost"]); // unknown
+    expect(store().pages.map((p) => p.id)).toEqual(before);
+
+    store().reorderPages("c1", [a, a]); // duplicate, wrong length vs unique
+    expect(store().pages.map((p) => p.id)).toEqual(before);
+  });
 });
 
 describe("mergeHydratedPages", () => {
@@ -854,6 +884,27 @@ describe("P1 browser tabs persistence", () => {
     expect(disk?.pages).toHaveLength(1);
     expect(disk?.pages[0]?.id).toBe(a);
     expect(disk?.activePageId).toBe(a);
+  });
+
+  it("reorderPages updates persisted page order", () => {
+    const a = store().createPage({
+      conversationId: "c-reorder",
+      url: "https://a.example/",
+      title: "A",
+    });
+    const b = store().createPage({
+      conversationId: "c-reorder",
+      url: "https://b.example/",
+      title: "B",
+    });
+    const c = store().createPage({
+      conversationId: "c-reorder",
+      url: "https://c.example/",
+      title: "C",
+    });
+    store().reorderPages("c-reorder", [c, a, b]);
+    const disk = loadPersistedBrowserTabs("c-reorder");
+    expect(disk?.pages.map((p) => p.id)).toEqual([c, a, b]);
   });
 
   it("remembers active page per conversation across hydrate", async () => {

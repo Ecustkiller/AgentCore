@@ -233,7 +233,7 @@ describe("attachSidecarTurn (D4)", () => {
     expect(onEventCalls).toBe(0);
   });
 
-  it("viewer abort detaches without cancelling the engine (C1)", async () => {
+  it("explicit AbortSignal detaches viewer without cancelling the engine (C1)", async () => {
     useConversationStore.getState().switchConversation(CID);
 
     let resolveAttach!: (v: ReturnType<typeof attachLiveResponse>) => void;
@@ -269,12 +269,70 @@ describe("attachSidecarTurn (D4)", () => {
       expect(getActiveSidecarTarget(CID)?.turnId).toBe("turn-live"),
     );
 
-    // Hydrate cleanup / 切会话：abort 观察泵，引擎必须继续。
+    // 显式卸观察：abort 观察泵，引擎必须继续（切会话不走此路径）。
     ac.abort();
     await expect(p).resolves.toBe(true);
     expect(cancelMock).not.toHaveBeenCalled();
     expect(getActiveSidecarTarget(CID)).toBeNull();
     // generating cleared so reopen hydrate can attach again.
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(false);
+  });
+
+  it("without external abort, attach keeps isGenerating until natural terminal", async () => {
+    useConversationStore.getState().switchConversation(CID);
+
+    // Mirror fold: message_end clears generating (teardown only clears on viewer abort).
+    dispatchMock.mockImplementation((event) => {
+      if (event.type === "message_end" || event.type === "error") {
+        useConversationStore.getState().setGenerating(false, CID);
+      }
+    });
+
+    let resolveAttach!: (v: ReturnType<typeof attachLiveResponse>) => void;
+    const attachGate = new Promise<ReturnType<typeof attachLiveResponse>>(
+      (resolve) => {
+        resolveAttach = resolve;
+      },
+    );
+    const cancelMock = vi.fn();
+    const attachMock = vi.fn(() => attachGate);
+    stubSidecarApi({
+      attach: attachMock,
+      cancel: cancelMock,
+    });
+
+    const p = attachSidecarTurn(CID);
+    await vi.waitFor(() => expect(attachMock).toHaveBeenCalled());
+
+    resolveAttach(
+      attachLiveResponse({
+        events: [
+          {
+            type: "message_start",
+            timestamp: "t0",
+            payload: { message_id: "a-live" },
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(getActiveSidecarTarget(CID)?.turnId).toBe("turn-live"),
+    );
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(true);
+
+    // Live terminal ends the turn — no external AbortSignal.
+    onEventCb?.({
+      conversationId: CID,
+      turnId: "turn-live",
+      event: {
+        type: "message_end",
+        timestamp: "t-end",
+        payload: { finish_reason: "stop" },
+      },
+    });
+    await expect(p).resolves.toBe(true);
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(getActiveSidecarTarget(CID)).toBeNull();
     expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(false);
   });
 

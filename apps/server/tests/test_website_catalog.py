@@ -153,10 +153,14 @@ def test_build_website_catalog_mapping_for_custom_labels():
     assert set(by_id) == {"copy", "frontend", "qa"}
 
 
-def test_build_toolshed_injects_tool_dense_pointers():
+def test_build_website_style_toolshed_injects_tool_dense_pointers():
     tasks, errors = expand_playbook(
-        "build_toolshed",
-        {"site": "Ops", "sections": ["应用外壳", "筛选条", "空状态"]},
+        "build_website",
+        {
+            "site": "Ops",
+            "style": "toolshed",
+            "sections": ["应用外壳", "筛选条", "空状态"],
+        },
     )
     assert errors == []
     by_id = {t["id"]: t for t in tasks}

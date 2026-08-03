@@ -118,6 +118,18 @@ def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
 _DELEGATE_LOG_AGENTS_CAP = 12
 
 
+def _is_same_host_turn_append(active: Any, message_id: str | None) -> bool:
+    """True only for same-turn secondary delegate (message_id ≡ host_turn_id).
+
+    Cross-turn adopt keeps the host eid active but this turn's message_id differs
+    from ``host_turn_id`` — must not soft-clear ``append_to`` (growth frames need
+    divert into the host journal). Empty / unbound ``host_turn_id`` is not same-turn.
+    """
+    host_tid = (getattr(active, "host_turn_id", None) or "").strip()
+    cur_tid = (message_id or "").strip()
+    return bool(host_tid) and host_tid == cur_tid
+
+
 class DelegateTool:
     """CEO-agent tool that delegates sub-tasks to a Run plan and returns their
     products for the CEO to synthesize (non-terminal, Option 1).
@@ -503,10 +515,15 @@ class DelegateTool:
         if append_to and append_to.lower() == "latest":
             from agentcore.runtime.coordination.session import active_coordination
 
-            # 同回合已有活跃协调图：latest ≡ 不传（自动并入当前图），禁止硬失败。
-            # 跨回合 / 无同回合活跃图时仍走历史 multi_agent 解析（exclude 本 turn）。
+            # 仅真同回合二次 delegate（message_id ≡ host_turn_id）才吞 latest。
+            # 跨回合 adopt 后 eid 已是宿主、但 message_id≠host_turn_id → 须保留
+            # append，走 graph_append + divert，让生长 run_plan 进宿主 journal。
             active = active_coordination(self._base_tool_context.execution_id)
-            if active is not None and active.active:
+            if (
+                active is not None
+                and active.active
+                and _is_same_host_turn_append(active, self._message_id)
+            ):
                 append_to = None
             else:
                 from agentcore.runtime.delegate.graph_append import (
@@ -529,7 +546,7 @@ class DelegateTool:
                 else:
                     append_to = resolved
         # 同回合显式 append_to 命中当前活跃协作图 ≡ 不传 append（与 latest 软化对齐）。
-        # 活跃图 A + append_to=B（B≠A）仍走下方跨图 load，禁止误吞。
+        # 跨回合 adopt 后同 eid 仍须走跨图 load；活跃图 A + append_to=B（B≠A）禁误吞。
         if append_to:
             from agentcore.runtime.coordination.session import active_coordination
 
@@ -538,6 +555,7 @@ class DelegateTool:
                 active is not None
                 and active.active
                 and append_to == active.execution_id
+                and _is_same_host_turn_append(active, self._message_id)
             ):
                 append_to = None
         if append_to:
@@ -1124,8 +1142,9 @@ class DelegateTool:
         ):
             self._approval_gate.grant_delegation(execution_id)
         # Resume never re-runs the original execute() path, so re-emit run_plan here:
-        # the frontend drops the pause bubble on message_start and must re-bind the DAG
-        # under the new streaming assistant before worker frames arrive.
+        # FE Option A keeps the same pause bubble + projection key on message_start
+        # (reuses the existing assistant; never delete+create) — re-bind the DAG under
+        # that same key before worker frames arrive.
         self._sink.emit(plan_event(self, execution_id, plan))
         logger.info(
             "delegate.resume_plan",

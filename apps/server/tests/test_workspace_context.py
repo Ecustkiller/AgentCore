@@ -155,8 +155,11 @@ def test_cloud_scratch_facts():
     assert "案卷出口·审查：`AgentCore/文档/reviews/`" in out
     assert "讨论/调研/审查类交付写此树" in out
     assert "用户工程源码仍写业务路径" in out
-    assert "通常无 Git" in out
+    # FakeBackend has no root → probe unknown; still soft-tips init_baseline (P3).
+    assert "init_baseline" in out
+    assert "不挡派工" in out or "不挡" in out
     assert "no_repo" in out
+    assert "通常无 Git" not in out
 
 
 def test_cloud_host_off_capability():
@@ -216,7 +219,8 @@ def test_browser_capability_override():
     )
     assert "browser=已装配" in out
     assert "local_open=未装配" in out
-    assert "escalate(browser_login=true)" in out
+    assert "ask_user(browser_login=true)" in out
+    assert "escalate(browser_login=true)" not in out
     assert "接管登录" in out
     assert "browser_navigate" in out
     assert "禁止为此" in out or "勿为此" in out or "你自己" in out
@@ -247,6 +251,8 @@ def test_local_browser_guide_mentions_workspace_relative_path():
     assert "site/index.html" in out or "相对" in out
     assert "完整预览" in out or "workspace://" in out
     assert "file://" in out  # 明示不支持
+    assert "console" in out
+    assert "browser_console" in out
 
 
 def test_browser_unassembled_guide_mentions_bind_or_sandbox():
@@ -263,7 +269,8 @@ def test_browser_unassembled_guide_mentions_bind_or_sandbox():
         or "open_local_project" in out
         or "云端沙箱浏览器" in out
     )
-    assert "escalate(browser_login=true)" in out
+    assert "ask_user(browser_login=true)" in out
+    assert "escalate(browser_login=true)" not in out
     assert "已登录，继续" in out
     assert "Cookie" in out  # 明确否决扫 Cookie 冒充路径
     assert "用浏览器打开" in out
@@ -388,3 +395,78 @@ def test_assemble_system_prompt_includes_workspace_facts():
     # Without facts, no block (prefix-cache identity for catalog / bare tests).
     bare = assemble_system_prompt()
     assert "<workspace_context>" not in bare
+
+
+def test_git_fact_present_line_no_soft_init_tip(tmp_path):
+    from agentcore.runtime.context.workspace_context import (
+        detect_workspace_git_sync,
+    )
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    backend = ServerWorkspace(root=root, sandbox=SubprocessSandbox())
+    fact = detect_workspace_git_sync(backend)
+    assert fact.present is True
+    assert fact.branch == "main"
+    out = build_workspace_context(
+        backend,
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+        git_fact=fact,
+    )
+    assert "版本控制：Git" in out
+    assert "分支 `main`" in out
+    assert "init_baseline" not in out
+
+
+def test_git_absent_soft_tip_visible_with_explicit_fact():
+    from agentcore.runtime.context.workspace_context import WorkspaceGitFact
+
+    out = build_workspace_context(
+        _FakeBackend("local"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+        git_fact=WorkspaceGitFact(present=False),
+    )
+    assert "工作区根无 Git" in out
+    assert "init_baseline" in out
+    assert "不挡派工" in out
+
+
+def test_git_absent_soft_tip_does_not_change_should_kickoff():
+    """P3: no-git soft tip must not flip kickoff / durable-pause truth."""
+    from agentcore.core.types import (
+        CommandAxis,
+        FileWriteAxis,
+        HostAxis,
+        PermissionAxes,
+        TeamKickoffAxis,
+    )
+    from agentcore.runtime.context.workspace_context import WorkspaceGitFact
+    from agentcore.runtime.kickoff.gate import should_kickoff
+
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+        git_fact=WorkspaceGitFact(present=False),
+    )
+    assert "工作区根无 Git" in out
+    assert "init_baseline" in out
+
+    axes = PermissionAxes(
+        FileWriteAxis.SESSION,
+        CommandAxis.KICKOFF,
+        TeamKickoffAxis.RULES,
+        HostAxis.ASK,
+    )
+    # Same inputs as a normal multi-worker plan-preview kickoff — git tip is orthogonal.
+    assert should_kickoff(plan_preview=True, local_gate=True, axes=axes) is True
+    assert should_kickoff(plan_preview=False, local_gate=False, axes=axes) is False

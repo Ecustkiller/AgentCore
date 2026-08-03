@@ -36,7 +36,6 @@ from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
 # playbook 降级为形状词汇教学示例（协作优先重设计阶段 2）：listing 仍嵌进 skill，口径改为对照学形状。
 _PLAYBOOK_LISTING = available_playbooks()
 _BUILD_WEBSITE_PLAYBOOK = PLAYBOOKS["build_website"]
-_BUILD_TOOLSHED_PLAYBOOK = PLAYBOOKS["build_toolshed"]
 _BUILD_APP_PLAYBOOK = PLAYBOOKS["build_app"]
 
 # 多维取证类终局对抗触发词（kickoff research_first_recommended + MLR/debate 入口分流句同源，禁止另抄字面量）。
@@ -51,6 +50,12 @@ _MULTI_LENS_COURTROOM_TRIGGERS_JOINED = "/".join(MULTI_LENS_COURTROOM_TRIGGERS)
 CONSULT_TEAM_ORCH_BY_SCENE = (
     "按场面：建站/工具台套 playbook、或拿不准怎么拆 → 必查 `team_orchestration_advanced`；"
     "常见对比 / 单人落盘 / 提问卡 → 直接做不必查；单人事清楚可 finalize → 可不查"
+)
+
+# Shared with能力目录 preamble — carve product UX out of「纯对话无需 consult」.
+CONSULT_PRODUCT_HELP_BY_SCENE = (
+    "按场面：本产品用法 / 入口 / UI / 功能介绍 → 必查 `product_help`；"
+    "非产品用法的知识问答 / 闲聊 → 直接答不必查"
 )
 
 
@@ -146,7 +151,7 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 形态贴合时可设 `playbook` + `playbook_args` 生成骨架（与手写 tasks 二选一）；否则按词汇手写。\
 【自由组队】可不声明 playbook，直接手写 `tasks`。\
 建站 / 工具台 / 绿场软件【推荐】具名 playbook（见 consult `build_website` / \
-`build_toolshed` / `build_app`）；手写 / `none` 不再硬拒，勿在此复读全文。\
+`build_app`；控制台 dense 用 `build_website` + `style=toolshed`）；手写 / `none` 不再硬拒，勿在此复读全文。\
 【结局分层】先定桌上结果再组队：「多角 / 多 Agent」≠成文产线。\
 **代码审计**（找 bug / 安全复查 / 静态审计代码并落盘纪律化报告）→ 【宜】`code_audit`\
 （`playbook_args`：scope；多模块加 modules≥2；【禁止】套 `research_report` 学术审校环；\
@@ -167,7 +172,9 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 材料已齐扩写 / 短文落盘仍单人（成篇落盘仍【宜】另派独立审校）。\
 本地修码：【无先验调查批】单文件/单符号一刀切 → 宜显式 `complexity_hint=light`+短任务（可 \
 `requires_files`）；有复现症状 / 多点 / 需验 → `repair_code`（单症状三波；`playbook_args` 必填 \
-`problem` + `verify`）。【已有多角调查/审查批、用户确认按结论修】→ **禁止**再套 \
+`problem` + `verify`）。白屏/挂载/渲染复现 → `verify=` 写 browser 形说明\
+（如「打开 /app 白屏消失+snapshot 可见主内容」），【勿】默认全仓 tsc/pytest 冒充 UI 修好。\
+【已有多角调查/审查批、用户确认按结论修】→ **禁止**再套 \
 `repair_code` 冷开新三角色；手写 tasks + 对各调查 run 设 `continue_from_run_id`（可并行；\
 可改 task 正文/title，换马甲≠换职能；队员默认全开相关工具面，不必再填 tools）。\
 **禁止**把 `none` 当修码默认、禁止触顶后再派马甲从零读。\
@@ -433,9 +440,10 @@ runtime 真调默认对阵（平台 allowlist 前两名 `PLATFORM_MODELS[0]` vs 
 
 立场倾向（`stance`）：每方只给【一句话】该方主张什么结论的立场倾向（单句判断句；工具硬上限\
 80 字作兜底，非单句形状或含论证展开特征会【拒绝调用】并要求改写重试）。正例：「支持一审判决正确」/\
-「认为判赔过重」。【硬化禁令】禁换行、分号、编号/顿号列表、「首先/其次/一、二、」类论证展开，\
+「认为判赔过重」。【硬化禁令】禁换行、分号、顿号/括号号等枚举展开、「首先/其次/一、二、」类论证展开，\
 亦禁论点清单、论证角度指令、事实细节——客观事实归 `background`，论点与论证路径是【辩手的工作产出】，\
 由辩手自己检索构建。反例（勿写，会被拒）：「核心论点包括(1)…(4)；请从…角度系统论证」。\
+模型名/版本号（如 GLM 5.2）可出现在单句立场里，不是枚举。\
 你只定命题与参与方 + 备共享底料；预写论点会让真交锋退化成执行剧本。
 
 赛前底料（`background`，可选）：具体案件 / 真实事件 / 有客观事实基础的命题，建议开辩前先快速检索\
@@ -807,8 +815,8 @@ _BUILD_WEBSITE = f"""\
 <build_website>
 【推荐】建站 / 落地页 / 营销官网用 `delegate(playbook="build_website", playbook_args={{...}})`\
 （质量管线更稳；手写 / `none` 仍可用，但不走本 playbook 流水线）。\
-控制台 / 后台 / 工具台 dense【推荐】改用 `consult_skill(build_toolshed)` → `playbook="build_toolshed"`，\
-勿误套本营销 playbook。
+控制台 / 后台 / 工具台 dense【推荐】同用本 playbook，另加 `playbook_args.style="toolshed"`\
+（tool_dense pack + 禁营销皮）；【禁止】再找已删除的独立 `build_toolshed` playbook。
 
 形状：{_BUILD_WEBSITE_PLAYBOOK.summary}
 槽位：{_BUILD_WEBSITE_PLAYBOOK.slots}
@@ -822,41 +830,22 @@ _BUILD_WEBSITE = f"""\
 【禁止】自拟视觉施工图（配色 / 动效 / 板块清单交给 playbook）。槽位拿不准再查本 skill。
 3. 短问澄清后：若尚未读过本指引再 `consult_skill(build_website)`，然后调 `delegate`：\
 `playbook="build_website"`；`playbook_args` 规则同上。
-4. playbook 三串：文案 → 前端（一人包 DESIGN.md + 整页 HTML/CSS/JS + 轻量 CONTRACT）→ 独立 QA；\
-含 `web_quality_scan` / DESIGN 风格 id 质量契约 / marketing catalog / visual critic；\
+4. 控制台 / 工具台 dense：`playbook_args.style="toolshed"`；可选 `sections` / `stack` / `audience`——\
+**只传事实输入**；强制 catalog pack `tool_dense` + anti-slop `domain=tool`；\
+【禁止】套营销 hero / pricing 皮。省略 style（或 `marketing`）= 营销/落地页。
+5. playbook 三串：文案 → 前端（一人包 DESIGN.md + 整页 HTML/CSS/JS + 轻量 CONTRACT）→ 独立 QA；\
+含 `web_quality_scan` / DESIGN 风格 id 质量契约 / catalog / visual critic；\
 `sections` 仅覆盖清单，不扇出分区节点。
 
 组队进阶旋钮（协调墙 / deliverable 等）见 `consult_skill(team_orchestration_advanced)`。
 </build_website>"""
-
-_BUILD_TOOLSHED = f"""\
-<build_toolshed>
-【推荐】控制台 / 后台 / 工具台 / SaaS admin dense UI 用\
-`delegate(playbook="build_toolshed", playbook_args={{...}})`\
-（手写 / `none` 仍可用，但不走本 playbook 流水线）。\
-营销落地页 / 官网【推荐】改用 `consult_skill(build_website)` → `playbook="build_website"`。
-
-形状：{_BUILD_TOOLSHED_PLAYBOOK.summary}
-槽位：{_BUILD_TOOLSHED_PLAYBOOK.slots}
-
-开工顺序：
-1. 关键未齐时可 `ask_user` 短问风格/产品边界；有稳妥默认 → 直接派。
-2. 调 `delegate`：`playbook="build_toolshed"`；`playbook_args.site` 填产品控制台简述，\
-可选 `sections` / `stack` / `audience`——**只传事实输入**，【禁止】自拟视觉施工图。
-3. 流水线为三串（文案 → 前端 DESIGN+整页+轻量 CONTRACT → 独立 QA）；\
-`sections` 仅覆盖清单、不扇出分区节点；\
-强制注入 catalog pack `tool_dense` + anti-slop `domain=tool`；\
-【禁止】套营销 hero / pricing 皮。
-
-组队进阶旋钮见 `consult_skill(team_orchestration_advanced)`。
-</build_toolshed>"""
 
 _BUILD_APP = f"""\
 <build_app>
 【推荐】绿场软件 / SPA 完整交付（从 0 到 1、搭建完整项目、完整 Vue·React·Vite·SPA / \
 数据看板）用 `delegate(playbook="build_app", playbook_args={{...}})`\
 （scaffold-first 多波更稳；手写 / `none` 仍可用）。\
-营销落地页 / 官网改用 `build_website`；控制台 dense 改用 `build_toolshed`；\
+营销落地页 / 官网改用 `build_website`；控制台 dense 改用 `build_website` + `style=toolshed`；\
 局部单功能改码可用手写 tasks 或可选 `build_feature`。
 
 形状：{_BUILD_APP_PLAYBOOK.summary}
@@ -906,6 +895,65 @@ _WORK_DISCIPLINE = """\
 </work_discipline>"""
 
 
+_PRODUCT_HELP = """\
+<product_help>
+用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再短答。
+
+【答法】
+- 聊天短答为主：一两句说清，FAQ 自含完整短答，勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
+- 对用户禁内部名（ask_user / SSE / playbook / run 等）；用产品面说法（对话、协作图、工作区、检查点、审批…）。
+- 桌面可附手册深链（hash 路由）：`#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`；\
+节 ID 权威见桌面手册（例：`what` / `mindset` / `quickstart` / `faq` / `workspace` / `settings` / \
+`briefing` / `checkpoint` / `control` / `tools` / `troubleshooting`）。
+- 手机无产品手册：只短答，勿承诺「点链接打开手册」或可点深链。
+
+【这是什么】（intro·what）
+AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
+「协作，是更高级的智能」。深链：`#/toolbox/manual/intro?s=what`
+
+【你怎么用】（intro·mindset）
+说目标别说步骤；小事秒答、大事才组团；全程透明、随时插手。没有固定角色——按任务临时上场。\
+深链：`#/toolbox/manual/intro?s=mindset`
+
+【5 分钟上手】（intro·quickstart）
+① 打开就能用（平台额度）；想自带模型去「设置 · 服务商」。② 新建对话，大白话说目标。\
+③ 简单秒回；复杂会出协作图。④ 结果落工作区（绑本地就在电脑上，否则在云端项目）。\
+深链：`#/toolbox/manual/intro?s=quickstart`
+
+【入口地图】（只指路，细节仍短答）
+- 对话：发任务 / 拍板 / 收结果
+- 协作图：看团队怎么跑
+- 工作区 / 文件页：产物与完整预览 → `#/toolbox/manual/reference?s=workspace`
+- 右坞浏览器：打开页 / 直播 / 登录接管
+- 工具箱 → 产品手册：`#/toolbox/manual/intro`（总入口）
+- 工具箱 → 能力图鉴：工具与提示词清单
+- 设置（模型 / 服务商 / 用量 / 外观 / 快捷键 / 反馈 / 关于）→ `#/toolbox/manual/reference?s=settings`
+- 检查点与审批、辩论室：关键拍板与正反交锋
+
+【FAQ 精华】（自含短答；桌面可附对应节）
+- 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
+- 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
+协作细则：`#/toolbox/manual/collaboration?s=briefing`
+- 检查点怎么答？——拍板卡：提交＝带选择继续，跳过＝结束本回合；计划复核：继续 / 调整 / 停止；\
+写文件等审批另弹窗。`#/toolbox/manual/collaboration?s=checkpoint`
+- 跑偏了？——发消息纠偏；局部可唤回原队员改；全错就重新生成或说「推翻重来」；太慢点停止。\
+`#/toolbox/manual/collaboration?s=control`
+- 画布 vs 白板？——画布＝对话里跨回合空间视图；白板＝工具箱独立创作工具。`?s=faq`
+- 费用？——「设置 · 用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
+- 用什么模型？——默认平台额度；自带 Key 在「设置 · 服务商」，组合在「设置 · 模型」。`?s=faq`
+- 数据存哪？——文件在工作区；对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
+- Agent 对 Git？——可读与看 diff/log；改文件与普通 push 等需审批；force push / reset·rebase / \
+在 main·master 直接提交或 push 不会做。`?s=faq`
+- 断网？——可浏览缓存对话与本机文件（只读）；不能发消息、改文件、跑 AI。`?s=faq`
+- Key 报错？——核对「设置 · 服务商」的 Key / 地址 / 模型名；可先切回平台模型排查。\
+`#/toolbox/manual/reference?s=troubleshooting`
+- 任务一直转？——点停止结束本回合，或发消息追问；长任务可中途打断后续跑。`?s=troubleshooting`
+- 产物找不到？——打开文件页看工作区；本地项目确认绑的是对的文件夹。`?s=troubleshooting`
+
+【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。
+</product_help>"""
+
+
 # --- The system skills (single source of truth) -----------------------------
 # Catalog summaries (the always-on one-line triggers) per the design (§4.4): sharp
 # enough that the model knows WHEN to pull each, without spending the body on it.
@@ -924,22 +972,21 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         body=_WORK_DISCIPLINE,
     ),
     SystemSkill(
+        name="product_help",
+        summary=(
+            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 → 短答；"
+            "桌面可附手册深链，手机只短答"
+        ),
+        body=_PRODUCT_HELP,
+    ),
+    SystemSkill(
         name="build_website",
         summary=(
             "建站/落地页/营销官网：糊可短问再派；规格已齐→推荐 "
-            "playbook=build_website；"
-            "三串文案→前端→QA；控制台勿用本 skill"
+            "playbook=build_website；控制台 dense 加 style=toolshed；"
+            "三串文案→前端→QA"
         ),
         body=_BUILD_WEBSITE,
-        requires_tools=("delegate",),
-    ),
-    SystemSkill(
-        name="build_toolshed",
-        summary=(
-            "控制台/后台/工具台 dense：推荐 playbook=build_toolshed；"
-            "pack=tool_dense；缺信息可短问；营销落地页改用 build_website"
-        ),
-        body=_BUILD_TOOLSHED,
         requires_tools=("delegate",),
     ),
     SystemSkill(
@@ -1080,11 +1127,12 @@ def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str
     lines = [
         "<能力目录>",
         "下列进阶能力的完整指引未常驻；要用到时，先用 `consult_skill(name)` 把指引拉回来再执行"
-        f"（纯对话式回答自己答即可，无需 consult；提问卡直接 ask_user、不必先查；"
+        f"（{CONSULT_PRODUCT_HELP_BY_SCENE}；"
+        "提问卡直接 ask_user、不必先查；"
         f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
         "糊建站 /「做个网站」先 ask_user，确认后再 consult `build_website`；"
         "规格已齐的落地页/作品集可直接 delegate(playbook=build_website)，不必先查；"
-        "控制台 / 后台 / 工具台 dense 先 consult `build_toolshed`；"
+        "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
         "绿场软件/SPA 完整交付必须 build_app（禁 none 手糊）；"
         "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature）：",
     ]

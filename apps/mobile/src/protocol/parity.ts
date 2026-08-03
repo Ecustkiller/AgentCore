@@ -132,7 +132,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   escalation_required: {
     verdict: "ported",
-    surface: "AssistantView · EscalationAnswer 待你拍板卡 (②)",
+    surface:
+      "AssistantView · EscalationAnswer 待你拍板卡 (②)；browser_login → extractEscalationSlots.esc.browserLogin 旁路",
   },
   escalation_resolved: {
     verdict: "ported",
@@ -223,10 +224,10 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "DelegationAuthorizationCard",
   },
   checkpoint_required: {
-    verdict: "simplified",
+    verdict: "ported",
     surface: "ResumeCard",
     reason:
-      "协议折入 ResumeCard 可恢复；桌面 CheckpointCard：kickoff/decision 共用 AskDecisionBody，proposal_pick/risk_ack/organize_plan 专用体；daily_review 勾选墙已对等进 ResumeCard；其余 intent 精简承接（见 DESKTOP_CHAT_PARITY · CheckpointCard / ask/*）",
+      "协议折入 ResumeCard；ask intent 专用面已对等（decision/kickoff compose+其他；proposal_pick/risk_ack 行选；organize_plan/daily_review 勾选墙）；本机目录 action 手机不可能履约故禁用",
   },
   checkpoint_resolved: {
     verdict: "simplified",
@@ -280,16 +281,16 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     reason: "调度埋点量化仅桌面诊断模式面板；手机无诊断面板 (fold no-op)",
   },
 
-  // —— L3 团队浏览器直播（桌面工作区直播面板 + 接管，手机暂不做）——
+  // —— L3 团队浏览器直播（桌面工作区直播面板 + 接管；手机 BrowserLiveSheet）——
   browser_live_frame: {
-    verdict: "simplified",
-    reason:
-      "L3 团队浏览器直播帧（base64 jpeg 截屏，ephemeral 侧信道、从不落 turn journal）喂桌面工作区直播面板；手机暂不做直播/接管面 (fold no-op)",
+    verdict: "ported",
+    surface:
+      "BrowserLiveSheet（ChatPage 挂载；登录卡「查看直播」开 sheet；ephemeral 侧信道、从不落 turn journal；fold no-op）",
   },
   browser_live_status: {
-    verdict: "simplified",
-    reason:
-      "同上 · 直播通道状态（started / no_session / session_closed）；手机无直播面板 (fold no-op)",
+    verdict: "ported",
+    surface:
+      "BrowserLiveSheet · 直播通道状态（started / no_session / session_closed）",
   },
 
   // —— AI 协作白板（桌面画布面，手机无板）——
@@ -403,12 +404,17 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface: "AssistantView · EscalationAnswer (②)",
   },
+  BrowserLoginDecisionCard: {
+    verdict: "ported",
+    surface:
+      "ResumeCard · ask_user browser_login 冷路 / EscalationAnswer · escalate browser_login 热路（BrowserLoginDecisionCard；「查看直播」→ ChatPage BrowserLiveSheet）",
+  },
   MemoryUpdateCard: { verdict: "ported", surface: "MemoryUpdateCard (③)" },
   CheckpointCard: {
-    verdict: "simplified",
+    verdict: "ported",
     surface: "ResumeCard",
     reason:
-      "桌面 kickoff/decision 共用 AskDecisionBody；proposal_pick/risk_ack/organize_plan 专用体；daily_review 勾选墙已对等进 ResumeCard；手机其余 intent 仍精简 ResumeCard 承接（organize_plan 仍确认=全保留）",
+      "ask intent 专用面已对等进 ResumeCard（decision/kickoff compose+其他；proposal/risk 行选；organize/daily 勾选墙）；本机目录 action 手机禁用",
   },
   PlanReviewCard: { verdict: "ported", surface: "ResumeCard" },
   TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
@@ -423,17 +429,16 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface: "AssistantView · hot-trace 轻状态行（resolved 门控，D3）",
   },
   ResumePrompt: {
-    verdict: "simplified",
+    verdict: "ported",
     surface: "ResumeCard",
     reason:
-      "桌面 ResumePrompt 复用 CheckpointCard 全 intent UI；手机精简 ResumeCard 降级承接（与 CheckpointCard 同缺口）",
+      "桌面 ResumePrompt 复用 CheckpointCard；手机 ResumeCard 已承接全 ask intent 专用面（本机目录 action 除外）",
   },
   FileArtifactsCard: { verdict: "ported", surface: "FileArtifactsCard" },
   TurnFileChangesReview: {
-    verdict: "simplified",
-    surface: "FileArtifactsCard",
-    reason:
-      "桌面 A1/A1+/A2′「查看改动」+ 回退基线（云 files/diff / 本机 sidecar）；手机产物卡仅清单+深链文件页，本期不做基线 diff/回退面（代码基本功 A+B 定案验收落桌面）",
+    verdict: "ported",
+    surface:
+      "TurnFileChangesReview（产物卡内展开；仅云 files/diff + restoreSnapshot，无 Local sidecar）",
   },
   FollowupChips: { verdict: "ported", surface: "ChatPage · 下一步 chips" },
   StageCard: { verdict: "ported", surface: "StageCard" },
@@ -501,12 +506,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
       "桌面跨回合同图追加锚点条（滚回宿主协作图）；手机 TeamView 无跨气泡图追加跳转，追加回合仍走常规进程时间线",
   },
 
-  // —— 提问 intent 专用卡（ask/；桌面 CheckpointCard 分支出；手机本期降级 ResumeCard）——
+  // —— 提问 intent 专用卡（ask/；桌面 CheckpointCard 分支出；手机 ResumeCard 承接）——
   "ask/AskDecisionBody": {
-    verdict: "simplified",
-    surface: "ResumeCard",
-    reason:
-      "通用澄清卡（decision + wire kickoff）：AskCardShell + 行式选项；手机无专用卡，ResumeCard 精简承接",
+    verdict: "ported",
+    surface:
+      "ResumeCard · decision/kickoff（default 预选 + compose 答复 +「其他」逃逸；本机目录 action 禁用）",
   },
   "ask/AskCommenceKickoff": {
     verdict: "internal",
@@ -514,22 +518,19 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
       "已退役 kickoff V2 Brief+Choose；仅离线预览对照，生产走 AskDecisionBody",
   },
   "ask/ProposalPickBody": {
-    verdict: "simplified",
-    surface: "ResumeCard",
-    reason:
-      "proposal_pick 生产卡：AskCardShell + 行式单选；手机无专用卡，ResumeCard chips 降级承接",
+    verdict: "ported",
+    surface:
+      "ResumeCard · proposal_pick 行式单选（未选禁 CTA「采用此方案」；提交带 selected）",
   },
   "ask/RiskAckBody": {
-    verdict: "simplified",
-    surface: "ResumeCard",
-    reason:
-      "risk_ack 生产卡：AskCardShell + 行式多选；手机无专用卡，ResumeCard chips 降级承接",
+    verdict: "ported",
+    surface:
+      "ResumeCard · risk_ack 行式多选（parseRiskLabel 严重度灰字；空选可继续）",
   },
   "ask/OrganizePlanBody": {
-    verdict: "simplified",
-    surface: "ResumeCard",
-    reason:
-      "organize_plan 生产卡：AskCardShell + 行式多选；手机无勾选墙，ResumeCard 确认=全保留降级",
+    verdict: "ported",
+    surface:
+      "ResumeCard · organize_plan 勾选墙（默认全选 / 取消=剔除 / 空选禁 CTA「确认并整理（n）」）",
   },
   "ask/DailyReviewBody": {
     verdict: "ported",
@@ -537,10 +538,9 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
       "ResumeCard · daily_review 勾选墙（默认全选 / 取消=跳过 / selected 语义对齐）",
   },
   "ask/AskUserFields": {
-    verdict: "simplified",
-    surface: "ResumeCard",
-    reason:
-      "桌面结构化问答内核（choice/text/其他逃逸 + useAskAnswer）；手机 ResumeCard 内嵌精简问答，无对等 AskUserFields 面",
+    verdict: "ported",
+    surface:
+      "ResumeCard 内嵌 default 预选 +「其他」逃逸 + composeAnswer（答复模型 α）；无独立 AskUserFields 面",
   },
   "ask/AskCardShell": {
     verdict: "internal",
@@ -586,7 +586,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   InlineTeamGraph: {
     verdict: "simplified",
     reason:
-      "手机用竖排 TeamView 代 React-Flow 画布；点队员卡下钻 RunDetail 详情面（对齐桌面抽屉信息，小屏合理）",
+      "有意竖排 TeamView，非待做画布（不接 React Flow）；点队员卡下钻 RunDetail（对齐桌面抽屉，小屏合理）",
   },
   MentionMenu: {
     verdict: "simplified",
@@ -608,12 +608,12 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   BrowserActivityCard: {
     verdict: "simplified",
     reason:
-      "L3 团队浏览器 M0：桌面把 worker browser_* 步聚合成关键帧活动卡（BrowserActivityCard / 单步 BrowserResult + 懒取工作区关键帧）；手机按 D12 退化为文本工具行（tool_use_end 已 ported、display 照折不丢数据），富卡后置",
+      "L3 团队浏览器 M0：桌面把 worker browser_* 步聚合成关键帧活动卡（BrowserActivityCard / 单步 BrowserResult + 懒取工作区关键帧）；手机按 D12 退化为文本工具行（tool_use_end 已 ported）；直播入口在登录卡「查看直播」→ BrowserLiveSheet，富活动卡后置",
   },
   BrowserTakeoverCard: {
     verdict: "simplified",
     reason:
-      "L3 团队浏览器 M2 接管留档卡（桌面直播面板发起接管后的只读时间线痕迹，起止 DURABLE 标记走 REST/store，接管期零帧落盘）；手机暂不做直播/接管面，痕迹卡随该功能后置",
+      "L3 团队浏览器 M2 接管留档卡（桌面直播面板发起接管后的只读时间线痕迹，起止 DURABLE 标记走 REST/store，接管期零帧落盘）；手机 BrowserLiveSheet 已支持直播/接管操作，留档卡后置",
   },
   PermissionChangeLine: {
     verdict: "simplified",
@@ -779,6 +779,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "toolbox/workflows/UseTemplateDialog": {
     verdict: "simplified",
     reason: "同上 · 从官方模板复制仅桌面",
+  },
+  "toolbox/workflows/OfficialTemplateGuide": {
+    verdict: "simplified",
+    reason: "同上 · 官方模板说明仅桌面",
   },
   "toolbox/workflows/RunWorkflowDialog": {
     verdict: "simplified",

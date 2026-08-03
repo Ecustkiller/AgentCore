@@ -6,7 +6,6 @@ import { FindingThreads } from "./FindingThreads";
 import { JudgeNote } from "./JudgeNote";
 import { resolveModeratorModel } from "./ModeratorIdentity";
 import { OpeningNote } from "./OpeningNote";
-import { PretrialSection } from "./PretrialSection";
 import { SectionHeader } from "./SectionHeader";
 import { SpeakerBlock, speechStageLabel } from "./SpeakerBlock";
 import { SteeringPanel } from "./SteeringPanel";
@@ -97,14 +96,6 @@ export function Transcript({
   return (
     <div className="space-y-1">
       {openingLine && <OpeningNote text={openingLine} model={moderatorModel} />}
-
-      {model.pretrial ? (
-        <PretrialSection
-          pretrial={model.pretrial}
-          moderatorModel={moderatorModel}
-          layoutMode={layoutMode}
-        />
-      ) : null}
 
       {model.rounds.map((round) => {
         const flat = isFlatRound(round);

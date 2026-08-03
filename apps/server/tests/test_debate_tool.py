@@ -538,13 +538,15 @@ def test_parse_sides_rejects_argument_list_stance():
 
 
 def test_parse_sides_rejects_semantic_shape_violations():
-    """语义形状：换行 / 首先其次 / 一、二、 类展开 → 拒绝。"""
+    """语义形状：换行 / 首先其次 / 一、二、 / 顿号枚举 → 拒绝。"""
     from agentcore.tools.builtin.debate.schema import parse_sides, validate_stance
 
     cases = [
         ("支持维持原判\n并认为程序合法", "换行"),
         ("首先支持维持原判其次反对改判", "论证展开"),
         ("一、支持维持原判二、反对改判请求", "论点清单"),
+        ("支持 1、事实清楚 2、适用正确", "论点清单"),
+        ("主张(1)维持原判(2)驳回上诉", "论点清单"),
     ]
     for stance, needle in cases:
         assert validate_stance(stance, side_key="pro") is not None
@@ -557,6 +559,38 @@ def test_parse_sides_rejects_semantic_shape_violations():
         assert sides == []
         assert needle in err or "论证展开" in err or "论点清单" in err or "单句" in err
         assert "请改写" in err
+
+
+def test_validate_stance_accepts_version_numbers_in_thin_stance():
+    """模型名/版本号中的 digit.digit 不是枚举——ASCII「N.」已撤出硬闸。"""
+    from agentcore.tools.builtin.debate.schema import parse_sides, validate_stance
+
+    cases = [
+        "认为 DeepSeek 模型整体优于 GLM 5.2",
+        "认为 GLM 5.2 模型整体优于 DeepSeek",
+        "主张采用 Claude 3.5",
+        "支持升级到 GPT-4.1",
+        # 故意缺口：纯英文「1. 2.」无其它特征时不再硬拒（观察，不回加歧义支）
+        "支持 1. 事实清楚即可",
+    ]
+    for stance in cases:
+        assert validate_stance(stance, side_key="pro") is None, stance
+    sides, err = parse_sides(
+        [
+            {
+                "key": "deepseek",
+                "name": "DeepSeek",
+                "stance": "认为 DeepSeek 模型整体优于 GLM 5.2",
+            },
+            {
+                "key": "glm",
+                "name": "GLM 5.2",
+                "stance": "认为 GLM 5.2 模型整体优于 DeepSeek",
+            },
+        ]
+    )
+    assert err == ""
+    assert len(sides) == 2
 
 
 async def test_rejects_thick_stance_at_tool_boundary():

@@ -252,6 +252,18 @@ def _basename_is_sensitive(name: str) -> bool:
     return False
 
 
+_TOP_TREE_REASON = (
+    "检测到疑似删除工作区顶层整项目目录的命令（启发式兜底，并非完整拦截）。"
+    "误伤面：非常规顶层目录名的合法清理也会弹确认。"
+    "需人工确认后才能执行；白名单清理目录（node_modules/.venv 等）不拦截。"
+)
+
+_NO_BASELINE_REASON = (
+    "检测到破坏性删除形，且本回合尚无可用的 Local zip 基线（启发式兜底，并非完整拦截）。"
+    "无法保证可回滚，需人工确认后才能执行；或先确保回合基线已落盘。"
+)
+
+
 def scan_destructive_text(text: str) -> BreakerHit | None:
     """Scan free-form command/code text for catastrophic patterns."""
     if not text or not text.strip():
@@ -264,6 +276,37 @@ def scan_destructive_text(text: str) -> BreakerHit | None:
                 reason=reason,
             )
     return None
+
+
+def scan_workspace_top_tree(text: str) -> BreakerHit | None:
+    """P2: top-level whole-project-tree delete → FORCE_APPROVAL (whitelist skipped)."""
+    from agentcore.workspace.destructive_fs import (
+        requires_top_level_tree_gate,
+        scan_destructive_fs,
+    )
+
+    hit = scan_destructive_fs(text)
+    if not requires_top_level_tree_gate(hit):
+        return None
+    return BreakerHit(
+        verdict=BreakerVerdict.FORCE_APPROVAL,
+        rule_id="destructive.workspace_top_tree",
+        reason=_TOP_TREE_REASON,
+    )
+
+
+def no_turn_baseline_hit() -> BreakerHit:
+    """P0a: destructive path on Local with no usable zip baseline."""
+    return BreakerHit(
+        verdict=BreakerVerdict.FORCE_APPROVAL,
+        rule_id="destructive.no_turn_baseline",
+        reason=_NO_BASELINE_REASON,
+    )
+
+
+def command_text_for_tool(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Public alias of the breaker command/code text extractor (engine baseline gate)."""
+    return _command_text_for_tool(tool_name, arguments)
 
 
 def _command_text_for_tool(tool_name: str, arguments: dict[str, Any]) -> str:
@@ -425,12 +468,15 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
     # host_shell: fuse-aligned families → DENY (方案 C); git force→main|master
     # stays FORCE_APPROVAL (fuse does not scan git). Ordinary push stays on the
     # Host GRANTABLE axis. terminal / code_execute / test_run keep FORCE_APPROVAL.
+    # P2 top-level workspace tree: FORCE_APPROVAL (whitelist cleanup skipped).
+    # Do not stack a second card when fuse-aligned DENY already applies.
     if name in {"terminal", "code_execute", "test_run", "host_shell"}:
         if name == "terminal":
             sub = str(args.get("subcommand") or "").strip().lower()
             if sub and sub != "start":
                 return None
-        hit = scan_destructive_text(_command_text_for_tool(name, args))
+        command_text = _command_text_for_tool(name, args)
+        hit = scan_destructive_text(command_text)
         if hit is not None:
             if (
                 name == "host_shell"
@@ -442,5 +488,9 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                     reason=_HOST_SHELL_FUSE_DENY_REASON,
                 )
             return hit
+        # P2 narrow gate (after catastrophic rules so fuse⊆DENY stays single-card).
+        top_hit = scan_workspace_top_tree(command_text)
+        if top_hit is not None:
+            return top_hit
 
     return None

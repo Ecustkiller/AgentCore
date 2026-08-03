@@ -54,8 +54,8 @@ def test_registry_registers_the_system_skills():
     assert names == {
         "team_orchestration_advanced",
         "work_discipline",
+        "product_help",
         "build_website",
-        "build_toolshed",
         "build_app",
         "debate_and_review",
         "revising_a_product",
@@ -66,6 +66,7 @@ def test_registry_registers_the_system_skills():
         "long_form_writing",
         "deep_multi_lens_research",
     }
+    assert "build_toolshed" not in names
 
 
 def test_registry_get_hit_and_miss():
@@ -93,6 +94,7 @@ def test_available_hides_gated_skills_without_required_tools():
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert "team_orchestration_advanced" in available
+    assert "product_help" in available  # requires_tools=() — always listed
     assert "build_website" in available
     assert "debate_and_review" in available
     assert "revising_a_product" in available
@@ -123,6 +125,17 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
     for skill in reg.list_all():
         assert skill.name in out
         assert skill.summary in out
+
+
+def test_directory_preamble_carves_out_product_help_consult():
+    """产品用法从「纯对话无需 consult」划出，与 platform_knowledge 必查对齐。"""
+    from agentcore.runtime.skills import CONSULT_PRODUCT_HELP_BY_SCENE
+
+    out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
+    assert CONSULT_PRODUCT_HELP_BY_SCENE in out
+    assert "必查 `product_help`" in out
+    assert "纯对话式回答自己答即可，无需 consult" not in out
+    assert "- product_help：" in out
 
 
 def test_directory_omits_gated_skills_on_autonomous_path():
@@ -164,6 +177,21 @@ async def test_consult_skill_returns_body_on_hit():
     assert result.output == reg.get("debate_and_review").body
 
 
+async def test_consult_skill_product_help_hit():
+    """验收：consult_skill('product_help') 命中；目录可列出。"""
+    reg = build_system_skill_registry()
+    skill = reg.get("product_help")
+    assert skill is not None
+    assert skill.requires_tools == ()
+    tool = ConsultSkillTool(registry=reg)
+    result = await tool.execute({"name": "product_help"}, _ctx())
+    assert result.success
+    assert result.output == skill.body
+    directory = render_skill_directory(reg, _NO_LIVE_USER)
+    assert "- product_help：" in directory
+    assert skill.summary in directory
+
+
 async def test_consult_skill_build_website_hit():
     """能力目录对齐：consult_skill('build_website') 可命中（回归 miss→none 旁路）。"""
     reg = build_system_skill_registry()
@@ -175,18 +203,23 @@ async def test_consult_skill_build_website_hit():
     assert "none" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- build_website：" in directory
-    assert "- build_toolshed：" in directory
+    assert "- build_toolshed：" not in directory
+    assert "style=\"toolshed\"" in result.output or "style=toolshed" in result.output
 
 
-async def test_consult_skill_build_toolshed_hit():
+async def test_consult_skill_build_toolshed_removed():
+    """旧独立 skill 名 miss；目录不再教独立 build_toolshed playbook。"""
     reg = build_system_skill_registry()
-    assert reg.get("build_toolshed") is not None
+    assert reg.get("build_toolshed") is None
     tool = ConsultSkillTool(registry=reg)
     result = await tool.execute({"name": "build_toolshed"}, _ctx())
-    assert result.success
-    assert "playbook=\"build_toolshed\"" in result.output
-    assert "tool_dense" in result.output
-    assert "none" in result.output
+    assert not result.success
+    directory = render_skill_directory(reg, _NO_LIVE_USER)
+    assert "- build_toolshed：" not in directory
+    website = reg.get("build_website")
+    assert website is not None
+    assert "style" in website.body and "toolshed" in website.body
+    assert 'playbook="build_toolshed"' not in website.body
 
 
 async def test_consult_skill_degrades_on_unknown_name():
@@ -269,6 +302,11 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "独立审校" in body
     assert "调研→撰稿" in body
     assert "质量缝" in body
+    # 本地修码：白屏/UI → verify= browser 形，勿默认全仓 tsc/pytest
+    assert "repair_code" in body
+    assert "白屏" in body or "挂载" in body
+    assert "verify=" in body and "browser" in body
+    assert "tsc" in body or "pytest" in body
 
 
 def test_work_discipline_skill_teaches_design_and_patch_tripwires():
@@ -281,6 +319,22 @@ def test_work_discipline_skill_teaches_design_and_patch_tripwires():
     assert "escalate" in body
     # worker 自主度不进本 skill（已在 identity）
     assert "小问题（路径拼写" not in body
+
+
+def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
+    body = _body("product_help")
+    assert "短答" in body
+    assert "禁内部名" in body
+    assert "ask_user" in body  # teach: don't say these to users
+    assert "#/toolbox/manual/" in body
+    assert "?s=what" in body and "?s=faq" in body
+    assert "手机" in body and "勿承诺" in body
+    assert "Multi-Agent" in body or "工作台" in body
+    assert "为什么没组团" in body
+    assert "RAG" in body  # forbid
+    # user-facing FAQ must be self-contained (not "see internal X")
+    assert "playbook=" not in body
+    assert "SSE" in body  # ban list only
 
 
 def test_team_orchestration_skill_teaches_delegate_knobs():

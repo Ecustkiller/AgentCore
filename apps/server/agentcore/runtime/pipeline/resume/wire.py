@@ -12,7 +12,11 @@ from agentcore.config import settings
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.profiles import TurnProfiles
-from agentcore.runtime.context import build_workspace_context, resolve_channel_profile
+from agentcore.runtime.context import (
+    build_workspace_context,
+    detect_workspace_git,
+    resolve_channel_profile,
+)
 from agentcore.runtime.costing import RunCost
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
@@ -229,7 +233,10 @@ async def _wire_continuation_toolset(
         shared_workspace=folder_id is not None,
         material_paths=frozenset(),
     )
-    from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
+    from agentcore.runtime.closing_posture import (
+        clear_cloud_web_verify_gap,
+        clear_unresolved_write_ownership,
+    )
     from agentcore.runtime.coordination.session import current_execution_id
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
@@ -237,6 +244,7 @@ async def _wire_continuation_toolset(
     execution_id_token = current_execution_id.set(bound_execution_id)
     current_delivery_verdict.set(None)
     clear_cloud_web_verify_gap()
+    clear_unresolved_write_ownership()
     if permission_axes is None:
         permission_axes = DEFAULT_PERMISSION_AXES
     approval_gate = (
@@ -269,6 +277,7 @@ async def _wire_continuation_toolset(
             permission_axes=permission_axes,
             mcp_enabled=mcp_discover.tool_count > 0,
             mcp_label=mcp_label,
+            git_fact=await detect_workspace_git(backend),
         ),
     )
     # Look up via ``resume.pipeline`` so any module-level monkeypatch on that

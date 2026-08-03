@@ -32,6 +32,7 @@ async def persist_suspension(
     questions: list[dict[str, Any]],
     required_event: Any,
     intent: AskCheckpointIntent,
+    browser_login: bool = False,
 ) -> bool:
     """Capture + persist the durable suspension frame for this ask_user pause (2b).
 
@@ -71,6 +72,7 @@ async def persist_suspension(
             assumptions=assumptions,
             questions=questions,
             intent=intent,
+            browser_login=browser_login,
             journal_entries=capture.journal_entries,
             citations=capture.citations,
             trace_id=capture.trace_id,

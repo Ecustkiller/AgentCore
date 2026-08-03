@@ -308,18 +308,29 @@ def strip_root_label_prefix(relative_path: str, root_label: str) -> str:
     return rest if rest else "."
 
 
+def _finalize_cleaned_name(cleaned: str, *, empty_fallback: str) -> str:
+    """Keep meaningful leading ``_`` / ``.``; strip only junk / Windows-dangerous tails.
+
+    Leading underscores (``_inventory``) and hidden-file dots (``.gitignore``) are
+    intentional names — never strip them. Trailing spaces / dots are still removed
+    (Windows forbids them); consecutive underscores stay collapsed by callers.
+    """
+    cleaned = cleaned.lstrip(" ").rstrip(" .")
+    return truncate_filename_utf8(cleaned or empty_fallback)
+
+
 def _clean_path_segment(segment: str) -> str:
     """Strip reserved chars from one path segment (directory or file name)."""
     cleaned = _UNSAFE_IN_SEGMENT.sub("_", segment)
-    cleaned = _MULTI_UNDERSCORE.sub("_", cleaned).strip(" ._")
-    return truncate_filename_utf8(cleaned or "_")
+    cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
+    return _finalize_cleaned_name(cleaned, empty_fallback="_")
 
 
 def _clean_dossier_filename(rest: str) -> str:
     """Flatten everything after a dossier prefix into one safe file name."""
     cleaned = _UNSAFE_IN_FILENAME.sub("_", rest.replace("\\", "/"))
-    cleaned = _MULTI_UNDERSCORE.sub("_", cleaned).strip(" ._")
-    return truncate_filename_utf8(cleaned or "untitled")
+    cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
+    return _finalize_cleaned_name(cleaned, empty_fallback="untitled")
 
 
 def sanitize_write_relpath(

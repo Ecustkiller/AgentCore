@@ -363,6 +363,20 @@ class HandlerMixin:
         decision = parse_decision(params.get("decision"))
         note = str(params.get("note") or "")
         selected = [str(s) for s in (params.get("selected") or [])]
+        # 开工组队有限否决（对齐云 POST resume）：仅 delegate team_preview continue 生效。
+        excluded_run_ids = [
+            str(x).strip()
+            for x in (params.get("excluded_run_ids") or [])
+            if str(x).strip()
+        ]
+        write_capability_overrides: list[dict[str, str]] = []
+        for raw in params.get("write_capability_overrides") or []:
+            if not isinstance(raw, dict):
+                continue
+            rid = str(raw.get("run_id") or "").strip()
+            cap = str(raw.get("capability") or "").strip()
+            if rid:
+                write_capability_overrides.append({"run_id": rid, "capability": cap})
         # Per-turn trace_id (mirrors startTurn): ties this continuation's proxied LLM
         # calls to its write-back so the resumed reply is greppable as one trace.
         trace_id = str(params.get("traceId") or "")
@@ -370,6 +384,33 @@ class HandlerMixin:
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
+
+        # Cold peek 无 plan blob → workers 行校验（同云端）；非法修正 rollback claim。
+        from agentcore.core.errors import ValidationError as CoreValidationError
+        from agentcore.runtime.kickoff.team_veto import (
+            should_apply_team_veto,
+            validate_team_preview_veto_workers,
+        )
+        from agentcore.runtime.suspension import TeamPreviewSuspension
+
+        if should_apply_team_veto(suspension, decision) and isinstance(
+            suspension, TeamPreviewSuspension
+        ):
+            try:
+                validate_team_preview_veto_workers(
+                    suspension.workers,
+                    excluded_run_ids=excluded_run_ids,
+                    write_capability_overrides=write_capability_overrides,
+                )
+            except CoreValidationError as e:
+                await self._paused_store.rollback_claim(message_id)
+                await self._send(
+                    protocol.make_error(
+                        request_id, protocol.INVALID_PARAMS, str(e)
+                    )
+                )
+                return
+
         task = asyncio.create_task(
             self._run_resume(
                 request_id,
@@ -380,6 +421,8 @@ class HandlerMixin:
                 trace_id,
                 user_message_id,
                 params.get("externalMounts"),
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
             )
         )
         self._register_turn(message_id, task, conversation_id=conversation_id)

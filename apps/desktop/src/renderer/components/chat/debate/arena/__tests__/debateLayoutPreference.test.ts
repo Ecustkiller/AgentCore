@@ -60,7 +60,6 @@ describe("debateLayoutPreference", () => {
       crossExamEnabled: false,
       evidenceLedger: [],
       subtopics: null,
-      pretrial: null,
     };
     expect(canUseSplitLayout(base)).toBe(true);
 

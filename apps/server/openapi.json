@@ -8434,7 +8434,7 @@
         "type": "object"
       },
       "MouseInputEvent": {
-        "description": "A pointer event in frame-pixel space (the driver rescales to the viewport).",
+        "description": "A pointer event in frame-pixel space (the driver rescales to the viewport).\n\n``button`` accepts DOM integers ``0|1|2`` (desktop/mobile wire) or Playwright\nnames ``left|right|middle``; validation normalizes to the name form.",
         "properties": {
           "button": {
             "anyOf": [
@@ -8447,9 +8447,18 @@
                 "type": "string"
               },
               {
+                "enum": [
+                  0,
+                  1,
+                  2
+                ],
+                "type": "integer"
+              },
+              {
                 "type": "null"
               }
             ],
+            "description": "DOM MouseEvent.button 0|1|2 (desktop/mobile wire) or Playwright/CDP left|right|middle; server normalizes to the name form.",
             "title": "Button"
           },
           "click_count": {
@@ -8775,6 +8784,11 @@
             },
             "title": "Assumptions",
             "type": "array"
+          },
+          "browser_login": {
+            "default": false,
+            "title": "Browser Login",
+            "type": "boolean"
           },
           "checkpoint_id": {
             "title": "Checkpoint Id",
@@ -9894,10 +9908,18 @@
         "type": "object"
       },
       "ResumeTurnRequest": {
-        "description": "Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).\n\nContinues a turn that paused at a plan_review / ask_user checkpoint and was\nDURABLY persisted (so it survived a client disconnect / server restart — the live\nin-process resolve is the corresponding interaction instead). Same decision\nvocabulary as the live resolve: ``continue`` (proceed — run the gated downstream\nfor plan_review / accept the CEO direction for ask_user), ``adjust`` (inject\n``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``\ncarries the option(s) the user picked from an ask_user menu (ignored for\nplan_review; the server drops any pick not actually offered). The engine-only\n``timeout`` is never sent by a client.",
+        "description": "Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).\n\nContinues a turn that paused at a plan_review / ask_user checkpoint and was\nDURABLY persisted (so it survived a client disconnect / server restart — the live\nin-process resolve is the corresponding interaction instead). Same decision\nvocabulary as the live resolve: ``continue`` (proceed — run the gated downstream\nfor plan_review / accept the CEO direction for ask_user), ``adjust`` (inject\n``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``\ncarries the option(s) the user picked from an ask_user menu (ignored for\nplan_review; the server drops any pick not actually offered). The engine-only\n``timeout`` is never sent by a client.\n\n``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate\n``team_preview`` ``continue`` (开工组队有限否决). Debate / ask / plan_review /\nstop ignore them (no 422). Hot-path ``ResolveInteraction`` is not extended.",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/CheckpointDecision"
+          },
+          "excluded_run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Excluded Run Ids",
+            "type": "array"
           },
           "note": {
             "default": "",
@@ -9911,6 +9933,14 @@
             },
             "maxItems": 50,
             "title": "Selected",
+            "type": "array"
+          },
+          "write_capability_overrides": {
+            "items": {
+              "$ref": "#/components/schemas/WriteCapabilityOverride"
+            },
+            "maxItems": 50,
+            "title": "Write Capability Overrides",
             "type": "array"
           }
         },
@@ -12530,6 +12560,68 @@
         "title": "TownGovernanceState",
         "type": "object"
       },
+      "TrashEntrySummary": {
+        "description": "One reversible entry under workspace ``AgentCore/trash/<id>/``.",
+        "properties": {
+          "deleted_at": {
+            "format": "date-time",
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "entry_id": {
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "is_dir": {
+            "title": "Is Dir",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "original_path": {
+            "title": "Original Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "original_path",
+          "name",
+          "is_dir",
+          "deleted_at"
+        ],
+        "title": "TrashEntrySummary",
+        "type": "object"
+      },
+      "TrashListResponse": {
+        "description": "List of AgentCore/trash entries (newest first).\n\n``retention_days`` mirrors ``workspace_retention_days`` — product one-click\nrestore only covers this zone; Local OS ``shell.trashItem`` is a separate track.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TrashEntrySummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "retention_days"
+        ],
+        "title": "TrashListResponse",
+        "type": "object"
+      },
       "TriggerStandingTaskResponse": {
         "properties": {
           "run_id": {
@@ -14510,6 +14602,28 @@
           }
         },
         "title": "WorldModifiersWire",
+        "type": "object"
+      },
+      "WriteCapabilityOverride": {
+        "description": "Delegate ``team_preview`` continue: tighten one worker's write capability.\n\nOnly ``text_only`` is legal (→ ``deliverable.form=prose``). Unknown ``run_id`` /\nnon-``text_only`` / upgrade attempts → 422 on resume.",
+        "properties": {
+          "capability": {
+            "const": "text_only",
+            "title": "Capability",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "capability"
+        ],
+        "title": "WriteCapabilityOverride",
         "type": "object"
       }
     }
@@ -23330,6 +23444,165 @@
           }
         },
         "summary": "Attach Stream",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/trash": {
+      "get": {
+        "description": "List ``AgentCore/trash`` entries for this conversation's workspace.",
+        "operationId": "list_conversation_trash_v1_conversations__conversation_id__trash_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversation Trash",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/trash/{entry_id}/restore": {
+      "post": {
+        "description": "Restore one ``AgentCore/trash`` entry (cloud workspace only).",
+        "operationId": "restore_conversation_trash_v1_conversations__conversation_id__trash__entry_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Conversation Trash",
         "tags": [
           "conversations"
         ]
@@ -37390,6 +37663,165 @@
           }
         },
         "summary": "Restore Workspace Snapshot",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/trash": {
+      "get": {
+        "description": "List reversible soft-deletes under ``AgentCore/trash`` (newest first).\n\nCloud / sidecar only. Local OS recycle-bin deletes are **not** listed here —\nrestore those via the system trash UI. Expired entries are purged on read\n(retention = ``workspace_retention_days``).",
+        "operationId": "list_workspace_trash_v1_workspaces__ws_id__trash_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Trash",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/trash/{entry_id}/restore": {
+      "post": {
+        "description": "Restore one ``AgentCore/trash`` entry to its original relative path.\n\nRefused for local workspaces (409): files live on the desktop; use the\ndesktop AgentCore/trash UI when the soft-delete fallback was used — never\nconfuse with OS ``shell.trashItem``.",
+        "operationId": "restore_workspace_trash_v1_workspaces__ws_id__trash__entry_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Workspace Trash",
         "tags": [
           "workspaces"
         ]

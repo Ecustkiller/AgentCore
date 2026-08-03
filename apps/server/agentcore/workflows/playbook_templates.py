@@ -2,6 +2,11 @@
 
 User workflows are **not** registered into ``PLAYBOOKS``. 「使用」= expand once and
 persist a definition snapshot under ``user_workflows``.
+
+Product rule: the template catalog is a **curated subset** of ``PLAYBOOKS``,
+not 1:1. Templates = short, repeatable, boss-facing shapes for toolbox copy /
+standing tasks. CEO shapes stay the full runtime vocabulary (narrow / recovery /
+continuation playbooks stay out of the catalog).
 """
 
 from __future__ import annotations
@@ -18,8 +23,15 @@ from agentcore.workflows.definition import (
     tasks_to_workflow_definition,
 )
 
-# Desktop template UI only has string textareas; builders expect list for angles.
+# Desktop template UI only has string textareas; builders expect list for
+# parallel_brief.angles / compare_options.options.
 _LIST_SLOT_SPLIT = re.compile(r"[,，、\n]+")
+
+# playbook → slot key that UI may send as a single string.
+_LIST_SLOTS: dict[str, str] = {
+    "parallel_brief": "angles",
+    "compare_options": "options",
+}
 
 
 def _coerce_list_slot(val: Any) -> Any:
@@ -39,28 +51,25 @@ def _coerce_list_slot(val: Any) -> Any:
     parts = [p.strip() for p in _LIST_SLOT_SPLIT.split(s) if p.strip()]
     return parts if parts else val
 
-# First-period official list (product). Other PLAYBOOKS names → explicit reject.
+# Curated official list (product). Other PLAYBOOKS names → explicit reject.
+# Intentionally NOT 1:1 with PLAYBOOKS — see module docstring.
 WORKFLOW_PLAYBOOK_IDS: tuple[str, ...] = (
-    "research_report",
-    "multi_lens_research",
     "parallel_brief",
-    "build_feature",
-    "build_app",
+    "research_report",
     "build_website",
-    "build_toolshed",
+    "build_app",
+    "compare_options",
 )
 
 _KNOWN: frozenset[str] = frozenset(WORKFLOW_PLAYBOOK_IDS)
 
 # Required primary slots the API asks the user to fill (builders may accept more).
 PRIMARY_SLOTS: dict[str, tuple[str, ...]] = {
-    "research_report": ("topic",),
-    "multi_lens_research": ("topic",),
     "parallel_brief": ("topic", "angles"),
-    "build_feature": ("feature",),
-    "build_app": ("app",),
+    "research_report": ("topic",),
     "build_website": ("site",),
-    "build_toolshed": ("site",),
+    "build_app": ("app",),
+    "compare_options": ("question", "options"),
 }
 
 # Soft optional defaults merged under user slots (user wins). Builders already default
@@ -70,30 +79,55 @@ _DEFAULT_OPTIONAL_SLOTS: dict[str, dict[str, Any]] = {
 }
 
 _TITLE: dict[str, str] = {
+    "parallel_brief": "多角摸底",
     "research_report": "调研报告成文",
-    "multi_lens_research": "多透镜调研",
-    "parallel_brief": "多角对齐摸底",
-    "build_feature": "功能交付",
-    "build_app": "绿场应用搭建",
-    "build_website": "营销站点搭建",
-    "build_toolshed": "工具台搭建",
+    "build_website": "搭建营销站点",
+    "build_app": "从零搭应用",
+    "compare_options": "方案对比选型",
+}
+
+# User-facing blurbs (not raw CEO/runtime summaries).
+_SUMMARY: dict[str, str] = {
+    "parallel_brief": (
+        "多人并行摸清议题并写方向笔记；适合「先弄懂」。"
+        "要交长文/落盘报告请用「调研报告成文」。"
+    ),
+    "research_report": (
+        "调研→提纲→写作→审校；仅当你明确要落盘成文或交报告时用。"
+        "只想弄懂议题请用「多角摸底」。"
+    ),
+    "build_website": (
+        "文案→整页站点→独立验收；默认营销/落地页。"
+        "可做后台工具台气质（对话里 style=toolshed）。"
+    ),
+    "build_app": (
+        "从零搭一个小应用：脚手架→模块→联调→冒烟；默认瘦启动。"
+    ),
+    "compare_options": (
+        "多路并行评估各选项再汇总对比推荐；适合「选哪个 / A 还是 B」。"
+        "只想摸清议题请用「多角摸底」。"
+    ),
 }
 
 _PRIMARY_SLOT_HELP: dict[str, str] = {
-    "research_report": "topic（必填，主题）",
-    "multi_lens_research": "topic（必填，主题/事件）",
     "parallel_brief": (
         "topic（必填，主题）；angles（必填，≥2 个可并行方向；"
         "数组或逗号/顿号分隔文本）"
     ),
-    "build_feature": "feature（必填，要实现的功能）",
+    "research_report": "topic（必填，主题）",
+    "build_website": (
+        "site（必填，站点/落地页/控制台简述）；"
+        "style（可选，marketing 默认 / toolshed=工具台 dense）"
+    ),
     "build_app": "app（必填，应用/SPA 简述）",
-    "build_website": "site（必填，站点/落地页简述）",
-    "build_toolshed": "site（必填，控制台/工具台简述）",
+    "compare_options": (
+        "question（必填，要决策的问题）；options（必填，≥2 个待比较选项；"
+        "数组或逗号/顿号分隔文本）"
+    ),
 }
 
 _DEGRADE_NOTE = (
-    "复制为我的工作流时不保留 tools / max_rounds / timeout_ms 等执行细项，可在画布自行调整。"
+    "复制后可在画布调整拆法；部分执行细项（工具白名单等）不会带入快照。"
 )
 
 
@@ -117,7 +151,7 @@ def list_playbook_templates() -> list[PlaybookTemplateItem]:
     out: list[PlaybookTemplateItem] = []
     for pid in WORKFLOW_PLAYBOOK_IDS:
         pb = PLAYBOOKS.get(pid)
-        base_summary = pb.summary if pb is not None else ""
+        base_summary = _SUMMARY.get(pid) or (pb.summary if pb is not None else "")
         summary = f"{base_summary}（{_DEGRADE_NOTE}）" if base_summary else _DEGRADE_NOTE
         out.append(
             PlaybookTemplateItem(
@@ -147,9 +181,10 @@ def merge_playbook_slots(playbook: str, slots: dict[str, Any] | None) -> dict[st
     merged: dict[str, Any] = dict(_DEFAULT_OPTIONAL_SLOTS.get(playbook) or {})
     merged.update(dict(slots or {}))
 
-    # parallel_brief.angles: coerce UI string → list before missing/expand checks.
-    if playbook == "parallel_brief" and "angles" in merged:
-        merged["angles"] = _coerce_list_slot(merged["angles"])
+    # List slots: coerce UI string → list before missing/expand checks.
+    list_key = _LIST_SLOTS.get(playbook)
+    if list_key is not None and list_key in merged:
+        merged[list_key] = _coerce_list_slot(merged[list_key])
 
     missing: list[str] = []
     for key in PRIMARY_SLOTS[playbook]:

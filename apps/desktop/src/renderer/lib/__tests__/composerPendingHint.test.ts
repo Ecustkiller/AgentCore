@@ -57,6 +57,24 @@ describe("composerPendingHint", () => {
     expect(conversationHasPendingDecision("other")).toBe(false);
   });
 
+  it("detects cold InteractionStore pending without pausedTurns", () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m1",
+      origin: "server",
+      payload: {
+        checkpoint_id: "tp-hint",
+        conversation_id: CID,
+        primitive: "delegate",
+        workers: [],
+        tools: [],
+      },
+    });
+    expect(conversationHasPendingDecision(CID)).toBe(true);
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
+  });
+
   it("detects pending approval interactions", () => {
     useInteractionStore.getState().hydratePending(CID, [
       {

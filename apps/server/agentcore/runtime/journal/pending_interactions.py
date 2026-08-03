@@ -208,7 +208,25 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
         return {**base, "runIds": run_ids}
     if rec.kind == "team_preview":
         worker_ids = [w.get("run_id", "") for w in (p.get("workers") or [])]
-        return {**base, "workerIds": worker_ids}
+        leaf: dict[str, Any] = {**base, "workerIds": worker_ids}
+        # Resolved 修正摘要（开工组队有限否决）— 仅非空时投影，旧向量保持无字段。
+        resolution = rec.resolution or {}
+        excluded = resolution.get("excluded_run_ids")
+        if isinstance(excluded, list) and excluded:
+            leaf["excludedRunIds"] = [str(x) for x in excluded if str(x).strip()]
+        overrides = resolution.get("write_capability_overrides")
+        if isinstance(overrides, list) and overrides:
+            projected_overrides: list[dict[str, str]] = []
+            for row in overrides:
+                if not isinstance(row, dict):
+                    continue
+                rid = str(row.get("run_id") or "").strip()
+                if not rid:
+                    continue
+                projected_overrides.append({"runId": rid, "capability": "text_only"})
+            if projected_overrides:
+                leaf["writeCapabilityOverrides"] = projected_overrides
+        return leaf
     if rec.kind == "delegation_authorization":
         # Wire field is ``tools`` (not grantable_tools) — P3 drift fix.
         return {
@@ -218,7 +236,7 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
             "tools": p.get("tools") or [],
         }
     if rec.kind == "escalation":
-        leaf: dict[str, Any] = {
+        esc: dict[str, Any] = {
             **base,
             "runId": p.get("run_id", ""),
             "agentId": p.get("agent_id", ""),
@@ -226,8 +244,8 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
             "assumption": p.get("assumption", ""),
         }
         if p.get("awaiting") in ("user", "ceo"):
-            leaf["awaiting"] = p["awaiting"]
-        return leaf
+            esc["awaiting"] = p["awaiting"]
+        return esc
     if rec.kind == "question_posted":
         return {
             **base,

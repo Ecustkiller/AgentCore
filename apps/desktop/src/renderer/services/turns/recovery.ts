@@ -62,9 +62,24 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
 
   const store = useConversationStore.getState();
   store.clearError(conversationId);
+
+  // Keep REST/journal projection on the graph while attach catch-up buffers, so
+  // already-completed workers do not blank out then re-animate running→completed.
+  const priorAssistant = [...getRuntime(conversationId).messages]
+    .reverse()
+    .find((m) => m.role === "assistant");
+  const journalSnap = priorAssistant?.runs ?? null;
+
   // Drop any partial assistant bubble + process/execution so the full journal
   // replay rebuilds cleanly (clear-then-fold · §3.6).
   clearAfterUserForReplay(conversationId, lastUser.id);
+
+  if (journalSnap) {
+    const mid = getRuntime(conversationId).messages.at(-1)?.id;
+    if (mid) {
+      useExecutionStore.getState().hydrateFromJournal(mid, journalSnap);
+    }
+  }
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);

@@ -21,6 +21,22 @@ def test_dangerous_chars_in_segment():
     assert sanitize_write_relpath("docs/a*b.md") == "docs/a_b.md"
 
 
+def test_preserves_meaningful_leading_underscore_and_dot():
+    """Leading ``_`` / ``.`` are intentional names — must not be stripped."""
+    assert sanitize_write_relpath("_inventory") == "_inventory"
+    assert sanitize_write_relpath("_inventory/items.json") == "_inventory/items.json"
+    assert sanitize_write_relpath(".gitignore") == ".gitignore"
+    assert sanitize_write_relpath("pkg/.env.local") == "pkg/.env.local"
+    # Trailing Windows-dangerous dots/spaces still cleaned.
+    assert sanitize_write_relpath("docs/report.") == "docs/report"
+    assert sanitize_write_relpath("docs/report ") == "docs/report"
+    # Dossier flatten must also keep a leading underscore in the flat name.
+    assert (
+        sanitize_write_relpath(f"{RESEARCH_PREFIX}_inventory/note.md")
+        == f"{RESEARCH_PREFIX}_inventory_note.md"
+    )
+
+
 def test_dossier_flattens_nested_to_filename():
     assert (
         sanitize_write_relpath(f"{RESEARCH_PREFIX}法庭迷局/UX系统设计.md")

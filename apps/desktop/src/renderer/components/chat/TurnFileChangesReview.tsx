@@ -14,15 +14,20 @@ import { ChevronDown, ChevronRight, Loader2, RotateCcw } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 /**
- * A1 / A1+ 只读「查看改动」——挂在产物卡内。
+ * A1 / A1+ 只读「查看改动」——挂在产物卡内 / 右坞「改动」tab。
  * 优先拉回合基线真 diff（A1+）；无基线 / 失败则降级工具参数预览（A1）。
  * 标签按路径相对回合初是否存在（新建/更新/删除），不按 file_write/str_replace 工具名。
+ * 有 Local zip 基线即可恢复（不依赖 file_* 产物；P0c）。
  * 不做 apply / 三方冲突（与交接「查看并应用」刻意区分）。
  *
  * 信息架构：折叠头 = 唯一身份条（路径 + 变更态 + 行统计）；展开体 = 纯 diff / 预览，不再套路径标题。
  */
 
 const WRITE_PREVIEW_LINES = 300;
+
+/** 能力边界诚实文案（基线 = 回合开始 overlay；忽略目录不进包）。 */
+const BASELINE_RESTORE_HINT =
+  "尽最大努力回到本回合开始（覆盖当前工作区 overlay；未进基线的目录如 node_modules/.venv 等不会还原）";
 
 /** 真 diff：按回合基线路径是否存在 → 新建/更新/删除（非工具名）。 */
 function turnChangeLabel(changeType: TurnFileChange["changeType"]): string {
@@ -400,9 +405,8 @@ export function TurnFileChangesReview({
 
   const onRollback = async () => {
     if (!conversationId || !baselineSnapshotId || restoring) return;
-    const confirmMsg = isLocal
-      ? "回退到本回合开始会覆盖当前本机工作区的所有文件（恢复到本回合开始时的快照），确定继续？"
-      : "回退到本回合开始会覆盖当前工作区的所有文件（恢复到本回合开始时的快照），确定继续？";
+    const where = isLocal ? "本机工作区" : "工作区";
+    const confirmMsg = `${BASELINE_RESTORE_HINT}。将覆盖当前${where}内基线所含文件，确定继续？`;
     if (!window.confirm(confirmMsg)) {
       return;
     }
@@ -416,10 +420,10 @@ export function TurnFileChangesReview({
       } else {
         await restoreSnapshot(conversationId, baselineSnapshotId);
       }
-      notifySuccess("已回退到本回合开始");
+      notifySuccess("已尽力恢复到本回合开始");
       setReloadToken((n) => n + 1);
     } catch (e) {
-      notifyActionError("回退失败", e);
+      notifyActionError("恢复失败", e);
     } finally {
       setRestoring(false);
     }
@@ -455,8 +459,8 @@ export function TurnFileChangesReview({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
               {isLocal
-                ? "相对本回合开始时的本机工作区基线（只读；相对「此刻」树）。"
-                : "相对本回合开始时的工作区基线（只读；相对「此刻」树，非云→本地应用）。"}
+                ? "相对本回合开始时的本机 zip 基线（只读 overlay；忽略未打包目录）。"
+                : "相对本回合开始时的工作区基线（只读 overlay；非云→本地应用）。"}
               {counts && (
                 <span className="ml-2 tabular-nums">
                   <span className="text-success">+{counts.added}</span>
@@ -471,7 +475,8 @@ export function TurnFileChangesReview({
                 size="sm"
                 disabled={restoring}
                 onClick={() => void onRollback()}
-                aria-label="回退到本回合开始"
+                aria-label="恢复到本回合开始"
+                title={BASELINE_RESTORE_HINT}
                 className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
               >
                 {restoring ? (
@@ -479,7 +484,7 @@ export function TurnFileChangesReview({
                 ) : (
                   <RotateCcw size={13} />
                 )}
-                回退到本回合开始
+                恢复到本回合开始
               </Button>
             )}
           </div>

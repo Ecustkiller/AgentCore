@@ -69,7 +69,13 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       },
       { baseUrl: "http://127.0.0.1:9", token: "bridge-tok" },
     );
-    assertExactKeys(withInference, sidecarIpc.resumeRpcParams.keys);
+    // Optional team_preview veto keys are omitted when empty (same as absent
+    // inference / browserBridge) — exact-key sample excludes them.
+    assertExactKeys(withInference, [
+      ...sidecarIpc.resumeRpcParams.keys.filter(
+        (k) => k !== "excluded_run_ids" && k !== "write_capability_overrides",
+      ),
+    ]);
     expect(withInference.browserBridge).toEqual({
       baseUrl: "http://127.0.0.1:9",
       token: "bridge-tok",
@@ -78,7 +84,11 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
     const withoutInference = buildSidecarResumeRpcParams(req);
     assertExactKeys(withoutInference, [
       ...sidecarIpc.resumeRpcParams.keys.filter(
-        (k) => k !== "inference" && k !== "browserBridge",
+        (k) =>
+          k !== "inference" &&
+          k !== "browserBridge" &&
+          k !== "excluded_run_ids" &&
+          k !== "write_capability_overrides",
       ),
     ]);
     expect(withoutInference.selected).toEqual(["a"]);
@@ -99,6 +109,29 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       permissionAxes: undefined,
     });
     expect("permissionAxes" in withoutAxes).toBe(false);
+  });
+
+  it("buildSidecarResumeRpcParams 可选透传 excluded_run_ids / write_capability_overrides", () => {
+    const params = buildSidecarResumeRpcParams({
+      messageId: "m-asst",
+      conversationId: "c1",
+      traceId: "abc123",
+      decision: "continue",
+      note: "",
+      selected: [],
+      excluded_run_ids: ["r2"],
+      write_capability_overrides: [{ run_id: "r1", capability: "text_only" }],
+    });
+    expect(params.excluded_run_ids).toEqual(["r2"]);
+    expect(params.write_capability_overrides).toEqual([
+      { run_id: "r1", capability: "text_only" },
+    ]);
+    expect(params.messageId).toBe("m-asst");
+    expect(params.decision).toBe("continue");
+    expect(params.selected).toEqual([]);
+    for (const key of Object.keys(params)) {
+      expect(sidecarIpc.resumeRpcParams.keys).toContain(key);
+    }
   });
 
   it("resume IPC request required fields are a superset of renderer routing keys", () => {

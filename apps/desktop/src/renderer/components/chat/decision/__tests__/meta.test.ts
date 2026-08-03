@@ -3,6 +3,7 @@ import {
   ASK_INTENT_META,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  teamCorrectionSuffix,
   teamPendingMarkerLabel,
   teamResolvedOutcome,
 } from "../meta";
@@ -29,9 +30,10 @@ describe("decision meta", () => {
       "复盘提案 · 确认要落盘的项",
     );
     expect(askResolvedOutcome("kickoff", "research_first").label).toBe(
-      "已停止本回合",
+      "已跳过本回合",
     );
     expect(askResolvedOutcome("kickoff", "research_first").tone).toBe("muted");
+    expect(askResolvedOutcome("decision", "stop").label).toBe("已跳过本回合");
     expect(askResolvedOutcome("decision", "stop").tone).toBe("muted");
   });
 
@@ -48,6 +50,23 @@ describe("decision meta", () => {
     expect(teamResolvedOutcome("debate", "continue", true).label).toBe(
       "已授权开赛 · 嘱咐已注入",
     );
+  });
+
+  it("teamCorrectionSuffix 对账排除/收紧；缺省空同旧", () => {
+    expect(teamCorrectionSuffix({})).toBe("");
+    expect(teamCorrectionSuffix({ excluded_run_ids: [] })).toBe("");
+    expect(
+      teamCorrectionSuffix({
+        excluded_run_ids: ["r1"],
+        write_capability_overrides: [],
+      }),
+    ).toBe(" · 已排除 1 岗");
+    expect(
+      teamCorrectionSuffix({
+        excluded_run_ids: ["r1", "r2"],
+        write_capability_overrides: [{ run_id: "r3", capability: "text_only" }],
+      }),
+    ).toBe(" · 已排除 2 岗 · 已收紧写盘");
   });
 
   it("pending marker + resume captions share one table", () => {

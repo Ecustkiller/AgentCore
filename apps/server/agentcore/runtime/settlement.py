@@ -131,6 +131,10 @@ def seed_settlement_dedupe_from_entries(
     Cold-path D8: endpoint prewrites ``*_resolved`` before claim; claim re-hydrates
     those rows into ``suspension.journal_entries``; resume pipeline must seed the new
     writer so the recover-path emit does not duplicate the row.
+
+    ``record_turn_fact`` also skips appending to ``TurnFactLog`` when the same key is
+    already in the inherited prefix — otherwise a phantom log row drifts index vs DB
+    ``seq`` and finalize enumerate can insert a duplicate trailing ``process_content``.
     """
     for entry in entries or []:
         kind = str(entry.get("kind") or "")
@@ -145,12 +149,18 @@ def cold_resume_settlement_event(
     decision: str,
     note: str = "",
     selected: list[str] | None = None,
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> SSEEvent:
     """Build the same ``*_resolved`` SSE recover will emit (D8 同形)."""
     from agentcore.runtime.events import (
         checkpoint_resolved,
         plan_review_resolved,
         team_preview_resolved,
+    )
+    from agentcore.runtime.kickoff.team_veto import (
+        should_apply_team_veto,
+        veto_summary_for_resolved,
     )
     from agentcore.runtime.suspension import (
         AskUserSuspension,
@@ -175,10 +185,21 @@ def cold_resume_settlement_event(
             note=note,
         )
     if isinstance(suspension, TeamPreviewSuspension):
+        excl: list[str] | None = None
+        overrides: list[dict[str, str]] | None = None
+        if should_apply_team_veto(suspension, decision):
+            excl, overrides = veto_summary_for_resolved(
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
+            )
+            excl = excl or None
+            overrides = overrides or None
         return team_preview_resolved(
             checkpoint_id=suspension.checkpoint_id,
             decision=decision,
             note=note,
+            excluded_run_ids=excl,
+            write_capability_overrides=overrides,
         )
     raise ValueError(f"unknown suspension kind for cold settlement: {type(suspension)!r}")
 
@@ -189,6 +210,8 @@ async def prewrite_cold_resume_settlement(
     decision: str,
     note: str = "",
     selected: list[str] | None = None,
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, str]] | None = None,
 ) -> None:
     """Cold-path D8: durable-write ``*_resolved`` before ``claim_paused_turn``.
 
@@ -196,7 +219,12 @@ async def prewrite_cold_resume_settlement(
     Raises on write failure so the resume endpoint can 5xx without claiming the frame.
     """
     event = cold_resume_settlement_event(
-        suspension, decision=decision, note=note, selected=selected
+        suspension,
+        decision=decision,
+        note=note,
+        selected=selected,
+        excluded_run_ids=excluded_run_ids,
+        write_capability_overrides=write_capability_overrides,
     )
     written = await prewrite_settlement(event)
     if written:

@@ -84,6 +84,7 @@ def checkpoint_required(
     assumptions: list[dict[str, Any]] | None = None,
     questions: list[dict[str, Any]] | None = None,
     intent: AskCheckpointIntent | None = None,
+    browser_login: bool | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {
         "checkpoint_id": checkpoint_id,
@@ -95,6 +96,8 @@ def checkpoint_required(
     }
     if intent is not None:
         payload["intent"] = intent
+    if browser_login is True:
+        payload["browser_login"] = True
     return SSEEvent(type=EventType.CHECKPOINT_REQUIRED, payload=payload)
 
 
@@ -220,14 +223,31 @@ def team_preview_required(
     )
 
 
-def team_preview_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
+def team_preview_resolved(
+    *,
+    checkpoint_id: str,
+    decision: str,
+    note: str = "",
+    excluded_run_ids: list[str] | None = None,
+    write_capability_overrides: list[dict[str, Any]] | None = None,
+) -> SSEEvent:
+    """Settle team_preview. Optional corrections are ABSENT when unset (旧客户端兼容)."""
+    payload: dict[str, Any] = {
+        "checkpoint_id": checkpoint_id,
+        "decision": decision,
+        "note": note,
+    }
+    if excluded_run_ids:
+        payload["excluded_run_ids"] = list(excluded_run_ids)
+    if write_capability_overrides:
+        payload["write_capability_overrides"] = [
+            {"run_id": str(row.get("run_id") or ""), "capability": "text_only"}
+            for row in write_capability_overrides
+            if isinstance(row, dict) and str(row.get("run_id") or "").strip()
+        ]
     return SSEEvent(
         type=EventType.TEAM_PREVIEW_RESOLVED,
-        payload={
-            "checkpoint_id": checkpoint_id,
-            "decision": decision,
-            "note": note,
-        },
+        payload=payload,
     )
 
 

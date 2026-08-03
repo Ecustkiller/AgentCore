@@ -91,9 +91,9 @@ def build_escalation_channel(
         # D1: after ask_user soft-stop cancelled a parked worker, CEO may have
         # stashed a resolve_escalation answer — pick it up without re-suspending.
         if awaiting_ceo:
-            from agentcore.runtime.coordination.session import active_coordination
+            from agentcore.runtime.coordination.session import resolve_coordination_session
 
-            session = active_coordination(env.base_tool_context.execution_id)
+            session = resolve_coordination_session(env.base_tool_context.execution_id)
             if session is not None:
                 stashed = session.take_stashed_resolution(run_id)
                 if stashed is not None:
@@ -129,9 +129,9 @@ def build_escalation_channel(
             from agentcore.runtime.coordination.bridge import (
                 post_escalation_to_coordination,
             )
-            from agentcore.runtime.coordination.session import active_coordination
+            from agentcore.runtime.coordination.session import resolve_coordination_session
 
-            session = active_coordination(env.base_tool_context.execution_id)
+            session = resolve_coordination_session(env.base_tool_context.execution_id)
             if session is not None and session.active:
                 from agentcore.workspace.write_claims import ownership_escalation_hints
 
@@ -239,9 +239,9 @@ def build_escalation_channel(
             else:
                 status, answer = "resolved", str(result or "").strip()
         if awaiting_ceo:
-            from agentcore.runtime.coordination.session import active_coordination
+            from agentcore.runtime.coordination.session import resolve_coordination_session
 
-            session = active_coordination(env.base_tool_context.execution_id)
+            session = resolve_coordination_session(env.base_tool_context.execution_id)
             if session is not None:
                 session.clear_arbitration(run_id)
         resolutions[question] = {"status": status, "answer": answer}

@@ -76,8 +76,8 @@ async def test_execute_allows_automation_text_without_delivery_ledger():
 
 
 @pytest.mark.asyncio
-async def test_execute_allows_build_toolshed_without_style_ledger():
-    """无风格账 + 非 full_auto 亦可 build_toolshed（场面账硬闸已拆）。"""
+async def test_execute_allows_build_website_toolshed_style_without_style_ledger():
+    """无视觉风格账 + 非 full_auto 亦可 build_website style=toolshed（场面账硬闸已拆）。"""
     cid = "auto-gate-toolshed-no-style"
     clear_delivery_confirmation(cid)
     clear_style_confirmation(cid)
@@ -88,8 +88,12 @@ async def test_execute_allows_build_toolshed_without_style_ledger():
     )
     result = await t.execute(
         {
-            "playbook": "build_toolshed",
-            "playbook_args": {"site": "Ops", "sections": ["应用外壳", "数据表格"]},
+            "playbook": "build_website",
+            "playbook_args": {
+                "site": "Ops",
+                "style": "toolshed",
+                "sections": ["应用外壳", "数据表格"],
+            },
             "coordinate": False,
         },
         local_ctx(),
@@ -121,8 +125,8 @@ async def test_execute_allows_build_website_without_style_ledger():
 
 
 @pytest.mark.asyncio
-async def test_execute_runnable_ledger_no_longer_rejects_toolshed():
-    """即便残留 delivery 账，也不再硬拒 toolshed。"""
+async def test_execute_runnable_ledger_no_longer_rejects_website_toolshed_style():
+    """即便残留 delivery 账，也不再硬拒 website + style=toolshed。"""
     cid = "auto-gate-runnable-toolshed"
     clear_delivery_confirmation(cid)
     clear_style_confirmation(cid)
@@ -136,8 +140,12 @@ async def test_execute_runnable_ledger_no_longer_rejects_toolshed():
     )
     result = await t.execute(
         {
-            "playbook": "build_toolshed",
-            "playbook_args": {"site": "Ops", "sections": ["应用外壳", "数据表格"]},
+            "playbook": "build_website",
+            "playbook_args": {
+                "site": "Ops",
+                "style": "toolshed",
+                "sections": ["应用外壳", "数据表格"],
+            },
             "coordinate": False,
         },
         local_ctx(),
@@ -162,8 +170,12 @@ async def test_execute_plan_ledger_no_longer_rejects_website():
     )
     r1 = await t.execute(
         {
-            "playbook": "build_toolshed",
-            "playbook_args": {"site": "X", "sections": ["应用外壳"]},
+            "playbook": "build_website",
+            "playbook_args": {
+                "site": "X",
+                "style": "toolshed",
+                "sections": ["应用外壳"],
+            },
             "coordinate": False,
         },
         local_ctx(),

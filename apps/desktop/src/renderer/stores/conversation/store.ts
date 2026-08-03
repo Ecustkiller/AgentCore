@@ -26,6 +26,7 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { useInteractionStore } from "@/stores/interactions";
 import type { TimelineMarkerDef } from "@/stores/interactions/registry";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type {
@@ -453,6 +454,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       if (clientId && clientId !== messageId) {
         useExecutionStore.getState().alignTurnKey(clientId, messageId);
         usePausedTurnStore.getState().rekeyMessageId(clientId, messageId);
+        useInteractionStore.getState().rekeyMessageId(clientId, messageId);
       }
     },
 

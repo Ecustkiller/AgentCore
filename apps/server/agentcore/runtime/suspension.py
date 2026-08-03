@@ -358,7 +358,7 @@ class TeamPreviewSuspension(TurnSuspension):
 
     plan: RunPlan
     completed: dict[str, RunState] = field(default_factory=dict)
-    # Upcoming workers the user is confirming ({run_id, role, task, depends_on, debate}).
+    # Upcoming workers the user is confirming ({run_id, role, task, depends_on}).
     workers: list[dict[str, Any]] = field(default_factory=list)
     # Execution-class tools the kickoff grant covers（将授权的执行能力；文件类由会话档信任）.
     tools: list[str] = field(default_factory=list)
@@ -405,6 +405,9 @@ class AskUserSuspension(TurnSuspension):
     assumptions: list[dict[str, Any]] = field(default_factory=list)
     questions: list[dict[str, Any]] = field(default_factory=list)
     intent: AskCheckpointIntent = "decision"
+    # CEO browser login gate (ask_user browser_login=true) — resume card mirrors
+    # escalate's「需要你登录 / 已登录，继续」; absent/false on older frames.
+    browser_login: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +434,7 @@ _EMPTY_SUMMARY_EXTRAS: dict[str, Any] = {
     "assumptions": [],
     "questions": [],
     "intent": None,
+    "browser_login": False,
 }
 
 
@@ -546,13 +550,16 @@ def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
 
 def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, AskUserSuspension)
-    return {
+    extras: dict[str, Any] = {
         "question": s.question,
         "context": s.context,
         "assumptions": list(s.assumptions),
         "questions": list(s.questions),
         "intent": s.intent,
     }
+    if s.browser_login:
+        extras["browser_login"] = True
+    return extras
 
 
 def _ask_user_from_extras(data: dict[str, Any]) -> dict[str, Any]:
@@ -562,6 +569,7 @@ def _ask_user_from_extras(data: dict[str, Any]) -> dict[str, Any]:
         "assumptions": list(data.get("assumptions") or []),
         "questions": list(data.get("questions") or []),
         "intent": data.get("intent") or "decision",
+        "browser_login": data.get("browser_login") is True,
     }
 
 
@@ -574,6 +582,7 @@ def _ask_user_summary_extras(s: TurnSuspension) -> dict[str, Any]:
         "assumptions": list(s.assumptions),
         "questions": list(s.questions),
         "intent": s.intent,
+        "browser_login": bool(s.browser_login),
     }
 
 

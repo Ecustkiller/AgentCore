@@ -123,6 +123,10 @@ class CheckpointRequiredPayload(WirePayload):
     assumptions: list[AskAssumption]
     questions: list[AskQuestion]
     intent: AskCheckpointIntent | None = absent(ts_type="CheckpointIntent")
+    browser_login: bool | None = absent(
+        "true=CEO 请求用户在右坞浏览器完成登录（同 escalate browser_login 体验）。"
+        "旧流缺字段按 false。"
+    )
 
 
 class CheckpointResolvedPayload(WirePayload):
@@ -190,7 +194,6 @@ class TeamPreviewWorker(WirePayload):
     role: str
     task: str
     depends_on: list[str]
-    debate: bool
     # D4：与 kickoff/summary.worker_rows 对齐；旧 journal 缺字段 → 前端不展示。
     form: str | None = absent("交付形态 prose/files 等；缺省=旧帧。")
     write_capability: Literal["text_only", "can_write_files"] | None = absent(
@@ -257,11 +260,25 @@ class TeamPreviewRequiredPayload(WirePayload):
     )
 
 
+class WriteCapabilityOverride(WirePayload):
+    """开工卡 continue 修正 / resolved 对账：单向收紧写盘（同效 form=prose）。仅允许 text_only。"""
+
+    run_id: str
+    capability: Literal["text_only"]
+
+
 class TeamPreviewResolvedPayload(WirePayload):
     checkpoint_id: str
     # continue(=grant[+steer]) / adjust / stop / research_first / …
     decision: CheckpointDecision
     note: str
+    # 开工组队有限否决：缺省 / 空 = 全员开工、无写盘收紧（旧客户端兼容）。
+    excluded_run_ids: list[str] | None = absent(
+        "用户关闭的 run_id；缺省/空=全员开工。"
+    )
+    write_capability_overrides: list[WriteCapabilityOverride] | None = absent(
+        "写盘单向收紧；仅 capability=text_only；未知 run_id / 升权 → 422（引擎侧）。"
+    )
 
 
 class StageCardRequiredPayload(WirePayload):

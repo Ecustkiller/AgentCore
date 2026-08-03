@@ -88,6 +88,65 @@ export async function downloadWorkspaceFile(
   };
 }
 
+/** Restore the conversation workspace to a snapshot (overwrites current files).
+ *  A2′ 整回合基线回退：覆盖工作区 overlay；手机无 Local sidecar。 */
+export async function restoreSnapshot(
+  conversationId: string,
+  snapshotId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    `/v1/conversations/${conversationId}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`恢复快照失败 (${res.status})`);
+}
+
+// --- AgentCore/trash (cloud soft-delete restore; not OS recycle bin) ---
+
+export interface WorkspaceTrashEntry {
+  entryId: string;
+  originalPath: string;
+  name: string;
+  isDir: boolean;
+  deletedAt: string;
+}
+
+type BackendTrashEntry = Schemas["TrashEntrySummary"];
+type TrashListResponse = Schemas["TrashListResponse"];
+
+const toTrashEntry = (e: BackendTrashEntry): WorkspaceTrashEntry => ({
+  entryId: e.entry_id,
+  originalPath: e.original_path,
+  name: e.name,
+  isDir: e.is_dir,
+  deletedAt: e.deleted_at,
+});
+
+/** List AgentCore/trash for a cloud conversation workspace (newest first). */
+export async function listTrash(
+  conversationId: string,
+): Promise<{ entries: WorkspaceTrashEntry[]; retentionDays: number }> {
+  const res = await apiFetch(`/v1/conversations/${conversationId}/trash`);
+  if (!res.ok) throw new Error(`加载软删区失败 (${res.status})`);
+  const data = (await res.json()) as TrashListResponse;
+  return {
+    entries: data.data.map(toTrashEntry),
+    retentionDays: data.retention_days,
+  };
+}
+
+/** Restore one AgentCore/trash entry to its original relative path. */
+export async function restoreTrash(
+  conversationId: string,
+  entryId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    `/v1/conversations/${conversationId}/trash/${encodeURIComponent(entryId)}/restore`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`还原失败 (${res.status})`);
+}
+
 /** Group a flat recursive listing into `dir → sorted children`. */
 export function buildTree(
   entries: WorkspaceFileEntry[],

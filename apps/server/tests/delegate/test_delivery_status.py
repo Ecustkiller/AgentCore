@@ -463,6 +463,61 @@ def test_maybe_emit_sets_current_delivery_verdict():
     assert verdict.delivered_files == ("a.md",)
     assert verdict.execution_id == "e-verdict"
 
+
+def test_unresolved_write_ownership_forces_partial_delivery_status(monkeypatch):
+    """案 P0-B：账本仍有未解 denied → delivery state 不得 delivered。"""
+    from agentcore.runtime.closing_posture import (
+        clear_unresolved_write_ownership,
+        turn_has_unresolved_write_ownership,
+    )
+    from agentcore.runtime.delegate.delivery_status import (
+        REASON_WRITE_OWNERSHIP,
+        current_delivery_verdict,
+    )
+    from agentcore.workspace.write_claims import WriteCoordinator
+
+    clear_unresolved_write_ownership()
+    current_delivery_verdict.set(None)
+    coord = WriteCoordinator({"plan.md": "del_owner"})
+    assert coord.claim("plan.md", "del_merger", frozenset()) == "del_owner"
+
+    monkeypatch.setattr(
+        "agentcore.workspace.write_claims.resolve_write_coordinator",
+        lambda **_kwargs: coord,
+    )
+
+    plan = _plan(
+        RunSpec(run_id="del_owner", task="写计划", role="架构师"),
+        RunSpec(run_id="del_merger", task="合并", role="合并员"),
+    )
+    results = {
+        "del_owner": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["plan.md"],
+            file_acceptance=_accepted("plan.md"),
+        ),
+        "del_merger": RunState(phase=RunPhase.COMPLETED, content="撞锁"),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-own-gap")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert any(
+        isinstance(g, dict) and g.get("reason") == REASON_WRITE_OWNERSHIP
+        for g in payload["gaps"]
+    )
+    assert turn_has_unresolved_write_ownership()
+
+    sink = EventSink()
+    maybe_emit_delivery_status(
+        sink, plan, results, execution_id="e-own-gap"
+    )
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.state == "partial"
+    clear_unresolved_write_ownership()
+    current_delivery_verdict.set(None)
+
 def test_soft_notes_only_are_notes_state_not_partial():
     plan = _plan(RunSpec(run_id="w1", task="写调研", role="调研员"))
     results = {

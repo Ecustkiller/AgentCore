@@ -8,3 +8,5 @@
 | 设计稿导出的 PNG/SVG 母版 | 小镇 3D 模型与纹理 → [`apps/town/Assets/TownAssets/`](../apps/town/Assets/TownAssets/README.md) |
 
 应用内引用品牌图时，从本目录复制或经构建脚本同步到目标 `public/`，**不要在各 app 各存一份未同步的副本**。
+
+Orbit 桌面图标母版：`agentcore-icon-orbit-cropped.png`（满铺、四角不透明 → macOS 打包 `apps/desktop/build/icon-mac.png`）；`agentcore-icon-orbit-rounded.png`（四角透明 squircle → Windows/Linux 打包 `icon-win.png` 与运行时 `apps/desktop/resources/icon.png`）。改母版后二进制复制到上述路径，勿重生成失真图。

@@ -203,6 +203,12 @@ async def test_handoff_prompt_splits_by_topology():
     assert "接力契约 + 增量交代" in upstream
     assert "不必为交而交" not in upstream
 
+    prose_up = build_worker_identity(
+        has_dependents=True, captain=False, form="prose"
+    )
+    assert "summary 不算正文" in prose_up
+    assert "加长 summary 也不能代替正文" in prose_up
+
     assert "不必为交而交" in leaf
     assert "接力契约 + 增量交代" in leaf
     assert "必须调用 handoff" not in leaf

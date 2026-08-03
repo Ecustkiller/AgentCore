@@ -318,11 +318,13 @@ class HandoffTool:
             )
         # 成篇质量：有下游时禁止空交（地板 = 合同 min_length，0 则仅要求非空）。
         # 豁免认 landed_artifact_kinds 中的 prose（跨 replace 存活）；骨架/空落盘不算。
-        # 同轮正文 0 字但 summary 非空：升格简报为候选正文；够地板则 success + final_text。
+        # 非 prose：同轮正文 0 字但 summary 非空 → 可升格简报为候选正文。
+        # prose + 有下游：summary 不算正文，禁止升格顶地板（对齐 identity）。
         # 空 summary 不豁免。勿依赖 has_landed_files bool——经 dataclasses.replace 会丢。
         promoted_body = ""
         if context.handoff_requires_body:
             from agentcore.runtime.runs.research_quality import (
+                brief_may_satisfy_body_floor,
                 promote_brief_to_deliverable,
                 upstream_body_floor_satisfied,
             )
@@ -330,12 +332,17 @@ class HandoffTool:
             body_chars = _body_chars(context)
             floor = max(0, int(context.handoff_min_body_chars or 0))
             kinds = context.landed_artifact_kinds
+            form = context.handoff_deliverable_form
             if not upstream_body_floor_satisfied(
                 body_chars=body_chars,
                 landed_artifact_kinds=kinds,
                 min_body_chars=floor,
             ):
-                if body_chars == 0 and summary:
+                if (
+                    body_chars == 0
+                    and summary
+                    and brief_may_satisfy_body_floor(deliverable_form=form)
+                ):
                     candidate = promote_brief_to_deliverable(
                         summary, arguments.get("key_points")
                     )
@@ -394,12 +401,21 @@ class HandoffTool:
                         if floor > 0
                         else "非空正文"
                     )
+                    prose_summary_hint = (
+                        "handoff 的 summary 不算正文；"
+                        if (
+                            body_chars == 0
+                            and summary
+                            and not brief_may_satisfy_body_floor(deliverable_form=form)
+                        )
+                        else ""
+                    )
                     land_hint = (
                         "已落盘的是骨架/提纲（skeleton），不算成篇交付；请补写实质正文并 "
                         f"file_write/file_append 成 prose，或在本轮写出{floor_hint}后再 handoff。"
                         if only_skeleton
                         else (
-                            f"本轮正文仅 {body_chars} 字（须{floor_hint}，"
+                            f"{prose_summary_hint}本轮正文仅 {body_chars} 字（须{floor_hint}，"
                             "或先落盘成篇 prose 产物后再交；骨架/空文件不算）。"
                             "请先写完交付正文并落盘，或在本轮写出足够正文后再调用 handoff——"
                             "禁止空壳简报进入下游任务。"
@@ -415,6 +431,7 @@ class HandoffTool:
                         rejected="empty_body",
                         only_skeleton=only_skeleton,
                         min_body_chars=floor,
+                        deliverable_form=form,
                     )
                     return ToolResult(
                         tool_call_id="",

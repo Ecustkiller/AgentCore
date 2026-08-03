@@ -17,6 +17,7 @@ from agentcore.runtime.browser.keyframes import KeyframeTracker
 from agentcore.tools.builtin import browser_execution_enabled_for, build_worker_registry
 from agentcore.tools.builtin.browser import (
     BROWSER_TOOL_NAMES,
+    BrowserConsoleTool,
     BrowserNavigateTool,
     BrowserScreenshotTool,
     BrowserSnapshotTool,
@@ -54,6 +55,7 @@ _BROWSER_NAMES = frozenset(
         "browser_scroll",
         "browser_snapshot",
         "browser_screenshot",
+        "browser_console",
     }
 )
 
@@ -78,12 +80,19 @@ def test_navigate_is_builtin_both():
 def test_interactive_browser_tools_are_builtin_both():
     from agentcore.tools.builtin.browser import (
         BrowserClickTool,
+        BrowserConsoleTool,
         BrowserScrollTool,
         BrowserSnapshotTool,
         BrowserTypeTool,
     )
 
-    for cls in (BrowserClickTool, BrowserTypeTool, BrowserScrollTool, BrowserSnapshotTool):
+    for cls in (
+        BrowserClickTool,
+        BrowserTypeTool,
+        BrowserScrollTool,
+        BrowserSnapshotTool,
+        BrowserConsoleTool,
+    ):
         reg = tool_registration(cls)
         schema = cls().schema
         assert reg.surface is ToolSurface.BUILTIN, schema.name
@@ -325,8 +334,44 @@ async def test_snapshot_wraps_tree_untrusted_no_keyframe(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_console_wraps_ring_buffer_untrusted_no_keyframe(tmp_path):
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/app",
+                "title": "App",
+                "messages": [
+                    {"level": "error", "text": "Uncaught TypeError: x", "timestamp": 1.0},
+                ],
+                "errors": [
+                    {
+                        "message": "x is not defined",
+                        "stack": "TypeError: x is not defined\n    at app.js:1",
+                        "timestamp": 1.1,
+                    },
+                ],
+                "truncated": {"messages_dropped": 0, "errors_dropped": 0},
+            },
+        )
+    )
+    tool = BrowserConsoleTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({}, _ctx(tmp_path))
+    assert result.success
+    assert session.sent[0].action == "console"
+    assert "frame" not in (result.display or {})
+    payload = json.loads(result.output)
+    assert payload["action"] == "console"
+    uw = payload["untrusted_web_content"]
+    assert uw["console_messages"][0]["level"] == "error"
+    assert uw["console_errors"][0]["message"] == "x is not defined"
+    assert payload["truncated"] == {"messages_dropped": 0, "errors_dropped": 0}
+    assert "读取页面 console" in (result.display or {}).get("detail", "")
+
+
+@pytest.mark.asyncio
 async def test_type_success_returns_current_snapshot_version(tmp_path):
-    """Mutation success must surface bumped snapshot_version (same field as snapshot)."""
+    """Mutation success must surface bumped snapshot_version + elements (same as snapshot)."""
     from agentcore.tools.builtin.browser import BrowserClickTool
 
     session = _FakeSession(
@@ -336,6 +381,8 @@ async def test_type_success_returns_current_snapshot_version(tmp_path):
                 "final_url": "https://example.com/",
                 "title": "Example",
                 "snapshot_version": 3,
+                "elements": "[e1] input: Name\n[e2] button: Go",
+                "aria": "- document",
             },
             frame=b"\xff\xd8\xff\xe0jpeg",
         )
@@ -348,11 +395,45 @@ async def test_type_success_returns_current_snapshot_version(tmp_path):
     payload = json.loads(result.output)
     assert payload["snapshot_version"] == 3
     assert payload["action"] == "type"
+    uw = payload["untrusted_web_content"]
+    assert uw["elements"] == "[e1] input: Name\n[e2] button: Go"
+    assert uw["accessibility_tree"] == "- document"
 
     click = BrowserClickTool(registry=_FakeRegistry(session=session))
     clicked = await click.execute({"ref": "e2", "snapshot_version": 3}, _ctx(tmp_path))
     assert clicked.success
-    assert json.loads(clicked.output)["snapshot_version"] == 3
+    clicked_payload = json.loads(clicked.output)
+    assert clicked_payload["snapshot_version"] == 3
+    assert clicked_payload["untrusted_web_content"]["elements"] == (
+        "[e1] input: Name\n[e2] button: Go"
+    )
+
+
+@pytest.mark.asyncio
+async def test_navigate_success_includes_elements_in_untrusted(tmp_path):
+    """Navigate (mutation) success wraps driver elements/aria like snapshot."""
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/",
+                "title": "Example Domain",
+                "http_status": 200,
+                "snapshot_version": 1,
+                "elements": "[e1] link: More information...",
+                "aria": "- document\n  - heading",
+            },
+            frame=b"\xff\xd8\xff\xe0jpeg",
+        )
+    )
+    tool = BrowserNavigateTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({"url": "https://example.com/"}, _ctx(tmp_path))
+    assert result.success
+    payload = json.loads(result.output)
+    assert payload["snapshot_version"] == 1
+    uw = payload["untrusted_web_content"]
+    assert uw["elements"] == "[e1] link: More information..."
+    assert uw["accessibility_tree"] == "- document\n  - heading"
 
 
 @pytest.mark.asyncio
@@ -549,16 +630,35 @@ async def test_type_password_blocked_maps_to_tool_result(tmp_path):
     assert result.success is False
     assert result.contract_failure is True
     assert result.metadata.get("code") == "password_blocked"
-    assert "escalate" in _fail_text(result)
+    # Fake ctx has no escalation channel → CEO path (ask_user), not escalate-only.
+    assert "ask_user(browser_login=true)" in _fail_text(result)
     assert "browser_login" in _fail_text(result)
     assert session.sent and session.sent[0].action == "type"
 
 
-def test_browser_type_schema_guides_password_escalate():
+def test_browser_type_schema_guides_password_login():
     desc = BrowserTypeTool().schema.description
     assert "password_blocked" in desc or "password" in desc.lower()
     assert "browser_login" in desc
+    assert "ask_user" in desc
+    assert "escalate" in desc
     assert "M0 不支持登录" not in desc
+
+
+def test_mutation_schemas_mention_inline_ref_table():
+    """click/type/scroll/navigate success already carries elements — snapshot only if needed."""
+    from agentcore.tools.builtin.browser import BrowserClickTool, BrowserScrollTool
+
+    for tool in (
+        BrowserNavigateTool(),
+        BrowserClickTool(),
+        BrowserTypeTool(),
+        BrowserScrollTool(),
+    ):
+        desc = tool.schema.description
+        assert "elements" in desc
+        assert "仅必要" in desc or "仅当" in desc
+        assert "browser_snapshot" in desc
 
 
 # -- 甲/乙：本会话 HTML 相对路径 ------------------------------------------------

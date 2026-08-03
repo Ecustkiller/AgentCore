@@ -567,3 +567,114 @@ def test_declare_still_blocks_running_owner():
     )
     assert conflicts == [("b", "x.md", "a")]
     assert ownership.owner_of("x.md") == "a"
+
+
+def test_nested_lookup_owner_status_falls_back_to_parent_session():
+    """嵌套 eid 无会话时，lookup 与 resolve_write_coordinator 同款父回退。"""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        current_execution_id,
+        set_active_coordination,
+    )
+    from agentcore.workspace.write_claims import lookup_owner_status
+
+    clear_active_coordination()
+    parent = CoordinationSession(execution_id="parent-exec", total_workers=2)
+    set_active_coordination(parent)
+    parent._running_workers["author-v1"] = "作者"
+    parent.ensure_file_ownership().declare("docs/plan.md", "author-v1", frozenset())
+    token = current_execution_id.set("parent-exec")
+    try:
+        role, status = lookup_owner_status(
+            "author-v1", execution_id="nested-child-exec"
+        )
+        assert status == "running"
+        assert role == "作者"
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination("parent-exec")
+        clear_active_coordination()
+
+
+def test_ended_owner_declare_and_claim_handoff_without_completed_run_ids():
+    """旁路 ended_owners：不进进度 completed_run_ids 也能 declare/claim 接手。"""
+    from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import Deliverable, RunSpec
+    from agentcore.workspace.write_claims import WriteCoordinator
+
+    ownership = WriteCoordinator()
+    ownership.declare("docs/overview.md", "author-v1", frozenset())
+    ownership.mark_written("docs/overview.md")
+    ownership.mark_ended("author-v1")
+    assert ownership.is_ended("author-v1")
+    assert ownership.claim("docs/overview.md", "merger", frozenset()) is None
+    assert ownership.owner_of("docs/overview.md") == "merger"
+
+    # Fresh ledger: declare_plan_artifacts path with ended (not completed_run_ids).
+    ownership2 = WriteCoordinator()
+    wave1 = RunPlan()
+    wave1.add(
+        RunSpec(
+            run_id="author-v1",
+            role="作者",
+            task="写",
+            deliverable=Deliverable(artifacts=["docs/overview.md"]),
+        )
+    )
+    declare_plan_artifacts(wave1, ownership2)
+    ownership2.mark_ended("author-v1")
+    reviser = RunSpec(
+        run_id="reviser",
+        role="修订",
+        task="改",
+        deliverable=Deliverable(artifacts=["docs/overview.md"]),
+    )
+    live = RunPlan()
+    live.add(wave1.nodes[0])
+    live.add(reviser)
+    conflicts = declare_plan_artifacts(
+        live,
+        ownership2,
+        only_run_ids={"reviser"},
+        completed_run_ids=set(),  # 故意不塞进度 completed
+    )
+    assert conflicts == []
+    assert ownership2.owner_of("docs/overview.md") == "reviser"
+
+    # Snapshot roundtrip keeps ended.
+    restored = WriteCoordinator.from_dict(ownership2.to_dict())
+    assert restored.is_ended("author-v1")
+
+
+def test_conflict_message_unknown_and_ended_ban_user_transfer():
+    from agentcore.workspace.write_claims import ownership_conflict_message
+
+    ended = ownership_conflict_message(
+        "docs/x.md",
+        "author",
+        ownership_kind="written",
+        owner_status="ended",
+    )
+    assert "已结束" in ended
+    assert "不要 escalate" in ended
+    assert "用户卡可点" not in ended
+    assert "transfer_ownership" not in ended
+
+    unknown = ownership_conflict_message(
+        "docs/x.md",
+        "author",
+        owner_status="unknown",
+    )
+    assert "未知" in unknown
+    assert "不要 escalate" in unknown
+    assert "用户卡可点" not in unknown
+    assert "transfer_ownership" not in unknown
+    # Running still offers structured user card.
+    running = ownership_conflict_message(
+        "docs/x.md",
+        "author",
+        owner_status="running",
+    )
+    assert "用户卡可点「移交写权」" in running

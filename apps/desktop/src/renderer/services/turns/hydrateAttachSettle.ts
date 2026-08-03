@@ -6,6 +6,9 @@
  * Warm reopen keeps the in-memory slice (adopt skips overwrite) but still runs
  * recovery-driven attach/settle so a detached live / ghost running assistant is
  * not left as fake "Replying".
+ *
+ * 观察泵挂在会话切片上：切会话 ≠ 卸观察。本路径不接受页级 AbortSignal；
+ * 显式卸观察仅由 `attachSidecarTurn({ signal })` 调用方传入。
  */
 import { logEvent } from "@/lib/log";
 import {
@@ -13,14 +16,10 @@ import {
   shouldHydrateLocalRecovery,
 } from "@/services/resume";
 import { getRuntime } from "@/stores/conversation";
+import { projectPausedRuns } from "./projectPausedRuns";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import { attachOnOpen, settleCloudRunningAssistant } from "./recovery";
 import { attachSidecarTurn } from "./sidecarAttach";
-
-export interface HydrateAttachSettleOptions {
-  /** 切会话 / hydrate 取消时 abort（停 sidecar live 等待，释放 claim）。 */
-  signal?: AbortSignal;
-}
 
 /**
  * Branch on recovery facts and rejoin / settle / project unsynced.
@@ -31,7 +30,6 @@ export interface HydrateAttachSettleOptions {
 export async function runHydrateAttachSettle(
   conversationId: string,
   recovery: ConversationRecovery,
-  opts?: HydrateAttachSettleOptions,
 ): Promise<"local" | "cloud"> {
   const useLocal = shouldHydrateLocalRecovery(recovery);
   logEvent("info", "conversation.hydrate", {
@@ -50,8 +48,14 @@ export async function runHydrateAttachSettle(
   }
   if (useLocal) {
     projectUnsyncedTurns(conversationId, recovery.unsynced);
+    // Paused local turns skip attach (no live buffer). Cloud pause writeback
+    // omits turn_journal, so reinject display runs from the pause frame.
+    if (recovery.pausedCount > 0) {
+      projectPausedRuns(conversationId, recovery.pausedRuns ?? {});
+    }
     if (recovery.sidecarLive && recovery.pausedCount === 0) {
-      await attachSidecarTurn(conversationId, { signal: opts?.signal });
+      // 切会话不卸观察泵 — 无页级 signal。
+      await attachSidecarTurn(conversationId);
     }
     return "local";
   }

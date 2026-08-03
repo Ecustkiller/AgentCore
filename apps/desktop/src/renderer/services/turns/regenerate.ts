@@ -7,8 +7,10 @@ import {
 } from "@/lib/errors";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import {
+  conversationHasColdPending,
   isClientOnlyResumeKey,
   resolveResumeMessageId,
+  resolveResumeOrigin,
 } from "@/services/resume";
 import { clearSidecarHealth, probeSidecar } from "@/services/sidecarHealth";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
@@ -17,11 +19,11 @@ import {
   resumeConversation,
 } from "@/services/streamConversation";
 import { resumeConversationViaSidecar } from "@/services/streamConversationViaSidecar";
+import type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
-import type { PendingResume } from "@/stores/pausedTurns";
 import {
   finalizeGeneratingForPausedConversation,
   finalizeGeneratingIfNeeded,
@@ -31,8 +33,8 @@ import {
 import { rejoinLiveTurn } from "./recovery";
 
 /** Durable resume routes to the local sidecar engine when the frame lives there. */
-function shouldResumeViaSidecar(pending: PendingResume | undefined): boolean {
-  return pending?.origin === "sidecar";
+function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
+  return origin === "sidecar";
 }
 
 /**
@@ -134,6 +136,7 @@ export async function runResume(
   decision: PlanReviewUserDecision,
   note: string,
   selected: string[] = [],
+  corrections?: TeamPreviewResumeCorrections,
 ): Promise<void> {
   const store = useConversationStore.getState();
   const conversationId = store.currentConversationId;
@@ -143,10 +146,7 @@ export async function runResume(
   if (getRuntime(conversationId).isGenerating) {
     // Defense: cold pending card + stuck generating is illegal — clear then continue.
     // True mid-stream (no cold card) still blocks so ResumePrompt submitting resets.
-    const hasColdPending = usePausedTurnStore
-      .getState()
-      .pending.some((p) => p.conversationId === conversationId);
-    if (hasColdPending) {
+    if (conversationHasColdPending(conversationId)) {
       finalizeGeneratingForPausedConversation(conversationId);
     } else {
       store.setError(
@@ -173,11 +173,18 @@ export async function runResume(
   const pending = usePausedTurnStore
     .getState()
     .pending.find((p) => p.messageId === resumeMessageId);
-  const viaSidecar = shouldResumeViaSidecar(pending);
+  const origin = resolveResumeOrigin(conversationId, resumeMessageId);
+  const viaSidecar = shouldResumeViaSidecar(origin);
 
   /** Banner「重试」：错误已在 runResume 内 setError；吞掉 rejection 避免未处理 Promise。 */
   const retryResume = () => {
-    void runResume(resumeMessageId, decision, note, selected).catch(() => {});
+    void runResume(
+      resumeMessageId,
+      decision,
+      note,
+      selected,
+      corrections,
+    ).catch(() => {});
   };
 
   const raiseSidecarUnavailable = (detail: string | null) => {
@@ -232,21 +239,26 @@ export async function runResume(
     store.setServerMessageIdOnLastMessage(resumeMessageId, conversationId);
   }
 
-  // Optimistic: drop the card as the request fires. Restore only on pre-stream refusal.
+  // Optimistic: drop the pausedTurns shell as the request fires. InteractionStore
+  // cold pending stays in submitting via submitInteraction; restore shell only
+  // when the request is refused before any stream opens.
   const pendingSnapshot = pending;
-  usePausedTurnStore.getState().remove(resumeMessageId);
+  const hadPausedFrame = pendingSnapshot != null;
+  if (hadPausedFrame) {
+    usePausedTurnStore.getState().remove(resumeMessageId);
+  }
+
+  const priorUser = [...getRuntime(conversationId).messages]
+    .reverse()
+    .find((m) => m.role === "user");
+  const userMessage = pendingSnapshot?.userMessage || priorUser?.content || "";
+  const userMessageId = pendingSnapshot?.userMessageId || priorUser?.id || "";
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   beginTurnPreflight(conversationId);
   try {
-    if (viaSidecar && pendingSnapshot && sidecarTarget) {
-      const userMessageId =
-        pendingSnapshot.userMessageId ||
-        [...getRuntime(conversationId).messages]
-          .reverse()
-          .find((m) => m.role === "user")?.id ||
-        "";
+    if (viaSidecar && sidecarTarget) {
       await resumeConversationViaSidecar({
         conversationId,
         rootId: sidecarTarget.rootId,
@@ -255,7 +267,9 @@ export async function runResume(
         decision,
         note,
         selected,
-        userMessage: pendingSnapshot.userMessage,
+        excluded_run_ids: corrections?.excluded_run_ids,
+        write_capability_overrides: corrections?.write_capability_overrides,
+        userMessage,
         userMessageId,
         signal: ac.signal,
       });
@@ -266,6 +280,8 @@ export async function runResume(
         decision,
         note,
         selected,
+        excluded_run_ids: corrections?.excluded_run_ids,
+        write_capability_overrides: corrections?.write_capability_overrides,
         signal: ac.signal,
       });
     }
@@ -279,8 +295,8 @@ export async function runResume(
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
       return;
     }
-    // Request refused before any stream opened → put the card back for retry.
-    if (isResumeRequestRefused(err) && pendingSnapshot) {
+    // Request refused before any stream opened → put the shell back for retry.
+    if (isResumeRequestRefused(err) && hadPausedFrame && pendingSnapshot) {
       usePausedTurnStore.getState().addLiveResume(pendingSnapshot);
     }
     const s = useConversationStore.getState();

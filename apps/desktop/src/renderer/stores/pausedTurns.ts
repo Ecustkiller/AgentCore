@@ -57,7 +57,6 @@ export interface PendingResume {
     role: string;
     task: string;
     depends_on: string[];
-    debate: boolean;
     form?: string;
     write_capability?: "text_only" | "can_write_files";
     write_capability_label?: string;
@@ -104,6 +103,8 @@ export interface PendingResume {
   questions: AskQuestion[];
   /** ask_user: wire may still send kickoff; UI treats as generic clarification. */
   intent: CheckpointIntent;
+  /** ask_user browser_login=true → login card + auto-reveal 右坞. */
+  browserLogin?: boolean;
   /** Where the durable frame lives — drives {@link runResume} sidecar vs server routing. */
   origin: ResumeOrigin;
 }
@@ -135,7 +136,6 @@ const toWorkers = (
       depends_on: Array.isArray(row.depends_on)
         ? row.depends_on.map(String)
         : [],
-      debate: Boolean(row.debate),
       ...(typeof row.form === "string" && row.form ? { form: row.form } : {}),
       ...(row.write_capability === "text_only" ||
       row.write_capability === "can_write_files"
@@ -346,6 +346,9 @@ function entryFromSummary(
     assumptions: toAssumptions(s.assumptions),
     questions: toQuestions(s.questions),
     intent: toIntent((s as { intent?: unknown }).intent),
+    ...((s as { browser_login?: unknown }).browser_login === true
+      ? { browserLogin: true as const }
+      : {}),
     origin,
   };
 }

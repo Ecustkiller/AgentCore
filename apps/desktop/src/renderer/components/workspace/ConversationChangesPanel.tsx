@@ -1,5 +1,7 @@
 import { TurnFileChangesReview } from "@/components/chat/TurnFileChangesReview";
 import { EmptyHint } from "@/components/files/parts";
+import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
+import { shouldIncludeChangesTurn } from "@/lib/conversationFileChanges";
 import {
   type FileArtifact,
   fileArtifactsFromExecution,
@@ -17,8 +19,8 @@ import { Diff } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 /**
- * 右坞条件「改动」tab 体 —— 本对话 AI 文件改动聚合（前端UX设计.md §十）。
- * 顶栏有改动记录（或深链）才挂本面板；按回合列出，复用 {@link TurnFileChangesReview}。
+ * 右坞条件「改动」tab 体 —— 本对话 AI 文件改动 / 回合基线聚合（前端UX设计.md §十 · P0c）。
+ * 顶栏有改动记录、Local zip 基线或深链才挂本面板；按回合列出，复用 {@link TurnFileChangesReview}。
  * 产物卡「查看改动」经 {@link useSidePanelStore.showChanges} 聚焦同源入口。
  */
 
@@ -35,6 +37,7 @@ export function ConversationChangesPanel() {
   );
   const byId = useExecutionStore((s) => s.byId);
   const focusMessageId = useSidePanelStore((s) => s.changesFocusMessageId);
+  const baselineMessageIds = useLocalTurnBaselineIds(conversationId, messages);
 
   const turns = useMemo((): TurnChanges[] => {
     const out: TurnChanges[] = [];
@@ -49,8 +52,16 @@ export function ConversationChangesPanel() {
         fileArtifactsFromProcess(msg.process),
         fileArtifactsFromExecution(execution),
       );
-      const focused = focusMessageId != null && messageId === focusMessageId;
-      if (artifacts.length === 0 && !focused) continue;
+      if (
+        !shouldIncludeChangesTurn({
+          artifactsLength: artifacts.length,
+          messageId,
+          baselineMessageIds,
+          focusMessageId,
+        })
+      ) {
+        continue;
+      }
       out.push({
         messageId,
         label: `回合 ${turnIndex}`,
@@ -66,7 +77,7 @@ export function ConversationChangesPanel() {
       });
     }
     return out;
-  }, [messages, byId, focusMessageId]);
+  }, [messages, byId, focusMessageId, baselineMessageIds]);
 
   const focusRef = useRef<HTMLElement | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: turns is an intentional re-run key after list lands
@@ -81,7 +92,7 @@ export function ConversationChangesPanel() {
         inline
         icon={<Diff size={26} className="text-muted-foreground/40" />}
         title="暂无改动"
-        hint="发送消息后，本对话 AI 写入工作区的文件改动会出现在这里。"
+        hint="发送消息后，本对话 AI 写入工作区的文件改动或可恢复基线会出现在这里。"
       />
     );
   }
@@ -92,7 +103,7 @@ export function ConversationChangesPanel() {
         inline
         icon={<Diff size={26} className="text-muted-foreground/40" />}
         title="暂无改动"
-        hint="本对话尚无 AI 文件改动。产物卡「查看改动」与此处同源。"
+        hint="本对话尚无 AI 文件改动或可恢复的回合基线。产物卡「查看改动」与此处同源。"
       />
     );
   }

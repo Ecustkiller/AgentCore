@@ -92,7 +92,6 @@ def _multi_agent_incremental_preview_badge() -> list[SSEEvent]:
                     "role": "法务",
                     "task": "审阅",
                     "depends_on": [],
-                    "debate": False,
                 }
             ],
             tools=["file_read", "file_write"],

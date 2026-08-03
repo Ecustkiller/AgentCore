@@ -122,15 +122,12 @@ def motion_cards_block(
 
 def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
     """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。"""
-    # 完工交接简报: the brief is structured (``state.debrief``, submitted via the worker's handoff
-    # tool — never mixed into the prose), so the deliverable IS the clean answer as-is. If the
-    # author suggested a 建议下一步, re-attach it as a readable footer (there is no CEO synthesis
-    # pass here to relay it). Same for an optional motion_card.
+    # 完工交接简报: ``state.debrief`` stays structured (handoff tool args) — never mixed into
+    # the deliverable prose. ``next_steps`` is rendered by run-detail 交接简报, not re-serialized
+    # into ``content`` (that hard footer caused duplicate「建议下一步」with the structured card).
+    # Optional motion_card still needs a user-visible cue when there is no CEO synthesis pass.
     text = state.content
     debrief = state.debrief if isinstance(state.debrief, dict) else None
-    next_steps = (debrief or {}).get("next_steps", "") if debrief else ""
-    if next_steps:
-        text = f"{text}\n\n---\n**建议下一步**：{next_steps}"
     card = (debrief or {}).get("motion_card") if debrief else None
     if isinstance(card, dict):
         from agentcore.runtime.deep_research_auto import tool_may_auto_debate

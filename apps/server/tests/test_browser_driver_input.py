@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from agentcore.tools.sandbox.browser.driver import Driver, _modifier_bitmask
+from agentcore.tools.sandbox.browser.driver import (
+    Driver,
+    _modifier_bitmask,
+    _normalize_mouse_button,
+)
 
 
 class FakeCdp:
@@ -57,6 +61,36 @@ async def test_input_maps_mouse_key_text_to_cdp():
     assert wheel["deltaY"] == 120
     assert d._cdp.calls[4][1]["key"] == "Enter" and d._cdp.calls[4][1]["code"] == "Enter"
     assert d._cdp.calls[5][1]["text"] == "hunter2"
+
+
+@pytest.mark.asyncio
+async def test_input_dom_button_numbers_map_to_cdp_names():
+    """Desktop/mobile wire DOM 0|1|2 → CDP left|middle|right (not str(0))."""
+    d = _driver()
+    events = [
+        {"kind": "mouse", "type": "down", "x": 1, "y": 1, "button": 0},
+        {"kind": "mouse", "type": "up", "x": 1, "y": 1, "button": 0},
+        {"kind": "mouse", "type": "down", "x": 2, "y": 2, "button": 1},
+        {"kind": "mouse", "type": "down", "x": 3, "y": 3, "button": 2},
+        {"kind": "mouse", "type": "move", "x": 4, "y": 4, "button": 0},
+    ]
+    res = await d.input({"events": events})
+    assert res == {"injected": 5}
+    assert d._cdp.calls[0][1]["button"] == "left"
+    assert d._cdp.calls[1][1]["button"] == "left"
+    assert d._cdp.calls[2][1]["button"] == "middle"
+    assert d._cdp.calls[3][1]["button"] == "right"
+    assert d._cdp.calls[4][1]["button"] == "left"
+
+
+def test_normalize_mouse_button_aliases():
+    assert _normalize_mouse_button(None) == "left"
+    assert _normalize_mouse_button(0) == "left"
+    assert _normalize_mouse_button(1) == "middle"
+    assert _normalize_mouse_button(2) == "right"
+    assert _normalize_mouse_button("left") == "left"
+    assert _normalize_mouse_button("RIGHT") == "right"
+    assert _normalize_mouse_button("1") == "middle"
 
 
 @pytest.mark.asyncio
@@ -154,9 +188,13 @@ async def test_type_fills_non_password():
 
 @pytest.mark.asyncio
 async def test_page_state_returns_bumped_snapshot_version():
-    """Mutations must return the post-bump snapshot_version (align host + tools)."""
+    """Mutations must return post-bump snapshot_version + fresh elements (MCP-style)."""
     d = Driver()
     d._snapshot_version = 4
+
+    class _Body:
+        async def aria_snapshot(self):
+            return "- document\n  - link: More"
 
     class _Page:
         url = "https://example.com/"
@@ -164,7 +202,44 @@ async def test_page_state_returns_bumped_snapshot_version():
         async def title(self):
             return "Example"
 
+        async def evaluate(self, _js, version):
+            return f"[e1] link: More (v{version})"
+
+        def locator(self, _sel):
+            return _Body()
+
     d._page = _Page()  # type: ignore[assignment]
     state = await d._page_state(capture=False)
     assert state["snapshot_version"] == 5
     assert d._snapshot_version == 5
+    assert state["elements"] == "[e1] link: More (v5)"
+    assert state["aria"].startswith("- document")
+
+
+@pytest.mark.asyncio
+async def test_page_state_aria_best_effort_when_aria_fails():
+    """elements still land when aria_snapshot raises (same as dedicated snapshot)."""
+    d = Driver()
+    d._snapshot_version = 0
+
+    class _Body:
+        async def aria_snapshot(self):
+            raise RuntimeError("aria unavailable")
+
+    class _Page:
+        url = "https://example.com/"
+
+        async def title(self):
+            return "Example"
+
+        async def evaluate(self, _js, version):
+            return "[e1] button: Go"
+
+        def locator(self, _sel):
+            return _Body()
+
+    d._page = _Page()  # type: ignore[assignment]
+    state = await d._page_state(capture=False)
+    assert state["snapshot_version"] == 1
+    assert state["elements"] == "[e1] button: Go"
+    assert state["aria"] == ""

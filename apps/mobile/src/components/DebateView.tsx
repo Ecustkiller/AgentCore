@@ -13,7 +13,6 @@ import type {
   DebateResultPayload,
   DebateRoundInfo,
 } from "@agentcore/contract-types";
-import type { DebatePretrialProjection } from "@agentcore/protocol-conformance";
 import type { ReactNode } from "react";
 
 const FORM_LABEL: Record<DebateResultPayload["form"], string> = {
@@ -88,12 +87,9 @@ function asHandoffKind(raw: string): HandoffKind {
 
 export function DebateView({
   debate,
-  pretrial,
   onFill,
 }: {
   debate: DebateResultPayload;
-  /** 庭前准备折叠态；缺省 / 老会话 → 不渲染。 */
-  pretrial?: DebatePretrialProjection | null;
   /** 有则展示「回复拍板 / 派查证」并回填 composer；只读上下文省略。 */
   onFill?: (text: string) => void;
 }) {
@@ -114,7 +110,6 @@ export function DebateView({
           <span className="debate-field-value">{rosterLine}</span>
         </div>
       )}
-      <PretrialBlock pretrial={pretrial ?? null} />
       {debate.narrative_first ? (
         <>
           {narrative}
@@ -126,57 +121,6 @@ export function DebateView({
           {narrative}
         </>
       )}
-    </div>
-  );
-}
-
-const PRETRIAL_STATUS: Record<string, string> = {
-  running: "准备中",
-  done: "已就绪",
-  skipped: "已跳过",
-  degraded: "已降级",
-};
-
-/** 庭前准备极简行：组卷轻态 + 台账条数；无则不渲染（无取证员舰队）。 */
-function PretrialBlock({
-  pretrial,
-}: {
-  pretrial: DebatePretrialProjection | null;
-}) {
-  if (!pretrial) return null;
-  const status = PRETRIAL_STATUS[pretrial.status] ?? pretrial.status;
-  const sideNames = pretrial.sides.map((s) => s.name).join(" · ");
-  // 权威=completed：running 不宣称完整度；缺字段=未知；intentional skip 非失败态。
-  const showCompleteness =
-    pretrial.status !== "running" && pretrial.completeness != null;
-  const completeness = !showCompleteness
-    ? ""
-    : pretrial.completeness === "full"
-      ? "齐全"
-      : pretrial.completeness === "partial"
-        ? "不完整"
-        : pretrial.completeness === "empty"
-          ? "空"
-          : String(pretrial.completeness);
-  const showIncompleteAlarm =
-    pretrial.incomplete === true &&
-    pretrial.status !== "running" &&
-    !pretrial.skipReason;
-  const external = pretrial.externalEvidenceMode === "skip" ? "外证跳过" : "";
-  return (
-    <div className="debate-field">
-      <span className="debate-field-label">庭前准备</span>
-      <span className="debate-field-value">
-        {status}
-        {pretrial.status === "running" ? " · 组装证据包" : ""}
-        {pretrial.evidenceLedgerCount > 0
-          ? ` · 台账 ${pretrial.evidenceLedgerCount} 条`
-          : ""}
-        {completeness ? ` · 完整度 ${completeness}` : ""}
-        {external ? ` · ${external}` : ""}
-        {showIncompleteAlarm ? " · 证据不完整" : ""}
-        {sideNames ? ` · ${sideNames}` : ""}
-      </span>
     </div>
   );
 }
@@ -417,50 +361,41 @@ function RoundClashes({
  *  轮编排。收场后由 {@link DebateView} 的全量双产物接管 (届时 `debate` 在手，本视图不再渲染)。 */
 export function LiveDebateNarrative({
   rounds,
-  pretrial,
 }: {
   rounds: DebateNarrativeRound[];
-  pretrial?: DebatePretrialProjection | null;
 }) {
-  if (rounds.length === 0 && !pretrial) return null;
+  if (rounds.length === 0) return null;
   return (
     <div className="debate">
       <div className="debate-head">
-        <span className="debate-title">
-          {rounds.length === 0 ? "庭前准备" : "辩论进行中"}
-        </span>
-        {rounds.length > 0 ? (
-          <span className="debate-tag">{rounds.length} 轮</span>
-        ) : null}
+        <span className="debate-title">辩论进行中</span>
+        <span className="debate-tag">{rounds.length} 轮</span>
       </div>
-      <PretrialBlock pretrial={pretrial ?? null} />
-      {rounds.length > 0 ? (
-        <div className="debate-rounds">
-          {rounds.map((r) => (
-            <div key={r.round_no} className="debate-round">
-              <div className="debate-round-head">
-                <span className="debate-round-no">第 {r.round_no} 轮</span>
-                <span className="debate-round-focus">{r.focus}</span>
-              </div>
-              {r.verdict && (
-                <div className="debate-verdict">
-                  <span className="debate-vpill">
-                    {r.verdict.real_clash ? "有交锋" : "各说各话"}
-                  </span>
-                  <span className="debate-vpill">
-                    {r.verdict.new_arguments ? "有新论据" : "无新论据"}
-                  </span>
-                  {r.verdict.converged && (
-                    <span className="debate-vpill vpill-ok">已收敛</span>
-                  )}
-                </div>
-              )}
-              <ModeratorSummary summary={r.summary} />
-              <RoundClashes round={r} />
+      <div className="debate-rounds">
+        {rounds.map((r) => (
+          <div key={r.round_no} className="debate-round">
+            <div className="debate-round-head">
+              <span className="debate-round-no">第 {r.round_no} 轮</span>
+              <span className="debate-round-focus">{r.focus}</span>
             </div>
-          ))}
-        </div>
-      ) : null}
+            {r.verdict && (
+              <div className="debate-verdict">
+                <span className="debate-vpill">
+                  {r.verdict.real_clash ? "有交锋" : "各说各话"}
+                </span>
+                <span className="debate-vpill">
+                  {r.verdict.new_arguments ? "有新论据" : "无新论据"}
+                </span>
+                {r.verdict.converged && (
+                  <span className="debate-vpill vpill-ok">已收敛</span>
+                )}
+              </div>
+            )}
+            <ModeratorSummary summary={r.summary} />
+            <RoundClashes round={r} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

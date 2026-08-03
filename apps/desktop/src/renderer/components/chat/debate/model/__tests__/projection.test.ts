@@ -574,3 +574,42 @@ describe("toDebateModel live opening", () => {
     expect(model?.opening).toBe("收场权威开场白");
   });
 });
+
+describe("toDebateModel live empty shell (no pretrial UI)", () => {
+  it("returns empty-rounds skeleton when debatePretrial fold exists", () => {
+    const model = toDebateModel(
+      baseExecution({
+        planType: "debate",
+        debatePretrial: {
+          status: "running",
+          thorough: true,
+          skipReason: null,
+          sides: [{ key: "pro", name: "正方" }],
+          orders: [],
+          evidenceLedgerCount: 0,
+          fallbackSelfSearch: false,
+          evidenceReady: false,
+        },
+      }),
+    );
+    expect(model).not.toBeNull();
+    expect(model?.settled).toBe(false);
+    expect(model?.rounds).toEqual([]);
+    expect(model?.form).toBe("debate");
+  });
+
+  it("returns empty-rounds skeleton from opening alone", () => {
+    const model = toDebateModel(
+      baseExecution({
+        debateOpening: "先从最要害切入。",
+      }),
+    );
+    expect(model).not.toBeNull();
+    expect(model?.rounds).toEqual([]);
+    expect(model?.opening).toBe("先从最要害切入。");
+  });
+
+  it("returns null when no rounds and no debate shell signal", () => {
+    expect(toDebateModel(baseExecution())).toBeNull();
+  });
+});

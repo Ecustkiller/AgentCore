@@ -204,7 +204,21 @@ def test_toolshed_intent_none_allowed():
     assert name is None
 
 
-def test_toolshed_intent_named_build_toolshed_ok():
+def test_toolshed_intent_named_build_website_style_ok():
+    name, reason, err = resolve_playbook_declaration(
+        {
+            "playbook": "build_website",
+            "playbook_args": {"site": "订单运营控制台", "style": "toolshed"},
+        },
+        user_message="帮我搭一个工具台",
+    )
+    assert err is None
+    assert name == "build_website"
+    assert reason is None
+
+
+def test_legacy_build_toolshed_playbook_unknown():
+    """旧名直接未知 playbook——无别名 / 静默改写。"""
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook": "build_toolshed",
@@ -212,9 +226,11 @@ def test_toolshed_intent_named_build_toolshed_ok():
         },
         user_message="帮我搭一个工具台",
     )
-    assert err is None
-    assert name == "build_toolshed"
+    assert name is None
     assert reason is None
+    assert err is not None
+    assert "未知" in err
+    assert "build_toolshed" in err
 
 
 def test_automation_delivery_ignored_named_playbooks_still_ok():
@@ -226,17 +242,21 @@ def test_automation_delivery_ignored_named_playbooks_still_ok():
     )
     name, reason, err = resolve_playbook_declaration(
         {
-            "playbook": "build_toolshed",
-            "playbook_args": {"site": "Ops", "sections": ["应用外壳"]},
+            "playbook": "build_website",
+            "playbook_args": {
+                "site": "Ops",
+                "style": "toolshed",
+                "sections": ["应用外壳"],
+            },
         },
         user_message="做短视频自动化 Agent",
         automation_delivery=conf,
     )
     assert err is None
-    assert name == "build_toolshed"
+    assert name == "build_website"
 
 
-def test_automation_console_allows_build_toolshed():
+def test_automation_console_allows_build_website_toolshed_style():
     from agentcore.runtime.runs.automation_delivery import DeliveryConfirmation
 
     conf = DeliveryConfirmation(
@@ -244,25 +264,23 @@ def test_automation_console_allows_build_toolshed():
     )
     name, reason, err = resolve_playbook_declaration(
         {
-            "playbook": "build_toolshed",
-            "playbook_args": {"site": "Ops", "sections": ["应用外壳"]},
+            "playbook": "build_website",
+            "playbook_args": {
+                "site": "Ops",
+                "style": "toolshed",
+                "sections": ["应用外壳"],
+            },
         },
         automation_delivery=conf,
     )
     assert err is None
-    assert name == "build_toolshed"
+    assert name == "build_website"
 
 
-def test_automation_plan_allows_website_and_toolshed():
+def test_automation_plan_allows_website():
     from agentcore.runtime.runs.automation_delivery import DeliveryConfirmation
 
     conf = DeliveryConfirmation(format_id="f2", label="仅方案", source="ask_user")
-    name_t, _, err_t = resolve_playbook_declaration(
-        {"playbook": "build_toolshed", "playbook_args": {"site": "X"}},
-        automation_delivery=conf,
-    )
-    assert err_t is None
-    assert name_t == "build_toolshed"
     name_w, _, err_w = resolve_playbook_declaration(
         {"playbook": "build_website", "playbook_args": {"site": "X"}},
         automation_delivery=conf,
@@ -272,7 +290,7 @@ def test_automation_plan_allows_website_and_toolshed():
 
 
 def test_automation_runnable_allows_toolshed_shaped_none():
-    """可运行自动化记账：控制台形手写 none 仍可（不强制 build_toolshed）。"""
+    """可运行自动化记账：控制台形手写 none 仍可（不强制 build_website style）。"""
     from agentcore.runtime.runs.automation_delivery import DeliveryConfirmation
 
     conf = DeliveryConfirmation(

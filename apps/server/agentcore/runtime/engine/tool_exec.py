@@ -51,6 +51,92 @@ from .tool_protocol_sanitize import (
 
 logger = get_logger(__name__)
 
+
+async def _apply_local_destructive_baseline_gate(
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    context: ToolContext,
+    existing: Any,
+) -> Any:
+    """P0a/b: Local destructive delete without zip baseline → FORCE_APPROVAL.
+
+    Regular :func:`~agentcore.workspace.turn_baseline.maybe_capture_turn_baseline`
+    remains non-blocking. This gate only upgrades the breaker hit when the call
+    matches a destructive_fs heuristic, the backend is Local, and no usable zip
+    can be ensured. Cloud staging deletes-not-written-back are unchanged
+    (``location != local`` skips). ``registry_egress`` rw-bind deletes are out of
+    scope (footnote / tests).
+
+    Does not stack a second card when ``existing`` is already DENY or
+    FORCE_APPROVAL — still best-effort ensures a baseline so post-approval
+    restore remains possible.
+    """
+    from agentcore.runtime.safety_breaker import (
+        BreakerVerdict,
+        command_text_for_tool,
+        no_turn_baseline_hit,
+    )
+    from agentcore.workspace.destructive_fs import (
+        requires_destructive_baseline_gate,
+        scan_destructive_fs,
+    )
+    from agentcore.workspace.turn_baseline import ensure_local_baseline_for_destructive
+
+    if getattr(context.backend, "location", None) != "local":
+        return existing
+    name = (tool_name or "").strip()
+    if name not in {"terminal", "code_execute", "host_shell"}:
+        return existing
+    if name == "terminal":
+        sub = str(args.get("subcommand") or "").strip().lower()
+        if sub and sub != "start":
+            return existing
+
+    fs_hit = scan_destructive_fs(command_text_for_tool(name, args))
+    if not requires_destructive_baseline_gate(fs_hit):
+        return existing
+
+    # Fuse-aligned DENY already owns the card — do not zip or stack.
+    if existing is not None and existing.verdict is BreakerVerdict.DENY:
+        return existing
+
+    # Prefer ServerWorkspace.root (sidecar Local). Channel-only LocalWorkspace
+    # has no Path root here — fail closed to FORCE_APPROVAL when we cannot zip.
+    workspace_root = getattr(context.backend, "root", None)
+    from agentcore.runtime.journal.writer import current_journal_writer
+
+    writer = current_journal_writer.get()
+    message_id = (writer.turn_id if writer is not None else "") or ""
+
+    ready = False
+    if workspace_root is not None and message_id:
+        try:
+            ready = await ensure_local_baseline_for_destructive(
+                user_id=context.user_id or "",
+                conversation_id=context.conversation_id or "",
+                message_id=message_id,
+                workspace_root=workspace_root,
+            )
+        except Exception:
+            logger.warning(
+                "turn.local_baseline_failed",
+                conversation_id=context.conversation_id,
+                message_id=message_id,
+                phase="destructive_ensure",
+                exc_info=True,
+            )
+            ready = False
+
+    if ready:
+        return existing
+
+    # Already forcing approval (e.g. P2 top-tree) — keep that card (no stack).
+    if existing is not None and existing.verdict is BreakerVerdict.FORCE_APPROVAL:
+        return existing
+    return no_turn_baseline_hit()
+
+
 # Marker in tool_use_start.arguments when JSON parse failed — must not look like a
 # successfully parsed empty object ``{}`` (journal / UI 假象).
 _ARGS_PARSE_FAILED_MARKER: dict[str, Any] = {"__args_parse_failed__": True}
@@ -589,6 +675,16 @@ async def execute_tools(
         from agentcore.runtime.safety_breaker import BreakerVerdict, evaluate_tool_call
 
         breaker = evaluate_tool_call(name, args)
+        # P0a/b: Local destructive_fs without usable zip → FORCE_APPROVAL (分轨).
+        # Runs after sync evaluate so P2 top-tree / fuse DENY stay single-card;
+        # still best-effort ensures baseline when already forcing.
+        if isinstance(args, dict):
+            breaker = await _apply_local_destructive_baseline_gate(
+                tool_name=name,
+                args=args,
+                context=context,
+                existing=breaker,
+            )
         if breaker is not None and breaker.verdict is BreakerVerdict.DENY:
             from agentcore.runtime.audit.hooks import on_circuit_breaker
 

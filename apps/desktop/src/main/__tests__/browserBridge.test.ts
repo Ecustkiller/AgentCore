@@ -280,7 +280,7 @@ describe("handleBridgeRequest", () => {
     expect(dispatched).toBe(false);
   });
 
-  it("command dispatches click/type/scroll/snapshot/screenshot", async () => {
+  it("command dispatches click/type/scroll/snapshot/screenshot/console", async () => {
     const auth = createBridgeAuth();
     const token = auth.issueToken();
     const seen: string[] = [];
@@ -290,6 +290,7 @@ describe("handleBridgeRequest", () => {
       "scroll",
       "snapshot",
       "screenshot",
+      "console",
     ] as const) {
       const { req, res, statusCode, body } = mockReqRes({
         method: "POST",
@@ -317,7 +318,14 @@ describe("handleBridgeRequest", () => {
       expect(statusCode()).toBe(200);
       expect(JSON.parse(body())).toMatchObject({ ok: true });
     }
-    expect(seen).toEqual(["click", "type", "scroll", "snapshot", "screenshot"]);
+    expect(seen).toEqual([
+      "click",
+      "type",
+      "scroll",
+      "snapshot",
+      "screenshot",
+      "console",
+    ]);
   });
 
   it("maps host_unavailable to 503", async () => {

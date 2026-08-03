@@ -38,14 +38,12 @@ function makePreview(
         role: "研究员",
         task: "调研竞品定价策略与公开资料",
         depends_on: [],
-        debate: false,
       },
       {
         run_id: "r2",
         role: "撰写员",
         task: "基于调研写定价建议",
         depends_on: ["r1"],
-        debate: true,
       },
     ],
     tools: [],
@@ -131,7 +129,7 @@ describe("TeamPreviewCard", () => {
     expect(screen.queryByText("调研竞品定价策略与公开资料")).toBeNull();
   });
 
-  it("点击展开后显示队员角色、任务、依赖与辩论标记", () => {
+  it("点击展开后显示队员角色、任务与依赖", () => {
     renderCard(<TeamPreviewCard preview={makePreview()} />);
 
     fireEvent.click(
@@ -152,7 +150,7 @@ describe("TeamPreviewCard", () => {
     expect(screen.getByText("调研竞品定价策略与公开资料")).toBeTruthy();
     expect(screen.getByText("基于调研写定价建议")).toBeTruthy();
     expect(screen.getByText("依赖 1 步")).toBeTruthy();
-    expect(screen.getByText("辩论")).toBeTruthy();
+    expect(screen.queryByText("辩论")).toBeNull();
   });
 
   it("resolved 展开后显示备注 note", () => {
@@ -207,6 +205,25 @@ describe("TeamPreviewCard", () => {
     expect(
       screen.getByRole("button", {
         name: /已选先调研 · 辩论未开赛/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("resolved continue + 排除/收紧对账后缀", () => {
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          decision: "continue",
+          excluded_run_ids: ["r2"],
+          write_capability_overrides: [
+            { run_id: "r1", capability: "text_only" },
+          ],
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /已授权开工 · 首波已放行 · 已排除 1 岗 · 已收紧写盘 · 2 名队员/,
       }),
     ).toBeTruthy();
   });

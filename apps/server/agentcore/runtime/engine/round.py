@@ -24,6 +24,7 @@ from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, re
 from agentcore.runtime.loop_controller import Intervention, LoopController
 from agentcore.runtime.verify import finish_guard, format_guard_steer
 
+from .browser_snapshot_clear import project_omitted_browser_snapshots
 from .directive import Continue, LoopDirective, Return, Rework
 from .outcome import RoundOutcome
 from .segments import tool_calls_to_dicts
@@ -87,6 +88,21 @@ def build_request_window(
             round=round_idx,
         )
         window = write_cleared
+    # Browser snapshot trees: keep only the newest full elements/accessibility_tree;
+    # older browser_* results drop those fields (field-level omit, not whole [已清理]).
+    browser_cleared = project_omitted_browser_snapshots(window, keep_recent=1)
+    if browser_cleared is not window:
+        n_omitted = sum(
+            1
+            for old, new in zip(window, browser_cleared, strict=True)
+            if old.content != new.content
+        )
+        logger.info(
+            "engine.browser_snapshot_clear",
+            omitted=n_omitted,
+            round=round_idx,
+        )
+        window = browser_cleared
     return window
 
 
@@ -285,8 +301,13 @@ def decide_no_tool_round(
     (``Return`` + DEGRADED) or retry on the same model (``Continue``).
     """
     if outcome.content:
+        from agentcore.runtime.closing_posture import (
+            downgrade_verdict_for_unresolved_write_ownership,
+        )
         from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
+        # P0-B: latch from write collisions may exist without a delivery card.
+        downgrade_verdict_for_unresolved_write_ownership()
         reworks = finish_guard(
             final_content,
             citation_count=len(citation_sink or []),
@@ -334,8 +355,12 @@ def apply_finish_guard_rework(
     ``content_reset`` for the CEO bubble, ``run_output_reset`` for a worker card — so the
     rewrite presents as a clean「违规版 → 修正版」replacement, not an append (统一底线).
     reason=``finish_guard`` is the ONLY reset that folds into the「已按交付规范重写」chip."""
+    from agentcore.runtime.closing_posture import (
+        downgrade_verdict_for_unresolved_write_ownership,
+    )
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
+    downgrade_verdict_for_unresolved_write_ownership()
     reworks = finish_guard(
         final_content,
         citation_count=len(citation_sink or []),

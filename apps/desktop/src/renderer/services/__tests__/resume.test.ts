@@ -8,8 +8,11 @@ import type {
 import { beforeEach, describe, expect, it } from "vitest";
 import { toMessage } from "../messages";
 import {
+  conversationHasColdPending,
   isClientOnlyResumeKey,
+  listVisibleColdResumes,
   resolveResumeMessageId,
+  resolveResumeOrigin,
   surfaceResumeFromLiveTurn,
 } from "../resume";
 
@@ -271,6 +274,81 @@ describe("surfaceResumeFromLiveTurn", () => {
     surfaceResumeFromLiveTurn(CID, "server");
 
     expect(paused().pending[0]?.origin).toBe("server");
+  });
+
+  it("does not clobber existing sidecar origin when caller passes server", () => {
+    seedTurn("m-server-1");
+    upsertAsk();
+    surfaceResumeFromLiveTurn(CID, "sidecar");
+    expect(paused().pending[0]?.origin).toBe("sidecar");
+
+    surfaceResumeFromLiveTurn(CID, "server");
+
+    expect(paused().pending[0]?.origin).toBe("sidecar");
+  });
+
+  it("prefers InteractionStore sidecar origin over caller server", () => {
+    seedTurn("m-server-1");
+    ix().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-1",
+      origin: "sidecar",
+      payload: cpPayload() as unknown as Record<string, unknown>,
+    });
+
+    surfaceResumeFromLiveTurn(CID, "server");
+
+    expect(paused().pending[0]?.origin).toBe("sidecar");
+  });
+});
+
+describe("listVisibleColdResumes (InteractionStore authority)", () => {
+  it("paints from IX cold pending without pausedTurns surface", () => {
+    seedTurn("m-server-tp");
+    ix().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: {
+        checkpoint_id: "tp1",
+        conversation_id: CID,
+        primitive: "delegate",
+        workers: [
+          { run_id: "r1", role: "调研", task: "做调研", depends_on: [] },
+        ],
+        tools: ["file_write"],
+        motion: "",
+        form: "",
+        sides: [],
+        max_rounds: 0,
+        thorough: true,
+      },
+    });
+
+    const visible = listVisibleColdResumes(CID);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toMatchObject({
+      messageId: "m-server-tp",
+      checkpointId: "tp1",
+      kind: "team_preview",
+      origin: "server",
+    });
+    expect(paused().pending).toHaveLength(0);
+  });
+
+  it("prefers Interaction origin over pausedTurns shell", () => {
+    seedTurn("m-server-1");
+    ix().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-1",
+      origin: "sidecar",
+      payload: cpPayload() as unknown as Record<string, unknown>,
+    });
+    expect(resolveResumeOrigin(CID, "m-server-1")).toBe("sidecar");
+    expect(conversationHasColdPending(CID)).toBe(true);
   });
 });
 

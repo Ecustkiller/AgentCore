@@ -12,11 +12,13 @@ const {
   settleCloudRunningAssistant,
   attachSidecarTurn,
   projectUnsyncedTurns,
+  projectPausedRuns,
 } = vi.hoisted(() => ({
   attachOnOpen: vi.fn(async () => {}),
   settleCloudRunningAssistant: vi.fn(async () => "ghost" as const),
   attachSidecarTurn: vi.fn(async () => true),
   projectUnsyncedTurns: vi.fn(),
+  projectPausedRuns: vi.fn(),
 }));
 
 vi.mock("../turns/recovery", () => ({
@@ -30,6 +32,10 @@ vi.mock("../turns/sidecarAttach", () => ({
 
 vi.mock("../turns/projectUnsynced", () => ({
   projectUnsyncedTurns,
+}));
+
+vi.mock("../turns/projectPausedRuns", () => ({
+  projectPausedRuns,
 }));
 
 vi.mock("@/lib/log", () => ({
@@ -80,6 +86,7 @@ beforeEach(() => {
   settleCloudRunningAssistant.mockClear();
   attachSidecarTurn.mockClear();
   projectUnsyncedTurns.mockClear();
+  projectPausedRuns.mockClear();
   vi.stubGlobal("window", { __WEB__: true });
 });
 
@@ -133,27 +140,53 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     useConversationStore.getState().switchConversation(CID);
     expect(getRuntime(CID).messages.length).toBe(0);
 
-    const ac = new AbortController();
-    const branch = await runHydrateAttachSettle(
-      CID,
-      {
-        sidecarLive: true,
-        cloudLive: false,
-        cloudKnown: true,
-        pausedCount: 0,
-        unsynced: [],
-      },
-      { signal: ac.signal },
-    );
+    const branch = await runHydrateAttachSettle(CID, {
+      sidecarLive: true,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
 
     expect(branch).toBe("local");
     expect(projectUnsyncedTurns).toHaveBeenCalledTimes(1);
     expect(attachSidecarTurn).toHaveBeenCalledTimes(1);
-    expect(attachSidecarTurn).toHaveBeenCalledWith(CID, {
-      signal: ac.signal,
-    });
+    // Hydrate 不传页级 signal（切会话 ≠ 卸观察泵）。
+    expect(attachSidecarTurn).toHaveBeenCalledWith(CID);
+    expect(projectPausedRuns).not.toHaveBeenCalled();
     expect(attachOnOpen).not.toHaveBeenCalled();
     expect(settleCloudRunningAssistant).not.toHaveBeenCalled();
+  });
+
+  it("local paused skips attach but projects pause-frame runs", async () => {
+    seedMessages({ role: "assistant", status: "complete", id: "a-paused" });
+    const pausedRuns = {
+      "a-paused": {
+        events: [
+          {
+            type: "run_plan",
+            payload: { execution_id: "exec-1" },
+            timestamp: "t0",
+          },
+        ],
+        finish_reason: "paused",
+      },
+    };
+
+    const branch = await runHydrateAttachSettle(CID, {
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 1,
+      unsynced: [],
+      pausedRuns,
+    });
+
+    expect(branch).toBe("local");
+    expect(attachSidecarTurn).not.toHaveBeenCalled();
+    expect(projectUnsyncedTurns).toHaveBeenCalledTimes(1);
+    expect(projectPausedRuns).toHaveBeenCalledTimes(1);
+    expect(projectPausedRuns).toHaveBeenCalledWith(CID, pausedRuns);
   });
 
   it("cloud complete assistant does not attach or settle", async () => {
@@ -205,6 +238,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(settleCloudRunningAssistant).not.toHaveBeenCalled();
     expect(attachOnOpen).not.toHaveBeenCalled();
     expect(attachSidecarTurn).not.toHaveBeenCalled();
+    expect(projectPausedRuns).not.toHaveBeenCalled();
   });
 
   it("cold overlay isGenerating without abort still settles", async () => {

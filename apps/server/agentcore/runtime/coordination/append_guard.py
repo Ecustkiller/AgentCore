@@ -307,6 +307,9 @@ def find_append_overlaps(
                     continue
                 if owner in done:
                     continue
+                is_ended = getattr(ownership, "is_ended", None) if ownership is not None else None
+                if is_ended is not None and is_ended(owner):
+                    continue
                 file_hit_id = owner
                 live_node = live_by_id.get(owner)
                 file_hit_role = (_node_role(live_node) if live_node else "") or owner
@@ -489,7 +492,8 @@ def declare_plan_artifacts(
 
     When ``completed_run_ids`` is set, a hard conflict against a **completed** holder is
     treated as dispatch-time handoff (审校→修订跨波次)：新节点声明同路径即接手，无需
-    用户点「移交写权」。仍在跑的锁主 / 未完成占位保持冲突。
+    用户点「移交写权」。``ended_owners`` on the ledger (nested terminal bypass) is
+    treated the same. Still-running lock owners keep blocking.
 
     Returns list of ``(new_run_id, path, conflicting_owner)`` for hard conflicts
     when not force/transfer-eligible (caller should have rejected via overlaps first).
@@ -533,8 +537,11 @@ def declare_plan_artifacts(
                 allow_ancestor_handoff=ancestor_handoff_at_declare,
             )
             if owner is not None:
-                if owner in done:
-                    # 原主已完成、本协作会话内仍占位 → 新波次声明同 artifact 即接手。
+                ended = bool(
+                    getattr(ownership, "is_ended", None) and ownership.is_ended(owner)
+                )
+                if owner in done or ended:
+                    # 原主已完成/已结束、本协作会话内仍占位 → 新波次声明同 artifact 即接手。
                     ownership.transfer(path, rid)
                     dispatch_handoffs.append((path, owner, rid))
                     continue
@@ -633,9 +640,9 @@ def declare_nested_drive_artifacts(
     force = bool(getattr(tool, "_delegate_force", False))
     completed: set[str] | frozenset[str] | None = None
     try:
-        from agentcore.runtime.coordination.session import active_coordination
+        from agentcore.runtime.coordination.session import resolve_coordination_session
 
-        sess = active_coordination(execution_id)
+        sess = resolve_coordination_session(execution_id)
         if sess is not None:
             completed = sess.completed_run_ids
     except Exception:  # noqa: BLE001

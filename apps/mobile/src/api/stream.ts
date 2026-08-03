@@ -53,12 +53,17 @@ export class StreamNetworkError extends Error {
  *  socket is dead — cancel and surface a retriable error (mirrors desktop streamConversation). */
 const IDLE_TIMEOUT_MS = 60_000;
 
+/** SSE comment after attach journal replay (+ hot re-hang); mirrors server
+ * ``sse._ATTACH_CAUGHT_UP`` / desktop ``ATTACH_CAUGHT_UP_COMMENT``. */
+export const ATTACH_CAUGHT_UP_COMMENT = "attach-caught-up";
+
 /** Latest journal seq per conversation (SSE ``id:`` → ``Last-Event-ID`` resume). */
 const lastEventIds = new Map<string, string>();
 
 /** Read an SSE response body to completion, delivering each parsed `data:` frame to
- *  `onEvent`. `event:` lines and `:` heartbeats are ignored (the data JSON already
- *  carries the type). Throws if the response has no readable body.
+ *  `onEvent`. `event:` lines are ignored (the data JSON already carries the type).
+ *  Comment frames (``: ping`` / ``: attach-caught-up``) go to ``onComment`` when set.
+ *  Throws if the response has no readable body.
  *
  *  Applies the idle stall watchdog: an *idle* timeout, never a total-duration cap — a
  *  long turn that keeps streaming (or just heart-beating) is never cut off. */
@@ -66,6 +71,7 @@ async function pumpSSE(
   response: Response,
   onEvent: (event: SSEEvent) => void,
   conversationId?: string,
+  onComment?: (comment: string) => void,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("无响应流");
@@ -102,6 +108,10 @@ async function pumpSSE(
     for (const frame of frames) {
       frameId = null;
       for (const line of frame.split("\n")) {
+        if (line.startsWith(":")) {
+          onComment?.(line.slice(1).trim());
+          continue;
+        }
         if (line.startsWith("id:")) {
           const id = line.slice(3).trim();
           if (id && conversationId) {
@@ -192,6 +202,10 @@ export type AttachOutcome =
  * backend takes the journal-backed full-turn replay path (流式回复持久化 §3.6).
  * Returns "none" on a 204 (nothing live to rejoin); throws on a transport drop
  * while attached (retriable) or on auth.
+ *
+ * Catch-up: buffer replay until ``: attach-caught-up``, then deliver in one burst
+ * so already-completed workers do not re-animate on refresh. Legacy servers without
+ * the comment flush the buffer when the stream ends.
  */
 export async function attachStream(
   conversationId: string,
@@ -215,16 +229,53 @@ export async function attachStream(
   });
   if (response.status === 204) return "none";
   if (!response.ok) throw await streamErrorFromResponse(response);
-  await pumpSSE(response, onEvent, conversationId);
+
+  const catchUp: SSEEvent[] = [];
+  let catchingUp = true;
+  await pumpSSE(
+    response,
+    (event) => {
+      if (catchingUp) {
+        catchUp.push(event);
+        return;
+      }
+      onEvent(event);
+    },
+    conversationId,
+    (comment) => {
+      if (!catchingUp) return;
+      if (comment !== ATTACH_CAUGHT_UP_COMMENT) return;
+      catchingUp = false;
+      for (const e of catchUp) onEvent(e);
+      catchUp.length = 0;
+    },
+  );
+  if (catchingUp && catchUp.length > 0) {
+    for (const e of catchUp) onEvent(e);
+  }
   return "attached";
 }
 
+/** Delegate team_preview 开工卡修正：排除岗 + 单向收紧写盘（定案 §3.3）。 */
+export interface WriteCapabilityOverride {
+  run_id: string;
+  capability: "text_only";
+}
+
+export interface TeamPreviewAmendments {
+  excluded_run_ids: string[];
+  write_capability_overrides: WriteCapabilityOverride[];
+}
+
 /** The user's settlement of a durably-paused turn (mirrors backend ResumeTurnRequest).
- *  `note` steers an `adjust`; `selected` carries ask_user picks (ignored for plan_review). */
+ *  `note` steers an `adjust`; `selected` carries ask_user picks (ignored for plan_review).
+ *  `excluded_run_ids` / `write_capability_overrides` only on delegate team_preview continue. */
 export interface ResumeTurnBody {
   decision: CheckpointDecision;
   note: string;
   selected: string[];
+  excluded_run_ids?: string[];
+  write_capability_overrides?: WriteCapabilityOverride[];
 }
 
 /**

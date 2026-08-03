@@ -16,7 +16,11 @@ from agentcore.memory import (
     assemble_turn_rules,
     load_memory_topics,
 )
-from agentcore.runtime.context import build_workspace_context, resolve_channel_profile
+from agentcore.runtime.context import (
+    build_workspace_context,
+    detect_workspace_git,
+    resolve_channel_profile,
+)
 from agentcore.runtime.costing import RunCost
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
@@ -138,6 +142,7 @@ async def prepare_fresh_turn(
 
     mcp_discover = await discover_mcp_tools(desktop_channel)
     mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
+    git_fact = await detect_workspace_git(backend)
     workspace_facts = build_workspace_context(
         backend,
         desktop_online=desktop_online,
@@ -145,6 +150,7 @@ async def prepare_fresh_turn(
         permission_axes=permission_axes,
         mcp_enabled=mcp_discover.tool_count > 0,
         mcp_label=mcp_label,
+        git_fact=git_fact,
     )
     system_prompt = assemble_system_prompt(
         memory_markdown=memory_markdown,
@@ -267,7 +273,10 @@ async def prepare_fresh_turn(
         shared_workspace=folder_id is not None,
         material_paths=material_paths,
     )
-    from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
+    from agentcore.runtime.closing_posture import (
+        clear_cloud_web_verify_gap,
+        clear_unresolved_write_ownership,
+    )
     from agentcore.runtime.coordination.session import current_execution_id
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
@@ -276,6 +285,7 @@ async def prepare_fresh_turn(
     # Fresh turn: prior batch delivery verdict must not leak into finish_guard.
     current_delivery_verdict.set(None)
     clear_cloud_web_verify_gap()
+    clear_unresolved_write_ownership()
 
     # Pillar B: if a background execution is already live for this conversation,
     # adopt it so the CEO wait path / interjection routing share one registry key.
@@ -286,6 +296,12 @@ async def prepare_fresh_turn(
         bound_execution_id = adopted.execution_id
         base_tool_context.execution_id = adopted.execution_id
         current_execution_id.set(adopted.execution_id)
+        # Harvest / reattach: re-stamp write-ownership honesty from the live ledger.
+        from agentcore.runtime.closing_posture import (
+            apply_write_ownership_honesty_for_session,
+        )
+
+        apply_write_ownership_honesty_for_session(adopted)
 
     return PreparedTurn(
         llm=llm,

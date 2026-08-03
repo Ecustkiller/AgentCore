@@ -46,6 +46,7 @@ import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
 import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
 import { workspaceOp } from "./workspace/dispatch";
 import { opErr } from "./workspace/result";
+import { listWorkspaceTrash, restoreWorkspaceTrash } from "./workspaceTrash";
 
 function parseStageDest(p: unknown): StageDest | undefined {
   if (!isRecord(p)) return undefined;
@@ -465,6 +466,18 @@ export function registerFsIpc(): void {
     const args = requireStringFields(p, ["rootId", "relPath"]);
     if (!args) return invalidFsResult();
     return trashPath(args.rootId, args.relPath);
+  });
+
+  ipcMain.handle(FS_CHANNELS.listWorkspaceTrash, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId"]);
+    if (!args) return invalidFsResult();
+    return listWorkspaceTrash(args.rootId);
+  });
+
+  ipcMain.handle(FS_CHANNELS.restoreWorkspaceTrash, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId", "entryId"]);
+    if (!args) return invalidFsResult();
+    return restoreWorkspaceTrash(args.rootId, args.entryId);
   });
 
   ipcMain.handle(FS_CHANNELS.pickAndStageAttachment, (_e, p: unknown) => {

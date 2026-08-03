@@ -29,8 +29,16 @@ from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
 from agentcore.runtime.journal.pending_interactions import fold_pending_interactions
+from agentcore.runtime.kickoff.team_veto import (
+    should_apply_team_veto,
+    validate_team_preview_veto_workers,
+)
 from agentcore.runtime.settlement import prewrite_cold_resume_settlement
-from agentcore.runtime.suspension import TurnSuspension, suspension_summary_fields
+from agentcore.runtime.suspension import (
+    TeamPreviewSuspension,
+    TurnSuspension,
+    suspension_summary_fields,
+)
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
@@ -238,12 +246,29 @@ async def resume_message(
         )
 
     decision = body.decision.value if hasattr(body.decision, "value") else str(body.decision)
+    excluded = list(body.excluded_run_ids or [])
+    overrides = [
+        {"run_id": o.run_id, "capability": o.capability}
+        for o in (body.write_capability_overrides or [])
+    ]
+    # 开工组队有限否决：仅 delegate team_preview continue 校验。
+    # 冷 peek 帧无 plan blob（plan 由 journal 重建）→ 用 workers 行校验。
+    if should_apply_team_veto(peeked, body.decision) and isinstance(
+        peeked, TeamPreviewSuspension
+    ):
+        validate_team_preview_veto_workers(
+            peeked.workers,
+            excluded_run_ids=excluded,
+            write_capability_overrides=overrides,
+        )
     try:
         await prewrite_cold_resume_settlement(
             peeked,
             decision=decision,
             note=body.note or "",
             selected=list(body.selected or []),
+            excluded_run_ids=excluded,
+            write_capability_overrides=overrides,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -269,6 +294,8 @@ async def resume_message(
                 decision=body.decision,
                 note=body.note,
                 selected=body.selected,
+                excluded_run_ids=excluded,
+                write_capability_overrides=overrides,
             ),
             sink=sink,
             llm_credentials=preflight.credentials,

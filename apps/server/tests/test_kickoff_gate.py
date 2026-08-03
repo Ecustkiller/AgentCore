@@ -225,14 +225,16 @@ def test_checkpoint_after_yields_plan_preview_half():
         )
         is False
     )
-    # Debate-marked node without checkpoint still previews.
-    debate_only = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="应推广"))
-    assert should_preview_delegate_plan(debate_only, finalize=False) is True
-    # Debate-marked + checkpoint_after → plan half still yields.
-    debate_cp = _plan(
+    # Solo with leftover stance/round tags must NOT hang plan-preview
+    # (CEO schema no longer advertises those fields; runtime tags are not kickoff marks).
+    tagged_solo = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="应推广"))
+    assert should_preview_delegate_plan(tagged_solo, finalize=False) is False
+    assert should_preview_delegate_plan(tagged_solo, finalize=True) is False
+    # checkpoint_after still yields plan half regardless of leftover tags.
+    tagged_cp = _plan(
         RunSpec(run_id="r1", task="辩", role="正方", stance="应推广", checkpoint_after=True)
     )
-    assert should_preview_delegate_plan(debate_cp, finalize=False) is False
+    assert should_preview_delegate_plan(tagged_cp, finalize=False) is False
 
 
 def test_debate_kickoff_summary_shape():

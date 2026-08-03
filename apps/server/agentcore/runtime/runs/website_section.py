@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Match playbook skeleton artifacts (build_website / build_toolshed).
+# Match playbook skeleton artifacts (build_website).
 CRITICAL_SITE_PATHS: tuple[str, ...] = (
     "site/index.html",
     "site/styles.css",

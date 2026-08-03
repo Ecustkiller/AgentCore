@@ -29,7 +29,6 @@ from agentcore.runtime.runs.playbooks._common import (
 )
 from agentcore.runtime.runs.playbooks.audit import code_audit
 from agentcore.runtime.runs.playbooks.build_site import (
-    build_toolshed,
     build_website,
     build_website_verify,
 )
@@ -105,13 +104,15 @@ PLAYBOOKS: dict[str, Playbook] = {
     "repair_code": Playbook(
         name="repair_code",
         summary=(
-            "【无先验调查批】诊断(短)→修补→验证的单症状修码（runtime 错 / 缺 export；"
-            "短轮次+工具收窄；禁触顶后换马甲；playbook_args 须 verify；"
-            "已有调查批确认修→手写+continue_from，勿套本 playbook）"
+            "【无先验调查批】诊断(短)→修补→验证的单症状修码（runtime 错 / 缺 export / "
+            "白屏挂载；短轮次；禁触顶后换马甲；playbook_args 须 verify="
+            "CLI 或 UI 复现说明；已有调查批确认修→手写+continue_from，勿套本 playbook）"
         ),
         slots=(
-            "problem(必填,错误症状/缺 export 等) / "
-            "verify(必填,怎么算修好:具体命令或等价说明;"
+            "problem(必填,错误症状/缺 export/白屏挂载等) / "
+            "verify(必填,怎么算修好:CLI 命令或页面/UI 复现说明;"
+            "例:verify=\"pytest tests/test_app.py -q\" 或 "
+            "verify=\"打开 /app 白屏消失+snapshot 可见主内容\";"
             "亦接受 verify_command/acceptance) / "
             "target(可选,优先文件路径) / artifacts(可选,落盘路径数组)"
         ),
@@ -137,32 +138,20 @@ PLAYBOOKS: dict[str, Playbook] = {
         name="build_website",
         summary=(
             "文案→前端(DESIGN.md+整页HTML/CSS/JS+轻量CONTRACT)→独立 QA"
-            "（三串串行；sections 仅覆盖清单不扇出；营销 pack + visual critic）"
+            "（三串串行；sections 仅覆盖清单不扇出；visual critic；"
+            "默认营销 pack；style=toolshed → tool_dense + 禁营销皮）"
         ),
         slots=(
-            "site(必填,要建的站点/落地页简述——delegate 时填入 playbook 的 site 参数, "
+            "site(必填,要建的站点/落地页/控制台简述——delegate 时填入 playbook 的 site 参数, "
             "例:site=\"面向企业客户的智能数据分析 SaaS 中文营销官网\") / "
+            "style(可选,气质槽:marketing 默认落地页;"
+            "toolshed=控制台 dense / tool pack / 禁营销皮) / "
             "sections(可选,页面分区覆盖清单,不扇出节点;"
-            "默认首屏英雄区·卖点能力区·行动号召区) / "
-            "stack(可选,技术栈) / audience(可选,访客/读者)"
+            "marketing 默认首屏英雄区·卖点能力区·行动号召区;"
+            "toolshed 默认应用外壳·侧栏导航·数据表格) / "
+            "stack(可选,技术栈) / audience(可选,访客/读者/使用者)"
         ),
         build=build_website,
-    ),
-    "build_toolshed": Playbook(
-        name="build_toolshed",
-        summary=(
-            "文案→前端(DESIGN.md+整页HTML/CSS/JS+轻量CONTRACT)→独立 QA"
-            "（三串串行；sections 仅覆盖清单不扇出；强制 pack=tool_dense；"
-            "anti-slop domain=tool；禁营销 hero/pricing 皮）"
-        ),
-        slots=(
-            "site(必填,要建的控制台/工具台简述——"
-            "例:site=\"面向运营的订单管理后台 dense 控制台\") / "
-            "sections(可选,页面分区覆盖清单,不扇出节点;"
-            "默认应用外壳·侧栏导航·数据表格) / "
-            "stack(可选,技术栈) / audience(可选,使用者)"
-        ),
-        build=build_toolshed,
     ),
     "build_website_verify": Playbook(
         name="build_website_verify",

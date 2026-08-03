@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
@@ -16,6 +17,100 @@ if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
 
 ChannelSurface = Literal["desktop", "web", "mobile", "unknown"]
+
+
+@dataclass(frozen=True)
+class WorkspaceGitFact:
+    """Root-``.git`` fact for ``<workspace_context>`` (same rule as ``git`` tool).
+
+    ``present=None`` = could not probe (e.g. remote Local without a local root).
+    Only the workspace root is considered — no nested scan, no parent climb.
+    """
+
+    present: bool | None
+    branch: str | None = None
+
+
+def _branch_from_git_head(head_text: str) -> str | None:
+    line = (head_text or "").strip().splitlines()[0] if head_text else ""
+    if line.startswith("ref: refs/heads/"):
+        branch = line.removeprefix("ref: refs/heads/").strip()
+        return branch or None
+    return None
+
+
+def detect_workspace_git_sync(backend: WorkspaceBackend | None) -> WorkspaceGitFact:
+    """Sync probe via ``backend.root`` when available (server / sidecar Local)."""
+    if backend is None:
+        return WorkspaceGitFact(present=None)
+    root = getattr(backend, "root", None)
+    if root is None:
+        return WorkspaceGitFact(present=None)
+    try:
+        root_path = Path(root)
+        git_meta = root_path / ".git"
+        if not git_meta.exists():
+            return WorkspaceGitFact(present=False)
+        branch: str | None = None
+        if git_meta.is_file():
+            # Worktree / gitfile pointer — treat as present; branch optional.
+            return WorkspaceGitFact(present=True, branch=None)
+        head = git_meta / "HEAD"
+        if head.is_file():
+            branch = _branch_from_git_head(head.read_text(encoding="utf-8", errors="replace"))
+        return WorkspaceGitFact(present=True, branch=branch)
+    except OSError:
+        return WorkspaceGitFact(present=None)
+
+
+async def detect_workspace_git(backend: WorkspaceBackend | None) -> WorkspaceGitFact:
+    """Probe root ``.git`` — sync root first, else ``backend.exists`` (desktop Local)."""
+    sync = detect_workspace_git_sync(backend)
+    if sync.present is not None:
+        return sync
+    if backend is None:
+        return WorkspaceGitFact(present=None)
+    exists = getattr(backend, "exists", None)
+    if exists is None:
+        return WorkspaceGitFact(present=None)
+    try:
+        if not await exists(".git"):
+            return WorkspaceGitFact(present=False)
+    except Exception:
+        return WorkspaceGitFact(present=None)
+    branch: str | None = None
+    read = getattr(backend, "read", None)
+    if read is not None:
+        try:
+            branch = _branch_from_git_head(await read(".git/HEAD"))
+        except Exception:
+            branch = None
+    return WorkspaceGitFact(present=True, branch=branch)
+
+
+def format_workspace_git_line(fact: WorkspaceGitFact) -> str:
+    """Single git fact line for ``<workspace_context>`` (soft tip; never a kickoff gate)."""
+    scope = "仅识别工作区根 `.git`，不扫嵌套、不上溯"
+    readonly = "只读 status/diff/log 无仓 → no_repo；其它写入无仓仍硬错"
+    if fact.present is True:
+        branch_bit = f"，分支 `{fact.branch}`" if fact.branch else ""
+        return (
+            f"版本控制：Git（{scope}{branch_bit}）。"
+            f"{readonly}。"
+        )
+    if fact.present is False:
+        return (
+            f"版本控制：工作区根无 Git（{scope}）。"
+            "写码/改工程时建议先建可回滚基线：可调 `git` 的 `init_baseline`"
+            "（初始化并首提交；需用户授权；已有仓且工作区脏则不代 commit）。"
+            "此提示不挡派工/开工卡。"
+            f"{readonly}。"
+        )
+    return (
+        f"版本控制：未能确认根 `.git`（{scope}；远端 Local 等无本地根时 git 工具可能不可用）。"
+        "写码时若确认无仓，可请用户授权 `git.init_baseline` 建首基线；不挡派工/开工卡。"
+        f"{readonly}。"
+    )
 
 _WEB_SURFACES: frozenset[str] = frozenset({"web", "mobile-web"})
 _MOBILE_SURFACES: frozenset[str] = frozenset({"mobile", "android", "ios"})
@@ -75,6 +170,7 @@ def build_workspace_context(
     permission_axes: PermissionAxes | None = None,
     mcp_enabled: bool = False,
     mcp_label: str | None = None,
+    git_fact: WorkspaceGitFact | None = None,
 ) -> str:
     """Render the ``<workspace_context>`` block for this turn's backend + client.
 
@@ -94,6 +190,10 @@ def build_workspace_context(
     ``exec_languages`` is the probed (local/sidecar) or fixed (cloud) language
     surface advertised on ``code_execute``; when set and execution is on, a one-line
     interpreter fact is appended so the model never plans against a missing launcher.
+
+    ``git_fact`` is the root-``.git`` probe (same rule as the ``git`` tool). Callers
+    that already awaited :func:`detect_workspace_git` should pass it; otherwise a
+    sync root probe runs. Soft tip only — never a kickoff / durable-pause gate.
     """
     if backend is None:
         return ""
@@ -332,7 +432,8 @@ def build_workspace_context(
             )
         browser_guide_line = (
             "浏览器指引：本回合已装配 browser_*"
-            "（navigate/click/type/scroll/snapshot 由 CEO 可直持；screenshot 仅 worker）。"
+            "（navigate/click/type/scroll/snapshot/console 由 CEO 可直持；screenshot 仅 worker）。"
+            "页面行为异常或发送未生效时先用 browser_console 取 JS 错误再决定是否继续点选；"
             + path_capability
             + "用户要「用浏览器打开 / 右坞打开 / 直播 / 帮我看页面」或已打开页短操作"
             "（搜一下 / 点一下 / 填一下）时："
@@ -345,7 +446,7 @@ def build_workspace_context(
             "禁止编造 browser_open 等未列出的工具名；"
             "禁止只用 read_url / web_search 交差并假装已打开浏览器。"
             "仅当用户只要摘要/标题且未点名浏览器时，才可用 read_url。"
-            "需要登录时 escalate(browser_login=true) 让用户在右坞「浏览器」接管登录"
+            "需要登录时 ask_user(browser_login=true) 让用户在右坞「浏览器」接管登录"
             "（归还后点「已登录，继续」）；模型永不代填密码。"
             "勿声称已替用户打开系统浏览器。"
         )
@@ -363,7 +464,7 @@ def build_workspace_context(
         product_path = (
             "装配后的产品路径：CEO 直调 browser_navigate / snapshot / type / click "
             "打开或短操作目标页（「随便搜」省略过重验收；截图验收仍可 delegate）→"
-            "需要登录则 escalate(browser_login=true) →"
+            "需要登录则 ask_user(browser_login=true) →"
             "用户在右坞「浏览器」接管 → 点「已登录，继续」；"
             "勿把「复制粘贴整页 / 扫本机 Cookie / 系统浏览器代登」说成主产品路径"
             "（用户主动贴文本可作补救，但不是接管流程）。"
@@ -402,11 +503,9 @@ def build_workspace_context(
     dossier_boundary_line = (
         "案卷边界：讨论/调研/审查类交付写此树；用户工程源码仍写业务路径。"
     )
-    # Git is optional: most cloud scratches / unbound trees have no `.git` at root.
-    git_line = (
-        "版本控制：通常无 Git（仅识别工作区根 `.git`，不扫嵌套、不上溯；"
-        "只读 status/diff/log 无仓 → no_repo，写入仍硬错）。"
-    )
+    # Git fact: prefer caller probe (async Local); else sync root; never gates kickoff.
+    resolved_git = git_fact if git_fact is not None else detect_workspace_git_sync(backend)
+    git_line = format_workspace_git_line(resolved_git)
 
     body_lines = [
         location_line,

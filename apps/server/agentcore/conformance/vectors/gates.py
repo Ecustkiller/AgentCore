@@ -434,14 +434,12 @@ def _team_preview_finalized() -> list[SSEEvent]:
                     "role": "调研",
                     "task": "调研方案",
                     "depends_on": [],
-                    "debate": False,
                 },
                 {
                     "run_id": "r2",
                     "role": "撰写",
                     "task": "写初稿",
                     "depends_on": ["r1"],
-                    "debate": False,
                 },
             ],
             tools=["code_execute", "file_write", "test_run"],
@@ -670,6 +668,165 @@ def _team_preview_resolved_continue() -> list[SSEEvent]:
     ]
 
 
+def _team_preview_exclude_one_continue() -> list[SSEEvent]:
+    """开工组队有限否决：排除一人后 continue — resolved 投影带 excluded_run_ids。
+
+    两岗无依赖，可合法排除 r2；首波仅 r1 开跑到 end_turn。
+    非法依赖排除（仍被 depends_on 引用）→ API 422 单测，本向量不表达拒答。
+    """
+    agents = [
+        {"id": "w1", "role": "调研", "thinking": True},
+        {"id": "w2", "role": "校对", "thinking": True},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研方案", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "校对摘要", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "调研"}, {"role": "校对"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行双岗",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        team_preview_required(
+            checkpoint_id="tp-ex1",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "调研",
+                    "task": "调研方案",
+                    "depends_on": [],
+                    "write_capability": "can_write_files",
+                    "write_capability_label": "可改文件",
+                },
+                {
+                    "run_id": "r2",
+                    "role": "校对",
+                    "task": "校对摘要",
+                    "depends_on": [],
+                    "write_capability": "text_only",
+                    "write_capability_label": "仅文字报告",
+                },
+            ],
+            tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
+        ),
+        team_preview_resolved(
+            checkpoint_id="tp-ex1",
+            decision="continue",
+            excluded_run_ids=["r2"],
+        ),
+        run_started("r1", "w1"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成（已排除校对岗）"),
+        content_delta("已排除校对岗，调研交付。"),
+        message_end(FinishReason.END_TURN, input_tokens=2400, output_tokens=280, cost=_COST),
+    ]
+
+
+def _team_preview_tighten_write_continue() -> list[SSEEvent]:
+    """开工组队有限否决：收紧写盘后 continue — resolved 投影带 write_capability_overrides。"""
+    agents = [
+        {"id": "w1", "role": "调研", "thinking": True},
+        {"id": "w2", "role": "撰写", "thinking": True},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研方案", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "写初稿", "depends_on": ["r1"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "调研"}, {"role": "撰写"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="构建 X",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        team_preview_required(
+            checkpoint_id="tp-tw1",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "调研",
+                    "task": "调研方案",
+                    "depends_on": [],
+                    "write_capability": "can_write_files",
+                    "write_capability_label": "可改文件",
+                },
+                {
+                    "run_id": "r2",
+                    "role": "撰写",
+                    "task": "写初稿",
+                    "depends_on": ["r1"],
+                    "write_capability": "can_write_files",
+                    "write_capability_label": "可改文件",
+                },
+            ],
+            tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
+        ),
+        team_preview_resolved(
+            checkpoint_id="tp-tw1",
+            decision="continue",
+            write_capability_overrides=[
+                {"run_id": "r2", "capability": "text_only"},
+            ],
+        ),
+        run_started("r1", "w1"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="初稿完成（仅文字）",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成"),
+        content_delta("撰写岗已收紧为仅文字，团队已交付。"),
+        message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
+
 def _decision_then_kill() -> list[SSEEvent]:
     """决策后杀进程：settlement 已落、无终态 → fold 无 pending gate，status=running。
 
@@ -718,6 +875,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "team_preview_finalized": ("团队预审：首波前挂起收口（finish_reason=paused）", _team_preview_finalized),
     "team_preview_resolved_continue": ("团队预审：开做后跑完首波", _team_preview_resolved_continue),
+    "team_preview_exclude_one_continue": (
+        "开工组队有限否决：排除一人 continue → resolved 投影 excluded_run_ids",
+        _team_preview_exclude_one_continue,
+    ),
+    "team_preview_tighten_write_continue": (
+        "开工组队有限否决：收紧写盘 continue → resolved 投影 write_capability_overrides",
+        _team_preview_tighten_write_continue,
+    ),
     "decision_then_kill": (
         "恢复收口：决策后杀进程 → fold 无待授权、status=running（已决策·执行中断 / 救火继续）",
         _decision_then_kill,

@@ -208,7 +208,7 @@ def test_playbook_template_catalog():
     for item in items:
         assert item.title
         assert item.primary_slots
-        assert "不保留" in item.summary or "降级" in item.summary
+        assert "快照" in item.summary or "降级" in item.summary or "不保留" in item.summary
 
 
 def test_from_playbook_success_research_report():
@@ -241,6 +241,22 @@ def test_from_playbook_rejects_not_in_catalog():
         instantiate_from_playbook("repair_code", {"problem": "x", "verify": "pytest"})
     assert "暂未列入" in str(ei2.value)
 
+    # Curated catalog: still in PLAYBOOKS / CEO shapes, not toolbox templates.
+    for pid, slots in (
+        ("build_feature", {"feature": "x"}),
+        ("multi_lens_research", {"topic": "x"}),
+    ):
+        with pytest.raises(PlaybookTemplateError) as ei3:
+            merge_playbook_slots(pid, slots)
+        assert "暂未列入" in str(ei3.value)
+        assert pid in PLAYBOOKS
+
+    # 旧独立 toolshed 已从 PLAYBOOKS 删除 → 未知（非「暂未列入」）。
+    with pytest.raises(PlaybookTemplateError) as ei_gone:
+        merge_playbook_slots("build_toolshed", {"site": "x"})
+    assert "未知" in str(ei_gone.value)
+    assert "build_toolshed" not in PLAYBOOKS
+
 
 def test_from_playbook_rejects_unknown_and_missing_slot():
     with pytest.raises(PlaybookTemplateError) as ei:
@@ -254,6 +270,16 @@ def test_from_playbook_rejects_unknown_and_missing_slot():
     with pytest.raises(PlaybookTemplateError) as ei3:
         merge_playbook_slots("parallel_brief", {"topic": "T", "angles": []})
     assert "angles" in str(ei3.value)
+
+    with pytest.raises(PlaybookTemplateError) as ei4:
+        merge_playbook_slots("compare_options", {"options": ["A", "B"]})
+    assert "question" in str(ei4.value)
+
+    with pytest.raises(PlaybookTemplateError) as ei5:
+        merge_playbook_slots(
+            "compare_options", {"question": "选哪个", "options": []}
+        )
+    assert "options" in str(ei5.value)
 
 
 def test_from_playbook_optional_name_and_defaults():
@@ -285,10 +311,30 @@ def test_from_playbook_parallel_brief_coerces_angles_string():
         "parallel_brief",
         {"topic": "议题", "angles": "甲、乙"},
     )
-    assert "多角对齐摸底" in name
+    assert "多角摸底" in name
     assert "议题" in name
     tasks = expand_workflow_to_tasks(definition)
     assert len(tasks) == 2
+
+
+def test_from_playbook_compare_options_success_and_coerce():
+    merged = merge_playbook_slots(
+        "compare_options",
+        {"question": "选库", "options": "Postgres,MySQL,SQLite"},
+    )
+    assert merged["options"] == ["Postgres", "MySQL", "SQLite"]
+
+    name, description, definition = instantiate_from_playbook(
+        "compare_options",
+        {"question": "选 Postgres 还是 MySQL", "options": "Postgres、MySQL"},
+    )
+    assert "方案对比选型" in name
+    assert "选 Postgres 还是 MySQL" in name
+    assert description and "compare_options" in description
+    tasks = expand_workflow_to_tasks(definition)
+    by_id = {t["id"]: t for t in tasks}
+    assert {"eval_0", "eval_1", "summary"} == set(by_id)
+    assert set(by_id["summary"]["depends_on"]) == {"eval_0", "eval_1"}
 
 
 def test_topology_lock_serializes():

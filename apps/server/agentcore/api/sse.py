@@ -18,6 +18,12 @@ from agentcore.runtime.events import EventSink, SSEEvent
 # streamConversation.ts) so a slow-but-alive turn is never mistaken for a drop.
 _HEARTBEAT_INTERVAL_S = 15.0
 
+# Marks the end of clear-then-fold replay (+ hot re-hang) so clients can buffer
+# and apply the catch-up segment in one paint, then live-tail. Comment frame —
+# not an EventType (no journal / conformance). Desktop + mobile pump parsers
+# recognize the same token; older clients ignore unknown ``:`` comments.
+_ATTACH_CAUGHT_UP = ": attach-caught-up\n\n"
+
 
 def _format_sse(event: SSEEvent, *, seq: int | None = None) -> str:
     """Serialize one SSE frame. Envelope JSON (type/timestamp/payload) is unchanged.
@@ -122,7 +128,7 @@ async def _attach_generator(
 
     With ``Last-Event-ID`` (P3): skip in-memory ``_history``; replay the turn's **full**
     durable journal + stream_state synthetic deltas (header value observational —
-    clear-then-fold), then live tail.
+    clear-then-fold), emit ``: attach-caught-up``, then live tail.
     """
     if last_event_id is None:
         # Same-process fast path: ``take_over`` history + synthetic ``message_end``
@@ -167,6 +173,8 @@ async def _attach_generator(
                 yield _format_sse(event)
             for event in pending_hot_interaction_events(conv_id):
                 yield _format_sse(event)
+        # Boundary: everything above is catch-up; clients one-shot fold then live.
+        yield _ATTACH_CAUGHT_UP
         while True:
             try:
                 event = await asyncio.wait_for(sink.get(), _HEARTBEAT_INTERVAL_S)

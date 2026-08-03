@@ -42,6 +42,11 @@ export const BROWSER_CHANNELS = {
   openExternal: "browser:open-external",
   /** 导航态推送（main→renderer：pageId + url + canGoBack/Forward + title）。 */
   navState: "browser:nav-state",
+  /**
+   * 页内 target=_blank → 同壳新页签请求（main→renderer）。
+   * 登录类 popup / window.open 不走此通道（主进程同 partition 子窗）。
+   */
+  openTab: "browser:open-tab",
 } as const;
 
 /** 内嵌视图占位矩形（DIP，相对主窗口内容区左上角）。 */
@@ -100,6 +105,14 @@ export interface BrowserOpenExternalInput {
   url: string;
 }
 
+/** main→renderer：Local web 页内 target=_blank 开同壳页签。 */
+export interface BrowserOpenTabRequest {
+  conversationId: string;
+  url: string;
+  /** true = 后台页签（中键 / ctrl-click），不抢激活。 */
+  background?: boolean;
+}
+
 export interface BrowserApi {
   show: (input: BrowserShowInput) => Promise<BrowserResult>;
   setBounds: (bounds: BrowserBounds) => void;
@@ -120,4 +133,6 @@ export interface BrowserApi {
   /** 在系统默认浏览器打开（仅安全 scheme）。 */
   openExternal: (input: BrowserOpenExternalInput) => Promise<BrowserResult>;
   onNavState: (cb: (state: BrowserNavState) => void) => () => void;
+  /** Local web target=_blank → 同壳新页签（main 推送）。 */
+  onOpenTab: (cb: (req: BrowserOpenTabRequest) => void) => () => void;
 }

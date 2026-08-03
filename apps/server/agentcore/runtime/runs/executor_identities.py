@@ -177,7 +177,8 @@ def _handoff_policy_with_dependents(form: DeliverableForm | None) -> str:
     if form == "prose":
         body += (
             "\n【正文门槛】结论与根因必须写在回复正文（≥合同 min_length）；"
-            "handoff 的 summary 不算正文——只交 summary、正文为空会被拒收。"
+            "handoff 的 summary 不算正文——只交 summary、正文为空会被拒收，"
+            "加长 summary 也不能代替正文。"
         )
     return body
 

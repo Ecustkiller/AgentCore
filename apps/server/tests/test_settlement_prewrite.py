@@ -374,3 +374,78 @@ async def test_stage_card_double_resolve_still_dedupes(
 
     kinds = [r["entry"]["kind"] for r in store.rows]
     assert kinds.count("stage_card_resolved") == 1
+
+
+@pytest.mark.asyncio
+async def test_cold_resume_settlement_redemit_does_not_phantom_fact_log() -> None:
+    """Cold resume: inherited ``*_resolved`` + dedupe re-emit must not grow fact_log.
+
+    A phantom log row drifts index vs DB seq; finalize enumerate then inserts a
+    duplicate trailing process_content (92f7fea8 / seq 286+287).
+    """
+    from agentcore.runtime.events import team_preview_resolved
+    from agentcore.runtime.facts import Fact, TurnFactLog, current_fact_log, record_turn_fact
+
+    event = team_preview_resolved(checkpoint_id="ck1", decision="continue", note="")
+    entry = entry_from_sse(event)
+    inherited = [
+        {"kind": "turn_paused", "payload": {}, "ts": "t0"},
+        entry,
+    ]
+    log = TurnFactLog(inherited_entries=inherited)
+    writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id=None)
+    seed_settlement_dedupe_from_entries(writer, inherited)
+
+    fl = current_fact_log.set(log)
+    wt = current_journal_writer.set(writer)
+    try:
+        before = len(log.entries())
+        assert writer.would_dedupe_settlement(entry)
+        fut = record_turn_fact(
+            Fact(kind=event.type.value, payload=dict(event.payload), ts=event.timestamp)
+        )
+        if fut is not None:
+            await fut
+        assert len(log.entries()) == before
+        assert sum(1 for e in log.entries() if e.get("kind") == "team_preview_resolved") == 1
+    finally:
+        current_journal_writer.reset(wt)
+        current_fact_log.reset(fl)
+
+
+@pytest.mark.asyncio
+async def test_hot_path_awaiter_still_records_fact_log_after_prewrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hot-path prewrite bypasses fact_log; awaiter re-emit must record once (catch-up)."""
+    from agentcore.runtime.facts import Fact, TurnFactLog, current_fact_log, record_turn_fact
+
+    store = _FakeStore()
+    monkeypatch.setattr(
+        "agentcore.conversation.store.get_conversation_store",
+        lambda: store,
+    )
+
+    event = checkpoint_resolved(
+        checkpoint_id="ck1", decision="continue", note="", selected=["A"]
+    )
+    log = TurnFactLog()
+    writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id=None)
+    fl = current_fact_log.set(log)
+    wt = current_journal_writer.set(writer)
+    try:
+        await prewrite_settlement(event)
+        assert len(log.entries()) == 0
+        assert [r["entry"]["kind"] for r in store.rows] == ["checkpoint_resolved"]
+
+        fut = record_turn_fact(
+            Fact(kind=event.type.value, payload=dict(event.payload), ts=event.timestamp)
+        )
+        if fut is not None:
+            await fut
+        assert len(log.entries()) == 1
+        assert log.entries()[0]["kind"] == "checkpoint_resolved"
+        assert [r["entry"]["kind"] for r in store.rows] == ["checkpoint_resolved"]
+    finally:
+        current_journal_writer.reset(wt)
+        current_fact_log.reset(fl)

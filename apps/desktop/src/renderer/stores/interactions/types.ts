@@ -1,3 +1,4 @@
+import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type { InteractionStatus } from "@/types/interactionExt";
 import {
   INTERACTION_ID_FIELD,
@@ -18,6 +19,21 @@ export {
   type InteractionSubmitPath,
 };
 
+/** Cold-path kinds that paint the durable ResumePrompt card. */
+export const COLD_RESUME_KINDS = [
+  "ask_user",
+  "plan_review",
+  "team_preview",
+] as const satisfies readonly InteractionKind[];
+
+export type ColdResumeKind = (typeof COLD_RESUME_KINDS)[number];
+
+export function isColdResumeKind(
+  kind: InteractionKind,
+): kind is ColdResumeKind {
+  return (COLD_RESUME_KINDS as readonly string[]).includes(kind);
+}
+
 /** One user-facing interaction card in the unified store (方案 §3.2). */
 export interface InteractionEntry {
   id: string;
@@ -29,6 +45,12 @@ export interface InteractionEntry {
   payload: Record<string, unknown>;
   /** Settlement payload when status is resolved (kind-specific). */
   resolution?: Record<string, unknown>;
+  /**
+   * Live transport that delivered this entry (SSE `ctx.source`).
+   * Cold submit prefers this for sidecar vs server routing; pausedTurns remains
+   * recovery/`setForConversation` shell + origin fallback.
+   */
+  origin?: ResumeOrigin;
 }
 
 /**
@@ -37,9 +59,9 @@ export interface InteractionEntry {
  * - 热阻塞 kind（approval / delegation_authorization / escalation）pending 或
  *   submitting 时为真——live turn 挂在卡上等答复。
  * - escalation 例外：`awaiting === "ceo"` 由 CEO 仲裁，用户无需行动 → 不算。
- * - 冷 kind（ask_user / plan_review / team_preview）恒为假：暂停的权威事实是
- *   pausedTurns store 的 durable 帧（journal 重放可能留下无帧的 pending 残影，
- *   不能拿来点灯），由调用方另行订阅。
+ * - 冷 kind（ask_user / plan_review / team_preview）恒为假：可操作权威是
+ *   InteractionStore cold pending（ResumePrompt）；侧栏灯由调用方另订 pausedTurns
+ *   recovery 壳或 cold pending，不经本函数。
  * - question_posted（非阻塞提问）团队没停 → 不算。
  */
 export function isAwaitingUserEntry(entry: InteractionEntry): boolean {

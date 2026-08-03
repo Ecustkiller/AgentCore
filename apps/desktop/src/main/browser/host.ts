@@ -5,7 +5,8 @@
  * - 外网页：**非持久** {@link browserPartitionFor}；工作区 HTML：**非持久**
  *   {@link workspacePartitionFor}——二者按 conversationId 切开，≠ PREVIEW / defaultSession；
  * - sandbox:true、**无 preload**、nodeIntegration 关、contextIsolation 开、webviewTag 关；
- * - 导航策略见 navigation.ts（按 web | workspace 模式；不改 lockPreviewNavigation）。
+ * - 导航策略见 navigation.ts（按 web | workspace 模式；不改 lockPreviewNavigation）；
+ * - web `window.open`：popup → 同 partition 子窗；target=_blank → 同壳新页签（见 openTab IPC）。
  *
  * 多页：一 client pageId 一 view；仅激活页 show+bounds，其余 hide；关页销毁 view。
  * 同 pageId 在 http(s) ↔ workspace 间切换时销毁重建以换 partition。
@@ -25,9 +26,11 @@ import {
   session,
 } from "electron";
 import type { BridgeAction, BridgeHostResult } from "./bridge-handler";
+import { ConsoleRingBuffer } from "./console-buffer";
 import {
   LOCAL_BROWSER_BLANK,
   type LocalBrowserNavMode,
+  type LocalBrowserWebOpenHooks,
   attachLocalBrowserDownloadGuard,
   isNavigableLocalBrowserUrl,
   lockLocalBrowserNavigation,
@@ -51,12 +54,16 @@ interface PageView {
   view: WebContentsView;
   snapshotVersion: number;
   kind: LocalBrowserNavMode;
+  /** Ring buffer: page console-message + main-frame did-fail-load. */
+  consoleBuf: ConsoleRingBuffer;
 }
 
 /** pageId → 视图。 */
 const pages = new Map<string, PageView>();
 /** 测试/断言用：与 setVisible 同步的可见性镜像。 */
 const pageVisible = new Map<string, boolean>();
+/** conversationId → OAuth/登录 popup 子窗（同 partition；关对话时一并关）。 */
+const popupsByConversation = new Map<string, Set<BrowserWindow>>();
 
 let hostWin: BrowserWindow | null = null;
 /**
@@ -171,6 +178,66 @@ function partitionFor(
     : browserPartitionFor(conversationId);
 }
 
+function trackPopupWindow(conversationId: string, win: BrowserWindow): void {
+  let set = popupsByConversation.get(conversationId);
+  if (!set) {
+    set = new Set();
+    popupsByConversation.set(conversationId, set);
+  }
+  set.add(win);
+  win.once("closed", () => {
+    const cur = popupsByConversation.get(conversationId);
+    if (!cur) return;
+    cur.delete(win);
+    if (cur.size === 0) popupsByConversation.delete(conversationId);
+  });
+}
+
+function closePopupsForConversation(conversationId: string): void {
+  const set = popupsByConversation.get(conversationId);
+  if (!set) return;
+  popupsByConversation.delete(conversationId);
+  for (const win of [...set]) {
+    try {
+      if (!win.isDestroyed()) win.close();
+    } catch {
+      /* 已销毁 */
+    }
+  }
+}
+
+function closeAllPopupWindows(): void {
+  const cids = [...popupsByConversation.keys()];
+  for (const cid of cids) closePopupsForConversation(cid);
+}
+
+/** 通知 renderer：target=_blank → 同壳新页签。 */
+function emitShellTabRequest(
+  conversationId: string,
+  url: string,
+  background: boolean,
+): void {
+  if (!hostWin || hostWin.isDestroyed()) return;
+  hostWin.webContents.send(BROWSER_CHANNELS.openTab, {
+    conversationId,
+    url,
+    background,
+  });
+}
+
+function webOpenHooksFor(
+  conversationId: string,
+  partition: string,
+): LocalBrowserWebOpenHooks {
+  return {
+    partition,
+    getParentWindow: () => (hostWin && !hostWin.isDestroyed() ? hostWin : null),
+    requestShellTab: (url, background) =>
+      emitShellTabRequest(conversationId, url, background),
+    trackPopup: (popupWin) => trackPopupWindow(conversationId, popupWin),
+  };
+}
+
 function createPageView(
   win: BrowserWindow,
   pageId: string,
@@ -192,7 +259,11 @@ function createPageView(
       // 刻意不挂 preload —— 浏览页不得拿应用 IPC。
     },
   });
-  lockLocalBrowserNavigation(view.webContents, kind);
+  lockLocalBrowserNavigation(
+    view.webContents,
+    kind,
+    kind === "web" ? webOpenHooksFor(conversationId, partition) : undefined,
+  );
   view.webContents.on("did-navigate", () => pushNavState(pageId));
   view.webContents.on("did-navigate-in-page", () => pushNavState(pageId));
   view.webContents.on("page-title-updated", () => pushNavState(pageId));
@@ -200,6 +271,49 @@ function createPageView(
   win.contentView.addChildView(view);
   void view.webContents.loadURL(LOCAL_BROWSER_BLANK);
   return view;
+}
+
+/** Attach console-message + did-fail-load → ring buffer (no debugger). */
+function attachConsoleCapture(entry: PageView): void {
+  const wc = entry.view.webContents;
+  const buf = entry.consoleBuf;
+  wc.on("console-message", (...args: unknown[]) => {
+    const first = args[0] as
+      | { message?: string; level?: string | number }
+      | undefined;
+    if (
+      first &&
+      typeof first === "object" &&
+      typeof first.message === "string"
+    ) {
+      buf.pushMessage(first.level, first.message);
+      return;
+    }
+    // Legacy positional: (event, level, message, line, sourceId)
+    const level = args[1];
+    const message = args[2];
+    if (typeof message === "string") {
+      buf.pushMessage(level, message);
+    }
+  });
+  wc.on(
+    "did-fail-load",
+    (
+      _event: unknown,
+      errorCode: number,
+      errorDescription: string,
+      validatedURL: string,
+      isMainFrame: boolean,
+    ) => {
+      if (!isMainFrame) return;
+      // ERR_ABORTED (-3) is common on redirects / superseding navigations.
+      if (errorCode === -3) return;
+      buf.pushError(
+        `did-fail-load: ${errorDescription || errorCode}`,
+        validatedURL ? `url=${validatedURL}` : undefined,
+      );
+    },
+  );
 }
 
 function setPageVisible(
@@ -252,8 +366,10 @@ function ensurePageKind(
     view,
     snapshotVersion: 0,
     kind,
+    consoleBuf: new ConsoleRingBuffer(),
   };
   pages.set(pageId, entry);
+  attachConsoleCapture(entry);
   return entry;
 }
 
@@ -286,6 +402,7 @@ function destroyPageView(pageId: string): void {
 
 /** 销毁全部本机页（宿主窗口关闭 / 升级清场）。 */
 export function closeAllLocalBrowserPages(): void {
+  closeAllPopupWindows();
   const ids = [...pages.keys()];
   for (const id of ids) destroyPageView(id);
   hostWin = null;
@@ -299,10 +416,24 @@ export function closeAllLocalBrowserPages(): void {
 export function closeConversationBrowserPages(conversationId: string): void {
   const cid = normalizeBrowserConversationId(conversationId);
   if (!cid) return;
+  closePopupsForConversation(cid);
   const ids = [...pages.entries()]
     .filter(([, e]) => e.conversationId === cid)
     .map(([id]) => id);
   for (const id of ids) destroyPageView(id);
+}
+
+/** 测试接缝：某对话存活 popup 子窗数量。 */
+export function localBrowserPopupCountForTests(conversationId: string): number {
+  const cid = normalizeBrowserConversationId(conversationId);
+  if (!cid) return 0;
+  const set = popupsByConversation.get(cid);
+  if (!set) return 0;
+  let n = 0;
+  for (const win of set) {
+    if (!win.isDestroyed()) n += 1;
+  }
+  return n;
 }
 
 /** 测试接缝：当前存活页的 conversationId 集合。 */
@@ -583,8 +714,10 @@ function ensurePageForBridge(
     view,
     snapshotVersion: 0,
     kind: "web",
+    consoleBuf: new ConsoleRingBuffer(),
   };
   pages.set(id, entry);
+  attachConsoleCapture(entry);
   return entry;
 }
 
@@ -638,11 +771,17 @@ async function bumpSnapshotAndState(
   const quality = opts.quality ?? 70;
   entry.snapshotVersion += 1;
   const meta = await pageMeta(entry);
-  // Align with sandbox driver `_page_state`: mutation bumps version AND returns it
-  // so the model can keep ref ops version-aligned without a forced re-snapshot.
+  // Align with sandbox `_page_state`: mutation bumps version, re-tags refs via
+  // SNAPSHOT_JS, and returns elements — new refs are already in the reply, so
+  // the model need not force another browser_snapshot.
+  const elementsRaw = await entry.view.webContents.executeJavaScript(
+    `(${SNAPSHOT_JS})(${entry.snapshotVersion})`,
+  );
   const state: Record<string, unknown> = {
     ...meta,
     snapshot_version: entry.snapshotVersion,
+    elements: typeof elementsRaw === "string" ? elementsRaw : "",
+    aria: "",
   };
   if (opts.capture) {
     const frame = await captureJpegFrame(entry, quality);
@@ -676,7 +815,7 @@ async function waitLoad(wc: WebContents, timeoutMs: number): Promise<void> {
 }
 
 /**
- * Bridge 派发：与 sandbox browser driver 六动作语义对齐。
+ * Bridge 派发：与 sandbox browser driver 动作语义对齐（含 console 只读证据）。
  * pageId = Registry session_id；conversationId 强制。
  */
 export async function bridgeDispatchLocalBrowser(
@@ -780,7 +919,7 @@ export async function bridgeDispatchLocalBrowser(
           return {
             ok: false,
             error:
-              "password_blocked: AI 不得填写密码框；请 escalate(blocking=true, browser_login=true) 让用户接管登录",
+              "password_blocked: AI 不得填写密码框；worker 请 escalate(blocking=true, browser_login=true)；CEO 请 ask_user(browser_login=true) 让用户接管登录",
           };
         }
         const text = String(args.text ?? "");
@@ -838,6 +977,19 @@ export async function bridgeDispatchLocalBrowser(
           }
         }
         return { ok: true, data };
+      }
+      case "console": {
+        const meta = await pageMeta(entry);
+        const snap = entry.consoleBuf.snapshot();
+        return {
+          ok: true,
+          data: {
+            ...meta,
+            messages: snap.messages,
+            errors: snap.errors,
+            truncated: snap.truncated,
+          },
+        };
       }
       default:
         return { ok: false, error: `unsupported_action:${action}` };

@@ -467,3 +467,95 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
         assert v.state == "partial"
     finally:
         current_delivery_verdict.reset(token)
+
+
+def test_unresolved_write_ownership_downgrades_verdict_no_dinggao_hard_reject():
+    """案 P0-B：未解写权冲突 → 内部降档；「定稿」正文不硬拒。"""
+    from agentcore.runtime.closing_posture import (
+        clear_unresolved_write_ownership,
+        collect_unresolved_write_ownership_paths,
+        downgrade_verdict_for_unresolved_write_ownership,
+        enforce_write_ownership_honesty,
+        note_unresolved_write_ownership,
+        turn_has_unresolved_write_ownership,
+    )
+    from agentcore.runtime.delegate.delivery_status import (
+        DeliveryVerdict,
+        current_delivery_verdict,
+    )
+    from agentcore.runtime.verify import finish_guard
+    from agentcore.workspace.write_claims import WriteCoordinator
+
+    clear_unresolved_write_ownership()
+    coord = WriteCoordinator({"plan.md": "del_owner"})
+    # Merger refused on claim — still held by owner → unresolved.
+    assert coord.claim("plan.md", "del_merger", frozenset()) == "del_owner"
+    paths = collect_unresolved_write_ownership_paths(
+        run_ids={"del_merger", "del_owner"},
+        coordinator=coord,
+    )
+    assert paths == ("plan.md",)
+    note_unresolved_write_ownership(run_id="del_merger")
+    assert turn_has_unresolved_write_ownership()
+
+    token = current_delivery_verdict.set(
+        DeliveryVerdict(
+            state="delivered",
+            delivered_files=("plan.md",),
+            execution_id="e-own",
+        )
+    )
+    try:
+        downgrade_verdict_for_unresolved_write_ownership(
+            execution_id="e-own",
+            run_ids={"del_merger", "del_owner"},
+            coordinator=coord,
+        )
+        v = current_delivery_verdict.get()
+        assert v is not None
+        assert v.state == "partial"
+        assert turn_has_unresolved_write_ownership()
+    finally:
+        current_delivery_verdict.reset(token)
+
+    # Soft banner only for posture A — 「定稿」 alone is not posture A / not hard-rejected.
+    dinggao = "主文件已定稿，两轮审校闭环，可进 W1。"
+    assert enforce_write_ownership_honesty(dinggao) == dinggao
+    assert finish_guard(
+        dinggao,
+        citation_count=0,
+        delivery_verdict=DeliveryVerdict(
+            state="partial",
+            delivered_files=("plan.md",),
+            execution_id="e-own",
+        ),
+    ) == []  # no「定稿」硬拒
+
+    # Posture A + latch → soft banner only (no discard).
+    posture_a = "三路产出已全部收卷，已完整可用。"
+    bannered = enforce_write_ownership_honesty(posture_a)
+    assert bannered.startswith("【写权说明】")
+    assert "已全部收卷" in bannered
+
+    # Structured transfer resolves → latch clears, no downgrade.
+    clear_unresolved_write_ownership()
+    note_unresolved_write_ownership(run_id="del_merger")
+    coord.transfer("plan.md", "del_merger")
+    token2 = current_delivery_verdict.set(
+        DeliveryVerdict(
+            state="delivered",
+            delivered_files=("plan.md",),
+            execution_id="e-own",
+        )
+    )
+    try:
+        downgrade_verdict_for_unresolved_write_ownership(
+            execution_id="e-own",
+            run_ids={"del_merger", "del_owner"},
+            coordinator=coord,
+        )
+        assert not turn_has_unresolved_write_ownership()
+        assert current_delivery_verdict.get().state == "delivered"
+    finally:
+        current_delivery_verdict.reset(token2)
+        clear_unresolved_write_ownership()

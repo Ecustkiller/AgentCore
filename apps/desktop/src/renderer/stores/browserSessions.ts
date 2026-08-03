@@ -116,6 +116,11 @@ interface BrowserSessionsState {
     info: BrowserServerSessionUpsert,
   ) => void;
   setPageTitle: (id: string, title: string) => void;
+  /**
+   * 重排某对话的页签：`orderedIds` 须是该对话当前页 id 的全排列（同集合），
+   * 否则 no-op。保留其他对话页在总数组中的相对槽位；成功后持久化。
+   */
+  reorderPages: (conversationId: string, orderedIds: string[]) => void;
   /** 清掉某会话的全部页 + 持久记录。 */
   clearConversation: (conversationId: string) => void;
   /**
@@ -653,6 +658,40 @@ export const useBrowserSessionsStore = create<BrowserSessionsState>(
         const page = pages.find((p) => p.id === id);
         persistBrowserTabsForConversation(
           page?.conversationId ?? null,
+          pages,
+          s.activePageId,
+        );
+        return { pages };
+      });
+    },
+
+    reorderPages: (conversationId, orderedIds) => {
+      set((s) => {
+        const scoped = s.pages.filter(
+          (p) => p.conversationId === conversationId,
+        );
+        if (scoped.length === 0 || orderedIds.length !== scoped.length) {
+          return s;
+        }
+        const scopedIds = new Set(scoped.map((p) => p.id));
+        const orderedUnique = new Set(orderedIds);
+        if (
+          orderedUnique.size !== orderedIds.length ||
+          orderedIds.some((id) => !scopedIds.has(id))
+        ) {
+          return s;
+        }
+        // Same multiset as scoped (length + subset ⇒ equal sets).
+        const byId = new Map(scoped.map((p) => [p.id, p]));
+        let nextIdx = 0;
+        const pages = s.pages.map((p) => {
+          if (p.conversationId !== conversationId) return p;
+          const id = orderedIds[nextIdx++];
+          const next = id != null ? byId.get(id) : undefined;
+          return next ?? p;
+        });
+        persistBrowserTabsForConversation(
+          conversationId,
           pages,
           s.activePageId,
         );

@@ -6,9 +6,63 @@ key / text content is ever persisted or echoed back (D17).
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field, WithJsonSchema
+
+# DOM MouseEvent.button (0|1|2) and Playwright/CDP names both arrive on the wire;
+# we always store/emit the CDP names so injection never sees a bare digit.
+_MOUSE_BUTTON_WIRE: dict[object, Literal["left", "right", "middle"]] = {
+    0: "left",
+    1: "middle",
+    2: "right",
+    "0": "left",
+    "1": "middle",
+    "2": "right",
+    "left": "left",
+    "middle": "middle",
+    "right": "right",
+}
+
+
+def _normalize_mouse_button_wire(v: Any) -> Literal["left", "right", "middle"] | None:
+    if v is None:
+        return None
+    # bool is an int subclass — reject True/False masquerading as 0/1.
+    if isinstance(v, bool):
+        raise ValueError("button must be 0|1|2 or left|right|middle")
+    if isinstance(v, int):
+        mapped = _MOUSE_BUTTON_WIRE.get(v)
+        if mapped is None:
+            raise ValueError("button must be 0|1|2 or left|right|middle")
+        return mapped
+    if isinstance(v, str):
+        mapped = _MOUSE_BUTTON_WIRE.get(v) or _MOUSE_BUTTON_WIRE.get(v.lower())
+        if mapped is None:
+            raise ValueError("button must be 0|1|2 or left|right|middle")
+        return mapped
+    raise ValueError("button must be 0|1|2 or left|right|middle")
+
+
+# Validation accepts DOM ints + names; JSON Schema advertises both (no OpenAPI drift).
+MouseButton = Annotated[
+    Literal["left", "right", "middle"] | None,
+    BeforeValidator(_normalize_mouse_button_wire),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "string", "enum": ["left", "right", "middle"]},
+                {"type": "integer", "enum": [0, 1, 2]},
+                {"type": "null"},
+            ],
+            "title": "Button",
+            "description": (
+                "DOM MouseEvent.button 0|1|2 (desktop/mobile wire) or "
+                "Playwright/CDP left|right|middle; server normalizes to the name form."
+            ),
+        }
+    ),
+]
 
 
 class BrowserSessionView(BaseModel):
@@ -78,17 +132,20 @@ class BrowserTakeoverState(BaseModel):
 
 
 class MouseInputEvent(BaseModel):
-    """A pointer event in frame-pixel space (the driver rescales to the viewport)."""
+    """A pointer event in frame-pixel space (the driver rescales to the viewport).
+
+    ``button`` accepts DOM integers ``0|1|2`` (desktop/mobile wire) or Playwright
+    names ``left|right|middle``; validation normalizes to the name form.
+    """
 
     kind: Literal["mouse"]
     type: Literal["down", "up", "move", "wheel"]
     x: float
     y: float
-    button: Literal["left", "right", "middle"] | None = None
+    button: MouseButton = None
     delta_x: float | None = None
     delta_y: float | None = None
     click_count: int | None = None
-
 
 class KeyInputEvent(BaseModel):
     """A key event. ``modifiers`` is a CDP bitmask or a list of names (alt/ctrl/meta/shift).

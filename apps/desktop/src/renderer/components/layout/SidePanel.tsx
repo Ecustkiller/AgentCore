@@ -19,13 +19,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  HorizontalTabStrip,
+  NO_TAB_DRAG_ATTR,
+  SortableTab,
+  useSortableTabIds,
+} from "@/components/ui/horizontal-tab-strip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useBrowserRegion } from "@/components/workspace/BrowserLivePanel";
 import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
-import { conversationHasFileArtifacts } from "@/lib/conversationFileChanges";
+import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
+import { conversationHasRestorableEntry } from "@/lib/conversationFileChanges";
 import { notifyError } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
@@ -104,7 +111,7 @@ function isDetailTabLive(
 /**
  * The conversation's single right-docked surface (前端UX设计.md §十 · 方案 B):
  * `[工作区*] [改动?] | 内容 tabs | [+]`，画布态另出条件「指挥台」。
- * 「改动」有本对话 AI 文件改动（或深链）才挂，挂后不可关。
+ * 「改动」有本对话 AI 文件改动 / Local 回合基线（或深链）才挂，挂后不可关。
  */
 export function SidePanel() {
   const open = useSidePanelStore((s) => s.open);
@@ -118,6 +125,7 @@ export function SidePanel() {
   const activeTabId = useSidePanelStore((s) => s.activeTabId);
   const setActiveTab = useSidePanelStore((s) => s.setActiveTab);
   const closeTab = useSidePanelStore((s) => s.closeTab);
+  const reorderContentTabs = useSidePanelStore((s) => s.reorderContentTabs);
   const floatTab = useSidePanelStore((s) => s.floatTab);
   const clearFloats = useSidePanelStore((s) => s.clearFloats);
   const openTerminalTab = useSidePanelStore((s) => s.openTerminalTab);
@@ -158,14 +166,19 @@ export function SidePanel() {
       .map((t) => t.id)
       .join("\u0001"),
   );
-  // Boolean selector：byId 每 token 变，但 true/false 不变则不重渲顶栏；messages 变则换 selector。
-  const hasFileChangesSelector = useCallback(
-    (s: { byId: Record<string, ExecutionRuntime> }) =>
-      conversationHasFileArtifacts(messages, s.byId),
-    [messages],
+  // Local zip 基线（不依赖 file_*）→ 脚本删后仍能挂「改动」进 restore。
+  const localBaselineIds = useLocalTurnBaselineIds(
+    currentConversationId,
+    messages,
   );
-  const hasFileChanges = useExecutionStore(hasFileChangesSelector);
-  const changesTabVisible = hasFileChanges || changesFocusMessageId != null;
+  // Boolean selector：byId 每 token 变，但 true/false 不变则不重渲顶栏；messages / 基线变则换 selector。
+  const hasRestorableSelector = useCallback(
+    (s: { byId: Record<string, ExecutionRuntime> }) =>
+      conversationHasRestorableEntry(messages, s.byId, localBaselineIds),
+    [messages, localBaselineIds],
+  );
+  const hasRestorable = useExecutionStore(hasRestorableSelector);
+  const changesTabVisible = hasRestorable || changesFocusMessageId != null;
   // 图上指挥 (前端UX设计.md §6.2): fixed 指挥台 tab + auto-surface (openPanel + badge,
   // never steals active tab). Hook runs before the `open` early-return so its effect
   // can reveal the panel even while closed. Inert in chat mode (`active` is false).
@@ -180,6 +193,11 @@ export function SidePanel() {
     // Move'd tabs leave the dock strip entirely (XOR dock/float).
     return tabs.filter((t) => live.has(t.id) && !floatingIds.has(t.id));
   }, [tabs, liveTabKey, floatingIds]);
+  const visibleTabIds = useMemo(
+    () => visibleTabs.map((t) => t.id),
+    [visibleTabs],
+  );
+  const { getItemProps } = useSortableTabIds(visibleTabIds, reorderContentTabs);
   const activeTab =
     activeTabId === WORKSPACE_TAB_ID ||
     activeTabId === CHANGES_TAB_ID ||
@@ -406,7 +424,11 @@ export function SidePanel() {
       />
 
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 pr-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <HorizontalTabStrip
+          className="min-w-0 flex-1"
+          contentClassName="gap-1"
+          aria-label="侧面板标签"
+        >
           {workspaceInDock && (
             <FixedTab
               active={workspaceActive}
@@ -434,17 +456,18 @@ export function SidePanel() {
           )}
           <div className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
           {visibleTabs.map((tab) => (
-            <ContentTabChip
-              key={tab.id}
-              tab={tab}
-              active={tab.id === activeTab?.id}
-              canPopOut={canFloatTabId(tab.id, tabs)}
-              onSelect={() => setActiveTab(tab.id)}
-              onClose={() => onCloseContentTab(tab.id)}
-              onPopOut={() => onPopOut(tab.id)}
-            />
+            <SortableTab key={tab.id} id={tab.id} getItemProps={getItemProps}>
+              <ContentTabChip
+                tab={tab}
+                active={tab.id === activeTab?.id}
+                canPopOut={canFloatTabId(tab.id, tabs)}
+                onSelect={() => setActiveTab(tab.id)}
+                onClose={() => onCloseContentTab(tab.id)}
+                onPopOut={() => onPopOut(tab.id)}
+              />
+            </SortableTab>
           ))}
-        </div>
+        </HorizontalTabStrip>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <IconButton aria-label="新建标签" title="新建标签">
@@ -666,6 +689,7 @@ function FixedTab({
       {onPopOut && (
         <SimpleTooltip label="弹出为浮窗">
           <IconButton
+            {...{ [NO_TAB_DRAG_ATTR]: "" }}
             onClick={onPopOut}
             aria-label={`弹出 ${label}`}
             className="mr-1 size-5 opacity-0 group-hover/tab:opacity-100"
@@ -782,6 +806,7 @@ function ContentTabChip({
       {canPopOut && onPopOut && (
         <SimpleTooltip label="弹出为浮窗">
           <IconButton
+            {...{ [NO_TAB_DRAG_ATTR]: "" }}
             onClick={onPopOut}
             aria-label={`弹出 ${tab.title}`}
             className="size-5 opacity-0 group-hover/tab:opacity-100"
@@ -791,6 +816,7 @@ function ContentTabChip({
         </SimpleTooltip>
       )}
       <IconButton
+        {...{ [NO_TAB_DRAG_ATTR]: "" }}
         onClick={onClose}
         aria-label={`关闭 ${tab.title}`}
         className="mr-1 size-5 opacity-0 group-hover/tab:opacity-100"

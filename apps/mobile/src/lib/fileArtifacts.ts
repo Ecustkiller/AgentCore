@@ -1,16 +1,14 @@
 // 回合产物盘点 —— 聊天内联「本回合产出文件」卡的纯数据源（手机端全新实现，对标桌面
 // lib/fileArtifacts.ts 语义；cross-platform-frontend.mdc：各端自建实现，仅共享契约类型）。
 //
-// 主清单（块 1）：只认 ``delivery_status.artifacts``（accepted+rejected 验收态）。
-// 无该字段 / 空数组 → 空清单（不 silent 降级扫工具列表）。
+// 主清单（块 1）：优先 ``delivery_status.artifacts``（accepted+rejected 验收态）。
+// 历史无 events → deliveryStatus 恒 null 时，旁路 process / events 工具列表让卡仍可出。
 //
-// 工具列表（process / events）仍供旁路盘点：写/改/删/移经 builtin file_ops。
+// 工具列表（process / events）另供「查看改动」A1 参数预览：写/改/删/移经 builtin file_ops。
 //   - 单聊（含历史 runs.process）从已折好的 process 时间线读 tool 步；
 //   - 实时回合 / 多 Agent（含历史 runs.events 日志）从原始 tool_use_start↔tool_use_end 事件
 //     按 tool_call_id 配对读 —— captain 与 worker 的工具都走这两类事件。
 // 主清单不把工具名当交付成功。
-//
-// 手机 parity=simplified：无「查看改动」完整面；清单 + 深链文件页即可。
 //
 // 纯函数、只读运行时态/事件，不碰协议 fold（故不触发 conformance、零持久化）。卡片只把
 // 「文件去哪了」可视化，真相仍以工作区文件树为准。
@@ -29,6 +27,13 @@ export type FileOp = "write" | "edit" | "delete" | "move";
 /** 路径级验收态（delivery_status.artifacts）。 */
 export type ArtifactAcceptance = "accepted" | "rejected";
 
+/** 工具参数派生的只读改动预览（A1）；缺参时为 undefined。 */
+export type FileChangePreview =
+  | { kind: "edit"; oldText: string; newText: string }
+  | { kind: "write"; content: string; mode: "overwrite" | "append" }
+  | { kind: "delete" }
+  | { kind: "move"; fromPath: string };
+
 export interface FileArtifact {
   /** 变更后的路径（move 取目的地，其余取 path）；同时作为回合内去重键。 */
   path: string;
@@ -38,6 +43,8 @@ export interface FileArtifact {
   op?: FileOp;
   /** 仅 move：源路径，用于「源 → 目的」展示。 */
   fromPath?: string;
+  /** A1：只读「查看改动」用的参数侧预览。 */
+  change?: FileChangePreview;
   /** 路径验收态（有则主清单显示已验收/未通过，不显示写入/编辑）。 */
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
@@ -65,6 +72,32 @@ function asStr(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+function changeFromTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  op: FileOp,
+  fromPath?: string,
+): FileChangePreview | undefined {
+  if (op === "edit") {
+    const oldText = asStr(args.old_string);
+    const newText = asStr(args.new_string);
+    if (!("old_string" in args) || !("new_string" in args)) return undefined;
+    return { kind: "edit", oldText, newText };
+  }
+  if (op === "write") {
+    const content = asStr(args.content);
+    if (!("content" in args)) return undefined;
+    return {
+      kind: "write",
+      content,
+      mode: toolName === "file_append" ? "append" : "overwrite",
+    };
+  }
+  if (op === "delete") return { kind: "delete" };
+  if (op === "move") return { kind: "move", fromPath: fromPath ?? "" };
+  return undefined;
+}
+
 /** 把一次工具调用映射成文件产物；非文件工具 / 未成功 / 缺路径 → null（不进卡）。 */
 function artifactFromTool(
   toolName: string,
@@ -78,11 +111,22 @@ function artifactFromTool(
     const to = asStr(args.destination);
     if (!to) return null;
     const from = asStr(args.source);
-    return { path: to, name: basename(to), op, fromPath: from || undefined };
+    return {
+      path: to,
+      name: basename(to),
+      op,
+      fromPath: from || undefined,
+      change: changeFromTool(toolName, args, op, from || undefined),
+    };
   }
   const path = asStr(args.path);
   if (!path) return null;
-  return { path, name: basename(path), op };
+  return {
+    path,
+    name: basename(path),
+    op,
+    change: changeFromTool(toolName, args, op),
+  };
 }
 
 /**
@@ -99,9 +143,14 @@ function dedupe(ordered: FileArtifact[]): FileArtifact[] {
   return order.map((p) => byPath.get(p) as FileArtifact);
 }
 
+/** 是否有可展开的改动预览（至少一条带 change）。 */
+export function hasChangePreviews(artifacts: FileArtifact[]): boolean {
+  return artifacts.some((a) => a.change != null);
+}
+
 /**
  * 主清单：有 ``deliveryStatus.artifacts`` 字段时用之（含空数组）；
- * 缺字段 → null（调用方应视为空，勿再扫工具列表）。draft 不进卡。
+ * 缺字段 → null（调用方应视为空，勿再扫工具列表）。
  */
 export function fileArtifactsFromDeliveryStatus(
   deliveryStatus: DeliveryStatusPayload | null | undefined,
@@ -178,6 +227,35 @@ export function fileArtifactsFromEvents(events: SSEEvent[]): FileArtifact[] {
 /** 合并多个来源（如历史回合的 process + events）后统一去重。 */
 export function mergeArtifacts(...lists: FileArtifact[][]): FileArtifact[] {
   return dedupe(lists.flat());
+}
+
+/** 工具旁路：process + events 合并（A1 预览 / 历史无 delivery 时出卡）。 */
+export function resolveToolFileArtifacts(
+  process: ProcessStep[] | undefined,
+  events: SSEEvent[] | undefined,
+): FileArtifact[] {
+  return mergeArtifacts(
+    fileArtifactsFromProcess(process),
+    fileArtifactsFromEvents(events ?? []),
+  );
+}
+
+/**
+ * 主清单 + 审阅旁路：有 ``artifacts`` 字段（含空）→ 尊重；缺字段 → 回落工具旁路出卡
+ *（历史无 events → deliveryStatus 恒 null 的缺口）。
+ * ``review`` 始终为工具旁路（供 A1 参数预览；可与 list 同源）。
+ */
+export function resolveArtifactsForTurn(args: {
+  deliveryStatus: DeliveryStatusPayload | null | undefined;
+  process?: ProcessStep[] | undefined;
+  events?: SSEEvent[] | undefined;
+}): { list: FileArtifact[]; review: FileArtifact[] } {
+  const fromDelivery = fileArtifactsFromDeliveryStatus(args.deliveryStatus);
+  const review = resolveToolFileArtifacts(args.process, args.events);
+  if (fromDelivery != null) {
+    return { list: fromDelivery, review };
+  }
+  return { list: review, review };
 }
 
 /** 主清单解析：只认验收 artifacts；缺字段 / 空 → []（不降级工具列表）。 */

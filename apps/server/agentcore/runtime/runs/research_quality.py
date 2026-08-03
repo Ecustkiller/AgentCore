@@ -183,6 +183,15 @@ def upstream_body_floor_satisfied(
     return n >= floor
 
 
+def brief_may_satisfy_body_floor(*, deliverable_form: str | None) -> bool:
+    """Whether ``promote_brief_to_deliverable`` may count toward the upstream floor.
+
+    ``form=prose`` + 有下游交接地板：只认 ``round_content_chars`` / 已落盘 prose，
+    summary 不算正文（对齐 identity）。非 prose / 未声明 form 仍允许升格服务其它场景。
+    """
+    return (deliverable_form or "") != "prose"
+
+
 def promote_brief_to_deliverable(
     summary: str,
     key_points: object = None,
@@ -191,6 +200,7 @@ def promote_brief_to_deliverable(
 
     ``summary`` 为首段；非空 ``key_points`` 附作 ``- …`` 列表。空 summary → ``""``
     （不豁免空交）。handoff / 收工闸 / 依赖注入共用。
+    有下游的 prose 交接地板不得用本函数冒充正文——见 ``brief_may_satisfy_body_floor``。
     """
     head = (summary or "").strip()
     if not head:

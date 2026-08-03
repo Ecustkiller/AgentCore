@@ -1,9 +1,10 @@
 """Built-in website section catalog (P1b) — constraint input, not a second framework.
 
 Marketing landing pack ships under ``website_catalog/marketing/`` (playbook
-``build_website``). Tool-dense console pack ships under ``website_catalog/tool_dense/``
-(playbook ``build_toolshed``). Briefs inject catalog id / path / summary (+ shell
-body); scanner does **not** hard-gate "must have used a shell".
+``build_website`` default). Tool-dense console pack ships under
+``website_catalog/tool_dense/`` (``build_website`` + ``style=toolshed``).
+Briefs inject catalog id / path / summary (+ shell body); scanner does **not**
+hard-gate "must have used a shell".
 """
 
 from __future__ import annotations

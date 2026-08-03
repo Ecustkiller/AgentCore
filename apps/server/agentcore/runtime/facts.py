@@ -557,6 +557,38 @@ _HOST_DIVERT_FACT_KINDS: frozenset[str] = frozenset(
 )
 
 
+def _settlement_key_in_fact_log(
+    log: TurnFactLog, turn_id: str, entry: dict[str, Any]
+) -> bool:
+    """True when ``entry``'s settlement dedupe key already appears in ``log``."""
+    from agentcore.runtime.journal.pending_interactions import settlement_dedupe_key
+
+    key = settlement_dedupe_key(
+        turn_id, str(entry.get("kind") or ""), dict(entry.get("payload") or {})
+    )
+    if key is None:
+        return False
+    for existing in log.entries():
+        ek = settlement_dedupe_key(
+            turn_id,
+            str(existing.get("kind") or ""),
+            dict(existing.get("payload") or {}),
+        )
+        if ek == key:
+            return True
+    return False
+
+
+def _resolved_seq_future(seq: int | None) -> asyncio.Future[int | None] | None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    future: asyncio.Future[int | None] = loop.create_future()
+    future.set_result(seq)
+    return future
+
+
 def record_turn_fact(fact: Fact) -> asyncio.Future[int | None] | None:
     """Append ``fact`` to the turn's ambient log and durable journal (no-op if unbound).
 
@@ -569,21 +601,35 @@ def record_turn_fact(fact: Fact) -> asyncio.Future[int | None] | None:
 
     跨回合同图追加：divert 绑定时，worker 侧 §8.3 重建 fact 续写宿主 ``turn_id``；
     ``graph_append`` 等追加回合显示事实仍走当前 writer（由 EventSink 分流）。
+
+    D8 settlement re-emit: when the writer would skip the durable write, do **not**
+    append a second row to ``TurnFactLog`` if that settlement key is already present
+    (cold resume: prewrite + claim put ``*_resolved`` in the inherited prefix). A
+    phantom log row drifts ``fact_log`` index vs DB ``seq``; finalize's enumerate
+    then inserts a duplicate trailing ``process_content``. Hot-path awaiter after
+    ``prewrite_settlement`` (which bypasses the fact log) still records once so the
+    log catches up with the durable row.
     """
     from agentcore.runtime.delegate.graph_append import current_graph_append_redirect
+    from agentcore.runtime.journal.writer import current_journal_writer
 
     redirect = current_graph_append_redirect.get()
     if redirect is not None and fact.kind in _HOST_DIVERT_FACT_KINDS:
         return redirect.host_writer.schedule_append(fact.entry())
 
+    entry = fact.entry()
     log = current_fact_log.get()
+    writer = current_journal_writer.get()
+
+    if writer is not None and writer.would_dedupe_settlement(entry):
+        if log is not None and not _settlement_key_in_fact_log(log, writer.turn_id, entry):
+            log.record_fact(fact)
+        return _resolved_seq_future(None)
+
     if log is not None:
         log.record_fact(fact)
-    from agentcore.runtime.journal.writer import current_journal_writer
-
-    writer = current_journal_writer.get()
     if writer is not None:
-        return writer.schedule_append(fact.entry())
+        return writer.schedule_append(entry)
     return None
 
 

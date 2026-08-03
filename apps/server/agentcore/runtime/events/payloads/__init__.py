@@ -128,6 +128,7 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(interaction.TeamPreviewSide),
     TsInterface(interaction.ModelCandidate),
     TsInterface(interaction.TeamPreviewRequiredPayload),
+    TsInterface(interaction.WriteCapabilityOverride),
     TsInterface(interaction.TeamPreviewResolvedPayload),
     TsInterface(interaction.StageCardRequiredPayload),
     TsInterface(interaction.StageCardResolvedPayload),

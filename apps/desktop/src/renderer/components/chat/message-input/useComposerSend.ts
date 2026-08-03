@@ -23,6 +23,7 @@ import {
   resolveDefaultPermissionAxes,
   setComposerDraftAxes,
 } from "@/services/permissionAxes";
+import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
@@ -34,6 +35,26 @@ import { useNavigate } from "react-router-dom";
 import type { PendingAttachment } from "./composerAttachments";
 import { dispatchBackgroundTask } from "./dispatchBackgroundTask";
 import { ensureAttachmentResident } from "./resideAttachment";
+
+/**
+ * Local-first parallel title mint after the first user message.
+ *
+ * Gates on {@link resolveSidecarRoot} (same as turn routing), not the
+ * background-handoff `isLocal` flag — drafts have no conversationId yet so that
+ * flag stays false and would skip mint. Cloud turns keep SSE
+ * `schedule_title_generation`; failure here leaves the provisional truncation.
+ */
+export function scheduleLocalAutoTitle(
+  conversationId: string,
+  userMessage: string,
+): void {
+  void resolveSidecarRoot(conversationId).then((target) => {
+    if (!target) return;
+    void requestAutoTitle(conversationId, userMessage).then((title) => {
+      if (title) patchConversationCache(conversationId, { title });
+    });
+  });
+}
 
 export function useComposerSend({
   value,
@@ -302,15 +323,9 @@ export function useComposerSend({
         patchConversationCache(conversationId, {
           title: provisionalConversationTitle(trimmed),
         });
-      }
-
-      // Local sidecar has no cloud SSE title_generated — mint in parallel with the
-      // turn (same core as cloud schedule_title_generation). Failure keeps the
-      // provisional truncation; local-turns write-back may still fall back.
-      if (isLocal && isFirstMessage) {
-        void requestAutoTitle(conversationId, trimmed).then((title) => {
-          if (title) patchConversationCache(conversationId, { title });
-        });
+        // Local sidecar has no cloud SSE title_generated — mint in parallel with
+        // the turn (same core as cloud schedule_title_generation).
+        scheduleLocalAutoTitle(conversationId, trimmed);
       }
 
       if (createdNew) {

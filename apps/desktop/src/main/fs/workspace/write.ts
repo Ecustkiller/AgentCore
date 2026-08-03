@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import { shell } from "electron";
 import { WORKSPACE_READ_MAX } from "../constants";
@@ -179,6 +186,12 @@ async function softDeleteToWorkspaceTrash(
   realPath: string,
   relPath: string,
 ): Promise<WorkspaceOpResult> {
+  if (trashDestUnderTarget(root.absPath, realPath)) {
+    return opErr(
+      "WorkspaceIOError",
+      "不能软删到自身子树内的回收区（会自嵌套）",
+    );
+  }
   const entryId = randomUUID().replace(/-/g, "");
   const entryDir = join(root.absPath, ...TRASH_REL.split("/"), entryId);
   const dest = join(entryDir, "content");
@@ -200,6 +213,88 @@ async function softDeleteToWorkspaceTrash(
     return opOk(null);
   } catch (e) {
     await fs.rm(entryDir, { recursive: true, force: true }).catch(() => {});
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+}
+
+/** True when AgentCore/trash would land inside ``targetAbs`` (self-nest risk). */
+function trashDestUnderTarget(rootAbs: string, targetAbs: string): boolean {
+  const trashRoot = resolve(join(rootAbs, ...TRASH_REL.split("/")));
+  const target = resolve(targetAbs);
+  const rel = relative(target, trashRoot);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function childRelFromRoot(rootAbs: string, childAbs: string): string {
+  return relative(rootAbs, childAbs).replace(/\\/g, "/");
+}
+
+/**
+ * Soft-delete a trash ancestor (e.g. bare AgentCore/) by expanding children —
+ * hard-clear internal zones first, then soft-delete each visible child.
+ */
+async function softDeleteExpandingTrashAncestor(
+  root: StoredRoot,
+  targetAbs: string,
+): Promise<WorkspaceOpResult> {
+  let names: string[];
+  try {
+    names = await fs.readdir(targetAbs);
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+
+  const zoneChildren: string[] = [];
+  const softChildren: string[] = [];
+  for (const name of names) {
+    const childAbs = join(targetAbs, name);
+    const childRel = childRelFromRoot(root.absPath, childAbs);
+    if (isInternalZoneRelPath(childRel)) {
+      zoneChildren.push(childAbs);
+    } else {
+      softChildren.push(childAbs);
+    }
+  }
+
+  for (const childAbs of zoneChildren) {
+    try {
+      await fs.rm(childAbs, { recursive: true, force: false });
+    } catch (e) {
+      return opErr("WorkspaceIOError", toReason(e));
+    }
+  }
+
+  for (const childAbs of softChildren) {
+    const childRel = childRelFromRoot(root.absPath, childAbs);
+    try {
+      await shell.trashItem(childAbs);
+    } catch {
+      const soft = await softDeleteToWorkspaceTrash(root, childAbs, childRel);
+      if (!soft.ok) return soft;
+    }
+  }
+
+  // Soft-deletes recreate AgentCore/trash under the ancestor — leave the shell.
+  try {
+    const remaining = await fs.readdir(targetAbs);
+    const leftovers: string[] = [];
+    for (const name of remaining) {
+      const childRel = childRelFromRoot(root.absPath, join(targetAbs, name));
+      if (!isInternalZoneRelPath(childRel)) {
+        leftovers.push(name);
+      }
+    }
+    if (leftovers.length > 0) {
+      return opErr(
+        "WorkspaceIOError",
+        `软删展开后目录仍有残留：${leftovers.slice(0, 5).join(", ")}`,
+      );
+    }
+    return opOk(null);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return opOk(null);
+    }
     return opErr("WorkspaceIOError", toReason(e));
   }
 }
@@ -232,6 +327,9 @@ export async function opDelete(
     if (hard) {
       await fs.rm(real.path, { recursive: true, force: false });
       return opOk(null);
+    }
+    if (trashDestUnderTarget(root.absPath, real.path)) {
+      return softDeleteExpandingTrashAncestor(root, real.path);
     }
     // 默认可逆：系统回收站；失败则落工作区软删区（无回收站 / 权限拒绝等）。
     try {

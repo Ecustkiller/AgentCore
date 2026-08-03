@@ -122,11 +122,13 @@ def _load_declared_tools() -> tuple[type, ...]:
     Order is part of the public surface (registry / catalog / OpenAI defs).
     """
     from agentcore.tools.builtin.amend_note import AmendNoteTool
+    from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
     from agentcore.tools.builtin.ask_user import AskUserTool
     from agentcore.tools.builtin.board_ops import BoardOpsTool
     from agentcore.tools.builtin.board_read import BoardReadTool
     from agentcore.tools.builtin.browser import (
         BrowserClickTool,
+        BrowserConsoleTool,
         BrowserNavigateTool,
         BrowserScreenshotTool,
         BrowserScrollTool,
@@ -202,6 +204,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         FileBatchTool,
         MdToDocxTool,
         MdToPdfTool,
+        ArchiveExtractTool,
         GrepTool,
         CodeSearchTool,
         CodeDiagnosticsTool,
@@ -216,6 +219,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         BrowserTypeTool,
         BrowserScrollTool,
         BrowserSnapshotTool,
+        BrowserConsoleTool,
         # Host 第三能力面 P0–P3 (L1 NEVER · CEO+worker；P3 host_shell GRANTABLE 例外)
         HostPingTool,
         HostInfoTool,

@@ -10,8 +10,9 @@
  * `sidecar:event` subscription). Concurrent attach coalesces; a later claim
  * revokes the prior owner. Do not call `sidecarApi.onEvent` here.
  *
- * Viewer vs engine (C1)：AbortSignal / 切会话 / hydrate cleanup 只卸观察（release
- * claim），**禁止** ``sidecarApi.cancel``——停引擎只走 ``stopConversation``。
+ * Viewer vs engine (C1)：可选 ``signal`` 仅作**显式卸观察**（release claim），
+ * **禁止** ``sidecarApi.cancel``——停引擎只走 ``stopConversation``。
+ * 切会话 ≠ 卸观察泵；hydrate 路径不传 signal。
  */
 import { logEvent } from "@/lib/log";
 import {
@@ -31,6 +32,7 @@ import type {
   SidecarAttachResponse,
   SidecarEventPush,
 } from "@shared/sidecar-contract";
+import { unstable_batchedUpdates } from "react-dom";
 import { loadRecovery } from "../resume";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import { markGhostInterrupted } from "./recovery";
@@ -89,12 +91,12 @@ function ensureUserRow(
 }
 
 export interface AttachSidecarTurnOptions {
-  /** 切会话 / hydrate 取消时 abort（只停 live 等待并释放 claim，不 cancel 引擎）。 */
+  /**
+   * 显式卸观察（单测 / 主动 detach）：只停 live 等待并释放 claim，不 cancel 引擎。
+   * 切会话 / hydrate 不传此 signal。
+   */
   signal?: AbortSignal;
 }
-
-/** Yield to the event loop every N folded snapshot events (大缓冲回放防假死). */
-const ATTACH_REPLAY_YIELD_EVERY = 64;
 
 /**
  * Attach a live sidecar turn after refresh / reopen.
@@ -309,14 +311,15 @@ async function attachSidecarTurnExclusive(
     }
 
     draining = true;
+    // Fold the full snapshot in one sync pass (no setTimeout yield) so React can
+    // batch paints — mid-replay yield was re-animating already-completed workers.
     const snapshot = res.events ?? [];
-    for (let i = 0; i < snapshot.length; i++) {
-      if (ac.signal.aborted) break;
-      foldEvent(snapshot[i] as SSEEvent);
-      if (i > 0 && i % ATTACH_REPLAY_YIELD_EVERY === 0) {
-        await new Promise<void>((r) => setTimeout(r, 0));
+    unstable_batchedUpdates(() => {
+      for (let i = 0; i < snapshot.length; i++) {
+        if (ac.signal.aborted) break;
+        foldEvent(snapshot[i] as SSEEvent);
       }
-    }
+    });
     while (!ac.signal.aborted && liveQueue.length > 0) {
       const next = liveQueue.shift();
       if (next) foldEvent(next);
@@ -368,9 +371,10 @@ function teardownAttachedTurn(
   externalSignal?.removeEventListener("abort", onExternalAbort);
   const store = useConversationStore.getState();
   store.setAbort(null, conversationId);
-  // Viewer abort: clear generating so reopen hydrate can attach again (engine may
-  // still be live — recovery.sidecarLive drives the next attach). Natural end
-  // already folded message_end; only mark outbox when we were not yanked away.
+  // Explicit viewer-signal abort only: clear generating so a later reopen can
+  // re-attach (engine may still be live — recovery.sidecarLive drives next
+  // attach). Natural end already folded message_end; only mark outbox when we
+  // were not yanked away. 切会话不走此分支。
   if (ac.signal.aborted) {
     if (getRuntime(conversationId).isGenerating) {
       store.setGenerating(false, conversationId);

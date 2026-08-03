@@ -22,6 +22,9 @@ from agentcore.workspace._paths import is_ignored_dir_entry
 
 MANIFEST_NAME = "manifest.json"
 
+# Chunk size for zip member reads (actual-byte gate; avoid loading a full bomb first).
+_ZIP_READ_CHUNK = 1024 * 1024
+
 
 def new_snapshot_id() -> str:
     """Time-sortable id: ``YYYYMMDDTHHMMSSZ-<short>`` (UTC + random suffix)."""
@@ -91,20 +94,127 @@ def zip_dir(
     return buf.getvalue()
 
 
+class ZipSlipError(Exception):
+    """Raised when a zip member would escape the extract root (zip-slip)."""
+
+    def __init__(self, member: str) -> None:
+        self.member = member
+        super().__init__(f"zip-slip rejected: {member}")
+
+
+class ZipExtractLimitError(Exception):
+    """Raised when extract hits a file-count or uncompressed-byte gate."""
+
+    def __init__(self, *, reason: str, file_count: int, total_bytes: int) -> None:
+        self.reason = reason
+        self.file_count = file_count
+        self.total_bytes = total_bytes
+        super().__init__(f"zip extract limit exceeded: {reason}")
+
+
+def zip_member_relpath(member: str) -> str | None:
+    """Normalize a zip entry name to a safe relative POSIX file path.
+
+    Returns ``None`` for directory entries (names ending in ``/``). Raises
+    :exc:`ZipSlipError` for absolute paths, drive letters, or ``..`` segments.
+    """
+    raw = member.replace("\\", "/")
+    if raw.endswith("/"):
+        return None
+    # Absolute / UNC / drive-letter shapes must not be joined under the extract root.
+    if raw.startswith("/") or raw.startswith("//") or (len(raw) >= 2 and raw[1] == ":"):
+        raise ZipSlipError(member)
+    parts = [p for p in raw.split("/") if p and p != "."]
+    if not parts or any(p == ".." for p in parts):
+        raise ZipSlipError(member)
+    return "/".join(parts)
+
+
+def iter_zip_file_members(
+    data: bytes,
+    *,
+    max_files: int | None = None,
+    max_uncompressed_bytes: int | None = None,
+) -> list[tuple[str, bytes]]:
+    """Return ``(relpath, content)`` for every safe file member (zip-slip → raise).
+
+    Used by ``archive_extract`` (fail-closed). :func:`unzip_into` shares
+    :func:`zip_member_relpath` but skips slip entries so storage restore can
+    continue. Optional ceilings guard zip bombs.
+    """
+    out: list[tuple[str, bytes]] = []
+    total_bytes = 0
+    # Chunked read so a lied-small ``file_size`` cannot force a full bomb into RAM
+    # before the actual-byte gate fires.
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            rel = zip_member_relpath(name)
+            if rel is None:
+                continue
+            if max_files is not None and len(out) >= max_files:
+                raise ZipExtractLimitError(
+                    reason="max_files",
+                    file_count=len(out),
+                    total_bytes=total_bytes,
+                )
+            # Fast-fail on declared size (honest large members); never the sole gate.
+            declared = int(info.file_size)
+            if (
+                max_uncompressed_bytes is not None
+                and total_bytes + declared > max_uncompressed_bytes
+            ):
+                raise ZipExtractLimitError(
+                    reason="max_uncompressed_bytes",
+                    file_count=len(out),
+                    total_bytes=total_bytes,
+                )
+            chunks: list[bytes] = []
+            actual = 0
+            with zf.open(info) as src:
+                while True:
+                    chunk = src.read(_ZIP_READ_CHUNK)
+                    if not chunk:
+                        break
+                    actual += len(chunk)
+                    if (
+                        max_uncompressed_bytes is not None
+                        and total_bytes + actual > max_uncompressed_bytes
+                    ):
+                        raise ZipExtractLimitError(
+                            reason="max_uncompressed_bytes",
+                            file_count=len(out),
+                            total_bytes=total_bytes,
+                        )
+                    chunks.append(chunk)
+            content = b"".join(chunks)
+            out.append((rel, content))
+            total_bytes += actual
+    return out
+
+
 def unzip_into(data: bytes, root: Path) -> None:
-    """Extract zip ``data`` over ``root`` (creating it), guarding against zip-slip."""
+    """Extract zip ``data`` over ``root`` (creating it), guarding against zip-slip.
+
+    Slip entries are skipped (storage restore must not abort the whole tree).
+    Path resolve is a second containment check after :func:`zip_member_relpath`.
+    """
     root.mkdir(parents=True, exist_ok=True)
     root_resolved = root.resolve()
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        for member in zf.namelist():
-            if member.endswith("/"):
+        for info in zf.infolist():
+            try:
+                rel = zip_member_relpath(info.filename)
+            except ZipSlipError:
                 continue
-            target = (root / member).resolve()
+            if rel is None:
+                continue
+            target = (root / rel).resolve()
             # Reject any entry that would land outside the workspace root.
             if target != root_resolved and root_resolved not in target.parents:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(member) as src, open(target, "wb") as dst:
+            with zf.open(info) as src, open(target, "wb") as dst:
                 dst.write(src.read())
 
 

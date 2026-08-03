@@ -34,7 +34,7 @@ import { useNavigate } from "react-router-dom";
  * reused by BOTH asking surfaces: the CEO's `ask_user` ({@link AskUserCard}) and a worker's
  * blocking `escalate` ({@link EscalationCard}). Extracted here because it is the drift-prone
  * core (the「其他」escape hatch, multi-select toggle, 答复模型 α composition); the two cards
- * only differ in their framing + footer (ask_user: 继续/停止; escalate: 提交/按假设继续), which
+ * only differ in their framing + footer (ask_user: 提交/跳过; escalate: 提交/按假设继续), which
  * each owns. 设计: docs/03-AI核心/Agent协作模式.md（向用户发问）.
  */
 

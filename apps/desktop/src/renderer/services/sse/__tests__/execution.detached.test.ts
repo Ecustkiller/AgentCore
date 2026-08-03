@@ -108,6 +108,7 @@ describe("execution_detached / execution_completed live path", () => {
       host_turn_id: MID,
     });
     expect(rt().status).toBe("running");
+    expect(refreshMod.refreshAfterExecutionCompleted).toHaveBeenCalledWith(CID);
   });
 
   it("detached → clears frozen toolProgress / workerToolPhases (D3)", () => {

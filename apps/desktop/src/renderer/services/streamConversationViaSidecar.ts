@@ -81,6 +81,12 @@ export interface ResumeViaSidecarOptions {
   decision: "continue" | "adjust" | "stop" | "research_first";
   note: string;
   selected?: string[];
+  /** team_preview（delegate）continue 修正；与云 resume / SidecarResumeRequest 同形。 */
+  excluded_run_ids?: string[];
+  write_capability_overrides?: Array<{
+    run_id: string;
+    capability: "text_only";
+  }>;
   /** Structured website style pick (s0/s1/…). */
   /** 挂起回合的原始用户消息（来自帧）——续跑完成后随回写落库。 */
   userMessage: string;
@@ -234,6 +240,8 @@ export async function resumeConversationViaSidecar({
   decision,
   note,
   selected,
+  excluded_run_ids,
+  write_capability_overrides,
   userMessageId,
   signal,
 }: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
@@ -269,6 +277,13 @@ export async function resumeConversationViaSidecar({
           decision,
           note,
           selected,
+          ...(excluded_run_ids && excluded_run_ids.length > 0
+            ? { excluded_run_ids }
+            : {}),
+          ...(write_capability_overrides &&
+          write_capability_overrides.length > 0
+            ? { write_capability_overrides }
+            : {}),
           inference,
           permissionAxes,
         }),

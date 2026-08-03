@@ -61,6 +61,8 @@ REASON_FILES_NOT_LANDED = "files_not_landed"
 REASON_VERIFY_FAILED = "verify_failed"
 # Literature-report evidence deficit (research_quality.REASON_EVIDENCE_DEFICIT).
 REASON_EVIDENCE_DEFICIT = "evidence_deficit"
+# Unresolved write-ownership collision (closing_posture P0-B · structured only).
+REASON_WRITE_OWNERSHIP = "write_ownership_conflict"
 # Keep in sync with runtime.runs.cutoff.REASON_DEGRADED_HANDOFF (wire gap reason).
 REASON_DEGRADED_HANDOFF = "degraded_handoff"
 _WRITING_CUTOFF_REASONS = frozenset({"token_budget", "worker_timeout"})
@@ -656,6 +658,31 @@ def build_delivery_status(
         raw_gaps.append(
             _annotate_gap("验收", text, reason=reason or REASON_EVIDENCE_DEFICIT)
         )
+    # ①d 未解写权冲突（案 ghost-owner P0-B）——denied_paths 仍被他人持锁 → blocking；
+    # 不扫「定稿|闭环」正文；真源=账本结构化信号。
+    from agentcore.runtime.closing_posture import (
+        note_unresolved_write_ownership_from_ledger,
+        run_ids_for_write_ownership_scan,
+    )
+
+    ownership_paths = note_unresolved_write_ownership_from_ledger(
+        execution_id=execution_id,
+        run_ids=run_ids_for_write_ownership_scan(plan=plan, results=results),
+    )
+    if ownership_paths:
+        shown = "、".join(f"`{p}`" for p in ownership_paths[:3])
+        more = (
+            f" 等 {len(ownership_paths)} 处"
+            if len(ownership_paths) > 3
+            else ""
+        )
+        raw_gaps.append(
+            _annotate_gap(
+                "验收",
+                f"写权冲突未解：{shown}{more}（账本仍记他人持锁；未结构化移交）",
+                reason=REASON_WRITE_OWNERSHIP,
+            )
+        )
     # ② 完成验收未满足 / soft overlay notes（批次级）。
     # Soft markers（「不阻断验收」等）经 _annotate_gap → severity=warning → state=notes。
     for gap in criteria_gaps or []:
@@ -796,9 +823,12 @@ def maybe_emit_delivery_status(
             )
         )
         from agentcore.runtime.closing_posture import (
+            downgrade_verdict_for_unresolved_write_ownership,
             note_cloud_web_verify_gap_from_delivery,
         )
 
+        # P0-B belt: latch already stamped in build; ensure delivered cannot stick.
+        downgrade_verdict_for_unresolved_write_ownership(execution_id=execution_id)
         note_cloud_web_verify_gap_from_delivery(gaps, criteria_gaps=criteria_gaps)
         from agentcore.runtime.events import delivery_status
 

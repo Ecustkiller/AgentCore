@@ -52,6 +52,8 @@ from agentcore.api.schemas import (
     SnapshotListResponse,
     SnapshotSummary,
     StatusResponse,
+    TrashEntrySummary,
+    TrashListResponse,
     UploadFileResponse,
     WorkspaceEditDoc,
     WorkspaceFileEntry,
@@ -101,6 +103,7 @@ from agentcore.workspace.locate import (
     format_shared_workspace_id,
     parse_workspace_id,
     workspace_has_entries,
+    workspace_root_path,
     workspace_storage_key,
 )
 from agentcore.workspace.locks import workspace_lock
@@ -121,6 +124,13 @@ from agentcore.workspace.snapshots import (
     list_snapshots,
     read_snapshot,
     restore_snapshot,
+)
+from agentcore.workspace.trash import (
+    TrashExpiredError,
+    TrashNotFound,
+    list_trash_entries,
+    restore_from_trash,
+    trash_retention_days,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -825,6 +835,8 @@ async def delete_workspace_file(
         raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
         raise NotFoundError("文件不存在") from e
+    except WorkspaceIOError as e:
+        raise ValidationError(str(e) or "删除失败") from e
     return StatusResponse()
 
 
@@ -1058,3 +1070,89 @@ async def download_workspace_snapshot(
         media_type="application/zip",
         headers=download_headers(filename),
     )
+
+
+# --- AgentCore/trash (soft-delete list + one-click restore; not OS recycle bin) ---
+
+
+@router.get("/{ws_id}/trash", response_model=TrashListResponse)
+async def list_workspace_trash(
+    ws_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+    shared_svc: SharedSpaceService = Depends(get_shared_space_service),
+):
+    """List reversible soft-deletes under ``AgentCore/trash`` (newest first).
+
+    Cloud / sidecar only. Local OS recycle-bin deletes are **not** listed here —
+    restore those via the system trash UI. Expired entries are purged on read
+    (retention = ``workspace_retention_days``).
+    """
+    target = await _resolve_owned_workspace(
+        ws_id, user.user_id, conv_repo, folder_repo, shared_svc
+    )
+    _require_cloud(target)
+    _refuse_shared_extra(target)
+    root = workspace_root_path(
+        user_id=user.user_id,
+        folder_id=target.folder_id,
+        conversation_id=target.conversation_id,
+    )
+    entries = list_trash_entries(root=root)
+    days = trash_retention_days()
+    return TrashListResponse(
+        data=[
+            TrashEntrySummary(
+                entry_id=e.entry_id,
+                original_path=e.original_path,
+                name=e.name,
+                is_dir=e.is_dir,
+                deleted_at=e.deleted_at,
+            )
+            for e in entries
+        ],
+        total=len(entries),
+        retention_days=days,
+    )
+
+
+@router.post("/{ws_id}/trash/{entry_id}/restore", response_model=StatusResponse)
+async def restore_workspace_trash(
+    ws_id: str,
+    entry_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+    shared_svc: SharedSpaceService = Depends(get_shared_space_service),
+):
+    """Restore one ``AgentCore/trash`` entry to its original relative path.
+
+    Refused for local workspaces (409): files live on the desktop; use the
+    desktop AgentCore/trash UI when the soft-delete fallback was used — never
+    confuse with OS ``shell.trashItem``.
+    """
+    target = await _resolve_owned_workspace(
+        ws_id, user.user_id, conv_repo, folder_repo, shared_svc
+    )
+    _require_cloud(target)
+    _refuse_shared_extra(target)
+    root = workspace_root_path(
+        user_id=user.user_id,
+        folder_id=target.folder_id,
+        conversation_id=target.conversation_id,
+    )
+    try:
+        async with workspace_lock(_storage_key(user.user_id, target)):
+            restore_from_trash(root=root, entry_id=entry_id)
+    except TrashNotFound as e:
+        raise NotFoundError("软删条目不存在") from e
+    except TrashExpiredError as e:
+        raise ConflictError(str(e) or "软删条目已过期") from e
+    except AlreadyExists as e:
+        raise ConflictError(f"目标路径已存在，无法还原：{e}") from e
+    except OutsideWorkspace as e:
+        raise ValidationError(f"软删元数据路径非法：{e}") from e
+    except WorkspaceIOError as e:
+        raise ValidationError(str(e) or "还原失败") from e
+    return StatusResponse()

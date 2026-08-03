@@ -12,14 +12,17 @@ Two eras share one class:
     ancestor holder (downstream only records intent via plan artifacts). Nested
     lead→child drives opt into declare-time handoff explicitly. Cross-wave:
     declaring a path whose holder is already in ``completed_run_ids`` auto-
-    transfers at dispatch (reviser after writer).
-  - **Write ``claim``** may hand off from an ancestor (downstream consolidates).
+    transfers at dispatch (reviser after writer). ``ended_owners`` (ledger bypass,
+    **not** progress ``completed_run_ids``) is treated the same for declare/claim.
+  - **Write ``claim``** may hand off from an ancestor (downstream consolidates)
+    or from an ``ended_owners`` holder (nested terminal ghost-lock fix).
   - **Completion handoff** moves owned paths to the unique dependent that listed
     the same artifact.
   - Explicit transfer: ``replaces_run_id`` / ``continue_from_run_id`` / ``force`` /
     ``resolve_escalation(transfer_ownership=true)`` / user structured裁决
     (user ownership card **only** when lock owner is still ``running``;
-    completed holders use same-seat replaces / declare handoff).
+    completed/ended holders use same-seat replaces / declare·claim handoff —
+    never NL「移交写权」).
   - Write-time ``claim`` refusals are remembered per refused run so escalate can
     attach ``ownership_paths`` even when the model paraphrases the conflict.
 
@@ -75,11 +78,11 @@ def ownership_conflict_message(
 
     ``ownership_kind``: ``\"declared\"`` (dispatch reserve, file may be empty/missing) or
     ``\"written\"`` (successful write recorded). ``owner_status``: ``running`` /
-    ``completed`` / ``unknown``.
+    ``completed`` / ``ended`` / ``unknown``.
 
-    Completed holders are **not** a user「移交写权」path — same-seat ``replaces`` /
-    dispatch ``declare`` auto-handoff is the fix. User transfer card is for
-    still-running lock owners only.
+    Completed / ended / unknown holders are **not** a user「移交写权」path — same-seat
+    ``replaces`` / dispatch ``declare`` (and ended ``claim``) auto-handoff is the fix.
+    User transfer card is for still-running lock owners only.
     """
     who = f"【{owner_role}】（`{owner_run_id}`）" if owner_role else f"`{owner_run_id}`"
     kind_bit = ""
@@ -87,11 +90,20 @@ def ownership_conflict_message(
         kind_bit = "（仅派发占位、尚未落盘——不是上一 run 残留锁）"
     elif ownership_kind == "written":
         kind_bit = "（锁主已成功写入过该路径）"
-    if owner_status == "completed":
+    if owner_status in ("completed", "ended"):
+        done_label = "已完成" if owner_status == "completed" else "已结束"
         return (
-            f"写入冲突：`{path}` 仍记在已完成队友 {who} 名下{kind_bit}。"
-            "锁主状态：已完成（账本仍记其名；同座续派 / 派发 declare "
+            f"写入冲突：`{path}` 仍记在{done_label}队友 {who} 名下{kind_bit}。"
+            f"锁主状态：{done_label}（账本仍记其名；同座续派 / 派发 declare "
             "同 artifact 会自动接手）。"
+            "请改写你自己职责下的文件，或等主管用同座位 replan/append"
+            "（系统 auto-replaces）接手后再写；"
+            "不要 escalate 请用户点「移交写权」，也不要另起同名终稿文件名抢写。"
+        )
+    if owner_status == "unknown":
+        return (
+            f"写入冲突：`{path}` 已归队友 {who} 负责{kind_bit}。"
+            "锁主状态：未知（批内账本或嵌套会话未对齐）。"
             "请改写你自己职责下的文件，或等主管用同座位 replan/append"
             "（系统 auto-replaces）接手后再写；"
             "不要 escalate 请用户点「移交写权」，也不要另起同名终稿文件名抢写。"
@@ -99,8 +111,6 @@ def ownership_conflict_message(
     status_bit = ""
     if owner_status == "running":
         status_bit = "锁主状态：进行中。"
-    elif owner_status == "unknown":
-        status_bit = "锁主状态：未知（批内账本或无协调会话）。"
     return (
         f"写入冲突：`{path}` 已归队友 {who} 负责{kind_bit}。"
         f"{status_bit}"
@@ -123,6 +133,7 @@ class WriteCoordinator:
         owners: dict[str, str] | None = None,
         *,
         written: set[str] | frozenset[str] | None = None,
+        ended_owners: set[str] | frozenset[str] | None = None,
     ) -> None:
         # normalized path -> run_id
         self._owner: dict[str, str] = {
@@ -132,18 +143,26 @@ class WriteCoordinator:
         self._written: set[str] = {
             _normalize(p) for p in (written or ()) if _normalize(p)
         }
+        # Terminal lock holders (nested or parent). Bypass for declare/claim handoff —
+        # **not** progress ``completed_run_ids`` (must not inflate team progress).
+        self._ended: set[str] = {
+            str(x).strip() for x in (ended_owners or ()) if str(x).strip()
+        }
         # Turn-local: run_id -> ordered paths this run was refused on ``claim``.
         # Feeds escalate ownership UI without depending on LLM question wording.
         # Not snapshotted — same-process escalate after collision is the hot path.
         self._denied: dict[str, list[str]] = {}
 
     def to_dict(self) -> dict[str, Any]:
-        """Snapshot: v2 nested ``{owners, written}``; empty written may still use v2."""
-        return {
+        """Snapshot: v2 nested ``{owners, written, ended}``; empty written may still use v2."""
+        payload: dict[str, Any] = {
             "_v": 2,
             "owners": dict(self._owner),
             "written": sorted(self._written),
         }
+        if self._ended:
+            payload["ended"] = sorted(self._ended)
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> WriteCoordinator:
@@ -162,7 +181,13 @@ class WriteCoordinator:
                 for p in raw_written
                 if isinstance(p, str) and str(p).strip()
             }
-            return cls(owners, written=written)
+            raw_ended = data.get("ended") or []
+            ended = {
+                str(x).strip()
+                for x in raw_ended
+                if isinstance(x, str) and str(x).strip()
+            }
+            return cls(owners, written=written, ended_owners=ended)
         # Legacy flat path → owner.
         owners = {
             str(k): str(v)
@@ -191,6 +216,20 @@ class WriteCoordinator:
         if not rid:
             return []
         return sorted(p for p, owner in self._owner.items() if owner == rid)
+
+    def mark_ended(self, run_id: str) -> None:
+        """Record a terminal lock-holder for declare/claim handoff (not progress)."""
+        rid = (run_id or "").strip()
+        if rid:
+            self._ended.add(rid)
+
+    def is_ended(self, run_id: str) -> bool:
+        rid = (run_id or "").strip()
+        return bool(rid) and rid in self._ended
+
+    @property
+    def ended_owners(self) -> set[str]:
+        return set(self._ended)
 
     def record_denied(self, path: str, run_id: str) -> None:
         """Remember a write-time refusal so escalate can attach ``ownership_paths``."""
@@ -230,6 +269,10 @@ class WriteCoordinator:
         rid = (run_id or "").strip() or "unknown"
         owner = self._owner.get(key)
         if owner is not None and owner != rid and owner not in ancestors and not force:
+            # Ended holder → write-time handoff (nested ghost lock); not orphan reclaim.
+            if owner in self._ended:
+                self._owner[key] = rid
+                return None
             self.record_denied(key, rid)
             return owner
         self._owner[key] = rid
@@ -248,7 +291,8 @@ class WriteCoordinator:
 
         Free path → become holder. Same run → ok. Ancestor already holds → keep
         ancestor (downstream intent only) unless ``allow_ancestor_handoff`` (nested
-        lead→child declare) or ``force``. Unrelated holder → return conflict owner.
+        lead→child declare) or ``force``. Ended unrelated holder → handoff.
+        Still-running unrelated holder → return conflict owner.
         """
         key = _normalize(path)
         if not key:
@@ -261,6 +305,9 @@ class WriteCoordinator:
         if owner in ancestors:
             if allow_ancestor_handoff:
                 self._owner[key] = rid
+            return None
+        if owner in self._ended:
+            self._owner[key] = rid
             return None
         return owner
 
@@ -315,17 +362,9 @@ def resolve_write_coordinator(
     if not file_ownership_v2_enabled():
         return fallback if fallback is not None else WriteCoordinator()
 
-    from agentcore.runtime.coordination.session import (
-        active_coordination,
-        current_execution_id,
-    )
+    from agentcore.runtime.coordination.session import resolve_coordination_session
 
-    eid = (execution_id or "").strip()
-    session = active_coordination(eid) if eid else None
-    if session is None:
-        parent_eid = (current_execution_id.get() or "").strip()
-        if parent_eid and parent_eid != eid:
-            session = active_coordination(parent_eid)
+    session = resolve_coordination_session(execution_id)
     if session is not None:
         return session.ensure_file_ownership()
     if fallback is not None:
@@ -338,17 +377,20 @@ def lookup_owner_status(
     *,
     execution_id: str | None = None,
 ) -> tuple[str | None, str]:
-    """Return ``(owner_role | None, owner_status)`` from the active coordination session.
+    """Return ``(owner_role | None, owner_status)`` from the coordination session.
 
-    ``owner_status`` is ``running`` / ``completed`` / ``unknown``.
+    Uses the same parent-session fallback as :func:`resolve_write_coordinator`
+    (``current_execution_id``) so nested workers do not always see ``unknown``.
+
+    ``owner_status`` is ``running`` / ``completed`` / ``ended`` / ``unknown``.
     """
     rid = (owner_run_id or "").strip()
     if not rid:
         return None, "unknown"
     try:
-        from agentcore.runtime.coordination.session import active_coordination
+        from agentcore.runtime.coordination.session import resolve_coordination_session
 
-        session = active_coordination(execution_id)
+        session = resolve_coordination_session(execution_id)
     except Exception:  # noqa: BLE001
         return None, "unknown"
     if session is None:
@@ -363,7 +405,11 @@ def lookup_owner_status(
     elif rid in session.completed_run_ids:
         status = "completed"
     else:
-        status = "unknown"
+        ledger = session.file_ownership
+        if ledger is not None and getattr(ledger, "is_ended", None) and ledger.is_ended(rid):
+            status = "ended"
+        else:
+            status = "unknown"
 
     plan = getattr(session, "live_plan", None)
     if plan is not None and hasattr(plan, "by_id"):
@@ -458,9 +504,9 @@ def _is_nested_child_of(
     if not child or not parent or child == parent:
         return False
     try:
-        from agentcore.runtime.coordination.session import active_coordination
+        from agentcore.runtime.coordination.session import resolve_coordination_session
 
-        session = active_coordination(execution_id)
+        session = resolve_coordination_session(execution_id)
     except Exception:  # noqa: BLE001
         return False
     if session is None:

@@ -83,8 +83,7 @@
             "run_id": "r1",
             "role": "调研",
             "task": "调研方案",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           },
           {
             "run_id": "r2",
@@ -92,8 +91,7 @@
             "task": "写初稿",
             "depends_on": [
               "r1"
-            ],
-            "debate": false
+            ]
           }
         ],
         "tools": [

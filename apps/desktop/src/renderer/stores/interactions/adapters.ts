@@ -6,6 +6,7 @@ import type {
   PlanReviewDisplay,
   TeamPreviewDisplay,
 } from "@/stores/conversation/types";
+import type { PendingResume, ResumeOrigin } from "@/stores/pausedTurns";
 import type {
   AskAssumption,
   AskQuestion,
@@ -15,7 +16,12 @@ import type {
 import type { InteractionKind } from "@/types/interactionExt";
 import { mapEntryResolution } from "./mapResolution";
 import { useInteractionStore } from "./store";
-import type { InteractionEntry } from "./types";
+import {
+  COLD_RESUME_KINDS,
+  type ColdResumeKind,
+  type InteractionEntry,
+  isColdResumeKind,
+} from "./types";
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -23,6 +29,37 @@ function str(v: unknown, fallback = ""): string {
 
 function arr<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
+}
+
+/** Parse team_preview continue corrections from resolved payload / optimistic resolution. */
+function parseTeamPreviewCorrections(
+  source: Record<string, unknown> | undefined,
+): {
+  excluded_run_ids?: string[];
+  write_capability_overrides?: Array<{
+    run_id: string;
+    capability: "text_only";
+  }>;
+} {
+  if (!source) return {};
+  const excluded = arr<unknown>(source.excluded_run_ids).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+  const overrides = arr<unknown>(source.write_capability_overrides)
+    .map((row) => {
+      if (!row || typeof row !== "object") return null;
+      const r = row as Record<string, unknown>;
+      if (typeof r.run_id !== "string" || !r.run_id) return null;
+      if (r.capability !== "text_only") return null;
+      return { run_id: r.run_id, capability: "text_only" as const };
+    })
+    .filter(
+      (row): row is { run_id: string; capability: "text_only" } => row != null,
+    );
+  return {
+    ...(excluded.length > 0 ? { excluded_run_ids: excluded } : {}),
+    ...(overrides.length > 0 ? { write_capability_overrides: overrides } : {}),
+  };
 }
 
 /** View-model for a pending approval card. */
@@ -60,6 +97,7 @@ export function entryToCheckpoint(e: InteractionEntry): CheckpointDisplay {
       settlement.status === "resolved"
         ? arr<string>(e.resolution?.selected)
         : [],
+    ...(p.browser_login === true ? { browserLogin: true as const } : {}),
   };
 }
 
@@ -99,7 +137,6 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       role: string;
       task?: string;
       depends_on?: string[];
-      debate?: boolean;
       form?: string;
       write_capability?: "text_only" | "can_write_files";
       write_capability_label?: string;
@@ -108,7 +145,6 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       role: w.role,
       task: w.task ?? "",
       depends_on: w.depends_on ?? [],
-      debate: Boolean(w.debate),
       ...(typeof w.form === "string" && w.form ? { form: w.form } : {}),
       ...(w.write_capability === "text_only" ||
       w.write_capability === "can_write_files"
@@ -189,6 +225,9 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       return modelCandidates.length > 0 ? { modelCandidates } : {};
     })(),
     ...mapEntryResolution(e),
+    ...parseTeamPreviewCorrections(
+      (e.resolution ?? undefined) as Record<string, unknown> | undefined,
+    ),
   };
 }
 
@@ -291,4 +330,112 @@ export function isToolGranted(
     if (tools.includes(toolName)) return true;
   }
   return false;
+}
+
+/**
+ * Build a ResumePrompt view-model from an InteractionStore cold pending entry.
+ * Caller supplies the stamped resume key + user context + routing origin.
+ */
+export function entryToColdResume(
+  e: InteractionEntry,
+  opts: {
+    resumeMessageId: string;
+    userMessage: string;
+    userMessageId: string;
+    origin: ResumeOrigin;
+  },
+): PendingResume | null {
+  if (!isColdResumeKind(e.kind)) return null;
+  const kind: ColdResumeKind = e.kind;
+  const base = {
+    messageId: opts.resumeMessageId,
+    conversationId: e.conversationId,
+    checkpointId: e.id,
+    kind,
+    userMessage: opts.userMessage,
+    userMessageId: opts.userMessageId,
+    origin: opts.origin,
+  };
+
+  if (kind === "ask_user") {
+    const cp = entryToCheckpoint(e);
+    return {
+      ...base,
+      steps: [],
+      pending: [],
+      workers: [],
+      tools: [],
+      primitive: "delegate",
+      motion: "",
+      form: "",
+      sides: [],
+      maxRounds: 0,
+      thorough: true,
+      question: cp.question,
+      context: cp.context,
+      assumptions: cp.assumptions,
+      questions: cp.questions,
+      intent: cp.intent,
+      ...(cp.browserLogin ? { browserLogin: true as const } : {}),
+    };
+  }
+
+  if (kind === "plan_review") {
+    const pr = entryToPlanReview(e);
+    return {
+      ...base,
+      steps: pr.steps,
+      pending: pr.pending,
+      ceoReview: pr.ceoReview,
+      workers: [],
+      tools: [],
+      primitive: "delegate",
+      motion: "",
+      form: "",
+      sides: [],
+      maxRounds: 0,
+      thorough: true,
+      question: "",
+      context: "",
+      assumptions: [],
+      questions: [],
+      intent: "decision",
+    };
+  }
+
+  const tp = entryToTeamPreview(e);
+  return {
+    ...base,
+    steps: [],
+    pending: [],
+    workers: tp.workers,
+    tools: tp.tools ?? [],
+    primitive: tp.primitive,
+    motion: tp.motion,
+    form: tp.form,
+    sides: tp.sides,
+    maxRounds: tp.maxRounds,
+    thorough: tp.thorough,
+    ...(tp.moderatorModel ? { moderatorModel: tp.moderatorModel } : {}),
+    ...(tp.moderatorOrigin ? { moderatorOrigin: tp.moderatorOrigin } : {}),
+    ...(tp.moderatorProviderId
+      ? { moderatorProviderId: tp.moderatorProviderId }
+      : {}),
+    ...(tp.sameModelDebate ? { sameModelDebate: true } : {}),
+    ...(tp.modelCandidates ? { modelCandidates: tp.modelCandidates } : {}),
+    question: "",
+    context: "",
+    assumptions: [],
+    questions: [],
+    intent: "kickoff",
+  };
+}
+
+/** Cold pending entries for a conversation (ResumePrompt authority). */
+export function listColdPendingEntries(
+  conversationId: string,
+): InteractionEntry[] {
+  return useInteractionStore
+    .getState()
+    .listPending(conversationId, [...COLD_RESUME_KINDS]);
 }

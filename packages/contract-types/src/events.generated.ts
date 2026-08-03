@@ -247,6 +247,8 @@ export interface CheckpointRequiredPayload {
   assumptions: AskAssumption[];
   questions: AskQuestion[];
   intent?: CheckpointIntent;
+  /** true=CEO 请求用户在右坞浏览器完成登录（同 escalate browser_login 体验）。旧流缺字段按 false。 */
+  browser_login?: boolean;
 }
 
 export interface CheckpointResolvedPayload {
@@ -309,7 +311,6 @@ export interface TeamPreviewWorker {
   role: string;
   task: string;
   depends_on: string[];
-  debate: boolean;
   /** 交付形态 prose/files 等；缺省=旧帧。 */
   form?: string;
   /** 写盘能力判别；由 form 推导。 */
@@ -376,10 +377,20 @@ export interface TeamPreviewRequiredPayload {
   model_candidates?: ModelCandidate[];
 }
 
+/** 开工卡 continue 修正 / resolved 对账：单向收紧写盘（同效 form=prose）。仅允许 text_only。 */
+export interface WriteCapabilityOverride {
+  run_id: string;
+  capability: "text_only";
+}
+
 export interface TeamPreviewResolvedPayload {
   checkpoint_id: string;
   decision: CheckpointDecision;
   note: string;
+  /** 用户关闭的 run_id；缺省/空=全员开工。 */
+  excluded_run_ids?: string[];
+  /** 写盘单向收紧；仅 capability=text_only；未知 run_id / 升权 → 422（引擎侧）。 */
+  write_capability_overrides?: WriteCapabilityOverride[];
 }
 
 /** 阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。

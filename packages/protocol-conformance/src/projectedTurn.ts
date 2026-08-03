@@ -319,6 +319,13 @@ export type ProjectedInteraction =
       id: string;
       status: InteractionStatus;
       workerIds: string[];
+      /** Resolved 修正：用户关闭的 run_id；缺省=无排除。 */
+      excludedRunIds?: string[];
+      /** Resolved 修正：写盘单向收紧（capability 仅 text_only）。 */
+      writeCapabilityOverrides?: Array<{
+        runId: string;
+        capability: "text_only";
+      }>;
     }
   | {
       kind: "delegation_authorization";

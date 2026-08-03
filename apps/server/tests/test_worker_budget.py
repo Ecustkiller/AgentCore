@@ -370,7 +370,7 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
 
 
 def test_prose_idle_gate_and_scaled_bar():
-    """prose_idle / zero_write 梯子已退役：闸恒关；短 max_rounds 仍提前 reflection。"""
+    """prose_idle / zero_write 梯子已退役：闸恒关。"""
     from agentcore.runtime.engine.governance import create_loop_controller
     from agentcore.runtime.runs.worker_budget import (
         resolve_prose_idle_finalize_rounds,
@@ -395,9 +395,6 @@ def test_prose_idle_gate_and_scaled_bar():
     )
     assert ctrl.prose_idle is False
     assert ctrl.zero_write_finalize_rounds == 0
-    # Short max_rounds pulls reflection earlier (default start 3 → 2).
-    assert ctrl.reflection_due(2)
-    assert not ctrl.reflection_due(1)
 
     files = create_loop_controller(
         frozenset({"file_read"}),

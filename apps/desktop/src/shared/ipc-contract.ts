@@ -45,6 +45,15 @@ export interface FsFileRef {
   name: string;
 }
 
+/** 工作区 ``AgentCore/trash`` 条目（产品一键还原；非 OS 回收站）。 */
+export interface WorkspaceTrashEntry {
+  entryId: string;
+  originalPath: string;
+  name: string;
+  isDir: boolean;
+  deletedAt: string;
+}
+
 /**
  * Fs IPC 失败判别码——renderer 按码分支（如懒物化工作区对 `not_found`），
  * **禁止**匹配 `reason` 中文文案。
@@ -196,6 +205,10 @@ export const FS_CHANNELS = {
   copyPath: "fs:copyPath",
   /** 将根内相对路径移入系统回收站（软删）。 */
   trashPath: "fs:trashPath",
+  /** 列出工作区 AgentCore/trash（产品一键还原；非 OS 回收站）。 */
+  listWorkspaceTrash: "fs:listWorkspaceTrash",
+  /** 还原一条 AgentCore/trash 条目到原相对路径。 */
+  restoreWorkspaceTrash: "fs:restoreWorkspaceTrash",
   /** 引用即驻留：系统文件选择器 → 写入工作区 attachments/ 或暂存。 */
   pickAndStageAttachment: "fs:pickAndStageAttachment",
   /** 从已授权根相对路径驻留。 */
@@ -394,8 +407,16 @@ export interface FsApi {
   /**
    * 将根内相对路径移入系统回收站（`shell.trashItem`，软删）。空 `relPath`（根自身）拒绝。
    * 路径尚不存在（懒建 scratch 未物化）视为成功。仅本地源有意义。
+   * **不**承诺产品一键还原——请到系统回收站手动恢复。
    */
   trashPath(rootId: string, relPath: string): Promise<FsResult>;
+  /**
+   * 列出本地根下 ``AgentCore/trash`` 条目（无系统回收站时的软删兜底）。
+   * OS ``shell.trashItem`` 删除不会出现在此列表。
+   */
+  listWorkspaceTrash(rootId: string): Promise<FsResult<WorkspaceTrashEntry[]>>;
+  /** 还原一条 AgentCore/trash 条目到原相对路径。 */
+  restoreWorkspaceTrash(rootId: string, entryId: string): Promise<FsResult>;
   /**
    * 引用即驻留：打开系统文件选择器，复制进对话工作区 ``attachments/``（有 dest）
    * 或主进程暂存（无 dest）。取消选择返回 ``null``。

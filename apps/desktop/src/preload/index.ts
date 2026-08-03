@@ -6,6 +6,7 @@ import {
   BROWSER_CHANNELS,
   type BrowserApi,
   type BrowserNavState,
+  type BrowserOpenTabRequest,
 } from "@shared/browser-contract";
 import {
   FLOAT_WINDOW_CHANNELS,
@@ -151,6 +152,10 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.copyPath, { rootId, relPath }),
   trashPath: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.trashPath, { rootId, relPath }),
+  listWorkspaceTrash: (rootId) =>
+    ipcRenderer.invoke(FS_CHANNELS.listWorkspaceTrash, { rootId }),
+  restoreWorkspaceTrash: (rootId, entryId) =>
+    ipcRenderer.invoke(FS_CHANNELS.restoreWorkspaceTrash, { rootId, entryId }),
   pickAndStageAttachment: (dest) =>
     ipcRenderer.invoke(FS_CHANNELS.pickAndStageAttachment, { dest }),
   stageFromRoot: (rootId, relPath, dest) =>
@@ -355,6 +360,12 @@ const browserApi: BrowserApi = {
     ipcRenderer.on(BROWSER_CHANNELS.navState, listener);
     return () =>
       ipcRenderer.removeListener(BROWSER_CHANNELS.navState, listener);
+  },
+  onOpenTab: (cb) => {
+    const listener = (_e: unknown, payload: BrowserOpenTabRequest) =>
+      cb(payload);
+    ipcRenderer.on(BROWSER_CHANNELS.openTab, listener);
+    return () => ipcRenderer.removeListener(BROWSER_CHANNELS.openTab, listener);
   },
 };
 

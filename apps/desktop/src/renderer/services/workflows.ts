@@ -173,10 +173,12 @@ const FALLBACK_PRIMARY_SLOTS: Record<
   build_feature: [{ key: "feature", label: "功能", hint: "要实现的功能简述" }],
   build_app: [{ key: "app", label: "应用", hint: "要搭建的应用 / SPA 简述" }],
   build_website: [
-    { key: "site", label: "站点", hint: "要建的站点 / 落地页简述" },
-  ],
-  build_toolshed: [
-    { key: "site", label: "工具台", hint: "控制台 / 工具台简述" },
+    { key: "site", label: "站点", hint: "要建的站点 / 落地页 / 控制台简述" },
+    {
+      key: "style",
+      label: "气质",
+      hint: "可选：marketing（默认落地页）或 toolshed（控制台 dense）",
+    },
   ],
   parallel_brief: [
     { key: "topic", label: "主题", hint: "要摸底对齐的主题" },

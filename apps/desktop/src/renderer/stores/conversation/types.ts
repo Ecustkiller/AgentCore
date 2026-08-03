@@ -27,6 +27,8 @@ export interface CheckpointDisplay {
   decision: CheckpointDecision | null;
   note: string;
   selected: string[];
+  /** Wire `browser_login` — CEO login gate; resume card mirrors escalate login UX. */
+  browserLogin?: boolean;
 }
 
 export interface NonBlockingAskDisplay {
@@ -53,7 +55,6 @@ export interface TeamPreviewWorkerDisplay {
   role: string;
   task: string;
   depends_on: string[];
-  debate: boolean;
   /** 交付形态；旧帧 absent → 不展示写盘能力。 */
   form?: string;
   /** 写盘能力判别；由 form 推导。 */
@@ -107,6 +108,18 @@ export interface TeamPreviewDisplay {
   status: "pending" | "resolved";
   decision: CheckpointDecision | null;
   note: string;
+  /**
+   * Resolved 对账：continue 时用户排除的 run_id（team_preview_resolved / 乐观 resolution）。
+   * 缺省 / 空 = 未排除（同旧文案）。
+   */
+  excluded_run_ids?: string[];
+  /**
+   * Resolved 对账：写盘收紧列表（仅 text_only）。缺省 / 空 = 未收紧。
+   */
+  write_capability_overrides?: Array<{
+    run_id: string;
+    capability: "text_only";
+  }>;
 }
 
 export interface Conversation {

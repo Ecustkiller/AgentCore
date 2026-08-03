@@ -235,6 +235,74 @@ describe("closeTab", () => {
   });
 });
 
+describe("reorderContentTabs", () => {
+  it("reorders matching tabs at their original index slots", () => {
+    panel().openTab(runDetail("run-1"));
+    panel().openTab(runDetail("run-2"));
+    panel().openTab(runDetail("run-3"));
+    panel().reorderContentTabs([
+      tabId("run-3"),
+      tabId("run-1"),
+      tabId("run-2"),
+    ]);
+    expect(panel().tabs.map((t) => t.id)).toEqual([
+      tabId("run-3"),
+      tabId("run-1"),
+      tabId("run-2"),
+    ]);
+  });
+
+  it("reorders a contiguous subset while keeping outsiders fixed", () => {
+    panel().openTab(runDetail("run-1"));
+    panel().openTab(runDetail("run-2"));
+    panel().openTab(runDetail("run-3"));
+    panel().openTab(runDetail("run-4"));
+    // Only reorder the middle pair: slots of run-2/run-3 become run-3/run-2.
+    panel().reorderContentTabs([tabId("run-3"), tabId("run-2")]);
+    expect(panel().tabs.map((t) => t.id)).toEqual([
+      tabId("run-1"),
+      tabId("run-3"),
+      tabId("run-2"),
+      tabId("run-4"),
+    ]);
+  });
+
+  it("keeps floating tabs' relative slots when reordering docked ids", () => {
+    panel().openTab(runDetail("run-1"));
+    panel().openTab(runDetail("run-2"));
+    panel().openTab(runDetail("run-3"));
+    panel().floatTab(tabId("run-2"));
+    // Reorder docked run-1 / run-3; floating run-2 stays in its index slot.
+    panel().reorderContentTabs([tabId("run-3"), tabId("run-1")]);
+    expect(panel().tabs.map((t) => t.id)).toEqual([
+      tabId("run-3"),
+      tabId("run-2"),
+      tabId("run-1"),
+    ]);
+    expect(panel().isFloating(tabId("run-2"))).toBe(true);
+  });
+
+  it("is a no-op for unknown / duplicate / length-mismatch ids", () => {
+    panel().openTab(runDetail("run-1"));
+    panel().openTab(runDetail("run-2"));
+    const before = panel().tabs.map((t) => t.id);
+
+    panel().reorderContentTabs([tabId("run-2"), "ghost"]);
+    expect(panel().tabs.map((t) => t.id)).toEqual(before);
+
+    panel().reorderContentTabs([tabId("run-1"), tabId("run-1")]);
+    expect(panel().tabs.map((t) => t.id)).toEqual(before);
+
+    // orderedIds longer than matching tabs in state
+    panel().reorderContentTabs([
+      tabId("run-1"),
+      tabId("run-2"),
+      tabId("run-3"),
+    ]);
+    expect(panel().tabs.map((t) => t.id)).toEqual(before);
+  });
+});
+
 describe("togglePanel", () => {
   it("opens, then closes (keeping the active tab)", () => {
     panel().showRunDetail(MID, "run-1");

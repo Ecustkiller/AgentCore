@@ -201,8 +201,6 @@ def test_liveness_circuit_first_fail_retires():
         tool_failure_warn=2,
         tool_failure_disable=3,
         unproductive_threshold=99,
-        reflection_start_round=99,
-        reflection_interval=99,
     )
     ctrl.record(
         [

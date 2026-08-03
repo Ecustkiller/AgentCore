@@ -19,9 +19,10 @@ skip_if:
 | 层 | 职责 |
 |---|---|
 | 记分牌 | 辩题/进度/VS/模型徽章（全页仅此一处常驻）/布局开关/站队 |
-| 庭前准备 | 组卷/证据包轻态（无取证员舰队）；靠 `debate_pretrial_started|completed` 撑首屏；旧 `pretrial:investigators:` 不入 `debate:` 命名空间 |
 | 剧本主列 | 正反：轮次发言+质询；红队：finding 三拍；圆桌：点名串行。发言**无**模型徽章 |
 | 终审舞台 | 唯一结论面：裁决卡 → 战果对照 → 留给你的 |
+
+**庭前准备 UI 已退场**（热路径秒过、无任务单实质面）；后端 `debate_pretrial_*` / fold 暂留供台账与预算。旧 `pretrial:investigators:` 不入 `debate:` 命名空间。
 
 **布局**：正反默认并排可切单栏；红队/圆桌恒单栏。阵营色 = 独立对立 token（`pro`蓝/`con`红），⊥ `--agent-N`。记分牌不 sticky。辩论回合默认落辩论室；协作图/对比平级 tab。
 

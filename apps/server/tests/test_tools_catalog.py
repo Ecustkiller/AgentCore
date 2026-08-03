@@ -31,6 +31,7 @@ _EXPECTED_NAMES = {
     "file_batch",
     "md_to_docx",
     "md_to_pdf",
+    "archive_extract",
     "grep",
     "code_search",
     "code_diagnostics",
@@ -65,6 +66,7 @@ _DELEGATED_MUTATION_NAMES = {
     "file_batch",
     "md_to_docx",
     "md_to_pdf",
+    "archive_extract",
     "code_execute",
 }
 
@@ -124,6 +126,7 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["file_batch"] is ToolApproval.GRANTABLE
     assert approvals["md_to_docx"] is ToolApproval.GRANTABLE
     assert approvals["md_to_pdf"] is ToolApproval.GRANTABLE
+    assert approvals["archive_extract"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
     assert approvals["file_read"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
@@ -146,6 +149,7 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
         "file_batch",
         "md_to_docx",
         "md_to_pdf",
+        "archive_extract",
     }
     assert "code_execute" not in names
     # Exactly the delegated mutation set minus code_execute (stays in lockstep).
@@ -265,6 +269,7 @@ def test_ceo_registry_browser_interactive_grantable_when_include_browser():
         "browser_type",
         "browser_scroll",
         "browser_snapshot",
+        "browser_console",
     ):
         assert name in schemas
         assert schemas[name].approval is ToolApproval.GRANTABLE

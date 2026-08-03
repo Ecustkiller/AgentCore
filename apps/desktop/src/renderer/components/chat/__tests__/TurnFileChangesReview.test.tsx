@@ -225,16 +225,19 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText("回退到本回合开始")).toBeTruthy();
+      expect(screen.getByLabelText("恢复到本回合开始")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByLabelText("回退到本回合开始"));
+    fireEvent.click(screen.getByLabelText("恢复到本回合开始"));
     await waitFor(() => {
       expect(restoreSnapshot).toHaveBeenCalledWith("c1", "snap-1");
       expect(notifySuccess).toHaveBeenCalled();
     });
     expect(getLocalTurnFilesDiff).not.toHaveBeenCalled();
     expect(restoreLocalTurnBaseline).not.toHaveBeenCalled();
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("overlay"),
+    );
   });
 
   it("hides rollback when falling back to tool-arg preview", async () => {
@@ -269,7 +272,47 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     await waitFor(() => {
       expect(screen.getByText(/工具参数侧预览/)).toBeTruthy();
     });
-    expect(screen.queryByLabelText("回退到本回合开始")).toBeNull();
+    expect(screen.queryByLabelText("恢复到本回合开始")).toBeNull();
+  });
+
+  it("P0c: empty file_* artifacts still shows restore when baseline available", async () => {
+    getTurnFilesDiff.mockResolvedValue({
+      messageId: "m1",
+      baselineSnapshotId: "snap-1",
+      available: true,
+      changes: [
+        {
+          path: "gone.ts",
+          changeType: "deleted",
+          baseSha: "b",
+          resultSha: null,
+          isBinary: false,
+          content: null,
+          sizeBytes: 0,
+          baseContent: "x",
+        },
+      ],
+      total: 1,
+      added: 0,
+      modified: 0,
+      deleted: 1,
+    });
+
+    render(
+      <TooltipProvider>
+        <TurnFileChangesReview
+          conversationId="c1"
+          messageId="m1"
+          artifacts={[]}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("恢复到本回合开始")).toBeTruthy();
+    });
+    expect(screen.getByText(/overlay/)).toBeTruthy();
+    expect(screen.getByText("删除")).toBeTruthy();
   });
 
   it("uses sidecar local diff/restore when workspace location is local", async () => {
@@ -311,16 +354,16 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText("回退到本回合开始")).toBeTruthy();
+      expect(screen.getByLabelText("恢复到本回合开始")).toBeTruthy();
     });
     expect(getLocalTurnFilesDiff).toHaveBeenCalledWith(
       { rootId: "root-1", subpath: "conversations/c1" },
       "m1",
     );
     expect(getTurnFilesDiff).not.toHaveBeenCalled();
-    expect(screen.getByText(/本机工作区基线/)).toBeTruthy();
+    expect(screen.getByText(/本机 zip 基线/)).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("回退到本回合开始"));
+    fireEvent.click(screen.getByLabelText("恢复到本回合开始"));
     await waitFor(() => {
       expect(restoreLocalTurnBaseline).toHaveBeenCalledWith(
         { rootId: "root-1", subpath: "conversations/c1" },

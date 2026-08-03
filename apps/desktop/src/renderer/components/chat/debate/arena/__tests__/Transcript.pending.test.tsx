@@ -77,7 +77,6 @@ function model(overrides: Partial<DebateModel> = {}): DebateModel {
     crossExamEnabled: false,
     evidenceLedger: [],
     subtopics: null,
-    pretrial: null,
     ...overrides,
   };
 }

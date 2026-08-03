@@ -50,6 +50,7 @@ function frameRecord(
   messageId: string,
   conversationId: string,
   createdAt: number,
+  extras: Record<string, unknown> = {},
 ) {
   return {
     message_id: messageId,
@@ -58,6 +59,7 @@ function frameRecord(
     summary: summary(messageId),
     frame: {},
     journal: [],
+    ...extras,
   };
 }
 
@@ -84,6 +86,37 @@ describe("SidecarManager.recovery paused[] (local frame file read, no spawn)", (
     expect(data.paused[0].question).toBe("要继续吗？");
     expect(data.liveRunning).toBe(false);
     expect(data.unsynced).toEqual([]);
+    expect(data.pausedRuns ?? {}).toEqual({});
+  });
+
+  it("surfaces display_runs as pausedRuns for collab-graph hydrate", async () => {
+    const displayRuns = {
+      events: [
+        {
+          type: "run_plan",
+          payload: { execution_id: "exec-1" },
+          timestamp: "t0",
+        },
+      ],
+      finish_reason: "paused",
+      process: [{ kind: "team", execution_id: "exec-1" }],
+    };
+    writeFrame(
+      "with-runs.json",
+      frameRecord("m_graph", "c-graph", 100, { display_runs: displayRuns }),
+    );
+    writeFrame("legacy-no-runs.json", frameRecord("m_legacy", "c-graph", 110));
+
+    const manager = new SidecarManager(() => {
+      throw new Error("recovery must not spawn the sidecar");
+    });
+    const data = await manager.recovery({ conversationId: "c-graph" });
+
+    expect(data.paused.map((d) => d.message_id)).toEqual([
+      "m_graph",
+      "m_legacy",
+    ]);
+    expect(data.pausedRuns).toEqual({ m_graph: displayRuns });
   });
 
   it("returns paused=[] when no frames directory exists yet", async () => {

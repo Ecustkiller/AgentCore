@@ -253,6 +253,30 @@ def test_team_preview_resolved_continue(projected):
     ]
 
 
+def test_team_preview_exclude_one_continue(projected):
+    p = projected["team_preview_exclude_one_continue"]
+    assert p["status"] == "completed"
+    assert _pending_gates(p) == []
+    tp = next(i for i in p["interactions"] if i["kind"] == "team_preview")
+    assert tp["status"] == "resolved"
+    assert tp["excludedRunIds"] == ["r2"]
+    assert "writeCapabilityOverrides" not in tp
+    assert p["progress"]["completed"] == 1
+
+
+def test_team_preview_tighten_write_continue(projected):
+    p = projected["team_preview_tighten_write_continue"]
+    assert p["status"] == "completed"
+    assert _pending_gates(p) == []
+    tp = next(i for i in p["interactions"] if i["kind"] == "team_preview")
+    assert tp["status"] == "resolved"
+    assert "excludedRunIds" not in tp
+    assert tp["writeCapabilityOverrides"] == [
+        {"runId": "r2", "capability": "text_only"},
+    ]
+    assert p["progress"]["completed"] == 2
+
+
 def test_debate_team_preview_resolved_continue(projected):
     p = projected["debate_team_preview_resolved_continue"]
     assert p["status"] == "running"

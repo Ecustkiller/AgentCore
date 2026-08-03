@@ -62,6 +62,11 @@ def test_scan_destructive_rm_root_hits(text: str):
 
 
 def test_scan_destructive_rm_workspace_paths_pass():
+    """Ordinary workspace relative rm stays off the catastrophic rm_root rule.
+
+    P2 top-tree / whitelist behavior is covered by evaluate_tool_call tests below —
+    this asserts the narrow catastrophic scanner does not expand to every ``rm -rf``.
+    """
     assert scan_destructive_text("rm -rf /tmp/build") is None
     assert scan_destructive_text("rm -rf ./dist") is None
     assert scan_destructive_text("rm -rf node_modules") is None
@@ -228,6 +233,65 @@ def test_evaluate_code_execute_benign_passes():
         )
         is None
     )
+
+
+def test_evaluate_whitelist_cleanup_passes():
+    """P2 whitelist: ordinary dependency/build cleanup must not FORCE_APPROVAL."""
+    for code in (
+        'shutil.rmtree("node_modules")\n',
+        'shutil.rmtree(".venv")\n',
+        "rm -rf dist\n",
+        "rm -rf ./build\n",
+        "Remove-Item -Recurse -Force .next\n",
+        "rimraf __pycache__\n",
+    ):
+        assert (
+            evaluate_tool_call("code_execute", {"language": "python", "code": code})
+            is None
+        ), code
+    assert (
+        evaluate_tool_call(
+            "terminal", {"subcommand": "start", "command": "rm -rf node_modules"}
+        )
+        is None
+    )
+
+
+def test_evaluate_top_level_project_rmtree_forces():
+    """P2: top-level whole-project tree → FORCE_APPROVAL (honest heuristic)."""
+    hit = evaluate_tool_call(
+        "code_execute",
+        {
+            "language": "python",
+            "code": 'shutil.rmtree(cwd / "ai-team-workbench")\n',
+        },
+    )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+    assert hit.rule_id == "destructive.workspace_top_tree"
+    assert "并非完整拦截" in hit.reason
+
+
+def test_evaluate_nested_rmtree_not_top_tree():
+    """Nested project path is not the P2 top-tree gate (P0 baseline gate is separate)."""
+    assert (
+        evaluate_tool_call(
+            "code_execute",
+            {"language": "python", "code": 'shutil.rmtree("src/legacy")\n'},
+        )
+        is None
+    )
+
+
+def test_host_shell_top_tree_forces_not_deny():
+    """P2 top-tree is FORCE_APPROVAL; must not be confused with fuse⊆DENY families."""
+    hit = evaluate_tool_call(
+        "host_shell", {"command": "rm -rf ./my-app"}
+    )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+    assert hit.rule_id == "destructive.workspace_top_tree"
+    assert hit.rule_id not in fuse_aligned_deny_rule_ids()
 
 
 def test_evaluate_host_shell_force_push_protected_forces():

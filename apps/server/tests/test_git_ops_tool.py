@@ -112,7 +112,10 @@ async def test_unknown_subcommand_rejected(tmp_path: Path):
 # --- CEO write ban ---
 
 
-@pytest.mark.parametrize("subcommand", sorted(git_write_subcommands()))
+@pytest.mark.parametrize(
+    "subcommand",
+    sorted(s for s in git_write_subcommands() if s != "init_baseline"),
+)
 async def test_ceo_context_rejects_all_write_subcommands(tmp_path: Path, subcommand: str):
     _init_repo(tmp_path / "repo")
     args: dict[str, Any] = {"subcommand": subcommand}
@@ -514,3 +517,57 @@ def test_parse_status_sb_extracts_branch():
     branch2, body2 = _parse_status_sb("## main\n")
     assert branch2 == "main"
     assert body2 == ""
+
+
+# --- init_baseline (P3 soft git baseline) ---
+
+
+async def test_init_baseline_creates_repo_and_first_commit(tmp_path: Path):
+    bare = tmp_path / "project"
+    bare.mkdir()
+    (bare / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    assert not (bare / ".git").exists()
+
+    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(bare))
+    assert result.success is True
+    assert (bare / ".git").exists()
+    assert "首提交" in result.output or "baseline" in result.output.lower()
+    assert result.metadata.get("sha")
+    # Tree is tracked after first commit.
+    status = await GitTool().execute(
+        {"subcommand": "status", "include_untracked": True}, _ceo_ctx(bare)
+    )
+    assert status.success is True
+    assert "app.py" not in (status.output or "") or "工作区干净" in (status.output or "")
+
+
+async def test_init_baseline_dirty_existing_repo_skips_commit(tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("dirty\n", encoding="utf-8")
+    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(repo))
+    assert result.success is True
+    assert result.metadata.get("code") == "dirty_skip"
+    assert "不代为 commit" in result.output
+    # Dirty content must remain uncommitted.
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+    )
+    assert porcelain.stdout.strip()
+
+
+async def test_init_baseline_clean_existing_repo_reports_already(tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(repo))
+    assert result.success is True
+    assert result.metadata.get("code") == "already_repo"
+    assert "无需 init_baseline" in result.output
+
+
+def test_init_baseline_in_write_allowlist():
+    assert "init_baseline" in _ALLOWED_SUBCOMMANDS
+    assert "init_baseline" in git_write_subcommands()

@@ -11,8 +11,12 @@ from agentcore.runtime.context.assembler import ContextAssembler
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
 from agentcore.runtime.context.workspace_context import (
     ChannelProfile,
+    WorkspaceGitFact,
     build_workspace_context,
     desktop_client_can_bind,
+    detect_workspace_git,
+    detect_workspace_git_sync,
+    format_workspace_git_line,
     resolve_channel_profile,
 )
 from agentcore.runtime.context.workspace_overview import build_workspace_overview
@@ -22,8 +26,12 @@ __all__ = [
     "ContextAssembler",
     "PromptContributor",
     "SectionOrder",
+    "WorkspaceGitFact",
     "build_workspace_context",
     "build_workspace_overview",
+    "detect_workspace_git",
+    "detect_workspace_git_sync",
     "desktop_client_can_bind",
+    "format_workspace_git_line",
     "resolve_channel_profile",
 ]

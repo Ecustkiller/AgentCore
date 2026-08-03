@@ -675,3 +675,59 @@ def test_runs_from_entries_synthesizes_team_when_process_team_missing():
     growth_runs = runs_from_entries(growth)
     assert growth_runs is not None
     assert [s["kind"] for s in (growth_runs.get("process") or [])] == ["content"]
+
+
+def test_settlement_fact_log_phantom_no_longer_duplicates_trailing_process_content():
+    """Regression: D8 cold-resume phantom in fact_log + finalize enumerate ⇒ dup PC.
+
+    Mimic drift (inherited resolved already in log; re-emit must not append again),
+    flush open captain content, then enumerate like ``persist_turn_journal``. With the
+    root fix, fact_log stays aligned so enumerate only adds ``turn_end`` after one PC.
+    """
+    from agentcore.runtime.events import team_preview_resolved
+    from agentcore.runtime.facts import Fact, record_turn_fact
+    from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
+    from agentcore.runtime.settlement import entry_from_sse, seed_settlement_dedupe_from_entries
+
+    event = team_preview_resolved(checkpoint_id="ck1", decision="continue", note="")
+    resolved = entry_from_sse(event)
+    inherited = [
+        {"kind": "turn_started", "payload": {}, "ts": "t0"},
+        {"kind": "team_preview_required", "payload": {"checkpoint_id": "ck1"}, "ts": "t1"},
+        {"kind": "turn_paused", "payload": {}, "ts": "t2"},
+        resolved,
+    ]
+    log = TurnFactLog(inherited_entries=inherited)
+    writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id=None)
+    seed_settlement_dedupe_from_entries(writer, inherited)
+    sink = EventSink()
+    # Structural process gate (team marker) so finalize persists journal.
+    sink.seed_process([{"kind": "team", "execution_id": "e1"}])
+
+    fl = current_fact_log.set(log)
+    wt = current_journal_writer.set(writer)
+    try:
+        # Recover-path re-emit (SSE still desired; must not phantom the log).
+        record_turn_fact(
+            Fact(kind=event.type.value, payload=dict(event.payload), ts=event.timestamp)
+        )
+        assert sum(1 for e in log.entries() if e.get("kind") == "team_preview_resolved") == 1
+
+        closing = "团队已全部收束。\n\n**本轮完成**\n说明：落盘完成。"
+        sink.emit(content_delta(closing))
+        sink.seed_journal(
+            [{"type": "run_completed", "payload": {"run_id": "cap"}, "timestamp": "t"}]
+        )
+        durable = _journal_entries_for_turn(log, sink=sink, finish=FinishReason.END_TURN)
+        assert durable is not None
+        pcs = [e for e in durable if e.get("kind") == "process_content"]
+        assert len(pcs) == 1
+        assert pcs[0]["payload"]["text"] == closing
+        assert durable[-1]["kind"] == "turn_end"
+
+        # Enumerate seqs like persist_turn_journal: one PC index, then turn_end.
+        kinds_by_seq = [e["kind"] for e in durable]
+        assert kinds_by_seq.count("process_content") == 1
+    finally:
+        current_journal_writer.reset(wt)
+        current_fact_log.reset(fl)

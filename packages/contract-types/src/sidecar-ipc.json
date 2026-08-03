@@ -31,6 +31,8 @@
       "note",
       "subpath",
       "selected",
+      "excluded_run_ids",
+      "write_capability_overrides",
       "inference",
       "browserBridge",
       "permissionAxes"
@@ -52,6 +54,8 @@
       "decision",
       "note",
       "selected",
+      "excluded_run_ids",
+      "write_capability_overrides",
       "inference",
       "browserBridge",
       "permissionAxes"

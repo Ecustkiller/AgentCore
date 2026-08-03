@@ -61,7 +61,6 @@ function makeTeamPreview(over: Record<string, unknown> = {}) {
         role: "研究员",
         task: "调研",
         depends_on: [],
-        debate: false,
       },
     ],
     tools: ["file_write", "code_execute"],
@@ -144,7 +143,6 @@ describe("ResumePrompt · team_preview delegate", () => {
             role: "研究员",
             task: longTask,
             depends_on: [],
-            debate: false,
           },
         ],
       }),
@@ -172,7 +170,6 @@ describe("ResumePrompt · team_preview delegate", () => {
           role: `队员${i}`,
           task: `任务说明 ${i}\n补充细节很多很多很多`,
           depends_on: [],
-          debate: false,
         })),
       }),
     ];
@@ -194,6 +191,169 @@ describe("ResumePrompt · team_preview delegate", () => {
 
     expect(screen.getByText("授权并开工")).toBeTruthy();
     expect(screen.getByPlaceholderText(/对全体队员的嘱咐/)).toBeTruthy();
+  });
+
+  it("纳入开关：排除无依赖队员后 continue 带 excluded_run_ids", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+            write_capability: "can_write_files",
+            write_capability_label: "可改文件",
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            task: "写报告",
+            depends_on: [],
+            write_capability: "text_only",
+            write_capability_label: "仅文字报告",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    fireEvent.click(screen.getByRole("switch", { name: "纳入本轮 · 撰写员" }));
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "continue",
+          excluded_run_ids: ["r2"],
+        }),
+      }),
+    );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.write_capability_overrides).toBeUndefined();
+  });
+
+  it("可改文件→仅文字：continue 带 write_capability_overrides", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+            write_capability: "can_write_files",
+            write_capability_label: "可改文件",
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            task: "写报告",
+            depends_on: [],
+            write_capability: "can_write_files",
+            write_capability_label: "可改文件",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
+    );
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "continue",
+          write_capability_overrides: [
+            { run_id: "r1", capability: "text_only" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("仍被依赖的岗禁止排除并短提示；至少保留 1 人", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            task: "写报告",
+            depends_on: ["r1"],
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    const r1Switch = screen.getByRole("switch", { name: "纳入本轮 · 研究员" });
+    const r2Switch = screen.getByRole("switch", { name: "纳入本轮 · 撰写员" });
+    expect(r1Switch).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("team-preview-dep-block-hint").textContent).toBe(
+      "仍有队员依赖此岗",
+    );
+    // 排除下游后：上游不再被依赖，但成唯一纳入者 → 仍禁止关到 0
+    fireEvent.click(r2Switch);
+    expect(r1Switch).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "continue",
+          excluded_run_ids: ["r2"],
+        }),
+      }),
+    );
+  });
+
+  it("stop 不带修正字段", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+            write_capability: "can_write_files",
+            write_capability_label: "可改文件",
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            task: "写报告",
+            depends_on: [],
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    fireEvent.click(screen.getByRole("switch", { name: "纳入本轮 · 撰写员" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
+    );
+    fireEvent.click(screen.getByText("停止"));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "stop",
+        }),
+      }),
+    );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.write_capability_overrides).toBeUndefined();
   });
 });
 
@@ -229,7 +389,7 @@ describe("ResumePrompt · team_preview debate", () => {
     expect(screen.getByPlaceholderText(/开赛嘱咐/)).toBeTruthy();
   });
 
-  it("主按钮带嘱咐发 continue", () => {
+  it("主按钮带嘱咐发 continue；辩论不附修正字段", () => {
     render(<ResumePrompt />);
     fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
       target: { value: "最关心成本谁买单" },
@@ -243,6 +403,13 @@ describe("ResumePrompt · team_preview debate", () => {
         }),
       }),
     );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.write_capability_overrides).toBeUndefined();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("开工卡不再提供 research_first 第三键（庭前取证内化）", () => {

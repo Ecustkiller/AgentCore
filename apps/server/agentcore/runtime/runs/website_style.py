@@ -1,6 +1,7 @@
 """Website DESIGN.md helpers + optional style confirmation cache.
 
-场面账硬闸已拆除：``build_website`` / ``build_toolshed`` 不再因缺 style 拒调。
+场面账硬闸已拆除：``build_website`` 不再因缺视觉风格账拒调
+（``playbook_args.style`` 气质槽另计，与本账无关）。
 无确认时 :func:`design_prompt_block` 软注入 ``s_default``；``web_quality_scan``
 仍要求 DESIGN.md 含「用户选定风格 id」标记。
 
@@ -91,7 +92,7 @@ class WebsiteStyleConfirmedFact:
 
 def build_website_missing_style_error() -> str:
     return (
-        "建站 playbook（build_website / build_toolshed）需要先经 ask_user 开工卡确认风格"
+        "建站 playbook（build_website）需要先经 ask_user 开工卡确认风格"
         "（DESIGN.md「用户选定风格 id」约定；无确认时软注入 s_default）。"
         "请先开开工提案卡选风格，或在 AutonomyPolicy.full_auto 下由机制落默认风格。"
     )

@@ -185,7 +185,36 @@ export function foldInteractions(
       }
       case "team_preview_resolved": {
         const id = str(p.checkpoint_id);
-        if (id) settle(map, "team_preview", id, "resolved");
+        if (!id) break;
+        const prev = map.get(keyOf("team_preview", id));
+        if (
+          !prev ||
+          prev.leaf.status !== "pending" ||
+          prev.leaf.kind !== "team_preview"
+        ) {
+          break;
+        }
+        const excluded = Array.isArray(p.excluded_run_ids)
+          ? p.excluded_run_ids.filter(
+              (x): x is string => typeof x === "string" && x.length > 0,
+            )
+          : [];
+        const overridesRaw = Array.isArray(p.write_capability_overrides)
+          ? p.write_capability_overrides
+          : [];
+        const overrides: Array<{ runId: string; capability: "text_only" }> = [];
+        for (const row of overridesRaw) {
+          const r = asRecord(row);
+          const rid = str(r.run_id);
+          if (!rid) continue;
+          overrides.push({ runId: rid, capability: "text_only" });
+        }
+        prev.leaf = {
+          ...prev.leaf,
+          status: "resolved",
+          ...(excluded.length ? { excludedRunIds: excluded } : {}),
+          ...(overrides.length ? { writeCapabilityOverrides: overrides } : {}),
+        };
         break;
       }
       case "question_posted": {

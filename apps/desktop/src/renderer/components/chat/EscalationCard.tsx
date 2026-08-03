@@ -9,7 +9,6 @@ import {
 } from "@/services/escalation";
 import { submitInteractionFeedback } from "@/services/interactionSubmit";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
-import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ArrowRight,
   Check,
@@ -18,17 +17,27 @@ import {
   Clock,
   HelpCircle,
   Loader2,
-  LogIn,
   Megaphone,
-  Radio,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { BrowserLoginDecisionCard } from "./BrowserLoginDecisionCard";
 import {
   AskNoteField,
   AskQuestionFields,
   type AskUserContent,
   useAskAnswer,
 } from "./ask/AskUserFields";
+import { ResolvedDecisionRecord } from "./decision";
+
+/** Stable disclosure key for settled / raised escalation cards (legacy null id → role+q). */
+function escalationDisclosureKey(
+  escalation: RunEscalation,
+  role: string,
+  facet: "raised" | "resolved",
+): string {
+  if (escalation.id) return `escalation:${facet}:${escalation.id}`;
+  return `escalation:${facet}:${role}:${escalation.question.slice(0, 80)}`;
+}
 
 function escalationKindTag(esc: RunEscalation): string | null {
   return escalationRowKindLabel(esc);
@@ -141,88 +150,25 @@ function PendingBrowserLoginEscalation({
     conversationId,
     escalation.id,
   );
-  // pending browserLogin 出现时自动揭示右坞浏览器壳；按 escalation.id 防 StrictMode / 重渲连弹。
-  // 「打开浏览器」按钮仍保留作兜底。
-  const revealedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!conversationId) return;
-    const key = escalation.id ?? "browser-login";
-    if (revealedFor.current === key) return;
-    revealedFor.current = key;
-    useSidePanelStore.getState().showBrowser();
-  }, [conversationId, escalation.id]);
-
+  const submitKind =
+    submitting === "answer"
+      ? ("logged_in" as const)
+      : submitting === "use_assumption"
+        ? ("use_assumption" as const)
+        : null;
   return (
-    <DecisionCard tone="primary" animate>
-      <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="primary">
-          <LogIn size={16} />
-        </DecisionCardIcon>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
-            <p className="min-w-0 flex-1 text-xs font-medium text-primary">
-              {role} · 需要你登录
-              {escalationKindTag(escalation)
-                ? ` · ${escalationKindTag(escalation)}`
-                : ""}
-            </p>
-            <ManualHelpLink to={MANUAL_HELP.control} />
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            在浏览器里完成登录后，点「已登录，继续」
-          </p>
-          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
-            {escalation.question}
-          </p>
-          {escalation.assumption ? (
-            <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-              未答则按此继续：{escalation.assumption}
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
-        {conversationId && (
-          <Button
-            variant="neutral"
-            disabled={busy}
-            onClick={() => useSidePanelStore.getState().showBrowser()}
-            icon={<Radio size={13} />}
-          >
-            打开浏览器
-          </Button>
-        )}
-        <Button
-          variant="primary"
-          disabled={busy}
-          onClick={() => send({ kind: "answer", answer: "已登录，继续" })}
-          icon={
-            submitting === "answer" ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Check size={13} />
-            )
-          }
-        >
-          已登录，继续
-        </Button>
-        <Button
-          variant="neutral"
-          disabled={busy}
-          onClick={() => send({ kind: "use_assumption" })}
-          icon={
-            submitting === "use_assumption" ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <ArrowRight size={13} />
-            )
-          }
-        >
-          按假设继续
-        </Button>
-      </div>
-    </DecisionCard>
+    <BrowserLoginDecisionCard
+      roleLabel={role}
+      question={escalation.question}
+      assumption={escalation.assumption || undefined}
+      conversationId={conversationId}
+      revealKey={escalation.id ?? "browser-login"}
+      busy={busy}
+      submitting={submitKind}
+      kindTag={escalationKindTag(escalation) || undefined}
+      onLoggedIn={() => send({ kind: "answer", answer: "已登录，继续" })}
+      onUseAssumption={() => send({ kind: "use_assumption" })}
+    />
   );
 }
 
@@ -513,9 +459,8 @@ function DormantEscalation({
 
 /** 非阻塞上报「边干边提醒」(run_escalation, status=raised): the worker surfaced a
  * decision/blocker but did NOT suspend — it proceeded on its assumption. A passive,
- * non-interactive notice (neutral tone, no resolve buttons) so 升级实时可见 holds even
- * when the 协作图 is collapsed, while staying visibly distinct from a 待你拍板 card.
- * 默认折成一行摘要（对齐队员任务），点开再看全文 + 假设——无需拍板不占裁决卡面积。 */
+ * non-interactive notice so 升级实时可见 holds even when the 协作图 is collapsed.
+ * 默认收起为一行（对齐 TeamPreview / ResolvedDecisionRecord），点开再看全文 + 假设。 */
 function RaisedEscalation({
   escalation,
   role,
@@ -523,57 +468,22 @@ function RaisedEscalation({
   escalation: RunEscalation;
   role: string;
 }) {
-  const [open, setOpen] = useState(false);
   const kind = escalationKindTag(escalation);
+  const summary = `${role} · 边干边上报（无需你拍板）${kind ? ` · ${kind}` : ""}`;
   return (
-    <DecisionCard tone="neutral" className="bg-card/60">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label={
-          open ? `收起 ${role} 边干边上报` : `展开 ${role} 边干边上报`
-        }
-        className="flex w-full items-start gap-2 text-left"
-      >
-        <span className="mt-0.5 shrink-0 text-muted-foreground">
-          <Megaphone size={14} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-1.5">
-            <p className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
-              {role} · 边干边上报（无需你拍板）
-              {kind ? ` · ${kind}` : ""}
-            </p>
-            {open ? (
-              <ChevronDown
-                size={14}
-                className="mt-0.5 shrink-0 text-muted-foreground"
-              />
-            ) : (
-              <ChevronRight
-                size={14}
-                className="mt-0.5 shrink-0 text-muted-foreground"
-              />
-            )}
-          </div>
-          <p
-            className={
-              open
-                ? "mt-0.5 whitespace-pre-wrap text-sm text-foreground"
-                : "mt-0.5 line-clamp-1 text-sm text-muted-foreground"
-            }
-          >
-            {escalation.question}
-          </p>
-          {open && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              已按假设继续：{escalation.assumption}
-            </p>
-          )}
-        </div>
-      </button>
-    </DecisionCard>
+    <ResolvedDecisionRecord
+      layout="neutralCollapsible"
+      disclosureKey={escalationDisclosureKey(escalation, role, "raised")}
+      icon={Megaphone}
+      summary={summary}
+    >
+      <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+        {escalation.question}
+      </p>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        已按假设继续：{escalation.assumption}
+      </p>
+    </ResolvedDecisionRecord>
   );
 }
 
@@ -613,33 +523,28 @@ function ResolvedEscalation({
     headline = "已答复";
   }
   return (
-    <DecisionCard tone="neutral" className="bg-card/60">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-muted-foreground">
-          {isFallback ? <Clock size={14} /> : <Check size={14} />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-muted-foreground">
-            {role} · {headline}
+    <ResolvedDecisionRecord
+      layout="neutralCollapsible"
+      disclosureKey={escalationDisclosureKey(escalation, role, "resolved")}
+      icon={isFallback ? Clock : Check}
+      summary={`${role} · ${headline}`}
+    >
+      <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+        {escalation.question}
+      </p>
+      {isFallback ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {timedOut ? "超时回落假设：" : "按假设继续："}
+          {escalation.assumption}
+        </p>
+      ) : (
+        escalation.answer && (
+          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
+            {escalation.answer}
           </p>
-          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
-            {escalation.question}
-          </p>
-          {isFallback ? (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {timedOut ? "超时回落假设：" : "按假设继续："}
-              {escalation.assumption}
-            </p>
-          ) : (
-            escalation.answer && (
-              <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
-                {escalation.answer}
-              </p>
-            )
-          )}
-        </div>
-      </div>
-    </DecisionCard>
+        )
+      )}
+    </ResolvedDecisionRecord>
   );
 }
 

@@ -298,4 +298,14 @@ async def _drive_captain_loop(
             content=content_from_transcript(frozen) if frozen else "",
         )
     finally:
+        # Browser B: same as worker executor_node — release this captain run's session
+        # bind so the next user turn (new captain_run_id) can reuse the conversation's
+        # unbound unique/active live tab. Without this, solo CEO browser_* stacks
+        # live sessions (registry live:1→2→3…) and the dock shows duplicate tabs.
+        try:
+            from agentcore.runtime.browser.registry import default_browser_session_registry
+
+            default_browser_session_registry().unbind_run(spec.run_id)
+        except Exception:  # noqa: BLE001 - teardown must not fail the captain path
+            logger.warning("browser.unbind_run_failed", run_id=spec.run_id)
         captain_transcript.reset(token)

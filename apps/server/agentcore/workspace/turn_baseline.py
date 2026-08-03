@@ -5,6 +5,10 @@ Local (sidecar ``_run_turn``): zip beside the workspace at
 ``AgentCore/baselines/{message_id}.zip`` (id = message_id; no DB required).
 
 失败 / 超限 / 超时只打日志，绝不阻断回合；桌面降级 A1 工具参数预览。
+
+**分轨（脚本破坏可回滚 P0a）**：常规 :func:`maybe_capture_turn_baseline` 仍永不阻断。
+仅 Local 破坏性删路径经 :func:`ensure_local_baseline_for_destructive` 在无还原点时
+由调用方升为 FORCE_APPROVAL / DENY——本模块仍只返回 ``None``/``False``，不抛不拦。
 """
 
 from __future__ import annotations
@@ -32,6 +36,23 @@ def local_baseline_path(workspace_root: Path, snapshot_id: str) -> Path:
     return workspace_root / Path(*BASELINES_REL.split("/")) / f"{snapshot_id}.zip"
 
 
+def local_baseline_ready(workspace_root: Path, snapshot_id: str) -> bool:
+    """True when a non-empty Local zip baseline exists for ``snapshot_id``."""
+    if not snapshot_id or not str(snapshot_id).strip():
+        return False
+    path = local_baseline_path(workspace_root, snapshot_id)
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+class _LocalBackendMarker:
+    """Minimal stand-in so capture helpers see ``location == "local"``."""
+
+    location = "local"
+
+
 async def maybe_capture_turn_baseline(
     *,
     user_id: str,
@@ -45,6 +66,8 @@ async def maybe_capture_turn_baseline(
 
     ``backend.location == "server"`` → cloud labeled snapshot (+ DB id stamp).
     ``backend.location == "local"`` → local zip under ``workspace_root`` (sidecar).
+
+    Never raises to block the turn — failures log and return ``None``.
     """
     if backend.location == "local":
         if workspace_root is None:
@@ -62,6 +85,36 @@ async def maybe_capture_turn_baseline(
         conversation_id=conversation_id,
         message_id=message_id,
     )
+
+
+async def ensure_local_baseline_for_destructive(
+    *,
+    user_id: str,
+    conversation_id: str,
+    message_id: str,
+    workspace_root: Path,
+) -> bool:
+    """P0b: ensure a usable Local zip exists before a destructive script/shell call.
+
+    If a zip is already present, returns True without re-zipping. Otherwise attempts
+    the same capture path as :func:`maybe_capture_turn_baseline` (still best-effort
+    internally — never raises). Returns whether a usable zip is available afterward.
+
+    Local-only; callers must not route cloud ``restoreSnapshot`` through this path.
+    """
+    if local_baseline_ready(workspace_root, message_id):
+        return True
+    sid = await maybe_capture_turn_baseline(
+        user_id=user_id,
+        folder_id=None,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        backend=_LocalBackendMarker(),  # type: ignore[arg-type]
+        workspace_root=workspace_root,
+    )
+    if sid and local_baseline_ready(workspace_root, sid):
+        return True
+    return local_baseline_ready(workspace_root, message_id)
 
 
 async def _capture_cloud_baseline(

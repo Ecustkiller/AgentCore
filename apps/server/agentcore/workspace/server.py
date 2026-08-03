@@ -86,7 +86,12 @@ from agentcore.workspace.text_replace import (
     TextReplaceNoMatch,
     apply_text_replace,
 )
-from agentcore.workspace.trash import is_internal_zone_path, soft_delete_to_trash
+from agentcore.workspace.trash import (
+    is_internal_zone_path,
+    soft_delete_expanding_trash_ancestor,
+    soft_delete_to_trash,
+    trash_dest_under_target,
+)
 
 _MAX_LIST_ENTRIES = 100
 _MAX_INDEX_FILES = 5000  # @ mention flat index cap (mirrors desktop LIST_FILES_CAP)
@@ -873,6 +878,8 @@ class ServerWorkspace:
             # Soft-delete into AgentCore/trash cannot nest under itself; treat
             # internal zones (index/trash/baselines) as permanent cleanup — not
             # the whole AgentCore/ tree (rules/memory/docs stay soft-deletable).
+            # When target is an ancestor of trash (e.g. bare AgentCore/), expand
+            # by children instead of moving the whole tree into itself.
             hard = permanent or is_internal_zone_path(path)
             try:
                 if hard:
@@ -880,6 +887,10 @@ class ServerWorkspace:
                         shutil.rmtree(target)
                     else:
                         target.unlink()
+                elif trash_dest_under_target(root=mount_root, target=target):
+                    soft_delete_expanding_trash_ancestor(
+                        root=mount_root, target=target
+                    )
                 else:
                     shared_routed = (
                         route_shared(path, self._shared_mounts)

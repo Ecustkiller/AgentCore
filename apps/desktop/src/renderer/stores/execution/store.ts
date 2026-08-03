@@ -237,10 +237,57 @@ const EMPTY_EXEC: ExecutionRuntime = {
   userInterjections: [],
 };
 
+const RUN_TERMINAL = new Set(["completed", "failed", "cancelled", "skipped"]);
+
+/**
+ * Journal settled a worker that the live slot still shows in-flight.
+ * Ephemeral live frames (deltas / phases) often outnumber sparse journal
+ * frames after detach — frames.length alone would refuse the catch-up and
+ * leave nodes stuck on「思考中」while journal already has run_completed.
+ */
+function journalSettlesLiveWorker(
+  cur: ExecutionRuntime,
+  journalPlan: ExecutionPlan,
+  journalFrames: RunFrame[],
+): boolean {
+  const curPlan = cur.plan;
+  if (!curPlan) return false;
+  const live = projectExecution(
+    curPlan,
+    cur.frames,
+    cur.status,
+    cur.debate,
+    cur.debateRounds,
+    cur.crossExamEnabled,
+    cur.debateOpening,
+  );
+  const fromJournal = projectExecution(
+    journalPlan,
+    journalFrames,
+    "running",
+    cur.debate,
+    cur.debateRounds,
+    cur.crossExamEnabled,
+    cur.debateOpening,
+  );
+  const liveById = new Map(live.runs.map((r) => [r.id, r]));
+  for (const jr of fromJournal.runs) {
+    if (jr.kind === "captain") continue;
+    if (!RUN_TERMINAL.has(jr.status)) continue;
+    const lr = liveById.get(jr.id);
+    if (lr && (lr.status === "pending" || lr.status === "running")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * True when a journal-built plan/frames are strictly ahead of the in-memory
- * slot. Same execution id; lexicographic (runs → agents → frames). Equal or
- * behind keeps memory so hydrate never rolls a live/SSE-ahead slot back.
+ * slot. Same execution id; lexicographic (runs → agents → frames), with a
+ * terminal-lead override so missed live `run_completed` can still heal.
+ * Equal or behind keeps memory so hydrate never rolls a live/SSE-ahead slot
+ * back via a smaller plan or fewer frames alone.
  */
 function journalIsNewerThan(
   cur: ExecutionRuntime,
@@ -256,6 +303,7 @@ function journalIsNewerThan(
   if (journalPlan.agents.length !== curPlan.agents.length) {
     return journalPlan.agents.length > curPlan.agents.length;
   }
+  if (journalSettlesLiveWorker(cur, journalPlan, journalFrames)) return true;
   return journalFrames.length > cur.frames.length;
 }
 
@@ -773,6 +821,28 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         const cur = state.byId[messageId] ?? EMPTY_EXEC;
         // Newer-wins: catch up after missed graph_append; never roll live back.
         if (!journalIsNewerThan(cur, plan, frames)) return {};
+        // Detached mid-flight: captain may have finish_reason=stop while workers
+        // still run — keep graph running + background stamp so soft refresh can
+        // heal worker terminals without collapsing the strip to「团队完成」.
+        const finishStatus =
+          fromExecutionCompleted ?? statusFromFinish(journal.finishReason);
+        const provisional: ExecutionRuntime = {
+          ...EMPTY_EXEC,
+          plan,
+          frames,
+          status: "running",
+          debate,
+          debateRounds,
+          crossExamEnabled,
+          debateOpening,
+        };
+        // Only hold running+detached when healing a live background drive.
+        // Finished-turn reload (no detached stamp) still follows finishReason /
+        // execution_completed even if some journal runs look unsettled.
+        const stillUnsettled =
+          fromExecutionCompleted == null &&
+          cur.executionDetached != null &&
+          hasUnsettledRuns(provisional);
         return {
           byId: {
             ...state.byId,
@@ -780,9 +850,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               plan,
               frames,
               playhead: null,
-              status:
-                fromExecutionCompleted ??
-                statusFromFinish(journal.finishReason),
+              status: stillUnsettled ? "running" : finishStatus,
               debate,
               debateRounds,
               crossExamEnabled,
@@ -794,7 +862,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               teamSynthesisPreview,
               coordinationWait: null,
               coordinationWaitStartedAt: null,
-              executionDetached: null,
+              executionDetached: stillUnsettled
+                ? (cur.executionDetached ?? null)
+                : null,
               deliveryStatus,
               userInterjections,
             },

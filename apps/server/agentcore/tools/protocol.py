@@ -316,6 +316,9 @@ class ToolContext:
     # 与 deliverable.min_length 同值（契约唯一真理源）。0 = 无字数地板，仅要求非空。
     # 旧拓扑常量 80 已撤；禁止发明地板。
     handoff_min_body_chars: int = 0
+    # ``deliverable.form``（``prose`` / ``files`` / None）。有下游 + prose 时禁止
+    # 用 summary 升格冒充交接地板正文；其它 form 仍可升格。
+    handoff_deliverable_form: str | None = None
     # True when this run already landed at least one file (file_write / append /
     # str_replace) on the *current* ToolContext object. Best-effort same-ctx
     # signal only — ``dataclasses.replace`` drops this bool. Handoff / executor

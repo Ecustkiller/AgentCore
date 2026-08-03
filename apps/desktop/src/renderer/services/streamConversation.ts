@@ -22,8 +22,14 @@ import {
   enterTurnStreaming,
   throwIfCannotOpenStream,
 } from "@/stores/conversation/turnPhaseActions";
+import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type { SSEEvent } from "@/types/events";
+import { unstable_batchedUpdates } from "react-dom";
+
+/** SSE comment after attach journal replay (+ hot re-hang); mirrors server
+ * ``sse._ATTACH_CAUGHT_UP``. Not an EventType — pump-level only. */
+export const ATTACH_CAUGHT_UP_COMMENT = "attach-caught-up";
 
 /** Max wait for response headers (connect + server accept). Distinct from {@link pumpSSE}'s
  *  idle timeout, which only applies once the body is streaming. */
@@ -119,11 +125,15 @@ export function clearLastEventId(conversationId: string): void {
  *
  * Tracks the latest SSE ``id:`` (journal seq) per conversation for ``Last-Event-ID``
  * resume (流式回复持久化 P3).
+ *
+ * ``onComment`` receives SSE comment payloads (text after ``:``), used by attach
+ * catch-up (``attach-caught-up``) — heartbeats (``ping``) are ignored by callers.
  */
 export async function pumpSseBody(
   response: Response,
   conversationId: string,
   onEvent?: (event: SSEEvent) => void,
+  onComment?: (comment: string) => void,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) return;
@@ -172,6 +182,11 @@ export async function pumpSseBody(
         frameId = null;
         continue;
       }
+      if (line.startsWith(":")) {
+        // Heartbeat (``: ping``) or attach boundary (``: attach-caught-up``).
+        onComment?.(line.slice(1).trim());
+        continue;
+      }
       if (line.startsWith("id:")) {
         const id = line.slice(3).trim();
         if (id) {
@@ -192,6 +207,27 @@ export async function pumpSseBody(
   }
 }
 
+/** Apply buffered attach catch-up events in one React batch (avoid per-frame worker
+ * running→completed paint during clear-then-fold replay). Clears any bridge
+ * hydrateFromJournal first so journal frames are not double-folded. */
+function flushAttachCatchUp(conversationId: string, events: SSEEvent[]): void {
+  unstable_batchedUpdates(() => {
+    const last = getRuntime(conversationId).messages.at(-1);
+    if (last?.role === "assistant") {
+      const { clearExecution } = useExecutionStore.getState();
+      clearExecution(last.id);
+      if (last.serverMessageId && last.serverMessageId !== last.id) {
+        clearExecution(last.serverMessageId);
+      }
+    }
+    for (const event of events) {
+      dispatchSSEEvent(event, { conversationId, source: "server" });
+    }
+    flushPendingContent(conversationId);
+    flushPendingFrames(conversationId);
+  });
+}
+
 /** Outcome of a re-attach attempt (执行与请求解耦 C1 · slice 1b). */
 export type AttachOutcome = "attached" | "none";
 
@@ -203,6 +239,11 @@ export type AttachOutcome = "attached" | "none";
  * P3). Callers that clear-then-fold (``rejoinLiveTurn``) truncate the bubble /
  * process / execution before attach — the replay segment folds into the empty
  * placeholder.
+ *
+ * Catch-up: buffer journal replay (+ hot re-hang) until ``: attach-caught-up``,
+ * then one-shot fold so already-completed workers do not paint running→completed
+ * again on refresh. Older servers without the comment flush the buffer when the
+ * stream ends (degraded: still one paint, no live boundary).
  */
 export async function attachConversation(
   conversationId: string,
@@ -249,7 +290,30 @@ export async function attachConversation(
       throw await streamErrorFromResponse(response);
     }
 
-    await pumpSseBody(response, conversationId);
+    const catchUp: SSEEvent[] = [];
+    let catchingUp = true;
+    await pumpSseBody(
+      response,
+      conversationId,
+      (event) => {
+        if (catchingUp) {
+          catchUp.push(event);
+          return;
+        }
+        dispatchSSEEvent(event, { conversationId, source: "server" });
+      },
+      (comment) => {
+        if (!catchingUp) return;
+        if (comment !== ATTACH_CAUGHT_UP_COMMENT) return;
+        catchingUp = false;
+        flushAttachCatchUp(conversationId, catchUp);
+        catchUp.length = 0;
+      },
+    );
+    // Legacy server: no caught-up comment — flush whatever we buffered (whole stream).
+    if (catchingUp && catchUp.length > 0) {
+      flushAttachCatchUp(conversationId, catchUp);
+    }
 
     if (getRuntime(conversationId).isGenerating) {
       throw new StreamError("network");
@@ -419,6 +483,12 @@ export interface ResumeConversationOptions {
   decision: PlanReviewUserDecision;
   note: string;
   selected?: string[];
+  /** team_preview（delegate）continue 修正；缺省 / 空 = 全员开工。 */
+  excluded_run_ids?: string[];
+  write_capability_overrides?: Array<{
+    run_id: string;
+    capability: "text_only";
+  }>;
   /** Structured website style pick (s0/s1/…). */
   signal?: AbortSignal;
 }
@@ -429,12 +499,20 @@ export async function resumeConversation({
   decision,
   note,
   selected = [],
+  excluded_run_ids,
+  write_capability_overrides,
   signal,
 }: ResumeConversationOptions): Promise<void> {
   const body = JSON.stringify({
     decision,
     note,
     selected,
+    ...(excluded_run_ids && excluded_run_ids.length > 0
+      ? { excluded_run_ids }
+      : {}),
+    ...(write_capability_overrides && write_capability_overrides.length > 0
+      ? { write_capability_overrides }
+      : {}),
   });
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages/${messageId}/resume`,

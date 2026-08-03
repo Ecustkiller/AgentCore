@@ -114,6 +114,71 @@ async def test_sidecar_settlement_prewrite_embeds_resume_frame(tmp_path) -> None
     assert sum(1 for e in entries2 if e.get("kind") == "process_reasoning") == 1
 
 
+def _team_preview() -> Any:
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.suspension import TeamPreviewSuspension
+
+    susp = TeamPreviewSuspension(
+        message_id="m-tp",
+        conversation_id="c1",
+        user_id="u1",
+        captain_run_id="r1",
+        checkpoint_id="ck-tp",
+        tool_call_id="tc1",
+        base_system_prompt="sys",
+        user_message="开工",
+        transcript=[],
+        history=[],
+        plan=RunPlan(),
+        workers=[
+            {"run_id": "a", "depends_on": []},
+            {"run_id": "b", "depends_on": []},
+        ],
+        primitive="delegate",
+    )
+    susp.journal_entries = [
+        {"kind": "team_preview_required", "payload": {"checkpoint_id": "ck-tp"}, "ts": None},
+    ]
+    return susp
+
+
+@pytest.mark.asyncio
+async def test_sidecar_settlement_prewrite_team_preview_veto_fields(tmp_path) -> None:
+    """开工否决字段进入 team_preview_resolved + resume_frame（对齐云 cold settlement）。"""
+    outbox = OutboxStore(tmp_path / "outbox")
+    outbox.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="开工",
+        message_id="m-tp",
+        trace_id="a" * 32,
+    )
+    await outbox.begin_turn(conversation_id="c1", message_id="m-tp", trace_id="a" * 32)
+    susp = _team_preview()
+    entry = await prewrite_sidecar_resume_settlement(
+        outbox,
+        susp,
+        decision="continue",
+        note="",
+        selected=[],
+        user_message_id="u1",
+        trace_id="a" * 32,
+        excluded_run_ids=["b"],
+        write_capability_overrides=[{"run_id": "a", "capability": "text_only"}],
+    )
+    assert entry["kind"] == "team_preview_resolved"
+    payload = entry["payload"]
+    assert payload.get("excluded_run_ids") == ["b"]
+    assert payload.get("write_capability_overrides") == [
+        {"run_id": "a", "capability": "text_only"}
+    ]
+    frame = payload["resume_frame"]
+    assert frame["excluded_run_ids"] == ["b"]
+    assert frame["write_capability_overrides"] == [
+        {"run_id": "a", "capability": "text_only"}
+    ]
+
+
 @pytest.mark.asyncio
 async def test_sidecar_settlement_prewrite_seeds_hang_frame_on_empty_outbox(
     tmp_path,

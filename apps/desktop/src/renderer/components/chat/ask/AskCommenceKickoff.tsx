@@ -281,7 +281,7 @@ export function AskCommenceKickoffBody({
               )
             }
           >
-            停止
+            跳过
           </Button>
           <span className="min-w-0 flex-1 text-xs text-muted-foreground">
             {answer.presetCount > 0

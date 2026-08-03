@@ -19,9 +19,9 @@ _AFFIRM_RE = re.compile(
 def should_preview_delegate_plan(plan: Any, *, finalize: bool) -> bool:
     """Whether the *plan half* of a delegate kickoff would show (ignores autonomy).
 
-    Hang when ≥2 workers OR any debate-marked node. Skip single-worker + finalize
-    (zero-friction solo path). Nested depth / resume / ask_user skip / full_auto
-    are decided by :func:`should_kickoff` and the caller.
+    Hang when ≥2 workers. Skip single-worker + finalize (zero-friction solo path).
+    Nested depth / resume / ask_user skip / full_auto are decided by
+    :func:`should_kickoff` and the caller.
 
     When any node has ``checkpoint_after``, the plan-preview half yields — mid-batch
     outline / plan_review cards own that拍板; capability-auth half is independent.
@@ -29,8 +29,6 @@ def should_preview_delegate_plan(plan: Any, *, finalize: bool) -> bool:
     if any(bool(getattr(n, "checkpoint_after", False)) for n in plan.nodes):
         return False
     if len(plan.nodes) >= 2:
-        return True
-    if any(bool(n.stance) or int(n.round or 0) > 0 for n in plan.nodes):
         return True
     if len(plan.nodes) == 1 and finalize:
         return False

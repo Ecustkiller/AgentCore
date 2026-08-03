@@ -33,6 +33,7 @@ function summary(over: Partial<PausedTurnSummary> = {}): PausedTurnSummary {
     primitive: "delegate",
     max_rounds: 0,
     thorough: true,
+    browser_login: false,
     ...over,
   };
 }
@@ -48,24 +49,30 @@ describe("ResumeCard · ask_user", () => {
     expect(screen.queryByText("调整")).toBeNull();
   });
 
-  it("继续 submits continue with the trimmed note", () => {
+  it("提交 submits continue with the trimmed note", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={summary()} onResume={onResume} />);
     fireEvent.change(screen.getByPlaceholderText(/可选/), {
       target: { value: "  选 A  " },
     });
-    fireEvent.click(screen.getByText("继续"));
+    fireEvent.click(screen.getByText("提交"));
     expect(onResume).toHaveBeenCalledWith("continue", "选 A", []);
   });
 
-  it("停止 submits stop", () => {
+  it("跳过 submits stop（硬停，非 empty continue）", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={summary()} onResume={onResume} />);
-    fireEvent.click(screen.getByText("停止"));
+    expect(screen.queryByText("停止")).toBeNull();
+    fireEvent.click(screen.getByText("跳过"));
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
+    expect(onResume).not.toHaveBeenCalledWith(
+      "continue",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
-  it("proposal_pick chip 选择映射进 selected", () => {
+  it("proposal_pick 行选映射进 selected；CTA 采用此方案", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -84,12 +91,41 @@ describe("ResumeCard · ask_user", () => {
         onResume={onResume}
       />,
     );
+    expect(
+      document.querySelector('[data-ask-intent="proposal_pick"]'),
+    ).toBeTruthy();
+    expect(screen.getByText("方案挑选 · 选一条推进")).toBeTruthy();
     fireEvent.click(screen.getByText("方案 A"));
-    fireEvent.click(screen.getByText("继续"));
-    expect(onResume).toHaveBeenCalledWith("continue", "方案 A", ["方案 A"]);
+    fireEvent.click(screen.getByText("采用此方案"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", ["方案 A"]);
   });
 
-  it("organize_plan 确认=全保留（无勾选 UI 时 selected 含全部选项）", () => {
+  it("proposal_pick 空选不可提交", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          intent: "proposal_pick",
+          questions: [
+            {
+              id: "q0",
+              prompt: "选方案",
+              kind: "choice",
+              multiple: false,
+              options: [{ label: "方案 A" }, { label: "方案 B" }],
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    const cta = screen.getByRole("button", { name: "采用此方案" });
+    expect((cta as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(cta);
+    expect(onResume).not.toHaveBeenCalled();
+  });
+
+  it("organize_plan 默认可剔除；非全保留；CTA 确认并整理（n）", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -111,8 +147,109 @@ describe("ResumeCard · ask_user", () => {
         onResume={onResume}
       />,
     );
-    fireEvent.click(screen.getByText("继续"));
-    expect(onResume).toHaveBeenCalledWith("continue", "", ["a → b", "删 x"]);
+    expect(
+      document.querySelector('[data-ask-intent="organize_plan"]'),
+    ).toBeTruthy();
+    expect(screen.getByText("整理方案 · 确认要执行的项")).toBeTruthy();
+    expect(screen.getByText("取消勾选即剔除")).toBeTruthy();
+    expect(screen.getByText("a → b")).toBeTruthy();
+    // Uncheck second item — not keep-all.
+    fireEvent.click(screen.getByText("删 x"));
+    fireEvent.click(screen.getByRole("button", { name: /确认并整理/ }));
+    expect(onResume).toHaveBeenCalledWith("continue", "", ["a → b"]);
+    expect(onResume.mock.calls[0][2]).not.toEqual(["a → b", "删 x"]);
+  });
+
+  it("organize_plan 空选禁 CTA", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          intent: "organize_plan",
+          questions: [
+            {
+              id: "q0",
+              prompt: "保留哪些操作",
+              kind: "choice",
+              multiple: true,
+              options: [
+                { label: "a → b", op: "move", source: "a", destination: "b" },
+                { label: "删 x", op: "delete", path: "x" },
+              ],
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByText("a → b"));
+    fireEvent.click(screen.getByText("删 x"));
+    const cta = screen.getByRole("button", { name: /^确认并整理$/ });
+    expect((cta as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(cta);
+    expect(onResume).not.toHaveBeenCalled();
+  });
+
+  it("risk_ack 行式多选；严重度灰字；空选可继续", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          intent: "risk_ack",
+          questions: [
+            {
+              id: "q0",
+              prompt: "本轮处理哪些风险",
+              kind: "choice",
+              multiple: true,
+              options: [
+                { label: "[高] 密钥轮换", detail: "优先" },
+                { label: "[低] 文档补齐" },
+              ],
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(document.querySelector('[data-ask-intent="risk_ack"]')).toBeTruthy();
+    expect(screen.getByText("密钥轮换")).toBeTruthy();
+    expect(screen.getByText("高")).toBeTruthy();
+    expect(screen.getByText("低")).toBeTruthy();
+    // Empty selection allowed.
+    fireEvent.click(screen.getByText("确认并继续"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", []);
+  });
+
+  it("decision default 预选 + compose 答复 +「其他」逃逸", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          intent: "decision",
+          questions: [
+            {
+              id: "q0",
+              prompt: "先做哪条",
+              kind: "choice",
+              multiple: false,
+              default: "方案 A",
+              options: [{ label: "方案 A" }, { label: "方案 B" }],
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(document.querySelector('[data-ask-intent="decision"]')).toBeTruthy();
+    expect(screen.getByText("其他…")).toBeTruthy();
+    // Default preselected — one-click submit composes.
+    fireEvent.click(screen.getByText("提交"));
+    expect(onResume).toHaveBeenCalledWith(
+      "continue",
+      "我的答复：\n· 先做哪条：方案 A",
+      [],
+    );
   });
 
   it("daily_review 默认全选，取消勾选后提交带 selected", () => {
@@ -242,7 +379,16 @@ describe("ResumeCard · team_preview", () => {
       checkpoint_id: "tp1",
       question: "",
       context: "",
-      workers: [{ role: "调研", task: "做A" }],
+      workers: [
+        {
+          run_id: "r1",
+          role: "调研",
+          task: "做A",
+          depends_on: [],
+          write_capability: "can_write_files",
+          write_capability_label: "可改文件",
+        },
+      ],
       tools: ["file_write"],
       primitive: "delegate",
       ...over,
@@ -254,19 +400,158 @@ describe("ResumeCard · team_preview", () => {
     expect(screen.getByText("停止")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
+    expect(screen.getByText("纳入本轮")).toBeTruthy();
+    expect(screen.getByText("本批工具：file_write")).toBeTruthy();
   });
 
-  it("主按钮带嘱咐发 continue", () => {
+  it("主按钮带嘱咐发 continue（未改正时无修正载荷）", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
     fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
       target: { value: "更简洁" },
     });
     fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "更简洁", []);
+    expect(onResume).toHaveBeenCalledWith("continue", "更简洁", [], {
+      excluded_run_ids: [],
+      write_capability_overrides: [],
+    });
   });
 
-  it("debate 仅开赛 + 停止；嘱咐走 continue", () => {
+  it("可排除多余岗；continue 带 excluded_run_ids", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: [],
+              write_capability: "can_write_files",
+              write_capability_label: "可改文件",
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("纳入本轮 写作"));
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
+      excluded_run_ids: ["r2"],
+      write_capability_overrides: [],
+    });
+  });
+
+  it("至少保留 1 人：关到 0 被拒并提示", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    fireEvent.click(screen.getByLabelText("纳入本轮 调研"));
+    expect(screen.getByTestId("team-include-hint").textContent).toBe(
+      "至少保留 1 名队员",
+    );
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
+      excluded_run_ids: [],
+      write_capability_overrides: [],
+    });
+  });
+
+  it("仍被他人 depends_on 引用的岗禁止排除", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: ["r1"],
+              write_capability: "can_write_files",
+              write_capability_label: "可改文件",
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("纳入本轮 调研"));
+    expect(screen.getByTestId("team-include-hint").textContent).toBe(
+      "仍有队员依赖此岗",
+    );
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
+      excluded_run_ids: [],
+      write_capability_overrides: [],
+    });
+  });
+
+  it("可改文件 → 仅文字：continue 带 write_capability_overrides", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    expect(screen.getByText("可改文件")).toBeTruthy();
+    fireEvent.click(screen.getByText("改为仅文字"));
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
+      excluded_run_ids: [],
+      write_capability_overrides: [{ run_id: "r1", capability: "text_only" }],
+    });
+  });
+
+  it("已是仅文字无升权入口；stop 不带修正", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: [],
+              write_capability: "can_write_files",
+              write_capability_label: "可改文件",
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.queryByText("改为仅文字")).toBeTruthy(); // r2 only
+    // tighten + exclude then stop → amendments ignored (undefined)
+    fireEvent.click(screen.getByText("改为仅文字"));
+    fireEvent.click(screen.getByLabelText("纳入本轮 写作"));
+    fireEvent.click(screen.getByText("停止"));
+    expect(onResume).toHaveBeenCalledWith("stop", "", []);
+  });
+
+  it("debate 仅开赛 + 停止；嘱咐走 continue；无纳入控件", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -282,6 +567,7 @@ describe("ResumeCard · team_preview", () => {
     expect(screen.getByText("开赛")).toBeTruthy();
     expect(screen.getByText("停止")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
+    expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.queryByText("先多视角调研再辩")).toBeNull();
     fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
       target: { value: "最关心成本谁买单" },
@@ -305,5 +591,104 @@ describe("ResumeCard · team_preview", () => {
     );
     expect(screen.queryByText("先多视角调研再辩")).toBeNull();
     expect(screen.getByText("开赛")).toBeTruthy();
+  });
+});
+
+describe("ResumeCard · ask_user browser_login", () => {
+  it("renders 需要你登录 + Sandbox 引导；可开直播；无假打开浏览器", () => {
+    const onOpenLive = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          browser_login: true,
+          question: "请登录目标站点",
+        })}
+        onResume={vi.fn()}
+        onOpenLive={onOpenLive}
+      />,
+    );
+    expect(screen.getByText(/需要你登录/)).toBeTruthy();
+    expect(screen.getByText("请登录目标站点")).toBeTruthy();
+    expect(screen.getByText(/Sandbox/)).toBeTruthy();
+    expect(screen.queryByText(/手机暂无内嵌浏览器/)).toBeNull();
+    expect(screen.queryByText(/桌面端完成登录/)).toBeNull();
+    expect(screen.getByText("已登录，继续")).toBeTruthy();
+    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByTestId("browser-login-open-live")).toBeTruthy();
+    fireEvent.click(screen.getByText("查看直播"));
+    expect(onOpenLive).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("跳过")).toBeNull();
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(screen.queryByText("需要你拍板（已离线保留）")).toBeNull();
+  });
+
+  it("无 onOpenLive 时不显示「查看直播」", () => {
+    render(
+      <ResumeCard
+        paused={summary({ browser_login: true, question: "登录" })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("browser-login-open-live")).toBeNull();
+    expect(screen.getByText(/Sandbox/)).toBeTruthy();
+  });
+
+  it("已登录，继续 → continue + note「已登录，继续」", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({ browser_login: true, question: "登录" })}
+        onResume={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByText("已登录，继续"));
+    expect(onResume).toHaveBeenCalledWith("continue", "已登录，继续", []);
+  });
+
+  it("停止 → stop（非跳过文案）", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({ browser_login: true, question: "登录" })}
+        onResume={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByText("停止"));
+    expect(onResume).toHaveBeenCalledWith("stop", "", []);
+  });
+
+  it("有 assumptions →「按假设继续」+ note=假设文案", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          browser_login: true,
+          question: "登录",
+          assumptions: [{ id: "a0", label: "登录", value: "用户已登录" }],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.getByText(/未答则按此继续：登录：用户已登录/)).toBeTruthy();
+    fireEvent.click(screen.getByText("按假设继续"));
+    expect(onResume).toHaveBeenCalledWith("continue", "登录：用户已登录", []);
+  });
+
+  it("无 assumptions 时不显示「按假设继续」", () => {
+    render(
+      <ResumeCard
+        paused={summary({ browser_login: true, question: "登录" })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("按假设继续")).toBeNull();
+  });
+
+  it("普通 ask 不受影响：仍是拍板标题 + 跳过", () => {
+    render(<ResumeCard paused={summary()} onResume={vi.fn()} />);
+    expect(screen.getByText("需要你拍板（已离线保留）")).toBeTruthy();
+    expect(screen.getByText("跳过")).toBeTruthy();
+    expect(screen.queryByText(/需要你登录/)).toBeNull();
+    expect(screen.queryByTestId("browser-login-decision")).toBeNull();
   });
 });

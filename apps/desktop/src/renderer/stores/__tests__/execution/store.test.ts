@@ -256,6 +256,180 @@ describe("hydrateFromJournal (reload replay, §9.3)", () => {
     expect(rt().frames).toHaveLength(1);
   });
 
+  it("hydrates when journal settled a worker live still shows running (terminal lead)", () => {
+    // Detach sample: live accumulated many ephemeral deltas; journal is sparse
+    // but already has run_completed. frames.length alone would refuse — terminal
+    // lead must catch up so the node leaves「思考中」.
+    const oneRun: ExecutionPlan = {
+      id: "exec-1",
+      planType: "multi_agent",
+      taskSummary: "T",
+      agents: [{ id: "agent-1", role: "修码员" }],
+      runs: [{ id: "run-1", agentId: "agent-1", task: "修", dependsOn: [] }],
+    };
+    store().startExecution(oneRun, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    for (let i = 0; i < 8; i++) {
+      store().recordFrame(
+        {
+          t: 1000 + i,
+          kind: "run_reasoning_delta",
+          runId: "run-1",
+          agentId: "agent-1",
+          delta: `chunk-${i}`,
+        },
+        MID,
+      );
+    }
+    expect(rt().frames.length).toBeGreaterThan(2);
+    store().setExecutionDetached(
+      {
+        execution_id: "exec-1",
+        conversation_id: "cid",
+        completed: 0,
+        total: 1,
+        host_turn_id: MID,
+      },
+      MID,
+    );
+
+    const settled: ExecutionJournal = {
+      finishReason: "stop",
+      events: [
+        {
+          type: "run_plan",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          payload: {
+            execution_id: "exec-1",
+            plan_type: "multi_agent",
+            task_summary: "T",
+            agents: [{ id: "agent-1", role: "修码员" }],
+            runs: [
+              {
+                id: "run-1",
+                agent_id: "agent-1",
+                task: "修",
+                depends_on: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "run_started",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: {
+            agent_id: "agent-1",
+            run_id: "run-1",
+            parent_run_id: null,
+            kind: "agent",
+          },
+        },
+        {
+          type: "run_completed",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          payload: {
+            run_id: "run-1",
+            agent_id: "agent-1",
+            output_summary: "done",
+            duration_ms: 1000,
+          },
+        },
+      ],
+    };
+    store().hydrateFromJournal(MID, settled);
+    const exec = projectRuntime(rt());
+    expect(exec?.runs.find((r) => r.id === "run-1")?.status).toBe("completed");
+    // All workers settled → clear background stamp + mark completed.
+    expect(rt().executionDetached).toBeNull();
+    expect(rt().status).toBe("completed");
+  });
+
+  it("keeps executionDetached when hydrate settles one worker but others remain", () => {
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().recordFrame(started("agent-2", "run-2"), MID);
+    for (let i = 0; i < 5; i++) {
+      store().recordFrame(
+        {
+          t: 1000 + i,
+          kind: "run_reasoning_delta",
+          runId: "run-1",
+          agentId: "agent-1",
+          delta: `x${i}`,
+        },
+        MID,
+      );
+    }
+    store().setExecutionDetached(
+      {
+        execution_id: "exec-1",
+        conversation_id: "cid",
+        completed: 0,
+        total: 3,
+        host_turn_id: MID,
+      },
+      MID,
+    );
+
+    const partial: ExecutionJournal = {
+      finishReason: "stop",
+      events: [
+        {
+          type: "run_plan",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          payload: {
+            execution_id: "exec-1",
+            plan_type: "multi_agent",
+            task_summary: plan.taskSummary,
+            agents: plan.agents.map((a) => ({ id: a.id, role: a.role })),
+            runs: plan.runs.map((r) => ({
+              id: r.id,
+              agent_id: r.agentId,
+              task: r.task,
+              depends_on: r.dependsOn,
+            })),
+          },
+        },
+        {
+          type: "run_started",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: {
+            agent_id: "agent-1",
+            run_id: "run-1",
+            parent_run_id: null,
+            kind: "agent",
+          },
+        },
+        {
+          type: "run_completed",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          payload: {
+            run_id: "run-1",
+            agent_id: "agent-1",
+            output_summary: "fixer done",
+            duration_ms: 500,
+          },
+        },
+        {
+          type: "run_started",
+          timestamp: "2026-01-01T00:00:03.000Z",
+          payload: {
+            agent_id: "agent-2",
+            run_id: "run-2",
+            parent_run_id: null,
+            kind: "agent",
+          },
+        },
+      ],
+    };
+    store().hydrateFromJournal(MID, partial);
+    const exec = projectRuntime(rt());
+    expect(exec?.runs.find((r) => r.id === "run-1")?.status).toBe("completed");
+    expect(exec?.runs.find((r) => r.id === "run-2")?.status).toBe("running");
+    expect(rt().status).toBe("running");
+    expect(rt().executionDetached?.execution_id).toBe("exec-1");
+  });
+
   it("is idempotent when re-hydrating an equal journal", () => {
     store().hydrateFromJournal(MID, journal);
     expect(rt().plan?.runs).toHaveLength(1);

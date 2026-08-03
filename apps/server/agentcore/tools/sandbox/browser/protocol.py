@@ -20,8 +20,16 @@ from typing import Any, Protocol, runtime_checkable
 # (no host decode) onto the ``browser_live_frame`` SSE event.
 BrowserFrameListener = Callable[[dict[str, Any]], None]
 
-# The six M0 browser actions (D11). State-changing ones auto-capture a keyframe.
-BROWSER_ACTIONS = ("navigate", "click", "type", "scroll", "snapshot", "screenshot")
+# Browser actions (D11 + console evidence). State-changing ones auto-capture a keyframe.
+BROWSER_ACTIONS = (
+    "navigate",
+    "click",
+    "type",
+    "scroll",
+    "snapshot",
+    "screenshot",
+    "console",
+)
 STATE_CHANGING_ACTIONS = frozenset({"navigate", "click", "type", "scroll"})
 
 

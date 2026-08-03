@@ -322,6 +322,17 @@ class AcceptRunOutcomeResponse(BaseModel):
     action: str = "run.outcome_accepted"
 
 
+class WriteCapabilityOverride(BaseModel):
+    """Delegate ``team_preview`` continue: tighten one worker's write capability.
+
+    Only ``text_only`` is legal (→ ``deliverable.form=prose``). Unknown ``run_id`` /
+    non-``text_only`` / upgrade attempts → 422 on resume.
+    """
+
+    run_id: str = Field(..., min_length=1, max_length=128)
+    capability: Literal["text_only"]
+
+
 class ResumeTurnRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
 
@@ -334,11 +345,19 @@ class ResumeTurnRequest(BaseModel):
     carries the option(s) the user picked from an ask_user menu (ignored for
     plan_review; the server drops any pick not actually offered). The engine-only
     ``timeout`` is never sent by a client.
+
+    ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
+    ``team_preview`` ``continue`` (开工组队有限否决). Debate / ask / plan_review /
+    stop ignore them (no 422). Hot-path ``ResolveInteraction`` is not extended.
     """
 
     decision: CheckpointDecision
     note: str = Field("", max_length=4000)
     selected: list[str] = Field(default_factory=list, max_length=50)
+    excluded_run_ids: list[str] = Field(default_factory=list, max_length=50)
+    write_capability_overrides: list[WriteCapabilityOverride] = Field(
+        default_factory=list, max_length=50
+    )
 
 
 class PendingInteractionSummary(BaseModel):
@@ -413,6 +432,7 @@ class PausedTurnSummary(BaseModel):
     assumptions: list[dict[str, Any]] = Field(default_factory=list)
     questions: list[dict[str, Any]] = Field(default_factory=list)
     intent: AskCheckpointIntent | None = None
+    browser_login: bool = False
 
 
 class TurnRecoveryResponse(BaseModel):

@@ -67,7 +67,7 @@ export function collectAskSelected(
 /**
  * The live, actionable ask_user card body — the single asking surface, shared by the
  * inline live card ({@link CheckpointCard}) and the durable 待恢复 resume card
- * (ResumePrompt). Settled by 提交 (→ continue) or 停止. Picks compose into ONE readable
+ * (ResumePrompt). Settled by 提交 (→ continue) or 跳过 (→ stop 硬停). Picks compose into ONE readable
  * note (答复模型 α), handed to `onSubmit`.
  *
  * `kickoff` 与 `decision` 共用 {@link AskDecisionBody}；`proposal_pick` / `risk_ack` /

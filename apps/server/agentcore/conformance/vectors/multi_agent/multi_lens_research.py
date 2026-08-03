@@ -95,7 +95,6 @@ def _preview_workers() -> list[dict]:
             "role": role,
             "task": task,
             "depends_on": [],
-            "debate": False,
         }
         for rid, role, task in _LENSES
     ]
@@ -105,7 +104,6 @@ def _preview_workers() -> list[dict]:
             "role": "汇总分析师",
             "task": f"交叉验证综述 · {_TOPIC}",
             "depends_on": [rid for rid, _r, _t in _LENSES],
-            "debate": False,
         }
     )
     return workers

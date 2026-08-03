@@ -449,6 +449,9 @@ async def execute_agent_node(
                 if deliverable is not None and int(deliverable.min_length or 0) > 0
                 else 0
             ),
+            handoff_deliverable_form=(
+                deliverable.form if deliverable is not None else None
+            ),
         )
         # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
         worker_tools = env.tools
@@ -1514,8 +1517,10 @@ async def execute_agent_node(
         # 成篇质量：有下游 + 相对合同未满足且无成篇 prose 落盘 → 失败（与 handoff 同口径）。
         # 认 tool_ctx.landed_artifact_kinds（跨 replace 存活）；勿用 has_landed_files /
         # 泛 files_touched（骨架落盘会误豁免）。地板只认 deliverable.min_length。
-        # 正文空但 debrief.summary 在 → 先升格再验地板（与 handoff promote 同口径）。
+        # 非 prose：正文空但 debrief.summary 在 → 先升格再验地板。
+        # prose + 有下游：summary 不算正文，禁止升格顶地板。
         from agentcore.runtime.runs.research_quality import (
+            brief_may_satisfy_body_floor,
             promote_brief_to_deliverable,
             upstream_body_floor_satisfied,
         )
@@ -1526,7 +1531,12 @@ async def execute_agent_node(
             if deliverable is not None and int(deliverable.min_length or 0) > 0
             else 0
         )
-        if body_chars == 0 and debrief:
+        form = deliverable.form if deliverable is not None else None
+        if (
+            body_chars == 0
+            and debrief
+            and brief_may_satisfy_body_floor(deliverable_form=form)
+        ):
             brief_summary = str((debrief or {}).get("summary") or "").strip()
             if brief_summary:
                 candidate = promote_brief_to_deliverable(
@@ -1545,8 +1555,18 @@ async def execute_agent_node(
             min_body_chars=floor,
         ):
             floor_hint = f"不足 {floor} 字（合同 min_length）" if floor > 0 else "为空"
+            summary_hint = (
+                "（summary 不算正文）"
+                if (
+                    body_chars == 0
+                    and debrief
+                    and str((debrief or {}).get("summary") or "").strip()
+                    and not brief_may_satisfy_body_floor(deliverable_form=form)
+                )
+                else ""
+            )
             reason = (
-                f"空交付不得进入下游：正文{floor_hint}"
+                f"空交付不得进入下游：正文{floor_hint}{summary_hint}"
                 "且无成篇落盘（prose；骨架/空文件不算）"
             )
             logger.info(
@@ -1554,6 +1574,7 @@ async def execute_agent_node(
                 run_id=spec.run_id,
                 body_chars=body_chars,
                 min_body_chars=floor,
+                deliverable_form=form,
             )
             env.sink.emit(
                 run_failed(

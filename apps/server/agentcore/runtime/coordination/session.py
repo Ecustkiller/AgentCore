@@ -567,6 +567,12 @@ class CoordinationSession:
     def mark_worker_completed(self, run_id: str) -> None:
         self.completed_run_ids.add(run_id)
         self.disarm_worker_timeout(run_id)
+        # Ended bypass on the write ledger (separate from progress completed_run_ids).
+        try:
+            if self.file_ownership is not None:
+                self.file_ownership.mark_ended(run_id)
+        except Exception:  # noqa: BLE001 — never break completion
+            pass
         self._handoff_ownership_on_complete(run_id)
 
     def _handoff_ownership_on_complete(self, run_id: str) -> None:
@@ -1434,6 +1440,26 @@ def active_coordination(execution_id: str | None = None) -> CoordinationSession 
     if not eid:
         return None
     return _sessions.get(eid)
+
+
+def resolve_coordination_session(
+    execution_id: str | None = None,
+) -> CoordinationSession | None:
+    """Coordination session with the same parent fallback as write-ledger resolve.
+
+    Nested sub-team ``execution_id`` often has no session of its own; fall back to
+    :data:`current_execution_id` so ownership lookup / escalate routing share the
+    parent book (mirrors :func:`~agentcore.workspace.write_claims.resolve_write_coordinator`).
+    """
+    eid = (execution_id or "").strip()
+    session = active_coordination(eid) if eid else None
+    if session is None:
+        parent_eid = (current_execution_id.get() or "").strip()
+        if parent_eid and parent_eid != eid:
+            session = active_coordination(parent_eid)
+    if session is None and not eid:
+        session = active_coordination()
+    return session
 
 
 def adopt_active_execution(

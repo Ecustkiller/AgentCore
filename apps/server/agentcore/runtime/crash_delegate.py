@@ -28,7 +28,7 @@ from agentcore.llm.credentials import bind_credential_pricing_context
 from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.llm.resolve import resolve_credentials
 from agentcore.memory import assemble_turn_rules, default_memory_store, load_memory_topics
-from agentcore.runtime.context import build_workspace_context
+from agentcore.runtime.context import build_workspace_context, detect_workspace_git
 from agentcore.runtime.facts import FactKind
 from agentcore.runtime.pipeline.resume.wire import wire_crash_turn
 from agentcore.runtime.resolve.prompt import (
@@ -147,6 +147,7 @@ async def production_crash_delegate_factory(
             desktop_online=False,
             exec_languages=exec_languages,
             permission_axes=permission_axes,
+            git_fact=await detect_workspace_git(backend),
         )
         system_prompt = assemble_system_prompt(
             memory_markdown=memory_markdown,

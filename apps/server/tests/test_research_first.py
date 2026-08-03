@@ -186,7 +186,6 @@ async def test_recover_research_first_on_delegate_kickoff_degrades_to_stop():
                 "role": "调研",
                 "task": "做A",
                 "depends_on": [],
-                "debate": False,
             }
         ],
         tools=[],

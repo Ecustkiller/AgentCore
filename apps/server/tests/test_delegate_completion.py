@@ -98,7 +98,17 @@ def test_repair_how_fixed_playbook_only():
         )
         is None
     )
+    assert (
+        validate_repair_how_fixed(
+            playbook="repair_code",
+            playbook_args={"verify": "打开 /app 白屏消失+snapshot 可见主内容"},
+        )
+        is None
+    )
     assert validate_repair_how_fixed(playbook=None, playbook_args={}) is None
+    missing = validate_repair_how_fixed(playbook="repair_code", playbook_args={})
+    assert missing is not None
+    assert "白屏" in missing or "snapshot" in missing
 
 
 def test_format_worker_gaps_block_empty():

@@ -144,15 +144,16 @@ export function ConversationPage() {
     setHydratePhase(warm ? "ready" : "loading");
 
     let cancelled = false;
-    let attachAbort: AbortController | null = null;
     void (async () => {
       // Kick network early; online SWR may reveal from local cache first.
       const winPromise = fetchMessageWindow(id);
 
       if (!warm) {
         const cached = await loadCachedConversation(id);
-        if (cancelled) return;
+        // Cache reveal is page-gated; do not return early — attach kick below
+        // must still run after navigate-away.
         if (
+          !cancelled &&
           cached &&
           adoptMessageWindow(
             id,
@@ -174,90 +175,73 @@ export function ConversationPage() {
 
       try {
         const win = await winPromise;
-        if (cancelled) return;
-        if (useConversationStore.getState().currentConversationId !== id) {
-          return;
-        }
-        // Warm memory: keep slice (adopt skips). Cold: adopt empty or SWR-reconcile cache.
-        if (!warm) {
-          const wrote = reconcileMessageWindow(
-            id,
-            win.messages,
-            {
-              hasMoreBefore: win.hasMoreBefore,
-              hasMoreAfter: win.hasMoreAfter,
-            },
-            win.memoryUpdates,
-          );
-          if (wrote) {
-            void persistOpenedCache(id, win.messages, win.memoryUpdates, {
-              hasMoreBefore: win.hasMoreBefore,
-              hasMoreAfter: win.hasMoreAfter,
-            });
+        // Adopt / reconcile stay page-lifecycle gated; attach kick below does not.
+        if (
+          !cancelled &&
+          useConversationStore.getState().currentConversationId === id
+        ) {
+          // Warm memory: keep slice (adopt skips). Cold: adopt empty or SWR-reconcile cache.
+          if (!warm) {
+            const wrote = reconcileMessageWindow(
+              id,
+              win.messages,
+              {
+                hasMoreBefore: win.hasMoreBefore,
+                hasMoreAfter: win.hasMoreAfter,
+              },
+              win.memoryUpdates,
+            );
+            if (wrote) {
+              void persistOpenedCache(id, win.messages, win.memoryUpdates, {
+                hasMoreBefore: win.hasMoreBefore,
+                hasMoreAfter: win.hasMoreAfter,
+              });
+            }
           }
         }
-        if (cancelled) return;
-        if (useConversationStore.getState().currentConversationId !== id) {
-          return;
-        }
-        // P0: ready after message-window adopt (+ parallel recovery), attach in background.
+        // P0: recovery then attach in background (slice-owned — still kick after navigate-away).
         const recovery = await recoveryLoaded;
+        void runHydrateAttachSettle(id, recovery);
         if (cancelled) return;
         if (useConversationStore.getState().currentConversationId !== id) {
           return;
         }
         setHydratePhase("ready");
-        attachAbort = new AbortController();
-        void runHydrateAttachSettle(id, recovery, {
-          signal: attachAbort.signal,
-        });
       } catch {
         // N4-A: network / outage → fall back to local-store snapshot for this id.
-        if (cancelled) return;
         // Online SWR may already have revealed from cache — stay ready.
         if (getRuntime(id).messages.length > 0 || getRuntime(id).isGenerating) {
-          setHydratePhase("ready");
           const recovery = await recoveryLoaded;
-          if (
-            !cancelled &&
-            useConversationStore.getState().currentConversationId === id
-          ) {
-            attachAbort = new AbortController();
-            void runHydrateAttachSettle(id, recovery, {
-              signal: attachAbort.signal,
-            });
-          }
+          // Slice-owned observation pump — kick even if this page effect cancelled.
+          void runHydrateAttachSettle(id, recovery);
+          if (!cancelled) setHydratePhase("ready");
         } else {
           const cached = await loadCachedConversation(id);
-          if (cancelled) return;
           if (cached) {
-            adoptMessageWindow(
-              id,
-              cached.messages as Message[],
-              {
-                hasMoreBefore: cached.hasMoreBefore,
-                hasMoreAfter: cached.hasMoreAfter,
-              },
-              cached.memoryUpdates as MemoryUpdate[],
-            );
-            logEvent("info", "conversation.hydrate", {
-              conversation_id: id,
-              branch: "offline_cache",
-            });
-            setHydratePhase("ready");
-            const recovery = await recoveryLoaded;
-            if (
-              !cancelled &&
-              useConversationStore.getState().currentConversationId === id
-            ) {
-              attachAbort = new AbortController();
-              void runHydrateAttachSettle(id, recovery, {
-                signal: attachAbort.signal,
+            if (!cancelled) {
+              adoptMessageWindow(
+                id,
+                cached.messages as Message[],
+                {
+                  hasMoreBefore: cached.hasMoreBefore,
+                  hasMoreAfter: cached.hasMoreAfter,
+                },
+                cached.memoryUpdates as MemoryUpdate[],
+              );
+              logEvent("info", "conversation.hydrate", {
+                conversation_id: id,
+                branch: "offline_cache",
               });
             }
+            const recovery = await recoveryLoaded;
+            void runHydrateAttachSettle(id, recovery);
+            if (!cancelled) setHydratePhase("ready");
           } else if (!warm) {
+            // Still try recovery attach (list running indicator) even when UI errors.
+            const recovery = await recoveryLoaded;
+            void runHydrateAttachSettle(id, recovery);
             // No cache + cold slice: explicit error (never silent blank like a draft).
-            setHydratePhase("error");
+            if (!cancelled) setHydratePhase("error");
             return;
           }
         }
@@ -282,7 +266,6 @@ export function ConversationPage() {
     })();
     return () => {
       cancelled = true;
-      attachAbort?.abort();
     };
   }, [id, hydrateRetry]);
 

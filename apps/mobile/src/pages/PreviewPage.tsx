@@ -183,7 +183,6 @@ export function PreviewPage() {
             team={team}
             debate={projected.debate}
             debateRounds={projected.debateRounds}
-            debatePretrial={projected.debatePretrial}
             asks={asks}
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}

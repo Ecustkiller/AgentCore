@@ -73,8 +73,8 @@ export const SIDE_PANEL_MAX_FLOATS = MAX_FLOATS;
 export const WORKSPACE_TAB_ID = "workspace";
 
 /**
- * Reserved id of the conditional 「改动」 tab（有本对话 AI 文件改动或深链时出现；
- * 出现后位次第二、不可销毁、可 detach；前端UX设计.md §十）。
+ * Reserved id of the conditional 「改动」 tab（有本对话 AI 文件改动 / Local 基线或深链时出现；
+ * 出现后位次第二、不可销毁、可 detach；前端UX设计.md §十 · P0c）。
  */
 export const CHANGES_TAB_ID = "changes";
 
@@ -471,6 +471,11 @@ interface SidePanelState {
   /** Close a content tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (fixed tabs are always there). */
   closeTab: (id: string) => void;
+  /**
+   * 重排 `tabs` 中出现在 `orderedIds` 里的项：抽出后按 orderedIds 排序，再写回原索引位。
+   * 不在 orderedIds 的 tab（含已 float）相对位置不变。校验失败则 no-op。
+   */
+  reorderContentTabs: (orderedIds: string[]) => void;
   /** Activate a dock tab, or focus the float if that id is floating (Move). */
   setActiveTab: (id: string) => void;
   /**
@@ -706,6 +711,37 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         focusSurface = { type: "dock" };
       }
       return { tabs, floats, activeTabId, focusSurface };
+    });
+  },
+
+  reorderContentTabs: (orderedIds) => {
+    set((s) => {
+      if (orderedIds.length === 0) return s;
+      const unique = new Set(orderedIds);
+      if (unique.size !== orderedIds.length) return s;
+      const byId = new Map(s.tabs.map((t) => [t.id, t]));
+      if (orderedIds.some((id) => !byId.has(id))) return s;
+      const matchCount = s.tabs.filter((t) => unique.has(t.id)).length;
+      if (orderedIds.length !== matchCount) return s;
+
+      const indices: number[] = [];
+      for (let i = 0; i < s.tabs.length; i++) {
+        const tab = s.tabs[i];
+        if (tab && unique.has(tab.id)) indices.push(i);
+      }
+      const reordered = orderedIds.flatMap((id) => {
+        const tab = byId.get(id);
+        return tab ? [tab] : [];
+      });
+      if (reordered.length !== indices.length) return s;
+      const tabs = [...s.tabs];
+      for (let i = 0; i < indices.length; i++) {
+        const at = indices[i];
+        const next = reordered[i];
+        if (at == null || next == null) return s;
+        tabs[at] = next;
+      }
+      return { tabs };
     });
   },
 

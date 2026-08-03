@@ -1,33 +1,53 @@
 /**
- * Local 浏览器 Attachment：hide=脱离、过期 show 拒、ensurePageKind 不因 wasActive 复活。
+ * Local 浏览器 Attachment：hide=脱离、过期 show 拒、ensurePageKind 不因 wasActive 复活；
+ * Bridge mutation（navigate/click/type/scroll）成功 data 含 elements + snapshot_version。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const ELEMENTS_TREE = "[e1] button: Go\n[e2] link: More";
 
 vi.mock("electron", () => ({
   BrowserWindow: {
     getFocusedWindow: () => null,
     getAllWindows: () => [],
   },
-  WebContentsView: vi.fn().mockImplementation(() => ({
-    webContents: {
-      isDestroyed: () => false,
-      on: vi.fn(),
-      loadURL: vi.fn().mockResolvedValue(undefined),
-      getURL: () => "about:blank",
-      getTitle: () => "",
-      navigationHistory: {
-        canGoBack: () => false,
-        canGoForward: () => false,
+  WebContentsView: vi.fn().mockImplementation(() => {
+    let url = "about:blank";
+    return {
+      webContents: {
+        isDestroyed: () => false,
+        on: vi.fn(),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        loadURL: vi.fn(async (next: string) => {
+          url = next;
+        }),
+        getURL: () => url,
+        getTitle: () => "",
+        navigationHistory: {
+          canGoBack: () => false,
+          canGoForward: () => false,
+        },
+        close: vi.fn(),
+        isLoadingMainFrame: () => false,
+        reload: vi.fn(),
+        setWindowOpenHandler: vi.fn(),
+        /** SNAPSHOT_JS uses querySelectorAll; password probe uses autocomplete. */
+        executeJavaScript: vi.fn(async (code: string) => {
+          if (typeof code === "string" && code.includes("querySelectorAll")) {
+            return ELEMENTS_TREE;
+          }
+          if (typeof code === "string" && code.includes("autocomplete")) {
+            return false;
+          }
+          return undefined;
+        }),
       },
-      close: vi.fn(),
-      isLoadingMainFrame: () => false,
-      reload: vi.fn(),
-      setWindowOpenHandler: vi.fn(),
-    },
-    setVisible: vi.fn(),
-    setBounds: vi.fn(),
-    getBounds: () => ({ x: 0, y: 0, width: 100, height: 100 }),
-  })),
+      setVisible: vi.fn(),
+      setBounds: vi.fn(),
+      getBounds: () => ({ x: 0, y: 0, width: 100, height: 100 }),
+    };
+  }),
   session: {
     fromPartition: vi.fn(() => ({
       setPermissionRequestHandler: vi.fn(),
@@ -45,6 +65,7 @@ vi.mock("../browser/workspace-protocol", () => ({
 
 import {
   advanceAttachmentGenerationForTests,
+  bridgeDispatchLocalBrowser,
   closeAllLocalBrowserPages,
   hideLocalBrowserPages,
   localBrowserActivePageIdForTests,
@@ -143,5 +164,151 @@ describe("Local browser Attachment", () => {
     });
     expect(localBrowserActivePageIdForTests()).toBeNull();
     expect(localBrowserPageVisibleForTests("page-stale")).toBe(false);
+  });
+});
+
+describe("Local bridge mutation returns elements", () => {
+  beforeEach(() => {
+    closeAllLocalBrowserPages();
+    resetLegacyBrowserClearForTests();
+    setBeforeAttachCheckForTests(null);
+  });
+
+  function seedPage(pageId = "page-mut") {
+    const win = mockWin();
+    expect(showLocalBrowserPage(win, pageId, BOUNDS, "conv-1")).toMatchObject({
+      ok: true,
+    });
+    return pageId;
+  }
+
+  it("navigate/click/type/scroll 成功 data 含 elements + snapshot_version", async () => {
+    const pageId = seedPage();
+
+    const nav = await bridgeDispatchLocalBrowser(
+      pageId,
+      "navigate",
+      { url: "https://example.com/", capture: false },
+      "conv-1",
+    );
+    expect(nav).toMatchObject({
+      ok: true,
+      data: {
+        elements: ELEMENTS_TREE,
+        snapshot_version: 1,
+        aria: "",
+      },
+    });
+
+    const clicked = await bridgeDispatchLocalBrowser(
+      pageId,
+      "click",
+      { ref: "e1", snapshot_version: 1, capture: false },
+      "conv-1",
+    );
+    expect(clicked).toMatchObject({
+      ok: true,
+      data: {
+        elements: ELEMENTS_TREE,
+        snapshot_version: 2,
+        aria: "",
+      },
+    });
+
+    const typed = await bridgeDispatchLocalBrowser(
+      pageId,
+      "type",
+      { ref: "e2", text: "hi", snapshot_version: 2, capture: false },
+      "conv-1",
+    );
+    expect(typed).toMatchObject({
+      ok: true,
+      data: {
+        elements: ELEMENTS_TREE,
+        snapshot_version: 3,
+        aria: "",
+      },
+    });
+
+    const scrolled = await bridgeDispatchLocalBrowser(
+      pageId,
+      "scroll",
+      { dy: 100, capture: false },
+      "conv-1",
+    );
+    expect(scrolled).toMatchObject({
+      ok: true,
+      data: {
+        elements: ELEMENTS_TREE,
+        snapshot_version: 4,
+        aria: "",
+      },
+    });
+  });
+
+  it("snapshot 仍返回 elements；version 过期 / password_blocked 不 bump", async () => {
+    const pageId = seedPage();
+    const snap = await bridgeDispatchLocalBrowser(
+      pageId,
+      "snapshot",
+      {},
+      "conv-1",
+    );
+    expect(snap).toMatchObject({
+      ok: true,
+      data: {
+        elements: ELEMENTS_TREE,
+        snapshot_version: 1,
+        aria: "",
+      },
+    });
+
+    const stale = await bridgeDispatchLocalBrowser(
+      pageId,
+      "click",
+      { ref: "e1", snapshot_version: 0, capture: false },
+      "conv-1",
+    );
+    expect(stale.ok).toBe(false);
+    expect(String((stale as { error?: string }).error)).toContain("版本过期");
+
+    const { WebContentsView } = await import("electron");
+    const lastView = vi.mocked(WebContentsView).mock.results.at(-1)?.value as {
+      webContents: { executeJavaScript: ReturnType<typeof vi.fn> };
+    };
+    lastView.webContents.executeJavaScript.mockImplementation(
+      async (code: string) => {
+        if (typeof code === "string" && code.includes("querySelectorAll")) {
+          return ELEMENTS_TREE;
+        }
+        if (typeof code === "string" && code.includes("autocomplete")) {
+          return true;
+        }
+        return undefined;
+      },
+    );
+
+    const blocked = await bridgeDispatchLocalBrowser(
+      pageId,
+      "type",
+      { ref: "e1", text: "secret", snapshot_version: 1, capture: false },
+      "conv-1",
+    );
+    expect(blocked.ok).toBe(false);
+    expect(String((blocked as { error?: string }).error)).toContain(
+      "password_blocked",
+    );
+
+    // snapshot_version stays at 1（stale / password 路径未 bump）
+    const again = await bridgeDispatchLocalBrowser(
+      pageId,
+      "click",
+      { ref: "e1", snapshot_version: 1, capture: false },
+      "conv-1",
+    );
+    expect(again).toMatchObject({
+      ok: true,
+      data: { snapshot_version: 2, elements: ELEMENTS_TREE },
+    });
   });
 });

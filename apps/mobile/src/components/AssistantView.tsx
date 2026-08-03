@@ -127,7 +127,6 @@ export function AssistantContent({
   team,
   debate,
   debateRounds,
-  debatePretrial,
   asks,
   escalationSlots,
   hotTraces,
@@ -137,6 +136,7 @@ export function AssistantContent({
   graphAppendAuthorizedBy,
   onFill,
   supportIds,
+  onOpenBrowserLive,
 }: {
   process?: ProcessStep[];
   content: string;
@@ -154,10 +154,6 @@ export function AssistantContent({
   /** 辩论进行中的逐轮叙事 (fold 的 `debateRounds`)：`debate` 收场产物未到时实时叠出主持人逐
    *  轮焦点 / 小结 / 裁判；收场后让位给 {@link DebateView} 的全量双产物。 */
   debateRounds?: DebateNarrativeRound[];
-  /** 庭前取证（fold 的 `debatePretrial`）；开赛后首轮前 / 收场复盘。组卷轻态，无舰队。 */
-  debatePretrial?:
-    | import("@agentcore/protocol-conformance").DebatePretrialProjection
-    | null;
   /** 非阻塞提问 (ask_user blocking=false): transport-only card content keyed by ask_id,
    *  read off raw events via {@link extractAsks} (NOT the ProjectedTurn). The timeline's
    *  `ask` marker resolves to its card here; empty/absent → the marker no-ops. */
@@ -181,17 +177,17 @@ export function AssistantContent({
   onFill?: (text: string) => void;
   /** 复制排查包 ids（报障 / Cursor 日志查询）；有任一 id 即在复制行显示入口. */
   supportIds?: SupportDiagnosticIds;
+  /** Open BrowserLiveSheet from browser_login EscalationAnswer. */
+  onOpenBrowserLive?: () => void;
 }) {
   const hasTeam = !!team && team.runs.length > 0;
   const turnLedger = evidenceLedger;
   return (
     <>
       {debate ? (
-        <DebateView debate={debate} pretrial={debatePretrial} onFill={onFill} />
+        <DebateView debate={debate} onFill={onFill} />
       ) : debateRounds && debateRounds.length > 0 ? (
-        <LiveDebateNarrative rounds={debateRounds} pretrial={debatePretrial} />
-      ) : debatePretrial ? (
-        <LiveDebateNarrative rounds={[]} pretrial={debatePretrial} />
+        <LiveDebateNarrative rounds={debateRounds} />
       ) : null}
       {process && process.length > 0 ? (
         // 统一团队时间线: the team graph rides its inline `team` marker; escalation /
@@ -209,6 +205,7 @@ export function AssistantContent({
           graphAppendActKinds={graphAppendActKinds}
           graphAppendAuthorizedBy={graphAppendAuthorizedBy}
           onFill={onFill}
+          onOpenBrowserLive={onOpenBrowserLive}
         />
       ) : (
         <>
@@ -539,6 +536,7 @@ function ProcessTimeline({
   graphAppendActKinds,
   graphAppendAuthorizedBy,
   onFill,
+  onOpenBrowserLive,
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
@@ -552,6 +550,7 @@ function ProcessTimeline({
   graphAppendActKinds?: Map<string, string>;
   graphAppendAuthorizedBy?: Map<string, string>;
   onFill?: (text: string) => void;
+  onOpenBrowserLive?: () => void;
 }) {
   const nodes = groupToolRuns(omitCoordinationIdleSteps(steps));
   // Legacy turns whose persisted process predates the `team` marker still carry a team
@@ -621,6 +620,7 @@ function ProcessTimeline({
                 esc={slot.esc}
                 escalationId={live}
                 conversationId={team.conversationId}
+                onOpenLive={onOpenBrowserLive}
               />
             );
           }

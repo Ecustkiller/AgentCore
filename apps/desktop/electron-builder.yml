@@ -11,10 +11,12 @@
 appId: xyz.fashitianxia.agentcore
 productName: AgentCore
 
-# 应用图标单源 = build/icon.png（1024×1024 方形品牌标记）。electron-builder 自动从
-# buildResources 的 icon.png 派生各平台图标（Windows .ico / macOS .icns / Linux png 集）。
-# 注意：仓库根 .gitignore 通用忽略 build/（Python 产物），已对 apps/desktop/build/icon.png
-# 加豁免使其入仓；运行时窗口图标另在 resources/icon.png（经 ?asset，见 main/index.ts）。
+# 应用图标按平台分源（母版在仓库根 assets/agentcore-icon-orbit-*.png，二进制复制入仓，勿重烤）：
+# - Win / Linux：icon-win.png = rounded（四角透明 squircle）。Windows 快捷方式/任务栏不会再套一层
+#   圆角，若用满铺直角源会呈「方角块」；须预先烤好透明角。
+# - macOS：icon-mac.png = cropped（满铺、四角不透明）。系统会自己做 mask，预圆角反而被裁切/发糊。
+# 仓库根 .gitignore 通用忽略 build/，已对上述两文件加豁免入仓。
+# 运行时窗口/任务栏图标另在 resources/icon.png（= rounded；经 ?asset，见 main/index.ts）。
 directories:
   output: release/${version}
   buildResources: build
@@ -58,6 +60,8 @@ extraResources:
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 win:
+  # 见上方「按平台分源」：rounded squircle，派生 .ico
+  icon: icon-win.png
   target:
     - nsis
 
@@ -70,6 +74,8 @@ nsis:
   shortcutName: AgentCore
 
 mac:
+  # 见上方「按平台分源」：满铺 cropped，派生 .icns（系统自行 mask）
+  icon: icon-mac.png
   # dmg = 首装下载；zip = electron-updater 拉取（latest-mac.yml）。
   # 内测未签名：首装需右键打开；自动更新安装可能再次遇 Gatekeeper（见 06-规划 Mac 部署设计）。
   target:
@@ -78,6 +84,8 @@ mac:
   category: public.app-category.productivity
 
 linux:
+  # 与 Win 同用 rounded（透明角在 Linux 桌面同样生效）
+  icon: icon-win.png
   target:
     - AppImage
   category: Utility

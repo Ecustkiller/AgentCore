@@ -108,8 +108,7 @@
             "run_id": "r3",
             "role": "法务",
             "task": "审阅",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           }
         ],
         "tools": [

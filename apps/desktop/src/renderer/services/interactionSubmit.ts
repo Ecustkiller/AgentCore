@@ -2,6 +2,7 @@ import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
 import { runResume } from "@/services/turns";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
@@ -9,6 +10,8 @@ import {
   useInteractionStore,
 } from "@/stores/interactions";
 import type { InteractionKind } from "@/types/interactionExt";
+
+export type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
 
 /** True when the API says this interaction is no longer answerable. */
 export function isInteractionOrphanedError(err: unknown): boolean {
@@ -85,16 +88,19 @@ export interface ColdSubmitArgs {
   decision: PlanReviewUserDecision;
   note: string;
   selected?: string[];
+  /** delegate team_preview continue only；stop / debate 不传。 */
+  excluded_run_ids?: string[];
+  write_capability_overrides?: TeamPreviewResumeCorrections["write_capability_overrides"];
 }
 
 /**
  * Unified submit path (方案 §3.2): kind → cold | hot | compose.
  *
  * Hot: interactions.beginSubmit gates double-submit.
- * Cold: authority is pausedTurns (backend recovery keeps cold in `paused`, not
- * pending_interactions). Do not gate on an interactions entry — after recovery
- * there often is none. Optional best-effort status flip when an entry exists.
- * Dedup = caller local submitting + paused frame still present.
+ * Cold: authority is InteractionStore cold pending (ResumePrompt paint + submit).
+ * pausedTurns remains recovery/`setForConversation` routing shell + origin
+ * fallback — do not require a pausedTurns frame to submit when IX has the entry.
+ * Dedup = caller local submitting + Interaction beginSubmit when tracked.
  */
 export async function submitInteraction(args: {
   id: string;
@@ -159,12 +165,34 @@ export async function submitInteraction(args: {
   if (tracked) store.beginSubmit(args.id);
 
   try {
-    await runResume(
-      args.cold.messageId,
-      args.cold.decision,
-      args.cold.note,
-      args.cold.selected,
-    );
+    const corrections: TeamPreviewResumeCorrections = {
+      ...(args.cold.excluded_run_ids && args.cold.excluded_run_ids.length > 0
+        ? { excluded_run_ids: args.cold.excluded_run_ids }
+        : {}),
+      ...(args.cold.write_capability_overrides &&
+      args.cold.write_capability_overrides.length > 0
+        ? {
+            write_capability_overrides: args.cold.write_capability_overrides,
+          }
+        : {}),
+    };
+    const hasCorrections = Object.keys(corrections).length > 0;
+    if (hasCorrections) {
+      await runResume(
+        args.cold.messageId,
+        args.cold.decision,
+        args.cold.note,
+        args.cold.selected,
+        corrections,
+      );
+    } else {
+      await runResume(
+        args.cold.messageId,
+        args.cold.decision,
+        args.cold.note,
+        args.cold.selected,
+      );
+    }
     store.markResolved({
       kind: args.kind,
       id: args.id,
@@ -172,6 +200,7 @@ export async function submitInteraction(args: {
         decision: args.cold.decision,
         note: args.cold.note,
         selected: args.cold.selected ?? [],
+        ...(hasCorrections ? corrections : {}),
       },
     });
     return "ok";

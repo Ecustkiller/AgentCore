@@ -97,7 +97,8 @@ _USAGE_TAIL = (
     "会话授权的区外目录以 `external/<别名>/…` 走文件工具；若代码需真实 OS 路径，"
     "读环境变量 `AGENTCORE_EXTERNAL_<别名大写>`（由执行环境注入，勿把绝对路径"
     "写进回复）。④ 抓取网页或调用公开 HTTP API 优先用 read_url / web_search "
-    "工具，不要在代码里发网络请求。"
+    "工具，不要在代码里发网络请求。⑤ 大 zip 持久解压到工作区请用 archive_extract；"
+    "勿只靠本工具解压后假定内容已在 canonical 工作区树可见。"
 )
 
 # Local-only: when a short CLI truly belongs on code_execute, don't default to bash —

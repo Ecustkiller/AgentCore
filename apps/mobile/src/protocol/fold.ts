@@ -81,6 +81,7 @@ import type {
   ProjectedRun,
   ProjectedTeamNote,
   ProjectedTurn,
+  RunEscalation,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
@@ -927,6 +928,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "escalation_required": {
         // 阻塞式求决策: pending card on run + positional escalation marker (二期 D1/D2).
+        // browser_login 不进 ProjectedRun（golden）；热路径读 extractEscalationSlots。
         const p = ev.payload as EscalationRequiredPayload;
         const run = runById(p.run_id);
         if (run)
@@ -1704,12 +1706,22 @@ export function extractStageCardTraces(
   return byId;
 }
 
+/**
+ * Transport-only escalation body (旁路 {@link extractEscalationSlots}).
+ * Wire `browser_login` → `browserLogin`；刻意不进 {@link ProjectedRun}.escalations /
+ * golden {@link RunEscalation}，以免破 conformance。
+ */
+export type EscalationSlotEsc = RunEscalation & {
+  /** Wire `browser_login` — 登录等待 escalate；缺省 / false 不写。 */
+  browserLogin?: boolean;
+};
+
 /** Timeline-slot lookup for escalations (统一时间线二期): id → card body. Transport-only
  * sibling of {@link fold} — ProjectedTurn.runs[].escalations stays id-less (golden shape). */
 export interface EscalationSlot {
   id: string;
   runId: string;
-  esc: import("@agentcore/protocol-conformance").RunEscalation;
+  esc: EscalationSlotEsc;
 }
 
 export function extractEscalationSlots(
@@ -1746,6 +1758,8 @@ export function extractEscalationSlots(
           answer: null,
           kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
           ...(p.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
+          // Transport-only: keep ProjectedRun.escalations golden-clean.
+          ...(p.browser_login === true ? { browserLogin: true as const } : {}),
         },
       });
     } else if (ev.type === "escalation_resolved") {

@@ -36,23 +36,27 @@ from .tool_exec import execute_tools
 
 
 def _captain_closing_honesty(content: str, controller: LoopController) -> str:
-    """CEO soft banners: softⅡ′ → cloud-web verify（姿势 A / 既有横幅）.
+    """CEO soft banners: softⅡ′ → write-ownership → cloud-web verify（姿势 A / 既有横幅）.
 
     Each enforce_* skips when an honesty banner prefix is already present.
     """
     if not content:
         return content
     from agentcore.runtime.closing_posture import (
+        downgrade_verdict_for_unresolved_write_ownership,
         enforce_ceo_mutation_honesty,
         enforce_cloud_web_verify_honesty,
+        enforce_write_ownership_honesty,
         rewrite_stale_ask_after_dispatch,
     )
 
+    downgrade_verdict_for_unresolved_write_ownership()
     out = rewrite_stale_ask_after_dispatch(content)
     out = enforce_ceo_mutation_honesty(
         out,
         landing_succeeded=controller.landing_succeeded,
     )
+    out = enforce_write_ownership_honesty(out)
     return enforce_cloud_web_verify_honesty(out)
 
 

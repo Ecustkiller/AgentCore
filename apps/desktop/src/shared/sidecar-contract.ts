@@ -210,6 +210,19 @@ export interface SidecarResumeRequest {
   note: string;
   /** ask_user 的选项选择；plan_review 忽略。 */
   selected?: string[];
+  /**
+   * team_preview（delegate）开工修正：用户关闭的 `run_id`；缺省 / 空 = 全员开工。
+   * 辩论 / 非 delegate / ask / plan_review：服务端忽略。stop 时客户端不传。
+   */
+  excluded_run_ids?: string[];
+  /**
+   * team_preview（delegate）写盘单向收紧：仅允许 `capability: "text_only"`。
+   * 形状锁死为数组（不用 map）；stop 时客户端不传。
+   */
+  write_capability_overrides?: Array<{
+    run_id: string;
+    capability: "text_only";
+  }>;
   /** Structured website style pick (s0/s1/…). */
   /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
   inference?: SidecarInference;
@@ -296,6 +309,8 @@ export function buildSidecarResumeRpcParams(
     | "selected"
     | "userMessageId"
     | "permissionAxes"
+    | "excluded_run_ids"
+    | "write_capability_overrides"
   >,
   inference?: SidecarInference,
   browserBridge?: SidecarBrowserBridge | null,
@@ -312,6 +327,15 @@ export function buildSidecarResumeRpcParams(
     // Explicit null clears sticky spawn-env leftovers on the Python side.
     ...(browserBridge !== undefined ? { browserBridge } : {}),
     ...(req.permissionAxes ? { permissionAxes: req.permissionAxes } : {}),
+    // Optional team_preview corrections — omit when empty (keys documented in
+    // packages/contract-types/src/sidecar-ipc.json as optional resume params).
+    ...(req.excluded_run_ids && req.excluded_run_ids.length > 0
+      ? { excluded_run_ids: req.excluded_run_ids }
+      : {}),
+    ...(req.write_capability_overrides &&
+    req.write_capability_overrides.length > 0
+      ? { write_capability_overrides: req.write_capability_overrides }
+      : {}),
   };
 }
 
@@ -434,6 +458,11 @@ export interface SidecarRecoveryResponse {
   unsynced: SidecarUnsyncedTurnSummary[];
   /** 本机冷路挂起帧（与原 listPaused 同源；一次 IPC 拿全本地事实）。 */
   paused: SidecarPausedTurn[];
+  /**
+   * message_id → pause 落盘时投影的 display runs（挂起重开协作图）。
+   * 与 ``paused[]`` summary 分离：summary 只喂开工卡 store，runs 走 hydrate。
+   */
+  pausedRuns?: Record<string, SidecarRunsPayload>;
 }
 
 /** 重绑本窗口并取回缓冲事件快照（零 await 段在主进程 handler 内）。 */

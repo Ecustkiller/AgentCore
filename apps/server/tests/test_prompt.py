@@ -101,7 +101,7 @@ def test_untrusted_content_guard_frames_external_and_cross_agent_text():
 
 
 def test_system_feedback_block_frames_engine_steers_as_non_user():
-    # 回合中引擎自动注入的 [系统提示]（交付前核验 / 熔断 / 进度复盘 / 循环提醒）以 role=user 进窗口，
+    # 回合中引擎自动注入的 [系统提示]（交付前核验 / 熔断 / 循环提醒）以 role=user 进窗口，
     # 模型易误当用户纠错、回一句「谢谢指正，我重新整理」，那句寒暄再随正常旁白通道漏进可见交付
     # （真实事故）。共享 base 的 <system_feedback> 把这类注入定性为「系统自动机制、非用户发言」并禁止
     # 致谢/复述/寒暄——放共享 base 所以 CEO 与每个 worker 都受约束。Pin 住块、非用户定性、以及点名要
@@ -343,7 +343,11 @@ def test_core_teaches_split_criterion_over_count():
 
 def test_catalog_preamble_matches_core_consult_intensity():
     """核与能力目录 preamble 共用同一句按场面强度。"""
-    from agentcore.runtime.skills import CONSULT_TEAM_ORCH_BY_SCENE, render_skill_directory
+    from agentcore.runtime.skills import (
+        CONSULT_PRODUCT_HELP_BY_SCENE,
+        CONSULT_TEAM_ORCH_BY_SCENE,
+        render_skill_directory,
+    )
 
     directory = render_skill_directory(
         build_system_skill_registry(),
@@ -351,7 +355,9 @@ def test_catalog_preamble_matches_core_consult_intensity():
     )
     assert CONSULT_TEAM_ORCH_BY_SCENE in _CEO_CORE_HINT
     assert CONSULT_TEAM_ORCH_BY_SCENE in directory
+    assert CONSULT_PRODUCT_HELP_BY_SCENE in directory
     assert "先 consult `team_orchestration_advanced` 再决定团队形态" not in directory
+    assert "纯对话式回答自己答即可，无需 consult" not in directory
 
 
 def test_core_teaches_delegate_graph_and_coordinate_invariants():
@@ -504,6 +510,16 @@ def test_core_teaches_execution_and_recall_routing():
     assert "禁止 DIRECT" not in hint
     assert "【回忆 / 核实产出】" in hint
     assert "口头拒绝" not in hint or "交付缺口" in hint
+
+
+def test_core_teaches_repair_code_ui_verify_routing():
+    """白屏/挂载复现 → verify= browser 形；勿默认全仓 tsc/pytest（提示词分流，非硬闸）."""
+    hint = _CEO_CORE_HINT
+    assert 'playbook="repair_code"' in hint
+    assert "白屏" in hint or "挂载" in hint
+    assert "browser" in hint
+    assert "verify=" in hint
+    assert "勿" in hint and ("tsc" in hint or "pytest" in hint)
 
 
 def test_core_teaches_outline_checkpoint_prefers_structured_path():
@@ -805,6 +821,24 @@ def test_ceo_core_teaches_memory_history_user_facing_framing():
     assert "装不知道" in hint
     assert "禁止报工具名" in hint or "禁止报工具名与内部角色名" in hint
     assert "画像细节" in hint
+
+
+def test_ceo_core_platform_knowledge_two_way_routing():
+    """平台知识两分：机制走系统提示+workspace；怎么用走 product_help；禁外搜/翻仓当手册。"""
+    hint = _CEO_CORE_HINT
+    assert "<platform_knowledge>" in hint and "</platform_knowledge>" in hint
+    block = hint.split("<platform_knowledge>", 1)[1].split("</platform_knowledge>", 1)[0]
+    # 常驻产品面地图短：品类 + 高频入口 + 两分路由，勿膨胀整本手册
+    assert len(block.strip().splitlines()) <= 30
+    assert "【品类】" in block
+    assert "【产品面地图·高频入口】" in block
+    assert "【两分路由】" in block
+    assert "机制" in block and "架构" in block and "记忆" in block and "能力边界" in block
+    assert "系统提示" in block and "workspace_context" in block
+    assert "怎么用" in block or "功能介绍" in block
+    assert "consult_skill(product_help)" in block
+    assert "web_search" in block
+    assert "工作区" in block and ("产品说明" in block or "平台手册" in block or "平台文档" in block)
 
 
 def test_ceo_core_teaches_intent_routing_for_adversarial_entry():

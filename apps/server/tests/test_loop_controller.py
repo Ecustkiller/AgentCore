@@ -11,7 +11,6 @@ from agentcore.runtime.loop_controller import (
     StuckReason,
     ToolAttempt,
     fingerprint_tool_call,
-    progress_review_prompt,
 )
 
 
@@ -1145,112 +1144,11 @@ def test_parse_failure_only_rounds_do_not_count_unproductive():
     assert c.unproductive_early_stop()
 
 
-# --- B2: periodic reflection injection ---
+# --- B2 periodic reflection inject: retired (soft cadence; little effect + browser false nags) ---
 
 
-def test_reflection_due_fires_on_cadence():
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    # 4th / 7th / 10th round (0-indexed 3 / 6 / 9) — cadence alone, no latch yet
-    assert [r for r in range(11) if c.reflection_due(r)] == [3, 6, 9]
-
-
-def test_reflection_latches_one_per_idle_streak():
-    """Soft 进度复盘每空转段一次；再空转交给 convergence，不重复同文案。"""
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    assert c.reflection_due(3)
-    c.mark_reflection_injected()
-    assert not c.reflection_due(6)
-    assert not c.reflection_due(9)
-    # Progress clears the latch → cadence can fire again.
-    c.record([_ok("w", "file_write")])
-    c.record([_ok("r", "web_search")])
-    c.record([_ok("r2", "web_search")])
-    assert not c.has_recent_progress()
-    assert c.reflection_due(9)
-
-
-def test_reflection_not_due_before_start_round():
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    assert not any(c.reflection_due(r) for r in range(3))
-
-
-def test_reflection_cadence_is_configurable():
-    c = LoopController(reflection_start_round=2, reflection_interval=4)
-    assert [r for r in range(11) if c.reflection_due(r)] == [2, 6, 10]
-
-
-def test_progress_review_prompt_is_anchored_to_round():
-    msg = progress_review_prompt(4)
-    assert "进度复盘" in msg
-    assert "已进行 4 轮" in msg
-
-
-def test_progress_review_prompt_role_split():
-    captain = progress_review_prompt(4, role="captain")
-    worker = progress_review_prompt(4, role="worker")
-    default = progress_review_prompt(4)
-
-    assert "对照用户目标" in captain
-    assert "再委派" in captain or "委派" in captain
-    assert "收尾" in captain
-    assert "直接给最终答案" not in captain
-    assert "直接给出最终答案" not in captain
-
-    assert "落盘" in worker
-    assert "handoff" in worker
-    assert "禁止直接给最终答案" in worker
-    assert "file_read" in worker
-    # Default (no role / empty) uses worker copy — solo & leaf workers.
-    assert "handoff" in default
-    assert "禁止直接给最终答案" in default
-    assert captain != worker
-
-
-def test_progress_review_prompt_form_prose_no_str_replace():
-    """D3: prose workers must not be urged to str_replace / file_write."""
-    msg = progress_review_prompt(4, form_prose=True)
-    assert "form=prose" in msg or "仅文字" in msg
-    assert "handoff" in msg
-    assert "escalate" in msg
-    assert "请用 str_replace" not in msg
-    assert "下一步用写文件 / str_replace" not in msg
-    # Mentions withheld write tools as forbidden empty spin, not as required action.
-    assert "禁止空转调用 str_replace" in msg or "未授" in msg
-
-
-def test_reflection_skips_when_recent_progress():
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    # Cadence round with a successful file_write → skip.
-    c.record([_ok("w", "file_write")])
-    assert c.has_recent_progress()
-    assert not c.reflection_due(3)
-
-    # Next non-progress round still within「近轮」window → still skip.
-    c.record([_ok("r", "web_search")])
-    assert c.has_recent_progress()
-    assert not c.reflection_due(6)
-
-    # Two non-progress rounds later → cadence may fire again.
-    c.record([_ok("r2", "web_search")])
-    assert not c.has_recent_progress()
-    assert c.reflection_due(6)
-
-
-def test_file_append_counts_as_progress_for_reflection_skip():
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    c.record([_ok("a", "file_append")])
-    assert c.has_recent_progress()
-    assert not c.reflection_due(3)
-
-
-def test_failed_progress_tool_does_not_skip_reflection():
-    c = LoopController(reflection_start_round=3, reflection_interval=3)
-    c.record([_fail("w", "file_write")])
-    assert not c.has_recent_progress()
-    assert c.reflection_due(3)
-
-
-def test_progress_tools_include_append_and_handoff():
+def test_progress_tools_reset_investigation_spin():
+    """PROGRESS_TOOLS success still clears same-target investigation spin."""
     from agentcore.runtime.loop_controller import PROGRESS_TOOLS
 
     assert {
@@ -1262,6 +1160,16 @@ def test_progress_tools_include_append_and_handoff():
         "delegate",
         "ask_user",
     } <= PROGRESS_TOOLS
+
+    c = LoopController(
+        investigation_tools=frozenset({"web_search"}),
+        convergence_spin_rounds=2,
+    )
+    c.record([_ok("r1", "web_search")])
+    c.record([_ok("r1", "web_search")])
+    assert c.same_target_investigation_streak >= 1
+    c.record([_ok("w", "file_write")])
+    assert c.same_target_investigation_streak == 0
 
 
 # --- over-investigation safety net (收敛治理, 保险丝: finalize-only runaway backstop) ---

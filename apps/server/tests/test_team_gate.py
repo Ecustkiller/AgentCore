@@ -272,6 +272,10 @@ def test_ceo_prompt_d10_repair_routing_rules():
     assert "continue_from_run_id" in core
     assert "换 title" in core or "换职能" in core
     assert "冷开新三角色" in core or "再套" in core
+    # 白屏/UI：verify= browser 形，勿默认全仓 tsc/pytest。
+    assert "白屏" in core or "挂载" in core
+    assert "browser" in core
+    assert "勿" in core and ("tsc" in core or "pytest" in core)
 
 
 def test_hard_stop_disables_investigation_tools_when_intent_clear():

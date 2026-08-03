@@ -354,9 +354,9 @@ def test_format_for_ceo_no_next_steps_section_when_none():
     assert "顺带提的后续方向" not in out
 
 
-def test_direct_result_answers_with_deliverable_and_footers_next_steps():
-    # finalize=true (single worker → user): the answer IS the clean deliverable; a 建议下一步 from
-    # the structured debrief is re-attached as a readable footer (no CEO synthesis pass to relay it).
+def test_direct_result_keeps_deliverable_clean_of_next_steps():
+    # finalize=true (single worker → user): the answer IS the clean deliverable. ``next_steps``
+    # stays on structured debrief (run-detail 交接简报) — do not re-serialize into content.
     t = tool(Provider([]))
     state = RunState(
         phase=RunPhase.COMPLETED,
@@ -364,8 +364,9 @@ def test_direct_result_answers_with_deliverable_and_footers_next_steps():
         debrief={"summary": "完成", "next_steps": "可考虑加单测"},
     )
     res = direct_result(t, state)
-    assert res.final_text.startswith("最终交付正文。")
-    assert "**建议下一步**：可考虑加单测" in res.final_text  # next-step relayed as a footer
+    assert res.final_text == "最终交付正文。"
+    assert "建议下一步" not in res.final_text
+    assert "可考虑加单测" not in res.final_text
 
 
 def test_format_for_ceo_includes_final_synthesis_discipline():

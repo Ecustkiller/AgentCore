@@ -2,6 +2,7 @@ import { formatCrossModelRosterLine } from "@/components/chat/debate/model";
 import { shouldHostPreviewInGraph } from "@/components/chat/debatePreviewPlacement";
 import {
   ResolvedDecisionRecord,
+  teamCorrectionSuffix,
   teamPendingMarkerLabel,
   teamResolvedOutcome,
 } from "@/components/chat/decision";
@@ -85,9 +86,6 @@ export function WorkerRows({ preview }: { preview: TeamPreviewDisplay }) {
               >
                 {w.write_capability_label}
               </span>
-            )}
-            {w.debate && (
-              <span className="text-xs text-muted-foreground">辩论</span>
             )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
@@ -242,7 +240,11 @@ function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
     decision,
     Boolean(preview.note?.trim()),
   );
-  const summary = `${meta.label} · ${summarySuffix(preview)}`;
+  const correction = teamCorrectionSuffix({
+    excluded_run_ids: preview.excluded_run_ids,
+    write_capability_overrides: preview.write_capability_overrides,
+  });
+  const summary = `${meta.label}${correction} · ${summarySuffix(preview)}`;
 
   return (
     <ResolvedDecisionRecord

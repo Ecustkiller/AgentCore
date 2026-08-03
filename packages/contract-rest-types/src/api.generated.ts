@@ -2209,6 +2209,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversation Trash
+         * @description List ``AgentCore/trash`` entries for this conversation's workspace.
+         */
+        get: operations["list_conversation_trash_v1_conversations__conversation_id__trash_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/trash/{entry_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Conversation Trash
+         * @description Restore one ``AgentCore/trash`` entry (cloud workspace only).
+         */
+        post: operations["restore_conversation_trash_v1_conversations__conversation_id__trash__entry_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/workspace/binding": {
         parameters: {
             query?: never;
@@ -5068,6 +5108,54 @@ export interface paths {
          *     mirror, not the user's machine.
          */
         post: operations["restore_workspace_snapshot_v1_workspaces__ws_id__snapshots__snapshot_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws_id}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Trash
+         * @description List reversible soft-deletes under ``AgentCore/trash`` (newest first).
+         *
+         *     Cloud / sidecar only. Local OS recycle-bin deletes are **not** listed here —
+         *     restore those via the system trash UI. Expired entries are purged on read
+         *     (retention = ``workspace_retention_days``).
+         */
+        get: operations["list_workspace_trash_v1_workspaces__ws_id__trash_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws_id}/trash/{entry_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Workspace Trash
+         * @description Restore one ``AgentCore/trash`` entry to its original relative path.
+         *
+         *     Refused for local workspaces (409): files live on the desktop; use the
+         *     desktop AgentCore/trash UI when the soft-delete fallback was used — never
+         *     confuse with OS ``shell.trashItem``.
+         */
+        post: operations["restore_workspace_trash_v1_workspaces__ws_id__trash__entry_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8759,10 +8847,16 @@ export interface components {
         /**
          * MouseInputEvent
          * @description A pointer event in frame-pixel space (the driver rescales to the viewport).
+         *
+         *     ``button`` accepts DOM integers ``0|1|2`` (desktop/mobile wire) or Playwright
+         *     names ``left|right|middle``; validation normalizes to the name form.
          */
         MouseInputEvent: {
-            /** Button */
-            button?: ("left" | "right" | "middle") | null;
+            /**
+             * Button
+             * @description DOM MouseEvent.button 0|1|2 (desktop/mobile wire) or Playwright/CDP left|right|middle; server normalizes to the name form.
+             */
+            button?: ("left" | "right" | "middle") | (0 | 1 | 2) | null;
             /** Click Count */
             click_count?: number | null;
             /** Delta X */
@@ -8889,6 +8983,11 @@ export interface components {
             assumptions?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Browser Login
+             * @default false
+             */
+            browser_login: boolean;
             /** Checkpoint Id */
             checkpoint_id: string;
             /**
@@ -9457,9 +9556,15 @@ export interface components {
          *     carries the option(s) the user picked from an ask_user menu (ignored for
          *     plan_review; the server drops any pick not actually offered). The engine-only
          *     ``timeout`` is never sent by a client.
+         *
+         *     ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
+         *     ``team_preview`` ``continue`` (开工组队有限否决). Debate / ask / plan_review /
+         *     stop ignore them (no 422). Hot-path ``ResolveInteraction`` is not extended.
          */
         ResumeTurnRequest: {
             decision: components["schemas"]["CheckpointDecision"];
+            /** Excluded Run Ids */
+            excluded_run_ids?: string[];
             /**
              * Note
              * @default
@@ -9467,6 +9572,8 @@ export interface components {
             note: string;
             /** Selected */
             selected?: string[];
+            /** Write Capability Overrides */
+            write_capability_overrides?: components["schemas"]["WriteCapabilityOverride"][];
         };
         /**
          * RewriteRequest
@@ -10605,6 +10712,40 @@ export interface components {
              */
             yes_votes: number;
         };
+        /**
+         * TrashEntrySummary
+         * @description One reversible entry under workspace ``AgentCore/trash/<id>/``.
+         */
+        TrashEntrySummary: {
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+            /** Entry Id */
+            entry_id: string;
+            /** Is Dir */
+            is_dir: boolean;
+            /** Name */
+            name: string;
+            /** Original Path */
+            original_path: string;
+        };
+        /**
+         * TrashListResponse
+         * @description List of AgentCore/trash entries (newest first).
+         *
+         *     ``retention_days`` mirrors ``workspace_retention_days`` — product one-click
+         *     restore only covers this zone; Local OS ``shell.trashItem`` is a separate track.
+         */
+        TrashListResponse: {
+            /** Data */
+            data: components["schemas"]["TrashEntrySummary"][];
+            /** Retention Days */
+            retention_days: number;
+            /** Total */
+            total: number;
+        };
         /** TriggerStandingTaskResponse */
         TriggerStandingTaskResponse: {
             /** Run Id */
@@ -11451,6 +11592,22 @@ export interface components {
              * @default false
              */
             storm_active: boolean;
+        };
+        /**
+         * WriteCapabilityOverride
+         * @description Delegate ``team_preview`` continue: tighten one worker's write capability.
+         *
+         *     Only ``text_only`` is legal (→ ``deliverable.form=prose``). Unknown ``run_id`` /
+         *     non-``text_only`` / upgrade attempts → 422 on resume.
+         */
+        WriteCapabilityOverride: {
+            /**
+             * Capability
+             * @constant
+             */
+            capability: "text_only";
+            /** Run Id */
+            run_id: string;
         };
     };
     responses: never;
@@ -15354,6 +15511,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversation_trash_v1_conversations__conversation_id__trash_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrashListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_conversation_trash_v1_conversations__conversation_id__trash__entry_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                entry_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21850,6 +22078,77 @@ export interface operations {
             path: {
                 ws_id: string;
                 snapshot_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_trash_v1_workspaces__ws_id__trash_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ws_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrashListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_workspace_trash_v1_workspaces__ws_id__trash__entry_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ws_id: string;
+                entry_id: string;
             };
             cookie?: {
                 access_token?: string | null;

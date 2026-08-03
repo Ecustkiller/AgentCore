@@ -1,16 +1,21 @@
-import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
-import { stageFileLabel } from "@/lib/stageDirs";
 // 「本回合产出文件」卡（前端UX设计.md §九「回合内文件呈现」，手机端全新实现，对标桌面
 // components/chat/FileArtifactsCard.tsx 语义）。主清单只认路径验收态（delivery_status.artifacts）；
-// 缺字段 → 空卡。挂在答复正文下方；点任一可预览行 → 跳到该对话的文件页并直接打开预览
-// （FileBrowser 的 `openPath` 深链）。删除态无文件可看 → 该行仅留痕、不可点。
-// 手机 parity=simplified：无「查看改动」完整面；清单 + 深链文件页即可。
+// 历史缺 delivery 时由 ChatPage 旁路 process/events。挂在答复正文下方；点任一可预览行 →
+// 跳到该对话的文件页并直接打开预览。「查看改动」在卡内展开（无右坞）。
+import { TurnFileChangesReview } from "@/components/TurnFileChangesReview";
+import {
+  type FileArtifact,
+  type FileOp,
+  hasChangePreviews,
+} from "@/lib/fileArtifacts";
+import { stageFileLabel } from "@/lib/stageDirs";
 import {
   ArrowRight,
   Check,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Diff,
   FilePlus,
   FolderOpen,
   type LucideIcon,
@@ -110,15 +115,26 @@ function ArtifactBody({
 export function FileArtifactsCard({
   artifacts,
   conversationId,
+  messageId = null,
+  reviewArtifacts,
 }: {
   artifacts: FileArtifact[];
   conversationId: string | null;
+  /** Assistant message id；有则「查看改动」可拉 A1+ 真 diff。 */
+  messageId?: string | null;
+  /** A1 工具参数预览源（process/events）；缺省回落 artifacts。 */
+  reviewArtifacts?: FileArtifact[];
 }) {
   const navigate = useNavigate();
   // 文件不多（≤4）默认展开一目了然；多了先收起，避免长清单淹没答复。
   const [expanded, setExpanded] = useState(artifacts.length <= 4);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   if (artifacts.length === 0) return null;
+
+  const reviewSource = reviewArtifacts ?? artifacts;
+  const canReview =
+    hasChangePreviews(reviewSource) || (!!conversationId && !!messageId);
 
   const open = (a: FileArtifact) => {
     if (!conversationId) return;
@@ -127,20 +143,34 @@ export function FileArtifactsCard({
 
   return (
     <div className="artifacts">
-      <button
-        type="button"
-        className="artifacts-head"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <FolderOpen size={15} className="artifacts-folder" aria-hidden />
-        <span className="artifacts-title">本回合产出文件</span>
-        <span className="artifacts-count">{artifacts.length}</span>
-        {expanded ? (
-          <ChevronUp size={15} className="artifact-go" aria-hidden />
-        ) : (
-          <ChevronDown size={15} className="artifact-go" aria-hidden />
+      <div className="artifacts-head-row">
+        <button
+          type="button"
+          className="artifacts-head"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <FolderOpen size={15} className="artifacts-folder" aria-hidden />
+          <span className="artifacts-title">本回合产出文件</span>
+          <span className="artifacts-count">{artifacts.length}</span>
+          {expanded ? (
+            <ChevronUp size={15} className="artifact-go" aria-hidden />
+          ) : (
+            <ChevronDown size={15} className="artifact-go" aria-hidden />
+          )}
+        </button>
+        {canReview && (
+          <button
+            type="button"
+            className="artifacts-review-btn"
+            aria-label="查看改动"
+            aria-expanded={reviewOpen}
+            onClick={() => setReviewOpen((v) => !v)}
+          >
+            <Diff size={14} aria-hidden />
+            查看改动
+          </button>
         )}
-      </button>
+      </div>
       {expanded && (
         <ul className="artifacts-list">
           {artifacts.map((a) => {
@@ -176,6 +206,13 @@ export function FileArtifactsCard({
             );
           })}
         </ul>
+      )}
+      {reviewOpen && (
+        <TurnFileChangesReview
+          artifacts={reviewSource}
+          conversationId={conversationId}
+          messageId={messageId}
+        />
       )}
     </div>
   );

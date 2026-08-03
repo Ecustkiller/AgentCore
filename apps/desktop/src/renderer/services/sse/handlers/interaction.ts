@@ -26,6 +26,7 @@ const INTERACTION_SSE_TYPES = interactionChannelEventTypes();
 function wireIntoInteractionStore(
   event: SSEEvent,
   conversationId: string,
+  origin: DispatchContext["source"],
 ): void {
   const messageId = execMessageId(conversationId) ?? "";
   applyInteractionWireEvent(
@@ -33,6 +34,7 @@ function wireIntoInteractionStore(
     (event.payload ?? {}) as Record<string, unknown>,
     conversationId,
     messageId,
+    origin,
   );
 }
 
@@ -93,7 +95,7 @@ export function handleInteractionEvent(
       flushPendingContent(conversationId);
       flushPendingFrames(conversationId);
     }
-    wireIntoInteractionStore(event, conversationId);
+    wireIntoInteractionStore(event, conversationId, ctx.source);
 
     if (requiredDef.timeline) {
       const wire = wireFor(requiredDef.kind);
@@ -117,7 +119,7 @@ export function handleInteractionEvent(
 
   const resolvedDef = defFromResolvedEvent(event.type);
   if (resolvedDef) {
-    wireIntoInteractionStore(event, conversationId);
+    wireIntoInteractionStore(event, conversationId, ctx.source);
     const effects = resolvedDef.sseResolved;
     const wire = wireFor(resolvedDef.kind);
     const id = (event.payload as Record<string, unknown>)?.[wire.idField];

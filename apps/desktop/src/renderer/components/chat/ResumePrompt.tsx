@@ -5,14 +5,17 @@ import {
   DecisionCardIcon,
   Textarea,
 } from "@/components/ui";
+import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
+  type TeamPreviewResumeCorrections,
   submitInteraction,
   submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import { selectVisibleColdResumes } from "@/services/resume";
 import { useConversationStore } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { useInteractionStore } from "@/stores/interactions";
@@ -32,6 +35,7 @@ import {
   Users,
 } from "lucide-react";
 import { type ComponentType, useRef, useState } from "react";
+import { BrowserLoginDecisionCard } from "./BrowserLoginDecisionCard";
 import { AskUserCard } from "./CheckpointCard";
 import { formatCrossModelRosterLine } from "./debate/model";
 import { TEAM_PRIMITIVE_META } from "./decision";
@@ -42,19 +46,29 @@ const CONCLUSION_CLAMP_CHARS = 60;
 /** Cold-path pending cards only (`ask_user` / `plan_review` / `team_preview`). */
 export function ResumePrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const pending = usePausedTurnStore((s) => s.pending);
+  // Live authority = InteractionStore cold pending; pausedTurns = recovery shell.
   const byId = useInteractionStore((s) => s.byId);
-  // Orphaned: silent dismiss (no tombstone card).
-  const visible = pending.filter((p) => {
-    if (p.conversationId !== conversationId) return false;
-    return byId.get(p.checkpointId)?.status !== "orphaned";
-  });
+  const pausedPending = usePausedTurnStore((s) => s.pending);
+  const messages = useConversationStore((s) =>
+    conversationId ? (s.byId?.[conversationId]?.messages ?? []) : [],
+  );
+  const visible = conversationId
+    ? selectVisibleColdResumes({
+        conversationId,
+        byId,
+        pausedPending,
+        messages,
+      })
+    : [];
   if (visible.length === 0) return null;
 
   return (
     <div className="mx-4 mb-2 space-y-2">
       {visible.map((turn) => (
-        <ResumeCard key={turn.messageId} turn={turn} />
+        <ResumeCard
+          key={`${turn.messageId}:${turn.checkpointId}`}
+          turn={turn}
+        />
       ))}
     </div>
   );
@@ -83,9 +97,26 @@ function useColdSubmit(turn: PendingResume) {
     decision: PlanReviewUserDecision,
     selected: string[] = [],
     note = "",
+    corrections?: TeamPreviewResumeCorrections,
   ) => {
     if (busy) return;
     setSubmitting(decision);
+    const continueCorrections =
+      decision === "continue" && corrections
+        ? {
+            ...(corrections.excluded_run_ids &&
+            corrections.excluded_run_ids.length > 0
+              ? { excluded_run_ids: corrections.excluded_run_ids }
+              : {}),
+            ...(corrections.write_capability_overrides &&
+            corrections.write_capability_overrides.length > 0
+              ? {
+                  write_capability_overrides:
+                    corrections.write_capability_overrides,
+                }
+              : {}),
+          }
+        : {};
     void submitInteraction({
       id: turn.checkpointId,
       kind: coldKind(turn),
@@ -95,6 +126,7 @@ function useColdSubmit(turn: PendingResume) {
         decision,
         note,
         selected,
+        ...continueCorrections,
       },
     })
       .then((result) => {
@@ -415,7 +447,21 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
   );
 }
 
-function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
+function TeamPreviewWorkers({
+  turn,
+  excludedRunIds,
+  onExcludedChange,
+  textOnlyRunIds,
+  onTextOnlyChange,
+  disabled,
+}: {
+  turn: PendingResume;
+  excludedRunIds: ReadonlySet<string>;
+  onExcludedChange: (runId: string, included: boolean) => void;
+  textOnlyRunIds: ReadonlySet<string>;
+  onTextOnlyChange: (runId: string, textOnly: boolean) => void;
+  disabled?: boolean;
+}) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -429,29 +475,92 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
     });
   };
 
+  const includedIds = new Set(
+    turn.workers.map((w) => w.run_id).filter((id) => !excludedRunIds.has(id)),
+  );
+
   return (
     <div className="mt-2 space-y-1.5">
       {turn.workers.map((w) => {
         const open = expanded.has(w.run_id);
+        const included = !excludedRunIds.has(w.run_id);
+        const dependedOn = [...includedIds].some((otherId) => {
+          if (otherId === w.run_id) return false;
+          const other = turn.workers.find((x) => x.run_id === otherId);
+          return other?.depends_on.includes(w.run_id) ?? false;
+        });
+        const lastIncluded = included && includedIds.size <= 1;
+        const excludeBlocked = included && (dependedOn || lastIncluded);
+        const effectiveTextOnly =
+          textOnlyRunIds.has(w.run_id) || w.write_capability === "text_only";
+        const canTighten =
+          included &&
+          w.write_capability === "can_write_files" &&
+          !textOnlyRunIds.has(w.run_id);
+        const writeLabel = effectiveTextOnly
+          ? (w.write_capability === "text_only"
+              ? w.write_capability_label
+              : undefined) || "仅文字报告"
+          : w.write_capability_label || "可改文件";
+
         const meta = (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="min-w-0 text-xs font-medium text-foreground">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <Switch
+              checked={included}
+              disabled={disabled || (included && excludeBlocked)}
+              label={`纳入本轮 · ${w.role}`}
+              onCheckedChange={(next) => onExcludedChange(w.run_id, next)}
+            />
+            <p
+              className={`min-w-0 text-xs font-medium ${
+                included
+                  ? "text-foreground"
+                  : "text-muted-foreground line-through"
+              }`}
+            >
               {w.role}
             </p>
-            {w.write_capability_label && (
-              <span
-                className={
-                  w.write_capability === "text_only"
-                    ? "text-xs font-medium text-muted-foreground"
-                    : "text-xs text-muted-foreground"
-                }
-              >
-                {w.write_capability_label}
-              </span>
-            )}
-            {w.debate && (
-              <span className="text-xs text-muted-foreground">辩论</span>
-            )}
+            {(w.write_capability || textOnlyRunIds.has(w.run_id)) &&
+              (canTighten ? (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTextOnlyChange(w.run_id, true);
+                  }}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-40"
+                  aria-label={`${w.role} 收紧为仅文字`}
+                >
+                  {writeLabel}
+                  <span className="text-muted-foreground/80"> → 仅文字</span>
+                </button>
+              ) : (
+                <span
+                  className={
+                    effectiveTextOnly
+                      ? "text-xs font-medium text-muted-foreground"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {writeLabel}
+                </span>
+              ))}
+            {textOnlyRunIds.has(w.run_id) &&
+              w.write_capability === "can_write_files" && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTextOnlyChange(w.run_id, false);
+                  }}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-40"
+                  aria-label={`${w.role} 撤销写盘收紧`}
+                >
+                  撤销
+                </button>
+              )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
                 依赖 {w.depends_on.length} 步
@@ -460,13 +569,24 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
           </div>
         );
 
+        const depHint =
+          included && dependedOn ? (
+            <p
+              className="mt-1 text-xs text-muted-foreground"
+              data-testid="team-preview-dep-block-hint"
+            >
+              仍有队员依赖此岗
+            </p>
+          ) : null;
+
         if (!w.task) {
           return (
             <div
               key={w.run_id}
               className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
             >
-              {meta}
+              <div className="flex items-start gap-1.5">{meta}</div>
+              {depHint}
             </div>
           );
         }
@@ -476,15 +596,24 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
             key={w.run_id}
             className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
           >
+            <div className="flex items-start gap-1.5">{meta}</div>
             <button
               type="button"
               onClick={() => toggle(w.run_id)}
               aria-expanded={open}
               aria-label={open ? `收起 ${w.role} 任务` : `展开 ${w.role} 任务`}
-              className="w-full text-left"
+              className="mt-0.5 w-full text-left"
             >
               <div className="flex items-start gap-1.5">
-                <div className="min-w-0 flex-1">{meta}</div>
+                <p
+                  className={
+                    open
+                      ? "min-w-0 flex-1 whitespace-pre-wrap text-xs text-muted-foreground"
+                      : "min-w-0 flex-1 line-clamp-1 text-xs text-muted-foreground"
+                  }
+                >
+                  {w.task}
+                </p>
                 {open ? (
                   <ChevronDown
                     size={14}
@@ -497,16 +626,8 @@ function TeamPreviewWorkers({ turn }: { turn: PendingResume }) {
                   />
                 )}
               </div>
-              <p
-                className={
-                  open
-                    ? "mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground"
-                    : "mt-0.5 line-clamp-1 text-xs text-muted-foreground"
-                }
-              >
-                {w.task}
-              </p>
             </button>
+            {depHint}
           </div>
         );
       })}
@@ -645,6 +766,12 @@ function TeamPreviewDebateBody({ turn }: { turn: PendingResume }) {
 function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const [capsOpen, setCapsOpen] = useState(false);
+  const [excludedRunIds, setExcludedRunIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [textOnlyRunIds, setTextOnlyRunIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const { submitting, busy, send } = useColdSubmit(turn);
   const isDebate = turn.primitive === "debate";
   const family = TEAM_PRIMITIVE_META[isDebate ? "debate" : "delegate"];
@@ -689,6 +816,54 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const capPreview = turn.tools.slice(0, 2).map(toolLabel);
   const capRest = turn.tools.length - capPreview.length;
 
+  const buildCorrections = (): TeamPreviewResumeCorrections | undefined => {
+    if (isDebate) return undefined;
+    const excluded_run_ids = turn.workers
+      .map((w) => w.run_id)
+      .filter((id) => excludedRunIds.has(id));
+    const write_capability_overrides = turn.workers
+      .filter(
+        (w) =>
+          !excludedRunIds.has(w.run_id) &&
+          textOnlyRunIds.has(w.run_id) &&
+          w.write_capability === "can_write_files",
+      )
+      .map((w) => ({
+        run_id: w.run_id,
+        capability: "text_only" as const,
+      }));
+    if (
+      excluded_run_ids.length === 0 &&
+      write_capability_overrides.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      ...(excluded_run_ids.length > 0 ? { excluded_run_ids } : {}),
+      ...(write_capability_overrides.length > 0
+        ? { write_capability_overrides }
+        : {}),
+    };
+  };
+
+  const onExcludedChange = (runId: string, included: boolean) => {
+    setExcludedRunIds((prev) => {
+      const next = new Set(prev);
+      if (included) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  };
+
+  const onTextOnlyChange = (runId: string, textOnly: boolean) => {
+    setTextOnlyRunIds((prev) => {
+      const next = new Set(prev);
+      if (textOnly) next.add(runId);
+      else next.delete(runId);
+      return next;
+    });
+  };
+
   return (
     <DecisionCard
       tone="primary"
@@ -715,7 +890,14 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
               {isDebate ? (
                 <TeamPreviewDebateBody turn={turn} />
               ) : (
-                <TeamPreviewWorkers turn={turn} />
+                <TeamPreviewWorkers
+                  turn={turn}
+                  excludedRunIds={excludedRunIds}
+                  onExcludedChange={onExcludedChange}
+                  textOnlyRunIds={textOnlyRunIds}
+                  onTextOnlyChange={onTextOnlyChange}
+                  disabled={busy}
+                />
               )}
 
               {showCapabilities && (
@@ -779,7 +961,9 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
               variant="primary"
               icon={spinnerOr("continue", <CheckCheck size={13} />)}
               disabled={busy}
-              onClick={() => send("continue", [], note.trim())}
+              onClick={() =>
+                send("continue", [], note.trim(), buildCorrections())
+              }
             >
               {isDebate
                 ? family.resumeCta
@@ -803,6 +987,9 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
 }
 
 function AskUserResumeCard({ turn }: { turn: PendingResume }) {
+  if (turn.browserLogin) {
+    return <AskUserBrowserLoginResumeCard turn={turn} />;
+  }
   return (
     <AskUserCard
       content={turn}
@@ -825,6 +1012,91 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
           throw new Error(submitInteractionFeedback(result));
         }
       }}
+    />
+  );
+}
+
+function formatBrowserLoginAssumption(
+  assumptions: PendingResume["assumptions"],
+): string | undefined {
+  if (assumptions.length === 0) return undefined;
+  const text = assumptions
+    .map((a) => {
+      const label = a.label?.trim() ?? "";
+      const value = a.value?.trim() ?? "";
+      if (label && value) return `${label}：${value}`;
+      return value || label;
+    })
+    .filter(Boolean)
+    .join("；");
+  return text || undefined;
+}
+
+function AskUserBrowserLoginResumeCard({ turn }: { turn: PendingResume }) {
+  const [submitting, setSubmitting] = useState<
+    "logged_in" | "use_assumption" | "stop" | null
+  >(null);
+  const entryStatus = useInteractionStore(
+    (s) => s.byId.get(turn.checkpointId)?.status,
+  );
+  const busy = submitting !== null || entryStatus === "submitting";
+  const assumption = formatBrowserLoginAssumption(turn.assumptions);
+
+  const send = async (
+    decision: "continue" | "stop",
+    opts?: { useAssumption?: boolean },
+  ) => {
+    if (busy) return;
+    const useAssumption = opts?.useAssumption === true && !!assumption;
+    setSubmitting(
+      useAssumption
+        ? "use_assumption"
+        : decision === "continue"
+          ? "logged_in"
+          : "stop",
+    );
+    try {
+      const result = await submitInteraction({
+        id: turn.checkpointId,
+        kind: "ask_user",
+        conversationId: turn.conversationId,
+        cold: {
+          messageId: turn.messageId,
+          decision,
+          note: useAssumption
+            ? assumption
+            : decision === "continue"
+              ? "已登录，继续"
+              : "",
+          selected: [],
+        },
+      });
+      if (result !== "ok") {
+        notifyError(submitInteractionFeedback(result));
+        setSubmitting(null);
+      }
+    } catch (err) {
+      notifyError(err, "提交失败");
+      setSubmitting(null);
+    }
+  };
+
+  return (
+    <BrowserLoginDecisionCard
+      roleLabel="主 Agent"
+      question={turn.question || "请在右坞浏览器完成登录"}
+      assumption={assumption}
+      conversationId={turn.conversationId}
+      revealKey={turn.checkpointId}
+      busy={busy}
+      submitting={submitting}
+      onLoggedIn={() => void send("continue")}
+      onUseAssumption={
+        assumption
+          ? () => void send("continue", { useAssumption: true })
+          : undefined
+      }
+      onStop={() => void send("stop")}
     />
   );
 }

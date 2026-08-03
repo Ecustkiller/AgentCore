@@ -85,6 +85,20 @@ class TurnJournalWriter:
     def has_settlement_dedupe(self, key: tuple[str, str, str]) -> bool:
         return key in self._settlement_dedupe
 
+    def would_dedupe_settlement(self, entry: dict[str, Any]) -> bool:
+        """True when a non-critical append of ``entry`` would skip the durable write.
+
+        Matches :meth:`_enqueue` settlement dedupe (awaiter / cold-resume re-emit).
+        Callers that also maintain ``TurnFactLog`` must consult this *before*
+        appending to the in-memory log — otherwise a skipped DB write still grows
+        the log and drifts ``fact_log`` index vs journal ``seq`` (finalize
+        enumerate then inserts duplicate trailing ``process_content``).
+        """
+        key = settlement_dedupe_key(
+            self.turn_id, str(entry.get("kind") or ""), dict(entry.get("payload") or {})
+        )
+        return key is not None and key in self._settlement_dedupe
+
     def register_settlement_dedupe(self, entry: dict[str, Any]) -> tuple[str, str, str] | None:
         """Register a settlement key so a later duplicate journal write is skipped."""
         key = settlement_dedupe_key(

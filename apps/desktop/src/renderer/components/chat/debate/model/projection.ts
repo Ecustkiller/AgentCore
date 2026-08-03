@@ -7,6 +7,7 @@ import {
   debateBeatFromContext,
   debateGroups,
   debateLiveRounds,
+  isDebate,
   isDebateFormGroup,
 } from "@/stores/execution";
 import type {
@@ -32,8 +33,6 @@ import type {
   DebateFindingView,
   DebateForm,
   DebateModel,
-  DebatePretrialSideView,
-  DebatePretrialView,
   DebateRosterSide,
   DebateRoundModel,
   DebateScoreView,
@@ -157,8 +156,8 @@ function runOutputText(execution: Execution, run: RunNode | null): string {
 }
 
 /** 把一个回合的 {@link Execution} 归一成 {@link DebateModel}；非辩论 / 进行中尚无任何
- * 轮次且无庭前准备 → null (不渲染)。收场以 `debate` 为权威；否则从 `debateRounds` + run 树重建。
- * 庭前准备可在首轮立论前单独撑起赛事页（`debate_pretrial_started` 即可，不依赖调查员事件）。 */
+ * 轮次且无开赛壳信号 → null (不渲染)。收场以 `debate` 为权威；否则从 `debateRounds` + run 树重建。
+ * 首轮立论前可用空骨架进辩论室（`debatePretrial` fold / 开场白 / planType / 辩标签），不渲染庭前 UI。 */
 export function toDebateModel(execution: Execution): DebateModel | null {
   if (execution.debate) {
     return settledModel(execution, execution.debate);
@@ -166,41 +165,14 @@ export function toDebateModel(execution: Execution): DebateModel | null {
   return liveModel(execution);
 }
 
-/** 庭前取证 → 展示态（组卷轻态；不 enrich 取证员 run / 舰队进度）。 */
-function resolvePretrial(execution: Execution): DebatePretrialView | null {
-  const raw = execution.debatePretrial;
-  if (!raw) return null;
-  const preparing = raw.status === "running";
-  const sides: DebatePretrialSideView[] = raw.sides.map((side) => {
-    const order = raw.orders.find((o) => o.side_key === side.key);
-    return {
-      sideKey: side.key,
-      name: side.name,
-      colorVar: debateSideColorVar(side.key, side.name),
-      tasks: (order?.tasks ?? []).map((t) => ({
-        query: t.query,
-        ...(t.purpose ? { purpose: t.purpose } : {}),
-      })),
-      preparing,
-    };
-  });
-  return {
-    status: raw.status,
-    thorough: raw.thorough,
-    skipReason: raw.skipReason,
-    evidenceLedgerCount: raw.evidenceLedgerCount,
-    fallbackSelfSearch: raw.fallbackSelfSearch,
-    evidenceReady: raw.evidenceReady,
-    sides,
-    completeness: raw.completeness,
-    incomplete: raw.incomplete,
-    ...(raw.externalEvidenceMode != null
-      ? { externalEvidenceMode: raw.externalEvidenceMode }
-      : {}),
-    ...(raw.externalEvidenceReason != null
-      ? { externalEvidenceReason: raw.externalEvidenceReason }
-      : {}),
-  };
+/** 无轮次时是否仍撑起辩论室空骨架（不依赖庭前 UI 区块）。 */
+function canEnterLiveDebateShell(execution: Execution): boolean {
+  return (
+    execution.debatePretrial != null ||
+    !!execution.debateOpening?.trim() ||
+    execution.planType === "debate" ||
+    isDebate(execution)
+  );
 }
 
 /** 收场：以权威 `debate_result` 为准，逐轮 `sides` 由 `run_id` 直取辩手节点。 */
@@ -266,7 +238,6 @@ function settledModel(
     opening: debate.opening || null,
     settled: true,
     crossExamEnabled: execution.crossExamEnabled,
-    pretrial: resolvePretrial(execution),
     evidenceLedger: Array.isArray(debate.evidence_ledger)
       ? debate.evidence_ledger
       : (execution.evidenceLedger ?? []),
@@ -275,15 +246,14 @@ function settledModel(
 }
 
 /** 进行中：2 方走 {@link debateGroups} 左右对开，多方走 {@link debateLiveRounds}；逐轮的
- * 焦点/小结/裁判 由 `debateRounds` (主持人增量) 按轮号合并。无任何轮次且无庭前准备 → null。 */
+ * 焦点/小结/裁判 由 `debateRounds` (主持人增量) 按轮号合并。无轮次且无开赛壳信号 → null。 */
 function liveModel(execution: Execution): DebateModel | null {
   const groups = debateGroups(execution);
   const rounds =
     groups.length > 0
       ? liveTwoSideRounds(execution, groups)
       : liveMultiSideRounds(execution);
-  const pretrial = resolvePretrial(execution);
-  if (rounds.length === 0 && !pretrial) return null;
+  if (rounds.length === 0 && !canEnterLiveDebateShell(execution)) return null;
   return {
     form: liveForm(execution),
     motion: null,
@@ -301,7 +271,6 @@ function liveModel(execution: Execution): DebateModel | null {
     opening: execution.debateOpening,
     settled: false,
     crossExamEnabled: execution.crossExamEnabled,
-    pretrial,
     evidenceLedger: execution.evidenceLedger ?? [],
     subtopics: null,
   };

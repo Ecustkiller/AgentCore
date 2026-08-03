@@ -205,7 +205,7 @@ describe("workflow templates / from-playbook (§10.8)", () => {
     });
     expect(t.slots[0]?.key).toBe("site");
     expect(t.slots[0]?.required).toBe(true);
-    expect(t.slots[0]?.hint).toContain("site");
+    expect(t.slots[0]?.hint).toContain("站点");
   });
 
   it("listWorkflowTemplates returns empty on 404 (hide official section)", async () => {

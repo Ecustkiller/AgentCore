@@ -6,13 +6,12 @@ import {
   uploadWorkspaceFile,
 } from "@/api/workspace";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
+import { TrashSection } from "@/components/TrashSection";
 // The cloud workspace file browser for ONE conversation (前端技术与架构 §七 · 云端文件浏览).
 //
 // Reachable from the chat header (/c/:id/files) — a full-screen, conversation-scoped shortcut
-// (no bottom tab bar). The 文件 tab's cross-workspace browser (/files/:wsId) is the sibling
-// surface; both render the shared <FileBrowser>, differing only in addressing (per-conversation
-// alias here, first-class workspace id there) and this page's header / back target. A 裸聊 with
-// no workspace yields an empty list.
+// (no bottom tab bar). Soft-delete zone (AgentCore/trash list+restore) toggles in-place —
+// same page as the file tree (对齐桌面 TrashSection 语义；非 OS 回收站).
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -25,6 +24,7 @@ export function FilesPage() {
     (location.state as { openPath?: string } | null)?.openPath ?? null;
   const [cwd, setCwd] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -61,6 +61,28 @@ export function FilesPage() {
     [conversationId, cwd],
   );
 
+  if (trashOpen && conversationId) {
+    return (
+      <div className="screen">
+        <header className="bar">
+          <button
+            type="button"
+            className="link"
+            onClick={() => setTrashOpen(false)}
+          >
+            ← 文件
+          </button>
+          <span>软删区</span>
+          <span className="bar-right" aria-hidden />
+        </header>
+        <TrashSection
+          conversationId={conversationId}
+          onRestored={() => setReloadKey((k) => k + 1)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="screen">
       <header className="bar">
@@ -72,14 +94,24 @@ export function FilesPage() {
           ← 返回
         </button>
         <span>文件</span>
-        <button
-          type="button"
-          className="link"
-          onClick={() => uploadInputRef.current?.click()}
-          disabled={uploading}
-        >
-          {uploading ? "上传中…" : "上传"}
-        </button>
+        <div className="bar-right">
+          <button
+            type="button"
+            className="link"
+            onClick={() => setTrashOpen(true)}
+            aria-label="软删区"
+          >
+            软删区
+          </button>
+          <button
+            type="button"
+            className="link"
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={uploading}
+          >
+            {uploading ? "上传中…" : "上传"}
+          </button>
+        </div>
         <input
           ref={uploadInputRef}
           type="file"

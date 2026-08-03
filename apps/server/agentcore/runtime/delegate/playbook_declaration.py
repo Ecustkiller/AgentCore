@@ -1,8 +1,9 @@
 """Delegate playbook declaration gate（结构校验）.
 
 自由组队：可不传 playbook，直接手写 ``tasks``（``playbook_none_reason`` 可选）。
-建站 / 工具台 / 绿场软件：推荐具名 ``build_website`` / ``build_toolshed`` /
-``build_app``（软引导见 skill / schema）；``none`` / 手写不再因意图硬拒。
+建站 / 工具台 / 绿场软件：推荐具名 ``build_website``（工具台气质用
+``style=toolshed``）/ ``build_app``（软引导见 skill / schema）；
+``none`` / 手写不再因意图硬拒。
 
 场面账（automation delivery / website style / presentation format）已拆除：
 具名 playbook 不再因交付形态记账硬拒。
@@ -122,10 +123,10 @@ def resolve_playbook_declaration(
             return None, None, (
                 f"未知 playbook『{named}』；可用：{available_playbooks()}。"
                 "或手写 `tasks`（可不声明 playbook）；"
-                "建站推荐具名 `build_website` / `build_toolshed`；"
+                "建站推荐具名 `build_website`（控制台 dense 加 style=toolshed）；"
                 "绿场软件推荐具名 `build_app`。"
             )
-        # 具名 build_app / build_website / build_toolshed 等直接放行。
+        # 具名 build_app / build_website 等直接放行。
         return named, None, None
 
     explicit_none = pid_s.casefold() == _PLAYBOOK_NONE

@@ -1,8 +1,14 @@
 import {
   fileArtifactsFromDeliveryStatus,
+  fileArtifactsFromProcess,
+  hasChangePreviews,
+  resolveArtifactsForTurn,
   resolveFileArtifactsForCard,
 } from "@/lib/fileArtifacts";
-import type { DeliveryStatusPayload } from "@agentcore/contract-types";
+import type {
+  DeliveryStatusPayload,
+  ProcessStep,
+} from "@agentcore/contract-types";
 import { describe, expect, it } from "vitest";
 
 describe("fileArtifacts from delivery_status.artifacts", () => {
@@ -68,5 +74,58 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
     } as DeliveryStatusPayload;
     expect(fileArtifactsFromDeliveryStatus(status)).toEqual([]);
     expect(resolveFileArtifactsForCard(status)).toEqual([]);
+  });
+});
+
+describe("fileArtifacts A1 change preview + history process bypass", () => {
+  const writeStep = {
+    kind: "tool",
+    id: "t1",
+    tool_name: "file_write",
+    arguments: { path: "notes.md", content: "hi" },
+    result: null,
+    status: "success",
+  } as ProcessStep;
+
+  it("attaches write/edit change previews from process", () => {
+    const arts = fileArtifactsFromProcess([writeStep]);
+    expect(arts).toEqual([
+      {
+        path: "notes.md",
+        name: "notes.md",
+        op: "write",
+        change: { kind: "write", content: "hi", mode: "overwrite" },
+      },
+    ]);
+    expect(hasChangePreviews(arts)).toBe(true);
+  });
+
+  it("resolveArtifactsForTurn: missing delivery falls back to process (history gap)", () => {
+    const { list, review } = resolveArtifactsForTurn({
+      deliveryStatus: null,
+      process: [writeStep],
+      events: [],
+    });
+    expect(list.map((a) => a.path)).toEqual(["notes.md"]);
+    expect(review).toEqual(list);
+    expect(hasChangePreviews(review)).toBe(true);
+  });
+
+  it("resolveArtifactsForTurn: empty delivery artifacts field stays empty (no silent tool fallback)", () => {
+    const status = {
+      execution_id: "e1",
+      state: "blocked",
+      summary: "x",
+      delivered_files: [],
+      gaps: [],
+      actions: [],
+      artifacts: [],
+    } as DeliveryStatusPayload;
+    const { list, review } = resolveArtifactsForTurn({
+      deliveryStatus: status,
+      process: [writeStep],
+    });
+    expect(list).toEqual([]);
+    expect(review.map((a) => a.path)).toEqual(["notes.md"]);
   });
 });

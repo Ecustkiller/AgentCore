@@ -14,6 +14,10 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/api/interaction";
+import {
+  BrowserLoginDecisionCard,
+  type BrowserLoginSubmitKind,
+} from "@/components/BrowserLoginDecisionCard";
 import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
@@ -26,7 +30,7 @@ import {
 } from "@/components/assistantLabels";
 import { buildLedgerMap } from "@/lib/evidenceLedger";
 import { isFileReadCeilingGuidance } from "@/lib/fileReadCeiling";
-import type { RunToolCall } from "@/protocol/fold";
+import type { EscalationSlotEsc, RunToolCall } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
 import type {
   ContextBlockWire,
@@ -576,19 +580,26 @@ function RunCard({
  *  the mobile PauseCard's reduced surface (structured forks fold to prose). decideEscalation
  *  POSTs to the unified resolve endpoint; the stream's `escalation_resolved` then folds this
  *  run's escalation to resolved/timeout and unmounts the card (so busy stays true on success).
- *  统一时间线二期: rendered at the escalation process marker (not under TeamView run cards). */
+ *  统一时间线二期: rendered at the escalation process marker (not under TeamView run cards).
+ *  browser_login → BrowserLoginDecisionCard（主钮一键「已登录，继续」，不因空 textarea 禁用；
+ *  可开 BrowserLiveSheet）。 */
 export function EscalationAnswer({
   esc,
   escalationId,
   conversationId,
+  onOpenLive,
 }: {
-  esc: RunEscalation;
+  esc: EscalationSlotEsc;
   escalationId: string;
   conversationId: string;
+  onOpenLive?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState<BrowserLoginSubmitKind | null>(
+    null,
+  );
 
   async function decide(decision: EscalationUserDecision) {
     if (busy) return;
@@ -600,7 +611,36 @@ export function EscalationAnswer({
     } catch (e) {
       setErr(e instanceof Error ? e.message : "提交失败");
       setBusy(false);
+      setSubmitting(null);
     }
+  }
+
+  if (esc.browserLogin) {
+    return (
+      <div className="run-escalation run-escalation-live">
+        <BrowserLoginDecisionCard
+          roleLabel="队员"
+          question={esc.question}
+          assumption={esc.assumption || undefined}
+          busy={busy}
+          submitting={submitting}
+          onLoggedIn={() => {
+            setSubmitting("logged_in");
+            void decide({ kind: "answer", answer: "已登录，继续" });
+          }}
+          onUseAssumption={
+            esc.assumption
+              ? () => {
+                  setSubmitting("use_assumption");
+                  void decide({ kind: "use_assumption" });
+                }
+              : undefined
+          }
+          onOpenLive={onOpenLive}
+        />
+        {err && <span className="run-error">{err}</span>}
+      </div>
+    );
   }
 
   return (

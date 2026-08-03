@@ -17,6 +17,8 @@ import {
 } from "@/api/modelProfiles";
 import { resolveStageCardStream } from "@/api/stageCard";
 import {
+  type ResumeTurnBody,
+  type TeamPreviewAmendments,
   attachStream,
   regenerateStream,
   resumeStream,
@@ -36,6 +38,7 @@ import {
   AssistantContent,
   SupportDiagnosticCopyButton,
 } from "@/components/AssistantView";
+import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
@@ -55,7 +58,7 @@ import {
   emptyChatCopy,
   emptyFailureNotice,
 } from "@/lib/errors";
-import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
+import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
 import {
   type MessageDelivery,
   defaultDelivery,
@@ -109,6 +112,7 @@ import type {
   CheckpointDecision,
   DebateNarrativeRound,
   MessageEndPayload,
+  MessageStartPayload,
   SSEEvent,
   TurnQueueCancelledPayload,
   TurnSteerAcceptedPayload,
@@ -475,22 +479,40 @@ function extractTurnWarning(events: SSEEvent[]): string | null {
   return null;
 }
 
+/** Live / journal：``message_start.message_id``（客户端 turn.id 是本地 UUID，不能当云 messageId）。 */
+function extractMessageId(events: SSEEvent[]): string | null {
+  for (const e of events) {
+    if (e.type === "message_start") {
+      return (e.payload as MessageStartPayload).message_id;
+    }
+  }
+  return null;
+}
+
 function AssistantBubble({
   turn,
   live,
   conversationId,
   onFill,
+  onOpenBrowserLive,
 }: {
   turn: Turn;
   live: boolean;
   conversationId: string | null;
   onFill: (text: string) => void;
+  onOpenBrowserLive?: () => void;
 }) {
   const p = useMemo(() => fold(turn.events), [turn.events]);
-  // 本回合产出文件：只认 delivery_status.artifacts（缺字段 → 空）。
-  const artifacts = useMemo(
-    () => resolveFileArtifactsForCard(p.deliveryStatus),
-    [p.deliveryStatus],
+  const messageId = useMemo(() => extractMessageId(turn.events), [turn.events]);
+  // 主清单优先 delivery_status；缺字段时回落 process/events（A1 旁路同源）。
+  const { list: artifacts, review: reviewArtifacts } = useMemo(
+    () =>
+      resolveArtifactsForTurn({
+        deliveryStatus: p.deliveryStatus,
+        process: p.process,
+        events: turn.events,
+      }),
+    [p.deliveryStatus, p.process, turn.events],
   );
   // 非阻塞提问卡内容：随时间线 `ask` 标记原位呈现（旁路读原始事件，不入 ProjectedTurn）。
   const asks = useMemo(() => extractAsks(turn.events), [turn.events]);
@@ -610,7 +632,6 @@ function AssistantBubble({
             team={team}
             debate={p.debate}
             debateRounds={p.debateRounds}
-            debatePretrial={p.debatePretrial}
             asks={asks}
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}
@@ -620,6 +641,7 @@ function AssistantBubble({
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
             onFill={onFill}
             supportIds={supportIds}
+            onOpenBrowserLive={onOpenBrowserLive}
           />
         ) : null}
         {failureNotice && (
@@ -630,7 +652,9 @@ function AssistantBubble({
         )}
         <FileArtifactsCard
           artifacts={artifacts}
+          reviewArtifacts={reviewArtifacts}
           conversationId={conversationId}
+          messageId={messageId}
         />
         {/* The team view carries its own progress header; the one-line meta is the
             single-agent fallback. */}
@@ -665,7 +689,6 @@ function HistoryAssistant({
     team,
     debate,
     debateRounds,
-    debatePretrial,
     turnWarning,
     foldEvidenceLedger,
     graphAppendActKinds,
@@ -682,7 +705,6 @@ function HistoryAssistant({
         team: undefined,
         debate: null,
         debateRounds: [] as DebateNarrativeRound[],
-        debatePretrial: null,
         turnWarning: warning,
         foldEvidenceLedger: [],
         graphAppendActKinds: new Map<string, string>(),
@@ -710,7 +732,6 @@ function HistoryAssistant({
       team,
       debate: p.debate,
       debateRounds: p.debateRounds,
-      debatePretrial: p.debatePretrial,
       turnWarning: warning ?? p.turnWarning,
       foldEvidenceLedger: p.evidenceLedger,
       graphAppendActKinds: extractGraphAppendActKinds(events),
@@ -724,10 +745,15 @@ function HistoryAssistant({
   const historyEvidenceLedger = m.evidenceLedger?.length
     ? m.evidenceLedger
     : foldEvidenceLedger;
-  // 本回合产出文件：只认 delivery_status.artifacts（缺字段 → 空）。
-  const artifacts = useMemo(
-    () => resolveFileArtifactsForCard(deliveryStatus),
-    [deliveryStatus],
+  // 历史无 events → deliveryStatus 恒 null；有 process 工具产物时旁路出卡 + A1 预览。
+  const { list: artifacts, review: reviewArtifacts } = useMemo(
+    () =>
+      resolveArtifactsForTurn({
+        deliveryStatus,
+        process,
+        events: m.runs?.events,
+      }),
+    [deliveryStatus, process, m.runs?.events],
   );
   // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
   const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
@@ -807,7 +833,6 @@ function HistoryAssistant({
             team={team}
             debate={debate}
             debateRounds={debateRounds}
-            debatePretrial={debatePretrial}
             asks={asks}
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}
@@ -826,7 +851,9 @@ function HistoryAssistant({
         )}
         <FileArtifactsCard
           artifacts={artifacts}
+          reviewArtifacts={reviewArtifacts}
           conversationId={conversationId}
+          messageId={m.id}
         />
         {(interrupted || stopped) && isLast && onRetry && (
           <button type="button" className="retry-btn" onClick={onRetry}>
@@ -874,6 +901,9 @@ export function ChatPage() {
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
+  /** Sandbox browser live sheet (Step4 · C): login card / hot escalate open this. */
+  const [browserLiveOpen, setBrowserLiveOpen] = useState(false);
+  const openBrowserLive = useCallback(() => setBrowserLiveOpen(true), []);
   const [recoveredInteractions, setRecoveredInteractions] = useState<
     PendingInteractionSummary[]
   >([]);
@@ -1948,6 +1978,7 @@ export function ChatPage() {
     decision: CheckpointDecision,
     note: string,
     selected: string[] = [],
+    amendments?: TeamPreviewAmendments,
   ) {
     if (!conversationId || busy) return;
     setPaused((p) => p.filter((x) => x.message_id !== messageId));
@@ -1962,14 +1993,21 @@ export function ChatPage() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
+      // stop / adjust / ask·debate：不带组队修正；delegate continue 才附排除/收紧。
+      const body: ResumeTurnBody = { decision, note, selected };
+      if (
+        decision === "continue" &&
+        amendments &&
+        (amendments.excluded_run_ids.length > 0 ||
+          amendments.write_capability_overrides.length > 0)
+      ) {
+        body.excluded_run_ids = amendments.excluded_run_ids;
+        body.write_capability_overrides = amendments.write_capability_overrides;
+      }
       await resumeStream(
         conversationId,
         messageId,
-        {
-          decision,
-          note,
-          selected,
-        },
+        body,
         appendEvent,
         ac.signal,
       );
@@ -2169,6 +2207,9 @@ export function ChatPage() {
                     live={isLiveStream}
                     conversationId={conversationId ?? null}
                     onFill={fillFollowup}
+                    onOpenBrowserLive={
+                      conversationId ? openBrowserLive : undefined
+                    }
                   />
                 ) : null}
               </div>
@@ -2228,9 +2269,10 @@ export function ChatPage() {
           <ResumeCard
             key={p.message_id}
             paused={p}
-            onResume={(decision, note, selected) =>
-              void resume(p.message_id, decision, note, selected)
+            onResume={(decision, note, selected, amendments) =>
+              void resume(p.message_id, decision, note, selected, amendments)
             }
+            onOpenLive={conversationId ? openBrowserLive : undefined}
           />
         ))}
 
@@ -2480,6 +2522,14 @@ export function ChatPage() {
         onOpen={() => setDrawerOpen(true)}
         activeId={conversationId}
       />
+
+      {conversationId ? (
+        <BrowserLiveSheet
+          conversationId={conversationId}
+          open={browserLiveOpen}
+          onClose={() => setBrowserLiveOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

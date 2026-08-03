@@ -418,6 +418,10 @@ async def resume_chat(
                                 llm_supports_tools=llm_supports_tools,
                                 permission_axes=permission_axes,
                                 x_client_platform=x_client_platform,
+                                excluded_run_ids=list(response.excluded_run_ids or []),
+                                write_capability_overrides=list(
+                                    response.write_capability_overrides or []
+                                ),
                             )
                     except asyncio.CancelledError:
                         # Hard cancel / lifespan / hard kill.

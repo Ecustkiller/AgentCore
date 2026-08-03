@@ -185,6 +185,82 @@ async def test_snapshot_lifecycle_by_ws_id(client, _fs_data_dir):
     assert (await client.post(f"/v1/workspaces/{ws}/snapshots/nope/restore")).status_code == 404
 
 
+async def test_trash_list_restore_by_ws_id(client, _fs_data_dir):
+    """AgentCore/trash list + restore (cloud); soft-delete via DELETE file."""
+    await register_and_login(client, "wsxtrash")
+    conv_id = await _new_conversation(client, "Trash")
+    ws = f"conv:{conv_id}"
+
+    await client.put(f"/v1/workspaces/{ws}/files/gone.txt", content=b"back")
+    assert (await client.delete(f"/v1/workspaces/{ws}/files/gone.txt")).status_code == 200
+    assert (await client.get(f"/v1/workspaces/{ws}/files/gone.txt")).status_code == 404
+
+    r = await client.get(f"/v1/workspaces/{ws}/trash")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] >= 1
+    assert body["retention_days"] >= 0
+    entry = next(e for e in body["data"] if e["original_path"] == "gone.txt")
+    eid = entry["entry_id"]
+
+    assert (
+        await client.post(f"/v1/workspaces/{ws}/trash/{eid}/restore")
+    ).status_code == 200
+    assert (await client.get(f"/v1/workspaces/{ws}/files/gone.txt")).content == b"back"
+    assert (await client.post(f"/v1/workspaces/{ws}/trash/nope/restore")).status_code == 404
+
+    # Conversation alias
+    r = await client.get(f"/v1/conversations/{conv_id}/trash")
+    assert r.status_code == 200
+
+
+async def test_delete_agentcore_expands_no_500(client, _fs_data_dir):
+    """DELETE AgentCore/ expands children (422 on IO errors, never self-nest 500)."""
+    await register_and_login(client, "wsxacdel")
+    conv_id = await _new_conversation(client, "AcDel")
+    ws = f"conv:{conv_id}"
+
+    await client.put(
+        f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md", content=b"rule-body"
+    )
+    r = await client.delete(f"/v1/workspaces/{ws}/files/AgentCore")
+    assert r.status_code == 200, r.text
+    assert (
+        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md")
+    ).status_code == 404
+
+    listed = await client.get(f"/v1/workspaces/{ws}/trash")
+    assert listed.status_code == 200, listed.text
+    entry = next(
+        e for e in listed.json()["data"] if e["original_path"] == "AgentCore/规则"
+    )
+    assert (
+        await client.post(f"/v1/workspaces/{ws}/trash/{entry['entry_id']}/restore")
+    ).status_code == 200
+    assert (
+        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md")
+    ).content == b"rule-body"
+
+
+async def test_delete_workspace_io_error_returns_422(client, _fs_data_dir, monkeypatch):
+    """DELETE files maps WorkspaceIOError → 422 (not unhandled 500)."""
+    from agentcore.api.routes import workspaces as ws_routes
+    from agentcore.workspace.protocol import WorkspaceIOError
+
+    await register_and_login(client, "wsxio422")
+    conv_id = await _new_conversation(client, "Io422")
+    ws = f"conv:{conv_id}"
+    await client.put(f"/v1/workspaces/{ws}/files/f.txt", content=b"x")
+
+    async def _boom(**_kwargs):
+        raise WorkspaceIOError("不能软删到自身子树内的回收区（会自嵌套）")
+
+    monkeypatch.setattr(ws_routes, "delete_file", _boom)
+    r = await client.delete(f"/v1/workspaces/{ws}/files/f.txt")
+    assert r.status_code == 422, r.text
+    assert "自嵌套" in r.text
+
+
 async def test_clone_repo_by_ws_id(client, _fs_data_dir, tmp_path, monkeypatch):
     if shutil.which("git") is None:
         pytest.skip("git not installed")

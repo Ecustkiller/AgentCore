@@ -190,6 +190,10 @@ def test_schema_exposes_form_enum():
     assert "调查" in cf or "改稿" in cf
     # 真纯丙：CEO schema 不再提供 tools 白名单开关。
     assert "tools" not in props_task
+    # 假辩论通道关死：CEO 不可经 delegate.tasks 写 stance/group/round。
+    assert "stance" not in props_task
+    assert "group" not in props_task
+    assert "round" not in props_task
     mc = props["must_contain"]
     assert "软提醒" in mc.get("description", "") or "短主题词" in mc.get("description", "")
     assert "细" in mc.get("description", "")  # 勿塞细枚举/细清单

@@ -56,8 +56,8 @@ export function conversationHasBrowserActivity(
 
 /**
  * 本会话是否存在 pending 的 `browserLogin` escalate（→ 归还控制提示走登录口径）。
- * 与 EscalationCard「需要你登录」同源：扫 execution 投影 `run.escalations`，
- * 勿硬编码接管原因。
+ * 与 EscalationCard「需要你登录」同源：扫 execution 投影 `run.escalations`。
+ * CEO ``ask_user(browser_login)`` 走 cold pause，由调用方另扫 pausedTurns。
  */
 export function conversationHasPendingBrowserLogin(
   messages: Message[],

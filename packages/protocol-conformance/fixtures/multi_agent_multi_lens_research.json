@@ -115,29 +115,25 @@
             "run_id": "lens_0",
             "role": "法律视角",
             "task": "梳理代言合同解约条款、连带责任与监管口径",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           },
           {
             "run_id": "lens_1",
             "role": "品牌商业视角",
             "task": "评估联名营收贡献、库存与渠道契约成本",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           },
           {
             "run_id": "lens_2",
             "role": "舆情公关视角",
             "task": "盘点舆论热度、声量拐点与危机公关窗口",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           },
           {
             "run_id": "lens_3",
             "role": "文化社会视角",
             "task": "分析代言人象征意义与圈层价值冲突",
-            "depends_on": [],
-            "debate": false
+            "depends_on": []
           },
           {
             "run_id": "synthesizer",
@@ -148,8 +144,7 @@
               "lens_1",
               "lens_2",
               "lens_3"
-            ],
-            "debate": false
+            ]
           }
         ],
         "tools": [

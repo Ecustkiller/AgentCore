@@ -7,7 +7,9 @@ import {
   isAllowedWebBrowserUrl,
   isAllowedWorkspaceBrowserUrl,
   isNavigableLocalBrowserUrl,
+  parseWindowOpenFeatures,
   resolveBridgeNavigateKind,
+  resolveWebWindowOpenRoute,
 } from "../browser/navigation-policy";
 import {
   BROWSER_PARTITION_PREFIX,
@@ -95,6 +97,99 @@ describe("resolveBridgeNavigateKind", () => {
     expect(resolveBridgeNavigateKind("site/index.html")).toBeNull();
     expect(resolveBridgeNavigateKind("file:///tmp/x")).toBeNull();
     expect(resolveBridgeNavigateKind("")).toBeNull();
+  });
+});
+
+describe("resolveWebWindowOpenRoute（popup / tab 分流）", () => {
+  it("new-window / default / other → popup（同 partition 子窗）", () => {
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "https://accounts.example.com/oauth",
+        disposition: "new-window",
+      }),
+    ).toBe("popup");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "https://login.example.com/qr",
+        disposition: "default",
+      }),
+    ).toBe("popup");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "http://localhost:3000/auth",
+        disposition: "other",
+      }),
+    ).toBe("popup");
+  });
+
+  it("foreground-tab / background-tab → tab（同壳新页签）", () => {
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "https://example.com/docs",
+        disposition: "foreground-tab",
+      }),
+    ).toBe("tab");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "https://example.com/help",
+        disposition: "background-tab",
+      }),
+    ).toBe("tab");
+  });
+
+  it("about:blank / 空 URL + new-window → popup（OAuth 先开空白）", () => {
+    expect(
+      resolveWebWindowOpenRoute({
+        url: LOCAL_BROWSER_BLANK,
+        disposition: "new-window",
+      }),
+    ).toBe("popup");
+    expect(
+      resolveWebWindowOpenRoute({ url: "", disposition: "new-window" }),
+    ).toBe("popup");
+  });
+
+  it("危险 scheme 一律 deny", () => {
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "file:///C:/Windows",
+        disposition: "new-window",
+      }),
+    ).toBe("deny");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "javascript:alert(1)",
+        disposition: "foreground-tab",
+      }),
+    ).toBe("deny");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "data:text/html,hi",
+        disposition: "new-window",
+      }),
+    ).toBe("deny");
+    expect(
+      resolveWebWindowOpenRoute({
+        url: "workspace://c1/a.html",
+        disposition: "new-window",
+      }),
+    ).toBe("deny");
+  });
+});
+
+describe("parseWindowOpenFeatures", () => {
+  it("缺省 520×720；解析 width/height/left/top", () => {
+    expect(parseWindowOpenFeatures(undefined)).toEqual({
+      width: 520,
+      height: 720,
+    });
+    expect(parseWindowOpenFeatures("width=480,height=640")).toEqual({
+      width: 480,
+      height: 640,
+    });
+    expect(
+      parseWindowOpenFeatures("left=10,top=20,width=400,height=500"),
+    ).toEqual({ width: 400, height: 500, x: 10, y: 20 });
   });
 });
 

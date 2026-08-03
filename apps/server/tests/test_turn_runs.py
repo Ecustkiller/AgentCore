@@ -455,6 +455,9 @@ async def test_attach_generator_replays_then_tails_then_closes(monkeypatch):
     replayed = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
     assert "content_delta" in replayed and "Hi" in replayed
 
+    caught_up = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+    assert caught_up == sse._ATTACH_CAUGHT_UP
+
     sink.emit(content_delta(" there"))  # live tail after re-attach
     tailed = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
     assert " there" in tailed
