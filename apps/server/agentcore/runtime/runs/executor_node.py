@@ -136,10 +136,7 @@ def _stamp_retrieval_evidence_gap(
         return state
     state.evidence_gap = True
     meta = getattr(state, "evidence_meta", None)
-    if not isinstance(meta, dict):
-        meta = {}
-    else:
-        meta = dict(meta)
+    meta = {} if not isinstance(meta, dict) else dict(meta)
     meta["evidence_gap"] = True
     policy = (search_policy or "").strip()
     if policy:

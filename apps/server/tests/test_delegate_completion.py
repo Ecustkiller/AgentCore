@@ -10,7 +10,7 @@ from agentcore.runtime.delegate.completion import (
     validate_repair_how_fixed,
 )
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
 
 def _run(*, files: list[str] | None = None, transcript: list[LLMMessage] | None = None):

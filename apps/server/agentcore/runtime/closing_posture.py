@@ -165,8 +165,8 @@ def closing_honesty_rework(
                 "不要用完成话术盖过对账档位。"
                 "真源=delivery_verdict 档位；禁止案面加完成话术词修案。"
             )
-        if getattr(delivery_verdict, "requires_draft_ack", False) and not claims_draft_acknowledgment(
-            text
+        if getattr(delivery_verdict, "requires_draft_ack", False) and (
+            not claims_draft_acknowledgment(text)
         ):
             return (
                 f"本回合交付对账档位为「{label}」（state={state}，证据降档）——"
@@ -474,9 +474,7 @@ def _delivery_text_implies_verify_gap(text: str) -> bool:
         return True
     if "测试未通过" in t or "验证命令未通过" in t:
         return True
-    if "browser_navigate 未成功" in t:
-        return True
-    return False
+    return "browser_navigate 未成功" in t
 
 
 def enforce_cloud_web_verify_honesty(content: str) -> str:

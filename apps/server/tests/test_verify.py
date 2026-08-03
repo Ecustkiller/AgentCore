@@ -512,8 +512,8 @@ def test_partial_verdict_rejects_delivery_done_claims():
 
 def test_site_done_phrase_not_expanded_into_posture_a():
     """禁止案面加词：站点/页面「做好了」不进姿势 A；建站正常收口不误伤。"""
-    from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
     from agentcore.runtime.closing_posture import claims_posture_a
+    from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
 
     assert not claims_posture_a("站点做好了。")
     assert not claims_posture_a("网站已经做好了。")

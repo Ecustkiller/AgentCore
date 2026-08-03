@@ -725,6 +725,7 @@ def test_schema_cues_xor_and_top_level_completion_criteria():
     assert "二选一" in t.schema.description
     assert "勿再填已删的 completion_criteria" in t.schema.description
     props = t.schema.parameters["properties"]
+    assert "completion_criteria" not in props
 
 
 def test_strict_description_separates_rework_from_disposition():

@@ -242,9 +242,7 @@ class ApprovalGate:
             return False
         if _is_permanent_delete(tool_name, arguments):
             return False
-        if _is_git_push(tool_name, arguments):
-            return False
-        return True
+        return not _is_git_push(tool_name, arguments)
 
     def _session_host_trust_covers(self, tool_name: str) -> bool:
         """host=session: trust Host GRANTABLE tools without per-call cards."""

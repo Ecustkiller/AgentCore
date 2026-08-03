@@ -73,10 +73,7 @@ def git_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
     if sub == "push":
         # ensure_repo (~2×20) + remote list (20) + push (60) + slack
         return 2 * _GIT_TIMEOUT + _GIT_TIMEOUT + 60.0 + _GIT_KILL_SLACK
-    if sub == "commit":
-        serial = 4
-    else:
-        serial = 2
+    serial = 4 if sub == "commit" else 2
     return serial * _GIT_TIMEOUT + _GIT_KILL_SLACK
 
 

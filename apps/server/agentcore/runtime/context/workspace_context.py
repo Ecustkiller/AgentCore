@@ -234,11 +234,10 @@ def build_workspace_context(
         from agentcore.tools.builtin import execution_class_enabled_for
 
         exec_on = execution_class_enabled_for(backend, permission_axes)
-    if terminal_enabled is not None:
-        term_on = terminal_enabled
-    else:
-        # terminal is execution_class ∧ local_only — same ask withhold as registry.
-        term_on = is_local and exec_on
+    # terminal is execution_class ∧ local_only — same ask withhold as registry.
+    term_on = (
+        terminal_enabled if terminal_enabled is not None else is_local and exec_on
+    )
     if browser_enabled is not None:
         browser_on = browser_enabled
     else:

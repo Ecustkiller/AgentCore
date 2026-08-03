@@ -445,10 +445,9 @@ def is_academic_usable_url(url: str) -> bool:
     host = host.removeprefix("www.")
     if not host:
         return False
-    for suffix in _ACADEMIC_HOST_SUFFIXES:
-        if host == suffix or host.endswith("." + suffix):
-            return True
-    return False
+    return any(
+        host == suffix or host.endswith("." + suffix) for suffix in _ACADEMIC_HOST_SUFFIXES
+    )
 
 
 def academic_usable_citation_count(citations: object) -> int:
@@ -579,9 +578,7 @@ def _state_structured_evidence_deficit(state: Any) -> bool:
     for key in ("evidence_meta", "search_evidence"):
         if _meta_signals_evidence_deficit(getattr(state, key, None)):
             return True
-    if _transcript_search_evidence_deficit(getattr(state, "transcript", None)):
-        return True
-    return False
+    return _transcript_search_evidence_deficit(getattr(state, "transcript", None))
 
 
 def _batch_has_structured_evidence_deficit(results: dict[str, Any]) -> bool:

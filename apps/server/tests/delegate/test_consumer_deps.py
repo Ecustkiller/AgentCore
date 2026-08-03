@@ -10,7 +10,6 @@ from agentcore.runtime.delegate.consumer_deps import (
 )
 from tests.delegate.conftest import Provider, ctx, tool
 
-
 # ── 纯函数闸 ──────────────────────────────────────────────────────────────────
 
 

@@ -322,9 +322,7 @@ def _truthy_flag(value: Any) -> bool:
         return True
     if isinstance(value, (int, float)) and value != 0:
         return True
-    if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
-        return True
-    return False
+    return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _git_push_breaker_hit(args: dict[str, Any]) -> BreakerHit | None:

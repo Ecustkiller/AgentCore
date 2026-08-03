@@ -26,9 +26,9 @@ from agentcore.runtime.safety_breaker import (
     is_sensitive_path,
     scan_destructive_text,
 )
-from agentcore.tools.builtin.host import shell_fuse_blocks
 from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
 from agentcore.tools.builtin.git_ops import _FORBIDDEN_PATTERNS
+from agentcore.tools.builtin.host import shell_fuse_blocks
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox

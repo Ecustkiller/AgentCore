@@ -225,8 +225,8 @@ async def _wire_continuation_toolset(
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
     )
-    from agentcore.runtime.coordination.session import current_execution_id
     from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
+    from agentcore.runtime.coordination.session import current_execution_id
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
     bound_execution_id = base_tool_context.execution_id
