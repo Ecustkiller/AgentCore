@@ -102,26 +102,14 @@ mv -f "${tmpRemote}" "${remoteAbsPath}"
 
 /** Upload every file under localDir into remoteAbsDir (flat). */
 function putRemoteDirFiles(localDir, remoteAbsDir, names) {
-  const staging = mkdtempSync(join(tmpdir(), "ac-cdn-up-"));
-  const tarball = join(staging, "assets.tgz");
-  try {
-    const list = names.filter((n) => existsSync(join(localDir, n)));
-    if (list.length === 0) return [];
-    run(
-      `tar ${list.length} assets`,
-      "tar",
-      ["-czf", tarball, "-C", localDir, ...list],
-    );
-    scp(tarball, "/tmp/ac-downloads-assets.tgz");
-    sshScript(`set -euo pipefail
-mkdir -p "${remoteAbsDir}"
-tar xzf /tmp/ac-downloads-assets.tgz -C "${remoteAbsDir}"
-rm -f /tmp/ac-downloads-assets.tgz
-`);
-    return list;
-  } finally {
-    rmSync(staging, { recursive: true, force: true });
+  const list = names.filter((n) => existsSync(join(localDir, n)));
+  if (list.length === 0) return [];
+  // Per-file scp: Windows `tar -czf` often produces archives Linux GNU tar rejects
+  // (trailing garbage / xattr), which broke release:win CDN sync.
+  for (const n of list) {
+    putRemoteFile(join(localDir, n), `${remoteAbsDir}/${n}`);
   }
+  return list;
 }
 
 async function fetchJson(url) {
