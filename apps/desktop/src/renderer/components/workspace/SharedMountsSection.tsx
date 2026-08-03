@@ -1,3 +1,4 @@
+import { CreateSharedSpaceDialog } from "@/components/files/sharedSpaces/CreateSharedSpaceDialog";
 import { Button } from "@/components/ui";
 import {
   useMountSharedSpace,
@@ -10,12 +11,13 @@ import {
   sharedMountModeLabel,
   sharedSpaceRoleLabel,
 } from "@/services/sharedSpaces";
-import { FolderPlus, Link2Off, Loader2, Users } from "lucide-react";
+import { FolderPlus, Link2Off, Loader2, Plus, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 /**
  * Cloud-conversation only: mount / unmount accepted shared spaces as
  * `shared/<alias>/` second roots. Hidden for local-bound chats (D2).
+ * Create entry lives here (not composer) so 「或创建」 is actionable.
  */
 export function SharedMountsSection({
   conversationId,
@@ -27,6 +29,7 @@ export function SharedMountsSection({
   const mount = useMountSharedSpace(conversationId);
   const unmount = useUnmountSharedSpace(conversationId);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const mounts = mountsQuery.data ?? [];
   const mountedIds = useMemo(
@@ -37,6 +40,25 @@ export function SharedMountsSection({
     () => (spacesQuery.data ?? []).filter((s) => !mountedIds.has(s.id)),
     [spacesQuery.data, mountedIds],
   );
+
+  const openCreate = () => {
+    setPickerOpen(false);
+    setCreateOpen(true);
+  };
+
+  const handleCreated = (spaceId: string) => {
+    mount.mutate(
+      { spaceId },
+      {
+        onSuccess: (m) => {
+          notifySuccess(
+            `已挂载「${m.label}」（${sharedMountModeLabel(m.mode)}）`,
+          );
+        },
+        onError: (err) => notifyError(err, "挂载失败"),
+      },
+    );
+  };
 
   if (mountsQuery.isLoading && mounts.length === 0) {
     return (
@@ -57,7 +79,16 @@ export function SharedMountsSection({
         <Button
           size="sm"
           variant="ghost"
-          disabled={available.length === 0 || mount.isPending}
+          disabled={mount.isPending}
+          onClick={openCreate}
+          icon={<Plus size={12} />}
+        >
+          新建
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={mount.isPending}
           onClick={() => setPickerOpen((v) => !v)}
           icon={<FolderPlus size={12} />}
         >
@@ -68,9 +99,20 @@ export function SharedMountsSection({
       {pickerOpen && (
         <div className="border-t border-border bg-muted/30 px-2 py-1.5">
           {available.length === 0 ? (
-            <p className="px-1 py-1 text-xs text-muted-foreground">
-              没有可挂载的共享空间（需先加入或创建）
-            </p>
+            <div className="flex flex-col gap-1 px-1 py-1">
+              <p className="text-xs text-muted-foreground">
+                没有可挂载的共享空间（需先加入或创建）
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-auto justify-start px-1 py-1 text-xs"
+                onClick={openCreate}
+                icon={<Plus size={12} />}
+              >
+                新建共享空间
+              </Button>
+            </div>
           ) : (
             <ul className="max-h-36 space-y-0.5 overflow-y-auto">
               {available.map((s) => (
@@ -122,7 +164,7 @@ export function SharedMountsSection({
         </p>
       ) : mounts.length === 0 ? (
         <p className="px-3 pb-2 text-xs text-muted-foreground/80">
-          尚未挂载。挂载后 Agent 可按你的角色读写该空间。
+          尚未挂载。可挂载已有空间，或新建并挂到本对话。
         </p>
       ) : (
         <ul className="space-y-0.5 px-2 pb-2">
@@ -159,6 +201,12 @@ export function SharedMountsSection({
           ))}
         </ul>
       )}
+
+      <CreateSharedSpaceDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
     </div>
   );
 }

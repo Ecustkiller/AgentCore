@@ -11,6 +11,10 @@
  * 事件命名沿用后端「组件.动作」式（如 `auth.bootstrap`），动作/状态走 snake_case 字段。
  * 鉴权可观测：`auth.bootstrap`（冷启动）、`auth.refresh`（静默刷新失败/歧义 cookie）、
  * `auth.session_kicked`（中途踢回登录页）。
+ * 自动更新可观测（主进程直写）：`updater.configure` / `updater.schedule_start` /
+ * `updater.policy` / `updater.check_begin|end` / `updater.phase` /
+ * `updater.download_begin|progress|end` / `updater.error` / `updater.quit_and_install`
+ *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点）。
  * 铁律：禁止把 token / 密码 / 消息正文放进 `fields`（只记可观测信号，不记机密与正文）。
  *
  * 与 ipc-contract（文件系统）/ sidecar-contract（本地引擎）/ updater-contract（自动更新）

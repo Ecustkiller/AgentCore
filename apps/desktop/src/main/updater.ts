@@ -1,14 +1,20 @@
 import { UPDATER_CHANNELS, type UpdaterStatus } from "@shared/updater-contract";
 import { net, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
 import { type UpdateInfo, autoUpdater } from "electron-updater";
+import { logDesktop } from "./log-service";
 
 // 检查频率（发布与门禁.md §7.6）：启动 + 每 4h + 系统唤醒。
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+/** download-progress 落盘节流，避免刷盘。 */
+const PROGRESS_LOG_MIN_MS = 1000;
+
+type CheckTrigger = "startup" | "interval" | "resume" | "manual";
 
 let mainWindow: BrowserWindow | null = null;
 let status: UpdaterStatus = { phase: "idle" };
 // 下载中的目标版本：download-progress 事件不带版本，从 update-available 暂存补上。
 let pendingVersion = "";
+let pendingSizeBytes: number | null = null;
 let intervalTimer: ReturnType<typeof setInterval> | null = null;
 // 云 API 基址，由 renderer 经 `configure` 传入（它是 API 地址单一源）；null = 尚未配置。
 let apiBaseUrl: string | null = null;
@@ -16,12 +22,29 @@ let apiBaseUrl: string | null = null;
 let scheduleStarted = false;
 // 防重复点「立即更新」并发起多次 downloadUpdate。
 let downloadInFlight = false;
+/** 最近一次 runCheck 起点（ms），供 phase / error 算 sinceCheckMs。 */
+let checkStartedAt = 0;
+let lastCheckTrigger: CheckTrigger | null = null;
+let lastProgressLogAt = 0;
+let downloadStartedAt = 0;
 
 function pushStatus(next: UpdaterStatus): void {
   status = next;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(UPDATER_CHANNELS.status, next);
   }
+}
+
+function sinceCheckMs(): number | null {
+  return checkStartedAt > 0 ? Date.now() - checkStartedAt : null;
+}
+
+function logUpdater(
+  level: "info" | "warn" | "error",
+  event: string,
+  fields?: Record<string, unknown>,
+): void {
+  logDesktop({ level, event, fields });
 }
 
 /** Normalize electron-updater releaseNotes (string | note list) to plain text. */
@@ -67,23 +90,79 @@ function packageSizeBytes(info: UpdateInfo): number | null {
  * fail-safe 刻意相反）。完整灰度 / 双通道仍依赖 §7.9 特性开关，未在此消费。
  */
 async function updatesEnabled(): Promise<boolean> {
-  if (!apiBaseUrl) return true;
+  if (!apiBaseUrl) {
+    logUpdater("info", "updater.policy", {
+      result: "skip_no_base",
+      enabled: true,
+      failOpen: true,
+      durationMs: 0,
+    });
+    return true;
+  }
+  const t0 = Date.now();
   try {
     const res = await net.fetch(`${apiBaseUrl}/updates/policy`);
-    if (!res.ok) return true;
+    const durationMs = Date.now() - t0;
+    if (!res.ok) {
+      logUpdater("warn", "updater.policy", {
+        result: "http_fail_open",
+        status: res.status,
+        enabled: true,
+        failOpen: true,
+        durationMs,
+      });
+      return true;
+    }
     const policy = (await res.json()) as { enabled?: boolean };
-    return policy.enabled !== false;
-  } catch {
+    const enabled = policy.enabled !== false;
+    logUpdater("info", "updater.policy", {
+      result: "ok",
+      status: res.status,
+      enabled,
+      failOpen: false,
+      durationMs,
+    });
+    return enabled;
+  } catch (err) {
+    logUpdater("warn", "updater.policy", {
+      result: "network_fail_open",
+      enabled: true,
+      failOpen: true,
+      durationMs: Date.now() - t0,
+      message: err instanceof Error ? err.message : String(err),
+    });
     return true;
   }
 }
 
-async function runCheck(): Promise<void> {
-  if (!(await updatesEnabled())) return;
+async function runCheck(trigger: CheckTrigger): Promise<void> {
+  lastCheckTrigger = trigger;
+  checkStartedAt = Date.now();
+  logUpdater("info", "updater.check_begin", { trigger });
+  if (!(await updatesEnabled())) {
+    logUpdater("info", "updater.check_end", {
+      trigger,
+      result: "skipped_disabled",
+      durationMs: Date.now() - checkStartedAt,
+    });
+    return;
+  }
   try {
     await autoUpdater.checkForUpdates();
-  } catch {
+    logUpdater("info", "updater.check_end", {
+      trigger,
+      result: "resolved",
+      durationMs: Date.now() - checkStartedAt,
+      phase: status.phase,
+    });
+  } catch (err) {
     // 网络等失败也会经 'error' 事件推状态；这里吞掉 reject 防未处理的 promise 异常。
+    logUpdater("warn", "updater.check_end", {
+      trigger,
+      result: "rejected",
+      durationMs: Date.now() - checkStartedAt,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -91,10 +170,28 @@ async function runDownload(): Promise<void> {
   if (downloadInFlight) return;
   if (status.phase !== "available" && status.phase !== "error") return;
   downloadInFlight = true;
+  downloadStartedAt = Date.now();
+  lastProgressLogAt = 0;
+  logUpdater("info", "updater.download_begin", {
+    version: pendingVersion || undefined,
+    sizeBytes: pendingSizeBytes ?? undefined,
+  });
   try {
     await autoUpdater.downloadUpdate();
-  } catch {
+    logUpdater("info", "updater.download_end", {
+      result: "resolved",
+      durationMs: Date.now() - downloadStartedAt,
+      version: pendingVersion || undefined,
+      phase: status.phase,
+    });
+  } catch (err) {
     // 失败经 'error' 事件推状态。
+    logUpdater("warn", "updater.download_end", {
+      result: "rejected",
+      durationMs: Date.now() - downloadStartedAt,
+      version: pendingVersion || undefined,
+      message: err instanceof Error ? err.message : String(err),
+    });
   } finally {
     downloadInFlight = false;
   }
@@ -104,9 +201,10 @@ async function runDownload(): Promise<void> {
 function startSchedule(): void {
   if (scheduleStarted) return;
   scheduleStarted = true;
-  void runCheck();
-  intervalTimer = setInterval(() => void runCheck(), CHECK_INTERVAL_MS);
-  powerMonitor.on("resume", () => void runCheck());
+  logUpdater("info", "updater.schedule_start", { firstCheck: true });
+  void runCheck("startup");
+  intervalTimer = setInterval(() => void runCheck("interval"), CHECK_INTERVAL_MS);
+  powerMonitor.on("resume", () => void runCheck("resume"));
 }
 
 /**
@@ -133,37 +231,92 @@ export function initUpdater(window: BrowserWindow): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
-  autoUpdater.on("checking-for-update", () =>
-    pushStatus({ phase: "checking" }),
-  );
+  autoUpdater.on("checking-for-update", () => {
+    pushStatus({ phase: "checking" });
+    logUpdater("info", "updater.phase", {
+      phase: "checking",
+      trigger: lastCheckTrigger,
+      sinceCheckMs: sinceCheckMs(),
+    });
+  });
   autoUpdater.on("update-available", (info) => {
     pendingVersion = info.version;
+    pendingSizeBytes = packageSizeBytes(info);
     pushStatus({
       phase: "available",
       version: info.version,
       releaseNotes: normalizeReleaseNotes(info),
-      sizeBytes: packageSizeBytes(info),
+      sizeBytes: pendingSizeBytes,
+    });
+    logUpdater("info", "updater.phase", {
+      phase: "available",
+      version: info.version,
+      sizeBytes: pendingSizeBytes ?? undefined,
+      trigger: lastCheckTrigger,
+      sinceCheckMs: sinceCheckMs(),
     });
   });
-  autoUpdater.on("update-not-available", () =>
-    pushStatus({ phase: "not-available" }),
-  );
-  autoUpdater.on("download-progress", (progress) =>
+  autoUpdater.on("update-not-available", () => {
+    pushStatus({ phase: "not-available" });
+    logUpdater("info", "updater.phase", {
+      phase: "not-available",
+      trigger: lastCheckTrigger,
+      sinceCheckMs: sinceCheckMs(),
+    });
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    const percent = Math.round(progress.percent);
+    const bytesPerSecond = Math.max(0, Math.round(progress.bytesPerSecond || 0));
+    const transferred = Math.max(0, Math.round(progress.transferred || 0));
+    const total = Math.max(0, Math.round(progress.total || 0));
     pushStatus({
       phase: "downloading",
       version: pendingVersion,
-      percent: Math.round(progress.percent),
-      bytesPerSecond: Math.max(0, Math.round(progress.bytesPerSecond || 0)),
-      transferred: Math.max(0, Math.round(progress.transferred || 0)),
-      total: Math.max(0, Math.round(progress.total || 0)),
-    }),
-  );
-  autoUpdater.on("update-downloaded", (info) =>
-    pushStatus({ phase: "downloaded", version: info.version }),
-  );
-  autoUpdater.on("error", (err) =>
-    pushStatus({ phase: "error", message: err?.message ?? "更新检查失败" }),
-  );
+      percent,
+      bytesPerSecond,
+      transferred,
+      total,
+    });
+    const now = Date.now();
+    if (
+      lastProgressLogAt === 0 ||
+      now - lastProgressLogAt >= PROGRESS_LOG_MIN_MS ||
+      percent >= 100
+    ) {
+      lastProgressLogAt = now;
+      logUpdater("info", "updater.download_progress", {
+        version: pendingVersion || undefined,
+        percent,
+        bytesPerSecond,
+        transferred,
+        total,
+        sinceDownloadMs:
+          downloadStartedAt > 0 ? now - downloadStartedAt : null,
+      });
+    }
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    pushStatus({ phase: "downloaded", version: info.version });
+    logUpdater("info", "updater.phase", {
+      phase: "downloaded",
+      version: info.version,
+      sinceDownloadMs:
+        downloadStartedAt > 0 ? Date.now() - downloadStartedAt : null,
+    });
+  });
+  autoUpdater.on("error", (err) => {
+    const message = err?.message ?? "更新检查失败";
+    const phaseBefore = status.phase;
+    pushStatus({ phase: "error", message });
+    logUpdater("error", "updater.error", {
+      message,
+      phaseBefore,
+      trigger: lastCheckTrigger,
+      sinceCheckMs: sinceCheckMs(),
+      sinceDownloadMs:
+        downloadStartedAt > 0 ? Date.now() - downloadStartedAt : null,
+    });
+  });
 
   // renderer 传入 API 基址后才启动调度——确保首次检查也先过远程熔断闸（fail-open）。
   ipcMain.handle(UPDATER_CHANNELS.configure, (_e, baseUrl: unknown) => {
@@ -171,11 +324,17 @@ export function initUpdater(window: BrowserWindow): void {
     // API 地址单一源，畸形仅可能来自被攻破的 renderer）。不抛：configure 契约为 Promise<void>。
     if (typeof baseUrl !== "string") return;
     apiBaseUrl = baseUrl;
+    logUpdater("info", "updater.configure", {
+      hasBaseUrl: baseUrl.length > 0,
+    });
     startSchedule();
   });
-  ipcMain.handle(UPDATER_CHANNELS.check, () => runCheck());
+  ipcMain.handle(UPDATER_CHANNELS.check, () => runCheck("manual"));
   ipcMain.handle(UPDATER_CHANNELS.download, () => runDownload());
   ipcMain.handle(UPDATER_CHANNELS.quitAndInstall, () => {
+    logUpdater("info", "updater.quit_and_install", {
+      version: pendingVersion || undefined,
+    });
     // isSilent=false：显示安装进度；isForceRunAfter=true：装毕重启应用。
     autoUpdater.quitAndInstall(false, true);
   });
