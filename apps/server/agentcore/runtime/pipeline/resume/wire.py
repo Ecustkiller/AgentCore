@@ -226,11 +226,13 @@ async def _wire_continuation_toolset(
         shared_workspace=folder_id is not None,
     )
     from agentcore.runtime.coordination.session import current_execution_id
+    from agentcore.runtime.closing_posture import clear_cloud_web_verify_gap
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
     bound_execution_id = base_tool_context.execution_id
     execution_id_token = current_execution_id.set(bound_execution_id)
     current_delivery_verdict.set(None)
+    clear_cloud_web_verify_gap()
     if permission_axes is None:
         permission_axes = DEFAULT_PERMISSION_AXES
     approval_gate = (

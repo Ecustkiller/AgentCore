@@ -302,6 +302,10 @@ def test_core_teaches_split_criterion_over_count():
     # 案 ceo-claim-edit-without-write 软Ⅱ′：零写盘禁假已改 + 禁默认整文件手贴。
     assert "诚实落盘" in hint
     assert "整文件自行粘贴" in hint or "整文件" in hint
+    # 案 cloud-web-install-deny-claim-verified A：云端不能装包时禁「自检全过/跑绿」。
+    assert "绿场 Web" in hint or "云端装包" in hint
+    assert "自检全过" in hint or "跑绿" in hint
+    assert "单测已绿" in hint or "跑绿" in hint
     # 案 fake-dispatch-stall-claim A：未 delegate 前禁「已派/已开工」；ask_user 须「先确认再派」。
     assert "派工·时序诚实" in hint
     assert "先确认再派" in hint or "尚未派工" in hint
@@ -585,6 +589,18 @@ def test_core_teaches_image_gen_egress_and_key_boundary():
     assert "生图" in orch
     assert "出站网络" in orch or "egress" in orch.lower() or "HTTPS" in orch
     assert "明文" in orch or "env" in orch
+
+
+def test_core_teaches_cloud_web_install_verify_honesty():
+    """案 20260803-cloud-web-install-deny-claim-verified A：云端不能装包时禁称跑绿。"""
+    hint = _CEO_CORE_HINT
+    assert "云端装包" in hint or "绿场 Web" in hint
+    assert "自检全过" in hint
+    assert "跑绿" in hint
+    assert "单测已绿" in hint
+    assert "export_to_local" in hint
+    # 与生图 / Office / 软Ⅱ′分轴提示仍在邻近段落
+    assert "分轴" in hint or "零写盘" in hint
 
 
 def test_core_teaches_short_clarify_not_scene_ledger():

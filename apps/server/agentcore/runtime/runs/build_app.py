@@ -229,6 +229,8 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "`check=build`（或 typecheck / vue-tsc）；"
                 "装包需受限出网，失败则诚实走结构自检（import 图 / graph_consistent）"
                 "并写明缺口，勿空转、勿改道 code_execute 跑 npm install。"
+                "【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」——"
+                "须点名未装包或未外环验绿，并给本机 install→build/test 或 export_to_local。"
                 "结果与缺口写入 QA 笔记落盘。只报告与最小修补，勿重写整站。"
             ),
             "depends_on": ["integrate"],

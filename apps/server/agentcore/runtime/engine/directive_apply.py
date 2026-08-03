@@ -35,16 +35,20 @@ from .segments import join_segments
 from .tool_exec import execute_tools
 
 
-def _captain_mutation_honesty(content: str, controller: LoopController) -> str:
-    """SoftⅡ′ banner when CEO claims edit / whole-file paste without write evidence."""
+def _captain_closing_honesty(content: str, controller: LoopController) -> str:
+    """CEO soft banners: softⅡ′ (zero-write) then cloud-web verify-green (install deny)."""
     if not content:
         return content
-    from agentcore.runtime.closing_posture import enforce_ceo_mutation_honesty
+    from agentcore.runtime.closing_posture import (
+        enforce_ceo_mutation_honesty,
+        enforce_cloud_web_verify_honesty,
+    )
 
-    return enforce_ceo_mutation_honesty(
+    out = enforce_ceo_mutation_honesty(
         content,
         landing_succeeded=controller.landing_succeeded,
     )
+    return enforce_cloud_web_verify_honesty(out)
 
 
 @dataclass
@@ -141,9 +145,9 @@ async def apply_loop_directive(
                     emit_content=emit_content,
                     run_id=run_id,
                 )
-            # CEO softⅡ′：零写盘却宣称已改 / 甩整文件手贴 → 仅加横幅，不丢稿不拒发。
+            # CEO soft banners：软Ⅱ′零写盘假改 + 云端装包拒仍称验绿 → 仅加横幅，不丢稿不拒发。
             if role == "captain" and content:
-                content = _captain_mutation_honesty(content, controller)
+                content = _captain_closing_honesty(content, controller)
             return DirectiveApplyResult(
                 action="return",
                 content=content,
@@ -253,7 +257,7 @@ async def apply_loop_directive(
                         finish_override_sink.append(FinishReason.PAUSED)
                     return DirectiveApplyResult(
                         action="return",
-                        content=_captain_mutation_honesty(
+                        content=_captain_closing_honesty(
                             join_segments(final_content, terminal.final_text or ""),
                             controller,
                         )
@@ -309,7 +313,7 @@ async def apply_loop_directive(
             return DirectiveApplyResult(
                 action="return",
                 content=(
-                    _captain_mutation_honesty(final_content, controller)
+                    _captain_closing_honesty(final_content, controller)
                     if role == "captain"
                     else final_content
                 ),

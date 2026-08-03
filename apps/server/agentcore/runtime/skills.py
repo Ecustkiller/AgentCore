@@ -859,7 +859,9 @@ _BUILD_APP = f"""\
 3. 五阶段不可跳（scaffold → shared → N×module → integrate → smoke），但模块默认可少；\
 禁单 worker 包整站；router/入口引用的页面须同波创建（可 stub）。
 4. 批次会自动扫 `.ts/.tsx/.vue` import 图（`graph_consistent`）；冒烟优先云端 \
-`test_run` check=install → build（装不了再结构自检 / `export_to_local` 本机装包）。
+`test_run` check=install → build（装不了再结构自检 / `export_to_local` 本机装包）。\
+云端不能代跑 install→build/test 时：【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」；\
+须写明未装包 / 未外环验绿，并给本机命令或 `export_to_local`（与 Office / 生图 / 零写盘假改分轴）。
 
 组队进阶旋钮见 `consult_skill(team_orchestration_advanced)`。
 </build_app>"""

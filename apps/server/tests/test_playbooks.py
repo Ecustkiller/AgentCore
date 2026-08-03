@@ -386,6 +386,9 @@ def test_build_app_five_waves_default_modules():
     assert "npm" in by_id["smoke"]["task"].lower() or "build" in by_id["smoke"]["task"]
     assert "test_run" in by_id["smoke"]["task"]
     assert "code_execute" not in by_id["smoke"]["task"] or "勿" in by_id["smoke"]["task"]
+    # 案 cloud-web-install-deny A：冒烟禁把结构自检说成跑绿。
+    assert "自检全过" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
+    assert "单测已绿" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
     # Scaffold artifacts must include per-module stub views (no dangling router).
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]

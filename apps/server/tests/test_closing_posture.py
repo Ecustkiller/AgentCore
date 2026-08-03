@@ -346,6 +346,53 @@ def test_ceo_mutation_honesty_banner_soft_only():
     )
 
 
+def test_cloud_web_verify_honesty_banner_soft_only():
+    """案 cloud-web-install-deny：装包拒/验证缺口 + 称跑绿 → 横幅；无闩锁或无口感 → 不拦。"""
+    from agentcore.runtime.closing_posture import (
+        claims_cloud_web_verify_green,
+        clear_cloud_web_verify_gap,
+        enforce_cloud_web_verify_honesty,
+        note_cloud_web_verify_gap,
+        note_cloud_web_verify_gap_from_delivery,
+        turn_has_cloud_web_verify_gap,
+    )
+
+    clear_cloud_web_verify_gap()
+    claim = "沙箱内能自检的链路全部通过，后端单测已跑绿；请你本机 npm install。"
+    assert claims_cloud_web_verify_green(claim)
+    assert enforce_cloud_web_verify_honesty(claim) == claim  # 无闩锁
+
+    note_cloud_web_verify_gap()
+    assert turn_has_cloud_web_verify_gap()
+    out = enforce_cloud_web_verify_honesty(claim)
+    assert out.startswith("【验证说明】")
+    assert "已跑绿" in out
+    # 幂等：已有横幅不再叠
+    assert enforce_cloud_web_verify_honesty(out) == out
+
+    # 诚实收口不拦
+    honest = "源码已落盘；云端无法装包，请 export_to_local 后本机 npm install → build。"
+    assert not claims_cloud_web_verify_green(honest)
+    assert enforce_cloud_web_verify_honesty(honest) == honest
+
+    clear_cloud_web_verify_gap()
+    note_cloud_web_verify_gap_from_delivery(
+        [{"reason": "verify_failed", "description": "测试未通过（test_run 未全部通过）"}]
+    )
+    assert turn_has_cloud_web_verify_gap()
+    clear_cloud_web_verify_gap()
+    note_cloud_web_verify_gap_from_delivery(
+        criteria_gaps=["提醒（不阻断验收）：已落盘 .ts/.tsx，建议补一次验证（test_run）"]
+    )
+    assert turn_has_cloud_web_verify_gap()
+    clear_cloud_web_verify_gap()
+    note_cloud_web_verify_gap_from_delivery(
+        [{"description": "无法装包：无出网·无 chokepoint"}]
+    )
+    assert turn_has_cloud_web_verify_gap()
+    clear_cloud_web_verify_gap()
+
+
 def test_max_rounds_ceiling_honesty_steer_and_banner():
     """max_rounds：steer 禁止无条件通过；仍宣称姿势 A → 加收口说明横幅。"""
     from agentcore.runtime.closing_posture import (

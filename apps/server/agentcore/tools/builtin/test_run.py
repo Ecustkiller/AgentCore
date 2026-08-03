@@ -618,6 +618,16 @@ def _is_budget_timeout(exec_result: ExecutionResult) -> bool:
     return _TIMEOUT_MARKER in (exec_result.stderr or "")
 
 
+def _note_install_network_unavailable() -> None:
+    """Stamp cloud-web verify honesty latch (案 B：结构化装包拒)."""
+    try:
+        from agentcore.runtime.closing_posture import note_cloud_web_verify_gap
+
+        note_cloud_web_verify_gap()
+    except Exception:  # noqa: BLE001 — side channel must never break verify
+        pass
+
+
 def _js_pm_run(profile: WorkspaceProfile, script: str) -> list[str]:
     pm = "npm"
     for candidate in ("pnpm", "yarn", "npm"):
@@ -892,6 +902,7 @@ class TestRunTool:
         is_local_backend = getattr(context.backend, "location", "server") == "local"
         if needs_install_net and not allows_restricted:
             msg = network_unavailable_message()
+            _note_install_network_unavailable()
             return ToolResult(
                 tool_call_id="",
                 success=False,
@@ -908,6 +919,7 @@ class TestRunTool:
 
             if not registry_egress_available():
                 msg = network_unavailable_message()
+                _note_install_network_unavailable()
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -968,6 +980,7 @@ class TestRunTool:
                 egress_code = details.get("code") if isinstance(details, dict) else None
                 if needs_install_net and egress_code == "egress_unavailable":
                     degrade = network_unavailable_message()
+                    _note_install_network_unavailable()
                     return ToolResult(
                         tool_call_id="",
                         success=False,

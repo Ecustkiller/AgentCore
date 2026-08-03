@@ -364,6 +364,15 @@ def test_team_orchestration_skill_teaches_image_gen_key_boundary():
     assert "env" in body.lower()
 
 
+def test_build_app_skill_teaches_cloud_install_verify_honesty():
+    """案 cloud-web-install-deny A：云端不能装包时禁「自检全过/跑绿」。"""
+    body = _body("build_app")
+    assert "install" in body.lower()
+    assert "结构自检" in body or "export_to_local" in body
+    assert "自检全过" in body or "跑绿" in body
+    assert "单测已绿" in body or "跑绿" in body
+
+
 def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline():
     # 定案甲：细则进任务范围/章节/落盘路径；停止主推细清单进 must_contain；
     # 若保留须标软提醒/短主题词。禁机构名/取证路径词；required_sections 只留少数验收点。
