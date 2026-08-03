@@ -97,8 +97,7 @@ function truncateSnippet(text: string, max = 48): string {
 
 /** Readable headline for structured `git` tool (subcommand + key args). */
 function gitPrimaryArg(args: Record<string, unknown>): string | null {
-  const sub =
-    typeof args.subcommand === "string" ? args.subcommand.trim() : "";
+  const sub = typeof args.subcommand === "string" ? args.subcommand.trim() : "";
   if (!sub) return null;
   if (sub === "push") {
     const remote =
@@ -108,13 +107,11 @@ function gitPrimaryArg(args: Record<string, unknown>): string | null {
     return `push → ${remote}`;
   }
   if (sub === "commit") {
-    const message =
-      typeof args.message === "string" ? args.message.trim() : "";
+    const message = typeof args.message === "string" ? args.message.trim() : "";
     return message ? `commit ${truncateSnippet(message)}` : "commit";
   }
   if (sub === "branch" || sub === "checkout") {
-    const branch =
-      typeof args.branch === "string" ? args.branch.trim() : "";
+    const branch = typeof args.branch === "string" ? args.branch.trim() : "";
     return branch ? `${sub} ${branch}` : sub;
   }
   if (sub === "add") {

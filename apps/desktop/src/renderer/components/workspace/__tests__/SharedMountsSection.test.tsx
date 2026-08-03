@@ -30,7 +30,7 @@ vi.mock("@/components/files/sharedSpaces/CreateSharedSpaceDialog", () => ({
     onCreated?: (spaceId: string) => void;
   }) =>
     open ? (
-      <div role="dialog" aria-label="新建共享空间">
+      <dialog open aria-label="新建共享空间">
         <button
           type="button"
           onClick={() => {
@@ -40,7 +40,7 @@ vi.mock("@/components/files/sharedSpaces/CreateSharedSpaceDialog", () => ({
         >
           模拟创建成功
         </button>
-      </div>
+      </dialog>
     ) : null,
 }));
 
@@ -49,10 +49,7 @@ vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
 }));
 
-import {
-  useSharedMounts,
-  useSharedSpaces,
-} from "@/hooks/useSharedSpaces";
+import { useSharedMounts, useSharedSpaces } from "@/hooks/useSharedSpaces";
 import { SharedMountsSection } from "../SharedMountsSection";
 
 const useSharedSpacesMock = vi.mocked(useSharedSpaces);

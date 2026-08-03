@@ -1,8 +1,8 @@
 import {
   FLOATING_PANEL_DEFAULT_HEIGHT,
   FLOATING_PANEL_DEFAULT_WIDTH,
-  FloatingPanelShell,
   type FloatingPanelRect,
+  FloatingPanelShell,
 } from "@/components/layout/FloatingPanelShell";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 

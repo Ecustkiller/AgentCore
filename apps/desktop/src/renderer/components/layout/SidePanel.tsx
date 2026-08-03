@@ -6,6 +6,7 @@ import {
   CommandPanelBody,
   useCommandRegion,
 } from "@/components/graph/CanvasDecisionPanel";
+import { closeOsFloatWindowsForTabs } from "@/components/layout/DesktopFloatWindowBridge";
 import { KillPtyConfirmDialog } from "@/components/terminal/KillPtyConfirmDialog";
 import {
   TerminalPanelBody,
@@ -25,7 +26,6 @@ import { ConversationChangesPanel } from "@/components/workspace/ConversationCha
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { conversationHasFileArtifacts } from "@/lib/conversationFileChanges";
-import { closeOsFloatWindowsForTabs } from "@/components/layout/DesktopFloatWindowBridge";
 import { notifyError } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
@@ -187,8 +187,7 @@ export function SidePanel() {
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceInDock = !floatingIds.has(WORKSPACE_TAB_ID);
-  const changesInDock =
-    changesTabVisible && !floatingIds.has(CHANGES_TAB_ID);
+  const changesInDock = changesTabVisible && !floatingIds.has(CHANGES_TAB_ID);
   const workspaceActive = workspaceInDock && activeTabId === WORKSPACE_TAB_ID;
   const changesActive = changesInDock && activeTabId === CHANGES_TAB_ID;
   const commandActive = command.show && activeTabId === COMMAND_TAB_ID;

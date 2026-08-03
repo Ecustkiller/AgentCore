@@ -404,7 +404,7 @@ function nextDockActiveAfterFloat(
   floating.add(floatedId);
   const dockedContent = state.tabs.filter((t) => !floating.has(t.id));
   if (dockedContent.length > 0) {
-    return dockedContent[dockedContent.length - 1]!.id;
+    return dockedContent[dockedContent.length - 1]?.id ?? WORKSPACE_TAB_ID;
   }
   if (!floating.has(CHANGES_TAB_ID)) return CHANGES_TAB_ID;
   if (!floating.has(WORKSPACE_TAB_ID)) return WORKSPACE_TAB_ID;
@@ -630,8 +630,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   isFloating: (tabId) => get().floats.some((f) => f.tabId === tabId),
 
   openTab: (tab, opts) => {
-    const reveal =
-      opts?.reveal !== false && canRevealSidePanel();
+    const reveal = opts?.reveal !== false && canRevealSidePanel();
     const activate = opts?.activate !== false;
     const state = get();
     const alreadyFloating = state.floats.some((f) => f.tabId === tab.id);
@@ -695,7 +694,9 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         const floatingIds = floatingIdSet(floats);
         const dockedNeighbour =
           tabs.slice(idx).find((t) => !floatingIds.has(t.id)) ??
-          [...tabs.slice(0, idx)].reverse().find((t) => !floatingIds.has(t.id)) ??
+          [...tabs.slice(0, idx)]
+            .reverse()
+            .find((t) => !floatingIds.has(t.id)) ??
           null;
         const next = dockedNeighbour ?? tabs[idx] ?? tabs[idx - 1] ?? null;
         activeTabId = next ? next.id : homeTabAfterDetailClose();
@@ -782,8 +783,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
           activeTabId !== COMMAND_TAB_ID &&
           !tabs.some((t) => t.id === activeTabId));
       if (activeGone) {
-        activeTabId =
-          tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose();
+        activeTabId = tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose();
       }
       return {
         floats: [],
@@ -799,9 +799,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       if (!s.floats.some((f) => f.tabId === tabId)) return s;
       return {
         floats: s.floats.map((f) =>
-          f.tabId === tabId
-            ? { ...f, layout: { ...f.layout, ...layout } }
-            : f,
+          f.tabId === tabId ? { ...f, layout: { ...f.layout, ...layout } } : f,
         ),
       };
     });
@@ -888,10 +886,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         ? s.activeTabId
         : (tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose());
       let focusSurface = s.focusSurface;
-      if (
-        focusSurface.type === "float" &&
-        droppedIds.has(focusSurface.tabId)
-      ) {
+      if (focusSurface.type === "float" && droppedIds.has(focusSurface.tabId)) {
         focusSurface = { type: "dock" };
       }
       return { tabs, floats, activeTabId, focusSurface };

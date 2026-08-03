@@ -4,12 +4,12 @@
  * Web / 单测无 preload → helpers no-op；桌面以 `floatWindowApi` 可用性为真窗门控。
  */
 
+import { isWebRuntime } from "@/lib/capabilities";
 import type {
   FloatWindowApi,
   FloatWindowClosedPayload,
   FloatWindowOpenInput,
 } from "@shared/float-window-contract";
-import { isWebRuntime } from "@/lib/capabilities";
 
 export type {
   FloatWindowApi,
@@ -26,7 +26,7 @@ export function getFloatWindowApi(): FloatWindowApi | undefined {
 export function canUseOsFloatWindow(): boolean {
   if (isWebRuntime()) return false;
   const api = getFloatWindowApi();
-  return Boolean(api?.open && api?.dock && api?.destroy && api?.onClosed);
+  return api != null;
 }
 
 export async function floatWindowOpen(

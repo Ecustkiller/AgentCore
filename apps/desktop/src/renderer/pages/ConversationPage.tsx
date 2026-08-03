@@ -29,7 +29,11 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
-import { WORKSPACE_TAB_ID, dismissFocusedFloat, useSidePanelStore } from "@/stores/sidePanel";
+import {
+  WORKSPACE_TAB_ID,
+  dismissFocusedFloat,
+  useSidePanelStore,
+} from "@/stores/sidePanel";
 import { useUIStore } from "@/stores/ui";
 import { MessageSquare, Network } from "lucide-react";
 import { useEffect, useState } from "react";

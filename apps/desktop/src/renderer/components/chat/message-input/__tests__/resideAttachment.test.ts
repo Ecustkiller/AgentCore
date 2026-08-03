@@ -261,11 +261,7 @@ describe("ensureAttachmentResident", () => {
       text: "",
       truncated: false,
     });
-    expect(upload).toHaveBeenCalledWith(
-      "c1",
-      "attachments/pack.docx",
-      blob,
-    );
+    expect(upload).toHaveBeenCalledWith("c1", "attachments/pack.docx", blob);
   });
 });
 

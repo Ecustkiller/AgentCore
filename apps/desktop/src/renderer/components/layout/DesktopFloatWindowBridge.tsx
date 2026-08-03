@@ -1,9 +1,10 @@
+import { sidePanelFloatTitle } from "@/components/layout/SidePanelSurfaceBody";
 import {
   canUseOsFloatWindow,
+  floatWindowDestroy,
+  floatWindowDock,
   floatWindowOpen,
   onFloatWindowClosed,
-  floatWindowDock,
-  floatWindowDestroy,
 } from "@/lib/floatWindowApi";
 import {
   applyFloatProjectionSnapshot,
@@ -12,15 +13,14 @@ import {
   openFloatSyncChannel,
   postFloatSync,
 } from "@/lib/floatWindowSync";
-import { sidePanelFloatTitle } from "@/components/layout/SidePanelSurfaceBody";
+import { useConversationStore } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
+import { useInteractionStore } from "@/stores/interactions";
 import {
   CHANGES_TAB_ID,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import { useConversationStore } from "@/stores/conversation";
-import { useExecutionStore } from "@/stores/execution";
-import { useInteractionStore } from "@/stores/interactions";
 import { useEffect, useRef } from "react";
 
 /**
@@ -65,7 +65,11 @@ export function DesktopFloatWindowBridge() {
     focusSurface.type === "float" ? focusSurface.tabId : null;
   useEffect(() => {
     if (!enabled || !conversationId || !focusFloatTabId) return;
-    if (!useSidePanelStore.getState().floats.some((f) => f.tabId === focusFloatTabId)) {
+    if (
+      !useSidePanelStore
+        .getState()
+        .floats.some((f) => f.tabId === focusFloatTabId)
+    ) {
       return;
     }
     void floatWindowOpen({

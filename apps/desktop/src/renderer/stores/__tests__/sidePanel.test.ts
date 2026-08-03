@@ -31,13 +31,13 @@ import {
   TEAM_TERMINAL_TAB_ID,
   WORKSPACE_TAB_ID,
   contentDetailTabId,
+  dismissFocusedFloat,
   fileTabId,
   runDetailTabId,
   sidePanelFocusTabId,
   sidePanelMaxWidth,
   simpleTurnDetailTabId,
   terminalDismissKey,
-  dismissFocusedFloat,
   useSidePanelStore,
 } from "../sidePanel";
 
@@ -768,7 +768,11 @@ describe("应用内浮窗（§十 · Move / float·dock / 上限 8）", () => {
     expect(panel().floatTab(fileTabId("src/a.ts"))).toBe(true);
     expect(panel().floatTab(WORKSPACE_TAB_ID)).toBe(true);
     expect(panel().floatTab(CHANGES_TAB_ID)).toBe(true);
-    expect(panel().floats.map((f) => f.tabId).sort()).toEqual(
+    expect(
+      panel()
+        .floats.map((f) => f.tabId)
+        .sort(),
+    ).toEqual(
       [
         CHANGES_TAB_ID,
         WORKSPACE_TAB_ID,
@@ -798,9 +802,11 @@ describe("应用内浮窗（§十 · Move / float·dock / 上限 8）", () => {
     panel().floatTab(WORKSPACE_TAB_ID);
     panel().closePanel();
     expect(panel().open).toBe(false);
-    expect(panel().floats.map((f) => f.tabId).sort()).toEqual(
-      [WORKSPACE_TAB_ID, tabId("run-1")].sort(),
-    );
+    expect(
+      panel()
+        .floats.map((f) => f.tabId)
+        .sort(),
+    ).toEqual([WORKSPACE_TAB_ID, tabId("run-1")].sort());
     expect(panel().tabs.map((t) => t.id)).toEqual([tabId("run-1")]);
 
     panel().openPanel();
@@ -881,7 +887,7 @@ describe("应用内浮窗（§十 · Move / float·dock / 上限 8）", () => {
     expect(sidePanelFocusTabId(panel())).toBe(tabId("run-2"));
     panel().focusFloat(tabId("run-1"));
     expect(sidePanelFocusTabId(panel())).toBe(tabId("run-1"));
-    expect(panel().floats[0]!.layout.zIndex).toBeGreaterThan(0);
+    expect(panel().floats[0]?.layout.zIndex).toBeGreaterThan(0);
   });
 
   it("focusFloat is a no-op when that float is already the focus surface", () => {

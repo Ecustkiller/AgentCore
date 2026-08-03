@@ -11,13 +11,13 @@ import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
+import { hasLocalFiles } from "@/lib/capabilities";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
   isEmptyInterruptedAssistant,
 } from "@/lib/composerContinueHint";
-import { hasLocalFiles } from "@/lib/capabilities";
 import { TOOLS_GATE_HINT, needsToolsGateHint } from "@/lib/llmToolsGate";
 import { defaultChatSupportsTools } from "@/services/llmProviders";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";

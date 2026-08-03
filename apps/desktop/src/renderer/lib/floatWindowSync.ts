@@ -6,26 +6,23 @@
  */
 
 import {
-  CHANGES_TAB_ID,
-  WORKSPACE_TAB_ID,
-  type DetailTab,
-  useSidePanelStore,
-} from "@/stores/sidePanel";
-import {
+  type Message,
   assistantProjectionId,
   runtimeOf,
   useConversationStore,
-  type Message,
 } from "@/stores/conversation";
 import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
-import {
-  type ExecutionRuntime,
-  useExecutionStore,
-} from "@/stores/execution";
+import { type ExecutionRuntime, useExecutionStore } from "@/stores/execution";
 import {
   type InteractionEntry,
   useInteractionStore,
 } from "@/stores/interactions";
+import {
+  CHANGES_TAB_ID,
+  type DetailTab,
+  WORKSPACE_TAB_ID,
+  useSidePanelStore,
+} from "@/stores/sidePanel";
 
 export const FLOAT_WINDOW_SYNC_CHANNEL = "agentcore:float-window-projection";
 

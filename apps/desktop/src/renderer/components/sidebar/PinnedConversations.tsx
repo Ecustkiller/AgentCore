@@ -1,5 +1,5 @@
 import { useConversations } from "@/hooks/useConversations";
-import { type Conversation } from "@/stores/conversation";
+import type { Conversation } from "@/stores/conversation";
 import { useMemo } from "react";
 import { ConversationItem } from "./ConversationItem";
 

@@ -1,5 +1,5 @@
-import { Markdown } from "@/components/chat/Markdown";
 import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
+import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailScroll } from "@/components/chat/detail/RunDetailScroll";
 import { FileDetail } from "@/components/files/FileDetail";
 import { EmptyHint } from "@/components/files/parts";
@@ -13,8 +13,8 @@ import {
 import { usePendingApprovals } from "@/stores/interactions";
 import {
   CHANGES_TAB_ID,
-  WORKSPACE_TAB_ID,
   type DetailTab,
+  WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
 import { FileText } from "lucide-react";

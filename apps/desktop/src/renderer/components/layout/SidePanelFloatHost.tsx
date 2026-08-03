@@ -1,7 +1,7 @@
 import { DesktopFloatWindowBridge } from "@/components/layout/DesktopFloatWindowBridge";
 import {
-  FloatingPanelHost,
   type FloatingPanelEntry,
+  FloatingPanelHost,
 } from "@/components/layout/FloatingPanelHost";
 import {
   SidePanelSurfaceBody,
@@ -42,8 +42,7 @@ export function SidePanelFloatHost() {
           height: f.layout.height,
         },
         zIndex: f.layout.zIndex,
-        closable:
-          f.tabId !== WORKSPACE_TAB_ID && f.tabId !== CHANGES_TAB_ID,
+        closable: f.tabId !== WORKSPACE_TAB_ID && f.tabId !== CHANGES_TAB_ID,
         focused:
           focusSurface.type === "float" && focusSurface.tabId === f.tabId,
       })),

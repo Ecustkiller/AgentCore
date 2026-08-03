@@ -9,8 +9,8 @@ import { useApplyTheme } from "@/lib/theme";
 import { useConversationStore } from "@/stores/conversation";
 import {
   CHANGES_TAB_ID,
-  WORKSPACE_TAB_ID,
   type DetailTab,
+  WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
 import { PanelsTopLeft } from "lucide-react";

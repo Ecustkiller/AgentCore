@@ -203,7 +203,10 @@ function startSchedule(): void {
   scheduleStarted = true;
   logUpdater("info", "updater.schedule_start", { firstCheck: true });
   void runCheck("startup");
-  intervalTimer = setInterval(() => void runCheck("interval"), CHECK_INTERVAL_MS);
+  intervalTimer = setInterval(
+    () => void runCheck("interval"),
+    CHECK_INTERVAL_MS,
+  );
   powerMonitor.on("resume", () => void runCheck("resume"));
 }
 
@@ -266,7 +269,10 @@ export function initUpdater(window: BrowserWindow): void {
   });
   autoUpdater.on("download-progress", (progress) => {
     const percent = Math.round(progress.percent);
-    const bytesPerSecond = Math.max(0, Math.round(progress.bytesPerSecond || 0));
+    const bytesPerSecond = Math.max(
+      0,
+      Math.round(progress.bytesPerSecond || 0),
+    );
     const transferred = Math.max(0, Math.round(progress.transferred || 0));
     const total = Math.max(0, Math.round(progress.total || 0));
     pushStatus({
@@ -290,8 +296,7 @@ export function initUpdater(window: BrowserWindow): void {
         bytesPerSecond,
         transferred,
         total,
-        sinceDownloadMs:
-          downloadStartedAt > 0 ? now - downloadStartedAt : null,
+        sinceDownloadMs: downloadStartedAt > 0 ? now - downloadStartedAt : null,
       });
     }
   });

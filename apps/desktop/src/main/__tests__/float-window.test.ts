@@ -60,7 +60,7 @@ const { BrowserWindowCtor, created, mainSend, ipcHandle } = vi.hoisted(() => {
     return win;
   }
 
-  const BrowserWindowCtor = vi.fn(() => {
+  const BrowserWindowCtor = vi.fn((_opts?: Record<string, unknown>) => {
     const win = createMockWin();
     created.push(win);
     return win;
@@ -248,7 +248,8 @@ describe("openFloatWindow", () => {
       conversationId: "cid-1",
       title: "A",
     });
-    const win = created[0]!;
+    const win = created[0];
+    expect(win).toBeDefined();
     expect(isManagedFloatWindow(win as never)).toBe(true);
     minimizeBrowserWindow(win as never);
     expect(win.minimize).not.toHaveBeenCalled();
@@ -261,7 +262,8 @@ describe("openFloatWindow", () => {
       conversationId: "cid-1",
       title: "A",
     });
-    const win = created[0]!;
+    const win = created[0];
+    expect(win).toBeDefined();
     win.isVisible.mockReturnValue(false);
     win.show.mockClear();
     openFloatWindow({
@@ -334,7 +336,7 @@ describe("openFloatWindow", () => {
     });
     created[0]?.focus.mockClear();
     // Simulate OS already focusing this window (e.g. after first open).
-    created[0]!.isFocused.mockReturnValue(true);
+    created[0]?.isFocused.mockReturnValue(true);
     openFloatWindow({
       tabId: "tab-1",
       conversationId: "cid-1",

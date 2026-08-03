@@ -37,8 +37,8 @@ export function safeBrowserFileName(name: string): string {
     .replace(/\\/g, "/")
     .trim()
     .split("/")
-    .pop()!
-    .replace(/^\.+/, "");
+    .pop()
+    ?.replace(/^\.+/, "");
   return base || "attachment";
 }
 

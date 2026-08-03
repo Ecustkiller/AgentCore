@@ -352,14 +352,11 @@ export function registerFloatWindowIpc(next: FloatWindowDeps): void {
   if (ipcRegistered) return;
   ipcRegistered = true;
 
-  ipcMain.handle(
-    FLOAT_WINDOW_CHANNELS.open,
-    (_e, raw: unknown): boolean => {
-      const input = parseOpenInput(raw);
-      if (!input) return false;
-      return openFloatWindow(input);
-    },
-  );
+  ipcMain.handle(FLOAT_WINDOW_CHANNELS.open, (_e, raw: unknown): boolean => {
+    const input = parseOpenInput(raw);
+    if (!input) return false;
+    return openFloatWindow(input);
+  });
 
   ipcMain.handle(FLOAT_WINDOW_CHANNELS.dock, (_e, raw: unknown): void => {
     const tabId = parseTabId(raw);

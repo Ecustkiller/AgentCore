@@ -40,9 +40,7 @@ afterEach(() => {
 describe("ForceUpdateGate", () => {
   it("renders hard-gate copy and min version when outdated and Electron", () => {
     render(<ForceUpdateGate />);
-    expect(
-      screen.getByText("当前版本过旧，须更新后才能继续使用"),
-    ).toBeTruthy();
+    expect(screen.getByText("当前版本过旧，须更新后才能继续使用")).toBeTruthy();
     expect(screen.getByText(/最低要求 0\.6\.5/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();

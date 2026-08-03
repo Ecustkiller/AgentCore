@@ -66,7 +66,9 @@ export function RecentConversations() {
       {(hasGroups || hasPinned) && (
         <div className="mx-3 border-t border-sidebar-border" />
       )}
-      <div className={`space-y-0.5 px-2 py-1 ${hasGroups || hasPinned ? "pt-2" : ""}`}>
+      <div
+        className={`space-y-0.5 px-2 py-1 ${hasGroups || hasPinned ? "pt-2" : ""}`}
+      >
         {recent.map((conv) => (
           <ConversationItem key={conv.id} conversation={conv} />
         ))}

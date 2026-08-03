@@ -1,19 +1,22 @@
 // @vitest-environment jsdom
 import { DesktopFloatWindowBridge } from "@/components/layout/DesktopFloatWindowBridge";
-import type { FloatWindowApi } from "@shared/float-window-contract";
 import { useConversationStore } from "@/stores/conversation";
 import {
   WORKSPACE_TAB_ID,
   runDetailTabId,
   useSidePanelStore,
 } from "@/stores/sidePanel";
+import type {
+  FloatWindowApi,
+  FloatWindowOpenInput,
+} from "@shared/float-window-contract";
 import { cleanup, render } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
   cleanup();
-  delete window.floatWindowApi;
+  window.floatWindowApi = undefined;
 });
 
 beforeEach(() => {
@@ -33,8 +36,7 @@ beforeEach(() => {
 
 describe("DesktopFloatWindowBridge closed wiring", () => {
   it("onClosed user/dock → dockTab; destroy → destroyFloat", () => {
-    let closedCb: ((p: { tabId: string; reason: string }) => void) | null =
-      null;
+    let closedCb: Parameters<FloatWindowApi["onClosed"]>[0] | null = null;
     const api: FloatWindowApi = {
       open: vi.fn(async () => true),
       dock: vi.fn(async () => undefined),
@@ -83,7 +85,7 @@ describe("DesktopFloatWindowBridge closed wiring", () => {
 
 describe("DesktopFloatWindowBridge open dedupe", () => {
   it("opens each float once; zIndex/focus churn does not re-open peers", async () => {
-    const open = vi.fn(async () => true);
+    const open = vi.fn(async (_input: FloatWindowOpenInput) => true);
     window.floatWindowApi = {
       open,
       dock: vi.fn(async () => undefined),

@@ -2,14 +2,14 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FloatWindowPage } from "@/pages/FloatWindowPage";
 import {
+  type DetailTab,
   WORKSPACE_TAB_ID,
   useSidePanelStore,
-  type DetailTab,
 } from "@/stores/sidePanel";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/layout/SidePanelSurfaceBody", () => ({
   SidePanelSurfaceBody: ({ tabId }: { tabId: string }) => (
@@ -36,7 +36,7 @@ vi.mock("@/lib/theme", () => ({
 
 afterEach(() => {
   cleanup();
-  delete window.floatWindowApi;
+  window.floatWindowApi = undefined;
 });
 
 beforeEach(() => {
@@ -105,9 +105,9 @@ describe("FloatWindowPage", () => {
     renderFloat("?cid=conv-1&tab=run:abc");
 
     expect(screen.getByTestId("window-controls")).toBeTruthy();
-    expect(screen.getByTestId("window-controls").getAttribute("data-show-minimize")).toBe(
-      "false",
-    );
+    expect(
+      screen.getByTestId("window-controls").getAttribute("data-show-minimize"),
+    ).toBe("false");
     expect(screen.queryByLabelText("钉回主坞")).toBeNull();
     expect(screen.queryByLabelText("关闭浮窗")).toBeNull();
   });

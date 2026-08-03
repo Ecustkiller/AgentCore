@@ -1,14 +1,14 @@
+import {
+  type FloatingPanelEntry,
+  FloatingPanelHost,
+} from "@/components/layout/FloatingPanelHost";
 // @vitest-environment jsdom
 import {
   FLOATING_PANEL_DEFAULT_HEIGHT,
   FLOATING_PANEL_DEFAULT_WIDTH,
-  FloatingPanelShell,
   type FloatingPanelRect,
+  FloatingPanelShell,
 } from "@/components/layout/FloatingPanelShell";
-import {
-  FloatingPanelHost,
-  type FloatingPanelEntry,
-} from "@/components/layout/FloatingPanelHost";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
@@ -64,7 +64,9 @@ describe("FloatingPanelShell", () => {
     const last = onRectChange.mock.calls.at(-1)?.[0] as FloatingPanelRect;
     expect(last.x).toBe(80);
     expect(last.y).toBe(70);
-    expect(container.querySelector('[data-floating-panel-id="a"]')).toBeTruthy();
+    expect(
+      container.querySelector('[data-floating-panel-id="a"]'),
+    ).toBeTruthy();
   });
 
   it("fires onFocus when the shell is pressed", () => {

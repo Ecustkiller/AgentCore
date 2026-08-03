@@ -2,6 +2,7 @@
 
 import type { AgentTownApi } from "@shared/agenttown-contract";
 import type { BrowserApi } from "@shared/browser-contract";
+import type { FloatWindowApi } from "@shared/float-window-contract";
 import type { HostApi } from "@shared/host-contract";
 import type { FsApi } from "@shared/ipc-contract";
 import type { LocalStoreApi } from "@shared/local-store-contract";
@@ -15,7 +16,6 @@ import type { PtyApi } from "@shared/pty-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
-import type { FloatWindowApi } from "@shared/float-window-contract";
 import type { WindowApi } from "@shared/window-contract";
 
 declare global {
@@ -67,5 +67,3 @@ declare global {
     __WEB_PREVIEW__?: boolean;
   }
 }
-
-export {};

@@ -11,7 +11,7 @@ import {
 } from "@/services/turnFilesDiff";
 import { restoreSnapshot } from "@/services/workspace";
 import { ChevronDown, ChevronRight, Loader2, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 /**
  * A1 / A1+ 只读「查看改动」——挂在产物卡内。
@@ -59,7 +59,10 @@ function diffRowClass(type: DiffLine["type"]): string {
   return "text-muted-foreground";
 }
 
-function summarizeLineDiff(oldText: string, newText: string): {
+function summarizeLineDiff(
+  oldText: string,
+  newText: string,
+): {
   lines: DiffLine[];
   adds: number;
   dels: number;
@@ -160,7 +163,10 @@ function FileChangeChrome({
         ) : (
           <ChevronRight size={12} className="shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 truncate font-mono text-foreground" title={path}>
+        <span
+          className="min-w-0 truncate font-mono text-foreground"
+          title={path}
+        >
           {path}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5 tabular-nums text-muted-foreground">
@@ -171,7 +177,11 @@ function FileChangeChrome({
   );
 }
 
-function EditTrailing({ adds, dels, label }: { adds: number; dels: number; label: string }) {
+function EditTrailing({
+  adds,
+  dels,
+  label,
+}: { adds: number; dels: number; label: string }) {
   return (
     <>
       <span>{label}</span>
@@ -226,7 +236,9 @@ function ArtifactChangeRow({ artifact }: { artifact: FileArtifact }) {
       {open && change.kind === "edit" && editDiff && (
         <DiffBody lines={editDiff.lines} />
       )}
-      {open && change.kind === "write" && <WriteBody content={change.content} />}
+      {open && change.kind === "write" && (
+        <WriteBody content={change.content} />
+      )}
       {open && change.kind === "delete" && <MetaBody detail="已删除" />}
       {open && change.kind === "move" && (
         <MetaBody
@@ -284,9 +296,7 @@ function TrueDiffRow({ change }: { change: TurnFileChange }) {
         change.changeType === "added" &&
         !change.isBinary &&
         change.content != null && <WriteBody content={change.content} />}
-      {open && change.changeType === "deleted" && (
-        <MetaBody detail="已删除" />
-      )}
+      {open && change.changeType === "deleted" && <MetaBody detail="已删除" />}
       {open && change.isBinary && change.changeType !== "deleted" && (
         <div className="rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground">
           二进制文件（{change.sizeBytes} 字节）— 请在工作区打开查看

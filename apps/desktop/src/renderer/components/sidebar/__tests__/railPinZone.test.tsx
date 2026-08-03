@@ -130,9 +130,9 @@ describe("sidebar rail 方案C (置顶 → 项目 → 裸聊)", () => {
 
     renderRail();
 
-    const order = [
-      ...screen.getAllByTestId(/^conv-|^group-/),
-    ].map((el) => el.getAttribute("data-testid"));
+    const order = [...screen.getAllByTestId(/^conv-|^group-/)].map((el) =>
+      el.getAttribute("data-testid"),
+    );
     expect(order).toEqual([
       "conv-pin-bare",
       "conv-pin-proj",

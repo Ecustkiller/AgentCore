@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { SidePanelFloatHost } from "@/components/layout/SidePanelFloatHost";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { FloatWindowApi } from "@shared/float-window-contract";
 import {
   WORKSPACE_TAB_ID,
   runDetailTabId,
   useSidePanelStore,
 } from "@/stores/sidePanel";
+import type { FloatWindowApi } from "@shared/float-window-contract";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,8 +24,8 @@ vi.mock("@/components/layout/SidePanelSurfaceBody", async () => {
 
 afterEach(() => {
   cleanup();
-  delete window.floatWindowApi;
-  delete window.__WEB__;
+  window.floatWindowApi = undefined;
+  window.__WEB__ = undefined;
 });
 
 beforeEach(() => {

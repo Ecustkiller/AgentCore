@@ -21,11 +21,11 @@ import {
 } from "lucide-react";
 import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { PinnedConversations } from "./PinnedConversations";
 import {
   RecentConversations,
   ViewAllConversations,
 } from "./RecentConversations";
-import { PinnedConversations } from "./PinnedConversations";
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
 

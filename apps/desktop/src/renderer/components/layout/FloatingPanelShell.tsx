@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 import { Pin, X } from "lucide-react";
 import {
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   useCallback,
   useRef,
 } from "react";
@@ -205,6 +205,7 @@ export function FloatingPanelShell({
   return (
     <div
       ref={rootRef}
+      // biome-ignore lint/a11y/useSemanticElements: in-app float panel — drag/resize chrome; native <dialog> modal/form semantics don't fit.
       role="dialog"
       aria-label={title}
       data-floating-panel-id={id}

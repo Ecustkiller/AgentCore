@@ -178,9 +178,9 @@ describe("floatWindowSync", () => {
     });
 
     expect(useConversationStore.getState().currentConversationId).toBe("c1");
-    expect(
-      useConversationStore.getState().byId.c1.messages[0]?.content,
-    ).toBe("stream");
+    expect(useConversationStore.getState().byId.c1.messages[0]?.content).toBe(
+      "stream",
+    );
     expect(useExecutionStore.getState().byId["msg-1"]?.status).toBe(
       "completed",
     );

@@ -7,6 +7,11 @@ import {
   type BrowserApi,
   type BrowserNavState,
 } from "@shared/browser-contract";
+import {
+  FLOAT_WINDOW_CHANNELS,
+  type FloatWindowApi,
+  type FloatWindowClosedPayload,
+} from "@shared/float-window-contract";
 import { HOST_CHANNELS, type HostApi } from "@shared/host-contract";
 import {
   FS_CHANNELS,
@@ -60,11 +65,6 @@ import {
   type UpdaterApi,
   type UpdaterStatus,
 } from "@shared/updater-contract";
-import {
-  FLOAT_WINDOW_CHANNELS,
-  type FloatWindowApi,
-  type FloatWindowClosedPayload,
-} from "@shared/float-window-contract";
 import {
   WINDOW_CHANNELS,
   type WindowApi,
