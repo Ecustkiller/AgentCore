@@ -8,12 +8,16 @@ message. Meta stamps ``origin=execution_harvest`` for attribution.
 Credential routing matches ordinary turns / standing-task fires (conversation
 model selection + billing preflight) — never hardcode ``llm_credentials=None``
 (that silently falls through to the platform key).
+
+When preflight refuses (quota / BYOK missing), :func:`persist_harvest_fallback`
+pushes any existing synthesis draft / ALL_COMPLETED terminal body to the user
+as an assistant message — no second LLM call (A1).
 """
 
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.conversation.common import (
@@ -42,6 +46,7 @@ from agentcore.llm.resolve import (
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.turn_runs import turn_runs
+from agentcore.workspace.limits import CHANNEL_DEAD_USER_VISIBLE
 from agentcore.workspace.locate import workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
 
@@ -74,6 +79,29 @@ _HARVEST_PUSH: dict[HarvestKind, tuple[str, str]] = {
     "cancelled": ("团队任务已取消", "后台团队已取消或中断，打开对话查看收尾。"),
 }
 
+_HARVEST_FALLBACK_EMPTY: dict[HarvestKind, str] = {
+    "success": (
+        "后台团队已完成，但系统收口未能调用模型生成新综合。"
+        "请查看上方团队进展与交付状态；也可稍后在额度恢复后让我继续汇总。"
+    ),
+    "failure": (
+        "后台团队已结束（含失败），但系统收口未能调用模型生成新综合。"
+        "请查看上方团队进展与交付状态中的缺口说明。"
+    ),
+    "cancelled": (
+        "后台团队已取消或中断，且系统收口未能调用模型生成新综合。"
+        "请查看上方已完成部分与交付状态。"
+    ),
+}
+
+_CHANNEL_DEAD_BODY_MARKERS = (
+    "channel dead",
+    "活性挂起",
+    "本地工作区文件通道已挂起",
+    "写盘通道不可用",
+    "本地文件暂时连不上",
+)
+
 
 class HarvestDeferredError(Exception):
     """Conversation slot occupied — keep registry; caller must retry, not unregister."""
@@ -102,6 +130,109 @@ def harvest_closing_kind(session: CoordinationSession) -> HarvestKind:
 
 def format_harvest_user_text(session: CoordinationSession) -> str:
     return _HARVEST_USER_TEXT[harvest_closing_kind(session)]
+
+
+def _all_completed_terminal_output(session: CoordinationSession) -> str:
+    """Pull ``ALL_COMPLETED.output`` (format_for_ceo / partial) from pending events."""
+    from agentcore.runtime.coordination.session import CoordinationEventKind
+
+    chunks: list[str] = []
+    for ev in list(getattr(session, "_pending", []) or []):
+        if getattr(ev, "kind", None) is not CoordinationEventKind.ALL_COMPLETED:
+            continue
+        out = (getattr(ev, "payload", None) or {}).get("output")
+        if isinstance(out, str) and out.strip():
+            chunks.append(out.strip())
+    return "\n\n".join(chunks)
+
+
+def _session_synthesis_or_terminal(session: CoordinationSession) -> str:
+    """Prefer CEO ``update_synthesis`` draft; else ALL_COMPLETED terminal body."""
+    draft = (getattr(session, "draft", None) or "").strip()
+    if draft:
+        return draft
+    return _all_completed_terminal_output(session)
+
+
+def _session_saw_channel_dead(session: CoordinationSession, body: str) -> bool:
+    if getattr(session, "workspace_channel_dead", False):
+        return True
+    text = (body or "").lower()
+    return any(m.lower() in text for m in _CHANNEL_DEAD_BODY_MARKERS)
+
+
+def build_harvest_fallback_content(
+    session: CoordinationSession,
+    *,
+    kind: HarvestKind,
+    error_message: str = "",
+) -> str:
+    """Assemble a no-LLM user-visible closing from existing synthesis/terminal (A1/A2)."""
+    body = _session_synthesis_or_terminal(session)
+    parts: list[str] = []
+    if _session_saw_channel_dead(session, body):
+        parts.append(CHANNEL_DEAD_USER_VISIBLE)
+    if body:
+        parts.append(body)
+    else:
+        parts.append(_HARVEST_FALLBACK_EMPTY[kind])
+    err = (error_message or "").strip()
+    if err:
+        parts.append(f"（系统说明：{err}）")
+    return "\n\n".join(parts)
+
+
+async def persist_harvest_fallback(
+    *,
+    db: Any,
+    conversation_id: str,
+    execution_id: str,
+    user_id: str,
+    session: CoordinationSession,
+    kind: HarvestKind,
+    error_message: str = "",
+) -> str:
+    """Persist structured fallback assistant row + best-effort push. Returns content."""
+    from agentcore.db.repositories import MessageRepository
+
+    content = build_harvest_fallback_content(
+        session, kind=kind, error_message=error_message
+    )
+    await MessageRepository(db).create(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=content,
+        metadata={
+            "origin": "execution_harvest_fallback",
+            "execution_id": execution_id,
+            "harvest_kind": kind,
+            "no_llm": True,
+            "channel_dead": _session_saw_channel_dead(session, content),
+        },
+    )
+    logger.info(
+        "coordination.harvest_fallback_persisted",
+        conversation_id=conversation_id,
+        execution_id=execution_id,
+        harvest_kind=kind,
+        content_chars=len(content),
+        channel_dead=_session_saw_channel_dead(session, content),
+    )
+    with contextlib.suppress(Exception):
+        await notify_user(
+            user_id,
+            PushNotification(
+                title="团队任务已收口（未重新调用模型）",
+                body="已将已有综合/终端产出推送到对话；打开查看。",
+                data={
+                    "conversation_id": conversation_id,
+                    "execution_id": execution_id,
+                    "origin": "execution_harvest_fallback",
+                    "harvest_kind": kind,
+                },
+            ),
+        )
+    return content
 
 
 async def run_harvest_closing_turn(
@@ -191,6 +322,17 @@ async def run_harvest_closing_turn(
                 error=e.message or str(e),
                 code=getattr(e, "code", None),
             )
+            # A1: push existing synthesis/terminal without another LLM call.
+            with contextlib.suppress(Exception):
+                await persist_harvest_fallback(
+                    db=db,
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    session=session,
+                    kind=kind,
+                    error_message=e.message or str(e),
+                )
             return
         local_binding = await resolve_local_binding(db, conv)
         profile_set = await resolve_profile_set(db, conv, user_id)

@@ -24,13 +24,12 @@ from agentcore.observability.query.stats import (
 SCHEMA_VERSION = "decision_spine.v0"
 
 # Key decision / failure events that belong on the spine (not the firehose).
-_DECISION_EVENTS = frozenset(
+_ACTIVE_DECISION_EVENTS = frozenset(
     {
         "delegate.started",
         "delegate.completed",
         "delegate.yielded",
         "delegate.acceptance_resolved",
-        "delegate.completion_criteria_unmet",
         "delegate.continuation_ok",
         "delegate.continuation_rejected",
         "delegate.run_redirect_hot",
@@ -47,6 +46,16 @@ _DECISION_EVENTS = frozenset(
         "sidecar.turn_cancelled",
     }
 )
+
+# S3-retired: production no longer emits; still surface when reading pre-S3 JSONL.
+# Do not treat as current contract — see docs「委派验收事件（S3 后）」.
+_HISTORICAL_DECISION_EVENTS = frozenset(
+    {
+        "delegate.completion_criteria_unmet",
+    }
+)
+
+_DECISION_EVENTS = _ACTIVE_DECISION_EVENTS | _HISTORICAL_DECISION_EVENTS
 
 _CLOSE_EVENTS = frozenset({"chat.turn_complete", "chat.resume_complete"})
 _START_EVENTS = frozenset({"chat.turn_start"})
@@ -533,7 +542,9 @@ def format_decision_spine(spine: dict[str, Any]) -> str:
         if len(detail_s) > 100:
             detail_s = detail_s[:100] + "..."
         icon = {"error": "[E]", "warning": "[W]"}.get(d.get("level", ""), "   ")
-        lines.append(f"    {dts}  {icon} {d.get('event')}  {detail_s}".rstrip())
+        ev = d.get("event")
+        hist = " (historical/S3)" if ev in _HISTORICAL_DECISION_EVENTS else ""
+        lines.append(f"    {dts}  {icon} {ev}{hist}  {detail_s}".rstrip())
 
     llm = spine.get("llm") or {}
     model_bits = ", ".join(

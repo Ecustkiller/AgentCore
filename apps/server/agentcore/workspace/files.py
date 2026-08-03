@@ -6,14 +6,22 @@ mode later — same seam) and goes through ``WorkspaceBackend`` so upload/downlo
 respect the traversal guard and will route to the desktop unchanged under
 ``LocalWorkspace``. Path policy lives in ``locate``; this layer never touches a
 raw ``Path``.
+
+Panel download is **decoupled** from AI ``read_bytes``: it uses
+:meth:`ServerWorkspace.resolve_for_download` with the upload-aligned ceiling, not
+``WORKSPACE_READ_MAX_BYTES``.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from pathlib import Path
+from typing import Literal, NoReturn
 
+from agentcore.config import settings
+from agentcore.core.errors import PayloadTooLargeError, ValidationError
+from agentcore.workspace.limits import is_file_too_large_detail
 from agentcore.workspace.locate import build_server_workspace
-from agentcore.workspace.protocol import DirEntry
+from agentcore.workspace.protocol import DirEntry, WorkspaceIOError
 
 
 async def list_files(
@@ -53,14 +61,56 @@ async def upload_file(
     return await backend.write_bytes(path, data)
 
 
-async def download_file(
-    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
-) -> bytes:
-    """Return the raw bytes of ``path`` in the conversation's workspace."""
+def raise_http_for_download_io(exc: WorkspaceIOError) -> NoReturn:
+    """Map a download-path ``WorkspaceIOError`` to a clear 4xx (never 500).
+
+    Oversized → 413; other I/O → 422. Always raises.
+    """
+    if is_file_too_large_detail(str(exc)):
+        max_bytes = settings.workspace_upload_max_bytes
+        raise PayloadTooLargeError(f"文件超出 {max_bytes} 字节的下载上限") from exc
+    raise ValidationError(str(exc) or "读取文件失败") from exc
+
+
+async def resolve_download_file(
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+    path: str,
+    max_bytes: int | None = None,
+) -> Path:
+    """Resolve ``path`` for HTTP panel download (``FileResponse``).
+
+    Bypasses the AI ``read_bytes`` 5 MiB gate; default ceiling matches upload.
+    """
     backend = build_server_workspace(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return await backend.read_bytes(path)
+    ceiling = settings.workspace_upload_max_bytes if max_bytes is None else max_bytes
+    return await backend.resolve_for_download(path, max_bytes=ceiling)
+
+
+async def download_file(
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+    path: str,
+    max_bytes: int | None = None,
+) -> bytes:
+    """Return the raw bytes of ``path`` via the panel-download capacity path."""
+    target = await resolve_download_file(
+        user_id=user_id,
+        folder_id=folder_id,
+        conversation_id=conversation_id,
+        path=path,
+        max_bytes=max_bytes,
+    )
+    try:
+        return target.read_bytes()
+    except OSError as e:
+        raise WorkspaceIOError(str(e)) from e
 
 
 async def create_dir(
@@ -98,9 +148,10 @@ async def read_file_for_edit(
 ) -> tuple[str, int, Literal["lf", "crlf"]]:
     """Read ``path`` for editing: ``(text, mtime_ms, eol)`` — full text + CAS baseline.
 
-    Unlike :func:`download_file` (raw bytes, used for truncated preview), this reads
-    the whole text and reports the mtime baseline so an in-panel save can do a
-    write-time CAS instead of blind-clobbering a file an Agent turn changed.
+    Unlike :func:`resolve_download_file` / :func:`download_file` (raw bytes for
+    panel download), this reads the whole text and reports the mtime baseline so
+    an in-panel save can do a write-time CAS instead of blind-clobbering a file
+    an Agent turn changed.
     """
     backend = build_server_workspace(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id

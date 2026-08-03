@@ -264,8 +264,8 @@ def test_ordinary_partial_without_draft_flag_allows_bare_delivered():
     assert closing_honesty_rework("主页已交付，详见产物卡。", verdict) is None
 
 
-def test_partial_verdict_rejects_pass_fixed_playable_claims():
-    """案 20260803：通过/已修复/可玩 并入姿势 A（thin-review 同族扩面）。"""
+def test_thin_review_expansion_withdrawn_from_posture_a():
+    """✅ 收窄姿势 A：撤回 20260803「复核/已修复/可玩」扩面；乙修好/验绿仍在。"""
     from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
 
     verdict = DeliveryVerdict(
@@ -276,24 +276,74 @@ def test_partial_verdict_rejects_pass_fixed_playable_claims():
     for claim in (
         "独立复核通过，可以收工。",
         "复核通过。",
+        "审查通过。",
+        "验收通过。",
         "炮塔购买已修复。",
         "现在可玩了。",
         "已经可以玩。",
         "本轮修复通过。",
     ):
-        assert claims_posture_a(claim), claim
-        reworks = finish_guard(
-            claim,
-            citation_count=0,
-            delivery_verdict=verdict,
-        )
-        assert any("姿势 A" in r or "档位" in r for r in reworks), claim
+        assert not claims_posture_a(claim), claim
+        assert (
+            finish_guard(
+                claim,
+                citation_count=0,
+                delivery_verdict=verdict,
+            )
+            == []
+        ), claim
+    # 乙骨架保留：修好 / 验绿仍属姿势 A。
+    assert claims_posture_a("缺陷已修好，可以收工。")
+    assert claims_posture_a("验证通过，可以交付。")
+    assert claims_posture_a("bug 已修复。")
 
 
 def test_bare_pass_without_review_prefix_not_posture_a():
     """裸「通过」不得进姿势 A——避免误伤「测试摘要：通过 3」。"""
     assert not claims_posture_a("摘要：通过 3 / 失败 0。")
     assert not claims_posture_a("请通过左侧栏购买炮塔。")
+
+
+def test_ceo_mutation_honesty_banner_soft_only():
+    """零写盘假已改 / 整文件手贴 → 横幅；有写盘证据或仅核对语 → 不拦。"""
+    from agentcore.runtime.closing_posture import (
+        asks_whole_file_user_paste,
+        claims_ceo_mutation_done,
+        enforce_ceo_mutation_honesty,
+    )
+    from agentcore.runtime.delegate.delivery_status import (
+        DeliveryVerdict,
+        current_delivery_verdict,
+    )
+
+    claim = "标题已修改，计时逻辑已修正，请自行替换整文件。"
+    assert claims_ceo_mutation_done(claim)
+    assert asks_whole_file_user_paste(claim)
+    out = enforce_ceo_mutation_honesty(claim, landing_succeeded=False)
+    assert out.startswith("【落盘说明】")
+    assert "已修改" in out
+
+    # 核对类不进闭集
+    check = "我对了一下工作区，文件里已经是新版本，不是我本轮又改了。"
+    assert not claims_ceo_mutation_done(check)
+    assert enforce_ceo_mutation_honesty(check, landing_succeeded=False) == check
+
+    # 裸「已处理你的疑问」不进表
+    assert not claims_ceo_mutation_done("已处理你的疑问，下面解释原因。")
+
+    token = current_delivery_verdict.set(
+        DeliveryVerdict(state="delivered", delivered_files=("a.ts",), execution_id="e1")
+    )
+    try:
+        assert (
+            enforce_ceo_mutation_honesty(claim, landing_succeeded=False) == claim
+        )
+    finally:
+        current_delivery_verdict.reset(token)
+
+    assert (
+        enforce_ceo_mutation_honesty(claim, landing_succeeded=True) == claim
+    )
 
 
 def test_max_rounds_ceiling_honesty_steer_and_banner():
@@ -313,10 +363,14 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
     assert "部分落地" in steer
     assert ceiling_honesty_steer(reason="token_budget") is None
 
-    dishonest = "独立复核通过，修复已全部完成，现在可玩。"
+    dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="max_rounds")
     assert out.startswith("【收口说明】")
-    assert "可玩" in out
+    assert "已全部完成" in out
+    # 扩面词族已撤回：仅「复核通过/可玩」不再触发横幅。
+    thin = "独立复核通过，现在可玩了。"
+    assert not claims_posture_a(thin)
+    assert enforce_ceiling_closing_honesty(thin, reason="max_rounds") == thin
     assert enforce_ceiling_closing_honesty("部分落地，炮塔栏仍缺一行。", reason="max_rounds") == (
         "部分落地，炮塔栏仍缺一行。"
     )

@@ -40,6 +40,15 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     "mkdir",
     "grep",
     "host_ping",
+    # Ambient listing rides the same local channel — retire with the file family
+    # so post-dead index_files rejects are not leftover noise.
+    "index_files",
+)
+
+# Short user-visible honest sentence (chat bubble / harvest fallback). Soft steer
+# still tells the model to say this; A2 also pushes it without waiting on LLM.
+CHANNEL_DEAD_USER_VISIBLE = (
+    "本地文件暂时连不上。请检查桌面连接后重试；我将基于已有材料收口。"
 )
 
 WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (

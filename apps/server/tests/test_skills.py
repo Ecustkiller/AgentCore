@@ -338,20 +338,30 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
 
 
 def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
-    """有执行须真 pptx；无执行允许 Marp/脚本但禁假称 PPT 已落盘。
+    """有执行须真 pptx；无执行禁再派跑脚本、禁假称 Office 已落盘。
 
-    案 20260803-ppt-office A+B：验收默认 files_written；当模板须 copy 再改。
+    案 20260803-ppt-office A+B + docx-office-exec-capability-lie B/C。
     """
     body = _body("team_orchestration_advanced")
     assert "python-pptx" in body
     assert "静默" in body and ".md" in body
-    assert "PPT 已落盘可直接使用" in body
+    assert "PPT 已落盘可直接使用" in body or "Word 已落盘可直接使用" in body
     assert "交付缺口" in body or "标缺口" in body
-    assert "files_written" in body
-    assert "code_verified" in body  # 禁设声明须点名
+    assert "form=files" in body or "artifacts" in body
     assert "file_copy" in body
     assert "当模板" in body
     assert "Presentation()" in body
+    assert "再派" in body and "跑脚本" in body
+    assert "不算过闸" in body or "不算" in body
+
+
+def test_team_orchestration_skill_teaches_image_gen_key_boundary():
+    """案 image-gen-byok-egress-boundary：无 egress 禁代出图；Key 不进工作区。"""
+    body = _body("team_orchestration_advanced")
+    assert "生图" in body
+    assert "代调" in body or "出图" in body
+    assert "明文" in body or "环境变量" in body
+    assert "env" in body.lower()
 
 
 def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline():
@@ -392,7 +402,6 @@ def test_team_orchestration_skill_teaches_review_contract_template():
     assert "web_search" in body
     assert "全文" in body or "复制" in body
     assert "deliverable" in body
-    assert "custom" in body and "不被引擎验证" in body
     assert "problems" in body and "suggestions" in body and "score" in body
 
 

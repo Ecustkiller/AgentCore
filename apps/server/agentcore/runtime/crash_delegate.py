@@ -146,6 +146,7 @@ async def production_crash_delegate_factory(
             backend,
             desktop_online=False,
             exec_languages=exec_languages,
+            permission_axes=permission_axes,
         )
         system_prompt = assemble_system_prompt(
             memory_markdown=memory_markdown,

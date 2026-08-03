@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import mimetypes
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import FileResponse
 
 from agentcore.api.dependencies import (
     AuthUser,
@@ -83,11 +85,12 @@ from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.files import (
     create_dir,
     delete_file,
-    download_file,
     list_file_index,
     list_files,
     move_file,
+    raise_http_for_download_io,
     read_file_for_edit,
+    resolve_download_file,
     upload_file,
     write_file_text,
 )
@@ -107,6 +110,7 @@ from agentcore.workspace.protocol import (
     NotUTF8,
     OutsideWorkspace,
     PathNotFound,
+    WorkspaceIOError,
 )
 from agentcore.workspace.shared_paths import (
     shared_workspace_has_entries,
@@ -253,9 +257,9 @@ async def _shared_upload(space_id: str, path: str, data: bytes) -> int:
     return await backend.write_bytes(path, data)
 
 
-async def _shared_download(space_id: str, path: str) -> bytes:
+async def _shared_resolve_download(space_id: str, path: str, *, max_bytes: int) -> Path:
     backend = build_shared_workspace(space_id)
-    return await backend.read_bytes(path)
+    return await backend.resolve_for_download(path, max_bytes=max_bytes)
 
 
 async def _shared_read_edit(space_id: str, path: str):
@@ -745,30 +749,40 @@ async def download_workspace_file(
     folder_repo: FolderRepository = Depends(get_folder_repo),
     shared_svc: SharedSpaceService = Depends(get_shared_space_service),
 ):
-    """Download a single file from a cloud workspace."""
+    """Download a single file from a cloud workspace.
+
+    Uses the panel-download path (upload-aligned ceiling + ``FileResponse``), not
+    the AI ``read_bytes`` 5 MiB gate.
+    """
     target = await _resolve_owned_workspace(
         ws_id, user.user_id, conv_repo, folder_repo, shared_svc
     )
     _require_cloud(target)
+    max_bytes = settings.workspace_upload_max_bytes
     try:
         if target.space_id:
-            data = await _shared_download(target.space_id, path)
+            file_path = await _shared_resolve_download(
+                target.space_id, path, max_bytes=max_bytes
+            )
         else:
-            data = await download_file(
+            file_path = await resolve_download_file(
                 user_id=user.user_id,
                 folder_id=target.folder_id,
                 conversation_id=target.conversation_id,
                 path=path,
+                max_bytes=max_bytes,
             )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except (PathNotFound, NotAFile) as e:
         raise NotFoundError("文件不存在") from e
+    except WorkspaceIOError as e:
+        raise_http_for_download_io(e)
 
     filename = path.rsplit("/", 1)[-1] or "download"
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return Response(
-        content=data,
+    return FileResponse(
+        file_path,
         media_type=media_type,
         headers=download_headers(filename),
     )

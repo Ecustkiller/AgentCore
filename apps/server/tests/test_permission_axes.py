@@ -129,6 +129,26 @@ def test_command_ask_withholds_execution_tools():
     assert "web_search" in names
 
 
+def test_command_ask_capability_line_matches_registry():
+    """案 20260803-docx-office-exec-capability-lie A：能力行与 registry 同一谓词（含 ask）。"""
+    from agentcore.runtime.context.workspace_context import build_workspace_context
+    from agentcore.tools.builtin import execution_class_enabled_for
+
+    axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+    backend = _LocalBackend()
+    assert execution_class_enabled_for(backend, axes) is False
+    out = build_workspace_context(
+        backend, desktop_online=True, permission_axes=axes
+    )
+    assert "code_execute=未装配" in out
+    assert "terminal=未装配" in out
+    # Without axes, local still shows 已装配 (backend gate alone).
+    assert (
+        "code_execute=已装配"
+        in build_workspace_context(backend, desktop_online=True)
+    )
+
+
 def test_kickoff_command_keeps_capability_auth():
     axes = _KICKOFF_RULES
     assert needs_capability_auth(local_gate=True, axes=axes) is True

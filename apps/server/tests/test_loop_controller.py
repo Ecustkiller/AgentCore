@@ -403,9 +403,86 @@ def test_workspace_channel_dead_disables_landing_tools():
     assert "file_write" in cb.disabled
     assert "str_replace" in cb.disabled
     assert "file_list" in cb.disabled
+    assert "index_files" in cb.disabled
     assert not cb.force_segmented
     assert WORKSPACE_CHANNEL_DEAD_RETIRE_STEER in (cb.message() or "")
     assert "派需要读写本地文件的队员" in (cb.message() or "")
+
+
+def test_workspace_channel_dead_emits_user_notice_once():
+    """A2: first sticky-dead stamps session + emits short content_delta on host sink."""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink, EventType
+    from agentcore.workspace.limits import (
+        CHANNEL_DEAD_USER_VISIBLE,
+        WORKSPACE_CHANNEL_DEAD_RETIRE_STEER,
+        WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS,
+    )
+
+    clear_active_coordination()
+    sink = EventSink()
+    session = CoordinationSession(
+        execution_id="exec-notice",
+        total_workers=2,
+        conversation_id="conv-notice",
+    )
+    session.event_sink = sink
+    set_active_coordination(session)
+    try:
+        c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+        meta = {
+            "liveness_timeout": True,
+            "timeout_layer": "channel",
+            "error_class": "permanent",
+            "workspace_channel_dead": True,
+            "execution_id": "exec-notice",
+            "retire_tools": list(WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS),
+            "retire_message": WORKSPACE_CHANNEL_DEAD_RETIRE_STEER,
+        }
+        c.record(
+            [
+                ToolAttempt(
+                    "dead1",
+                    "file_read",
+                    success=False,
+                    error_summary="活性挂起",
+                    meta=meta,
+                )
+            ]
+        )
+        assert session.workspace_channel_dead is True
+        assert session.channel_dead_user_notice_emitted is True
+        deltas = [e for e in sink._history if e.type is EventType.CONTENT_DELTA]
+        assert len(deltas) == 1
+        assert CHANNEL_DEAD_USER_VISIBLE in (deltas[0].payload.get("delta") or "")
+
+        # Second channel-dead attempt must not double-emit.
+        c.record(
+            [
+                ToolAttempt(
+                    "dead2",
+                    "file_list",
+                    success=False,
+                    error_summary="活性挂起",
+                    meta=meta,
+                )
+            ]
+        )
+        deltas2 = [e for e in sink._history if e.type is EventType.CONTENT_DELTA]
+        assert len(deltas2) == 1
+    finally:
+        clear_active_coordination()
+
+
+def test_index_files_in_channel_dead_retire_family():
+    """A3: ambient index_files retires with the local file tool family."""
+    from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
+
+    assert "index_files" in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
 
 
 def test_retire_tools_honored_even_with_contract_failure():

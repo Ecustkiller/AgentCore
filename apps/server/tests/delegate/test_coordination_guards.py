@@ -645,7 +645,6 @@ async def test_merge_auto_replaces_vacated_seat_and_rewrites_deps():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is True
@@ -709,7 +708,6 @@ async def test_merge_rejects_overlapping_append_with_explanation():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is False
@@ -773,7 +771,6 @@ async def test_merge_allows_non_overlapping_append():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is True
@@ -1011,7 +1008,6 @@ async def test_merge_all_skipped_returns_structured_failure():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is False
@@ -1056,7 +1052,6 @@ async def test_merge_partial_skip_lists_merged_and_skipped():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is True
@@ -1085,6 +1080,24 @@ def test_user_stop_body_keeps_stream_without_chrome_notes():
     assert "连接中断" not in body
     empty = compose_interrupt_body("", reason=TurnInterruptReason.USER_STOP)
     assert empty == ""
+
+
+def test_redrive_failed_body_forces_user_visible_notice():
+    """案 fake-dispatch-stall-claim C：redrive_failed 禁止静默清队无说明。"""
+    from agentcore.runtime.turn_interrupt import REDRIVE_FAILED_USER_VISIBLE
+
+    kickoff = "好，派 3 个 worker 开工高规格版："
+    body = compose_interrupt_body(kickoff, reason=TurnInterruptReason.REDRIVE_FAILED)
+    assert kickoff in body
+    assert REDRIVE_FAILED_USER_VISIBLE in body
+    assert "后台恢复失败" in body
+
+    empty = compose_interrupt_body("", reason=TurnInterruptReason.REDRIVE_FAILED)
+    assert empty == REDRIVE_FAILED_USER_VISIBLE
+
+    # Idempotent — no stacked notices on re-salvage.
+    again = compose_interrupt_body(body, reason=TurnInterruptReason.REDRIVE_FAILED)
+    assert again.count("【中断说明】") == 1
 
 
 async def test_user_stop_cancels_drive_and_release_clears():
@@ -1396,7 +1409,6 @@ async def test_merge_admits_after_completed_owner_and_handoffs():
             seed_notes=None,
             complexity_hint="",
             call_idx=2,
-            completion_criteria=None,
             coordination="none",
         )
         assert result.success is True
@@ -1610,7 +1622,6 @@ def test_try_start_sibling_reject_creates_no_session():
         seed_notes=None,
         complexity_hint="standard",
         call_idx=1,
-        completion_criteria=None,
         coordinate=True,
     )
     assert started is not None

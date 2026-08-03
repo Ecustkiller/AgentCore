@@ -1047,6 +1047,14 @@ async def execute_tools(
         if not result.success and not policy_failure:
             error_summary = output if isinstance(output, str) else ""
         result_meta = dict(result.metadata) if result.metadata else {}
+        if (
+            not result.success
+            and result_meta.get("workspace_channel_dead")
+            and getattr(tool_context, "execution_id", None)
+        ):
+            # So loop_controller can stamp the coordination session (workers often
+            # lack current_execution_id ContextVar).
+            result_meta.setdefault("execution_id", tool_context.execution_id)
         if not result.success and "error_class" not in result_meta:
             if result_meta.get("retire_tools") or result_meta.get("liveness_timeout"):
                 result_meta["error_class"] = ERROR_CLASS_PERMANENT

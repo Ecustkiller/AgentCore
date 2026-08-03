@@ -33,6 +33,26 @@ def test_prepare_injects_round_content_when_message_empty():
     assert args["message"] == "帮你分析一下选项："
 
 
+def test_prepare_rewrites_dispatch_started_framing():
+    """案 fake-dispatch C：口播已开工的卡面须改成先确认再派。"""
+    calls = prepare_blocking_ask_user_tool_calls(
+        [_ask_user_call()],
+        "好，派 3 个 worker 开工高规格版：",
+    )
+    args = json.loads(calls[0].function.arguments)
+    assert "先确认再派" in args["message"]
+    assert "尚未真正开工" in args["message"]
+
+
+def test_prepare_rewrites_explicit_dispatch_message():
+    calls = prepare_blocking_ask_user_tool_calls(
+        [_ask_user_call(message="已派出团队开工")],
+        "正文铺垫",
+    )
+    args = json.loads(calls[0].function.arguments)
+    assert args["message"].startswith("先确认再派")
+
+
 def test_prepare_leaves_explicit_message():
     calls = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call(message="卡片文案")],

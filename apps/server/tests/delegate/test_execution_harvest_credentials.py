@@ -98,11 +98,13 @@ async def test_harvest_closing_passes_preflight_credentials_to_run():
 
 
 @pytest.mark.asyncio
-async def test_harvest_closing_aborts_without_message_when_preflight_refuses():
-    """No synthetic 系统收口 row / platform fallback when billing gate refuses."""
+async def test_harvest_closing_persists_fallback_when_preflight_refuses():
+    """A1: quota/BYOK refuse → push existing synthesis without LLM turn."""
     import agentcore.conversation.execution_harvest as eh
 
     session = _session("exec-refuse", "conv-refuse")
+    session.update_draft("## 架构结论\n模块 A 依赖 B。")
+    session.workspace_channel_dead = True
     set_active_coordination(session)
     conv = SimpleNamespace(user_id="user-1", folder_id=None, id="conv-refuse")
     user = SimpleNamespace(user_id="user-1")
@@ -114,6 +116,7 @@ async def test_harvest_closing_aborts_without_message_when_preflight_refuses():
 
     run_mock = AsyncMock()
     msg_create = AsyncMock()
+    notify = AsyncMock()
 
     with (
         patch.object(eh, "async_session_factory", return_value=db_cm),
@@ -127,6 +130,7 @@ async def test_harvest_closing_aborts_without_message_when_preflight_refuses():
             AsyncMock(side_effect=BYOKKeyMissingError("请先配置 Key")),
         ),
         patch.object(eh, "run_and_persist", new=run_mock),
+        patch.object(eh, "notify_user", new=notify),
         patch("agentcore.db.repositories.MessageRepository") as msg_repo_cls,
         patch.object(eh.turn_runs, "get", return_value=None),
     ):
@@ -139,5 +143,65 @@ async def test_harvest_closing_aborts_without_message_when_preflight_refuses():
             execution_id="exec-refuse",
         )
 
-    msg_create.assert_not_called()
     run_mock.assert_not_called()
+    msg_create.assert_called_once()
+    kwargs = msg_create.await_args.kwargs
+    assert kwargs["role"] == "assistant"
+    assert "架构结论" in kwargs["content"]
+    assert "本地文件暂时连不上" in kwargs["content"]
+    assert "请先配置 Key" in kwargs["content"]
+    assert kwargs["metadata"]["origin"] == "execution_harvest_fallback"
+    assert kwargs["metadata"]["no_llm"] is True
+    notify.assert_awaited()
+
+
+def test_build_harvest_fallback_prefers_draft_over_terminal():
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    session = _session("exec-b", "conv-b")
+    session.update_draft("草稿优先")
+    session._pending.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"output": "终端正文不应优先", "completed": 1, "total": 1},
+        )
+    )
+    text = eh.build_harvest_fallback_content(session, kind="success", error_message="额度已满")
+    assert "草稿优先" in text
+    assert "终端正文" not in text
+    assert "额度已满" in text
+
+
+def test_build_harvest_fallback_uses_terminal_when_no_draft():
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    session = _session("exec-t", "conv-t")
+    session._pending.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"output": "## 团队成品\n结论 X", "completed": 2, "total": 2},
+        )
+    )
+    text = eh.build_harvest_fallback_content(session, kind="success")
+    assert "结论 X" in text
+    assert "本地文件暂时连不上" not in text
+
+
+def test_build_harvest_fallback_channel_dead_notice_from_flag():
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.workspace.limits import CHANNEL_DEAD_USER_VISIBLE
+
+    session = _session("exec-cd", "conv-cd")
+    session.workspace_channel_dead = True
+    session.update_draft("已有分析")
+    text = eh.build_harvest_fallback_content(session, kind="failure")
+    assert text.startswith(CHANNEL_DEAD_USER_VISIBLE)
+    assert "已有分析" in text

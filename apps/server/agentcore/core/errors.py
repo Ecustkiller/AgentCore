@@ -273,6 +273,17 @@ class ValidationError(AgentCoreError):
     status_code = 422
 
 
+class PayloadTooLargeError(ValidationError):
+    """Request / download payload exceeds a configured byte ceiling (HTTP 413).
+
+    Reuses ``VALIDATION_ERROR`` so clients already treating validation as
+    non-retriable keep working; status is 413 so oversized panel downloads are
+    distinct from generic 422 path/UTF-8 problems and never collapse to 500.
+    """
+
+    status_code = 413
+
+
 class RateLimitedError(AgentCoreError):
     """Too many requests in a rolling window; this one is refused (HTTP 429).
 

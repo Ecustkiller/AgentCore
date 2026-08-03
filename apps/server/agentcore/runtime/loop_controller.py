@@ -1015,7 +1015,19 @@ class LoopController:
                     meta.get("liveness_timeout")
                     and meta.get("timeout_layer") == "channel"
                 ):
+                    was_dead = self._workspace_channel_dead
                     self._workspace_channel_dead = True
+                    if not was_dead:
+                        # A2: force a short user-visible honest sentence (not only
+                        # tool error / soft steer). Best-effort; never raises.
+                        from agentcore.runtime.coordination.channel_dead_notice import (
+                            mark_and_emit_channel_dead_user_notice,
+                        )
+
+                        eid = meta.get("execution_id")
+                        mark_and_emit_channel_dead_user_notice(
+                            execution_id=str(eid).strip() if eid else None
+                        )
                 if retire_list:
                     summary = (attempt.error_summary or "").strip()
                     for sname in retire_list:

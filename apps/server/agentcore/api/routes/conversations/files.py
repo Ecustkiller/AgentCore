@@ -4,7 +4,8 @@ import mimetypes
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import FileResponse
 
 from agentcore.api.dependencies import (
     AuthUser,
@@ -34,10 +35,11 @@ from agentcore.docs_export.workspace_export import ExportMarkdownError, export_m
 from agentcore.workspace.files import (
     create_dir,
     delete_file,
-    download_file,
     list_files,
     move_file,
+    raise_http_for_download_io,
     read_file_for_edit,
+    resolve_download_file,
     upload_file,
     write_file_text,
 )
@@ -50,6 +52,7 @@ from agentcore.workspace.protocol import (
     NotUTF8,
     OutsideWorkspace,
     PathNotFound,
+    WorkspaceIOError,
 )
 
 from ._helpers import _get_owned_conversation
@@ -239,24 +242,31 @@ async def download_workspace_file(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Download a single file from the conversation's scratch workspace."""
+    """Download a single file from the conversation's scratch workspace.
+
+    Panel download uses upload-aligned capacity + ``FileResponse`` — not the AI
+    ``read_bytes`` 5 MiB gate.
+    """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
-        data = await download_file(
+        file_path = await resolve_download_file(
             user_id=user.user_id,
             folder_id=conv.folder_id,
             conversation_id=conv.id,
             path=path,
+            max_bytes=settings.workspace_upload_max_bytes,
         )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except (PathNotFound, NotAFile) as e:
         raise NotFoundError("文件不存在") from e
+    except WorkspaceIOError as e:
+        raise_http_for_download_io(e)
 
     filename = path.rsplit("/", 1)[-1] or "download"
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return Response(
-        content=data,
+    return FileResponse(
+        file_path,
         media_type=media_type,
         headers=download_headers(filename),
     )

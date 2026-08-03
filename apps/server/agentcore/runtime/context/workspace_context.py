@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal
 from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
 
 if TYPE_CHECKING:
-    from agentcore.core.types import HostAxis
+    from agentcore.core.types import HostAxis, PermissionAxes
     from agentcore.workspace.protocol import WorkspaceBackend
 
 ChannelSurface = Literal["desktop", "web", "mobile", "unknown"]
@@ -72,6 +72,7 @@ def build_workspace_context(
     browser_enabled: bool | None = None,
     exec_languages: list[str] | tuple[str, ...] | None = None,
     host_axis: HostAxis | str | None = None,
+    permission_axes: PermissionAxes | None = None,
     mcp_enabled: bool = False,
     mcp_label: str | None = None,
 ) -> str:
@@ -81,8 +82,14 @@ def build_workspace_context(
     even for an empty cloud scratch). ``backend is None`` → ``""`` (caller omits).
 
     Capability line uses the same predicates as worker registry assembly
-    (``code_execution_enabled_for`` / ``browser_execution_enabled_for``); optional
-    ``*_enabled`` overrides are for tests / probes only — not a second truth source.
+    (``execution_class_enabled_for`` / ``browser_execution_enabled_for``, including
+    ``command=ask`` withhold); optional ``*_enabled`` overrides are for tests /
+    probes only — not a second truth source.
+
+    ``permission_axes`` folds ask-withhold into ``code_execute`` / ``terminal`` /
+    ``browser`` so the line never contradicts the worker toolset or identity
+    (案 20260803-docx-office-exec-capability-lie A). When ``host_axis`` is omitted,
+    it is taken from ``permission_axes.host``.
 
     ``exec_languages`` is the probed (local/sidecar) or fixed (cloud) language
     surface advertised on ``code_execute``; when set and execution is on, a one-line
@@ -90,6 +97,9 @@ def build_workspace_context(
     """
     if backend is None:
         return ""
+
+    if host_axis is None and permission_axes is not None:
+        host_axis = permission_axes.host
 
     location: Literal["server", "local"] = backend.location
     root_label = (getattr(backend, "root_label", None) or "workspace").strip() or "workspace"
@@ -110,6 +120,12 @@ def build_workspace_context(
             "产物出口：你写入工作区的文件位于用户本机目录，"
             "用户可在「文件」面板查看；HTML 同样走「完整预览」进右坞「浏览器」标签"
             "（或本机直接打开，按用户习惯）。"
+        )
+        # 本机有 Host 出口，但仍禁 Key 明文进工作区（案 B 与位置正交）。
+        egress_line = (
+            "出站网络：本机 code_execute / terminal 可走用户机器网络；"
+            "仍【禁止】把用户粘贴的第三方 API Key 写入工作区明文——"
+            "脚本脚手架用环境变量占位，由用户本机自备；无原生生图工具时勿假装平台代出图。"
         )
     else:
         location_line = "执行位置：云端沙箱（服务端）"
@@ -133,6 +149,17 @@ def build_workspace_context(
             "（打开右坞「浏览器」标签，应用内渲染，非系统浏览器）；"
             "不要让用户去本机磁盘查找这些文件，"
             "也不要声称文件已在用户电脑上、或让其在本地「双击打开」。"
+        )
+        # 案 20260803-image-gen-byok-egress-boundary A：云沙箱 code_execute 默认
+        # --network=none；有执行 ≠ 能代调用户 Key 出网（含生图）。
+        egress_line = (
+            "出站网络：云端 code_execute 默认无任意 HTTPS 出口（`--network=none`；"
+            "装包白名单 egress 仅 test_run install，≠通用出网）；"
+            "【禁止】承诺「云端用用户 Key 代调外部生图/中转站 API 并把图写进工作区」；"
+            "允许：① 说明无原生生图工具并拒接代出图；② 引导桌面端/本机有出口环境；"
+            "③ 明确「只帮写本机脚本、平台不出图」。"
+            "【禁止】把第三方 API Key 写入工作区明文（含 env）；browser_* 另计"
+            "（隔离浏览器，≠ code_execute 出网）。"
         )
 
     if desktop_online:
@@ -201,17 +228,24 @@ def build_workspace_context(
             "（未见「本对话已授权区外目录…」则禁止声称授权已确认或可访问本机目录。）"
         )
 
-    exec_on = code_execute_enabled
-    if exec_on is None:
-        from agentcore.tools.builtin import code_execution_enabled_for
+    if code_execute_enabled is not None:
+        exec_on = code_execute_enabled
+    else:
+        from agentcore.tools.builtin import execution_class_enabled_for
 
-        exec_on = code_execution_enabled_for(backend)
-    term_on = is_local if terminal_enabled is None else terminal_enabled
-    browser_on = browser_enabled
-    if browser_on is None:
+        exec_on = execution_class_enabled_for(backend, permission_axes)
+    if terminal_enabled is not None:
+        term_on = terminal_enabled
+    else:
+        # terminal is execution_class ∧ local_only — same ask withhold as registry.
+        term_on = is_local and exec_on
+    if browser_enabled is not None:
+        browser_on = browser_enabled
+    else:
         from agentcore.tools.builtin import browser_execution_enabled_for
 
-        browser_on = browser_execution_enabled_for(backend)
+        # Registry: include_browser = include_execution ∧ browser_execution_enabled_for.
+        browser_on = exec_on and browser_execution_enabled_for(backend)
     # local_open = 本机工作区可让用户直接打开产物（非 L3 浏览器工具；与 location 同事实）。
     local_open_on = is_local
     # Host 已装配 ⇔ host≠off ∧ 桌面回填通道可达（desktop_online）。
@@ -367,6 +401,7 @@ def build_workspace_context(
         identity_line,
         reach_line,
         artifact_line,
+        egress_line,
         dossier_research_line,
         dossier_debate_line,
         dossier_reviews_line,

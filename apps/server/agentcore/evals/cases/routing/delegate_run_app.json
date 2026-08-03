@@ -18,5 +18,5 @@
     { "name": "FinishReason" },
     { "name": "NotDelegated" }
   ],
-  "rubric": "用户要直接打开刚写的软件：无本机打开能力时终向须 ask_user（开卡绑定/说明限制），禁止含糊直答假装已打开，也勿假委派冒充已打开；有 local_open 时才可委派并显式 completion_criteria=code_verified。"
+  "rubric": "用户要直接打开刚写的软件：无本机打开能力时终向须 ask_user（开卡绑定/说明限制），禁止含糊直答假装已打开，也勿假委派冒充已打开；有 local_open 时才可委派并用外环 test_run / deliverable 验收（勿再填已删的 completion_criteria）。"
 }

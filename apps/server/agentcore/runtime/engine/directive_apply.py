@@ -35,6 +35,18 @@ from .segments import join_segments
 from .tool_exec import execute_tools
 
 
+def _captain_mutation_honesty(content: str, controller: LoopController) -> str:
+    """SoftⅡ′ banner when CEO claims edit / whole-file paste without write evidence."""
+    if not content:
+        return content
+    from agentcore.runtime.closing_posture import enforce_ceo_mutation_honesty
+
+    return enforce_ceo_mutation_honesty(
+        content,
+        landing_succeeded=controller.landing_succeeded,
+    )
+
+
 @dataclass
 class DirectiveApplyResult:
     """Result of applying one loop directive."""
@@ -129,6 +141,9 @@ async def apply_loop_directive(
                     emit_content=emit_content,
                     run_id=run_id,
                 )
+            # CEO softⅡ′：零写盘却宣称已改 / 甩整文件手贴 → 仅加横幅，不丢稿不拒发。
+            if role == "captain" and content:
+                content = _captain_mutation_honesty(content, controller)
             return DirectiveApplyResult(
                 action="return",
                 content=content,
@@ -238,7 +253,12 @@ async def apply_loop_directive(
                         finish_override_sink.append(FinishReason.PAUSED)
                     return DirectiveApplyResult(
                         action="return",
-                        content=join_segments(final_content, terminal.final_text or ""),
+                        content=_captain_mutation_honesty(
+                            join_segments(final_content, terminal.final_text or ""),
+                            controller,
+                        )
+                        if role == "captain"
+                        else join_segments(final_content, terminal.final_text or ""),
                         reasoning=final_reasoning,
                         usage=total_usage,
                         rounds=rounds,
@@ -288,7 +308,11 @@ async def apply_loop_directive(
                 )
             return DirectiveApplyResult(
                 action="return",
-                content=final_content,
+                content=(
+                    _captain_mutation_honesty(final_content, controller)
+                    if role == "captain"
+                    else final_content
+                ),
                 reasoning=final_reasoning,
                 usage=total_usage,
                 rounds=rounds,

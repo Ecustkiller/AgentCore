@@ -33,8 +33,8 @@ _FORMAL_COMPLETE_TIERS = frozenset({"delivered"})
 _INFORMAL_TIERS = frozenset({"partial", "notes", "blocked"})
 
 # (A) 完整交付宣称闭集。故意不含裸「已完成 / 已交付 / 弱可用」——修码/建站正常收口不得误伤。
-# 同族扩面（案 20260803-longfix-thin-review-claim-pass）：「通过/已修复/可玩」并入姿势 A；
-# 仍禁止随意加案面词（「综述已完成」「站点做好了」等）——漏拦优先回档位/产物结构。
+# ✅ 已撤回 20260803「复核/审查/验收通过、已修复、可玩」扩面；乙（修好/验绿）仍在。
+# 禁止再往本表加案面词（「综述已完成」「站点做好了」等）；漏拦应回到档位/产物结构，而非加词。
 _POSTURE_A_CLAIMS = re.compile(
     r"(?:"
     r"已全部收卷|全部收卷|已收卷|"
@@ -47,12 +47,9 @@ _POSTURE_A_CLAIMS = re.compile(
     r"所有(?:任务|队员|节点)(?:已|都已)(?:完成|交付|就绪)|"
     r"已完整可用|已可以使用|已经可以使用|"
     r"已完全可用|已可直接使用|已经可以直接使用|"
-    r"已修好|修复已完成|bug\s*已修复|缺陷已修复|问题已修复|已修复|"
+    r"已修好|修复已完成|bug\s*已修复|缺陷已修复|问题已修复|"
     r"已验证通过|验证通过|验证已绿|验证已通过|"
-    r"测试已通过|已跑通测试|测试已跑通|"
-    r"(?:独立)?(?:复核|审查|审校|质检|验收)(?:已)?通过|"
-    r"修复通过|本轮(?:修复)?通过|"
-    r"可玩|已经可以玩|可以玩了|已可开玩|已经可玩"
+    r"测试已通过|已跑通测试|测试已跑通"
     r")"
 )
 
@@ -292,7 +289,7 @@ def ceiling_honesty_steer(*, reason: str) -> str | None:
         return None
     return (
         "[系统提示] 本回合已达轮次硬上限（max_rounds），强制收口。"
-        "【禁止】无条件宣称复核通过 / 已修复 / 可玩 / 验证通过 / 已全部完成等姿势 A；"
+        "【禁止】无条件宣称验证通过 / 已修好 / 已全部完成 / 已完整可用等姿势 A；"
         "须按「部分落地 + 未闭合项」收口：点名已落地与未闭合，勿假装验收过关。"
         "有交付对账卡时以档位为准；非正式完成不得姿势 A。"
     )
@@ -318,6 +315,80 @@ def enforce_ceiling_closing_honesty(content: str, *, reason: str) -> str:
     if stripped.startswith("【收口说明】"):
         return text
     return _CEILING_HONESTY_BANNER + text
+
+
+# --- CEO mutation honesty (案 20260803-ceo-claim-edit-without-write · 软Ⅱ′) ---
+# Soft only: prefix banner, never discard/reject the turn. Prompt is primary;
+# this catches high-confidence 「假已改 / 甩整文件手贴」when this turn has no write evidence.
+# Deliberately narrow — bare「已处理」/「可用了」不进表，避免误伤核对与解释。
+
+_CEO_MUTATION_DONE_CLAIMS = re.compile(
+    r"(?:"
+    r"已(?:成功)?(?:修改|修正|改好|改完|改妥)|"
+    r"(?:代码|文件|源码)已(?:修改|修正|改好|更新|落盘)|"
+    r"已将.{0,24}(?:修改|写入|落盘|更新)到|"
+    r"✅\s*已(?:改|修改|修正)|"
+    r"修改已完成|修正已完成|改动已落地"
+    r")"
+)
+
+_CEO_WHOLE_FILE_PASTE = re.compile(
+    r"(?:"
+    r"请(?:你)?(?:自己|自行).{0,12}(?:替换|粘贴|覆盖).{0,24}整(?:个|份)?文件|"
+    r"请(?:把|将).{0,20}整(?:个|份)?文件.{0,16}(?:粘贴|替换|覆盖)|"
+    r"自己替换整文件|整文件自行(?:替换|粘贴)|"
+    r"请(?:把|将)?下面.{0,20}完整.{0,12}(?:粘贴|替换).{0,16}(?:覆盖|文件)|"
+    r"手动(?:把|将)?.{0,12}整(?:份|个)?(?:文件|代码).{0,12}粘贴"
+    r")"
+)
+
+_MUTATION_HONESTY_BANNER = (
+    "【落盘说明】本回合未见工作区写盘成功记录——若下文称「已改/已修正」"
+    "或请你「自行粘贴整文件」，可能不准确。改文件应由带写权队员落盘；"
+    "写不通时请看阻塞原因与下一步。你明确要求时，可只采用差异片段（非整文件覆盖）。\n\n"
+)
+
+
+def claims_ceo_mutation_done(content: str) -> bool:
+    """True when CEO prose claims this-turn file mutation completed."""
+    return _positive_hits(_CEO_MUTATION_DONE_CLAIMS, content or "")
+
+
+def asks_whole_file_user_paste(content: str) -> bool:
+    """True when CEO asks the user to paste/replace a whole file themselves."""
+    return bool(_CEO_WHOLE_FILE_PASTE.search(content or ""))
+
+
+def turn_has_product_write_evidence(*, landing_succeeded: bool = False) -> bool:
+    """Whether this turn has product write evidence (CEO landing or accepted delivery files)."""
+    if landing_succeeded:
+        return True
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+
+    verdict = current_delivery_verdict.get()
+    if verdict is None:
+        return False
+    return bool(verdict.delivered_files)
+
+
+def enforce_ceo_mutation_honesty(
+    content: str,
+    *,
+    landing_succeeded: bool = False,
+) -> str:
+    """Prefix honesty banner when CEO claims edit / whole-file paste without write evidence.
+
+    Does not rewrite or block the turn — soft backstop only (软Ⅱ′).
+    """
+    text = content or ""
+    if turn_has_product_write_evidence(landing_succeeded=landing_succeeded):
+        return text
+    if not (claims_ceo_mutation_done(text) or asks_whole_file_user_paste(text)):
+        return text
+    stripped = text.lstrip()
+    if stripped.startswith("【落盘说明】") or stripped.startswith("【收口说明】"):
+        return text
+    return _MUTATION_HONESTY_BANNER + text
 
 
 def downgrade_verdict_for_max_rounds() -> None:

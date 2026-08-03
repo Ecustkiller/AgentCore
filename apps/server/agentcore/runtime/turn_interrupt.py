@@ -62,16 +62,30 @@ def finish_reason_for(reason: TurnInterruptReason) -> FinishReason:
     return FinishReason.INTERRUPTED
 
 
-def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
-    """Return streamed captain text only.
+# 案 20260803-fake-dispatch-stall-claim · C：redrive_failed 禁止静默清队无说明。
+# USER_STOP / PROCESS_KILL 仍只靠 metadata + StatusStrip；本原因必须正文可见。
+REDRIVE_FAILED_USER_VISIBLE = (
+    "【中断说明】后台恢复失败，本轮未完工（团队已清）。可直接发送下一条继续。"
+)
 
-    Terminal chrome (已停止 / 已中断) lives in message metadata
-    (``incomplete`` + ``finish_reason``) and frontend StatusStrip / chips —
-    do not append parenthetical body notes. ``reason`` is kept for call-site
-    symmetry with ``finish_reason_for``; it does not affect body text.
+
+def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
+    """Return captain text for an interrupted turn.
+
+    USER_STOP / PROCESS_KILL: streamed content only — stop/interrupt chrome stays in
+    message metadata + StatusStrip (no parenthetical body notes).
+
+    REDRIVE_FAILED: always leave a user-visible honesty note in the body so a
+    kickoff bubble cannot freeze as「已开工」while the team was silently cleared.
     """
-    _ = reason
-    return (content or "").strip()
+    text = (content or "").strip()
+    if reason is not TurnInterruptReason.REDRIVE_FAILED:
+        return text
+    if REDRIVE_FAILED_USER_VISIBLE in text or "后台恢复失败" in text:
+        return text
+    if not text:
+        return REDRIVE_FAILED_USER_VISIBLE
+    return f"{text}\n\n{REDRIVE_FAILED_USER_VISIBLE}"
 
 
 def _journal_has_turn_end(entries: list[dict] | None) -> bool:

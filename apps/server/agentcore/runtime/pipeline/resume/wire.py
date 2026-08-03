@@ -260,7 +260,7 @@ async def _wire_continuation_toolset(
             backend,
             desktop_online=desktop_online,
             exec_languages=exec_languages,
-            host_axis=permission_axes.host if permission_axes is not None else None,
+            permission_axes=permission_axes,
             mcp_enabled=mcp_discover.tool_count > 0,
             mcp_label=mcp_label,
         ),

@@ -32,6 +32,10 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     (``tools.sandbox.cloud_health``) also gates this predicate: a failed probe withholds
     the class so registry registration and ``workspace_context`` stay truthful. An
     unprobed process (tests, lifespan not run, config off) keeps config-only semantics.
+
+    Does **not** fold ``command=ask`` withhold — callers that stamp capability lines or
+    build registries must use :func:`execution_class_enabled_for` so ask / backend /
+    health share one truth with the worker toolset.
     """
     if backend is None:
         return True
@@ -43,6 +47,22 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
 
     # False → known unhealthy; True / None (never probed) → config gate alone.
     return cloud_sandbox_health() is not False
+
+
+def execution_class_enabled_for(
+    backend: WorkspaceBackend | None,
+    permission_axes: "PermissionAxes | None" = None,
+) -> bool:
+    """Final include_execution predicate for worker registry + capability lines.
+
+    ``code_execution_enabled_for(backend)`` ∧ ¬``command=ask`` withhold. Same bit
+    ``build_worker_registry`` uses so ``workspace_context`` never claims
+    ``code_execute=已装配`` while the toolset / identity says 未装配
+    (案 20260803-docx-office-exec-capability-lie A).
+    """
+    if permission_axes is not None and permission_axes.withholds_execution_tools:
+        return False
+    return code_execution_enabled_for(backend)
 
 
 def browser_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
@@ -156,9 +176,7 @@ def build_worker_registry(
     Host tools gate on ``desktop_online`` ∧ ``host≠off`` (orthogonal to command).
     """
     location = backend.location if backend is not None else None
-    include_execution = code_execution_enabled_for(backend)
-    if permission_axes is not None and permission_axes.withholds_execution_tools:
-        include_execution = False
+    include_execution = execution_class_enabled_for(backend, permission_axes)
     include_browser = include_execution and browser_execution_enabled_for(backend)
     include_host = desktop_online and (
         permission_axes is None or not permission_axes.host_disabled

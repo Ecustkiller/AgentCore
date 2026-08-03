@@ -376,6 +376,10 @@ class CoordinationSession:
     # Explicit user /stop cascaded cancel — release_turn_coordination must clear
     # (not detach) so the background drive does not outlive the stopped turn.
     user_stopped: bool = False
+    # Sticky local workspace channel dead (process-local; harvest fallback / A2).
+    workspace_channel_dead: bool = False
+    # One-shot host content_delta for CHANNEL_DEAD_USER_VISIBLE already emitted.
+    channel_dead_user_notice_emitted: bool = False
     # Note-wall coordination mode for this batch (``wall`` | ``none``). Used by idle
     # wait to keep the main turn open when wall + 0 completions (要等齐).
     coordination: str = "none"

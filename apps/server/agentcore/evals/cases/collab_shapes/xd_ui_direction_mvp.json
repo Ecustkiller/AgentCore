@@ -15,15 +15,12 @@
   ],
   "path": "team",
   "mode": "economy",
-  "_note": "方向选定≠全量实现：默认 1 人两段或契约/MVP 切片；wave1 禁止顶层 code_verified。对照产品失败样：选方案三后双人串行+npm build 触顶。",
+  "_note": "方向选定≠全量实现：默认 1 人两段或契约/MVP 切片；勿再填已删的 completion_criteria。对照产品失败样：选方案三后双人串行+npm build 触顶。",
   "checks": [
     { "name": "FinishReason" },
     { "name": "Delegated" },
     { "name": "ShapeMatches", "args": { "threshold": 0.6 } },
-    {
-      "name": "DelegateCriteriaForbidden",
-      "args": { "forbid": ["code_verified"] }
-    },
+    { "name": "DelegateCriteriaForbidden" },
     { "name": "NonEmpty", "args": { "min_len": 40 } }
   ],
   "expected_shape": {

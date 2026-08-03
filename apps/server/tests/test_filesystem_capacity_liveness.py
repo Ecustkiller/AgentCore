@@ -62,6 +62,37 @@ async def test_server_workspace_read_bytes_rejects_over_5mib(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_resolve_for_download_bypasses_ai_read_gate(tmp_path: Path):
+    """Panel download may serve files above AI 5 MiB, under upload-aligned ceiling."""
+    from agentcore.config import settings
+
+    mid = WORKSPACE_READ_MAX_BYTES + 1
+    assert mid < settings.workspace_upload_max_bytes
+    big = tmp_path / "deck.pptx"
+    big.write_bytes(b"P" * mid)
+    ws = _ws(tmp_path)
+    resolved = await ws.resolve_for_download(
+        "deck.pptx", max_bytes=settings.workspace_upload_max_bytes
+    )
+    assert resolved == big.resolve()
+    # AI path still gated:
+    with pytest.raises(WorkspaceIOError) as ei:
+        await ws.read_bytes("deck.pptx")
+    assert str(ei.value) == FILE_TOO_LARGE_DETAIL
+
+
+@pytest.mark.asyncio
+async def test_resolve_for_download_rejects_over_upload_ceiling(tmp_path: Path):
+    ceiling = 64
+    big = tmp_path / "too-big.bin"
+    big.write_bytes(b"x" * (ceiling + 1))
+    ws = _ws(tmp_path)
+    with pytest.raises(WorkspaceIOError) as ei:
+        await ws.resolve_for_download("too-big.bin", max_bytes=ceiling)
+    assert str(ei.value) == FILE_TOO_LARGE_DETAIL
+
+
+@pytest.mark.asyncio
 async def test_file_read_oversized_is_contract_failure(tmp_path: Path):
     big = tmp_path / "huge.txt"
     big.write_bytes(b"a" * (WORKSPACE_READ_MAX_BYTES + 1))

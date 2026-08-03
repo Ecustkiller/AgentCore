@@ -445,6 +445,29 @@ class ServerWorkspace:
             await self._emit_shared_mutation(path, "file_written")
             return len(content)
 
+    async def resolve_for_download(self, path: str, *, max_bytes: int) -> Path:
+        """Resolve a on-disk path for HTTP panel download (``FileResponse``).
+
+        Capacity is ``max_bytes`` (aligned with upload), **not** the AI-tool
+        ``WORKSPACE_READ_MAX_BYTES`` gate used by :meth:`read` / :meth:`read_bytes`.
+        Does not load file contents into memory.
+        """
+        if self._external_needs_channel(path):
+            raise WorkspaceIOError("会话授权目录在本机引擎外不可直读")
+        await self._gate_shared(path, write=False)
+        target = self._safe(path)
+        if not target.exists():
+            raise PathNotFound(path)
+        if not target.is_file():
+            raise NotAFile(path)
+        try:
+            size = target.stat().st_size
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        if size > max_bytes:
+            raise WorkspaceIOError(FILE_TOO_LARGE_DETAIL)
+        return target
+
     async def read_bytes(self, path: str) -> bytes:
         if self._external_needs_channel(path):
             return await self._require_external_bridge().read_bytes(path)

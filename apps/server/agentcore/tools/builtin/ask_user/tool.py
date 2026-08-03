@@ -257,6 +257,8 @@ class AskUserTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        from agentcore.runtime.engine.ask_user_pause_visible import honest_ask_user_message
+
         message = str(arguments.get("message") or "").strip()
         if not message:
             return ToolResult(
@@ -265,6 +267,7 @@ class AskUserTool:
                 output="",
                 error="ask_user 需要非空的 message 参数（向用户说明你在问什么）。",
             )
+        message = honest_ask_user_message(message)
         card_parsed = parse_card(arguments.get("card"))
         # Success returns a known card literal (also a str); errors return a Chinese
         # guidance string not in CARD_KINDS.

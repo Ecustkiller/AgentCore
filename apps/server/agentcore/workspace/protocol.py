@@ -231,11 +231,12 @@ class WorkspaceBackend(Protocol):
         ...
 
     async def read_bytes(self, path: str) -> bytes:
-        """Return the raw bytes of ``path`` (binary-safe; for file download).
+        """Return the raw bytes of ``path`` (binary-safe; AI / tool whole-file read).
 
-        The byte-level counterpart of ``read`` for non-text files (images, PDFs,
-        archives). Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /
-        ``WorkspaceIOError``.
+        Subject to the AI capacity gate (``WORKSPACE_READ_MAX_BYTES``). HTTP panel
+        download must not use this — it goes through the dedicated download path
+        (upload-aligned ceiling + ``FileResponse``). Raises ``OutsideWorkspace`` /
+        ``PathNotFound`` / ``NotAFile`` / ``WorkspaceIOError``.
         """
         ...
 

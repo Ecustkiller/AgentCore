@@ -299,6 +299,13 @@ def test_core_teaches_split_criterion_over_count():
     assert "问还是派·中性" in hint or "不偏" in hint
     # P3 路由探针硬错对治：贴码写回强制派、点名实体扇出。
     assert "写回" in hint and "必须" in hint and "delegate" in hint
+    # 案 ceo-claim-edit-without-write 软Ⅱ′：零写盘禁假已改 + 禁默认整文件手贴。
+    assert "诚实落盘" in hint
+    assert "整文件自行粘贴" in hint or "整文件" in hint
+    # 案 fake-dispatch-stall-claim A：未 delegate 前禁「已派/已开工」；ask_user 须「先确认再派」。
+    assert "派工·时序诚实" in hint
+    assert "先确认再派" in hint or "尚未派工" in hint
+    assert "已开工" in hint  # 禁表出现在提示里
     assert "至少 N 人" in hint or "tasks 至少" in hint
     assert "写完这句立刻" in hint or "禁止第二句" in hint
     # 按场面 consult：与能力目录 preamble 同强度（禁「可选 vs 必先查」对打）。
@@ -465,14 +472,12 @@ def test_core_teaches_execution_and_recall_routing():
     assert "【执行 / 运行 / 打开】" in hint
     assert "workspace_context" in hint
     assert "ask_user" in hint
-    assert 'completion_criteria={"type":"code_verified"' in hint
+    assert "test_run" in hint or "verify" in hint
     assert "意图梯度" in hint
     assert "跑起来" in hint and "报 URL" in hint
     assert "验证员" in hint
     assert "browser_navigate" in hint
     assert "右坞打开" in hint or "帮我看页面" in hint
-    assert "省略" in hint
-    assert "勿默认" in hint and "runtime_ready" in hint
     assert "验收" in hint and ("截图" in hint or "screenshot" in hint)
     assert "delegate" in hint
     assert "读文件" in hint or "列目录" in hint
@@ -507,21 +512,16 @@ def test_core_worker_capability_follows_workspace_facts():
 
 
 def test_core_teaches_delivery_honesty_when_no_execution():
-    # 云端无执行环境：核心短钩子点验收种类；交付缺口细节在编排 skill。
+    # 云端无执行环境：核心短钩子点复盘/落盘；交付缺口细节在编排 skill。
     hint = _CEO_CORE_HINT
-    assert "code_verified" in hint
-    assert "runtime_ready" in hint
     assert "ask_user" in hint
+    assert "test_run" in hint or "verify" in hint
+    assert "意图梯度" in hint
+    assert "browser_navigate" in hint
+    assert "验证员" in hint or "跑起来" in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
-    assert "不要设" in skill or "显式声明会被硬拒" in skill
     assert "未运行验证" in skill or "交付缺口" in skill
-    # C：右坞/浏览器打开 → 省略 completion_criteria，勿默认 runtime_ready；
-    # 纯启服/跑起来看 → CEO terminal，禁止默认验证员/navigate 流水线。
-    assert "意图梯度" in skill
-    assert "browser_navigate" in skill
-    assert "省略" in skill and "勿默认" in skill
-    assert "验证员" in skill or "跑起来" in skill
-    assert "≠必须" in skill or "默认为必须" in skill
+    assert "form=files" in skill
 
 
 def test_core_teaches_delivery_path_by_workspace_type():
@@ -551,27 +551,40 @@ def test_core_teaches_delivery_path_by_workspace_type():
 
 
 def test_core_teaches_presentation_honesty():
-    # 演讲/PPT：诚实性钩子保留；场面 format_options 已退役。
-    # 案 20260803-ppt-office A+B：默认 files_written；当模板须 file_copy。
+    # 演讲/PPT/Office：诚实性钩子保留；场面 format_options 已退役。
+    # 须真目标后缀；无执行禁再派跑脚本；当模板须 file_copy。
     hint = _CEO_CORE_HINT
-    assert "pptx" in hint.lower() and "marp" in hint.lower()
-    assert "PPT 已落盘可直接使用" in hint
+    assert "pptx" in hint.lower()
+    assert "Office 已落盘可直接使用" in hint or "PPT 已落盘可直接使用" in hint
     assert "静默" in hint or "只交" in hint
-    assert "files_written" in hint
-    assert "code_verified" in hint
     assert "file_copy" in hint
     assert "当模板" in hint or "按模板" in hint
     assert "Presentation()" in hint
+    assert "再派" in hint or "ask_user" in hint
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
     assert "format_options" not in kickoff
     assert "style_options" not in kickoff
     orch = _TEAM_ORCHESTRATION_ADVANCED
     assert "python-pptx" in orch
     assert "代写全章节大纲" in orch or "Marp 语法" in orch
-    assert "files_written" in orch
     assert "file_copy" in orch
     assert "当模板" in orch
     assert "Presentation()" in orch
+    assert "再派" in orch and "跑脚本" in orch
+    assert ".py" in orch and "不算" in orch
+
+
+def test_core_teaches_image_gen_egress_and_key_boundary():
+    """案 20260803-image-gen-byok-egress-boundary A+B：无 egress 禁代调出图；Key 不落盘。"""
+    hint = _CEO_CORE_HINT
+    assert "生图" in hint
+    assert "代调" in hint or "出图" in hint
+    assert "API Key" in hint or "明文" in hint
+    assert "本机脚本" in hint or "只帮写" in hint
+    orch = _TEAM_ORCHESTRATION_ADVANCED
+    assert "生图" in orch
+    assert "出站网络" in orch or "egress" in orch.lower() or "HTTPS" in orch
+    assert "明文" in orch or "env" in orch
 
 
 def test_core_teaches_short_clarify_not_scene_ledger():
@@ -585,18 +598,15 @@ def test_core_teaches_short_clarify_not_scene_ledger():
 
 
 def test_skill_teaches_environment_capability_constraint():
-    # 编排 skill：无执行环境时不设 code_verified（显式会被硬拒）、改交付形态、显式标缺口。
+    # 编排 skill：无执行环境时改交付形态、显式标缺口（S3：无 kind 硬拒文案）。
     # 轻对齐：跑/验终向靠提示词对照 workspace（引擎不扫用户文硬分叉）。
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "环境能力约束" in skill
     assert "code_execute=未装配" in skill
-    assert "显式声明会被硬拒" in skill
     assert "交付缺口" in skill
     assert "bind_local_folder" in skill
-    assert "不】从任务文案推断" in skill or "不从任务文案推断" in skill
-    assert "执行成功证据" in skill
-    assert "禁止只验" in skill
-    assert "不扫用户文" in skill or "硬改工具面" in skill
+    assert "ask_user" in skill
+    assert "form=files" in skill
     assert "能力策略收口" not in skill
 
 

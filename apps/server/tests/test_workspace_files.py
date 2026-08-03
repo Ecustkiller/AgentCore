@@ -10,8 +10,16 @@ from pathlib import Path
 import pytest
 
 from agentcore.config import settings
-from agentcore.workspace.files import download_file, list_files, upload_file
-from agentcore.workspace.protocol import NotAFile, OutsideWorkspace, PathNotFound
+from agentcore.core.errors import PayloadTooLargeError, ValidationError
+from agentcore.workspace.files import (
+    download_file,
+    list_files,
+    raise_http_for_download_io,
+    resolve_download_file,
+    upload_file,
+)
+from agentcore.workspace.limits import FILE_TOO_LARGE_DETAIL, WORKSPACE_READ_MAX_BYTES
+from agentcore.workspace.protocol import NotAFile, OutsideWorkspace, PathNotFound, WorkspaceIOError
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +37,55 @@ async def test_upload_then_download_roundtrip():
         user_id="u1", folder_id="f1", conversation_id="c1", path="in/data.bin"
     )
     assert got == blob
+
+
+async def test_download_allows_above_ai_read_gate_under_upload_ceiling():
+    """Panel download path is decoupled from AI ``read_bytes`` 5 MiB."""
+    size = WORKSPACE_READ_MAX_BYTES + 1024
+    assert size < settings.workspace_upload_max_bytes
+    # Bypass upload HTTP body path: write via service after building workspace root.
+    from agentcore.workspace.locate import build_server_workspace
+
+    backend = build_server_workspace(user_id="u1", folder_id="f1", conversation_id="c1")
+    await backend.write_bytes("big.pptx", b"B" * size)
+
+    resolved = await resolve_download_file(
+        user_id="u1", folder_id="f1", conversation_id="c1", path="big.pptx"
+    )
+    assert resolved.stat().st_size == size
+    got = await download_file(
+        user_id="u1", folder_id="f1", conversation_id="c1", path="big.pptx"
+    )
+    assert len(got) == size
+
+
+async def test_download_rejects_over_upload_ceiling(monkeypatch):
+    monkeypatch.setattr(settings, "workspace_upload_max_bytes", 64)
+    from agentcore.workspace.locate import build_server_workspace
+
+    ceiling = settings.workspace_upload_max_bytes
+    backend = build_server_workspace(user_id="u1", folder_id="f1", conversation_id="c1")
+    await backend.write_bytes("huge.bin", b"H" * (ceiling + 1))
+
+    with pytest.raises(WorkspaceIOError) as ei:
+        await resolve_download_file(
+            user_id="u1", folder_id="f1", conversation_id="c1", path="huge.bin"
+        )
+    assert str(ei.value) == FILE_TOO_LARGE_DETAIL
+
+
+def test_raise_http_for_download_io_maps_too_large_to_413():
+    with pytest.raises(PayloadTooLargeError) as ei:
+        raise_http_for_download_io(WorkspaceIOError(FILE_TOO_LARGE_DETAIL))
+    assert ei.value.status_code == 413
+    assert str(settings.workspace_upload_max_bytes) in ei.value.message
+
+
+def test_raise_http_for_download_io_maps_other_io_to_422():
+    with pytest.raises(ValidationError) as ei:
+        raise_http_for_download_io(WorkspaceIOError("disk full"))
+    assert ei.value.status_code == 422
+    assert "disk full" in ei.value.message
 
 
 async def test_uploaded_file_appears_in_listing():

@@ -13,6 +13,7 @@ from typing import Any
 
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
+from agentcore.runtime.engine.ask_user_pause_visible import honest_ask_user_message
 from agentcore.runtime.facts import FactKind, current_fact_log
 from agentcore.runtime.loop_controller import ToolAttempt
 
@@ -48,20 +49,25 @@ def prepare_blocking_ask_user_tool_calls(
     tool_calls: list[ToolCall],
     round_content: str,
 ) -> list[ToolCall]:
-    """Inject ``round_content`` into a blocking ``ask_user`` when ``message`` is empty."""
+    """Inject ``round_content`` into a blocking ``ask_user`` when ``message`` is empty.
+
+    Also rewrites dispatch-started framing so the pause card cannot read as「已开工」.
+    """
     content = (round_content or "").strip()
-    if not content:
-        return tool_calls
     patched: list[ToolCall] = []
     for tc in tool_calls:
         if not is_blocking_ask_user(tc):
             patched.append(tc)
             continue
         args = _parse_args(tc)
-        if str(args.get("message") or "").strip():
+        explicit = str(args.get("message") or "").strip()
+        if explicit:
+            args["message"] = honest_ask_user_message(explicit)
+        elif content:
+            args["message"] = honest_ask_user_message(content)
+        else:
             patched.append(tc)
             continue
-        args["message"] = content
         patched.append(_patch_tool_call_args(tc, args))
     return patched
 
