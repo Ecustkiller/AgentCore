@@ -1,19 +1,20 @@
-"""Clone a public git repository into a conversation's workspace (决策⑤).
+"""Clone a git repository into a conversation's workspace (决策⑤ · G3).
 
 The developer half of "文件进出": after upload (anyone), ``git clone`` brings an
-existing public repo into the project space. Cloud mode runs ``git`` as a server
-subprocess into the resolved workspace root; P2 (local mode) routes the same
-operation through the desktop channel — this module is the server-side seam.
+existing repo into the project space. Cloud mode runs ``git`` as a server
+subprocess into the resolved workspace root.
 
 Safety:
 - ``git`` is invoked via argv (``create_subprocess_exec``) — never a shell
   string — so a hostile URL cannot inject commands.
-- Only ``http(s)`` URLs are accepted (public repos; private-repo tokens come
-  later). ``ssh``/``file``/etc. are rejected so the server can't be coerced into
-  reading local repos or arbitrary hosts via a different transport.
+- Only ``http(s)`` URLs are accepted. ``ssh``/``file``/etc. are rejected so the
+  server can't be coerced into reading local repos or arbitrary hosts via a
+  different transport.
 - The URL is run through the shared SSRF guard (``core.net.classify_url``, the same
   policy as ``read_url`` / favicon), so a clone target that resolves to a
   local/internal/reserved address (e.g. ``169.254.169.254``) is refused (SEC-006).
+- Optional account-level PAT (G3) is embedded into the clone URL in-process only;
+  never logged; tools never accept password parameters.
 - The clone is shallow + single-branch, has a timeout, and runs with
   ``GIT_TERMINAL_PROMPT=0`` so an auth-required repo fails fast instead of
   hanging on a credential prompt.
@@ -31,6 +32,7 @@ from urllib.parse import urlparse
 from agentcore.config import settings
 from agentcore.core.net import PRIVATE_IP_BLOCKS, URLBlock, classify_url
 from agentcore.workspace._paths import resolve_safe_path
+from agentcore.workspace.git_credentials import GitAuthMaterial, embed_http_basic_auth
 from agentcore.workspace.locate import resolve_workspace_root
 
 _ALLOWED_SCHEMES = ("http", "https")
@@ -84,11 +86,14 @@ async def clone_repo(
     repo_url: str,
     dest: str | None = None,
     depth: int = 1,
+    auth: GitAuthMaterial | None = None,
 ) -> str:
     """Clone ``repo_url`` into the conversation's workspace; return the dest path.
 
-    ``dest`` (workspace-relative) defaults to the repo name. Raises ``ValueError``
-    for a bad URL / destination, ``CloneError`` if the clone itself fails.
+    ``dest`` (workspace-relative) defaults to the repo name. When ``auth`` is set,
+    the PAT is embedded into the clone URL for the subprocess only (never logged).
+    Raises ``ValueError`` for a bad URL / destination, ``CloneError`` if the clone
+    itself fails.
     """
     _validate_url(repo_url)
     await _reject_ssrf(repo_url)
@@ -102,8 +107,14 @@ async def clone_repo(
     if target.exists() and any(target.iterdir()):
         raise ValueError("目标目录已存在且非空")
 
+    clone_url = repo_url
+    if auth is not None:
+        clone_url = embed_http_basic_auth(
+            repo_url, username=auth.username, token=auth.token
+        )
+
     await _git_clone(
-        repo_url, target, depth=depth, timeout=settings.workspace_clone_timeout_seconds
+        clone_url, target, depth=depth, timeout=settings.workspace_clone_timeout_seconds
     )
     # ``target`` is the resolved absolute path from the traversal guard; report it
     # back relative to the (resolved) workspace root for the client.
@@ -115,6 +126,7 @@ async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> 
 
     Separated from :func:`clone_repo` (which owns URL policy) so the raw mechanics
     can be tested hermetically against a local ``file://`` source repo.
+    ``repo_url`` may embed basic auth; callers must not log it.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     args = ["git", "clone", "--single-branch"]
@@ -145,4 +157,42 @@ async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> 
 
     if proc.returncode != 0:
         detail = stderr.decode(errors="replace").strip() or "git clone 失败"
+        detail = _sanitize_clone_error(detail)
+        if _looks_like_auth_failure(detail):
+            detail = (
+                f"{detail}\n"
+                "私仓需要凭据：请到「设置 → Git 凭据」配置账户级 PAT 后重试；"
+                "或打开已配置凭据的本地仓库。"
+            )
         raise CloneError(detail)
+
+
+def _sanitize_clone_error(detail: str) -> str:
+    """Strip accidental user:token@ from git stderr before returning to clients."""
+    # Best-effort: redact http(s)://user:pass@host
+    import re
+
+    return re.sub(
+        r"(https?://)([^:@/\s]+):([^@/\s]+)@",
+        r"\1***:***@",
+        detail,
+        flags=re.IGNORECASE,
+    )
+
+
+def _looks_like_auth_failure(detail: str) -> bool:
+    lower = detail.lower()
+    markers = (
+        "authentication failed",
+        "could not read username",
+        "invalid username or password",
+        "access denied",
+        "permission denied",
+        "authentication required",
+        "fatal: could not read",
+        "http basic: access denied",
+        "repository not found",
+        "the requested url returned error: 401",
+        "the requested url returned error: 403",
+    )
+    return any(m in lower for m in markers)

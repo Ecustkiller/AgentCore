@@ -145,6 +145,165 @@ describe("ApprovalCard git headline", () => {
     );
     expect(screen.getByText("status")).toBeTruthy();
   });
+
+  it("shows create_pr with title and head → base", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: {
+          subcommand: "create_pr",
+          title: "Add git SCM panel",
+          head: "feat/scm",
+          base: "main",
+          remote: "origin",
+        },
+      }),
+    );
+    expect(
+      screen.getByText("create_pr Add git SCM panel · feat/scm → main"),
+    ).toBeTruthy();
+  });
+
+  it("shows add + paths from the real paths array", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "add", paths: ["src/a.ts", "src/b.ts"] },
+      }),
+    );
+    expect(screen.getByText("add src/a.ts, src/b.ts")).toBeTruthy();
+  });
+
+  it("does not misread path/file_path for git add", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: {
+          subcommand: "add",
+          path: "wrong.txt",
+          file_path: "also-wrong.txt",
+          paths: ["real.txt"],
+        },
+      }),
+    );
+    expect(screen.getByText("add real.txt")).toBeTruthy();
+    expect(screen.queryByText("add wrong.txt")).toBeNull();
+  });
+
+  it("falls back to bare add when paths missing", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "add" },
+      }),
+    );
+    expect(screen.getByText("add")).toBeTruthy();
+  });
+
+  it("shows pull ← remote for git pull approvals", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "pull", remote: "upstream" },
+      }),
+    );
+    expect(screen.getByText("pull ← upstream")).toBeTruthy();
+  });
+
+  it("defaults pull remote to origin when omitted", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "pull" },
+      }),
+    );
+    expect(screen.getByText("pull ← origin")).toBeTruthy();
+  });
+
+  it("shows fetch ← remote", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "fetch", remote: "origin" },
+      }),
+    );
+    expect(screen.getByText("fetch ← origin")).toBeTruthy();
+  });
+
+  it("shows show + ref", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "show", ref: "HEAD~1" },
+      }),
+    );
+    expect(screen.getByText("show HEAD~1")).toBeTruthy();
+  });
+
+  it("shows blame + paths", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "blame", paths: ["README.md"] },
+      }),
+    );
+    expect(screen.getByText("blame README.md")).toBeTruthy();
+  });
+
+  it("shows G2 stash / merge / rebase / cherry-pick / tag / remote headlines", () => {
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "stash", action: "push" },
+      }),
+    );
+    expect(screen.getByText("stash push")).toBeTruthy();
+    cleanup();
+
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "merge", ref: "develop" },
+      }),
+    );
+    expect(screen.getByText("merge develop")).toBeTruthy();
+    cleanup();
+
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "rebase", branch: "main" },
+      }),
+    );
+    expect(screen.getByText("rebase main")).toBeTruthy();
+    cleanup();
+
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "cherry-pick", commit: "abc1234" },
+      }),
+    );
+    expect(screen.getByText("cherry-pick abc1234")).toBeTruthy();
+    cleanup();
+
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "tag", action: "create", name: "v1.0" },
+      }),
+    );
+    expect(screen.getByText("tag v1.0")).toBeTruthy();
+    cleanup();
+
+    renderCard(
+      card({
+        toolName: "git",
+        arguments: { subcommand: "remote", action: "add", name: "upstream" },
+      }),
+    );
+    expect(screen.getByText("remote add upstream")).toBeTruthy();
+  });
 });
 
 describe("ApprovalCard CTA (工具审批 A+B)", () => {

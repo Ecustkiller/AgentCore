@@ -68,10 +68,9 @@ def tool_call_requires_approval(
     if approval is ToolApproval.GRANTABLE:
         return True
     if tool_name == "git":
-        from agentcore.tools.builtin.git_ops import git_write_subcommands
+        from agentcore.tools.builtin.git_ops import git_call_is_write
 
-        subcommand = str(arguments.get("subcommand", "")).strip().lower()
-        return subcommand in git_write_subcommands()
+        return git_call_is_write(arguments)
     if tool_name == "terminal":
         from agentcore.tools.builtin.terminal import terminal_approval_subcommands
 
@@ -138,15 +137,21 @@ def _is_permanent_delete(tool_name: str, arguments: dict[str, Any]) -> bool:
     return False
 
 
-def _is_git_push(tool_name: str, arguments: dict[str, Any]) -> bool:
-    """True for structured ``git push`` — remote publish always needs a confirm card.
+def _is_git_remote_publish(tool_name: str, arguments: dict[str, Any]) -> bool:
+    """True for structured ``git push`` / ``create_pr`` — always needs a confirm card.
 
     Session file trust, kickoff/delegation grants, and turn-wide file-class /
-    per-tool grants must not silently cover push (product: 普通 push 先弹确认).
+    per-tool grants must not silently cover remote publish (product: 普通 push /
+    开 PR 先弹确认).
     """
     if tool_name != "git":
         return False
-    return str(arguments.get("subcommand") or "").strip().lower() == "push"
+    sub = str(arguments.get("subcommand") or "").strip().lower()
+    return sub in {"push", "create_pr"}
+
+
+# Back-compat alias for callers / tests that imported the old name.
+_is_git_push = _is_git_remote_publish
 
 
 def _preview_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -232,9 +237,9 @@ class ApprovalGate:
     def _session_file_trust_covers(self, tool_name: str, arguments: dict[str, Any]) -> bool:
         """file_write=session: trust reversible file-mutation class without per-call cards.
 
-        Permanent deletes and structured ``git push`` still prompt. Execution-class
-        tools are not in ``file_op_tools`` and still need kickoff / turn grant /
-        per-call / auto.
+        Permanent deletes and structured ``git push`` / ``create_pr`` still prompt.
+        Execution-class tools are not in ``file_op_tools`` and still need kickoff /
+        turn grant / per-call / auto.
         """
         if not self.permission_axes.trusts_file_writes:
             return False
@@ -242,7 +247,7 @@ class ApprovalGate:
             return False
         if _is_permanent_delete(tool_name, arguments):
             return False
-        return not _is_git_push(tool_name, arguments)
+        return not _is_git_remote_publish(tool_name, arguments)
 
     def _session_host_trust_covers(self, tool_name: str) -> bool:
         """host=session: trust Host GRANTABLE tools without per-call cards."""
@@ -283,7 +288,7 @@ class ApprovalGate:
         if force:
             return True
         # Remote publish: never short-circuit via session / kickoff / turn grants.
-        if _is_git_push(tool_name, arguments):
+        if _is_git_remote_publish(tool_name, arguments):
             return tool_name not in self._denied
         if self._delegation_covers(execution_id, tool_name):
             return False
@@ -318,10 +323,10 @@ class ApprovalGate:
         grants so catastrophic shapes still require a human click even under
         ``command=auto``. Turn-wide grants from a forced card are refused (one-shot
         only) so a single click cannot silently clear sibling destructive prompts.
-        Structured ``git push`` likewise always prompts (session / kickoff / turn
-        grants do not cover remote publish).
+        Structured ``git push`` / ``create_pr`` likewise always prompts (session /
+        kickoff / turn grants do not cover remote publish).
         """
-        publish = _is_git_push(tool_name, arguments)
+        publish = _is_git_remote_publish(tool_name, arguments)
 
         if not force and not publish and self._delegation_covers(execution_id, tool_name):
             logger.debug(
@@ -459,9 +464,9 @@ class ApprovalGate:
                 continue
             if req.payload.get("tool_name") not in tool_names:
                 continue
-            # Never sweep structured git push — remote publish always needs its own card.
+            # Never sweep structured git push / create_pr — remote publish needs own card.
             pending_args = req.payload.get("arguments")
-            if isinstance(pending_args, dict) and _is_git_push(
+            if isinstance(pending_args, dict) and _is_git_remote_publish(
                 str(req.payload.get("tool_name") or ""), pending_args
             ):
                 continue

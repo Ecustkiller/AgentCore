@@ -2,8 +2,8 @@
 
 场面账硬闸已拆除：``build_website`` 不再因缺视觉风格账拒调
 （``playbook_args.style`` 气质槽另计，与本账无关）。
-无确认时 :func:`design_prompt_block` 软注入 ``s_default``；``web_quality_scan``
-仍要求 DESIGN.md 含「用户选定风格 id」标记。
+无确认时 :func:`design_prompt_block` 软注入 ``s_default`` 与短正向 DESIGN 配方；
+``web_quality_scan`` 仍要求 DESIGN.md 含「用户选定风格 id」标记。
 
 Ledger helpers (``record_*`` / pause rehydrate) retained for tests and durable
 cache — production resume no longer records style picks from ask wire.
@@ -372,11 +372,21 @@ def find_scattered_colors(text: str, allowed: set[str]) -> list[str]:
     return hits
 
 
+# 默认 / s_default 路径软注入：抬品味，不扩硬闸 / anti-slop 指纹。
+_DEFAULT_DESIGN_RECIPE = (
+    "【正向配方·默认】单一视觉焦点；大面用中性色、主色极少；"
+    "禁止装饰性渐变 / glow / 粒子；动效仅用于交互反馈，勿作氛围装饰。"
+)
+
+
 def design_prompt_block(*, style: StyleConfirmation | None) -> str:
     """Inject into the design-node task book.
 
     No style ledger: soft-inject ``s_default``. With a confirmation (legacy / tests),
     write that id. ``web_quality_scan`` still requires the DESIGN.md marker.
+
+    Default / ``s_default`` also soft-injects a short positive DESIGN recipe
+    (taste lift on the no-pick path). Non-default confirmed styles skip it.
     """
     if style is None:
         sid = DEFAULT_STYLE_ID
@@ -384,14 +394,18 @@ def design_prompt_block(*, style: StyleConfirmation | None) -> str:
         style_line = (
             f"未指定风格时使用默认 id=`{sid}`（{label}）——必须原样写入。"
         )
+        recipe = _DEFAULT_DESIGN_RECIPE
     else:
         sid = style.style_id
         label = style.label
         style_line = f"用户选定风格 id=`{sid}`（{label}，来源 {style.source}）——必须原样写入。"
+        # 默认路径抬品味优先：仅 s_default（含 full_auto 落默认）塞完整配方。
+        recipe = _DEFAULT_DESIGN_RECIPE if sid == DEFAULT_STYLE_ID else ""
     return (
         f"【设计契约】用 file_write 落盘 `{DESIGN_MD_PATH}`，须含："
         f"色板 tokens（CSS 变量名 + hex）、字体、间距、对比度策略、禁止项、"
         f"以及章节「{STYLE_ID_HEADING}」下一行写 `{sid}`。"
         f"{style_line}"
+        f"{recipe}"
         "骨架与分区实现只读本文件，禁止另起散色。"
     )

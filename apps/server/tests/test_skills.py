@@ -200,9 +200,15 @@ async def test_consult_skill_build_website_hit():
     result = await tool.execute({"name": "build_website"}, _ctx())
     assert result.success
     assert "playbook=\"build_website\"" in result.output
+    assert (
+        "playbook_args.topic" in result.output
+        or 'playbook_args={{"topic"' in result.output
+        or '"topic"' in result.output
+    )
     assert "none" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- build_website：" in directory
+    assert "playbook_args.topic" in directory
     assert "- build_toolshed：" not in directory
     assert "style=\"toolshed\"" in result.output or "style=toolshed" in result.output
 

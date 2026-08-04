@@ -155,3 +155,31 @@ async def test_clone_repo_end_to_end(tmp_path: Path, monkeypatch):
 )
 def test_derive_dest_name(url: str, expected: str):
     assert _derive_dest_name(url) == expected
+
+
+# --- G3 credential URL embedding ---
+
+
+def test_embed_http_basic_auth_redacts_into_netloc():
+    from agentcore.workspace.git_credentials import embed_http_basic_auth
+
+    url = embed_http_basic_auth(
+        "https://github.com/o/r.git",
+        username="x-access-token",
+        token="ghp_secret",
+    )
+    assert url.startswith("https://x-access-token:ghp_secret@github.com/")
+    assert "o/r.git" in url
+
+
+def test_sanitize_clone_error_strips_basic_auth():
+    raw = "fatal: https://user:sekret@github.com/o/r.git/info/refs not valid"
+    cleaned = gitmod._sanitize_clone_error(raw)
+    assert "sekret" not in cleaned
+    assert "***:***@" in cleaned
+
+
+def test_looks_like_auth_failure():
+    assert gitmod._looks_like_auth_failure("Authentication failed for 'https://…'")
+    assert not gitmod._looks_like_auth_failure("fatal: repository path does not exist")
+

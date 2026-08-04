@@ -244,7 +244,7 @@ describe("ModelSettings (profiles + providers)", () => {
 
     const name = (await screen.findByLabelText("名称")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "写作强档" } });
-    fireEvent.change(screen.getByLabelText("主模型"), {
+    fireEvent.change(screen.getByTestId("profile-main-select"), {
       target: { value: "prov-deepseek::deepseek-v4-pro" },
     });
     fireEvent.click(screen.getByText("保存"));
@@ -262,6 +262,92 @@ describe("ModelSettings (profiles + providers)", () => {
         set_as_default: false,
       }),
     );
+  });
+
+  it("saves a hand-filled custom BYOK model id", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52], SYSTEM_52.id);
+    mockCreateProfile.mockResolvedValue({
+      ...USER_PROFILE,
+      name: "火山接入点",
+      main: {
+        origin: "byok",
+        provider_id: "prov-deepseek",
+        model: "ep-my-endpoint",
+      },
+      worker: null,
+    });
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+
+    fireEvent.change(await screen.findByLabelText("名称"), {
+      target: { value: "火山接入点" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-select"), {
+      target: { value: "__custom__" },
+    });
+
+    const custom = await screen.findByTestId("profile-main-custom");
+    expect(custom).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("服务商"), {
+      target: { value: "prov-deepseek" },
+    });
+    fireEvent.change(screen.getByLabelText("模型 ID"), {
+      target: { value: "ep-my-endpoint" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(mockCreateProfile).toHaveBeenCalledWith({
+        name: "火山接入点",
+        main: {
+          origin: "byok",
+          provider_id: "prov-deepseek",
+          model: "ep-my-endpoint",
+        },
+        worker: null,
+        background: null,
+        set_as_default: false,
+      }),
+    );
+  });
+
+  it("echoes a saved custom BYOK model when editing", async () => {
+    const customProfile: LlmModelProfileView = {
+      ...USER_PROFILE,
+      main: {
+        origin: "byok",
+        provider_id: "prov-deepseek",
+        model: "ep-saved-custom",
+      },
+      worker: null,
+    };
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, customProfile], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`profile-card-${customProfile.id}`),
+      ).toBeTruthy(),
+    );
+    const card = screen.getByTestId(`profile-card-${customProfile.id}`);
+    const editBtn = card.querySelector("button.btn-outline");
+    expect(editBtn).toBeTruthy();
+    fireEvent.click(editBtn as HTMLButtonElement);
+
+    const mainSelect = (await screen.findByTestId(
+      "profile-main-select",
+    )) as HTMLSelectElement;
+    // Folded into the provider group as a selectable option (回显).
+    expect(mainSelect.value).toBe("prov-deepseek::ep-saved-custom");
+    expect(
+      Array.from(mainSelect.options).some(
+        (o) => o.value === "prov-deepseek::ep-saved-custom",
+      ),
+    ).toBe(true);
   });
 
   it("does not offer edit/delete on system presets", async () => {

@@ -397,7 +397,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.queryByText("模型组合")).toBeNull();
   });
 
-  it("on 新建 when seedMain fails shows providers guide link and does not open editor", () => {
+  it("on 新建 with BYOK but empty catalog opens editor for custom model id", () => {
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: true,
@@ -427,10 +427,14 @@ describe("ModelSettings (profiles)", () => {
     mockProfiles(profilesResponse({ data: [] }));
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    expect(screen.queryByText("新建组合", { selector: "p" })).toBeNull();
-    const link = screen.getByRole("link", { name: "接入服务商" });
-    expect(link.getAttribute("href")).toBe("/more/providers");
-    expect(screen.getByText(/暂无可用模型/)).toBeTruthy();
+    expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    expect(
+      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
+    ).toBe(true);
+    expect(screen.queryByText(/暂无可用模型/)).toBeNull();
   });
 
   it("on 新建 when seedMain fails with platform_available shows admin/retry copy", () => {
@@ -461,8 +465,9 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.queryByText(/暂无可用模型，请先/)).toBeNull();
   });
 
-  it("when groups have no models, create editor shows providers guide and disables Worker/background", () => {
-    // current 可 seedMain，但 provider 不在列表且无 catalog/default → groups.models 合计为空
+  it("when groups have no catalog models but BYOK exists, custom is available and Worker stays enabled", () => {
+    // current 可 seedMain，但 provider 不在列表且无 catalog/default → groups.models 合计为空；
+    // 仍可经「自定义…」手填 BYOK model id。
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: true,
@@ -497,17 +502,22 @@ describe("ModelSettings (profiles)", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
-    const guide = screen.getByRole("link", { name: "接入服务商" });
-    expect(guide.getAttribute("href")).toBe("/more/providers");
-    expect(screen.getByText(/暂无可用模型/)).toBeTruthy();
+    expect(screen.queryByText(/暂无可用模型/)).toBeNull();
+
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    expect(
+      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
+    ).toBe(true);
 
     expect(document.getElementById("profile-worker")).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
     expect(document.getElementById("profile-background")).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
   });
 
@@ -541,6 +551,145 @@ describe("ModelSettings (profiles)", () => {
       screen.getByText(/平台额度暂不可用，请联系管理员或稍后重试/),
     ).toBeTruthy();
     expect(screen.queryByText(/暂无可用模型，请先/)).toBeNull();
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    expect(
+      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
+    ).toBe(false);
+  });
+
+  it("saves a hand-filled BYOK custom model id from 自定义…", async () => {
+    vi.mocked(updateLlmModelProfile).mockResolvedValue({
+      id: "user-mine",
+      name: "办公",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p1", model: "ep-volc-123" },
+      worker: null,
+      background: null,
+    });
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    fireEvent.change(mainSelect, { target: { value: "__custom__" } });
+    expect(screen.getByLabelText("自定义服务商")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("自定义服务商"), {
+      target: { value: "p1" },
+    });
+    fireEvent.change(screen.getByLabelText("自定义 model id"), {
+      target: { value: "ep-volc-123" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(updateLlmModelProfile).toHaveBeenCalledWith(
+        "user-mine",
+        expect.objectContaining({
+          main: {
+            origin: "byok",
+            provider_id: "p1",
+            model: "ep-volc-123",
+          },
+        }),
+      ),
+    );
+  });
+
+  it("echoes a saved custom BYOK model id in the edit select via folded group", () => {
+    mockProviders(providersResponse());
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-mine",
+            name: "办公",
+            kind: "user",
+            is_default: false,
+            main: {
+              origin: "byok",
+              provider_id: "p1",
+              model: "ep-already-saved",
+            },
+            worker: null,
+            background: null,
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    expect(mainSelect.value).toBe("p1::ep-already-saved");
+    expect(
+      [...mainSelect.options].some((o) => o.value === "p1::ep-already-saved"),
+    ).toBe(true);
+    // 已在目录折叠项里，不强制展开自定义面板
+    expect(screen.queryByLabelText("自定义 model id")).toBeNull();
+  });
+
+  it("platform-only catalog does not offer 自定义…", () => {
+    useModelsMock.mockReturnValue({
+      data: {
+        byok_configured: false,
+        current: { id: "platform-flash", origin: "platform" },
+        models: [
+          {
+            id: "platform-flash",
+            origin: "platform",
+            display_name: "Flash (平台)",
+            vendor: "Platform",
+            capabilities: [],
+            available: true,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useModels>);
+    mockProviders(
+      providersResponse({
+        providers: [],
+        platform_available: true,
+        platform_model: "platform-flash",
+        billing_mode: "platform",
+      }),
+    );
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-plat",
+            name: "平台组合",
+            kind: "user",
+            is_default: true,
+            main: {
+              origin: "platform",
+              provider_id: null,
+              model: "platform-flash",
+            },
+            worker: null,
+            background: null,
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    expect(
+      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
+    ).toBe(false);
+    expect(screen.queryByLabelText("自定义 model id")).toBeNull();
   });
 
   it("surfaces ADMIN_PRODUCT_FORBIDDEN instead of a generic load failure", () => {

@@ -156,10 +156,10 @@ def _continue_skipped_runs_action(roles: list[str]) -> dict[str, str]:
 
 def _website_verify_action(site: str) -> dict[str, str]:
     """Structured second-act CTA when whole-page QA deferred for budget."""
-    site_arg = f'site="{site}"' if site else 'site="<站点简述>"'
+    topic_arg = f'topic="{site}"' if site else 'topic="<站点简述>"'
     prompt = (
         "请对本站做第二段整页验收：delegate 时用 playbook=build_website_verify，"
-        f"playbook_args 填 {site_arg}。"
+        f"playbook_args 填 {topic_arg}。"
         "工作区已有 site/ 产物，只跑整页/视觉 QA，勿重做文案、骨架或分区。"
     )
     return {

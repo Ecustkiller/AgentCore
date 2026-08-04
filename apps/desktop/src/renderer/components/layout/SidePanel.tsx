@@ -29,10 +29,14 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useBrowserRegion } from "@/components/workspace/BrowserLivePanel";
 import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
+import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
+import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { conversationHasRestorableEntry } from "@/lib/conversationFileChanges";
+import { gitTrackHasWork } from "@/lib/gitRepoStatus";
 import { notifyError } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
@@ -178,7 +182,20 @@ export function SidePanel() {
     [messages, localBaselineIds],
   );
   const hasRestorable = useExecutionStore(hasRestorableSelector);
-  const changesTabVisible = hasRestorable || changesFocusMessageId != null;
+  const wsMode = useWorkspaceModeState(currentConversationId);
+  const canGit =
+    hasLocalFiles() &&
+    !!wsMode?.effective.isLocal &&
+    !!wsMode.effective.rootId &&
+    !wsMode.effective.rootMissing;
+  const { status: gitStatus } = useGitRepoStatus(
+    canGit ? wsMode?.effective.rootId : null,
+    canGit,
+  );
+  const changesTabVisible =
+    hasRestorable ||
+    changesFocusMessageId != null ||
+    gitTrackHasWork(gitStatus);
   // 图上指挥 (前端UX设计.md §6.2): fixed 指挥台 tab + auto-surface (openPanel + badge,
   // never steals active tab). Hook runs before the `open` early-return so its effect
   // can reveal the panel even while closed. Inert in chat mode (`active` is false).

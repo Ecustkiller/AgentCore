@@ -300,6 +300,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "只留方向句" in hint
     assert "1 人两段" in hint or "一人两段" in hint
     assert "规格已齐" in hint
+    assert "playbook_args.topic" in hint
     assert "立刻派 ≠ 立刻全量" in hint or "立刻全量" in hint
     assert "MVP" in hint or "契约" in hint
     assert "问还是派·中性" in hint or "不偏" in hint
@@ -308,6 +309,15 @@ def test_core_teaches_split_criterion_over_count():
     # 案 ceo-claim-edit-without-write 软Ⅱ′：零写盘禁假已改 + 禁默认整文件手贴。
     assert "诚实落盘" in hint
     assert "整文件自行粘贴" in hint or "整文件" in hint
+    # 软Ⅱ′ regress 辅线：用户明确不要自操作后禁甩「请你替换整个文件」，须 delegate 写盘。
+    assert "不要自己操作" in hint or "直接改文件" in hint
+    assert "请你替换整个文件" in hint
+    assert "delegate" in hint and "写盘" in hint
+    # 巡检案 A：无写盘成功/工具失败禁成功口吻；禁复读上一轮启服套话。
+    assert "已完成调整" in hint and "已成功修改" in hint
+    assert "相关工具失败" in hint
+    assert "启服" in hint and "复读" in hint
+    assert "落盘说明" not in hint  # 不恢复 mutation honesty 横幅文案
     # 案 merge-pipeline-skeleton-busy-claim A′：多源合并→单写手成篇；骨架禁审校清理连环。
     assert "多源合并" in hint and "成篇优先" in hint
     assert "CEO 自写" in hint  # 禁表出现在提示里
@@ -321,6 +331,10 @@ def test_core_teaches_split_criterion_over_count():
     assert "派工·时序诚实" in hint
     assert "先确认再派" in hint or "尚未派工" in hint
     assert "已开工" in hint  # 禁表出现在提示里
+    # 夜巡残差 A′：无 ask_user 的 kickoff+pause / 「继续」重派；开工预览确认前禁「已跑起来」。
+    assert "尚未真正派工" in hint or "还在准备" in hint
+    assert "kickoff" in hint or "方向：派团队" in hint
+    assert "确认后开工" in hint or "方案已备好" in hint
     assert "至少 N 人" in hint or "tasks 至少" in hint
     assert "写完这句立刻" in hint or "禁止第二句" in hint
     # 按场面 consult：与能力目录 preamble 同强度（禁「可选 vs 必先查」对打）。

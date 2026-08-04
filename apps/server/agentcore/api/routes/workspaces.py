@@ -933,12 +933,21 @@ async def clone_repo_into_workspace(
     folder_repo: FolderRepository = Depends(get_folder_repo),
     shared_svc: SharedSpaceService = Depends(get_shared_space_service),
 ):
-    """Clone a public git repository into a cloud workspace (决策⑤)."""
+    """Clone a public git repository into a cloud workspace (决策⑤ · G3)."""
     target = await _resolve_owned_workspace(
         ws_id, user.user_id, conv_repo, folder_repo, shared_svc
     )
     _require_cloud(target)
     _refuse_shared_extra(target)
+    from agentcore.db.base import async_session_factory
+    from agentcore.workspace.git_credentials import load_git_auth
+
+    auth = None
+    try:
+        async with async_session_factory() as session:
+            auth = await load_git_auth(session, user.user_id)
+    except Exception:  # noqa: BLE001 — public clone still works without PAT table
+        auth = None
     try:
         async with workspace_lock(_storage_key(user.user_id, target)):
             dest = await clone_repo(
@@ -947,6 +956,7 @@ async def clone_repo_into_workspace(
                 conversation_id=target.conversation_id,
                 repo_url=body.repo_url,
                 dest=body.dest,
+                auth=auth,
             )
     except ValueError as e:
         raise ValidationError(str(e)) from e

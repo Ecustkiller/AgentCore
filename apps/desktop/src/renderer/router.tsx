@@ -21,6 +21,7 @@ import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { FeedbackSettings } from "@/pages/more/FeedbackSettings";
+import { GitCredentialSettings } from "@/pages/more/GitCredentialSettings";
 import { ImPrivacySettings } from "@/pages/more/ImPrivacySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { MoreIndexRedirect } from "@/pages/more/MoreIndexRedirect";
@@ -147,6 +148,7 @@ export const router = createHashRouter([
           { index: true, element: <MoreIndexRedirect /> },
           { path: "model", element: <ModelSettings /> },
           { path: "providers", element: <ProviderSettings /> },
+          { path: "git", element: <GitCredentialSettings /> },
           { path: "account", element: <AccountSettings /> },
           { path: "messages", element: <ImPrivacySettings /> },
           { path: "usage", element: <UsageSettings /> },

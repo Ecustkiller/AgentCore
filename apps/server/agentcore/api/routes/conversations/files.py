@@ -360,8 +360,17 @@ async def clone_repo_into_workspace(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Clone a public git repository into the conversation's scratch workspace (决策⑤)."""
+    """Clone a public git repository into the conversation's scratch workspace (决策⑤ · G3)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    from agentcore.db.base import async_session_factory
+    from agentcore.workspace.git_credentials import load_git_auth
+
+    auth = None
+    try:
+        async with async_session_factory() as session:
+            auth = await load_git_auth(session, user.user_id)
+    except Exception:  # noqa: BLE001 — public clone still works without PAT table
+        auth = None
     try:
         async with _conv_workspace_lock(conv, user_id=user.user_id):
             dest = await clone_repo(
@@ -370,6 +379,7 @@ async def clone_repo_into_workspace(
                 conversation_id=conv.id,
                 repo_url=body.repo_url,
                 dest=body.dest,
+                auth=auth,
             )
     except ValueError as e:
         raise ValidationError(str(e)) from e

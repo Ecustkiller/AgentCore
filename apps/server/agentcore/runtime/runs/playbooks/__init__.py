@@ -142,8 +142,11 @@ PLAYBOOKS: dict[str, Playbook] = {
             "默认营销 pack；style=toolshed → tool_dense + 禁营销皮）"
         ),
         slots=(
-            "site(必填,要建的站点/落地页/控制台简述——delegate 时填入 playbook 的 site 参数, "
-            "例:site=\"面向企业客户的智能数据分析 SaaS 中文营销官网\") / "
+            "topic(必填,站点/落地页/控制台一句话简述——"
+            "产物目录固定 site/，不是文件夹槽；"
+            "delegate 时写入 playbook_args.topic；"
+            "亦接受 purpose/brief/description 同义简述键；不接受旧键 site；"
+            "例:topic=\"面向企业客户的智能数据分析 SaaS 中文营销官网\") / "
             "style(可选,气质槽:marketing 默认落地页;"
             "toolshed=控制台 dense / tool pack / 禁营销皮) / "
             "sections(可选,页面分区覆盖清单,不扇出节点;"
@@ -160,8 +163,9 @@ PLAYBOOKS: dict[str, Playbook] = {
             "勿重建文案/整站"
         ),
         slots=(
-            "site(必填,与建站时 site 简述一致或写工作区站点名——"
-            "例:site=\"面向企业客户的智能数据分析 SaaS 中文营销官网\")"
+            "topic(必填,与建站时 topic 简述一致或写工作区站点名——"
+            "产物目录固定 site/，不是文件夹槽；"
+            "例:topic=\"面向企业客户的智能数据分析 SaaS 中文营销官网\")"
         ),
         build=build_website_verify,
     ),
@@ -195,6 +199,22 @@ def available_playbooks() -> str:
     """One-line ``name（summary）`` listing for schema / skill / error messages — single source so
     the available set never drifts between the registry and what the CEO is told."""
     return "；".join(f"{p.name}（{p.summary}）" for p in PLAYBOOKS.values())
+
+
+def playbook_args_schema_description() -> str:
+    """``delegate.playbook_args`` schema description — required-slot cues from ``PLAYBOOKS``.
+
+    Skill / Playbook docs point here for slots; always-on path skips consult for
+    build_website, so the tool schema must carry at least the required keys.
+    Full optional detail remains in each playbook's ``slots`` string (consult skill).
+    """
+    required_cues = "；".join(f"{p.name}→{p.slots}" for p in PLAYBOOKS.values())
+    return (
+        "具名 playbook 槽位对象（与 playbook/playbook_id 联用；手写 tasks 时勿传）。"
+        "建站必填 topic（简述；亦接受 purpose/brief/description；不接受旧键 site）、"
+        "绿场必填 app——勿空对象。"
+        f"{required_cues}"
+    )
 
 
 def collect_playbook_notes(tasks: list[dict[str, Any]]) -> list[str]:
@@ -237,6 +257,12 @@ def expand_playbook(
     if args is not None and not isinstance(args, dict):
         return [], [f"playbook_args 必须是对象；{pb.name} 槽位：{pb.slots}"]
     slot_args: dict[str, Any] = dict(args or {})
+    if name in ("build_website", "build_website_verify"):
+        from agentcore.runtime.runs.playbooks.build_site import (
+            normalize_website_topic_args,
+        )
+
+        slot_args = normalize_website_topic_args(slot_args)
     um = clean_str(user_message)
     if um:
         slot_args[USER_MESSAGE_MECH_KEY] = um
@@ -254,4 +280,5 @@ __all__ = [
     "available_playbooks",
     "collect_playbook_notes",
     "expand_playbook",
+    "playbook_args_schema_description",
 ]

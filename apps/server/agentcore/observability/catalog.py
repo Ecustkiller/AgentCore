@@ -700,6 +700,17 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='graph_append.host_journal_load_failed'),
     EventSpec(name='graph_append.host_resolve_failed'),
     EventSpec(name='graph_append.host_writer_seq_fallback'),
+    EventSpec(
+        name='git.create_pr.ok',
+        description='结构化 git create_pr 成功（GitHub-only）',
+        fields={
+            'owner': FieldType('str'),
+            'repo': FieldType('str'),
+            'number': FieldType('int'),
+            'base': FieldType('str'),
+            'head': FieldType('str'),
+        },
+    ),
     EventSpec(name='handoff.apply_failed'),
     EventSpec(name='handoff.apply_file_failed'),
     EventSpec(name='handoff.apply_snapshot_missing'),

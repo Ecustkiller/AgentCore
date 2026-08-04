@@ -6,6 +6,7 @@ import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
 import {
   type DefaultProviderGroup,
+  PLATFORM_POINTER_ID,
   buildDefaultProviderGroups,
   decodePointer,
   encodePointer,
@@ -31,13 +32,48 @@ import {
 import type { LlmProviderView } from "@/services/llmProviders";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { SettingsHeader } from "./SettingsHeader";
+
+/** `<select>` 哨兵：进入 BYOK 手填 model id（非 encodePointer 值）。 */
+const CUSTOM_SELECT_VALUE = "__custom__";
 
 /** groups 内所有 group.models 合计为空（有 provider 但 models 空也算）。 */
 function hasSelectableModels(groups: DefaultProviderGroup[]): boolean {
   return groups.some((g) => g.models.length > 0);
+}
+
+/** 存在 BYOK 服务商分组时，即使目录为空也可手填 model id。 */
+function hasByokProviderGroups(groups: DefaultProviderGroup[]): boolean {
+  return groups.some((g) => g.providerId !== PLATFORM_POINTER_ID);
+}
+
+/** 目录项或 BYOK 自定义均可选。 */
+function canChooseModel(groups: DefaultProviderGroup[]): boolean {
+  return hasSelectableModels(groups) || hasByokProviderGroups(groups);
+}
+
+function pointerInGroups(
+  groups: DefaultProviderGroup[],
+  value: string,
+): boolean {
+  if (!value) return false;
+  return groups.some((g) =>
+    g.models.some((m) => encodePointer(g.providerId, m.model) === value),
+  );
+}
+
+/** 从分组取第一个可选槽（平台或 BYOK），用于新建种子。 */
+function firstSlotFromGroups(
+  groups: DefaultProviderGroup[],
+): ModelProfileSlot | null {
+  for (const g of groups) {
+    const m = g.models[0];
+    if (!m) continue;
+    return decodePointer(encodePointer(g.providerId, m.model));
+  }
+  return null;
 }
 
 /** 无可选模型时的引导：平台开闸空目录 vs BYOK 休眠分流。 */
@@ -242,12 +278,14 @@ function ModelProfilesSection({
       };
     }
     const first = catalogModels.find((m) => m.available !== false);
-    if (!first) return null;
-    return {
-      origin: first.origin,
-      provider_id: first.provider_id ?? null,
-      model: first.id,
-    };
+    if (first) {
+      return {
+        origin: first.origin,
+        provider_id: first.provider_id ?? null,
+        model: first.id,
+      };
+    }
+    return firstSlotFromGroups(groups);
   };
 
   const withPending = async (fn: () => Promise<void>) => {
@@ -300,7 +338,8 @@ function ModelProfilesSection({
 
   const onCreate = () => {
     const main = seedMain();
-    if (!main) {
+    // 无目录种子时：有 BYOK 仍可开编辑器手填；仅平台空目录 / 无服务商才拦。
+    if (!main && providers.length === 0) {
       setActionError(
         <NoAvailableModelsGuide platformAvailable={platformAvailable} />,
       );
@@ -379,7 +418,7 @@ function ModelProfilesSection({
               platformAvailable={platformAvailable}
               initial={{
                 name: "未命名组合",
-                main: seedMain(),
+                main: seedMain(), // 可能为 null：BYOK 空目录时靠「自定义…」手填
                 worker: null,
                 background: null,
               }}
@@ -564,7 +603,8 @@ function ProfileEditor({
   const [main, setMain] = useState(initial.main);
   const [worker, setWorker] = useState(initial.worker);
   const [background, setBackground] = useState(initial.background);
-  const noSelectableModels = !hasSelectableModels(groups);
+  const canChoose = canChooseModel(groups);
+  const showEmptyGuide = !canChoose;
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/20 px-3 py-3">
@@ -588,7 +628,7 @@ function ProfileEditor({
           disabled={pending}
           onChange={(value) => setMain(decodePointer(value))}
         />
-        {noSelectableModels && (
+        {showEmptyGuide && (
           <NoAvailableModelsGuide
             platformAvailable={platformAvailable}
             className="mt-1"
@@ -601,7 +641,7 @@ function ProfileEditor({
           id="profile-worker"
           groups={groups}
           value={pointerValue(worker)}
-          disabled={pending || noSelectableModels}
+          disabled={pending || !canChoose}
           followLabel="跟随主模型"
           onChange={(value) => setWorker(decodePointer(value))}
         />
@@ -615,7 +655,7 @@ function ProfileEditor({
           id="profile-background"
           groups={groups}
           value={pointerValue(background)}
-          disabled={pending || noSelectableModels}
+          disabled={pending || !canChoose}
           followLabel="跟随主模型"
           onChange={(value) => setBackground(decodePointer(value))}
         />
@@ -670,35 +710,149 @@ function ProviderModelSelect({
   followLabel?: string;
   onChange: (value: string) => void;
 }) {
+  const byokGroups = useMemo(
+    () => groups.filter((g) => g.providerId !== PLATFORM_POINTER_ID),
+    [groups],
+  );
+  const canCustom = byokGroups.length > 0;
+  const valueListed = !value || pointerInGroups(groups, value);
+
+  const decoded = value ? decodePointer(value) : null;
+  const unlistedByok =
+    canCustom &&
+    !!value &&
+    !valueListed &&
+    decoded?.origin === "byok" &&
+    !!decoded.provider_id;
+
+  const [customOpen, setCustomOpen] = useState(unlistedByok);
+  const [customProviderId, setCustomProviderId] = useState(
+    () =>
+      (decoded?.origin === "byok" && decoded.provider_id) ||
+      byokGroups[0]?.providerId ||
+      "",
+  );
+  const [customModel, setCustomModel] = useState(() =>
+    unlistedByok && decoded ? decoded.model : "",
+  );
+
+  useEffect(() => {
+    if (unlistedByok && decoded?.provider_id) {
+      // 已在自定义态时勿用 decode 回写 input，避免 trim 后吞掉正在输入的空格。
+      if (!customOpen) {
+        setCustomProviderId(decoded.provider_id);
+        setCustomModel(decoded.model);
+        setCustomOpen(true);
+      }
+      return;
+    }
+    if (valueListed && value !== "") {
+      setCustomOpen(false);
+    }
+  }, [
+    unlistedByok,
+    valueListed,
+    value,
+    decoded?.provider_id,
+    decoded?.model,
+    customOpen,
+  ]);
+
+  const showCustom = customOpen && canCustom;
+  const selectValue = showCustom ? CUSTOM_SELECT_VALUE : value;
+
+  const emitCustom = (providerId: string, model: string) => {
+    const trimmed = model.trim();
+    if (providerId && trimmed) {
+      onChange(encodePointer(providerId, trimmed));
+    } else {
+      onChange("");
+    }
+  };
+
   return (
-    <select
-      id={id}
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value)}
-      className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-    >
-      {followLabel !== undefined ? (
-        <option value="">{followLabel}</option>
-      ) : (
-        value === "" && (
-          <option value="" disabled>
-            选择模型
-          </option>
-        )
-      )}
-      {groups.map((group) => (
-        <optgroup key={group.providerId} label={group.providerLabel}>
-          {group.models.map((m) => (
-            <option
-              key={m.model}
-              value={encodePointer(group.providerId, m.model)}
-            >
-              {m.label}
+    <div>
+      <select
+        id={id}
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM_SELECT_VALUE) {
+            const pid = customProviderId || byokGroups[0]?.providerId || "";
+            setCustomProviderId(pid);
+            setCustomModel("");
+            setCustomOpen(true);
+            onChange("");
+            return;
+          }
+          setCustomOpen(false);
+          onChange(next);
+        }}
+        className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+      >
+        {followLabel !== undefined ? (
+          <option value="">{followLabel}</option>
+        ) : (
+          value === "" &&
+          !showCustom && (
+            <option value="" disabled>
+              选择模型
             </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+          )
+        )}
+        {groups.map((group) => (
+          <optgroup key={group.providerId} label={group.providerLabel}>
+            {group.models.map((m) => (
+              <option
+                key={m.model}
+                value={encodePointer(group.providerId, m.model)}
+              >
+                {m.label}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        {canCustom && <option value={CUSTOM_SELECT_VALUE}>自定义…</option>}
+      </select>
+      {showCustom && (
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={customProviderId}
+              disabled={disabled}
+              aria-label="自定义服务商"
+              onChange={(e) => {
+                const pid = e.target.value;
+                setCustomProviderId(pid);
+                emitCustom(pid, customModel);
+              }}
+              className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 sm:max-w-[40%]"
+            >
+              {byokGroups.map((g) => (
+                <option key={g.providerId} value={g.providerId}>
+                  {g.providerLabel}
+                </option>
+              ))}
+            </select>
+            <input
+              value={customModel}
+              disabled={disabled}
+              aria-label="自定义 model id"
+              placeholder="model id，如 ep-xxxx"
+              onChange={(e) => {
+                const m = e.target.value;
+                setCustomModel(m);
+                emitCustom(customProviderId, m);
+              }}
+              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            目录未覆盖时可手填（火山 ep-、中转私有 id 等）。
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

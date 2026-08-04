@@ -102,7 +102,7 @@ def test_resolve_none_with_reason_ok():
 
 def test_resolve_named_playbook_ok():
     name, reason, err = resolve_playbook_declaration(
-        {"playbook": "build_website", "playbook_args": {"site": "X"}}
+        {"playbook": "build_website", "playbook_args": {"topic": "X"}}
     )
     assert err is None
     assert name == "build_website"
@@ -178,7 +178,7 @@ def test_website_intent_named_build_website_ok():
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook": "build_website",
-            "playbook_args": {"site": "面向中小商家的 GEO 营销官网"},
+            "playbook_args": {"topic": "面向中小商家的 GEO 营销官网"},
         },
         user_message="帮我做个官网",
     )
@@ -208,7 +208,7 @@ def test_toolshed_intent_named_build_website_style_ok():
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook": "build_website",
-            "playbook_args": {"site": "订单运营控制台", "style": "toolshed"},
+            "playbook_args": {"topic": "订单运营控制台", "style": "toolshed"},
         },
         user_message="帮我搭一个工具台",
     )
@@ -222,7 +222,7 @@ def test_legacy_build_toolshed_playbook_unknown():
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook": "build_toolshed",
-            "playbook_args": {"site": "订单运营控制台"},
+            "playbook_args": {"topic": "订单运营控制台"},
         },
         user_message="帮我搭一个工具台",
     )
@@ -244,7 +244,7 @@ def test_automation_delivery_ignored_named_playbooks_still_ok():
         {
             "playbook": "build_website",
             "playbook_args": {
-                "site": "Ops",
+                "topic": "Ops",
                 "style": "toolshed",
                 "sections": ["应用外壳"],
             },
@@ -266,7 +266,7 @@ def test_automation_console_allows_build_website_toolshed_style():
         {
             "playbook": "build_website",
             "playbook_args": {
-                "site": "Ops",
+                "topic": "Ops",
                 "style": "toolshed",
                 "sections": ["应用外壳"],
             },
@@ -282,7 +282,7 @@ def test_automation_plan_allows_website():
 
     conf = DeliveryConfirmation(format_id="f2", label="仅方案", source="ask_user")
     name_w, _, err_w = resolve_playbook_declaration(
-        {"playbook": "build_website", "playbook_args": {"site": "X"}},
+        {"playbook": "build_website", "playbook_args": {"topic": "X"}},
         automation_delivery=conf,
     )
     assert err_w is None
@@ -374,7 +374,7 @@ def test_build_website_verify_named_ok():
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook": "build_website_verify",
-            "playbook_args": {"site": "GEO 官网"},
+            "playbook_args": {"topic": "GEO 官网"},
         },
         user_message="请对本站做第二段整页验收",
     )

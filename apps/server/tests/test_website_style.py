@@ -11,8 +11,10 @@ from agentcore.runtime.facts import FactKind, TurnFactLog, TurnPausedFact, curre
 from agentcore.runtime.runs.website_style import (
     DEFAULT_STYLE_ID,
     STYLE_ID_HEADING,
+    StyleConfirmation,
     build_website_missing_style_error,
     clear_style_confirmation,
+    design_prompt_block,
     ensure_full_auto_default_style,
     extract_style_id_from_design,
     get_style_confirmation,
@@ -221,3 +223,31 @@ def test_build_website_missing_style_error_mentions_ask_user():
     assert "ask_user" in err
     _ = AutonomyPolicy.MANAGED  # keyed exemption exists in product vocabulary
     assert "full_auto" in err.lower()
+
+
+def test_design_prompt_block_default_injects_positive_recipe():
+    """无确认 / s_default：软注入正向 DESIGN 配方；非默认选定风格不塞完整配方。"""
+    none_block = design_prompt_block(style=None)
+    assert DEFAULT_STYLE_ID in none_block
+    assert "正向配方" in none_block
+    assert "单一视觉焦点" in none_block
+    assert "中性" in none_block
+    assert "渐变" in none_block
+    assert "glow" in none_block
+    assert "粒子" in none_block
+    assert "反馈" in none_block
+
+    default_conf = StyleConfirmation(
+        style_id=DEFAULT_STYLE_ID,
+        label="简洁克制·高对比",
+        source="full_auto_default",
+    )
+    default_block = design_prompt_block(style=default_conf)
+    assert "正向配方" in default_block
+    assert "单一视觉焦点" in default_block
+
+    picked = StyleConfirmation(style_id="s0", label="深色科技", source="ask_user")
+    picked_block = design_prompt_block(style=picked)
+    assert "s0" in picked_block
+    assert "正向配方" not in picked_block
+    assert "单一视觉焦点" not in picked_block

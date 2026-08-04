@@ -196,3 +196,18 @@ export async function wsWriteFileText(
   );
   return { ok: res.ok, mtimeMs: res.mtime_ms, conflict: res.conflict };
 }
+
+/** Shallow-clone an http(s) repo into a cloud workspace (G3). */
+export async function wsCloneRepo(
+  wsId: string,
+  input: { repoUrl: string; dest?: string | null },
+): Promise<string> {
+  const res = await api.post<Schemas["CloneRepoResponse"]>(
+    `${wsPath(wsId)}/clone`,
+    {
+      repo_url: input.repoUrl,
+      dest: input.dest ?? null,
+    } satisfies Schemas["CloneRepoRequest"],
+  );
+  return res.path;
+}

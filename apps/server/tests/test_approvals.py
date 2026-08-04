@@ -998,7 +998,7 @@ async def test_session_file_trust_still_prompts_git_push():
 
 
 async def test_delegation_grant_does_not_cover_git_push():
-    """Kickoff/delegation grant covers git writes except push."""
+    """Kickoff/delegation grant covers git writes except push / create_pr."""
     from agentcore.core.types import (
         CommandAxis,
         FileWriteAxis,
@@ -1034,6 +1034,11 @@ async def test_delegation_grant_does_not_cover_git_push():
     assert gate.will_prompt(
         tool_name="git",
         arguments={"subcommand": "push"},
+        execution_id="exec-1",
+    )
+    assert gate.will_prompt(
+        tool_name="git",
+        arguments={"subcommand": "create_pr", "title": "x"},
         execution_id="exec-1",
     )
 

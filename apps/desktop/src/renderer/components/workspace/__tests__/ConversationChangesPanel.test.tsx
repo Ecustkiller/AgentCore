@@ -16,6 +16,22 @@ vi.mock("@/hooks/useLocalTurnBaselineIds", () => ({
   useLocalTurnBaselineIds,
 }));
 
+vi.mock("@/hooks/useGitRepoStatus", () => ({
+  useGitRepoStatus: () => ({ status: null, refresh: vi.fn() }),
+}));
+
+vi.mock("@/components/workspace/WorkspaceModeControl", () => ({
+  useWorkspaceModeState: () => null,
+}));
+
+vi.mock("@/hooks/useWorkspaces", () => ({
+  useConversationWorkspace: () => null,
+}));
+
+vi.mock("@/lib/capabilities", () => ({
+  hasLocalFiles: () => false,
+}));
+
 vi.mock("@/components/chat/TurnFileChangesReview", () => ({
   TurnFileChangesReview: ({
     messageId,

@@ -742,6 +742,11 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "simplified",
     reason: "反馈设置页，手机暂不做",
   },
+  "more/GitCredentialSettings": {
+    verdict: "simplified",
+    reason:
+      "GitHub PAT / clone·SCM 凭据页仅桌面本波；手机无本地 SCM 与 clone 对话框，云 clone 凭据后置",
+  },
   "more/RedirectToOfficialChat": {
     verdict: "simplified",
     reason:

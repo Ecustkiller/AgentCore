@@ -7,7 +7,7 @@ lives in the CEO core; advanced HOW lives in ``consult_skill(team_orchestration_
 from __future__ import annotations
 
 from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
-from agentcore.runtime.runs.playbooks import PLAYBOOKS
+from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_description
 
 # Shared task-level deliverable shape (delegate tasks + replan binds/add).
 TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
@@ -52,8 +52,9 @@ DELEGATE_DESCRIPTION = (
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
     "跨回合加人 append_to_execution_id=\"latest\"。"
-    "playbook 可选（建站推荐 build_website，控制台 dense 加 playbook_args.style=toolshed；"
-    "绿场软件/SPA 推荐 build_app；其余可省略直接手写 tasks）；与 tasks 二选一。"
+    "playbook 可选（建站推荐 build_website 且必填 playbook_args.topic；"
+    "控制台 dense 另加 style=toolshed；绿场软件/SPA 推荐 build_app 且必填 app；"
+    "其余可省略直接手写 tasks）；与 tasks 二选一。"
     "交付靠 deliverable.form/artifacts；勿再填已删的 completion_criteria。"
     "拿不准怎么拆再 consult_skill(team_orchestration_advanced)。"
 )
@@ -132,10 +133,11 @@ DELEGATE_PARAMETERS = {
             "enum": sorted(PLAYBOOKS),
             "description": (
                 "可选固化形状名（与 tasks 二选一：传此字段时勿再传 tasks，"
-                "槽位进 playbook_args）。建站/落地页推荐 build_website；"
+                "槽位进 playbook_args）。建站/落地页推荐 build_website"
+                "（必填 playbook_args.topic；产物目录固定 site/）；"
                 "控制台/工具台 dense 同用 build_website + playbook_args.style=toolshed；"
-                "绿场软件/SPA 完整交付推荐 build_app；其余自由组队可省略，"
-                "直接手写 tasks。亦可用 playbook_id。"
+                "绿场软件/SPA 完整交付推荐 build_app（必填 playbook_args.app）；"
+                "其余自由组队可省略，直接手写 tasks。亦可用 playbook_id。"
             ),
         },
         "playbook_id": {
@@ -152,7 +154,10 @@ DELEGATE_PARAMETERS = {
                 "软件意图禁止仅因单文件缩成 1 名前端 + 单 HTML。"
             ),
         },
-        "playbook_args": {"type": "object"},
+        "playbook_args": {
+            "type": "object",
+            "description": playbook_args_schema_description(),
+        },
         "coordination": {
             "type": "string",
             "enum": ["wall", "none"],

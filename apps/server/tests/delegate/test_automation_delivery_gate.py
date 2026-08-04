@@ -90,7 +90,7 @@ async def test_execute_allows_build_website_toolshed_style_without_style_ledger(
         {
             "playbook": "build_website",
             "playbook_args": {
-                "site": "Ops",
+                "topic": "Ops",
                 "style": "toolshed",
                 "sections": ["应用外壳", "数据表格"],
             },
@@ -115,7 +115,7 @@ async def test_execute_allows_build_website_without_style_ledger():
     result = await t.execute(
         {
             "playbook": "build_website",
-            "playbook_args": {"site": "Acme 落地页", "sections": ["首页"]},
+            "playbook_args": {"topic": "Acme 落地页", "sections": ["首页"]},
             "coordinate": False,
         },
         local_ctx(),
@@ -142,7 +142,7 @@ async def test_execute_runnable_ledger_no_longer_rejects_website_toolshed_style(
         {
             "playbook": "build_website",
             "playbook_args": {
-                "site": "Ops",
+                "topic": "Ops",
                 "style": "toolshed",
                 "sections": ["应用外壳", "数据表格"],
             },
@@ -172,7 +172,7 @@ async def test_execute_plan_ledger_no_longer_rejects_website():
         {
             "playbook": "build_website",
             "playbook_args": {
-                "site": "X",
+                "topic": "X",
                 "style": "toolshed",
                 "sections": ["应用外壳"],
             },
@@ -185,7 +185,7 @@ async def test_execute_plan_ledger_no_longer_rejects_website():
     r2 = await t.execute(
         {
             "playbook": "build_website",
-            "playbook_args": {"site": "X", "sections": ["首页"]},
+            "playbook_args": {"topic": "X", "sections": ["首页"]},
             "coordinate": False,
         },
         local_ctx(),

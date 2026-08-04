@@ -1,6 +1,11 @@
 import { TurnFileChangesReview } from "@/components/chat/TurnFileChangesReview";
 import { EmptyHint } from "@/components/files/parts";
+import { GitChangesSection } from "@/components/workspace/GitChangesSection";
+import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
+import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
+import { useConversationWorkspace } from "@/hooks/useWorkspaces";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { shouldIncludeChangesTurn } from "@/lib/conversationFileChanges";
 import {
   type FileArtifact,
@@ -8,6 +13,7 @@ import {
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
+import { gitTrackHasWork } from "@/lib/gitRepoStatus";
 import { useConversationStore } from "@/stores/conversation";
 import {
   assistantProjectionId,
@@ -19,9 +25,8 @@ import { Diff } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 /**
- * 右坞条件「改动」tab 体 —— 本对话 AI 文件改动 / 回合基线聚合（前端UX设计.md §十 · P0c）。
- * 顶栏有改动记录、Local zip 基线或深链才挂本面板；按回合列出，复用 {@link TurnFileChangesReview}。
- * 产物卡「查看改动」经 {@link useSidePanelStore.showChanges} 聚焦同源入口。
+ * 右坞条件「改动」tab 体 —— 双轨：Git SCM（U2/U3）∥ 回合 zip 回滚（P0c）。
+ * 顶栏有改动记录、Local zip 基线、Git 有货或深链才挂本面板。
  */
 
 interface TurnChanges {
@@ -38,6 +43,22 @@ export function ConversationChangesPanel() {
   const byId = useExecutionStore((s) => s.byId);
   const focusMessageId = useSidePanelStore((s) => s.changesFocusMessageId);
   const baselineMessageIds = useLocalTurnBaselineIds(conversationId, messages);
+
+  const wsState = useWorkspaceModeState(conversationId);
+  const convWs = useConversationWorkspace(conversationId);
+  const canGit =
+    hasLocalFiles() &&
+    !!wsState?.effective.isLocal &&
+    !!wsState.effective.rootId &&
+    !wsState.effective.rootMissing;
+  const rootId = canGit ? (wsState?.effective.rootId ?? null) : null;
+  // FileDetail / createLocalRootSource 期望 workspace 相对路径；git 仍在仓根跑。
+  const workspaceSubpath = convWs?.subpath ?? "";
+  const { status: gitStatus, refresh: refreshGit } = useGitRepoStatus(
+    rootId,
+    canGit,
+  );
+  const showGitTrack = gitTrackHasWork(gitStatus);
 
   const turns = useMemo((): TurnChanges[] => {
     const out: TurnChanges[] = [];
@@ -97,13 +118,13 @@ export function ConversationChangesPanel() {
     );
   }
 
-  if (turns.length === 0) {
+  if (turns.length === 0 && !showGitTrack) {
     return (
       <EmptyHint
         inline
         icon={<Diff size={26} className="text-muted-foreground/40" />}
         title="暂无改动"
-        hint="本对话尚无 AI 文件改动或可恢复的回合基线。产物卡「查看改动」与此处同源。"
+        hint="本对话尚无 AI 文件改动、可恢复的回合基线，或 Git 未提交变更。产物卡「查看改动」与此处同源。"
       />
     );
   }
@@ -111,35 +132,53 @@ export function ConversationChangesPanel() {
   return (
     <div className="h-full overflow-y-auto p-3">
       <div className="space-y-4">
-        {turns.map((t) => {
-          const focused = t.messageId === focusMessageId;
-          return (
-            <section
-              key={t.messageId}
-              ref={focused ? focusRef : undefined}
-              className={`rounded-xl border border-border bg-card ${
-                focused ? "ring-1 ring-primary/40" : ""
-              }`}
-            >
-              <header className="border-b border-border px-3 py-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  {t.label}
-                  {t.artifacts.length > 0 && (
-                    <span className="ml-2 tabular-nums text-muted-foreground/80">
-                      {t.artifacts.length} 个文件
-                    </span>
-                  )}
-                </h3>
-              </header>
-              <TurnFileChangesReview
-                artifacts={t.artifacts}
-                conversationId={conversationId}
-                messageId={t.messageId}
-                variant="panel"
-              />
-            </section>
-          );
-        })}
+        {showGitTrack && rootId && gitStatus ? (
+          <GitChangesSection
+            rootId={rootId}
+            status={gitStatus}
+            onRefresh={() => void refreshGit()}
+            subpath={workspaceSubpath}
+          />
+        ) : null}
+
+        {turns.length > 0 ? (
+          <div className="space-y-4" data-testid="zip-changes-track">
+            {showGitTrack ? (
+              <p className="px-0.5 text-xs text-muted-foreground">
+                回合改动（zip 基线回滚 · 与 Git 正交）
+              </p>
+            ) : null}
+            {turns.map((t) => {
+              const focused = t.messageId === focusMessageId;
+              return (
+                <section
+                  key={t.messageId}
+                  ref={focused ? focusRef : undefined}
+                  className={`rounded-xl border border-border bg-card ${
+                    focused ? "ring-1 ring-primary/40" : ""
+                  }`}
+                >
+                  <header className="border-b border-border px-3 py-2">
+                    <h3 className="text-xs font-medium text-muted-foreground">
+                      {t.label}
+                      {t.artifacts.length > 0 && (
+                        <span className="ml-2 tabular-nums text-muted-foreground/80">
+                          {t.artifacts.length} 个文件
+                        </span>
+                      )}
+                    </h3>
+                  </header>
+                  <TurnFileChangesReview
+                    artifacts={t.artifacts}
+                    conversationId={conversationId}
+                    messageId={t.messageId}
+                    variant="panel"
+                  />
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </div>
   );

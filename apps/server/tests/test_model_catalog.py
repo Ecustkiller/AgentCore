@@ -28,13 +28,19 @@ pytestmark = pytest.mark.anyio
 # --- helpers -----------------------------------------------------------------
 
 
-def _prov(pid: str, *, default_model: str = "deepseek-v4-flash", label: str = "P"):
+def _prov(
+    pid: str,
+    *,
+    default_model: str = "deepseek-v4-flash",
+    label: str = "P",
+    base_url: str | None = None,
+):
     return SimpleNamespace(
         id=pid,
         user_id="u1",
         label=label,
         default_model=default_model,
-        base_url=f"http://{pid}/v1",
+        base_url=base_url if base_url is not None else f"http://{pid}/v1",
         api_key_enc=b"x",
         supports_tools=None,
         status="active",
@@ -161,6 +167,80 @@ async def test_catalog_with_key_mixes_byok_and_platform(monkeypatch):
     # BYOK rows carry the provider label for UI grouping.
     byok = [m for m in cat.models if m.origin == "byok"]
     assert all(m.available and m.provider_label == "DeepSeek" for m in byok)
+
+
+async def test_catalog_discovery_failed_keeps_vendor_presets(monkeypatch):
+    """DeepSeek-class base_url: discovery None still lists ≥2 preset model ids."""
+    reset_discovery_cache_for_tests()
+    row = _prov(
+        "prov-ds",
+        default_model="deepseek-v4-flash",
+        label="DeepSeek",
+        base_url="https://api.deepseek.com",
+    )
+    monkeypatch.setattr(catalog.settings, "platform_api_key", "")
+    monkeypatch.setattr(catalog.settings, "billing_mode", "byok")
+    _mock_catalog(
+        monkeypatch,
+        providers=[row],
+        selection=ModelSelection(
+            model="deepseek-v4-flash", origin="byok", provider_id="prov-ds"
+        ),
+        discovered={"prov-ds": None},
+    )
+    cat = await resolve_model_catalog(None, "u1")
+    byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-ds"}
+    assert "deepseek-v4-flash" in byok_ids
+    assert "deepseek-v4-pro" in byok_ids
+    assert len(byok_ids) >= 2
+
+
+async def test_catalog_discovery_unions_with_vendor_presets(monkeypatch):
+    """Discovery success ∪ presets: both preset and endpoint-only ids appear."""
+    reset_discovery_cache_for_tests()
+    row = _prov(
+        "prov-ds",
+        default_model="deepseek-v4-flash",
+        label="DeepSeek",
+        base_url="https://api.deepseek.com/v1/",  # alias + trailing slash
+    )
+    monkeypatch.setattr(catalog.settings, "platform_api_key", "")
+    monkeypatch.setattr(catalog.settings, "billing_mode", "byok")
+    _mock_catalog(
+        monkeypatch,
+        providers=[row],
+        selection=ModelSelection(
+            model="deepseek-v4-flash", origin="byok", provider_id="prov-ds"
+        ),
+        discovered={"prov-ds": ["deepseek-v4-flash", "endpoint-only-model"]},
+    )
+    cat = await resolve_model_catalog(None, "u1")
+    byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-ds"}
+    assert "deepseek-v4-flash" in byok_ids
+    assert "deepseek-v4-pro" in byok_ids  # from preset, not discovery
+    assert "endpoint-only-model" in byok_ids
+
+
+async def test_catalog_custom_base_url_has_no_presets(monkeypatch):
+    """Unknown base_url: only default + discovery (no vendor preset injection)."""
+    reset_discovery_cache_for_tests()
+    row = _prov(
+        "prov-custom",
+        default_model="my-default",
+        label="Custom",
+        base_url="https://my-proxy.example/v1",
+    )
+    monkeypatch.setattr(catalog.settings, "platform_api_key", "")
+    monkeypatch.setattr(catalog.settings, "billing_mode", "byok")
+    _mock_catalog(
+        monkeypatch,
+        providers=[row],
+        selection=ModelSelection(model="my-default", origin="byok", provider_id="prov-custom"),
+        discovered={"prov-custom": None},
+    )
+    cat = await resolve_model_catalog(None, "u1")
+    byok_ids = [m.id for m in cat.models if m.origin == "byok"]
+    assert byok_ids == ["my-default"]
 
 
 async def test_catalog_same_model_id_under_two_providers(monkeypatch):

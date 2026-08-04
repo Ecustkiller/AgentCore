@@ -13,6 +13,22 @@ from agentcore.runtime.runs.web_quality_rules import anti_slop_prompt_block
 
 # 建站 / 落地页产物约定（下游便签与 QA 回读共用；禁 CEO 手糊内容→单前端）。
 _BUILD_WEBSITE_DIR = "site"
+# 简述同义词 → 规范键 topic；永不映射旧键 site（与目录 site/ 撞名已废）。
+TOPIC_BRIEF_ALIASES: tuple[str, ...] = ("purpose", "brief", "description")
+
+
+def normalize_website_topic_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Promote brief-synonym keys to canonical ``topic``; never accept legacy ``site``."""
+    out = dict(args)
+    if clean_str(out.get("topic")):
+        return out
+    for key in TOPIC_BRIEF_ALIASES:
+        alt = clean_str(out.get(key))
+        if alt:
+            out["topic"] = alt
+            return out
+    return out
+
 _BUILD_WEBSITE_COPY = f"{_BUILD_WEBSITE_DIR}/copy.md"
 _BUILD_WEBSITE_HTML = f"{_BUILD_WEBSITE_DIR}/index.html"
 _BUILD_WEBSITE_CSS = f"{_BUILD_WEBSITE_DIR}/styles.css"
@@ -29,7 +45,9 @@ STYLE_TOOLSHED = "toolshed"
 _ALLOWED_STYLES = frozenset({STYLE_MARKETING, STYLE_TOOLSHED})
 
 # 文案包结构化板块（验收用 required_sections，替代高 min_length）
+# 首项对齐 task 里 visual thesis / 信息架构，must_contain_soft 仍软拦。
 _BUILD_WEBSITE_COPY_SECTIONS = (
+    "视觉 thesis",
     "品牌一句话",
     "各分区标题与正文",
     "CTA",
@@ -43,7 +61,7 @@ _BUILD_WEBSITE_VISUAL_THESIS = (
 )
 
 _BUILD_WEBSITE_DOMAIN_HINT = (
-    "站点类型默认按营销/落地页审美；若 site 描述明显是产品控制台 / 工具页，"
+    "站点类型默认按营销/落地页审美；若 topic（简述）明显是产品控制台 / 工具页，"
     "按工具页信息架构优先。"
 )
 
@@ -58,6 +76,7 @@ _BUILD_TOOLSHED_DOMAIN_HINT = (
 )
 
 _BUILD_TOOLSHED_COPY_SECTIONS = (
+    "信息架构",
     "产品一句话",
     "各分区标题与正文",
     "主操作 CTA",
@@ -67,7 +86,7 @@ _BUILD_TOOLSHED_COPY_SECTIONS = (
 
 def _website_qa_task(
     *,
-    site: str,
+    topic: str,
     copy_files_qa: str,
     tone_qa: str,
     deferred_ok: bool,
@@ -80,7 +99,7 @@ def _website_qa_task(
         else "（本 playbook 专跑整页验收；工作区已有 site/ 产物，勿重做文案/骨架/整站）"
     )
     return (
-        f"独立【整页验收】站点【{site}】{defer_line}："
+        f"独立【整页验收】站点【{topic}】{defer_line}："
         f"file_read 全部产物（"
         f"{copy_files_qa} / `{_BUILD_WEBSITE_DESIGN}` / `{_BUILD_WEBSITE_HTML}` / "
         f"`{_BUILD_WEBSITE_CSS}` / `{_BUILD_WEBSITE_JS}` / "
@@ -111,11 +130,12 @@ def _build_three_chain_site(
     visual_thesis: str,
     domain_hint: str,
     copy_sections: tuple[str, ...],
-    site_slot_hint: str,
+    topic_slot_hint: str,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Shared three-chain site pipeline: copy → frontend (DESIGN+page+CONTRACT) → QA.
 
     ``sections`` is a coverage checklist only — no partition fan-out / assemble.
+    Slot ``topic`` = one-line brief; artifacts always under fixed ``site/``.
     """
     from agentcore.runtime.runs.website_catalog import (
         catalog_contract_stub,
@@ -129,9 +149,12 @@ def _build_three_chain_site(
         get_style_confirmation,
     )
 
-    site = clean_str(args.get("site"))
-    if not site:
-        return [], [f"{playbook_name} 需要 slot『site』（{site_slot_hint}）"]
+    topic = clean_str(args.get("topic"))
+    if not topic:
+        return [], [
+            f"{playbook_name} 需要 slot『topic』（{topic_slot_hint}；"
+            f"产物目录固定 {_BUILD_WEBSITE_DIR}/，不是文件夹槽）"
+        ]
     sections = clean_str_list(args.get("sections"), cap=None)
     if not sections:
         sections = list(default_sections)
@@ -161,7 +184,7 @@ def _build_three_chain_site(
                 f"{anti_slop}"
                 "任务书只消费事实输入（品牌 / 受众 / 素材 / 用户明示偏好）；"
                 "禁止在文案包里自拟配色色板 / 动效清单当施工图（色板归前端 DESIGN）。"
-                f"为站点【{site}】撰写完整文案包{aud}：品牌一句话、各区块标题 / 正文 / CTA、"
+                f"为站点【{topic}】撰写完整文案包{aud}：品牌一句话、各区块标题 / 正文 / CTA、"
                 "SEO 标题与 meta description、可选的微文案（按钮 / 脚注）。"
                 f"须覆盖这些分区：{all_sections_label}。"
                 f"用 file_write 落盘 `{_BUILD_WEBSITE_COPY}`；"
@@ -183,7 +206,7 @@ def _build_three_chain_site(
             "role": "前端开发者",
             "task": (
                 f"先 file_read 上游文案（`{_BUILD_WEBSITE_COPY}`），"
-                f"为站点【{site}】一人包整页实现{stack_hint}{aud}。"
+                f"为站点【{topic}】一人包整页实现{stack_hint}{aud}。"
                 f"{design_block}"
                 "先落 DESIGN（含 style 账 / tokens），再实现整页；"
                 "颜色 / 字体只引用 DESIGN tokens，【禁止】散写未声明 hex。"
@@ -230,7 +253,7 @@ def _build_three_chain_site(
             "id": "qa",
             "role": "页面 QA",
             "task": _website_qa_task(
-                site=site,
+                topic=topic,
                 copy_files_qa=f"`{_BUILD_WEBSITE_COPY}`",
                 tone_qa="",
                 deferred_ok=True,
@@ -279,7 +302,7 @@ def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
             visual_thesis=_BUILD_TOOLSHED_VISUAL_THESIS,
             domain_hint=_BUILD_TOOLSHED_DOMAIN_HINT,
             copy_sections=_BUILD_TOOLSHED_COPY_SECTIONS,
-            site_slot_hint="要建的控制台 / 工具台简述",
+            topic_slot_hint="要建的控制台 / 工具台一句话简述",
         )
 
     return _build_three_chain_site(
@@ -291,23 +314,24 @@ def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
         visual_thesis=_BUILD_WEBSITE_VISUAL_THESIS,
         domain_hint=_BUILD_WEBSITE_DOMAIN_HINT,
         copy_sections=_BUILD_WEBSITE_COPY_SECTIONS,
-        site_slot_hint="要建的站点 / 落地页简述",
+        topic_slot_hint="要建的站点 / 落地页一句话简述",
     )
 
 
 def build_website_verify(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """Second-act whole-page QA only — for qa_deferred_budget follow-up turns."""
-    site = clean_str(args.get("site"))
-    if not site:
+    topic = clean_str(args.get("topic"))
+    if not topic:
         return [], [
-            "build_website_verify 需要 slot『site』（与建站时 site 简述一致，或写工作区站点名）"
+            "build_website_verify 需要 slot『topic』（与建站时 topic 简述一致，"
+            f"或写工作区站点名；产物目录固定 {_BUILD_WEBSITE_DIR}/，不是文件夹槽）"
         ]
     return [
         {
             "id": "qa",
             "role": "页面 QA",
             "task": _website_qa_task(
-                site=site,
+                topic=topic,
                 copy_files_qa=f"`{_BUILD_WEBSITE_COPY}`（若存在）",
                 tone_qa="",
                 deferred_ok=False,

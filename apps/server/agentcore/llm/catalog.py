@@ -9,16 +9,17 @@ Each catalog row carries ``origin`` (``byok`` | ``platform``) and, for byok rows
 several providers (and once more as a platform row), because「run model X on provider
 A」vs「on provider B」vs「on platform free quota」are genuinely different options.
 
-* **byok** rows — proxied from EACH active provider's endpoint ``GET /models`` when
-  configured, cached ~10min per ``(provider_id, base_url)``. Upstream failure degrades
-  to that provider's locally-known model (never a 500).
+* **byok** rows — per provider: ``default_model ∪`` vendor presets matched by
+  normalized ``base_url`` ``∪`` proxied ``GET /models`` (cached ~10min per
+  ``(provider_id, base_url)``). Discovery failure / empty still keeps preset + default
+  (never a 500); unknown/custom ``base_url`` has no preset (default + discovery only).
 * **platform** rows — the operator platform model set when platform credentials exist.
 
 A keyless user on a deployment with no platform subsidy gets an EMPTY catalog — the UI
 shows an empty state that guides to 设置·模型配置 (no greyed-out「add a key」guide rows).
 
-Discovery is the source of WHICH models exist; ``model_metadata`` only ENRICHES the
-display fields. Pricing reuses the community chain (:func:`pricing_for_model`).
+BYOK id set = default ∪ base_url presets ∪ discovery; ``model_metadata`` only
+ENRICHES display fields. Pricing reuses the community chain (:func:`pricing_for_model`).
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from agentcore.billing.preference import (
 )
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.llm.byok_provider_presets import preset_models_for_base_url
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.model_metadata import model_metadata_for
 from agentcore.llm.pricing import (
@@ -163,9 +165,11 @@ async def _discover_provider_models(row, creds: LLMCredentials) -> list[str] | N
 def _provider_entries(
     row, creds: LLMCredentials, discovered: list[str] | None
 ) -> list[ModelCatalogEntry]:
-    """One provider's byok rows: its default model + discovered ids, tagged with provider."""
+    """One provider's byok rows: default ∪ base_url preset ∪ discovered, tagged with provider."""
     current = (creds.default_model or "").strip() or PLATFORM_MODEL_FLASH
-    ids = _dedupe([current, *discovered]) if discovered else _dedupe([current])
+    presets = preset_models_for_base_url(creds.base_url)
+    discovered_ids = discovered if discovered is not None else []
+    ids = _dedupe([current, *presets, *discovered_ids])
     label = (row.label or "").strip() or None
     return [
         _entry(

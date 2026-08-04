@@ -95,16 +95,35 @@ function truncateSnippet(text: string, max = 48): string {
   return `${t.slice(0, max)}…`;
 }
 
+/** Format `paths` array for git approval headlines. */
+function gitPathsSnippet(args: Record<string, unknown>): string {
+  const raw = args.paths;
+  if (!Array.isArray(raw)) return "";
+  const paths = raw
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    .map((p) => p.trim());
+  if (paths.length === 0) return "";
+  return truncateSnippet(paths.join(", "));
+}
+
+function gitRemoteName(args: Record<string, unknown>): string {
+  return typeof args.remote === "string" && args.remote.trim()
+    ? args.remote.trim()
+    : "origin";
+}
+
 /** Readable headline for structured `git` tool (subcommand + key args). */
 function gitPrimaryArg(args: Record<string, unknown>): string | null {
   const sub = typeof args.subcommand === "string" ? args.subcommand.trim() : "";
   if (!sub) return null;
   if (sub === "push") {
-    const remote =
-      typeof args.remote === "string" && args.remote.trim()
-        ? args.remote.trim()
-        : "origin";
-    return `push → ${remote}`;
+    return `push → ${gitRemoteName(args)}`;
+  }
+  if (sub === "pull") {
+    return `pull ← ${gitRemoteName(args)}`;
+  }
+  if (sub === "fetch") {
+    return `fetch ← ${gitRemoteName(args)}`;
   }
   if (sub === "commit") {
     const message = typeof args.message === "string" ? args.message.trim() : "";
@@ -115,13 +134,94 @@ function gitPrimaryArg(args: Record<string, unknown>): string | null {
     return branch ? `${sub} ${branch}` : sub;
   }
   if (sub === "add") {
-    const path =
-      typeof args.path === "string"
-        ? args.path.trim()
-        : typeof args.file_path === "string"
-          ? args.file_path.trim()
+    const paths = gitPathsSnippet(args);
+    return paths ? `add ${paths}` : "add";
+  }
+  if (sub === "show") {
+    const ref =
+      typeof args.ref === "string"
+        ? args.ref.trim()
+        : typeof args.revision === "string"
+          ? args.revision.trim()
           : "";
-    return path ? `add ${path}` : "add";
+    if (ref) return `show ${truncateSnippet(ref)}`;
+    const paths = gitPathsSnippet(args);
+    return paths ? `show ${paths}` : "show";
+  }
+  if (sub === "blame") {
+    const paths = gitPathsSnippet(args);
+    return paths ? `blame ${paths}` : "blame";
+  }
+  if (sub === "stash") {
+    const action =
+      typeof args.action === "string" && args.action.trim()
+        ? args.action.trim()
+        : "list";
+    return `stash ${action}`;
+  }
+  if (sub === "merge" || sub === "rebase") {
+    const ref =
+      typeof args.ref === "string" && args.ref.trim()
+        ? args.ref.trim()
+        : typeof args.branch === "string" && args.branch.trim()
+          ? args.branch.trim()
+          : "";
+    return ref ? `${sub} ${truncateSnippet(ref)}` : sub;
+  }
+  if (sub === "cherry-pick" || sub === "cherry_pick") {
+    const ref =
+      typeof args.ref === "string" && args.ref.trim()
+        ? args.ref.trim()
+        : typeof args.object === "string" && args.object.trim()
+          ? args.object.trim()
+          : typeof args.commit === "string" && args.commit.trim()
+            ? args.commit.trim()
+            : "";
+    return ref ? `cherry-pick ${truncateSnippet(ref)}` : "cherry-pick";
+  }
+  if (sub === "tag") {
+    const action =
+      typeof args.action === "string" && args.action.trim()
+        ? args.action.trim()
+        : "list";
+    const name =
+      typeof args.name === "string" && args.name.trim() ? args.name.trim() : "";
+    if (action === "create" || action === "add") {
+      return name ? `tag ${name}` : "tag create";
+    }
+    return action === "list" ? "tag list" : `tag ${action}`;
+  }
+  if (sub === "remote") {
+    const action =
+      typeof args.action === "string" && args.action.trim()
+        ? args.action.trim()
+        : "list";
+    const name =
+      typeof args.name === "string" && args.name.trim() ? args.name.trim() : "";
+    if (action === "add") {
+      return name ? `remote add ${name}` : "remote add";
+    }
+    return action === "list" || action === "-v"
+      ? "remote list"
+      : `remote ${action}`;
+  }
+  if (sub === "create_pr") {
+    const title =
+      typeof args.title === "string" && args.title.trim()
+        ? truncateSnippet(args.title.trim())
+        : "";
+    const head =
+      typeof args.head === "string" && args.head.trim() ? args.head.trim() : "";
+    const base =
+      typeof args.base === "string" && args.base.trim() ? args.base.trim() : "";
+    const remote = gitRemoteName(args);
+    const arrow = head && base ? `${head} → ${base}` : head || base || "";
+    const bits = [
+      title ? `create_pr ${title}` : "create_pr",
+      arrow,
+      remote !== "origin" ? `@ ${remote}` : "",
+    ].filter(Boolean);
+    return bits.join(" · ");
   }
   return sub;
 }

@@ -17,6 +17,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.storage.assets import AssetStorage
+from agentcore.workspace.git_credentials import delete_git_credentials_for_user
 
 
 async def cleanup_account_resources(
@@ -34,9 +35,9 @@ async def cleanup_account_resources(
 
     Soft-deletes the user's conversations (the retention sweeper later reclaims their
     workspaces), revokes every public share link the user created (no shared snapshot
-    outlives the account), drops all BYOK providers + model profiles, removes
-    the avatar object, and cascades shared-space ownership / membership (owner →
-    delete spaces + disk; member → drop membership rows + pending invites).
+    outlives the account), drops all BYOK providers + model profiles + Git PAT,
+    removes the avatar object, and cascades shared-space ownership / membership
+    (owner → delete spaces + disk; member → drop membership rows + pending invites).
     ``avatar_key`` must be captured by the caller *before* the user row is anonymized
     (soft-delete nulls it). Each step is independently idempotent, so re-running on
     an already-注销 account is harmless. The append-only cost ledger (不变量①) is
@@ -53,6 +54,7 @@ async def cleanup_account_resources(
         from agentcore.db.repositories.llm_profiles import LlmModelProfileRepository as _Repo
 
         await _Repo(conversations._session).delete_all_for_user(user_id)
+    await delete_git_credentials_for_user(conversations._session, user_id)
     if avatar_key:
         await assets.delete(avatar_key)
     if shared_spaces is not None:

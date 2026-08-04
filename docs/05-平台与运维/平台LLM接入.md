@@ -33,7 +33,7 @@ skip_if:
 - **回合内鉴权死短路（甲+乙）**：同一用户回合首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）后，`llm/turn_auth_dead.py` 回合级死位短路后续未启动的 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
 - **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member` 按 Worker 槽重解析。
-- **统一目录** `GET /v1/users/me/models`：键 `(id, origin, provider_id)`；BYOK 行代理发现（禁硬编码清单）；platform 行有补贴才列。
+- **统一目录** `GET /v1/users/me/models`：键 `(id, origin, provider_id)`；BYOK 行 = `default_model` ∪ 按 `base_url` 匹配的厂商预设 models ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设，避免同厂商下拉只剩一项）；**不是**用前端硬编码清单取代发现。组合编辑另支持对 BYOK 服务商**手填** model id（火山 `ep-…`、私有中转等；platform 仍只 allowlist）。platform 行有补贴才列。
 
 ## 三、sidecar 推理代理
 

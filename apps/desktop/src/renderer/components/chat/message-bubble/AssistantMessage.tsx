@@ -49,6 +49,8 @@ import { DeliveryStatusMount } from "./DeliveryStatusMount";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { SyncStatusHint } from "./SyncStatusHint";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
+import { UnproductiveToolFailureHint } from "./UnproductiveToolFailureHint";
+import { WholeFilePasteHint } from "./WholeFilePasteHint";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
 
@@ -331,6 +333,21 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         <TurnWarningBanner message={message.turnWarning} />
       )}
       {turnBody}
+      {!message.isStreaming && (
+        <UnproductiveToolFailureHint
+          finishReason={finishReason}
+          content={message.content}
+          process={message.process}
+          journal={message.runs}
+        />
+      )}
+      {!message.isStreaming && (
+        <WholeFilePasteHint
+          content={message.content}
+          process={message.process}
+          journal={message.runs}
+        />
+      )}
       {displayError && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />

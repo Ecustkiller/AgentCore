@@ -391,7 +391,7 @@ class HostShellTool:
                 "参数：command（必填）；可选 timeout_seconds（默认 60，上限 120）。"
                 "P3 首版不支持 cwd——固定用户 home / 默认 shell cwd。"
                 "结构化 host_* 仍可作快捷路径；毁灭性命令有启发式熔断（非完整边界）；"
-                "git push --force 到 main/master 与 terminal 同级强制审批"
+                "git push --force 到 main/master 硬拒（与结构化 git / terminal 文本同为 DENY）"
                 "（普通 push 仍走 Host 授权轴）。"
             ),
             parameters={

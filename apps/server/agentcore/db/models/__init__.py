@@ -17,7 +17,7 @@ from ._helpers import _new_uuid
 from .admin_audit import AdminAuditLog
 from .admin_mfa import AdminMfa
 from .agent_audit import AgentAuditEvent
-from .auth import Credentials, RefreshToken, UserLlmProvider
+from .auth import Credentials, RefreshToken, UserGitCredential, UserLlmProvider
 from .billing import CostCall, CostEvent
 from .boards import Board
 from .browser import BrowserTakeoverRow
@@ -104,6 +104,7 @@ __all__ = [
     "UserDirectorySettings",
     "Friendship",
     "FriendRequest",
+    "UserGitCredential",
     "UserLlmProvider",
     "UserWorkflow",
     "_new_uuid",

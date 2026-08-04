@@ -428,7 +428,7 @@ def test_unwrap_nested_delegate_arguments_success_and_no_false_positive():
     assert out is not None
     assert out["tasks"] == inner_tasks
 
-    as_dict = {"arguments": {"playbook": "build_website", "playbook_args": {"site": "X"}}}
+    as_dict = {"arguments": {"playbook": "build_website", "playbook_args": {"topic": "X"}}}
     out2 = unwrap_nested_delegate_arguments(as_dict)
     assert out2 is not None
     assert out2["playbook"] == "build_website"

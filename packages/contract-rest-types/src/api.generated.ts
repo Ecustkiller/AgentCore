@@ -2292,7 +2292,7 @@ export interface paths {
         put?: never;
         /**
          * Clone Repo Into Workspace
-         * @description Clone a public git repository into the conversation's scratch workspace (决策⑤).
+         * @description Clone a public git repository into the conversation's scratch workspace (决策⑤ · G3).
          */
         post: operations["clone_repo_into_workspace_v1_conversations__conversation_id__workspace_clone_post"];
         delete?: never;
@@ -4347,6 +4347,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/me/git-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Credentials
+         * @description Whether an account Git PAT is configured (+ masked tip).
+         */
+        get: operations["get_git_credentials_v1_users_me_git_credentials_get"];
+        /**
+         * Upsert Git Credentials
+         * @description Create or replace the account Git PAT (encrypted at rest).
+         */
+        put: operations["upsert_git_credentials_v1_users_me_git_credentials_put"];
+        post?: never;
+        /**
+         * Delete Git Credentials
+         * @description Clear the account Git PAT.
+         */
+        delete: operations["delete_git_credentials_v1_users_me_git_credentials_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/llm-model-profiles": {
         parameters: {
             query?: never;
@@ -4868,7 +4896,7 @@ export interface paths {
         put?: never;
         /**
          * Clone Repo Into Workspace
-         * @description Clone a public git repository into a cloud workspace (决策⑤).
+         * @description Clone a public git repository into a cloud workspace (决策⑤ · G3).
          */
         post: operations["clone_repo_into_workspace_v1_workspaces__ws_id__clone_post"];
         delete?: never;
@@ -6681,7 +6709,7 @@ export interface components {
         };
         /**
          * CloneRepoRequest
-         * @description Clone a public git repository into the conversation's workspace.
+         * @description Clone an http(s) git repository into the conversation's workspace (G3).
          */
         CloneRepoRequest: {
             /** Dest */
@@ -7900,6 +7928,20 @@ export interface components {
             slots?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * GitCredentialView
+         * @description Settings view of the account Git credential — never the plaintext token.
+         */
+        GitCredentialView: {
+            /** Configured */
+            configured: boolean;
+            /** Masked Token */
+            masked_token?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Username */
+            username?: string | null;
         };
         /**
          * GrantExternalReadonlyRequest
@@ -11259,6 +11301,22 @@ export interface components {
             path: string;
             /** Size Bytes */
             size_bytes: number;
+        };
+        /**
+         * UpsertGitCredentialRequest
+         * @description Save / replace the account Git PAT (encrypted at rest; never returned).
+         */
+        UpsertGitCredentialRequest: {
+            /**
+             * Token
+             * @description Plaintext PAT / OAuth token (AES-256-GCM at rest; never returned).
+             */
+            token: string;
+            /**
+             * Username
+             * @description Remote username (default x-access-token for GitHub PAT).
+             */
+            username?: string | null;
         };
         /**
          * UsageBreakdown
@@ -20400,6 +20458,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_credentials_v1_users_me_git_credentials_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_git_credentials_v1_users_me_git_credentials_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertGitCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_git_credentials_v1_users_me_git_credentials_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */

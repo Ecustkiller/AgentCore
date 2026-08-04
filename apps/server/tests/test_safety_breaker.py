@@ -79,9 +79,6 @@ def test_scan_destructive_rm_workspace_paths_pass():
         ("mkfs.ext4 /dev/sda1", "destructive.format_device"),
         ("dd if=/dev/zero of=/dev/sda bs=1M", "destructive.format_device"),
         ("format C:", "destructive.format_device"),
-        ("git push --force origin main", "destructive.git_force_push_protected"),
-        ("git push -f origin master", "destructive.git_force_push_protected"),
-        ("git push origin main --force-with-lease", "destructive.git_force_push_protected"),
         ("shutdown -h now", "destructive.shutdown"),
         ("Restart-Computer", "destructive.shutdown"),
     ],
@@ -91,6 +88,24 @@ def test_scan_destructive_other_rules(text: str, rule_id: str):
     assert hit is not None
     assert hit.rule_id == rule_id
     assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "git push --force origin main",
+        "git push -f origin master",
+        "git push origin main --force-with-lease",
+    ],
+)
+def test_scan_git_force_push_protected_denies(text: str):
+    """Shell text force→main|master is DENY (aligned with structured git)."""
+    hit = scan_destructive_text(text)
+    assert hit is not None
+    assert hit.rule_id == "destructive.git_force_push_protected"
+    assert hit.verdict is BreakerVerdict.DENY
+    assert "硬拒" in hit.reason
+    assert "并非完整拦截" in hit.reason
 
 
 def test_scan_git_push_feature_branch_ok():
@@ -294,15 +309,25 @@ def test_host_shell_top_tree_forces_not_deny():
     assert hit.rule_id not in fuse_aligned_deny_rule_ids()
 
 
-def test_evaluate_host_shell_force_push_protected_forces():
-    """host_shell must share terminal's force→main|master FORCE_APPROVAL scan."""
-    hit = evaluate_tool_call(
-        "host_shell", {"command": "git push --force origin main"}
-    )
+@pytest.mark.parametrize(
+    "tool_name,arguments",
+    [
+        ("terminal", {"subcommand": "start", "command": "git push --force origin main"}),
+        ("host_shell", {"command": "git push --force origin main"}),
+        ("code_execute", {"code": "os.system('git push --force origin main')"}),
+        ("test_run", {"filter": "git push --force-with-lease origin master"}),
+    ],
+)
+def test_evaluate_shell_force_push_protected_denies(
+    tool_name: str, arguments: dict[str, Any]
+):
+    """terminal / code_execute / test_run / host_shell: force→main|master → DENY."""
+    hit = evaluate_tool_call(tool_name, arguments)
     assert hit is not None
-    assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+    assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "destructive.git_force_push_protected"
     assert "destructive.git_force_push_protected" not in fuse_aligned_deny_rule_ids()
+    assert "硬拒" in hit.reason
 
 
 def test_evaluate_host_shell_ordinary_push_passes():
@@ -374,7 +399,8 @@ def test_fuse_aligned_deny_rule_ids_exclude_git():
 def test_git_forbidden_list_shared_with_git_ops():
     assert git_forbidden_subcommands() == _FORBIDDEN_PATTERNS
     assert "push" not in git_forbidden_subcommands()
-    assert {"reset", "rebase", "merge", "clean", "stash"} <= git_forbidden_subcommands()
+    assert {"reset", "clean"} <= git_forbidden_subcommands()
+    assert git_forbidden_subcommands().isdisjoint({"stash", "merge", "rebase"})
 
 
 def test_evaluate_git_forbidden_denies():
@@ -382,6 +408,38 @@ def test_evaluate_git_forbidden_denies():
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "git.forbidden_subcommand"
+    clean = evaluate_tool_call("git", {"subcommand": "clean"})
+    assert clean is not None
+    assert clean.rule_id == "git.forbidden_subcommand"
+
+
+def test_evaluate_git_g2_collab_passes_breaker():
+    """G2 verbs are allowlisted — breaker must not DENY (approval / execute guards)."""
+    for args in (
+        {"subcommand": "merge", "ref": "feature/x"},
+        {"subcommand": "rebase", "ref": "feature/x"},
+        {"subcommand": "cherry-pick", "ref": "abc"},
+        {"subcommand": "stash", "action": "push"},
+        {"subcommand": "tag", "action": "create", "name": "v1"},
+        {"subcommand": "remote", "action": "add", "name": "o", "url": "https://x"},
+    ):
+        assert evaluate_tool_call("git", args) is None
+
+
+@pytest.mark.parametrize(
+    "args,rule_id",
+    [
+        ({"subcommand": "stash", "action": "drop"}, "git.forbidden_stash_destructive"),
+        ({"subcommand": "stash", "action": "clear"}, "git.forbidden_stash_destructive"),
+        ({"subcommand": "tag", "action": "delete"}, "git.forbidden_tag_delete"),
+        ({"subcommand": "remote", "action": "remove"}, "git.forbidden_remote_remove"),
+    ],
+)
+def test_evaluate_git_g2_destructive_actions_deny(args: dict[str, Any], rule_id: str):
+    hit = evaluate_tool_call("git", args)
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == rule_id
 
 
 def test_evaluate_git_ordinary_push_passes():

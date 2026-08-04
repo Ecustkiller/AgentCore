@@ -22,5 +22,10 @@ export default defineConfig({
     // vectors from packages/protocol-conformance/fixtures.
     fs: { allow: [searchForWorkspaceRoot(process.cwd())] },
   },
+  // Align with electron.vite.config: dynamic import("mermaid") otherwise races
+  // Vite's deps optimizer →「图表引擎加载失败」(see Diagram getMermaid).
+  optimizeDeps: {
+    include: ["mermaid"],
+  },
   plugins: [react()],
 });

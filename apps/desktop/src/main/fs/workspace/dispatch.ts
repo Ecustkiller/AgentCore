@@ -6,6 +6,8 @@ import { opArchive } from "./archive";
 import { opDiagnostics } from "./diagnostics";
 import { opExecute } from "./exec";
 import { probeAvailableLanguages } from "./execCodec";
+import { opGitRepoStatus } from "./gitRepoStatus";
+import { opGitScm } from "./gitScm";
 import { opGrep } from "./grep";
 import {
   opProcessList,
@@ -69,6 +71,7 @@ const ORGANIZE_ALLOWED_OPS = new Set<WorkspaceOpName>([
   "mkdir",
   "delete",
   "diagnostics",
+  "git_repo_status",
 ]);
 
 const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
@@ -79,6 +82,7 @@ const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
   "execute",
   "process_start",
   "archive",
+  "git_scm",
 ]);
 
 const READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区";
@@ -256,6 +260,10 @@ export async function executeWorkspaceOp(
         return await opProcessList(root, args);
       case "diagnostics":
         return await opDiagnostics(root, args);
+      case "git_repo_status":
+        return await opGitRepoStatus(root);
+      case "git_scm":
+        return await opGitScm(root, args);
       default:
         return opErr("WorkspaceIOError", `本地工作区未知的操作：${op}`);
     }

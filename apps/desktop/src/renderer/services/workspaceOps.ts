@@ -12,8 +12,12 @@ const PROCESS_OPS = new Set<string>([
   "process_list",
 ]);
 
-/** Language advertise probe — hang must not raise the file-channel banner (A1/A2). */
-const NON_FILE_CHANNEL_OPS = new Set<string>(["probe_exec"]);
+/** Language advertise / U1 git chip — hang must not raise the file-channel banner (A1/A2). */
+const NON_FILE_CHANNEL_OPS = new Set<string>([
+  "probe_exec",
+  "git_repo_status",
+  "git_scm",
+]);
 
 /**
  * Desktop half of the local-workspace op channel (双模式工作区 P2a).

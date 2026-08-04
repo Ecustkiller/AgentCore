@@ -42,6 +42,12 @@ export const llmProviderKeys = {
   list: ["llm-providers", "list"] as const,
 };
 
+/** 设置·Git 凭据（`GET /v1/users/me/git-credentials` · G3）。 */
+export const gitCredentialKeys = {
+  all: ["git-credentials"] as const,
+  detail: ["git-credentials", "detail"] as const,
+};
+
 /** 账号模型组合（`GET /v1/users/me/llm-model-profiles`）。 */
 export const llmModelProfileKeys = {
   all: ["llm-model-profiles"] as const,

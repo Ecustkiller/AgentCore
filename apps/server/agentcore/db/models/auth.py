@@ -96,6 +96,30 @@ class UserLlmProvider(Base):
     )
 
 
+# --- User Git credentials (G3 · 云私仓账户级 PAT) ---
+# One row per account. Ciphertext via security.KeyEncryptor (same AES-256-GCM
+# wire as BYOK). Plaintext never returned; tools never accept password params —
+# clone/push load this row server-side when running on cloud workspaces.
+
+
+class UserGitCredential(Base):
+    __tablename__ = "user_git_credentials"
+
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    # AES-256-GCM ciphertext (nonce ‖ ct+tag); never the plaintext PAT.
+    token_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    # Optional remote username (GitHub PAT commonly uses ``x-access-token``).
+    username: Mapped[str] = mapped_column(
+        String(200), server_default=text("'x-access-token'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
 # --- Refresh Tokens ---
 
 

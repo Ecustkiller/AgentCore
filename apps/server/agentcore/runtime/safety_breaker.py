@@ -26,10 +26,10 @@ from typing import Any
 # ── Git hard-ban (single source for git_ops + breaker) ───────────────────────
 
 # Ordinary ``push`` is allowlisted (approval + CEO-delegate); force / protected
-# targets stay hard-denied below. reset/rebase/merge/clean/stash remain banned.
-GIT_FORBIDDEN_SUBCOMMANDS: frozenset[str] = frozenset(
-    {"reset", "rebase", "merge", "clean", "stash"}
-)
+# targets stay hard-denied below. reset/clean remain banned. G2 collaboration
+# verbs (stash/merge/rebase/cherry-pick/tag/remote) are allowlisted in git_ops
+# with execution-layer guards — not in this hard-ban set.
+GIT_FORBIDDEN_SUBCOMMANDS: frozenset[str] = frozenset({"reset", "clean"})
 GIT_PROTECTED_BRANCHES: frozenset[str] = frozenset({"main", "master"})
 
 
@@ -120,7 +120,7 @@ _DESTRUCTIVE_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
             r"(?:--force(?:-with-lease)?\b|(?<![-\w])-f(?![-\w]))"
         ),
         "检测到疑似向 main/master 强制推送的命令（启发式兜底，并非完整拦截）。"
-        "需人工确认后才能执行。",
+        "已硬拒，不可由权限模式或本轮放行放开；请改用功能分支或在本机终端手动处理。",
     ),
     (
         "destructive.shutdown",
@@ -136,7 +136,8 @@ _DESTRUCTIVE_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
 # host_shell fuse (tools.builtin.host) already hard-denies these families.
 # Breaker upgrades them to DENY on the host_shell path so approval cards do not
 # promise a run that fuse will still refuse. git force is intentionally absent —
-# fuse does not scan git; shell/terminal text stays FORCE_APPROVAL.
+# fuse does not scan git; shell text force→main|master is DENY via the scanner
+# itself (aligned with structured git), not via this fuse⊆DENY set.
 # Keep this set in lockstep with host fuse overlap (see fuse⊆DENY tests).
 FUSE_ALIGNED_DENY_RULE_IDS: frozenset[str] = frozenset(
     {
@@ -144,6 +145,12 @@ FUSE_ALIGNED_DENY_RULE_IDS: frozenset[str] = frozenset(
         "destructive.format_device",
         "destructive.shutdown",
     }
+)
+
+# Shell/command text rules that hard-deny (not FORCE_APPROVAL). Distinct from
+# fuse⊆DENY: applies on terminal / code_execute / test_run / host_shell alike.
+_TEXT_DENY_RULE_IDS: frozenset[str] = frozenset(
+    {"destructive.git_force_push_protected"}
 )
 
 _HOST_SHELL_FUSE_DENY_REASON = (
@@ -270,8 +277,13 @@ def scan_destructive_text(text: str) -> BreakerHit | None:
         return None
     for rule_id, pattern, reason in _DESTRUCTIVE_RULES:
         if pattern.search(text):
+            verdict = (
+                BreakerVerdict.DENY
+                if rule_id in _TEXT_DENY_RULE_IDS
+                else BreakerVerdict.FORCE_APPROVAL
+            )
             return BreakerHit(
-                verdict=BreakerVerdict.FORCE_APPROVAL,
+                verdict=verdict,
                 rule_id=rule_id,
                 reason=reason,
             )
@@ -454,8 +466,37 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 verdict=BreakerVerdict.DENY,
                 rule_id="git.forbidden_subcommand",
                 reason=(
-                    f"Git 子命令 '{sub}' 被硬禁清单拒绝（reset/rebase/merge 等不可由"
+                    f"Git 子命令 '{sub}' 被硬禁清单拒绝（reset/clean 等不可由"
                     "权限模式或本轮放行放开）。请改由用户在本机终端手动完成。"
+                ),
+            )
+        action = str(args.get("action") or "").strip().lower()
+        # G2: destructive stash/tag/remote actions stay DENY (not grantable).
+        if sub == "stash" and action in {"drop", "clear"}:
+            return BreakerHit(
+                verdict=BreakerVerdict.DENY,
+                rule_id="git.forbidden_stash_destructive",
+                reason=(
+                    "禁止 git stash drop/clear（不可由权限模式或本轮放行放开）。"
+                    "请改用 list/push/pop，或由用户在本机终端手动处理。"
+                ),
+            )
+        if sub == "tag" and action in {"delete", "remove", "rm"}:
+            return BreakerHit(
+                verdict=BreakerVerdict.DENY,
+                rule_id="git.forbidden_tag_delete",
+                reason=(
+                    "禁止删除 tag（不可由权限模式或本轮放行放开）。"
+                    "仅允许 list / create（轻量标签）。"
+                ),
+            )
+        if sub == "remote" and action in {"remove", "rm", "delete"}:
+            return BreakerHit(
+                verdict=BreakerVerdict.DENY,
+                rule_id="git.forbidden_remote_remove",
+                reason=(
+                    "禁止 git remote remove（不可由权限模式或本轮放行放开）。"
+                    "仅允许 list / add。"
                 ),
             )
         # Ordinary push may proceed to approval; force / protected-branch target DENY.
@@ -465,9 +506,10 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 return push_hit
 
     # Destructive text on execution / terminal / host_shell surfaces.
-    # host_shell: fuse-aligned families → DENY (方案 C); git force→main|master
-    # stays FORCE_APPROVAL (fuse does not scan git). Ordinary push stays on the
-    # Host GRANTABLE axis. terminal / code_execute / test_run keep FORCE_APPROVAL.
+    # host_shell: fuse-aligned families → DENY (方案 C). git force→main|master
+    # text → DENY on all shell paths (scanner; fuse still does not scan git).
+    # Ordinary push stays on the Host GRANTABLE axis. Other catastrophic shapes
+    # stay FORCE_APPROVAL on terminal / code_execute / test_run.
     # P2 top-level workspace tree: FORCE_APPROVAL (whitelist cleanup skipped).
     # Do not stack a second card when fuse-aligned DENY already applies.
     if name in {"terminal", "code_execute", "test_run", "host_shell"}:

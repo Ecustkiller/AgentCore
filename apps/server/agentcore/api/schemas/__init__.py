@@ -132,6 +132,10 @@ from .feedback import (
     UpdateFeedbackStatusRequest,
 )
 from .files import RewriteRequest, RewriteResponse
+from .git_credentials import (
+    GitCredentialView,
+    UpsertGitCredentialRequest,
+)
 from .handoff import (
     ApplyHandoffRequest,
     DispatchHandoffRequest,
@@ -436,6 +440,9 @@ __all__ = [
     "UpdateLlmProviderRequest",
     "LlmProviderView",
     "LlmProvidersResponse",
+    # git credentials (G3 云私仓 PAT)
+    "UpsertGitCredentialRequest",
+    "GitCredentialView",
     # llm model profiles (模型组合)
     "ModelProfileSlot",
     "LlmModelProfileView",

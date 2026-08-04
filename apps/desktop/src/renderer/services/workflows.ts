@@ -82,7 +82,7 @@ export interface FromPlaybookInput {
   playbook: string;
   /** Optional display name for the new user workflow. */
   name?: string | null;
-  /** Primary slot values (topic / feature / site / task / app …). */
+  /** Primary slot values (topic / feature / task / app …). */
   slots: Record<string, string>;
 }
 
@@ -173,7 +173,11 @@ const FALLBACK_PRIMARY_SLOTS: Record<
   build_feature: [{ key: "feature", label: "功能", hint: "要实现的功能简述" }],
   build_app: [{ key: "app", label: "应用", hint: "要搭建的应用 / SPA 简述" }],
   build_website: [
-    { key: "site", label: "站点", hint: "要建的站点 / 落地页 / 控制台简述" },
+    {
+      key: "topic",
+      label: "简述",
+      hint: "站点/落地页/控制台一句话简述（产物目录固定 site/）",
+    },
     {
       key: "style",
       label: "气质",

@@ -1,4 +1,5 @@
 import { ClearScratchDialog } from "@/components/files/ClearScratchDialog";
+import { CloneRepoDialog } from "@/components/files/CloneRepoDialog";
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
 import {
@@ -47,6 +48,7 @@ import {
   FolderOpen,
   FolderPlus,
   FolderSearch,
+  GitBranch,
   HardDrive,
   MessageSquare,
   Pencil,
@@ -108,6 +110,7 @@ export function WorkspaceSection({
   const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const [clearScratchOpen, setClearScratchOpen] = useState(false);
   const [clearingScratch, setClearingScratch] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(ws.name);
 
@@ -123,6 +126,12 @@ export function WorkspaceSection({
   /** Cloud conv scratch only — local/project roots never get root-level clear. */
   const canClearScratch =
     !!conversationId && !isLocal && !offlineCloud && !!source?.caps.edit;
+  /** Cloud workspace only — clone API requires cloud location. */
+  const canClone =
+    !isLocal &&
+    !offlineCloud &&
+    !!source?.caps.edit &&
+    !ws.wsId.startsWith("shared:");
   const scratchGenerating = useConversationGenerating(conversationId ?? "");
 
   const folder = folderId
@@ -432,6 +441,12 @@ export function WorkspaceSection({
                     <span className="flex-1 truncate">上传文件</span>
                   </ContextMenuItem>
                 )}
+                {canClone && (
+                  <ContextMenuItem onSelect={() => setCloneOpen(true)}>
+                    <GitBranch size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">克隆仓库</span>
+                  </ContextMenuItem>
+                )}
                 <ContextMenuSeparator />
               </>
             )}
@@ -518,6 +533,14 @@ export function WorkspaceSection({
           name={ws.name}
           busy={clearingScratch}
           onConfirm={() => void confirmClearScratch()}
+        />
+      )}
+      {canClone && (
+        <CloneRepoDialog
+          open={cloneOpen}
+          onOpenChange={setCloneOpen}
+          wsId={ws.wsId}
+          onCloned={() => treeRef.current?.refresh()}
         />
       )}
     </div>

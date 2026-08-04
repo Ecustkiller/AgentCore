@@ -547,7 +547,7 @@ def test_repair_code_requires_verify_how_fixed():
 def test_build_website_three_chain_default_sections():
     tasks, errors = expand_playbook(
         "build_website",
-        {"site": "GEO 官网落地页", "stack": "静态 HTML", "audience": "中小商家"},
+        {"topic": "GEO 官网落地页", "stack": "静态 HTML", "audience": "中小商家"},
     )
     assert errors == []
     by_id = _by_id(tasks)
@@ -562,7 +562,9 @@ def test_build_website_three_chain_default_sections():
     assert by_id["copy"]["deliverable"]["form"] == "files"
     assert by_id["copy"]["deliverable"]["artifacts"] == ["site/copy.md"]
     assert by_id["copy"]["deliverable"].get("strict") is True
-    assert "品牌一句话" in by_id["copy"]["deliverable"]["required_sections"]
+    copy_secs = by_id["copy"]["deliverable"]["required_sections"]
+    assert copy_secs[0] == "视觉 thesis"
+    assert "品牌一句话" in copy_secs
     assert by_id["copy"]["deliverable"].get("must_contain_soft") is True
     assert "visual thesis" in by_id["copy"]["task"]
     assert "anti-slop" in by_id["copy"]["task"]
@@ -586,6 +588,9 @@ def test_build_website_three_chain_default_sections():
     ]
     assert "site/copy.md" in by_id["frontend"]["task"]
     assert "DESIGN" in by_id["frontend"]["task"]
+    # 无风格确认 → design_prompt_block 软注入 s_default 正向配方
+    assert "正向配方" in by_id["frontend"]["task"]
+    assert "单一视觉焦点" in by_id["frontend"]["task"]
     assert "静态 HTML" in by_id["frontend"]["task"]
     assert "pack=marketing" in by_id["frontend"]["task"]
     # QA
@@ -615,7 +620,7 @@ def test_build_website_sections_coverage_only_no_fanout():
     """sections 仅作文案/前端覆盖清单，节点数恒为 3。"""
     tasks, errors = expand_playbook(
         "build_website",
-        {"site": "S", "sections": ["导航", "定价", "FAQ"]},
+        {"topic": "S", "sections": ["导航", "定价", "FAQ"]},
     )
     assert errors == []
     by_id = _by_id(tasks)
@@ -627,7 +632,7 @@ def test_build_website_sections_coverage_only_no_fanout():
     assert "assemble" not in by_id
 
     eight = [f"区{i}" for i in range(8)]
-    tasks8, errors8 = expand_playbook("build_website", {"site": "S", "sections": eight})
+    tasks8, errors8 = expand_playbook("build_website", {"topic": "S", "sections": eight})
     assert errors8 == []
     assert len(tasks8) == 3
     by_id8 = _by_id(tasks8)
@@ -639,7 +644,7 @@ def test_build_website_sections_coverage_only_no_fanout():
 def test_build_website_custom_sections_still_three_nodes():
     tasks, errors = expand_playbook(
         "build_website",
-        {"site": "S", "sections": ["导航", "定价"]},
+        {"topic": "S", "sections": ["导航", "定价"]},
     )
     assert errors == []
     by_id = _by_id(tasks)
@@ -649,10 +654,37 @@ def test_build_website_custom_sections_still_three_nodes():
     assert "定价" in by_id["frontend"]["task"]
 
 
-def test_build_website_requires_site():
+def test_build_website_requires_topic():
     tasks, errors = expand_playbook("build_website", {})
     assert tasks == []
-    assert errors and "site" in errors[0]
+    assert errors and "topic" in errors[0]
+    # 旧键 site 不兼容：缺 topic 即报错，不映射
+    legacy, legacy_err = expand_playbook("build_website", {"site": "旧简述"})
+    assert legacy == []
+    assert legacy_err and "topic" in legacy_err[0]
+
+
+def test_build_website_topic_brief_aliases():
+    """purpose/brief/description → topic；有 topic 时不以别名覆盖；site 永不映射。"""
+    for key in ("purpose", "brief", "description"):
+        tasks, errors = expand_playbook("build_website", {key: f"简述via_{key}"})
+        assert errors == []
+        assert len(tasks) == 3
+        assert f"简述via_{key}" in tasks[0]["task"]
+
+    prefer, prefer_err = expand_playbook(
+        "build_website", {"topic": "规范键", "purpose": "别名不应覆盖"}
+    )
+    assert prefer_err == []
+    assert "规范键" in prefer[0]["task"]
+    assert "别名不应覆盖" not in prefer[0]["task"]
+
+    verify, verify_err = expand_playbook(
+        "build_website_verify", {"purpose": "续验简述"}
+    )
+    assert verify_err == []
+    assert len(verify) == 1
+    assert "续验简述" in verify[0]["task"]
 
 
 def test_build_website_style_toolshed_three_chain_injects_tool_dense():
@@ -665,7 +697,7 @@ def test_build_website_style_toolshed_three_chain_injects_tool_dense():
     tasks, errors = expand_playbook(
         "build_website",
         {
-            "site": "订单运营控制台",
+            "topic": "订单运营控制台",
             "style": "toolshed",
             "sections": ["应用外壳", "侧栏导航", "数据表格"],
         },
@@ -684,7 +716,10 @@ def test_build_website_style_toolshed_three_chain_injects_tool_dense():
     assert "catalog:data_table" in fe
     assert "审美域·工具页" in by_id["copy"]["task"]
     assert "信息架构" in by_id["copy"]["task"]
-    assert "产品一句话" in by_id["copy"]["deliverable"]["required_sections"]
+    toolshed_secs = by_id["copy"]["deliverable"]["required_sections"]
+    assert toolshed_secs[0] == "信息架构"
+    assert "产品一句话" in toolshed_secs
+    assert by_id["copy"]["deliverable"].get("must_contain_soft") is True
     assert "website_catalog/marketing/" not in fe
     assert by_id["frontend"]["deliverable"]["artifacts"] == [
         "site/DESIGN.md",
@@ -702,7 +737,7 @@ def test_build_website_style_toolshed_three_chain_injects_tool_dense():
 
 def test_build_toolshed_playbook_removed():
     """旧独立 playbook 名直接未知失败——无别名 / 静默改写。"""
-    tasks, errors = expand_playbook("build_toolshed", {"site": "Ops"})
+    tasks, errors = expand_playbook("build_toolshed", {"topic": "Ops"})
     assert tasks == []
     assert errors and "未知" in errors[0]
     assert "build_toolshed" in errors[0]
@@ -710,7 +745,7 @@ def test_build_toolshed_playbook_removed():
 
 def test_build_website_rejects_unknown_style():
     tasks, errors = expand_playbook(
-        "build_website", {"site": "S", "style": "neon"}
+        "build_website", {"topic": "S", "style": "neon"}
     )
     assert tasks == []
     assert errors and "style" in errors[0]
@@ -718,8 +753,8 @@ def test_build_website_rejects_unknown_style():
 
 
 def test_build_website_verify_qa_only_no_rebuild():
-    """Second-act verify: single QA node, deferred_ok=False, requires site."""
-    tasks, errors = expand_playbook("build_website_verify", {"site": "GEO 官网"})
+    """Second-act verify: single QA node, deferred_ok=False, requires topic."""
+    tasks, errors = expand_playbook("build_website_verify", {"topic": "GEO 官网"})
     assert errors == []
     assert len(tasks) == 1
     qa = tasks[0]
@@ -733,11 +768,14 @@ def test_build_website_verify_qa_only_no_rebuild():
 
     empty, err = expand_playbook("build_website_verify", {})
     assert empty == []
-    assert err and "site" in err[0]
+    assert err and "topic" in err[0]
+    legacy, legacy_err = expand_playbook("build_website_verify", {"site": "旧简述"})
+    assert legacy == []
+    assert legacy_err and "topic" in legacy_err[0]
 
 
 def test_build_website_qa_shares_helper_deferred_ok():
-    tasks, _ = expand_playbook("build_website", {"site": "S", "sections": ["A"]})
+    tasks, _ = expand_playbook("build_website", {"topic": "S", "sections": ["A"]})
     qa = next(t for t in tasks if t["id"] == "qa")
     assert "预算不足可跳过" in qa["task"]
     assert "站点【S】" in qa["task"]
@@ -746,7 +784,7 @@ def test_build_website_qa_shares_helper_deferred_ok():
 def test_build_website_files_form_builds_run_plan():
     """form=files + artifacts 经真实 builder 接通；三串 DAG 可 waves()。"""
     tasks, errors = expand_playbook(
-        "build_website", {"site": "T", "sections": ["A", "B"]}
+        "build_website", {"topic": "T", "sections": ["A", "B"]}
     )
     assert errors == []
     plan, plan_errors = build_run_plan(tasks, id_prefix="pb_bw")
@@ -782,7 +820,7 @@ def test_build_website_files_form_builds_run_plan():
 def test_build_website_many_sections_still_three_nodes_run_plan():
     """多分区仍三节点，经真实 builder 接通。"""
     eight = [f"区{i}" for i in range(8)]
-    tasks, errors = expand_playbook("build_website", {"site": "T", "sections": eight})
+    tasks, errors = expand_playbook("build_website", {"topic": "T", "sections": eight})
     assert errors == []
     plan, plan_errors = build_run_plan(tasks, id_prefix="pb_bw8")
     assert plan_errors == []
@@ -1084,8 +1122,8 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
             "target": "app.ts",
         },
         "build_app": {"app": "Ops board", "modules": ["overview", "list"]},
-        "build_website": {"site": "Landing", "sections": ["hero", "cta"]},
-        "build_website_verify": {"site": "Landing"},
+        "build_website": {"topic": "Landing", "sections": ["hero", "cta"]},
+        "build_website_verify": {"topic": "Landing"},
         "compare_options": {"question": "Q", "options": ["A", "B", "C"]},
         "multi_lens_research": {"topic": "T"},
     }

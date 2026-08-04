@@ -2,6 +2,7 @@ import { SectionLabel, SurfaceNavLink } from "@/components/ui";
 import {
   Cpu,
   Gauge,
+  GitBranch,
   Info,
   KeyRound,
   Keyboard,
@@ -24,8 +25,8 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Settings are grouped by intent: 模型 (组合) + 服务商 (Key) adjacent; 账户 /
-// 偏好 / 关于. Opening /more 落点见 MoreIndexRedirect。
+// Settings are grouped by intent: 模型 (组合) + 服务商 (Key) adjacent; Git 凭据
+// 挂账户组（G3）；账户 / 偏好 / 关于. Opening /more 落点见 MoreIndexRedirect。
 // 「自动化」已迁至工具箱 #/toolbox/automations。
 // AI 记忆内容管理在「文件」页，不设设置子页。
 // 新会话默认权限配方：对话内权限徽章「设为新会话默认」（无设置子页）。
@@ -42,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "账户",
     items: [
       { icon: UserCog, label: "账户设置", path: "/more/account" },
+      { icon: GitBranch, label: "Git 凭据", path: "/more/git" },
       { icon: Gauge, label: "用量", path: "/more/usage" },
     ],
   },

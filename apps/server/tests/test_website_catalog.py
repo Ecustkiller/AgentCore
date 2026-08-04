@@ -112,7 +112,7 @@ def test_build_website_injects_catalog_pointers():
     tasks, errors = expand_playbook(
         "build_website",
         {
-            "site": "Demo 落地页",
+            "topic": "Demo 落地页",
             "sections": ["首屏英雄区", "卖点能力区", "行动号召区"],
         },
     )
@@ -140,7 +140,7 @@ def test_build_website_injects_catalog_pointers():
 def test_build_website_catalog_mapping_for_custom_labels():
     tasks, errors = expand_playbook(
         "build_website",
-        {"site": "S", "sections": ["导航", "定价", "FAQ"]},
+        {"topic": "S", "sections": ["导航", "定价", "FAQ"]},
     )
     assert errors == []
     by_id = {t["id"]: t for t in tasks}
@@ -157,7 +157,7 @@ def test_build_website_style_toolshed_injects_tool_dense_pointers():
     tasks, errors = expand_playbook(
         "build_website",
         {
-            "site": "Ops",
+            "topic": "Ops",
             "style": "toolshed",
             "sections": ["应用外壳", "筛选条", "空状态"],
         },

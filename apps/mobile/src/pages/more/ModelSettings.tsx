@@ -53,22 +53,52 @@ type ProviderModelGroup = {
 };
 
 const PLATFORM_POINTER_ID = "__platform__";
+/** Select sentinel for「自定义」— not a pointer; BYOK provider + free-text model id. */
+const CUSTOM_SELECT_VALUE = "__custom__";
 
+function encodeSlot(slot: ModelProfileSlot): string {
+  if (slot.origin === "platform" || !slot.provider_id) {
+    return `${PLATFORM_POINTER_ID}::${slot.model}`;
+  }
+  return `${slot.provider_id}::${slot.model}`;
+}
+
+function decodeSlot(value: string): ModelProfileSlot | null {
+  const i = value.indexOf("::");
+  if (i < 0) return null;
+  const provider_id = value.slice(0, i);
+  const model = value.slice(i + 2);
+  if (!provider_id || !model) return null;
+  if (provider_id === PLATFORM_POINTER_ID) {
+    return { origin: "platform", provider_id: null, model };
+  }
+  return { origin: "byok", provider_id, model };
+}
+
+/**
+ * Per-provider option groups for slot selectors.
+ * BYOK candidates = catalog rows ∪ provider.default_model ∪ live slot models;
+ * platform group only from available catalog (+ optional platform_model fallback).
+ * Platform has no「自定义」entry — custom is a separate select sentinel.
+ */
 function defaultModelGroups(
   catalog: ModelCatalog | null,
+  providers: LlmProviderView[],
   platformModel?: string | null,
+  ...slots: (ModelProfileSlot | null | undefined)[]
 ): ProviderModelGroup[] {
   const groups: ProviderModelGroup[] = [];
 
   const platformItems: ProviderModelGroup["items"] = [];
   const platformSeen = new Set<string>();
   const addPlatform = (id: string, displayName: string) => {
-    if (!id || platformSeen.has(id)) return;
-    platformSeen.add(id);
+    const m = id.trim();
+    if (!m || platformSeen.has(m)) return;
+    platformSeen.add(m);
     platformItems.push({
-      id,
-      display_name: displayName,
-      value: `${PLATFORM_POINTER_ID}::${id}`,
+      id: m,
+      display_name: displayName.trim() || m,
+      value: `${PLATFORM_POINTER_ID}::${m}`,
     });
   };
   for (const item of catalog?.models ?? []) {
@@ -85,45 +115,60 @@ function defaultModelGroups(
     });
   }
 
-  const byok = new Map<string, ProviderModelGroup>();
-  for (const item of catalog?.models ?? []) {
-    if (item.origin !== "byok" || !item.provider_id) continue;
-    const key = item.provider_id;
-    const entry = {
-      id: item.id,
-      display_name: item.display_name,
-      value: `${item.provider_id}::${item.id}`,
-    };
-    const g = byok.get(key);
-    if (g) g.items.push(entry);
-    else
-      byok.set(key, {
-        key,
-        title: item.provider_label ?? item.vendor,
-        items: [entry],
+  for (const p of providers) {
+    const items: ProviderModelGroup["items"] = [];
+    const seen = new Set<string>();
+    const add = (id: string, displayName?: string | null) => {
+      const m = id.trim();
+      if (!m || seen.has(m)) return;
+      seen.add(m);
+      items.push({
+        id: m,
+        display_name: displayName?.trim() || m,
+        value: `${p.id}::${m}`,
       });
+    };
+    for (const item of catalog?.models ?? []) {
+      if (item.origin === "byok" && item.provider_id === p.id) {
+        add(item.id, item.display_name);
+      }
+    }
+    if (p.default_model) add(p.default_model);
+    groups.push({
+      key: p.id,
+      title: p.label?.trim() || endpointHost(p.base_url) || p.id,
+      items,
+    });
   }
-  groups.push(...byok.values());
+
+  for (const slot of slots) {
+    if (!slot?.model) continue;
+    const groupKey =
+      slot.origin === "platform" || !slot.provider_id
+        ? PLATFORM_POINTER_ID
+        : slot.provider_id;
+    let group = groups.find((g) => g.key === groupKey);
+    if (!group && groupKey === PLATFORM_POINTER_ID) {
+      group = { key: PLATFORM_POINTER_ID, title: "平台额度", items: [] };
+      groups.unshift(group);
+    }
+    if (group && !group.items.some((i) => i.id === slot.model)) {
+      group.items.unshift({
+        id: slot.model,
+        display_name: slot.model,
+        value: encodeSlot(slot),
+      });
+    }
+  }
   return groups;
 }
 
-function encodeSlot(slot: ModelProfileSlot): string {
-  if (slot.origin === "platform") {
-    return `${PLATFORM_POINTER_ID}::${slot.model}`;
+function knownPointerValues(groups: ProviderModelGroup[]): Set<string> {
+  const out = new Set<string>();
+  for (const g of groups) {
+    for (const item of g.items) out.add(item.value);
   }
-  return `${slot.provider_id}::${slot.model}`;
-}
-
-function decodeSlot(value: string): ModelProfileSlot | null {
-  const i = value.indexOf("::");
-  if (i < 0) return null;
-  const provider_id = value.slice(0, i);
-  const model = value.slice(i + 2);
-  if (!provider_id || !model) return null;
-  if (provider_id === PLATFORM_POINTER_ID) {
-    return { origin: "platform", provider_id: null, model };
-  }
-  return { origin: "byok", provider_id, model };
+  return out;
 }
 
 type Surface =
@@ -256,6 +301,7 @@ export function ModelSettings() {
           <ProfileForm
             profile={surface.mode === "edit" ? surface.profile : undefined}
             catalog={catalog}
+            providers={data?.providers ?? []}
             platformAvailable={platformMode}
             platformModel={data?.platform_model}
             onSaved={() => {
@@ -487,9 +533,174 @@ function ProfilesSection({
   );
 }
 
+/**
+ * Slot picker: known catalog/provider options + optional「自定义」
+ * (BYOK provider + free-text model id). Platform has no custom entry.
+ * `value` is an encoded pointer or "" (follow).
+ */
+function SlotModelSelect({
+  id,
+  label,
+  groups,
+  providers,
+  value,
+  followLabel,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  groups: ProviderModelGroup[];
+  providers: LlmProviderView[];
+  value: string;
+  followLabel?: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const known = knownPointerValues(groups);
+  const decoded = value ? decodeSlot(value) : null;
+  const knownHas = Boolean(value && known.has(value));
+  const isOrphanByok = Boolean(
+    value && !knownHas && decoded?.origin === "byok" && decoded.provider_id,
+  );
+
+  const [customMode, setCustomMode] = useState(isOrphanByok);
+  const [customProviderId, setCustomProviderId] = useState(
+    () =>
+      (decoded?.origin === "byok" && decoded.provider_id) ||
+      providers[0]?.id ||
+      "",
+  );
+  const [customModel, setCustomModel] = useState(() =>
+    isOrphanByok && decoded ? decoded.model : "",
+  );
+
+  // Echo orphan BYOK pointers in custom mode; leave custom mode only when a known option is chosen.
+  useEffect(() => {
+    if (isOrphanByok && decoded?.provider_id) {
+      setCustomMode(true);
+      setCustomProviderId(decoded.provider_id);
+      setCustomModel(decoded.model);
+    } else if (knownHas) {
+      setCustomMode(false);
+    }
+  }, [isOrphanByok, knownHas, decoded?.provider_id, decoded?.model]);
+
+  const allowCustom = providers.length > 0;
+  const selectValue = customMode ? CUSTOM_SELECT_VALUE : value;
+
+  function emitCustom(providerId: string, model: string) {
+    const m = model.trim();
+    if (providerId && m) onChange(`${providerId}::${m}`);
+    else onChange("");
+  }
+
+  function onSelectChange(next: string) {
+    if (next === CUSTOM_SELECT_VALUE) {
+      setCustomMode(true);
+      const providerId = customProviderId || providers[0]?.id || "";
+      setCustomProviderId(providerId);
+      setCustomModel("");
+      onChange("");
+      return;
+    }
+    setCustomMode(false);
+    onChange(next);
+  }
+
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      <select
+        id={id}
+        className="text-input"
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => onSelectChange(e.target.value)}
+        data-testid={`${id}-select`}
+      >
+        {followLabel !== undefined ? (
+          <option value="">{followLabel}</option>
+        ) : (
+          !value &&
+          !customMode && (
+            <option value="" disabled>
+              选择模型
+            </option>
+          )
+        )}
+        {groups.map((g) => (
+          <optgroup key={g.key} label={g.title}>
+            {g.items.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.display_name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        {allowCustom && <option value={CUSTOM_SELECT_VALUE}>自定义…</option>}
+      </select>
+
+      {customMode && allowCustom && (
+        <div
+          className="custom-model-fields"
+          data-testid={`${id}-custom`}
+          style={{ marginTop: 8 }}
+        >
+          <label className="field-label" htmlFor={`${id}-provider`}>
+            服务商
+          </label>
+          <select
+            id={`${id}-provider`}
+            className="text-input"
+            value={customProviderId}
+            disabled={disabled}
+            onChange={(e) => {
+              const pid = e.target.value;
+              setCustomProviderId(pid);
+              emitCustom(pid, customModel);
+            }}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label?.trim() || endpointHost(p.base_url) || p.id}
+              </option>
+            ))}
+          </select>
+          <label
+            className="field-label"
+            htmlFor={`${id}-model`}
+            style={{ marginTop: 8 }}
+          >
+            模型 ID
+          </label>
+          <input
+            id={`${id}-model`}
+            className="text-input"
+            value={customModel}
+            disabled={disabled}
+            placeholder="model id，如 ep-xxxx"
+            onChange={(e) => {
+              const m = e.target.value;
+              setCustomModel(m);
+              emitCustom(customProviderId, m);
+            }}
+          />
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            目录未覆盖时可手填（火山 ep-、中转私有 id 等）。
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileForm({
   profile,
   catalog,
+  providers,
   platformAvailable,
   platformModel,
   onSaved,
@@ -497,17 +708,26 @@ function ProfileForm({
 }: {
   profile?: LlmModelProfileView;
   catalog: ModelCatalog | null;
+  providers: LlmProviderView[];
   platformAvailable: boolean;
   platformModel?: string | null;
   onSaved: () => void;
   onCancel: () => void;
 }) {
   const editing = Boolean(profile);
-  const groups = defaultModelGroups(catalog, platformModel);
+  const groups = defaultModelGroups(
+    catalog,
+    providers,
+    platformModel,
+    profile?.main,
+    profile?.worker,
+    profile?.background,
+  );
   const firstMain =
-    groups[0]?.items[0]?.value ??
+    groups.find((g) => g.items.length > 0)?.items[0]?.value ??
     (platformModel ? `${PLATFORM_POINTER_ID}::${platformModel}` : "");
-  const noSelectableModels = groups.every((g) => g.items.length === 0);
+  const noSelectableModels =
+    groups.every((g) => g.items.length === 0) && providers.length === 0;
 
   const [name, setName] = useState(profile?.name ?? "");
   const [mainValue, setMainValue] = useState(
@@ -521,17 +741,6 @@ function ProfileForm({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const renderOptgroups = () =>
-    groups.map((g) => (
-      <optgroup key={g.key} label={g.title}>
-        {g.items.map((m) => (
-          <option key={m.value} value={m.value}>
-            {m.display_name}
-          </option>
-        ))}
-      </optgroup>
-    ));
 
   async function save() {
     const trimmed = name.trim();
@@ -584,6 +793,8 @@ function ProfileForm({
     }
   }
 
+  const slotDisabled = saving || noSelectableModels;
+
   return (
     <div className="section" data-testid="profile-form">
       <div className="section-card">
@@ -600,69 +811,49 @@ function ProfileForm({
             placeholder="例如：日常写作"
           />
         </div>
-        <div className="field">
-          <label className="field-label" htmlFor="profile-main">
-            主模型
-          </label>
-          <select
-            id="profile-main"
-            className="text-input"
-            value={mainValue}
-            disabled={saving || groups.length === 0}
-            onChange={(e) => setMainValue(e.target.value)}
+        <SlotModelSelect
+          id="profile-main"
+          label="主模型"
+          groups={groups}
+          providers={providers}
+          value={mainValue}
+          disabled={slotDisabled}
+          onChange={setMainValue}
+        />
+        {noSelectableModels && (
+          <p
+            className="muted"
+            data-testid="profile-no-models"
+            style={{ fontSize: 12, marginTop: 4 }}
           >
-            {!mainValue && (
-              <option value="" disabled>
-                选择主模型
-              </option>
-            )}
-            {renderOptgroups()}
-          </select>
-          {noSelectableModels && (
-            <p
-              className="muted"
-              data-testid="profile-no-models"
-              style={{ fontSize: 12, marginTop: 4 }}
-            >
-              {platformAvailable
-                ? "暂无可用模型。平台额度暂不可用，请联系管理员或稍后重试。"
-                : "暂无可用模型，请先添加服务商。"}
-            </p>
-          )}
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="profile-worker">
-            Worker 模型
-          </label>
-          <select
-            id="profile-worker"
-            className="text-input"
-            value={workerValue}
-            disabled={saving}
-            onChange={(e) => setWorkerValue(e.target.value)}
-          >
-            <option value="">跟随主模型</option>
-            {renderOptgroups()}
-          </select>
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="profile-background">
-            后台模型
-          </label>
-          <select
-            id="profile-background"
-            className="text-input"
-            value={backgroundValue}
-            disabled={saving}
-            onChange={(e) => setBackgroundValue(e.target.value)}
-          >
-            <option value="">跟随主模型</option>
-            {renderOptgroups()}
-          </select>
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            标题、记忆等便宜任务；空则跟随主模型。
+            {platformAvailable
+              ? "暂无可用模型。平台额度暂不可用，请联系管理员或稍后重试。"
+              : "暂无可用模型，请先添加服务商。"}
           </p>
-        </div>
+        )}
+        <SlotModelSelect
+          id="profile-worker"
+          label="Worker 模型"
+          groups={groups}
+          providers={providers}
+          value={workerValue}
+          followLabel="跟随主模型"
+          disabled={slotDisabled}
+          onChange={setWorkerValue}
+        />
+        <SlotModelSelect
+          id="profile-background"
+          label="后台模型"
+          groups={groups}
+          providers={providers}
+          value={backgroundValue}
+          followLabel="跟随主模型"
+          disabled={slotDisabled}
+          onChange={setBackgroundValue}
+        />
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          标题、记忆等便宜任务；空则跟随主模型。
+        </p>
         {error && <p className="error">{error}</p>}
         <div className="field-actions">
           <button

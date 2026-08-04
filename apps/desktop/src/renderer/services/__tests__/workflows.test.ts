@@ -201,11 +201,12 @@ describe("workflow templates / from-playbook (§10.8)", () => {
       id: "build_website",
       title: "建站",
       summary: "文案→前端→QA",
-      primary_slots: "site（必填，站点/落地页简述）",
+      primary_slots:
+        "topic（必填，站点/落地页/控制台一句话简述；产物目录固定 site/）",
     });
-    expect(t.slots[0]?.key).toBe("site");
+    expect(t.slots[0]?.key).toBe("topic");
     expect(t.slots[0]?.required).toBe(true);
-    expect(t.slots[0]?.hint).toContain("站点");
+    expect(t.slots[0]?.hint).toContain("简述");
   });
 
   it("listWorkflowTemplates returns empty on 404 (hide official section)", async () => {
@@ -245,14 +246,14 @@ describe("workflow templates / from-playbook (§10.8)", () => {
     const created = await createWorkflowFromPlaybook({
       playbook: "build_website",
       name: "我的建站",
-      slots: { site: "SaaS 营销官网" },
+      slots: { topic: "SaaS 营销官网" },
     });
     expect(created.id).toBe("wf-from-pb");
     expect(created.localOnly).toBeFalsy();
     expect(apiPost).toHaveBeenCalledWith("/v1/workflows/from-playbook", {
       playbook: "build_website",
       name: "我的建站",
-      slots: { site: "SaaS 营销官网" },
+      slots: { topic: "SaaS 营销官网" },
     });
   });
 

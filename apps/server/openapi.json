@@ -3499,7 +3499,7 @@
         "type": "object"
       },
       "CloneRepoRequest": {
-        "description": "Clone a public git repository into the conversation's workspace.",
+        "description": "Clone an http(s) git repository into the conversation's workspace (G3).",
         "properties": {
           "dest": {
             "anyOf": [
@@ -6329,6 +6329,54 @@
           "playbook"
         ],
         "title": "FromPlaybookRequest",
+        "type": "object"
+      },
+      "GitCredentialView": {
+        "description": "Settings view of the account Git credential — never the plaintext token.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "masked_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Token"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "title": "GitCredentialView",
         "type": "object"
       },
       "GrantExternalReadonlyRequest": {
@@ -13967,6 +14015,36 @@
           "size_bytes"
         ],
         "title": "UploadFileResponse",
+        "type": "object"
+      },
+      "UpsertGitCredentialRequest": {
+        "description": "Save / replace the account Git PAT (encrypted at rest; never returned).",
+        "properties": {
+          "token": {
+            "description": "Plaintext PAT / OAuth token (AES-256-GCM at rest; never returned).",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Remote username (default x-access-token for GitHub PAT).",
+            "title": "Username"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "UpsertGitCredentialRequest",
         "type": "object"
       },
       "UsageBreakdown": {
@@ -24044,7 +24122,7 @@
     },
     "/v1/conversations/{conversation_id}/workspace/clone": {
       "post": {
-        "description": "Clone a public git repository into the conversation's scratch workspace (决策⑤).",
+        "description": "Clone a public git repository into the conversation's scratch workspace (决策⑤ · G3).",
         "operationId": "clone_repo_into_workspace_v1_conversations__conversation_id__workspace_clone_post",
         "parameters": [
           {
@@ -34043,6 +34121,210 @@
         ]
       }
     },
+    "/v1/users/me/git-credentials": {
+      "delete": {
+        "description": "Clear the account Git PAT.",
+        "operationId": "delete_git_credentials_v1_users_me_git_credentials_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Git Credentials",
+        "tags": [
+          "git-credentials"
+        ]
+      },
+      "get": {
+        "description": "Whether an account Git PAT is configured (+ masked tip).",
+        "operationId": "get_git_credentials_v1_users_me_git_credentials_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitCredentialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Git Credentials",
+        "tags": [
+          "git-credentials"
+        ]
+      },
+      "put": {
+        "description": "Create or replace the account Git PAT (encrypted at rest).",
+        "operationId": "upsert_git_credentials_v1_users_me_git_credentials_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertGitCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitCredentialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Git Credentials",
+        "tags": [
+          "git-credentials"
+        ]
+      }
+    },
     "/v1/users/me/llm-model-profiles": {
       "get": {
         "operationId": "list_model_profiles_v1_users_me_llm_model_profiles_get",
@@ -36602,7 +36884,7 @@
     },
     "/v1/workspaces/{ws_id}/clone": {
       "post": {
-        "description": "Clone a public git repository into a cloud workspace (决策⑤).",
+        "description": "Clone a public git repository into a cloud workspace (决策⑤ · G3).",
         "operationId": "clone_repo_into_workspace_v1_workspaces__ws_id__clone_post",
         "parameters": [
           {

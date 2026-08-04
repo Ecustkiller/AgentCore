@@ -170,6 +170,12 @@ def test_schema_exposes_form_enum():
     # 纠正「一次只能 / 同步阻塞到全队完成」误述（协调默认立即返回、可同回合追加）
     assert "立即返回" in DELEGATE_DESCRIPTION
     assert "一张图" in DELEGATE_DESCRIPTION
+    # 建站常驻路径勿先 consult：schema 必须带 playbook_args.topic，否则缺 slot 全失败。
+    assert "playbook_args.topic" in DELEGATE_DESCRIPTION
+    pa = DELEGATE_PARAMETERS["properties"]["playbook_args"]["description"]
+    assert "build_website" in pa and "topic" in pa
+    assert "建站必填 topic" in pa
+    assert "勿空对象" in pa
     deps = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]["depends_on"][
         "description"
     ]

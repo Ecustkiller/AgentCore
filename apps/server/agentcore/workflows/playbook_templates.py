@@ -67,7 +67,7 @@ _KNOWN: frozenset[str] = frozenset(WORKFLOW_PLAYBOOK_IDS)
 PRIMARY_SLOTS: dict[str, tuple[str, ...]] = {
     "parallel_brief": ("topic", "angles"),
     "research_report": ("topic",),
-    "build_website": ("site",),
+    "build_website": ("topic",),
     "build_app": ("app",),
     "compare_options": ("question", "options"),
 }
@@ -116,7 +116,7 @@ _PRIMARY_SLOT_HELP: dict[str, str] = {
     ),
     "research_report": "topic（必填，主题）",
     "build_website": (
-        "site（必填，站点/落地页/控制台简述）；"
+        "topic（必填，站点/落地页/控制台一句话简述；产物目录固定 site/，不是文件夹槽）；"
         "style（可选，marketing 默认 / toolshed=工具台 dense）"
     ),
     "build_app": "app（必填，应用/SPA 简述）",
@@ -180,6 +180,13 @@ def merge_playbook_slots(playbook: str, slots: dict[str, Any] | None) -> dict[st
 
     merged: dict[str, Any] = dict(_DEFAULT_OPTIONAL_SLOTS.get(playbook) or {})
     merged.update(dict(slots or {}))
+
+    if playbook == "build_website":
+        from agentcore.runtime.runs.playbooks.build_site import (
+            normalize_website_topic_args,
+        )
+
+        merged = normalize_website_topic_args(merged)
 
     # List slots: coerce UI string → list before missing/expand checks.
     list_key = _LIST_SLOTS.get(playbook)

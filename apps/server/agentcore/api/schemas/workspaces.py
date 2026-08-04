@@ -309,7 +309,7 @@ class CreateDirRequest(BaseModel):
 
 
 class CloneRepoRequest(BaseModel):
-    """Clone a public git repository into the conversation's workspace."""
+    """Clone an http(s) git repository into the conversation's workspace (G3)."""
 
     repo_url: str = Field(..., min_length=1, max_length=2000)
     # Optional workspace-relative target dir; defaults to the repo name.

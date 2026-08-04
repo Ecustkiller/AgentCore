@@ -825,11 +825,14 @@ _BUILD_WEBSITE = f"""\
 1. 关键未齐（类型/受众/风格等）或用户只说「做个网站」→ 可 `ask_user` **短问**一句（\
 默认风格由机制写入 DESIGN），或直接派并在 assumptions/正文写明默认。\
 **勿先** consult 本 skill 再问。
-2. **规格已齐**（用户已点名风格/站点类型/交付范围等）→ **直接** `delegate(playbook="build_website", …)`，\
-**勿先** consult；`playbook_args.site` 等只填用户已给事实，\
-【禁止】自拟视觉施工图（配色 / 动效 / 板块清单交给 playbook）。槽位拿不准再查本 skill。
+2. **规格已齐**（用户已点名风格/站点类型/交付范围等）→ **直接** \
+`delegate(playbook="build_website", playbook_args={{"topic": "…"}})`，\
+**勿先** consult；**必填** `playbook_args.topic`（站点/落地页一句话简述，取用户已给事实；\
+产物目录固定 `site/`，不是文件夹槽），\
+【禁止】空 `playbook_args` / 漏 topic；【禁止】自拟视觉施工图（配色 / 动效 / 板块清单交给 playbook）。\
+槽位拿不准再查本 skill。
 3. 短问澄清后：若尚未读过本指引再 `consult_skill(build_website)`，然后调 `delegate`：\
-`playbook="build_website"`；`playbook_args` 规则同上。
+`playbook="build_website"` + **必填** `playbook_args.topic`；其余规则同上。
 4. 控制台 / 工具台 dense：`playbook_args.style="toolshed"`；可选 `sections` / `stack` / `audience`——\
 **只传事实输入**；强制 catalog pack `tool_dense` + anti-slop `domain=tool`；\
 【禁止】套营销 hero / pricing 皮。省略 style（或 `marketing`）= 营销/落地页。
@@ -942,8 +945,8 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 - 费用？——「设置 · 用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
 - 用什么模型？——默认平台额度；自带 Key 在「设置 · 服务商」，组合在「设置 · 模型」。`?s=faq`
 - 数据存哪？——文件在工作区；对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
-- Agent 对 Git？——可读与看 diff/log；改文件与普通 push 等需审批；force push / reset·rebase / \
-在 main·master 直接提交或 push 不会做。`?s=faq`
+- Agent 对 Git？——可读与看 diff/log；改文件、普通 push、开 PR（GitHub）、merge/rebase 等需审批；\
+force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 PR 不会做。`?s=faq`
 - 断网？——可浏览缓存对话与本机文件（只读）；不能发消息、改文件、跑 AI。`?s=faq`
 - Key 报错？——核对「设置 · 服务商」的 Key / 地址 / 模型名；可先切回平台模型排查。\
 `#/toolbox/manual/reference?s=troubleshooting`
@@ -983,8 +986,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="build_website",
         summary=(
             "建站/落地页/营销官网：糊可短问再派；规格已齐→推荐 "
-            "playbook=build_website；控制台 dense 加 style=toolshed；"
-            "三串文案→前端→QA"
+            "playbook=build_website + playbook_args.topic；"
+            "控制台 dense 加 style=toolshed；三串文案→前端→QA"
         ),
         body=_BUILD_WEBSITE,
         requires_tools=("delegate",),
@@ -1131,7 +1134,8 @@ def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str
         "提问卡直接 ask_user、不必先查；"
         f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
         "糊建站 /「做个网站」先 ask_user，确认后再 consult `build_website`；"
-        "规格已齐的落地页/作品集可直接 delegate(playbook=build_website)，不必先查；"
+        "规格已齐的落地页/作品集可直接 delegate(playbook=build_website, "
+        "playbook_args.topic=简述)，不必先查；"
         "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
         "绿场软件/SPA 完整交付必须 build_app（禁 none 手糊）；"
         "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature）：",

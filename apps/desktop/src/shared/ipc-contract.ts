@@ -132,6 +132,8 @@ export type FsWriteResult =
  * 供服务端裁剪工具 schema（坏 WSL bash 等不进 enum）。
  * ``diagnostics`` 同样不是 backend 方法——本地 TypeScript LanguageService 诊断（写码验证内环）；
  * 云端无 LS 时诚实 ``status=unavailable``，不把通道打挂。
+ * ``git_repo_status`` / ``git_scm`` 同样不是 backend 方法——桌面 U1–U3 用户 SCM
+ *（只读摘要 + stage/commit/push/pull）；渲染层经 ``workspaceOp`` 直调，服务端/Agent 不发此 op。
  */
 export type WorkspaceOpName =
   | "read"
@@ -157,7 +159,33 @@ export type WorkspaceOpName =
   | "process_read"
   | "process_stop"
   | "process_list"
-  | "diagnostics";
+  | "diagnostics"
+  | "git_repo_status"
+  | "git_scm";
+
+/** U2：单条 Git 变更（path + porcelain XY 片段）。 */
+export interface GitChangeEntry {
+  path: string;
+  /** 如 ``M `` / `` M`` / ``??`` */
+  code: string;
+}
+
+/**
+ * ``git_repo_status`` 成功 value —— U1 chip + U2 变更列表。
+ * ``present:false`` = 无仓 / git 不可用（UI 不挂 chip / git 轨，勿假成功）。
+ */
+export type GitRepoStatusValue =
+  | { present: false }
+  | {
+      present: true;
+      branch: string;
+      dirty: boolean;
+      ahead?: number;
+      behind?: number;
+      staged?: GitChangeEntry[];
+      unstaged?: GitChangeEntry[];
+      conflicted?: string[];
+    };
 
 /**
  * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveClientToolInteraction.result`

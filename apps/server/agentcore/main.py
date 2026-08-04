@@ -24,6 +24,7 @@ from agentcore.api.routes import (
     feedback,
     files,
     folders,
+    git_credentials,
     inference,
     llm_model_profiles,
     llm_providers,
@@ -481,6 +482,7 @@ app.include_router(favicon.router, prefix="/v1")
 app.include_router(feedback.router, prefix="/v1")
 app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
+app.include_router(git_credentials.router, prefix="/v1")
 app.include_router(notices.router, prefix="/v1")
 app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_providers.router, prefix="/v1")

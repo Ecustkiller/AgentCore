@@ -31,6 +31,11 @@ export default defineConfig({
   server: {
     port: 5175,
   },
+  // Align with electron.vite.config: dynamic import("mermaid") otherwise races
+  // Vite's deps optimizer →「图表引擎加载失败」(see Diagram getMermaid).
+  optimizeDeps: {
+    include: ["mermaid"],
+  },
   build: {
     // MUST stay outside electron-vite `out/` — electron-builder packs `out/**` into
     // the installer (electron-builder.yml `files`), same constraint as shoot-out/.

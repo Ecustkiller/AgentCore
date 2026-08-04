@@ -796,7 +796,7 @@ def test_qa_deferred_budget_emits_website_verify_action():
     action = next(a for a in payload["actions"] if a["kind"] == "website_verify")
     assert "build_website_verify" in action["prompt"]
     assert "GEO 官网" in action["prompt"]
-    assert "site=" in action["prompt"]
+    assert "topic=" in action["prompt"]
 
 
 @pytest.mark.asyncio

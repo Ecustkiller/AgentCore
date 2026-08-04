@@ -309,16 +309,16 @@ export const referenceChapter: ManualChapterContent = {
                   type: "boundaryTable",
                   rows: [
                     {
-                      can: "读文件；git status / diff / log",
+                      can: "读文件；git status / diff / log / fetch / show / blame；stash/tag/remote list",
                       approve:
-                        "改文件；git add / commit / push / 建分支 / 切分支；跑代码",
-                      wont: "force push；reset / rebase；在 main / master 上直接提交或 push",
+                        "改文件；git add / commit / push / pull / 建分支 / 切分支；merge / rebase / cherry-pick；stash push/pop；tag create；remote add；开 PR（GitHub）；跑代码",
+                      wont: "force push；reset / clean；stash drop/clear；删 tag；remote remove；在 main / master 上直接提交、push 或 merge/rebase；GitLab 开 PR",
                     },
                   ],
                 },
                 {
                   type: "text",
-                  text: "普通 push 会先弹确认；force / 推保护分支仍禁止。",
+                  text: "普通 push / 开 PR 会先弹确认；force / 推保护分支仍禁止。",
                 },
               ],
             },

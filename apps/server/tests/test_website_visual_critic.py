@@ -48,7 +48,7 @@ class _FakeReader:
 def test_build_website_qa_enables_visual_critic():
     tasks, errors = expand_playbook(
         "build_website",
-        {"site": "Demo", "audience": "访客"},
+        {"topic": "Demo", "audience": "访客"},
     )
     assert errors == []
     qa = next(t for t in tasks if t["id"] == "qa")

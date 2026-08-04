@@ -107,6 +107,11 @@ class WorkspaceOp(StrEnum):
     PROCESS_READ = "process_read"
     PROCESS_STOP = "process_stop"
     PROCESS_LIST = "process_list"
+    # Desktop U1–U3 user SCM: read-only status + controlled stage/commit/push/pull.
+    # NOT WorkspaceBackend methods — renderer invokes via ``workspaceOp``; server
+    # never issues these ops (kept in the closed set so ends cannot drift).
+    GIT_REPO_STATUS = "git_repo_status"
+    GIT_SCM = "git_scm"
 
 
 # Map a serialized error ``kind`` back to its WorkspaceError subclass, so a remote
