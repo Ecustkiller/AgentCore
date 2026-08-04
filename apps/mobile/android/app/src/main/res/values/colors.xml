@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Native shell chrome — aligned with mobile-light `--panel` (pure white). -->
+    <!-- Native shell chrome: aligned with mobile-light panel (pure white). -->
     <color name="shellBackground">#FFFFFF</color>
     <color name="colorPrimary">#FFFFFF</color>
     <color name="colorPrimaryDark">#FFFFFF</color>
-    <!-- Approximate mobile-light `--accent` for any residual AppCompat chrome. -->
+    <!-- Approximate mobile-light accent for residual AppCompat chrome. -->
     <color name="colorAccent">#2F6FED</color>
 </resources>
