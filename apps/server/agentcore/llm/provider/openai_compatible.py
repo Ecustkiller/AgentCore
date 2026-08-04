@@ -761,13 +761,10 @@ class OpenAICompatibleProvider:
                 attempt=attempt + 1,
                 body_preview=preview,
             )
-            # ``platform`` is our credential leaf name — saying it in the face looks
-            # like AgentCore itself is down. Prefer an upstream-capacity phrasing.
-            message = (
-                f"上游模型服务暂时不可用（{status_code}），请稍后再试"
-                if self._name == "platform"
-                else f"{self._name} 服务端错误（{status_code}），请稍后再试"
-            )
+            # Product face (A′ · 2026-08-04): never put credential leaf names
+            # (``platform`` / BYOK ``user`` / vendor) or「服务端错误」on the bubble —
+            # those read as AgentCore itself failing. Upstream body stays in preview.
+            message = f"上游模型服务暂时不可用（{status_code}），请稍后再试"
             err = upstream_error(
                 message,
                 status=status_code,
@@ -793,10 +790,10 @@ class OpenAICompatibleProvider:
     def _network_error_to_llm(self, exc: httpx.HTTPError) -> LLMError:
         """Map transient transport failures to retryable LLM errors."""
         if isinstance(exc, httpx.TimeoutException):
-            return LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+            return LLMTimeoutError("连接上游模型服务超时，请检查网络后重试")
         detail = str(exc).strip() or type(exc).__name__
         return upstream_error(
-            f"{self._name} 连接中断，请稍后再试",
+            "上游模型服务连接中断，请稍后再试",
             status=502,
             body=detail.encode(),
         )
@@ -979,7 +976,7 @@ class OpenAICompatibleProvider:
         if code == 404:
             raise LLMError(f"{self._name} 接口地址不可达（404），请检查 base_url 配置")
         if code >= 500:
-            raise LLMError(f"{self._name} 服务端错误（{code}），请稍后再试")
+            raise LLMError(f"上游模型服务暂时不可用（{code}），请稍后再试")
         raise LLMError(f"{self._name} 连通测试失败（HTTP {code}）")
 
     async def probe_tools(self, *, model: str) -> bool | None:

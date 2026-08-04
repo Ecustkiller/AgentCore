@@ -182,14 +182,18 @@ def _clear_auth_cookies(response: Response, *, user_id: str | None = None) -> No
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register(
     body: RegisterRequest,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
     messaging: MessagingService = Depends(get_messaging_service),
 ):
+    from agentcore.middleware.rate_limit import get_client_ip
+
     user = await service.register(
         username=body.username,
         password=body.password,
         display_name=body.display_name,
         email=body.email,
+        registration_ip=get_client_ip(request),
     )
     # Enroll the new account into every auto-join chat (the 内测全员群). Best-effort
     # so a messaging hiccup never blocks account creation — a missed enrollment can

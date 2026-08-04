@@ -146,13 +146,47 @@ async def _seed_llm_key(
 
 
 async def _seed_user(
-    session_factory, username: str, *, role: str = "user", status: str = "active"
+    session_factory,
+    username: str,
+    *,
+    role: str = "user",
+    status: str = "active",
+    registration_ip: str | None = None,
 ) -> str:
     async with session_factory() as session:
         user = await UserRepository(session).create(
-            username=username, display_name=username, role=role, status=status
+            username=username,
+            display_name=username,
+            role=role,
+            status=status,
+            registration_ip=registration_ip,
         )
     return user.user_id
+
+
+async def _seed_refresh_token(
+    session_factory,
+    *,
+    user_id: str,
+    ip: str | None = None,
+    platform: str = "desktop",
+) -> str:
+    """Insert one active refresh-token tip so admin IP filter / sessions can see it."""
+    from datetime import UTC, datetime, timedelta
+
+    from agentcore.db.repositories.auth import RefreshTokenRepository
+
+    async with session_factory() as session:
+        row = await RefreshTokenRepository(session).create(
+            user_id=user_id,
+            token_hash=f"hash-{new_id()}",
+            token_family=new_id(),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+            client_platform=platform,
+            user_agent="AgentCoreTest/1.0",
+            ip=ip,
+        )
+    return row.token_family
 
 
 async def _soft_delete_user(session_factory, user_id: str) -> None:
@@ -326,6 +360,58 @@ async def test_admin_roster_filters_by_role_and_status(client, make_admin, sessi
         await client.get("/v1/admin/users", params={"role": "user", "status": "active"})
     ).json()
     assert {u["username"] for u in combo["data"]} == {"alice"}
+
+
+async def test_admin_roster_filters_by_ip_and_registration_time(
+    client, make_admin, session_factory
+):
+    """``ip`` matches registration_ip OR any refresh_tokens.ip; ``since``/``until``
+    bound created_at. Register path writes registration_ip via get_client_ip."""
+    from datetime import UTC, datetime, timedelta
+
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+
+    # registration_ip match
+    await _seed_user(session_factory, "reg_ip", registration_ip="198.51.100.7")
+    # login-IP-only match (no registration_ip)
+    login_only = await _seed_user(session_factory, "login_ip")
+    await _seed_refresh_token(session_factory, user_id=login_only, ip="198.51.100.7")
+    # unrelated
+    await _seed_user(session_factory, "other_ip", registration_ip="203.0.113.9")
+
+    by_ip = (await client.get("/v1/admin/users", params={"ip": "198.51.100.7"})).json()
+    assert {u["username"] for u in by_ip["data"]} == {"reg_ip", "login_ip"}
+    assert by_ip["total"] == 2
+    assert all("registration_ip" in u for u in by_ip["data"])
+
+    # Registration via HTTP writes the peer IP (TestClient → typically "testclient").
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "fresh_reg", "password": _PW},
+    )
+    assert r.status_code == 201, r.text
+    roster = (await client.get("/v1/admin/users", params={"q": "fresh_reg"})).json()
+    assert roster["total"] == 1
+    assert roster["data"][0]["registration_ip"]  # non-empty peer IP
+
+    # since / until bound created_at.
+    past_until = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
+    assert (await client.get("/v1/admin/users", params={"until": past_until})).json()[
+        "total"
+    ] == 0
+    future_since = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    assert (await client.get("/v1/admin/users", params={"since": future_since})).json()[
+        "total"
+    ] == 0
+    # since=far past includes the freshly registered account.
+    past_since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    recent = (
+        await client.get(
+            "/v1/admin/users", params={"q": "fresh_reg", "since": past_since}
+        )
+    ).json()
+    assert recent["total"] == 1
 
 
 async def test_admin_roster_rejects_invalid_filter_params(client, make_admin):
@@ -1481,6 +1567,37 @@ async def test_admin_user_detail_composes_account_view(client, make_admin, sessi
             "cost_estimated_total": 0,
         }
     ]
+    # 加强可查: registration_ip + sessions (empty when no refresh tips).
+    assert "registration_ip" in b["user"]
+    assert b["sessions"] == []
+
+
+async def test_admin_user_detail_includes_sessions(
+    client, make_admin, session_factory
+):
+    """Detail surfaces active refresh-token sessions (ip/ua/platform/times)."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(
+        session_factory, "alice_sess", registration_ip="203.0.113.50"
+    )
+    fam = await _seed_refresh_token(
+        session_factory, user_id=alice, ip="203.0.113.51", platform="mobile"
+    )
+
+    r = await client.get(f"/v1/admin/users/{alice}/detail")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["user"]["registration_ip"] == "203.0.113.50"
+    assert len(b["sessions"]) == 1
+    sess = b["sessions"][0]
+    assert sess["id"] == fam
+    assert sess["ip"] == "203.0.113.51"
+    assert sess["platform"] == "mobile"
+    assert sess["user_agent"] == "AgentCoreTest/1.0"
+    assert sess["current"] is False
+    assert sess["created_at"]
+    assert sess["last_used_at"]
 
 
 async def test_admin_user_detail_exposes_models_and_by_model_usage(

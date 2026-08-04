@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .auth import SessionSummary
 from .usage import (
     CostBreakdown,
     DailyCost,
@@ -27,6 +28,8 @@ class AdminUserResponse(BaseModel):
     quota overrides so the operator can manage accounts. Each quota override is
     nullable — NULL = inherit the global config threshold for that dimension
     (成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.
+    ``registration_ip`` is the client IP captured at signup (加强可查; NULL for
+    pre-column / seeded rows).
     """
 
     id: str
@@ -41,6 +44,8 @@ class AdminUserResponse(BaseModel):
     quota_daily_cost_cny: float | None
     quota_daily_requests: int | None
     created_at: datetime
+    # Client IP at registration (加强可查). NULL for pre-column / seeded rows.
+    registration_ip: str | None = None
     # NULL for a live account; a timestamp marks a 注销 (self-service deleted +
     # anonymized) account. The roster hides these by default and renders them as
     # 「已注销」when surfaced — they're tombstones, not manageable accounts.
@@ -422,8 +427,10 @@ class AdminUserDetail(BaseModel):
     API key), this account's usage (today/month/
     trend/by-model — the per-user counterpart of ``AdminUsageSummary``),
     its recent conversations, and its recent turn activity (``turn_metrics``, each
-    drillable into 会话复盘). Money is integer nano-CNY; ``CostBreakdown.cny_total``
-    is yuan. ``billing_mode`` frames cost honestly (byok = own-key spend).
+    drillable into 会话复盘), plus active login ``sessions`` (refresh-token families,
+    same shape as ``GET /v1/auth/sessions``). Money is integer nano-CNY;
+    ``CostBreakdown.cny_total`` is yuan. ``billing_mode`` frames cost honestly
+    (byok = own-key spend).
     """
 
     user: AdminUserResponse
@@ -442,6 +449,9 @@ class AdminUserDetail(BaseModel):
     conversations: list[AdminConversationLine]
     # Recent turns (newest-first, capped) — each drillable into 会话复盘.
     recent_turns: list[TurnMetricLine]
+    # Active login devices (refresh-token families) — same shape as ``GET /v1/auth/sessions``.
+    # Read-only for ops 加强可查; ``current`` is always false (admin is not in-session).
+    sessions: list[SessionSummary] = []
     billing_mode: str
 
 

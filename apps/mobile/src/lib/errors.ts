@@ -108,8 +108,7 @@ export function emptyChatCopy(): {
 /**
  * Visible notice for an empty assistant bubble that finished abnormally
  * (`error` / `unproductive`). Desktop synthesizes a full error card; mobile
- * has no that path yet — this keeps the failure readable instead of a blank
- * / hidden bubble.
+ * keeps the failure readable instead of a blank / hidden bubble.
  */
 export function emptyFailureNotice(
   finishReason: string | null | undefined,
@@ -119,3 +118,37 @@ export function emptyFailureNotice(
     return "工具连续无有效进展或参数无效，请重试。";
   return null;
 }
+
+/** Short diagnosis labels for degraded empty-response finishes (mirrors backend / desktop). */
+export const EMPTY_RESPONSE_CHIP_LABELS: Record<string, string> = {
+  oauth_expired: "模型无响应 · 可能需要刷新 Sub2API OAuth",
+  content_filtered: "内容被过滤",
+  model_unknown: "模型名未被上游识别",
+  silent_empty: "模型返回空内容",
+  format_mismatch: "上游响应格式异常",
+};
+
+/** Chip suffix for degraded finish when an empty-response diagnosis is available. */
+export function degradedFinishChipLabel(
+  diagnosis: string | undefined,
+  errorMessage: string | undefined,
+): string | undefined {
+  if (diagnosis && EMPTY_RESPONSE_CHIP_LABELS[diagnosis]) {
+    return EMPTY_RESPONSE_CHIP_LABELS[diagnosis];
+  }
+  if (errorMessage?.includes(" · ")) {
+    return errorMessage.split(" · ", 2)[1];
+  }
+  return undefined;
+}
+
+/**
+ * Abnormal finish reasons that warrant a bubble chip.
+ * `cancelled` / `interrupted` omitted — partial body / 已停止 is the terminal signal.
+ */
+export const FINISH_REASON_META: Record<string, { label: string }> = {
+  max_rounds: { label: "已达最大轮次 · 提前收尾" },
+  degraded: { label: "降级完成 · 模型多次空响应" },
+  unproductive: { label: "无有效进展 · 提前收尾" },
+  error: { label: "调用失败" },
+};

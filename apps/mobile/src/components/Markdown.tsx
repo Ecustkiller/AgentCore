@@ -2,22 +2,28 @@ import { EvidenceBadge } from "@/components/EvidenceBadge";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { remarkCitations } from "@/components/remarkCitations";
 import { remarkEvidence } from "@/components/remarkEvidence";
+import { splitMarkdownBlocks } from "@/components/streamingMarkdown";
 // Assistant-message Markdown for the mobile client (前端技术与架构 §七 · 富渲染).
 //
-// Full stack now (matches desktop coverage, minimal-deps variant): react-markdown +
-// remark-gfm (headings/lists/tables/task lists/code) + remark-math & rehype-katex (math)
-// + rehype-highlight (token-class code highlighting, themed via markdown.css onto the
-// semantic tokens) + lazy mermaid (```mermaid → diagram, dynamically imported so it never
-// bloats the main bundle) + inline `[n]` / `#rN` citation chips (remarkCitations →
-// `citemark` via data.hProperties, resolved against citations + evidence ledger).
+// Full stack (matches desktop coverage, minimal-deps variant): react-markdown +
+// remark-gfm + remark-math & rehype-katex + rehype-highlight (deferred while streaming)
+// + lazy mermaid (```mermaid → diagram; source-only while streaming) + inline `[n]` /
+// `#rN` citation chips with optional `citationToDisplay` map (no Popover — clickable
+// external link + stable display number). Streaming splits into memoized top-level
+// blocks so finished chunks skip re-parse on each delta.
 //
-// This is a pure rendering leaf (no drift surface — it never touches the protocol fold).
+// Pure rendering leaf (no protocol fold). No import from apps/desktop.
 import type {
   Citation,
   EvidenceLedgerEntry,
   TurnEvidenceLedgerEntry,
 } from "@agentcore/contract-types";
-import { type ReactNode, memo, useMemo } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  memo,
+  useMemo,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
@@ -26,7 +32,17 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import "@/components/markdown.css";
 
-const rehypePlugins = [rehypeKatex, rehypeHighlight];
+type ReactMarkdownProps = ComponentPropsWithoutRef<typeof ReactMarkdown>;
+
+// Stable module-level plugin refs so ReactMarkdown doesn't re-init on every delta.
+const remarkBase = [remarkGfm, remarkMath];
+const rehypeHighlighted: ReactMarkdownProps["rehypePlugins"] = [
+  rehypeKatex,
+  [rehypeHighlight, { ignoreMissing: true }],
+];
+// While streaming: drop rehype-highlight — re-tokenizing every code block on each
+// delta is the dominant cost. Plain monospace until the turn finishes.
+const rehypeStreaming: ReactMarkdownProps["rehypePlugins"] = [rehypeKatex];
 
 type LedgerLike = TurnEvidenceLedgerEntry | EvidenceLedgerEntry;
 
@@ -49,103 +65,170 @@ function ledgerEntryAsCitation(entry: LedgerLike): Citation | null {
   };
 }
 
+/**
+ * Resolve a `#rN` chip target: prefer ``citations[].id``, else evidence ledger.
+ * Returns pool index + display fallback so chips align with an optional display map.
+ */
 function resolveLedgerCitation(
   ledgerId: string,
   citations: Citation[],
   evidenceLedger: readonly LedgerLike[] | null | undefined,
-): Citation | null {
-  const byId = citations.find((c) => c.id === ledgerId);
-  if (byId?.url) return byId;
+): { citation: Citation; poolIndex: number; displayFallback: number } | null {
+  const byId = citations.findIndex((c) => c.id === ledgerId);
+  if (byId >= 0) {
+    const citation = citations[byId];
+    if (citation?.url) {
+      return { citation, poolIndex: byId, displayFallback: byId + 1 };
+    }
+  }
   const entry = evidenceLedger?.find((e) => e.id === ledgerId);
   if (!entry) return null;
   const asCite = ledgerEntryAsCitation(entry);
   if (!asCite) return null;
-  const byUrl = citations.find((c) => c.url === asCite.url);
-  return byUrl ?? asCite;
+  const byUrl = citations.findIndex((c) => c.url === asCite.url);
+  const matchedByUrl = byUrl >= 0 ? citations[byUrl] : undefined;
+  if (matchedByUrl) {
+    return {
+      citation: matchedByUrl,
+      poolIndex: byUrl,
+      displayFallback: byUrl + 1,
+    };
+  }
+  const n = Number(/^#r(\d+)$/.exec(ledgerId)?.[1]);
+  return {
+    citation: asCite,
+    poolIndex: -1,
+    displayFallback: Number.isFinite(n) && n > 0 ? n : 1,
+  };
 }
 
+/**
+ * Inline citation chip: display number linked to the source URL (no Popover —
+ * mobile simplifies to tappable external link; numbering follows ``toDisplay``).
+ */
 function CitationChip({
   "data-n": dataN,
   "data-ledger-id": dataLedgerId,
   citations,
   evidenceLedger,
+  toDisplay,
 }: {
   "data-n"?: string;
   "data-ledger-id"?: string;
   children?: ReactNode;
   citations: Citation[];
   evidenceLedger?: readonly LedgerLike[] | null;
+  toDisplay: ReadonlyMap<number, number>;
 }) {
   if (dataLedgerId) {
-    const source = resolveLedgerCitation(
-      dataLedgerId,
-      citations,
-      evidenceLedger,
-    );
-    if (!source?.url) return <>{dataLedgerId}</>;
-    const n =
-      citations.findIndex(
-        (c) => c.id === dataLedgerId || c.url === source.url,
-      ) + 1;
-    const label =
-      n > 0 ? n : Number(/^#r(\d+)$/.exec(dataLedgerId)?.[1]) || dataLedgerId;
+    const hit = resolveLedgerCitation(dataLedgerId, citations, evidenceLedger);
+    if (!hit) return <>{dataLedgerId}</>;
+    const { citation, poolIndex, displayFallback } = hit;
+    const display =
+      poolIndex >= 0
+        ? (toDisplay.get(poolIndex + 1) ?? displayFallback)
+        : displayFallback;
     return (
       <a
         className="cite-chip"
-        href={source.url}
+        href={citation.url}
         target="_blank"
         rel="noreferrer"
-        title={source.title || source.url}
-        aria-label={`来源 ${label}（${dataLedgerId}）`}
+        title={citation.title || citation.url}
+        aria-label={`来源 ${display}（${dataLedgerId}）`}
       >
-        {label}
+        {display}
       </a>
     );
   }
-  const n = Number(dataN);
-  if (!Number.isFinite(n) || n < 1) {
+
+  const canonical = Number(dataN);
+  if (!Number.isFinite(canonical) || canonical < 1) {
     return <>{dataN != null ? `[${dataN}]` : null}</>;
   }
-  const source = citations[n - 1];
-  if (source?.url) {
-    return (
-      <a
-        className="cite-chip"
-        href={source.url}
-        target="_blank"
-        rel="noreferrer"
-        title={source.title || source.url}
-      >
-        {n}
-      </a>
-    );
+  const citation = citations[canonical - 1];
+  const display = toDisplay.get(canonical);
+  if (!citation?.url || display == null) {
+    return <>{`[${canonical}]`}</>;
   }
-  return <sup className="cite-chip">{n}</sup>;
+  return (
+    <a
+      className="cite-chip"
+      href={citation.url}
+      target="_blank"
+      rel="noreferrer"
+      title={citation.title || citation.url}
+      aria-label={`来源 ${display}`}
+    >
+      {display}
+    </a>
+  );
 }
 
-/** Render Markdown text. `muted` reads a notch quieter (a turn's reasoning) than the
- *  answer body. `citations`, when present, turns inline `[n]` markers into chips that
- *  link to the matching source. `#rN` also rewrites when ledger ids are known
- *  (citations[].id / evidenceLedger). `evidence` (debate speech only, 举证责任) turns
- *  inline `【已核实·出处】` / `【待核实·推断】` markers into {@link EvidenceBadge} chips. */
-export const Markdown = memo(function Markdown({
+/** One memoized Markdown chunk — finished blocks skip re-parse across streaming deltas. */
+const MarkdownChunk = memo(function MarkdownChunk({
   content,
-  muted = false,
-  citations,
-  evidenceLedger = null,
-  evidence = false,
+  remarkPlugins: remarks,
+  rehypePlugins: rehype,
+  components,
 }: {
   content: string;
-  muted?: boolean;
+  remarkPlugins: ReactMarkdownProps["remarkPlugins"];
+  rehypePlugins: ReactMarkdownProps["rehypePlugins"];
+  components: Components;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarks}
+      rehypePlugins={rehype}
+      components={components}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
+
+interface Props {
+  content: string;
+  /** Web sources; enables `[n]` citation chips linking to each source. */
   citations?: Citation[];
+  /**
+   * Canonical (1-based) → display number map (shared with source cards when parent
+   * builds one). When omitted, chips fall back to identity (pool index).
+   */
+  citationToDisplay?: ReadonlyMap<number, number>;
+  /** While true: split into memoized blocks, defer highlight + mermaid render. */
+  isStreaming?: boolean;
+  /** Quieter tone for secondary content (e.g. reasoning). */
+  muted?: boolean;
+  /** Debate speech only: render evidence-status markers as {@link EvidenceBadge}. */
+  evidence?: boolean;
+  /** Known turn-ledger ids (`#rN`); when omitted, derived from ledger + citations. */
+  knownLedgerIds?: ReadonlySet<string> | null;
+  /** Turn research ledger — `#rN` URL fallback when citations lag or omit id. */
   evidenceLedger?:
     | readonly TurnEvidenceLedgerEntry[]
     | readonly EvidenceLedgerEntry[]
     | null;
-  evidence?: boolean;
-}) {
+}
+
+/**
+ * Assistant-message Markdown: GFM, KaTeX, deferred highlight while streaming,
+ * mermaid (source-only mid-stream), and optional citation chips with display map.
+ */
+export const Markdown = memo(function Markdown({
+  content,
+  muted = false,
+  citations,
+  citationToDisplay,
+  isStreaming = false,
+  evidenceLedger = null,
+  evidence = false,
+  knownLedgerIds = null,
+}: Props) {
   const citationCount = citations?.length ?? 0;
-  const knownLedgerIds = useMemo(() => {
+  const resolvedLedgerIds = useMemo(() => {
+    if (knownLedgerIds && knownLedgerIds.size > 0) return knownLedgerIds;
     const ids = new Set<string>();
     for (const e of evidenceLedger ?? []) {
       if (e.id) ids.add(e.id);
@@ -154,22 +237,28 @@ export const Markdown = memo(function Markdown({
       if (c.id) ids.add(c.id);
     }
     return ids.size > 0 ? ids : null;
-  }, [evidenceLedger, citations]);
-  const ledgerIdCount = knownLedgerIds?.size ?? 0;
+  }, [knownLedgerIds, evidenceLedger, citations]);
+  const ledgerIdCount = resolvedLedgerIds?.size ?? 0;
 
-  const remarkPlugins = useMemo(() => {
+  const toDisplay = useMemo(() => {
+    if (citationToDisplay) return citationToDisplay;
+    const m = new Map<number, number>();
+    for (let i = 1; i <= citationCount; i++) m.set(i, i);
+    return m;
+  }, [citationToDisplay, citationCount]);
+
+  const remarks = useMemo(() => {
     if (citationCount <= 0 && ledgerIdCount <= 0 && !evidence) {
-      return [remarkGfm, remarkMath];
+      return remarkBase;
     }
     return [
-      remarkGfm,
-      remarkMath,
+      ...remarkBase,
       ...(citationCount > 0 || ledgerIdCount > 0
-        ? [remarkCitations(citationCount, knownLedgerIds)]
+        ? [remarkCitations(citationCount, resolvedLedgerIds)]
         : []),
       ...(evidence ? [remarkEvidence()] : []),
     ];
-  }, [citationCount, ledgerIdCount, knownLedgerIds, evidence]);
+  }, [citationCount, ledgerIdCount, resolvedLedgerIds, evidence]);
 
   const components = useMemo<Components>(() => {
     const pool = citations ?? [];
@@ -200,7 +289,16 @@ export const Markdown = memo(function Markdown({
       code({ className, children, ...props }) {
         const lang = /language-(\w+)/.exec(className || "")?.[1];
         if (lang === "mermaid") {
-          return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+          const chart = String(children).replace(/\n$/, "");
+          // Half-written diagram is a syntax error — show source until the turn finishes.
+          if (isStreaming) {
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          }
+          return <MermaidDiagram chart={chart} />;
         }
         return (
           <code className={className} {...props}>
@@ -220,30 +318,53 @@ export const Markdown = memo(function Markdown({
           data-ledger-id={props["data-ledger-id"]}
           citations={pool}
           evidenceLedger={evidenceLedger}
+          toDisplay={toDisplay}
         >
           {props.children}
         </CitationChip>
       );
       (base as Record<string, unknown>).citemark = CiteMark;
     }
-    // 举证徽章（举证责任）：remarkEvidence 产出的自定义 `evidencemark` 映射到 EvidenceBadge。走
-    // data.hProperties 而非 cite: 链接 url——后者会被 react-markdown 的 urlTransform 清空。仅辩论
-    // 发言 opt-in（evidence=true），不扰其余 markdown。
+    // 举证徽章：remarkEvidence → evidencemark。仅辩论发言 opt-in。
     if (evidence) {
       (base as Record<string, unknown>).evidencemark = EvidenceBadge;
     }
     return base;
-  }, [citations, evidenceLedger, citationCount, ledgerIdCount, evidence]);
+  }, [
+    citations,
+    evidenceLedger,
+    citationCount,
+    ledgerIdCount,
+    evidence,
+    toDisplay,
+    isStreaming,
+  ]);
+
+  const rehype = isStreaming ? rehypeStreaming : rehypeHighlighted;
+  const blocks = isStreaming ? splitMarkdownBlocks(content) : null;
 
   return (
     <div className={`md${muted ? " md-muted" : ""}`}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      {blocks ? (
+        blocks.map((block, i) => (
+          <MarkdownChunk
+            // Streaming blocks are append-only: index is the stable identity.
+            // biome-ignore lint/suspicious/noArrayIndexKey: append-only streaming blocks
+            key={i}
+            content={block}
+            remarkPlugins={remarks}
+            rehypePlugins={rehype}
+            components={components}
+          />
+        ))
+      ) : (
+        <MarkdownChunk
+          content={content}
+          remarkPlugins={remarks}
+          rehypePlugins={rehype}
+          components={components}
+        />
+      )}
     </div>
   );
 });

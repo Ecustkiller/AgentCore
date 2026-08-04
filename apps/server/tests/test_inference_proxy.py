@@ -679,7 +679,7 @@ async def test_forward_stream_upstream_error_returns_502(monkeypatch):
             from agentcore.core.errors import LLMUpstreamError
 
             raise LLMUpstreamError(
-                "platform 服务端错误（503），请稍后再试",
+                "上游模型服务暂时不可用（503），请稍后再试",
                 upstream_status=503,
             )
             yield  # pragma: no cover — makes this an async generator

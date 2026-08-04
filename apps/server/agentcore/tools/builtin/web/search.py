@@ -18,6 +18,10 @@ from agentcore.core.citation_tier import citation_tier_for_url, stamp_citation_t
 from agentcore.core.logging import get_logger
 from agentcore.core.net import describe_net_error, site_of
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.builtin.web.cloud_fallback import (
+    CLOUD_FALLBACK_NOTE,
+    try_cloud_web_search_fallback,
+)
 from agentcore.tools.builtin.web.relevance import (
     dropped_host_samples,
     filter_results_for_injection,
@@ -31,6 +35,7 @@ from agentcore.tools.builtin.web.search_backend import (
     SearchResult,
     SearXNGBackend,
     TavilyBackend,
+    describe_search_error,
     get_search_backend,
     infer_search_language,
     track_phase_durations,
@@ -450,10 +455,14 @@ def prepare_search_query(query: str) -> PreparedSearchQuery:
     )
 
 
-def _backend_label(backend: SearchBackend | None, *, cached: bool) -> str:
+def _backend_label(
+    backend: SearchBackend | None, *, cached: bool, cloud_fallback: bool = False
+) -> str:
     """Stable backend name for ``tool.web_search`` observability."""
     if cached:
         return "cache"
+    if cloud_fallback:
+        return "cloud_inference"
     if backend is None:
         return "unknown"
     if isinstance(backend, FallbackSearchBackend):
@@ -661,6 +670,8 @@ class WebSearchTool:
 
         # A6: wrap the existing on_phase channel to emit structured phase durations.
         on_phase, finish_phases = track_phase_durations(context.on_phase)
+        cloud_fallback = False
+        backend: SearchBackend | None = None
         try:
             backend = get_search_backend()
             # 工具执行阶段进度 (联网搜索前端展示优化): thread the engine-injected phase
@@ -668,15 +679,31 @@ class WebSearchTool:
             # while this blocking request is in flight. ``None`` on unscoped call
             # sites (tests / evals) — the backend skips it; duration logging still runs
             # when phases fire.
-            results = await backend.search(
-                query,
-                max_results=max_results,
-                on_phase=on_phase,
-                language=language,
-            )
+            try:
+                results = await backend.search(
+                    query,
+                    max_results=max_results,
+                    on_phase=on_phase,
+                    language=language,
+                )
+            except Exception as primary_exc:
+                # Sidecar-only cloud leg: local SearXNG unreachable + inference JWT bound
+                # via ContextVar → POST /v1/inference/web_search. Cloud API never binds
+                # creds → None → original error. Not for HTTP 403 / empty SERP.
+                cloud = await try_cloud_web_search_fallback(
+                    primary_exc,
+                    query=query,
+                    max_results=max_results,
+                    language=language,
+                    on_phase=on_phase,
+                )
+                if cloud is None:
+                    raise primary_exc
+                results = cloud
+                cloud_fallback = True
         except Exception as e:
             finish_phases()
-            reason = describe_net_error(e)
+            reason = describe_search_error(e, backend)
             logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))
             return ToolResult(
                 tool_call_id="",
@@ -701,14 +728,16 @@ class WebSearchTool:
         # ``_maybe_retry_weak_serp``. Kept BEFORE ``finish_phases`` so the retry's
         # 「改用备用引擎 / 正在检索」phases are still tracked and drive the waiting UI. The
         # final adopted set flows into the cache write + ``_success_result`` below unchanged.
-        results = await self._maybe_retry_weak_serp(
-            query,
-            results,
-            backend,
-            max_results=max_results,
-            language=language,
-            on_phase=on_phase,
-        )
+        # Skip when results already came from cloud inference (sidecar has no Tavily).
+        if not cloud_fallback:
+            results = await self._maybe_retry_weak_serp(
+                query,
+                results,
+                backend,
+                max_results=max_results,
+                language=language,
+                on_phase=on_phase,
+            )
         finish_phases()
 
         # Cache the outcome: a non-empty set positively (served for the TTL), an EMPTY
@@ -741,6 +770,7 @@ class WebSearchTool:
             context=context,
             original_query=original_query,
             adjustment_note=adjustment_note,
+            cloud_fallback=cloud_fallback,
         )
 
     async def _maybe_retry_weak_serp(
@@ -843,6 +873,7 @@ class WebSearchTool:
         context: ToolContext | None = None,
         original_query: str | None = None,
         adjustment_note: str | None = None,
+        cloud_fallback: bool = False,
     ) -> ToolResult:
         """Build the (identical-shape) success ToolResult for a live or cached hit.
 
@@ -871,6 +902,8 @@ class WebSearchTool:
         notes: list[str] = []
         if adjustment_note:
             notes.append(adjustment_note)
+        if cloud_fallback:
+            notes.append(CLOUD_FALLBACK_NOTE)
         empty_streak = 0
         budget = getattr(context, "retrieval_budget", None) if context is not None else None
         is_empty_injection = bool(filtered.uniformly_weak) or not items
@@ -955,7 +988,7 @@ class WebSearchTool:
                 for r in kept
             ],
         }
-        backend_name = _backend_label(backend, cached=cached)
+        backend_name = _backend_label(backend, cached=cached, cloud_fallback=cloud_fallback)
         metadata: dict[str, Any] = {
             "result_count": len(items),
             "query": query,
@@ -969,6 +1002,8 @@ class WebSearchTool:
             metadata["dropped_hosts"] = dropped_hosts
         if cached:
             metadata["cached"] = True
+        if cloud_fallback:
+            metadata["cloud_fallback"] = True
         if not items:
             metadata["empty"] = True
         if empty_streak:
@@ -994,6 +1029,7 @@ class WebSearchTool:
             empty_streak=empty_streak,
             backend=backend_name,
             cached=cached,
+            cloud_fallback=cloud_fallback,
             search_policy=search_policy or "",
         )
         return ToolResult(

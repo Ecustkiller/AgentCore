@@ -12,9 +12,9 @@ const config: CapacitorConfig = {
   // Keep in sync with android `shellBackground` / mobile-light `--panel`.
   backgroundColor: "#ffffff",
   plugins: {
-    // Dark icons on the light shell (Capacitor SystemBars; not the legacy StatusBar plugin).
+    // Dark icons on the light shell (Cap LIGHT = light appearance / dark glyphs; not the legacy StatusBar plugin).
     SystemBars: {
-      style: "DARK",
+      style: "LIGHT",
     },
     // Show the「需要你」pause push even when the app is in the foreground (iOS otherwise
     // suppresses foreground alerts). Android shows foreground notifications regardless.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MODEL_CONFIG_PATH,
   StreamHttpError,
+  degradedFinishChipLabel,
   describeStreamHttpError,
   emptyChatCopy,
   emptyFailureNotice,
@@ -90,5 +91,19 @@ describe("emptyFailureNotice", () => {
     expect(emptyFailureNotice("degraded")).toBeNull();
     expect(emptyFailureNotice(null)).toBeNull();
     expect(emptyFailureNotice(undefined)).toBeNull();
+  });
+});
+
+describe("degradedFinishChipLabel", () => {
+  it("maps known empty_diagnosis keys", () => {
+    expect(degradedFinishChipLabel("silent_empty", undefined)).toBe(
+      "模型返回空内容",
+    );
+  });
+
+  it("falls back to message suffix after ·", () => {
+    expect(degradedFinishChipLabel(undefined, "降级 · 内容被过滤")).toBe(
+      "内容被过滤",
+    );
   });
 });

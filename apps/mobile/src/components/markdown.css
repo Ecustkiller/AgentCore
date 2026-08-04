@@ -95,22 +95,25 @@
   border: none;
 }
 
-/* --- Inline citation chips ([n] / #rN → citemark from remarkCitations). --- */
+/* --- Inline citation chips ([n] / #rN → citemark from remarkCitations).
+   Pill shape aligned with desktop chip (rounded-full + primary wash); no Popover. --- */
 .cite-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  margin: 0 1px;
-  font-size: 10px;
-  line-height: 1;
+  gap: 2px;
+  min-width: 1.15em;
+  height: auto;
+  padding: 0 6px;
+  margin: 0 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
   color: var(--accent);
   text-decoration: none;
   vertical-align: middle;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
 }
 
 /* --- Inline evidence badges (辩手举证标记 → evidencemark from remarkEvidence). ---

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from agentcore.api.routes.inference import proxy, token
+from agentcore.api.routes.inference import proxy, token, web_search
 from agentcore.config import settings
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.db.base import async_session_factory
@@ -14,6 +14,7 @@ from agentcore.security.tokens import decode_inference_token
 router = APIRouter(tags=["inference"])
 router.include_router(token.router)
 router.include_router(proxy.router)
+router.include_router(web_search.router)
 
 # Stable import paths for tests and monkeypatch targets (see test_inference_proxy.py).
 from agentcore.api.routes.inference.proxy import (  # noqa: E402

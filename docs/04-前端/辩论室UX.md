@@ -1,6 +1,6 @@
 ﻿---
 status: blueprint
-code: apps/desktop/src/renderer/
+code: apps/desktop/src/renderer/,apps/mobile/src/components/DebateView.tsx
 related:
   - docs/04-前端/前端UX设计.md
   - docs/03-AI核心/辩论编排设计.md
@@ -27,6 +27,10 @@ skip_if:
 **布局**：正反默认并排可切单栏；红队/圆桌恒单栏。阵营色 = 独立对立 token（`pro`蓝/`con`红），⊥ `--agent-N`。记分牌不 sticky。辩论回合默认落辩论室；协作图/对比平级 tab。
 
 **约束**：纯渲染层，**不动** fold/conformance。
+
+### 手机（有意精简 · ✅）
+
+无独立赛事页 / 站队 / 掌舵卡。落点 = `DebateView` + `LiveDebateNarrative`（双产物精简复盘，挂团队列表下）；介入靠主 composer 插话/排队。parity `debate_*` = `simplified`（非「未 port」债）。权威一句 → [前端 UX §十五](/docs/04-前端/前端UX设计.md)。
 
 ## 否决 / 退场
 

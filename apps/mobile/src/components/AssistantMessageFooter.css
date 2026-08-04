@@ -1,0 +1,100 @@
+/* Assistant bubble footer — actions + usage hierarchy (mobile Sheet for 更多). */
+
+.amf {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.amf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.amf-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.amf-btn:active {
+  background: var(--accent);
+}
+
+.amf-btn-block {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.amf-usage {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.amf-sheet-label {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.amf-sheet-label:first-child {
+  margin-top: 0;
+}
+
+.amf-sheet-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1.45;
+}
+
+.amf-usage-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.amf-usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.amf-usage-row-pad {
+  margin-top: 4px;
+}
+
+.amf-usage-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.amf-sheet-done {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.amf-sheet-done:active {
+  opacity: 0.85;
+}

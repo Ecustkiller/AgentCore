@@ -39,8 +39,10 @@ import {
   drainOutbox,
   flushTurn,
   isPermanentHttpFailure,
+  normalizeToolFailureCode,
   outboxDir,
   shouldDeleteOutboxAfterAck,
+  toolFailuresFromJournal,
 } from "../outbox-writeback";
 
 const dir = () => outboxDir();
@@ -230,6 +232,109 @@ describe("drainOutbox", () => {
     expect(body.journal).toEqual([
       { kind: "run_started", payload: { id: "r1" }, ts: "t0" },
       { kind: "run_completed", payload: { id: "r1" }, ts: null },
+    ]);
+  });
+
+  it("includes tool_failures from journal tool_call success=false", async () => {
+    writeReady("u-tf", {
+      journal: {
+        "0": {
+          kind: "tool_call",
+          payload: {
+            name: "web_search",
+            success: false,
+            result: "搜索失败：无法建立连接（出网受限或站点不可达）",
+          },
+          ts: "t0",
+        },
+      },
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-tf",
+        assistant_message_id: "m1",
+        title: null,
+      },
+    });
+
+    await drainOutbox();
+    const body = h.bearerPostJson.mock.calls[0]?.[1] as {
+      tool_failures?: Array<{ tool: string; code: string; message: string }>;
+    };
+    expect(body.tool_failures).toEqual([
+      {
+        tool: "web_search",
+        code: "egress_connect",
+        message: "搜索失败：无法建立连接（出网受限或站点不可达）",
+      },
+    ]);
+  });
+
+  it("omits tool_failures when journal has no failed tools", async () => {
+    writeReady("u-ok", {
+      journal: {
+        "0": {
+          kind: "tool_call",
+          payload: { name: "web_search", success: true, result: "ok" },
+        },
+      },
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-ok",
+        assistant_message_id: "m1",
+        title: null,
+      },
+    });
+
+    await drainOutbox();
+    const body = h.bearerPostJson.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body.tool_failures).toBeUndefined();
+  });
+
+  it("normalizeToolFailureCode maps searxng / egress / other", () => {
+    expect(normalizeToolFailureCode("searxng unreachable")).toBe(
+      "searxng_unreachable",
+    );
+    expect(normalizeToolFailureCode("无法建立连接（出网受限）")).toBe(
+      "egress_connect",
+    );
+    expect(normalizeToolFailureCode("缺少参数")).toBe("other");
+    expect(normalizeToolFailureCode("x", "egress_connect")).toBe(
+      "egress_connect",
+    );
+  });
+
+  it("toolFailuresFromJournal prefers tool_call over tool_use_end", () => {
+    expect(
+      toolFailuresFromJournal([
+        {
+          kind: "tool_call",
+          payload: {
+            name: "web_search",
+            success: false,
+            result: "searxng down",
+          },
+        },
+        {
+          kind: "tool_use_end",
+          payload: {
+            tool_name: "web_search",
+            status: "error",
+            result: "display duplicate",
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        tool: "web_search",
+        code: "searxng_unreachable",
+        message: "searxng down",
+      },
     ]);
   });
 

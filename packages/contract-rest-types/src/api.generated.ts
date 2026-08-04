@@ -497,11 +497,12 @@ export interface paths {
          * @description The full account roster, paginated, each row carrying its all-time spend.
          *
          *     Filters (AND): ``q`` substring-matches username/display_name, ``role``/``status``
-         *     pin those dimensions. ``sort`` ∈ {``created_at``, ``cost``} (累计成本) with ``order``
-         *     ∈ {``asc``, ``desc``}. ``include_deleted`` surfaces 注销 (soft-deleted, anonymized)
-         *     accounts — hidden by default as tombstones, shown on demand for audit. Admin-only
-         *     directory — enumeration is intended here. Money is nano-CNY; clients format ¥ as
-         *     ``cost_total / 1e9``.
+         *     pin those dimensions, ``ip`` matches ``registration_ip`` or any refresh-token IP,
+         *     ``since``/``until`` bound registration ``created_at``. ``sort`` ∈ {``created_at``,
+         *     ``cost``} (累计成本) with ``order`` ∈ {``asc``, ``desc``}. ``include_deleted``
+         *     surfaces 注销 (soft-deleted, anonymized) accounts — hidden by default as
+         *     tombstones, shown on demand for audit. Admin-only directory — enumeration is
+         *     intended here. Money is nano-CNY; clients format ¥ as ``cost_total / 1e9``.
          */
         get: operations["list_users_v1_admin_users_get"];
         put?: never;
@@ -561,7 +562,7 @@ export interface paths {
          * User Detail
          * @description 用户详情下钻 (用户管理 P0): one account's record + configured model names +
          *     its own usage (today / month / 7-day trend / by-model) + recent
-         *     conversations + recent turn activity.
+         *     conversations + recent turn activity + active login sessions (加强可查).
          *
          *     The per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped
          *     to one account — composed with the account's recent conversation roster (message
@@ -569,7 +570,8 @@ export interface paths {
          *     drill into 会话复盘). Configured model names come from the account default
          *     模型组合 (``main_model`` / ``background_model``; never the API key) + provider
          *     count from ``user_llm_providers``. Per-model stats scan ``cost_calls`` (last 30
-         *     days). Admin cross-user; 404 for an unknown id.
+         *     days). Sessions reuse the owner ``AuthService.list_sessions`` shape (read-only).
+         *     Admin cross-user; 404 for an unknown id.
          */
         get: operations["user_detail_v1_admin_users__user_id__detail_get"];
         put?: never;
@@ -3039,6 +3041,26 @@ export interface paths {
         put?: never;
         /** Inference Chat Completions */
         post: operations["inference_chat_completions_v1_inference_v1_chat_completions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inference/web_search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sidecar cloud web search
+         * @description Run server-side web search for a sidecar turn (SearXNG→Tavily; no client keys).
+         */
+        post: operations["inference_web_search_v1_inference_web_search_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5697,8 +5719,10 @@ export interface components {
          *     API key), this account's usage (today/month/
          *     trend/by-model — the per-user counterpart of ``AdminUsageSummary``),
          *     its recent conversations, and its recent turn activity (``turn_metrics``, each
-         *     drillable into 会话复盘). Money is integer nano-CNY; ``CostBreakdown.cny_total``
-         *     is yuan. ``billing_mode`` frames cost honestly (byok = own-key spend).
+         *     drillable into 会话复盘), plus active login ``sessions`` (refresh-token families,
+         *     same shape as ``GET /v1/auth/sessions``). Money is integer nano-CNY;
+         *     ``CostBreakdown.cny_total`` is yuan. ``billing_mode`` frames cost honestly
+         *     (byok = own-key spend).
          */
         AdminUserDetail: {
             /** Background Model */
@@ -5721,6 +5745,11 @@ export interface components {
             recent_daily_cost: components["schemas"]["DailyCost"][];
             /** Recent Turns */
             recent_turns: components["schemas"]["TurnMetricLine"][];
+            /**
+             * Sessions
+             * @default []
+             */
+            sessions: components["schemas"]["SessionSummary"][];
             today: components["schemas"]["UsageWindow"];
             user: components["schemas"]["AdminUserResponse"];
         };
@@ -5758,6 +5787,8 @@ export interface components {
             quota_daily_tokens: number | null;
             /** Quota Monthly Cost Cny */
             quota_monthly_cost_cny: number | null;
+            /** Registration Ip */
+            registration_ip?: string | null;
             /**
              * Role
              * @enum {string}
@@ -5790,6 +5821,8 @@ export interface components {
          *     quota overrides so the operator can manage accounts. Each quota override is
          *     nullable — NULL = inherit the global config threshold for that dimension
          *     (成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.
+         *     ``registration_ip`` is the client IP captured at signup (加强可查; NULL for
+         *     pre-column / seeded rows).
          */
         AdminUserResponse: {
             /**
@@ -5815,6 +5848,8 @@ export interface components {
             quota_daily_tokens: number | null;
             /** Quota Monthly Cost Cny */
             quota_monthly_cost_cny: number | null;
+            /** Registration Ip */
+            registration_ip?: string | null;
             /**
              * Role
              * @enum {string}
@@ -8045,6 +8080,38 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * InferenceWebSearchRequest
+         * @description Sidecar cloud-search body — query required; result count / language optional.
+         */
+        InferenceWebSearchRequest: {
+            /** Language */
+            language?: string | null;
+            /** Max Results */
+            max_results?: number | null;
+            /** Query */
+            query: string;
+        };
+        /** InferenceWebSearchResponse */
+        InferenceWebSearchResponse: {
+            /** Results */
+            results: components["schemas"]["InferenceWebSearchResultItem"][];
+            /**
+             * Source
+             * @default cloud
+             * @constant
+             */
+            source: "cloud";
+        };
+        /** InferenceWebSearchResultItem */
+        InferenceWebSearchResultItem: {
+            /** Snippet */
+            snippet: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
         /** InjectSimulationEventRequest */
         InjectSimulationEventRequest: {
             /**
@@ -8232,6 +8299,24 @@ export interface components {
             arguments: string;
             /** Name */
             name: string;
+        };
+        /**
+         * LocalTurnToolFailure
+         * @description One failed tool call summary for local-turn write-back observability.
+         *
+         *     Optional on ``RecordTurnRequest`` — old clients omit the list. Server logs a
+         *     count/codes rollup; does not persist into the messages table.
+         */
+        LocalTurnToolFailure: {
+            /** Code */
+            code: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Tool */
+            tool: string;
         };
         /** LoginMfaRequest */
         LoginMfaRequest: {
@@ -9198,6 +9283,8 @@ export interface components {
              */
             rounds: number;
             runs?: components["schemas"]["RunsPayload"] | null;
+            /** Tool Failures */
+            tool_failures?: components["schemas"]["LocalTurnToolFailure"][];
             /** Trace Id */
             trace_id: string;
             /** User Message */
@@ -12347,6 +12434,9 @@ export interface operations {
                 q?: string | null;
                 role?: ("user" | "admin") | null;
                 status?: ("active" | "disabled") | null;
+                ip?: string | null;
+                since?: string | null;
+                until?: string | null;
                 sort?: "created_at" | "cost";
                 order?: "asc" | "desc";
                 include_deleted?: boolean;
@@ -17507,6 +17597,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inference_web_search_v1_inference_web_search_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InferenceWebSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceWebSearchResponse"];
                 };
             };
             /** @description Validation Error */

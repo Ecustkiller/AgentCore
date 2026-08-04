@@ -1,0 +1,884 @@
+import { Markdown } from "@/components/Markdown";
+import { NonBlockingAskCard } from "@/components/NonBlockingAskCard";
+import {
+  EscalationAnswer,
+  TeamView,
+  escalationDetail,
+} from "@/components/TeamView";
+import { toolDetail, toolLabel } from "@/components/assistantLabels";
+import {
+  codeDiagnosticsSummary,
+  extractCodeDiagnostics,
+} from "@/lib/codeDiagnostics";
+import { isFileReadCeilingGuidance } from "@/lib/fileReadCeiling";
+import { isVerifyBudgetExceeded } from "@/lib/verifyBudget";
+import type {
+  EscalationSlot,
+  HotDecisionTrace,
+  NonBlockingAsk,
+  RunToolCall,
+  StageCardTrace,
+} from "@/protocol/fold";
+import { actAuthorizedByLabel } from "@/protocol/fold";
+import type {
+  Citation,
+  EvidenceLedgerEntry,
+  ProcessStep,
+  ToolPhase,
+} from "@agentcore/contract-types";
+import type {
+  ProjectedAct,
+  ProjectedAgent,
+  ProjectedRun,
+  ProjectedTeamNote,
+  TurnStatus,
+} from "@agentcore/protocol-conformance";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import "@/components/ProcessTimeline.css";
+
+type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
+
+/** 跨回合同图追加锚点文案（批 A4）：开辩论幕与同幕补派区分；手机列表语气，非桌面 ↑ 跳转条。 */
+export function graphAppendAnchorLabel(
+  addedCount: number,
+  actKind?: string | null,
+  authorizedBy?: string | null,
+): string {
+  const n = Math.max(0, addedCount | 0);
+  const base =
+    actKind === "debate"
+      ? `已开辩论幕 · 追加 ${n} 名成员`
+      : `已往上方协作图追加 ${n} 名成员`;
+  const auth = actAuthorizedByLabel(authorizedBy);
+  return auth ? `${base} · ${auth}` : base;
+}
+
+export interface TeamProjection {
+  agents: ProjectedAgent[];
+  runs: ProjectedRun[];
+  progress: { completed: number; total: number };
+  /** 幕序列（批 A4）：透传给 {@link TeamView} 做多幕列表分组。 */
+  acts?: ProjectedAct[];
+  /** 团队便签墙 (§2.2 通): notes workers broadcast to their concurrent siblings this turn
+   *  (`team_note_posted`), in post order — rendered by {@link TeamView}. Optional so the promo
+   *  still (which builds team from a truncated vector) and legacy callers keep compiling. */
+  teamNotes?: ProjectedTeamNote[];
+  /** 交付状态（`delivery_status`，能力闸门与交付诚实性）：delegate 收尾的结构化交付对账，
+   *  由 {@link TeamView} 在 partial / blocked 时渲染。Optional（旧调用方 / promo 兼容）。 */
+  deliveryStatus?:
+    | import("@agentcore/contract-types").DeliveryStatusPayload
+    | null;
+  /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
+  status?: TurnStatus | null;
+  /** 阻塞式求决策 (②): forwarded straight to {@link TeamView} via the `{...team}` spread so a
+   *  worker's pending escalation can render as an actionable answer card. All optional — a
+   *  read-only / history team simply omits them. */
+  conversationId?: string | null;
+  /** runId → pending escalation id from ProjectedTurn.interactions (P3). */
+  pendingEscalations?: Map<string, string>;
+  /** Live turn → the pending escalation is answerable over the open stream. */
+  escalationsInteractive?: boolean;
+  /** 队员工具明细 (RunDetail · 工具调用): runId → the worker's tool calls, from the transport-only
+   *  sibling {@link import("@/protocol/fold").extractRunToolCalls} (the fold drops run-scoped tool
+   *  IO, so the run-detail panel reads it from here). Absent → the panel shows no tool section. */
+  runToolCalls?: Map<string, RunToolCall[]>;
+  /** Worker `tool_use_progress` (run_id): runId → live EXECUTION phase (transport-only sibling
+   *  {@link import("@/protocol/fold").extractWorkerToolPhases}). */
+  workerToolPhases?: Map<string, { phase: string; toolName: string }>;
+  /** 场级证据台账（`extractEvidenceLedger`）：辩论徽章 `#eN` 解析。 */
+  evidenceLedger?: EvidenceLedgerEntry[];
+}
+
+/** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,
+ *  read live via extractToolPhases) — so a slow tool reads「Searching / Fetching page /
+ *  Running」rather than a bare「Running」status. Mirrors desktop (各端全新建; chrome, not
+ *  shared logic). Unknown phase → generic「Working」. */
+const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
+  queued: "Queued",
+  querying: "Searching",
+  fallback: "Trying fallback",
+  fetching: "Fetching page",
+  reading: "Extracting",
+  executing: "Running",
+  blocked: "Network blocked",
+};
+const toolPhaseText = (phase: ToolPhase | undefined): string | null =>
+  phase ? (TOOL_PHASE_TEXT[phase] ?? "Working") : null;
+
+/** Seconds a tool has been running, ticking client-side from when this row first saw `running`
+ *  (≈ the tool_use_start instant) — a liveliness cue for a BLOCKING tool (web_search) whose
+ *  execution streams no incremental progress. Resets when not running. Mirrors desktop. */
+function useRunningElapsed(running: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [running]);
+  return elapsed;
+}
+
+/**
+ * 「直播中自动展开、收场后按保存值」——手机端会话态镜像（各端全新建；不落盘、不碰桌面
+ * disclosure store）。流式临时收起/展开只在本轮 live 有效；收场回到 settled 选择。
+ */
+function useStreamAwareDisclosure(
+  live: boolean,
+  opts?: { liveDefault?: boolean; settledDefault?: boolean },
+): readonly [boolean, () => void] {
+  const liveDefault = opts?.liveDefault ?? true;
+  const settledDefault = opts?.settledDefault ?? false;
+  const [stored, setStored] = useState(settledDefault);
+  const [liveOverride, setLiveOverride] = useState<boolean | null>(null);
+  const prevLive = useRef(live);
+
+  useEffect(() => {
+    if (prevLive.current && !live) setLiveOverride(null);
+    prevLive.current = live;
+  }, [live]);
+
+  const expanded = live ? (liveOverride ?? liveDefault) : stored;
+
+  const toggle = useCallback(() => {
+    if (live) setLiveOverride((v) => !(v ?? liveDefault));
+    else setStored((v) => !v);
+  }, [live, liveDefault]);
+
+  return [expanded, toggle] as const;
+}
+
+/** Last path segment of a detail (a file 名 from a path / url); the whole string when it
+ *  carries no separator (a query / pattern). Keeps a group summary compact. */
+function baseName(detail: string): string {
+  if (!detail) return "";
+  const segs = detail.split(/[/\\]/);
+  return segs[segs.length - 1] || detail;
+}
+
+type TimelineNode =
+  | Exclude<ProcessStep, { kind: "tool" }>
+  | { kind: "tool"; step: ToolStepData }
+  | { kind: "tool-group"; tools: ToolStepData[] };
+
+/** Coalesce consecutive tool steps into collapsible groups (前端UX设计.md §一B): a run of
+ *  ≥2 adjacent tool steps folds into one `tool-group`, a lone tool stays inline, and
+ *  reasoning/content break runs so chronological order is preserved. Mobile keeps its own
+ *  copy of this fold — it is chrome, not a protocol fold (no conformance), so the desktop
+ *  `groupToolRuns` is intentionally NOT imported (各端全新建 per cross-platform-frontend). */
+function groupToolRuns(steps: ProcessStep[]): TimelineNode[] {
+  const nodes: TimelineNode[] = [];
+  let run: ToolStepData[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    nodes.push(
+      run.length === 1
+        ? { kind: "tool", step: run[0] }
+        : { kind: "tool-group", tools: run },
+    );
+    run = [];
+  };
+  for (const s of steps) {
+    if (s.kind === "tool") run.push(s);
+    else {
+      flush();
+      nodes.push(s);
+    }
+  }
+  flush();
+  return nodes;
+}
+
+/** Stable render keys（对称桌面 timelineNodeKeys）：中段 insert 不位移后续行。 */
+function timelineNodeKeys(nodes: TimelineNode[]): string[] {
+  const ordinals = new Map<string, number>();
+  return nodes.map((node) => {
+    switch (node.kind) {
+      case "team":
+        return `team-${node.execution_id}`;
+      case "graph_append":
+        return `gappend-${node.execution_id}-${node.host_message_id}`;
+      case "team_preview":
+        return `tp-${node.checkpoint_id}`;
+      case "checkpoint":
+        return `cp-${node.checkpoint_id}`;
+      case "ask":
+        return `ask-${node.ask_id}`;
+      case "plan_review":
+        return `pr-${node.checkpoint_id}`;
+      case "escalation":
+        return `esc-${node.escalation_id}`;
+      case "approval":
+        return `appr-${node.approval_id}`;
+      case "delegation_authorization":
+        return `dauth-${node.authorization_id}`;
+      case "stage_card":
+        return `sc-${node.stage_card_id}`;
+      case "tool":
+        return `tool-${node.step.id}`;
+      case "tool-group":
+        return `tgrp-${node.tools[0]?.id ?? "empty"}`;
+      default: {
+        const n = (ordinals.get(node.kind) ?? 0) + 1;
+        ordinals.set(node.kind, n);
+        return `${node.kind}-${n}`;
+      }
+    }
+  });
+}
+
+/** CEO 协调空转工具（与桌面 `COORDINATION_IDLE_TOOLS` 对称）。 */
+function isCoordinationIdleTool(toolName: string): boolean {
+  return toolName === "wait";
+}
+
+function isWaitIdleReasoning(steps: ProcessStep[], index: number): boolean {
+  if (steps[index]?.kind !== "reasoning") return false;
+  let i = index + 1;
+  let sawWait = false;
+  while (i < steps.length) {
+    const s = steps[i];
+    if (s.kind === "tool") {
+      if (!isCoordinationIdleTool(s.tool_name)) return false;
+      sawWait = true;
+      i++;
+      continue;
+    }
+    break;
+  }
+  if (sawWait) return true;
+  let j = index - 1;
+  sawWait = false;
+  while (j >= 0) {
+    const s = steps[j];
+    if (s.kind === "tool") {
+      if (!isCoordinationIdleTool(s.tool_name)) return false;
+      sawWait = true;
+      j--;
+      continue;
+    }
+    break;
+  }
+  return sawWait;
+}
+
+/** View-layer omit：隐藏 wait 空转段（S4 Thought 降噪，对称桌面）。 */
+function omitCoordinationIdleSteps(steps: ProcessStep[]): ProcessStep[] {
+  if (steps.length === 0) return steps;
+  let changed = false;
+  const out: ProcessStep[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.kind === "tool" && isCoordinationIdleTool(s.tool_name)) {
+      changed = true;
+      continue;
+    }
+    if (s.kind === "reasoning" && isWaitIdleReasoning(steps, i)) {
+      changed = true;
+      continue;
+    }
+    out.push(s);
+  }
+  return changed ? out : steps;
+}
+
+/** Header summary for a folded tool group: per-category counts in first-seen order
+ *  (「Read file 6 · Edit file 2」), or each call's name/query when a single-category run is ≤3. */
+function toolGroupSummary(tools: ToolStepData[]): string {
+  const sameKind = tools.every((t) => t.tool_name === tools[0].tool_name);
+  if (sameKind && tools.length <= 3) {
+    const label = toolLabel(tools[0].tool_name);
+    const names = tools.map((t) => baseName(toolDetail(t.arguments)));
+    if (names.every(Boolean)) return `${label} ${names.join(" · ")}`;
+  }
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  for (const t of tools) {
+    const label = toolLabel(t.tool_name);
+    if (!counts.has(label)) order.push(label);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return order.map((l) => `${l} ${counts.get(l)}`).join(" · ");
+}
+
+/** Thought 折叠覆盖面：推理/工具 + 弱式决策痕迹（批准/委派授权/推进卡）。
+ *  强交互卡（checkpoint/ask/escalation/…）仍外置可见；手机操作仍走 Sheet。 */
+function isProcessNode(node: TimelineNode): boolean {
+  return (
+    node.kind === "reasoning" ||
+    node.kind === "tool" ||
+    node.kind === "tool-group" ||
+    node.kind === "approval" ||
+    node.kind === "delegation_authorization" ||
+    node.kind === "stage_card"
+  );
+}
+
+function countProcessStats(nodes: TimelineNode[]) {
+  let reasoningCount = 0;
+  let toolCount = 0;
+  for (const node of nodes) {
+    if (node.kind === "reasoning") reasoningCount++;
+    else if (node.kind === "tool") toolCount++;
+    else if (node.kind === "tool-group") toolCount += node.tools.length;
+  }
+  return { reasoningCount, toolCount };
+}
+
+function formatProcessSummary(
+  reasoningCount: number,
+  toolCount: number,
+): string {
+  const parts: string[] = [];
+  if (reasoningCount > 0) {
+    parts.push(
+      `Thought ${reasoningCount} step${reasoningCount === 1 ? "" : "s"}`,
+    );
+  }
+  if (toolCount > 0) {
+    parts.push(`Used ${toolCount} tool${toolCount === 1 ? "" : "s"}`);
+  }
+  return parts.join(" · ");
+}
+
+function ThinkingDots() {
+  return (
+    <span className="thinking-dots" aria-hidden>
+      <span className="thinking-dot" style={{ animationDelay: "0ms" }} />
+      <span className="thinking-dot" style={{ animationDelay: "150ms" }} />
+      <span className="thinking-dot" style={{ animationDelay: "300ms" }} />
+    </span>
+  );
+}
+
+function ThinkingHeader({
+  isStreaming,
+  expanded,
+  streamingLabel,
+  doneLabel,
+  onToggle,
+}: {
+  isStreaming: boolean;
+  expanded: boolean;
+  streamingLabel: string;
+  doneLabel: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button type="button" className="thinking-header" onClick={onToggle}>
+      {isStreaming ? (
+        <>
+          <ThinkingDots />
+          <span>{streamingLabel}</span>
+        </>
+      ) : (
+        <>
+          <span>{doneLabel}</span>
+          <span className="thinking-chevron" aria-hidden>
+            {expanded ? "▾" : "▸"}
+          </span>
+        </>
+      )}
+    </button>
+  );
+}
+
+/** Collapsible thinking block — live auto-expand / settled collapse (对称桌面 InlineReasoning). */
+export function Reasoning({
+  text,
+  isStreaming = false,
+}: {
+  text: string;
+  isStreaming?: boolean;
+}) {
+  const [expanded, toggle] = useStreamAwareDisclosure(isStreaming, {
+    settledDefault: false,
+  });
+
+  return (
+    <div className="process-thought">
+      <ThinkingHeader
+        isStreaming={isStreaming}
+        expanded={expanded}
+        streamingLabel="Thinking…"
+        doneLabel="Thought"
+        onToggle={toggle}
+      />
+      {expanded && (
+        <div className="process-thought-body">
+          <Markdown content={text} isStreaming={isStreaming} muted />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The single-agent inline timeline: content (Markdown), thinking (collapsible), and tool
+ *  calls, in the order the model produced them. Consecutive tools coalesce into a
+ *  collapsible {@link ToolGroup} (≥2); a lone tool stays an inline {@link ToolStep}.
+ *  Settled turns fold process nodes into a Thought/tools summary (对称桌面). */
+export function ProcessTimeline({
+  steps,
+  citations,
+  citationToDisplay,
+  evidenceLedger,
+  isStreaming = false,
+  messageId: _messageId,
+  fallbackContent,
+  team,
+  asks,
+  escalationSlots,
+  hotTraces,
+  stageCardTraces,
+  toolPhases,
+  graphAppendActKinds,
+  graphAppendAuthorizedBy,
+  onFill,
+  onOpenBrowserLive,
+}: {
+  steps: ProcessStep[];
+  citations?: Citation[];
+  citationToDisplay?: ReadonlyMap<number, number>;
+  evidenceLedger?: EvidenceLedgerEntry[];
+  /** Live turn → stream-aware Thought/tool expand + Markdown streaming path. */
+  isStreaming?: boolean;
+  /** Turn key for disclosure identity (optional; session-scoped when absent). */
+  messageId?: string | null;
+  /** Scalar content when process has no `content` step yet (slot before team). */
+  fallbackContent?: string;
+  team?: TeamProjection;
+  asks?: NonBlockingAsk[];
+  escalationSlots?: Map<string, EscalationSlot>;
+  hotTraces?: Map<string, HotDecisionTrace>;
+  stageCardTraces?: Map<string, StageCardTrace>;
+  toolPhases?: Map<string, ToolPhase>;
+  graphAppendActKinds?: Map<string, string>;
+  graphAppendAuthorizedBy?: Map<string, string>;
+  onFill?: (text: string) => void;
+  onOpenBrowserLive?: (opts?: { runId?: string }) => void;
+}) {
+  const displayProcess = omitCoordinationIdleSteps(steps);
+  const nodes = groupToolRuns(displayProcess);
+  const nodeKeys = timelineNodeKeys(nodes);
+  const { reasoningCount, toolCount } = countProcessStats(nodes);
+  const shouldCollapseProcess =
+    !isStreaming &&
+    (reasoningCount > 0 || toolCount > 0) &&
+    !(reasoningCount === 1 && toolCount === 0);
+  const [processExpanded, toggleProcess] = useStreamAwareDisclosure(
+    isStreaming,
+    { settledDefault: false },
+  );
+  const processSummary = formatProcessSummary(reasoningCount, toolCount);
+
+  const hasContentStep = steps.some((s) => s.kind === "content");
+  const hasTeamMarker = steps.some((s) => s.kind === "team");
+  const fallbackText = fallbackContent ?? "";
+  const fallbackBeforeTeamIdx =
+    !hasContentStep && fallbackText
+      ? nodes.findIndex((n) => n.kind === "team" || n.kind === "graph_append")
+      : -1;
+  const showFallbackAfter =
+    !hasContentStep && Boolean(fallbackText) && fallbackBeforeTeamIdx < 0;
+
+  const last = displayProcess[displayProcess.length - 1];
+  const showThinkingTail =
+    isStreaming &&
+    last?.kind === "tool" &&
+    last.status !== "running" &&
+    last.tool_name !== "wait";
+
+  const renderFallback = (key: string) => (
+    <div key={key} className="process-narration">
+      <Markdown
+        content={fallbackText}
+        citations={citations}
+        citationToDisplay={citationToDisplay}
+        evidenceLedger={evidenceLedger}
+        isStreaming={isStreaming}
+      />
+    </div>
+  );
+
+  const renderNode = (node: TimelineNode, i: number) => {
+    const live = isStreaming && i === nodes.length - 1;
+    const nodeKey = nodeKeys[i];
+
+    if (node.kind === "content") {
+      return (
+        <div key={nodeKey} className="process-narration">
+          <Markdown
+            content={node.text}
+            citations={citations}
+            citationToDisplay={citationToDisplay}
+            evidenceLedger={evidenceLedger}
+            isStreaming={live}
+          />
+        </div>
+      );
+    }
+    if (node.kind === "reasoning") {
+      return <Reasoning key={nodeKey} text={node.text} isStreaming={live} />;
+    }
+    if (node.kind === "team") {
+      return team ? <TeamView key={nodeKey} {...team} /> : null;
+    }
+    if (node.kind === "graph_append") {
+      const actKind = graphAppendActKinds?.get(node.execution_id);
+      const auth = graphAppendAuthorizedBy?.get(node.execution_id);
+      return (
+        <div key={nodeKey} className="graph-append-anchor">
+          {graphAppendAnchorLabel(node.added_count, actKind, auth)}
+        </div>
+      );
+    }
+    if (node.kind === "ask") {
+      const ask = asks?.find((a) => a.id === node.ask_id);
+      return ask && onFill ? (
+        <NonBlockingAskCard key={ask.id} ask={ask} onFill={onFill} />
+      ) : null;
+    }
+    if (node.kind === "escalation") {
+      const slot = escalationSlots?.get(node.escalation_id);
+      if (!slot) return null;
+      const liveEsc =
+        slot.esc.status === "pending" &&
+        team?.escalationsInteractive &&
+        team.conversationId
+          ? slot.id
+          : undefined;
+      if (liveEsc && team?.conversationId) {
+        return (
+          <EscalationAnswer
+            key={slot.id}
+            esc={slot.esc}
+            escalationId={liveEsc}
+            conversationId={team.conversationId}
+            runId={slot.runId}
+            onOpenLive={onOpenBrowserLive}
+          />
+        );
+      }
+      const detail = escalationDetail(slot.esc);
+      return (
+        <div key={slot.id} className="run-escalation">
+          <span className="run-escalation-q">↑ {slot.esc.question}</span>
+          {detail && <span className="run-escalation-a">{detail}</span>}
+        </div>
+      );
+    }
+    // 热审批 / 委派授权痕迹 (D3): resolved 后轻行；pending 不显（操作面在 Sheet/PauseCard）。
+    if (node.kind === "approval") {
+      const t = hotTraces?.get(node.approval_id);
+      if (!t?.resolved) return null;
+      const tool = t.toolName ? toolLabel(t.toolName) : "工具";
+      return (
+        <div key={nodeKey} className="hot-trace">
+          ✓ {t.denied ? `已拒绝 · ${tool}` : `已批准 · ${tool}`}
+        </div>
+      );
+    }
+    if (node.kind === "delegation_authorization") {
+      const t = hotTraces?.get(node.authorization_id);
+      if (!t?.resolved) return null;
+      return (
+        <div key={nodeKey} className="hot-trace">
+          ✓ {t.denied ? "已拒绝委派授权" : "已授权开工"}
+        </div>
+      );
+    }
+    if (node.kind === "stage_card") {
+      const t = stageCardTraces?.get(node.stage_card_id);
+      if (!t || t.outcome === "pending") return null;
+      const label =
+        t.outcome === "orphaned"
+          ? "推进卡 · 已失效"
+          : t.decision === "research_first"
+            ? "推进卡 · 已选补充调研"
+            : "推进卡 · 已开辩";
+      return (
+        <div key={nodeKey} className="hot-trace">
+          {t.outcome === "orphaned" ? "✕ " : "✓ "}
+          {label}
+        </div>
+      );
+    }
+    // checkpoint·plan_review·team_preview：手机阻塞交互走 Sheet，时间线 no-op。
+    if (
+      node.kind === "checkpoint" ||
+      node.kind === "plan_review" ||
+      node.kind === "team_preview"
+    ) {
+      return null;
+    }
+    if (node.kind === "tool-group") {
+      return (
+        <ToolGroup
+          key={nodeKey}
+          tools={node.tools}
+          toolPhases={toolPhases}
+          isStreaming={live}
+        />
+      );
+    }
+    if (node.kind === "rework") {
+      return (
+        <span key={nodeKey} className="rework-chip">
+          引用/格式核验后已重写
+        </span>
+      );
+    }
+    if (node.kind !== "tool") return null;
+    return (
+      <ToolStep
+        key={nodeKey}
+        step={node.step}
+        phase={toolPhases?.get(node.step.id)}
+      />
+    );
+  };
+
+  return (
+    <div className="timeline">
+      {team && !hasTeamMarker ? <TeamView {...team} /> : null}
+      {nodes.map((node, i) => {
+        const prefix =
+          i === fallbackBeforeTeamIdx
+            ? renderFallback("fallback-before-team")
+            : null;
+
+        if (shouldCollapseProcess) {
+          const isFirstProcess =
+            isProcessNode(node) && !nodes.slice(0, i).some(isProcessNode);
+
+          if (!processExpanded) {
+            if (isProcessNode(node)) {
+              if (!isFirstProcess) return null;
+              return (
+                <Fragment key={`sum-${nodeKeys[i]}`}>
+                  {prefix}
+                  <button
+                    type="button"
+                    className="process-summary"
+                    onClick={toggleProcess}
+                  >
+                    <span>{processSummary}</span>
+                    <span className="thinking-chevron" aria-hidden>
+                      ▸
+                    </span>
+                  </button>
+                </Fragment>
+              );
+            }
+          } else if (isFirstProcess) {
+            return (
+              <Fragment key="process-expanded">
+                {prefix}
+                <button
+                  type="button"
+                  className="process-summary"
+                  onClick={toggleProcess}
+                >
+                  <span>{processSummary}</span>
+                  <span className="thinking-chevron" aria-hidden>
+                    ▾
+                  </span>
+                </button>
+                {renderNode(node, i)}
+              </Fragment>
+            );
+          }
+        }
+
+        if (prefix) {
+          return (
+            <Fragment key={`wrap-${nodeKeys[i]}`}>
+              {prefix}
+              {renderNode(node, i)}
+            </Fragment>
+          );
+        }
+        return renderNode(node, i);
+      })}
+      {showFallbackAfter && renderFallback("fallback-after")}
+      {showThinkingTail && (
+        <span className="thinking-tail">
+          <ThinkingDots />
+          Thinking…
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** ≥2 consecutive `web_search` — flatten (no outer shell). Each search row already
+ *  shows query + count; mirroring desktop ToolLineGroup's web_search flat path. */
+function isWebSearchFlatGroup(tools: ToolStepData[]): boolean {
+  return tools.length >= 2 && tools.every((t) => t.tool_name === "web_search");
+}
+
+/** Folded run of ≥2 consecutive tools — stream-aware expand (对称桌面 DefaultToolLineGroup). */
+function ToolGroup({
+  tools,
+  toolPhases,
+  isStreaming = false,
+}: {
+  tools: ToolStepData[];
+  toolPhases?: Map<string, ToolPhase>;
+  isStreaming?: boolean;
+}) {
+  const [expanded, toggleExpanded] = useStreamAwareDisclosure(isStreaming);
+  if (isWebSearchFlatGroup(tools)) {
+    return (
+      <div className="tool-group-flat">
+        {tools.map((t) => (
+          <ToolStep key={t.id} step={t} phase={toolPhases?.get(t.id)} />
+        ))}
+      </div>
+    );
+  }
+  const errorCount = tools.reduce(
+    (n, t) =>
+      n +
+      (t.status === "error" &&
+      !isFileReadCeilingGuidance(t.tool_name, t.result) &&
+      !isVerifyBudgetExceeded(t.display)
+        ? 1
+        : 0),
+    0,
+  );
+  const running = tools.some((t) => t.status === "running");
+  return (
+    <div className="tool-group">
+      <button
+        type="button"
+        className="tool-group-head"
+        onClick={toggleExpanded}
+      >
+        <span className="tool-group-summary-row">
+          {running && <ThinkingDots />}
+          <span className="tool-group-summary">{toolGroupSummary(tools)}</span>
+          {errorCount > 0 && (
+            <span className="tool-group-error">{errorCount} failed</span>
+          )}
+          {!running && (
+            <span className="thinking-chevron" aria-hidden>
+              {expanded ? "▾" : "▸"}
+            </span>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="tool-group-body">
+          {tools.map((t) => (
+            <ToolStep key={t.id} step={t} phase={toolPhases?.get(t.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TOOL_STATUS: Record<ToolStepData["status"], string> = {
+  running: "Running",
+  success: "Done",
+  error: "Failed",
+};
+
+/** A tool call: English name (+ its arg detail) · status, expandable to its full arguments and
+ *  result. While running, the status shows the coarse phase (Searching / Queued / Trying fallback,
+ *  from the live `phase`) + an elapsed timer — a live waiting cue instead of a static「Running」. */
+function ToolStep({
+  step,
+  phase,
+}: {
+  step: ToolStepData;
+  phase?: ToolPhase;
+}) {
+  const [open, setOpen] = useState(false);
+  const args = Object.keys(step.arguments).length > 0 ? step.arguments : null;
+  const detail = toolDetail(step.arguments);
+  const running = step.status === "running";
+  const ceilingGuidance =
+    step.status === "error" &&
+    (isFileReadCeilingGuidance(step.tool_name, step.result) ||
+      isVerifyBudgetExceeded(step.display));
+  const diagnostics = extractCodeDiagnostics(step.display);
+  const elapsed = useRunningElapsed(running);
+  const doneStatus = ceilingGuidance
+    ? isVerifyBudgetExceeded(step.display)
+      ? "验证未完成"
+      : "Notice"
+    : diagnostics
+      ? codeDiagnosticsSummary(diagnostics)
+      : TOOL_STATUS[step.status];
+  const runningStatus = running
+    ? [
+        toolPhaseText(phase) ?? TOOL_STATUS.running,
+        elapsed >= 1 ? `${elapsed}s` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : doneStatus;
+  const shellClass = ceilingGuidance
+    ? "tool tool-guidance"
+    : `tool tool-${step.status}`;
+  return (
+    <div className={shellClass}>
+      <button
+        type="button"
+        className="tool-head"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="tool-name">
+          {toolLabel(step.tool_name)}
+          {detail && <span className="tool-detail">{detail}</span>}
+        </span>
+        <span className="tool-status">{runningStatus}</span>
+      </button>
+      {open && (args || step.result != null || diagnostics) && (
+        <div className="tool-body">
+          {isVerifyBudgetExceeded(step.display) && (
+            <div className="tool-incomplete">验证未完成（预算耗尽）</div>
+          )}
+          {diagnostics && (
+            <div className="tool-diagnostics">
+              <div className="tool-diagnostics-title">类型诊断</div>
+              <div>{codeDiagnosticsSummary(diagnostics)}</div>
+              {diagnostics.status === "ok" &&
+                diagnostics.diagnostics
+                  .filter((d) => d.severity === "error")
+                  .slice(0, 8)
+                  .map((d, i) => (
+                    <div
+                      key={`${d.path}:${d.line}:${i}`}
+                      className="tool-diagnostics-row"
+                    >
+                      {d.path}:{d.line} · {d.message}
+                      {d.code ? (
+                        <span className="tool-diagnostics-code">
+                          {" "}
+                          ({d.code})
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+            </div>
+          )}
+          {args && (
+            <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>
+          )}
+          {step.result != null && step.result !== "" && (
+            <pre className="tool-pre">{step.result}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

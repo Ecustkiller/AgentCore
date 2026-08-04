@@ -49,7 +49,15 @@ class FakeUsers:
         )
 
     async def create(
-        self, *, username, display_name=None, email=None, role="user", status="active", commit=True
+        self,
+        *,
+        username,
+        display_name=None,
+        email=None,
+        role="user",
+        status="active",
+        registration_ip=None,
+        commit=True,
     ):
         user = SimpleNamespace(
             user_id=new_id(),
@@ -58,6 +66,7 @@ class FakeUsers:
             email=email,
             role=role,
             status=status,
+            registration_ip=registration_ip,
             deleted_at=None,
         )
         self._by_id[user.user_id] = user
@@ -243,6 +252,14 @@ async def test_register_success():
     assert user.username == "alice"
     cred = await creds.get_by_user_id(user.user_id)
     assert cred is not None and cred.password_hash != _PW
+
+
+async def test_register_writes_registration_ip():
+    svc, _users, _creds, _tokens = _make()
+    user = await svc.register(
+        username="ipuser", password=_PW, registration_ip="203.0.113.10"
+    )
+    assert user.registration_ip == "203.0.113.10"
 
 
 async def test_register_closed_raises_authorization_error(monkeypatch):

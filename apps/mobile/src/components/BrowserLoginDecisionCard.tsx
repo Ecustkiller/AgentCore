@@ -8,6 +8,8 @@
  */
 export type BrowserLoginSubmitKind = "logged_in" | "use_assumption" | "stop";
 
+export type OpenBrowserLiveOpts = { runId?: string };
+
 export function BrowserLoginDecisionCard({
   roleLabel,
   question,
@@ -18,6 +20,7 @@ export function BrowserLoginDecisionCard({
   onUseAssumption,
   onStop,
   onOpenLive,
+  liveRunId,
 }: {
   roleLabel: string;
   question: string;
@@ -28,7 +31,9 @@ export function BrowserLoginDecisionCard({
   onUseAssumption?: () => void;
   onStop?: () => void;
   /** Open BrowserLiveSheet (Sandbox). Absent → no「查看直播」affordance. */
-  onOpenLive?: () => void;
+  onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
+  /** Optional run pin for BrowserLive session matching. */
+  liveRunId?: string;
 }) {
   return (
     <div className="browser-login-card" data-testid="browser-login-decision">
@@ -49,7 +54,9 @@ export function BrowserLoginDecisionCard({
             className="pause-btn pause-btn-neutral"
             disabled={busy}
             data-testid="browser-login-open-live"
-            onClick={onOpenLive}
+            onClick={() =>
+              onOpenLive(liveRunId ? { runId: liveRunId } : undefined)
+            }
           >
             查看直播
           </button>

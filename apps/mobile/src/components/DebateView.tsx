@@ -1,19 +1,18 @@
-// 辩论双产物的移动端精简视图 (辩论编排设计.md「双产物」), rendered under the team list.
+// 辩论双产物的移动端视图 (辩论编排设计.md「双产物」), rendered under the team list.
 //
-// A phone-native reduction of the desktop DebateProducts: the 决策简报 (倾向/置信/争点/
-// 各方最强论点/分歧/建议/待解) over a collapsed 交锋叙事线 (逐轮 焦点 + 裁判 + 小结).
-// `narrative_first` flips their order (exploratory roundtable leads with the process, a
-// decision debate with the conclusion). The per-side full speeches (L3) are NOT repeated
-// here — they already live as each debater's RunCard preview in the team list above (one
-// source, phone-sized). Consumed identically by live turns and history replay off the same
-// ProjectedTurn.debate (fold) — no second data path.
+// Phone-native reduction of desktop DebateProducts / DebateProgressLine: 决策简报
+// (倾向/置信/争点/各方最强论点/分歧/建议/待解) over a collapsible 交锋叙事线
+// (逐轮 焦点 + 裁判 + 小结). `narrative_first` flips their order. Per-side full
+// speeches stay on RunCards in the team list above. No desktop import; no canvas CTA.
+import { Markdown } from "@/components/Markdown";
 import type {
   DebateHandoffInfo,
   DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundInfo,
 } from "@agentcore/contract-types";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import "./DebateView.css";
 
 const FORM_LABEL: Record<DebateResultPayload["form"], string> = {
   debate: "正反辩论",
@@ -85,6 +84,22 @@ function asHandoffKind(raw: string): HandoffKind {
     : "question";
 }
 
+function formatRoundHint(round: {
+  round_no: number;
+  focus: string;
+  summary: string;
+  inFlight?: boolean;
+}): string {
+  const label = round.round_no > 0 ? `第 ${round.round_no} 轮` : "本场";
+  if (round.inFlight && !round.focus) return `${label} · 进行中`;
+  if (round.focus && round.summary) {
+    return `${label} · ${round.focus} · ${round.summary}`;
+  }
+  if (round.focus) return `${label} · ${round.focus}`;
+  if (round.summary) return `${label} · ${round.summary}`;
+  return label;
+}
+
 export function DebateView({
   debate,
   onFill,
@@ -96,8 +111,9 @@ export function DebateView({
   const brief = <Brief debate={debate} onFill={onFill} />;
   const narrative = <Narrative debate={debate} />;
   const rosterLine = formatDebateRosterLine(debate);
+  const opening = (debate.opening ?? "").trim();
   return (
-    <div className="debate">
+    <div className="debate" data-testid="debate-view">
       <div className="debate-head">
         <span className="debate-title">主持人终审</span>
         <span className="debate-tag">{FORM_LABEL[debate.form] ?? "辩论"}</span>
@@ -105,11 +121,18 @@ export function DebateView({
           {STOP_LABEL[debate.stop_reason] ?? debate.stop_reason}
         </span>
       </div>
+      {debate.motion.trim() ? (
+        <p className="debate-motion">
+          <span className="debate-motion-label">辩题 · </span>
+          {debate.motion.trim()}
+        </p>
+      ) : null}
       {rosterLine && (
         <div className="debate-field" data-testid="debate-roster-line">
           <span className="debate-field-value">{rosterLine}</span>
         </div>
       )}
+      {opening ? <p className="debate-opening">{opening}</p> : null}
       {debate.narrative_first ? (
         <>
           {narrative}
@@ -136,12 +159,15 @@ function Brief({
 }) {
   const b = debate.brief;
   const conf = CONFIDENCE_LABEL[b.confidence] ?? b.confidence;
+  const decisive = (b.decisive ?? "").trim();
   return (
     <div className="debate-brief">
+      <div className="debate-brief-kicker">裁决</div>
       <div className="debate-leaning">
         <span className="debate-leaning-text">{b.leaning}</span>
         <span className={`debate-conf conf-${b.confidence}`}>置信 {conf}</span>
       </div>
+      {decisive ? <Field label="关键依据">{decisive}</Field> : null}
       <Field label="关键争点">{b.crux}</Field>
       <div className="debate-points">
         {debate.sides.map((s) => (
@@ -156,7 +182,9 @@ function Brief({
         ))}
       </div>
       <HandoffsBlock items={b.handoffs ?? []} onFill={onFill} />
-      <Field label="建议">{b.recommendation}</Field>
+      <Field label="建议">
+        <Markdown content={b.recommendation} muted />
+      </Field>
     </div>
   );
 }
@@ -235,9 +263,21 @@ function HandoffsBlock({
  *  焦点 + 裁判徽章 + 主持人小结; the full speeches stay in the team list above. */
 function Narrative({ debate }: { debate: DebateResultPayload }) {
   if (debate.rounds.length === 0) return null;
+  const latest = debate.rounds[debate.rounds.length - 1];
+  const hint = formatRoundHint({
+    round_no: latest.round_no,
+    focus: latest.focus,
+    summary: latest.summary,
+  });
   return (
     <details className="debate-narrative">
-      <summary>交锋叙事线 · {debate.rounds.length} 轮</summary>
+      <summary>
+        <span className="debate-progress-chevron" aria-hidden />
+        <span className="debate-progress-badge">
+          交锋叙事 · {debate.rounds.length} 轮
+        </span>
+        <span className="debate-progress-hint">{hint}</span>
+      </summary>
       <div className="debate-rounds">
         {debate.rounds.map((r) => (
           <div key={r.round_no} className="debate-round">
@@ -293,21 +333,19 @@ function RoundWitnessExam({ round }: { round: DebateRoundInfo }) {
   );
 }
 
-/** 主持人小结 —— 逐轮小结由主持人（中立裁判）给出，用一枚「主持人」小标记明确作者身份（桌面端是
- *  法槌头像 + 发言气泡，手机端精简为小标记 + 文本）。空小结不渲染。 */
+/** 主持人小结 —— 逐轮小结由主持人（中立裁判）给出。空小结不渲染。 */
 function ModeratorSummary({ summary }: { summary: string }) {
   if (!summary) return null;
   return (
-    <div className="debate-round-summary">
-      <span className="debate-round-no">主持人</span> {summary}
-    </div>
+    <p className="debate-round-summary-line">
+      <strong>小结 · </strong>
+      {summary}
+    </p>
   );
 }
 
 /** 本轮「你的追问」(辩论编排设计.md §6.3)：向谁问 + 问题原文 +
- *  是否被承接。`answered` 是结构事实（是否真有后续轮跑起来答它，追问即续辩则恒真），非「答得好不好」。
- *  仅收场 {@link DebateRoundInfo} 携带（live 孪生 {@link DebateNarrativeRound} 不带）；无追问 → 不渲染。
- *  手机端只读复盘——逐轮决策 / 追问输入是桌面端能力（手机无掌舵卡）。 */
+ *  是否被承接。手机端只读复盘——逐轮决策 / 追问输入是桌面端能力。 */
 function RoundInterjections({ round }: { round: DebateRoundInfo }) {
   const items = round.user_interjections ?? [];
   if (items.length === 0) return null;
@@ -330,9 +368,7 @@ function RoundInterjections({ round }: { round: DebateRoundInfo }) {
   );
 }
 
-/** L3 论点级交锋边（谁驳谁）：把本轮裁判抽取的针对性反驳渲染成「来源方 → 被驳方  要点」列表。
- *  `from_key`/`to_key` 是语义 side key，据本轮 `sides` 解析成展示名（解析不到则原样退化）。
- *  收场与进行中两路同构（{@link DebateRoundInfo} / {@link DebateNarrativeRound} 都带 `clashes`）。 */
+/** L3 论点级交锋边（谁驳谁）：把本轮裁判抽取的针对性反驳渲染成「来源方 → 被驳方  要点」列表。 */
 function RoundClashes({
   round,
 }: {
@@ -355,46 +391,89 @@ function RoundClashes({
   );
 }
 
-/** 辩论进行中的逐轮叙事 (live) —— 逐轮增量事件 (`debate_round_started` / `debate_round`) 折叠
- *  出的 {@link DebateNarrativeRound}：每轮发言前先亮焦点，裁判 + 小结在发言后补上 (verdict=null
- *  = 该轮仍在进行)。各方发言全文不在此 (已是上方团队列表里各辩手的 RunCard)，故只铺主持人的逐
- *  轮编排。收场后由 {@link DebateView} 的全量双产物接管 (届时 `debate` 在手，本视图不再渲染)。 */
+/** 辩论进行中的逐轮叙事 (live) —— 对齐桌面 DebateProgressLine：折叠看最新焦点，展开看全轮。
+ *  收场后由 {@link DebateView} 的全量双产物接管。 */
 export function LiveDebateNarrative({
   rounds,
 }: {
   rounds: DebateNarrativeRound[];
 }) {
+  const live = rounds.some((r) => r.verdict == null);
+  const [expanded, setExpanded] = useState(live);
   if (rounds.length === 0) return null;
+  const latest = rounds[rounds.length - 1];
+  const inFlight = latest.verdict == null;
+  const hint = formatRoundHint({
+    round_no: latest.round_no,
+    focus: latest.focus,
+    summary: latest.summary,
+    inFlight,
+  });
   return (
-    <div className="debate">
+    <div className="debate" data-testid="live-debate-narrative">
       <div className="debate-head">
         <span className="debate-title">辩论进行中</span>
         <span className="debate-tag">{rounds.length} 轮</span>
       </div>
-      <div className="debate-rounds">
-        {rounds.map((r) => (
-          <div key={r.round_no} className="debate-round">
-            <div className="debate-round-head">
-              <span className="debate-round-no">第 {r.round_no} 轮</span>
-              <span className="debate-round-focus">{r.focus}</span>
-            </div>
-            {r.verdict && (
-              <div className="debate-verdict">
-                <span className="debate-vpill">
-                  {r.verdict.real_clash ? "有交锋" : "各说各话"}
-                </span>
-                <span className="debate-vpill">
-                  {r.verdict.new_arguments ? "有新论据" : "无新论据"}
-                </span>
-                {r.verdict.converged && (
-                  <span className="debate-vpill vpill-ok">已收敛</span>
-                )}
-              </div>
-            )}
-            <ModeratorSummary summary={r.summary} />
-            <RoundClashes round={r} />
-          </div>
-        ))}
+      <div className="debate-progress">
+        <button
+          type="button"
+          className="debate-progress-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={expanded ? "收起推进线" : "展开推进线"}
+        >
+          <span className="debate-progress-chevron" aria-hidden>
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span className="debate-progress-badge">推进线 {rounds.length}</span>
+          {!expanded && <span className="debate-progress-hint">{hint}</span>}
+        </button>
+        {expanded && (
+          <ol className="debate-rounds">
+            {rounds.map((r) => {
+              const roundLive = r.verdict == null;
+              return (
+                <li key={r.round_no} className="debate-round">
+                  <div className="debate-round-head">
+                    <span className="debate-round-no">第 {r.round_no} 轮</span>
+                    {roundLive && (
+                      <span className="debate-round-live">进行中</span>
+                    )}
+                  </div>
+                  {r.focus ? (
+                    <p className="debate-round-focus">
+                      <span className="debate-motion-label">焦点 · </span>
+                      {r.focus}
+                    </p>
+                  ) : roundLive ? (
+                    <p className="debate-round-focus-muted">等待焦点…</p>
+                  ) : null}
+                  {r.verdict && (
+                    <div className="debate-verdict">
+                      <span className="debate-vpill">
+                        {r.verdict.real_clash ? "有交锋" : "各说各话"}
+                      </span>
+                      <span className="debate-vpill">
+                        {r.verdict.new_arguments ? "有新论据" : "无新论据"}
+                      </span>
+                      {r.verdict.converged && (
+                        <span className="debate-vpill vpill-ok">已收敛</span>
+                      )}
+                    </div>
+                  )}
+                  {r.summary ? (
+                    <p className="debate-round-summary-line">
+                      <strong>小结 · </strong>
+                      {r.summary}
+                    </p>
+                  ) : null}
+                  <RoundClashes round={r} />
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </div>
     </div>
   );
@@ -404,7 +483,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="debate-field">
       <span className="debate-field-label">{label}</span>
-      <span className="debate-field-value">{children}</span>
+      <div className="debate-field-value">{children}</div>
     </div>
   );
 }

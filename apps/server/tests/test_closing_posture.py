@@ -339,46 +339,25 @@ def test_bare_pass_without_review_prefix_not_posture_a():
     assert not claims_posture_a("请通过左侧栏购买炮塔。")
 
 
-def test_ceo_mutation_honesty_banner_soft_only():
-    """零写盘假已改 / 整文件手贴 → 横幅；有写盘证据或仅核对语 → 不拦。"""
+def test_ceo_mutation_honesty_banner_withdrawn():
+    """2026-08-04：只删【落盘说明】横幅；enforce 恒等；检测器仍可用。"""
     from agentcore.runtime.closing_posture import (
         asks_whole_file_user_paste,
         claims_ceo_mutation_done,
         enforce_ceo_mutation_honesty,
     )
-    from agentcore.runtime.delegate.delivery_status import (
-        DeliveryVerdict,
-        current_delivery_verdict,
-    )
 
     claim = "标题已修改，计时逻辑已修正，请自行替换整文件。"
     assert claims_ceo_mutation_done(claim)
     assert asks_whole_file_user_paste(claim)
-    out = enforce_ceo_mutation_honesty(claim, landing_succeeded=False)
-    assert out.startswith("【落盘说明】")
-    assert "已修改" in out
+    assert enforce_ceo_mutation_honesty(claim, landing_succeeded=False) == claim
+    assert "【落盘说明】" not in enforce_ceo_mutation_honesty(claim)
 
-    # 核对类不进闭集
     check = "我对了一下工作区，文件里已经是新版本，不是我本轮又改了。"
     assert not claims_ceo_mutation_done(check)
     assert enforce_ceo_mutation_honesty(check, landing_succeeded=False) == check
-
-    # 裸「已处理你的疑问」不进表
     assert not claims_ceo_mutation_done("已处理你的疑问，下面解释原因。")
-
-    token = current_delivery_verdict.set(
-        DeliveryVerdict(state="delivered", delivered_files=("a.ts",), execution_id="e1")
-    )
-    try:
-        assert (
-            enforce_ceo_mutation_honesty(claim, landing_succeeded=False) == claim
-        )
-    finally:
-        current_delivery_verdict.reset(token)
-
-    assert (
-        enforce_ceo_mutation_honesty(claim, landing_succeeded=True) == claim
-    )
+    assert enforce_ceo_mutation_honesty(claim, landing_succeeded=True) == claim
 
 
 def test_cloud_web_verify_honesty_banner_soft_only():

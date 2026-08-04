@@ -8,13 +8,26 @@
  * Unlike PauseCard it reads a PERSISTED PausedTurnSummary and asks the parent to drive a
  * fresh resume stream. These assert the two kind branches (ask_user / plan_review), that the
  * note rides along, and the plan_review-only 调整 gating — coverage the durable path lacked.
- * The block comment keeps the @vitest-environment directive file-leading past organizeImports.
+ * Dense kinds (team_preview / walls) use Latch + Interaction Sheet; Modal is stubbed (jsdom
+ * lacks showModal). The block comment keeps the @vitest-environment directive file-leading
+ * past organizeImports.
  */
 
 import type { PausedTurnSummary } from "@/api/turn";
 import { ResumeCard } from "@/components/ResumeCard";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/Modal", () => ({
+  Modal: ({
+    children,
+    className,
+  }: {
+    children: ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
+}));
 
 afterEach(cleanup);
 
@@ -94,7 +107,9 @@ describe("ResumeCard · ask_user", () => {
     expect(
       document.querySelector('[data-ask-intent="proposal_pick"]'),
     ).toBeTruthy();
-    expect(screen.getByText("方案挑选 · 选一条推进")).toBeTruthy();
+    expect(screen.getAllByText("方案挑选 · 选一条推进").length).toBeGreaterThan(
+      0,
+    );
     fireEvent.click(screen.getByText("方案 A"));
     fireEvent.click(screen.getByText("采用此方案"));
     expect(onResume).toHaveBeenCalledWith("continue", "", ["方案 A"]);
@@ -150,7 +165,9 @@ describe("ResumeCard · ask_user", () => {
     expect(
       document.querySelector('[data-ask-intent="organize_plan"]'),
     ).toBeTruthy();
-    expect(screen.getByText("整理方案 · 确认要执行的项")).toBeTruthy();
+    expect(
+      screen.getAllByText("整理方案 · 确认要执行的项").length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("取消勾选即剔除")).toBeTruthy();
     expect(screen.getByText("a → b")).toBeTruthy();
     // Uncheck second item — not keep-all.
@@ -283,7 +300,9 @@ describe("ResumeCard · ask_user", () => {
         onResume={onResume}
       />,
     );
-    expect(screen.getByText("复盘提案 · 确认要落盘的项")).toBeTruthy();
+    expect(
+      screen.getAllByText("复盘提案 · 确认要落盘的项").length,
+    ).toBeGreaterThan(0);
     expect(
       document.querySelector('[data-ask-intent="daily_review"]'),
     ).toBeTruthy();
@@ -350,7 +369,9 @@ describe("ResumeCard · plan_review", () => {
 
   it("renders the plan_review headline and the completed step", () => {
     render(<ResumeCard paused={planReview()} onResume={vi.fn()} />);
-    expect(screen.getByText("执行已暂停 · 待你决定是否继续")).toBeTruthy();
+    expect(
+      screen.getAllByText("执行已暂停 · 待你决定是否继续").length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("调研")).toBeTruthy();
     expect(screen.getByText("方案就绪")).toBeTruthy();
   });
@@ -402,6 +423,21 @@ describe("ResumeCard · team_preview", () => {
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByText("纳入本轮")).toBeTruthy();
     expect(screen.getByText("本批工具：file_write")).toBeTruthy();
+  });
+
+  it("Latch + Sheet：默认打开可点 CTA；收起留 latch，再打开不丢控件", () => {
+    render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
+    // Sheet open → latch hidden so chat column is not double-taxed.
+    expect(screen.queryByTestId("resume-card-latch")).toBeNull();
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("interaction-sheet-collapse"));
+    expect(screen.queryByText("授权并开工")).toBeNull();
+    const latch = screen.getByTestId("resume-card-latch");
+    expect(latch).toBeTruthy();
+    expect(screen.getByText("1 人待确认 · 点开授权开工")).toBeTruthy();
+    fireEvent.click(latch);
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(screen.getByText("纳入本轮")).toBeTruthy();
   });
 
   it("主按钮带嘱咐发 continue（未改正时无修正载荷）", () => {

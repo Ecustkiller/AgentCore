@@ -465,11 +465,11 @@
 }
 
 .im-lightbox-nav.prev {
-  left: max(8px, env(safe-area-inset-left));
+  left: max(8px, var(--safe-area-inset-left, env(safe-area-inset-left)));
 }
 
 .im-lightbox-nav.next {
-  right: max(8px, env(safe-area-inset-right));
+  right: max(8px, var(--safe-area-inset-right, env(safe-area-inset-right)));
 }
 
 .im-attach-file-wrap {

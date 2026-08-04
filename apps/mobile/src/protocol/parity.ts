@@ -140,28 +140,42 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "AssistantView · 升级收束轻行",
   },
 
-  // —— 辩论 ——
-  debate_result: { verdict: "ported", surface: "DebateView" },
-  debate_round_started: { verdict: "ported", surface: "LiveDebateNarrative" },
+  // —— 辩论（事件 fold 有面；相对桌面赛事页/站队/掌舵为有意精简）——
+  debate_result: {
+    verdict: "simplified",
+    surface: "DebateView",
+    reason:
+      "双产物精简复盘；无 DebateArena 赛事页 / 记分牌站队 / SteeringPanel 掌舵卡（介入靠主 composer）",
+  },
+  debate_round_started: {
+    verdict: "simplified",
+    surface: "LiveDebateNarrative",
+    reason: "叙事线有；无赛事页轮次舞台",
+  },
   debate_round: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "LiveDebateNarrative / DebateView",
+    reason: "叙事/交锋有；无赛事页并排舞台与站队",
   },
   debate_pretrial_started: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "LiveDebateNarrative · 庭前取证",
+    reason: "台账轻呈现；无独立庭前任务单 UI（桌面亦已退场热路径）",
   },
   debate_pretrial_orders: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "LiveDebateNarrative · 庭前取证",
+    reason: "同上",
   },
   debate_pretrial_progress: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "LiveDebateNarrative · 庭前取证",
+    reason: "同上",
   },
   debate_pretrial_completed: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "LiveDebateNarrative · 庭前取证 / DebateView",
+    reason: "同上",
   },
 
   // —— 团队便签墙 ——
@@ -481,8 +495,9 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   },
   StatusStrip: { verdict: "ported", surface: "ChatPage · 状态 meta 行" },
   DebateProgressLine: {
-    verdict: "ported",
+    verdict: "simplified",
     surface: "TeamView · 辩论进展预览（fold 对齐 StatusStrip）",
+    reason: "进展预览有；无桌面状态条「打开辩论室」进赛事页 CTA",
   },
   TeamSynthesisPreviewLine: {
     verdict: "ported",

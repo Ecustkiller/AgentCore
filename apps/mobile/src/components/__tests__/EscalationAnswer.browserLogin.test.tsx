@@ -5,6 +5,8 @@
  * - 主钮一键 answer「已登录，继续」（不因空 textarea 禁用）
  * - 有 assumption →「按假设继续」
  * - 普通 escalate 仍要 textarea 非空才可提交
+ * - 普通 escalate 无 assumption → 不显示「按假设继续」；占位不暗示可点该钮
+ * - onResolved：POST 成功后回调（冷恢复）
  */
 
 import { EscalationAnswer } from "@/components/TeamView";
@@ -42,14 +44,20 @@ const loginEsc: EscalationSlotEsc = {
 
 function renderAnswer(
   esc: EscalationSlotEsc = loginEsc,
-  onOpenLive?: () => void,
+  extras?: {
+    onOpenLive?: (opts?: { runId?: string }) => void;
+    onResolved?: () => void;
+    runId?: string;
+  },
 ) {
   return render(
     <EscalationAnswer
       esc={esc}
       escalationId="esc-login"
       conversationId="conv-1"
-      onOpenLive={onOpenLive}
+      runId={extras?.runId}
+      onOpenLive={extras?.onOpenLive}
+      onResolved={extras?.onResolved}
     />,
   );
 }
@@ -57,7 +65,7 @@ function renderAnswer(
 describe("EscalationAnswer · browser_login", () => {
   it("shows 需要你登录 + Sandbox 引导；可开直播；无假打开浏览器", () => {
     const onOpenLive = vi.fn();
-    renderAnswer(loginEsc, onOpenLive);
+    renderAnswer(loginEsc, { onOpenLive, runId: "run-w1" });
     expect(screen.getByText(/需要你登录/)).toBeTruthy();
     expect(screen.getByText("请先登录目标站点")).toBeTruthy();
     expect(screen.getByText(/Sandbox/)).toBeTruthy();
@@ -68,6 +76,7 @@ describe("EscalationAnswer · browser_login", () => {
     expect(screen.getByTestId("browser-login-open-live")).toBeTruthy();
     fireEvent.click(screen.getByText("查看直播"));
     expect(onOpenLive).toHaveBeenCalledTimes(1);
+    expect(onOpenLive).toHaveBeenCalledWith({ runId: "run-w1" });
     expect(screen.queryByText("打开浏览器")).toBeNull();
     expect(screen.queryByPlaceholderText(/输入你的决定/)).toBeNull();
   });
@@ -118,5 +127,45 @@ describe("EscalationAnswer · browser_login", () => {
       target: { value: "走 B" },
     });
     expect((submit as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("普通 escalate 无 assumption → 不显示「按假设继续」；占位不暗示该钮", () => {
+    renderAnswer({
+      question: "选哪条路？",
+      assumption: "",
+      blocking: true,
+      status: "pending",
+      answer: null,
+      kind: "normal",
+    });
+    expect(screen.queryByText("按假设继续")).toBeNull();
+    expect(screen.getByPlaceholderText("输入你的决定")).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/按假设继续/)).toBeNull();
+  });
+
+  it("onResolved：POST 成功后回调（busy 留给父级撤卡，不永等 SSE）", async () => {
+    const onResolved = vi.fn();
+    renderAnswer(
+      {
+        question: "选哪条路？",
+        assumption: "走 A",
+        blocking: true,
+        status: "pending",
+        answer: null,
+        kind: "normal",
+      },
+      { onResolved },
+    );
+    fireEvent.change(screen.getByPlaceholderText(/输入你的决定/), {
+      target: { value: "走 B" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    });
+    expect(decideEscalation).toHaveBeenCalledWith("conv-1", "esc-login", {
+      kind: "answer",
+      answer: "走 B",
+    });
+    expect(onResolved).toHaveBeenCalledTimes(1);
   });
 });

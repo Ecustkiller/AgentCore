@@ -1,8 +1,14 @@
 """Sidecar local-turn write-back — ``CloudStore.finalize(mode="local")``."""
 
+from collections.abc import Sequence
+from typing import Any
+
 from agentcore.conversation.store import get_cloud_store
 from agentcore.core.log_context import log_context
+from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
+
+logger = get_logger(__name__)
 
 
 async def record_local_turn(
@@ -16,6 +22,7 @@ async def record_local_turn(
     evidence_ledger: list[dict] | None = None,
     runs: dict | None = None,
     journal: list[dict] | None = None,
+    tool_failures: Sequence[dict[str, Any]] | None = None,
     user_message_id: str,
     message_id: str | None = None,
     input_tokens: int = 0,
@@ -33,8 +40,19 @@ async def record_local_turn(
     Routes through ``CloudStore.finalize(mode="local")`` so D7 merge rules apply
     (content monotonic, status gate, journal seq upsert, no early-return).
     Spend is NOT recorded here — metered at ``/v1/inference``.
+    ``tool_failures`` is observability-only (logged, not persisted to message tables).
     """
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user_id):
+        failures = [f for f in (tool_failures or ()) if isinstance(f, dict)]
+        if failures:
+            codes = [str(f.get("code") or "other") for f in failures]
+            logger.info(
+                "chat.local_turn_tool_failures",
+                conversation_id=conversation_id,
+                message_id=message_id,
+                count=len(failures),
+                codes=codes,
+            )
         result = await get_cloud_store().finalize(
             mode="local",
             conversation_id=conversation_id,

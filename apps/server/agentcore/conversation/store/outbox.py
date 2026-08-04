@@ -675,6 +675,71 @@ def journal_entries_from_map(journal: dict[str, Any] | None) -> list[dict[str, A
     return entries or None
 
 
+def tool_failures_from_journal(
+    entries: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    """Project failed tool facts into ``RecordTurnRequest.tool_failures``.
+
+    Prefers execution ``tool_call`` facts (``success=false``). When none exist,
+    falls back to display ``tool_use_end`` with ``status=error`` (legacy/crash
+    salvage journals). Codes are coarse-mapped from the error text.
+    """
+    from agentcore.api.schemas.messages import (
+        normalize_local_turn_tool_failure_code,
+        truncate_tool_failure_message,
+    )
+
+    if not entries:
+        return []
+
+    def _row(tool: str, message: str) -> dict[str, str] | None:
+        name = (tool or "").strip()
+        if not name:
+            return None
+        msg = truncate_tool_failure_message(message)
+        return {
+            "tool": name[:128],
+            "code": normalize_local_turn_tool_failure_code(msg),
+            "message": msg,
+        }
+
+    from_facts: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("kind") or "") != "tool_call":
+            continue
+        payload = entry.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("success", True):
+            continue
+        row = _row(str(payload.get("name") or ""), str(payload.get("result") or ""))
+        if row:
+            from_facts.append(row)
+    if from_facts:
+        return from_facts
+
+    from_ends: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("kind") or "") != "tool_use_end":
+            continue
+        payload = entry.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("status", "success") == "success":
+            continue
+        row = _row(
+            str(payload.get("tool_name") or ""),
+            str(payload.get("result") or ""),
+        )
+        if row:
+            from_ends.append(row)
+    return from_ends
+
+
 def list_outbox_records(base: Path) -> list[dict[str, Any]]:
     """Read all outbox JSON records (best-effort; skips torn files)."""
     if not base.is_dir():
@@ -728,4 +793,7 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
     journal = journal_entries_from_map(record.get("journal"))
     if journal is not None:
         body["journal"] = journal
+    failures = tool_failures_from_journal(journal)
+    if failures:
+        body["tool_failures"] = failures
     return body

@@ -44,9 +44,23 @@ class _TrackingUsers:
         return self._by_username.get(username)
 
     async def create(
-        self, *, username, display_name=None, email=None, role="user", status="active", commit=True
+        self,
+        *,
+        username,
+        display_name=None,
+        email=None,
+        role="user",
+        status="active",
+        registration_ip=None,
+        commit=True,
     ):
-        self.create_kwargs.append({"commit": commit, "username": username})
+        self.create_kwargs.append(
+            {
+                "commit": commit,
+                "username": username,
+                "registration_ip": registration_ip,
+            }
+        )
         user = SimpleNamespace(
             user_id="u1",
             username=username,
@@ -54,6 +68,7 @@ class _TrackingUsers:
             email=email,
             role=role,
             status=status,
+            registration_ip=registration_ip,
         )
         self._by_username[username] = user
         return user
@@ -95,7 +110,9 @@ async def test_register_defers_commit_then_commits_once():
     )
     user = await svc.register(username="atomic", password=_PW)
     assert user.username == "atomic"
-    assert users.create_kwargs == [{"commit": False, "username": "atomic"}]
+    assert users.create_kwargs == [
+        {"commit": False, "username": "atomic", "registration_ip": None}
+    ]
     assert creds.create_kwargs == [{"commit": False, "user_id": "u1"}]
     assert session.commits == 1
 

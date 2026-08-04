@@ -3,7 +3,9 @@ import type { PausedTurnSummary } from "@/api/turn";
 import {
   BrowserLoginDecisionCard,
   type BrowserLoginSubmitKind,
+  type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
+import { PendingInteractionChrome } from "@/components/InteractionSheet";
 import { composeAnswer } from "@/components/ask/composeAnswer";
 import {
   RISK_SEVERITY_TAG,
@@ -20,6 +22,7 @@ import {
 // decision/kickoff = default 预选 + compose 答复模型 +「其他」逃逸（本机目录 action 不做）。
 // Delegate team_preview：纳入开关 + 写盘单向收紧（开工组队有限否决 · 块 C）。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
+// Dense kinds use Latch + Interaction Sheet so long worker lists never inflate .screen.
 import type { CheckpointDecision } from "@agentcore/contract-types";
 import { useState } from "react";
 
@@ -226,7 +229,7 @@ export function ResumeCard({
     amendments?: TeamPreviewAmendments,
   ) => void;
   /** Open BrowserLiveSheet from cold-path browser_login card. */
-  onOpenLive?: () => void;
+  onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
 }) {
   const isPlanReview = paused.kind === "plan_review";
   const isTeamPreview = paused.kind === "team_preview";
@@ -269,7 +272,7 @@ function AskUserBrowserLoginResumeCard({
     selected: string[],
     amendments?: TeamPreviewAmendments,
   ) => void;
-  onOpenLive?: () => void;
+  onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
 }) {
   const [submitting, setSubmitting] = useState<BrowserLoginSubmitKind | null>(
     null,
@@ -302,7 +305,7 @@ function AskUserBrowserLoginResumeCard({
   };
 
   return (
-    <div className="pause">
+    <div className="pause pause--budget">
       <BrowserLoginDecisionCard
         roleLabel="主 Agent"
         question={paused.question || "请完成登录后继续"}
@@ -600,9 +603,44 @@ function ResumeCardBody({
                 ? "提交"
                 : "继续";
 
-  return (
-    <div className="pause" data-ask-intent={askIntentAttr}>
-      <div className="pause-title">{title}</div>
+  // Dense = form / roster / wall → sheet; short single ask stays inline with height budget.
+  const useSheet =
+    isTeamPreview ||
+    isPlanReview ||
+    isCheckboxWall ||
+    isProposalPick ||
+    isRiskAck ||
+    questions.length >= 2;
+
+  const latchSummaryText = (() => {
+    if (isDelegateKickoff) {
+      return `${included.size} 人待确认 · 点开授权开工`;
+    }
+    if (isDebateKickoff) {
+      const motion = ((paused as { motion?: string }).motion ?? "")
+        .trim()
+        .replace(/\s+/g, " ");
+      const clipped =
+        motion.length <= 36 ? motion : `${motion.slice(0, Math.max(1, 35))}…`;
+      return clipped ? `${clipped} · 开赛` : "开赛前确认";
+    }
+    if (isPlanReview) {
+      const n = paused.steps?.length ?? 0;
+      return n > 0 ? `${n} 步待确认` : "待你决定是否继续";
+    }
+    if (isDailyReview || isOrganizePlan) {
+      return wallPicked > 0 ? `已选 ${wallPicked} 项` : "勾选后确认";
+    }
+    if (isProposalPick) return "选一条方案推进";
+    if (isRiskAck) return "勾选本轮处理项";
+    const q = (paused.question ?? "").trim().replace(/\s+/g, " ");
+    if (q) return q.length <= 40 ? q : `${q.slice(0, 39)}…`;
+    return "需要你拍板";
+  })();
+
+  const bodyInner = (
+    <>
+      {!useSheet ? <div className="pause-title">{title}</div> : null}
       {paused.user_message && (
         <div className="pause-context">{paused.user_message}</div>
       )}
@@ -1077,33 +1115,60 @@ function ResumeCardBody({
           确认后按方案批量执行，不再二次弹审批；完成后可撤销本次 move/mkdir。
         </div>
       )}
-      <div className="pause-actions">
+    </>
+  );
+
+  const footer = (
+    <div className="pause-actions">
+      <button
+        type="button"
+        className="pause-btn pause-btn-primary"
+        disabled={ctaDisabled}
+        onClick={() => submit("continue")}
+      >
+        {primaryCta}
+      </button>
+      {isPlanReview && (
         <button
           type="button"
-          className="pause-btn pause-btn-primary"
-          disabled={ctaDisabled}
-          onClick={() => submit("continue")}
+          className="pause-btn pause-btn-neutral"
+          disabled={!note.trim()}
+          onClick={() => submit("adjust")}
         >
-          {primaryCta}
+          调整
         </button>
-        {isPlanReview && (
-          <button
-            type="button"
-            className="pause-btn pause-btn-neutral"
-            disabled={!note.trim()}
-            onClick={() => submit("adjust")}
-          >
-            调整
-          </button>
-        )}
-        <button
-          type="button"
-          className="pause-btn pause-btn-danger"
-          onClick={() => submit("stop")}
-        >
-          {isAskUser ? "跳过" : "停止"}
-        </button>
-      </div>
+      )}
+      <button
+        type="button"
+        className="pause-btn pause-btn-danger"
+        onClick={() => submit("stop")}
+      >
+        {isAskUser ? "跳过" : "停止"}
+      </button>
+    </div>
+  );
+
+  if (useSheet) {
+    return (
+      <PendingInteractionChrome
+        title={title}
+        summary={latchSummaryText}
+        label={title}
+        footer={footer}
+        bodyAttrs={
+          askIntentAttr ? { "data-ask-intent": askIntentAttr } : undefined
+        }
+        latchTestId="resume-card-latch"
+      >
+        {bodyInner}
+      </PendingInteractionChrome>
+    );
+  }
+
+  return (
+    <div className="pause pause--budget" data-ask-intent={askIntentAttr}>
+      <div className="pause-scroll">{bodyInner}</div>
+      {footer}
     </div>
   );
 }

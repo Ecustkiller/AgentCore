@@ -12,6 +12,7 @@ import type {
   ProcessStep,
   SSEEvent,
   TurnEvidenceLedgerEntry,
+  UsageBreakdown,
 } from "@agentcore/contract-types";
 
 type Schemas = components["schemas"];
@@ -69,6 +70,10 @@ export interface MessageDetail {
   trace_id?: string | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON. */
   duration_ms?: number | null;
+  /** Token 用量（messages.usage）；Footer 明细. */
+  usage?: UsageBreakdown | null;
+  /** ReAct 轮次（messages.rounds）. */
+  rounds?: number | null;
   created_at: string;
 }
 
@@ -253,6 +258,8 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
     origin: row.origin ?? null,
     trace_id: row.trace_id ?? null,
     duration_ms: row.duration_ms ?? null,
+    usage: row.usage ?? null,
+    rounds: row.rounds ?? null,
     created_at: row.created_at,
   };
 }

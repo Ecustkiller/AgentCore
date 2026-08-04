@@ -35,6 +35,15 @@ import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
+/** UTC day bounds for ``since`` / ``until`` query params (date input → ISO). */
+function dateToSince(isoDate: string): string {
+  return `${isoDate}T00:00:00.000Z`;
+}
+
+function dateToUntil(isoDate: string): string {
+  return `${isoDate}T23:59:59.999Z`;
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
@@ -90,6 +99,10 @@ export function UsersPage() {
   const [page, setPage] = useAdminListPage();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  const [ip, setIp] = useState("");
+  const [debouncedIp, setDebouncedIp] = useState("");
+  const [sinceDate, setSinceDate] = useState("");
+  const [untilDate, setUntilDate] = useState("");
   // "all" = dimension unpinned (no query param sent).
   const [role, setRole] = useState<UserRole | "all">("all");
   const [status, setStatus] = useState<UserStatus | "all">("all");
@@ -104,21 +117,26 @@ export function UsersPage() {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   // The account the operator is about to 注销 (null = no dialog open).
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
-  const skipQPageReset = useRef(true);
+  const skipFilterPageReset = useRef(true);
 
-  // Debounce the search box; a new query always restarts at page 1 (skip mount).
+  // Debounce text filters; a new query always restarts at page 1 (skip mount).
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
   }, [q]);
 
   useEffect(() => {
-    if (skipQPageReset.current) {
-      skipQPageReset.current = false;
+    const t = setTimeout(() => setDebouncedIp(ip), 300);
+    return () => clearTimeout(t);
+  }, [ip]);
+
+  useEffect(() => {
+    if (skipFilterPageReset.current) {
+      skipFilterPageReset.current = false;
       return;
     }
     setPage(1);
-  }, [debouncedQ, setPage]);
+  }, [debouncedQ, debouncedIp, setPage]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +148,9 @@ export function UsersPage() {
         q: debouncedQ,
         role: role === "all" ? undefined : role,
         status: status === "all" ? undefined : status,
+        ip: debouncedIp,
+        since: sinceDate ? dateToSince(sinceDate) : undefined,
+        until: untilDate ? dateToUntil(untilDate) : undefined,
         sort,
         order,
         includeDeleted,
@@ -141,7 +162,18 @@ export function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedQ, role, status, sort, order, includeDeleted]);
+  }, [
+    page,
+    debouncedQ,
+    debouncedIp,
+    sinceDate,
+    untilDate,
+    role,
+    status,
+    sort,
+    order,
+    includeDeleted,
+  ]);
 
   // Flip a column's sort: re-click toggles direction; a new key starts desc.
   // Any sort change restarts at page 1 (offset pagination over a new ordering).
@@ -267,6 +299,37 @@ export function UsersPage() {
             />
             显示已注销
           </label>
+          <Input
+            type="search"
+            placeholder="按 IP 筛选"
+            value={ip}
+            onChange={(e) => setIp(e.target.value)}
+            className="w-40"
+            aria-label="按 IP 筛选"
+            title="匹配注册 IP 或任一登录会话 IP"
+          />
+          <Input
+            type="date"
+            value={sinceDate}
+            onChange={(e) => {
+              setSinceDate(e.target.value);
+              setPage(1);
+            }}
+            className="w-36"
+            title="注册起始（UTC 日）"
+            aria-label="注册起始日期"
+          />
+          <Input
+            type="date"
+            value={untilDate}
+            onChange={(e) => {
+              setUntilDate(e.target.value);
+              setPage(1);
+            }}
+            className="w-36"
+            title="注册截止（UTC 日）"
+            aria-label="注册截止日期"
+          />
           <div className="relative">
             <Search
               size={14}

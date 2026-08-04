@@ -186,6 +186,7 @@ def _admin_user_response(user: User) -> AdminUserResponse:
         quota_daily_cost_cny=user.quota_daily_cost_cny,
         quota_daily_requests=user.quota_daily_requests,
         created_at=user.created_at,
+        registration_ip=getattr(user, "registration_ip", None),
         deleted_at=user.deleted_at,
     )
 

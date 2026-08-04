@@ -12,6 +12,10 @@ import { usePolling } from "@/lib/usePolling";
 // The 消息 tab carries an aggregate unread badge. Mobile has no global messaging store (each
 // page fetches its own), so the count is polled here (visibility-aware, see usePolling) by
 // summing the chat list's per-chat unread — the same listChats the 消息 page already uses.
+//
+// 对话 tab restore: leaving for 消息/文件/我的 then tapping 对话 returns the last `/` or
+// `/c/:id` (module-scoped; SPA session only). Re-tapping 对话 while already on that tab
+// resets to the draft home `/` (same as the old always-navigate(`/`) when already on `/c/:id`).
 import type { LucideIcon } from "lucide-react";
 import { Files, Mail, MessageSquare, User } from "lucide-react";
 import { useState } from "react";
@@ -30,6 +34,9 @@ const TABS: TabDef[] = [
   { label: "我的", route: "/more", Icon: User },
 ];
 
+/** Last path owned by the 对话 tab (`/` draft or `/c/:id`). Survives tab switches in-process. */
+let lastChatPath = "/";
+
 /** A tab owns its section: the 对话 tab covers the draft home (`/`) AND an open conversation
  *  (`/c/:id`); others light over their drill-down children (e.g. /files/:wsId keeps 文件 lit).
  *  Detail pages that hide the bar never reach this. */
@@ -38,10 +45,25 @@ function isActive(pathname: string, route: string): boolean {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
 
+function rememberChatPath(pathname: string): void {
+  // Exact `/` or `/c/:id` only — `/c/:id/files` hides the bar and never hits TabBar.
+  if (pathname === "/" || /^\/c\/[^/]+$/.test(pathname)) {
+    lastChatPath = pathname;
+  }
+}
+
+/** Target for the 对话 tab click. Re-tap while already there → draft `/`; else restore memory. */
+function chatTabTarget(pathname: string): string {
+  if (isActive(pathname, "/")) return "/";
+  return lastChatPath;
+}
+
 export function TabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [unread, setUnread] = useState(0);
+
+  rememberChatPath(pathname);
 
   usePolling(async () => {
     try {
@@ -63,7 +85,9 @@ export function TabBar() {
             type="button"
             className={`tab${active ? " tab-active" : ""}`}
             aria-current={active ? "page" : undefined}
-            onClick={() => navigate(route)}
+            onClick={() =>
+              navigate(route === "/" ? chatTabTarget(pathname) : route)
+            }
           >
             <span className="tab-icon">
               <Icon size={22} strokeWidth={active ? 2.4 : 2} />

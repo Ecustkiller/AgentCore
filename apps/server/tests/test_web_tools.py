@@ -142,6 +142,34 @@ def test_parse_results_skips_incomplete_entries():
     assert out[0].snippet == ""
 
 
+def test_parse_results_accepts_cloud_snippet_field():
+    """Cloud ``/v1/inference/web_search`` returns ``snippet``, not ``content``."""
+    data = {
+        "results": [
+            {"title": "A", "url": "https://a.com", "snippet": "cloud snip a"},
+            {"title": "B", "url": "https://b.com", "snippet": "cloud snip b"},
+        ]
+    }
+    out = _parse_results(data, max_results=10)
+    assert [r.snippet for r in out] == ["cloud snip a", "cloud snip b"]
+
+
+def test_parse_results_prefers_content_over_snippet():
+    data = {
+        "results": [
+            {
+                "title": "A",
+                "url": "https://a.com",
+                "content": "from content",
+                "snippet": "from snippet",
+            },
+            {"title": "B", "url": "https://b.com", "content": "", "snippet": "only snippet"},
+        ]
+    }
+    out = _parse_results(data, max_results=10)
+    assert [r.snippet for r in out] == ["from content", "only snippet"]
+
+
 # --- _net: circuit breaker + error description ---
 
 
@@ -165,6 +193,60 @@ def test_describe_net_error_is_honest():
     req = httpx.Request("GET", "https://x.com")
     err = httpx.HTTPStatusError("boom", request=req, response=httpx.Response(403, request=req))
     assert describe_net_error(err) == "HTTP 403"
+
+
+def test_describe_net_error_loopback_searxng_vs_public():
+    # Loopback / configured SearXNG connect failure → 本机搜索未就绪 (not 出网受限).
+    local = describe_net_error(
+        httpx.ConnectError("connection refused"),
+        url="http://127.0.0.1:18888/search",
+    )
+    assert "本机搜索" in local and "未就绪" in local
+    assert "SearXNG" in local
+    assert "出网受限" not in local
+    assert "18888" in local or "compose" in local
+
+    localhost = describe_net_error(
+        httpx.ConnectTimeout(""),
+        url="http://localhost:18888",
+    )
+    assert "本机搜索" in localhost and "未就绪" in localhost
+    assert "出网受限" not in localhost
+
+    # Public target keeps the egress-restricted copy (read_url / favicon path).
+    public = describe_net_error(
+        httpx.ConnectError("connection refused"),
+        url="https://example.com/page",
+    )
+    assert "出网受限" in public
+    assert "本机搜索" not in public
+
+    # Bare ConnectError with no url/request stays public (callers must pass url /
+    # local_service for SearXNG — see describe_searxng_error).
+    bare = describe_net_error(httpx.ConnectError("connection refused"))
+    assert "出网受限" in bare
+    assert "本机搜索" not in bare
+
+    # Real httpx attaches request.url — loopback is detected without an explicit url=.
+    req = httpx.Request("GET", "http://127.0.0.1:18888/search")
+    from_req = describe_net_error(httpx.ConnectError("refused", request=req))
+    assert "本机搜索" in from_req and "出网受限" not in from_req
+
+
+def test_describe_searxng_error_marks_configured_host():
+    # Non-loopback compose service name still gets local-search copy via local_service.
+    msg = search_backend_mod.describe_searxng_error(
+        httpx.ConnectError("connection refused"),
+        base_url="http://searxng:8080",
+    )
+    assert "本机搜索" in msg and "未就绪" in msg
+    assert "出网受限" not in msg
+
+    via_backend = search_backend_mod.describe_search_error(
+        httpx.ConnectError("down"),
+        SearXNGBackend("http://127.0.0.1:18888"),
+    )
+    assert "本机搜索" in via_backend
 
 
 # --- read_url: SSRF classification ---
@@ -1200,6 +1282,179 @@ async def test_fallback_aclose_closes_both_legs():
 
     await FallbackSearchBackend(_Closeable("p"), _Closeable("f")).aclose()
     assert sorted(closed) == ["f", "p"]
+
+
+# --- Sidecar cloud inference web_search fallback (local SearXNG unreachable) ---
+
+
+def test_inference_web_search_url_strips_openai_v1_suffix():
+    from agentcore.tools.builtin.web.cloud_fallback import inference_web_search_url
+
+    assert (
+        inference_web_search_url("https://api.example.com/v1/inference/v1")
+        == "https://api.example.com/v1/inference/web_search"
+    )
+    assert (
+        inference_web_search_url("http://localhost:8000/v1/inference/v1/")
+        == "http://localhost:8000/v1/inference/web_search"
+    )
+
+
+def test_is_local_search_unreachable_selectivity():
+    from agentcore.tools.builtin.web.cloud_fallback import is_local_search_unreachable
+
+    assert is_local_search_unreachable(httpx.ConnectError("refused"))
+    assert is_local_search_unreachable(httpx.ConnectTimeout("slow"))
+    assert is_local_search_unreachable(EgressError("搜索服务 localhost 已临时熔断约 30s"))
+    # HTTP 403 / read timeout / empty success path must NOT trigger cloud fallback.
+    req = httpx.Request("GET", "http://localhost/search")
+    resp = httpx.Response(403, request=req)
+    assert not is_local_search_unreachable(httpx.HTTPStatusError("forbidden", request=req, response=resp))
+    assert not is_local_search_unreachable(httpx.ReadTimeout("slow read"))
+    assert not is_local_search_unreachable(ValueError("bogus"))
+
+
+async def test_web_search_cloud_fallback_on_local_connect_error(monkeypatch):
+    """Local SearXNG ConnectError + bound inference JWT → cloud 200 results."""
+    from agentcore.tools.builtin.web.cloud_fallback import (
+        CLOUD_FALLBACK_NOTE,
+        InferenceSearchCredentials,
+        inference_search_credentials_scope,
+    )
+
+    class _DownBackend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            raise httpx.ConnectError("connection refused")
+
+    posted: dict = {}
+
+    class _CloudClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, json=None, headers=None):
+            posted["url"] = url
+            posted["json"] = json
+            posted["auth"] = (headers or {}).get("Authorization")
+            req = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Alpha beta overview",
+                            "url": "https://example.com/cloud",
+                            # Real InferenceWebSearchResultItem shape uses snippet.
+                            "snippet": "alpha beta findings from cloud search",
+                        }
+                    ],
+                    "source": "cloud",
+                },
+                request=req,
+            )
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _DownBackend())
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.web.cloud_fallback.outbound_async_client",
+        lambda **kwargs: _CloudClient(),
+    )
+
+    creds = InferenceSearchCredentials(
+        api_key="jwt-test",
+        base_url="https://api.example.com/v1/inference/v1",
+    )
+    with inference_search_credentials_scope(creds):
+        result = await WebSearchTool().execute({"query": "alpha beta"}, _ctx())
+
+    assert result.success is True
+    payload = json.loads(result.output)
+    assert payload["results"][0]["url"] == "https://example.com/cloud"
+    assert payload["results"][0]["snippet"] == "alpha beta findings from cloud search"
+    assert CLOUD_FALLBACK_NOTE in (payload.get("note") or "")
+    assert result.metadata.get("cloud_fallback") is True
+    assert result.metadata.get("backend") == "cloud_inference"
+    assert posted["url"] == "https://api.example.com/v1/inference/web_search"
+    assert posted["auth"] == "Bearer jwt-test"
+    assert posted["json"]["query"] == "alpha beta"
+
+
+async def test_web_search_no_cloud_fallback_without_credentials(monkeypatch):
+    """No ContextVar creds → ConnectError surfaces; cloud not called."""
+    from agentcore.tools.builtin.web.cloud_fallback import (
+        bind_inference_search_credentials,
+        reset_inference_search_credentials,
+    )
+
+    down_req = httpx.Request("GET", "http://127.0.0.1:18888/search")
+
+    class _DownBackend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            raise httpx.ConnectError("connection refused", request=down_req)
+
+    cloud_calls = {"n": 0}
+
+    async def _no_cloud(*args, **kwargs):
+        cloud_calls["n"] += 1
+        raise AssertionError("cloud must not be called without creds")
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _DownBackend())
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.web.cloud_fallback.cloud_inference_web_search",
+        _no_cloud,
+    )
+
+    # Explicitly clear any leaked creds from a prior test.
+    token = bind_inference_search_credentials(None)
+    try:
+        result = await WebSearchTool().execute({"query": "alpha"}, _ctx())
+    finally:
+        reset_inference_search_credentials(token)
+
+    assert result.success is False
+    assert "搜索失败" in (result.error or "")
+    assert "本机搜索" in (result.error or "") and "未就绪" in (result.error or "")
+    assert "出网受限" not in (result.error or "")
+    assert cloud_calls["n"] == 0
+
+
+async def test_web_search_no_cloud_fallback_on_http_403(monkeypatch):
+    """HTTP 403 from local SearXNG is not an unreachable-class failure."""
+    from agentcore.tools.builtin.web.cloud_fallback import (
+        InferenceSearchCredentials,
+        inference_search_credentials_scope,
+    )
+
+    req = httpx.Request("GET", "http://localhost/search")
+    resp = httpx.Response(403, request=req)
+
+    class _ForbiddenBackend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            raise httpx.HTTPStatusError("forbidden", request=req, response=resp)
+
+    cloud_calls = {"n": 0}
+
+    async def _no_cloud(*args, **kwargs):
+        cloud_calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _ForbiddenBackend())
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.web.cloud_fallback.cloud_inference_web_search",
+        _no_cloud,
+    )
+
+    creds = InferenceSearchCredentials(
+        api_key="jwt-test",
+        base_url="https://api.example.com/v1/inference/v1",
+    )
+    with inference_search_credentials_scope(creds):
+        result = await WebSearchTool().execute({"query": "alpha"}, _ctx())
+
+    assert result.success is False
+    assert cloud_calls["n"] == 0
 
 
 # --- 全垃圾 SERP 兜底: tool-layer Tavily weak-retry (decision lives in the tool, not the

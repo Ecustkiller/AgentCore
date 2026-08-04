@@ -42,6 +42,7 @@ from agentcore.api.schemas import (
     AdminUserResponse,
     DailyCost,
     ModelCostLine,
+    SessionSummary,
     StatusResponse,
     TurnMetricLine,
     UsageWindow,
@@ -77,6 +78,9 @@ async def list_users(
     q: str | None = Query(None, max_length=100),
     role: Literal["user", "admin"] | None = Query(None),
     status: Literal["active", "disabled"] | None = Query(None),
+    ip: str | None = Query(None, max_length=64),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
     sort: Literal["created_at", "cost"] = Query("created_at"),
     order: Literal["asc", "desc"] = Query("desc"),
     include_deleted: bool = Query(False),
@@ -85,11 +89,12 @@ async def list_users(
     """The full account roster, paginated, each row carrying its all-time spend.
 
     Filters (AND): ``q`` substring-matches username/display_name, ``role``/``status``
-    pin those dimensions. ``sort`` ∈ {``created_at``, ``cost``} (累计成本) with ``order``
-    ∈ {``asc``, ``desc``}. ``include_deleted`` surfaces 注销 (soft-deleted, anonymized)
-    accounts — hidden by default as tombstones, shown on demand for audit. Admin-only
-    directory — enumeration is intended here. Money is nano-CNY; clients format ¥ as
-    ``cost_total / 1e9``.
+    pin those dimensions, ``ip`` matches ``registration_ip`` or any refresh-token IP,
+    ``since``/``until`` bound registration ``created_at``. ``sort`` ∈ {``created_at``,
+    ``cost``} (累计成本) with ``order`` ∈ {``asc``, ``desc``}. ``include_deleted``
+    surfaces 注销 (soft-deleted, anonymized) accounts — hidden by default as
+    tombstones, shown on demand for audit. Admin-only directory — enumeration is
+    intended here. Money is nano-CNY; clients format ¥ as ``cost_total / 1e9``.
     """
     rows, total = await service.list_users(
         page=page,
@@ -97,6 +102,9 @@ async def list_users(
         query=q,
         role=role,
         status=status,
+        ip=ip,
+        since=since,
+        until=until,
         sort=sort,
         order=order,
         include_deleted=include_deleted,
@@ -274,11 +282,12 @@ async def user_detail(
     messages_repo: MessageRepository = Depends(get_message_repo),
     metrics_repo: TurnMetricsRepository = Depends(get_turn_metrics_repo),
     llm_providers: UserLlmProviderRepository = Depends(get_user_llm_provider_repo),
+    auth_service: AuthService = Depends(get_auth_service),
     session: AsyncSession = Depends(get_db),
 ) -> AdminUserDetail:
     """用户详情下钻 (用户管理 P0): one account's record + configured model names +
     its own usage (today / month / 7-day trend / by-model) + recent
-    conversations + recent turn activity.
+    conversations + recent turn activity + active login sessions (加强可查).
 
     The per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped
     to one account — composed with the account's recent conversation roster (message
@@ -286,7 +295,8 @@ async def user_detail(
     drill into 会话复盘). Configured model names come from the account default
     模型组合 (``main_model`` / ``background_model``; never the API key) + provider
     count from ``user_llm_providers``. Per-model stats scan ``cost_calls`` (last 30
-    days). Admin cross-user; 404 for an unknown id.
+    days). Sessions reuse the owner ``AuthService.list_sessions`` shape (read-only).
+    Admin cross-user; 404 for an unknown id.
     """
     user = await users.get_by_id(user_id)
     if user is None:
@@ -342,6 +352,21 @@ async def user_detail(
 
     recent_turns = await metrics_repo.list_recent_for_user(user_id, limit=_USER_RECENT_TURNS)
 
+    # Active login devices (refresh-token families). Admin is never "current".
+    auth_sessions = await auth_service.list_sessions(user_id=user_id, current_family=None)
+    session_lines = [
+        SessionSummary(
+            id=s.id,
+            platform=s.platform,
+            user_agent=s.user_agent,
+            ip=s.ip,
+            created_at=s.created_at,
+            last_used_at=s.last_used_at,
+            current=False,
+        )
+        for s in auth_sessions
+    ]
+
     return AdminUserDetail(
         user=_admin_user_response(user),
         default_model=default_model,
@@ -372,5 +397,6 @@ async def user_detail(
         recent_daily_cost=recent_daily_cost,
         conversations=conversation_lines,
         recent_turns=[TurnMetricLine.model_validate(r) for r in recent_turns],
+        sessions=session_lines,
         billing_mode=settings.billing_mode,
     )

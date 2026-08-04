@@ -1165,7 +1165,7 @@
         "type": "object"
       },
       "AdminUserDetail": {
-        "description": "One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).\n\nStitches the per-user views an operator needs to understand an account: the\nfull record (``user``), the account BYOK default chat/background model names +\nprovider count (from the ``users`` pointers / ``user_llm_providers`` — never the\nAPI key), this account's usage (today/month/\ntrend/by-model — the per-user counterpart of ``AdminUsageSummary``),\nits recent conversations, and its recent turn activity (``turn_metrics``, each\ndrillable into 会话复盘). Money is integer nano-CNY; ``CostBreakdown.cny_total``\nis yuan. ``billing_mode`` frames cost honestly (byok = own-key spend).",
+        "description": "One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).\n\nStitches the per-user views an operator needs to understand an account: the\nfull record (``user``), the account BYOK default chat/background model names +\nprovider count (from the ``users`` pointers / ``user_llm_providers`` — never the\nAPI key), this account's usage (today/month/\ntrend/by-model — the per-user counterpart of ``AdminUsageSummary``),\nits recent conversations, and its recent turn activity (``turn_metrics``, each\ndrillable into 会话复盘), plus active login ``sessions`` (refresh-token families,\nsame shape as ``GET /v1/auth/sessions``). Money is integer nano-CNY;\n``CostBreakdown.cny_total`` is yuan. ``billing_mode`` frames cost honestly\n(byok = own-key spend).",
         "properties": {
           "background_model": {
             "anyOf": [
@@ -1227,6 +1227,14 @@
               "$ref": "#/components/schemas/TurnMetricLine"
             },
             "title": "Recent Turns",
+            "type": "array"
+          },
+          "sessions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            },
+            "title": "Sessions",
             "type": "array"
           },
           "today": {
@@ -1340,6 +1348,17 @@
             ],
             "title": "Quota Monthly Cost Cny"
           },
+          "registration_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registration Ip"
+          },
           "role": {
             "enum": [
               "user",
@@ -1412,7 +1431,7 @@
         "type": "object"
       },
       "AdminUserResponse": {
-        "description": "A platform account as seen by the admin console (full record + quota state).\n\nRicher than ``UserResponse`` (the self-view): adds ``status`` and the per-user\nquota overrides so the operator can manage accounts. Each quota override is\nnullable — NULL = inherit the global config threshold for that dimension\n(成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.",
+        "description": "A platform account as seen by the admin console (full record + quota state).\n\nRicher than ``UserResponse`` (the self-view): adds ``status`` and the per-user\nquota overrides so the operator can manage accounts. Each quota override is\nnullable — NULL = inherit the global config threshold for that dimension\n(成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.\n``registration_ip`` is the client IP captured at signup (加强可查; NULL for\npre-column / seeded rows).",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -1497,6 +1516,17 @@
               }
             ],
             "title": "Quota Monthly Cost Cny"
+          },
+          "registration_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registration Ip"
           },
           "role": {
             "enum": [
@@ -6682,6 +6712,91 @@
         "title": "InferenceTokenResponse",
         "type": "object"
       },
+      "InferenceWebSearchRequest": {
+        "description": "Sidecar cloud-search body — query required; result count / language optional.",
+        "properties": {
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Results"
+          },
+          "query": {
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "InferenceWebSearchRequest",
+        "type": "object"
+      },
+      "InferenceWebSearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/InferenceWebSearchResultItem"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "source": {
+            "const": "cloud",
+            "default": "cloud",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "InferenceWebSearchResponse",
+        "type": "object"
+      },
+      "InferenceWebSearchResultItem": {
+        "properties": {
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "snippet"
+        ],
+        "title": "InferenceWebSearchResultItem",
+        "type": "object"
+      },
       "InjectSimulationEventRequest": {
         "properties": {
           "event_type": {
@@ -7188,6 +7303,35 @@
           "arguments"
         ],
         "title": "LlmWindowToolCallFunction",
+        "type": "object"
+      },
+      "LocalTurnToolFailure": {
+        "description": "One failed tool call summary for local-turn write-back observability.\n\nOptional on ``RecordTurnRequest`` — old clients omit the list. Server logs a\ncount/codes rollup; does not persist into the messages table.",
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Message",
+            "type": "string"
+          },
+          "tool": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "code"
+        ],
+        "title": "LocalTurnToolFailure",
         "type": "object"
       },
       "LoginMfaRequest": {
@@ -9171,6 +9315,14 @@
                 "type": "null"
               }
             ]
+          },
+          "tool_failures": {
+            "items": {
+              "$ref": "#/components/schemas/LocalTurnToolFailure"
+            },
+            "maxItems": 50,
+            "title": "Tool Failures",
+            "type": "array"
           },
           "trace_id": {
             "maxLength": 32,
@@ -16432,7 +16584,7 @@
     },
     "/v1/admin/users": {
       "get": {
-        "description": "The full account roster, paginated, each row carrying its all-time spend.\n\nFilters (AND): ``q`` substring-matches username/display_name, ``role``/``status``\npin those dimensions. ``sort`` ∈ {``created_at``, ``cost``} (累计成本) with ``order``\n∈ {``asc``, ``desc``}. ``include_deleted`` surfaces 注销 (soft-deleted, anonymized)\naccounts — hidden by default as tombstones, shown on demand for audit. Admin-only\ndirectory — enumeration is intended here. Money is nano-CNY; clients format ¥ as\n``cost_total / 1e9``.",
+        "description": "The full account roster, paginated, each row carrying its all-time spend.\n\nFilters (AND): ``q`` substring-matches username/display_name, ``role``/``status``\npin those dimensions, ``ip`` matches ``registration_ip`` or any refresh-token IP,\n``since``/``until`` bound registration ``created_at``. ``sort`` ∈ {``created_at``,\n``cost``} (累计成本) with ``order`` ∈ {``asc``, ``desc``}. ``include_deleted``\nsurfaces 注销 (soft-deleted, anonymized) accounts — hidden by default as\ntombstones, shown on demand for audit. Admin-only directory — enumeration is\nintended here. Money is nano-CNY; clients format ¥ as ``cost_total / 1e9``.",
         "operationId": "list_users_v1_admin_users_get",
         "parameters": [
           {
@@ -16513,6 +16665,57 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ip"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
             }
           },
           {
@@ -16777,7 +16980,7 @@
     },
     "/v1/admin/users/{user_id}/detail": {
       "get": {
-        "description": "用户详情下钻 (用户管理 P0): one account's record + configured model names +\nits own usage (today / month / 7-day trend / by-model) + recent\nconversations + recent turn activity.\n\nThe per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped\nto one account — composed with the account's recent conversation roster (message\ncounts batched, no N+1) and its recent turns (each carries ``conversation_id`` to\ndrill into 会话复盘). Configured model names come from the account default\n模型组合 (``main_model`` / ``background_model``; never the API key) + provider\ncount from ``user_llm_providers``. Per-model stats scan ``cost_calls`` (last 30\ndays). Admin cross-user; 404 for an unknown id.",
+        "description": "用户详情下钻 (用户管理 P0): one account's record + configured model names +\nits own usage (today / month / 7-day trend / by-model) + recent\nconversations + recent turn activity + active login sessions (加强可查).\n\nThe per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped\nto one account — composed with the account's recent conversation roster (message\ncounts batched, no N+1) and its recent turns (each carries ``conversation_id`` to\ndrill into 会话复盘). Configured model names come from the account default\n模型组合 (``main_model`` / ``background_model``; never the API key) + provider\ncount from ``user_llm_providers``. Per-model stats scan ``cost_calls`` (last 30\ndays). Sessions reuse the owner ``AuthService.list_sessions`` shape (read-only).\nAdmin cross-user; 404 for an unknown id.",
         "operationId": "user_detail_v1_admin_users__user_id__detail_get",
         "parameters": [
           {
@@ -27764,6 +27967,66 @@
           }
         },
         "summary": "Inference Chat Completions",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/inference/web_search": {
+      "post": {
+        "description": "Run server-side web search for a sidecar turn (SearXNG→Tavily; no client keys).",
+        "operationId": "inference_web_search_v1_inference_web_search_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InferenceWebSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceWebSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sidecar cloud web search",
         "tags": [
           "inference"
         ]

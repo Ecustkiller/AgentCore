@@ -371,6 +371,7 @@ def enforce_ceiling_closing_honesty(content: str, *, reason: str) -> str:
 
 
 # --- CEO mutation honesty (案 20260803-ceo-claim-edit-without-write · 软Ⅱ′) ---
+# 2026-08-04：【落盘说明】横幅已撤（与完成态叠放净负）；检测器保留；不做完成态降档。
 # Soft only: prefix banner, never discard/reject the turn. Prompt is primary;
 # this catches high-confidence 「假已改 / 甩整文件手贴」when this turn has no write evidence.
 # Deliberately narrow — bare「已处理」/「可用了」不进表，避免误伤核对与解释。
@@ -395,15 +396,11 @@ _CEO_WHOLE_FILE_PASTE = re.compile(
     r")"
 )
 
-_MUTATION_HONESTY_BANNER = (
-    "【落盘说明】本回合未见工作区写盘成功记录——若下文称「已改/已修正」"
-    "或请你「自行粘贴整文件」，可能不准确。改文件应由带写权队员落盘；"
-    "写不通时请看阻塞原因与下一步。你明确要求时，可只采用差异片段（非整文件覆盖）。\n\n"
-)
-
-
 def claims_ceo_mutation_done(content: str) -> bool:
-    """True when CEO prose claims this-turn file mutation completed."""
+    """True when CEO prose claims this-turn file mutation completed.
+
+    Detector kept for tests / future gates; soft banner path withdrawn 2026-08-04.
+    """
     return _positive_hits(_CEO_MUTATION_DONE_CLAIMS, content or "")
 
 
@@ -429,19 +426,14 @@ def enforce_ceo_mutation_honesty(
     *,
     landing_succeeded: bool = False,
 ) -> str:
-    """Prefix honesty banner when CEO claims edit / whole-file paste without write evidence.
+    """No-op: 【落盘说明】soft banner withdrawn (2026-08-04).
 
-    Does not rewrite or block the turn — soft backstop only (软Ⅱ′).
+    Prefixing a hardcoded warning while leaving model「已落盘/已验收」intact caused
+    conflicting status in-bubble (sample 92e9dcaa). Boarded: delete banner only;
+    no completion-claim downgrade. ``landing_succeeded`` retained for call-site compat.
     """
-    text = content or ""
-    if turn_has_product_write_evidence(landing_succeeded=landing_succeeded):
-        return text
-    if not (claims_ceo_mutation_done(text) or asks_whole_file_user_paste(text)):
-        return text
-    stripped = text.lstrip()
-    if stripped.startswith("【落盘说明】") or stripped.startswith("【收口说明】"):
-        return text
-    return _MUTATION_HONESTY_BANNER + text
+    _ = landing_succeeded
+    return content or ""
 
 
 # --- Cloud Web install/verify honesty (案 20260803-cloud-web-install-deny-claim-verified · A+B) ---

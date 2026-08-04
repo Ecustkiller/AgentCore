@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agentcore.api.schemas.usage import CostBreakdown, UsageBreakdown
 from agentcore.runtime.approvals import ApprovalDecision, DelegationAuthorizationDecision
@@ -721,6 +721,87 @@ class MessageListResponse(BaseModel):
 # snapshots stay out of scope (local files live on the user's disk; the local→云
 # handoff is the separate explicit bridge).
 
+# Coarse failure codes for local-turn write-back stats (not a full taxonomy).
+LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
+    {"searxng_unreachable", "egress_connect", "other"}
+)
+TOOL_FAILURE_MESSAGE_MAX = 200
+
+
+def normalize_local_turn_tool_failure_code(message: str, *, code: str | None = None) -> str:
+    """Map a tool-failure message (and optional client code) to a coarse stats bucket.
+
+    Intentional coarse heuristics — prefer known client ``code``, else keyword scan
+    on Chinese/English error text. Unknown → ``other``.
+    """
+    raw_code = (code or "").strip()
+    if raw_code in LOCAL_TURN_TOOL_FAILURE_CODES:
+        return raw_code
+    text = (message or "").lower()
+    raw = message or ""
+    if (
+        "searxng" in text
+        or "搜索服务" in raw
+        or ("unreachable" in text and "searx" in text)
+    ):
+        return "searxng_unreachable"
+    if any(
+        needle in text
+        for needle in (
+            "connecterror",
+            "connect timeout",
+            "connecttimeout",
+            "egress",
+            "network is unreachable",
+        )
+    ) or any(
+        needle in raw
+        for needle in (
+            "无法建立连接",
+            "出网受限",
+            "连接超时",
+            "连接失败",
+        )
+    ):
+        return "egress_connect"
+    return "other"
+
+
+def truncate_tool_failure_message(message: str | None) -> str:
+    """Cap write-back failure messages for the wire (≤``TOOL_FAILURE_MESSAGE_MAX``)."""
+    if not message:
+        return ""
+    text = str(message)
+    if len(text) <= TOOL_FAILURE_MESSAGE_MAX:
+        return text
+    return text[:TOOL_FAILURE_MESSAGE_MAX]
+
+
+class LocalTurnToolFailure(BaseModel):
+    """One failed tool call summary for local-turn write-back observability.
+
+    Optional on ``RecordTurnRequest`` — old clients omit the list. Server logs a
+    count/codes rollup; does not persist into the messages table.
+    """
+
+    tool: str = Field(..., min_length=1, max_length=128)
+    code: str = Field(..., min_length=1, max_length=64)
+    message: str = Field("", max_length=TOOL_FAILURE_MESSAGE_MAX)
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def _cap_message(cls, value: object) -> str:
+        return truncate_tool_failure_message("" if value is None else str(value))
+
+    @model_validator(mode="after")
+    def _normalize_code(self) -> "LocalTurnToolFailure":
+        object.__setattr__(
+            self,
+            "code",
+            normalize_local_turn_tool_failure_code(self.message, code=self.code),
+        )
+        return self
+
 
 class RecordTurnRequest(BaseModel):
     """A finished local (sidecar) turn to persist: the user message + assistant reply.
@@ -746,6 +827,9 @@ class RecordTurnRequest(BaseModel):
     # projection, only the mid-turn ``outbox.journal`` map — finalize persists these
     # directly when ``runs`` is absent. Happy-path write-back still sends ``runs``.
     journal: list[dict[str, Any]] | None = None
+    # Optional failed-tool rollup for server-side stats (journal tool_call success=false).
+    # Omitted by legacy clients → empty list; never blocks write-back.
+    tool_failures: list[LocalTurnToolFailure] = Field(default_factory=list, max_length=50)
     # The client-minted id of the user bubble (a clean UUID). Pinning the persisted
     # user row to it makes the whole write-back idempotent: the desktop retries this
     # POST on a flaky response, and a retry after a write we DID commit must not

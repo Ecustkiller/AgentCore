@@ -130,6 +130,111 @@ function journalEntriesFromMap(
   return keys.map((k) => journal[k]);
 }
 
+const TOOL_FAILURE_MESSAGE_MAX = 200;
+
+/** Coarse write-back failure codes (mirrors server ``normalize_local_turn_tool_failure_code``). */
+export function normalizeToolFailureCode(
+  message: string,
+  code?: string | null,
+): string {
+  const rawCode = (code || "").trim();
+  if (
+    rawCode === "searxng_unreachable" ||
+    rawCode === "egress_connect" ||
+    rawCode === "other"
+  ) {
+    return rawCode;
+  }
+  const text = (message || "").toLowerCase();
+  const raw = message || "";
+  if (
+    text.includes("searxng") ||
+    raw.includes("搜索服务") ||
+    (text.includes("unreachable") && text.includes("searx"))
+  ) {
+    return "searxng_unreachable";
+  }
+  if (
+    [
+      "connecterror",
+      "connect timeout",
+      "connecttimeout",
+      "egress",
+      "network is unreachable",
+    ].some((n) => text.includes(n)) ||
+    ["无法建立连接", "出网受限", "连接超时", "连接失败"].some((n) =>
+      raw.includes(n),
+    )
+  ) {
+    return "egress_connect";
+  }
+  return "other";
+}
+
+function truncateToolFailureMessage(message: string): string {
+  if (!message) return "";
+  return message.length <= TOOL_FAILURE_MESSAGE_MAX
+    ? message
+    : message.slice(0, TOOL_FAILURE_MESSAGE_MAX);
+}
+
+/**
+ * Project failed tool facts into ``RecordTurnRequest.tool_failures``.
+ * Prefers journal ``tool_call`` success=false; falls back to ``tool_use_end`` status=error.
+ */
+export function toolFailuresFromJournal(
+  entries: unknown[] | undefined,
+): Array<{ tool: string; code: string; message: string }> {
+  if (!entries || entries.length === 0) return [];
+
+  const row = (
+    tool: string,
+    message: string,
+  ): { tool: string; code: string; message: string } | null => {
+    const name = (tool || "").trim();
+    if (!name) return null;
+    const msg = truncateToolFailureMessage(message);
+    return {
+      tool: name.slice(0, 128),
+      code: normalizeToolFailureCode(msg),
+      message: msg,
+    };
+  };
+
+  const fromFacts: Array<{ tool: string; code: string; message: string }> = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (e.kind !== "tool_call") continue;
+    const payload =
+      e.payload && typeof e.payload === "object"
+        ? (e.payload as Record<string, unknown>)
+        : null;
+    if (!payload || payload.success !== false) continue;
+    const built = row(String(payload.name || ""), String(payload.result || ""));
+    if (built) fromFacts.push(built);
+  }
+  if (fromFacts.length > 0) return fromFacts;
+
+  const fromEnds: Array<{ tool: string; code: string; message: string }> = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (e.kind !== "tool_use_end") continue;
+    const payload =
+      e.payload && typeof e.payload === "object"
+        ? (e.payload as Record<string, unknown>)
+        : null;
+    if (!payload || (payload.status ?? "success") === "success") continue;
+    const built = row(
+      String(payload.tool_name || ""),
+      String(payload.result || ""),
+    );
+    if (built) fromEnds.push(built);
+  }
+  return fromEnds;
+}
+
 /**
  * When hard-kill left content empty, promote captain stream snapshots into
  * content / reasoning_content (incomplete salvage). Returns true when the
@@ -231,6 +336,8 @@ function toRecordTurnBody(record: OutboxRecord): Record<string, unknown> {
   };
   const journal = journalEntriesFromMap(record.journal);
   if (journal) body.journal = journal;
+  const failures = toolFailuresFromJournal(journal);
+  if (failures.length > 0) body.tool_failures = failures;
   return body;
 }
 

@@ -27,6 +27,19 @@ def _finish_str(result: dict[str, Any]) -> str | None:
     return finish.value if hasattr(finish, "value") else str(finish)
 
 
+def _inference_search_creds(creds: Any):
+    """Map turn ``LLMCredentials`` → leaf ``InferenceSearchCredentials`` (no llm import in web)."""
+    from agentcore.tools.builtin.web.cloud_fallback import InferenceSearchCredentials
+
+    if creds is None:
+        return None
+    return InferenceSearchCredentials(
+        api_key=creds.api_key,
+        base_url=creds.base_url,
+        extra_headers=creds.extra_headers,
+    )
+
+
 def _emit_user_stop_message_end(sink: EventSink) -> None:
     """Live stop confirmation for the UI (honest ``stopping`` → ``stopped``).
 
@@ -137,34 +150,40 @@ class TurnExecutionMixin:
                     user_id=self._user_id,
                 ):
                     from agentcore.sidecar import server as sidecar_server
+                    from agentcore.tools.builtin.web.cloud_fallback import (
+                        inference_search_credentials_scope,
+                    )
 
                     # Sidecar is spawned only by the desktop Electron host. Pass
                     # platform=desktop so prepare builds DesktopClientChannel and
                     # MCP/Host discover over the existing ClientTool fulfill path
                     # (docs/06-规划/本机引擎MCP-Host回填接通定案.md P0). Never infer
                     # desktop_online from location=local.
-                    result = await sidecar_server.run_chat_pipeline(
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        history=list(history),
-                        sink=sink,
-                        user_id=self._user_id,
-                        backend=backend,
-                        approvals_enabled=self._approvals_enabled,
-                        permission_axes=self._permission_axes,
-                        llm_credentials=turn_creds,
-                        suspension_saver=saver,
-                        suspension_deleter=deleter,
-                        message_id=message_id,
-                        x_client_platform="desktop",
-                    )
-                    # Pillar D1: keep sink open while a detached background drive is
-                    # still live so run_completed / execution_completed reach the UI
-                    # and outbox READY is not sealed mid-DURABLE append. Cancel /
-                    # exception skip this await and still close below.
-                    from agentcore.runtime.coordination import await_live_detached_drive
+                    # Bind inference JWT for web_search cloud fallback when local
+                    # SearXNG is unreachable (ContextVar; reset after turn).
+                    with inference_search_credentials_scope(_inference_search_creds(turn_creds)):
+                        result = await sidecar_server.run_chat_pipeline(
+                            conversation_id=conversation_id,
+                            user_message=user_message,
+                            history=list(history),
+                            sink=sink,
+                            user_id=self._user_id,
+                            backend=backend,
+                            approvals_enabled=self._approvals_enabled,
+                            permission_axes=self._permission_axes,
+                            llm_credentials=turn_creds,
+                            suspension_saver=saver,
+                            suspension_deleter=deleter,
+                            message_id=message_id,
+                            x_client_platform="desktop",
+                        )
+                        # Pillar D1: keep sink open while a detached background drive is
+                        # still live so run_completed / execution_completed reach the UI
+                        # and outbox READY is not sealed mid-DURABLE append. Cancel /
+                        # exception skip this await and still close below.
+                        from agentcore.runtime.coordination import await_live_detached_drive
 
-                    await await_live_detached_drive(conversation_id)
+                        await await_live_detached_drive(conversation_id)
             finally:
                 # Cancel path: emit confirmation *before* close so the pump still
                 # delivers ``message_end(cancelled)`` (TURN_CANCELLED alone is not enough).
@@ -389,31 +408,37 @@ class TurnExecutionMixin:
                     user_id=self._user_id,
                 ):
                     from agentcore.sidecar import server as sidecar_server
-
-                    result = await sidecar_server.resume_chat_pipeline(
-                        suspension=suspension,
-                        decision=decision,
-                        note=note,
-                        selected=selected,
-                        sink=sink,
-                        backend=backend,
-                        # The Sidecar has no message DB, so the prior-turn history rides in the
-                        # local frame record (rehydrated onto the suspension at claim) — the resume
-                        # splices it ahead of the journal-folded rounds (Phase 2 ⑤).
-                        history=suspension.history,
-                        llm_credentials=resume_creds,
-                        suspension_saver=saver,
-                        suspension_deleter=deleter,
-                        permission_axes=self._permission_axes,
-                        # Same desktop channel as fresh turns — omit ⇒ resume drops MCP/Host.
-                        x_client_platform="desktop",
-                        excluded_run_ids=excluded,
-                        write_capability_overrides=overrides,
+                    from agentcore.tools.builtin.web.cloud_fallback import (
+                        inference_search_credentials_scope,
                     )
-                    # Same D1 hold as _run_turn: delay close while detached drive lives.
-                    from agentcore.runtime.coordination import await_live_detached_drive
 
-                    await await_live_detached_drive(conversation_id)
+                    with inference_search_credentials_scope(
+                        _inference_search_creds(resume_creds)
+                    ):
+                        result = await sidecar_server.resume_chat_pipeline(
+                            suspension=suspension,
+                            decision=decision,
+                            note=note,
+                            selected=selected,
+                            sink=sink,
+                            backend=backend,
+                            # Sidecar has no message DB: prior-turn history rides in the
+                            # local frame (rehydrated at claim); resume splices it ahead
+                            # of the journal-folded rounds (Phase 2 ⑤).
+                            history=suspension.history,
+                            llm_credentials=resume_creds,
+                            suspension_saver=saver,
+                            suspension_deleter=deleter,
+                            permission_axes=self._permission_axes,
+                            # Same desktop channel as fresh turns — omit ⇒ resume drops MCP/Host.
+                            x_client_platform="desktop",
+                            excluded_run_ids=excluded,
+                            write_capability_overrides=overrides,
+                        )
+                        # Same D1 hold as _run_turn: delay close while detached drive lives.
+                        from agentcore.runtime.coordination import await_live_detached_drive
+
+                        await await_live_detached_drive(conversation_id)
             finally:
                 _emit_cancel_end_if_cancelling(sink)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns

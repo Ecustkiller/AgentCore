@@ -17,6 +17,7 @@ export type AdminUserDetail = components["schemas"]["AdminUserDetail"];
 export type AdminConversationLine =
   components["schemas"]["AdminConversationLine"];
 export type ModelCostLine = components["schemas"]["ModelCostLine"];
+export type SessionSummary = components["schemas"]["SessionSummary"];
 export type AdminResetPasswordResponse =
   components["schemas"]["AdminResetPasswordResponse"];
 export type AdminSetPasswordRequest =
@@ -29,6 +30,12 @@ export interface ListUsersParams {
   /** Pin the role / status dimension (omit = all). */
   role?: UserRole;
   status?: UserStatus;
+  /** Match registration_ip or any refresh-token IP (加强可查). */
+  ip?: string;
+  /** Registration-time lower bound (ISO datetime). */
+  since?: string;
+  /** Registration-time upper bound (ISO datetime). */
+  until?: string;
   /** Sort key + direction (default: newest registration first). */
   sort?: UserSort;
   order?: SortOrder;
@@ -49,6 +56,10 @@ export async function listUsers(
   if (q) search.set("q", q);
   if (params.role) search.set("role", params.role);
   if (params.status) search.set("status", params.status);
+  const ip = params.ip?.trim();
+  if (ip) search.set("ip", ip);
+  if (params.since) search.set("since", params.since);
+  if (params.until) search.set("until", params.until);
   if (params.includeDeleted) search.set("include_deleted", "true");
   return api.get<AdminUserListResponse>(`/v1/admin/users?${search.toString()}`);
 }

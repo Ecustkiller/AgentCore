@@ -26,7 +26,11 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  return getTokens() ? <>{children}</> : <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (getTokens()) return <>{children}</>;
+  // Carry the attempted path so LoginPage can return here after auth (open-redirect checked there).
+  const from = `${location.pathname}${location.search}`;
+  return <Navigate to="/login" replace state={{ from }} />;
 }
 
 // A top-level destination: authed + wrapped in the persistent bottom TabBar. The 对话 chat is

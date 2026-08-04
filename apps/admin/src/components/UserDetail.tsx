@@ -22,9 +22,10 @@ import {
   type AdminConversationLine,
   type AdminUserDetail,
   type ModelCostLine,
+  type SessionSummary,
   fetchUserDetail,
 } from "@/services/adminUsers";
-import { ArrowLeft, ExternalLink, KeyRound, MessageSquare, RefreshCw } from "lucide-react";
+import { ArrowLeft, ExternalLink, KeyRound, MessageSquare, Monitor, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -154,6 +155,8 @@ export function UserDetail({
               {user.email ? ` · ${user.email}` : ""}
               {" · 注册 "}
               {fmtTime(user.created_at)}
+              {" · 注册 IP "}
+              {user.registration_ip || "—"}
             </p>
             <p className="mt-3 text-muted-foreground text-xs">
               配额：{quotaSummary(user)}
@@ -166,6 +169,8 @@ export function UserDetail({
               {data.background_model ?? "未配置"}
             </p>
           </header>
+
+          <SessionsTable rows={data.sessions ?? []} />
 
           {byok && (
             <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-muted-foreground text-xs">
@@ -321,6 +326,63 @@ function Stat({ label, value }: { label: string; value: string }) {
         {value}
       </div>
     </div>
+  );
+}
+
+function SessionsTable({ rows }: { rows: SessionSummary[] }) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="border-border border-b px-5 py-3.5">
+        <h2 className="text-base font-semibold text-foreground">登录会话</h2>
+        <p className="mt-0.5 text-muted-foreground text-xs">
+          当前有效的 refresh-token 族 · 只读
+        </p>
+      </div>
+      {rows.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground text-sm">
+          <Monitor size={22} className="text-muted-foreground/60" />
+          暂无活跃登录会话
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
+              <th className="px-5 py-2.5 font-medium">IP</th>
+              <th className="px-5 py-2.5 font-medium">User-Agent</th>
+              <th className="px-5 py-2.5 font-medium">平台</th>
+              <th className="px-5 py-2.5 font-medium">最近使用</th>
+              <th className="px-5 py-2.5 font-medium">创建时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr
+                key={s.id}
+                className="border-border border-b align-top last:border-0"
+              >
+                <td className="whitespace-nowrap px-5 py-3 text-foreground tabular-nums">
+                  {s.ip || "—"}
+                </td>
+                <td className="max-w-md px-5 py-3 text-muted-foreground">
+                  <span className="line-clamp-2 break-all" title={s.user_agent ?? undefined}>
+                    {s.user_agent || "—"}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                  {s.platform || "—"}
+                </td>
+                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
+                  {fmtTime(s.last_used_at)}
+                </td>
+                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
+                  {fmtTime(s.created_at)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }
 

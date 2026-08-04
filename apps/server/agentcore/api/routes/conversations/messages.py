@@ -692,6 +692,7 @@ async def record_local_turn_endpoint(
         evidence_ledger=[e.model_dump() for e in body.evidence_ledger] or None,
         runs=body.runs.model_dump() if body.runs else None,
         journal=body.journal,
+        tool_failures=[f.model_dump() for f in body.tool_failures],
         user_message_id=body.user_message_id,
         message_id=body.message_id,
         input_tokens=body.input_tokens,

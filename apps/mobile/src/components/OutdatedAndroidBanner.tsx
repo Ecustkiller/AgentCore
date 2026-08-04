@@ -2,6 +2,8 @@
  * Soft outdated-Android banner (sideload). Shown when the installed APK is older
  * than brand CDN `android/latest.json`. Dismissible for the session; CTA opens
  * the CDN APK URL in the system browser.
+ * Layout: document-flow (not fixed) so visible banner pushes the header down — see
+ * `.outdated-android-banner` + `#root` flex column in styles.css.
  */
 import {
   dismissAndroidUpdate,

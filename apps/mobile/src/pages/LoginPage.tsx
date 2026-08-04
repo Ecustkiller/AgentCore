@@ -5,7 +5,7 @@ import {
 } from "@/lib/rememberedUsername";
 import type { LegalDocId } from "@/pages/legal/types";
 import { type FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 type Mode = "login" | "register";
 
@@ -13,8 +13,21 @@ function legalPath(id: LegalDocId): string {
   return `/legal/${id}`;
 }
 
+/** Relative in-app path only — blocks `//…`, absolute URLs, and `/login` loops. */
+function safeReturnPath(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  if (raw.includes("://")) return null;
+  if (raw === "/login" || raw.startsWith("/login?")) return null;
+  return raw;
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = safeReturnPath(
+    (location.state as { from?: unknown } | null)?.from,
+  );
   const [mode, setMode] = useState<Mode>("login");
   // Prefill last successful login username; shared across login/register tabs.
   const [username, setUsername] = useState(() => getRememberedUsername() ?? "");
@@ -53,7 +66,7 @@ export function LoginPage() {
       }
       await login(trimmed, password);
       setRememberedUsername(trimmed);
-      navigate("/", { replace: true });
+      navigate(from ?? "/", { replace: true });
     } catch (err) {
       setError(
         err instanceof Error

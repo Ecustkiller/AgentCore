@@ -17,6 +17,7 @@ import {
 import {
   BrowserLoginDecisionCard,
   type BrowserLoginSubmitKind,
+  type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
 import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
@@ -49,6 +50,7 @@ import type {
   TurnStatus,
 } from "@agentcore/protocol-conformance";
 import { type ReactNode, useMemo, useState } from "react";
+import "./TeamView.css";
 
 /** 幕 kind → 列表分组头短标签（无 title 时回落；手机列表语言，非桌面幕分带）。 */
 const ACT_KIND_LABEL: Record<ActKind, string> = {
@@ -201,6 +203,149 @@ function lastLine(text: string | undefined): string | null {
   return lines[lines.length - 1] || null;
 }
 
+/** Sum worker costs (nano-CNY); mirrors desktop StatusStrip turn money signal. */
+function aggregateWorkerCost(runs: readonly ProjectedRun[]): {
+  nano: number;
+  estimated: boolean;
+  unpriced: boolean;
+} | null {
+  let nano = 0;
+  let estimated = false;
+  let unpriced = false;
+  let any = false;
+  for (const r of runs) {
+    if (r.kind === "captain") continue;
+    const c = r.cost;
+    if (!c) continue;
+    any = true;
+    if (c.pricing_source === "unpriced") unpriced = true;
+    if (c.total > 0) {
+      nano += c.total;
+    } else if (c.estimated_total && c.estimated_total > 0) {
+      nano += c.estimated_total;
+      estimated = true;
+    }
+  }
+  if (!any) return null;
+  return { nano, estimated, unpriced };
+}
+
+function maxDebateRound(workers: readonly ProjectedRun[]): number {
+  let max = 0;
+  for (const r of workers) {
+    if (r.round > max) max = r.round;
+  }
+  return max;
+}
+
+function debateEntryText(workers: readonly ProjectedRun[]): string {
+  const round = maxDebateRound(workers);
+  const pros = workers.filter((r) => r.stance === "pro").length;
+  const cons = workers.filter((r) => r.stance === "con").length;
+  const parts: string[] = [];
+  if (round > 0) parts.push(`第 ${round} 轮`);
+  if (pros || cons) parts.push(`正 ${pros} · 反 ${cons}`);
+  const running = workers.filter((r) => r.status === "running").length;
+  if (running > 0) parts.push(`${running} 人发言中`);
+  return parts.length > 0 ? parts.join(" · ") : "辩论协作进行中";
+}
+
+type StripFace = {
+  title: string;
+  mark: "run" | "ok" | "err" | "paused" | "muted";
+  phase: boolean;
+};
+
+function teamStripFace(args: {
+  status: TurnStatus | null | undefined;
+  isDebate: boolean;
+  multiAct: boolean;
+  actCount: number;
+  workers: readonly ProjectedRun[];
+  progress: { completed: number; total: number };
+}): StripFace {
+  const { status, isDebate, multiAct, actCount, workers, progress } = args;
+  const liveRound = maxDebateRound(workers);
+  if (status === "failed") {
+    return { title: "任务失败", mark: "err", phase: false };
+  }
+  if (status === "cancelled") {
+    return { title: "已停止", mark: "muted", phase: false };
+  }
+  if (status === "paused") {
+    return {
+      title: isDebate
+        ? liveRound > 0
+          ? `辩论已暂停 · 第 ${liveRound} 轮`
+          : "辩论已暂停 · 等待你确认"
+        : "已暂停 · 等待你确认后才会继续",
+      mark: "paused",
+      phase: true,
+    };
+  }
+  if (status === "running") {
+    if (isDebate) {
+      return {
+        title: liveRound > 0 ? `辩论 · 第 ${liveRound} 轮进行中` : "辩论进行中",
+        mark: "run",
+        phase: true,
+      };
+    }
+    const allWorkersDone =
+      progress.total > 0 &&
+      workers.length > 0 &&
+      workers.every(
+        (r) =>
+          r.status === "completed" ||
+          r.status === "failed" ||
+          r.status === "cancelled" ||
+          r.status === "skipped",
+      );
+    if (allWorkersDone) {
+      return { title: "正在生成汇总", mark: "run", phase: true };
+    }
+    return { title: "协作进行中", mark: "run", phase: true };
+  }
+  // completed / unknown history
+  if (isDebate) {
+    return {
+      title: liveRound > 0 ? `辩论完成 · ${liveRound} 轮` : "辩论完成",
+      mark: "ok",
+      phase: false,
+    };
+  }
+  if (multiAct) {
+    return { title: `团队完成 · ${actCount} 幕`, mark: "ok", phase: false };
+  }
+  return { title: "团队完成", mark: "ok", phase: false };
+}
+
+function teamStripMeta(args: {
+  agents: readonly ProjectedAgent[];
+  workers: readonly ProjectedRun[];
+  progress: { completed: number; total: number };
+  status: TurnStatus | null | undefined;
+}): string {
+  const { agents, workers, progress, status } = args;
+  const bits: string[] = [];
+  const agentN = agents.length > 0 ? agents.length : workers.length;
+  if (agentN > 0) bits.push(`${agentN} 个 Agent`);
+  bits.push(`${progress.completed}/${progress.total} 子任务`);
+  const failed = workers.filter((r) => r.status === "failed").length;
+  if (failed > 0) bits.push(`${failed} 失败`);
+  const dur = workers.reduce((acc, r) => acc + (r.durationMs ?? 0), 0);
+  if (dur > 0 && status !== "running") bits.push(`用时 ${formatDuration(dur)}`);
+  const money = aggregateWorkerCost(workers);
+  if (money) {
+    if (money.nano > 0) {
+      bits.push(formatCostYuan(money.nano, money.estimated));
+    } else if (money.unpriced) {
+      bits.push("自带密钥·未计价");
+    }
+  }
+  return bits.join(" · ");
+}
+
 /** The read-only one-liner under an escalation's question, by lifecycle. */
 export function escalationDetail(esc: RunEscalation): string | null {
   if (esc.status === "resolved" && esc.answer) return `已答复：${esc.answer}`;
@@ -258,6 +403,7 @@ export function TeamView({
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
   // list is the same ProjectedTurn slice whether live or replayed.
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(true);
   const workers = runs.filter((r) => r.kind !== "captain");
   const ledgerMap = useMemo(
     () => (evidenceLedger.length ? buildLedgerMap(evidenceLedger) : null),
@@ -276,6 +422,37 @@ export function TeamView({
   const pct =
     progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
   const notesDefaultOpen = teamNotesDefaultExpanded(status, teamNotes);
+  const strip = teamStripFace({
+    status,
+    isDebate,
+    multiAct,
+    actCount: acts.length,
+    workers,
+    progress,
+  });
+  const stripMeta = teamStripMeta({ agents, workers, progress, status });
+  const showDebateEntry = isDebate;
+  const synthesisBlurbs = workers
+    .filter((r) => r.status === "completed" && !!r.outputSummary)
+    .map((r) => ({
+      id: r.id,
+      role: r.role ?? agents.find((a) => a.id === r.agentId)?.role ?? r.agentId,
+      summary: r.outputSummary as string,
+    }));
+  const synthesizing =
+    status === "running" &&
+    progress.total > 0 &&
+    workers.length > 0 &&
+    workers.every(
+      (r) =>
+        r.status === "completed" ||
+        r.status === "failed" ||
+        r.status === "cancelled" ||
+        r.status === "skipped",
+    );
+  const showSynthesis =
+    synthesisBlurbs.length > 0 &&
+    (status === "running" || status === "paused" || synthesizing);
 
   // Indent a nested delegate by how many worker parents it chains through (stage-2 子任务).
   const depthOf = (run: ProjectedRun): number => {
@@ -330,40 +507,104 @@ export function TeamView({
 
   return (
     <EvidenceLedgerProvider ledger={ledgerMap}>
-      <div className="team">
-        <div className="team-head">
-          <span className="team-count">
-            团队 {progress.completed}/{progress.total}
-          </span>
-          {multiAct ? (
-            <span className="team-tag">{acts.length} 幕</span>
-          ) : isDebate ? (
-            <span className="team-tag">辩论</span>
-          ) : null}
+      <div className="team" data-testid="team-view">
+        <div className="team-strip">
+          <div className="team-strip-row">
+            <span
+              className={`team-strip-mark mark-${strip.mark}`}
+              aria-hidden
+            />
+            <div className="team-strip-body">
+              <div
+                className={`team-strip-title${strip.phase ? " is-phase" : ""}`}
+              >
+                <span>{strip.title}</span>
+                {multiAct ? (
+                  <span className="team-tag">{acts.length} 幕</span>
+                ) : isDebate ? (
+                  <span className="team-tag">辩论</span>
+                ) : null}
+              </div>
+              {stripMeta ? (
+                <div className="team-strip-meta">{stripMeta}</div>
+              ) : null}
+            </div>
+            {!isDebate && (
+              <span
+                className={`team-strip-progress${strip.phase ? " is-phase" : ""}`}
+              >
+                {progress.completed}/{progress.total}
+              </span>
+            )}
+            <button
+              type="button"
+              className="team-strip-toggle"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-label={expanded ? "收起协作列表" : "展开协作列表"}
+            >
+              {expanded ? "▾" : "▸"}
+            </button>
+          </div>
         </div>
         <div className="team-bar">
           <span className="team-bar-fill" style={{ width: `${pct}%` }} />
         </div>
-        <div className="team-runs">{runCards}</div>
-        {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
-          concurrent siblings this turn — the visible, glass-box face of the note wall (贴事实·
-          不要求回应, NOT a chat). Shown attributed (谁贴的) + kind-tagged (我定了 / 提个醒), in post
-          order. Empty (the common case) renders nothing. Collapsible like 思考/工具组 (<details>):
-          running + active note → default open; finished/stopped → collapsed「团队便签 N」. Remount
-          via key when the default flips so turn completion re-applies the collapsed default. */}
-        {/* 交付轻提示（对齐桌面 DeliveryStatusMount）：delivered / notes 静默；
-          partial / blocked 一句 summary；无验收卡、无动作、无缺口明细。 */}
-        {deliveryStatus ? <DeliverySection status={deliveryStatus} /> : null}
-        {teamNotes.length > 0 && (
-          <TeamNotesWall
-            key={notesDefaultOpen ? "open" : "shut"}
-            notes={teamNotes}
-            defaultOpen={notesDefaultOpen}
-          />
+        {expanded && (
+          <div className="team-body">
+            {showDebateEntry ? (
+              <div
+                className="team-debate-entry"
+                data-testid="team-debate-entry"
+              >
+                <span className="team-debate-entry-tag">辩论进展</span>
+                <span className="team-debate-entry-text">
+                  {debateEntryText(workers)}
+                </span>
+              </div>
+            ) : null}
+            {showSynthesis ? (
+              <div
+                className={`team-synthesis${synthesizing ? " is-live" : ""}`}
+                data-testid="team-synthesis-preview"
+              >
+                <div className="team-synthesis-head">
+                  <span className="team-synthesis-badge">
+                    {synthesizing ? "生成汇总" : "团队进展"}
+                  </span>
+                  <span className="team-synthesis-title">
+                    {synthesizing
+                      ? `${progress.completed}/${progress.total} 已完成，正在生成汇总`
+                      : `${synthesisBlurbs.length} 人已产出摘要`}
+                  </span>
+                </div>
+                <ul className="team-synthesis-list">
+                  {synthesisBlurbs.map((w) => (
+                    <li key={w.id} className="team-synthesis-item">
+                      <strong>{w.role}</strong>：{w.summary}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="team-runs">{runCards}</div>
+          </div>
         )}
-        {/* 深度检视单个队员 (RunDetail): the detail panel for the tapped run — a native <dialog>
-          bottom sheet. Navigating (修订链切换 / 关系跳转) swaps `selectedRunId` so the SAME open
-          dialog re-renders in place (no remount flash); unmounting (→ null) closes it. */}
+        {/* 交付 / 便签在折叠后仍可达（对齐桌面：便签墙不随图折叠卸载）。 */}
+        {(deliveryStatus || teamNotes.length > 0) && (
+          <div className="team-body team-body-persist">
+            {deliveryStatus ? (
+              <DeliverySection status={deliveryStatus} />
+            ) : null}
+            {teamNotes.length > 0 && (
+              <TeamNotesWall
+                key={notesDefaultOpen ? "open" : "shut"}
+                notes={teamNotes}
+                defaultOpen={notesDefaultOpen}
+              />
+            )}
+          </div>
+        )}
         {selectedRun && (
           <RunDetailPanel
             run={selectedRun}
@@ -534,16 +775,51 @@ function RunCard({
 }) {
   const st = runStatusLabel(run.status, run);
   const name = run.role ?? agent?.role ?? run.agentId;
-  // Running: the worker's streaming tail (tool composing > tool executing > output last line).
-  // Settled: its one-line summary. Both come off the same fold whether live or replayed.
-  const preview =
-    run.status === "running"
-      ? agent?.toolProgress
-        ? `Composing ${toolLabel(agent.toolProgress.toolName)}…`
-        : workerToolPhase
-          ? `${toolPhaseText(workerToolPhase.phase) ?? "Working"} · ${toolLabel(workerToolPhase.toolName)}`
-          : lastLine(agent?.output)
-      : run.outputSummary;
+  // Align desktop agent-node peek: heading + body (tool / output / thinking / summary).
+  let activity: {
+    heading: string;
+    text: string;
+    live?: boolean;
+    italic?: boolean;
+  } | null = null;
+  if (run.status === "running") {
+    if (agent?.toolProgress) {
+      activity = {
+        heading: "正在生成",
+        text: `${toolLabel(agent.toolProgress.toolName)}…`,
+        live: true,
+      };
+    } else if (workerToolPhase) {
+      activity = {
+        heading: toolPhaseText(workerToolPhase.phase) ?? "Working",
+        text: toolLabel(workerToolPhase.toolName),
+        live: true,
+      };
+    } else {
+      const out = lastLine(agent?.output);
+      if (out) {
+        activity = { heading: "输出中", text: out, live: true };
+      } else if (agent?.reasoning) {
+        activity = {
+          heading: "思考中",
+          text: lastLine(agent.reasoning) ?? agent.reasoning,
+          live: true,
+          italic: true,
+        };
+      }
+    }
+  } else if (run.status === "failed" && run.error) {
+    activity = { heading: "失败原因", text: run.error };
+  } else if (run.outputSummary) {
+    activity = { heading: "产出预览", text: run.outputSummary };
+  }
+
+  const footBits: string[] = [];
+  if (run.model) footBits.push(run.model);
+  if (run.status === "completed" && run.durationMs != null) {
+    footBits.push(formatDuration(run.durationMs));
+  }
+  if (run.round > 0) footBits.push(`第 ${run.round} 轮`);
 
   return (
     <div
@@ -564,10 +840,27 @@ function RunCard({
           continuationIndex={continuationIndex}
         />
         {run.task && <div className="run-task">{run.task}</div>}
-        {preview && <div className="run-preview">{preview}</div>}
-        {run.error && <div className="run-error">{run.error}</div>}
-        {run.status === "completed" && run.durationMs != null && (
-          <div className="run-foot">{formatDuration(run.durationMs)}</div>
+        {activity && (
+          <div className={`run-activity${activity.live ? " is-live" : ""}`}>
+            <div className="run-activity-head">{activity.heading}</div>
+            <div
+              className={`run-preview${activity.italic ? " is-italic" : ""}`}
+            >
+              {activity.text}
+            </div>
+          </div>
+        )}
+        {run.error && run.status !== "failed" && (
+          <div className="run-error">{run.error}</div>
+        )}
+        {footBits.length > 0 && (
+          <div className="run-foot">
+            {footBits.map((b) => (
+              <span key={b} className="run-foot-item">
+                {b}
+              </span>
+            ))}
+          </div>
         )}
       </button>
       {/* 升级卡已迁独立时间线标记（统一时间线二期 D2）；节点仍保留 上报 pill。 */}
@@ -587,12 +880,18 @@ export function EscalationAnswer({
   esc,
   escalationId,
   conversationId,
+  runId,
   onOpenLive,
+  onResolved,
 }: {
   esc: EscalationSlotEsc;
   escalationId: string;
   conversationId: string;
-  onOpenLive?: () => void;
+  /** Worker run id — forwarded to BrowserLive session pin when opening live. */
+  runId?: string;
+  onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
+  /** Cold recovery: POST success → parent dismisses card (no SSE unmount). */
+  onResolved?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -607,6 +906,10 @@ export function EscalationAnswer({
     setErr(null);
     try {
       await decideEscalation(conversationId, escalationId, decision);
+      if (onResolved) {
+        onResolved();
+        return;
+      }
       // Leave busy=true on success: escalation_resolved drops `pending` and unmounts this.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "提交失败");
@@ -637,6 +940,7 @@ export function EscalationAnswer({
               : undefined
           }
           onOpenLive={onOpenLive}
+          liveRunId={runId}
         />
         {err && <span className="run-error">{err}</span>}
       </div>
@@ -656,7 +960,11 @@ export function EscalationAnswer({
         rows={2}
         value={note}
         disabled={busy}
-        placeholder="输入你的决定（留空则点「按假设继续」）"
+        placeholder={
+          esc.assumption
+            ? "输入你的决定（留空则点「按假设继续」）"
+            : "输入你的决定"
+        }
         onChange={(e) => setNote(e.target.value)}
       />
       <div className="run-escalation-actions">
@@ -668,14 +976,16 @@ export function EscalationAnswer({
         >
           提交
         </button>
-        <button
-          type="button"
-          className="esc-btn esc-btn-neutral"
-          disabled={busy}
-          onClick={() => void decide({ kind: "use_assumption" })}
-        >
-          按假设继续
-        </button>
+        {esc.assumption ? (
+          <button
+            type="button"
+            className="esc-btn esc-btn-neutral"
+            disabled={busy}
+            onClick={() => void decide({ kind: "use_assumption" })}
+          >
+            按假设继续
+          </button>
+        ) : null}
       </div>
       {busy && <span className="run-escalation-busy">处理中…</span>}
       {err && <span className="run-error">{err}</span>}

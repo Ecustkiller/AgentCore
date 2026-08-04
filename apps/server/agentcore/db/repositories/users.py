@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentcore.core.types import new_id
-from agentcore.db.models import CostEvent, User, UserBlock, UserDirectorySettings
+from agentcore.db.models import CostEvent, RefreshToken, User, UserBlock, UserDirectorySettings
 
 from ._base import _UNSET, _ilike_pattern, _sum_int, commit_or_flush
 
@@ -72,6 +72,9 @@ class UserRepository:
         query: str | None = None,
         role: str | None = None,
         status: str | None = None,
+        ip: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
         sort: str = "created_at",
         order: str = "desc",
         include_deleted: bool = False,
@@ -81,12 +84,15 @@ class UserRepository:
 
         Unlike ``search`` (exact-match, anti-enumeration for the 找人 directory), this
         is the operator's full roster. Filters (AND-combined): ``query`` substring
-        ILIKEs username/display_name, ``role``/``status`` pin those dimensions. 注销
-        (soft-deleted, anonymized → ``deleted_<id>``) accounts are excluded unless
-        ``include_deleted`` — tombstones, noise for the live roster but kept for audit.
-        ``sort`` ∈ {``created_at``, ``cost``} with ``order`` ∈ {``asc``, ``desc``}
-        (cost ties break by newest-first for stable pagination). The total reflects the
-        same filters. Returns ``([(user, cost_total_nano)], total)``.
+        ILIKEs username/display_name, ``role``/``status`` pin those dimensions,
+        ``ip`` matches ``registration_ip`` or any ``refresh_tokens.ip`` (any status —
+        historical login IPs count for 加强可查), ``since``/``until`` bound
+        ``created_at``. 注销 (soft-deleted, anonymized → ``deleted_<id>``) accounts
+        are excluded unless ``include_deleted`` — tombstones, noise for the live
+        roster but kept for audit. ``sort`` ∈ {``created_at``, ``cost``} with
+        ``order`` ∈ {``asc``, ``desc``} (cost ties break by newest-first for stable
+        pagination). The total reflects the same filters. Returns
+        ``([(user, cost_total_nano)], total)``.
 
         Cost is a LEFT JOIN onto a per-user SUM of ``cost_events.cost_total_nano`` (a
         never-spent account reads 0). MVP aggregates the ledger per roster page — fine
@@ -104,6 +110,18 @@ class UserRepository:
             conditions.append(User.role == role)
         if status is not None:
             conditions.append(User.status == status)
+        ip_q = (ip or "").strip()
+        if ip_q:
+            token_ip_match = (
+                select(RefreshToken.id)
+                .where(RefreshToken.user_id == User.user_id, RefreshToken.ip == ip_q)
+                .exists()
+            )
+            conditions.append(or_(User.registration_ip == ip_q, token_ip_match))
+        if since is not None:
+            conditions.append(User.created_at >= since)
+        if until is not None:
+            conditions.append(User.created_at <= until)
 
         count_stmt = select(func.count()).select_from(User)
         if conditions:
@@ -169,6 +187,7 @@ class UserRepository:
         email: str | None = None,
         role: str = "user",
         status: str = "active",
+        registration_ip: str | None = None,
         commit: bool = True,
     ) -> User:
         user = User(
@@ -178,6 +197,7 @@ class UserRepository:
             email=email,
             role=role,
             status=status,
+            registration_ip=registration_ip,
         )
         self._session.add(user)
         await commit_or_flush(self._session, commit=commit)

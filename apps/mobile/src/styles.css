@@ -14,6 +14,13 @@ body,
   margin: 0;
 }
 
+/* Column shell so the outdated-Android banner (document flow) can push .screen /
+   .tabs-shell down instead of overlaying the header. */
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
 body {
   background: var(--bg);
   color: var(--fg);
@@ -29,10 +36,10 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* The app shell is fixed-height (each .screen is 100dvh with its own inner scroller), so the
-   body never needs to scroll. Disabling its overscroll kills the whole-page rubber-band /
-   pull-to-refresh that would otherwise betray the WebView — without clipping (no overflow
-   hidden, which could crop the composer if 100dvh and 100% ever disagree). */
+/* The app shell is fixed-height (#root fills the viewport; each .screen / .tabs-shell flexes
+   into the remaining space with its own inner scroller), so the body never needs to scroll.
+   Disabling its overscroll kills the whole-page rubber-band / pull-to-refresh that would
+   otherwise betray the WebView — without clipping (no overflow hidden). */
 html,
 body {
   overscroll-behavior: none;
@@ -54,8 +61,7 @@ body {
     background: oklch(0.94 0.006 255);
   }
   #root {
-    display: flex;
-    justify-content: center;
+    align-items: center;
   }
   .screen,
   .tabs-shell {
@@ -76,44 +82,60 @@ body {
 .screen {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* Fill remaining #root space (banner sibling occupies flow when visible). */
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
 }
 
+/* Center content without the padding shorthand wiping .screen's safe-area insets. */
 .screen.center {
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding-left: 24px;
+  padding-right: 24px;
 }
 
 /* --- Bottom tab navigation (手机端布局重构 · 底部 4-tab 导航) --- */
-/* The shell owns the viewport height + top safe-area; the page fills the body and the TabBar
+/* The shell owns the remaining viewport + top safe-area; the page fills the body and the TabBar
    owns the bottom safe-area (home indicator). Only top-level pages mount inside a shell;
-   detail pages keep their bare .screen (100dvh) so they push full-screen over the bar. */
+   detail pages keep their bare .screen so they push full-screen over the bar. */
 .tabs-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  padding-top: env(safe-area-inset-top);
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+  /* visualViewport keyboard bridge (TabLayout); 0 when adjustResize already shrunk the view. */
+  padding-bottom: var(--keyboard-inset-bottom, 0px);
 }
 
-/* Soft Android sideload update banner (fixed under status bar; dismissible). */
+/* Soft Android sideload update banner (document flow; pushes header down when visible).
+   Owns the top safe-area itself (was previously position:fixed at inset-top). */
 .outdated-android-banner {
-  position: fixed;
-  top: env(safe-area-inset-top);
-  left: 0;
-  right: 0;
+  position: relative;
+  flex-shrink: 0;
   z-index: 40;
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   min-height: 44px;
-  padding: 8px 12px;
+  padding: calc(8px + var(--safe-area-inset-top, env(safe-area-inset-top))) 12px
+    8px;
   font-size: 13px;
   color: var(--fg);
   background: color-mix(in oklch, var(--accent) 12%, var(--panel));
   border-bottom: 1px solid var(--border);
+}
+
+/* Banner already cleared the notch — drop duplicate top inset on the sibling shell. */
+#root:has(> .outdated-android-banner) > .screen,
+#root:has(> .outdated-android-banner) > .tabs-shell {
+  padding-top: 0;
 }
 
 .outdated-android-banner-text {
@@ -146,11 +168,8 @@ body {
 
 @media (min-width: 768px) {
   .outdated-android-banner {
-    left: 50%;
-    right: auto;
     width: 480px;
     max-width: 100%;
-    transform: translateX(-50%);
   }
 }
 
@@ -161,7 +180,7 @@ body {
   flex-direction: column;
 }
 
-/* A page inside the tab shell drops its own 100dvh + safe-area (the shell + bar own those)
+/* A page inside the tab shell drops its own flex fill + safe-area (the shell + bar own those)
    and just fills the body. */
 .tabs-body > .screen {
   height: 100%;
@@ -174,7 +193,7 @@ body {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--panel);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
 }
 
 .tab {
@@ -771,62 +790,7 @@ button.link {
   color: var(--muted);
 }
 
-.timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* 热审批 / 委派授权痕迹 (统一时间线二期 D3): resolved 后 required 时刻槽的轻状态行。 */
-.hot-trace {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* 跨回合同图追加：追加回合锚点（宿主气泡仍挂完整协作图）。 */
-.graph-append-anchor {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 4px 0;
-}
-
-.reasoning {
-  font-size: 13px;
-}
-
-.reasoning summary {
-  padding: 4px 0;
-  color: var(--muted);
-  cursor: pointer;
-  list-style: none;
-  /* 不拉满行宽，避免下方旁白被读成思考正文（S4） */
-  display: inline-block;
-}
-
-.reasoning summary::-webkit-details-marker {
-  display: none;
-}
-
-.reasoning summary::before {
-  content: "▸ ";
-}
-
-.reasoning[open] summary::before {
-  content: "▾ ";
-}
-
-.reasoning[open] > :not(summary) {
-  margin-top: 6px;
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--muted) 35%, transparent);
-}
-
-/* 过程线旁白：与 .reasoning 左边线/muted 区分（S4） */
-.process-narration {
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--border) 80%, transparent);
-  color: var(--fg);
-}
+/* timeline / reasoning / process-narration / tool-group → ProcessTimeline.css */
 
 /* 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): collapsible like 思考 (.reasoning); each
    block shows its channel origin + the body the CEO read. */
@@ -1036,162 +1000,7 @@ button.link {
   word-break: break-word;
 }
 
-/* 连续工具折叠组 (前端UX设计.md §一B): same <details> fold idiom as 思考 (.reasoning) in a
-   .tool-style bordered shell; expands to the per-tool cards. Pure web_search runs skip the
-   shell and render as a flat stack (parity with desktop ToolLineGroup). */
-.tool-group-flat {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tool-group {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.tool-group > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg);
-  background: var(--bg);
-  cursor: pointer;
-  list-style: none;
-}
-
-.tool-group > summary::-webkit-details-marker {
-  display: none;
-}
-
-.tool-group > summary::before {
-  content: "▸";
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.tool-group[open] > summary::before {
-  content: "▾";
-}
-
-.tool-group-summary {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tool-group-error {
-  flex-shrink: 0;
-  color: var(--error);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.tool-group-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.cites {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.cites-title {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.cite {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 10px;
-  color: var(--fg);
-  text-decoration: none;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.cite-n {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.cite-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.cite-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.cite-title {
-  overflow: hidden;
-  font-size: 13px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.cite-id {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-
-.cite-tier {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
-  border-radius: 999px;
-}
-
-.cite-tier-official {
-  color: var(--success);
-  background: color-mix(in oklch, var(--success) 12%, transparent);
-}
-
-.cite-tier-media {
-  color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
-}
-
-.cite-tier-unknown {
-  color: var(--muted);
-  background: var(--panel);
-}
-
-.cite-tier-weak {
-  color: var(--warning);
-  background: color-mix(in oklch, var(--warning) 12%, transparent);
-}
-
-.cite-site {
-  font-size: 12px;
-  color: var(--muted);
-}
+/* tool-group → ProcessTimeline.css; cites → SourceCards.css */
 
 /* --- 「本回合产出文件」卡 (回合内文件呈现 §九): 折叠清单 + 一键直达预览 --- */
 .artifacts {
@@ -2146,8 +1955,10 @@ dialog.run-detail::backdrop {
   flex: 1;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
   overflow-y: auto;
-  padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 14px 16px
+    calc(16px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom)));
 }
 
 .rd-section-title {
@@ -2758,7 +2569,7 @@ dialog.run-detail::backdrop {
   background: var(--border);
 }
 
-/* 阶段推进卡（批 B）— 紧凑列表呈现 */
+/* 阶段推进卡（批 B）— 紧凑列表呈现；pending 进 interaction-sheet 时去重外盒 margin */
 .stage-card {
   margin: 8px 12px;
   padding: 12px;
@@ -2767,6 +2578,14 @@ dialog.run-detail::backdrop {
   border-radius: 12px;
   font-size: 13px;
   line-height: 1.45;
+}
+.interaction-sheet .stage-card,
+.stage-card--sheet {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 .stage-card--orphaned,
 .stage-card--resolved {
@@ -3634,7 +3453,8 @@ dialog.run-detail::backdrop {
 .sheet {
   background: var(--panel);
   border-radius: 16px 16px 0 0;
-  padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+  padding: 8px 12px
+    calc(12px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom)));
 }
 
 dialog.sheet {
@@ -3642,6 +3462,7 @@ dialog.sheet {
   inset: auto 0 0;
   width: 100%;
   max-width: 100%;
+  max-height: 85vh;
   margin: 0;
   border: none;
   color: var(--fg);
@@ -3649,6 +3470,95 @@ dialog.sheet {
 
 dialog.sheet::backdrop {
   background: rgba(0, 0, 0, 0.4);
+}
+
+/* Latch + Interaction Sheet chrome（PendingInteractionChrome） */
+.ix-latch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  box-sizing: border-box;
+  margin: 0 16px 10px;
+  padding: 10px 12px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.ix-latch-text {
+  flex: 1;
+  min-width: 0;
+}
+.ix-latch-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ix-latch-summary {
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ix-latch-action {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.interaction-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  padding: 0;
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
+}
+.ix-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 14px 16px 8px;
+}
+.ix-sheet-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ix-sheet-collapse {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ix-sheet-collapse:active {
+  background: var(--border);
+}
+.ix-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 16px 12px;
+}
+.ix-sheet-footer {
+  flex-shrink: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
 }
 
 .sheet-title {
@@ -3687,6 +3597,8 @@ dialog.sheet::backdrop {
 
 /* 会话级模型组合 · 选择器 (ModelPicker bottom sheet). Lists account combinations;
    「管理组合」routes to 设置·模型配置. */
+/* 比 dialog.sheet 的 85vh 更矮；提高 specificity 以免被通用封顶盖掉 */
+dialog.sheet.model-sheet,
 .model-sheet {
   display: flex;
   flex-direction: column;
@@ -3881,9 +3793,17 @@ dialog.dialog::backdrop {
 
 .error.inline-actions {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.error-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .error.inline-actions .msg-copy-btn {
@@ -3921,7 +3841,9 @@ dialog.dialog::backdrop {
 
 /* Interactive pause card (审批 / 检查点 / plan_review) — the actionable surface for a turn
    blocked on the user. 蓝=需要你（拍板类不用琥珀，对齐桌面 ResumePrompt primary）;
-   sits above the composer, always visible. */
+   sits above the composer, always visible.
+   Dense kinds render via PendingInteractionChrome (Latch + Sheet); short ask uses
+   .pause--budget so the card never owns the full .screen height. */
 .pause {
   display: flex;
   flex-direction: column;
@@ -3932,6 +3854,27 @@ dialog.dialog::backdrop {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-left: 3px solid var(--accent);
   border-radius: 12px;
+}
+
+.pause--budget {
+  max-height: min(30vh, 16rem);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pause-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pause--budget .pause-actions {
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .pause-hint {
@@ -4277,7 +4220,8 @@ dialog.viewer {
   height: 100%;
   max-height: 100%;
   margin: 0;
-  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  padding: var(--safe-area-inset-top, env(safe-area-inset-top)) 0
+    var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
   border: none;
   background: var(--bg);
   color: var(--fg);
@@ -4365,8 +4309,8 @@ dialog.viewer::backdrop {
   max-width: 360px;
   background: var(--bg);
   border-right: 1px solid var(--border);
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
   transform: translateX(-100%);
   transition: transform 0.25s ease;
   will-change: transform;
@@ -4687,8 +4631,8 @@ dialog.browser-live-sheet.is-full {
   height: 100%;
   max-height: 100%;
   border-radius: 0;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
 }
 
 dialog.browser-live-sheet[open] {

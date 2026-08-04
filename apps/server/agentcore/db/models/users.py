@@ -97,6 +97,9 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
+    # Client IP captured at registration (加强可查). NULL for pre-column rows /
+    # seeded accounts. Same width as refresh_tokens.ip; written via get_client_ip.
+    registration_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Self-service account deletion (注销账户). NULL = live account; a timestamp marks
     # a user-initiated deletion. On delete the row is soft-deleted + anonymized
     # (username → "deleted_<id>", email → NULL) so the unique identifiers free up for

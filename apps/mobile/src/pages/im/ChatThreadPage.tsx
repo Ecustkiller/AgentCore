@@ -479,7 +479,10 @@ export function ChatThreadPage() {
             placeholder={replyTarget ? "输入回复…" : "发送消息…"}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void send();
+              if (e.key !== "Enter") return;
+              if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
+                return;
+              void send();
             }}
           />
           <button

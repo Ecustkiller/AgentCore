@@ -95,6 +95,56 @@ def site_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+def is_loopback_host(host: str) -> bool:
+    """True for ``localhost`` / ``127.0.0.0/8`` / ``::1`` (SearXNG default bind).
+
+    Used only to pick honest connect-error copy — does **not** relax SSRF.
+    """
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return False
+    if h in {"localhost", "localhost.localdomain"}:
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _error_target_host(e: BaseException, url: str | None) -> str | None:
+    """Hostname for error copy: explicit ``url``, else ``e.request.url`` when present."""
+    if url:
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            host = ""
+        return host or None
+    # httpx.RequestError.request raises RuntimeError when unset — prefer the
+    # private slot, then a guarded property read for non-httpx exceptions.
+    req = getattr(e, "_request", None)
+    if req is None:
+        try:
+            req = getattr(e, "request", None)
+        except RuntimeError:
+            req = None
+    if req is None:
+        return None
+    host = getattr(getattr(req, "url", None), "host", None)
+    return str(host).lower() if host else None
+
+
+# Connect failures to loopback / configured SearXNG — not「出网受限」(that copy is for
+# public egress). Compose hint matches .env.example SEARXNG_URL default port.
+_LOCAL_SEARCH_CONNECT = (
+    "本机搜索服务未就绪（无法连接 SearXNG）；"
+    "请检查 docker compose 是否已启动 searxng 及端口映射（默认 18888）"
+)
+_LOCAL_SEARCH_CONNECT_TIMEOUT = (
+    "本机搜索服务未就绪（连接 SearXNG 超时）；"
+    "请检查 docker compose 是否已启动 searxng 及端口映射（默认 18888）"
+)
+
+
 def _is_ssl_error(e: BaseException) -> bool:
     """True when an exception (or its cause chain) is a TLS/cert-verification failure.
 
@@ -114,12 +164,22 @@ def _is_ssl_error(e: BaseException) -> bool:
     return "CERTIFICATE_VERIFY_FAILED" in str(e)
 
 
-def describe_net_error(e: BaseException) -> str:
+def describe_net_error(
+    e: BaseException,
+    *,
+    url: str | None = None,
+    local_service: bool = False,
+) -> str:
     """Readable reason for a failed outbound request.
 
     httpx timeout/connect errors frequently stringify to ``""``; surface the
     failure type plus a plain-language hint so both the log and the model see a
     real cause instead of an empty string.
+
+    ``url`` / ``e.request`` / ``local_service``: connect-class failures aimed at
+    loopback (or an explicitly local service such as configured SearXNG) get
+    「本机搜索服务未就绪」instead of the public「出网受限」copy. Does not change
+    SSRF policy — classification only.
     """
     if isinstance(e, EgressError):
         return str(e)
@@ -132,12 +192,18 @@ def describe_net_error(e: BaseException) -> str:
             "SSL 证书校验失败（站点证书链不被信任，常见于国内部分政务/法院站点）；"
             "改用 web_search 摘要或换其它来源，勿对同一站点反复重试"
         )
+    host = _error_target_host(e, url)
+    treat_as_local = local_service or (host is not None and is_loopback_host(host))
     if isinstance(e, httpx.ConnectTimeout):
+        if treat_as_local:
+            return _LOCAL_SEARCH_CONNECT_TIMEOUT
         return "连接超时（无法连上该站点，可能出网受限或站点不可达）"
     if isinstance(e, httpx.ReadTimeout):
         return "读取超时（站点响应过慢）"
     if isinstance(e, (httpx.ConnectError, httpx.NetworkError)):
         detail = str(e).strip()
+        if treat_as_local:
+            return _LOCAL_SEARCH_CONNECT + (f": {detail}" if detail else "")
         return "无法建立连接（出网受限或站点不可达）" + (f": {detail}" if detail else "")
     if isinstance(e, httpx.TimeoutException):
         return "请求超时"
@@ -391,6 +457,7 @@ __all__ = [
     "describe_net_error",
     "ip_is_safe",
     "is_fake_ip_proxy_signature",
+    "is_loopback_host",
     "is_safe_url",
     "private_ip_block",
     "site_of",

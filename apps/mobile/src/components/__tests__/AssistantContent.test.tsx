@@ -166,9 +166,36 @@ describe("AssistantContent", () => {
       { url: "https://a.com/post", title: "A 标题", site: "a.com" },
     ];
     render(<AssistantContent content="" citations={citations} />);
-    expect(screen.getByText("来源")).toBeTruthy();
-    expect(screen.getByText("A 标题")).toBeTruthy();
+    expect(screen.getByText("来源 1")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /来源 1：A 标题/ });
+    expect(link.getAttribute("href")).toBe("https://a.com/post");
     expect(screen.getByText("a.com")).toBeTruthy();
+  });
+
+  it("shows finishReason chip for degraded turns", () => {
+    render(<AssistantContent content="降级后的短答" finishReason="degraded" />);
+    expect(screen.getByTestId("finish-reason-chip").textContent).toContain(
+      "降级完成",
+    );
+  });
+
+  it("shows single-agent delivery shortfall hint", () => {
+    render(
+      <AssistantContent
+        content="部分交付"
+        deliveryStatus={{
+          execution_id: "e1",
+          state: "partial",
+          summary: "缺验收项",
+          delivered_files: [],
+          gaps: [],
+          actions: [],
+        }}
+      />,
+    );
+    expect(screen.getByTestId("delivery-shortfall-hint").textContent).toBe(
+      "缺验收项",
+    );
   });
 
   it("renders citation tier badges when tier is present", () => {
@@ -230,7 +257,8 @@ describe("AssistantContent", () => {
         status: "success",
       },
     ];
-    render(<AssistantContent content="" process={process} />);
+    // isStreaming keeps process rows expanded (settled folds into「Used N tools」).
+    render(<AssistantContent content="" process={process} isStreaming />);
     expect(screen.getByText("Search web")).toBeTruthy();
     expect(screen.getByText("openai 新闻")).toBeTruthy();
     expect(screen.getByText("Done")).toBeTruthy();
@@ -252,6 +280,7 @@ describe("AssistantContent", () => {
       <AssistantContent
         content=""
         process={process}
+        isStreaming
         toolPhases={new Map([["t1", "querying"]])}
       />,
     );
@@ -271,8 +300,27 @@ describe("AssistantContent", () => {
         status: "running",
       },
     ];
-    render(<AssistantContent content="" process={process} />);
+    render(<AssistantContent content="" process={process} isStreaming />);
     expect(screen.getByText("Running")).toBeTruthy();
+  });
+
+  it("collapses settled Thought+tools into a process summary", () => {
+    const process: ProcessStep[] = [
+      { kind: "reasoning", text: "plan" },
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "web_search",
+        arguments: { query: "q" },
+        result: null,
+        status: "success",
+      },
+      { kind: "content", text: "answer" },
+    ];
+    render(<AssistantContent content="" process={process} />);
+    expect(screen.getByText("Thought 1 step · Used 1 tool")).toBeTruthy();
+    expect(screen.queryByText("Search web")).toBeNull();
+    expect(screen.getByTestId("md").textContent).toBe("answer");
   });
 
   it("renders the team graph for a multi-agent turn", () => {

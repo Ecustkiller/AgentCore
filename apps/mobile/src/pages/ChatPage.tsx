@@ -1,3 +1,4 @@
+import { listBrowserSessions } from "@/api/browserSessions";
 import { getTokens } from "@/api/client";
 import {
   type MemoryUpdate,
@@ -36,9 +37,11 @@ import {
 import { getMessageCostDisplay } from "@/api/usage";
 import {
   AssistantContent,
+  FinishReasonChip,
   SupportDiagnosticCopyButton,
 } from "@/components/AssistantView";
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
+import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
@@ -49,14 +52,17 @@ import { PauseCard } from "@/components/PauseCard";
 import { QueuedTurnsBar } from "@/components/QueuedTurnsBar";
 import { ResumeCard } from "@/components/ResumeCard";
 import { StageCard } from "@/components/StageCard";
+import { EscalationAnswer } from "@/components/TeamView";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
 import {
   type ErrorAction,
   StreamHttpError,
+  degradedFinishChipLabel,
   describeStreamHttpError,
   emptyChatCopy,
   emptyFailureNotice,
+  errorActionForCode,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
 import {
@@ -66,7 +72,6 @@ import {
 } from "@/lib/messageDelivery";
 import {
   type QueuedTurnEntry,
-  clearQueuedTurns,
   listQueuedTurns,
   removeQueuedTurn,
   upsertQueuedTurn,
@@ -90,10 +95,10 @@ import {
   type SupportDiagnosticIds,
   extractSupportIdsFromEvents,
 } from "@/lib/supportDiagnostics";
-import { formatDuration, formatMessageTime } from "@/lib/time";
 import { useStickScroll } from "@/lib/useStickScroll";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import {
+  type EscalationSlotEsc,
   extractAsks,
   extractEscalationSlots,
   extractEvidenceLedger,
@@ -111,12 +116,15 @@ import {
 import type {
   CheckpointDecision,
   DebateNarrativeRound,
+  DeliveryStatusPayload,
+  ErrorPayload,
   MessageEndPayload,
   MessageStartPayload,
   SSEEvent,
   TurnQueueCancelledPayload,
   TurnSteerAcceptedPayload,
   TurnWarningPayload,
+  UsageBreakdown,
 } from "@agentcore/contract-types";
 import type {
   ProjectedInteraction,
@@ -239,38 +247,62 @@ function extractTurnClock(events: SSEEvent[]): string | null {
   return events[0]?.timestamp ?? null;
 }
 
-/** Live 回合用时：message_end.duration_ms（旁路，不入 ProjectedTurn）。 */
-function extractTurnDurationMs(events: SSEEvent[]): number | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type !== "message_end") continue;
-    const ms = (e.payload as MessageEndPayload | undefined)?.duration_ms;
-    return typeof ms === "number" && ms > 0 ? ms : null;
+/** message_end + error 旁路元数据（用量 / 轮次 / 收尾 / 诊断）— 不入 ProjectedTurn. */
+function extractTurnChrome(events: SSEEvent[]): {
+  usage: UsageBreakdown | null;
+  rounds: number | null;
+  durationMs: number | null;
+  finishReason: string | null;
+  emptyDiagnosis: string | undefined;
+  errorCode: string | undefined;
+  errorMessage: string | undefined;
+  credentialSource: string | null | undefined;
+} {
+  let usage: UsageBreakdown | null = null;
+  let rounds: number | null = null;
+  let durationMs: number | null = null;
+  let finishReason: string | null = null;
+  let emptyDiagnosis: string | undefined;
+  let errorCode: string | undefined;
+  let errorMessage: string | undefined;
+  let credentialSource: string | null | undefined;
+  for (const e of events) {
+    if (e.type === "error") {
+      const p = e.payload as ErrorPayload;
+      errorCode = p.code;
+      errorMessage = p.message;
+      emptyDiagnosis = p.context?.empty_diagnosis;
+      credentialSource = p.context?.credential_source;
+    }
+    if (e.type === "message_end") {
+      const p = e.payload as MessageEndPayload;
+      finishReason = p.finish_reason;
+      rounds = typeof p.rounds === "number" ? p.rounds : null;
+      durationMs =
+        typeof p.duration_ms === "number" && p.duration_ms > 0
+          ? p.duration_ms
+          : null;
+      if (p.usage) {
+        usage = {
+          input: p.usage.input_tokens,
+          output: p.usage.output_tokens,
+          reasoning: p.usage.reasoning_tokens,
+          cache_hit: p.usage.cache_hit_tokens,
+          cache_miss: p.usage.cache_miss_tokens,
+        };
+      }
+    }
   }
-  return null;
-}
-
-/** 气泡底部时间 meta：时钟 · 用时（有则显）。 */
-function TurnTimeMeta({
-  clockIso,
-  durationMs,
-}: {
-  clockIso: string | null | undefined;
-  durationMs?: number | null;
-}) {
-  const clockLabel = clockIso ? formatMessageTime(clockIso) : "";
-  const dur =
-    durationMs != null && durationMs > 0
-      ? `用时 ${formatDuration(durationMs)}`
-      : "";
-  if (!clockLabel && !dur) return null;
-  return (
-    <div className="meta time-meta">
-      {clockLabel}
-      {clockLabel && dur ? " · " : ""}
-      {dur}
-    </div>
-  );
+  return {
+    usage,
+    rounds,
+    durationMs,
+    finishReason,
+    emptyDiagnosis,
+    errorCode,
+    errorMessage,
+    credentialSource,
+  };
 }
 
 /** Build 排查包 ids for a history assistant row (REST trace_id + journal execution_id). */
@@ -451,6 +483,38 @@ function recoveredStageCard(
   };
 }
 
+/** Cold recovery · pending escalation → EscalationAnswer card body. */
+function recoveredEscalation(a: PendingInteractionSummary): {
+  id: string;
+  runId: string;
+  esc: EscalationSlotEsc;
+} | null {
+  if (a.kind !== "escalation") return null;
+  const p = a.payload ?? {};
+  if (p.awaiting === "ceo") return null;
+  const question = typeof p.question === "string" ? p.question.trim() : "";
+  if (!question) return null;
+  const assumption = typeof p.assumption === "string" ? p.assumption : "";
+  const runId = typeof p.run_id === "string" ? p.run_id : "";
+  const kindRaw = p.kind;
+  const kind =
+    kindRaw === "scope" || kindRaw === "dep" ? kindRaw : ("normal" as const);
+  return {
+    id: a.id,
+    runId,
+    esc: {
+      question,
+      assumption,
+      blocking: true,
+      status: "pending",
+      answer: null,
+      kind,
+      ...(p.awaiting === "user" ? { awaiting: "user" as const } : {}),
+      ...(p.browser_login === true ? { browserLogin: true as const } : {}),
+    },
+  };
+}
+
 /** One-line status derived from the projected turn — proves the fold drives the UI
  * (进度 / 工具 are read off ProjectedTurn, not re-parsed from events). A `paused` turn
  * returns null: its actionable surface owns the view instead — an `approval` pause shows the
@@ -495,15 +559,19 @@ function AssistantBubble({
   conversationId,
   onFill,
   onOpenBrowserLive,
+  onRetry,
 }: {
   turn: Turn;
   live: boolean;
   conversationId: string | null;
   onFill: (text: string) => void;
-  onOpenBrowserLive?: () => void;
+  onOpenBrowserLive?: (opts?: OpenBrowserLiveOpts) => void;
+  onRetry?: () => void;
 }) {
+  const navigate = useNavigate();
   const p = useMemo(() => fold(turn.events), [turn.events]);
   const messageId = useMemo(() => extractMessageId(turn.events), [turn.events]);
+  const chrome = useMemo(() => extractTurnChrome(turn.events), [turn.events]);
   // 主清单优先 delivery_status；缺字段时回落 process/events（A1 旁路同源）。
   const { list: artifacts, review: reviewArtifacts } = useMemo(
     () =>
@@ -572,7 +640,6 @@ function AssistantBubble({
   );
   const meta = summarize(p);
   const clockIso = extractTurnClock(turn.events);
-  const durationMs = extractTurnDurationMs(turn.events);
   const isMulti = p.runs.length > 0;
   const team = isMulti
     ? {
@@ -594,8 +661,15 @@ function AssistantBubble({
   const empty =
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 对齐桌面：空正文 + error/unproductive → 可见失败说明（不必整泡无 process）。
+  const finishReason = live ? null : (chrome.finishReason ?? p.finishReason);
   const failureNotice = !(p.content ?? "").trim()
-    ? emptyFailureNotice(p.finishReason)
+    ? emptyFailureNotice(finishReason)
+    : null;
+  const errorAction = failureNotice
+    ? errorActionForCode(chrome.errorCode, {
+        credentialSource: chrome.credentialSource,
+        message: chrome.errorMessage,
+      })
     : null;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   // BYOK: billed total is 0; estimated_total may carry a community-catalog estimate.
@@ -615,12 +689,21 @@ function AssistantBubble({
     conversationId,
     ...extractSupportIdsFromEvents(turn.events),
   };
+  const finishDiagnosis = degradedFinishChipLabel(
+    chrome.emptyDiagnosis,
+    chrome.errorMessage,
+  );
   return (
     <>
       <div className="bubble assistant">
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {empty && !failureNotice ? (
           <span className="muted">{live ? "…" : ""}</span>
+        ) : empty && failureNotice ? (
+          <FinishReasonChip
+            reason={finishReason}
+            diagnosisLabel={finishDiagnosis}
+          />
         ) : !empty ? (
           <AssistantContent
             process={p.process}
@@ -628,6 +711,8 @@ function AssistantBubble({
             reasoning={p.reasoning}
             citations={p.citations}
             evidenceLedger={turnEvidenceLedger}
+            isStreaming={live}
+            messageId={messageId}
             captainContext={p.captainContext}
             team={team}
             debate={p.debate}
@@ -642,12 +727,40 @@ function AssistantBubble({
             onFill={onFill}
             supportIds={supportIds}
             onOpenBrowserLive={onOpenBrowserLive}
+            finishReason={finishReason}
+            finishDiagnosisLabel={finishDiagnosis}
+            deliveryStatus={
+              isMulti
+                ? null
+                : (p.deliveryStatus as DeliveryStatusPayload | null)
+            }
+            usage={live ? null : chrome.usage}
+            rounds={live ? null : chrome.rounds}
+            costText={live ? null : cost}
+            durationMs={live ? null : chrome.durationMs}
+            clockIso={live ? null : clockIso}
           />
         ) : null}
         {failureNotice && (
           <div className="error inline-actions">
             <span>{failureNotice}</span>
-            <SupportDiagnosticCopyButton ids={supportIds} />
+            <div className="error-card-actions">
+              <SupportDiagnosticCopyButton ids={supportIds} />
+              {errorAction && (
+                <button
+                  type="button"
+                  className="retry-btn"
+                  onClick={() => navigate(errorAction.href)}
+                >
+                  {errorAction.label}
+                </button>
+              )}
+              {onRetry && (
+                <button type="button" className="retry-btn" onClick={onRetry}>
+                  重试
+                </button>
+              )}
+            </div>
           </div>
         )}
         <FileArtifactsCard
@@ -659,8 +772,6 @@ function AssistantBubble({
         {/* The team view carries its own progress header; the one-line meta is the
             single-agent fallback. */}
         {!isMulti && meta && <div className="meta">{meta}</div>}
-        <TurnTimeMeta clockIso={clockIso} durationMs={durationMs} />
-        {cost && <div className="cost">{cost}</div>}
       </div>
       <InterjectionBubbles items={p.userInterjections} />
     </>
@@ -685,6 +796,7 @@ function HistoryAssistant({
   onRetry?: () => void;
   isLast?: boolean;
 }) {
+  const navigate = useNavigate();
   const {
     team,
     debate,
@@ -695,11 +807,22 @@ function HistoryAssistant({
     graphAppendAuthorizedBy,
     deliveryStatus,
     userInterjections,
+    chrome,
   } = useMemo(() => {
     const events = m.runs?.events;
     const warning =
       m.runs?.turn_warning ??
       (events?.length ? extractTurnWarning(events) : null);
+    const emptyChrome = {
+      usage: null as UsageBreakdown | null,
+      rounds: null as number | null,
+      durationMs: null as number | null,
+      finishReason: null as string | null,
+      emptyDiagnosis: undefined as string | undefined,
+      errorCode: undefined as string | undefined,
+      errorMessage: undefined as string | undefined,
+      credentialSource: undefined as string | null | undefined,
+    };
     if (!events || events.length === 0)
       return {
         team: undefined,
@@ -711,6 +834,7 @@ function HistoryAssistant({
         graphAppendAuthorizedBy: new Map<string, string>(),
         deliveryStatus: null,
         userInterjections: [] as ProjectedTurn["userInterjections"],
+        chrome: emptyChrome,
       };
     const p = fold(events);
     const team =
@@ -738,6 +862,7 @@ function HistoryAssistant({
       graphAppendAuthorizedBy: extractGraphAppendAuthorizedBy(events),
       deliveryStatus: p.deliveryStatus,
       userInterjections: p.userInterjections,
+      chrome: extractTurnChrome(events),
     };
   }, [m.runs]);
   const process = m.runs?.process ?? undefined;
@@ -786,9 +911,10 @@ function HistoryAssistant({
         ? COST_UNPRICED_LABEL
         : null;
   const streaming = m.status === "running" && !m.paused;
+  const finishReason = m.runs?.finish_reason ?? chrome.finishReason ?? null;
   const interrupted =
-    m.status === "incomplete" || m.runs?.finish_reason === "interrupted";
-  const stopped = m.runs?.finish_reason === "cancelled";
+    m.status === "incomplete" || finishReason === "interrupted";
+  const stopped = finishReason === "cancelled";
   const emptyBody =
     !team &&
     (!process || process.length === 0) &&
@@ -798,9 +924,21 @@ function HistoryAssistant({
     artifacts.length === 0;
   const failureNotice =
     !streaming && !(m.content ?? "").trim()
-      ? emptyFailureNotice(m.runs?.finish_reason)
+      ? emptyFailureNotice(finishReason)
       : null;
+  const errorAction = failureNotice
+    ? errorActionForCode(chrome.errorCode, {
+        credentialSource: chrome.credentialSource,
+        message: chrome.errorMessage,
+      })
+    : null;
   const supportIds = historySupportIds(m, conversationId);
+  const showRetry =
+    !!onRetry && isLast && (interrupted || stopped || !!failureNotice);
+  const finishDiagnosis = degradedFinishChipLabel(
+    chrome.emptyDiagnosis,
+    chrome.errorMessage,
+  );
 
   if (
     emptyBody &&
@@ -822,13 +960,20 @@ function HistoryAssistant({
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {streaming && !m.content && !m.reasoning_content && !process?.length ? (
           <span className="muted">…</span>
-        ) : emptyBody && failureNotice ? null : (
+        ) : emptyBody && failureNotice ? (
+          <FinishReasonChip
+            reason={finishReason}
+            diagnosisLabel={finishDiagnosis}
+          />
+        ) : (
           <AssistantContent
             process={process}
             content={m.content ?? ""}
             reasoning={m.reasoning_content ?? undefined}
             citations={m.citations}
             evidenceLedger={historyEvidenceLedger}
+            isStreaming={streaming}
+            messageId={m.id}
             captainContext={m.runs?.captain_context ?? undefined}
             team={team}
             debate={debate}
@@ -841,12 +986,36 @@ function HistoryAssistant({
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
             onFill={onFill}
             supportIds={supportIds}
+            finishReason={streaming ? null : finishReason}
+            finishDiagnosisLabel={finishDiagnosis}
+            deliveryStatus={team ? null : deliveryStatus}
+            usage={streaming ? null : (m.usage ?? chrome.usage)}
+            rounds={streaming ? null : (m.rounds ?? chrome.rounds)}
+            costText={streaming ? null : cost}
+            durationMs={streaming ? null : (m.duration_ms ?? chrome.durationMs)}
+            clockIso={streaming ? null : m.created_at}
           />
         )}
         {failureNotice && (
           <div className="error inline-actions">
             <span>{failureNotice}</span>
-            <SupportDiagnosticCopyButton ids={supportIds} />
+            <div className="error-card-actions">
+              <SupportDiagnosticCopyButton ids={supportIds} />
+              {errorAction && (
+                <button
+                  type="button"
+                  className="retry-btn"
+                  onClick={() => navigate(errorAction.href)}
+                >
+                  {errorAction.label}
+                </button>
+              )}
+              {showRetry && (
+                <button type="button" className="retry-btn" onClick={onRetry}>
+                  重试
+                </button>
+              )}
+            </div>
           </div>
         )}
         <FileArtifactsCard
@@ -855,13 +1024,11 @@ function HistoryAssistant({
           conversationId={conversationId}
           messageId={m.id}
         />
-        {(interrupted || stopped) && isLast && onRetry && (
+        {(interrupted || stopped) && showRetry && !failureNotice && (
           <button type="button" className="retry-btn" onClick={onRetry}>
             重试
           </button>
         )}
-        <TurnTimeMeta clockIso={m.created_at} durationMs={m.duration_ms} />
-        {cost && !streaming && <div className="cost">{cost}</div>}
       </div>
       <InterjectionBubbles items={userInterjections} />
     </>
@@ -903,7 +1070,42 @@ export function ChatPage() {
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
   /** Sandbox browser live sheet (Step4 · C): login card / hot escalate open this. */
   const [browserLiveOpen, setBrowserLiveOpen] = useState(false);
-  const openBrowserLive = useCallback(() => setBrowserLiveOpen(true), []);
+  const [browserLiveSessionId, setBrowserLiveSessionId] = useState<
+    string | null
+  >(null);
+  const openBrowserLive = useCallback(
+    (opts?: OpenBrowserLiveOpts) => {
+      if (!conversationId) {
+        setBrowserLiveOpen(true);
+        return;
+      }
+      void listBrowserSessions(conversationId)
+        .then((list) => {
+          let sid = "";
+          const wantRun = opts?.runId?.trim();
+          if (wantRun) {
+            const match = list.sessions.find(
+              (s) => s.runId?.trim() === wantRun,
+            );
+            if (match?.sessionId?.trim()) sid = match.sessionId.trim();
+          }
+          if (!sid) {
+            sid =
+              list.activeSessionId?.trim() ||
+              list.sessions[0]?.sessionId?.trim() ||
+              "";
+          }
+          setBrowserLiveSessionId(sid || null);
+        })
+        .catch(() => {
+          setBrowserLiveSessionId(null);
+        })
+        .finally(() => {
+          setBrowserLiveOpen(true);
+        });
+    },
+    [conversationId],
+  );
   const [recoveredInteractions, setRecoveredInteractions] = useState<
     PendingInteractionSummary[]
   >([]);
@@ -1181,12 +1383,13 @@ export function ChatPage() {
     setSending(false);
     setPaused([]);
     setRecoveredInteractions([]);
+    setBrowserLiveOpen(false);
+    setBrowserLiveSessionId(null);
     setHasMoreBefore(false);
     setMemoryUpdates([]);
     setPermissionLabel(null);
     setCurrentProfileId(null);
     setActiveTurn(null);
-    clearQueuedTurns(conversationId);
     let cancelled = false;
     void getConversation(conversationId)
       .then((c) => {
@@ -1392,6 +1595,14 @@ export function ChatPage() {
       .map(recoveredStageCard)
       .filter((x): x is NonNullable<typeof x> => x != null);
   }, [liveProjection, recoveredInteractions, busy]);
+
+  // 冷恢复 escalation：composer 上方可答卡（优先于 HistoryAssistant 时间线 interactive）。
+  const escalationCards = useMemo(() => {
+    if (busy) return [];
+    return recoveredInteractions
+      .map(recoveredEscalation)
+      .filter((x): x is NonNullable<typeof x> => x != null);
+  }, [recoveredInteractions, busy]);
 
   // 下一步推荐 chips: live path matches followups_generated.message_id to this turn's
   // message_start; reload (no live turn) replays MessageDetail.followups on the latest
@@ -1985,10 +2196,9 @@ export function ChatPage() {
     setError(null);
     clearStopping();
     setSending(true);
-    setTurns((t) => [
-      ...t,
-      { id: crypto.randomUUID(), userText: null, events: [] },
-    ]);
+    const turnId = crypto.randomUUID();
+    setActiveTurn(turnId);
+    setTurns((t) => [...t, { id: turnId, userText: null, events: [] }]);
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -2008,7 +2218,7 @@ export function ChatPage() {
         conversationId,
         messageId,
         body,
-        appendEvent,
+        (event) => appendEventToTurn(turnId, event),
         ac.signal,
       );
     } catch (e) {
@@ -2031,7 +2241,6 @@ export function ChatPage() {
       note?: string;
       motionOverride?: string | null;
     },
-    onEvent: (event: SSEEvent) => void,
   ): Promise<void> {
     if (!conversationId || busy) return;
     setRecoveredInteractions((prev) =>
@@ -2040,10 +2249,9 @@ export function ChatPage() {
     setError(null);
     clearStopping();
     setSending(true);
-    setTurns((t) => [
-      ...t,
-      { id: crypto.randomUUID(), userText: null, events: [] },
-    ]);
+    const turnId = crypto.randomUUID();
+    setActiveTurn(turnId);
+    setTurns((t) => [...t, { id: turnId, userText: null, events: [] }]);
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -2051,7 +2259,7 @@ export function ChatPage() {
         conversationId,
         stageCardId,
         body,
-        onEvent,
+        (event) => appendEventToTurn(turnId, event),
         ac.signal,
       );
     } catch (e) {
@@ -2091,7 +2299,11 @@ export function ChatPage() {
         <span className="bar-title">
           {conversationId ? "对话" : "新对话"}
           {permissionLabel ? (
-            <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+            <span
+              className="muted"
+              style={{ marginLeft: 8, fontSize: 12 }}
+              title="本会话权限配方（只读；改默认请到 设置 → 新会话默认权限）"
+            >
               · {permissionLabel}
             </span>
           ) : null}
@@ -2262,6 +2474,25 @@ export function ChatPage() {
         ) : null,
       )}
 
+      {!busy &&
+        conversationId &&
+        escalationCards.map((card) => (
+          <EscalationAnswer
+            key={card.id}
+            esc={card.esc}
+            escalationId={card.id}
+            conversationId={conversationId}
+            runId={card.runId || undefined}
+            onOpenLive={openBrowserLive}
+            onResolved={() => {
+              setRecoveredInteractions((prev) =>
+                prev.filter((a) => a.id !== card.id),
+              );
+              void attachOnOpen(conversationId);
+            }}
+          />
+        ))}
+
       {/* Durable resume cards (a turn that paused then lost its stream). Hidden while a
           stream is live — a live run owns the pause surface (PauseCard) instead. */}
       {!busy &&
@@ -2283,7 +2514,7 @@ export function ChatPage() {
             key={card.id}
             card={card}
             onResolve={async (args) => {
-              await runStageCard(card.id, args, appendEvent);
+              await runStageCard(card.id, args);
             }}
           />
         ))}
@@ -2438,7 +2669,11 @@ export function ChatPage() {
           disabled={history === null || stopPhase === "stopping"}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void onSubmit();
+            if (e.key !== "Enter") return;
+            // IME 组合态（中文选词等）：Enter 确认候选，勿当发送。
+            if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
+              return;
+            void onSubmit();
           }}
         />
         {voice.isSupported && (
@@ -2526,8 +2761,12 @@ export function ChatPage() {
       {conversationId ? (
         <BrowserLiveSheet
           conversationId={conversationId}
+          sessionId={browserLiveSessionId}
           open={browserLiveOpen}
-          onClose={() => setBrowserLiveOpen(false)}
+          onClose={() => {
+            setBrowserLiveOpen(false);
+            setBrowserLiveSessionId(null);
+          }}
         />
       ) : null}
     </div>

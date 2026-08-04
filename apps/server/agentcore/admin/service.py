@@ -12,6 +12,8 @@ Schema ↔ ORM mapping stays in the API layer; this service speaks in domain
 objects (``User``) and the repository's quota sentinel convention.
 """
 
+from datetime import datetime
+
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.models import User
 from agentcore.db.repositories import UserRepository
@@ -29,16 +31,20 @@ class AdminService:
         query: str | None = None,
         role: str | None = None,
         status: str | None = None,
+        ip: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
         sort: str = "created_at",
         order: str = "desc",
         include_deleted: bool = False,
     ) -> tuple[list[tuple[User, int]], int]:
         """One page of the account roster + each row's all-time spend, with the total.
 
-        ``query``/``role``/``status`` filter (AND); ``sort`` ∈ {created_at, cost} with
-        ``order`` ∈ {asc, desc}; ``include_deleted`` surfaces 注销 (soft-deleted,
-        anonymized) accounts (hidden by default — a tombstone roster is ops noise).
-        The route validates the enum-shaped params; this layer forwards them verbatim.
+        ``query``/``role``/``status``/``ip``/``since``/``until`` filter (AND); ``sort`` ∈
+        {created_at, cost} with ``order`` ∈ {asc, desc}; ``include_deleted`` surfaces
+        注销 (soft-deleted, anonymized) accounts (hidden by default — a tombstone
+        roster is ops noise). The route validates the enum-shaped params; this layer
+        forwards them verbatim.
         """
         offset = (page - 1) * page_size
         return await self._users.list_all(
@@ -47,6 +53,9 @@ class AdminService:
             query=query,
             role=role,
             status=status,
+            ip=ip,
+            since=since,
+            until=until,
             sort=sort,
             order=order,
             include_deleted=include_deleted,

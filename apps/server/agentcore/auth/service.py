@@ -163,6 +163,7 @@ class AuthService:
         password: str,
         display_name: str | None = None,
         email: str | None = None,
+        registration_ip: str | None = None,
     ) -> User:
         if not settings.registration_open:
             raise AuthorizationError("注册已关闭")
@@ -181,6 +182,7 @@ class AuthService:
             username=username,
             display_name=display_name or username,
             email=email,
+            registration_ip=registration_ip,
             commit=False,
         )
         await self._credentials.create(

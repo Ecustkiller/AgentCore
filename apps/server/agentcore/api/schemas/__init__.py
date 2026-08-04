@@ -160,6 +160,7 @@ from .messages import (
     AcceptRunOutcomeResponse,
     Citation,
     EvidenceLedgerEntryRest,
+    LocalTurnToolFailure,
     MemoryUpdateItemView,
     MemoryUpdateView,
     MessageAttachment,
@@ -191,6 +192,8 @@ from .messages import (
     WorkspaceOpError,
     WriteCapabilityOverride,
     interaction_result_from_body,
+    normalize_local_turn_tool_failure_code,
+    truncate_tool_failure_message,
 )
 from .messaging import (
     AdminMuteRequest,
@@ -526,8 +529,11 @@ __all__ = [
     "MemoryUpdateView",
     "MessageDetail",
     "MessageListResponse",
+    "LocalTurnToolFailure",
     "RecordTurnRequest",
     "RecordTurnResponse",
+    "normalize_local_turn_tool_failure_code",
+    "truncate_tool_failure_message",
     "StopTurnResponse",
     # search
     "SearchItem",

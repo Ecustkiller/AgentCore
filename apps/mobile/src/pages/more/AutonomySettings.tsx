@@ -1,8 +1,8 @@
 import { type AutonomyPolicy, getAutonomy, setAutonomy } from "@/api/autonomy";
 // 权限配方 (/more/autonomy) — AutonomyPolicy 三配方。
 //
-// Mirrors desktop AutonomySettings: three recipe options. Mobile is cloud-only
-// (no sidecar axes badge mid-session yet) — GET/PUT the API directly.
+// Mirrors desktop AutonomySettings: three recipe options. Mobile is cloud-only —
+// GET/PUT account default only; mid-session four-axis badge is desktop-only.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
@@ -22,14 +22,12 @@ const OPTIONS: AutonomyOption[] = [
   {
     value: "less_interrupt",
     label: "少打断（推荐）",
-    description:
-      "新会话默认：本会话信任改文件；自动执行；组团卡按规则；本机会话信任。",
+    description: "新会话默认：本会话信任改文件；自动执行；组团卡按规则。",
   },
   {
     value: "managed",
     label: "托管",
-    description:
-      "新会话默认：本会话信任改文件；自动执行；跳过组团卡；本机会话信任。",
+    description: "新会话默认：本会话信任改文件；自动执行；跳过组团卡。",
   },
 ];
 
@@ -66,7 +64,7 @@ export function AutonomySettings() {
       policy !== "less_interrupt" &&
       policy !== "managed" &&
       !window.confirm(
-        "切换到「免审执行」后，执行类（代码/终端/浏览器等）与桌面提醒将免审；Host/MCP 仍按本机轴。确定？",
+        "切换到「免审执行」后，执行类（代码/浏览器等）将免审。确定？",
       )
     ) {
       return;
@@ -101,7 +99,7 @@ export function AutonomySettings() {
 
       <div className="settings-body">
         <p className="settings-desc">
-          只影响之后新建的对话。已有会话的权限在对话详情中查看。
+          只影响之后新建的对话。已有会话顶栏可看当前配方（只读）；手机暂不支持在会话内改四轴。
         </p>
 
         {policy === null && !loadError ? (

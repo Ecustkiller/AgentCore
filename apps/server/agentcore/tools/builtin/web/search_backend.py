@@ -170,7 +170,11 @@ class SearchBackend(Protocol):
 
 
 def _parse_results(data: dict[str, Any], max_results: int) -> list[SearchResult]:
-    """Filter + dedup + truncate a SearXNG JSON payload into SearchResults.
+    """Filter + dedup + truncate a search JSON payload into SearchResults.
+
+    SearXNG / Tavily expose the summary as ``content``; cloud
+    ``/v1/inference/web_search`` returns ``snippet``. Prefer ``content`` when
+    present, else ``snippet``.
 
     SearXNG already orders results by cross-engine aggregate score, so we keep
     insertion order: drop entries missing url/title, dedup by normalized url
@@ -188,7 +192,9 @@ def _parse_results(data: dict[str, Any], max_results: int) -> list[SearchResult]
         if key in seen:
             continue
         seen.add(key)
-        results.append(SearchResult(title=title, url=url, snippet=item.get("content") or ""))
+        # SearXNG/Tavily: content; cloud inference web_search: snippet.
+        snippet = item.get("content") or item.get("snippet") or ""
+        results.append(SearchResult(title=title, url=url, snippet=snippet))
         if len(results) >= max_results:
             break
     return results
@@ -196,6 +202,16 @@ def _parse_results(data: dict[str, Any], max_results: int) -> list[SearchResult]
 
 def _searxng_host(base_url: str) -> str:
     return (urlparse(base_url).hostname or "localhost").lower()
+
+
+def describe_searxng_error(e: BaseException, *, base_url: str) -> str:
+    """Honest copy for failures talking to the configured SearXNG host.
+
+    Connect-class errors are always「本机搜索服务未就绪」(loopback *or* compose
+    service name) — never the public「出网受限」wording. Other failures fall
+    through to :func:`describe_net_error`. Classification only; no SSRF change.
+    """
+    return describe_net_error(e, url=base_url, local_service=True)
 
 
 class _TokenBucket:
@@ -400,9 +416,9 @@ class TavilyBackend:
     hitting the free self-hosted instance and incur no per-query Tavily cost.
 
     Tavily's result objects expose ``title`` / ``url`` / ``content`` — the same
-    shape SearXNG returns — so :func:`_parse_results` parses both. Holds a
-    persistent ``httpx.AsyncClient`` (keep-alive to the fixed Tavily host), closed
-    on shutdown via the wrapping backend's ``aclose``.
+    shape SearXNG returns. :func:`_parse_results` also accepts cloud ``snippet``.
+    Holds a persistent ``httpx.AsyncClient`` (keep-alive to the fixed Tavily
+    host), closed on shutdown via the wrapping backend's ``aclose``.
     """
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
@@ -504,7 +520,11 @@ class FallbackSearchBackend:
         except Exception as primary_exc:  # noqa: BLE001 - any primary failure → try fallback
             logger.warning(
                 "search.primary_failed_try_fallback",
-                reason=describe_net_error(primary_exc),
+                reason=(
+                    describe_searxng_error(primary_exc, base_url=self.primary.base_url)
+                    if isinstance(self.primary, SearXNGBackend)
+                    else describe_net_error(primary_exc)
+                ),
                 error_repr=repr(primary_exc),
             )
             # 工具执行阶段进度: the primary went search-blind — signal「改用备用引擎」so the
@@ -535,6 +555,19 @@ class FallbackSearchBackend:
                 await closer()
             except Exception:  # noqa: BLE001 - best-effort shutdown cleanup
                 logger.warning("search.backend_aclose_failed", backend=type(backend).__name__)
+
+
+def describe_search_error(e: BaseException, backend: SearchBackend | None = None) -> str:
+    """Pick SearXNG-local vs public egress copy from the active search backend."""
+    if backend is None:
+        return describe_net_error(e)
+    primary: SearchBackend = (
+        backend.primary if isinstance(backend, FallbackSearchBackend) else backend
+    )
+    base = getattr(primary, "base_url", None)
+    if isinstance(primary, SearXNGBackend) and isinstance(base, str) and base:
+        return describe_searxng_error(e, base_url=base)
+    return describe_net_error(e)
 
 
 _backend: SearchBackend | None = None
@@ -636,7 +669,7 @@ async def probe_search_results() -> tuple[bool, int] | None:
     try:
         results = await backend.search(_SEARCH_CANARY_QUERY, max_results=1)
     except Exception as exc:  # noqa: BLE001 - best-effort; any failure == can't confirm
-        logger.warning("searxng.canary_failed", reason=describe_net_error(exc))
+        logger.warning("searxng.canary_failed", reason=describe_search_error(exc, backend))
         return None
     ok = len(results) > 0
     if ok:
