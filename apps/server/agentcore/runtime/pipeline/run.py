@@ -32,7 +32,7 @@ from agentcore.runtime.pipeline.settle import (
 )
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — test seam
 from agentcore.runtime.runs import RunKind, RunSpec, build_captain_executor
-from agentcore.runtime.session_persistence import SessionRosterWriter
+from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
@@ -169,6 +169,9 @@ async def run_chat_pipeline(
     # flush with audit at turn-end so cross-turn load-on-miss stays durable.
     roster_writer = SessionRosterWriter.wrap(session_saver)
     session_saver = roster_writer.save if roster_writer is not None else None
+    wire_roster_for_turn(
+        conversation_id, roster_writer=roster_writer, session_loader=session_loader
+    )
     # 执行级事件溯源 Phase 2 ⑤: publish this turn's history so a suspending face captures it
     # into the durable frame — the resume window splices it ahead of the journal-folded
     # rounds (the journal stores only history's LENGTH). Reset in finally.

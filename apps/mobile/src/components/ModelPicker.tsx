@@ -147,11 +147,18 @@ function ProfileRows({
         <p>暂无可用组合</p>
         {platformAvailable ? (
           <p data-testid="profiles-empty-platform">
-            平台额度暂不可用，请联系管理员或稍后重试。
+            请稍后重试，或到设置检查模型配置。{" "}
+            <button type="button" className="link" onClick={onOpenManage}>
+              去模型配置
+            </button>
           </p>
         ) : (
           <p data-testid="profiles-empty-byok">
-            请先{" "}
+            请先到{" "}
+            <a href="https://jiurelay.com/" target="_blank" rel="noreferrer">
+              jiurelay
+            </a>{" "}
+            免费自配额度，或{" "}
             <button type="button" className="link" onClick={onOpenManage}>
               去模型配置
             </button>

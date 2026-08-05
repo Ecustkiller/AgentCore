@@ -11,7 +11,8 @@ Turns a conversation's full transcript into a downloadable artifact. Two formats
   usage snapshot, timestamps), minus internal-only ids. ``finish_reason`` is
   projected from turn journal (``turn_end``) or ``usage.finish_reason`` when
   present — Message ORM no longer carries that column; omit honestly when neither
-  source has it.
+  source has it. Pure-failure empty assistants add ``visible_text`` (same
+  projection Markdown uses) without rewriting ``content``.
 
 The route reads the whole transcript (``MessageRepository.list_all_for_conversation``)
 and optionally a journal map, then hands them here; these functions are pure
@@ -25,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from agentcore.conversation.failure_visible import export_visible_text
 from agentcore.db.models import Conversation, Message
 from agentcore.runtime.journal import KIND_TURN_END
 
@@ -35,14 +37,25 @@ _EXPORTED_ROLES = ("user", "assistant")
 _ROLE_LABELS = {"user": "用户", "assistant": "AgentCore"}
 
 
-def _visible_messages(messages: Sequence[Message]) -> list[Message]:
-    """User/assistant turns that carry text, in render order.
+def _visible_export_rows(
+    messages: Sequence[Message],
+    journal_map: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+) -> list[tuple[Message, str]]:
+    """User/assistant turns with readable body, in render order.
 
-    A row with no content (e.g. an interrupted assistant turn that only produced
-    tool calls) would render as an empty section, so it is dropped — export shows
-    what the user can read.
+    Ordinary empty rows (e.g. interrupted tool-only assistants) are dropped.
+    Pure-failure assistants (empty content + error metadata) keep a section whose
+    body is projected from usage / journal error — not from dual-written content.
     """
-    return [m for m in messages if m.role in _EXPORTED_ROLES and (m.content or "").strip()]
+    rows: list[tuple[Message, str]] = []
+    for m in messages:
+        if m.role not in _EXPORTED_ROLES:
+            continue
+        entries = journal_map.get(m.id) if journal_map is not None else None
+        text = export_visible_text(m, journal_entries=entries)
+        if text:
+            rows.append((m, text))
+    return rows
 
 
 def _fmt_ts(value: datetime | None) -> str:
@@ -85,25 +98,31 @@ def _export_finish_reason(
     return fr if isinstance(fr, str) and fr else None
 
 
-def conversation_to_markdown(conversation: Conversation, messages: Sequence[Message]) -> str:
+def conversation_to_markdown(
+    conversation: Conversation,
+    messages: Sequence[Message],
+    *,
+    journal_map: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+) -> str:
     """Render a conversation as a clean Markdown transcript (the default export).
 
     Each turn becomes a ``##`` section headed by its author and time, followed by
     the message text. Web sources (citations) and attachment names are appended per
-    turn as small reference lists when present.
+    turn as small reference lists when present. Pure-failure empty assistants still
+    export a readable error sentence from usage / journal when available.
     """
     title = (conversation.title or "").strip() or "未命名对话"
     lines: list[str] = [f"# {title}", ""]
     lines.append(f"> 由 AgentCore 导出 · {_fmt_ts(datetime.now(UTC))} UTC")
     lines.append("")
 
-    for msg in _visible_messages(messages):
+    for msg, body in _visible_export_rows(messages, journal_map):
         label = _ROLE_LABELS.get(msg.role, msg.role)
         ts = _fmt_ts(msg.created_at)
         heading = f"## {label}" + (f" · {ts}" if ts else "")
         lines.append(heading)
         lines.append("")
-        lines.append((msg.content or "").strip())
+        lines.append(body)
         lines.append("")
 
         citations = msg.citations or []
@@ -150,6 +169,8 @@ def conversation_to_json(
 
     ``journal_map`` is message_id → ordered turn_journal entries (from the export
     route). ``finish_reason`` is included only when journal or usage can supply it.
+    Empty failed assistants may also carry ``visible_text`` (readable error
+    projection); ``content`` remains the on-disk body.
     """
     exported: list[dict[str, Any]] = []
     for m in messages:
@@ -157,6 +178,8 @@ def conversation_to_json(
             continue
         row: dict[str, Any] = {
             "role": m.role,
+            # Content stays the persisted body (empty for pure failure — never
+            # dual-write the error sentence back into the authoritative field).
             "content": m.content,
             "reasoning_content": m.reasoning_content,
             "citations": m.citations or [],
@@ -168,6 +191,12 @@ def conversation_to_json(
         finish_reason = _export_finish_reason(m, entries)
         if finish_reason is not None:
             row["finish_reason"] = finish_reason
+        # Empty pure-failure: same readable projection Markdown uses, as a
+        # sibling field (visible_text), not as content.
+        if not (m.content or "").strip():
+            visible = export_visible_text(m, journal_entries=entries)
+            if visible:
+                row["visible_text"] = visible
         exported.append(row)
     return {
         "conversation_id": conversation.id,

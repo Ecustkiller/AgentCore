@@ -19,6 +19,7 @@ from agentcore.llm.credentials import (
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
+from agentcore.sidecar.run_session_store import LocalRunSessionStore
 from agentcore.sidecar.server_pkg.handlers import HandlerMixin
 from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -44,6 +45,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None
+        # Local durable 留人 roster (cloud ``run_sessions`` counterpart). ``None`` ⇒
+        # memory-only; continuation must not claim「落盘未命中」.
+        self._run_session_store: LocalRunSessionStore | None = None
         # Progressive outbox (as-built: 双模式工作区 §10.3): sibling of paused under dataDir.
         # ``None`` ⇒ no data dir ⇒ no local outbox (dev without durable write-back).
         self._outbox_store: OutboxStore | None = None
@@ -204,6 +208,27 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         if store is None:
             return None, None
         return store.save, store.delete
+
+    def _session_hooks(
+        self, conversation_id: str
+    ) -> tuple[
+        Callable[[Any], Awaitable[None]] | None,
+        Callable[[str], Awaitable[Any]] | None,
+    ]:
+        """The (saver, loader) closures the pipeline wires into delegate continuation.
+
+        Backed by the local run-session store so a memory-roster miss can rehydrate
+        across byte-cap eviction (parity with cloud ``session_callbacks``).
+        ``(None, None)`` when no store ⇒ memory-only.
+        """
+        store = self._run_session_store
+        if store is None:
+            return None, None
+
+        async def _persist(session: Any) -> None:
+            await store.save(conversation_id, session)
+
+        return _persist, store.load
 
     def _creds_for(
         self, conversation_id: str, trace_id: str = "", message_id: str = ""

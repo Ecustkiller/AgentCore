@@ -10,7 +10,15 @@ from agentcore.conversation.history import (
 from agentcore.core.error_codes import ErrorCode
 
 
-def _msg(role, content="", *, status=None, error_code=None, finish_reason=None):
+def _msg(
+    role,
+    content="",
+    *,
+    status=None,
+    error_code=None,
+    finish_reason=None,
+    error_message=None,
+):
     usage = {}
     if status is not None:
         usage["status"] = status
@@ -18,6 +26,8 @@ def _msg(role, content="", *, status=None, error_code=None, finish_reason=None):
         usage["error_code"] = error_code
     if finish_reason is not None:
         usage["finish_reason"] = finish_reason
+    if error_message is not None:
+        usage["error_message"] = error_message
     return SimpleNamespace(role=role, content=content, usage=usage or None)
 
 
@@ -51,6 +61,29 @@ def test_fold_merges_consecutive_failures_into_one_note():
     assert "鉴权失败" in note
     assert out[4] == {"role": "user", "content": "换个说法"}
     assert out[5] == {"role": "assistant", "content": "正常回答"}
+
+
+def test_fold_empty_failure_is_note_not_raw_error_body():
+    """After stop dual-write: empty failed rows stay notes, not fake assistant prose."""
+    rows = [
+        _msg("user", "hi"),
+        _msg(
+            "assistant",
+            "",
+            status="failed",
+            error_code=ErrorCode.LLM_TIMEOUT,
+            error_message="连接超时，请稍后重试",
+        ),
+    ]
+    out = _fold_history_messages(rows)
+    assert len(out) == 2
+    assert out[0] == {"role": "user", "content": "hi"}
+    note = out[1]["content"]
+    assert note.startswith("（系统注记：")
+    assert "连接超时" in note
+    assert "详情：连接超时，请稍后重试" in note
+    # Must not look like a normal assistant reply that merely repeats the error.
+    assert out[1]["content"] != "连接超时，请稍后重试"
 
 
 def test_failure_note_single():

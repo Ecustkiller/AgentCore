@@ -1,11 +1,13 @@
 /**
- * U3：用户 SCM 受控 git（stage/unstage/commit/push/pull/diff）。
+ * U3：用户 SCM 受控 git（stage/unstage/commit/push/pull/fetch/diff/discard）。
  * 与结构化 ``git`` 同口径护栏：push 禁 force / 保护分支；pull 固定 --ff-only；
- * 不接受 reset/clean。渲染层 push/pull 另做恒确认（对等审批卡）。
+ * fetch 仅更新远端跟踪引用（无 force/prune/refspec 旋钮）；
+ * discard 仅 ``restore --worktree``（须指定 paths）；不接受 reset/clean。
+ * 渲染层 push/pull/discard 另做恒确认（对等审批卡）；fetch 免确认。
  */
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import type { StoredRoot } from "../roots";
@@ -19,7 +21,15 @@ const GIT_NET_TIMEOUT_MS = 60_000;
 /** 与 server ``GIT_PROTECTED_BRANCHES`` 对齐（桌面镜像，不改 safety_breaker）。 */
 export const GIT_PROTECTED_BRANCHES = new Set(["main", "master"]);
 
-type ScmAction = "stage" | "unstage" | "commit" | "push" | "pull" | "diff";
+type ScmAction =
+  | "stage"
+  | "unstage"
+  | "commit"
+  | "push"
+  | "pull"
+  | "fetch"
+  | "diff"
+  | "discard";
 
 function toReason(e: unknown): string {
   if (e instanceof Error) return e.message || String(e);
@@ -91,6 +101,56 @@ function normalizePaths(raw: unknown): string[] {
   return out;
 }
 
+/**
+ * discard 路径护栏（与 UI canDiscard 只传仓内相对路径对齐的纵深）：
+ * 拒空、``-`` 前缀、``..`` 穿越、绝对路径。合法则返回归一化相对路径。
+ */
+export function evaluateDiscardPath(raw: string): string | { path: string } {
+  const p = raw.replace(/\\/g, "/").trim();
+  if (!p) return "discard 路径不能为空";
+  if (p.startsWith("-"))
+    return "discard 路径不能以 - 开头（禁止伪装成 git 选项）";
+  if (isAbsolute(raw.trim()) || isAbsolute(p) || /^[A-Za-z]:\//.test(p)) {
+    return "discard 禁止绝对路径";
+  }
+  if (p.startsWith("/") || p.startsWith("//")) {
+    return "discard 禁止绝对路径";
+  }
+  const segments = p.split("/");
+  if (segments.some((seg) => seg === "..")) {
+    return "discard 禁止路径穿越（..）";
+  }
+  return { path: p };
+}
+
+/** 解析 discard paths；任一非法 → 错误文案（不做静默过滤）。 */
+export function evaluateDiscardPaths(
+  raw: unknown,
+): { paths: string[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return {
+      error:
+        "discard 必须指定 paths（禁止无路径整仓丢弃；未跟踪文件不支持 discard）",
+    };
+  }
+  const paths: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      return { error: "discard paths 须为字符串数组" };
+    }
+    const checked = evaluateDiscardPath(item);
+    if (typeof checked === "string") return { error: checked };
+    paths.push(checked.path);
+  }
+  if (paths.length === 0) {
+    return {
+      error:
+        "discard 必须指定 paths（禁止无路径整仓丢弃；未跟踪文件不支持 discard）",
+    };
+  }
+  return { paths };
+}
+
 async function currentBranch(cwd: string): Promise<string> {
   const { stdout, code } = await runGit(cwd, ["branch", "--show-current"]);
   if (code !== 0) return "";
@@ -127,7 +187,9 @@ export function parseGitScmAction(raw: unknown): ScmAction | null {
     a === "commit" ||
     a === "push" ||
     a === "pull" ||
-    a === "diff"
+    a === "fetch" ||
+    a === "diff" ||
+    a === "discard"
   ) {
     return a;
   }
@@ -176,7 +238,7 @@ export async function opGitScm(
   if (!action) {
     return opErr(
       "WorkspaceIOError",
-      "git_scm action 须为 stage / unstage / commit / push / pull / diff",
+      "git_scm action 须为 stage / unstage / commit / push / pull / fetch / diff / discard",
     );
   }
 
@@ -194,8 +256,12 @@ export async function opGitScm(
         return await doPush(cwd, args);
       case "pull":
         return await doPull(cwd, args);
+      case "fetch":
+        return await doFetch(cwd, args);
       case "diff":
         return await doDiff(cwd, args);
+      case "discard":
+        return await doDiscard(cwd, args);
       default:
         return opErr("WorkspaceIOError", `未知 git_scm action：${action}`);
     }
@@ -418,6 +484,117 @@ async function doPull(
     remote,
     ff_only: true,
     detail: detail ? `${summary}\n${detail}` : summary,
+  });
+}
+
+/**
+ * 只更新远端跟踪引用；禁止 force / prune / tags / all / refspec 旋钮。
+ */
+async function doFetch(
+  cwd: string,
+  args: Record<string, unknown>,
+): Promise<WorkspaceOpResult> {
+  for (const k of [
+    "force",
+    "prune",
+    "tags",
+    "all",
+    "refspec",
+    "depth",
+    "unshallow",
+  ]) {
+    if (k in args) {
+      return opErr(
+        "WorkspaceIOError",
+        "fetch 仅支持指定 remote，禁止 force/prune/tags/all/refspec 等参数",
+      );
+    }
+  }
+
+  const remote =
+    (typeof args.remote === "string" && args.remote.trim()) || "origin";
+  if (remote.startsWith("-")) {
+    return opErr("WorkspaceIOError", "remote 名称非法");
+  }
+
+  const remotes = await runGit(cwd, ["remote"]);
+  if (remotes.code !== 0) {
+    return opErr(
+      "WorkspaceIOError",
+      failureDetail(remotes.stdout, remotes.stderr, "无法列出 remote"),
+    );
+  }
+  const listed = remotes.stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (listed.length === 0) {
+    return opErr(
+      "WorkspaceIOError",
+      "当前仓库未配置 remote。请先配置 remote 后再 fetch。",
+    );
+  }
+  if (!listed.includes(remote)) {
+    return opErr(
+      "WorkspaceIOError",
+      `remote '${remote}' 不存在（已配置：${listed.join(", ")}）。`,
+    );
+  }
+
+  const { stdout, stderr, code } = await runGit(
+    cwd,
+    ["fetch", remote],
+    GIT_NET_TIMEOUT_MS,
+  );
+  if (code !== 0) {
+    return opErr(
+      "WorkspaceIOError",
+      failureDetail(
+        stdout,
+        stderr,
+        "git fetch 失败（请检查凭据 / remote；去设置凭据或打开已配置凭据的本地仓）",
+      ),
+    );
+  }
+  const detail = (stdout || stderr).trim();
+  const summary = `已获取 ${remote}`;
+  return opOk({
+    action: "fetch",
+    remote,
+    detail: detail ? `${summary}\n${detail}` : summary,
+  });
+}
+
+/**
+ * 窄口丢弃：仅 ``git restore --worktree -- <paths>``。
+ * 必须指定 paths；不做整仓、不做 clean（未跟踪文件请自行处理）。
+ * 恢复目标是索引/暂存区内容（不是 HEAD）；路径须通过 evaluateDiscardPaths。
+ */
+async function doDiscard(
+  cwd: string,
+  args: Record<string, unknown>,
+): Promise<WorkspaceOpResult> {
+  const checked = evaluateDiscardPaths(args.paths);
+  if ("error" in checked) {
+    return opErr("WorkspaceIOError", checked.error);
+  }
+  const { paths } = checked;
+  const { stdout, stderr, code } = await runGit(cwd, [
+    "restore",
+    "--worktree",
+    "--",
+    ...paths,
+  ]);
+  if (code !== 0) {
+    return opErr(
+      "WorkspaceIOError",
+      failureDetail(stdout, stderr, "丢弃工作区改动失败"),
+    );
+  }
+  return opOk({
+    action: "discard",
+    paths,
+    detail: (stdout || stderr).trim(),
   });
 }
 

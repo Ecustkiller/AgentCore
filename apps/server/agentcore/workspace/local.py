@@ -111,6 +111,8 @@ class LocalWorkspace:
         # Turn material paths for AI list AI-noise reveal (passed as reveal_paths).
         # Set by prepare/wire from ``collect_turn_material_paths``; default empty.
         self.ai_list_materials: frozenset[str] = frozenset()
+        # When True, channel list/list_tree keep archive suffixes visible.
+        self.ai_list_reveal_archives: bool = False
 
     @property
     def dirty(self) -> bool:
@@ -275,6 +277,8 @@ class LocalWorkspace:
         reveal = self._channel_reveal_paths()
         if reveal:
             payload["reveal_paths"] = reveal
+        if self.ai_list_reveal_archives:
+            payload["reveal_archives"] = True
         value = await self._channel.request(
             WorkspaceOp.LIST, payload, root_id=root_id
         )
@@ -334,6 +338,8 @@ class LocalWorkspace:
         reveal = self._channel_reveal_paths()
         if reveal:
             tree_payload["reveal_paths"] = reveal
+        if self.ai_list_reveal_archives:
+            tree_payload["reveal_archives"] = True
         value = await self._channel.request(
             WorkspaceOp.LIST_TREE,
             tree_payload,

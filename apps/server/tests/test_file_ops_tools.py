@@ -1367,6 +1367,103 @@ async def test_file_list_reveals_material_png(tmp_path: Path):
     assert "空目录" in bare.output or bare.output.strip() == "" or "shot" not in bare.output
 
 
+async def test_file_list_external_mount_shows_archive_zip(tmp_path: Path):
+    """external/<alias>/ 下列出可见用户压缩包；工作区根 zip 仍隐藏。"""
+    from agentcore.workspace.external_mounts import ExternalMount
+
+    ext = tmp_path / "ext_root"
+    ext.mkdir()
+    (ext / "咨询.sy.zip").write_bytes(b"PK\x03\x04")
+    (ext / "note.txt").write_text("hi", encoding="utf-8")
+    (tmp_path / "noise.zip").write_bytes(b"PK\x03\x04")
+
+    ctx = _ctx(tmp_path)
+    ctx.backend.attach_external_mounts(
+        {
+            "desk": ExternalMount(
+                alias="desk",
+                root_id="r",
+                label="桌面",
+                abs_path=str(ext),
+                mode="readonly",
+            )
+        }
+    )
+
+    listed = await FileListTool().execute(
+        {"directory": "external/desk", "pattern": "*"}, ctx
+    )
+    assert listed.success is True
+    assert "咨询.sy.zip" in listed.output
+    assert "note.txt" in listed.output
+
+    tree = await FileListTool().execute(
+        {
+            "directory": "external/desk",
+            "pattern": "*",
+            "recursive": True,
+            "max_depth": 2,
+        },
+        ctx,
+    )
+    assert tree.success is True
+    assert "咨询.sy.zip" in tree.output
+
+    root = await FileListTool().execute(
+        {"directory": ".", "pattern": "*"}, ctx
+    )
+    assert root.success is True
+    assert "noise.zip" not in root.output
+
+
+async def test_file_list_pattern_zip_reveals_workspace_archive(tmp_path: Path):
+    """pattern 指向压缩包后缀时，工作区根 zip 也应列出。"""
+    (tmp_path / "pack.zip").write_bytes(b"PK\x03\x04")
+    (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+
+    hidden = await FileListTool().execute(
+        {"directory": ".", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert hidden.success is True
+    assert "pack.zip" not in hidden.output
+
+    revealed = await FileListTool().execute(
+        {"directory": ".", "pattern": "*.zip"}, _ctx(tmp_path)
+    )
+    assert revealed.success is True
+    assert "pack.zip" in revealed.output
+
+
+async def test_file_list_bare_external_actionable_hint_no_mounts(tmp_path: Path):
+    result = await FileListTool().execute(
+        {"directory": "external"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert "external/<别名>/" in result.error
+    assert "尚无" in result.error or "授权" in result.error
+
+
+async def test_file_list_bare_external_lists_current_mounts(tmp_path: Path):
+    from agentcore.workspace.external_mounts import ExternalMount
+
+    ctx = _ctx(tmp_path)
+    ctx.backend.attach_external_mounts(
+        {
+            "desk": ExternalMount(
+                alias="desk",
+                root_id="r",
+                label="桌面",
+                abs_path=str(tmp_path),
+                mode="readonly",
+            )
+        }
+    )
+    result = await FileListTool().execute({"directory": "external"}, ctx)
+    assert result.success is False
+    assert "external/<别名>/" in result.error
+    assert "`external/desk/`" in result.error
+
+
 # --- write_scope (冷启动 explore_memory) ---
 
 

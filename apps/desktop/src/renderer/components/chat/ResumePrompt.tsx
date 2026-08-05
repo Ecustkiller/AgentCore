@@ -425,7 +425,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
               disabled={busy}
               onClick={() => send("stop", [], note.trim())}
             >
-              停止
+              取消
             </Button>
             <span className="ml-auto" />
             {gateHint ? (
@@ -977,7 +977,7 @@ function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
               disabled={busy}
               onClick={() => send("stop", [], note.trim())}
             >
-              停止
+              取消
             </Button>
           </div>
         </div>

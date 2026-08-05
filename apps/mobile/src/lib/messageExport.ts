@@ -67,12 +67,26 @@ export function formatProcessExport(
   return lines.join("\n\n").trim();
 }
 
+/**
+ * Copy/export deliverable: non-empty `content`, else empty-failure visible notice
+ * (structured error / emptyFailureNotice). Does not hide content when it equals error.
+ */
+export function exportDeliverableText(
+  content: string | null | undefined,
+  failureNotice?: string | null,
+): string {
+  const body = (content ?? "").trim();
+  if (body) return body;
+  return (failureNotice ?? "").trim();
+}
+
 export function formatMessageExport(
   content: string,
   process: ProcessStep[] | undefined,
   mode: MessageCopyMode,
+  opts?: { failureNotice?: string | null },
 ): string {
-  const deliverable = content.trim();
+  const deliverable = exportDeliverableText(content, opts?.failureNotice);
   if (mode === "deliverable") return deliverable;
 
   const processText = formatProcessExport(process);

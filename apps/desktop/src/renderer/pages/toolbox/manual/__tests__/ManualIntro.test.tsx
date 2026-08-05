@@ -21,7 +21,7 @@ describe("ManualIntro", () => {
     expect(screen.queryByText(/在 ChatGPT/)).toBeNull();
     expect(screen.queryByText(/在 Cursor/)).toBeNull();
     expect(screen.getByText("协作，是更高级的智能")).toBeTruthy();
-    expect(screen.getByText("直接开聊（平台额度）")).toBeTruthy();
+    expect(screen.getByText("接入额度后开聊")).toBeTruthy();
     expect(screen.getByText("说目标")).toBeTruthy();
   });
 });

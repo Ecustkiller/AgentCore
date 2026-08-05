@@ -113,7 +113,7 @@ def test_result_stop_is_terminal_with_closing_text():
     # NOT as output (which is the CEO-facing breadcrumb).
     assert res.effect is ToolEffect.INTERACT
     assert res.final_text == "先到这"
-    assert "跳过未回答" in res.output
+    assert "取消未回答" in res.output
 
 
 def test_result_stop_empty_closing_when_no_note():
@@ -167,7 +167,7 @@ async def test_settle_ask_user_stop_yields_terminal_text():
     # stop → finish WITHOUT another CEO round (the closing note is the whole reply).
     assert settled.terminal_text == "收工"
     assert settled.effect is ToolEffect.INTERACT
-    assert "跳过未回答" in settled.output
+    assert "取消未回答" in settled.output
     # the resolution is journaled so a reload replays the settled card.
     journal = sink.execution_journal() or []
     assert any(e["type"] == EventType.CHECKPOINT_RESOLVED.value for e in journal)

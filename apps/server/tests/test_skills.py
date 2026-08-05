@@ -667,6 +667,9 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "开工提案卡" not in body
     assert "提案体硬闸" not in body
     assert "一键开做" not in body or "禁止" in body
+    # 开工卡取消：skills 仅补一句，主引导在 tool result
+    assert "开工卡取消" in body
+    assert "宜先短问" in body or "哪里要调" in body
     assert "checkpoint_after" not in body
     # 缺主体 continue = 确认卡上 default；无 default 不得派工
     assert "缺主体" in body
@@ -718,6 +721,9 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "https://fashitianxia.xyz/download" in body
     assert "授权已确认" in body
     assert "本对话已授权区外目录" in body
+    # 先同意再发现：桌面模糊指代禁首轮要文件名
+    assert "先同意再发现" in body
+    assert "禁止" in body and "文件名" in body
     # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检；禁「就好办了」/臆造 Folders
     assert "通道复检" in body
     assert "就好办了" in body

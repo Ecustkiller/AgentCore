@@ -15,6 +15,7 @@ from agentcore.conversation.common import generate_title as mint_title
 from agentcore.conversation.common import log_cost_recorded
 from agentcore.conversation.compaction import schedule_compaction_if_due
 from agentcore.conversation.store.merge import (
+    DEFAULT_FAILED_ERROR_MESSAGE,
     MESSAGE_STATUS_COMPLETE,
     MESSAGE_STATUS_FAILED,
     MESSAGE_STATUS_INCOMPLETE,
@@ -44,7 +45,11 @@ from agentcore.runtime.events import (
     followups_generated,
     followups_unavailable,
 )
-from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
+from agentcore.runtime.journal import (
+    KIND_TURN_END,
+    journal_entries_from_display_runs,
+    persist_turn_journal,
+)
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
 
@@ -63,6 +68,87 @@ _SKIP_DERIVED_FINISH = frozenset(
 def _incomplete_body(content: str) -> str:
     """Streamed captain text only; interrupt chrome is metadata + UI, not body copy."""
     return (content or "").strip()
+
+
+def _ensure_structured_run_error(
+    *,
+    existing: dict[str, Any] | None = None,
+    error_code: Any = None,
+    error_message: Any = None,
+) -> dict[str, Any]:
+    """Build structured error for FAILED settle journal/usage (never for content).
+
+    Always returns ``code`` + ``message``. When ``existing`` carries a ``context``
+    dict (e.g. BYOK deconfigured), keep it so cold-load / remedy UI can act on it.
+    """
+    code: Any = None
+    message: Any = None
+    if isinstance(existing, dict):
+        code = existing.get("code")
+        message = existing.get("message")
+    code = code or error_code or ErrorCode.PIPELINE_ERROR
+    raw = message if message is not None else error_message
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        text = DEFAULT_FAILED_ERROR_MESSAGE
+    out: dict[str, Any] = {"code": str(code), "message": text[:_RUN_ERROR_MESSAGE_CAP]}
+    if isinstance(existing, dict):
+        ctx = existing.get("context")
+        if isinstance(ctx, dict):
+            out["context"] = ctx
+    return out
+
+
+def _merge_run_error_into_journal_entries(
+    entries: list[dict[str, Any]] | None,
+    run_error: dict[str, Any],
+    *,
+    finish_reason: Any = None,
+) -> list[dict[str, Any]]:
+    """FAILED settle: durable ``turn_end`` must carry structured error.
+
+    Progressive journals may omit ``turn_end`` or ship a partial ``error``. Merge
+    before persist so cold-load cards see code/message; never drop existing fields
+    (including ``context``) when completing a sparse error object.
+    """
+    base: list[dict[str, Any]] = [dict(e) for e in entries] if entries else []
+    turn_end_idx: int | None = None
+    for i in range(len(base) - 1, -1, -1):
+        if (base[i].get("kind") or "") == KIND_TURN_END:
+            turn_end_idx = i
+            break
+
+    if turn_end_idx is None:
+        payload: dict[str, Any] = {"error": dict(run_error)}
+        if finish_reason is not None:
+            payload["finish_reason"] = finish_reason
+        base.append({"kind": KIND_TURN_END, "payload": payload, "ts": None})
+        return base
+
+    entry = dict(base[turn_end_idx])
+    payload = dict(entry.get("payload") or {})
+    existing_err = payload.get("error")
+    if not isinstance(existing_err, dict):
+        payload["error"] = dict(run_error)
+    else:
+        merged = dict(existing_err)
+        for key in ("code", "message"):
+            cur = merged.get(key)
+            missing = (
+                not cur.strip()
+                if isinstance(cur, str)
+                else cur is None or cur == ""
+            )
+            if missing and run_error.get(key) is not None:
+                merged[key] = run_error[key]
+        if "context" not in merged and isinstance(run_error.get("context"), dict):
+            merged["context"] = run_error["context"]
+        payload["error"] = merged
+    if finish_reason is not None and not payload.get("finish_reason"):
+        payload["finish_reason"] = finish_reason
+    entry["payload"] = payload
+    base[turn_end_idx] = entry
+    return base
 
 
 def _usage_metadata(
@@ -371,12 +457,29 @@ class CloudStore:
             return
 
         turn_error = result.get("error")
+        # String errors are the common cloud shape; dict is rare but accepted.
+        if isinstance(turn_error, dict):
+            turn_error_message = turn_error.get("message")
+        elif turn_error:
+            turn_error_message = str(turn_error)
+        else:
+            turn_error_message = None
+        message_id = result.get("message_id")
+        terminal_status = (
+            MESSAGE_STATUS_FAILED
+            if turn_error or finish_value == FinishReason.ERROR.value
+            else MESSAGE_STATUS_COMPLETE
+        )
+        # FAILED/ERROR settle: structured error is the authority for failure copy.
+        # Synthesize {code, message} when missing so journal/usage never lack an
+        # error object while content stays empty (or partial only).
         run_error = (
-            {
-                "code": result.get("error_code") or ErrorCode.PIPELINE_ERROR,
-                "message": str(turn_error)[:_RUN_ERROR_MESSAGE_CAP],
-            }
-            if turn_error
+            _ensure_structured_run_error(
+                existing=turn_error if isinstance(turn_error, dict) else None,
+                error_code=result.get("error_code"),
+                error_message=turn_error_message,
+            )
+            if terminal_status == MESSAGE_STATUS_FAILED
             else None
         )
         abnormal = bool(turn_error) or (
@@ -390,30 +493,27 @@ class CloudStore:
             else None
         )
         durable_entries = journal_entries if journal_entries is not None else synth_entries
-        message_id = result.get("message_id")
-        terminal_status = (
-            MESSAGE_STATUS_FAILED
-            if turn_error or finish_value == FinishReason.ERROR.value
-            else MESSAGE_STATUS_COMPLETE
-        )
+        # Progressive journal may lack / sparseness turn_end.error — merge before
+        # persist so durable facts carry the same structured error as usage.
+        if terminal_status == MESSAGE_STATUS_FAILED and run_error is not None:
+            durable_entries = _merge_run_error_into_journal_entries(
+                durable_entries,
+                run_error,
+                finish_reason=finish_value,
+            )
+        if terminal_status == MESSAGE_STATUS_FAILED:
+            assistant_reply = visible_failed_assistant_content(content=assistant_reply)
+        usage_extra: dict[str, Any] = {"paused": False}
+        if run_error is not None:
+            usage_extra["error_code"] = run_error["code"]
+            usage_extra["error"] = run_error
 
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
 
             if message_id:
-                # Failed settle with no prose: keep any longer checkpoint body via
-                # merge; only when both sides are blank, land the error as visible
-                # content (stream stall / hard LLM fail → no empty bubble).
-                if terminal_status == MESSAGE_STATUS_FAILED and not assistant_reply.strip():
-                    existing = await msg_repo.get_by_id(
-                        message_id, conversation_id=conversation_id
-                    )
-                    existing_body = (existing.content if existing else None) or ""
-                    if not existing_body.strip():
-                        assistant_reply = visible_failed_assistant_content(
-                            content="",
-                            error=str(turn_error) if turn_error else None,
-                        )
+                # Partial stays in content via merge; pure failure writes empty body.
+                # Structured error rides usage/journal (not message.content).
                 await msg_repo.upsert_assistant(
                     conversation_id=conversation_id,
                     message_id=message_id,
@@ -429,7 +529,7 @@ class CloudStore:
                         # Non-pause settle must clear the cold pause latch (resume
                         # continuation / terminal) — merge_usage_status only drops it
                         # on terminal OR explicit paused:false.
-                        extra={"paused": False},
+                        extra=usage_extra,
                     ),
                     merge=True,
                 )
@@ -810,7 +910,29 @@ class CloudStore:
             elif finish_value is not None:
                 usage_metadata["finish_reason"] = finish_value
         run_error = runs.get("error") if isinstance(runs, dict) else None
-        if isinstance(run_error, dict):
+        runs_for_journal = runs
+        if terminal_status == MESSAGE_STATUS_FAILED:
+            run_error = _ensure_structured_run_error(
+                existing=run_error if isinstance(run_error, dict) else None,
+                error_code=(
+                    run_error.get("code") if isinstance(run_error, dict) else None
+                ),
+                error_message=(
+                    run_error.get("message") if isinstance(run_error, dict) else None
+                ),
+            )
+            usage_metadata["error_code"] = run_error["code"]
+            usage_metadata["error"] = run_error
+            # Ensure journal projection carries structured error even when the
+            # client omitted ``runs.error`` on an ERROR finish.
+            if isinstance(runs, dict):
+                runs_for_journal = {**runs, "error": run_error}
+            else:
+                runs_for_journal = {
+                    "finish_reason": finish_value,
+                    "error": run_error,
+                }
+        elif isinstance(run_error, dict):
             err_code = run_error.get("code")
             if err_code:
                 usage_metadata["error_code"] = err_code
@@ -849,14 +971,8 @@ class CloudStore:
                     content_to_write,
                     incoming_status=terminal_status,
                 )
-                if terminal_status == MESSAGE_STATUS_FAILED and not (content or "").strip():
-                    err_msg = (
-                        run_error.get("message") if isinstance(run_error, dict) else None
-                    )
-                    content = visible_failed_assistant_content(
-                        content="",
-                        error=str(err_msg) if err_msg else None,
-                    )
+                if terminal_status == MESSAGE_STATUS_FAILED:
+                    content = visible_failed_assistant_content(content=content)
                 assistant_msg = await MessageRepository(session).upsert_assistant(
                     conversation_id=conversation_id,
                     message_id=message_id,
@@ -875,10 +991,21 @@ class CloudStore:
                     # display ``runs``; crash salvage may pass journal alone.
                     if isinstance(journal, list) and journal:
                         durable = journal
-                    elif runs is not None:
-                        durable = journal_entries_from_display_runs(runs)
+                    elif runs_for_journal is not None:
+                        durable = journal_entries_from_display_runs(runs_for_journal)
                     else:
                         durable = None
+                    # Same口径 as cloud live: FAILED must land structured error on
+                    # turn_end even when progressive journal omitted / sparsed it.
+                    if (
+                        terminal_status == MESSAGE_STATUS_FAILED
+                        and run_error is not None
+                    ):
+                        durable = _merge_run_error_into_journal_entries(
+                            durable,
+                            run_error,
+                            finish_reason=finish_value,
+                        )
                     if durable is not None:
                         await persist_turn_journal(
                             session,

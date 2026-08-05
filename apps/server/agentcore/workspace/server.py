@@ -166,6 +166,9 @@ class ServerWorkspace:
         # Turn material paths for AI ``list_tree`` AI-noise reveal (∪ attachments/).
         # Set by prepare/wire from ``collect_turn_material_paths``; default empty.
         self.ai_list_materials: frozenset[str] = frozenset()
+        # When True, AI list_tree / channel list keep archive suffixes visible
+        # (file_list pattern targets zip/rar/…). Default False.
+        self.ai_list_reveal_archives: bool = False
 
     @property
     def dirty(self) -> bool:
@@ -587,7 +590,9 @@ class ServerWorkspace:
 
     async def list(self, directory: str, pattern: str) -> list[DirEntry]:
         if self._external_needs_channel(directory):
-            return await self._require_external_bridge().list(directory, pattern)
+            bridge = self._require_external_bridge()
+            bridge.ai_list_reveal_archives = self.ai_list_reveal_archives
+            return await bridge.list(directory, pattern)
         await self._gate_shared(directory, write=False)
         base = self._safe(directory)
         if not base.is_dir():
@@ -694,7 +699,9 @@ class ServerWorkspace:
         max_entries: int = 200,
     ) -> TreeResult:
         if self._external_needs_channel(directory):
-            return await self._require_external_bridge().list_tree(
+            bridge = self._require_external_bridge()
+            bridge.ai_list_reveal_archives = self.ai_list_reveal_archives
+            return await bridge.list_tree(
                 directory,
                 pattern=pattern,
                 max_depth=max_depth,
@@ -709,6 +716,7 @@ class ServerWorkspace:
         elided_count = 0
         warnings: list[str] = []
         name_filter = pattern or "*"
+        reveal_archives = self.ai_list_reveal_archives
 
         def walk(dir_path: Path, depth: int, *, is_root: bool) -> None:
             nonlocal truncated, elided_count
@@ -721,19 +729,32 @@ class ServerWorkspace:
                     try:
                         rel = dir_path.resolve().relative_to(self._root.resolve()).as_posix()
                     except ValueError:
-                        rel = dir_path.name
+                        rel = self._model_path(dir_path, logical=directory)
                     if rel == ".":
                         rel = directory if directory not in ("", ".") else "."
                     warnings.append(f"跳过无权限目录：{rel}")
                     return
                 raise WorkspaceIOError(str(e)) from e
 
-            try:
-                parent_rel = dir_path.resolve().relative_to(self._root.resolve()).as_posix()
-            except ValueError:
+            # Prefer model-facing ``external/<alias>/…`` (or shared) when the
+            # list root is in that namespace — mount abs may sit under the
+            # primary tree in tests / edge layouts, which would otherwise hide
+            # archives as workspace AI-noise.
+            if parse_external_path(directory) is not None or parse_shared_path(
+                directory
+            ) is not None:
+                parent_rel = self._model_path(dir_path, logical=directory)
+            else:
+                try:
+                    parent_rel = dir_path.resolve().relative_to(
+                        self._root.resolve()
+                    ).as_posix()
+                except ValueError:
+                    parent_rel = self._model_path(dir_path, logical=directory)
+            if parent_rel in (".", ""):
                 parent_rel = ""
-            if parent_rel == ".":
-                parent_rel = ""
+            elif parent_rel.endswith("/."):
+                parent_rel = parent_rel[:-2]
 
             for child in children:
                 # Name-first prune — do not ``is_dir`` locked ignore-set dirs.
@@ -750,11 +771,12 @@ class ServerWorkspace:
                     raise WorkspaceIOError(str(e)) from e
 
                 # AI list_tree: system noise always; AI noise except attachments/
-                # and this-turn material paths.
+                # materials; archives under external/ or reveal_archives.
                 if is_file and is_ai_list_hidden_file(
                     parent_rel=parent_rel,
                     name=child.name,
                     materials=self.ai_list_materials,
+                    reveal_archives=reveal_archives,
                 ):
                     continue
 

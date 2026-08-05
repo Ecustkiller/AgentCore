@@ -79,6 +79,25 @@ def test_ceo_seeds_visible_to_workers_via_new_for():
     assert fresh[0].run_id == CEO_SEED_RUN_ID
 
 
+def test_ceo_seeds_opening_pull_renders_once():
+    """Cold-open preload contract: first pull (executor before react) sees seeds; second empty."""
+    from agentcore.runtime.runs.notewall import format_notes_for_injection
+
+    wall = NoteWall()
+    seed_note_wall(
+        wall,
+        [{"kind": "decision", "text": "受众：初学者"}],
+        sink=EventSink(),
+        execution_id="e",
+    )
+    opening = wall.new_for("worker-run-1")
+    assert [n.text for n in opening] == ["受众：初学者"]
+    rendered = format_notes_for_injection(opening)
+    assert "受众：初学者" in rendered
+    assert "团队便签" in rendered
+    assert wall.new_for("worker-run-1") == []
+
+
 def test_resolve_coordination_defaults_none():
     assert (
         resolve_coordination(

@@ -408,19 +408,23 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
-  it("用户 abort → 不恢复续跑卡", async () => {
+  it("用户 abort → 不恢复续跑卡，并离开 stopping", async () => {
     resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
-    resumeConversationMock.mockRejectedValue(
-      new DOMException("Aborted", "AbortError"),
-    );
+    // 模拟诚实停止：流已开后点停 → phase=stopping，再 RPC Abort（先于 message_end）。
+    resumeConversationMock.mockImplementation(async () => {
+      useConversationStore.getState().setTurnPhase("stopping", "c1");
+      throw new DOMException("Aborted", "AbortError");
+    });
 
     await runResume("m1", "continue", "");
 
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.error).toBeNull();
+    expect(useConversationStore.getState().byId.c1?.turnPhase).toBe("stopped");
+    expect(useConversationStore.getState().byId.c1?.isGenerating).toBe(false);
   });
 
   it("探活失败横幅的「重试」清缓存强制重探（非死按钮）", async () => {

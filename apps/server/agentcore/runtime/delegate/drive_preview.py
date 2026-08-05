@@ -103,7 +103,7 @@ async def team_preview_before_workers(
         # 用户 STOP：清 keep，允许回合收尾 orphan 未消费推进卡。
         if playbook_name == "multi_lens_research":
             clear_turn_keeps_stage_card()
-        return await finalize_stopped(tool, plan, {})
+        return await finalize_stopped(tool, plan, {}, kickoff_cancelled=True)
     # CONTINUE / ADJUST：MLR 真正开跑 → keep。
     if playbook_name == "multi_lens_research":
         from agentcore.runtime.kickoff.stage_card import mark_turn_keeps_stage_card

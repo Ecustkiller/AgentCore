@@ -8,8 +8,55 @@ import {
   isConnectivityErrorCode,
   resetSessionConnectivityFailures,
   syntheticErrorForEmptyFailure,
+  visibleMessageText,
 } from "@/lib/errors";
 import { afterEach, describe, expect, it } from "vitest";
+
+describe("visibleMessageText", () => {
+  it("prefers non-empty content over error (partial deliverable)", () => {
+    expect(
+      visibleMessageText({
+        content: "半成品答案",
+        error: { message: "模型调用失败，请重试。" },
+      }),
+    ).toBe("半成品答案");
+  });
+
+  it("falls back to error.message when content is empty", () => {
+    expect(
+      visibleMessageText({
+        content: "  ",
+        error: {
+          message: "上游限流，暂时无法继续本回合。请稍后再试或点重试。",
+        },
+      }),
+    ).toBe("上游限流，暂时无法继续本回合。请稍后再试或点重试。");
+  });
+
+  it("falls back to runs.error.message when message.error is absent", () => {
+    expect(
+      visibleMessageText({
+        content: "",
+        runs: { error: { message: "本地引擎启动失败" } },
+      }),
+    ).toBe("本地引擎启动失败");
+  });
+
+  it("does not hide content that equals the error string", () => {
+    const same = "模型调用失败，请重试。";
+    expect(
+      visibleMessageText({
+        content: same,
+        error: { message: same },
+      }),
+    ).toBe(same);
+  });
+
+  it("returns empty when neither content nor error is present", () => {
+    expect(visibleMessageText({ content: "" })).toBe("");
+    expect(visibleMessageText({})).toBe("");
+  });
+});
 
 describe("syntheticErrorForEmptyFailure", () => {
   it("synthesizes a card for empty error-finished turns", () => {

@@ -177,6 +177,11 @@ data/
 # Eval fixture workspaces may grow AgentCore/ trash when a probe mutates them
 apps/server/agentcore/evals/fixtures/**/.agentcore/
 
+# Accidental nested clone / probe drop of this repo at the workspace root
+# (may contain code_search.db ~90MB+). Leading slash = repo root only; do not
+# match docs/ or other paths named AgentCore.
+/AgentCore/
+
 # Cursor 对话存档（PChat 生成的上下文归档，不应进入代码仓库）
 杂项/
 

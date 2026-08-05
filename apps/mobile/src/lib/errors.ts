@@ -119,6 +119,36 @@ export function emptyFailureNotice(
   return null;
 }
 
+/**
+ * Empty-bubble failure copy: prefer structured `error.message`
+ * (live `chrome.errorMessage` / cold `runs.error.message`); else
+ * {@link emptyFailureNotice} for `error` / `unproductive` finishes.
+ */
+export function emptyFailureVisibleNotice(
+  finishReason: string | null | undefined,
+  errorMessage?: string | null,
+): string | null {
+  const specific = errorMessage?.trim();
+  if (specific) return specific;
+  return emptyFailureNotice(finishReason);
+}
+
+/**
+ * ChatPage live/history gate: empty content → {@link emptyFailureVisibleNotice};
+ * non-empty content or `skip` (streaming / live mid-turn) → null.
+ */
+export function resolveEmptyFailureNotice(opts: {
+  content: string | null | undefined;
+  finishReason: string | null | undefined;
+  errorMessage?: string | null;
+  /** When true (streaming / live unfinished), never synthesize a failure line. */
+  skip?: boolean;
+}): string | null {
+  if (opts.skip) return null;
+  if ((opts.content ?? "").trim()) return null;
+  return emptyFailureVisibleNotice(opts.finishReason, opts.errorMessage);
+}
+
 /** Short diagnosis labels for degraded empty-response finishes (mirrors backend / desktop). */
 export const EMPTY_RESPONSE_CHIP_LABELS: Record<string, string> = {
   oauth_expired: "模型无响应 · 可能需要刷新 Sub2API OAuth",

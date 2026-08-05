@@ -20,10 +20,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/hooks/useLlmModelProfiles", () => ({
   useLlmModelProfiles: vi.fn(),
 }));
+vi.mock("@/hooks/useModels", () => ({ useModels: vi.fn() }));
 vi.mock("@/hooks/useLlmProviders", () => ({
   useLlmProviders: vi.fn(),
 }));
-vi.mock("@/hooks/useModels", () => ({ useModels: vi.fn() }));
 vi.mock("@/hooks/useConversations", () => ({
   useConversations: vi.fn(() => []),
   patchConversationCache: vi.fn(),
@@ -47,14 +47,15 @@ import { useModels } from "@/hooks/useModels";
 import { __setUiStorageBackendForTests } from "@/lib/uiStorage";
 import { setConversationModelProfile } from "@/services/conversations";
 import type { LlmModelProfileListResponse } from "@/services/llmModelProfiles";
+import type { LlmProvidersResponse } from "@/services/llmProviders";
 import { setLastUsedProfileId } from "@/services/models";
 import { useConversationStore } from "@/stores/conversation";
 import type { Conversation } from "@/stores/conversation";
 import { ModelPicker } from "../ModelPicker";
 
 const useProfilesMock = vi.mocked(useLlmModelProfiles);
-const useProvidersMock = vi.mocked(useLlmProviders);
 const useModelsMock = vi.mocked(useModels);
+const useLlmProvidersMock = vi.mocked(useLlmProviders);
 const useConversationsMock = vi.mocked(useConversations);
 const setProfileMock = vi.mocked(setConversationModelProfile);
 
@@ -105,6 +106,21 @@ function mockProfiles(data: LlmModelProfileListResponse | undefined): void {
   } as unknown as ReturnType<typeof useLlmModelProfiles>);
 }
 
+function mockProviders(over: Partial<LlmProvidersResponse> = {}): void {
+  useLlmProvidersMock.mockReturnValue({
+    data: {
+      providers: [],
+      billing_mode: "byok",
+      platform_available: false,
+      platform_model: null,
+      ...over,
+    },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useLlmProviders>);
+}
+
 function conv(partial: Partial<Conversation> & { id: string }): Conversation {
   return {
     title: "T",
@@ -125,20 +141,6 @@ function renderPicker() {
   );
 }
 
-function mockProviders(platformAvailable = false): void {
-  useProvidersMock.mockReturnValue({
-    data: {
-      providers: [],
-      default_model_profile_id: null,
-      billing_mode: platformAvailable ? "platform" : "byok",
-      platform_available: platformAvailable,
-      platform_model: null,
-    },
-    isLoading: false,
-    isError: false,
-  } as unknown as ReturnType<typeof useLlmProviders>);
-}
-
 beforeEach(() => {
   const store = new Map<string, string>();
   __setUiStorageBackendForTests({
@@ -153,7 +155,6 @@ beforeEach(() => {
   });
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useConversationsMock.mockReturnValue([]);
-  mockProviders(false);
   useModelsMock.mockReturnValue({
     data: {
       byok_configured: true,
@@ -191,6 +192,7 @@ beforeEach(() => {
     isError: false,
     refetch: vi.fn(),
   } as unknown as ReturnType<typeof useModels>);
+  mockProviders();
   setProfileMock.mockReset();
   vi.mocked(patchConversationCache).mockReset();
 });
@@ -279,26 +281,34 @@ describe("ModelPicker", () => {
     expect(screen.getByText("研究")).toBeTruthy();
   });
 
-  it("empty profile list shows providers guide and keeps manage-combinations link", () => {
+  it("empty profile list with BYOK shows jiurelay and providers guide and keeps manage-combinations link", () => {
     mockProfiles(profiles({ data: [] }));
+    mockProviders({ platform_available: false, billing_mode: "byok" });
     renderPicker();
     fireEvent.click(screen.getByRole("button", { name: /模型组合：/ }));
     expect(screen.getByText("暂无可用组合")).toBeTruthy();
+    const jiurelayLink = screen.getByRole("link", { name: "jiurelay" });
+    expect(jiurelayLink.getAttribute("href")).toBe("https://jiurelay.com/");
     const providersLink = screen.getByRole("link", { name: "接入服务商" });
     expect(providersLink.getAttribute("href")).toBe("/more/providers");
     expect(screen.getByText("管理组合…")).toBeTruthy();
   });
 
-  it("empty profile list with platform_available shows admin/retry copy, not providers CTA", () => {
-    mockProviders(true);
+  it("empty profile list with platform_available shows retry/settings guide without jiurelay", () => {
     mockProfiles(profiles({ data: [] }));
+    mockProviders({
+      platform_available: true,
+      billing_mode: "platform",
+    });
     renderPicker();
     fireEvent.click(screen.getByRole("button", { name: /模型组合：/ }));
     expect(screen.getByText("暂无可用组合")).toBeTruthy();
-    expect(
-      screen.getByText("平台额度暂不可用，请联系管理员或稍后重试。"),
-    ).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "接入服务商" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "jiurelay" })).toBeNull();
+    expect(screen.getByText(/请稍后重试/)).toBeTruthy();
+    const settingsLink = screen.getByRole("link", {
+      name: "设置 · 模型",
+    });
+    expect(settingsLink.getAttribute("href")).toBe("/more/model");
     expect(screen.getByText("管理组合…")).toBeTruthy();
   });
 });

@@ -86,7 +86,7 @@ export function BrowserLoginDecisionCard({
             disabled={busy}
             onClick={onStop}
           >
-            {submitting === "stop" ? "处理中…" : "停止"}
+            {submitting === "stop" ? "处理中…" : "取消"}
           </button>
         ) : null}
       </div>

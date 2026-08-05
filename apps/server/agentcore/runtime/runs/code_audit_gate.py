@@ -16,12 +16,61 @@ _VERDICTS = frozenset({"属实", "误报", "部分属实", "待核实"})
 _SEVERITIES = frozenset({"高", "中", "低", "观察·工程"})
 _SECURITY_CATEGORIES = frozenset({"安全", "路径", "注入"})
 
+# 常见英文同义 → 中文闭集（精确匹配，大小写不敏感；禁复合怪写 / 万能清洗）。
+_SEVERITY_SYNONYMS: dict[str, str] = {
+    "high": "高",
+    "critical": "高",
+    "medium": "中",
+    "med": "中",
+    "moderate": "中",
+    "low": "低",
+    "info": "观察·工程",
+    "informational": "观察·工程",
+    "observation": "观察·工程",
+    "observational": "观察·工程",
+    "notice": "观察·工程",
+    "engineering": "观察·工程",
+}
+_VERDICT_SYNONYMS: dict[str, str] = {
+    "confirmed": "属实",
+    "true": "属实",
+    "valid": "属实",
+    "real": "属实",
+    "false_positive": "误报",
+    "false-positive": "误报",
+    "false positive": "误报",
+    "fp": "误报",
+    "invalid": "误报",
+    "partial": "部分属实",
+    "partially_confirmed": "部分属实",
+    "partially-confirmed": "部分属实",
+    "partially confirmed": "部分属实",
+    "partially_true": "部分属实",
+    "partially true": "部分属实",
+    "pending": "待核实",
+    "unverified": "待核实",
+    "needs_verification": "待核实",
+    "needs-verification": "待核实",
+    "to_verify": "待核实",
+    "to-verify": "待核实",
+}
+
 # L3：全量 typecheck / pytest 超时不得充当中+缺陷证据。
 _TIMEOUT_AS_DEFECT = re.compile(
     r"(typecheck|tsc\b|pytest|test:server:unit).{0,40}(timeout|超时|预算耗尽|exceeded\s+\d+s)"
     r"|(timeout|超时|预算耗尽).{0,40}(typecheck|tsc\b|pytest|全量单测)",
     re.IGNORECASE,
 )
+
+
+def _normalize_closed(value: str, *, chinese: frozenset[str], synonyms: dict[str, str]) -> str:
+    """Map Chinese closed-set or common English synonym; otherwise return stripped raw."""
+    raw = value.strip()
+    if not raw:
+        return ""
+    if raw in chinese:
+        return raw
+    return synonyms.get(raw.lower(), raw)
 
 
 def parse_audit_json(text: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -55,9 +104,17 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
         if not isinstance(item, dict):
             failures.append(f"{prefix} 须为对象")
             continue
-        sev = _as_str(item.get("severity"))
+        sev = _normalize_closed(
+            _as_str(item.get("severity")),
+            chinese=_SEVERITIES,
+            synonyms=_SEVERITY_SYNONYMS,
+        )
         ver = _as_str(item.get("verification"))
-        verd = _as_str(item.get("verdict"))
+        verd = _normalize_closed(
+            _as_str(item.get("verdict")),
+            chinese=_VERDICTS,
+            synonyms=_VERDICT_SYNONYMS,
+        )
         evidence = _as_str(item.get("evidence"))
         summary = _as_str(item.get("summary") or item.get("id"))
         category = _as_str(item.get("category"))

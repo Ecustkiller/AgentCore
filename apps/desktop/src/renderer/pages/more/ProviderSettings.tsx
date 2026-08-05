@@ -106,7 +106,7 @@ export function ProviderSettings() {
         description={
           platformMode
             ? "接入 OpenAI 兼容服务商（可多个）。不接入也可用平台额度。"
-            : "接入 OpenAI 兼容服务商（可多个）。未接入则无法对话。"
+            : "接入 OpenAI 兼容服务商（可多个）。需自行在 jiurelay 免费配额度或接入服务商后才能对话。"
         }
       />
 

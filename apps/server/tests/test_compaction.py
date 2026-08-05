@@ -166,6 +166,22 @@ def test_render_fold_skips_empty_messages():
     assert out.count("：") == 1
 
 
+def test_render_fold_keeps_pure_failure_brief():
+    failed = SimpleNamespace(
+        role="assistant",
+        content="",
+        usage={
+            "status": "failed",
+            "error_code": "LLM_TIMEOUT",
+            "error_message": "连接超时",
+        },
+        created_at=0,
+    )
+    out = _render_fold("", [failed, _msg("user", "real")])
+    assert "（失败）连接超时" in out
+    assert "real" in out
+
+
 # --- compaction system prompt guards ---
 
 

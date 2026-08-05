@@ -136,7 +136,7 @@ export function BrowserLoginDecisionCard({
               )
             }
           >
-            停止
+            取消
           </Button>
         ) : null}
       </div>

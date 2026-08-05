@@ -105,6 +105,17 @@ export const AI_NOISE_FILE_SUFFIXES = [
   ".eot",
 ] as const;
 
+/** 压缩包后缀（AI 噪音子集）。↔ 服务端 `AI_ARCHIVE_FILE_SUFFIXES`（parity gate）。 */
+export const AI_ARCHIVE_FILE_SUFFIXES = [
+  ".zip",
+  ".tar",
+  ".gz",
+  ".tgz",
+  ".bz2",
+  ".7z",
+  ".rar",
+] as const;
+
 function endsWithAny(name: string, suffixes: readonly string[]): boolean {
   const lower = name.toLowerCase();
   return suffixes.some((suf) => lower.endsWith(suf));
@@ -167,9 +178,32 @@ export function shouldSkipWorkspaceEntry(
     : shouldSkipFileName(name);
 }
 
+/** Options for AI list hide exemptions (parity with server sparse_listing). */
+export type AiListSkipOptions = {
+  /** ``file_list`` pattern 指向压缩包后缀时为 true。 */
+  revealArchives?: boolean;
+  /** 当前根为会话区外 mount（desktop session root）时为 true。 */
+  externalNs?: boolean;
+};
+
+/** Whether ``path`` is under the model-facing ``external/<alias>/`` namespace. */
+export function isExternalNsPath(path: string): boolean {
+  const p = path
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/^\/+|\/+$/g, "");
+  return p === "external" || p.startsWith("external/");
+}
+
+/** AI-noise archive basename (zip/rar/7z/…). */
+export function shouldSkipAiArchiveFileName(name: string): boolean {
+  return endsWithAny(name, AI_ARCHIVE_FILE_SUFFIXES);
+}
+
 /**
  * AI ``opList`` / ``opListTree``：系统噪音始终隐藏；AI 噪音在 ``attachments/``
- * 或 ``revealPaths``（本回合材料）下豁免（与服务端 ``is_ai_list_hidden_file`` /
+ * 或 ``revealPaths``（本回合材料）下豁免；压缩包在区外 ``external/`` 命名空间 /
+ * session mount / ``revealArchives`` 时豁免（与服务端 ``is_ai_list_hidden_file`` /
  * ``should_hide_ai_noise_from_list`` 对齐）。索引 / grep 仍用
  * {@link shouldSkipWorkspaceEntry}。
  */
@@ -178,6 +212,7 @@ export function shouldSkipAiListEntry(
   isDirectory: boolean,
   parentRel = "",
   revealPaths?: ReadonlySet<string>,
+  options?: AiListSkipOptions,
 ): boolean {
   if (isDirectory) return shouldSkipDirName(name, parentRel);
   if (shouldSkipSystemFileName(name)) return true;
@@ -186,6 +221,10 @@ export function shouldSkipAiListEntry(
   const child = parent && parent !== "." ? `${parent}/${name}` : name;
   if (isAttachmentPath(child)) return false;
   if (revealPaths?.has(child)) return false;
+  if (shouldSkipAiArchiveFileName(name)) {
+    if (options?.revealArchives) return false;
+    if (options?.externalNs || isExternalNsPath(child)) return false;
+  }
   return true;
 }
 

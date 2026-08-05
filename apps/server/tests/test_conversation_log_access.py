@@ -180,6 +180,37 @@ def test_render_includes_journal_tool_and_skips_followups_noise():
     assert "followups" not in md.lower() or "#### followups" not in md.lower()
 
 
+def test_render_pure_failure_surfaces_error_text():
+    from agentcore.conversation.log_export import search_snippet_from_messages
+
+    conv = SimpleNamespace(
+        id="c1",
+        title="T",
+        created_at=None,
+        updated_at=None,
+    )
+    msg = SimpleNamespace(
+        id="m-fail",
+        role="assistant",
+        content="",
+        reasoning_content=None,
+        attachments=None,
+        evidence_ledger=None,
+        citations=None,
+        usage={
+            "status": "failed",
+            "error_code": "LLM_TIMEOUT",
+            "error_message": "连接超时，请稍后重试",
+        },
+    )
+    md = render_conversation_log(conv, [msg], {})
+    assert "连接超时，请稍后重试" in md
+    assert "turn status=failed" in md
+    snippet = search_snippet_from_messages([msg], "超时")
+    assert snippet is not None
+    assert "连接超时" in snippet
+
+
 # --- read_conversation soft miss / host exclude ------------------------------
 
 

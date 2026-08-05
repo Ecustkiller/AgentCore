@@ -144,6 +144,7 @@ export function AssistantMessageFooter({
   durationMs,
   clockIso,
   finishReason,
+  failureNotice,
   isStreaming = false,
 }: {
   content: string;
@@ -155,6 +156,8 @@ export function AssistantMessageFooter({
   durationMs?: number | null;
   clockIso?: string | null;
   finishReason?: string | null;
+  /** Empty-failure visible notice for copy when content is blank. */
+  failureNotice?: string | null;
   isStreaming?: boolean;
 }) {
   const [copied, setCopied] = useState<MessageCopyMode | "support" | null>(
@@ -164,7 +167,10 @@ export function AssistantMessageFooter({
   const [copySheetOpen, setCopySheetOpen] = useState(false);
 
   const supportText = supportIds ? formatSupportDiagnosticText(supportIds) : "";
-  const hasContent = !!content.trim() || (process && process.length > 0);
+  const hasContent =
+    !!content.trim() ||
+    !!(process && process.length > 0) ||
+    !!failureNotice?.trim();
   const hasProcess = (process?.length ?? 0) > 0;
   const finishLabel = finishReason
     ? FINISH_REASON_META[finishReason]?.label
@@ -174,7 +180,9 @@ export function AssistantMessageFooter({
 
   const onCopy = async (mode: MessageCopyMode) => {
     setCopySheetOpen(false);
-    const text = formatMessageExport(content, process, mode);
+    const text = formatMessageExport(content, process, mode, {
+      failureNotice,
+    });
     if (await copyText(text)) {
       setCopied(mode);
       window.setTimeout(() => setCopied(null), 1500);

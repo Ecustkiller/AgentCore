@@ -79,7 +79,7 @@ export function AskSectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-/** 底栏：主 CTA + 安静的跳过（wire 仍 decision=stop 硬停）+ 右侧提示。五种 intent 同一形。 */
+/** 底栏：主 CTA + 安静的取消（wire 仍 decision=stop 硬停）+ 右侧提示。五种 intent 同一形。 */
 export function AskCardFooter({
   cta,
   ctaIcon: CtaIcon,
@@ -95,7 +95,7 @@ export function AskCardFooter({
   busy: boolean;
   submitting: CheckpointUserDecision | null;
   onContinue: () => void;
-  /** 次要 CTA「跳过」；调用方仍发 resume decision=stop（硬停收口）。 */
+  /** 次要 CTA「取消」；调用方仍发 resume decision=stop（硬停收口）。 */
   onStop: () => void;
   hint?: string;
   /** 额外禁用主 CTA（如 proposal_pick 尚未选中任一项）。busy 时仍会禁用。 */
@@ -133,7 +133,7 @@ export function AskCardFooter({
           )
         }
       >
-        跳过
+        取消
       </Button>
       {hint && (
         <span className="min-w-0 flex-1 text-xs text-muted-foreground">

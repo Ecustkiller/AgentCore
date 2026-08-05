@@ -258,7 +258,7 @@ export function ResumeCard({
   );
 }
 
-/** CEO ask_user(browser_login)：continue note 固定「已登录，继续」；次钮 stop（勿「跳过」）；
+/** CEO ask_user(browser_login)：continue note 固定「已登录，继续」；次钮 stop（文案「取消」）；
  * 有 assumptions →「按假设继续」（冷路 continue + note=假设文案）。 */
 function AskUserBrowserLoginResumeCard({
   paused,
@@ -1098,7 +1098,7 @@ function ResumeCardBody({
             : isTeamPreview
               ? "可选 · 对全体队员的嘱咐（授权开工时注入）"
               : isPlanReview
-                ? "可选 · 调整时作为对下游的指示；停止时作为收尾备注"
+                ? "可选 · 调整时作为对下游的指示；取消时作为收尾备注"
                 : isDecisionAsk
                   ? "可选 · 补充说明"
                   : "可选 · 你的答复或补充，留空则按上面继续"
@@ -1143,7 +1143,7 @@ function ResumeCardBody({
         className="pause-btn pause-btn-danger"
         onClick={() => submit("stop")}
       >
-        {isAskUser ? "跳过" : "停止"}
+        取消
       </button>
     </div>
   );

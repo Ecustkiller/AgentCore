@@ -48,6 +48,10 @@ vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
 }));
 
+vi.mock("@/services/workspace", () => ({
+  openWorkspaceInBrowser: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { notifyError } from "@/lib/toast";
 import {
   closeBrowserSession,
@@ -55,6 +59,7 @@ import {
   listBrowserSessions,
   navigateBrowserSession,
 } from "@/services/browserSessions";
+import { openWorkspaceInBrowser } from "@/services/workspace";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { BrowserPanel, isLocalhostBrowserUrl } from "../BrowserPanel";
 
@@ -67,6 +72,7 @@ const closeMock = vi.mocked(closeBrowserSession);
 const createMock = vi.mocked(createBrowserSession);
 const navigateMock = vi.mocked(navigateBrowserSession);
 const notifyMock = vi.mocked(notifyError);
+const openWorkspaceMock = vi.mocked(openWorkspaceInBrowser);
 
 function mockBrowserApi(overrides: Partial<BrowserApi> = {}): BrowserApi {
   return {
@@ -126,6 +132,8 @@ beforeEach(() => {
   createMock.mockReset();
   navigateMock.mockReset();
   notifyMock.mockReset();
+  openWorkspaceMock.mockReset();
+  openWorkspaceMock.mockResolvedValue(undefined);
   listMock.mockResolvedValue({ sessions: [], activeSessionId: null });
   closeMock.mockResolvedValue(undefined);
   createMock.mockResolvedValue({
@@ -159,6 +167,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.browserApi = undefined;
+  (window as unknown as { fsApi?: unknown }).fsApi = undefined;
 });
 
 describe("BrowserPanel", () => {
@@ -899,10 +908,118 @@ describe("BrowserPanel", () => {
       "在系统浏览器打开",
     ) as HTMLButtonElement;
     expect(openBtn.disabled).toBe(true);
-    // disabled 外包 span，悬停可出「仅支持 http(s) 链接」（SimpleTooltip）
+    // disabled 外包 span，悬停可出原因（SimpleTooltip）
     expect(openBtn.parentElement?.tagName).toBe("SPAN");
 
     fireEvent.contextMenu(screen.getByLabelText("地址栏"));
     expect(screen.getByText("在系统浏览器打开")).toBeTruthy();
+  });
+
+  it("workspace:// 本会话页可外开：走 openWorkspaceInBrowser，不走 openExternal", async () => {
+    const api = mockBrowserApi();
+    window.browserApi = api;
+    window.fsApi = {
+      previewArchive: vi.fn(),
+    } as unknown as typeof window.fsApi;
+    useBrowserSessionsStore.setState({
+      pages: [
+        {
+          id: "p-ws",
+          url: "workspace://conv-1/site/index.html",
+          title: "index.html",
+          conversationId: "conv-1",
+        },
+      ],
+      activePageId: "p-ws",
+    });
+    renderPanel(<BrowserPanel conversationId="conv-1" liveAvailable={false} />);
+
+    const openBtn = screen.getByLabelText(
+      "在系统浏览器打开",
+    ) as HTMLButtonElement;
+    expect(openBtn.disabled).toBe(false);
+    fireEvent.click(openBtn);
+
+    await waitFor(() => {
+      expect(openWorkspaceMock).toHaveBeenCalledWith(
+        "conv-1",
+        "site/index.html",
+      );
+    });
+    expect(api.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("跨会话 workspace:// 仍拒；http(s) 仍走 openExternal", async () => {
+    const api = mockBrowserApi();
+    window.browserApi = api;
+    window.fsApi = {
+      previewArchive: vi.fn(),
+    } as unknown as typeof window.fsApi;
+
+    useBrowserSessionsStore.setState({
+      pages: [
+        {
+          id: "p-other",
+          url: "workspace://other-cid/site/index.html",
+          title: "other",
+          conversationId: "conv-1",
+        },
+      ],
+      activePageId: "p-other",
+    });
+    renderPanel(<BrowserPanel conversationId="conv-1" liveAvailable={false} />);
+    expect(
+      (screen.getByLabelText("在系统浏览器打开") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    useBrowserSessionsStore.setState({
+      pages: [
+        {
+          id: "p-http",
+          url: "https://example.com/docs",
+          title: "docs",
+          conversationId: "conv-1",
+        },
+      ],
+      activePageId: "p-http",
+    });
+    cleanup();
+    renderPanel(<BrowserPanel conversationId="conv-1" liveAvailable={false} />);
+    const httpBtn = screen.getByLabelText(
+      "在系统浏览器打开",
+    ) as HTMLButtonElement;
+    expect(httpBtn.disabled).toBe(false);
+    fireEvent.click(httpBtn);
+    await waitFor(() => {
+      expect(api.openExternal).toHaveBeenCalledWith({
+        url: "https://example.com/docs",
+      });
+    });
+    expect(openWorkspaceMock).not.toHaveBeenCalled();
+  });
+
+  it("file:// 与非法 scheme 仍拒，且不调用 openExternal / openWorkspaceInBrowser", () => {
+    const api = mockBrowserApi();
+    window.browserApi = api;
+    window.fsApi = {
+      previewArchive: vi.fn(),
+    } as unknown as typeof window.fsApi;
+    useBrowserSessionsStore.setState({
+      pages: [
+        {
+          id: "p-file",
+          url: "file:///tmp/x.html",
+          title: "file",
+          conversationId: "conv-1",
+        },
+      ],
+      activePageId: "p-file",
+    });
+    renderPanel(<BrowserPanel conversationId="conv-1" liveAvailable={false} />);
+    expect(
+      (screen.getByLabelText("在系统浏览器打开") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(api.openExternal).not.toHaveBeenCalled();
+    expect(openWorkspaceMock).not.toHaveBeenCalled();
   });
 });

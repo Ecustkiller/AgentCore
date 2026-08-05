@@ -208,6 +208,28 @@ export const LLM_UNPRODUCTIVE_MESSAGE =
   "工具连续无有效进展或参数无效，请重试。";
 
 /**
+ * Visible sentence for preview / export / canvas outlets that otherwise only
+ * read `content`. Non-empty trimmed content wins (partial deliverable); pure
+ * failure falls back to `error.message` then `runs.error.message`.
+ *
+ * Never hides content when it equals the error string — the bubble already
+ * owns the error card; outlets just need a readable fallback when content is empty.
+ */
+export function visibleMessageText(msg: {
+  content?: string | null;
+  error?: { message?: string } | null;
+  runs?: { error?: { message?: string } | null } | null;
+}): string {
+  const content = (msg.content ?? "").trim();
+  if (content) return content;
+  const fromError = msg.error?.message?.trim();
+  if (fromError) return fromError;
+  const fromRuns = msg.runs?.error?.message?.trim();
+  if (fromRuns) return fromRuns;
+  return "";
+}
+
+/**
  * When reload lost the error payload but left an empty failure-finished bubble
  * (`error` / `unproductive`), synthesize a minimal card so the user still sees
  * an explanation + retry — same surface as a real `message.error` card.

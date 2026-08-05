@@ -20,10 +20,12 @@ from pathlib import PureWindowsPath
 from typing import Any
 
 from agentcore.workspace._paths import (
+    is_ai_archive_file_name,
     is_ai_noise_file_name,
     is_system_ignored_file_name,
 )
 from agentcore.workspace.attachments import ATTACHMENTS_DIR
+from agentcore.workspace.external_mounts import EXTERNAL_PREFIX
 
 # Newest non-attachment paths kept as an explicit supplement in project mode
 # (beyond attachments). The rest collapse into the summary line.
@@ -36,6 +38,12 @@ def is_attachment_path(path: str) -> bool:
     """Whether ``path`` lives under the resident ``attachments/`` directory."""
     p = path.replace("\\", "/").lstrip("./")
     return p == ATTACHMENTS_DIR or p.startswith(f"{ATTACHMENTS_DIR}/")
+
+
+def is_external_ns_path(path: str) -> bool:
+    """Whether ``path`` is under the model-facing ``external/<alias>/`` namespace."""
+    p = path.replace("\\", "/").lstrip("./").strip("/")
+    return p == EXTERNAL_PREFIX.rstrip("/") or p.startswith(EXTERNAL_PREFIX)
 
 
 def _is_absolute_os_path(raw: str) -> bool:
@@ -83,13 +91,19 @@ def collect_turn_material_paths(attachments: list[dict[str, Any]] | None) -> fro
 
 
 def should_hide_ai_noise_from_list(
-    path: str, *, materials: frozenset[str] | None = None
+    path: str,
+    *,
+    materials: frozenset[str] | None = None,
+    reveal_archives: bool = False,
 ) -> bool:
     """True when ``path`` is AI-noise and *not* under ``attachments/`` / materials.
 
     Used by ``file_list`` tool-layer filtering (``list`` is shared with UI and
     only strips system noise). Attachment zips/media and this-turn material
     paths stay visible to the agent; the same suffixes elsewhere remain hidden.
+    Archives under ``external/<alias>/`` (区外用户目录) and when
+    ``reveal_archives`` (pattern targets zip/rar/…) stay visible; workspace
+    media/binaries stay hidden.
     """
     p = path.replace("\\", "/").lstrip("./")
     name = p.rsplit("/", 1)[-1] if p else ""
@@ -97,7 +111,12 @@ def should_hide_ai_noise_from_list(
         return False
     if is_attachment_path(p):
         return False
-    return not (materials and p in materials)
+    if materials and p in materials:
+        return False
+    return not (
+        is_ai_archive_file_name(name)
+        and (reveal_archives or is_external_ns_path(p))
+    )
 
 
 def is_ai_list_hidden_file(
@@ -105,11 +124,13 @@ def is_ai_list_hidden_file(
     parent_rel: str,
     name: str,
     materials: frozenset[str] | None = None,
+    reveal_archives: bool = False,
 ) -> bool:
     """Whether a file child should be omitted from AI ``list_tree`` walks.
 
     System suffixes always hidden. AI-noise suffixes hidden unless the child
-    path lives under ``attachments/`` or is in ``materials``.
+    path lives under ``attachments/``, is in ``materials``, or (archives only)
+    under ``external/`` / ``reveal_archives``.
     """
     if is_system_ignored_file_name(name):
         return True
@@ -119,7 +140,12 @@ def is_ai_list_hidden_file(
     child = name if parent in ("", ".") else f"{parent}/{name}"
     if is_attachment_path(child):
         return False
-    return not (materials and child in materials)
+    if materials and child in materials:
+        return False
+    return not (
+        is_ai_archive_file_name(name)
+        and (reveal_archives or is_external_ns_path(child))
+    )
 
 
 def partition_sparse_paths(

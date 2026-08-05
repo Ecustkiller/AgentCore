@@ -154,8 +154,8 @@ def test_d7_salvage_paths_keep_monotonic_protection():
     )
 
 
-def test_visible_failed_assistant_content_keeps_partial_or_surfaces_error():
-    """Empty ERROR settle must not land a blank bubble; partial prose wins."""
+def test_visible_failed_assistant_content_keeps_partial_only():
+    """FAILED content keeps half-finished prose; pure failure stays empty (error ≠ content)."""
     assert (
         visible_failed_assistant_content(content="已有半成品", error="模型流式响应停滞")
         == "已有半成品"
@@ -164,12 +164,9 @@ def test_visible_failed_assistant_content_keeps_partial_or_surfaces_error():
         visible_failed_assistant_content(
             content="", error="模型流式响应停滞（长时间无输出），请稍后重试"
         )
-        == "模型流式响应停滞（长时间无输出），请稍后重试"
+        == ""
     )
-    assert (
-        visible_failed_assistant_content(content="   ", error=None)
-        == "模型调用失败，请稍后重试。"
-    )
+    assert visible_failed_assistant_content(content="   ", error=None) == ""
 
 
 # --- Protocol shape ---
@@ -254,10 +251,11 @@ async def test_begin_turn_propagates_placeholder_failure(monkeypatch):
 
 
 async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
-    """Empty content ERROR upserts failed + error_code and surfaces the error as body."""
+    """Empty content ERROR upserts failed + structured error; content stays empty."""
     from agentcore.core.error_codes import ErrorCode
 
     upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
 
     class MsgRepo:
         def __init__(self, _s):
@@ -284,6 +282,9 @@ async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(
@@ -291,7 +292,7 @@ async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
-    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
@@ -331,11 +332,266 @@ async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
     )
 
     assert upserted["message_id"] == "m-first"
-    assert upserted["content"] == "连接超时"
+    assert upserted["content"] == ""
     meta = upserted["metadata"]
     assert meta["status"] == MESSAGE_STATUS_FAILED
     assert meta["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert meta["error"] == {"code": ErrorCode.LLM_TIMEOUT, "message": "连接超时"}
     assert meta["finish_reason"] == FinishReason.ERROR.value
+    assert journaled and journaled[0]["entries"][0]["payload"]["error"] == {
+        "code": ErrorCode.LLM_TIMEOUT,
+        "message": "连接超时",
+    }
+
+
+async def test_finalize_cloud_synthesizes_error_when_missing(monkeypatch):
+    """finish_reason=error with no error payload still lands structured error on usage/journal."""
+    from agentcore.conversation.store.merge import DEFAULT_FAILED_ERROR_MESSAGE
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+    class MetricsRepo:
+        def __init__(self, _s):
+            pass
+
+        async def record(self, **_kw):
+            return None
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    await CloudStore().finalize(
+        mode="cloud",
+        result={
+            "message_id": "m-synth",
+            "content": "",
+            "finish_reason": FinishReason.ERROR,
+            "rounds": 0,
+        },
+        conversation_id="c1",
+        user_id="u1",
+        folder_id=None,
+        backend=SimpleNamespace(location="cloud"),
+        sink=SimpleNamespace(emit=lambda *_a, **_k: None),
+        user_message="hi",
+        llm_credentials=None,
+        trace_id="e" * 32,
+        turn_id="turn-synth",
+        duration_ms=10,
+    )
+
+    assert upserted["content"] == ""
+    meta = upserted["metadata"]
+    assert meta["status"] == MESSAGE_STATUS_FAILED
+    assert meta["error_code"] == ErrorCode.PIPELINE_ERROR
+    assert meta["error"] == {
+        "code": ErrorCode.PIPELINE_ERROR,
+        "message": DEFAULT_FAILED_ERROR_MESSAGE,
+    }
+    assert journaled
+    turn_end = next(
+        e for e in journaled[0]["entries"] if e.get("kind") == "turn_end"
+    )
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.PIPELINE_ERROR,
+        "message": DEFAULT_FAILED_ERROR_MESSAGE,
+    }
+
+
+def test_ensure_structured_run_error_preserves_context():
+    """BYOK deconfigured (etc.): synthesize must keep existing.context."""
+    from agentcore.core.error_codes import ErrorCode
+
+    out = cloud_mod._ensure_structured_run_error(
+        existing={
+            "code": ErrorCode.LLM_KEY_REQUIRED,
+            "message": "请先配置 API Key",
+            "context": {"remedy": "open_byok_settings", "provider": "deepseek"},
+        }
+    )
+    assert out == {
+        "code": ErrorCode.LLM_KEY_REQUIRED,
+        "message": "请先配置 API Key",
+        "context": {"remedy": "open_byok_settings", "provider": "deepseek"},
+    }
+
+
+def test_merge_run_error_into_journal_completes_sparse_turn_end():
+    """Missing / partial turn_end.error is filled; other error fields stay."""
+    from agentcore.core.error_codes import ErrorCode
+
+    entries = [
+        {"kind": "llm_call", "payload": {"model": "m"}, "ts": "t0"},
+        {
+            "kind": "turn_end",
+            "payload": {
+                "finish_reason": "error",
+                "error": {
+                    "code": "",
+                    "context": {"remedy": "open_byok_settings"},
+                },
+            },
+            "ts": None,
+        },
+    ]
+    merged = cloud_mod._merge_run_error_into_journal_entries(
+        entries,
+        {
+            "code": ErrorCode.LLM_KEY_REQUIRED,
+            "message": "请先配置 API Key",
+            "context": {"remedy": "should_not_overwrite"},
+        },
+        finish_reason="error",
+    )
+    turn_end = next(e for e in merged if e.get("kind") == "turn_end")
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.LLM_KEY_REQUIRED,
+        "message": "请先配置 API Key",
+        "context": {"remedy": "open_byok_settings"},
+    }
+    # Non-turn_end facts preserved.
+    assert merged[0]["kind"] == "llm_call"
+
+
+def test_merge_run_error_into_journal_appends_turn_end_when_absent():
+    """Progressive journal with no turn_end still gets one carrying structured error."""
+    from agentcore.core.error_codes import ErrorCode
+
+    merged = cloud_mod._merge_run_error_into_journal_entries(
+        [{"kind": "llm_call", "payload": {"model": "m"}, "ts": "t0"}],
+        {"code": ErrorCode.PIPELINE_ERROR, "message": "管线崩溃"},
+        finish_reason="error",
+    )
+    assert [e["kind"] for e in merged] == ["llm_call", "turn_end"]
+    assert merged[1]["payload"] == {
+        "finish_reason": "error",
+        "error": {"code": ErrorCode.PIPELINE_ERROR, "message": "管线崩溃"},
+    }
+
+
+async def test_finalize_cloud_merges_error_into_incomplete_progressive_journal(
+    monkeypatch,
+):
+    """Progressive journal with turn_end lacking error still gets concrete error on persist."""
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+    class MetricsRepo:
+        def __init__(self, _s):
+            pass
+
+        async def record(self, **_kw):
+            return None
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    await CloudStore().finalize(
+        mode="cloud",
+        result={
+            "message_id": "m-prog-sparse",
+            "content": "",
+            "error": {
+                "code": ErrorCode.LLM_TIMEOUT,
+                "message": "连接超时，请稍后重试",
+            },
+            "error_code": ErrorCode.LLM_TIMEOUT,
+            "finish_reason": FinishReason.ERROR,
+            "rounds": 1,
+            "journal_entries": [
+                {"kind": "llm_call", "payload": {"model": "m", "round": 1}, "ts": "t0"},
+                {
+                    "kind": "turn_end",
+                    "payload": {"finish_reason": "error"},
+                    "ts": None,
+                },
+            ],
+        },
+        conversation_id="c1",
+        user_id="u1",
+        folder_id=None,
+        backend=SimpleNamespace(location="cloud"),
+        sink=SimpleNamespace(emit=lambda *_a, **_k: None),
+        user_message="hi",
+        llm_credentials=None,
+        trace_id="d" * 32,
+        turn_id="turn-prog-sparse",
+        duration_ms=10,
+    )
+
+    assert upserted["content"] == ""
+    assert journaled
+    entries = journaled[0]["entries"]
+    assert entries[0]["kind"] == "llm_call"
+    turn_end = next(e for e in entries if e.get("kind") == "turn_end")
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.LLM_TIMEOUT,
+        "message": "连接超时，请稍后重试",
+    }
 
 
 async def test_finalize_cloud_keeps_existing_partial_on_empty_error(monkeypatch):
@@ -495,10 +751,11 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
 
 
 async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
-    """Local write-back: empty ERROR must settle (was gated on non-empty content)."""
+    """Local write-back: empty ERROR settles failed + structured error; content empty."""
     from agentcore.core.error_codes import ErrorCode
 
     upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
 
     class MsgRepo:
         def __init__(self, _s):
@@ -534,10 +791,13 @@ async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
-    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
@@ -570,11 +830,219 @@ async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
     assert result is not None
     assert result["assistant_message_id"] == "m-err"
     assert upserted["message_id"] == "m-err"
-    assert upserted["content"] == "超时"
+    assert upserted["content"] == ""
     meta = upserted["metadata"]
     assert meta["status"] == MESSAGE_STATUS_FAILED
     assert meta["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert meta["error"] == {"code": ErrorCode.LLM_TIMEOUT, "message": "超时"}
     assert meta["finish_reason"] == FinishReason.ERROR.value
+    assert journaled
+    turn_end = next(
+        e for e in journaled[0]["entries"] if e.get("kind") == "turn_end"
+    )
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.LLM_TIMEOUT,
+        "message": "超时",
+    }
+
+
+async def test_finalize_local_synthesizes_error_when_missing(monkeypatch):
+    """Local ERROR without runs.error still synthesizes structured error into usage/journal."""
+    from agentcore.conversation.store.merge import DEFAULT_FAILED_ERROR_MESSAGE
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def create(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def user_message_for_assistant(self, **_k):
+            return None
+
+        async def set_followups(self, *_a, **_k):
+            pass
+
+    class ConvRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="t")
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
+    )
+    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
+    from agentcore.conversation.common import FollowupsMintResult
+
+    monkeypatch.setattr(
+        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
+    )
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    result = await CloudStore().finalize(
+        mode="local",
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        runs={"events": [], "finish_reason": "error"},
+        user_message_id="u1m",
+        message_id="m-synth-local",
+        trace_id="f" * 32,
+        finish_reason=FinishReason.ERROR.value,
+    )
+    assert result is not None
+    assert upserted["content"] == ""
+    meta = upserted["metadata"]
+    assert meta["status"] == MESSAGE_STATUS_FAILED
+    assert meta["error"] == {
+        "code": ErrorCode.PIPELINE_ERROR,
+        "message": DEFAULT_FAILED_ERROR_MESSAGE,
+    }
+    assert journaled
+    turn_end = next(
+        e for e in journaled[0]["entries"] if e.get("kind") == "turn_end"
+    )
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.PIPELINE_ERROR,
+        "message": DEFAULT_FAILED_ERROR_MESSAGE,
+    }
+
+
+async def test_finalize_local_merges_error_into_incomplete_progressive_journal(
+    monkeypatch,
+):
+    """Local FAILED + progressive journal without turn_end.error → persist concrete error."""
+    from agentcore.core.error_codes import ErrorCode
+
+    upserted: dict[str, Any] = {}
+    journaled: list[Any] = []
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def create(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def upsert_assistant(self, **kw):
+            upserted.update(kw)
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def user_message_for_assistant(self, **_k):
+            return None
+
+        async def set_followups(self, *_a, **_k):
+            pass
+
+    class ConvRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="t")
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _persist_journal(_session, **kw):
+        journaled.append(kw)
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
+    )
+    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
+    from agentcore.conversation.common import FollowupsMintResult
+
+    monkeypatch.setattr(
+        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
+    )
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+
+    result = await CloudStore().finalize(
+        mode="local",
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        runs={
+            "events": [],
+            "finish_reason": "error",
+            "error": {
+                "code": ErrorCode.LLM_KEY_REQUIRED,
+                "message": "请先配置 API Key",
+                "context": {"remedy": "open_byok_settings"},
+            },
+        },
+        journal=[
+            {"kind": "llm_call", "payload": {"model": "m"}, "ts": "t0"},
+            {"kind": "turn_end", "payload": {"finish_reason": "error"}, "ts": None},
+        ],
+        user_message_id="u1m",
+        message_id="m-local-prog-sparse",
+        trace_id="a" * 32,
+        finish_reason=FinishReason.ERROR.value,
+    )
+    assert result is not None
+    assert upserted["content"] == ""
+    meta = upserted["metadata"]
+    assert meta["status"] == MESSAGE_STATUS_FAILED
+    assert meta["error"] == {
+        "code": ErrorCode.LLM_KEY_REQUIRED,
+        "message": "请先配置 API Key",
+        "context": {"remedy": "open_byok_settings"},
+    }
+    assert journaled
+    entries = journaled[0]["entries"]
+    assert entries[0]["kind"] == "llm_call"
+    turn_end = next(e for e in entries if e.get("kind") == "turn_end")
+    assert turn_end["payload"]["error"] == {
+        "code": ErrorCode.LLM_KEY_REQUIRED,
+        "message": "请先配置 API Key",
+        "context": {"remedy": "open_byok_settings"},
+    }
 
 
 async def test_finalize_local_keeps_existing_partial_on_empty_error(monkeypatch):

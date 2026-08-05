@@ -71,8 +71,8 @@ import {
   degradedFinishChipLabel,
   describeStreamHttpError,
   emptyChatCopy,
-  emptyFailureNotice,
   errorActionForCode,
+  resolveEmptyFailureNotice,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
 import {
@@ -669,11 +669,14 @@ function AssistantBubble({
     : undefined;
   const empty =
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
-  // 对齐桌面：空正文 + error/unproductive → 可见失败说明（不必整泡无 process）。
+  // 对齐桌面：空正文 + 结构化 error / error·unproductive → 可见失败说明。
   const finishReason = live ? null : (chrome.finishReason ?? p.finishReason);
-  const failureNotice = !(p.content ?? "").trim()
-    ? emptyFailureNotice(finishReason)
-    : null;
+  const failureNotice = resolveEmptyFailureNotice({
+    content: p.content,
+    finishReason,
+    errorMessage: chrome.errorMessage,
+    skip: live,
+  });
   const errorAction = failureNotice
     ? errorActionForCode(chrome.errorCode, {
         credentialSource: chrome.credentialSource,
@@ -738,6 +741,7 @@ function AssistantBubble({
             onOpenBrowserLive={onOpenBrowserLive}
             finishReason={finishReason}
             finishDiagnosisLabel={finishDiagnosis}
+            failureNotice={failureNotice}
             deliveryStatus={
               isMulti
                 ? null
@@ -921,6 +925,10 @@ function HistoryAssistant({
         : null;
   const streaming = m.status === "running" && !m.paused;
   const finishReason = m.runs?.finish_reason ?? chrome.finishReason ?? null;
+  // Cold path: prefer live chrome (SSE error in events), else durable runs.error.
+  const errorMessage =
+    chrome.errorMessage ?? m.runs?.error?.message ?? undefined;
+  const errorCode = chrome.errorCode ?? m.runs?.error?.code ?? undefined;
   const interrupted =
     m.status === "incomplete" || finishReason === "interrupted";
   const stopped = finishReason === "cancelled";
@@ -931,14 +939,16 @@ function HistoryAssistant({
     !m.reasoning_content &&
     m.citations.length === 0 &&
     artifacts.length === 0;
-  const failureNotice =
-    !streaming && !(m.content ?? "").trim()
-      ? emptyFailureNotice(finishReason)
-      : null;
+  const failureNotice = resolveEmptyFailureNotice({
+    content: m.content,
+    finishReason,
+    errorMessage,
+    skip: streaming,
+  });
   const errorAction = failureNotice
-    ? errorActionForCode(chrome.errorCode, {
+    ? errorActionForCode(errorCode, {
         credentialSource: chrome.credentialSource,
-        message: chrome.errorMessage,
+        message: errorMessage,
       })
     : null;
   const supportIds = historySupportIds(m, conversationId);
@@ -946,7 +956,7 @@ function HistoryAssistant({
     !!onRetry && isLast && (interrupted || stopped || !!failureNotice);
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
-    chrome.errorMessage,
+    errorMessage,
   );
 
   if (
@@ -997,6 +1007,7 @@ function HistoryAssistant({
             supportIds={supportIds}
             finishReason={streaming ? null : finishReason}
             finishDiagnosisLabel={finishDiagnosis}
+            failureNotice={failureNotice}
             deliveryStatus={team ? null : deliveryStatus}
             usage={streaming ? null : (m.usage ?? chrome.usage)}
             rounds={streaming ? null : (m.rounds ?? chrome.rounds)}

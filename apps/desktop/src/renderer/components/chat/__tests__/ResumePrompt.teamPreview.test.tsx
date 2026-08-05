@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 开工卡可操作面：delegate / debate 均两键（授权开工·开赛 / 停止）；
+ * 开工卡可操作面：delegate / debate 均两键（授权开工·开赛 / 取消）；
  * continue + 非空备注 = 嘱咐注入；debate 无「调整」。
  */
 
@@ -94,14 +94,14 @@ beforeEach(() => {
 });
 
 describe("ResumePrompt · team_preview delegate", () => {
-  it("仅两按钮：授权并开工 + 停止；无逐次审批 / 调整", () => {
+  it("仅两按钮：授权并开工 + 取消；无逐次审批 / 调整", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();
     expect(
       screen.getByText("团队尚未开工。等待你确认后才会上场，请过目分工："),
     ).toBeTruthy();
     expect(screen.getByText("授权并开工")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.getByText("将授权的执行能力")).toBeTruthy();
@@ -340,7 +340,7 @@ describe("ResumePrompt · team_preview delegate", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
     );
-    fireEvent.click(screen.getByText("停止"));
+    fireEvent.click(screen.getByText("取消"));
     expect(submitInteraction).toHaveBeenCalledWith(
       expect.objectContaining({
         cold: expect.objectContaining({
@@ -374,7 +374,7 @@ describe("ResumePrompt · team_preview debate", () => {
     ];
   });
 
-  it("仅两按钮：授权开赛 + 停止；无调整 / 逐次审批", () => {
+  it("仅两按钮：授权开赛 + 取消；无调整 / 逐次审批", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开赛")).toBeNull();
     expect(
@@ -383,7 +383,7 @@ describe("ResumePrompt · team_preview debate", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("授权开赛")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByPlaceholderText(/开赛嘱咐/)).toBeTruthy();

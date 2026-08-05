@@ -71,4 +71,30 @@ describe("formatMessageExport", () => {
       "仅交付",
     );
   });
+
+  it("deliverable-only uses error.message on empty failure", () => {
+    expect(
+      formatMessageExport("", undefined, "deliverable", {
+        error: { message: "模型调用失败，请重试。" },
+      }),
+    ).toBe("模型调用失败，请重试。");
+  });
+
+  it("deliverable-only prefers content over error", () => {
+    expect(
+      formatMessageExport("已写出一半", undefined, "deliverable", {
+        error: { message: "模型调用失败，请重试。" },
+      }),
+    ).toBe("已写出一半");
+  });
+
+  it("with_process empty failure still surfaces error as deliverable", () => {
+    const processOnly: ProcessStep[] = [{ kind: "reasoning", text: "想一下" }];
+    const text = formatMessageExport("", processOnly, "with_process", {
+      error: { message: "工具连续无有效进展或参数无效，请重试。" },
+    });
+    expect(text).toContain("【过程】");
+    expect(text).toContain("【交付】");
+    expect(text).toContain("工具连续无有效进展或参数无效，请重试。");
+  });
 });

@@ -1104,7 +1104,14 @@ class DelegateTool:
         if seed_notes:
             self._seed_notes = list(seed_notes)
         if decision is CheckpointDecision.STOP:
-            return await finalize_stopped(self, plan, seed_completed)
+            # team_preview STOP → soft guidance; plan_review STOP keeps format_for_ceo.
+            return await finalize_stopped(
+                self,
+                plan,
+                seed_completed,
+                kickoff_cancelled=apply_kickoff_grant,
+                note=note,
+            )
 
         # Steer: ADJUST always; kickoff CONTINUE+note ≡ former adjust (嘱咐注入未跑队员).
         # plan_review CONTINUE+note does not steer (apply_kickoff_grant=False; UI still has 调整).

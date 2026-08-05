@@ -29,6 +29,9 @@ export type NoticeTemplate = {
   slots: readonly NoticeTemplateSlot[];
   /** 维护/故障类建议设结束时间的提示 */
   endHint?: string;
+  /** 套用时预填 CTA（可选） */
+  cta_label?: string;
+  cta_url?: string;
   build: (v: Record<string, string>) => { title: string; body: string };
 };
 
@@ -222,6 +225,42 @@ ${detailLine}如有疑问，打开消息页「AgentCore 官方」查看本条归
     },
   },
   {
+    id: "quota_jiurelay",
+    label: "额度不可用 · jiurelay",
+    description: "平台额度暂不可用 · 引导免费自配",
+    title: "平台额度暂时不可用 · 请免费自配 jiurelay",
+    body: `平台提供的额度暂时不可用。
+
+请到 https://jiurelay.com/ 免费自行配额度后，在「设置 · 服务商」接入即可继续使用。
+
+如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
+    severity: "high",
+    surface: "both",
+    dismiss_policy: "once",
+    cta_label: "前往 jiurelay 免费配额",
+    cta_url: "https://jiurelay.com/",
+    endHint: "平台额度恢复后归档，或设结束时间避免过期横幅残留",
+    slots: [
+      {
+        key: "note",
+        label: "补充说明（可选）",
+        placeholder: "可留空；如恢复预估时间",
+        multiline: true,
+      },
+    ],
+    build: (v) => {
+      const note = v.note?.trim();
+      const noteBlock = note ? `\n补充：${note}\n` : "\n";
+      return {
+        title: "平台额度暂时不可用 · 请免费自配 jiurelay",
+        body: `平台提供的额度暂时不可用。
+
+请到 https://jiurelay.com/ 免费自行配额度后，在「设置 · 服务商」接入即可继续使用。
+${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
+      };
+    },
+  },
+  {
     id: "outage",
     label: "故障 / 降级",
     description: "突发不可用 · 横幅常驻",
@@ -405,8 +444,8 @@ export function templateToFormSeed(t: NoticeTemplate): NoticeFormSeed {
     severity: t.severity,
     surface: t.surface,
     dismiss_policy: t.dismiss_policy,
-    cta_label: "",
-    cta_url: "",
+    cta_label: t.cta_label ?? "",
+    cta_url: t.cta_url ?? "",
     start_at: "",
     end_at: "",
   };

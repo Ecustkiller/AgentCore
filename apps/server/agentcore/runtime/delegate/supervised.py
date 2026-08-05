@@ -322,9 +322,19 @@ def _declare_replan_adds_on_coordination(
     )
 
 async def finalize_stopped(
-    tool: DelegateTool, plan: RunPlan, seed_completed: dict[str, RunState]
+    tool: DelegateTool,
+    plan: RunPlan,
+    seed_completed: dict[str, RunState],
+    *,
+    kickoff_cancelled: bool = False,
+    note: str = "",
 ) -> ToolResult:
-    """Wrap up a partial plan without running the tail."""
+    """Wrap up a partial plan without running the tail.
+
+    ``kickoff_cancelled`` marks team_preview STOP (drive_preview / resume_plan with
+    ``apply_kickoff_grant``). That path replaces ``format_for_ceo`` with soft
+    guidance — plan_review / replan stop keep the normal CEO brief.
+    """
     from agentcore.runtime.delegate.accumulate import (
         accumulate_usage,
         collect_citations,
@@ -366,10 +376,16 @@ async def finalize_stopped(
         for session in registered:
             await tool._session_saver(session)
     absorb_children(tool)
+    if kickoff_cancelled:
+        from agentcore.runtime.kickoff.cancel_guidance import format_kickoff_cancel_result
+
+        output = format_kickoff_cancel_result(primitive="delegate", note=note)
+    else:
+        output = format_for_ceo(tool, plan, results)
     return ToolResult(
         tool_call_id="",
         success=True,
-        output=format_for_ceo(tool, plan, results),
+        output=output,
         output_limit=DELEGATE_OUTPUT_LIMIT,
     )
 

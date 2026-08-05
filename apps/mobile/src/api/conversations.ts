@@ -20,6 +20,9 @@ type Schemas = components["schemas"];
 /** A conversation row from the list/detail endpoints (server-shaped). */
 export type ConversationSummary = Schemas["ConversationSummary"];
 
+/** Terminal error on a failed turn (schemas.py RunError) — cold-path error card. */
+export type RunError = Schemas["RunError"];
+
 /** An assistant message's persisted replay payload (schemas.py RunsPayload).
  *  `events` is a MULTI-agent turn's ordered run/tool SSE journal (empty `[]` for a
  *  single-agent turn) — re-fold it through the SAME {@link fold} as the live stream to
@@ -36,6 +39,8 @@ export interface RunsPayload {
   captain_context?: ContextBlockWire[] | null;
   /** 预检警告（P2 DURABLE）：lifted turn_warning for plain-chat reload. */
   turn_warning?: string | null;
+  /** 报错回合 terminal error（冷加载 inline 错因；null = 干净回合）. */
+  error?: RunError | null;
 }
 
 /** A user message's attachment as persisted (composer 附件). The agent-chat send ships the
@@ -242,18 +247,21 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
             | ContextBlockWire[]
             | null,
           turn_warning: runs.turn_warning ?? null,
+          error: runs.error ?? null,
         }
       : paused
         ? {
             events: [],
             finish_reason: "paused",
             process: null,
+            error: null,
           }
         : status === "incomplete"
           ? {
               events: [],
               finish_reason: "interrupted",
               process: null,
+              error: null,
             }
           : null,
     status,

@@ -6,6 +6,10 @@ asks the gate whether to durable-pause before fan-out / moderator start.
 
 from __future__ import annotations
 
+from agentcore.runtime.kickoff.cancel_guidance import (
+    KICKOFF_CANCEL_GUIDANCE,
+    format_kickoff_cancel_result,
+)
 from agentcore.runtime.kickoff.debate_host import (
     DebateHostAttach,
     resolve_debate_host_attach,
@@ -65,6 +69,8 @@ __all__ = [
     "discard_mlr_preauth",
     "emit_stage_card_for_motion",
     "grant_mlr_preauth",
+    "format_kickoff_cancel_result",
+    "KICKOFF_CANCEL_GUIDANCE",
     "kickoff_tools",
     "mark_turn_keeps_stage_card",
     "needs_capability_auth",

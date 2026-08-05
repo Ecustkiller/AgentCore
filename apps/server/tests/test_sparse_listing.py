@@ -150,6 +150,41 @@ def test_attachments_exempt_ai_noise_from_list_helpers():
     assert is_ai_list_hidden_file(parent_rel="attachments", name="x.db") is True
 
 
+def test_external_ns_archives_visible_media_still_hidden():
+    """区外 external/<alias>/ 压缩包可见；同路径媒体仍按 AI 噪音隐藏。"""
+    from agentcore.workspace.sparse_listing import is_external_ns_path
+
+    assert is_external_ns_path("external/desk/咨询.sy.zip") is True
+    assert is_external_ns_path("external/desk") is True
+    assert is_external_ns_path("src/external/x.zip") is False
+
+    assert should_hide_ai_noise_from_list("external/desk/咨询.sy.zip") is False
+    assert should_hide_ai_noise_from_list("external/desk/note.rar") is False
+    assert should_hide_ai_noise_from_list("external/desk/photo.png") is True
+    assert should_hide_ai_noise_from_list("out.zip") is True  # workspace root noise
+
+    assert (
+        is_ai_list_hidden_file(parent_rel="external/desk", name="咨询.sy.zip")
+        is False
+    )
+    assert (
+        is_ai_list_hidden_file(parent_rel="external/desk", name="shot.png") is True
+    )
+    # pattern 豁免：工作区根压缩包在 reveal_archives 时可见
+    assert (
+        should_hide_ai_noise_from_list("noise.zip", reveal_archives=True) is False
+    )
+    assert (
+        should_hide_ai_noise_from_list("shot.png", reveal_archives=True) is True
+    )
+    assert (
+        is_ai_list_hidden_file(
+            parent_rel="", name="noise.zip", reveal_archives=True
+        )
+        is False
+    )
+
+
 def test_materials_exempt_ai_noise_outside_attachments():
     """Turn material paths reveal AI-noise even outside attachments/."""
     materials = frozenset({"src/shot.png"})

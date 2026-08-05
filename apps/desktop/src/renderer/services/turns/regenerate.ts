@@ -27,6 +27,7 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
   finalizeGeneratingForPausedConversation,
   finalizeGeneratingIfNeeded,
+  finalizeHonestStopAbort,
   isAbort,
   isTransportDrop,
 } from "./helpers";
@@ -88,7 +89,7 @@ export async function runRegenerate(
     });
   } catch (err) {
     if (isAbort(err)) {
-      finalizeGeneratingIfNeeded(conversationId);
+      finalizeHonestStopAbort(conversationId);
       return;
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
@@ -287,6 +288,7 @@ export async function runResume(
     }
   } catch (err) {
     if (isAbort(err)) {
+      finalizeHonestStopAbort(conversationId);
       return;
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —

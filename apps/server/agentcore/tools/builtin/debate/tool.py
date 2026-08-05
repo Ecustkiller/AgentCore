@@ -477,11 +477,14 @@ class DebateTool:
         """
 
         if decision is CheckpointDecision.STOP:
-            closing = (note or "").strip() or "用户停止了辩论，未开赛。"
+            from agentcore.runtime.kickoff.cancel_guidance import (
+                format_kickoff_cancel_result,
+            )
+
             return ToolResult(
                 tool_call_id="",
                 success=True,
-                output=closing,
+                output=format_kickoff_cancel_result(primitive="debate", note=note),
                 effect=ToolEffect.CONTINUE,
             )
 
@@ -577,10 +580,14 @@ class DebateTool:
                 tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND
             )
         if decision is CheckpointDecision.STOP:
+            from agentcore.runtime.kickoff.cancel_guidance import (
+                format_kickoff_cancel_result,
+            )
+
             return ToolResult(
                 tool_call_id="",
                 success=True,
-                output="用户停止了辩论，未开赛。",
+                output=format_kickoff_cancel_result(primitive="debate"),
                 effect=ToolEffect.CONTINUE,
             )
         return None

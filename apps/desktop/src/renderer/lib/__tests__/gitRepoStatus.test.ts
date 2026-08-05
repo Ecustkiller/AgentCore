@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchGitRepoStatus, gitTrackHasWork } from "../gitRepoStatus";
-import { GIT_PUSH_CONFIRM, gitPush } from "../gitScm";
+import {
+  GIT_DISCARD_CONFIRM,
+  GIT_PUSH_CONFIRM,
+  gitDiscardConfirmMessage,
+  gitPush,
+} from "../gitScm";
 
 vi.mock("@/lib/toast", () => ({
   notifyActionError: vi.fn(),
@@ -161,5 +166,18 @@ describe("gitPush confirm", () => {
       "git_scm",
       expect.objectContaining({ action: "push" }),
     );
+  });
+});
+
+describe("gitDiscard confirm copy", () => {
+  it("honestly describes restore --worktree (index, not HEAD)", () => {
+    expect(GIT_DISCARD_CONFIRM).toMatch(/暂存区|索引/);
+    expect(GIT_DISCARD_CONFIRM).not.toMatch(/\bHEAD\b/);
+    expect(GIT_DISCARD_CONFIRM).toMatch(/不是上次提交/);
+    expect(gitDiscardConfirmMessage(1)).toBe(GIT_DISCARD_CONFIRM);
+    const multi = gitDiscardConfirmMessage(3);
+    expect(multi).toMatch(/3 个文件/);
+    expect(multi).toMatch(/暂存区|索引/);
+    expect(multi).not.toMatch(/\bHEAD\b/);
   });
 });

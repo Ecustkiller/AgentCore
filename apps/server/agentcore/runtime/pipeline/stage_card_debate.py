@@ -27,7 +27,7 @@ from agentcore.runtime.kickoff.stage_card import debate_arguments_from_card
 from agentcore.runtime.pipeline.assemble import assemble_ceo_turn
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
 from agentcore.runtime.pipeline.settle import salvage_pipeline_exception, settle_successful_turn
-from agentcore.runtime.session_persistence import SessionRosterWriter
+from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
@@ -92,6 +92,9 @@ async def run_stage_card_debate_pipeline(
     )
     roster_writer = SessionRosterWriter.wrap(session_saver)
     session_saver_wrapped = roster_writer.save if roster_writer is not None else None
+    wire_roster_for_turn(
+        conversation_id, roster_writer=roster_writer, session_loader=session_loader
+    )
     history_token = turn_history.set(history)
     citations: list[dict] = []
     citations_token = turn_citations.set(citations)

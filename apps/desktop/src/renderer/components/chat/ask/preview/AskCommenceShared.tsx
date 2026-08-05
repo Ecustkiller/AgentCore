@@ -79,7 +79,7 @@ export function CommenceFooter({
           className="text-muted-foreground hover:text-foreground"
           icon={<OctagonX size={14} />}
         >
-          跳过
+          取消
         </Button>
       </div>
       <span className="block text-xs text-muted-foreground">

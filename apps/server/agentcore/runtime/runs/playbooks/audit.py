@@ -28,11 +28,15 @@ _AUDIT_DISCIPLINE = """
 预算不够则少报：本模块 Phase B 最多定案 K={k} 条；未覆盖面最多一行「未覆盖缺口」。
 
 【每条发现强制字段】验证方式∈全文精读|运行验证|静态推断·未读全|待核实；
-定案∈属实|误报|部分属实|待核实；证据指针=文件:行或命令+退出码。
+定案∈属实|误报|部分属实|待核实（亦接受常见英文同义如
+confirmed/false_positive/pending，结构闸归一；禁「属实（不进 N）」等带括号后缀的复合写法）；
+证据指针=文件:行或命令+退出码。
 安全/路径/注入类必写可达性（输入是否用户可控+调用链一句话）；其它中+建议写。
 硬规则：验证方式为未读全或定案为待核实 → 不得标中及以上。
 
-【严重度】高=明确利用/注入路径，或静默丢数据/错归属且用户可感知；
+【严重度】高|中|低|观察·工程（亦接受常见英文同义如
+high/medium/low/critical/info/observation，结构闸归一；禁带括号后缀的复合写法）。
+高=明确利用/注入路径，或静默丢数据/错归属且用户可感知；
 中=可达安全削弱/错配即挂/工具误伤本机其它工程；产品语义错默认中；
 低=纵深缺失/不可达/探针质量/属实可修的小工程卫生（低进 N）；
 观察·工程=超时/未读全/纯慢（不进 N）。禁止把全量 tsc/pytest 超时写成中+缺陷。
@@ -76,7 +80,12 @@ def _auditor_task_body(
         f"{_AUDIT_DISCIPLINE.format(k=k)}"
         f"完整报告用 file_write 落到 `{artifact}`（Markdown）；"
         f"另交配套 `{json_artifact}`（findings：severity/verification/verdict/evidence 等）。"
-        "handoff 只给人审速览摘要 + 路径，不得以 handoff 替代落盘。"
+        "handoff 人审速览（可执行摘要，不代落盘）："
+        "summary 写共 N 条属实（只计「一、属实缺陷」）与报告路径；"
+        "key_points 须覆盖属实缺陷——每条格式 `缺陷id|严重度|一句话`，"
+        "另含报告路径一条；空话或仅「审计完成」不够。"
+        "受 handoff 条数上限时中+优先，并写「另有 n 条见报告」。"
+        "不得以 handoff 替代落盘（Markdown 与 .audit.json 仍须 file_write）。"
         "短命令优先：rg/grep、定点 read、git check-ignore、git ls-files；"
         "禁止把全量 typecheck/全量 pytest 超时当作中+缺陷证据。"
     )
@@ -191,6 +200,8 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "仍成立的中+（去重）/ 已撤销 / 待核实与未覆盖缺口；"
                 "N 只计各路「一、属实缺陷」合并去重后的条数。"
                 f"先 file_read 各审计员落盘报告，再 file_write 到 `{synth_path}`。"
+                "handoff 人审速览同审计员：key_points 覆盖属实（`缺陷id|严重度|一句话`）"
+                f"+ 汇总路径 `{synth_path}`；空话不够；不得以 handoff 代落盘。"
                 "不要重做全量审计；不要套 research_report 审校环。"
                 "正向确认默认不写。"
             ),

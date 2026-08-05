@@ -115,6 +115,9 @@ def test_cloud_scratch_facts():
     assert "区外目录授权需先处在本地工作区" not in out
     assert "云端无法直接授权本机区外路径" not in out
     assert "立即" in out and "勿用纯文本" in out
+    # 先同意再发现：禁首轮文本题要文件名
+    assert "先同意再发现" in out
+    assert "文件名" in out
     assert "在哪工作" in out
     assert "仅新建会话" in out
     assert "ask_user" in out  # 本机出路走卡，勿纯文本

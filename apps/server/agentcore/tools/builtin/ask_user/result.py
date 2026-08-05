@@ -87,7 +87,7 @@ def ask_user_tool_result(
         return ToolResult(
             tool_call_id="",
             success=True,
-            output="用户跳过未回答。",
+            output="用户取消未回答。",
             effect=ToolEffect.INTERACT,
             final_text=note,
         )

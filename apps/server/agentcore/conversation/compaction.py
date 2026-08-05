@@ -39,6 +39,7 @@ from collections.abc import Sequence
 
 from agentcore.billing.gate import run_background_llm
 from agentcore.config import settings
+from agentcore.conversation.failure_visible import export_visible_text
 from agentcore.core.logging import get_logger
 from agentcore.core.text import truncate_head_tail
 from agentcore.db.base import async_session_factory
@@ -130,11 +131,20 @@ def compaction_message_due(
 
 def _render_fold(old_summary: str, messages: Sequence[Message]) -> str:
     """The user-turn payload: the prior rolling summary + the片段 to merge into it."""
-    lines = [
-        f"{m.role}：{m.content.strip()}"
-        for m in messages
-        if m.role in ("user", "assistant") and m.content and m.content.strip()
-    ]
+    lines: list[str] = []
+    for m in messages:
+        if m.role not in ("user", "assistant"):
+            continue
+        body = (m.content or "").strip()
+        if body:
+            lines.append(f"{m.role}：{body}")
+            continue
+        # Pure-failure empty assistants: keep a brief failure line so the cause is
+        # not silently dropped when content is no longer dual-written.
+        if m.role == "assistant":
+            fail = export_visible_text(m)
+            if fail:
+                lines.append(f"assistant：（失败）{fail}")
     convo = "\n\n".join(lines) if lines else "（无正文）"
     prior = old_summary.strip() or "（无，这是本对话的首次压缩）"
     return (

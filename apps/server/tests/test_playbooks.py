@@ -45,6 +45,8 @@ def test_code_audit_single_module_one_auditor():
     assert "两阶段" in t["task"] or "A 宽扫" in t["task"]
     assert "K=8" in t["task"] or "最多定案 K=8" in t["task"]
     assert ".audit.json" in t["task"]
+    assert "缺陷id|严重度|一句话" in t["task"]
+    assert "不得以 handoff 替代落盘" in t["task"]
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.nodes) == 1
@@ -66,6 +68,8 @@ def test_code_audit_multi_module_parallel_plus_synth():
     assert synth["role"] == "审计主管"
     assert set(synth["depends_on"]) == {"audit_0", "audit_1", "audit_2"}
     assert synth["deliverable"]["artifacts"] == [f"{REVIEWS_DIR}/code-audit-汇总速览.md"]
+    assert "缺陷id|严重度|一句话" in synth["task"]
+    assert "不得以 handoff 代落盘" in synth["task"]
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.waves()) >= 2

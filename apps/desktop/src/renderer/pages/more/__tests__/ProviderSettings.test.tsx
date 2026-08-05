@@ -112,6 +112,23 @@ describe("ProviderSettings", () => {
     renderPage();
     expect(screen.getByText("平台额度")).toBeTruthy();
     expect(screen.getByText(/平台模型 deepseek-v4-flash/)).toBeTruthy();
+    expect(screen.getByText(/不接入也可用平台额度/)).toBeTruthy();
+  });
+
+  it("when platform is off, header guides to jiurelay or providers", () => {
+    mockProviders(
+      providersResponse({
+        providers: [],
+        platform_available: false,
+        billing_mode: "byok",
+      }),
+    );
+    renderPage();
+    expect(
+      screen.getByText(/需自行在 jiurelay 免费配额度或接入服务商/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/不接入也可用平台额度/)).toBeNull();
+    expect(screen.queryByText(/联系管理员/)).toBeNull();
   });
 
   it("confirms then deletes a provider", async () => {

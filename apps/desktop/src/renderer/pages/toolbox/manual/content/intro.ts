@@ -65,14 +65,14 @@ export const introChapter: ManualChapterContent = {
           type: "steps",
           items: [
             {
-              title: "直接开聊（平台额度）",
+              title: "接入额度后开聊",
               desc: [
-                "平台默认给你额度，打开就能用。想用自己的模型？去 ",
+                "到 https://jiurelay.com/ 免费自行配额度后，在 ",
                 {
                   text: "设置 · 服务商",
                   link: { kind: "go", to: APP_PATHS.more.providers },
                 },
-                " 接入 API Key（可选，自担费用）。",
+                " 接入即可；也可自带 API Key（BYOK，自担费用）。",
               ],
             },
             {

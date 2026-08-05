@@ -44,6 +44,8 @@ vi.mock("@/stores/conversation", () => ({
 }));
 vi.mock("@/stores/conversation/turnPhaseActions", () => ({
   beginTurnPreflight: vi.fn(),
+  getTurnPhase: vi.fn(() => "stopping"),
+  completeTurnPhase: vi.fn(),
 }));
 vi.mock("@/stores/interactions", async () => {
   const actual = await vi.importActual<typeof import("@/stores/interactions")>(

@@ -92,9 +92,10 @@ describe("searchIndex", () => {
     expect(quick?.label).toBe("5 分钟上手");
     expect(quick?.to).toBe("/toolbox/manual/intro?s=quickstart");
     expect(quick?.haystack).toContain("5 分钟");
-    expect(quick?.haystack).toContain("直接开聊");
+    expect(quick?.haystack).toContain("接入额度");
     expect(quick?.haystack).toContain("api key");
-    expect(quick?.body).toContain("直接开聊（平台额度）");
+    expect(quick?.haystack).toContain("jiurelay.com");
+    expect(quick?.body).toContain("接入额度后开聊");
 
     const what = entries.find((e) => e.itemId === "what");
     expect(what?.haystack).toContain("协作，是更高级的智能");

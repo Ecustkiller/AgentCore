@@ -37,6 +37,12 @@ _SETS: tuple[tuple[str, str, str, str], ...] = (
         "AI_NOISE_FILE_SUFFIXES",
         "array",
     ),
+    (
+        "ai_archive_suffixes",
+        "AI_ARCHIVE_FILE_SUFFIXES",
+        "AI_ARCHIVE_FILE_SUFFIXES",
+        "array",
+    ),
 )
 
 _STRING_LIT = re.compile(r'"([^"]+)"')

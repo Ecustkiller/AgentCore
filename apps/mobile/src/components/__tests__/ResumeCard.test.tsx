@@ -72,11 +72,11 @@ describe("ResumeCard · ask_user", () => {
     expect(onResume).toHaveBeenCalledWith("continue", "选 A", []);
   });
 
-  it("跳过 submits stop（硬停，非 empty continue）", () => {
+  it("取消 submits stop（硬停，非 empty continue）", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={summary()} onResume={onResume} />);
-    expect(screen.queryByText("停止")).toBeNull();
-    fireEvent.click(screen.getByText("跳过"));
+    expect(screen.queryByText("跳过")).toBeNull();
+    fireEvent.click(screen.getByText("取消"));
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
     expect(onResume).not.toHaveBeenCalledWith(
       "continue",
@@ -415,10 +415,10 @@ describe("ResumeCard · team_preview", () => {
       ...over,
     });
 
-  it("非 debate 仅授权并开工 + 停止，无调整 / 逐次审批", () => {
+  it("非 debate 仅授权并开工 + 取消，无调整 / 逐次审批", () => {
     render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
     expect(screen.getByText("授权并开工")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByText("纳入本轮")).toBeTruthy();
@@ -583,11 +583,11 @@ describe("ResumeCard · team_preview", () => {
     // tighten + exclude then stop → amendments ignored (undefined)
     fireEvent.click(screen.getByText("改为仅文字"));
     fireEvent.click(screen.getByLabelText("纳入本轮 写作"));
-    fireEvent.click(screen.getByText("停止"));
+    fireEvent.click(screen.getByText("取消"));
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
   });
 
-  it("debate 仅开赛 + 停止；嘱咐走 continue；无纳入控件", () => {
+  it("debate 仅开赛 + 取消；嘱咐走 continue；无纳入控件", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -601,7 +601,7 @@ describe("ResumeCard · team_preview", () => {
       />,
     );
     expect(screen.getByText("开赛")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.queryByText("先多视角调研再辩")).toBeNull();
@@ -649,11 +649,12 @@ describe("ResumeCard · ask_user browser_login", () => {
     expect(screen.queryByText(/手机暂无内嵌浏览器/)).toBeNull();
     expect(screen.queryByText(/桌面端完成登录/)).toBeNull();
     expect(screen.getByText("已登录，继续")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.getByTestId("browser-login-open-live")).toBeTruthy();
     fireEvent.click(screen.getByText("查看直播"));
     expect(onOpenLive).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("跳过")).toBeNull();
+    expect(screen.queryByText("停止")).toBeNull();
     expect(screen.queryByText("打开浏览器")).toBeNull();
     expect(screen.queryByText("需要你拍板（已离线保留）")).toBeNull();
   });
@@ -681,7 +682,7 @@ describe("ResumeCard · ask_user browser_login", () => {
     expect(onResume).toHaveBeenCalledWith("continue", "已登录，继续", []);
   });
 
-  it("停止 → stop（非跳过文案）", () => {
+  it("取消 → stop（wire decision=stop）", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -689,7 +690,7 @@ describe("ResumeCard · ask_user browser_login", () => {
         onResume={onResume}
       />,
     );
-    fireEvent.click(screen.getByText("停止"));
+    fireEvent.click(screen.getByText("取消"));
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
   });
 
@@ -720,10 +721,10 @@ describe("ResumeCard · ask_user browser_login", () => {
     expect(screen.queryByText("按假设继续")).toBeNull();
   });
 
-  it("普通 ask 不受影响：仍是拍板标题 + 跳过", () => {
+  it("普通 ask 不受影响：仍是拍板标题 + 取消", () => {
     render(<ResumeCard paused={summary()} onResume={vi.fn()} />);
     expect(screen.getByText("需要你拍板（已离线保留）")).toBeTruthy();
-    expect(screen.getByText("跳过")).toBeTruthy();
+    expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText(/需要你登录/)).toBeNull();
     expect(screen.queryByTestId("browser-login-decision")).toBeNull();
   });

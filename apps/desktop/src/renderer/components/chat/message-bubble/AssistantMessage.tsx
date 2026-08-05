@@ -21,6 +21,7 @@ import {
   formatAssistantErrorMessage,
   isConnectivityErrorCode,
   syntheticErrorForEmptyFailure,
+  visibleMessageText,
 } from "@/lib/errors";
 import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
 import {
@@ -35,7 +36,6 @@ import { runRegenerate } from "@/services/turns";
 import {
   assistantProjectionId,
   getActiveRuntime,
-  useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
@@ -106,7 +106,6 @@ function MultiAgentFileArtifacts({ messageId }: { messageId: string }) {
 }
 
 export function AssistantMessage({ message }: MessageBubbleProps) {
-  const isGenerating = useActiveGenerating();
   const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
   const cachedTurn = useUsageStore((s) => s.messageCosts[message.id] ?? null);
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -212,16 +211,28 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     }
   };
 
-  // 流式中可复制 (对话基础功能补齐): the full footer is gated until the turn settles (its
-  // usage / regenerate actions are meaningless mid-stream), but a long reply is often worth
-  // copying before it finishes — so expose a lightweight copy affordance while streaming.
-  // Default = 仅交付; with process timeline offer「含过程」too.
+  // 流式中可复制 (对话基础功能补齐): full footer is gated on THIS message's isStreaming
+  // (not session isGenerating — a settled bubble must keep regenerate/cost while another
+  // turn streams). Mid-stream usage/regenerate are meaningless, but a long reply is often
+  // worth copying early — lightweight copy while streaming. Default = 仅交付; with process
+  // timeline offer「含过程」too.
+  const exportError = { error: message.error, runs: message.runs };
   const { copied: streamCopied, onCopy: onStreamCopy } = useCopyAction(() =>
-    formatMessageExport(message.content, message.process, "deliverable"),
+    formatMessageExport(
+      message.content,
+      message.process,
+      "deliverable",
+      exportError,
+    ),
   );
   const { copied: streamCopiedProcess, onCopy: onStreamCopyProcess } =
     useCopyAction(() =>
-      formatMessageExport(message.content, message.process, "with_process"),
+      formatMessageExport(
+        message.content,
+        message.process,
+        "with_process",
+        exportError,
+      ),
     );
 
   const handleRegenerate = () => {
@@ -278,15 +289,17 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           it grow; once settled, cap a truly long answer to a fade + 展开全文 so it doesn't
           dominate the viewport (短/中答案原样全展). */}
       {message.isStreaming && !hideContentForCheckpoint ? (
-        <Markdown
-          content={message.content}
-          citations={citations}
-          citationToDisplay={citationDisplay.toDisplay}
-          knownLedgerIds={knownLedgerIds}
-          evidenceLedger={evidenceLedger}
-          isStreaming={message.isStreaming}
-        />
-      ) : hideContentForCheckpoint ? null : (
+        (message.content ?? "").trim() ? (
+          <Markdown
+            content={message.content}
+            citations={citations}
+            citationToDisplay={citationDisplay.toDisplay}
+            knownLedgerIds={knownLedgerIds}
+            evidenceLedger={evidenceLedger}
+            isStreaming={message.isStreaming}
+          />
+        ) : null
+      ) : hideContentForCheckpoint || !(message.content ?? "").trim() ? null : (
         <CollapsibleSpeech
           contentKey={message.content}
           fadeToClass="from-background"
@@ -452,15 +465,26 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           <SyncStatusHint syncStatus={message.syncStatus} />
         </div>
       )}
-      {!message.isStreaming && !isGenerating && message.content.length > 0 && (
-        <AssistantMessageFooter
-          message={message}
-          captainContext={captainContext}
-          costText={costText}
-          finishReason={finishReason}
-          onRegenerate={handleRegenerate}
-        />
-      )}
+      {!message.isStreaming &&
+        (message.content.length > 0 ||
+          !!displayError ||
+          // runs.error may still ride the export duck type before / beside message.error lift.
+          !!visibleMessageText({
+            content: "",
+            error: message.error,
+            runs: message.runs as {
+              error?: { message?: string } | null;
+            } | null,
+          })) && (
+          <AssistantMessageFooter
+            message={message}
+            captainContext={captainContext}
+            costText={costText}
+            finishReason={finishReason}
+            onRegenerate={handleRegenerate}
+            displayError={displayError}
+          />
+        )}
     </div>
   );
 }

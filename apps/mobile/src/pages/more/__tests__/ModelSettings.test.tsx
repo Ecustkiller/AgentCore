@@ -220,6 +220,24 @@ describe("ModelSettings (profiles + providers)", () => {
     );
   });
 
+  it("when platform is off, settings desc guides to jiurelay or providers", async () => {
+    mockList.mockResolvedValue(
+      makeProviders({
+        billing_mode: "byok",
+        platform_available: false,
+        platform_model: null,
+      }),
+    );
+    stubProfiles([USER_PROFILE], USER_PROFILE.id);
+    render(<ModelSettings />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/需自行在 jiurelay 免费配额度或接入服务商/),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(/不接入也可用平台额度直接对话/)).toBeNull();
+  });
+
   it("sets the account default combination", async () => {
     mockList.mockResolvedValue(makeProviders());
     stubProfiles([SYSTEM_52, USER_PROFILE], SYSTEM_52.id);

@@ -348,19 +348,37 @@ export function AssistantMessageFooter({
   costText,
   finishReason,
   onRegenerate,
+  displayError,
 }: {
   message: Message;
   captainContext: ContextBlockWire[];
   costText: string | null;
   finishReason: string | undefined;
   onRegenerate: () => void;
+  /** Settled empty-failure card (message.error or synthetic); feeds copy via visibleMessageText. */
+  displayError?: { code: string; message: string } | null;
 }) {
   const hasProcess = (message.process?.length ?? 0) > 0;
+  // Prefer displayError so synthesizable empty failures (no error payload) still copy.
+  const exportError = {
+    error: displayError ?? message.error,
+    runs: message.runs,
+  };
   const { copied, onCopy } = useCopyAction(() =>
-    formatMessageExport(message.content, message.process, "deliverable"),
+    formatMessageExport(
+      message.content,
+      message.process,
+      "deliverable",
+      exportError,
+    ),
   );
   const { copied: copiedProcess, onCopy: onCopyProcess } = useCopyAction(() =>
-    formatMessageExport(message.content, message.process, "with_process"),
+    formatMessageExport(
+      message.content,
+      message.process,
+      "with_process",
+      exportError,
+    ),
   );
   const collabSummary = useMemo(
     () => formatCollabSummary(message.collab),

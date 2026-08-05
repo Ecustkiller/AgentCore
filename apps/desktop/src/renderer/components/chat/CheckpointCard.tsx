@@ -67,7 +67,7 @@ export function collectAskSelected(
 /**
  * The live, actionable ask_user card body — the single asking surface, shared by the
  * inline live card ({@link CheckpointCard}) and the durable 待恢复 resume card
- * (ResumePrompt). Settled by 提交 (→ continue) or 跳过 (→ stop 硬停). Picks compose into ONE readable
+ * (ResumePrompt). Settled by 提交 (→ continue) or 取消 (→ stop 硬停). Picks compose into ONE readable
  * note (答复模型 α), handed to `onSubmit`.
  *
  * `kickoff` 与 `decision` 共用 {@link AskDecisionBody}；`proposal_pick` / `risk_ack` /
@@ -210,9 +210,18 @@ export function AskUserCard({
   );
 }
 
+/** Collapsed one-liner: user's answer first (note → selected), never the CEO
+ * question — that reads like a live prompt next to a success label. */
+function resolvedCollapsedSummary(checkpoint: CheckpointDisplay): string {
+  const note = checkpoint.note.trim();
+  if (note) return note;
+  if (checkpoint.selected.length > 0) return checkpoint.selected.join(" · ");
+  return "";
+}
+
 /** The settled record of an ask_user card: how it was decided, plus the user's
- * answer note. Carries its outcome's tone (calm) so a glance down the history reads
- * the verdict without expanding. */
+ * answer note. Outcome tone stays on badge/label so a glance still reads the
+ * verdict; shell is quiet card chrome (not a success toast). */
 function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
   const decision = checkpoint.decision ?? "timeout";
   const resolved = askResolvedOutcome(checkpoint.intent, decision);
@@ -225,7 +234,7 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
       tone={resolved.tone}
       icon={resolved.icon}
       label={resolved.label}
-      collapsedSummary={checkpoint.question}
+      collapsedSummary={resolvedCollapsedSummary(checkpoint)}
       askIntent={checkpoint.intent}
     >
       <div className="space-y-1.5 pb-3 pl-10 pr-3">

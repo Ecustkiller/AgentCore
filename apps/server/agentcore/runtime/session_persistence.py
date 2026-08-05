@@ -28,10 +28,35 @@ from agentcore.db.base import telemetry_session_factory
 from agentcore.db.repositories import RunSessionRepository
 from agentcore.runtime.runs.serialize import session_from_row, session_to_row
 from agentcore.runtime.runs.session import RunSession
+from agentcore.runtime.sessions import SessionLoader, default_session_registry
 
 logger = get_logger(__name__)
 
 type _SessionSave = Callable[[RunSession], Awaitable[None]]
+
+
+def wire_roster_for_turn(
+    conversation_id: str,
+    *,
+    roster_writer: SessionRosterWriter | None,
+    session_loader: SessionLoader | None,
+) -> None:
+    """Bind persist-before-evict + log assembly observability for this turn.
+
+    Call once after :meth:`SessionRosterWriter.wrap` in every pipeline entry
+    (fresh / resume / workflow / stage-card).
+    """
+    store = default_session_registry().get_or_create(conversation_id)
+    if roster_writer is not None:
+        store.bind_evict_persist(roster_writer.schedule, durable=True)
+    else:
+        store.bind_evict_persist(None, durable=False)
+    logger.info(
+        "session_roster.wired",
+        persist=roster_writer is not None,
+        loader=session_loader is not None,
+        conversation_id=conversation_id,
+    )
 
 
 async def save_run_session(conversation_id: str, session: RunSession) -> None:

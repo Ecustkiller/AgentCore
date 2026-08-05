@@ -30,6 +30,7 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
+from agentcore.workspace._paths import AI_ARCHIVE_FILE_SUFFIXES
 from agentcore.workspace.attachment_parse import (
     MARKITDOWN_EXTENSIONS,
     SKIP_EXTENSIONS,
@@ -38,6 +39,7 @@ from agentcore.workspace.attachment_parse import (
     extract_office_bytes,
     parsed_copy_path,
 )
+from agentcore.workspace.external_mounts import EXTERNAL_PREFIX, parse_external_path
 from agentcore.workspace.limits import (
     FILE_TOO_LARGE_DETAIL,
     OFFICE_EXTRACT_MAX_BYTES,
@@ -756,6 +758,44 @@ def _pattern_filters(pattern: str) -> bool:
     """True when ``pattern`` is narrower than「列全部」."""
     p = (pattern or "*").strip() or "*"
     return p != "*"
+
+
+def _pattern_targets_archives(pattern: str) -> bool:
+    """True when glob(s) end with an AI-archive suffix (``*.zip``, ``*.{rar,7z}``…)."""
+    for pat in expand_brace_globs(pattern):
+        lower = (pat or "").lower().rstrip("/")
+        if any(lower.endswith(suf) for suf in AI_ARCHIVE_FILE_SUFFIXES):
+            return True
+    return False
+
+
+def _is_bare_external_directory(directory: str) -> bool:
+    """True for ``external`` / ``external/`` (no alias) — not a listable mount path."""
+    raw = (directory or "").strip().replace("\\", "/").strip("/")
+    return raw == EXTERNAL_PREFIX.rstrip("/")
+
+
+def _looks_like_external_directory(directory: str) -> bool:
+    """Bare ``external`` or any ``external/<alias>/…`` shape (even unknown alias)."""
+    raw = (directory or "").strip().replace("\\", "/").strip("/")
+    if raw == EXTERNAL_PREFIX.rstrip("/") or raw.startswith(EXTERNAL_PREFIX):
+        return True
+    return parse_external_path(directory) is not None
+
+
+def _external_directory_hint(backend: Any) -> str:
+    """Actionable mounts guidance for bare / failed ``external`` list attempts."""
+    guide = (
+        "须使用 `external/<别名>/`（例如 `external/desktop/`）访问已授权区外目录"
+    )
+    mounts = getattr(backend, "_mounts", None) or {}
+    if not mounts:
+        return (
+            f"{guide}；本对话尚无会话级区外目录授权"
+            "（用户经 ask_user grant_* 确认后才会出现 mounts）。"
+        )
+    parts = [f"`external/{a}/`" for a in mounts]
+    return f"{guide}；当前 mounts：{'；'.join(parts)}。"
 
 
 def _no_match_hint(
@@ -1868,6 +1908,7 @@ class FileListTool:
                 "列出某个目录下的文件与子目录。路径必须是相对于工作区的相对路径。"
                 "默认只列当前层（recursive=false）：`*.py` 不会进入子目录；"
                 "要搜整棵树请设 recursive=true。支持 `{ts,tsx}` 花括号二选一。"
+                "区外目录须 `external/<别名>/`（勿传裸 `external`）；"
                 "大 zip 持久展开请用 archive_extract，勿假定仅靠 code_execute 解压即工作区可见。"
             ),
             parameters={
@@ -1877,7 +1918,8 @@ class FileListTool:
                         "type": "string",
                         "description": (
                             "工作区相对 POSIX 目录（默认 `.`=整仓；`/<根标签>/…` 与裸 `/`、"
-                            "`\\` 视为根；其它绝对路径拒绝）"
+                            "`\\` 视为根；区外授权目录用 `external/<别名>/`，禁止裸 `external`；"
+                            "其它绝对路径拒绝）"
                         ),
                         "default": ".",
                     },
@@ -1916,7 +1958,18 @@ class FileListTool:
         max_depth = int(arguments.get("max_depth", 3))
         max_depth = max(1, min(max_depth, 8))
         patterns = expand_brace_globs(str(pattern))
+        reveal_archives = _pattern_targets_archives(str(pattern))
 
+        if _is_bare_external_directory(str(directory)):
+            return _error(
+                f"directory={directory!r} 无效：裸 `external` 不是可列目录。"
+                + _external_directory_hint(context.backend),
+                start,
+            )
+
+        prev_reveal = getattr(context.backend, "ai_list_reveal_archives", False)
+        if reveal_archives:
+            context.backend.ai_list_reveal_archives = True
         try:
             if recursive:
                 merged: dict[str, TreeEntry] = {}
@@ -1940,7 +1993,9 @@ class FileListTool:
                         for e in await context.backend.list(directory, "*")
                         if e.is_dir
                         or not should_hide_ai_noise_from_list(
-                            e.path, materials=context.material_paths
+                            e.path,
+                            materials=context.material_paths,
+                            reveal_archives=reveal_archives,
                         )
                     ]
                     if bare:
@@ -1970,7 +2025,8 @@ class FileListTool:
             else:
                 # ``list`` is shared with user UI (system-noise only); strip AI
                 # noise here so media/archives don't pollute the agent view —
-                # except under ``attachments/`` or this-turn ``material_paths``.
+                # except under ``attachments/``, this-turn ``material_paths``,
+                # ``external/<alias>/`` archives, or pattern-targeted archives.
                 seen: set[str] = set()
                 entries: list[DirEntry] = []
                 for pat in patterns:
@@ -1978,7 +2034,9 @@ class FileListTool:
                         if dir_entry.path in seen:
                             continue
                         if dir_entry.is_dir or not should_hide_ai_noise_from_list(
-                            dir_entry.path, materials=context.material_paths
+                            dir_entry.path,
+                            materials=context.material_paths,
+                            reveal_archives=reveal_archives,
                         ):
                             seen.add(dir_entry.path)
                             entries.append(dir_entry)
@@ -1992,7 +2050,9 @@ class FileListTool:
                         for e in await context.backend.list(directory, "*")
                         if e.is_dir
                         or not should_hide_ai_noise_from_list(
-                            e.path, materials=context.material_paths
+                            e.path,
+                            materials=context.material_paths,
+                            reveal_archives=reveal_archives,
                         )
                     ]
                     if bare:
@@ -2012,12 +2072,33 @@ class FileListTool:
                 start,
             )
         except NotADirectory:
+            if _looks_like_external_directory(str(directory)):
+                return _error(
+                    f"不是可列的区外目录：{directory}。"
+                    + _external_directory_hint(context.backend),
+                    start,
+                )
             return _error(f"不是目录：{directory}", start)
+        except PathNotFound:
+            if _looks_like_external_directory(str(directory)):
+                return _error(
+                    f"区外路径不存在或未授权：{directory}。"
+                    + _external_directory_hint(context.backend),
+                    start,
+                )
+            return _error(f"列目录失败：路径不存在：{directory}", start)
         except WorkspaceError as e:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
+            if _looks_like_external_directory(str(directory)):
+                return _error(
+                    f"列目录失败：{e}。" + _external_directory_hint(context.backend),
+                    start,
+                )
             return _error(f"列目录失败：{e}", start)
+        finally:
+            context.backend.ai_list_reveal_archives = prev_reveal
 
         return ToolResult(
             tool_call_id="",

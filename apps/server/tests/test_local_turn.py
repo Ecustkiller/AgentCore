@@ -8,7 +8,7 @@ Covered:
 * a full turn persists the user + assistant messages AND the turn journal;
 * an empty reply with no process state persists only the user row (noop);
 * an empty reply with journal/runs still settles the assistant (+ journal);
-* an empty ERROR still settles the assistant row (failed + error_code);
+* an empty ERROR still settles the assistant row (failed + error_code; content empty);
 * **no cost ledger is ever written**;
 * the user row is pinned to the client-minted id;
 * a retried write-back is an idempotent D7 merge upsert (no early-return abandon);
@@ -340,7 +340,7 @@ async def test_record_local_turn_empty_with_runs_settles(monkeypatch):
 
 
 async def test_record_local_turn_empty_error_settles_assistant(monkeypatch):
-    """Empty ERROR still upserts failed + error_code and surfaces the error as body."""
+    """Empty ERROR still upserts failed + error_code; content stays empty."""
     from agentcore.core.error_codes import ErrorCode
 
     events: list = []
@@ -366,8 +366,9 @@ async def test_record_local_turn_empty_error_settles_assistant(monkeypatch):
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "failed"
     assert usage[2]["error_code"] == ErrorCode.LLM_TIMEOUT
+    assert usage[2]["error"] == {"code": ErrorCode.LLM_TIMEOUT, "message": "超时"}
     content = next(e for e in events if e[0] == "content")
-    assert content[2] == "超时"
+    assert content[2] == ""
     assert result["assistant_message_id"] == "assistant-id"
     assert result["noop"] is False
 

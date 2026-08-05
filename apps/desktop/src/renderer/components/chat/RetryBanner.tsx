@@ -28,7 +28,9 @@ import { useNavigate } from "react-router-dom";
  * / {@link import("./ResumePrompt").ResumePrompt}.
  *
  * Reconnect drops ({@link RECONNECT_BANNER} · rejoinLiveTurn) label the button
- * 「重连」; every other retryable failure keeps 「重试」.
+ * 「重连」; unknown cloud settle
+ * ({@link import("@/services/turns/helpers").UNKNOWN_CLOUD_BANNER}) and every
+ * other retryable failure keep 「重试」.
  */
 export function RetryBanner() {
   const error = useActiveError();
@@ -38,6 +40,7 @@ export function RetryBanner() {
   const navigate = useNavigate();
   if (!error) return null;
 
+  // True transport drop only — UNKNOWN_CLOUD_BANNER must stay 「重试」.
   const retryLabel = error === RECONNECT_BANNER ? "重连" : "重试";
 
   return (

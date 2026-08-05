@@ -9,7 +9,9 @@ import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
   RECONNECT_BANNER,
+  UNKNOWN_CLOUD_BANNER,
   finalizeGeneratingForPausedConversation,
+  finalizeHonestStopAbort,
   isAbort,
   isTransportDrop,
   lastUserMessageOf,
@@ -98,7 +100,10 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
     // offer a resend.
     return last?.role === "assistant";
   } catch (err) {
-    if (isAbort(err)) return true; // user stopped — handled
+    if (isAbort(err)) {
+      finalizeHonestStopAbort(conversationId);
+      return true;
+    }
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
@@ -173,12 +178,16 @@ export function markGhostInterrupted(conversationId: string): void {
  * - paused≥1 → hold + clear generating/streaming (card + isGenerating is illegal)
  * - cloudKnown ∧ !live ∧ paused=0 → real dead-lease / TTL degrade → ghost
  *   (also covers stale ``usage.paused`` latch with no ``paused_turns`` frame)
- * - !cloudKnown → unknown (request failed); never ghost — hold
+ * - !cloudKnown → unknown (request failed); never ghost — hold + {@link UNKNOWN_CLOUD_BANNER}
+ *   (retry re-settles / loadRecovery; never resend; not {@link RECONNECT_BANNER})
  */
 export async function settleCloudRunningAssistant(
   conversationId: string,
   recovery: ConversationRecovery,
 ): Promise<"rejoin" | "ghost" | "hold"> {
+  const store = useConversationStore.getState();
+  store.clearError(conversationId);
+
   let snap = recovery;
   // Empty or unknown cloud facts: one refresh before deciding (same race as pause).
   if ((!snap.cloudKnown || !snap.cloudLive) && snap.pausedCount === 0) {
@@ -189,7 +198,14 @@ export async function settleCloudRunningAssistant(
     return "rejoin";
   }
   if (!snap.cloudKnown) {
-    // Failure ≠ confirmed idle — leave the running assistant alone.
+    // Failure ≠ confirmed idle — leave the running assistant alone, but give an
+    // honest retry affordance (not "连接中断"). Retry re-settles, never resends.
+    store.setError(
+      UNKNOWN_CLOUD_BANNER,
+      () => void settleCloudRunningAssistant(conversationId, snap),
+      conversationId,
+      null,
+    );
     return "hold";
   }
   if (!snap.cloudLive && snap.pausedCount === 0) {
@@ -221,7 +237,10 @@ export async function attachOnOpen(conversationId: string): Promise<void> {
   try {
     await attachConversation(conversationId, ac.signal);
   } catch (err) {
-    if (isAbort(err)) return;
+    if (isAbort(err)) {
+      finalizeHonestStopAbort(conversationId);
+      return;
+    }
     const s = useConversationStore.getState();
     // Only surface a reconnect banner if a bubble actually opened (a run was live
     // and we lost it); a pre-event drop / 204 stays silent.

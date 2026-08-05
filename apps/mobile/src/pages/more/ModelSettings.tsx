@@ -302,8 +302,8 @@ export function ModelSettings() {
             profile={surface.mode === "edit" ? surface.profile : undefined}
             catalog={catalog}
             providers={data?.providers ?? []}
-            platformAvailable={platformMode}
             platformModel={data?.platform_model}
+            platformAvailable={platformMode}
             onSaved={() => {
               setSurface({ kind: "list" });
               void loadProfiles();
@@ -328,7 +328,7 @@ export function ModelSettings() {
             <p className="settings-desc">
               {platformMode
                 ? "接入你自己的 OpenAI 兼容服务商为高级选项——不接入也可用平台额度直接对话。可添加多个服务商，按你的端点自担费用。Key 经 AES 加密存储，仅回显后 4 位。"
-                : "添加一个或多个 OpenAI 兼容服务商（API Key、Base URL、默认模型名）即可对话。Key 经 AES 加密存储，仅回显后 4 位。"}
+                : "需自行在 jiurelay 免费配额度或接入服务商后才能对话。可添加多个 OpenAI 兼容服务商（API Key、Base URL、默认模型名）。Key 经 AES 加密存储，仅回显后 4 位。"}
             </p>
 
             <ProfilesSection
@@ -701,16 +701,16 @@ function ProfileForm({
   profile,
   catalog,
   providers,
-  platformAvailable,
   platformModel,
+  platformAvailable,
   onSaved,
   onCancel,
 }: {
   profile?: LlmModelProfileView;
   catalog: ModelCatalog | null;
   providers: LlmProviderView[];
-  platformAvailable: boolean;
   platformModel?: string | null;
+  platformAvailable: boolean;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -826,9 +826,21 @@ function ProfileForm({
             data-testid="profile-no-models"
             style={{ fontSize: 12, marginTop: 4 }}
           >
-            {platformAvailable
-              ? "暂无可用模型。平台额度暂不可用，请联系管理员或稍后重试。"
-              : "暂无可用模型，请先添加服务商。"}
+            {platformAvailable ? (
+              <>暂无可用模型。请稍后重试，或到设置检查服务商与模型配置。</>
+            ) : (
+              <>
+                暂无可用模型。请到{" "}
+                <a
+                  href="https://jiurelay.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  jiurelay
+                </a>{" "}
+                免费配额度，或先添加服务商。
+              </>
+            )}
           </p>
         )}
         <SlotModelSelect

@@ -9,6 +9,10 @@
  */
 
 import {
+  WORKSPACE_SCHEME,
+  resolveWorkspaceProtocolRequest,
+} from "@shared/workspace-browser-url";
+import {
   PREVIEW_CSP,
   mimeForPath,
   normalizePreviewPath,
@@ -16,7 +20,7 @@ import {
 } from "../preview/paths";
 import { normalizeBrowserConversationId } from "./paths";
 
-export const WORKSPACE_SCHEME = "workspace";
+export { resolveWorkspaceProtocolRequest, WORKSPACE_SCHEME };
 
 /** 工作区 partition 前缀（完整键 = {@link workspacePartitionFor}）。 */
 export const WORKSPACE_PARTITION_PREFIX = "agentcore-browser-workspace";
@@ -63,32 +67,4 @@ export function isWorkspaceBrowserUrl(url: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * 纯校验：请求 URL 的 host 是否等于本 partition 绑定的 conversationId。
- * handler 与单测共用（缺 host/path → 403；跨 cid → 403）。
- */
-export function resolveWorkspaceProtocolRequest(
-  requestUrl: string,
-  boundConversationId: string,
-):
-  | { ok: true; conversationId: string; rel: string }
-  | { ok: false; status: 400 | 403 } {
-  const bound = normalizeBrowserConversationId(boundConversationId);
-  if (!bound) return { ok: false, status: 403 };
-  let url: URL;
-  try {
-    url = new URL(requestUrl);
-  } catch {
-    return { ok: false, status: 400 };
-  }
-  if (url.protocol.toLowerCase() !== `${WORKSPACE_SCHEME}:`) {
-    return { ok: false, status: 400 };
-  }
-  const host = normalizeBrowserConversationId(url.hostname);
-  const rel = normalizePreviewPath(url.pathname);
-  if (!host || !rel) return { ok: false, status: 403 };
-  if (host !== bound) return { ok: false, status: 403 };
-  return { ok: true, conversationId: host, rel };
 }

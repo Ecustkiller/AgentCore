@@ -1,6 +1,6 @@
 /**
  * U3：用户 SCM 动作 —— 经 ``workspaceOp('git_scm')``；
- * push/pull 在调用前恒确认（对等结构化 git 审批卡）。
+ * push/pull/discard 在调用前恒确认（对等结构化 git 审批卡）；fetch 免确认。
  */
 import { notifyActionError, notifySuccess } from "@/lib/toast";
 
@@ -10,13 +10,18 @@ export const GIT_PUSH_CONFIRM =
 export const GIT_PULL_CONFIRM =
   "将以快进方式拉取（固定 --ff-only）。非快进或冲突会失败，需打开文件手动处理。确定继续？";
 
+export const GIT_DISCARD_CONFIRM =
+  "将丢弃该文件的未暂存改动（恢复为暂存区/索引中的内容，不是上次提交）。此操作不可撤销。确定继续？";
+
 export type GitScmAction =
   | "stage"
   | "unstage"
   | "commit"
   | "push"
   | "pull"
-  | "diff";
+  | "fetch"
+  | "diff"
+  | "discard";
 
 export interface GitScmResult {
   ok: true;
@@ -139,6 +144,20 @@ export async function gitPull(
   return true;
 }
 
+/** fetch：免确认；仅更新远端跟踪引用。 */
+export async function gitFetch(
+  rootId: string,
+  opts?: { remote?: string },
+): Promise<boolean> {
+  const r = await runGitScm(rootId, "fetch", { remote: opts?.remote });
+  if (!r.ok) {
+    notifyActionError("获取失败", r.detail);
+    return false;
+  }
+  notifySuccess(r.detail?.split("\n")[0] || "已获取");
+  return true;
+}
+
 export async function gitDiffText(
   rootId: string,
   path: string,
@@ -150,4 +169,84 @@ export async function gitDiffText(
     return null;
   }
   return r.text ?? "";
+}
+
+/**
+ * 窄口丢弃未暂存工作区改动：恒确认；须指定 path(s)；不做 clean / 无路径整仓。
+ */
+export function gitDiscardConfirmMessage(count: number): string {
+  if (count <= 1) return GIT_DISCARD_CONFIRM;
+  return `将丢弃 ${count} 个文件的未暂存改动（恢复为暂存区/索引中的内容，不是上次提交）。此操作不可撤销。确定继续？`;
+}
+
+export async function gitDiscard(
+  rootId: string,
+  paths: string | string[],
+  opts?: { skipConfirm?: boolean },
+): Promise<boolean> {
+  const list = (Array.isArray(paths) ? paths : [paths])
+    .map((p) => p.replace(/\\/g, "/").trim())
+    .filter(Boolean);
+  if (list.length === 0) return false;
+  if (
+    !opts?.skipConfirm &&
+    typeof window !== "undefined" &&
+    !window.confirm(gitDiscardConfirmMessage(list.length))
+  ) {
+    return false;
+  }
+  const r = await runGitScm(rootId, "discard", { paths: list });
+  if (!r.ok) {
+    notifyActionError("丢弃改动失败", r.detail);
+    return false;
+  }
+  return true;
+}
+
+export const GIT_DELETE_UNTRACKED_CONFIRM =
+  "将把该未跟踪文件移入系统回收站（不是 git clean）。确定继续？";
+
+export function gitDeleteUntrackedConfirmMessage(count: number): string {
+  if (count <= 1) return GIT_DELETE_UNTRACKED_CONFIRM;
+  return `将把 ${count} 个未跟踪文件移入系统回收站（不是 git clean）。确定继续？`;
+}
+
+/** 删除未跟踪文件：走 trashPath（系统回收站），禁止 git clean。 */
+export async function deleteUntrackedFiles(
+  rootId: string,
+  workspaceRelPaths: string[],
+  opts?: { skipConfirm?: boolean },
+): Promise<boolean> {
+  const safe = workspaceRelPaths
+    .map((p) => p.replace(/\\/g, "/").replace(/^\/+/, "").trim())
+    .filter((p) => p.length > 0);
+  if (safe.length === 0) {
+    notifyActionError("删除失败", "无效路径");
+    return false;
+  }
+  if (
+    !opts?.skipConfirm &&
+    typeof window !== "undefined" &&
+    !window.confirm(gitDeleteUntrackedConfirmMessage(safe.length))
+  ) {
+    return false;
+  }
+  const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
+  if (!fsApi?.trashPath) {
+    notifyActionError("删除失败", "本地工作区不可用");
+    return false;
+  }
+  for (const rel of safe) {
+    try {
+      const res = await fsApi.trashPath(rootId, rel);
+      if (!res.ok) {
+        notifyActionError("删除失败", res.reason || rel);
+        return false;
+      }
+    } catch (e) {
+      notifyActionError("删除失败", e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }
+  return true;
 }

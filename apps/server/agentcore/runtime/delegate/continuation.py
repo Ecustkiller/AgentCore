@@ -22,11 +22,17 @@ logger = get_logger(__name__)
 
 
 class ContinuationRejectedError(Exception):
-    """输入校验失败：该项拒绝续派，驱动层折成 FAILED RunState 交回 CEO。"""
+    """输入校验失败：该项拒绝续派，驱动层折成 FAILED RunState 交回 CEO。
 
-    def __init__(self, message: str) -> None:
+    ``cause`` 枚举（观测 / CEO 文案分流，勿暗示「id 抄错」）：
+    ``empty`` / ``self`` / ``in_progress`` / ``recall_limit`` /
+    ``evicted`` / ``loader_absent`` / ``loader_miss`` / ``not_found``.
+    """
+
+    def __init__(self, message: str, *, cause: str = "not_found") -> None:
         super().__init__(message)
         self.message = message
+        self.cause = cause
 
 
 def merge_continuation_tools(
@@ -87,11 +93,12 @@ async def resolve_session(
     """校验并取回目标现场。失败抛 :class:`ContinuationRejectedError`（明确报错，不静默降级）。"""
     target = continue_from_run_id.strip()
     if not target:
-        raise ContinuationRejectedError("continue_from_run_id 不能为空。")
+        raise ContinuationRejectedError("continue_from_run_id 不能为空。", cause="empty")
     if target == own_run_id:
         raise ContinuationRejectedError(
             f"continue_from_run_id 不能自指（`{target}`）。请填已完成的其它 run，"
-            "或去掉该字段走冷委派。"
+            "或去掉该字段走冷委派。",
+            cause="self",
         )
     # 终局 run（COMPLETED / FAILED）可带现场续写；真正进行中（未终局）才拒。FAILED 放行——
     # CEO 用 continue_from 让原作者在失败草稿上改写正是同人续派的用途。CANCELLED / SKIPPED
@@ -101,7 +108,8 @@ async def resolve_session(
         if st.phase not in (RunPhase.COMPLETED, RunPhase.FAILED):
             raise ContinuationRejectedError(
                 f"目标 run `{target}` 仍在进行中（{st.phase.value}），无法带现场续派。"
-                "请用 depends_on 等它完成后再续，或改冷委派。"
+                "请用 depends_on 等它完成后再续，或改冷委派。",
+                cause="in_progress",
             )
     elif completed is not None:
         # 同批尚未出现在 completed：若 plan 里存在该节点且本节点依赖它，调度保证先跑完；
@@ -111,19 +119,20 @@ async def resolve_session(
     session = None
     if tool._session_store is not None:
         session = tool._session_store.get(target)
-    if session is None and tool._session_loader is not None:
-        session = await tool._session_loader(target)
+    loader = tool._session_loader
+    if session is None and loader is not None:
+        session = await loader(target)
         if session is not None and tool._session_store is not None:
             tool._session_store.put(session)
             # Loader hit on a tip id is rare (DB keys are roots); if tip somehow
             # persisted as root, no alias needed. If we resolved via in-memory
             # alias already, session is non-None above.
-    if session is None and tool._session_store is not None and tool._session_loader is not None:
+    if session is None and tool._session_store is not None and loader is not None:
         # Tip id miss in memory: try loading the aliased root if we still have the map
         # after a partial prune (alias present, root session flushed to DB only).
         root = tool._session_store.root_for_alias(target)
         if root:
-            session = await tool._session_loader(root)
+            session = await loader(root)
             if session is not None:
                 tool._session_store.put(session)
                 tool._session_store.link_alias(target, session.run_id)
@@ -133,17 +142,44 @@ async def resolve_session(
                     root_run_id=session.run_id,
                 )
     if session is None:
-        raise ContinuationRejectedError(
-            f"找不到 run_id 为 `{target}` 的可续写现场（内存与落盘均未命中）。"
-            "若该 id 是图上续派链末端，请改填现场根（wire `continues_run_id` / "
-            "首次冷开的 run_id）；或改用冷委派并设 `replaces_run_id` 标接手。"
-        )
+        raise _miss_rejected(tool, target)
     if session.recall_count >= DEFAULT_RECALL_LIMIT:
         raise ContinuationRejectedError(
             f"队员 `{target}` 的带现场续派已达上限（{DEFAULT_RECALL_LIMIT} 次）。"
-            "请改用冷委派重派，并设 replaces_run_id 标接手。"
+            "请改用冷委派重派，并设 replaces_run_id 标接手。",
+            cause="recall_limit",
         )
     return session
+
+
+def _miss_rejected(tool: DelegateTool, target: str) -> ContinuationRejectedError:
+    """Build a roster-miss rejection with a distinguishable cause + honest copy."""
+    store = tool._session_store
+    evict_reason = store.eviction_reason(target) if store is not None else None
+    if evict_reason is None and store is not None:
+        root = store.root_for_alias(target)
+        if root:
+            evict_reason = store.eviction_reason(root)
+    if evict_reason is not None:
+        return ContinuationRejectedError(
+            f"run_id `{target}` 的可续写现场已被内存 roster 淘汰"
+            f"（reason={evict_reason}）。这不是 id 填错——请改用冷委派并设 "
+            "`replaces_run_id` 标接手。",
+            cause="evicted",
+        )
+    if tool._session_loader is None:
+        return ContinuationRejectedError(
+            f"找不到 run_id 为 `{target}` 的可续写现场（仅查了内存；本回合未装配落盘 "
+            "loader，不能写成「落盘未命中」）。现场可能已淘汰或从未登记——请改用冷委派并设 "
+            "`replaces_run_id` 标接手。",
+            cause="loader_absent",
+        )
+    return ContinuationRejectedError(
+        f"找不到 run_id 为 `{target}` 的可续写现场（内存与落盘均未命中）。"
+        "若该 id 是图上续派链末端，请改填现场根（wire `continues_run_id` / "
+        "首次冷开的 run_id）；或改用冷委派并设 `replaces_run_id` 标接手。",
+        cause="loader_miss",
+    )
 
 
 async def run_continuation(
@@ -171,6 +207,7 @@ async def run_continuation(
             run_id=spec.run_id,
             continue_from=spec.continue_from_run_id,
             reason=exc.message,
+            cause=exc.cause,
         )
         # 图态接缝：plan 已入图的节点若无 run_failed，前端会卡在「排队中」。
         # 拒续在进 continue_run / run_started 之前，须显式下发终态帧。

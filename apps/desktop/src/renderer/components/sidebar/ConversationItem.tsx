@@ -29,6 +29,7 @@ import {
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import { shouldShowConversationCloudIcon } from "@/lib/conversationWorkspaceMode";
+import { visibleMessageText } from "@/lib/errors";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -66,7 +67,14 @@ import { ConversationCloudIcon } from "./ConversationWorkspaceModeIcon";
 
 const PREVIEW_DELAY_MS = 500;
 const PREVIEW_MAX_CHARS = 80;
-const EMPTY_MESSAGES: { role: "user" | "assistant"; content: string }[] = [];
+type PreviewMessage = {
+  role: "user" | "assistant";
+  content: string;
+  error?: { message?: string } | null;
+  runs?: { error?: { message?: string } | null } | null;
+};
+
+const EMPTY_MESSAGES: PreviewMessage[] = [];
 
 function timeAgo(date: string | Date): string {
   const ms = Date.now() - new Date(date).getTime();
@@ -87,36 +95,39 @@ function truncatePreview(text: string, max = PREVIEW_MAX_CHARS): string {
 
 function buildMessagePreview(
   lastMessagePreview: string | null,
-  messages: { role: "user" | "assistant"; content: string }[],
+  messages: PreviewMessage[],
 ): string | null {
   if (lastMessagePreview?.trim()) {
     return truncatePreview(lastMessagePreview);
   }
   if (messages.length === 0) return null;
 
-  let lastUser: (typeof messages)[number] | null = null;
-  let lastAssistant: (typeof messages)[number] | null = null;
+  let lastUserText: string | null = null;
+  let lastAssistantText: string | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!msg.content.trim()) continue;
-    if (msg.role === "assistant" && !lastAssistant) lastAssistant = msg;
-    if (msg.role === "user" && !lastUser) lastUser = msg;
-    if (lastUser && lastAssistant) break;
+    const text = visibleMessageText(msg);
+    if (!text) continue;
+    if (msg.role === "assistant" && !lastAssistantText)
+      lastAssistantText = text;
+    if (msg.role === "user" && !lastUserText) lastUserText = text;
+    if (lastUserText && lastAssistantText) break;
   }
 
   const parts: string[] = [];
-  if (lastUser) {
-    parts.push(`你: ${truncatePreview(lastUser.content, 40)}`);
+  if (lastUserText) {
+    parts.push(`你: ${truncatePreview(lastUserText, 40)}`);
   }
-  if (lastAssistant) {
-    parts.push(`AI: ${truncatePreview(lastAssistant.content, 40)}`);
+  if (lastAssistantText) {
+    parts.push(`AI: ${truncatePreview(lastAssistantText, 40)}`);
   }
   if (parts.length > 0) return parts.join(" → ");
 
   const last = messages[messages.length - 1];
-  if (!last.content.trim()) return null;
+  const lastText = visibleMessageText(last);
+  if (!lastText) return null;
   const roleLabel = last.role === "user" ? "你" : "AI";
-  return `${roleLabel}: ${truncatePreview(last.content)}`;
+  return `${roleLabel}: ${truncatePreview(lastText)}`;
 }
 
 interface Props {

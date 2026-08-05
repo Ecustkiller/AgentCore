@@ -563,4 +563,10 @@ export interface ExecutionJournal {
   finishReason: string;
   /** Per-run ProcessStep[] from journal (reload overlay). Absent on older journals. */
   runProcesses?: Record<string, ProcessStep[]> | null;
+  /**
+   * Structured turn failure from journal ``turn_end.error`` (cold reload / duck
+   * path). Live SSE usually lifts this onto ``Message.error``; keep optional here
+   * so ``visibleMessageText`` / export can still read runs.error.
+   */
+  error?: { code?: string; message?: string } | null;
 }

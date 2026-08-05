@@ -64,6 +64,23 @@ export function AskDecisionBody({
   const canLocalFs = hasLocalFiles() && !!window.fsApi;
   const canBindAction = !!conversationId && !!onBindResolve && canLocalFs;
 
+  /** 当前选中（含 default 预选）落在须本机履约的 option 上时返回之；Continue 不得退化成口头「已授权」。 */
+  const findPendingFolderOption = (): {
+    q: AskQuestion;
+    opt: AskOption;
+  } | null => {
+    for (const q of content.questions) {
+      if (q.kind === "text") continue;
+      for (const label of answer.answers[q.id] ?? []) {
+        const opt = q.options.find((o) => o.label === label);
+        if (opt && isDesktopFolderAction(opt.action)) {
+          return { q, opt };
+        }
+      }
+    }
+    return null;
+  };
+
   const handleBindOption = async (q: AskQuestion, opt: AskOption) => {
     if (busy || bindBusyLabel) return;
 
@@ -107,6 +124,9 @@ export function AskDecisionBody({
       try {
         await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
       } catch {
+        // resume 失败：留在卡上
+      } finally {
+        // resume 未 throw 且卡未卸载时，也须清 busy，避免主 CTA 永久卡住
         setBindBusyLabel(null);
       }
       return;
@@ -130,6 +150,8 @@ export function AskDecisionBody({
       try {
         await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
       } catch {
+        // resume 失败：留在卡上
+      } finally {
         setBindBusyLabel(null);
       }
       return;
@@ -145,8 +167,39 @@ export function AskDecisionBody({
     try {
       await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
     } catch {
+      // resume 失败：留在卡上
+    } finally {
       setBindBusyLabel(null);
     }
+  };
+
+  /**
+   * 继续：普通选项 → 原 onContinue；选中 grant_* / bind_* / open_local_project →
+   * 一键=弹 picker（对齐点选项行），取消则留在卡上、不提交口头授权文案。
+   */
+  const handleContinue = () => {
+    if (busy || bindBusyLabel) return;
+    const pending = findPendingFolderOption();
+    if (!pending) {
+      onContinue();
+      return;
+    }
+    const { q, opt } = pending;
+    if (!hasLocalFiles()) {
+      setBindError(guideDesktopDownload());
+      return;
+    }
+    const canRunFolder =
+      opt.action === "open_local_project" ? canLocalFs : canBindAction;
+    if (!canRunFolder) {
+      setBindError(
+        opt.action === "open_local_project"
+          ? "打开本地项目仅桌面端可用"
+          : "本机目录授权仅桌面端可用",
+      );
+      return;
+    }
+    void handleBindOption(q, opt);
   };
 
   const questionRows = (q: AskQuestion): AskRow[] => {
@@ -221,9 +274,9 @@ export function AskDecisionBody({
         <AskCardFooter
           cta={META.cta}
           ctaIcon={META.ctaIcon}
-          busy={busy}
+          busy={busy || !!bindBusyLabel}
           submitting={submitting}
-          onContinue={onContinue}
+          onContinue={handleContinue}
           onStop={onStop}
         />
       }

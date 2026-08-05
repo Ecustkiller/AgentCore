@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from agentcore.conversation.failure_visible import export_visible_text
 from agentcore.db.models import Conversation, Message
 from agentcore.runtime.journal import KIND_TURN_END
 
@@ -243,6 +244,13 @@ def _render_message_block(
     if content:
         lines.append(content)
         lines.append("")
+    else:
+        # Pure failure: content stays empty; surface structured error so the log
+        # is not a blank Assistant heading.
+        fail_text = export_visible_text(msg, journal_entries=journal)
+        if fail_text:
+            lines.append(fail_text)
+            lines.append("")
 
     evidence = msg.evidence_ledger if isinstance(msg.evidence_ledger, list) else []
     if evidence:
@@ -269,7 +277,7 @@ def _render_message_block(
         lines.append("")
 
     usage = msg.usage if isinstance(msg.usage, dict) else None
-    if usage and usage.get("status") in {"error", "cancelled", "interrupted"}:
+    if usage and usage.get("status") in {"error", "cancelled", "interrupted", "failed"}:
         lines.append(f"*system:* turn status={usage.get('status')}")
         lines.append("")
 
@@ -363,10 +371,18 @@ def chunk_transcript(
 
 
 def search_snippet_from_messages(messages: Sequence[Message], query: str) -> str | None:
-    """Pick a short content snippet matching ``query`` (or latest user text)."""
+    """Pick a short content snippet matching ``query`` (or latest readable text).
+
+    Pure-failure assistants contribute their structured error sentence so search
+    rows are not blank when content was never dual-written.
+    """
     q = (query or "").strip().lower()
+
+    def _body(msg: Message) -> str:
+        return export_visible_text(msg) or ""
+
     for msg in reversed(list(messages)):
-        body = (msg.content or "").strip()
+        body = _body(msg)
         if not body:
             continue
         if q and q in body.lower():
@@ -374,4 +390,8 @@ def search_snippet_from_messages(messages: Sequence[Message], query: str) -> str
     for msg in reversed(list(messages)):
         if msg.role == "user" and (msg.content or "").strip():
             return _clip(msg.content or "", SEARCH_SNIPPET_CHARS)
+    for msg in reversed(list(messages)):
+        body = _body(msg)
+        if body:
+            return _clip(body, SEARCH_SNIPPET_CHARS)
     return None

@@ -188,6 +188,10 @@ export async function executeWorkspaceOp(
           String(args.directory ?? "."),
           String(args.pattern ?? "*"),
           normalizeRevealPaths(args.reveal_paths),
+          {
+            revealArchives: Boolean(args.reveal_archives),
+            externalNs: resolveSessionMode(root) !== null,
+          },
         );
       case "exists":
         return await opExists(root, String(args.path ?? ""));
@@ -206,6 +210,10 @@ export async function executeWorkspaceOp(
           Number(args.max_depth ?? 3),
           Number(args.max_entries ?? 200),
           normalizeRevealPaths(args.reveal_paths),
+          {
+            revealArchives: Boolean(args.reveal_archives),
+            externalNs: resolveSessionMode(root) !== null,
+          },
         );
       case "index_files":
         return await opIndexFiles(

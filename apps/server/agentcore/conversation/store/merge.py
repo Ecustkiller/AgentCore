@@ -7,6 +7,7 @@ importing ``conversation``. Callers may keep importing from this path.
 from __future__ import annotations
 
 from agentcore.core.message_merge import (
+    DEFAULT_FAILED_ERROR_MESSAGE,
     MESSAGE_STATUS_COMPLETE,
     MESSAGE_STATUS_FAILED,
     MESSAGE_STATUS_INCOMPLETE,
@@ -23,6 +24,7 @@ from agentcore.core.message_merge import (
 )
 
 __all__ = [
+    "DEFAULT_FAILED_ERROR_MESSAGE",
     "MESSAGE_STATUS_COMPLETE",
     "MESSAGE_STATUS_FAILED",
     "MESSAGE_STATUS_INCOMPLETE",

@@ -1,3 +1,4 @@
+import { visibleMessageText } from "@/lib/errors";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import type { Execution } from "@/stores/execution";
 import {
@@ -69,7 +70,8 @@ export function useGraphDrillIn(
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role === "assistant" && m.executionId === execution.id) {
-        return m.content ? { id: m.id, content: m.content } : null;
+        const content = visibleMessageText(m);
+        return content ? { id: m.id, content } : null;
       }
     }
     return null;

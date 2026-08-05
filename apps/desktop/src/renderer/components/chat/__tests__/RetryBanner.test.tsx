@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { RECONNECT_BANNER } from "@/services/turns/helpers";
+import {
+  RECONNECT_BANNER,
+  UNKNOWN_CLOUD_BANNER,
+} from "@/services/turns/helpers";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RetryBanner } from "../RetryBanner";
@@ -38,6 +41,14 @@ describe("RetryBanner reconnect label", () => {
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "重连" }));
     expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("shows 重试 for unknown-cloud settle banner (not 重连)", () => {
+    error = UNKNOWN_CLOUD_BANNER;
+    render(<RetryBanner />);
+    expect(screen.getByText(UNKNOWN_CLOUD_BANNER)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
   });
 
   it("keeps 重试 for other retryable failures", () => {

@@ -9,7 +9,10 @@ import {
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { collectWorkspaceFiles } from "../tree";
-import { shouldSkipAiListEntry } from "../workspaceIgnore";
+import {
+  type AiListSkipOptions,
+  shouldSkipAiListEntry,
+} from "../workspaceIgnore";
 import { globToRegExp, opErr, opOk, toPosix } from "./result";
 
 function isAccessDeniedError(e: unknown): boolean {
@@ -81,6 +84,7 @@ export async function opList(
   directory: string,
   pattern: string,
   revealPaths?: ReadonlySet<string>,
+  listOptions?: AiListSkipOptions,
 ): Promise<WorkspaceOpResult> {
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
@@ -138,11 +142,20 @@ export async function opList(
           : relFromBase
         : listBaseRel;
       // Name-first dir ignore (locked ``.pytest_tmp`` etc.) before trusting type.
-      // AI list: attachments/ + reveal_paths exempt AI-noise; index/grep unchanged.
-      if (shouldSkipAiListEntry(d.name, true, parentRel, revealPaths)) continue;
+      // AI list: attachments/ + reveal_paths + external/archives exemptions.
+      if (
+        shouldSkipAiListEntry(d.name, true, parentRel, revealPaths, listOptions)
+      )
+        continue;
       if (
         !isDir &&
-        shouldSkipAiListEntry(d.name, false, parentRel, revealPaths)
+        shouldSkipAiListEntry(
+          d.name,
+          false,
+          parentRel,
+          revealPaths,
+          listOptions,
+        )
       )
         continue;
       const childRel = relFromBase ? `${relFromBase}/${d.name}` : d.name;
@@ -249,6 +262,7 @@ export async function opListTree(
   maxDepth: number,
   maxEntries: number,
   revealPaths?: ReadonlySet<string>,
+  listOptions?: AiListSkipOptions,
 ): Promise<WorkspaceOpResult> {
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
@@ -298,12 +312,21 @@ export async function opListTree(
     );
     for (const d of dirents) {
       // Name-first ignore prune before descending into locked noise dirs.
-      // AI list_tree: attachments/ + reveal_paths exempt AI-noise; index/grep unchanged.
-      if (shouldSkipAiListEntry(d.name, true, parentRel, revealPaths)) continue;
+      // AI list_tree: attachments/ + reveal_paths + external/archives exemptions.
+      if (
+        shouldSkipAiListEntry(d.name, true, parentRel, revealPaths, listOptions)
+      )
+        continue;
       const isDir = d.isDirectory() && !d.isSymbolicLink();
       if (
         !isDir &&
-        shouldSkipAiListEntry(d.name, false, parentRel, revealPaths)
+        shouldSkipAiListEntry(
+          d.name,
+          false,
+          parentRel,
+          revealPaths,
+          listOptions,
+        )
       )
         continue;
       const childAbs = join(absDir, d.name);

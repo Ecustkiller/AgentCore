@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * 已定案检查点存根：默认收起成单行（结论 + 问题摘要），点击展开见问题全文、
- * 选项 chips 与答复明细。收起态只保留一行，明细/选项均随卡一起收起。
+ * 已定案检查点存根：默认收起成单行（结论 + 用户答复摘要），点击展开见问题全文、
+ * 选项 chips 与答复明细。收起态不展示 CEO 原问题（避免贴在成功标签旁像催促）。
  */
 
 import type { CheckpointDisplay } from "@/stores/conversation";
@@ -25,22 +25,46 @@ const resolvedKickoff: CheckpointDisplay = {
 };
 
 describe("ResolvedCheckpoint 单行折叠", () => {
-  it("默认收起单行：结论+问题摘要常驻，答复明细隐藏；点击展开见完整 note", () => {
+  it("默认收起单行：结论+答复摘要常驻，CEO 问题与明细隐藏；点击展开见全文", () => {
     render(<CheckpointCard checkpoint={resolvedKickoff} />);
 
-    // 收起单行：结论标签 + 问题摘要。
     expect(screen.getByText("已按你的决定继续")).toBeTruthy();
-    expect(screen.getByText(resolvedKickoff.question)).toBeTruthy();
-
-    // note 明细收起时不渲染。
-    expect(document.body.textContent).not.toContain("就按这个方案开做：");
-    expect(document.body.textContent).not.toContain("· 定位？：综述型");
-
-    // 展开：点击存根头部 → 答复明细出现。
-    fireEvent.click(screen.getByText("已按你的决定继续"));
+    // 收起摘要是 note（截断展示），不是 CEO 问题。
     expect(document.body.textContent).toContain("就按这个方案开做：");
+    expect(document.body.textContent).not.toContain(resolvedKickoff.question);
+
+    fireEvent.click(screen.getByText("已按你的决定继续"));
+    expect(document.body.textContent).toContain(resolvedKickoff.question);
     expect(document.body.textContent).toContain("· 定位？：综述型");
     expect(document.body.textContent).toContain("· 篇幅？：精简干货");
+  });
+
+  it("无 note 时折叠摘要用 selected；无答复则只留结论标签", () => {
+    const withSelected: CheckpointDisplay = {
+      ...resolvedKickoff,
+      id: "cp-2",
+      intent: "proposal_pick",
+      question: "选哪条方案推进？",
+      selected: ["方案 C：外包试点"],
+      note: "",
+    };
+    render(<CheckpointCard checkpoint={withSelected} />);
+
+    expect(screen.getByText("已选定方案")).toBeTruthy();
+    expect(document.body.textContent).toContain("方案 C：外包试点");
+    expect(document.body.textContent).not.toContain("选哪条方案推进？");
+
+    cleanup();
+
+    const labelOnly: CheckpointDisplay = {
+      ...withSelected,
+      id: "cp-3",
+      selected: [],
+      note: "",
+    };
+    render(<CheckpointCard checkpoint={labelOnly} />);
+    expect(screen.getByText("已选定方案")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("选哪条方案推进？");
   });
 
   it("proposal_pick：选项 chips 收起时随卡隐藏、展开后显示", () => {
@@ -54,12 +78,13 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     };
     render(<CheckpointCard checkpoint={resolvedProposal} />);
 
-    // 收起：仅结论 + 问题摘要，chip 不显示。
+    // 收起：结论 + selected 摘要（truncate 行），展开区 chips 尚未挂载。
     expect(screen.getByText("已选定方案")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("方案 C：外包试点");
+    const stub = screen.getByText("已选定方案").closest("button");
+    expect(stub?.textContent).toContain("方案 C：外包试点");
 
-    // 展开：chip 显示。
     fireEvent.click(screen.getByText("已选定方案"));
     expect(screen.getByText("方案 C：外包试点")).toBeTruthy();
+    expect(document.body.textContent).toContain("选哪条方案推进？");
   });
 });

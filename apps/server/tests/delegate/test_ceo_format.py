@@ -150,26 +150,17 @@ def test_format_for_ceo_footer_guards_against_claiming_unwritten_files():
 
 
 def test_format_for_ceo_includes_goal_verification_and_completion_judgment():
-    # 合·验证 4a (docs/03-AI核心/编排器与CEO主Agent.md §收尾即验收 第二道): the synthesis wrap-up tells the CEO
-    # to verify the assembled result against the user's original request + each task's
-    # deliverable and give an explicit done/not-done judgment (fill genuine gaps via
-    # delegate/replan/revise, don't fake done, don't spin) — a layer distinct from per-piece
-    # contract and the file 防幻觉 guard.
+    # 合·验证 4a：收尾仍提示对照用户请求做完工核验（瘦 footer 后保留关键词）。
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="建登录接口", role="后端")])
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="登录接口已完成")}
     out = format_for_ceo(t, plan, results)
     assert "完工核验" in out
-    assert "实质达成" in out
-    assert "空转" in out  # the don't-spin-when-done half of the completion judgment
+    assert "未达成" in out or "已达成" in out
 
 
 def test_format_for_ceo_includes_semantic_boundary_reconciliation():
-    # 合·验证 4b (docs/03-AI核心/编排器与CEO主Agent.md §收尾即验收 第一道): before merging interdependent
-    # parallel pieces, the synthesis wrap-up tells the CEO to reconcile the SEAMS — only
-    # "do they fit together" (冲突 / 缺口 / 重复), NOT per-piece quality (that's the contract
-    # line) — and fix mismatches with revise/replan rather than papering over. It is framed as
-    # the ACTIVE version of today's passive "only caught when a worker raises escalate scope".
+    # 合·验证 4b：瘦 footer 仍保留语义边界对账（冲突/缺口/重复），且排在完工核验前。
     t = tool(Provider([]))
     plan = RunPlan(
         nodes=[
@@ -184,8 +175,6 @@ def test_format_for_ceo_includes_semantic_boundary_reconciliation():
     out = format_for_ceo(t, plan, results)
     assert "语义边界对账" in out
     assert "冲突" in out and "缺口" in out and "重复" in out
-    assert "糊过去" in out
-    # the seam check is distinct from — and ordered before — the 4a whole-goal verification.
     assert out.index("语义边界对账") < out.index("完工核验")
 
 
@@ -211,7 +200,7 @@ def test_format_for_ceo_surfaces_team_notes_for_reconciliation():
     out = format_for_ceo(t, plan, results)
     assert "队员过程中广播的【当前有效】" in out  # the synthesis notes-block header
     assert "接口 /login" in out and "登录页我来写" in out
-    assert "上方若有【团队便签】一并对照" in out
+    assert "便签" in out  # footer points at notes during seam reconcile
     # the checklist precedes the per-worker products (read it before reconciling the bodies).
     assert out.index("队员过程中广播的【当前有效】") < out.index("run_id: `w1`")
 
@@ -370,20 +359,19 @@ def test_direct_result_keeps_deliverable_clean_of_next_steps():
 
 
 def test_format_for_ceo_includes_final_synthesis_discipline():
-    # 终稿纪律（能力闸门与交付诚实性 B4）：交付物在前、过程简述至多一段、禁止把
-    # escalation 原文 / 中间合成草稿粘进终稿、未交付承诺产物显式列出。纯 prompt 层，
-    # 落在 format_for_ceo 的收尾合成指引里。
+    # 终稿纪律（瘦 footer）：交付物在前、过程至多一段、名册铁律、PPT 诚实一句。
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="做课件", role="课件工程师")])
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="脚本已写好")}
     out = format_for_ceo(t, plan, results)
     assert "【终稿纪律】" in out
-    assert "写在最前" in out
+    assert "交付物在前" in out
     assert "至多一段" in out
-    assert "中间合成草稿" in out and "escalation 原文" in out
-    assert "未交付 / 需你操作" in out
     assert "队员终态名册" in out
+    assert "禁止编造" in out and "全部交付" in out
     assert "PPT 已落盘" in out and ".pptx" in out
+    # 无命题卡时不塞开辩死文案
+    assert "建议开辩" not in out.split("以上为团队产出", 1)[-1]
 
 
 def test_worker_products_failed_with_body_surfaces_error_not_pass_through():
@@ -404,6 +392,71 @@ def test_worker_products_failed_with_body_surfaces_error_not_pass_through():
     assert "失败" in products[0]["body"]
     assert "未把产物写入工作区" in products[0]["body"]
     assert "invoke tool file_write" not in products[0]["body"]
+
+
+def test_worker_products_empty_body_with_files_and_debrief_is_pointer():
+    """A3: 空正文 + files_touched + debrief → pointer，交接结论不丢；失败节点不装交付。"""
+    t = tool(Provider([]))
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="w_ok", task="写报告", role="撰稿"),
+            RunSpec(run_id="w_fail", task="写附录", role="附录"),
+        ]
+    )
+    results = {
+        "w_ok": RunState(
+            phase=RunPhase.COMPLETED,
+            content="",
+            files_touched=["report.md"],
+            file_acceptance=_accepted("report.md"),
+            debrief={
+                "summary": "报告已落盘",
+                "key_points": ["结论甲", "路径 report.md"],
+                "next_steps": "可做竞品对比",
+            },
+        ),
+        "w_fail": RunState(
+            phase=RunPhase.FAILED,
+            content="",
+            files_touched=["draft.md"],
+            error="契约未达标",
+            debrief={"summary": "半成品勿当真交付"},
+        ),
+    }
+    products = worker_products(t, plan, results)
+    by_id = {p["run_id"]: p for p in products}
+    ok = by_id["w_ok"]
+    assert ok["fidelity"] == "pointer"
+    assert ok["status"] == "completed"
+    assert "交接结论：报告已落盘" in ok["body"]
+    assert "结论甲" in ok["body"]
+    assert "文件产出（已验收）" in ok["body"]
+    fail = by_id["w_fail"]
+    assert fail["fidelity"] == ""
+    assert fail["status"] == "failed"
+    assert "失败" in fail["body"] and "契约未达标" in fail["body"]
+    assert "交接结论" not in fail["body"]  # 勿把失败装成已交付 pointer
+    out = format_for_ceo(t, plan, results)
+    assert "交接结论：报告已落盘" in out
+    assert "可做竞品对比" in out  # debrief.next_steps 仍进建议区
+
+
+def test_format_for_ceo_footer_is_lean_but_keeps_iron_laws():
+    """B: 无条件瘦 footer — 防幻觉/文件产出/名册铁律仍在，自然长度下降。"""
+    t = tool(Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="写摘要", role="调研员")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="短综述")}
+    out = format_for_ceo(t, plan, results)
+    footer = out.split("以上为团队产出", 1)[-1]
+    assert "防幻觉" in footer
+    assert "文件产出（已验收）" in footer
+    assert "未真正落盘" in footer or "未达成" in footer
+    assert "队员终态名册" in footer or "全部交付" in footer
+    assert "失败" in footer or "接替" in footer or "禁止编造" in footer
+    # Old footer was ~900+ chars of packaging; lean target stays well under that.
+    assert len(footer) < 550
+    assert "工作日志" not in footer
+    assert "上方若有【建议开辩】" not in footer
 
 
 def test_format_for_ceo_roster_forbids_all_delivered_when_partial_failure():

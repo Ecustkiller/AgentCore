@@ -8,8 +8,8 @@ import {
 } from "../noticeTemplates";
 
 describe("noticeTemplates", () => {
-  it("exposes eight operational templates with required fields", () => {
-    expect(NOTICE_TEMPLATES).toHaveLength(8);
+  it("exposes nine operational templates with required fields", () => {
+    expect(NOTICE_TEMPLATES).toHaveLength(9);
     for (const t of NOTICE_TEMPLATES) {
       expect(t.id).toBeTruthy();
       expect(t.title.trim().length).toBeGreaterThan(0);
@@ -37,14 +37,31 @@ describe("noticeTemplates", () => {
     expect(seed.end_at).toBe("");
   });
 
+  it("quota_jiurelay seeds jiurelay CTA and fixed copy", () => {
+    const t = NOTICE_TEMPLATES.find((x) => x.id === "quota_jiurelay")!;
+    expect(t).toBeTruthy();
+    const seed = templateToFormSeed(t);
+    expect(seed.title).toBe("平台额度暂时不可用 · 请免费自配 jiurelay");
+    expect(seed.body).toContain("免费自行配额度");
+    expect(seed.body).toContain("设置 · 服务商");
+    expect(seed.body).not.toMatch(/注册|充值/);
+    expect(seed.cta_label).toBe("前往 jiurelay 免费配额");
+    expect(seed.cta_url).toBe("https://jiurelay.com/");
+    expect(seed.surface).toBe("both");
+    const withNote = buildFromSlots(t, { note: "预计明日恢复" });
+    expect(withNote.body).toContain("补充：预计明日恢复");
+  });
+
   it("buildFromSlots fills hotfix copy from slot values", () => {
     const hotfix = NOTICE_TEMPLATES.find((t) => t.id === "hotfix")!;
     const built = buildFromSlots(hotfix, {
       time: "14:30",
       summary: "修复消息发送超时",
     });
-    expect(built.title).toBe("系统更新 · 约 14:30");
-    expect(built.body).toContain("今天 14:30");
+    expect(built.title).toBe(
+      "约 14:30 更新 · 请按需规划好时间 · 提前停止使用 AI 功能",
+    );
+    expect(built.body).toContain("今天约 14:30");
     expect(built.body).toContain("修复消息发送超时");
   });
 
@@ -62,7 +79,9 @@ describe("noticeTemplates", () => {
       time: "10:00",
       highlights: "消息编辑\n撤回优化\n多余行应被截断\n不会出现",
     });
-    expect(built.title).toBe("版本更新 · 0.4.2 · 约 10:00");
+    expect(built.title).toBe(
+      "约 10:00 发版 · 请按需规划好时间 · 提前停止使用 AI 功能",
+    );
     expect(built.body).toContain("1. 消息编辑");
     expect(built.body).toContain("2. 撤回优化");
     expect(built.body).toContain("3. 多余行应被截断");

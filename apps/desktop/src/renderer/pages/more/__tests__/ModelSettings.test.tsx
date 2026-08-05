@@ -384,7 +384,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getByText("GLM-5.2")).toBeTruthy();
   });
 
-  it("shows empty CTA to providers when byok has no providers or platform", () => {
+  it("shows empty CTA to jiurelay and providers when byok has no providers or platform", () => {
     mockProviders(
       providersResponse({
         providers: [],
@@ -393,7 +393,11 @@ describe("ModelSettings (profiles)", () => {
       }),
     );
     renderPage();
+    expect(screen.getByRole("link", { name: "jiurelay" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "接入服务商" })).toBeTruthy();
+    expect(
+      screen.getByText(/需自行在 jiurelay 免费配额度或接入服务商/),
+    ).toBeTruthy();
     expect(screen.queryByText("模型组合")).toBeNull();
   });
 
@@ -437,7 +441,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.queryByText(/暂无可用模型/)).toBeNull();
   });
 
-  it("on 新建 when seedMain fails with platform_available shows admin/retry copy", () => {
+  it("on 新建 when seedMain fails with platform_available shows retry/settings guide", () => {
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: false,
@@ -459,10 +463,11 @@ describe("ModelSettings (profiles)", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.queryByText("新建组合", { selector: "p" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "jiurelay" })).toBeNull();
+    expect(screen.getByText(/请稍后重试/)).toBeTruthy();
     expect(
-      screen.getByText(/平台额度暂不可用，请联系管理员或稍后重试/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/暂无可用模型，请先/)).toBeNull();
+      screen.getAllByRole("link", { name: "设置 · 服务商" }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("when groups have no catalog models but BYOK exists, custom is available and Worker stays enabled", () => {
@@ -521,7 +526,7 @@ describe("ModelSettings (profiles)", () => {
     );
   });
 
-  it("when groups have no models with platform_available, editor shows admin/retry copy", () => {
+  it("when groups have no models with platform_available, editor shows retry/settings guide", () => {
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: false,
@@ -547,10 +552,11 @@ describe("ModelSettings (profiles)", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "jiurelay" })).toBeNull();
+    expect(screen.getByText(/请稍后重试/)).toBeTruthy();
     expect(
-      screen.getByText(/平台额度暂不可用，请联系管理员或稍后重试/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/暂无可用模型，请先/)).toBeNull();
+      screen.getAllByRole("link", { name: "设置 · 服务商" }).length,
+    ).toBeGreaterThan(0);
     const mainSelect = document.getElementById(
       "profile-main",
     ) as HTMLSelectElement;

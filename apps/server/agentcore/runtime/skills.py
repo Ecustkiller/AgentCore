@@ -518,8 +518,9 @@ task 正文写清续干指令（改哪里 / 新任务是什么）；可与 depen
 什么时候【不要】带现场续派，而改用冷委派（不设 continue_from_run_id）——仅甲：真换职能\
 （需另一专长从头干，非仅改 title）、找不到可续现场、要把多份产物合并了再改、调查失败且无\
 可用现场、或独立新任务（防上下文污染）。原稿 FAILED 但 transcript 仍在 → 仍可乙续派改写。\
-若续派提示找不到该 run、已达唤回上限、或目标仍在进行中，也按同样方式改冷委派，并设 \
-replaces_run_id 标接手（值 = 被替换的原 run_id）。协调态里对失败 worker 的补派同理：必填 \
+若续派提示「现场已被内存 roster 淘汰」或找不到该 run、已达唤回上限、或目标仍在进行中，\
+也按同样方式改冷委派，并设 replaces_run_id 标接手（值 = 被替换的原 run_id）——这不是 id \
+抄错，而是现场已淘汰→冷委派。协调态里对失败 worker 的补派同理：必填 \
 replaces_run_id，否则下游 depends_on 不会接到补跑。
 </revising_a_product>"""
 
@@ -547,6 +548,7 @@ _ASK_USER_KICKOFF = """\
 （`recommended` 至多一项；**禁止**把「（推荐）」写进 `label`，倾向只走字段）。
 - 专用 `card`：`proposal_pick` / `risk_ack` / `organize_plan`（恰好 1 题）——见 ask_user_midtask。
 
+【开工卡取消】team_preview 拒开工后工具结果已引导：宜先短问哪里要调，再行动；勿未问清重派同一套 / 再开辩。
 【软件 / 应用】交付形态不清时短问或写明默认；**禁止**静默默认单 HTML。
 【绿场完整交付】可 `playbook="build_app"`；局部单功能手写或 `build_feature`。
 </ask_user_kickoff>"""
@@ -561,7 +563,7 @@ _ASK_USER_MIDTASK = """\
 （A/B 各自的权衡 / 代价），并把你倾向的一项标 `recommended=true`（至多一项；**禁止**把\
 「（推荐）」写进 `label`——UI 会按字段画灰字「推荐」）：不替用户预选，却让 ta 一眼\
 看到你的专业倾向、快速拍板。用户「提交」会带上 ta 勾选的选项与可选补充，回到\
-你的循环；「停止」结束本回合。同样：发问的话只写进 `message`、正文在发问前留空（避免落库铺垫与恢复后\
+你的循环；「取消」结束本回合。同样：发问的话只写进 `message`、正文在发问前留空（避免落库铺垫与恢复后\
 的话粘连，详见 ask_user_kickoff / 通用短澄清）。
 
 何时【不要】用 ask_user：
@@ -612,6 +614,11 @@ _ASK_USER_MIDTASK = """\
 - 看/分析/整理本机某目录（含桌面）→ 只读 `grant_readonly_folder`；整理 \
   `grant_organize_folder`。与绑定正交：云端草稿 + 桌面在线亦可授权（经桌面通道读 \
   `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
+- 【先同意再发现】用户已点名常见目录（桌面/下载等）+ 模糊指代（「咨询的」「那个」压缩包/\
+  文件夹等）+ 明确任务 → 首动只发 **单 choice** `grant_readonly_folder`（或整理则 \
+  `grant_organize_folder`）；模糊词写进 `message`（例：授权桌面后找含「咨询」的压缩包并转 PDF），\
+  **禁止**首轮再叠文本题要文件名/绝对路径。授权后在 `external/<别名>/…` 列目录 + 关键词匹配；\
+  唯一或高置信 → 直接干；仅 0 命中或多个难分时再短问。勿用 `host_shell` 绕过 grant 探 Desktop。
 桌面在线时 choice 选项可标对应 action（立即发卡，勿纯文本劝授权）。同目录从只读升整理\
 须重新弹卡。确认后区外目录以 `external/<别名>/…` 可用；整理方案用 `card="organize_plan"` \
 → 确认后 `file_batch(organize_plan_id=…)`；扫描/执行：手写单 worker `tasks`\
@@ -699,8 +706,8 @@ _DELEGATE_CHECKPOINT = """\
 委派途中的波间挂起（checkpoint_after）：当你在【同一次 delegate 的多步流水线（用 depends_on 串成的 DAG）】\
 里安排了一个高危 / 不可逆 / 范围可能跑偏的中间步骤，要在它跑完后、运行下游前让用户把关时，\
 给那个中间 task 设 `checkpoint_after=true`：该步完成后会自动暂停，把已完成步骤的产出与待运行的下游步骤\
-一并展示给用户，由 ta 选「继续 / 调整 / 停止」——继续=照原计划跑下游；调整=ta 留一句指示，作为高优先级\
-要求注入尚未运行的下游步骤再放行；停止=就地结束、不再跑下游。
+一并展示给用户，由 ta 选「继续 / 调整 / 取消」——继续=照原计划跑下游；调整=ta 留一句指示，作为高优先级\
+要求注入尚未运行的下游步骤再放行；取消=就地结束、不再跑下游。
 
 用户明文要求对产出计划/提纲把关时【必用】本机制（或 `research_report` playbook），禁止纯聊天出提纲代卡；\
 未明文要求或任务明显轻量时，才可对话式确认。高危中间步无用户明文时仍可选用，但克制——别给每个步骤都设；\
@@ -943,7 +950,7 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 深链：`#/toolbox/manual/intro?s=mindset`
 
 【5 分钟上手】（intro·quickstart）
-① 打开就能用（平台额度）；想自带模型去「设置 · 服务商」。② 新建对话，大白话说目标。\
+① 到 https://jiurelay.com/ 免费自行配额度后在「设置 · 服务商」接入；也可自带 Key（BYOK）。② 新建对话，大白话说目标。\
 ③ 简单秒回；复杂会出协作图。④ 结果落工作区（绑本地就在电脑上，否则在云端项目）。\
 深链：`#/toolbox/manual/intro?s=quickstart`
 
@@ -982,18 +989,18 @@ _PRODUCT_HELP_FAQ = """\
 - 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
 - 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
 协作细则：`#/toolbox/manual/collaboration?s=briefing`
-- 检查点怎么答？——拍板卡：提交＝带选择继续，跳过＝结束本回合；计划复核：继续 / 调整 / 停止；\
+- 检查点怎么答？——拍板卡：提交＝带选择继续，取消＝结束本回合；计划复核：继续 / 调整 / 取消；\
 写文件等审批另弹窗。`#/toolbox/manual/collaboration?s=checkpoint`
 - 跑偏了？——发消息纠偏；局部可唤回原队员改；全错就重新生成或说「推翻重来」；太慢点停止。\
 `#/toolbox/manual/collaboration?s=control`
 - 画布 vs 白板？——画布＝对话里跨回合空间视图；白板＝工具箱独立创作工具。`?s=faq`
 - 费用？——「设置 · 用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
-- 用什么模型？——默认平台额度；自带 Key 在「设置 · 服务商」，组合在「设置 · 模型」。`?s=faq`
+- 用什么模型？——到 https://jiurelay.com/ 免费自行配额度后在「设置 · 服务商」接入；也可自带 Key（BYOK）；组合在「设置 · 模型」。`?s=faq`
 - 数据存哪？——文件在工作区；对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
 - Agent 对 Git？——可读与看 diff/log；改文件、普通 push、开 PR（GitHub）、merge/rebase 等需审批；\
 force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 PR 不会做。`?s=faq`
 - 断网？——可浏览缓存对话与本机文件（只读）；不能发消息、改文件、跑 AI。`?s=faq`
-- Key 报错？——核对「设置 · 服务商」的 Key / 地址 / 模型名；可先切回平台模型排查。\
+- Key 报错？——核对「设置 · 服务商」的 Key / 地址 / 模型名；可换一家服务商或自带 Key 再试。\
 `#/toolbox/manual/reference?s=troubleshooting`
 - 任务一直转？——点停止结束本回合，或发消息追问；长任务可中途打断后续跑。`?s=troubleshooting`
 - 产物找不到？——打开文件页看工作区；本地项目确认绑的是对的文件夹。`?s=troubleshooting`
@@ -1101,7 +1108,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="delegate_checkpoint",
         summary=(
             "委派多步流水线时给高危中间步设 checkpoint_after，在波边界暂停让用户把关"
-            "「继续 / 调整 / 停止」"
+            "「继续 / 调整 / 取消」"
         ),
         body=_DELEGATE_CHECKPOINT,
         requires_tools=("ask_user",),

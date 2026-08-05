@@ -153,7 +153,9 @@ def route_external(
 def external_ns(alias: str, rel: str = "") -> str:
     """Build the model-facing path ``external/<alias>[/rel]``."""
     rel = (rel or "").replace("\\", "/").strip("/")
-    return f"{EXTERNAL_PREFIX}{alias}/{rel}" if rel else f"{EXTERNAL_PREFIX}{alias}"
+    if not rel or rel == ".":
+        return f"{EXTERNAL_PREFIX}{alias}"
+    return f"{EXTERNAL_PREFIX}{alias}/{rel}"
 
 
 def readonly_write_error(path: str) -> str:

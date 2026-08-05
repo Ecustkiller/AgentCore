@@ -240,10 +240,13 @@ def test_core_states_coordinator_tool_boundary():
     assert "验证员" in hint  # 禁止为此 delegate 验证员/browser
     assert "禁止" in hint and "host_shell" in hint
     assert "terminal" in hint
-    # 高代价本机探测前先澄清：短句多解时禁止立刻 host_shell 扫路径。
+    # OS 排查意图多解才先澄清；「桌面有个××」走 grant 发现，不算盲探、禁先问文件名。
     assert "本机 Host" in hint
     assert "澄清意图" in hint
     assert "扫路径" in hint or "盲探" in hint
+    assert "OS 排查" in hint or "排查意图" in hint
+    assert "不算" in hint and "盲探" in hint
+    assert "禁止" in hint and "文件名" in hint
 
 
 def test_core_teaches_split_criterion_over_count():
@@ -770,12 +773,17 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "grant_readonly_folder" in hint
     assert "grant_organize_folder" in hint
     assert "ask_user" in hint
+    # 先同意再发现：模糊指代禁首轮要文件名。
+    assert "先同意再发现" in hint
+    assert "禁止" in hint and "文件名" in hint
     # 不得无条件鼓动「立即发卡」——本机 Host/区外叙述只留在 workspace_context。
     assert "立即发卡" not in hint
     mid = build_system_skill_registry().get("ask_user_midtask")
     assert mid is not None
     assert "开只读授权" in mid.body or "区外目录" in mid.body
     assert "organize_plan" in mid.body
+    assert "先同意再发现" in mid.body
+    assert "禁止" in mid.body and "文件名" in mid.body
 
 
 def test_core_teaches_narrowed_attachment_scope_must_start():

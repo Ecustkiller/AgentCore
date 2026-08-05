@@ -6,7 +6,8 @@ to avoid burning tokens on cross-turn accumulated tool output.
 
 Failed assistant turns (empty content + failed status) are folded into a short
 system-framed note so the next turn can attribute prior failures correctly
-instead of inventing causes.
+instead of inventing causes. Error prose stays in the note — never as ordinary
+assistant content back to the LLM.
 """
 
 from datetime import datetime
@@ -15,53 +16,33 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
-from agentcore.core.error_codes import ErrorCode
+from agentcore.conversation.failure_visible import (
+    error_message_from_usage,
+    failure_category_label,
+    is_failed_empty_assistant,
+    usage_of,
+)
 from agentcore.db.repositories import ConversationRepository, MessageRepository
 
-# Error codes → short zh category labels for the next-turn failure note.
-_FAILURE_CATEGORY_LABELS: dict[str, str] = {
-    ErrorCode.LLM_TIMEOUT: "连接超时",
-    ErrorCode.LLM_KEY_INVALID: "鉴权失败（API Key 无效或无权限）",
-    ErrorCode.LLM_KEY_REQUIRED: "未配置 API Key",
-    ErrorCode.LLM_INSUFFICIENT_BALANCE: "上游账户余额不足",
-    ErrorCode.LLM_RATE_LIMIT: "上游限流",
-    ErrorCode.LLM_ERROR: "模型调用失败",
-    ErrorCode.PIPELINE_ERROR: "管线执行失败",
-    ErrorCode.QUOTA_EXCEEDED: "额度已用尽",
-    ErrorCode.KEY_STORAGE_UNAVAILABLE: "密钥存储不可用",
-}
+# Re-export detection helpers for existing tests / callers.
+_is_failed_empty_assistant = is_failed_empty_assistant
+_failure_category_label = failure_category_label
+
+_DETAIL_CLIP = 120
 
 
-def _usage_of(msg: Any) -> dict:
-    usage = getattr(msg, "usage", None)
-    return usage if isinstance(usage, dict) else {}
+def _failure_detail(msg: Any) -> str | None:
+    """Optional short error_message for the note (category remains primary)."""
+    raw = error_message_from_usage(usage_of(msg))
+    if not raw:
+        return None
+    text = raw.strip()
+    if len(text) > _DETAIL_CLIP:
+        return text[: _DETAIL_CLIP - 1] + "…"
+    return text
 
 
-def _is_failed_empty_assistant(msg: Any) -> bool:
-    """True when an assistant row is a soft/hard failure with no deliverable text."""
-    if getattr(msg, "role", None) != "assistant":
-        return False
-    if (getattr(msg, "content", None) or "").strip():
-        return False
-    usage = _usage_of(msg)
-    if usage.get("status") == "failed":
-        return True
-    finish = usage.get("finish_reason")
-    return finish in ("error", "degraded")
-
-
-def _failure_category_label(msg: Any) -> str:
-    usage = _usage_of(msg)
-    code = usage.get("error_code") or ""
-    if isinstance(code, str) and code in _FAILURE_CATEGORY_LABELS:
-        return _FAILURE_CATEGORY_LABELS[code]
-    finish = usage.get("finish_reason")
-    if finish == "degraded":
-        return "模型空响应（降级收尾）"
-    return "模型调用失败"
-
-
-def _failure_note(categories: list[str]) -> dict:
+def _failure_note(categories: list[str], details: list[str] | None = None) -> dict:
     """Merge consecutive failed turns into one short assistant-framed system note.
 
     Assistant role (not bare system) mirrors the compaction summary block — slots
@@ -86,6 +67,16 @@ def _failure_note(categories: list[str]) -> dict:
             f"（系统注记：此前连续 {n} 轮 AI 调用失败，均未产生有效回复。"
             f"失败原因类别：{cats}。请据此如实说明，不要编造其它原因。）"
         )
+    if details:
+        # One clipped detail line — still a note, not fake assistant prose.
+        seen_d: set[str] = set()
+        unique_d: list[str] = []
+        for d in details:
+            if d and d not in seen_d:
+                seen_d.add(d)
+                unique_d.append(d)
+        if unique_d:
+            body = body.removesuffix("）") + f" 详情：{'；'.join(unique_d)}。）"
     return {"role": "assistant", "content": body}
 
 
@@ -93,11 +84,13 @@ def _fold_history_messages(messages: list[Any]) -> list[dict]:
     """Fold ORM message rows into ``[{role, content}]``, merging consecutive failures."""
     history: list[dict] = []
     pending_failures: list[str] = []
+    pending_details: list[str] = []
 
     def flush_failures() -> None:
         if pending_failures:
-            history.append(_failure_note(pending_failures))
+            history.append(_failure_note(pending_failures, pending_details))
             pending_failures.clear()
+            pending_details.clear()
 
     for msg in messages:
         role = getattr(msg, "role", None)
@@ -115,6 +108,9 @@ def _fold_history_messages(messages: list[Any]) -> list[dict]:
             history.append(item)
         elif _is_failed_empty_assistant(msg):
             pending_failures.append(_failure_category_label(msg))
+            detail = _failure_detail(msg)
+            if detail:
+                pending_details.append(detail)
         # else: empty non-failed assistant / other roles — skip
     flush_failures()
     return history

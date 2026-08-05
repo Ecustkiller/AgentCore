@@ -206,6 +206,10 @@ class WorkspaceBackend(Protocol):
     # Turn-scoped paths exempt from AI-noise list hiding (attachments / materials).
     # Implementations default to empty; prepare/resume stamp before tools run.
     ai_list_materials: frozenset[str]
+    # When True, AI list/tree may reveal archive suffixes (zip/rar/…) that are
+    # otherwise noise-hidden — set briefly by file_list when the pattern targets
+    # archives; implementations default False.
+    ai_list_reveal_archives: bool
 
     @property
     def dirty(self) -> bool:

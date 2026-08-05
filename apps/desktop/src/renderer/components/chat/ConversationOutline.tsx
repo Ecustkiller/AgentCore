@@ -1,5 +1,6 @@
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { visibleMessageText } from "@/lib/errors";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import { ListTree, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -28,7 +29,7 @@ export function ConversationOutline() {
         .filter((m) => m.role === "user")
         .map((m) => ({
           id: m.id,
-          label: m.content.trim().replace(/\s+/g, " ").slice(0, 80),
+          label: visibleMessageText(m).replace(/\s+/g, " ").slice(0, 80),
         })),
     [messages],
   );

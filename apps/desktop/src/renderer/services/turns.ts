@@ -2,6 +2,7 @@ export {
   isAbort,
   isTransportDrop,
   RECONNECT_BANNER,
+  UNKNOWN_CLOUD_BANNER,
   lastUserMessageOf,
   lastUserMessage,
   lastUserMessageId,

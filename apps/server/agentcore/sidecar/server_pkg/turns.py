@@ -108,6 +108,7 @@ class TurnExecutionMixin:
         sink = EventSink()
         backend = self._make_backend(external_mounts=params.get("externalMounts"))
         saver, deleter = self._suspension_hooks()
+        session_saver, session_loader = self._session_hooks(conversation_id)
         outbox = self._outbox_store
         if outbox is not None:
             outbox.bind_turn(
@@ -172,6 +173,8 @@ class TurnExecutionMixin:
                             approvals_enabled=self._approvals_enabled,
                             permission_axes=self._permission_axes,
                             llm_credentials=turn_creds,
+                            session_saver=session_saver,
+                            session_loader=session_loader,
                             suspension_saver=saver,
                             suspension_deleter=deleter,
                             message_id=message_id,
@@ -333,6 +336,7 @@ class TurnExecutionMixin:
         sink = EventSink()
         backend = self._make_backend(external_mounts=external_mounts)
         saver, deleter = self._suspension_hooks()
+        session_saver, session_loader = self._session_hooks(conversation_id)
         outbox = self._outbox_store
         settlement_durable = False
         if outbox is not None:
@@ -427,6 +431,8 @@ class TurnExecutionMixin:
                             # of the journal-folded rounds (Phase 2 ⑤).
                             history=suspension.history,
                             llm_credentials=resume_creds,
+                            session_saver=session_saver,
+                            session_loader=session_loader,
                             suspension_saver=saver,
                             suspension_deleter=deleter,
                             permission_axes=self._permission_axes,

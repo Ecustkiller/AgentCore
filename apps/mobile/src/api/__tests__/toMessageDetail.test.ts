@@ -1,4 +1,9 @@
 import { toMessageDetail } from "@/api/conversations";
+import { resolveEmptyFailureNotice } from "@/lib/errors";
+import {
+  exportDeliverableText,
+  formatMessageExport,
+} from "@/lib/messageExport";
 import type { components } from "@/types/api.generated";
 import { describe, expect, it } from "vitest";
 
@@ -55,5 +60,78 @@ describe("toMessageDetail evidence_ledger", () => {
     const tid = "b".repeat(32);
     expect(toMessageDetail(baseRow({ trace_id: tid })).trace_id).toBe(tid);
     expect(toMessageDetail(baseRow()).trace_id).toBeNull();
+  });
+});
+
+describe("toMessageDetail runs.error (cold-load failure)", () => {
+  it("projects runs.error so ChatPage can show a specific failure line", () => {
+    const m = toMessageDetail(
+      baseRow({
+        content: "",
+        runs: {
+          events: [],
+          finish_reason: "error",
+          process: null,
+          error: {
+            code: "LLM_KEY_INVALID",
+            message: "API Key 已吊销，请重新配置。",
+          },
+        },
+      }),
+    );
+    expect(m.runs?.error).toEqual({
+      code: "LLM_KEY_INVALID",
+      message: "API Key 已吊销，请重新配置。",
+    });
+    expect(
+      resolveEmptyFailureNotice({
+        content: m.content,
+        finishReason: m.runs?.finish_reason,
+        errorMessage: m.runs?.error?.message,
+      }),
+    ).toBe("API Key 已吊销，请重新配置。");
+  });
+
+  it("keeps null error on clean turns", () => {
+    const m = toMessageDetail(
+      baseRow({
+        runs: {
+          events: [],
+          finish_reason: "end_turn",
+          process: null,
+          error: null,
+        },
+      }),
+    );
+    expect(m.runs?.error).toBeNull();
+  });
+});
+
+describe("cold-load empty failure → export", () => {
+  it("exports the structured error when content is empty", () => {
+    const m = toMessageDetail(
+      baseRow({
+        content: "",
+        runs: {
+          events: [],
+          finish_reason: "error",
+          process: null,
+          error: { code: "LLM_TIMEOUT", message: "上游超时，请稍后重试。" },
+        },
+      }),
+    );
+    const notice = resolveEmptyFailureNotice({
+      content: m.content,
+      finishReason: m.runs?.finish_reason,
+      errorMessage: m.runs?.error?.message,
+    });
+    expect(exportDeliverableText(m.content, notice)).toBe(
+      "上游超时，请稍后重试。",
+    );
+    expect(
+      formatMessageExport(m.content ?? "", undefined, "deliverable", {
+        failureNotice: notice,
+      }),
+    ).toBe("上游超时，请稍后重试。");
   });
 });

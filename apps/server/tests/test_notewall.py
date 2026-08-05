@@ -709,6 +709,23 @@ def test_inherit_notes_visible_in_new_for():
     assert any("snake_case" in n.text for n in fresh)
 
 
+def test_inherit_opening_pull_renders_once():
+    """Cold-open preload: inherited notes inject once; cursor blocks redelivery."""
+    from agentcore.runtime.runs.notewall import NoteWall, format_notes_for_injection
+
+    wall1 = NoteWall()
+    wall1.post(run_id="r1", agent_id="a1", role="写手", kind="decision", text="用 snake_case")
+
+    wall2 = NoteWall()
+    wall2.inherit(wall1.active_notes())
+
+    opening = wall2.new_for("new_worker")
+    assert any("snake_case" in n.text for n in opening)
+    rendered = format_notes_for_injection(opening)
+    assert "snake_case" in rendered
+    assert wall2.new_for("new_worker") == []
+
+
 def test_inherit_empty_wall_is_noop():
     """继承空墙不产生任何便签。"""
     from agentcore.runtime.runs.notewall import NoteWall

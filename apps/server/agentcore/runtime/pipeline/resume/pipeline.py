@@ -42,7 +42,7 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
 from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
-from agentcore.runtime.session_persistence import SessionRosterWriter
+from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
 from agentcore.runtime.settlement import seed_settlement_dedupe_from_entries
 from agentcore.runtime.suspension import (
@@ -196,6 +196,9 @@ async def resume_chat_pipeline(
     # Session roster write-through (as-built: 成本配额 §三): fire-and-forget + turn-end flush (parity with run).
     roster_writer = SessionRosterWriter.wrap(session_saver)
     session_saver = roster_writer.save if roster_writer is not None else None
+    wire_roster_for_turn(
+        conversation_id, roster_writer=roster_writer, session_loader=session_loader
+    )
     fact_log = TurnFactLog(inherited_entries=list(suspension.journal_entries))
     fact_log_token = current_fact_log.set(fact_log)
     from agentcore.llm.turn_auth_dead import bind_turn_auth_dead, reset_turn_auth_dead

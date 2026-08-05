@@ -30,10 +30,10 @@ describe("decision meta", () => {
       "复盘提案 · 确认要落盘的项",
     );
     expect(askResolvedOutcome("kickoff", "research_first").label).toBe(
-      "已跳过本回合",
+      "已取消本回合",
     );
     expect(askResolvedOutcome("kickoff", "research_first").tone).toBe("muted");
-    expect(askResolvedOutcome("decision", "stop").label).toBe("已跳过本回合");
+    expect(askResolvedOutcome("decision", "stop").label).toBe("已取消本回合");
     expect(askResolvedOutcome("decision", "stop").tone).toBe("muted");
   });
 
@@ -42,7 +42,7 @@ describe("decision meta", () => {
       "已选先调研 · 辩论未开赛",
     );
     expect(teamResolvedOutcome("delegate", "research_first", false).label).toBe(
-      "已停止 · 团队未启动",
+      "已取消 · 团队未启动",
     );
     expect(teamResolvedOutcome("delegate", "continue", true).label).toBe(
       "已授权开工 · 嘱咐已注入队员",

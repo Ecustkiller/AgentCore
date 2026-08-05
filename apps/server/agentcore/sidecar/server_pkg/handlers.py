@@ -18,6 +18,7 @@ from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.sidecar import protocol
 from agentcore.sidecar.identity import resolve_sidecar_user_id
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
+from agentcore.sidecar.run_session_store import LocalRunSessionStore
 from agentcore.sidecar.server_pkg.result import parse_decision
 
 logger = get_logger(__name__)
@@ -51,6 +52,7 @@ class HandlerMixin:
         data_dir = str(params.get("dataDir") or "").strip()
         self._paused_store = self._build_paused_store(data_dir)
         self._outbox_store = self._build_outbox_store(data_dir)
+        self._run_session_store = self._build_run_session_store(data_dir)
         if self._outbox_store is not None:
             from agentcore.conversation.store import set_conversation_store
 
@@ -70,6 +72,7 @@ class HandlerMixin:
             permission_axes=self._permission_axes.to_dict(),
             durable_pause=self._paused_store is not None,
             outbox=self._outbox_store is not None,
+            durable_roster=self._run_session_store is not None,
         )
         await self._reply(
             request_id,
@@ -84,6 +87,7 @@ class HandlerMixin:
                     # gated on a usable local data dir.
                     "durablePause": self._paused_store is not None,
                     "outbox": self._outbox_store is not None,
+                    "durableRoster": self._run_session_store is not None,
                 },
             },
         )
@@ -135,6 +139,22 @@ class HandlerMixin:
         if not data_dir:
             return None
         return OutboxStore(Path(data_dir) / "outbox")
+
+    @staticmethod
+    def _build_run_session_store(data_dir: str) -> LocalRunSessionStore | None:
+        """Build the local durable 留人 roster (sibling of paused under dataDir).
+
+        Aligns sidecar with cloud ``turn_runner.session_callbacks``: without this,
+        memory LRU eviction is a hard miss and rejection copy falsely claimed
+        「落盘未命中」. Absent dataDir / persist disabled ⇒ ``None`` ⇒ memory-only.
+        """
+        if not data_dir:
+            return None
+        from agentcore.config import settings
+
+        if not settings.session_roster_persist_enabled:
+            return None
+        return LocalRunSessionStore(Path(data_dir) / "run_sessions")
 
     @staticmethod
     def _parse_inference(raw: Any) -> LLMCredentials | None:

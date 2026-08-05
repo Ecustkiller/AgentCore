@@ -286,7 +286,7 @@ const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
   },
   {
     label: "服务商",
-    desc: "平台额度说明，或自带 Key（BYOK）",
+    desc: "接入额度或自带 Key（BYOK）",
     to: APP_PATHS.more.providers,
   },
   {

@@ -6,9 +6,16 @@
  * 搜索与下轮 history 仍只用交付正文——本模块只服务出口，不改持久化契约。
  */
 
+import { visibleMessageText } from "@/lib/errors";
 import type { ProcessStep } from "@/types/events";
 
 export type MessageCopyMode = "deliverable" | "with_process";
+
+/** Optional error fields for empty-failure deliverable fallback. */
+export type MessageExportErrorSource = {
+  error?: { message?: string } | null;
+  runs?: { error?: { message?: string } | null } | null;
+};
 
 /** Chrome labels for copy text — keep in sync with message-bubble/constants TOOL_META. */
 const TOOL_LABEL: Record<string, string> = {
@@ -146,15 +153,20 @@ export function formatProcessExport(
 
 /**
  * Build clipboard / share text for an assistant message.
- * - deliverable: `messages.content` only（默认）
+ * - deliverable: `messages.content` only（默认）；纯失败（空 content）回落 error.message
  * - with_process: 过程时间线 + 交付正文（无 process 时退化为仅交付）
  */
 export function formatMessageExport(
   content: string,
   process: ProcessStep[] | undefined,
   mode: MessageCopyMode,
+  errorSource?: MessageExportErrorSource,
 ): string {
-  const deliverable = content.trim();
+  const deliverable = visibleMessageText({
+    content,
+    error: errorSource?.error,
+    runs: errorSource?.runs,
+  });
   if (mode === "deliverable") return deliverable;
 
   const processText = formatProcessExport(process);

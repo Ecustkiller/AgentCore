@@ -63,11 +63,44 @@ def test_store_get_refreshes_lru_recency():
 
 
 def test_store_evicts_over_byte_cap():
+    # Durable path: classic LRU byte eviction (disk can rehydrate the victim).
     store = SessionStore(max_bytes=10)
+    store.bind_evict_persist(None, durable=True)
     store.put(_session("a", text="x" * 8))
     store.put(_session("b", text="y" * 8))  # total 16 > 10 → evict LRU (a)
     assert "a" not in store
     assert "b" in store
+    assert store.eviction_reason("a") == "bytes"
+
+
+def test_store_protects_mega_without_durable():
+    # Memory-only: a mega (≥ half cap) must not be silently dropped for a small peer.
+    store = SessionStore(max_bytes=10)
+    store.bind_evict_persist(None, durable=False)
+    store.put(_session("mega", text="x" * 8))
+    store.put(_session("tiny", text="y" * 3))
+    assert "mega" in store
+    # Over-cap tolerated when every non-MRU is a mega / only megas remain protected.
+    assert len(store) >= 1
+
+
+def test_store_evict_persist_hook_fires_before_drop():
+    saved: list[str] = []
+    store = SessionStore(max_bytes=10)
+    store.bind_evict_persist(lambda s: saved.append(s.run_id), durable=True)
+    store.put(_session("a", text="x" * 8))
+    store.put(_session("b", text="y" * 8))
+    assert saved == ["a"]
+    assert "a" not in store
+
+
+def test_store_count_eviction_logs_reason():
+    store = SessionStore(max_sessions=2)
+    store.bind_evict_persist(None, durable=True)
+    store.put(_session("a"))
+    store.put(_session("b"))
+    store.put(_session("c"))
+    assert store.eviction_reason("a") == "count"
 
 
 # --- SessionRegistry：conversation 维度 ---------------------------------------

@@ -5,6 +5,10 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
+import {
+  completeTurnPhase,
+  getTurnPhase,
+} from "@/stores/conversation/turnPhaseActions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 
 /** The user's explicit stop (abort button) — never surfaced as an error. */
@@ -20,6 +24,19 @@ export function finalizeGeneratingIfNeeded(conversationId: string): void {
   if (getRuntime(conversationId).isGenerating) {
     useConversationStore.getState().finalizeLastMessage(conversationId);
   }
+}
+
+/**
+ * Honest-stop Abort 收口：RPC 可能先于 ``message_end`` reject。
+ * ``stopping`` → ``stopped``，并清 ``isGenerating``，避免卡「停止中」直到刷新。
+ * Shared by sendTurn / resume / regenerate / rejoin / stage-card（midFlight 除外：
+ * Stop ≠ 取消排队）。
+ */
+export function finalizeHonestStopAbort(conversationId: string): void {
+  if (getTurnPhase(conversationId) === "stopping") {
+    completeTurnPhase(conversationId, "stopped");
+  }
+  finalizeGeneratingIfNeeded(conversationId);
 }
 
 /**
@@ -81,6 +98,14 @@ export function isTransportDrop(err: unknown): boolean {
  * the background, so the action reconnects rather than resends. */
 export const RECONNECT_BANNER =
   "连接中断，回合仍在后台继续。点击「重连」继续查看。";
+
+/**
+ * zh banner when recovery could not confirm cloud live/idle (``!cloudKnown``).
+ * Not a transport drop — do not reuse {@link RECONNECT_BANNER}. Retry re-settles
+ * (refresh facts); never ghost, never resend.
+ */
+export const UNKNOWN_CLOUD_BANNER =
+  "暂时无法确认回合状态。点击「重试」再查一次。";
 
 /** The latest user message of a conversation's slice, or null. */
 export function lastUserMessageOf(conversationId: string): Message | null {

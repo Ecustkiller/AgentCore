@@ -1056,7 +1056,7 @@ async def test_kickoff_failure_does_not_finalize(monkeypatch):
         return ToolResult(
             tool_call_id="",
             success=True,
-            output="用户停止了辩论，未开赛。",
+            output="用户取消了辩论，未开赛。\n宜先问用户方案或分工哪里要调，再行动；勿未问清就重派同一套 / 再调 debate。",
             effect=ToolEffect.CONTINUE,
         )
 

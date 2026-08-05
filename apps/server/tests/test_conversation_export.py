@@ -68,6 +68,44 @@ def test_markdown_skips_empty_and_non_dialogue_rows():
     assert md.count("## ") == 1
 
 
+def test_markdown_keeps_pure_failure_from_error_metadata():
+    """Empty content + failed usage still exports the structured error sentence."""
+    conv = _conv()
+    messages = [
+        _msg("user", "问题"),
+        _msg(
+            "assistant",
+            "",
+            usage={
+                "status": "failed",
+                "error_code": "LLM_TIMEOUT",
+                "error_message": "连接超时，请稍后重试",
+            },
+        ),
+    ]
+    md = conversation_to_markdown(conv, messages)
+    assert "连接超时，请稍后重试" in md
+    assert md.count("## ") == 2
+
+
+def test_markdown_pure_failure_from_journal_error():
+    assistant = _msg("assistant", "", usage={"status": "failed", "finish_reason": "error"})
+    assistant.id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    journal_map = {
+        assistant.id: [
+            {
+                "kind": "turn_end",
+                "payload": {
+                    "finish_reason": "error",
+                    "error": {"code": "LLM_ERROR", "message": "上游模型不可用"},
+                },
+            }
+        ]
+    }
+    md = conversation_to_markdown(_conv(), [_msg("user", "q"), assistant], journal_map=journal_map)
+    assert "上游模型不可用" in md
+
+
 def test_markdown_untitled_fallback():
     md = conversation_to_markdown(_conv(""), [_msg("user", "hi")])
     assert md.startswith("# 未命名对话")
@@ -120,6 +158,46 @@ def test_json_export_omits_finish_reason_when_unknown():
     conv = _conv("J")
     out = conversation_to_json(conv, [_msg("assistant", "a", usage={"status": "complete"})])
     assert "finish_reason" not in out["messages"][0]
+
+
+def test_json_export_empty_failure_adds_visible_text():
+    """Pure failure: content stays empty; visible_text mirrors Markdown readable projection."""
+    conv = _conv("J")
+    assistant = _msg(
+        "assistant",
+        "",
+        usage={
+            "status": "failed",
+            "error_code": "LLM_TIMEOUT",
+            "error": {"code": "LLM_TIMEOUT", "message": "连接超时，请稍后重试"},
+        },
+    )
+    out = conversation_to_json(conv, [_msg("user", "q"), assistant])
+    row = out["messages"][1]
+    assert row["content"] == ""
+    assert row["visible_text"] == "连接超时，请稍后重试"
+    # Successful / non-empty rows must not invent visible_text.
+    assert "visible_text" not in out["messages"][0]
+
+
+def test_json_export_empty_failure_visible_text_from_journal():
+    assistant = _msg("assistant", "", usage={"status": "failed", "finish_reason": "error"})
+    assistant.id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    journal_map = {
+        assistant.id: [
+            {
+                "kind": "turn_end",
+                "payload": {
+                    "finish_reason": "error",
+                    "error": {"code": "PIPELINE_ERROR", "message": "管线崩溃"},
+                },
+            }
+        ]
+    }
+    out = conversation_to_json(_conv(), [assistant], journal_map=journal_map)
+    row = out["messages"][0]
+    assert row["content"] == ""
+    assert row["visible_text"] == "管线崩溃"
 
 
 def test_share_snapshot_is_content_only():

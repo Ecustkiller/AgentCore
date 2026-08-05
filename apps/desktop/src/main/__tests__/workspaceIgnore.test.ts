@@ -110,4 +110,30 @@ describe("workspaceIgnore", () => {
       shouldSkipAiListEntry("pack.zip", false, "attachments", reveal),
     ).toBe(false);
   });
+
+  it("AI list shows archives under external ns / session mount / revealArchives", () => {
+    expect(shouldSkipAiListEntry("咨询.sy.zip", false, "external/desk")).toBe(
+      false,
+    );
+    expect(shouldSkipAiListEntry("shot.png", false, "external/desk")).toBe(
+      true,
+    );
+    expect(shouldSkipAiListEntry("out.zip", false, "")).toBe(true);
+    expect(
+      shouldSkipAiListEntry("out.zip", false, "", undefined, {
+        revealArchives: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipAiListEntry("out.zip", false, "", undefined, {
+        externalNs: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipAiListEntry("shot.png", false, "", undefined, {
+        externalNs: true,
+        revealArchives: true,
+      }),
+    ).toBe(true);
+  });
 });

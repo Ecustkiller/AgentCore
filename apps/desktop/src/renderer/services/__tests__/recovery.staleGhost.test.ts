@@ -25,6 +25,7 @@ vi.mock("@/services/messages", () => ({
   loadLatestWindow: vi.fn(),
 }));
 
+import { UNKNOWN_CLOUD_BANNER } from "../turns/helpers";
 import { settleCloudRunningAssistant } from "../turns/recovery";
 
 const CID = "conv-stale-ghost";
@@ -205,7 +206,7 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
     expect(useConversationStore.getState().byId[CID].isGenerating).toBe(false);
   });
 
-  it("cloudKnown=false (refresh still unknown) → hold, never ghost", async () => {
+  it("cloudKnown=false (refresh still unknown) → hold + unknown banner, never ghost", async () => {
     seedRunningAssistant();
     apiGet.mockRejectedValue(new Error("network down"));
 
@@ -220,5 +221,47 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
     expect(assistant()?.finishReason).not.toBe("interrupted");
     expect(assistant()?.isStreaming).toBe(true);
     expect(useConversationStore.getState().byId[CID].isGenerating).toBe(true);
+
+    const rt = useConversationStore.getState().byId[CID];
+    expect(rt.error).toBe(UNKNOWN_CLOUD_BANNER);
+    expect(rt.retry).toBeTypeOf("function");
+
+    // 「重试」再 settle / loadRecovery，不 resend；仍失败则保持 running + banner。
+    apiGet.mockRejectedValueOnce(new Error("still down"));
+    rt.retry?.();
+    await vi.waitFor(() => {
+      expect(apiGet).toHaveBeenCalledTimes(2);
+      expect(useConversationStore.getState().byId[CID].error).toBe(
+        UNKNOWN_CLOUD_BANNER,
+      );
+    });
+    expect(assistant()?.status).toBe("running");
+    expect(assistant()?.finishReason).not.toBe("interrupted");
+  });
+
+  it("cloudKnown=false → unknown-banner retry that recovers settles (ghost)", async () => {
+    seedRunningAssistant();
+    apiGet.mockRejectedValueOnce(new Error("network down"));
+
+    await settleCloudRunningAssistant(CID, {
+      ...emptyRecovery,
+      cloudKnown: false,
+    });
+    expect(useConversationStore.getState().byId[CID].error).toBe(
+      UNKNOWN_CLOUD_BANNER,
+    );
+
+    apiGet.mockResolvedValueOnce({
+      live_running: false,
+      paused: [],
+      pending_interactions: [],
+    });
+    useConversationStore.getState().byId[CID].retry?.();
+    await vi.waitFor(() =>
+      expect(assistant()?.finishReason).toBe("interrupted"),
+    );
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(useConversationStore.getState().byId[CID].error).toBeNull();
+    expect(useConversationStore.getState().byId[CID].retry).toBeNull();
   });
 });

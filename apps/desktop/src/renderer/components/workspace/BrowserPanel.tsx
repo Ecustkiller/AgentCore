@@ -43,6 +43,7 @@ import {
   navigateBrowserSession,
   patchBrowserSessionNav,
 } from "@/services/browserSessions";
+import { openWorkspaceInBrowser } from "@/services/workspace";
 import {
   hostBrowserPageId,
   isBlankBrowserUrl,
@@ -63,6 +64,7 @@ import type {
   BrowserOpenTabRequest,
 } from "@shared/browser-contract";
 import { isSafeExternalUrl } from "@shared/safe-url";
+import { resolveWorkspaceOpenRel } from "@shared/workspace-browser-url";
 import {
   ArrowLeft,
   ArrowRight,
@@ -510,23 +512,50 @@ export function BrowserPanel({
 
   const openExternalUrl = useCallback(
     (url: string) => {
-      if (!url || !isSafeExternalUrl(url)) {
+      const trimmed = url.trim();
+      if (!trimmed) {
         notifyError(
-          new Error("仅支持打开 http(s) 链接"),
+          new Error("仅支持打开 http(s) 或本会话工作区页面"),
+          "无法在系统浏览器打开",
+        );
+        return;
+      }
+
+      // 方案 A：workspace:// → 快照/检出临时目录 → shell.openPath（与文件树同源）
+      const workspaceRel = resolveWorkspaceOpenRel(trimmed, conversationId);
+      if (workspaceRel !== null) {
+        if (!conversationId || !window.fsApi?.previewArchive) {
+          notifyError(
+            new Error("此环境不支持导出工作区并在系统浏览器打开"),
+            "无法在系统浏览器打开",
+          );
+          return;
+        }
+        void openWorkspaceInBrowser(conversationId, workspaceRel).catch(
+          (err) => {
+            notifyError(err, "无法导出并在系统浏览器打开");
+          },
+        );
+        return;
+      }
+
+      if (!isSafeExternalUrl(trimmed)) {
+        notifyError(
+          new Error("仅支持打开 http(s) 或本会话工作区页面"),
           "无法在系统浏览器打开",
         );
         return;
       }
       if (!browserApi?.openExternal) {
         // Web / 无 IPC：走 window.open，由主窗 setWindowOpenHandler 转系统浏览器。
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.open(trimmed, "_blank", "noopener,noreferrer");
         return;
       }
-      void browserApi.openExternal({ url }).then((r) => {
+      void browserApi.openExternal({ url: trimmed }).then((r) => {
         if (!r.ok) notifyError(new Error(r.reason), "无法在系统浏览器打开");
       });
     },
-    [browserApi],
+    [browserApi, conversationId],
   );
 
   const onOpenExternal = () => {
@@ -550,9 +579,20 @@ export function BrowserPanel({
           nav.url &&
           !isBlankBrowserUrl(nav.url))),
   );
-  const canOpenExternal = isSafeExternalUrl(
-    draftUrl.trim() || activePage?.url || "",
+  const externalCandidateUrl = draftUrl.trim() || activePage?.url || "";
+  const workspaceOpenRel = resolveWorkspaceOpenRel(
+    externalCandidateUrl,
+    conversationId,
   );
+  const canOpenWorkspaceExternal =
+    workspaceOpenRel !== null && Boolean(window.fsApi?.previewArchive);
+  const canOpenHttpExternal = isSafeExternalUrl(externalCandidateUrl);
+  const canOpenExternal = canOpenHttpExternal || canOpenWorkspaceExternal;
+  const openExternalTooltip = canOpenWorkspaceExternal
+    ? "导出临时副本并在系统浏览器打开"
+    : canOpenHttpExternal
+      ? "在系统浏览器打开"
+      : "仅支持 http(s) 或本会话工作区页面";
 
   const showPlaceholder = !showLive && !useLocalHost;
   const isEmptyPage =
@@ -570,7 +610,14 @@ export function BrowserPanel({
             const active = page.id === activePage?.id;
             const isAiPage = Boolean(page.serverSessionId);
             const tabOpenUrl = active ? draftUrl.trim() || page.url : page.url;
-            const tabCanOpenExternal = isSafeExternalUrl(tabOpenUrl);
+            const tabWorkspaceRel = resolveWorkspaceOpenRel(
+              tabOpenUrl,
+              conversationId,
+            );
+            const tabCanOpenExternal =
+              isSafeExternalUrl(tabOpenUrl) ||
+              (tabWorkspaceRel !== null &&
+                Boolean(window.fsApi?.previewArchive));
             return (
               <ContextMenu key={page.id}>
                 <SortableTab
@@ -699,9 +746,7 @@ export function BrowserPanel({
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        <SimpleTooltip
-          label={canOpenExternal ? "在系统浏览器打开" : "仅支持 http(s) 链接"}
-        >
+        <SimpleTooltip label={openExternalTooltip}>
           {/* span: disabled 按钮不接 pointer events → 仍能悬停出原因 */}
           <span className="inline-flex">
             <IconButton

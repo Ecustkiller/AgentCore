@@ -82,6 +82,7 @@ export function AssistantContent({
   onOpenBrowserLive,
   finishReason,
   finishDiagnosisLabel,
+  failureNotice,
   deliveryStatus,
   usage,
   rounds,
@@ -140,6 +141,8 @@ export function AssistantContent({
   finishReason?: string | null;
   /** Degraded chip diagnosis suffix. */
   finishDiagnosisLabel?: string;
+  /** Empty-failure visible notice (structured error / emptyFailureNotice) for copy/export. */
+  failureNotice?: string | null;
   /** 单 Agent 交付轻提示；多 Agent 由 TeamView 自带，此处跳过以免双份。 */
   deliveryStatus?: DeliveryStatusPayload | null;
   usage?: UsageBreakdown | null;
@@ -248,6 +251,7 @@ export function AssistantContent({
         durationMs={durationMs}
         clockIso={clockIso}
         finishReason={finishReason}
+        failureNotice={failureNotice}
         isStreaming={isStreaming}
       />
     </>

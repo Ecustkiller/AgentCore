@@ -1,11 +1,12 @@
 import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { hasLocalFiles } from "@/lib/capabilities";
+import { useSidePanelStore } from "@/stores/sidePanel";
 import { GitBranch } from "lucide-react";
 
 /**
- * U1 会话条只读 Git chip：分支名 + dirty 点（有仓才显）。
- * 与「改动」zip∥git 双轨正交；stage/commit/push 在「改动」tab（U3）。
+ * U1 会话条只读 Git chip：分支名 + dirty 点 + ahead/behind。
+ * 点击打开「改动」tab（U3 stage/commit/push 入口）。
  */
 export function ComposerGitStatusChip({
   conversationId,
@@ -13,6 +14,7 @@ export function ComposerGitStatusChip({
   conversationId: string | null;
 }) {
   const state = useWorkspaceModeState(conversationId);
+  const showChanges = useSidePanelStore((s) => s.showChanges);
   const canProbe =
     hasLocalFiles() &&
     !!state?.effective.isLocal &&
@@ -26,25 +28,39 @@ export function ComposerGitStatusChip({
 
   if (!status) return null;
 
-  const title = status.dirty
-    ? `${status.branch} · 工作区有未提交改动`
-    : status.branch;
+  const syncBits: string[] = [];
+  if (status.ahead > 0) syncBits.push(`↑${status.ahead}`);
+  if (status.behind > 0) syncBits.push(`↓${status.behind}`);
+  const syncLabel = syncBits.join(" ");
+
+  const titleParts = [status.branch];
+  if (status.dirty) titleParts.push("工作区有未提交改动");
+  if (syncLabel) titleParts.push(syncLabel);
+  titleParts.push("打开改动");
+  const title = titleParts.join(" · ");
 
   return (
-    <span
-      className="inline-flex h-7 max-w-[140px] shrink items-center gap-1 px-1.5 text-xs text-muted-foreground"
+    <button
+      type="button"
+      className="inline-flex h-7 max-w-[168px] shrink items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
       title={title}
       aria-label={title}
       data-testid="composer-git-status-chip"
+      onClick={() => showChanges()}
     >
       <GitBranch size={12} className="shrink-0" aria-hidden />
       <span className="min-w-0 truncate">{status.branch}</span>
+      {syncLabel ? (
+        <span className="shrink-0 tabular-nums text-muted-foreground/80">
+          {syncLabel}
+        </span>
+      ) : null}
       {status.dirty ? (
         <span
           className="inline-block size-1.5 shrink-0 rounded-full bg-warning"
           aria-label="有未提交改动"
         />
       ) : null}
-    </span>
+    </button>
   );
 }

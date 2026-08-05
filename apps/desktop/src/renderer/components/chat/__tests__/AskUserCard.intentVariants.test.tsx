@@ -127,12 +127,12 @@ describe("AskUserCard intent variants", () => {
     expect(onSubmit).toHaveBeenCalledWith("continue", "", ["方案 C：外包试点"]);
   });
 
-  it("次要 CTA 文案为跳过，点击仍发 decision=stop", async () => {
+  it("次要 CTA 文案为取消，点击仍发 decision=stop", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderCard("proposal_pick", proposalContent, onSubmit);
 
     expect(screen.queryByText("停止")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "跳过" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onSubmit).toHaveBeenCalledWith("stop", "", []);
   });
 

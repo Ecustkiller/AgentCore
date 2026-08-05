@@ -422,7 +422,15 @@ async def test_debate_resume_stop_continue_adjust():
     stop = await tool.resume_after_kickoff(
         decision=CheckpointDecision.STOP, note="算了", arguments=args
     )
-    assert "停止" in stop.output or "算了" in stop.output
+    assert "算了" in stop.output
+    assert "宜先问" in stop.output
+    assert "再行动" in stop.output
+    stop_empty = await tool.resume_after_kickoff(
+        decision=CheckpointDecision.STOP, note="", arguments=args
+    )
+    assert "用户取消了辩论，未开赛。" in stop_empty.output
+    assert "宜先问" in stop_empty.output
+    assert "再调 debate" in stop_empty.output
 
     captured: list[dict] = []
 

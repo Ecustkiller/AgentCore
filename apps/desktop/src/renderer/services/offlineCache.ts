@@ -7,6 +7,7 @@ import {
   type GroupedConversations,
   getConversations,
 } from "@/hooks/useConversations";
+import { visibleMessageText } from "@/lib/errors";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import type { FolderMeta } from "@/services/folders";
@@ -176,13 +177,26 @@ export async function persistOpenedCache(
   flags: { hasMoreBefore: boolean; hasMoreAfter: boolean },
 ): Promise<void> {
   const listed = getConversations().find((c) => c.id === id);
-  const conversation = listed ?? {
-    id,
-    title: "对话",
-    updatedAt: new Date().toISOString(),
-    messageCount: messages.length,
-    lastMessagePreview: messages.at(-1)?.content?.slice(0, 80) ?? null,
-  };
+  const last = messages.at(-1);
+  const previewFromMessages = last
+    ? (() => {
+        const text = visibleMessageText(last);
+        return text ? text.slice(0, 80) : null;
+      })()
+    : null;
+  const conversation = listed
+    ? {
+        ...listed,
+        messageCount: messages.length,
+        lastMessagePreview: previewFromMessages ?? listed.lastMessagePreview,
+      }
+    : {
+        id,
+        title: "对话",
+        updatedAt: new Date().toISOString(),
+        messageCount: messages.length,
+        lastMessagePreview: previewFromMessages,
+      };
   await cacheOpenedConversation({
     conversation,
     messages,

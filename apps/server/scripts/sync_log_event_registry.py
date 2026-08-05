@@ -75,7 +75,24 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     },
     "delegate.yielded": {"reason": "str"},
     "delegate.continuation_ok": {"run_id": "str"},
-    "delegate.continuation_rejected": {"run_id": "str", "reason": "str"},
+    "delegate.continuation_rejected": {
+        "run_id": "str",
+        "reason": "str",
+        "cause": "str",
+    },
+    "roster.session_evicted": {
+        "run_id": "str",
+        "reason": "str",
+        "bytes": "int",
+        "total_bytes": "int",
+        "max_bytes": "int",
+        "n_sessions": "int",
+    },
+    "session_roster.wired": {
+        "persist": "bool",
+        "loader": "bool",
+        "conversation_id": "str",
+    },
     "delegate.run_redirect_hot": {
         "execution_id": "str",
         "cancelled_run_id": "str",

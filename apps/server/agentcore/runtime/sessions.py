@@ -38,14 +38,21 @@ from agentcore.runtime.runs.session import RunSession
 logger = get_logger(__name__)
 
 # Durable-roster persistence callbacks (留人 跨进程落盘 P3), implemented by the
-# DB-aware caller (conversation/turn_runner.py) and plumbed through the pipeline to
-# delegate / revise so the tools and pipeline stay DB-unaware. ``SessionSaver``
-# write-throughs a finished / revised session (pipeline wraps it in
-# ``SessionRosterWriter``: schedule on the hot path, flush at turn end); ``SessionLoader``
-# rehydrates one by run_id on an in-memory roster miss. Both optional — absent ⇒
-# in-memory-only (P2).
+# DB-aware caller (conversation/turn_runner.py) / Sidecar local file store and
+# plumbed through the pipeline to delegate / revise so the tools and pipeline stay
+# storage-unaware. ``SessionSaver`` write-throughs a finished / revised session
+# (pipeline wraps it in ``SessionRosterWriter``: schedule on the hot path, flush at
+# turn end); ``SessionLoader`` rehydrates one by run_id on an in-memory roster miss.
+# Both optional — absent ⇒ in-memory-only (P2).
 SessionSaver = Callable[[RunSession], Awaitable[None]]
 SessionLoader = Callable[[str], Awaitable[RunSession | None]]
+
+# Sync hook invoked immediately before an LRU drop (so callers can schedule
+# write-through before the in-memory object disappears). Optional.
+EvictPersist = Callable[[RunSession], None]
+
+# Cap of recently-evicted run_ids remembered for continuation cause diagnosis.
+_RECENT_EVICT_CAP = 64
 
 
 def _session_bytes(session: RunSession) -> int:
@@ -80,11 +87,38 @@ class SessionStore:
         self._max_bytes = max_bytes
         self._ttl = ttl_seconds
         self.last_access: float = time.time()
+        # When True, byte/count LRU may drop megas (disk/file loader can rehydrate).
+        # When False, prefer keeping large continuable sessions over the byte cap.
+        self._durable: bool = False
+        self._evict_persist: EvictPersist | None = None
+        # run_id → eviction reason (bytes|count), for continuation cause diagnosis.
+        self._recently_evicted: OrderedDict[str, str] = OrderedDict()
+
+    def bind_evict_persist(
+        self,
+        persist: EvictPersist | None,
+        *,
+        durable: bool | None = None,
+    ) -> None:
+        """Wire per-turn write-through + durable flag (pipeline calls each turn).
+
+        ``persist`` is invoked synchronously just before an LRU drop so the
+        SessionRosterWriter can schedule a save. ``durable`` defaults to
+        ``persist is not None``.
+        """
+        self._evict_persist = persist
+        self._durable = bool(persist is not None) if durable is None else durable
+
+    def eviction_reason(self, run_id: str) -> str | None:
+        """Return ``bytes`` / ``count`` if ``run_id`` was recently LRU-evicted."""
+        return self._recently_evicted.get((run_id or "").strip())
 
     def put(self, session: RunSession) -> None:
         """Register / refresh a run's recoverable session (most-recently-used), then
         enforce the TTL + count + byte caps."""
         self.last_access = time.time()
+        # A re-put clears a prior eviction mark (session is live again).
+        self._recently_evicted.pop(session.run_id, None)
         self._sessions[session.run_id] = session
         self._sessions.move_to_end(session.run_id)
         self._prune()
@@ -123,7 +157,7 @@ class SessionStore:
         if session is None:
             return None
         if self._is_expired(session):
-            self._drop_session(key)
+            self._drop_session(key, reason="ttl", note_evict=False)
             logger.info("roster.session_expired", run_id=key)
             return None
         self._sessions.move_to_end(key)
@@ -137,26 +171,88 @@ class SessionStore:
     def _is_expired(self, session: RunSession) -> bool:
         return (time.time() - session.updated_at) > self._ttl
 
-    def _drop_session(self, run_id: str) -> None:
-        self._sessions.pop(run_id, None)
+    def _note_evicted(self, run_id: str, reason: str) -> None:
+        self._recently_evicted[run_id] = reason
+        self._recently_evicted.move_to_end(run_id)
+        while len(self._recently_evicted) > _RECENT_EVICT_CAP:
+            self._recently_evicted.popitem(last=False)
+
+    def _drop_session(
+        self,
+        run_id: str,
+        *,
+        reason: str,
+        note_evict: bool = True,
+    ) -> None:
+        session = self._sessions.pop(run_id, None)
         dead = [a for a, root in self._aliases.items() if root == run_id or a == run_id]
         for a in dead:
             del self._aliases[a]
+        if session is None:
+            return
+        if note_evict and reason in ("bytes", "count"):
+            # Persist-before-evict: schedule durable write while we still hold the object.
+            if self._evict_persist is not None:
+                try:
+                    self._evict_persist(session)
+                except Exception as e:  # noqa: BLE001 — never break the turn on persist
+                    logger.warning(
+                        "roster.evict_persist_failed",
+                        run_id=run_id,
+                        reason=reason,
+                        error=str(e),
+                    )
+            nbytes = _session_bytes(session)
+            self._note_evicted(run_id, reason)
+            logger.info(
+                "roster.session_evicted",
+                run_id=run_id,
+                reason=reason,
+                bytes=nbytes,
+                total_bytes=self._total_bytes(),
+                max_bytes=self._max_bytes,
+                n_sessions=len(self._sessions),
+            )
+
+    def _pick_byte_eviction_victim(self) -> str | None:
+        """Choose a non-MRU victim for the byte cap.
+
+        With durable persistence: classic LRU (oldest first).
+        Without: prefer dropping smaller sessions so a continuable mega is kept
+        even when the roster is temporarily over the byte cap.
+        """
+        if len(self._sessions) <= 1:
+            return None
+        items = list(self._sessions.items())
+        non_mru = items[:-1]
+        if self._durable:
+            return non_mru[0][0]
+        mega_floor = max(1, self._max_bytes // 2)
+        small = [rid for rid, s in non_mru if _session_bytes(s) < mega_floor]
+        if small:
+            return small[0]
+        # No durable backend and every non-MRU is a mega → keep them (tolerate over-cap).
+        return None
 
     def _prune(self) -> None:
-        """Drop expired sessions, then LRU-evict (oldest first) until within the
-        count and byte caps. Rosters are small, so the O(n) byte recount per evicted
-        entry is negligible."""
+        """Drop expired sessions, then LRU-evict until within the count and byte caps.
+
+        Byte eviction persists-before-drop when a hook is bound; without durable
+        persistence, megas (≥ half the byte cap) are protected over the cap.
+        """
         now = time.time()
         expired = [rid for rid, s in self._sessions.items() if (now - s.updated_at) > self._ttl]
         for rid in expired:
-            self._drop_session(rid)
+            self._drop_session(rid, reason="ttl", note_evict=False)
+            logger.info("roster.session_expired", run_id=rid)
         while len(self._sessions) > self._max_sessions:
             oldest, _ = next(iter(self._sessions.items()))
-            self._drop_session(oldest)
+            self._drop_session(oldest, reason="count")
         while self._total_bytes() > self._max_bytes and len(self._sessions) > 1:
-            oldest, _ = next(iter(self._sessions.items()))
-            self._drop_session(oldest)
+            victim = self._pick_byte_eviction_victim()
+            if victim is None:
+                break
+            self._drop_session(victim, reason="bytes")
 
     def _total_bytes(self) -> int:
         return sum(_session_bytes(s) for s in self._sessions.values())
@@ -178,11 +274,7 @@ class SessionStore:
             else:
                 live.append(session)
         for rid in expired:
-            del self._sessions[rid]
-            # Drop aliases that pointed at the expired root (or were the expired key).
-            dead = [a for a, root in self._aliases.items() if root == rid or a == rid]
-            for a in dead:
-                del self._aliases[a]
+            self._drop_session(rid, reason="ttl", note_evict=False)
             logger.info("roster.session_expired", run_id=rid)
         return live
 

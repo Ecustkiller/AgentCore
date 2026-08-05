@@ -8,7 +8,11 @@ import {
 } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { resolveStageCardConversation } from "@/services/streamConversation";
-import { finalizeGeneratingIfNeeded, isAbort } from "@/services/turns/helpers";
+import {
+  finalizeGeneratingIfNeeded,
+  finalizeHonestStopAbort,
+  isAbort,
+} from "@/services/turns/helpers";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import {
@@ -111,9 +115,12 @@ export function StageCard({ entry }: { entry: InteractionEntry }) {
         finalizeGeneratingIfNeeded(conversationId);
         return;
       }
+      if (isAbort(err)) {
+        finalizeHonestStopAbort(conversationId);
+        return;
+      }
       // 非 422 / 用户中止：必须清 isGenerating，否则 composer 永久卡死。
       finalizeGeneratingIfNeeded(conversationId);
-      if (isAbort(err)) return;
       const msg = describeStreamError(err);
       if (msg) {
         const retry = isRetriableStreamError(err)

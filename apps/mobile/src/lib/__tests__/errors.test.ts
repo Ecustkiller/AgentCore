@@ -6,7 +6,9 @@ import {
   describeStreamHttpError,
   emptyChatCopy,
   emptyFailureNotice,
+  emptyFailureVisibleNotice,
   errorActionForCode,
+  resolveEmptyFailureNotice,
 } from "../errors";
 
 describe("errorActionForCode", () => {
@@ -91,6 +93,74 @@ describe("emptyFailureNotice", () => {
     expect(emptyFailureNotice("degraded")).toBeNull();
     expect(emptyFailureNotice(null)).toBeNull();
     expect(emptyFailureNotice(undefined)).toBeNull();
+  });
+});
+
+describe("emptyFailureVisibleNotice", () => {
+  it("prefers structured error.message over the generic finish notice", () => {
+    expect(
+      emptyFailureVisibleNotice("error", "API Key 已吊销，请重新配置。"),
+    ).toBe("API Key 已吊销，请重新配置。");
+  });
+
+  it("falls back to emptyFailureNotice when error message is blank", () => {
+    expect(emptyFailureVisibleNotice("error", "  ")).toBe(
+      "模型调用失败，请重试。",
+    );
+    expect(emptyFailureVisibleNotice("error", null)).toBe(
+      "模型调用失败，请重试。",
+    );
+    expect(emptyFailureVisibleNotice("unproductive", undefined)).toBe(
+      "工具连续无有效进展或参数无效，请重试。",
+    );
+  });
+
+  it("still surfaces a specific error when finishReason alone would be silent", () => {
+    expect(emptyFailureVisibleNotice(null, "上游超时，请稍后重试。")).toBe(
+      "上游超时，请稍后重试。",
+    );
+  });
+});
+
+describe("resolveEmptyFailureNotice (ChatPage gate)", () => {
+  it("shows structured error on empty cold-load failure", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "error",
+        errorMessage: "配额已用尽",
+      }),
+    ).toBe("配额已用尽");
+  });
+
+  it("uses generic notice when empty + failure finish + no error payload", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: null,
+        finishReason: "error",
+      }),
+    ).toBe("模型调用失败，请重试。");
+  });
+
+  it("keeps non-empty content (half reply) — no failure line", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "半成品答复",
+        finishReason: "error",
+        errorMessage: "后面又挂了",
+      }),
+    ).toBeNull();
+  });
+
+  it("skips while streaming / live", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "error",
+        errorMessage: "不该在流式中出现",
+        skip: true,
+      }),
+    ).toBeNull();
   });
 });
 

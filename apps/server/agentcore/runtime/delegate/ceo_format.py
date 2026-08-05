@@ -220,7 +220,10 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     for rid, st in results.items():
         if rid in plan_ids or st is None:
             continue
-        if st.phase is not RunPhase.COMPLETED or not (st.content or "").strip():
+        if st.phase is not RunPhase.COMPLETED:
+            continue
+        # Empty prose + files_touched is still a real product (pointer path).
+        if not (st.content or "").strip() and not st.files_touched:
             continue
         # Naming: continue_run / redirect use ``{target}_rev{n}``
         if "_rev" in rid:
@@ -232,14 +235,18 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     # structured ``debrief`` from the handoff tool — never appended to the prose), so the body
     # sizes on the deliverable alone, the author's own 结论 LEADS the body, and 建议下一步 is
     # surfaced separately (format_for_ceo) for the CEO to relay to the user.
+    # Empty ``content`` must NOT drop ``debrief`` — file producers often hand off via
+    # summary/key_points only (pointer fidelity).
     cleaned: dict[str, tuple[str, dict[str, Any] | None]] = {}
     for node in plan.nodes:
         st = results.get(node.run_id)
         if node.run_id in hot_by_original:
             _rid, hot_st = hot_by_original[node.run_id]
-            cleaned[node.run_id] = (hot_st.content, hot_st.debrief)
+            cleaned[node.run_id] = (hot_st.content or "", hot_st.debrief)
+        elif st:
+            cleaned[node.run_id] = (st.content or "", st.debrief)
         else:
-            cleaned[node.run_id] = (st.content, st.debrief) if st and st.content else ("", None)
+            cleaned[node.run_id] = ("", None)
 
     def _mode(node) -> str:
         if node.run_id in hot_by_original:
@@ -251,10 +258,13 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         # Only COMPLETED products are pass_through / pointer. FAILED nodes often
         # still carry a body (contract miss after retries) — that must surface as
         #「失败：…」via the error branch below, never as a fake delivered product.
-        if not st or st.phase is not RunPhase.COMPLETED or not st.content:
+        if not st or st.phase is not RunPhase.COMPLETED:
             return "none"
+        # File producers: empty prose + files_touched still → pointer (brief / paths).
         if st.files_touched:
             return "pointer"
+        if not st.content:
+            return "none"
         return "pass_through"
 
     modes = {node.run_id: _mode(node) for node in plan.nodes}
@@ -632,40 +642,27 @@ def format_for_ceo(
         lines.append(
             f"\n### {wp['role']}（{wp['status']}） · run_id: `{wp['run_id']}`\n{wp['body']}"
         )
-    lines.append(
-        "\n---\n以上为团队产出。各成员的「文件产出（已验收）」行是落盘且通过路径验收的地面真相。\n"
-        "⚠️ 防幻觉铁律：worker 是否真交付文件，只看「文件产出（已验收）」行——正文声称写了却无此行 = 未真正"
-        "落盘，判为【未达成】，用 delegate 设 continue_from_run_id 带现场续派落盘或重新冷委派。"
-        "「未通过验收」行虽已落盘但不得当作已交付。纯文本产出的 worker（调研 / 分析等）"
-        "无文件产出属正常。\n"
-        "多路并行且相互依赖时，做一步【语义边界对账】：查冲突（双方对同一接口假设不一致）、"
-        "缺口（掉在缝里没人做）、重复（两人做了同一件事）；上方若有【团队便签】一并对照。"
-        "对出问题用 continue_from_run_id 续派 / replan 修，别糊过去。独立并行（各干各的）跳过此步。\n"
-        "收尾前对照用户原始请求做【完工核验】：每件事是否实质达成？未达成就补（delegate / replan / "
-        "continue_from_run_id），已达成就自信收口、不无谓空转。然后用你自己的声音写一段简短概览，串起各人结论，"
-        "指引用户看细节，不逐字复述。如有队员建议的下一步，择有价值者带给用户。"
-        + (
-            "上方若有【建议开辩】命题卡：择优后可直接调 debate 开赛"
-            "（motion/sides 直传或磨锋利；background 汇编客观事实，不得装观点）；"
-            "同回合协调态/批收口后再开辩合法。\n"
+    # Lean footer (unconditional): keep 防幻觉 / 文件产出判据 / 名册铁律; drop debate-dead
+    # copy when no cards, compress PPT + work-log rhetoric.
+    debate_tail = ""
+    if cards_block:
+        debate_tail = (
+            "有【建议开辩】卡：择优后可直接调 debate"
+            "（background 只汇编事实）。\n"
             if auto_adopt
-            else (
-                "上方若有【建议开辩】命题卡：在概览里呈报命题 + 各方 + 理由；"
-                "系统已/将登记阶段推进卡，【勿口头征求开辩同意】；"
-                "本回合不要直接调用 debate。\n"
-            )
+            else "有【建议开辩】卡：概览呈报命题+各方；勿口头征求、本回合勿直接 debate。\n"
         )
-        + "【终稿纪律】终稿只写给用户的交付，不是工作日志：交付物（结论 / 产物指引 / 缺口与后续动作）"
-        "写在最前；过程叙述（谁做了什么、中途发生了什么）压缩成【至多一段】简述；"
-        "禁止把上方 escalation 原文、系统提示、协调事件、进度卡叙事或中间合成草稿整段粘进终稿"
-        "——升级与缺口只保留【结论与影响】一句话。若有未交付的承诺产物，用一小节显式列出"
-        "「未交付 / 需你操作」，不得混在长文里含糊带过。"
-        "对照上方【队员终态名册】：有失败 / 跳过 / 接替时必须写入终稿，"
-        "禁止编造「全部交付 / 全部完成」。"
-        "本批若已有交付状态卡：终稿必须是短概览（勿展开模块表 / 逐步工作日志），"
-        "细节用户自行查看卡片与 run；超长会被交付前核验回炉。"
-        "若用户要的是 PowerPoint（.pptx）而「文件产出」仅有 md / 脚本、无 .pptx："
-        "禁止写「PPT 已落盘 / 可直接打开 / 可直接使用」——如实点名部分交付与缺口。"
+    lines.append(
+        "\n---\n以上为团队产出。「文件产出（已验收）」= 落盘且路径验收通过的地面真相。\n"
+        "⚠️ 防幻觉铁律：是否真交付文件只看「文件产出（已验收）」行——"
+        "正文声称写了却无此行 = 未真正落盘【未达成】，用 continue_from_run_id 续派或冷委派；"
+        "「未通过验收」不得当已交付；纯文本无文件属正常。\n"
+        "相互依赖时【语义边界对账】（冲突/缺口/重复；有便签一并对照）；"
+        "【完工核验】对照用户请求：未达成就补，已达成则短概览收口。\n"
+        + debate_tail
+        + "【终稿纪律】交付物在前、过程至多一段；对照【队员终态名册】，"
+        "失败/跳过/接替必须写入，禁止编造「全部交付」。"
+        "要 PPT 却无 .pptx：禁止写「PPT 已落盘」。"
     )
     output = "\n".join(lines)
     if any(wp["status"] != "completed" for wp in products) or any(

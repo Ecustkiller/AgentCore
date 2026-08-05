@@ -258,7 +258,7 @@ describe("ModelPicker (mobile profiles)", () => {
     expect(mockNavigate).toHaveBeenCalledWith(MODEL_CONFIG_PATH);
   });
 
-  it("empty list with BYOK shows 去模型配置 CTA", async () => {
+  it("empty list with BYOK shows jiurelay and 去模型配置 CTA", async () => {
     profilesData = { default_model_profile_id: null, data: [] };
     mockListProviders.mockResolvedValue(providersResponse());
     const onClose = vi.fn();
@@ -273,12 +273,15 @@ describe("ModelPicker (mobile profiles)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("profiles-empty-byok")).toBeTruthy(),
     );
+    const jiurelayLink = screen.getByRole("link", { name: "jiurelay" });
+    expect(jiurelayLink.getAttribute("href")).toBe("https://jiurelay.com/");
+    expect(screen.getByText(/免费自配额度/)).toBeTruthy();
     fireEvent.click(screen.getByText("去模型配置"));
     expect(onClose).toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith(MODEL_CONFIG_PATH);
   });
 
-  it("empty list with platform_available shows admin/retry copy", async () => {
+  it("empty list with platform_available shows retry/settings guide without jiurelay", async () => {
     profilesData = { default_model_profile_id: null, data: [] };
     mockListProviders.mockResolvedValue(
       providersResponse({
@@ -296,9 +299,9 @@ describe("ModelPicker (mobile profiles)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("profiles-empty-platform")).toBeTruthy(),
     );
-    expect(
-      screen.getByText("平台额度暂不可用，请联系管理员或稍后重试。"),
-    ).toBeTruthy();
-    expect(screen.queryByText("去模型配置")).toBeNull();
+    expect(screen.queryByRole("link", { name: "jiurelay" })).toBeNull();
+    expect(screen.getByText(/请稍后重试/)).toBeTruthy();
+    expect(screen.getByText(/到设置检查模型配置/)).toBeTruthy();
+    expect(screen.getByText("去模型配置")).toBeTruthy();
   });
 });

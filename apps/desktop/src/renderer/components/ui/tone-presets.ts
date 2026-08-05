@@ -190,9 +190,10 @@ export const interactiveCheckpointTone = {
 /** Settled ask_user record shells. */
 export const resolvedCheckpointTone = {
   success: {
-    wrap: "border-success/25 bg-success/5",
-    badge: "bg-success/10 text-success",
-    label: "text-success",
+    // Fully archival chrome; continue vs stop still differs by icon shape + label.
+    wrap: "border-border bg-card/60",
+    badge: "bg-muted text-muted-foreground",
+    label: "text-muted-foreground",
   },
   destructive: {
     wrap: "border-destructive/25 bg-destructive/5",

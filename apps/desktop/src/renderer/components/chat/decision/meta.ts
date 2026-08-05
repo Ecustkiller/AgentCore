@@ -57,9 +57,9 @@ const ASK_CLARIFY_META = {
   resolved: {
     continue: { label: "已按你的决定继续", tone: "success" },
     adjust: { label: "已按你的调整继续", tone: "success" },
-    // stop = 用户点「跳过」硬停收口，非失败；与 timeout/orphaned、协作图 cancelled 同档 muted。
-    stop: { label: "已跳过本回合", tone: "muted" },
-    research_first: { label: "已跳过本回合", tone: "muted" },
+    // stop = 用户点「取消」硬停收口，非失败；与 timeout/orphaned、协作图 cancelled 同档 muted。
+    stop: { label: "已取消本回合", tone: "muted" },
+    research_first: { label: "已取消本回合", tone: "muted" },
     timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
     orphaned: {
       label: "已失效（回合已结束或服务已重启）",
@@ -81,8 +81,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已选定方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已跳过本回合", tone: "muted" },
-      research_first: { label: "已跳过本回合", tone: "muted" },
+      stop: { label: "已取消本回合", tone: "muted" },
+      research_first: { label: "已取消本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -99,8 +99,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认风险处理项", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已跳过本回合", tone: "muted" },
-      research_first: { label: "已跳过本回合", tone: "muted" },
+      stop: { label: "已取消本回合", tone: "muted" },
+      research_first: { label: "已取消本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -117,8 +117,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认整理方案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已跳过本回合", tone: "muted" },
-      research_first: { label: "已跳过本回合", tone: "muted" },
+      stop: { label: "已取消本回合", tone: "muted" },
+      research_first: { label: "已取消本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -135,8 +135,8 @@ export const ASK_INTENT_META = {
     resolved: {
       continue: { label: "已确认复盘提案", tone: "success" },
       adjust: { label: "已按你的调整继续", tone: "success" },
-      stop: { label: "已跳过本回合", tone: "muted" },
-      research_first: { label: "已跳过本回合", tone: "muted" },
+      stop: { label: "已取消本回合", tone: "muted" },
+      research_first: { label: "已取消本回合", tone: "muted" },
       timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
       orphaned: {
         label: "已失效（回合已结束或服务已重启）",
@@ -192,11 +192,11 @@ export const TEAM_PRIMITIVE_META = {
         icon: Pencil,
         label: "已调整 · 备注已注入队员并开做",
       },
-      stop: { icon: OctagonX, label: "已停止 · 团队未启动" },
-      // research_first 仅辩论开工卡合法；误落到 delegate 时按停止文案降级展示。
+      stop: { icon: OctagonX, label: "已取消 · 团队未启动" },
+      // research_first 仅辩论开工卡合法；误落到 delegate 时按取消文案降级展示。
       research_first: {
         icon: OctagonX,
-        label: "已停止 · 团队未启动",
+        label: "已取消 · 团队未启动",
       },
       timeout: { icon: Clock, label: "未及时回应，已自动开做" },
       orphaned: {
@@ -224,7 +224,7 @@ export const TEAM_PRIMITIVE_META = {
         icon: Pencil,
         label: "已调整辩题 · 开赛",
       },
-      stop: { icon: OctagonX, label: "已停止 · 辩论未开赛" },
+      stop: { icon: OctagonX, label: "已取消 · 辩论未开赛" },
       research_first: {
         icon: Scale,
         label: "已选先调研 · 辩论未开赛",

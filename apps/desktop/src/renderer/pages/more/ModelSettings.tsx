@@ -76,30 +76,51 @@ function firstSlotFromGroups(
   return null;
 }
 
-/** 无可选模型时的引导：平台开闸空目录 vs BYOK 休眠分流。 */
+/**
+ * 无可选模型时的引导。
+ * 平台可用：稍后重试 / 去设置检查（不硬推第三方）。
+ * 平台不可用：jiurelay 免费配额度或接入服务商。
+ */
 function NoAvailableModelsGuide({
-  platformAvailable,
   className,
+  platformAvailable,
 }: {
-  platformAvailable: boolean;
   className?: string;
+  platformAvailable: boolean;
 }) {
   if (platformAvailable) {
     return (
       <p className={cn("text-xs text-muted-foreground", className)}>
-        暂无可用模型。平台额度暂不可用，请联系管理员或稍后重试。
+        暂无可用模型。请稍后重试，或到{" "}
+        <Link
+          to="/more/providers"
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          设置 · 服务商
+        </Link>{" "}
+        检查配置。
       </p>
     );
   }
   return (
     <p className={cn("text-xs text-muted-foreground", className)}>
-      暂无可用模型，请先{" "}
+      暂无可用模型。请到{" "}
+      <a
+        href="https://jiurelay.com/"
+        target="_blank"
+        rel="noreferrer"
+        className="text-primary underline-offset-2 hover:underline"
+      >
+        jiurelay
+      </a>{" "}
+      免费配额度，或{" "}
       <Link
         to="/more/providers"
         className="text-primary underline-offset-2 hover:underline"
       >
         接入服务商
       </Link>
+      。
     </p>
   );
 }
@@ -132,7 +153,7 @@ export function ModelSettings() {
         description={
           platformAvailable
             ? "选择账号默认组合（主模型 + 可选 Worker / 后台）。可用平台额度直接对话，也可接入服务商。"
-            : "选择账号默认组合（主模型 + 可选 Worker / 后台）。需先接入服务商。"
+            : "选择账号默认组合（主模型 + 可选 Worker / 后台）。需自行在 jiurelay 免费配额度或接入服务商。"
         }
       />
 
@@ -174,7 +195,16 @@ function EmptyProfilesCta() {
   return (
     <Card className="flex flex-col items-center justify-center gap-3 border-dashed py-8 text-center">
       <p className="text-sm text-muted-foreground">
-        还没有可用模型。先接入服务商。
+        还没有可用模型。请到{" "}
+        <a
+          href="https://jiurelay.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          jiurelay
+        </a>{" "}
+        免费配额度，或接入服务商。
       </p>
       <Button
         size="sm"
@@ -630,8 +660,8 @@ function ProfileEditor({
         />
         {showEmptyGuide && (
           <NoAvailableModelsGuide
-            platformAvailable={platformAvailable}
             className="mt-1"
+            platformAvailable={platformAvailable}
           />
         )}
       </label>

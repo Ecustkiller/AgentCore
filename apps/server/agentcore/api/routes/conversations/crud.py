@@ -407,8 +407,8 @@ async def export_conversation(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     messages = await msg_repo.list_all_for_conversation(conversation_id)
     stem = _safe_export_stem(conv.title, conversation_id)
+    journal_map = await journal_repo.load_map([m.id for m in messages])
     if format == "json":
-        journal_map = await journal_repo.load_map([m.id for m in messages])
         payload = conversation_to_json(conv, messages, journal_map=journal_map)
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         return Response(
@@ -416,7 +416,7 @@ async def export_conversation(
             media_type="application/json",
             headers=_download_headers(f"{stem}.json"),
         )
-    content = conversation_to_markdown(conv, messages)
+    content = conversation_to_markdown(conv, messages, journal_map=journal_map)
     return Response(
         content=content,
         media_type="text/markdown; charset=utf-8",

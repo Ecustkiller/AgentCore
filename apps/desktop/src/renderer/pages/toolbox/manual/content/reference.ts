@@ -146,7 +146,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               label: "服务商",
-              desc: "平台额度说明，或自带 Key（BYOK）",
+              desc: "接入额度或自带 Key（BYOK）",
               to: APP_PATHS.more.providers,
             },
             {
@@ -225,7 +225,7 @@ export const referenceChapter: ManualChapterContent = {
                 {
                   type: "text",
                   text: [
-                    "拍板卡：提交＝带选择继续，跳过＝结束本回合。计划复核：继续 / 调整（备注给下游）/ 停止。写文件等工具审批另弹窗，按自主度配方决定问不问。展开见 ",
+                    "拍板卡：提交＝带选择继续，取消＝结束本回合。计划复核：继续 / 调整（备注给下游）/ 取消。写文件等工具审批另弹窗，按自主度配方决定问不问。展开见 ",
                     {
                       text: "检查点与审批",
                       link: {
@@ -327,7 +327,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "默认用平台额度跑（内测期平台代付），打开就能用。",
+                  text: "到 https://jiurelay.com/ 免费自行配额度后，在「设置 · 服务商」接入即可使用。",
                 },
                 {
                   type: "text",
@@ -422,7 +422,7 @@ export const referenceChapter: ManualChapterContent = {
                       text: "设置 · 服务商",
                       link: { kind: "go", to: APP_PATHS.more.providers },
                     },
-                    " 核对 Key、base URL 与模型名是否填对；换一家厂商或自定义端点再试。平台额度异常时也可先切回平台模型确认是否为 Key 问题。",
+                    " 核对 Key、base URL 与模型名是否填对；换一家厂商或自定义端点再试，确认是否为 Key 问题。",
                   ],
                 },
               ],
@@ -479,7 +479,7 @@ export const referenceChapter: ManualChapterContent = {
           items: [
             {
               title: "自带 Key（BYOK）",
-              desc: "平台默认已备额度，打开即用；想用自己的模型可自带 API Key（可选升级），在「设置 · 服务商」里填写与管理。",
+              desc: "额度可到 https://jiurelay.com/ 免费自行配后在「设置 · 服务商」接入；也可自带 API Key（BYOK），同页填写与管理。",
             },
             {
               title: "生成的文件",
@@ -632,7 +632,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "你主动喊停后的状态展示；动作叫「停止」，不用「取消」当 gloss。",
+                  text: "你主动喊停（停止生成）后的状态展示；动作/终态叫「停止 / 已停止」。冷卡次要键「取消」（拒答/拒开工）与此正交，勿混用。",
                 },
               ],
             },

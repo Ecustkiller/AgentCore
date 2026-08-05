@@ -70,6 +70,60 @@ def test_validate_accepts_clean_low_finding():
     )
 
 
+def test_validate_accepts_english_severity_and_verdict():
+    assert (
+        validate_code_audit_payload(
+            {
+                "findings": [
+                    _ok_finding(severity="low", verdict="confirmed"),
+                    _ok_finding(
+                        severity="MEDIUM",
+                        verdict="false_positive",
+                        summary="误报样例",
+                    ),
+                    _ok_finding(
+                        severity="info",
+                        verdict="pending",
+                        summary="观察样例",
+                    ),
+                    _ok_finding(
+                        severity="critical",
+                        verdict="partially confirmed",
+                        trigger_path="POST /x → handler",
+                        reachability="用户可控输入经校验前直达",
+                        summary="高危样例",
+                    ),
+                ]
+            }
+        )
+        == []
+    )
+
+
+def test_validate_rejects_compound_severity_and_verdict():
+    fails = validate_code_audit_payload(
+        {
+            "findings": [
+                _ok_finding(verdict="属实（不进 N）"),
+                _ok_finding(severity="低（观察）", verdict="误报（已撤销）"),
+            ]
+        }
+    )
+    assert any("verdict 无效" in f for f in fails)
+    assert any("severity 无效" in f for f in fails)
+
+
+def test_validate_english_pending_still_blocks_medium():
+    fails = validate_code_audit_payload(
+        {
+            "findings": [
+                _ok_finding(severity="medium", verdict="pending"),
+            ]
+        }
+    )
+    assert any("不得标中/高" in f for f in fails)
+
+
 def test_check_contract_code_audit_gate_wires_through():
     md = "## 〇、人审速览\n## 一、属实缺陷\n验证方式\n定案\n## 二、已撤销\n## 三、观察与工程债\n"
     json_path = "AgentCore/文档/reviews/x.audit.json"

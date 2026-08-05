@@ -119,8 +119,8 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
     refetch,
   } = useLlmModelProfiles();
   const { data: catalog } = useModels();
-  const { data: providers } = useLlmProviders();
-  const platformAvailable = providers?.platform_available === true;
+  const { data: providersResponse } = useLlmProviders();
+  const platformAvailable = providersResponse?.platform_available === true;
   const navigate = useNavigate();
 
   const [open, setOpen] = useState(false);
@@ -312,11 +312,28 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
                 <p>暂无可用组合</p>
                 {platformAvailable ? (
                   <p className="mt-1">
-                    平台额度暂不可用，请联系管理员或稍后重试。
+                    请稍后重试，或到{" "}
+                    <Link
+                      to="/more/model"
+                      onClick={() => setOpen(false)}
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      设置 · 模型
+                    </Link>{" "}
+                    检查配置。
                   </p>
                 ) : (
                   <p className="mt-1">
-                    请先{" "}
+                    请先到{" "}
+                    <a
+                      href="https://jiurelay.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      jiurelay
+                    </a>{" "}
+                    免费自配额度，或{" "}
                     <Link
                       to="/more/providers"
                       onClick={() => setOpen(false)}

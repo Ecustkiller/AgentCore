@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseGitStatusSb } from "../fs/workspace/gitRepoStatus";
-import { evaluatePushGuard, parseGitScmAction } from "../fs/workspace/gitScm";
+import {
+  evaluateDiscardPath,
+  evaluateDiscardPaths,
+  evaluatePushGuard,
+  parseGitScmAction,
+} from "../fs/workspace/gitScm";
 
 describe("parseGitStatusSb", () => {
   it("parses branch ahead of remote", () => {
@@ -72,7 +77,10 @@ describe("gitScm guards", () => {
   it("parses known actions", () => {
     expect(parseGitScmAction("stage")).toBe("stage");
     expect(parseGitScmAction("PUSH")).toBe("push");
+    expect(parseGitScmAction("discard")).toBe("discard");
+    expect(parseGitScmAction("fetch")).toBe("fetch");
     expect(parseGitScmAction("reset")).toBeNull();
+    expect(parseGitScmAction("clean")).toBeNull();
   });
 
   it("denies force / protected branch push", () => {
@@ -97,6 +105,32 @@ describe("gitScm guards", () => {
         args: {},
       }),
     ).toBeNull();
+  });
+
+  it("discard path guard rejects empty, dash, traversal, absolute", () => {
+    expect(evaluateDiscardPath("")).toMatch(/空/);
+    expect(evaluateDiscardPath("  ")).toMatch(/空/);
+    expect(evaluateDiscardPath("-n")).toMatch(/-/);
+    expect(evaluateDiscardPath("--worktree")).toMatch(/-/);
+    expect(evaluateDiscardPath("../x")).toMatch(/\.\./);
+    expect(evaluateDiscardPath("foo/../bar")).toMatch(/\.\./);
+    expect(evaluateDiscardPath("/etc/passwd")).toMatch(/绝对/);
+    expect(evaluateDiscardPath("C:/Windows/system32")).toMatch(/绝对/);
+    expect(evaluateDiscardPath("a.ts")).toEqual({ path: "a.ts" });
+    expect(evaluateDiscardPath("src\\a.ts")).toEqual({ path: "src/a.ts" });
+
+    expect(evaluateDiscardPaths(undefined)).toMatchObject({
+      error: expect.stringMatching(/必须指定 paths/),
+    });
+    expect(evaluateDiscardPaths([])).toMatchObject({
+      error: expect.stringMatching(/必须指定 paths/),
+    });
+    expect(evaluateDiscardPaths(["ok.ts", "../evil"])).toMatchObject({
+      error: expect.stringMatching(/\.\./),
+    });
+    expect(evaluateDiscardPaths(["a.ts", "b.ts"])).toEqual({
+      paths: ["a.ts", "b.ts"],
+    });
   });
 });
 
@@ -214,6 +248,120 @@ describe("executeWorkspaceOp git_repo_status + git_scm", () => {
       force: true,
     });
     expect(pushDenied.ok).toBe(false);
+  });
+
+  it("discards unstaged tracked worktree changes; rejects pathless discard", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { readFile } = await import("node:fs/promises");
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync("git", ["--version"], { windowsHide: true });
+    } catch {
+      return;
+    }
+    await execFileAsync("git", ["init"], { cwd: dir, windowsHide: true });
+    await execFileAsync("git", ["config", "user.email", "u2@test"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    await execFileAsync("git", ["config", "user.name", "u2"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    await writeFile(join(dir, "a.txt"), "base\n", "utf-8");
+    await execFileAsync("git", ["add", "a.txt"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    await execFileAsync("git", ["commit", "-m", "init"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    // staged+unstaged：discard 应回到索引（staged），不是 HEAD
+    await writeFile(join(dir, "a.txt"), "staged\n", "utf-8");
+    await execFileAsync("git", ["add", "a.txt"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    await writeFile(join(dir, "a.txt"), "dirty\n", "utf-8");
+
+    const { executeWorkspaceOp } = await import("../fs-service");
+    const root = { id: "r", name: "r", absPath: dir };
+
+    const denied = await executeWorkspaceOp(root, "git_scm", {
+      action: "discard",
+    });
+    expect(denied.ok).toBe(false);
+
+    const traversal = await executeWorkspaceOp(root, "git_scm", {
+      action: "discard",
+      paths: ["../outside.txt"],
+    });
+    expect(traversal.ok).toBe(false);
+    if (!traversal.ok) {
+      expect(traversal.error.detail).toMatch(/\.\./);
+    }
+
+    const absolute = await executeWorkspaceOp(root, "git_scm", {
+      action: "discard",
+      paths: ["/etc/passwd"],
+    });
+    expect(absolute.ok).toBe(false);
+    if (!absolute.ok) {
+      expect(absolute.error.detail).toMatch(/绝对/);
+    }
+
+    const dashOpt = await executeWorkspaceOp(root, "git_scm", {
+      action: "discard",
+      paths: ["--worktree"],
+    });
+    expect(dashOpt.ok).toBe(false);
+
+    const discarded = await executeWorkspaceOp(root, "git_scm", {
+      action: "discard",
+      paths: ["a.txt"],
+    });
+    expect(discarded.ok).toBe(true);
+    const restored = (await readFile(join(dir, "a.txt"), "utf-8")).replace(
+      /\r\n/g,
+      "\n",
+    );
+    expect(restored).toBe("staged\n");
+  });
+
+  it("fetch rejects prune knobs and missing remote", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync("git", ["--version"], { windowsHide: true });
+    } catch {
+      return;
+    }
+    await execFileAsync("git", ["init"], { cwd: dir, windowsHide: true });
+    await execFileAsync("git", ["config", "user.email", "u2@test"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+    await execFileAsync("git", ["config", "user.name", "u2"], {
+      cwd: dir,
+      windowsHide: true,
+    });
+
+    const { executeWorkspaceOp } = await import("../fs-service");
+    const root = { id: "r", name: "r", absPath: dir };
+
+    const noRemote = await executeWorkspaceOp(root, "git_scm", {
+      action: "fetch",
+    });
+    expect(noRemote.ok).toBe(false);
+
+    const pruned = await executeWorkspaceOp(root, "git_scm", {
+      action: "fetch",
+      prune: true,
+    });
+    expect(pruned.ok).toBe(false);
   });
 
   it("refuses push from main", async () => {

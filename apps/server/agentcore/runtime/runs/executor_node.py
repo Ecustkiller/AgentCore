@@ -614,11 +614,15 @@ async def execute_agent_node(
         # of cold ``_build_messages`` — same run_id, consume the hung transcript.
         received_blocks: list[ContextBlock] = []
         prior_attempt = completed.get(spec.run_id)
-        if (
+        # Cold-open only: seed/inherited notes are already on the wall before react, but
+        # ``on_round_begin`` skips round 0 — preload once after assembly so round-1-only
+        # workers still see them. Continuation keeps the hung transcript as-is (no re-seed).
+        cold_open = not (
             prior_attempt is not None
             and prior_attempt.phase is RunPhase.FAILED
             and prior_attempt.transcript
-        ):
+        )
+        if not cold_open:
             from agentcore.runtime.runs.executor_continue import (
                 _record_continuation_run_head,
                 _strip_historical_reasoning,
@@ -688,6 +692,10 @@ async def execute_agent_node(
         # frozen at its opening. new_for already excludes self-posted, caps the burst, and
         # advances this run's cursor (each note delivered at most once). Empty (solo / no
         # fresh notes) → [] → a no-op round, identical to today's behaviour.
+        #
+        # Cold-open preload: seed / inherited notes sit on the wall before round 0, but the
+        # loop only calls this hook from round≥1 — extend once here so「开局即见」holds.
+        # Cursor advance means the same notes are not re-pushed on the first mid-flight pull.
         _note_nudged: list[bool] = [False]
 
         def _pull_notes(_rid: str = spec.run_id) -> list[LLMMessage]:
@@ -707,6 +715,9 @@ async def execute_agent_node(
                 _note_nudged[0] = True
                 injected.append(LLMMessage(role="user", content=NOTE_NUDGE_TEXT))
             return injected
+
+        if cold_open:
+            messages.extend(_pull_notes())
 
         attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
         if deliverable and deliverable.visual_critic:

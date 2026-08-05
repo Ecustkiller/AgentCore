@@ -93,8 +93,11 @@ function reconcileMessageWindow(
 
 export function ConversationPage() {
   const { id } = useParams<{ id: string }>();
-  const [hydratePhase, setHydratePhase] =
-    useState<ConversationHydratePhase>("ready");
+  // Cold open with `:id` must not paint one ready frame of empty draft before the
+  // effect flips to loading (ConversationHydrateOverlay purpose). Draft `/` stays ready.
+  const [hydratePhase, setHydratePhase] = useState<ConversationHydratePhase>(
+    () => (id ? "loading" : "ready"),
+  );
   const [hydrateRetry, setHydrateRetry] = useState(0);
 
   // 路由参数是 conversation 的真相来源（刷新/前进后退/直达链接时同步到 store），

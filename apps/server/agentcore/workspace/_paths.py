@@ -168,6 +168,20 @@ AI_NOISE_FILE_SUFFIXES: frozenset[str] = frozenset(
     }
 )
 
+# Archive subset of AI noise — visible under ``external/<alias>/`` list / when
+# ``file_list`` pattern targets these suffixes. ↔ desktop ``AI_ARCHIVE_FILE_SUFFIXES``.
+AI_ARCHIVE_FILE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".zip",
+        ".tar",
+        ".gz",
+        ".tgz",
+        ".bz2",
+        ".7z",
+        ".rar",
+    }
+)
+
 # Combined AI-perspective suffixes (system ∪ AI noise). Prefer the tiered helpers
 # below; this alias exists for callers / tests that mean "hide from AI".
 IGNORED_FILE_SUFFIXES: frozenset[str] = SYSTEM_IGNORED_FILE_SUFFIXES | AI_NOISE_FILE_SUFFIXES
@@ -251,6 +265,11 @@ def is_system_ignored_file_name(name: str) -> bool:
 def is_ai_noise_file_name(name: str) -> bool:
     """Whether a file basename is AI-only noise (still visible in user UI)."""
     return _suffix_match(name, AI_NOISE_FILE_SUFFIXES)
+
+
+def is_ai_archive_file_name(name: str) -> bool:
+    """Whether a file basename is an archive suffix (AI-noise subset)."""
+    return _suffix_match(name, AI_ARCHIVE_FILE_SUFFIXES)
 
 
 def is_ignored_file_name(name: str) -> bool:

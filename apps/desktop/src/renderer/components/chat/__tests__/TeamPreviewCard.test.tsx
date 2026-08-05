@@ -188,7 +188,7 @@ describe("TeamPreviewCard", () => {
 
   it.each([
     ["adjust", "已调整 · 备注已注入队员并开做 · 2 名队员"],
-    ["stop", "已停止 · 团队未启动 · 2 名队员"],
+    ["stop", "已取消 · 团队未启动 · 2 名队员"],
     ["timeout", "未及时回应，已自动开做 · 2 名队员"],
     ["orphaned", "已失效（回合已结束或服务已重启） · 2 名队员"],
   ] as const)("resolved decision=%s 保留既有 label 文案", (decision, label) => {

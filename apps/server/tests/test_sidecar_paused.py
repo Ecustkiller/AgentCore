@@ -309,6 +309,8 @@ def test_start_turn_wires_local_suspension_hooks(tmp_path, monkeypatch):
     async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
         captured["saver"] = kwargs.get("suspension_saver")
         captured["deleter"] = kwargs.get("suspension_deleter")
+        captured["session_saver"] = kwargs.get("session_saver")
+        captured["session_loader"] = kwargs.get("session_loader")
         kwargs["sink"].close()
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
 
@@ -338,6 +340,61 @@ def test_start_turn_wires_local_suspension_hooks(tmp_path, monkeypatch):
     asyncio.run(drive())
     assert captured["saver"] is not None
     assert captured["deleter"] is not None
+    # 留人 roster: dataDir ⇒ local run_session store wired (parity with cloud callbacks).
+    assert captured["session_saver"] is not None
+    assert captured["session_loader"] is not None
+
+
+def test_initialize_advertises_durable_roster_from_data_dir(tmp_path):
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    asyncio.run(_initialize(server, tmp_path, data_dir=str(tmp_path / "data")))
+    caps = _response(sent, 1)["result"]["capabilities"]
+    assert caps["durableRoster"] is True
+
+
+def test_initialize_without_data_dir_disables_durable_roster(tmp_path):
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    asyncio.run(_initialize(server, tmp_path, data_dir=None))
+    caps = _response(sent, 1)["result"]["capabilities"]
+    assert caps["durableRoster"] is False
+
+
+def test_start_turn_without_data_dir_leaves_session_hooks_none(tmp_path, monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["session_saver"] = kwargs.get("session_saver")
+        captured["session_loader"] = kwargs.get("session_loader")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await _initialize(server, tmp_path, data_dir=None)
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "hi",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert captured["session_saver"] is None
+    assert captured["session_loader"] is None
 
 
 def test_list_paused_returns_seeded_frames(tmp_path):

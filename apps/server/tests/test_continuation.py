@@ -187,6 +187,75 @@ async def test_continue_from_self_ref_rejected():
         raise AssertionError("expected ContinuationRejectedError")
     except ContinuationRejectedError as exc:
         assert "自指" in exc.message
+        assert exc.cause == "self"
+
+
+async def test_resolve_session_loader_absent_copy():
+    """No loader ⇒ must not claim「落盘未命中」."""
+    store = SessionStore()
+    tool = _tool(store, _Provider(["x"]))
+    try:
+        await resolve_session(tool, "ghost", own_run_id="t_2")
+        raise AssertionError("expected ContinuationRejectedError")
+    except ContinuationRejectedError as exc:
+        assert exc.cause == "loader_absent"
+        assert "落盘均未命中" not in exc.message
+        assert "未装配落盘" in exc.message
+        assert "冷委派" in exc.message
+
+
+async def test_resolve_session_loader_miss_copy():
+    store = SessionStore()
+
+    async def _miss(_run_id: str):
+        return None
+
+    tool = DelegateTool(
+        llm=_Provider(["x"]),
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=_ctx(),
+        captain_run_id="CEO",
+        session_store=store,
+        session_loader=_miss,
+    )
+    try:
+        await resolve_session(tool, "ghost", own_run_id="t_2")
+        raise AssertionError("expected ContinuationRejectedError")
+    except ContinuationRejectedError as exc:
+        assert exc.cause == "loader_miss"
+        assert "落盘均未命中" in exc.message
+
+
+async def test_resolve_session_evicted_cause():
+    store = SessionStore(max_bytes=10)
+    store.bind_evict_persist(None, durable=True)
+    store.put(_session_for_roster("a", text="x" * 8))
+    store.put(_session_for_roster("b", text="y" * 8))
+    assert store.eviction_reason("a") == "bytes"
+    tool = _tool(store, _Provider(["x"]))
+    try:
+        await resolve_session(tool, "a", own_run_id="t_2")
+        raise AssertionError("expected ContinuationRejectedError")
+    except ContinuationRejectedError as exc:
+        assert exc.cause == "evicted"
+        assert "淘汰" in exc.message
+        assert "不是 id" in exc.message or "冷委派" in exc.message
+        assert "落盘均未命中" not in exc.message
+
+
+def _session_for_roster(run_id: str, *, text: str = "x"):
+    from agentcore.llm.provider.protocol import LLMMessage
+
+    return RunSession(
+        run_id=run_id,
+        spec=RunSpec(run_id=run_id, agent_id=run_id, role="A", task="t"),
+        transcript=[LLMMessage(role="assistant", content=text)],
+        content=text,
+    )
 
 
 async def test_continue_from_capped_rejects():

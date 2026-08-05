@@ -1,5 +1,6 @@
 /** Turn spine: hydrate journal, fold messages → turns (LOD nodes built in useCanvasFlow). */
 
+import { visibleMessageText } from "@/lib/errors";
 import {
   assistantProjectionId,
   useActiveMessages,
@@ -119,7 +120,7 @@ export function useCanvasTurns({
           kind: "team",
           exec,
           prompt: lastUser,
-          answer: m.content,
+          answer: visibleMessageText(m),
           promptMessageId: lastUserId,
           answerMessageId: m.id,
           running: exec?.status === "running" || m.isStreaming,
@@ -134,7 +135,7 @@ export function useCanvasTurns({
           kind: "simple",
           exec: null,
           prompt: lastUser,
-          answer: m.content,
+          answer: visibleMessageText(m),
           promptMessageId: lastUserId,
           answerMessageId: m.id,
           running: m.isStreaming,
