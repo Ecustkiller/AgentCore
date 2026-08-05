@@ -115,6 +115,7 @@ export function FilesPage() {
         <input
           ref={uploadInputRef}
           type="file"
+          accept="image/*,.pdf,.md,.markdown,.txt,.json,.csv,.html,.css,.js,.ts,.tsx,.py,.zip,text/*"
           style={{ display: "none" }}
           onChange={(e) => void onPickUpload(e)}
         />
@@ -127,6 +128,7 @@ export function FilesPage() {
         reloadKey={reloadKey}
         openPath={openPath}
         emptyHint="此对话还没有工作区文件。"
+        onUpload={() => uploadInputRef.current?.click()}
       />
 
       {uploadError && <div className="error bar">{uploadError}</div>}

@@ -1,6 +1,6 @@
 """红队 finding 台账 —— 解析 / 去重合并 / 跨轮累积 / 门决派生。
 
-→ 见提案: docs/06-规划/红队与圆桌形态重设计提案.md §3.2、O5/O7
+→ 见 docs/03-AI核心/辩论编排设计.md / 辩论质询证据与证人.md（详细提案不在公开仓）
 """
 
 from __future__ import annotations

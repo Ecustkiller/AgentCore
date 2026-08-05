@@ -18,6 +18,10 @@ export interface FileNode {
   name: string;
   path: string;
   isDir: boolean;
+  /** Leaf entry size when known; synthetic mid-path dirs stay undefined. */
+  sizeBytes?: number;
+  /** Edit CAS mtime (ms); dirs may have it, synthetic mid-path dirs stay undefined. */
+  mtimeMs?: number;
 }
 
 /** A downloaded file's bytes plus the name to save it as and its resolved type. */
@@ -165,11 +169,23 @@ export function buildTree(
     let parent = "";
     segs.forEach((name, i) => {
       const full = parent ? `${parent}/${name}` : name;
-      const isDir = i < segs.length - 1 ? true : entry.is_dir;
+      const isLeaf = i === segs.length - 1;
+      const isDir = isLeaf ? entry.is_dir : true;
       const here = bucket(parent);
       const prev = here.get(name);
-      if (!prev) here.set(name, { name, path: full, isDir });
-      else if (isDir) prev.isDir = true;
+      // Only the listing leaf carries size/mtime; synthetic intermediate dirs stay bare
+      // until a real dir entry for the same path arrives and merges meta.
+      const sizeBytes =
+        isLeaf && entry.size_bytes != null ? entry.size_bytes : undefined;
+      const mtimeMs =
+        isLeaf && entry.mtime_ms != null ? entry.mtime_ms : undefined;
+      if (!prev) {
+        here.set(name, { name, path: full, isDir, sizeBytes, mtimeMs });
+      } else {
+        if (isDir) prev.isDir = true;
+        if (sizeBytes != null) prev.sizeBytes = sizeBytes;
+        if (mtimeMs != null) prev.mtimeMs = mtimeMs;
+      }
       parent = full;
     });
   }

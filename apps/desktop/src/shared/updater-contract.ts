@@ -2,9 +2,11 @@
  * 自动更新 IPC 契约 —— 主进程 / preload / renderer 三端共享的单一真相源。
  *
  * 行为锚定 `docs/05-平台与运维/发布与门禁.md` §7.6：electron-updater **发现即说明、
- * 用户同意后再下载**，且**不自动安装**——由用户点「重启安装」决定安装时机
- * （`quitAndInstall`）。检查调度（启动 + 每 4h + 系统唤醒）与 fail-open 远程熔断在
- * 主进程 `main/updater.ts`；稍后提醒 / 跳过此版本的持久化在 renderer。
+ * 用户同意后再下载**（软更新：同意后关窗后台静默下；硬闸全屏跟进度），且**不自动安装**
+ * ——由用户点「重启安装」决定安装时机（`quitAndInstall`）。检查调度（启动 + 每 4h +
+ * 系统唤醒）与 fail-open 远程熔断在主进程 `main/updater.ts`；稍后提醒 / 跳过此版本的
+ * 持久化在 renderer。**临时**：主进程 `disableDifferentialDownload=true`（全量包）；
+ * 分发改善后改回差分（见 §7.6 表「客户端更新 UX」）。
  *
  * 仅打包态（`app.isPackaged`）真正接入 electron-updater；dev / 未打包态状态恒为
  * `unsupported`（autoUpdater 在无 `*-update.yml` 元数据时不可用），但 IPC 句柄仍注册为

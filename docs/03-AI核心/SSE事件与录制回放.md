@@ -1,5 +1,5 @@
 ﻿---
-status: blueprint
+status: landed
 code: apps/server/agentcore/runtime/events/,apps/server/agentcore/replay/
 related:
   - docs/03-AI核心/执行引擎架构设计.md

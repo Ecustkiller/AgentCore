@@ -751,7 +751,7 @@ class OpenAICompatibleProvider:
                 body=body,
             )
         if status_code == 402:
-            raise LLMInsufficientBalanceError()
+            raise LLMInsufficientBalanceError(provider_name=self._name)
         if status_code >= 500:
             preview = body_preview(body)
             logger.warning(
@@ -970,11 +970,11 @@ class OpenAICompatibleProvider:
         if code in (401, 403):
             raise LLMError(f"{self._name} API Key 无效或无权限（鉴权失败），请检查后重试")
         if code == 402:
-            raise LLMInsufficientBalanceError(
-                f"{self._name} API Key 有效，但账户余额不足，请充值后使用。"
-            )
+            raise LLMInsufficientBalanceError(provider_name=self._name)
         if code == 404:
-            raise LLMError(f"{self._name} 接口地址不可达（404），请检查 base_url 配置")
+            # Must read body: model-id 404s (Not found the model / resource_not_found)
+            # must not be mislabelled as a bad base_url.
+            raise LLMError(client_error_message(self._name, code, response.content))
         if code >= 500:
             raise LLMError(f"上游模型服务暂时不可用（{code}），请稍后再试")
         raise LLMError(f"{self._name} 连通测试失败（HTTP {code}）")
@@ -1073,7 +1073,7 @@ class OpenAICompatibleProvider:
                 upstream_body_preview=body_preview(response.content),
             )
         if code == 402:
-            raise LLMInsufficientBalanceError()
+            raise LLMInsufficientBalanceError(provider_name=self._name)
         if code >= 400:
             raise LLMError(f"{self._name} 列出模型失败（HTTP {code}）")
         try:

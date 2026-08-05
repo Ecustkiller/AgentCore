@@ -5,6 +5,7 @@ import {
   type WorkspaceFileEntry,
   buildTree,
 } from "@/api/workspace";
+import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
 import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 import {
@@ -25,7 +26,26 @@ import {
 // `reloadKey` bump (stay in the current folder after a write). The list endpoint only returns
 // 顶层 or 整树, so the whole tree is fetched once (recursive) and walked in memory — one
 // round-trip, instant folder nav (same as the original per-conversation browser).
-import { useEffect, useRef, useState } from "react";
+import {
+  ChevronRight,
+  File,
+  FileCode,
+  FileJson,
+  FileText,
+  Folder,
+  Image as ImageIcon,
+  type LucideIcon,
+  RefreshCw,
+  Search,
+  Upload,
+} from "lucide-react";
+import {
+  type TouchEvent as ReactTouchEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 
 /** The injected data source: how to list the tree and fetch one file's bytes. */
@@ -44,6 +64,51 @@ const IMAGE_EXT = new Set([
   "bmp",
   "ico",
   "avif",
+]);
+const MARKDOWN_EXT = new Set(["md", "markdown"]);
+const CODE_EXT = new Set([
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "htm",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "sh",
+  "bash",
+  "zsh",
+  "sql",
+  "vue",
+  "svelte",
+  "php",
+  "lua",
+  "r",
+  "dart",
+  "swift",
+  "scala",
+  "pl",
+  "ps1",
+  "bat",
+  "gradle",
 ]);
 const TEXT_EXT = new Set([
   "txt",
@@ -106,16 +171,89 @@ const TEXT_EXT = new Set([
   "gradle",
 ]);
 const TEXT_PREVIEW_MAX = 512 * 1024;
+const CRUMB_COLLAPSE_AT = 4;
+const PULL_THRESHOLD_PX = 64;
 
 function ext(name: string): string {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i + 1).toLowerCase() : name.toLowerCase();
 }
 
-function formatSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
+    return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  }
+  const mb = bytes / (1024 * 1024);
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+/** Short Chinese relative time for list subtitles (e.g. 刚刚 / 昨天 / 3 天前). */
+export function formatFileMtime(mtimeMs: number, nowMs = Date.now()): string {
+  const sec = Math.max(0, Math.floor((nowMs - mtimeMs) / 1000));
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const d = new Date(mtimeMs);
+  const now = new Date(nowMs);
+  const startOfDay = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
+  if (days === 1) return "昨天";
+  if (days > 1 && days < 30) return `${days} 天前`;
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function fileIcon(name: string, isDir: boolean): LucideIcon {
+  if (isDir) return Folder;
+  const e = ext(name);
+  if (IMAGE_EXT.has(e)) return ImageIcon;
+  if (MARKDOWN_EXT.has(e) || e === "txt" || e === "log") return FileText;
+  if (e === "json" || e === "jsonl") return FileJson;
+  if (CODE_EXT.has(e)) return FileCode;
+  return File;
+}
+
+function fileSubtitle(node: FileNode): string | null {
+  if (node.isDir) {
+    if (node.mtimeMs != null) return formatFileMtime(node.mtimeMs);
+    return null;
+  }
+  const parts: string[] = [];
+  if (node.sizeBytes != null) parts.push(formatFileSize(node.sizeBytes));
+  if (node.mtimeMs != null) parts.push(formatFileMtime(node.mtimeMs));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+type CrumbItem =
+  | { kind: "seg"; index: number; label: string }
+  | { kind: "ellipsis" };
+
+/** Collapse deep crumbs: keep first + last two; middle → one 「…」. */
+function collapseCrumbs(crumbs: string[]): CrumbItem[] {
+  if (crumbs.length <= CRUMB_COLLAPSE_AT) {
+    return crumbs.map((label, index) => ({
+      kind: "seg" as const,
+      index,
+      label,
+    }));
+  }
+  const first = crumbs[0] ?? "";
+  const penult = crumbs[crumbs.length - 2] ?? "";
+  const lastLabel = crumbs[crumbs.length - 1] ?? "";
+  const last = crumbs.length - 1;
+  return [
+    { kind: "seg", index: 0, label: first },
+    { kind: "ellipsis" },
+    { kind: "seg", index: last - 1, label: penult },
+    { kind: "seg", index: last, label: lastLabel },
+  ];
 }
 
 export function FileBrowser({
@@ -123,8 +261,9 @@ export function FileBrowser({
   cwd,
   onCwdChange,
   reloadKey = 0,
-  emptyHint = "（空）",
+  emptyHint = "此文件夹还没有文件。",
   openPath = null,
+  onUpload,
 }: {
   source: FileBrowserSource;
   cwd: string;
@@ -134,18 +273,37 @@ export function FileBrowser({
   /** 深链：树加载后自动打开该路径文件的预览并落到其所在目录（聊天「本回合产出文件」卡的
    *  一键直达）。只消费一次；树里找不到则按路径直接构造节点（下载失败由预览器兜底报错）。 */
   openPath?: string | null;
+  /** Optional empty-state CTA — typically opens the parent page's hidden upload input. */
+  onUpload?: () => void;
 }) {
   const navigate = useNavigate();
   const [tree, setTree] = useState<Map<string, FileNode[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<FileNode | null>(null);
+  const [query, setQuery] = useState("");
+  const [localReload, setLocalReload] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullDy, setPullDy] = useState(0);
   const openedRef = useRef(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pullStartY = useRef<number | null>(null);
+  const pulling = useRef(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey is an intentional manual-reload trigger — bumping it re-lists even though the body doesn't read it
+  // Blank the list only when the injected source identity changes (not on refresh/upload
+  // reloadKey bumps — those keep the previous tree until the new listing arrives).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: source identity is the intentional reset trigger
   useEffect(() => {
-    let cancelled = false;
     setTree(null);
     setError(null);
+    setQuery("");
+    openedRef.current = false;
+  }, [source]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey / localReload are intentional manual-reload triggers
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setRefreshing(true);
     source
       .list()
       .then((entries) => {
@@ -161,11 +319,20 @@ export function FileBrowser({
         }
         setError(e instanceof Error ? e.message : "加载文件列表失败");
         setTree(new Map());
+      })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [source, reloadKey, navigate]);
+  }, [source, reloadKey, localReload, navigate]);
+
+  // Clear cwd filter when navigating folders.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cwd change is the intentional clear trigger
+  useEffect(() => {
+    setQuery("");
+  }, [cwd]);
 
   // 一键直达：树就绪后，把请求的文件落到其目录并打开预览。只跑一次（openedRef 守门），
   // 避免折回目录/二次打开。找不到精确节点就按路径构造一个（预览器自行下载、失败兜底）。
@@ -183,10 +350,90 @@ export function FileBrowser({
   }, [openPath, tree, onCwdChange]);
 
   const children = tree?.get(cwd) ?? [];
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return children;
+    return children.filter((n) => n.name.toLowerCase().includes(q));
+  }, [children, query]);
   const crumbs = cwd ? cwd.split("/") : [];
+  const crumbItems = collapseCrumbs(crumbs);
+
+  function refresh() {
+    setLocalReload((k) => k + 1);
+  }
+
+  function onTouchStart(e: ReactTouchEvent) {
+    const el = listRef.current;
+    if (!el || el.scrollTop > 0 || refreshing) return;
+    pullStartY.current = e.touches[0]?.clientY ?? null;
+    pulling.current = true;
+  }
+
+  function onTouchMove(e: ReactTouchEvent) {
+    if (!pulling.current || pullStartY.current == null) return;
+    const y = e.touches[0]?.clientY ?? pullStartY.current;
+    const dy = Math.max(0, Math.min(96, y - pullStartY.current));
+    setPullDy(dy);
+  }
+
+  function onTouchEnd() {
+    if (!pulling.current) return;
+    const should = pullDy >= PULL_THRESHOLD_PX;
+    pulling.current = false;
+    pullStartY.current = null;
+    setPullDy(0);
+    if (should) refresh();
+  }
+
+  const emptyRoot =
+    tree !== null && cwd === "" && children.length === 0 && !error;
+  const emptyFolder =
+    tree !== null && cwd !== "" && children.length === 0 && !error;
+  const emptyFilter =
+    tree !== null && children.length > 0 && filtered.length === 0 && !error;
 
   return (
     <>
+      {tree !== null && (
+        <div className="file-browser-toolbar">
+          <div className="file-search">
+            <Search size={16} className="file-search-icon" aria-hidden />
+            <input
+              type="search"
+              className="file-search-input"
+              placeholder="搜索当前目录"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              enterKeyHint="search"
+              autoComplete="off"
+            />
+            {query && (
+              <button
+                type="button"
+                className="file-search-clear"
+                aria-label="清除搜索"
+                onClick={() => setQuery("")}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            className="file-refresh"
+            aria-label="刷新"
+            disabled={refreshing}
+            onClick={refresh}
+          >
+            <RefreshCw
+              size={16}
+              className={refreshing ? "file-refresh-spin" : undefined}
+              aria-hidden
+            />
+          </button>
+        </div>
+      )}
+
       {tree !== null && (
         <div className="crumbs">
           <button
@@ -197,9 +444,30 @@ export function FileBrowser({
           >
             根目录
           </button>
-          {crumbs.map((seg, i) => {
-            const full = crumbs.slice(0, i + 1).join("/");
-            const last = i === crumbs.length - 1;
+          {crumbItems.map((item) => {
+            if (item.kind === "ellipsis") {
+              return (
+                <span key="crumb-ellipsis" className="crumb-seg">
+                  <span className="crumb-sep">/</span>
+                  <button
+                    type="button"
+                    className="crumb crumb-ellipsis"
+                    title={crumbs.slice(1, -2).join("/")}
+                    onClick={() => {
+                      // Jump to the deepest collapsed ancestor (segment before last two).
+                      const target = crumbs
+                        .slice(0, crumbs.length - 2)
+                        .join("/");
+                      onCwdChange(target);
+                    }}
+                  >
+                    …
+                  </button>
+                </span>
+              );
+            }
+            const full = crumbs.slice(0, item.index + 1).join("/");
+            const last = item.index === crumbs.length - 1;
             return (
               <span key={full} className="crumb-seg">
                 <span className="crumb-sep">/</span>
@@ -209,7 +477,7 @@ export function FileBrowser({
                   disabled={last}
                   onClick={() => onCwdChange(full)}
                 >
-                  {seg}
+                  {item.label}
                 </button>
               </span>
             );
@@ -217,15 +485,65 @@ export function FileBrowser({
         </div>
       )}
 
-      <div className="list">
+      <div
+        ref={listRef}
+        className="list file-list"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
+        {(pullDy > 0 || (refreshing && tree !== null)) && (
+          <div
+            className="file-pull-hint"
+            style={{
+              height:
+                refreshing && tree !== null ? 28 : Math.max(0, pullDy * 0.5),
+            }}
+          >
+            {refreshing && tree !== null
+              ? "刷新中…"
+              : pullDy >= PULL_THRESHOLD_PX
+                ? "松开刷新"
+                : "下拉刷新"}
+          </div>
+        )}
         {tree === null && !error && <p className="muted hint">加载中…</p>}
-        {tree !== null && cwd === "" && children.length === 0 && !error && (
-          <p className="muted hint">{emptyHint}</p>
+        {emptyRoot && (
+          <div className="file-empty">
+            <p className="file-empty-title">{emptyHint}</p>
+            {onUpload && (
+              <button
+                type="button"
+                className="file-empty-cta"
+                onClick={onUpload}
+              >
+                <Upload size={16} aria-hidden />
+                上传文件
+              </button>
+            )}
+          </div>
         )}
-        {tree !== null && cwd !== "" && children.length === 0 && (
-          <p className="muted hint">（空文件夹）</p>
+        {emptyFolder && (
+          <div className="file-empty">
+            <p className="file-empty-title">此文件夹是空的</p>
+            {onUpload && (
+              <button
+                type="button"
+                className="file-empty-cta"
+                onClick={onUpload}
+              >
+                <Upload size={16} aria-hidden />
+                上传到这里
+              </button>
+            )}
+          </div>
         )}
-        {children.map((node) => {
+        {emptyFilter && (
+          <p className="muted hint">当前目录没有匹配「{query.trim()}」的项</p>
+        )}
+        {filtered.map((node) => {
+          const Icon = fileIcon(node.name, node.isDir);
           const stage = node.isDir ? stageDirMeta(node.path) : null;
           const stageCaption =
             stage && tree
@@ -234,38 +552,38 @@ export function FileBrowser({
                   countDescendantFiles(node.path, (d) => tree.get(d)),
                 )
               : null;
-          return node.isDir ? (
+          // Stage badge wins for dirs; otherwise optional mtime subtitle.
+          const subtitle = stageCaption ? null : fileSubtitle(node);
+          return (
             <button
               key={node.path}
               type="button"
               className="file-row"
               title={stage?.tooltip}
-              onClick={() => onCwdChange(node.path)}
+              onClick={() =>
+                node.isDir ? onCwdChange(node.path) : setViewing(node)
+              }
             >
-              <span className="file-icon" aria-hidden>
-                ▸
+              <span
+                className={`file-icon${node.isDir ? "" : " file-icon-doc"}`}
+                aria-hidden
+              >
+                <Icon size={16} />
               </span>
-              <span className="file-name">{node.name}</span>
+              <span className="file-row-main">
+                <span className="file-name">{node.name}</span>
+                {subtitle && <span className="file-sub">{subtitle}</span>}
+              </span>
               {stageCaption && (
                 <span className="file-tag" title={stage?.tooltip}>
                   {stageCaption}
                 </span>
               )}
-              <span className="file-chevron" aria-hidden>
-                ›
-              </span>
-            </button>
-          ) : (
-            <button
-              key={node.path}
-              type="button"
-              className="file-row"
-              onClick={() => setViewing(node)}
-            >
-              <span className="file-icon file-icon-doc" aria-hidden>
-                ·
-              </span>
-              <span className="file-name">{node.name}</span>
+              {node.isDir && (
+                <span className="file-chevron" aria-hidden>
+                  <ChevronRight size={18} />
+                </span>
+              )}
             </button>
           );
         })}
@@ -288,12 +606,13 @@ type View =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "image"; url: string }
+  | { kind: "markdown"; text: string }
   | { kind: "text"; text: string }
   | { kind: "binary"; size: number };
 
-/** Full-screen preview for one file: text in a <pre>, images inline, anything else a
- *  download-only notice. Bytes are fetched once via the injected `download`; the 下载/分享
- *  actions reuse them (Web Share where the OS sheet can take a file, else browser download). */
+/** Full-screen preview for one file: Markdown reading view, text in a <pre>, images
+ *  full-width, anything else a clear download-only notice. Bytes are fetched once via the
+ *  injected `download`; 分享/下载 reuse them. */
 function FileViewer({
   node,
   download,
@@ -317,6 +636,7 @@ function FileViewer({
         setFile(f);
         const e = ext(node.name);
         const isImage = f.contentType.startsWith("image/") || IMAGE_EXT.has(e);
+        const isMarkdown = MARKDOWN_EXT.has(e);
         const isText =
           f.contentType.startsWith("text/") ||
           /json|javascript|xml|yaml|toml|csv/.test(f.contentType) ||
@@ -326,7 +646,9 @@ function FileViewer({
           setView({ kind: "image", url: objectUrl });
         } else if (isText && f.blob.size <= TEXT_PREVIEW_MAX) {
           const text = await f.blob.text();
-          if (!cancelled) setView({ kind: "text", text });
+          if (cancelled) return;
+          if (isMarkdown) setView({ kind: "markdown", text });
+          else setView({ kind: "text", text });
         } else {
           setView({ kind: "binary", size: f.blob.size });
         }
@@ -359,12 +681,14 @@ function FileViewer({
 
   return (
     <Modal className="viewer" onClose={onClose} label={node.name}>
-      <header className="bar">
+      <header className="bar viewer-bar">
         <button type="button" className="link" onClick={onClose}>
           ← 文件
         </button>
-        <span className="viewer-name">{node.name}</span>
-        <span className="bar-right">
+        <span className="viewer-name" title={node.name}>
+          {node.name}
+        </span>
+        <span className="bar-right viewer-actions">
           {sharable && (
             <button
               type="button"
@@ -385,18 +709,28 @@ function FileViewer({
           </button>
         </span>
       </header>
-      <div className="viewer-body">
+      <div
+        className={`viewer-body${view.kind === "markdown" ? " viewer-body-md" : ""}`}
+      >
         {view.kind === "loading" && <p className="muted hint">加载中…</p>}
         {view.kind === "error" && <p className="error hint">{view.message}</p>}
         {view.kind === "image" && (
           <img className="viewer-img" src={view.url} alt={node.name} />
         )}
+        {view.kind === "markdown" && (
+          <div className="viewer-md">
+            <Markdown content={view.text} />
+          </div>
+        )}
         {view.kind === "text" && <pre className="viewer-text">{view.text}</pre>}
         {view.kind === "binary" && (
-          <p className="muted hint">
-            无法预览此文件类型（{formatSize(view.size)}
-            ）。点右上角「下载」保存。
-          </p>
+          <div className="file-empty">
+            <p className="file-empty-title">无法预览此文件类型</p>
+            <p className="muted hint">
+              {formatFileSize(view.size)}
+              。可用右上角「下载」或「分享」保存。
+            </p>
+          </div>
         )}
       </div>
     </Modal>

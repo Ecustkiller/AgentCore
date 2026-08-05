@@ -1,5 +1,5 @@
 ---
-status: blueprint
+status: landed
 code: apps/desktop/src/renderer/
 related:
   - docs/04-前端/前端UX设计.md

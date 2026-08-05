@@ -1,10 +1,13 @@
-import type { GroupedConversations } from "@/hooks/useConversations";
-import { queryClient } from "@/lib/queryClient";
 /**
  * N4-A 只读离线 — renderer helpers over `window.localStoreApi`.
  *
  * Desktop-only; web / preview / tests without the IPC no-op gracefully.
  */
+import {
+  type GroupedConversations,
+  getConversations,
+} from "@/hooks/useConversations";
+import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import type { FolderMeta } from "@/services/folders";
 import type { WorkspaceInfo } from "@/services/workspaces";
@@ -160,6 +163,33 @@ export async function cacheOpenedConversation(input: {
   } catch (err) {
     console.warn("[local-store] putOpenedConversation failed", err);
   }
+}
+
+/**
+ * Persist a trusted latest window into the offline opened cache.
+ * Call only after a gate-passed write (loadLatestWindow / cold reconcile).
+ */
+export async function persistOpenedCache(
+  id: string,
+  messages: Message[],
+  memoryUpdates: MemoryUpdate[],
+  flags: { hasMoreBefore: boolean; hasMoreAfter: boolean },
+): Promise<void> {
+  const listed = getConversations().find((c) => c.id === id);
+  const conversation = listed ?? {
+    id,
+    title: "对话",
+    updatedAt: new Date().toISOString(),
+    messageCount: messages.length,
+    lastMessagePreview: messages.at(-1)?.content?.slice(0, 80) ?? null,
+  };
+  await cacheOpenedConversation({
+    conversation,
+    messages,
+    memoryUpdates,
+    hasMoreBefore: flags.hasMoreBefore,
+    hasMoreAfter: flags.hasMoreAfter,
+  });
 }
 
 export async function loadCachedConversation(

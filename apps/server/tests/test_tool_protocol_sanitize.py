@@ -11,9 +11,13 @@ from agentcore.core.types import ToolCategory
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.runtime.engine.tool_protocol_sanitize import (
+    ASSISTANT_CONTENT_MAX_CHARS,
+    ASSISTANT_CONTENT_OVERSIZE_FACE,
+    prepare_assistant_content,
     sanitize_protocol_text,
     sanitize_tool_args,
     sanitize_tool_name,
+    truncate_at_dsml_open,
 )
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.serialize import debrief_from_transcript
@@ -35,6 +39,69 @@ def test_sanitize_protocol_text_strips_tool_call_tags():
     assert "<longcat" not in cleaned
     assert "结论如下" in cleaned
     assert "完。" in cleaned
+
+
+def test_sanitize_protocol_text_strips_dsml_keeps_prose():
+    raw = (
+        "先派设计更新任务。\n\n"
+        '<｜DSML｜tool_calls>\n'
+        '<｜DSML｜invoke name="delegate">\n'
+        '<｜DSML｜parameter name="tasks" string="false">[{"role": "调研员"}]'
+        "</｜DSML｜parameter>\n"
+        "</｜DSML｜invoke>\n"
+        "</｜DSML｜tool_calls>\n\n"
+        "交付综述如下。"
+    )
+    cleaned = sanitize_protocol_text(raw)
+    assert "｜DSML｜" not in cleaned
+    assert "<｜DSML｜" not in cleaned
+    assert "先派设计更新任务。" in cleaned
+    assert "交付综述如下。" in cleaned
+    assert "调研员" not in cleaned
+
+
+def test_sanitize_protocol_text_unclosed_dsml_drops_tail():
+    raw = "自然语言前缀\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"delegate\">\n未闭合…"
+    cleaned = sanitize_protocol_text(raw)
+    assert cleaned.strip() == "自然语言前缀"
+    assert "｜DSML｜" not in cleaned
+
+
+def test_sanitize_protocol_text_truncated_close_keeps_resume_prose():
+    raw = '前缀\n\n<｜DSML｜parameter name="t">json</｜DSML｜parameter\n\n后缀正文'
+    cleaned = sanitize_protocol_text(raw)
+    assert "前缀" in cleaned
+    assert "后缀正文" in cleaned
+    assert "json" not in cleaned
+    assert "｜DSML｜" not in cleaned
+
+
+def test_truncate_at_dsml_open_salvage():
+    raw = "已写一半\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"delegate\">\nx"
+    assert truncate_at_dsml_open(raw) == "已写一半\n\n"
+    assert truncate_at_dsml_open("无标记") == "无标记"
+
+
+def test_prepare_assistant_content_salvage_truncates_then_sanitizes():
+    raw = "前缀OK\n\n<｜DSML｜tool_calls>\n" + ("x" * 1000)
+    out = prepare_assistant_content(raw, salvage=True)
+    assert out.strip() == "前缀OK"
+    assert "｜DSML｜" not in out
+
+
+def test_prepare_assistant_content_oversize_after_strip_is_short_face():
+    # No DSML — plain prose past the ceiling becomes the short error face.
+    raw = "字" * (ASSISTANT_CONTENT_MAX_CHARS + 1)
+    assert prepare_assistant_content(raw) == ASSISTANT_CONTENT_OVERSIZE_FACE
+
+
+def test_prepare_assistant_content_dsml_wall_then_oversize_face():
+    # Strip leaves a still-huge prefix → short face (not the multi-MB wall).
+    prefix = "字" * (ASSISTANT_CONTENT_MAX_CHARS + 50)
+    raw = prefix + "\n\n<｜DSML｜tool_calls>\n" + ("y" * 10_000)
+    assert prepare_assistant_content(raw) == ASSISTANT_CONTENT_OVERSIZE_FACE
+    # Salvage truncates before the wall, so oversize prefix alone still faces.
+    assert prepare_assistant_content(raw, salvage=True) == ASSISTANT_CONTENT_OVERSIZE_FACE
 
 
 def test_sanitize_tool_args_recursive():

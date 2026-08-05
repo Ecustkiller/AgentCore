@@ -12,7 +12,10 @@ from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_des
 # Shared task-level deliverable shape (delegate tasks + replan binds/add).
 TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     "type": "object",
-    "description": "可选交付物（form 等）。细节见 team_orchestration_advanced。",
+    "description": (
+        "可选交付物（form 等）。用户已拍板验收口径写入「已确认约束」"
+        "（与 task/team_brief 同块约定）；细节见 team_orchestration_advanced。"
+    ),
     "properties": {
         "name": {"type": "string"},
         "form": {
@@ -73,6 +76,8 @@ DELEGATE_PARAMETERS = {
                         "type": "string",
                         "description": (
                             "自包含=目标+边界+验收（宜短；worker 看不到完整历史）。"
+                            "用户已拍板项写入固定「已确认约束：…」块"
+                            "（有 ask 槽位答案则写入；无卡亦须枚举；约束块优先于附件旧角色表）；"
                             "细则进任务范围/required_sections/artifacts；"
                             "must_contain 仅短主题词软提醒（勿塞细清单）；"
                             "全队共识进顶层 team_brief（勿把长文塞进本字段）。"
@@ -180,8 +185,9 @@ DELEGATE_PARAMETERS = {
         "team_brief": {
             "type": "string",
             "description": (
-                "全队共识（预算口径、日期、共享约束等）；"
-                "写入后各 worker 开局可见——勿在每个 task 里重复粘贴。"
+                "全队共识（预算口径、日期、共享约束、「已确认约束」等）；"
+                "写入后各 worker 开局可见——勿在每个 task 里重复粘贴；"
+                "约束块优先于附件旧角色表。"
             ),
         },
         "complexity_hint": {

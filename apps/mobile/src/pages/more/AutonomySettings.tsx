@@ -1,8 +1,7 @@
 import { type AutonomyPolicy, getAutonomy, setAutonomy } from "@/api/autonomy";
 // 权限配方 (/more/autonomy) — AutonomyPolicy 三配方。
 //
-// Mirrors desktop AutonomySettings: three recipe options. Mobile is cloud-only —
-// GET/PUT account default only; mid-session four-axis badge is desktop-only.
+// 账户级「新会话默认」；本会话四轴在对话页 composer「＋」→ 本会话权限改。
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
@@ -99,7 +98,8 @@ export function AutonomySettings() {
 
       <div className="settings-body">
         <p className="settings-desc">
-          只影响之后新建的对话。已有会话顶栏可看当前配方（只读）；手机暂不支持在会话内改四轴。
+          只影响之后新建的对话。已有会话可在对话页「＋」→
+          本会话权限里改四轴（也可在该菜单「设为新会话默认」）。
         </p>
 
         {policy === null && !loadError ? (

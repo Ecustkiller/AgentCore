@@ -169,7 +169,7 @@ def _build_three_chain_site(
     style_conf = get_style_confirmation(
         clean_str(args.get(CONVERSATION_ID_MECH_KEY)) or None
     )
-    design_block = design_prompt_block(style=style_conf)
+    design_block = design_prompt_block(style=style_conf, domain=anti_slop_domain)
     catalog_block = catalog_prompt_block_skeleton(sections, pack=pack)
     catalog_shells = catalog_shell_bodies_for_sections(sections, pack=pack)
     catalog_css = catalog_shared_css_for_skeleton(pack=pack)

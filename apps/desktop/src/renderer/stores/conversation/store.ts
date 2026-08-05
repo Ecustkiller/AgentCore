@@ -17,6 +17,7 @@ import {
   foldToolUseStart,
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
+import { logEvent } from "@/lib/log";
 import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
 import { flushPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
@@ -41,6 +42,7 @@ import type {
   UsageBreakdown,
 } from "@/types/events";
 import { create } from "zustand";
+import { isMessageWindowResident } from "./messageWindowWrite";
 import {
   DRAFT_KEY,
   EMPTY_RUNTIME,
@@ -81,7 +83,11 @@ export interface ConversationState {
 
   setCurrentConversation: (id: string | null) => void;
   dropConversationRuntime: (id: string) => void;
-  setMessages: (messages: Message[]) => void;
+  /**
+   * @deprecated Prefer {@link setMessageWindow}. No production callers; kept
+   * conversation-scoped so it cannot silently patch the wrong active slice.
+   */
+  setMessages: (messages: Message[], conversationId?: string | null) => void;
   setMessageWindow: (
     messages: Message[],
     flags: { hasMoreBefore: boolean; hasMoreAfter: boolean },
@@ -231,7 +237,11 @@ export interface ConversationState {
   ) => void;
   createAssistantMessage: (conversationId?: string | null) => string;
   finalizeLastMessage: (conversationId?: string | null) => void;
-  updateMessage: (id: string, update: Partial<Message>) => void;
+  updateMessage: (
+    id: string,
+    update: Partial<Message>,
+    conversationId?: string | null,
+  ) => void;
   removeMessage: (id: string, conversationId?: string | null) => void;
   truncateAfter: (id: string, conversationId?: string | null) => void;
   reconcileLastTurn: (
@@ -258,8 +268,17 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   setGenerating: (v: boolean, conversationId?: string | null) => void;
-  clearMessages: () => void;
+  /**
+   * @deprecated Prefer {@link setMessageWindow} / dropConversationRuntime.
+   * No production callers; conversation-scoped (no active-slice footgun).
+   */
+  clearMessages: (conversationId?: string | null) => void;
   switchConversation: (id: string | null) => void;
+  /**
+   * Explicit idle-slice drop (tests / diagnostics). Production terminal SSE
+   * (`message_end` / `error`) no longer calls this — idle eviction is LRU-only
+   * on {@link ConversationState.switchConversation}.
+   */
   releaseBackgroundSlice: (conversationId: string) => void;
   setAbort: (a: AbortController | null, conversationId?: string | null) => void;
   setTurnPhase: (phase: TurnPhase, conversationId?: string | null) => void;
@@ -272,7 +291,7 @@ export interface ConversationState {
     action?: ErrorAction | null,
   ) => void;
   clearError: (conversationId?: string | null) => void;
-  focusMessage: (id: string) => void;
+  focusMessage: (id: string, conversationId?: string | null) => void;
   requestMessageFocus: (conversationId: string, messageId: string) => void;
   clearPendingFocus: () => void;
 }
@@ -289,10 +308,6 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       if (!patch) return {};
       return { byId: { ...state.byId, [key]: { ...cur, ...patch } } };
     });
-
-  const patchActive = (
-    update: (rt: ConversationRuntime) => Partial<ConversationRuntime> | null,
-  ): void => patchConversation(undefined, update);
 
   return {
     currentConversationId: null,
@@ -316,14 +331,35 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         };
       }),
 
-    setMessages: (messages) => patchActive(() => ({ messages })),
+    setMessages: (messages, conversationId) =>
+      patchConversation(conversationId, () => ({ messages })),
 
-    setMessageWindow: (messages, flags, conversationId) =>
+    setMessageWindow: (messages, flags, conversationId) => {
+      const state = get();
+      const key = conversationId ?? state.currentConversationId ?? DRAFT_KEY;
+      if (
+        !isMessageWindowResident(
+          state.currentConversationId,
+          state.byId,
+          conversationId,
+        )
+      ) {
+        logEvent("info", "conversation.slice_diag", {
+          action: "reject_not_resident",
+          conversation_id: key,
+          active_id: state.currentConversationId,
+          incoming_count: messages.length,
+          has_more_after: flags.hasMoreAfter,
+          has_more_before: flags.hasMoreBefore,
+        });
+        return;
+      }
       patchConversation(conversationId, () => ({
         messages,
         hasMoreBefore: flags.hasMoreBefore,
         hasMoreAfter: flags.hasMoreAfter,
-      })),
+      }));
+    },
 
     prependMessages: (older, hasMoreBefore, conversationId) =>
       patchConversation(conversationId, (rt) => {
@@ -843,8 +879,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages, isGenerating: false };
       }),
 
-    updateMessage: (id, update) =>
-      patchActive((rt) => ({
+    updateMessage: (id, update, conversationId) =>
+      patchConversation(conversationId, (rt) => ({
         messages: rt.messages.map((m) =>
           m.id === id ? { ...m, ...update } : m,
         ),
@@ -961,8 +997,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     setGenerating: (v, conversationId) =>
       patchConversation(conversationId, () => ({ isGenerating: v })),
 
-    clearMessages: () =>
-      patchActive(() => ({
+    clearMessages: (conversationId) =>
+      patchConversation(conversationId, () => ({
         messages: [],
         memoryUpdates: [],
         isGenerating: false,
@@ -1000,10 +1036,42 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     releaseBackgroundSlice: (conversationId) =>
       set((state) => {
         const activeKey = state.currentConversationId ?? DRAFT_KEY;
-        if (conversationId === activeKey) return {};
+        if (conversationId === activeKey) {
+          logEvent("info", "conversation.slice_diag", {
+            action: "release_skip_active",
+            conversation_id: conversationId,
+            active_id: activeKey,
+            message_count: state.byId[conversationId]?.messages.length ?? 0,
+          });
+          return {};
+        }
         const slice = state.byId[conversationId];
-        if (!slice) return {};
-        if (isConversationSliceBusy(conversationId, slice)) return {};
+        if (!slice) {
+          logEvent("info", "conversation.slice_diag", {
+            action: "release_skip_missing",
+            conversation_id: conversationId,
+            active_id: activeKey,
+          });
+          return {};
+        }
+        if (isConversationSliceBusy(conversationId, slice)) {
+          logEvent("info", "conversation.slice_diag", {
+            action: "release_skip_busy",
+            conversation_id: conversationId,
+            active_id: activeKey,
+            message_count: slice.messages.length,
+            is_generating: slice.isGenerating,
+          });
+          return {};
+        }
+        logEvent("warn", "conversation.slice_diag", {
+          action: "release_drop",
+          conversation_id: conversationId,
+          active_id: activeKey,
+          message_count: slice.messages.length,
+          has_more_after: slice.hasMoreAfter,
+          has_more_before: slice.hasMoreBefore,
+        });
         const byId = { ...state.byId };
         delete byId[conversationId];
         return {
@@ -1088,8 +1156,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         errorAction: null,
       })),
 
-    focusMessage: (id) =>
-      patchActive((rt) => ({
+    focusMessage: (id, conversationId) =>
+      patchConversation(conversationId, (rt) => ({
         messageFocus: { id, nonce: (rt.messageFocus?.nonce ?? 0) + 1 },
       })),
 

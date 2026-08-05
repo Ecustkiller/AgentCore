@@ -825,11 +825,14 @@ def maybe_emit_delivery_status(
         from agentcore.runtime.closing_posture import (
             downgrade_verdict_for_unresolved_write_ownership,
             note_cloud_web_verify_gap_from_delivery,
+            note_cutoff_delivery_gap_from_delivery,
         )
 
         # P0-B belt: latch already stamped in build; ensure delivered cannot stick.
         downgrade_verdict_for_unresolved_write_ownership(execution_id=execution_id)
         note_cloud_web_verify_gap_from_delivery(gaps, criteria_gaps=criteria_gaps)
+        # B′：token_budget / writing cutoff → CEO 综收软横幅 latch（真源=结构化 gaps）。
+        note_cutoff_delivery_gap_from_delivery(gaps)
         from agentcore.runtime.events import delivery_status
 
         sink.emit(delivery_status(**payload))

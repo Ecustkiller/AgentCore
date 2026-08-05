@@ -1,3 +1,4 @@
+import { getAutonomy } from "@/api/autonomy";
 import { listBrowserSessions } from "@/api/browserSessions";
 import { getTokens } from "@/api/client";
 import {
@@ -16,6 +17,13 @@ import {
   setLastModelProfileId,
   useModelProfiles,
 } from "@/api/modelProfiles";
+import {
+  DEFAULT_PERMISSION_AXES,
+  type PermissionAxes,
+  axesShortLabel,
+  normalizeAxes,
+  recipeToAxes,
+} from "@/api/permissionAxes";
 import { resolveStageCardStream } from "@/api/stageCard";
 import {
   type ResumeTurnBody,
@@ -42,6 +50,7 @@ import {
 } from "@/components/AssistantView";
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
+import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
@@ -49,6 +58,7 @@ import { InterjectionBubbles } from "@/components/InterjectionBubbles";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PauseCard } from "@/components/PauseCard";
+import { PermissionAxesSheet } from "@/components/PermissionAxesSheet";
 import { QueuedTurnsBar } from "@/components/QueuedTurnsBar";
 import { ResumeCard } from "@/components/ResumeCard";
 import { StageCard } from "@/components/StageCard";
@@ -132,7 +142,6 @@ import type {
 } from "@agentcore/protocol-conformance";
 import {
   ArrowDown,
-  Bot,
   Folder,
   Loader2,
   Menu,
@@ -1051,12 +1060,17 @@ export function ChatPage() {
   const [steerHint, setSteerHint] = useState<string | null>(null);
   const steerHintIdRef = useRef<string | null>(null);
   const steerHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Session permission recipe label (谨慎 / 少打断 / 托管 / 自定义). */
-  const [permissionLabel, setPermissionLabel] = useState<string | null>(null);
+  /** 本会话权限四轴（草稿本地；已有会话跟 conversation.permission_axes）。 */
+  const [permissionAxes, setPermissionAxes] = useState<PermissionAxes>(
+    DEFAULT_PERMISSION_AXES,
+  );
+  const [permissionDraftTouched, setPermissionDraftTouched] = useState(false);
   // 会话级模型组合 (对齐桌面): conversation override profile id (null = follow account default).
-  // A draft seeds from last-used profile. Badge shows the combination name; tap opens picker.
+  // A draft seeds from last-used profile；「＋」菜单打开 ModelPicker。
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [permissionSheetOpen, setPermissionSheetOpen] = useState(false);
   const { data: modelProfiles } = useModelProfiles();
   // Files staged for the next send: their text rides the body (composer 附件). A pick that
   // can't be read as text (image / binary) surfaces `attachError` and isn't staged.
@@ -1364,11 +1378,21 @@ export function ChatPage() {
       setPaused([]);
       setHasMoreBefore(false);
       setMemoryUpdates([]);
-      setPermissionLabel(null);
+      setPermissionDraftTouched(false);
+      setMoreOpen(false);
+      setPermissionSheetOpen(false);
       // 新对话继承上次选择: seed the draft's profile from last-used (localStorage);
       // applied to the conversation on first send (startDraft).
       setCurrentProfileId(getLastModelProfileId());
       setActiveTurn(null);
+      // Seed draft axes from account default recipe (best-effort).
+      void getAutonomy()
+        .then((d) => {
+          setPermissionAxes(recipeToAxes(d.policy));
+        })
+        .catch(() => {
+          setPermissionAxes(DEFAULT_PERMISSION_AXES);
+        });
       return;
     }
     setHistory(null);
@@ -1387,24 +1411,17 @@ export function ChatPage() {
     setBrowserLiveSessionId(null);
     setHasMoreBefore(false);
     setMemoryUpdates([]);
-    setPermissionLabel(null);
+    setPermissionAxes(DEFAULT_PERMISSION_AXES);
+    setPermissionDraftTouched(false);
+    setMoreOpen(false);
+    setPermissionSheetOpen(false);
     setCurrentProfileId(null);
     setActiveTurn(null);
     let cancelled = false;
     void getConversation(conversationId)
       .then((c) => {
         if (cancelled) return;
-        const axes = c.permission_axes;
-        const host = axes?.host ?? "session";
-        const key = axes
-          ? `${axes.file_write}/${axes.command}/${axes.team_kickoff}/${host}`
-          : "session/auto/rules/session";
-        const labels: Record<string, string> = {
-          "ask/ask/rules/off": "谨慎",
-          "session/auto/rules/session": "少打断",
-          "session/auto/skip/session": "托管",
-        };
-        setPermissionLabel(labels[key] ?? "自定义");
+        setPermissionAxes(normalizeAxes(c.permission_axes));
         setCurrentProfileId(c.model_profile_id ?? null);
       })
       .catch(() => {
@@ -1693,7 +1710,12 @@ export function ChatPage() {
     setError(null);
     setSending(true);
     try {
-      const id = await createConversation();
+      const id = await createConversation(
+        undefined,
+        permissionDraftTouched
+          ? { permission_axes: permissionAxes }
+          : undefined,
+      );
       // 新对话继承上次选择: apply the draft's chosen profile before its first turn streams
       // (best-effort — a failure just falls back to the account default).
       if (currentProfileId) {
@@ -2281,9 +2303,11 @@ export function ChatPage() {
     }
   }
 
-  // 当前组合 badge: conversation override → account default → placeholder.
+  // 当前组合：conversation override → account default → placeholder（「＋」菜单展示）。
   const modelLabel =
     profileDisplayLabel(modelProfiles, currentProfileId) ?? "默认组合";
+  const permissionLabel = axesShortLabel(permissionAxes);
+  const composerLocked = history === null || stopPhase === "stopping";
 
   return (
     <div className="screen">
@@ -2296,18 +2320,7 @@ export function ChatPage() {
         >
           <Menu size={20} />
         </button>
-        <span className="bar-title">
-          {conversationId ? "对话" : "新对话"}
-          {permissionLabel ? (
-            <span
-              className="muted"
-              style={{ marginLeft: 8, fontSize: 12 }}
-              title="本会话权限配方（只读；改默认请到 设置 → 新会话默认权限）"
-            >
-              · {permissionLabel}
-            </span>
-          ) : null}
-        </span>
+        <span className="bar-title">{conversationId ? "对话" : "新对话"}</span>
         <div className="bar-right">
           {conversationId && (
             <button
@@ -2574,6 +2587,7 @@ export function ChatPage() {
                   key={text}
                   type="button"
                   className="followup-chip"
+                  title={text}
                   onClick={() => fillFollowup(text)}
                 >
                   {text}
@@ -2632,19 +2646,6 @@ export function ChatPage() {
         />
       )}
 
-      <div className="model-bar">
-        <button
-          type="button"
-          className="model-badge"
-          onClick={() => setPickerOpen(true)}
-          disabled={history === null || busy}
-          aria-label={`当前模型组合：${modelLabel}，点击切换`}
-        >
-          <Bot size={14} aria-hidden />
-          <span className="model-badge-name">{modelLabel}</span>
-        </button>
-      </div>
-
       <div className="composer">
         <input
           ref={attachInputRef}
@@ -2656,9 +2657,11 @@ export function ChatPage() {
         <button
           type="button"
           className="attach-btn"
-          onClick={() => attachInputRef.current?.click()}
-          disabled={history === null || stopPhase === "stopping"}
-          aria-label="添加附件"
+          onClick={() => setMoreOpen(true)}
+          disabled={composerLocked}
+          aria-label="更多选项"
+          aria-expanded={moreOpen}
+          title="更多"
         >
           ＋
         </button>
@@ -2666,7 +2669,7 @@ export function ChatPage() {
           ref={composerInputRef}
           placeholder={history === null ? "加载中…" : "说点什么…"}
           value={input}
-          disabled={history === null || stopPhase === "stopping"}
+          disabled={composerLocked}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
@@ -2679,7 +2682,7 @@ export function ChatPage() {
         {voice.isSupported && (
           <VoiceButton
             state={voice.state}
-            disabled={history === null || stopPhase === "stopping"}
+            disabled={composerLocked}
             onClick={voice.toggle}
           />
         )}
@@ -2743,11 +2746,46 @@ export function ChatPage() {
         )}
       </div>
 
+      {moreOpen && (
+        <ComposerMoreSheet
+          modelLabel={modelLabel}
+          permissionLabel={permissionLabel}
+          disabled={history === null || busy}
+          onClose={() => setMoreOpen(false)}
+          onOpenModel={() => {
+            setMoreOpen(false);
+            setPickerOpen(true);
+          }}
+          onOpenPermission={() => {
+            setMoreOpen(false);
+            setPermissionSheetOpen(true);
+          }}
+          onAttach={() => {
+            setMoreOpen(false);
+            attachInputRef.current?.click();
+          }}
+        />
+      )}
+
       {pickerOpen && (
         <ModelPicker
           conversationProfileId={currentProfileId}
           onSelect={(id) => void onSelectProfile(id)}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+
+      {permissionSheetOpen && (
+        <PermissionAxesSheet
+          conversationId={conversationId ?? null}
+          axes={permissionAxes}
+          disabled={history === null || busy}
+          onAxesChange={(next) => {
+            setPermissionAxes(next);
+            if (!conversationId) setPermissionDraftTouched(true);
+          }}
+          onClose={() => setPermissionSheetOpen(false)}
+          onError={(text) => setError({ text })}
         />
       )}
 

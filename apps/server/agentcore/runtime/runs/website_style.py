@@ -2,7 +2,8 @@
 
 场面账硬闸已拆除：``build_website`` 不再因缺视觉风格账拒调
 （``playbook_args.style`` 气质槽另计，与本账无关）。
-无确认时 :func:`design_prompt_block` 软注入 ``s_default`` 与短正向 DESIGN 配方；
+无确认时 :func:`design_prompt_block` 软注入 ``s_default`` 与短正向 DESIGN 配方
+（``domain=tool`` 为工具台配方，否则营销向默认配方）；
 ``web_quality_scan`` 仍要求 DESIGN.md 含「用户选定风格 id」标记。
 
 Ledger helpers (``record_*`` / pause rehydrate) retained for tests and durable
@@ -377,30 +378,42 @@ _DEFAULT_DESIGN_RECIPE = (
     "【正向配方·默认】单一视觉焦点；大面用中性色、主色极少；"
     "禁止装饰性渐变 / glow / 粒子；动效仅用于交互反馈，勿作氛围装饰。"
 )
+_TOOL_DESIGN_RECIPE = (
+    "【正向配方·工具台】中性 chrome、accent 极少；"
+    "禁止默认 Tailwind 蓝 #2563eb / blue-600 当主色；"
+    "用密度 / 侧栏 · 表 token；勿套营销 hero。"
+)
 
 
-def design_prompt_block(*, style: StyleConfirmation | None) -> str:
+def design_prompt_block(
+    *, style: StyleConfirmation | None, domain: str = "marketing"
+) -> str:
     """Inject into the design-node task book.
 
     No style ledger: soft-inject ``s_default``. With a confirmation (legacy / tests),
     write that id. ``web_quality_scan`` still requires the DESIGN.md marker.
 
     Default / ``s_default`` also soft-injects a short positive DESIGN recipe
-    (taste lift on the no-pick path). Non-default confirmed styles skip it.
+    (taste lift on the no-pick path). ``domain="tool"`` uses the toolshed recipe;
+    ``marketing`` (default) keeps the landing-page recipe. Non-default confirmed
+    styles skip the recipe.
     """
+    positive_recipe = (
+        _TOOL_DESIGN_RECIPE if domain == "tool" else _DEFAULT_DESIGN_RECIPE
+    )
     if style is None:
         sid = DEFAULT_STYLE_ID
         label = DEFAULT_STYLE_LABEL
         style_line = (
             f"未指定风格时使用默认 id=`{sid}`（{label}）——必须原样写入。"
         )
-        recipe = _DEFAULT_DESIGN_RECIPE
+        recipe = positive_recipe
     else:
         sid = style.style_id
         label = style.label
         style_line = f"用户选定风格 id=`{sid}`（{label}，来源 {style.source}）——必须原样写入。"
         # 默认路径抬品味优先：仅 s_default（含 full_auto 落默认）塞完整配方。
-        recipe = _DEFAULT_DESIGN_RECIPE if sid == DEFAULT_STYLE_ID else ""
+        recipe = positive_recipe if sid == DEFAULT_STYLE_ID else ""
     return (
         f"【设计契约】用 file_write 落盘 `{DESIGN_MD_PATH}`，须含："
         f"色板 tokens（CSS 变量名 + hex）、字体、间距、对比度策略、禁止项、"

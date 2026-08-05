@@ -215,15 +215,24 @@ describe("conversation store", () => {
     });
   });
 
-  // Companion to Step 4's release-on-leave: a turn that finishes while the user
-  // is on another conversation leaves an idle slice no switch will reclaim, so
-  // the turn pipeline calls releaseBackgroundSlice on its terminal events.
-  describe("releaseBackgroundSlice (background turn completion)", () => {
-    it("drops an idle background conversation's buffer", () => {
+  // Step 2: terminal SSE no longer calls releaseBackgroundSlice — background
+  // idle windows stay until LRU prune on switch. The API remains for tests /
+  // explicit eviction (busy / active guards still apply).
+  describe("releaseBackgroundSlice (explicit / test helper)", () => {
+    it("background turn completion without release keeps the idle slice", () => {
       store().switchConversation("a");
-      store().createAssistantMessage(); // a: streaming in the background
-      store().switchConversation("b"); // a kept alive (busy)
-      store().finalizeLastMessage("a"); // a's background turn completes → idle
+      store().createAssistantMessage();
+      store().switchConversation("b");
+      store().finalizeLastMessage("a");
+      expect(store().byId.a).toBeDefined();
+      expect(getRuntime("a").isGenerating).toBe(false);
+    });
+
+    it("drops an idle background conversation's buffer when called", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().switchConversation("b");
+      store().finalizeLastMessage("a");
       store().releaseBackgroundSlice("a");
       expect(store().byId.a).toBeUndefined();
     });
@@ -231,9 +240,8 @@ describe("conversation store", () => {
     it("never releases the active conversation", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
-      store().finalizeLastMessage(); // active a, now idle
+      store().finalizeLastMessage();
       store().releaseBackgroundSlice("a");
-      // a is on screen — releasing it would blank the view, so it must survive.
       expect(store().byId.a).toBeDefined();
     });
 
@@ -241,7 +249,7 @@ describe("conversation store", () => {
       store().switchConversation("a");
       store().createAssistantMessage();
       store().switchConversation("b");
-      store().finalizeLastMessage("a"); // a is no longer generating…
+      store().finalizeLastMessage("a");
       ix().upsertRequired({
         kind: "approval",
         conversationId: "a",
@@ -254,7 +262,7 @@ describe("conversation store", () => {
           arguments: {},
         },
       });
-      store().releaseBackgroundSlice("a"); // …but a paused approval keeps it
+      store().releaseBackgroundSlice("a");
       expect(store().byId.a).toBeDefined();
     });
 
@@ -377,7 +385,7 @@ describe("conversation store", () => {
 
       store().attachErrorToLastMessage({
         code: "LLM_INSUFFICIENT_BALANCE",
-        message: "DeepSeek 账户余额不足，请前往 DeepSeek 开放平台充值后重试。",
+        message: "当前模型 API Key 有效，但账户余额不足，请充值后重试。",
       });
 
       const last = rt().messages[0];

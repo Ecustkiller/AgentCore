@@ -371,3 +371,32 @@ def test_inference_token_expired_is_retryable():
 def test_upstream_error_is_retryable():
     err = LLMUpstreamError("test", upstream_status=502)
     assert err.retryable is True
+
+
+def test_client_error_message_404_model_not_base_url():
+    from agentcore.llm.errors import client_error_message
+
+    body = b'{"error":{"message":"Not found the model x","code":"resource_not_found"}}'
+    msg = client_error_message("DeepSeek", 404, body)
+    assert "Not found the model x" in msg
+    assert "base_url" not in msg
+    assert "默认模型" in msg
+
+
+def test_client_error_message_404_empty_body_blames_base_url():
+    from agentcore.llm.errors import client_error_message
+
+    msg = client_error_message("DeepSeek", 404, b"")
+    assert "base_url" in msg
+    assert "默认模型" not in msg
+
+
+def test_client_error_message_404_path_with_unrelated_message():
+    from agentcore.llm.errors import client_error_message
+
+    body = b'{"error":{"message":"No route matched"}}'
+    msg = client_error_message("网关", 404, body)
+    assert "No route matched" in msg
+    # Unrelated 404 with a body: surface upstream text, do not invent base_url blame
+    # unless body is empty (path-style guess).
+    assert msg.startswith("网关 ")

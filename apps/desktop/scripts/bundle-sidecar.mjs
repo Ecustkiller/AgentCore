@@ -1,6 +1,6 @@
 // @ts-check
 /*
- * 构建内置 Python 运行时（远期规划 §一.1「内置 Python 打包」，方案 B）。
+ * 构建内置 Python 运行时（双模式工作区 §十「内置 Python 打包」，方案 B）。
  *
  * 目标：让**打包后**的桌面端无需用户机器上的任何系统 Python / venv / uv，也能拉起
  * `python -m agentcore.sidecar`（本机 Python 引擎）。做法 = 随包带：

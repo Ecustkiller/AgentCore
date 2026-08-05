@@ -1,3 +1,4 @@
+import { logEvent } from "@/lib/log";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
@@ -256,7 +257,17 @@ export function handleMessageStreamEvent(
           }
         }
       }
-      conv.releaseBackgroundSlice(conversationId);
+      // Idle slice eviction is LRU-only on switchConversation — do not drop the
+      // complete window here (message-window write contract step 2).
+      logEvent("info", "conversation.slice_diag", {
+        action: "message_end_slice_kept",
+        conversation_id: conversationId,
+        active_id: useConversationStore.getState().currentConversationId,
+        still_in_memory: Boolean(
+          useConversationStore.getState().byId[conversationId],
+        ),
+        finish_reason: payload.finish_reason ?? null,
+      });
       finalizeTurnTrace(conversationId);
       clearGraphAppendRedirect(conversationId);
       if (paused) surfaceResumeFromLiveTurn(conversationId, ctx.source);
@@ -292,7 +303,7 @@ export function handleMessageStreamEvent(
       if (mid && execRuntime(useExecutionStore.getState(), mid).plan) {
         useExecutionStore.getState().setStatus("failed", mid);
       }
-      store.releaseBackgroundSlice(conversationId);
+      // Same as message_end: keep the complete window; idle prune is LRU-only.
       finalizeTurnTrace(conversationId);
       clearGraphAppendRedirect(conversationId);
       if (!isTerminalPhase(getTurnPhase(conversationId))) {

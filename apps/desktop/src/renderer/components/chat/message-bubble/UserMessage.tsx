@@ -66,9 +66,10 @@ export function UserMessage({ message }: MessageBubbleProps) {
     if (!trimmed) return;
     setEditing(false);
     if (trimmed === message.content) return;
+    if (!conversationId) return;
     useConversationStore
       .getState()
-      .updateMessage(message.id, { content: trimmed });
+      .updateMessage(message.id, { content: trimmed }, conversationId);
     void runRegenerate(message.id, trimmed);
   };
 

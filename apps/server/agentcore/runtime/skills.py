@@ -54,7 +54,9 @@ CONSULT_TEAM_ORCH_BY_SCENE = (
 
 # Shared with能力目录 preamble — carve product UX out of「纯对话无需 consult」.
 CONSULT_PRODUCT_HELP_BY_SCENE = (
-    "按场面：本产品用法 / 入口 / UI / 功能介绍 → 必查 `product_help`；"
+    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ"
+    "（为何没组团、费用、Key、断网…）→ 必查 `product_help`；"
+    "细节按场面再查 `product_help_map` / `product_help_faq`；"
     "非产品用法的知识问答 / 闲聊 → 直接答不必查"
 )
 
@@ -326,7 +328,11 @@ CEO 自己 `terminal` 启服报 URL（**【禁止】**为此派验证员/browser
 验收底线、分工范围（宜短，防 tool JSON 写断）；细则进【任务范围正文】/ `required_sections` \
 章节座位 / `artifacts` 落盘路径——**停止**把细枚举清单塞进 `must_contain`（若保留，仅短主题词\
 软提醒）；全队共享口径进顶层 `team_brief`；**必读锚点 ≤2–3 个路径**，**禁止**长文件清单 / \
-grep 全仓清单写进 task——细节靠 worker 自探。交付物的【专业方案】——章节结构与论证脉络、代码的模块划分与架构、页面布局\
+grep 全仓清单写进 task——细节靠 worker 自探。\
+**【已确认约束】**派工时 `task` / `deliverable` / `team_brief` 【必须】含固定块「已确认约束：…」——\
+用户已拍板的关键取舍（角色边界 / 范围 / 验收口径）写成短枚举；有 ask_user 结算 → 槽位答案写入该块；\
+无卡、仅自由文确认 → 仍须由你枚举（【禁止】指望工人从对话/附件猜；【禁止】意图分类自动抽约束）。\
+附件 / 旧角色表与定稿冲突 → **约束块优先**。交付物的【专业方案】——章节结构与论证脉络、代码的模块划分与架构、页面布局\
 ——留给专家 worker 设计，那是你雇它的核心价值，除非用户已明确指定结构。别在 task 里替它把骨架列全，\
 也别拿 `deliverable.required_sections` 当结构蓝图——它只兜「必须覆盖的少数验收要点」，不是替专家\
 规定完整章节。审查 / 评估 / 研究类同理：可写范围与验收，别写风险预判、引导性问题清单、法条 / \
@@ -381,7 +387,8 @@ repair_code；禁 none 当修码默认）。`build_feature` / `build_website` \
 横向重大信号靠便签补齐；④ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，\
 必须【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
 白费（简介流水线类任务尤甚）；⑤ 契约共享面类任务把接口契约写成「我定了」便签——手搓并行审查时照此照办。\
-收工时读概览里的【团队便签】核对是否与各人产出一致。
+收工时读概览里的【团队便签】核对是否与各人产出一致。\
+主 Agent 预置共识时：`team_brief` / 各 task 的「已确认约束」块须与用户拍板一致；冲突时以约束块为准，勿让附件旧表盖过。
 </team_orchestration_advanced>"""
 
 _DEBATE_AND_REVIEW = """\
@@ -894,21 +901,38 @@ _WORK_DISCIPLINE = """\
 
 【大文件拆分·软】按职责 / 变更原因拆，不按行数；多员并行时优先降低同文件冲突面。单一内聚可不动。
 
-【写 task】只写目标·边界·验收；细则进 deliverable，全队共识进 team_brief；执行层细节留给工人。方案层岔路预留 escalate，勿在 task 里替工人选定架构。
+【写 task】只写目标·边界·验收；细则进 deliverable，全队共识进 team_brief；用户已拍板项写入固定\
+「已确认约束：…」块（有 ask 槽位则写入、无卡亦须枚举；约束块优先于附件旧表）；执行层细节留给工人。\
+方案层岔路预留 escalate，勿在 task 里替工人选定架构。
 </work_discipline>"""
 
 
 _PRODUCT_HELP = """\
 <product_help>
-用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再短答。
+用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再按场面短答；\
+入口/UI 点名细节 → `consult_skill(product_help_map)`；FAQ 类 → `consult_skill(product_help_faq)`。
 
 【答法】
-- 聊天短答为主：一两句说清，FAQ 自含完整短答，勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
+- 聊天短答为主：一两句说清；勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
 - 对用户禁内部名（ask_user / SSE / playbook / run 等）；用产品面说法（对话、协作图、工作区、检查点、审批…）。
-- 桌面可附手册深链（hash 路由）：`#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`；\
-节 ID 权威见桌面手册（例：`what` / `mindset` / `quickstart` / `faq` / `workspace` / `settings` / \
-`briefing` / `checkpoint` / `control` / `tools` / `troubleshooting`）。
-- 手机无产品手册：只短答，勿承诺「点链接打开手册」或可点深链。
+- 功能总览（「你有什么功能 / 能做什么」等宽问）：强制短——1 句定位 + ≤3 能力柱 + 1 句试一试；\
+勿整表复述入口地图、勿粘贴 FAQ 清单。
+- 入口定位：仅当用户点名某入口 / UI /「××在哪」时，再查 `product_help_map` 后短答；\
+桌面可附深链、手机只短答（规则见 map）。
+- FAQ（「为什么没组团 / 费用 / Key…」等）：即使冷启动、本回合尚无协作图，\
+也再查 `product_help_faq`，用其中自含短答；勿当成本回合情境编故事，勿对用户说内部名。
+- 正例：宽问「有什么功能」→ 只用下方总览骨架短答，不拉 map / faq。
+- 反例：宽问却整表复述入口地图或 FAQ 清单。
+- 正例：用户问「设置在哪」→ 查 map 后指路（桌面可附深链）。
+- 正例：冷启动「为什么没组团」→ 查 faq，用 faq 里的产品口径短答（勿临场编「本回合没派工」）。
+- 反例：未查 faq 却编造费用 / 组团口径，或把 FAQ 当成「本回合我还没派工」的临场解释。
+
+【功能总览骨架】（宽问时用；勿展开入口表）
+定位：AgentCore 是 Multi-Agent AI 工作台——你只对接一位 CEO；简单直接答，复杂组团后把结果交给你。\
+「协作，是更高级的智能」。
+能力柱（≤3）：① 对话里说目标、拍板、收结果 ② 复杂任务看协作图、随时插手 ③ 产物落工作区；\
+手册在工具箱、偏好在设置。
+试一试：直接说你想完成的事即可。
 
 【这是什么】（intro·what）
 AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
@@ -923,6 +947,21 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 ③ 简单秒回；复杂会出协作图。④ 结果落工作区（绑本地就在电脑上，否则在云端项目）。\
 深链：`#/toolbox/manual/intro?s=quickstart`
 
+【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。\
+完整入口表与 FAQ 清单不在本 body——分别见 `product_help_map` / `product_help_faq`。
+</product_help>"""
+
+
+_PRODUCT_HELP_MAP = """\
+<product_help_map>
+入口 / UI「在哪」的指路 HOW。仅当用户点名某入口 / UI 时再 consult；宽问功能总览勿整表复述本地图。
+
+【桌面深链 / 手机】
+- 桌面可附手册深链（hash 路由）：`#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`；\
+节 ID 权威见桌面手册（例：`what` / `mindset` / `quickstart` / `faq` / `workspace` / `settings` / \
+`briefing` / `checkpoint` / `control` / `tools` / `troubleshooting`）。
+- 手机无产品手册：只短答，勿承诺「点链接打开手册」或可点深链。
+
 【入口地图】（只指路，细节仍短答）
 - 对话：发任务 / 拍板 / 收结果
 - 协作图：看团队怎么跑
@@ -932,6 +971,12 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 - 工具箱 → 能力图鉴：工具与提示词清单
 - 设置（模型 / 服务商 / 用量 / 外观 / 快捷键 / 反馈 / 关于）→ `#/toolbox/manual/reference?s=settings`
 - 检查点与审批、辩论室：关键拍板与正反交锋
+</product_help_map>"""
+
+
+_PRODUCT_HELP_FAQ = """\
+<product_help_faq>
+常见产品面 FAQ 的自含短答。用户问到对应题时 consult 本 skill；勿整表粘贴给宽问「有什么功能」。
 
 【FAQ 精华】（自含短答；桌面可附对应节）
 - 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
@@ -952,9 +997,7 @@ force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 P
 `#/toolbox/manual/reference?s=troubleshooting`
 - 任务一直转？——点停止结束本回合，或发消息追问；长任务可中途打断后续跑。`?s=troubleshooting`
 - 产物找不到？——打开文件页看工作区；本地项目确认绑的是对的文件夹。`?s=troubleshooting`
-
-【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。
-</product_help>"""
+</product_help_faq>"""
 
 
 # --- The system skills (single source of truth) -----------------------------
@@ -977,10 +1020,24 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help",
         summary=(
-            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 → 短答；"
-            "桌面可附手册深链，手机只短答"
+            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 产品面 FAQ"
+            "（为何没组团、费用、Key…）→ 先查本 skill 再短答；"
+            "入口点名再查 product_help_map，FAQ 再查 product_help_faq"
         ),
         body=_PRODUCT_HELP,
+    ),
+    SystemSkill(
+        name="product_help_map",
+        summary=(
+            "用户点名某入口 / UI /「××在哪」→ 入口地图短答；"
+            "桌面可附手册深链，手机只短答勿承诺深链"
+        ),
+        body=_PRODUCT_HELP_MAP,
+    ),
+    SystemSkill(
+        name="product_help_faq",
+        summary="产品面 FAQ（组团 / 费用 / Key / 断网…）→ 自含短答；桌面可附对应手册节",
+        body=_PRODUCT_HELP_FAQ,
     ),
     SystemSkill(
         name="build_website",

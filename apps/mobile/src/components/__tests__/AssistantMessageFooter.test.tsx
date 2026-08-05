@@ -29,6 +29,20 @@ vi.mock("@/components/InteractionSheet", () => ({
   ),
 }));
 
+vi.mock("@/components/Modal", () => ({
+  Modal: ({
+    children,
+    label,
+  }: {
+    children: React.ReactNode;
+    label?: string;
+  }) => (
+    <div data-testid="copy-mode-sheet" data-label={label}>
+      {children}
+    </div>
+  ),
+}));
+
 afterEach(cleanup);
 
 describe("FinishReasonChip", () => {
@@ -72,7 +86,7 @@ describe("DeliveryShortfallHint", () => {
 });
 
 describe("AssistantMessageFooter", () => {
-  it("exposes copy deliverable + with_process when process exists", () => {
+  it("opens copy Action Sheet with 仅交付 / 含过程 when process exists", () => {
     render(
       <AssistantMessageFooter
         content="答案"
@@ -97,20 +111,27 @@ describe("AssistantMessageFooter", () => {
         durationMs={45000}
       />,
     );
-    expect(screen.getByText("复制交付")).toBeTruthy();
-    expect(screen.getByText("含过程")).toBeTruthy();
-    expect(screen.getByTestId("assistant-usage-summary").textContent).toContain(
-      "↑1.2k",
+    expect(
+      screen.getByTestId("assistant-footer-copy").getAttribute("aria-label"),
+    ).toBe("复制");
+    expect(screen.queryByText("含过程")).toBeNull();
+    fireEvent.click(screen.getByTestId("assistant-footer-copy"));
+    expect(screen.getByTestId("copy-mode-sheet")).toBeTruthy();
+    expect(screen.getByTestId("copy-mode-deliverable").textContent).toBe(
+      "仅交付",
     );
-    expect(screen.getByTestId("assistant-usage-summary").textContent).toContain(
-      "¥0.01",
+    expect(screen.getByTestId("copy-mode-with-process").textContent).toBe(
+      "含过程",
     );
-    expect(screen.getByTestId("assistant-usage-summary").textContent).toContain(
-      "用时 45s",
+    expect(screen.getByTestId("assistant-usage-summary").textContent).toBe(
+      "¥0.01 · 用时 45s",
     );
+    expect(
+      screen.getByTestId("assistant-usage-summary").textContent,
+    ).not.toMatch(/[↑↓]/);
   });
 
-  it("opens Sheet for usage detail via 更多", () => {
+  it("opens Sheet for usage detail via ⋯", () => {
     render(
       <AssistantMessageFooter
         content="答案"
@@ -123,7 +144,10 @@ describe("AssistantMessageFooter", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByTestId("assistant-footer-more"));
+    expect(screen.queryByTestId("assistant-usage-summary")).toBeNull();
+    const more = screen.getByTestId("assistant-footer-more");
+    expect(more.getAttribute("aria-label")).toBe("更多");
+    fireEvent.click(more);
     expect(screen.getByTestId("interaction-sheet")).toBeTruthy();
     expect(screen.getByText("用量详情")).toBeTruthy();
     expect(screen.getByText("思考")).toBeTruthy();
@@ -131,7 +155,9 @@ describe("AssistantMessageFooter", () => {
 
   it("streaming footer is copy-only", () => {
     render(<AssistantMessageFooter content="streaming…" isStreaming />);
-    expect(screen.getByText("复制交付")).toBeTruthy();
+    expect(
+      screen.getByTestId("assistant-footer-copy").getAttribute("aria-label"),
+    ).toBe("复制");
     expect(screen.queryByTestId("assistant-usage-summary")).toBeNull();
     expect(screen.queryByTestId("assistant-footer-more")).toBeNull();
   });

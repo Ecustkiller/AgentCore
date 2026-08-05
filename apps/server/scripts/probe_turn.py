@@ -238,7 +238,10 @@ async def probe(args: argparse.Namespace) -> None:
         start = time.monotonic()
         url = f"{base_url}/v1/conversations/{conv_id}/messages"
         async with client.stream(
-            "POST", url, headers=headers, json={"content": args.message}
+            "POST",
+            url,
+            headers=headers,
+            json={"content": args.message, "delivery": "steer"},
         ) as resp:
             if resp.status_code != 200:
                 body = (await resp.aread()).decode("utf-8", "replace")

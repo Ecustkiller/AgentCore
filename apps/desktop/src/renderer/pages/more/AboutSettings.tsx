@@ -49,9 +49,9 @@ function updateStatusText(status: UpdaterStatus): string {
     case "not-available":
       return "已是最新版本。";
     case "available":
-      return `发现新版本 ${status.version}，确认后开始下载。`;
+      return `发现新版本 ${status.version}，确认后开始后台下载。`;
     case "downloading":
-      return `正在下载新版本 ${status.version}…（${formatDownloadProgress({
+      return `正在后台下载 ${status.version}…（${formatDownloadProgress({
         percent: status.percent,
         transferred: status.transferred,
         total: status.total,
@@ -60,7 +60,7 @@ function updateStatusText(status: UpdaterStatus): string {
     case "downloaded":
       return `新版本 ${status.version} 已下载，重启后生效。`;
     case "error":
-      return `更新检查失败：${status.message}`;
+      return `更新失败：${status.message}`;
   }
 }
 
@@ -84,11 +84,25 @@ function UpdateSection() {
           <Button size="md" onClick={() => void install()}>
             重启安装
           </Button>
-        ) : status.phase === "available" || status.phase === "downloading" ? (
+        ) : null}
+        {status.phase === "available" ? (
           <Button size="md" onClick={() => openUpdateDialog()}>
-            {status.phase === "downloading" ? "查看下载进度" : "查看更新"}
+            查看更新
           </Button>
-        ) : (
+        ) : null}
+        {status.phase === "downloading" ? (
+          <Button
+            variant="neutral"
+            size="md"
+            disabled
+            icon={<Loader2 size={14} className="animate-spin" />}
+          >
+            下载中…
+          </Button>
+        ) : null}
+        {status.phase !== "downloaded" &&
+        status.phase !== "available" &&
+        status.phase !== "downloading" ? (
           <Button
             variant="neutral"
             size="md"
@@ -104,19 +118,12 @@ function UpdateSection() {
           >
             检查更新
           </Button>
-        )}
-        {status.phase === "available" || status.phase === "downloading" ? (
+        ) : null}
+        {status.phase === "available" ? (
           <Button
             variant="neutral"
             size="md"
-            disabled={busy}
-            icon={
-              busy ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <RefreshCw size={14} />
-              )
-            }
+            icon={<RefreshCw size={14} />}
             onClick={() => void check()}
           >
             重新检查

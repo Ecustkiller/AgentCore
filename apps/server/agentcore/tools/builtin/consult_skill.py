@@ -12,7 +12,7 @@ A wrong / unknown name degrades gracefully (mirrors ``ToolNotFoundError``): the
 result is non-fatal and lists the registered skill names so the model can retry —
 a model-config / typo problem must never break a turn.
 
-→ 见设计: docs/06-规划/提示词瘦身与系统Skill落地设计.md §4.3
+→ 见设计: docs/03-AI核心/工具与能力系统.md（系统 Skill；详细提案不在公开仓）
 """
 
 from __future__ import annotations

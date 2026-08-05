@@ -84,4 +84,44 @@ describe("ProviderForm", () => {
     expect(patch.label).toBe("My DeepSeek");
     expect(patch.default_model).toBe("deepseek-v4-flash");
   });
+
+  it("exposes an editable default model on non-custom presets", () => {
+    render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
+    expect(modelInput.value).toBe("deepseek-v4-flash");
+    fireEvent.change(modelInput, { target: { value: "deepseek-v4" } });
+    expect(modelInput.value).toBe("deepseek-v4");
+  });
+
+  it("prefills Moonshot with kimi-k2.6 and saves an edited default model", async () => {
+    mockCreate.mockResolvedValue({
+      id: "prov-moon",
+      label: "Kimi (Moonshot)",
+      base_url: "https://api.moonshot.cn/v1",
+      default_model: "kimi-k2.6",
+      status: "unchecked",
+    });
+    const onSaved = vi.fn();
+    render(<ProviderForm onSaved={onSaved} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("厂商"), {
+      target: { value: "moonshot" },
+    });
+    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
+    expect(modelInput.value).toBe("kimi-k2.6");
+
+    fireEvent.change(modelInput, { target: { value: "kimi-k2.5" } });
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-moon" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    expect(mockCreate).toHaveBeenCalledWith({
+      api_key: "sk-moon",
+      base_url: "https://api.moonshot.cn/v1",
+      default_model: "kimi-k2.5",
+      label: "Kimi (Moonshot)",
+    });
+  });
 });

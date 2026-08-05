@@ -49,7 +49,7 @@ from .round import (
 )
 from .segments import join_segments
 from .soft_gates import maybe_soft_gate_no_tool_return
-from .tool_protocol_sanitize import sanitize_protocol_text
+from .tool_protocol_sanitize import prepare_assistant_content
 from .tool_round import handle_tool_calls_round
 
 logger = get_logger(__name__)
@@ -357,12 +357,12 @@ async def react_loop(
 
         Every react_loop return (CEO / worker / forced finalize) funnels through
         here so the RETURNED deliverable — the text that is persisted and replayed
-        on reload — is clean of stray ``<longcat_tool_call>`` / ``</arg_key>`` tags
-        some providers leak into prose. Live ``content_delta`` was already streamed
-        (接受活体流短暂脏、reload 后干净); we clean only the final value and never
-        buffer at the SSE-delta level.
+        on reload — is clean of stray ``<longcat_tool_call>`` / ``</arg_key>`` /
+        ``<｜DSML｜…>`` tags some providers leak into prose. Live ``content_delta``
+        was already streamed (接受活体流短暂脏、reload 后干净); we clean only the
+        final value and never buffer at the SSE-delta level.
         """
-        return sanitize_protocol_text(content), reasoning, usage, rounds
+        return prepare_assistant_content(content), reasoning, usage, rounds
 
     # G4: publish captain live mirror only when role=="captain" — NOT via
     # deliverable_only (workers / debaters also set that flag and nest under the

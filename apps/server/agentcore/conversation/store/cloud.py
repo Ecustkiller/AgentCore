@@ -203,8 +203,11 @@ class CloudStore:
         message_id: str | None,
     ) -> None:
         """Persist a cancelled turn's already-streamed reply + finished work."""
+        from agentcore.core.assistant_content import prepare_assistant_content
+
         streamed = (content or "").strip()
-        body = streamed
+        # Salvage B: cut at first DSML open; upsert still applies strip + length top.
+        body = prepare_assistant_content(streamed, salvage=True)
         if not message_id:
             logger.warning(
                 "chat.incomplete_persist_skipped",

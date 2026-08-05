@@ -131,7 +131,10 @@ export function TurnDetailPage() {
           useConversationStore.getState().currentConversationId ===
             conversationId
         ) {
-          // Warm memory: keep slice. Cold: adopt empty or SWR-reconcile over cache.
+          // Warm: keep slice. TurnDetail URL always targets a specific turn —
+          // same product boundary as ConversationPage "has destination" (do not
+          // snap to latest; that could unload the mid-history turn under view).
+          // Cold: adopt empty or SWR-reconcile over cache.
           if (!warm) {
             const s = useConversationStore.getState();
             if (

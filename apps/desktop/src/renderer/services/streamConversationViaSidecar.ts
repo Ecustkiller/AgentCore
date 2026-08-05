@@ -39,7 +39,7 @@ import type {
 /**
  * 本地引擎（sidecar）对话流 —— 与 `streamConversation`（云 SSE）对偶的另一条链路。
  *
- * 双模式工作区 / 远期规划 §一.1：当一个会话绑定了本地授权根、且走 sidecar 时，回合由
+ * 双模式工作区：当一个会话绑定了本地授权根、且走 sidecar 时，回合由
  * 用户机器上的 `python -m agentcore.sidecar` 跑。本函数把那条 stdio JSON-RPC 链路在
  * renderer 这端「伪装成」一次普通流式回合：
  *

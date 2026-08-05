@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 export function ConversationOutline() {
   const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +52,7 @@ export function ConversationOutline() {
   if (turns.length < 2) return null;
 
   const jump = (id: string) => {
-    focusMessage(id);
+    focusMessage(id, conversationId);
     setOpen(false);
   };
 

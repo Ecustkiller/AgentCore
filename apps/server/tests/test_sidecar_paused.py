@@ -1,4 +1,4 @@
-"""Sidecar durable pause/resume tests (双模式工作区 / 远期规划 §一.1, 路 A).
+"""Sidecar durable pause/resume tests (双模式工作区 §十, 路 A).
 
 Two layers:
 

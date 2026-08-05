@@ -11553,13 +11553,22 @@ export interface components {
         };
         /**
          * WorkspaceFileEntry
-         * @description One entry in a workspace listing — relative POSIX path + kind.
+         * @description One entry in a workspace listing — relative POSIX path + kind + optional meta.
+         *
+         *     ``size_bytes`` / ``mtime_ms`` feed mobile list subtitles. Files fill both when
+         *     known; directories keep ``size_bytes=None`` (``mtime_ms`` when available).
+         *     ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``. Absent → ``None``
+         *     (backward compatible).
          */
         WorkspaceFileEntry: {
             /** Is Dir */
             is_dir: boolean;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
             /** Path */
             path: string;
+            /** Size Bytes */
+            size_bytes?: number | null;
         };
         /**
          * WorkspaceFileIndexResponse

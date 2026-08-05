@@ -88,9 +88,10 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
     const outcome = await attachConversation(conversationId, ac.signal);
     if (outcome === "attached") return true;
     // No live run — the detached turn already finished + persisted. Reload it so
-    // the placeholder is replaced by the saved reply.
-    await loadLatestWindow(conversationId);
+    // the placeholder is replaced by the saved reply. Clear generating first so
+    // the whole-window write gate does not reject the reload.
     useConversationStore.getState().setGenerating(false, conversationId);
+    await loadLatestWindow(conversationId);
     const last = getRuntime(conversationId).messages.at(-1);
     // A persisted assistant reply means the detached turn delivered — handled.
     // Still ending on the user message means it produced nothing → let the caller
@@ -134,12 +135,18 @@ export function markGhostInterrupted(conversationId: string): void {
   const store = useConversationStore.getState();
   const last = getRuntime(conversationId).messages.at(-1);
   if (!last || last.role !== "assistant" || last.status !== "running") return;
-  store.updateMessage(last.id, {
-    isStreaming: false,
-    status: "incomplete",
-    finishReason: "interrupted",
-    runs: last.runs ? { ...last.runs, finishReason: "interrupted" } : last.runs,
-  });
+  store.updateMessage(
+    last.id,
+    {
+      isStreaming: false,
+      status: "incomplete",
+      finishReason: "interrupted",
+      runs: last.runs
+        ? { ...last.runs, finishReason: "interrupted" }
+        : last.runs,
+    },
+    conversationId,
+  );
   useConversationStore.getState().setGenerating(false, conversationId);
   const exec = useExecutionStore.getState();
   exec.clearExecution(last.id);

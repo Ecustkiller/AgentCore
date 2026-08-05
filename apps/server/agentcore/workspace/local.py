@@ -278,13 +278,19 @@ class LocalWorkspace:
         value = await self._channel.request(
             WorkspaceOp.LIST, payload, root_id=root_id
         )
-        return [
-            DirEntry(
-                path=self._out_routed(str(e["path"]), alias),
-                is_dir=bool(e["is_dir"]),
+        out: list[DirEntry] = []
+        for e in value or []:
+            raw_size = e.get("size_bytes")
+            raw_mtime = e.get("mtime_ms")
+            out.append(
+                DirEntry(
+                    path=self._out_routed(str(e["path"]), alias),
+                    is_dir=bool(e["is_dir"]),
+                    size_bytes=None if raw_size is None else int(raw_size),
+                    mtime_ms=None if raw_mtime is None else int(raw_mtime),
+                )
             )
-            for e in (value or [])
-        ]
+        return out
 
     async def exists(self, path: str) -> bool:
         root_id, rel, _ = self._route(path)

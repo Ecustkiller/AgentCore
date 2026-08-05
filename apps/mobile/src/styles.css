@@ -249,7 +249,7 @@ body {
   font-weight: 600;
   color: #fff;
   background: var(--accent);
-  border: 1px solid var(--panel);
+  border: 1px solid var(--bg);
   border-radius: 999px;
 }
 
@@ -539,7 +539,7 @@ button.link {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px;
+  padding: 16px 20px;
 }
 
 .turn {
@@ -663,11 +663,15 @@ button.link {
   text-align: right;
 }
 
+/* AI = document stream (align desktop): no bubble fill/border/radius; column gutter from .messages */
 .bubble.assistant {
-  align-self: flex-start;
-  max-width: 92%;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  align-self: stretch;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  border: none;
 }
 
 /* --- Rich assistant content (富渲染): Markdown body + 思考 + 工具 + 引用 --- */
@@ -2530,30 +2534,50 @@ dialog.run-detail::backdrop {
 }
 
 /* 下一步推荐 (CEO→用户): one-tap quick-reply chips above the composer for a finished turn —
-   tapping fills the input (review/edit before send). Transport-only; retires on the next turn. */
+   tapping fills the input (review/edit before send). Transport-only; retires on the next turn.
+   Mobile: single-row horizontal strip (nowrap + ellipsis) so 2–4 long chips don't eat the
+   viewport; full text still fills the composer on tap. */
 .followups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 16px 0;
+  gap: 4px;
+  padding: 6px 0 0;
 }
 
 .followups-label {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 0 16px;
   font-size: 12px;
   color: var(--muted);
 }
 
 .followups-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 0 16px;
+}
+
+.followups-row::-webkit-scrollbar {
+  display: none;
+}
+
+.followups-empty {
+  padding: 0 16px;
+  font-size: 12px;
 }
 
 .followup-chip {
-  min-height: 36px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  max-width: min(72vw, 18rem);
+  min-height: 32px;
   padding: 6px 12px;
   font-size: 13px;
   font-weight: 500;
@@ -2562,7 +2586,9 @@ dialog.run-detail::backdrop {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .followup-chip:active:not(:disabled) {
@@ -2916,30 +2942,30 @@ dialog.run-detail::backdrop {
   color: var(--muted);
 }
 
-/* 会话级模型切换：当前模型 badge，贴在 composer 上方（对齐桌面 CurrentModelBadge）。 */
-.model-bar {
-  display: flex;
-  padding: 6px 16px 0;
-}
-
-.model-badge {
+/* 模型组合：composer 同行 compact chip（不再单独占一横条）。 */
+.composer .model-badge {
   display: inline-flex;
+  flex: 0 1 auto;
+  flex-shrink: 1;
   align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 4px 10px;
+  gap: 4px;
+  max-width: 7.5rem;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 8px;
   color: var(--muted);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1;
 }
 
-.model-badge:disabled {
+.composer .model-badge:disabled {
   opacity: 0.55;
 }
 
-.model-badge-name {
+.composer .model-badge-name {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3595,6 +3621,137 @@ dialog.sheet::backdrop {
   color: var(--muted);
 }
 
+/* Composer「＋」更多选项 / 本会话权限 sheet */
+.more-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  color: var(--fg);
+  text-align: left;
+  background: var(--bg);
+  border: none;
+  border-radius: 12px;
+}
+
+.more-row:active:not(:disabled) {
+  background: var(--border);
+}
+
+.more-row:disabled {
+  opacity: 0.5;
+}
+
+.more-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.more-row-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.more-row-sub {
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+dialog.sheet.permission-sheet,
+.permission-sheet {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.permission-section-label {
+  margin: 12px 8px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.permission-recipe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.permission-recipe {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg);
+  border: none;
+  border-radius: 12px;
+}
+
+.permission-recipe:active:not(:disabled) {
+  background: var(--border);
+}
+
+.permission-recipe.selected {
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg));
+}
+
+.permission-recipe-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.permission-recipe-desc {
+  font-size: 12px;
+}
+
+.permission-chevron-open {
+  transform: rotate(180deg);
+}
+
+.permission-axes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 4px 8px;
+}
+
+.permission-axis-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.permission-chip {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.permission-chip.selected {
+  font-weight: 500;
+  color: var(--fg);
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg));
+  border-color: transparent;
+}
+
+.permission-chip:disabled {
+  opacity: 0.4;
+}
+
 /* 会话级模型组合 · 选择器 (ModelPicker bottom sheet). Lists account combinations;
    「管理组合」routes to 设置·模型配置. */
 /* 比 dialog.sheet 的 85vh 更矮；提高 specificity 以免被通用封顶盖掉 */
@@ -4063,20 +4220,116 @@ dialog.dialog::backdrop {
 }
 
 /* --- Cloud workspace file browser (云端文件浏览): breadcrumb + rows + full-screen viewer --- */
+.file-browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.file-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.file-search-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 40px 8px 36px;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.file-search-input::placeholder {
+  color: var(--muted);
+}
+
+.file-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  transform: translateY(-50%);
+  font-size: 14px;
+}
+
+.file-refresh {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.file-refresh:disabled {
+  opacity: 0.55;
+}
+
+.file-refresh-spin {
+  animation: file-spin 0.8s linear infinite;
+}
+
+@keyframes file-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.file-pull-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  transition: height 0.05s linear;
+}
+
+.file-list {
+  overscroll-behavior-y: contain;
+}
+
 .crumbs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 2px;
   padding: 8px 16px;
+  overflow-x: auto;
   font-size: 13px;
   border-bottom: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch;
 }
 
 .crumb-seg {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .crumb-sep {
@@ -4097,69 +4350,15 @@ dialog.dialog::backdrop {
   opacity: 1;
 }
 
-/* 项目协作摘要（文字降级 · 工作区文件页顶部） */
-.collab-summary {
-  margin: 0 12px 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel);
-}
-
-.collab-summary-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.collab-summary-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.collab-summary-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 4px;
-  text-align: left;
-  color: var(--fg);
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-}
-
-.collab-summary-row:active {
-  background: var(--bg);
-}
-
-.collab-summary-title {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.collab-summary-acts,
-.collab-summary-refs {
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.collab-summary-note {
-  margin-top: 6px;
-  font-size: 11px;
+.crumb-ellipsis {
+  letter-spacing: 1px;
 }
 
 .file-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 48px;
+  min-height: 52px;
   padding: 10px 14px;
   text-align: left;
   color: var(--fg);
@@ -4175,18 +4374,46 @@ dialog.dialog::backdrop {
 
 .file-icon {
   flex-shrink: 0;
-  width: 16px;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
   color: var(--accent);
-  text-align: center;
 }
 
 .file-icon-doc {
   color: var(--muted);
 }
 
-.file-name {
+/* 工作区行：文件夹 + 右下角小云标（云端身份，不占副标题行） */
+.file-icon-cloud-ws {
+  position: relative;
+  width: 20px;
+  height: 20px;
+}
+
+.file-icon-cloud-ws > svg:first-child {
+  display: block;
+}
+
+.file-icon-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 2px;
+}
+
+.file-row-main {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-name {
   min-width: 0;
   overflow: hidden;
   font-size: 15px;
@@ -4194,9 +4421,23 @@ dialog.dialog::backdrop {
   text-overflow: ellipsis;
 }
 
+.file-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .file-chevron {
   flex-shrink: 0;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
 }
 
@@ -4208,6 +4449,37 @@ dialog.dialog::backdrop {
   color: var(--muted);
   background: var(--border);
   border-radius: 999px;
+}
+
+.file-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.file-empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.file-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 /* Full-screen file previewer — native <dialog>. Opaque fullscreen, so the UA
@@ -4236,6 +4508,10 @@ dialog.viewer::backdrop {
   background: var(--bg);
 }
 
+.viewer-bar {
+  gap: 8px;
+}
+
 .viewer-name {
   flex: 1;
   min-width: 0;
@@ -4246,18 +4522,38 @@ dialog.viewer::backdrop {
   text-overflow: ellipsis;
 }
 
+.viewer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .viewer-body {
   flex: 1;
   overflow: auto;
   padding: 16px;
 }
 
+.viewer-body-md {
+  padding: 12px 16px 24px;
+}
+
 .viewer-img {
   display: block;
+  width: 100%;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
   border-radius: 8px;
+  object-fit: contain;
+}
+
+.viewer-md {
+  max-width: 100%;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--fg);
 }
 
 .viewer-text {

@@ -8,7 +8,7 @@ the CEO's 能力目录 and pulled via ``consult_skill`` — but ONLY when the de
 gate ``settings.legal_vertical_enabled`` is on, so generic deployments never see
 legal content in the catalog.
 
-Design (见 docs/06-规划/远期规划.md §4.5 法律垂直): v0 builds NO new infra. The
+Design (公开权威 → docs/03-AI核心/工具与能力系统.md · 法律垂直；详细提案不在公开仓): v0 builds NO new infra. The
 「对方律师作战室」hero rides existing primitives — ``delegate`` (起草 / 核验 / 格式 worker)
 + ``debate(form=red_team, is_subject=...)`` (原告红队单向攻、我方回应修补) +
 ``checkpoint_after`` / ``ask_user`` (人审闸门) + web 检索 (法条接地). This Skill is the

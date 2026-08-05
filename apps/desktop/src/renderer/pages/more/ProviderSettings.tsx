@@ -272,7 +272,7 @@ function ProviderCard({
   const metaParts = [
     host || null,
     provider.masked_key ?? "已配置",
-    provider.default_model || null,
+    provider.default_model ? `默认模型 ${provider.default_model}` : null,
   ].filter(Boolean);
 
   return (

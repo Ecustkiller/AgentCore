@@ -15,7 +15,7 @@ import { loadLatestWindow } from "@/services/messages";
  */
 export function refreshAfterBackgroundExecution(conversationId: string): void {
   const reload = (): void => {
-    void loadLatestWindow(conversationId).catch(() => {
+    void loadLatestWindow(conversationId, { softRefresh: true }).catch(() => {
       /* best-effort */
     });
   };

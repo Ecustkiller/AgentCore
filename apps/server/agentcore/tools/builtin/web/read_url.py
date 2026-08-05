@@ -64,7 +64,8 @@ _POLICY_FAILURE = "policy_failure"
 # Shared stop-read trailer for hard-dead fetch classes (403/404/timeout/SSRF/egress).
 _STOP_READ_HINT = (
     "——请停止对该来源换 URL / 同策略重试；基于已有 web_search 摘要与已读材料收口写作，"
-    "不要再空转外网深读"
+    "不要再空转外网深读。"
+    "收口 ≠ 可伪精确逐步菜单：无现行可核证据时，后台点击路径须标「易变/待实测」+ 查找关键词"
 )
 
 

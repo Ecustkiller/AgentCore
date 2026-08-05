@@ -19,9 +19,10 @@ import { Loader2 } from "lucide-react";
 
 /**
  * Consent-first update explanation dialog (发布与门禁.md §7.6).
- * Opens on `available` (subject to skip/snooze); shows download progress when
- * downloading. Under the force-update hard gate: no Esc / overlay dismiss, no
- * skip / snooze, no close affordances — only update / install / retry.
+ *
+ * Soft update: only the `available` consent surface — 「立即更新」关窗并后台静默下载。
+ * Force-update hard gate: non-dismissible multi-phase (download progress / install /
+ * retry) when the dialog is opened from the gate.
  */
 export function UpdateAvailableDialog() {
   const dialogOpen = useUpdatesStore((s) => s.dialogOpen);
@@ -44,11 +45,13 @@ export function UpdateAvailableDialog() {
       ? status.version
       : null;
 
-  const relevant =
-    status.phase === "available" ||
-    status.phase === "downloading" ||
-    status.phase === "downloaded" ||
-    status.phase === "error";
+  // Soft: consent only. Force: keep download / ready / error in-dialog.
+  const relevant = force
+    ? status.phase === "available" ||
+      status.phase === "downloading" ||
+      status.phase === "downloaded" ||
+      status.phase === "error"
+    : status.phase === "available";
 
   const open = dialogOpen && relevant;
 
@@ -111,7 +114,7 @@ export function UpdateAvailableDialog() {
                 </>
               ) : null}
 
-              {status.phase === "downloading" ? (
+              {force && status.phase === "downloading" ? (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     下载进度{" "}
@@ -121,9 +124,6 @@ export function UpdateAvailableDialog() {
                       total: status.total,
                       bytesPerSecond: status.bytesPerSecond,
                     })}
-                    {force
-                      ? null
-                      : " — 可关闭本窗口，进度仍可在「设置 · 关于」查看。"}
                   </p>
                   <progress
                     className="h-2 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
@@ -133,15 +133,13 @@ export function UpdateAvailableDialog() {
                 </div>
               ) : null}
 
-              {status.phase === "downloaded" ? (
+              {force && status.phase === "downloaded" ? (
                 <p className="text-sm text-muted-foreground">
-                  {force
-                    ? "将在重启后安装。"
-                    : "将在重启后安装。也可稍后在「设置 · 关于」安装。"}
+                  将在重启后安装。
                 </p>
               ) : null}
 
-              {status.phase === "error" ? (
+              {force && status.phase === "error" ? (
                 <p className="text-sm text-destructive">{status.message}</p>
               ) : null}
             </div>
@@ -178,20 +176,7 @@ export function UpdateAvailableDialog() {
               </>
             ) : null}
 
-            {status.phase === "downloading" ? (
-              force ? null : (
-                <Button
-                  variant="neutral"
-                  size="md"
-                  icon={<Loader2 size={14} className="animate-spin" />}
-                  onClick={() => closeUpdateDialog()}
-                >
-                  后台下载
-                </Button>
-              )
-            ) : null}
-
-            {status.phase === "downloading" && force ? (
+            {force && status.phase === "downloading" ? (
               <Button
                 variant="neutral"
                 size="md"
@@ -202,7 +187,7 @@ export function UpdateAvailableDialog() {
               </Button>
             ) : null}
 
-            {status.phase === "downloaded" ? (
+            {force && status.phase === "downloaded" ? (
               <Button
                 variant="primary"
                 size="md"
@@ -212,25 +197,14 @@ export function UpdateAvailableDialog() {
               </Button>
             ) : null}
 
-            {status.phase === "error" ? (
-              <>
-                {force ? null : (
-                  <Button
-                    variant="neutral"
-                    size="md"
-                    onClick={() => closeUpdateDialog()}
-                  >
-                    关闭
-                  </Button>
-                )}
-                <Button
-                  variant="primary"
-                  size="md"
-                  onClick={() => void download()}
-                >
-                  重试下载
-                </Button>
-              </>
+            {force && status.phase === "error" ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => void download()}
+              >
+                重试下载
+              </Button>
             ) : null}
           </DialogFooter>
         </DialogContent>

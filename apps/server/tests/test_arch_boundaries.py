@@ -108,9 +108,9 @@ def test_db_does_not_import_runtime_or_conversation() -> None:
     """``db`` is a persistence leaf — no upward reach into runtime / conversation.
 
     Shared pure helpers that both db and conversation/runtime need live in leaf
-    packages (``core.message_merge``, ``costing``). Lease CRUD stays under
-    ``runtime.leases`` and is imported from there by callers, not re-exported
-    through ``db.repositories``.
+    packages (``core.message_merge``, ``core.assistant_content``, ``costing``).
+    Lease CRUD stays under ``runtime.leases`` and is imported from there by
+    callers, not re-exported through ``db.repositories``.
     """
     files = _py_files("db")
     assert _violations(files, ("agentcore.runtime", "agentcore.conversation")) == {}

@@ -47,9 +47,8 @@ export function finalizeGeneratingForPausedConversation(
     store.finalizeLastMessage(conversationId);
   }
 
-  // Stamp paused on the tail assistant (hydrate-equivalent close). updateMessage
-  // is active-slice only — generating lock above is conversation-scoped either way.
-  if (store.currentConversationId !== conversationId) return;
+  // Stamp paused on the tail assistant (hydrate-equivalent close). Must update
+  // the *target* conversation even when another chat is open.
   const tail = getRuntime(conversationId).messages.at(-1);
   if (
     !tail ||
@@ -59,11 +58,15 @@ export function finalizeGeneratingForPausedConversation(
   ) {
     return;
   }
-  store.updateMessage(tail.id, {
-    isStreaming: false,
-    finishReason: "paused",
-    runs: tail.runs ? { ...tail.runs, finishReason: "paused" } : tail.runs,
-  });
+  store.updateMessage(
+    tail.id,
+    {
+      isStreaming: false,
+      finishReason: "paused",
+      runs: tail.runs ? { ...tail.runs, finishReason: "paused" } : tail.runs,
+    },
+    conversationId,
+  );
 }
 
 /** A mid-stream transport drop (socket died), as opposed to a backend refusal

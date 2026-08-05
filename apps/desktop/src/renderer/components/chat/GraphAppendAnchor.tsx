@@ -57,7 +57,7 @@ export function GraphAppendAnchor({
             .getState()
             .setKey(`${conversationId}::${slotId}:inline-graph`, true, true);
         }
-        focusMessage(focusId);
+        focusMessage(focusId, conversationId);
       }}
       className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >

@@ -35,6 +35,7 @@ def build_provider(
     credentials: LLMCredentials | None = None,
     *,
     purpose: ProviderPurpose = "user_facing",
+    display_name: str | None = None,
 ) -> LLMProvider:
     """Build an upstream provider from resolved credentials.
 
@@ -43,6 +44,11 @@ def build_provider(
     user-facing paths cannot silently re-platform onto ``PLATFORM_API_KEY``.
 
     ``purpose`` is retained for call-site clarity only.
+
+    ``display_name`` overrides the leaf's user-facing name (BYOK 测连 uses the
+    provider ``label`` so errors never show the internal credential source ``user``).
+    Does **not** change ``credentials.source`` — turn-path pricing still binds from
+    ``creds.source``.
 
     ``source=platform`` always yields :class:`PlatformProvider` (per-model key
     resolution). Pre-resolved platform ``api_key`` on ``credentials`` is not frozen
@@ -55,7 +61,8 @@ def build_provider(
 
     Every leaf is wrapped by :func:`observe_provider` so ``complete`` / ``stream``
     emit uniform ``llm.call`` / ``llm.call_failed`` (observation only — no retry).
-    The fence also forwards leaf ``probe`` / ``probe_tools`` for BYOK connectivity tests.
+    The fence also forwards leaf ``probe`` / ``probe_tools`` / ``list_models`` for
+    BYOK connectivity tests.
     """
     _ = purpose  # call-site documentation only
     if credentials is None:
@@ -66,8 +73,9 @@ def build_provider(
         )
     if credentials.source == "platform":
         return build_platform_provider(purpose=purpose)
+    leaf_name = (display_name or "").strip() or credentials.source
     leaf: LLMProvider = OpenAICompatibleProvider(
-        name=credentials.source,
+        name=leaf_name,
         api_key=credentials.api_key,
         base_url=credentials.base_url,
         extra_headers=credentials.extra_headers,

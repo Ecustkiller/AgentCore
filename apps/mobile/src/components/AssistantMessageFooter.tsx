@@ -1,4 +1,5 @@
 import { InteractionSheet } from "@/components/InteractionSheet";
+import { Modal } from "@/components/Modal";
 import { FINISH_REASON_META } from "@/lib/errors";
 import {
   type MessageCopyMode,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/supportDiagnostics";
 import { formatDuration, formatMessageTime } from "@/lib/time";
 import type { ProcessStep, UsageBreakdown } from "@agentcore/contract-types";
+import { Check, Copy, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import "./AssistantMessageFooter.css";
 
@@ -25,15 +27,13 @@ function cacheRatePercent(usage: UsageBreakdown): number | null {
   return Math.round((usage.cache_hit / usage.input) * 100);
 }
 
-/** Compact token / round / cost / duration — right-side footer meta. */
+/** Signal-only footer meta (cost / rounds / duration / clock); token detail lives in ⋯ Sheet. */
 function UsageSummary({
-  usage,
   rounds,
   costText,
   durationMs,
   clockIso,
 }: {
-  usage?: UsageBreakdown | null;
   rounds?: number | null;
   costText?: string | null;
   durationMs?: number | null;
@@ -42,27 +42,12 @@ function UsageSummary({
   const durationText =
     durationMs != null && durationMs > 0 ? formatDuration(durationMs) : null;
   const clockLabel = clockIso ? formatMessageTime(clockIso) : "";
-  if (
-    !usage &&
-    (rounds == null || rounds <= 1) &&
-    !costText &&
-    !durationText &&
-    !clockLabel
-  ) {
-    return null;
-  }
-
-  const rate = usage ? cacheRatePercent(usage) : null;
   const parts: string[] = [];
-  if (usage) {
-    const inPart = `↑${formatCompact(usage.input)}${rate != null && rate > 0 ? `(缓${rate}%)` : ""}`;
-    const outPart = `↓${formatCompact(usage.output)}${usage.reasoning > 0 ? `(思${formatCompact(usage.reasoning)})` : ""}`;
-    parts.push(`${inPart} ${outPart}`);
-  }
-  if (rounds != null && rounds > 1) parts.push(`${rounds} 轮`);
   if (costText) parts.push(costText);
+  if (rounds != null && rounds > 1) parts.push(`${rounds} 轮`);
   if (durationText) parts.push(`用时 ${durationText}`);
   if (clockLabel) parts.push(clockLabel);
+  if (parts.length === 0) return null;
 
   return (
     <div className="amf-usage" data-testid="assistant-usage-summary">
@@ -106,10 +91,48 @@ function UsageDetailRows({ usage }: { usage: UsageBreakdown }) {
   );
 }
 
+/** Touch-native copy picker — mirrors desktop Copy dropdown (仅交付 / 含过程). */
+function CopyModeSheet({
+  onPick,
+  onClose,
+}: {
+  onPick: (mode: MessageCopyMode) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal className="sheet" onClose={onClose} label="复制">
+      <div className="sheet-title">复制</div>
+      <button
+        type="button"
+        className="sheet-item"
+        data-testid="copy-mode-deliverable"
+        onClick={() => onPick("deliverable")}
+      >
+        仅交付
+      </button>
+      <button
+        type="button"
+        className="sheet-item"
+        data-testid="copy-mode-with-process"
+        onClick={() => onPick("with_process")}
+      >
+        含过程
+      </button>
+      <button
+        type="button"
+        className="sheet-item sheet-cancel"
+        onClick={onClose}
+      >
+        取消
+      </button>
+    </Modal>
+  );
+}
+
 /**
  * Assistant bubble footer — copy strategy + usage/cost/duration hierarchy.
- * 赞踩 / 收藏：手机尚无 client API 封装，不做假 UI（后端 REST 存在亦不在此接线）。
- * 「更多」走 Sheet(A) 用量明细 / 收尾原因 / 排查包。
+ * 主行：无边框图标 Copy / MoreHorizontal（对齐桌面）；有过程时 Copy → Action Sheet 分档。
+ * ⋯ Sheet：用量 / 收尾 / 排查包。赞踩 / 收藏：手机尚无 client API，不做假 UI。
  */
 export function AssistantMessageFooter({
   content,
@@ -138,6 +161,7 @@ export function AssistantMessageFooter({
     null,
   );
   const [moreOpen, setMoreOpen] = useState(false);
+  const [copySheetOpen, setCopySheetOpen] = useState(false);
 
   const supportText = supportIds ? formatSupportDiagnosticText(supportIds) : "";
   const hasContent = !!content.trim() || (process && process.length > 0);
@@ -148,36 +172,57 @@ export function AssistantMessageFooter({
   const hasMore =
     !!usage || !!finishLabel || !!supportText || (rounds != null && rounds > 1);
 
+  const onCopy = async (mode: MessageCopyMode) => {
+    setCopySheetOpen(false);
+    const text = formatMessageExport(content, process, mode);
+    if (await copyText(text)) {
+      setCopied(mode);
+      window.setTimeout(() => setCopied(null), 1500);
+    }
+  };
+
+  const onCopyTrigger = () => {
+    if (hasProcess) {
+      setCopySheetOpen(true);
+      return;
+    }
+    void onCopy("deliverable");
+  };
+
+  const copyDone = copied === "deliverable" || copied === "with_process";
+
+  const copyBtn = (
+    <button
+      type="button"
+      className="amf-icon-btn"
+      onClick={onCopyTrigger}
+      data-testid="assistant-footer-copy"
+      aria-label={copyDone ? "已复制" : "复制"}
+    >
+      {copyDone ? (
+        <Check size={16} strokeWidth={1.75} />
+      ) : (
+        <Copy size={16} strokeWidth={1.75} />
+      )}
+    </button>
+  );
+
+  const copySheet = copySheetOpen ? (
+    <CopyModeSheet
+      onPick={(mode) => void onCopy(mode)}
+      onClose={() => setCopySheetOpen(false)}
+    />
+  ) : null;
+
   // Streaming: only lightweight copy when there is body text (usage meaningless mid-stream).
   if (isStreaming) {
     if (!hasContent || !content.trim()) return null;
-    const onCopy = async (mode: MessageCopyMode) => {
-      const text = formatMessageExport(content, process, mode);
-      if (await copyText(text)) {
-        setCopied(mode);
-        window.setTimeout(() => setCopied(null), 1500);
-      }
-    };
     return (
-      <div className="amf" data-testid="assistant-message-footer">
-        <div className="amf-actions">
-          <button
-            type="button"
-            className="amf-btn"
-            onClick={() => void onCopy("deliverable")}
-          >
-            {copied === "deliverable" ? "已复制" : "复制交付"}
-          </button>
-          {hasProcess && (
-            <button
-              type="button"
-              className="amf-btn"
-              onClick={() => void onCopy("with_process")}
-            >
-              {copied === "with_process" ? "已复制" : "含过程"}
-            </button>
-          )}
+      <div data-testid="assistant-message-footer">
+        <div className="amf">
+          <div className="amf-actions">{copyBtn}</div>
         </div>
+        {copySheet}
       </div>
     );
   }
@@ -185,14 +230,6 @@ export function AssistantMessageFooter({
   if (!hasContent && !supportText && !usage && !costText && !durationMs) {
     return null;
   }
-
-  const onCopy = async (mode: MessageCopyMode) => {
-    const text = formatMessageExport(content, process, mode);
-    if (await copyText(text)) {
-      setCopied(mode);
-      window.setTimeout(() => setCopied(null), 1500);
-    }
-  };
 
   const onCopySupport = async () => {
     if (!supportText) return;
@@ -203,44 +240,30 @@ export function AssistantMessageFooter({
   };
 
   return (
-    <div className="amf" data-testid="assistant-message-footer">
-      <div className="amf-actions">
-        {hasContent && (
-          <button
-            type="button"
-            className="amf-btn"
-            onClick={() => void onCopy("deliverable")}
-          >
-            {copied === "deliverable" ? "已复制" : "复制交付"}
-          </button>
-        )}
-        {hasContent && hasProcess && (
-          <button
-            type="button"
-            className="amf-btn"
-            onClick={() => void onCopy("with_process")}
-          >
-            {copied === "with_process" ? "已复制" : "含过程"}
-          </button>
-        )}
-        {hasMore && (
-          <button
-            type="button"
-            className="amf-btn"
-            onClick={() => setMoreOpen(true)}
-            data-testid="assistant-footer-more"
-          >
-            更多
-          </button>
-        )}
+    <div data-testid="assistant-message-footer">
+      <div className="amf">
+        <div className="amf-actions">
+          {hasContent && copyBtn}
+          {hasMore && (
+            <button
+              type="button"
+              className="amf-icon-btn"
+              onClick={() => setMoreOpen(true)}
+              data-testid="assistant-footer-more"
+              aria-label="更多"
+            >
+              <MoreHorizontal size={16} strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+        <UsageSummary
+          rounds={rounds}
+          costText={costText}
+          durationMs={durationMs}
+          clockIso={clockIso}
+        />
       </div>
-      <UsageSummary
-        usage={usage}
-        rounds={rounds}
-        costText={costText}
-        durationMs={durationMs}
-        clockIso={clockIso}
-      />
+      {copySheet}
       {moreOpen && (
         <InteractionSheet
           title="消息详情"

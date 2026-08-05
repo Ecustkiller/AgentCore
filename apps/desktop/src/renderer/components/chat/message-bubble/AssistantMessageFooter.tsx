@@ -49,39 +49,20 @@ function cacheRatePercent(usage: UsageBreakdown): number | null {
   return Math.round((usage.cache_hit / usage.input) * 100);
 }
 
-/** Direction glyph separated from the number so `↑41.1k` is not read as `141.1k`. */
-function UsageDir({ dir }: { dir: "in" | "out" }) {
-  return (
-    <span
-      aria-hidden
-      className="mr-0.5 inline-block font-sans not-italic text-muted-foreground/55"
-    >
-      {dir === "in" ? "↑" : "↓"}
-    </span>
-  );
-}
-
-/** Compact token / round / cost / duration summary — right-aligned in the footer. */
+/** Signal-only summary (cost / rounds / duration) — token detail lives in「更多」. */
 function MessageUsageSummary({
-  usage,
   rounds,
   costText,
   durationMs,
 }: {
-  usage: UsageBreakdown | undefined;
   rounds: number | undefined;
   costText: string | null;
   durationMs?: number;
 }) {
   const durationText =
     durationMs != null && durationMs > 0 ? formatDuration(durationMs) : null;
-  if (!usage && (rounds == null || rounds <= 1) && !costText && !durationText)
+  if ((rounds == null || rounds <= 1) && !costText && !durationText)
     return null;
-
-  const rate = usage ? cacheRatePercent(usage) : null;
-  const tooltip = usage
-    ? `输入 ${formatCompact(usage.input)}（缓存命中 ${formatCompact(usage.cache_hit)} · 未命中 ${formatCompact(usage.cache_miss)}）· 输出 ${formatCompact(usage.output)}（思考 ${formatCompact(usage.reasoning)}）`
-    : undefined;
 
   const parts: ReactNode[] = [];
   const pushSep = () => {
@@ -93,49 +74,24 @@ function MessageUsageSummary({
       );
   };
 
-  if (usage) {
-    parts.push(
-      <span key="usage" className="inline-flex items-center gap-1">
-        <span className="inline-flex items-baseline">
-          <UsageDir dir="in" />
-          <span>
-            {formatCompact(usage.input)}
-            {rate != null && rate > 0 ? `(缓${rate}%)` : ""}
-          </span>
-        </span>
-        <span className="inline-flex items-baseline">
-          <UsageDir dir="out" />
-          <span>
-            {formatCompact(usage.output)}
-            {usage.reasoning > 0 ? `(思${formatCompact(usage.reasoning)})` : ""}
-          </span>
-        </span>
-      </span>,
-    );
+  if (costText) {
+    pushSep();
+    parts.push(<span key="cost">{costText}</span>);
   }
   if (rounds != null && rounds > 1) {
     pushSep();
     parts.push(<span key="rounds">{rounds} 轮</span>);
-  }
-  if (costText) {
-    pushSep();
-    parts.push(<span key="cost">{costText}</span>);
   }
   if (durationText) {
     pushSep();
     parts.push(<span key="dur">用时 {durationText}</span>);
   }
 
-  const body = (
+  return (
     <span className="inline-flex cursor-default items-center gap-1.5 text-xs tabular-nums text-muted-foreground/70">
       {parts}
     </span>
   );
-
-  if (tooltip) {
-    return <SimpleTooltip label={tooltip}>{body}</SimpleTooltip>;
-  }
-  return body;
 }
 
 function UsageDetailPanel({ usage }: { usage: UsageBreakdown }) {
@@ -468,7 +424,6 @@ export function AssistantMessageFooter({
           </span>
         )}
         <MessageUsageSummary
-          usage={message.usage}
           rounds={message.rounds}
           costText={costText}
           durationMs={message.durationMs}

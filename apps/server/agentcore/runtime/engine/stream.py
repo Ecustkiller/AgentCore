@@ -257,12 +257,13 @@ async def stream_llm_round(
                 last_stall_error = LLMTimeoutError("模型流式响应停滞（长时间无输出），请稍后重试")
                 # Window accounting: attempt 0 stall consumes window 1. With
                 # multiplier=2, allow one more stream attempt; do NOT use
-                # ``remaining < idle`` (first-window overshoot made retries dead).
+                # ``remaining < idle`` / wall-clock-past-budget here — first-window
+                # overshoot (asyncio.timeout under load) must not kill the retry
+                # that window accounting exists to preserve. After we emit
+                # ``llm.call_retried``, ``retry_committed`` lets the next iteration
+                # open the stream even if wall budget already elapsed.
                 windows_used = attempt + 1
                 can_retry = attempt < MAX_RETRIES - 1 and windows_used < max_stall_windows
-                if budget is not None and (time.monotonic() - start) >= budget:
-                    # Already past wall budget — don't claim a retry we won't start.
-                    can_retry = False
                 if not can_retry:
                     raise last_stall_error from None
 

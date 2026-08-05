@@ -1,4 +1,4 @@
-"""Sidecar Slice 1 walking-skeleton tests (双模式工作区 / 远期规划 §一.1).
+"""Sidecar Slice 1 walking-skeleton tests (双模式工作区 §十).
 
 Two layers, both zero-LLM (a scripted provider stands in for DeepSeek, mirroring
 ``test_evals_smoke``):

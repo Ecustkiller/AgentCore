@@ -70,7 +70,7 @@ describe("UpdateAvailableDialog", () => {
     expect(download).toHaveBeenCalled();
   });
 
-  it("shows progress while downloading", () => {
+  it("soft update does not keep a download-progress dialog", () => {
     useUpdatesStore.setState({
       status: {
         phase: "downloading",
@@ -81,12 +81,32 @@ describe("UpdateAvailableDialog", () => {
         total: 198_180_864,
       },
       dialogOpen: true,
+      outdatedMinVersion: null,
+    });
+    render(<UpdateAvailableDialog />);
+    expect(screen.queryByText(/下载进度/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "后台下载" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
+  });
+
+  it("force gate still shows download progress in dialog", () => {
+    useUpdatesStore.setState({
+      status: {
+        phase: "downloading",
+        version: "0.7.0",
+        percent: 42,
+        bytesPerSecond: 524_288,
+        transferred: 83_886_080,
+        total: 198_180_864,
+      },
+      dialogOpen: true,
+      outdatedMinVersion: "0.6.5",
     });
     render(<UpdateAvailableDialog />);
     expect(
       screen.getByText(/下载进度 42% · 80 MB \/ 189 MB · 512 KB\/s/),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "后台下载" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下载中…" })).toBeTruthy();
   });
 
   it("hides on web clients", () => {

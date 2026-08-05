@@ -175,14 +175,18 @@ async def ceiling_finalize(
         files_expected=files_expected,
         form_prose=form_prose,
     )
-    # CEO / captain：max_rounds 强制收口不得无条件姿势 A（finish_guard 被绕过）。
-    if role != "worker" and ceiling_reason == "max_rounds":
+    # CEO / captain：硬顶强制收口不得无条件姿势 A（finish_guard 被绕过）。
+    # max_rounds / token_budget 对称；worker salvage 靠 finalize 注入的 ceiling_honesty_steer。
+    if role != "worker" and ceiling_reason in ("max_rounds", "token_budget"):
         from agentcore.runtime.closing_posture import (
-            downgrade_verdict_for_max_rounds,
+            downgrade_verdict_for_ceiling,
             enforce_ceiling_closing_honesty,
+            note_cutoff_delivery_gap,
         )
 
-        downgrade_verdict_for_max_rounds()
+        downgrade_verdict_for_ceiling(reason=ceiling_reason)
+        if ceiling_reason == "token_budget":
+            note_cutoff_delivery_gap()
 
         def _honest_close(text: str) -> str:
             return enforce_ceiling_closing_honesty(text, reason=ceiling_reason)

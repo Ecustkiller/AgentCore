@@ -73,12 +73,16 @@ def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
     """Return captain text for an interrupted turn.
 
     USER_STOP / PROCESS_KILL: streamed content only — stop/interrupt chrome stays in
-    message metadata + StatusStrip (no parenthetical body notes).
+    message metadata + StatusStrip (no parenthetical body notes). Truncate at the
+    first DSML open tag so unfinished tool XML never enters the incomplete bubble
+    (``upsert_assistant`` still runs sanitize + length ceiling).
 
     REDRIVE_FAILED: always leave a user-visible honesty note in the body so a
     kickoff bubble cannot freeze as「已开工」while the team was silently cleared.
     """
-    text = (content or "").strip()
+    from agentcore.runtime.engine.tool_protocol_sanitize import prepare_assistant_content
+
+    text = prepare_assistant_content((content or "").strip(), salvage=True)
     if reason is not TurnInterruptReason.REDRIVE_FAILED:
         return text
     if REDRIVE_FAILED_USER_VISIBLE in text or "后台恢复失败" in text:

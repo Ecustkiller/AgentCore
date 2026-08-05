@@ -2792,3 +2792,12 @@ def test_url_cache_registry_reaps_idle_conversation():
     reg.get_or_create("fresh")  # creation triggers idle reaping
     assert "idle" not in reg
     assert "fresh" in reg
+
+
+def test_stop_read_hint_aligns_closing_with_howto_path_honesty():
+    """howto A′：读失败收口 ≠ 可伪精确逐步菜单（与 prompt claim_evidence 对齐）。"""
+    from agentcore.tools.builtin.web.read_url import _STOP_READ_HINT
+
+    assert "收口" in _STOP_READ_HINT
+    assert "伪精确" in _STOP_READ_HINT or "逐步菜单" in _STOP_READ_HINT
+    assert "易变" in _STOP_READ_HINT or "待实测" in _STOP_READ_HINT

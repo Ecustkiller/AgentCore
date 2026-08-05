@@ -187,6 +187,12 @@ def test_schema_exposes_form_enum():
     assert "≥1" in props_task["require_upstream"]["description"] or "全量" in props_task[
         "require_upstream"
     ]["description"]
+    # 定稿漂移 A′：task / deliverable / team_brief schema 钉「已确认约束」
+    assert "已确认约束" in props_task["task"]["description"]
+    assert "已确认约束" in str(TASK_DELIVERABLE_SCHEMA.get("description") or "")
+    brief = DELEGATE_PARAMETERS["properties"]["team_brief"]["description"]
+    assert "已确认约束" in brief
+    assert "附件" in brief or "优先" in brief
 
     coord = DELEGATE_PARAMETERS["properties"]["coordinate"]["description"]
     assert "协调" in coord

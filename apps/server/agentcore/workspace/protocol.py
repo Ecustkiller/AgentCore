@@ -90,10 +90,17 @@ class WorkspaceIOError(WorkspaceError):
 
 @dataclass(frozen=True)
 class DirEntry:
-    """One entry from ``list`` — workspace-relative POSIX path + kind."""
+    """One entry from ``list`` — workspace-relative POSIX path + kind.
+
+    ``size_bytes`` / ``mtime_ms`` are optional metadata for UI subtitles (mobile).
+    Files fill both when known; directories keep ``size_bytes=None`` and may still
+    expose ``mtime_ms``. ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``.
+    """
 
     path: str
     is_dir: bool
+    size_bytes: int | None = None
+    mtime_ms: int | None = None
 
 
 @dataclass(frozen=True)

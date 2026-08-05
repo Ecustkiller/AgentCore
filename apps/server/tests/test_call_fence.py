@@ -165,6 +165,23 @@ def test_build_provider_wraps_with_fence(monkeypatch):
     # BYOK 设置·测试 calls probe on the fence-wrapped provider — must not AttributeError.
     assert callable(getattr(provider, "probe", None))
     assert callable(getattr(provider, "probe_tools", None))
+    assert callable(getattr(provider, "list_models", None))
+    assert unwrap_provider(provider)._name == "user"
+
+
+def test_build_provider_display_name_overrides_leaf_name():
+    from agentcore.llm.credentials import LLMCredentials
+
+    provider = build_provider(
+        LLMCredentials(
+            api_key="k",
+            base_url="http://x/v1",
+            default_model="deepseek-v4-flash",
+            source="user",
+        ),
+        display_name="我的网关",
+    )
+    assert unwrap_provider(provider)._name == "我的网关"
 
 
 def test_build_provider_rejects_none_credentials():
@@ -181,6 +198,7 @@ async def test_fence_forwards_probe_and_probe_tools():
             super().__init__()
             self.probe_model: str | None = None
             self.tools_model: str | None = None
+            self.listed = False
 
         async def probe(self, *, model: str) -> None:
             self.probe_model = model
@@ -189,18 +207,31 @@ async def test_fence_forwards_probe_and_probe_tools():
             self.tools_model = model
             return True
 
+        async def list_models(self) -> list[str]:
+            self.listed = True
+            return ["m1"]
+
     leaf = _ProbeLeaf()
     provider = observe_provider(leaf)
     await provider.probe(model=DEEPSEEK_V4_FLASH)
     assert leaf.probe_model == DEEPSEEK_V4_FLASH
     assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is True
     assert leaf.tools_model == DEEPSEEK_V4_FLASH
+    assert await provider.list_models() == ["m1"]
+    assert leaf.listed is True
 
 
 @pytest.mark.asyncio
 async def test_fence_probe_tools_none_when_leaf_lacks_method():
     provider = observe_provider(_FakeLeaf())  # no probe_tools
     assert await provider.probe_tools(model=DEEPSEEK_V4_FLASH) is None
+
+
+@pytest.mark.asyncio
+async def test_fence_list_models_raises_when_leaf_lacks_method():
+    provider = observe_provider(_FakeLeaf())
+    with pytest.raises(AttributeError, match="list_models"):
+        await provider.list_models()
 
 
 def test_log_llm_call_includes_attempt():

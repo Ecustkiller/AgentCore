@@ -29,7 +29,9 @@ const PROD_CSP = [
   "script-src 'self'",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
+  // blob:：IM / 头像预览等「Bearer fetch → createObjectURL → <img>」所需（与桌面
+  // main/index.ts、消息IM.md §六对齐）。只展示本页已鉴权字节，不放宽第三方远程图。
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   // connect-src stays broad: the API base origin is configured at runtime (cloud https /
   // self-host http://localhost) and SSE/websocket ride it — script-src is the XSS containment.

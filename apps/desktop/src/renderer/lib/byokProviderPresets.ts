@@ -50,8 +50,9 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     label: "Kimi (Moonshot)",
     baseUrl: "https://api.moonshot.cn/v1",
     baseUrlAliases: ["https://api.moonshot.ai/v1"],
-    defaultModel: "kimi-k2.5",
-    models: ["kimi-k2.5", "kimi-k2", "moonshot-v1-8k", "moonshot-v1-32k"],
+    defaultModel: "kimi-k2.6",
+    // kimi-k2 / moonshot-v1-* retired; k2.5 kept for older keys.
+    models: ["kimi-k2.6", "kimi-k3", "kimi-k2.5"],
     keyHelpUrl: "https://platform.moonshot.cn/console/api-keys",
   },
   {

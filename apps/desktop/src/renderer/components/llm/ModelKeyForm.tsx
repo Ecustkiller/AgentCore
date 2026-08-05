@@ -76,9 +76,9 @@ export type ModelKeyFormProps = {
 /**
  * BYOK 服务商表单 — 设置·服务商的「添加服务商」/「编辑服务商」共用单一真相源。
  *
- * 预设厂商：主路径 = 厂商 + 名称 + Key；`default_model` 静默用预设默认（编辑保留已存值）；
- * Base URL 进高级。自定义端点：Base URL + 默认模型名必填可见。
- * 对话用哪个模型在「模型组合」/ picker，不在本表单。
+ * 主路径 = 厂商 + 名称 + Key + 默认模型（连接测试与目录兜底；选预设预填，编辑保留已存值）。
+ * 预设厂商：Base URL 进高级。自定义端点：Base URL 主路径必填。
+ * 对话日常选用在「模型组合」/ picker，不在本表单。
  */
 export function ModelKeyForm({
   providerId,
@@ -205,7 +205,7 @@ export function ModelKeyForm({
           </select>
           {!isCustom && (
             <p className="mt-1 text-xs text-muted-foreground">
-              选择后将预填名称与端点；对话用哪个模型请在「模型组合」中选择。
+              选择后将预填名称、端点与默认模型；日常选用请到「模型组合」。
             </p>
           )}
         </label>
@@ -249,38 +249,38 @@ export function ModelKeyForm({
           </div>
         </label>
         {isCustom && (
-          <>
-            <label className="block" htmlFor={baseUrlId}>
-              <span className="text-xs text-muted-foreground">Base URL</span>
-              <Input
-                id={baseUrlId}
-                type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://your-endpoint.example/v1"
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-1 w-full font-mono"
-              />
-            </label>
-            <label className="block" htmlFor={defaultModelId}>
-              <span className="text-xs text-muted-foreground">默认模型名</span>
-              <Input
-                id={defaultModelId}
-                type="text"
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                placeholder="model-name"
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-1 w-full font-mono"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                连接测试与目录兜底用；日常选用请到「模型组合」。
-              </p>
-            </label>
-          </>
+          <label className="block" htmlFor={baseUrlId}>
+            <span className="text-xs text-muted-foreground">Base URL</span>
+            <Input
+              id={baseUrlId}
+              type="text"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://your-endpoint.example/v1"
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1 w-full font-mono"
+            />
+          </label>
         )}
+        <div>
+          <label className="block" htmlFor={defaultModelId}>
+            <span className="text-xs text-muted-foreground">默认模型</span>
+            <Input
+              id={defaultModelId}
+              type="text"
+              value={defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+              placeholder={preset?.defaultModel ?? "model-name"}
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-1 w-full font-mono"
+            />
+          </label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            连接测试与目录兜底用；日常选用请到「模型组合」。
+          </p>
+        </div>
         {!isCustom && (
           <details
             className="rounded-lg border border-border/60 bg-muted/20 p-3"

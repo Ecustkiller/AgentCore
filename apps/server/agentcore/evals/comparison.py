@@ -8,7 +8,7 @@ vs 基准臂，最后在「质量·成本·延迟」三轴上聚合，按 archet
 ``matched_single``（等算力单体 best-of-N、按 team 的**思考-token 中位数**预算对齐）已落地——见
 :func:`_run_matched_single_arm`：把「团队更好」从「砸了更多算力」纠正为「**同等算力下**更好」，
 这是「多 Agent 是否真有价值」的关键判据。预算主单位 = 思考-token（钱/延迟并列报但不对齐），
-是产品负责人已拍板的协议（远期规划 §2.4）。
+是产品负责人已拍板的协议（见 docs/02-架构/后端架构.md §五；详细提案不在公开仓）。
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ async def _best_of_n_single(
     """按**思考-token 预算**反复跑「单体」一臂，累计思考-token 够到 ``budget_thinking`` 即停
     （至少 1 次、至多上限次）。
 
-    预算主单位 = 思考-token（产品负责人已拍板：钱/延迟并列报但**不**对齐，见远期规划 §2.4）。
+    预算主单位 = 思考-token（产品负责人已拍板：钱/延迟并列报但**不**对齐，见后端架构 §五）。
     顺序跑只为按实测累计思考-token 定 N（best-of-N 的 N 不预知）；返回每次尝试的 TurnOutcome。
     预算 ≤0（team 全 sample 无思考-token / 出错）→ 只跑 1 次，退化等价 single 臂。
     """
@@ -229,7 +229,7 @@ async def _run_matched_single_arm(
 ) -> ArmResult:
     """跑 matched_single 臂：把单体 best-of-N 到 team 的**思考-token 中位数预算 T_B**。
 
-    协议（产品负责人已拍板，见远期规划 §2.4）：预算主单位 = 思考-token；测量后对齐——先跑
+    协议（产品负责人已拍板，见后端架构 §五）：预算主单位 = 思考-token；测量后对齐——先跑
     team、取思考-token 中位数 T_B、调 best-of-N 的 N 逼近 T_B。实际对齐度由报告的
     ``thinking_token_ratio``（team/matched）体现，落在 [0.8, 1.25] 即视为等算力（该带在取倒数
     下自封闭）。每 sample：按 T_B best-of-N → 选优 champion → 折叠成可与 team 逐对裁判的

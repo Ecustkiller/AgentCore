@@ -172,6 +172,15 @@ async function runDownload(): Promise<void> {
   downloadInFlight = true;
   downloadStartedAt = Date.now();
   lastProgressLogAt = 0;
+  // 立刻进入 downloading，避免首包 progress 前 UI /「关于」仍停在 available。
+  pushStatus({
+    phase: "downloading",
+    version: pendingVersion,
+    percent: 0,
+    bytesPerSecond: 0,
+    transferred: 0,
+    total: pendingSizeBytes ?? 0,
+  });
   logUpdater("info", "updater.download_begin", {
     version: pendingVersion || undefined,
     sizeBytes: pendingSizeBytes ?? undefined,
@@ -233,6 +242,11 @@ export function initUpdater(window: BrowserWindow): void {
   // 发现即说明、用户同意后再下载；安装仍须显式 quitAndInstall（§7.6）。
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // 临时默认：关闭 blockmap 差分，改拉全量安装包（~190MB）。
+  // 动机：downloads 经 Tunnel 时差分小 Range / multipart 易卡到数分钟～十余分钟
+  //（本机日志 8.5MB 差分 ≈509s）；全量单连接更稳。分发改国内 OSS/CDN（§7.6b 方案 B）
+  // 并验收 Range 后应改回 false。→ 发布与门禁.md §7.6 客户端更新 UX。
+  autoUpdater.disableDifferentialDownload = true;
 
   autoUpdater.on("checking-for-update", () => {
     pushStatus({ phase: "checking" });
@@ -331,6 +345,7 @@ export function initUpdater(window: BrowserWindow): void {
     apiBaseUrl = baseUrl;
     logUpdater("info", "updater.configure", {
       hasBaseUrl: baseUrl.length > 0,
+      disableDifferentialDownload: autoUpdater.disableDifferentialDownload,
     });
     startSchedule();
   });

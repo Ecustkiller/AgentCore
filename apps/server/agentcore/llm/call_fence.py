@@ -5,7 +5,8 @@ failure → ``llm.call_failed``). Does **not** retry, swap models, or alter chun
 contracts (``stream_reset`` / ``aborted`` pass through unchanged).
 
 Also forwards leaf-only helpers used outside the chat path (``probe`` /
-``probe_tools`` for BYOK 设置·测试) — the fence must not strip those methods.
+``probe_tools`` / ``list_models`` for BYOK 设置·测试) — the fence must not
+strip those methods.
 
 Inner provider I/O retries stay inside the leaf; this fence sees one attempt per
 outer call (``attempt`` defaults to 1; exhausted upstream retries surface via
@@ -71,6 +72,16 @@ class ObservingLLMProvider:
         if probe_tools is None:
             return None
         return await probe_tools(model=model)
+
+    async def list_models(self) -> list[str]:
+        """Forward ``GET /models`` discovery to the leaf (BYOK 测连优先路径)."""
+        list_models = getattr(self._inner, "list_models", None)
+        if list_models is None:
+            raise AttributeError(
+                f"{type(self._inner).__name__} has no list_models(); "
+                "ObservingLLMProvider cannot discover models"
+            )
+        return await list_models()
 
     def _provider_name(self) -> str | None:
         name = getattr(self._inner, "name", None) or getattr(self._inner, "_name", None)

@@ -41,8 +41,9 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
         label="Kimi (Moonshot)",
         base_url="https://api.moonshot.cn/v1",
         base_url_aliases=("https://api.moonshot.ai/v1",),
-        default_model="kimi-k2.5",
-        models=("kimi-k2.5", "kimi-k2", "moonshot-v1-8k", "moonshot-v1-32k"),
+        default_model="kimi-k2.6",
+        # kimi-k2 / moonshot-v1-* retired; k2.5 kept for older keys.
+        models=("kimi-k2.6", "kimi-k3", "kimi-k2.5"),
     ),
     ByokProviderPreset(
         id="zhipu",

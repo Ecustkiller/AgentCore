@@ -103,14 +103,21 @@ async def test_list_parses_dir_entries():
     response = {
         "ok": True,
         "value": [
-            {"path": "src", "is_dir": True},
-            {"path": "src/main.py", "is_dir": False},
+            {"path": "src", "is_dir": True, "mtime_ms": 1000},
+            {
+                "path": "src/main.py",
+                "is_dir": False,
+                "size_bytes": 42,
+                "mtime_ms": 2000,
+            },
+            {"path": "readme.md", "is_dir": False},  # optional meta absent → None
         ],
     }
     entries, _ = await _round_trip(local.list(".", "*"), sink, registry, response)
-    assert [(e.path, e.is_dir) for e in entries] == [
-        ("src", True),
-        ("src/main.py", False),
+    assert [(e.path, e.is_dir, e.size_bytes, e.mtime_ms) for e in entries] == [
+        ("src", True, None, 1000),
+        ("src/main.py", False, 42, 2000),
+        ("readme.md", False, None, None),
     ]
 
 

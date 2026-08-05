@@ -97,7 +97,7 @@ describe("ProviderSettings", () => {
     expect(screen.getByText("OpenAI")).toBeTruthy();
     expect(screen.getByText(/api\.deepseek\.com/)).toBeTruthy();
     expect(screen.getByText(/••••abcd/)).toBeTruthy();
-    expect(screen.getByText(/deepseek-v4-pro/)).toBeTruthy();
+    expect(screen.getByText(/默认模型 deepseek-v4-pro/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     expect(screen.queryByText("模型组合")).toBeNull();
   });

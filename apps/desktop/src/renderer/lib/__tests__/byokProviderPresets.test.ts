@@ -64,4 +64,12 @@ describe("getByokProviderPreset", () => {
   it("lists DeepSeek first among vendor presets", () => {
     expect(BYOK_PROVIDER_PRESETS[0]?.id).toBe("deepseek");
   });
+
+  it("defaults Moonshot to kimi-k2.6 with current models", () => {
+    const preset = getByokProviderPreset("moonshot");
+    expect(preset.defaultModel).toBe("kimi-k2.6");
+    expect(preset.models).toEqual(["kimi-k2.6", "kimi-k3", "kimi-k2.5"]);
+    expect(preset.models).not.toContain("kimi-k2");
+    expect(preset.models).not.toContain("moonshot-v1-8k");
+  });
 });

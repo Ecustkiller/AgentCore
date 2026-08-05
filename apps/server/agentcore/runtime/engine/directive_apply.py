@@ -36,9 +36,10 @@ from .tool_exec import execute_tools
 
 
 def _captain_closing_honesty(content: str, controller: LoopController) -> str:
-    """CEO soft banners: softⅡ′ → write-ownership → cloud-web verify（姿势 A / 既有横幅）.
+    """CEO soft banners: softⅡ′ → write-ownership → cutoff/partial → cloud-web verify.
 
     Each enforce_* skips when an honesty banner prefix is already present.
+    Cutoff latch（token_budget 等）真源=结构化 gaps/partial，不扩姿势 A 词表。
     """
     if not content:
         return content
@@ -46,6 +47,7 @@ def _captain_closing_honesty(content: str, controller: LoopController) -> str:
         downgrade_verdict_for_unresolved_write_ownership,
         enforce_ceo_mutation_honesty,
         enforce_cloud_web_verify_honesty,
+        enforce_cutoff_closing_honesty,
         enforce_write_ownership_honesty,
         rewrite_stale_ask_after_dispatch,
     )
@@ -57,6 +59,7 @@ def _captain_closing_honesty(content: str, controller: LoopController) -> str:
         landing_succeeded=controller.landing_succeeded,
     )
     out = enforce_write_ownership_honesty(out)
+    out = enforce_cutoff_closing_honesty(out)
     return enforce_cloud_web_verify_honesty(out)
 
 

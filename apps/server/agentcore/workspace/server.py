@@ -612,12 +612,24 @@ class ServerWorkspace:
                     raise WorkspaceIOError(str(e)) from e
                 if is_file and is_system_ignored_file_name(entry.name):
                     continue
+                # Soft meta for UI subtitles — never fail the whole listing on stat.
+                size_bytes: int | None = None
+                mtime_ms: int | None = None
+                try:
+                    st = entry.stat()
+                    mtime_ms = st.st_mtime_ns // 1_000_000
+                    if not is_dir:
+                        size_bytes = int(st.st_size)
+                except OSError:
+                    pass
                 # UI REST shares ``list`` — only system noise; AI ``file_list``
                 # applies AI-noise filtering in the tool layer.
                 out.append(
                     DirEntry(
                         path=self._model_path(entry, logical=directory),
                         is_dir=is_dir,
+                        size_bytes=size_bytes,
+                        mtime_ms=mtime_ms,
                     )
                 )
             return out

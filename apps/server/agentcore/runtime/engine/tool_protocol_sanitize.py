@@ -5,6 +5,11 @@ markers such as ``</longcat_arg_key>`` or ``<longcat_tool_call>`` inside tool na
 argument strings, or handoff summary text. Clean at the tool-exec / harvest seam so
 illegal names become retryable and briefs stay readable — no provider-specific adapter.
 
+DeepSeek-family models may also paste DSML tool-call markup
+(``<｜DSML｜tool_calls>`` / ``invoke`` / ``parameter``) into ``delta.content``; that
+must be stripped from assistant deliverable prose the same way — keep surrounding
+natural language, never reject the whole bubble on sight of a marker.
+
 Also used **before** ``json.loads`` on raw tool-call arguments: models sometimes mix
 Anthropic-style ``<parameter>`` / ``<object>`` fragments into OpenAI JSON args, which
 would otherwise hard-fail as ``args_parse_failed``.
@@ -25,12 +30,25 @@ import json
 import re
 from typing import Any
 
+from agentcore.core.assistant_content import (
+    _PROTOCOL_TAG_RE,
+    ASSISTANT_CONTENT_MAX_CHARS,
+    ASSISTANT_CONTENT_OVERSIZE_FACE,
+    prepare_assistant_content,
+    sanitize_protocol_text,
+    truncate_at_dsml_open,
+)
+
 __all__ = [
+    "ASSISTANT_CONTENT_MAX_CHARS",
+    "ASSISTANT_CONTENT_OVERSIZE_FACE",
+    "prepare_assistant_content",
     "salvage_handoff_raw_arguments",
     "sanitize_protocol_text",
     "sanitize_raw_tool_arguments",
     "sanitize_tool_args",
     "sanitize_tool_name",
+    "truncate_at_dsml_open",
     "unwrap_nested_delegate_arguments",
 ]
 
@@ -44,17 +62,6 @@ _HANDOFF_BARE_KEY_RE = re.compile(
 # sole top-level payload key (narrow unwrap; do not guess other fields).
 _DELEGATE_PAYLOAD_KEYS = frozenset({"tasks", "playbook", "playbook_id", "arguments"})
 
-# Vendor / generic tool-protocol tags (open or close), optionally with attrs.
-# Includes bare structural wrappers (``object`` / ``list`` / ``item``) seen when
-# XML-style tool calling leaks into JSON arguments.
-_PROTOCOL_TAG_RE = re.compile(
-    r"</?"
-    r"(?:longcat_)?"
-    r"(?:arg_key|arg_value|tool_call|tool_name|parameter|arguments?|function|"
-    r"object|list|item|invoke|tool)"
-    r"(?:\s[^>]*)?>",
-    re.IGNORECASE,
-)
 # Hybrid leak: ``<parameter name="role":`` (XML open tag broken into JSON key colon).
 _PARAMETER_NAME_COLON_RE = re.compile(
     r'<parameter\s+name="([^"]+)"\s*:',
@@ -64,19 +71,6 @@ _PARAMETER_NAME_COLON_RE = re.compile(
 _JSON_KEY_GT_RE = re.compile(r'("(?:tasks|arguments|parameters|query|path|content)")\s*>')
 # Residual angle-bracket junk stuck to identifiers (defense in depth after tag strip).
 _STRAY_ANGLE_RE = re.compile(r"[<>]")
-
-
-def sanitize_protocol_text(text: str) -> str:
-    """Remove protocol tags from free text; collapse leftover whitespace runs lightly."""
-    if not text:
-        return text
-    cleaned = _PROTOCOL_TAG_RE.sub("", text)
-    # Do not strip all ``<>`` from prose (may contain comparisons); only collapse
-    # whitespace left by removed tags.
-    if cleaned != text:
-        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned
 
 
 def sanitize_raw_tool_arguments(raw: str) -> str:

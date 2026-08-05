@@ -3,7 +3,7 @@
 把「轮内全员并行波」从引擎唯一形状降级为 DEBATE profile 的形状；红队 / 圆桌由既有
 原语（并行委派 + continue_run + 材料注入）组合出星型三拍 / 点名串行。
 
-→ 见提案: docs/06-规划/红队与圆桌形态重设计提案.md §3.1
+→ 见 docs/03-AI核心/辩论编排设计.md（形态 profile；详细提案不在公开仓）
 """
 
 from __future__ import annotations

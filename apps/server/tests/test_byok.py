@@ -33,8 +33,10 @@ def test_mask_key_hides_short_key_entirely():
 
 
 class _Resp:
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, content: bytes = b"") -> None:
         self.status_code = status_code
+        self.content = content
+        self.text = content.decode("utf-8", errors="replace")
 
 
 def _provider(post_handler) -> OpenAICompatibleProvider:
@@ -67,7 +69,7 @@ async def test_probe_treats_429_as_reachable():
         await provider.close()
 
 
-@pytest.mark.parametrize("code", [400, 401, 403, 404, 500, 503])
+@pytest.mark.parametrize("code", [400, 401, 403, 500, 503])
 async def test_probe_raises_on_failure_codes(code):
     async def post(*a, **k):
         return _Resp(code)
@@ -76,6 +78,59 @@ async def test_probe_raises_on_failure_codes(code):
     try:
         with pytest.raises(LLMError):
             await provider.probe(model=DEEPSEEK_V4_FLASH)
+    finally:
+        await provider.close()
+
+
+async def test_probe_404_path_blames_base_url_when_body_empty():
+    async def post(*a, **k):
+        return _Resp(404)
+
+    provider = _provider(post)
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert "base_url" in str(ei.value)
+        assert "默认模型" not in str(ei.value)
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"error":{"message":"Not found the model xxx","code":"resource_not_found"}}',
+        b'{"error":{"message":"Permission denied: model not allowed","type":"invalid_request_error"}}',
+        b'{"error":{"message":"The model `foo` does not exist","code":"model_not_found"}}',
+    ],
+)
+async def test_probe_404_model_guides_change_default_model(body):
+    async def post(*a, **k):
+        return _Resp(404, content=body)
+
+    provider = _provider(post)
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model="stale-model")
+        msg = str(ei.value)
+        assert "base_url" not in msg
+        assert "默认模型" in msg or "model" in msg.lower() or "Model" in msg
+    finally:
+        await provider.close()
+
+
+async def test_probe_404_model_prefers_upstream_error_message():
+    body = b'{"error":{"message":"Not found the model gpt-old","code":"resource_not_found"}}'
+
+    async def post(*a, **k):
+        return _Resp(404, content=body)
+
+    provider = _provider(post)
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model="gpt-old")
+        assert "Not found the model gpt-old" in str(ei.value)
+        assert "base_url" not in str(ei.value)
     finally:
         await provider.close()
 

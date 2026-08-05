@@ -3,13 +3,17 @@ import {
   isExecutionHarvestMessage,
 } from "@/lib/executionHarvest";
 import { ensureTimelineMarkersFromJournal } from "@/lib/foldMessageLane";
+import { logEvent } from "@/lib/log";
 import { promoteScalarContentIntoProcess } from "@/lib/processTimeline";
 import { api } from "@/services/api";
+import { persistOpenedCache } from "@/services/offlineCache";
 import { surfaceResumeFromAssistant } from "@/services/resume";
 import {
   type MemoryUpdate,
   type Message,
   getRuntime,
+  isMessageWindowResident,
+  isMessageWindowStrictlyRicher,
   useConversationStore,
 } from "@/stores/conversation";
 import { hydrateInteractionsFromJournal } from "@/stores/interactions";
@@ -468,14 +472,139 @@ export async function loadNewerMessages(conversationId: string): Promise<void> {
 }
 
 /**
+ * Soft background refresh (harvest / detached catch-up): applies the full
+ * whole-window write gates, including active+hasMoreAfter (do not yank the
+ * user off mid-history). Intentional snap (composer send / 「跳到最新」) omit
+ * this flag so hasMoreAfter + non-dominating latest windows may still apply.
+ */
+export type LoadLatestWindowOpts = {
+  softRefresh?: boolean;
+};
+
+/**
+ * Warm open write policy (消息窗写入契约 step 3):
+ * - generating → keep live slice (no network window replace)
+ * - destination (pendingFocus / ?msg=) → keep current slice for jump/load-around
+ * - else (sidebar reopen / A→B→A) → explicit latest snap (not softRefresh)
+ */
+export type WarmOpenAction = "skip_generating" | "keep_anchor" | "snap_latest";
+
+export function decideWarmOpenAction(opts: {
+  isGenerating: boolean;
+  hasDestination: boolean;
+}): WarmOpenAction {
+  if (opts.isGenerating) return "skip_generating";
+  if (opts.hasDestination) return "keep_anchor";
+  return "snap_latest";
+}
+
+/**
  * Reload the latest window, replacing whatever is on screen. Used to snap back
  * to the live head before a new turn when the user is reading a historical
  * window (a search-hit jump left `hasMoreAfter`), so the turn appends at the
  * true tail rather than into a mid-conversation gap.
  */
-export async function loadLatestWindow(conversationId: string): Promise<void> {
+export async function loadLatestWindow(
+  conversationId: string,
+  opts: LoadLatestWindowOpts = {},
+): Promise<boolean> {
+  const softRefresh = opts.softRefresh === true;
+
+  const reject = (
+    action: string,
+    fields: Record<string, unknown> = {},
+  ): false => {
+    const s = useConversationStore.getState();
+    const rt = s.byId[conversationId];
+    logEvent("info", "conversation.slice_diag", {
+      action,
+      conversation_id: conversationId,
+      active_id: s.currentConversationId,
+      soft_refresh: softRefresh,
+      message_count: rt?.messages.length ?? 0,
+      is_generating: rt?.isGenerating ?? false,
+      has_more_after: rt?.hasMoreAfter ?? false,
+      ...fields,
+    });
+    return false;
+  };
+
+  const storeBefore = useConversationStore.getState();
+  if (
+    !isMessageWindowResident(
+      storeBefore.currentConversationId,
+      storeBefore.byId,
+      conversationId,
+    )
+  ) {
+    return reject("reject_not_resident");
+  }
+  const before = storeBefore.byId[conversationId];
+  if (before?.isGenerating) {
+    return reject("reject_generating");
+  }
+  if (
+    softRefresh &&
+    storeBefore.currentConversationId === conversationId &&
+    before?.hasMoreAfter
+  ) {
+    return reject("reject_active_has_more_after");
+  }
+
   const win = await fetchMessageWindow(conversationId);
   const store = useConversationStore.getState();
+  if (
+    !isMessageWindowResident(
+      store.currentConversationId,
+      store.byId,
+      conversationId,
+    )
+  ) {
+    return reject("reject_not_resident", { after_count: win.messages.length });
+  }
+  const rt = store.byId[conversationId];
+  if (rt?.isGenerating) {
+    return reject("reject_generating", { after_count: win.messages.length });
+  }
+  if (
+    softRefresh &&
+    store.currentConversationId === conversationId &&
+    rt?.hasMoreAfter
+  ) {
+    return reject("reject_active_has_more_after", {
+      after_count: win.messages.length,
+    });
+  }
+
+  const existing = rt?.messages ?? [];
+  const snapPastHistory =
+    !softRefresh &&
+    store.currentConversationId === conversationId &&
+    (rt?.hasMoreAfter ?? false);
+  if (
+    existing.length > 0 &&
+    !snapPastHistory &&
+    !isMessageWindowStrictlyRicher(win.messages, existing)
+  ) {
+    return reject("reject_not_richer", {
+      before_count: existing.length,
+      after_count: win.messages.length,
+    });
+  }
+
+  logEvent("info", "conversation.slice_diag", {
+    action: "load_latest_window",
+    conversation_id: conversationId,
+    active_id: store.currentConversationId,
+    soft_refresh: softRefresh,
+    before_count: before?.messages.length ?? 0,
+    after_count: win.messages.length,
+    has_more_after: win.hasMoreAfter,
+    has_more_before: win.hasMoreBefore,
+    replaced_while_background:
+      store.currentConversationId !== null &&
+      store.currentConversationId !== conversationId,
+  });
   store.setMessageWindow(
     win.messages,
     { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
@@ -483,6 +612,12 @@ export async function loadLatestWindow(conversationId: string): Promise<void> {
   );
   // Latest window owns the tail cards; replace them (older/around pages return none).
   store.setMemoryUpdates(win.memoryUpdates, conversationId);
+  // Trusted write only — reject paths above return without persisting.
+  void persistOpenedCache(conversationId, win.messages, win.memoryUpdates, {
+    hasMoreBefore: win.hasMoreBefore,
+    hasMoreAfter: win.hasMoreAfter,
+  });
+  return true;
 }
 
 /**
@@ -505,7 +640,7 @@ export async function jumpToMessage(
     (m) => m.id === messageId || m.serverMessageId === messageId,
   );
   if (present) {
-    store.focusMessage(present.id);
+    store.focusMessage(present.id, conversationId);
     return;
   }
   try {
@@ -530,7 +665,8 @@ export async function jumpToMessage(
       const hit = msgs.find(
         (m) => m.id === messageId || m.serverMessageId === messageId,
       );
-      if (hit) useConversationStore.getState().focusMessage(hit.id);
+      if (hit)
+        useConversationStore.getState().focusMessage(hit.id, conversationId);
     });
   } catch {
     /* message gone / not owned — leave the conversation as-is */
@@ -566,7 +702,7 @@ export async function setMessageFeedback(
   const prev =
     store.byId[conversationId]?.messages.find((m) => m.id === messageId)
       ?.feedback ?? null;
-  store.updateMessage(messageId, { feedback });
+  store.updateMessage(messageId, { feedback }, conversationId);
   try {
     await api.patch(
       `/v1/conversations/${conversationId}/messages/${messageId}/feedback`,
@@ -575,7 +711,7 @@ export async function setMessageFeedback(
   } catch (err) {
     useConversationStore
       .getState()
-      .updateMessage(messageId, { feedback: prev });
+      .updateMessage(messageId, { feedback: prev }, conversationId);
     throw err;
   }
 }

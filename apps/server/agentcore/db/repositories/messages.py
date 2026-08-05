@@ -159,6 +159,19 @@ class MessageRepository:
                     incoming_status=incoming_status,
                 )
                 write_usage = merge_usage_status(existing.usage, metadata)
+        # Final gate: strip vendor DSML / tool-protocol residue + length ceiling
+        # (complete / paused / incomplete all land here). Live checkpoints stay dirty.
+        # Incomplete / cancel salvage also truncates at the first DSML open tag.
+        from agentcore.core.assistant_content import prepare_assistant_content
+        from agentcore.core.message_merge import MESSAGE_STATUS_INCOMPLETE
+
+        status_for_prep = (write_usage or {}).get("status") or (metadata or {}).get(
+            "status"
+        )
+        write_content = prepare_assistant_content(
+            write_content or "",
+            salvage=status_for_prep == MESSAGE_STATUS_INCOMPLETE,
+        )
         values: dict = {
             "id": mid,
             "conversation_id": conversation_id,

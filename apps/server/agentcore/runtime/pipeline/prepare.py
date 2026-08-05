@@ -275,6 +275,7 @@ async def prepare_fresh_turn(
     )
     from agentcore.runtime.closing_posture import (
         clear_cloud_web_verify_gap,
+        clear_cutoff_delivery_gap,
         clear_unresolved_write_ownership,
     )
     from agentcore.runtime.coordination.session import current_execution_id
@@ -285,6 +286,7 @@ async def prepare_fresh_turn(
     # Fresh turn: prior batch delivery verdict must not leak into finish_guard.
     current_delivery_verdict.set(None)
     clear_cloud_web_verify_gap()
+    clear_cutoff_delivery_gap()
     clear_unresolved_write_ownership()
 
     # Pillar B: if a background execution is already live for this conversation,

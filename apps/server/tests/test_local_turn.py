@@ -1,4 +1,4 @@
-"""Unit tests for the sidecar local-turn write-back (双模式工作区 / 远期规划 §一.1).
+"""Unit tests for the sidecar local-turn write-back (双模式工作区 §十).
 
 ``record_local_turn`` routes through ``CloudStore.finalize(mode="local")`` — content +
 status + journal, no cost ledger. All DB collaborators are faked (镜像 ``test_handoff_job``).

@@ -277,13 +277,33 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
 
   it("routes read / list through the dispatcher", async () => {
     await run("write", { path: "hello.txt", content: "hi" });
+    await run("mkdir", { path: "subdir" });
     expect(valOf(await run("read", { path: "hello.txt" }))).toBe("hi");
     const entries = valOf(
       await run("list", { directory: ".", pattern: "*" }),
     ) as {
       path: string;
+      is_dir: boolean;
+      size_bytes: number | null;
+      mtime_ms: number | null;
     }[];
-    expect(entries.some((e) => e.path === "hello.txt")).toBe(true);
+    const hello = entries.find((e) => e.path === "hello.txt");
+    expect(hello).toMatchObject({
+      is_dir: false,
+      size_bytes: 2,
+    });
+    expect(hello?.mtime_ms).toEqual(expect.any(Number));
+    expect(hello).toBeDefined();
+    if (!hello || hello.mtime_ms == null) {
+      throw new Error("expected hello.txt entry with mtime_ms");
+    }
+    expect(hello.mtime_ms).toBeGreaterThan(0);
+    const sub = entries.find((e) => e.path === "subdir");
+    expect(sub).toMatchObject({
+      is_dir: true,
+      size_bytes: null,
+    });
+    expect(sub?.mtime_ms).toEqual(expect.any(Number));
   });
 
   it("index_files returns a flat, ignore-pruned, posix-sorted file list", async () => {

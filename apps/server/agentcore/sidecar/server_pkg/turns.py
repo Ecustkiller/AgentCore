@@ -157,7 +157,7 @@ class TurnExecutionMixin:
                     # Sidecar is spawned only by the desktop Electron host. Pass
                     # platform=desktop so prepare builds DesktopClientChannel and
                     # MCP/Host discover over the existing ClientTool fulfill path
-                    # (docs/06-规划/本机引擎MCP-Host回填接通定案.md P0). Never infer
+                    # (docs/02-架构/双模式工作区.md · Host / 本机回填). Never infer
                     # desktop_online from location=local.
                     # Bind inference JWT for web_search cloud fallback when local
                     # SearXNG is unreachable (ContextVar; reset after turn).

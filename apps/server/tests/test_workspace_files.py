@@ -105,6 +105,38 @@ async def test_uploaded_file_appears_in_listing():
     assert "sub/deep.txt" in deep
 
 
+async def test_list_entries_include_size_and_mtime():
+    """Cloud list fills file size/mtime; directories keep size_bytes=None."""
+    body = b"hello-meta"
+    await upload_file(
+        user_id="u1",
+        folder_id="f1",
+        conversation_id="c1",
+        path="nested/note.txt",
+        data=body,
+    )
+    top = {
+        e.path: e
+        for e in await list_files(user_id="u1", folder_id="f1", conversation_id="c1")
+    }
+    assert "nested" in top
+    assert top["nested"].is_dir is True
+    assert top["nested"].size_bytes is None
+    if top["nested"].mtime_ms is not None:
+        assert top["nested"].mtime_ms > 0
+
+    by_path = {
+        e.path: e
+        for e in await list_files(
+            user_id="u1", folder_id="f1", conversation_id="c1", recursive=True
+        )
+    }
+    file_entry = by_path["nested/note.txt"]
+    assert file_entry.is_dir is False
+    assert file_entry.size_bytes == len(body)
+    assert file_entry.mtime_ms is not None and file_entry.mtime_ms > 0
+
+
 async def test_download_missing_raises():
     with pytest.raises(PathNotFound):
         await download_file(user_id="u1", folder_id="f1", conversation_id="c1", path="ghost.bin")

@@ -14,7 +14,13 @@
  * 自动更新可观测（主进程直写）：`updater.configure` / `updater.schedule_start` /
  * `updater.policy` / `updater.check_begin|end` / `updater.phase` /
  * `updater.download_begin|progress|end` / `updater.error` / `updater.quit_and_install`
- *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点）。
+ *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点；
+ * `configure` 另记 `disableDifferentialDownload`——临时全量开关是否开启）。
+ * 切对话消息窗诊断（临时）：`conversation.slice_diag`（`action`=
+ * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
+ *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
+ * `load_latest_window` / `open_decide` / `reject_not_resident` /
+ * `reject_not_richer` / `reject_generating` / `reject_active_has_more_after` 等）。
  * 铁律：禁止把 token / 密码 / 消息正文放进 `fields`（只记可观测信号，不记机密与正文）。
  *
  * 与 ipc-contract（文件系统）/ sidecar-contract（本地引擎）/ updater-contract（自动更新）

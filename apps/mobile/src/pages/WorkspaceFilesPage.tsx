@@ -4,7 +4,6 @@ import {
   listWorkspaceFilesByWs,
   uploadWorkspaceFileByWs,
 } from "@/api/workspaces";
-import { CollaborationSummaryList } from "@/components/CollaborationSummaryList";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // Browse ONE cloud workspace's files (手机端布局重构 · 跨工作区文件总览).
 //
@@ -13,6 +12,7 @@ import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // <FileBrowser> over a first-class workspace source (api/workspaces.ts), the cross-workspace
 // sibling of the per-conversation /c/:id/files. The workspace name rides in router state from
 // the list so the header shows it without a refetch.
+// 协作摘要已从本页拿掉：文件页只做浏览/预览/上传；项目协作时间线留桌面（手机暂无入口）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -87,12 +87,11 @@ export function WorkspaceFilesPage() {
         <input
           ref={uploadInputRef}
           type="file"
+          accept="image/*,.pdf,.md,.markdown,.txt,.json,.csv,.html,.css,.js,.ts,.tsx,.py,.zip,text/*"
           style={{ display: "none" }}
           onChange={(e) => void onPickUpload(e)}
         />
       </header>
-
-      <CollaborationSummaryList wsId={wsId} />
 
       <FileBrowser
         source={source}
@@ -100,6 +99,7 @@ export function WorkspaceFilesPage() {
         onCwdChange={setCwd}
         reloadKey={reloadKey}
         emptyHint="此工作区还没有文件。"
+        onUpload={() => uploadInputRef.current?.click()}
       />
 
       {uploadError && <div className="error bar">{uploadError}</div>}

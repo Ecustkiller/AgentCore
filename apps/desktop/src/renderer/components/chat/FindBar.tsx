@@ -24,6 +24,7 @@ export function FindBar({
 }) {
   const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const openSearch = useUIStore((s) => s.openSearch);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -50,7 +51,7 @@ export function FindBar({
     const q = query.trim().toLowerCase();
     if (!q) return;
     const first = messages.find((m) => m.content.toLowerCase().includes(q));
-    if (first) focusMessage(first.id);
+    if (first) focusMessage(first.id, conversationId);
   }, [query]);
 
   if (!open) return null;
@@ -62,7 +63,7 @@ export function FindBar({
     if (matches.length === 0) return;
     const next = (index + delta + matches.length) % matches.length;
     setIndex(next);
-    focusMessage(matches[next]);
+    focusMessage(matches[next], conversationId);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

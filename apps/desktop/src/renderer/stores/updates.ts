@@ -1,7 +1,8 @@
 import { hasAutoUpdater } from "@/lib/capabilities";
 import { clientVersion } from "@/lib/clientBuildInfo";
 import { compareSemver, isDesktopVersionOutdated } from "@/lib/desktopVersion";
-import { notifyInfo } from "@/lib/toast";
+import { formatBytes } from "@/lib/format";
+import { notifyActionError, notifyInfo } from "@/lib/toast";
 import { uiGet, uiSet } from "@/lib/uiStorage";
 import { BASE_URL } from "@/services/api";
 import { fetchUpdatesPolicy } from "@/services/system";
@@ -10,10 +11,11 @@ import { create } from "zustand";
 
 /**
  * 自动更新状态的前端落点（发布与门禁.md §7.6）。主进程权威持有状态机；发现新版本后
- * **不**自动下载——本 store 弹说明窗，用户同意后再 `download()`。订阅在应用外壳启动
- * （`startUpdates`），故说明窗 / 就绪 toast 与「关于」页状态在任何路由下都能更新。
+ * **不**自动下载——本 store 弹说明窗，用户同意后再 `download()`。软更新：同意后立刻关窗
+ * + 短 toast，后台静默下载；进度在「设置 · 关于」；就绪 sticky toast。强制更新硬闸仍全屏
+ * 跟进度。订阅在应用外壳启动（`startUpdates`）。
  *
- * 另：强制更新硬闸（`outdatedMinVersion`）在启动时拉 `GET /updates/policy`，本地低于
+ * 硬闸（`outdatedMinVersion`）在启动时拉 `GET /updates/policy`，本地低于
  * `min_desktop_version` 时由 AppShell 全屏硬遮罩挡住；不可关闭，只能走更新流程。
  * 硬闸激活时 skip/snooze 无效。拉取失败 fail-open（不拦）。
  */
@@ -116,7 +118,10 @@ interface UpdatesState {
    * 跳过偏好——用户显式点了检查）。
    */
   check: () => Promise<void>;
-  /** Start downloading the available update. */
+  /**
+   * 开始下载当前可用更新。软更新：立刻关说明窗 + toast「正在后台下载」；硬闸下不关窗、
+   * 不 toast（由 ForceUpdateGate / 说明窗跟进度）。
+   */
   download: () => Promise<void>;
   /** Snooze auto-prompt for current available version for 24h. No-op under hard gate. */
   remindLater: () => void;
@@ -153,6 +158,24 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
   download: async () => {
     const api = getUpdaterApi();
     if (!api) return;
+    const force = isForceUpdateActive();
+    const { status } = useUpdatesStore.getState();
+    if (!force) {
+      useUpdatesStore.setState({ dialogOpen: false });
+      if (status.phase === "available") {
+        const sizeHint =
+          status.sizeBytes != null && status.sizeBytes > 0
+            ? `（约 ${formatBytes(status.sizeBytes)}）`
+            : "";
+        notifyInfo(`正在后台下载 ${status.version}${sizeHint}`, {
+          description: "进度可在「设置 · 关于」查看",
+        });
+      } else if (status.phase === "error") {
+        notifyInfo("正在后台重试下载…", {
+          description: "进度可在「设置 · 关于」查看",
+        });
+      }
+    }
     try {
       await api.download();
     } catch {
@@ -197,6 +220,8 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
 
 // 已弹过「就绪」提示的版本——防同一版本在多次轮询 / 系统唤醒后重复 toast。
 let notifiedVersion = "";
+/** 软更新失败 toast 去重（同 message 不连弹）。 */
+let notifiedErrorMessage = "";
 
 function maybeOpenDialogForStatus(
   status: UpdaterStatus,
@@ -224,8 +249,8 @@ async function pollOutdatedPolicy(): Promise<void> {
 
 /**
  * 在应用外壳挂载时启动：同步初始状态 + 订阅推送写入 store。发现可用版本时按
- * skip/snooze 决定是否弹说明窗（硬闸激活时忽略 skip/snooze）；下载完毕弹 sticky
- * 「重启安装」（§7.6）。返回取消订阅函数。
+ * skip/snooze 决定是否弹说明窗（硬闸激活时忽略 skip/snooze）；软更新下载失败 toast；
+ * 下载完毕 sticky「重启安装」（§7.6）。返回取消订阅函数。
  *
  * 非 Electron / preload 未注入 `window.updaterApi`（如纯浏览器打开 Vite 端口）时 no-op，
  * 状态置 `unsupported`，与契约「dev 态不生效」一致。
@@ -256,7 +281,11 @@ export function startUpdates(): () => void {
     if (status.phase === "available") {
       const force = forcePromptAfterCheck;
       forcePromptAfterCheck = false;
+      notifiedErrorMessage = "";
       maybeOpenDialogForStatus(status, { force });
+    } else if (status.phase === "downloading") {
+      forcePromptAfterCheck = false;
+      notifiedErrorMessage = "";
     } else if (status.phase !== "checking") {
       forcePromptAfterCheck = false;
     }
@@ -275,6 +304,16 @@ export function startUpdates(): () => void {
         },
       });
     }
+
+    // 软更新：失败不重开说明窗，toast +「关于」可重试；硬闸由门面展示错误。
+    if (
+      status.phase === "error" &&
+      !isForceUpdateActive() &&
+      status.message !== notifiedErrorMessage
+    ) {
+      notifiedErrorMessage = status.message;
+      notifyActionError("更新失败", status.message);
+    }
   });
 }
 
@@ -282,4 +321,5 @@ export function startUpdates(): () => void {
 export function __resetUpdatesModuleForTests(): void {
   forcePromptAfterCheck = false;
   notifiedVersion = "";
+  notifiedErrorMessage = "";
 }

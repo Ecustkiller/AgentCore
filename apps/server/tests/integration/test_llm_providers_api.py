@@ -235,10 +235,27 @@ async def test_model_profile_rejects_foreign_provider(client, byok):
 
 
 class _FakeProvider:
-    def __init__(self, *, fail: bool, supports_tools: bool | None = True) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool,
+        supports_tools: bool | None = True,
+        model_ids: list[str] | None = None,
+    ) -> None:
         self._fail = fail
         self._supports_tools = supports_tools
+        self._model_ids = model_ids if model_ids is not None else ["gpt-4o-mini"]
         self.probe_model: str | None = None
+        self.list_models_called = False
+
+    async def list_models(self) -> list[str]:
+        self.list_models_called = True
+        if self._fail:
+            # Force fallback to probe so fail=True still exercises probe error path.
+            from agentcore.core.errors import LLMError
+
+            raise LLMError("list_models unavailable")
+        return list(self._model_ids)
 
     async def probe(self, *, model: str) -> None:
         self.probe_model = model
@@ -258,14 +275,18 @@ async def test_test_provider_active_on_success(client, byok, monkeypatch):
         await client.post(_BASE, json={"api_key": "sk-good-4242", "default_model": "gpt-4o-mini"})
     ).json()
     fake = _FakeProvider(fail=False, supports_tools=True)
-    monkeypatch.setattr("agentcore.llm.provider_service.build_provider", lambda creds: fake)
+    monkeypatch.setattr(
+        "agentcore.llm.provider_service.build_provider",
+        lambda creds, **kwargs: fake,
+    )
 
     r = await client.post(f"{_BASE}/{created['id']}/test")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "active"
     assert body["supports_tools"] is True
-    assert fake.probe_model == "gpt-4o-mini"
+    assert fake.list_models_called is True
+    assert fake.probe_model is None  # /models success → skip probe
 
     persisted = (await client.get(_BASE)).json()["providers"][0]
     assert persisted["status"] == "active"
@@ -277,7 +298,7 @@ async def test_test_provider_error_on_probe_failure(client, byok, monkeypatch):
     created = (await client.post(_BASE, json={"api_key": "sk-bad-0000"})).json()
     monkeypatch.setattr(
         "agentcore.llm.provider_service.build_provider",
-        lambda creds: _FakeProvider(fail=True),
+        lambda creds, **kwargs: _FakeProvider(fail=True),
     )
     r = await client.post(f"{_BASE}/{created['id']}/test")
     assert r.status_code == 200, r.text

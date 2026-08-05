@@ -103,7 +103,13 @@ export async function opList(
 
   const recursive = pattern.includes("**");
   const re = globToRegExp(pattern);
-  const results: { path: string; is_dir: boolean }[] = [];
+  type ListEntry = {
+    path: string;
+    is_dir: boolean;
+    size_bytes: number | null;
+    mtime_ms: number | null;
+  };
+  const results: ListEntry[] = [];
   const listBaseRel = (() => {
     const d = directory.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
     return d === "." ? "" : d;
@@ -141,9 +147,23 @@ export async function opList(
         continue;
       const childRel = relFromBase ? `${relFromBase}/${d.name}` : d.name;
       if (re.test(childRel)) {
+        const childAbs = join(absDir, d.name);
+        // Symmetry with server DirEntry: file size + mtime_ms; dirs size null.
+        // Per-entry stat failure → empty metadata, do not fail the whole list.
+        let size_bytes: number | null = null;
+        let mtime_ms: number | null = null;
+        try {
+          const st = await fs.stat(childAbs);
+          size_bytes = isDir ? null : st.size;
+          mtime_ms = Math.trunc(st.mtimeMs);
+        } catch {
+          /* leave nulls */
+        }
         results.push({
-          path: toPosix(relative(root.absPath, join(absDir, d.name))),
+          path: toPosix(relative(root.absPath, childAbs)),
           is_dir: isDir,
+          size_bytes,
+          mtime_ms,
         });
       }
       if (recursive && isDir && depth + 1 <= LIST_FILES_MAX_DEPTH) {

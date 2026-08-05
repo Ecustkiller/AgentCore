@@ -59,7 +59,7 @@ describe("AutonomySettings", () => {
         /新会话默认：本会话信任改文件；自动执行；组团卡按规则。$/,
       ),
     ).toBeTruthy();
-    expect(screen.getByText(/手机暂不支持在会话内改四轴/)).toBeTruthy();
+    expect(screen.getByText(/对话页「＋」→ 本会话权限/)).toBeTruthy();
 
     const selected = screen.getByRole("radio", {
       name: /少打断/,

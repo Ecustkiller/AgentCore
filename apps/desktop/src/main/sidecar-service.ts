@@ -40,7 +40,7 @@ import { logDesktop } from "./log-service";
 import { listUnsyncedSummaries, sidecarDataDir } from "./outbox-writeback";
 import { SidecarEventBuffer } from "./sidecar-event-buffer";
 
-// 本地回合的审批门（双模式工作区 / 远期规划 §一）。开启后，sidecar 引擎对 worker 的「碰真实
+// 本地回合的审批门（双模式工作区 §十）。开启后，sidecar 引擎对 worker 的「碰真实
 // 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
 // 审批请求随回合事件流回 renderer，用户的决定经 `window.sidecarApi.respond` 结算回这条 stdio
 // 链路（renderer 把统一结算入口 `resolveInteraction` 在本地回合改走 sidecar）。
@@ -152,7 +152,7 @@ function currentBrowserBridge(): { baseUrl: string; token: string } | null {
 /**
  * 解析拉起 sidecar 的命令。
  *
- * **打包态**（`app.isPackaged`）走**内置 Python 运行时**（远期规划 §一.1「内置 Python 打包」
+ * **打包态**（`app.isPackaged`）走**内置 Python 运行时**（双模式工作区 §十「内置 Python 打包」
  * 方案 B）：随包带一份独立 CPython 发行版 + `--target` 装好的 site-packages（构建见
  * `scripts/bundle-sidecar.mjs`），由 electron-builder `extraResources` 拷到
  * `process.resourcesPath/sidecar`。用户机器**无需任何系统 Python / venv / uv**；引擎包不在

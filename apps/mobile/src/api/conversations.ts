@@ -160,12 +160,21 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!res.ok) throw new Error(`删除失败 (${res.status})`);
 }
 
-/** Create a fresh cloud conversation and return its id (skeleton: no folder/mode). */
-export async function createConversation(title?: string): Promise<string> {
+/** Create a fresh cloud conversation and return its id (skeleton: no folder/mode).
+ *  Optional ``permission_axes`` seeds this session (else account default recipe). */
+export async function createConversation(
+  title?: string,
+  opts?: { permission_axes?: Schemas["PermissionAxesModel"] | null },
+): Promise<string> {
   const res = await apiFetch("/v1/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: title ?? null }),
+    body: JSON.stringify({
+      title: title ?? null,
+      ...(opts?.permission_axes
+        ? { permission_axes: opts.permission_axes }
+        : {}),
+    }),
   });
   if (!res.ok) throw new Error(`创建会话失败 (${res.status})`);
   const data = (await res.json()) as { id: string };

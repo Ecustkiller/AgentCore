@@ -716,6 +716,9 @@ def test_build_website_style_toolshed_three_chain_injects_tool_dense():
     assert "catalog:data_table" in fe
     assert "审美域·工具页" in by_id["copy"]["task"]
     assert "信息架构" in by_id["copy"]["task"]
+    assert "正向配方·工具台" in fe
+    assert "#2563eb" in fe
+    assert "单一视觉焦点" not in fe
     toolshed_secs = by_id["copy"]["deliverable"]["required_sections"]
     assert toolshed_secs[0] == "信息架构"
     assert "产品一句话" in toolshed_secs

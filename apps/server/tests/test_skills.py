@@ -55,6 +55,8 @@ def test_registry_registers_the_system_skills():
         "team_orchestration_advanced",
         "work_discipline",
         "product_help",
+        "product_help_map",
+        "product_help_faq",
         "build_website",
         "build_app",
         "debate_and_review",
@@ -95,6 +97,8 @@ def test_available_hides_gated_skills_without_required_tools():
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert "team_orchestration_advanced" in available
     assert "product_help" in available  # requires_tools=() — always listed
+    assert "product_help_map" in available
+    assert "product_help_faq" in available
     assert "build_website" in available
     assert "debate_and_review" in available
     assert "revising_a_product" in available
@@ -134,8 +138,12 @@ def test_directory_preamble_carves_out_product_help_consult():
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
     assert CONSULT_PRODUCT_HELP_BY_SCENE in out
     assert "必查 `product_help`" in out
+    assert "product_help_map" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert "product_help_faq" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "纯对话式回答自己答即可，无需 consult" not in out
     assert "- product_help：" in out
+    assert "- product_help_map：" in out
+    assert "- product_help_faq：" in out
 
 
 def test_directory_omits_gated_skills_on_autonomous_path():
@@ -178,7 +186,7 @@ async def test_consult_skill_returns_body_on_hit():
 
 
 async def test_consult_skill_product_help_hit():
-    """验收：consult_skill('product_help') 命中；目录可列出。"""
+    """验收：consult_skill('product_help') 命中；目录可列出三级披露。"""
     reg = build_system_skill_registry()
     skill = reg.get("product_help")
     assert skill is not None
@@ -189,7 +197,15 @@ async def test_consult_skill_product_help_hit():
     assert result.output == skill.body
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- product_help：" in directory
+    assert "- product_help_map：" in directory
+    assert "- product_help_faq：" in directory
     assert skill.summary in directory
+    for name in ("product_help_map", "product_help_faq"):
+        sibling = reg.get(name)
+        assert sibling is not None
+        hit = await tool.execute({"name": name}, _ctx())
+        assert hit.success
+        assert hit.output == sibling.body
 
 
 async def test_consult_skill_build_website_hit():
@@ -325,22 +341,39 @@ def test_work_discipline_skill_teaches_design_and_patch_tripwires():
     assert "escalate" in body
     # worker 自主度不进本 skill（已在 identity）
     assert "小问题（路径拼写" not in body
+    # 定稿漂移 A′：写 task 须含「已确认约束」
+    assert "已确认约束" in body
 
 
 def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
-    body = _body("product_help")
-    assert "短答" in body
-    assert "禁内部名" in body
-    assert "ask_user" in body  # teach: don't say these to users
-    assert "#/toolbox/manual/" in body
-    assert "?s=what" in body and "?s=faq" in body
-    assert "手机" in body and "勿承诺" in body
-    assert "Multi-Agent" in body or "工作台" in body
-    assert "为什么没组团" in body
-    assert "RAG" in body  # forbid
-    # user-facing FAQ must be self-contained (not "see internal X")
-    assert "playbook=" not in body
-    assert "SSE" in body  # ban list only
+    """二级披露：答法在 product_help；入口/深链在 map；FAQ 在 faq。"""
+    help_body = _body("product_help")
+    map_body = _body("product_help_map")
+    faq_body = _body("product_help_faq")
+
+    assert "短答" in help_body
+    assert "禁内部名" in help_body
+    assert "ask_user" in help_body  # teach: don't say these to users
+    assert "功能总览" in help_body and "≤3" in help_body
+    assert "product_help_map" in help_body and "product_help_faq" in help_body
+    assert "【入口地图】" not in help_body
+    assert "【FAQ 精华】" not in help_body
+    # 答法可举例 FAQ 题名作分流；完整短答须只在 faq body
+    assert "一人答更快就直接干" not in help_body
+    assert "Multi-Agent" in help_body or "工作台" in help_body
+    assert "RAG" in help_body  # forbid
+    assert "playbook=" not in help_body
+    assert "SSE" in help_body  # ban list only
+
+    assert "【入口地图】" in map_body
+    assert "#/toolbox/manual/" in map_body
+    assert "手机" in map_body and "勿承诺" in map_body
+    assert "?s=workspace" in map_body or "workspace" in map_body
+
+    assert "【FAQ 精华】" in faq_body
+    assert "为什么没组团" in faq_body
+    assert "?s=faq" in faq_body
+    assert "playbook=" not in faq_body
 
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
@@ -483,6 +516,9 @@ def test_team_orchestration_skill_teaches_seed_notes_and_team_brief():
     assert 'coordination="wall"' in body or "coordination" in body
     assert "wall" in body and "none" in body
     assert "正交" in body or "互不依赖" in body
+    # 定稿漂移 A′：team_brief / task 固定「已确认约束」；约束优先于附件旧表
+    assert "已确认约束" in body
+    assert "约束块优先" in body or "优先" in body
 
 
 def test_team_orchestration_skill_teaches_coordination_wall_vs_none():

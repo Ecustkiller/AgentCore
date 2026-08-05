@@ -8,10 +8,9 @@ import {
 import { useState } from "react";
 
 // 添加 / 编辑一个 BYOK 服务商 (设置·模型配置). Mobile-local vendor presets (no shared package
-// with desktop) prefill the endpoint / label; 「自定义」requires Base URL + default model.
-// Preset vendors: main path = vendor + name + Key; default_model is silent (preset default /
-// keep stored on edit). Base URL override lives under 高级. Chat model pick lives in
-// 模型组合, not this form.
+// with desktop) prefill the endpoint / label / default model; 「自定义」also requires Base URL.
+// Preset vendors: main path = vendor + name + Key + editable default model (连接测试 / 目录兜底).
+// Base URL override lives under 高级. Chat model pick lives in 模型组合, not this form.
 
 /** Mobile-local BYOK presets. */
 type ProviderId =
@@ -50,7 +49,7 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "Kimi (Moonshot)",
     baseUrl: "https://api.moonshot.cn/v1",
     baseUrlAliases: ["https://api.moonshot.ai/v1"],
-    defaultModel: "kimi-k2.5",
+    defaultModel: "kimi-k2.6",
   },
   {
     id: "zhipu",
@@ -220,7 +219,7 @@ export function ProviderForm({
         </select>
         {!isCustom && (
           <p className="section-note" style={{ marginTop: 4 }}>
-            选择后将预填名称与端点；对话用哪个模型请在「模型组合」中选择。
+            选择后将预填名称、端点与默认模型；对话用哪个模型请在「模型组合」中选择。
           </p>
         )}
       </div>
@@ -266,42 +265,41 @@ export function ProviderForm({
       </div>
 
       {isCustom && (
-        <>
-          <div className="field">
-            <label className="field-label" htmlFor="llm-base-url">
-              Base URL
-            </label>
-            <input
-              id="llm-base-url"
-              type="text"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://your-endpoint.example/v1"
-              autoComplete="off"
-              spellCheck={false}
-              className="text-input"
-            />
-          </div>
-          <div className="field">
-            <label className="field-label" htmlFor="llm-default-model">
-              默认模型名
-            </label>
-            <input
-              id="llm-default-model"
-              type="text"
-              value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder="model-name"
-              autoComplete="off"
-              spellCheck={false}
-              className="text-input"
-            />
-            <p className="section-note" style={{ marginTop: 4 }}>
-              连接测试与目录兜底用；日常选用请到「模型组合」。
-            </p>
-          </div>
-        </>
+        <div className="field">
+          <label className="field-label" htmlFor="llm-base-url">
+            Base URL
+          </label>
+          <input
+            id="llm-base-url"
+            type="text"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://your-endpoint.example/v1"
+            autoComplete="off"
+            spellCheck={false}
+            className="text-input"
+          />
+        </div>
       )}
+
+      <div className="field">
+        <label className="field-label" htmlFor="llm-default-model">
+          默认模型名
+        </label>
+        <input
+          id="llm-default-model"
+          type="text"
+          value={defaultModel}
+          onChange={(e) => setDefaultModel(e.target.value)}
+          placeholder="model-name"
+          autoComplete="off"
+          spellCheck={false}
+          className="text-input"
+        />
+        <p className="section-note" style={{ marginTop: 4 }}>
+          连接测试与目录兜底用；日常选用请到「模型组合」。
+        </p>
+      </div>
 
       {!isCustom && (
         <details

@@ -475,6 +475,38 @@ def test_core_reminds_pass_hidden_context_to_worker():
     assert "对话历史" in hint
 
 
+def test_core_teaches_confirmed_constraints_block_on_delegate():
+    """定稿漂移 A′：委派须固定「已确认约束」；有 ask 槽位写入、无卡亦枚举；约束优先于附件旧表。"""
+    hint = _CEO_CORE_HINT
+    assert "已确认约束" in hint
+    assert "ask_user" in hint
+    assert "自由文" in hint
+    assert "意图分类" in hint  # 禁止自动抽
+    assert "约束块优先" in hint or "优先" in hint
+    assert "附件" in hint
+    # 编排 skill 同口径
+    skill = _TEAM_ORCHESTRATION_ADVANCED
+    assert "已确认约束" in skill
+    assert "约束块优先" in skill or "优先" in skill
+
+
+def test_shared_base_teaches_howto_stale_path_honesty():
+    """howto 过时路径 A′：无现行可核 → 易变/待实测；覆盖零工具；收口≠伪精确菜单。"""
+    from agentcore.runtime.resolve.prompt import _DEFAULT_SYSTEM_PROMPT
+
+    assert "易变/待实测" in _DEFAULT_SYSTEM_PROMPT or "易变" in _DEFAULT_SYSTEM_PROMPT
+    assert "待实测" in _DEFAULT_SYSTEM_PROMPT
+    assert "零工具" in _DEFAULT_SYSTEM_PROMPT
+    assert "逐步菜单" in _DEFAULT_SYSTEM_PROMPT or "逐步点击" in _DEFAULT_SYSTEM_PROMPT
+    assert "现行可核" in _DEFAULT_SYSTEM_PROMPT
+    assert "当日" in _DEFAULT_SYSTEM_PROMPT  # 明示不是机械日历门槛
+    assert "摘要收口" in _DEFAULT_SYSTEM_PROMPT
+    assert "伪精确" in _DEFAULT_SYSTEM_PROMPT
+    # claim_evidence 旁对齐路径主张
+    assert "后台路径" in _DEFAULT_SYSTEM_PROMPT or "逐步点击" in _DEFAULT_SYSTEM_PROMPT
+    assert "<claim_evidence>" in _DEFAULT_SYSTEM_PROMPT
+
+
 def test_skill_teaches_constraint_vs_solution_boundary():
     # 认知分工边界（约束 vs 方案）: the CEO writes requirements/constraints into the
     # task, but leaves the deliverable's professional STRUCTURE (a paper's chapters /
@@ -487,6 +519,7 @@ def test_skill_teaches_constraint_vs_solution_boundary():
     # 审查 / 评估类「指路不代答」：初审线索走便签，不写进 task 替答。
     assert "seed_notes" in skill and "heads_up" in skill
     assert "引导性问题" in skill or "风险预判" in skill
+    assert "已确认约束" in skill
 
 
 def test_core_teaches_delegate_point_dont_answer():
@@ -851,6 +884,7 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     assert "系统提示" in block and "workspace_context" in block
     assert "怎么用" in block or "功能介绍" in block
     assert "consult_skill(product_help)" in block
+    assert "product_help_map" in block and "product_help_faq" in block
     assert "web_search" in block
     assert "工作区" in block and ("产品说明" in block or "平台手册" in block or "平台文档" in block)
 

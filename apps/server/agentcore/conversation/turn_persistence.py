@@ -195,6 +195,9 @@ def compose_salvage_content(
     ``journal_entries`` is preferred (hang-frame facts or an explicit snapshot). When
     omitted, the ambient :data:`current_fact_log` is used. Journals without
     ``turn_paused`` yield an empty base — same as legacy live-only salvage.
+
+    Truncates at the first DSML open tag (salvage B) before returning — unfinished
+    tool XML must not join the incomplete body.
     """
     entries = journal_entries
     if entries is None:
@@ -202,9 +205,11 @@ def compose_salvage_content(
         entries = log.entries() if log is not None else None
     snap = pre_pause_from_journal(entries)
     pre = (snap.content if snap is not None else "") or ""
+    from agentcore.core.assistant_content import prepare_assistant_content
     from agentcore.runtime.closing_posture import reconcile_resume_closing
 
-    return reconcile_resume_closing(pre, live or "")
+    joined = reconcile_resume_closing(pre, live or "")
+    return prepare_assistant_content(joined, salvage=True)
 
 
 def compose_salvage_journal(

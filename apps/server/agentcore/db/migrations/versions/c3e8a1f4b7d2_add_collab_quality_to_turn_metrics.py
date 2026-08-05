@@ -4,7 +4,7 @@ Revision ID: c3e8a1f4b7d2
 Revises: b1d7f3c9a2e4
 Create Date: 2026-06-29 11:30:00.000000
 
-学·度量 闸门 (docs/06-规划/远期规划.md §2.4): per-turn 协作质量 signals, the
+学·度量 闸门 (docs/02-架构/后端架构.md §五 / 管理员后台 §四): per-turn 协作质量 signals, the
 operator面 counterpart of the offline log_stats 方向盘. Four counters the turn already
 surfaces at chat.turn_complete (off the delegate/revise tool roll-ups), persisted so the
 admin 观测看板 can aggregate them with indexed SQL instead of scanning logs/dev.jsonl

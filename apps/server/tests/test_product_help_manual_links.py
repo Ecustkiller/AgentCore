@@ -1,9 +1,9 @@
-"""product_help ↔ desktop manual deep-link drift gate.
+"""product_help* ↔ desktop manual deep-link drift gate.
 
 Parses ``sectionIds.ts`` (+ ``paths.ts`` chapter keys) from the monorepo and
-asserts every ``#/toolbox/manual/...`` / bare ``?s=`` in the ``product_help``
-skill body lands in that registry (canonical ids + aliases). No TS→Python
-export — lightweight regex parse only.
+asserts every ``#/toolbox/manual/...`` / bare ``?s=`` in the ``product_help`` /
+``product_help_map`` / ``product_help_faq`` skill bodies lands in that registry
+(canonical ids + aliases). No TS→Python export — lightweight regex parse only.
 """
 
 from __future__ import annotations
@@ -303,11 +303,19 @@ def collect_manual_link_errors(body: str, registry: ManualRegistry) -> list[str]
     return errors
 
 
-def product_help_body() -> str:
-    skill = build_system_skill_registry().get("product_help")
-    _require(skill is not None, "product_help skill missing from system registry")
-    assert skill is not None
-    return skill.body
+_PRODUCT_HELP_SKILL_NAMES = ("product_help", "product_help_map", "product_help_faq")
+
+
+def product_help_bodies() -> str:
+    """Concatenate all product_help* bodies that may carry manual deep-links."""
+    reg = build_system_skill_registry()
+    parts: list[str] = []
+    for name in _PRODUCT_HELP_SKILL_NAMES:
+        skill = reg.get(name)
+        _require(skill is not None, f"{name} skill missing from system registry")
+        assert skill is not None
+        parts.append(skill.body)
+    return "\n".join(parts)
 
 
 # --- tests -------------------------------------------------------------------
@@ -326,17 +334,17 @@ def test_desktop_manual_registry_parses_nonempty():
 
 def test_product_help_manual_deeplinks_match_section_registry():
     reg = load_manual_registry()
-    body = product_help_body()
+    body = product_help_bodies()
     hits = extract_manual_links(body)
     assert any(h.kind == "full" for h in hits), "expected at least one full manual deep-link"
     assert any(h.kind == "bare" for h in hits), "expected at least one bare ?s= fragment"
     errors = collect_manual_link_errors(body, reg)
-    assert not errors, "product_help manual deep-link drift:\n- " + "\n- ".join(errors)
+    assert not errors, "product_help* manual deep-link drift:\n- " + "\n- ".join(errors)
 
 
 def test_intentional_dead_manual_links_fail_gate():
     reg = load_manual_registry()
-    body = product_help_body()
+    body = product_help_bodies()
     poisoned = (
         body
         + "\n深链：`#/toolbox/manual/intro?s=dead_section_xyz`\n"

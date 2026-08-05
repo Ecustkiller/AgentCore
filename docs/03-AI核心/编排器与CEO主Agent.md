@@ -1,5 +1,5 @@
 ﻿---
-status: blueprint
+status: landed
 code: apps/server/agentcore/
 related:
   - docs/03-AI核心/运行时总览.md
@@ -147,14 +147,12 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 纯路由器替换 CEO / 前置分类器 / Worker 直连 / 取消 CEO 综述 | 规划壁垒、编排税、不可观测、丧失「一个声音」 |
 | 累计 N 次只读软提醒护栏 | A/B 净负已移除；靠提示词边界 + 失控硬兜底 |
 | 默认加硬闸/软闸「优化服从度」 | **否决**；阶梯见 `.cursor/rules/intercept-discipline.mdc`（提示词→观测→一次性软提示→结构化硬拒） |
-| 扩大收口姿势 A / 完成话术正则冒充近零误报 | **否决**；✅ 已收窄撤回 20260803 扩面（非删闸）；书目闸独立保留 → [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md) |
-| 领域 kind 扩表（S2a/b）/ 按任务类型继续加 `completion_criteria` kind | **否决**（种类膨胀）；✅ S3 已删 kind 体系，接盘见上节 |
-| 边删 kind 边加新启发式完成硬闸；「验码绿」等伪装成新 kind | **否决**；与拦截纪律默认否决对齐 |
+| 扩大收口姿势 A / 完成话术正则冒充近零误报 | **否决** → [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md) |
+| 领域 kind 扩表 / 边删 kind 边加启发式完成硬闸 | **否决**；S3 接盘见上节 |
 | `validate_criteria_kind_fit` 扫 task 拟合硬闸 | ✅ **已随 S3 退役** |
-| `host_shell` fuse 改可批可跑（方案 B） | **否决**；削弱执行侧灾难闸 → [安全权限 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
-| 仅改熔断文案当终案（方案 D） | **否决当终案**（可作过渡）；✅ 方案 C 已落地：fuse 已覆盖形 breaker 直接 `DENY` |
-| 扫角色名静默改写 deliverable（`is_independent_review_role`） | **已删**；改靠 playbook/deliverable 结构；不加新 kind |
-| `consumer_deps` 软警告只打日志 | **已接通** CEO 可见结果尾（不拒收/不改图；禁升级硬拒） |
+| `host_shell` fuse 改可批可跑（B）/ 仅改文案当终案（D） | **否决** → [安全 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
+| 扫角色名静默改写 deliverable | **已删**（见上节） |
+| `consumer_deps` 软警告只打日志 | **已接通**（见上节） |
 
 ## 开场卡 / 检查点
 

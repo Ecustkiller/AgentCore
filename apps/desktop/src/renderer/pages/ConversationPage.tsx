@@ -8,17 +8,18 @@ import { SidePanel } from "@/components/layout/SidePanel";
 import { SidePanelFloatHost } from "@/components/layout/SidePanelFloatHost";
 import { SidePanelToggle } from "@/components/layout/SidePanelToggle";
 import { Button } from "@/components/ui";
-import { getConversations } from "@/hooks/useConversations";
 import { logEvent } from "@/lib/log";
 import { reconcileExternalGrants } from "@/lib/reconcileExternalGrants";
 import {
+  decideWarmOpenAction,
   fetchMessageWindow,
   jumpToMessage,
+  loadLatestWindow,
   shouldSetGeneratingOnHydrate,
 } from "@/services/messages";
 import {
-  cacheOpenedConversation,
   loadCachedConversation,
+  persistOpenedCache,
 } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
 import { runHydrateAttachSettle } from "@/services/turns";
@@ -46,6 +47,12 @@ function readMsgAnchor(): string | null {
   const q = hash.indexOf("?");
   if (q === -1) return null;
   return new URLSearchParams(hash.slice(q + 1)).get("msg");
+}
+
+function hasOpenDestination(conversationId: string): boolean {
+  const pending = useConversationStore.getState().pendingFocus;
+  if (pending?.conversationId === conversationId) return true;
+  return readMsgAnchor() != null;
 }
 
 function adoptMessageWindow(
@@ -84,29 +91,6 @@ function reconcileMessageWindow(
   return true;
 }
 
-async function persistOpenedCache(
-  id: string,
-  messages: Message[],
-  memoryUpdates: MemoryUpdate[],
-  flags: { hasMoreBefore: boolean; hasMoreAfter: boolean },
-): Promise<void> {
-  const listed = getConversations().find((c) => c.id === id);
-  const conversation = listed ?? {
-    id,
-    title: "对话",
-    updatedAt: new Date().toISOString(),
-    messageCount: messages.length,
-    lastMessagePreview: messages.at(-1)?.content?.slice(0, 80) ?? null,
-  };
-  await cacheOpenedConversation({
-    conversation,
-    messages,
-    memoryUpdates,
-    hasMoreBefore: flags.hasMoreBefore,
-    hasMoreAfter: flags.hasMoreAfter,
-  });
-}
-
 export function ConversationPage() {
   const { id } = useParams<{ id: string }>();
   const [hydratePhase, setHydratePhase] =
@@ -141,6 +125,16 @@ export function ConversationPage() {
 
     const warm =
       getRuntime(id).messages.length > 0 || getRuntime(id).isGenerating;
+    const warmRt = getRuntime(id);
+    logEvent("info", "conversation.slice_diag", {
+      action: "open_decide",
+      conversation_id: id,
+      warm,
+      message_count: warmRt.messages.length,
+      is_generating: warmRt.isGenerating,
+      has_more_after: warmRt.hasMoreAfter,
+      has_more_before: warmRt.hasMoreBefore,
+    });
     setHydratePhase(warm ? "ready" : "loading");
 
     let cancelled = false;
@@ -180,7 +174,8 @@ export function ConversationPage() {
           !cancelled &&
           useConversationStore.getState().currentConversationId === id
         ) {
-          // Warm memory: keep slice (adopt skips). Cold: adopt empty or SWR-reconcile cache.
+          // Cold: adopt empty or SWR-reconcile cache.
+          // Warm: generating / destination keep slice; idle no-destination → latest snap.
           if (!warm) {
             const wrote = reconcileMessageWindow(
               id,
@@ -191,10 +186,50 @@ export function ConversationPage() {
               },
               win.memoryUpdates,
             );
+            logEvent("info", "conversation.slice_diag", {
+              action: "cold_reconcile",
+              conversation_id: id,
+              wrote,
+              network_count: win.messages.length,
+              has_more_after: win.hasMoreAfter,
+            });
             if (wrote) {
               void persistOpenedCache(id, win.messages, win.memoryUpdates, {
                 hasMoreBefore: win.hasMoreBefore,
                 hasMoreAfter: win.hasMoreAfter,
+              });
+            }
+          } else {
+            const rt = getRuntime(id);
+            const action = decideWarmOpenAction({
+              isGenerating: rt.isGenerating,
+              hasDestination: hasOpenDestination(id),
+            });
+            if (action === "snap_latest") {
+              // Explicit snap (composer「跳到最新」同权) — crosses richer/hasMoreAfter.
+              // persistOpenedCache runs inside loadLatestWindow on success (no double-write).
+              const wrote = await loadLatestWindow(id);
+              logEvent("info", "conversation.slice_diag", {
+                action: "warm_snap_latest",
+                conversation_id: id,
+                wrote,
+                memory_count_before: rt.messages.length,
+                memory_has_more_after_before: rt.hasMoreAfter,
+              });
+            } else {
+              logEvent("warn", "conversation.slice_diag", {
+                action:
+                  action === "skip_generating"
+                    ? "warm_skip_reconcile"
+                    : "warm_keep_anchor",
+                conversation_id: id,
+                reason: action,
+                memory_count: rt.messages.length,
+                network_count: win.messages.length,
+                memory_has_more_after: rt.hasMoreAfter,
+                network_has_more_after: win.hasMoreAfter,
+                memory_tail_id: rt.messages.at(-1)?.id ?? null,
+                network_tail_id: win.messages.at(-1)?.id ?? null,
               });
             }
           }

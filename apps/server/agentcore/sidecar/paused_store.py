@@ -3,7 +3,7 @@
 The cloud persists a paused turn's frame to the ``paused_turns`` table + its
 journal-so-far to ``turn_journal`` (``runtime/suspension_persistence.py``), so a
 ``POST .../resume`` can rebuild the turn on a fresh process. The Sidecar has **no
-DB** (双模式工作区 / 远期规划 §一.1): a turn that paused at a plan_review / ask_user
+DB** (双模式工作区 §十): a turn that paused at a plan_review / ask_user
 checkpoint lived only on the in-proc ``InteractionRegistry`` Future, so closing the
 app (or any subprocess death) lost it.
 

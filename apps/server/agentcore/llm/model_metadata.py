@@ -105,6 +105,19 @@ _METADATA: dict[str, ModelMeta] = {
         capabilities=frozenset({CAPABILITY_VISION, CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=256_000,
     ),
+    # Exact entries so family-prefix does not collapse to「Kimi K2」.
+    "kimi-k2.6": ModelMeta(
+        display_name="Kimi K2.6",
+        vendor="Moonshot",
+        capabilities=frozenset({CAPABILITY_VISION, CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=256_000,
+    ),
+    "kimi-k3": ModelMeta(
+        display_name="Kimi K3",
+        vendor="Moonshot",
+        capabilities=frozenset({CAPABILITY_VISION, CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=1_000_000,
+    ),
     "moonshot-v1-128k": ModelMeta(
         display_name="Moonshot v1 128K",
         vendor="Moonshot",

@@ -422,7 +422,7 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
     steer = ceiling_honesty_steer(reason="max_rounds")
     assert steer is not None
     assert "部分落地" in steer
-    assert ceiling_honesty_steer(reason="token_budget") is None
+    assert "max_rounds" in steer
 
     dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="max_rounds")
@@ -446,6 +446,84 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
         assert v.state == "partial"
     finally:
         current_delivery_verdict.reset(token)
+
+
+def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds():
+    """token_budget ↔ max_rounds：诚实 steer / 姿势 A 横幅 / verdict 降档对称。"""
+    from agentcore.runtime.closing_posture import (
+        ceiling_honesty_steer,
+        downgrade_verdict_for_ceiling,
+        enforce_ceiling_closing_honesty,
+    )
+    from agentcore.runtime.delegate.delivery_status import (
+        DeliveryVerdict,
+        current_delivery_verdict,
+    )
+
+    steer = ceiling_honesty_steer(reason="token_budget")
+    assert steer is not None
+    assert "token_budget" in steer
+    assert "部分落地" in steer
+    assert ceiling_honesty_steer(reason="other") is None
+
+    dishonest = "修复已全部完成，已完整可用。"
+    out = enforce_ceiling_closing_honesty(dishonest, reason="token_budget")
+    assert out.startswith("【收口说明】")
+    assert "token" in out.lower() or "预算" in out
+    assert "已全部完成" in out
+    # 非姿势 A 不因 ceiling banner  alone 改写（「完整落盘」不进姿势 A）。
+    complete_landing = "文档已完整落盘（六章全部）。"
+    assert not claims_posture_a(complete_landing)
+    assert (
+        enforce_ceiling_closing_honesty(complete_landing, reason="token_budget")
+        == complete_landing
+    )
+    assert enforce_ceiling_closing_honesty("部分落地，缺收口。", reason="token_budget") == (
+        "部分落地，缺收口。"
+    )
+
+    token = current_delivery_verdict.set(
+        DeliveryVerdict(state="delivered", delivered_files=("a.ts",), execution_id="e-tb")
+    )
+    try:
+        downgrade_verdict_for_ceiling(reason="token_budget")
+        v = current_delivery_verdict.get()
+        assert v is not None
+        assert v.state == "partial"
+    finally:
+        current_delivery_verdict.reset(token)
+
+
+def test_cutoff_delivery_gap_ceo_soft_banner_not_posture_a_expansion():
+    """B′：token_budget gap latch → CEO 综收软横幅；「完整落盘」不靠扩姿势 A。"""
+    from agentcore.runtime.closing_posture import (
+        clear_cutoff_delivery_gap,
+        enforce_cutoff_closing_honesty,
+        note_cutoff_delivery_gap_from_delivery,
+        turn_has_cutoff_delivery_gap,
+    )
+
+    clear_cutoff_delivery_gap()
+    assert not turn_has_cutoff_delivery_gap()
+    note_cutoff_delivery_gap_from_delivery(
+        [{"description": "成篇未写完", "reason": "token_budget"}]
+    )
+    assert turn_has_cutoff_delivery_gap()
+
+    # 本案用户可见句：不进姿势 A，靠结构化 latch 软横幅。
+    dishonest = "文档已完整落盘（六章全部），可直接使用。"
+    assert not claims_posture_a(dishonest)
+    bannered = enforce_cutoff_closing_honesty(dishonest)
+    assert bannered.startswith("【收口说明】")
+    assert "部分交付" in bannered
+    assert "完整落盘" in bannered
+
+    # 已诚实部分交付 → 不叠横幅。
+    honest = "部分交付：前五章已落盘，第六章未闭合，建议续派补齐。"
+    assert enforce_cutoff_closing_honesty(honest) == honest
+
+    clear_cutoff_delivery_gap()
+    assert enforce_cutoff_closing_honesty(dishonest) == dishonest
 
 
 def test_unresolved_write_ownership_downgrades_verdict_no_dinggao_hard_reject():

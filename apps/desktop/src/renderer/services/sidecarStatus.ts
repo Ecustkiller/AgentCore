@@ -3,7 +3,7 @@ import type { SidecarStatusPush } from "@shared/sidecar-contract";
 /**
  * 消费 sidecar 生命周期 / 诊断推送（接通 `onStatus` 死通道）。
  *
- * 双模式工作区 / 远期规划 §一.1：sidecar（本机 Python 引擎）拉起失败 / 进程退出会经主进程
+ * 双模式工作区 §十：sidecar（本机 Python 引擎）拉起失败 / 进程退出会经主进程
  * `onStatus` 推来**精确诊断**（uv/venv 找不到、引擎导入失败、退出码…）。在此之前 renderer
  * 无任何消费方——一个 sidecar 回合失败只体现为通用「网络连接中断」横幅，把「本地引擎起不来」
  * 误报成「网络问题」，既误导又无从排查。

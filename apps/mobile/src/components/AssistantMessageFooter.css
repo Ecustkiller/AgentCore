@@ -1,17 +1,40 @@
-/* Assistant bubble footer — actions + usage hierarchy (mobile Sheet for 更多). */
+/* Assistant bubble footer — 单行：左图标 / 右 meta（对齐桌面）；有过程时复制开 Action Sheet. */
 
 .amf {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 8px;
+  min-width: 0;
 }
 
 .amf-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-shrink: 0;
+  gap: 2px;
   align-items: center;
+}
+
+/* Ghost icon — no chrome box; touch target ≥36px. */
+.amf-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.amf-icon-btn:active {
+  background: var(--accent);
+  color: var(--fg);
 }
 
 .amf-btn {
@@ -36,10 +59,16 @@
 }
 
 .amf-usage {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   line-height: 1.4;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .amf-sheet-label {

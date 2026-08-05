@@ -159,10 +159,18 @@ class TrashListResponse(BaseModel):
 
 
 class WorkspaceFileEntry(BaseModel):
-    """One entry in a workspace listing — relative POSIX path + kind."""
+    """One entry in a workspace listing — relative POSIX path + kind + optional meta.
+
+    ``size_bytes`` / ``mtime_ms`` feed mobile list subtitles. Files fill both when
+    known; directories keep ``size_bytes=None`` (``mtime_ms`` when available).
+    ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``. Absent → ``None``
+    (backward compatible).
+    """
 
     path: str
     is_dir: bool
+    size_bytes: int | None = None
+    mtime_ms: int | None = None
 
     model_config = {"from_attributes": True}
 

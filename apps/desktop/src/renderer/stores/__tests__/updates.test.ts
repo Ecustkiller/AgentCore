@@ -11,11 +11,12 @@ vi.mock("@/services/system", () => ({
 }));
 vi.mock("@/lib/toast", () => ({
   notifyInfo: vi.fn(),
+  notifyActionError: vi.fn(),
 }));
 
 import { hasAutoUpdater } from "@/lib/capabilities";
 import { clientVersion } from "@/lib/clientBuildInfo";
-import { notifyInfo } from "@/lib/toast";
+import { notifyActionError, notifyInfo } from "@/lib/toast";
 import {
   __clearMemoryUiStorageForTests,
   __setUiStorageBackendForTests,
@@ -33,6 +34,7 @@ const hasAutoUpdaterMock = vi.mocked(hasAutoUpdater);
 const clientVersionMock = vi.mocked(clientVersion);
 const fetchPolicyMock = vi.mocked(fetchUpdatesPolicy);
 const notifyInfoMock = vi.mocked(notifyInfo);
+const notifyActionErrorMock = vi.mocked(notifyActionError);
 
 function stubUpdaterApi() {
   const listeners: Array<(status: unknown) => void> = [];
@@ -64,6 +66,7 @@ beforeEach(() => {
   clientVersionMock.mockReturnValue("0.6.1");
   fetchPolicyMock.mockReset();
   notifyInfoMock.mockReset();
+  notifyActionErrorMock.mockReset();
   __setUiStorageBackendForTests(null);
   __clearMemoryUiStorageForTests();
   // Use memory backend so prefs don't leak across tests via real localStorage.
@@ -254,12 +257,41 @@ describe("update consent dialog + prefs", () => {
     expect(loadUpdatePrefs().skippedVersion).toBeUndefined();
   });
 
-  it("download invokes updaterApi.download", async () => {
+  it("download closes dialog, toasts, and invokes updaterApi.download", async () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      sizeBytes: 2048,
+    });
+    expect(useUpdatesStore.getState().dialogOpen).toBe(true);
     await useUpdatesStore.getState().download();
     expect(api.download).toHaveBeenCalled();
+    expect(useUpdatesStore.getState().dialogOpen).toBe(false);
+    expect(notifyInfoMock).toHaveBeenCalledWith(
+      "正在后台下载 0.7.0（约 2.0 KB）",
+      expect.objectContaining({
+        description: "进度可在「设置 · 关于」查看",
+      }),
+    );
+  });
+
+  it("download under hard gate keeps dialog open and skips background toast", async () => {
+    const api = stubUpdaterApi();
+    startUpdates();
+    useUpdatesStore.setState({
+      outdatedMinVersion: "0.6.5",
+      dialogOpen: true,
+      status: { phase: "available", version: "0.7.0", sizeBytes: 2048 },
+    });
+    await useUpdatesStore.getState().download();
+    expect(api.download).toHaveBeenCalled();
+    expect(useUpdatesStore.getState().dialogOpen).toBe(true);
+    expect(notifyInfoMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("正在后台下载"),
+      expect.anything(),
+    );
   });
 
   it("toasts on downloaded without auto-install", () => {
@@ -268,5 +300,16 @@ describe("update consent dialog + prefs", () => {
     api._emit({ phase: "downloaded", version: "0.7.0" });
     expect(notifyInfoMock).toHaveBeenCalled();
     expect(api.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("soft-update error toasts without reopening dialog", () => {
+    const api = stubUpdaterApi();
+    startUpdates();
+    api._emit({ phase: "error", message: "network down" });
+    expect(notifyActionErrorMock).toHaveBeenCalledWith(
+      "更新失败",
+      "network down",
+    );
+    expect(useUpdatesStore.getState().dialogOpen).toBe(false);
   });
 });

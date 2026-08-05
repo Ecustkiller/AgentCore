@@ -1,5 +1,5 @@
 ---
-status: blueprint
+status: landed
 code: apps/desktop/src/renderer/
 related:
   - docs/04-前端/前端技术与架构.md
@@ -22,6 +22,10 @@ skip_if:
 | 内嵌协作图、图视图、聊天⇄画布、图技术选型 | [协作图与双视图 UX](/docs/04-前端/协作图与双视图UX.md) |
 | 辩论室赛事页、介入、站队 | [辩论室 UX](/docs/04-前端/辩论室UX.md) |
 | 协作图渲染内核 | [前端技术 §9.13](/docs/04-前端/前端技术与架构.md) |
+| PermissionAxes 四轴语义 | [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)（本文只记壳层呈现） |
+| BrowserSession / 统一浏览器 | [前端技术 §9.12](/docs/04-前端/前端技术与架构.md) |
+| Git 闭环 / 改动双轨 | [工具与能力 · Git](/docs/03-AI核心/工具与能力系统.md#git-闭环)（本文只记用户面） |
+| 断线只读 vs 完全离线 | [双模式工作区](/docs/02-架构/双模式工作区.md) |
 
 心智：「掌管 AI CEO 带队的 Agent 团队」。原则：零门槛、渐进揭示、简单任务零噪音。
 
@@ -49,7 +53,7 @@ skip_if:
 
 ## 九、文件交互
 
-**项目=工作区**；入口= SidePanel + `/files`。**否决**云/本地两平级分段。删项目：对话归档、文件保留期清理；**否决**级联删聊天、`Folder.archived`。「清空本对话产物」仅云端 `conv:` scratch。审批：信任档下文件改动免逐次卡（永久删仍问）。草稿「在哪工作」单一 chip。md 默认阅读预览；HTML 面板显源码，完整效果走统一浏览器壳（桌面 `workspace://` + 右坞 BrowserPanel；Web 下载 / 系统浏览器；→ 前端技术 §9.12）。产物主清单认 `delivery_status.artifacts` 验收态（已验收/未通过；**否决**写入/编辑标签冒充交付）；「查看改动」按路径相对基线标新建/更新/删除，与右坞「改动」tab 同源（见 §十）。**否决**「交付验收」大卡与卡上动作：`delivered`/`notes` 静默；仅 `partial`/`blocked` 一句轻提示；缺口细节不靠验收卡展开（后台 `gaps` 仍供对账与 finish_guard）。案卷徽章复用文件树；**否决**阶段 Tab。协作时间线=读时聚合；**否决**项目级 execution 实体。共享空间并入「项目」段角标「共享」。→ [双模式工作区](/docs/02-架构/双模式工作区.md)；产物卡 → `lib/fileArtifacts.ts`。
+**项目=工作区**；入口= SidePanel + `/files`。**否决**云/本地两平级分段。删项目：对话归档、文件保留期清理；**否决**级联删聊天、`Folder.archived`。「清空本对话产物」仅云端 `conv:` scratch。审批：信任档下文件改动免逐次卡（永久删仍问）。草稿「在哪工作」单一 chip。md 默认阅读预览；HTML 面板显源码，完整效果走统一浏览器壳（→ [前端技术 §9.12](/docs/04-前端/前端技术与架构.md)）。产物主清单认 `delivery_status.artifacts`；呈现口径（否决交付验收大卡等）→ [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md)。「查看改动」与右坞「改动」tab 同源（见 §十）。案卷徽章复用文件树；**否决**阶段 Tab。协作时间线=读时聚合；**否决**项目级 execution 实体。共享空间并入「项目」段角标「共享」。→ [双模式工作区](/docs/02-架构/双模式工作区.md)；产物卡 → `lib/fileArtifacts.ts`。
 
 ## 十、详情面板（右坞）
 
@@ -61,7 +65,7 @@ skip_if:
 
 **「改动」tab**：本对话 AI 文件改动聚合（只读真 diff + 回滚；不做 apply/三方冲突——仍归交接）。行标签=新建/更新/删除（相对回合基线；**否决**工具名「写入/编辑」）。与产物卡「查看改动」同源聚焦（深链可先挂再聚焦）。**出现** = 本对话已有 AI 文件改动记录，或本机存在回合 zip 基线（脚本删亦可进「恢复到本回合开始」），或产物卡深链；**不**空挂常驻（对齐 Cursor 等「有货才审」）。恢复文案诚实：尽力 overlay，非完整镜像。**卸下** = 本对话无改动记录且无 Local 基线（切对话各自推导）；有改动/基线时挂上不抢焦点。**否决**空态常驻入口；**否决**「清空本对话产物」作为卸 tab 条件（清空只抹云 scratch 盘，process/execution 改动史仍在）。文案用「改动」；**否决** tab 名 `diff`。→ `ConversationChangesPanel.tsx` · `conversationFileChanges.ts`
 
-**✅ Git 闭环 · 用户 SCM U1–U3（与 zip 双轨）**：会话条 **U1** 只读展示当前分支 + dirty 点（有仓才显；Local 无 root / 无 `.git` 不挂）。「改动」**U2** 在保留回合 zip 回滚轨之外，增加 **Git 变更列表**（unstaged/staged，可跳 diff）——两轨语义不合并；有货才显。**U3** 人可 stage/unstage、填 message 提交、push/pull：与结构化 `git` **同口径**（push/`create_pr` 恒确认、ff-only pull、禁 force/保护分支直推），桌面侧为 `window.confirm` + 主进程镜像护栏（**不经** server `ApprovalGate` / `safety_breaker`）。冲突：诚实横幅 + 打开文件；**否决**做人肉三方 merge UI。权威阶段表 → [工具 · Git 闭环](/docs/03-AI核心/工具与能力系统.md#git-闭环)。→ 见代码：`ComposerGitStatusChip` · `GitChangesSection` · `git_repo_status` / `git_scm` workspace op
+**✅ Git 闭环 · 用户 SCM U1–U3（与 zip 双轨）**：会话条分支+dirty；「改动」tab 增 Git 列表（与 zip 轨语义不合并）；人可 stage/commit/push/pull，与结构化 `git` 同口径（桌面 `window.confirm` + 主进程护栏，**不经** server ApprovalGate）。冲突诚实停、**否决**三方 merge UI。阶段表权威 → [工具 · Git 闭环](/docs/03-AI核心/工具与能力系统.md#git-闭环)。→ 见代码：`ComposerGitStatusChip` · `GitChangesSection` · `git_repo_status` / `git_scm` workspace op
 
 
 ### ✅ 应用内浮窗（方案 B · Web）
@@ -111,7 +115,7 @@ skip_if:
 
 ## 十三、模型与自主度
 
-设置拆「模型」（组合）/「服务商」（BYOK）/「Git 凭据」（G3 云私仓 PAT；Local 说明继承 OS/`gh auth`）；本地引擎挂外观。会话选**组合**非裸模型。组合槽位候选来自统一目录（BYOK：default ∪ 厂商预设 ∪ 发现）；另支持对 BYOK 服务商**手填** model id（平台行仍只 allowlist）。**否决**角色→模型矩阵、质量档、双 picker。自主度配方三选一（谨慎 / 少打断（默认）/ 托管）→ [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。账户默认：桌面经对话权限徽章「设为新会话默认」写入；手机仍可经设置改。会话内徽章可改四轴（含本机）——**桌面**；**手机**顶栏只读显示当前配方，暂不提供会话内改轴（设置页文案已写明）。非法组合不可选；自定义四轴不可存为账户默认。
+设置拆「模型」（组合）/「服务商」（BYOK）/「Git 凭据」（G3 云私仓 PAT；Local 说明继承 OS/`gh auth`）；本地引擎挂外观。会话选**组合**非裸模型。组合槽位候选来自统一目录（BYOK：default ∪ 厂商预设 ∪ 发现）；另支持对 BYOK 服务商**手填** model id（平台行仍只 allowlist）。**否决**角色→模型矩阵、质量档、双 picker。自主度配方三选一（谨慎 / 少打断（默认）/ 托管）→ [安全权限与治理 §三](/docs/05-平台与运维/安全权限与治理.md)。账户默认：桌面经对话权限徽章「设为新会话默认」写入；手机可经设置或会话内「＋」菜单同入口写入。会话内可改四轴（含本机）：**桌面**靠权限徽章；**手机**收进 composer「＋」更多选项（与模型组合、附件同菜单；无能力项不出现），顶栏不再展示配方后缀。非法组合不可选；自定义四轴不可存为账户默认。
 
 ## 十四、搜索
 
@@ -119,4 +123,4 @@ Cmd+K：搜索；页内：筛选；Cmd+F：查找。Tier 3 语义搜索 ⏳（�
 
 ## 十五、待定与收藏
 
-移动端图简化 ✅：竖排 TeamView 有意简化（非待做画布；→ 见代码 `TeamView` · parity `InlineTeamGraph`）。移动端辩论 ✅：`DebateView` / `LiveDebateNarrative` 双产物精简复盘（无赛事页、站队、掌舵卡；介入靠主 composer 插话/排队；parity `debate_*` = simplified）。跨会话多任务总览、无障碍、流式字级动画 ⏳。**断线只读（N4-A）**：可浏览已缓存对话与本机文件（只读），不能发送 / 改文件 / 跑 AI；「本地引擎」= 本机执行更快，**不是**离线模式（推理仍要云）。完全离线（本机推理 + 本机消息库）仍 ⏳。消息收藏 ✅：命令面板「已收藏」facet；**否决**侧栏独立列表。
+移动端图简化 ✅：竖排 TeamView 有意简化（非待做画布；→ 见代码 `TeamView` · parity `InlineTeamGraph`）。移动端辩论 ✅：`DebateView` / `LiveDebateNarrative` 双产物精简复盘（无赛事页、站队、掌舵卡；介入靠主 composer 插话/排队；parity `debate_*` = simplified）。跨会话多任务总览、无障碍、流式字级动画 ⏳。**断线只读 / 完全离线** → [双模式工作区](/docs/02-架构/双模式工作区.md)（本文不复述）。消息收藏 ✅：命令面板「已收藏」facet；**否决**侧栏独立列表。

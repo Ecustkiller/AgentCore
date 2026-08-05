@@ -14526,15 +14526,37 @@
         "type": "object"
       },
       "WorkspaceFileEntry": {
-        "description": "One entry in a workspace listing — relative POSIX path + kind.",
+        "description": "One entry in a workspace listing — relative POSIX path + kind + optional meta.\n\n``size_bytes`` / ``mtime_ms`` feed mobile list subtitles. Files fill both when\nknown; directories keep ``size_bytes=None`` (``mtime_ms`` when available).\n``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``. Absent → ``None``\n(backward compatible).",
         "properties": {
           "is_dir": {
             "title": "Is Dir",
             "type": "boolean"
           },
+          "mtime_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime Ms"
+          },
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
           }
         },
         "required": [
@@ -14861,7 +14883,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.35"
+    "version": "0.3.36"
   },
   "openapi": "3.1.0",
   "paths": {

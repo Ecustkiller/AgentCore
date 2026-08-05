@@ -20,7 +20,9 @@ from agentcore.config import settings
 from agentcore.core.errors import (
     BYOKKeyMissingError,
     KeyStorageUnavailableError,
+    LLMAuthError,
     LLMError,
+    LLMInsufficientBalanceError,
     NotFoundError,
     ValidationError,
 )
@@ -271,8 +273,10 @@ class LlmProviderService:
                 enc=enc,
                 message="无法解密已保存的 Key（服务端密钥变更或数据损坏），请重新填写",
             )
-        provider = build_provider(credentials)
-        model = credentials.default_model
+        # User-facing errors use label (never internal credential source ``user``).
+        display_name = (row.label or "").strip() or "服务商"
+        provider = build_provider(credentials, display_name=display_name)
+        model = (credentials.default_model or "").strip()
         base_url = credentials.base_url
         supports_tools: bool | None = None
         logger.info(
@@ -284,20 +288,27 @@ class LlmProviderService:
             provider_type=type(provider).__name__,
         )
         try:
-            await provider.probe(model=model)
-            status, message = "active", None
-            supports_tools = await provider.probe_tools(model=model)
-        except LLMError as e:
-            status, message = "error", str(e)
-            logger.warning(
-                "llm_provider.test.failed",
-                user_id=user_id,
-                provider_id=provider_id,
-                base_url=base_url,
-                model=model,
-                error_type=type(e).__name__,
-                error=str(e),
+            status, message, supports_tools = await self._run_connectivity_test(
+                provider, model=model
             )
+            if status == "error":
+                logger.warning(
+                    "llm_provider.test.failed",
+                    user_id=user_id,
+                    provider_id=provider_id,
+                    base_url=base_url,
+                    model=model,
+                    error=message,
+                )
+            else:
+                logger.info(
+                    "llm_provider.test.ok",
+                    user_id=user_id,
+                    provider_id=provider_id,
+                    base_url=base_url,
+                    model=model,
+                    supports_tools=supports_tools,
+                )
         except Exception:
             logger.exception(
                 "llm_provider.test.unhandled",
@@ -308,15 +319,6 @@ class LlmProviderService:
                 provider_type=type(provider).__name__,
             )
             raise
-        else:
-            logger.info(
-                "llm_provider.test.ok",
-                user_id=user_id,
-                provider_id=provider_id,
-                base_url=base_url,
-                model=model,
-                supports_tools=supports_tools,
-            )
         finally:
             await provider.close()
         await self._repo.update_status(provider_id, status)
@@ -325,3 +327,55 @@ class LlmProviderService:
         fresh = await self._repo.get(provider_id, user_id=user_id)
         assert fresh is not None
         return self._view(fresh, enc=enc, message=message)
+
+    async def _run_connectivity_test(
+        self,
+        provider: object,
+        *,
+        model: str,
+    ) -> tuple[str, str | None, bool | None]:
+        """Prefer ``list_models`` (connection OK); fall back to ``probe(default_model)``.
+
+        Auth / balance failures from ``list_models`` are hard errors. Other
+        ``list_models`` failures fall through to the legacy probe path. Tools
+        probing is best-effort and never flips an otherwise-active result to error.
+        """
+        list_fn = getattr(provider, "list_models", None)
+        if callable(list_fn):
+            try:
+                model_ids = await list_fn()
+            except (LLMAuthError, LLMInsufficientBalanceError) as e:
+                return "error", str(e), None
+            except LLMError:
+                # Non-auth discovery failure → fall back to chat probe.
+                pass
+            else:
+                message: str | None = None
+                if model and model_ids and model not in model_ids:
+                    message = (
+                        f"连接正常，但默认模型 {model} 不在上游列表，请更换"
+                    )
+                supports_tools = await self._best_effort_probe_tools(provider, model=model)
+                return "active", message, supports_tools
+
+        try:
+            await provider.probe(model=model)  # type: ignore[attr-defined]
+        except LLMError as e:
+            return "error", str(e), None
+        supports_tools = await self._best_effort_probe_tools(provider, model=model)
+        return "active", None, supports_tools
+
+    @staticmethod
+    async def _best_effort_probe_tools(provider: object, *, model: str) -> bool | None:
+        probe_tools = getattr(provider, "probe_tools", None)
+        if not callable(probe_tools) or not model:
+            return None
+        try:
+            return await probe_tools(model=model)
+        except Exception:  # noqa: BLE001 — tools probe must not fail the whole test
+            logger.warning(
+                "llm_provider.test.probe_tools_failed",
+                model=model,
+                exc_info=True,
+            )
+            return None

@@ -280,18 +280,26 @@ async function attachSidecarTurnExclusive(
           (m.id === res.messageId || m.serverMessageId === res.messageId),
       );
       if (assistant) {
-        store.updateMessage(assistant.id, {
-          isStreaming: true,
-          status: "running",
-          ...(res.messageId !== assistant.id
-            ? { serverMessageId: res.messageId }
-            : {}),
-        });
+        store.updateMessage(
+          assistant.id,
+          {
+            isStreaming: true,
+            status: "running",
+            ...(res.messageId !== assistant.id
+              ? { serverMessageId: res.messageId }
+              : {}),
+          },
+          conversationId,
+        );
       } else {
         store.createAssistantMessage(conversationId);
         const last = getRuntime(conversationId).messages.at(-1);
         if (last && res.messageId) {
-          store.updateMessage(last.id, { serverMessageId: res.messageId });
+          store.updateMessage(
+            last.id,
+            { serverMessageId: res.messageId },
+            conversationId,
+          );
         }
       }
       anchorUserMessageId = res.userMessageId;

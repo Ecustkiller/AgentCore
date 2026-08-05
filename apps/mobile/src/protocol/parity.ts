@@ -633,7 +633,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   PermissionChangeLine: {
     verdict: "simplified",
     reason:
-      "桌面把会话级权限轴切换（PUT permission-axes → 审计 permission.axes_changed，走 REST 非事件通道）在对话流内渲染「权限 A → B」系统提示行；手机可在 AutonomySettings 切档，但暂不在对话流内渲染该切换提示行（parity 最小同步，随需后置）",
+      "桌面把会话级权限轴切换（PUT permission-axes → 审计 permission.axes_changed，走 REST 非事件通道）在对话流内渲染「权限 A → B」系统提示行；手机已可在 composer「＋」→ 本会话权限改四轴（对齐 PUT permission-axes），流内 A→B 系统行仍后置",
   },
   ConversationHydrateOverlay: {
     verdict: "simplified",
@@ -941,8 +941,8 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   },
   "conversations/CollaborationTimeline": {
     verdict: "simplified",
-    surface: "CollaborationSummaryList（工作区文件页文字摘要）",
-    reason: "桌面项目协作时间线+阶段产物；手机降级为文字摘要列表，无可缩放大图",
+    reason:
+      "桌面项目协作时间线+阶段产物；手机有意不挂文件页（文件页只做浏览/上传），暂无独立入口",
   },
   TurnDetailPage: {
     verdict: "simplified",

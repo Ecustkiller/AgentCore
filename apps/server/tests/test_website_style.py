@@ -236,6 +236,8 @@ def test_design_prompt_block_default_injects_positive_recipe():
     assert "glow" in none_block
     assert "粒子" in none_block
     assert "反馈" in none_block
+    assert "#2563eb" not in none_block
+    assert "工具台" not in none_block
 
     default_conf = StyleConfirmation(
         style_id=DEFAULT_STYLE_ID,
@@ -245,9 +247,41 @@ def test_design_prompt_block_default_injects_positive_recipe():
     default_block = design_prompt_block(style=default_conf)
     assert "正向配方" in default_block
     assert "单一视觉焦点" in default_block
+    assert "#2563eb" not in default_block
 
     picked = StyleConfirmation(style_id="s0", label="深色科技", source="ask_user")
     picked_block = design_prompt_block(style=picked)
     assert "s0" in picked_block
     assert "正向配方" not in picked_block
     assert "单一视觉焦点" not in picked_block
+
+
+def test_design_prompt_block_tool_domain_injects_toolshed_recipe():
+    """domain=tool：软注入工具台配方（含 Tailwind 蓝禁令）；marketing 不含该禁。"""
+    tool_block = design_prompt_block(style=None, domain="tool")
+    assert "正向配方·工具台" in tool_block
+    assert "工具" in tool_block
+    assert "#2563eb" in tool_block
+    assert "blue-600" in tool_block
+    assert "中性 chrome" in tool_block
+    assert "营销 hero" in tool_block
+    assert "单一视觉焦点" not in tool_block
+
+    default_conf = StyleConfirmation(
+        style_id=DEFAULT_STYLE_ID,
+        label="简洁克制·高对比",
+        source="full_auto_default",
+    )
+    tool_default = design_prompt_block(style=default_conf, domain="tool")
+    assert "#2563eb" in tool_default
+    assert "正向配方·工具台" in tool_default
+
+    picked = StyleConfirmation(style_id="s0", label="深色科技", source="ask_user")
+    tool_picked = design_prompt_block(style=picked, domain="tool")
+    assert "正向配方" not in tool_picked
+    assert "#2563eb" not in tool_picked
+
+    marketing = design_prompt_block(style=None, domain="marketing")
+    assert "#2563eb" not in marketing
+    assert "单一视觉焦点" in marketing
+    assert "工具台" not in marketing

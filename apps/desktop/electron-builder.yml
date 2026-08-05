@@ -42,7 +42,7 @@ asarUnpack:
 npmRebuild: false
 nodeGypRebuild: false
 
-# 内置 Python 运行时（远期规划 §一.1「内置 Python 打包」方案 B）：由 scripts/bundle-sidecar.mjs
+# 内置 Python 运行时（双模式工作区 §十「内置 Python 打包」方案 B）：由 scripts/bundle-sidecar.mjs
 # 预构建到 resources/sidecar/（独立 CPython + --target site-packages），随包拷入应用
 # resources/sidecar/。主进程 resolveSpawnConfig 在 app.isPackaged 时据此拉起 sidecar，
 # 用户机器无需任何系统 Python / venv / uv。须在 electron-builder 前跑 `pnpm bundle:sidecar`

@@ -47,11 +47,7 @@ export function projectPausedRuns(
   if (ids.length === 0) return;
 
   const store = useConversationStore.getState();
-  // patchActive keys off currentConversationId — hydrate already switched.
-  if (store.currentConversationId !== conversationId) {
-    store.switchConversation(conversationId);
-  }
-
+  // Conversation-scoped updateMessage — do not switch the open conversation.
   for (const [messageId, runs] of Object.entries(pausedRuns)) {
     const events = asSSEEvents(runs.events);
     if (events.length === 0) continue;
@@ -96,13 +92,17 @@ export function projectPausedRuns(
 
     // Conversation bubble lookup is still by client `msg.id`; slot keys above
     // are projection-scoped only (no dual-write / no post-hoc slot copy).
-    store.updateMessage(msg.id, {
-      executionId,
-      runs: journal,
-      process,
-      finishReason: "paused",
-      isStreaming: false,
-      ...(msg.serverMessageId ? {} : { serverMessageId: messageId }),
-    });
+    store.updateMessage(
+      msg.id,
+      {
+        executionId,
+        runs: journal,
+        process,
+        finishReason: "paused",
+        isStreaming: false,
+        ...(msg.serverMessageId ? {} : { serverMessageId: messageId }),
+      },
+      conversationId,
+    );
   }
 }

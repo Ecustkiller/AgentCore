@@ -1,7 +1,7 @@
 /**
  * Sidecar IPC 契约 —— 主进程 / preload / renderer 三端共享的单一真相源。
  *
- * sidecar（双模式工作区 / 远期规划 §一.1）是跑在用户本机的 Python 进程，**托管同一个
+ * sidecar（双模式工作区 §十）是跑在用户本机的 Python 进程，**托管同一个
  * 运行时引擎**：桌面 spawn `python -m agentcore.sidecar`，经 stdio JSON-RPC 驱动它，
  * 一个回合完全在本机执行（文件 / 代码直接碰真实本地盘，不再每个 op 经 `WorkspaceChannel`
  * 往返云端）。

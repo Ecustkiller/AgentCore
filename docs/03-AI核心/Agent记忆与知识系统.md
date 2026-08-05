@@ -1,5 +1,5 @@
 ---
-status: blueprint
+status: landed
 code: apps/server/agentcore/memory/
 related:
   - docs/03-AI核心/上下文传递可视化.md

@@ -178,17 +178,41 @@ async def test_list_providers_platform_signal_false_when_dormant(service, monkey
 
 
 class _FakeProbeProvider:
-    def __init__(self, *, fail: bool, supports_tools: bool | None) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        supports_tools: bool | None = None,
+        model_ids: list[str] | None = None,
+        list_models_error: Exception | None = None,
+        probe_tools_raises: bool = False,
+    ) -> None:
         self._fail = fail
         self._supports_tools = supports_tools
+        self._model_ids = model_ids
+        self._list_models_error = list_models_error
+        self._probe_tools_raises = probe_tools_raises
         self.probe_model: str | None = None
+        self.list_models_called = False
+        self.probe_called = False
+
+    async def list_models(self) -> list[str]:
+        self.list_models_called = True
+        if self._list_models_error is not None:
+            raise self._list_models_error
+        if self._model_ids is None:
+            raise LLMError("list_models unavailable")
+        return list(self._model_ids)
 
     async def probe(self, *, model: str) -> None:
+        self.probe_called = True
         self.probe_model = model
         if self._fail:
             raise LLMError("bad key")
 
     async def probe_tools(self, *, model: str) -> bool | None:
+        if self._probe_tools_raises:
+            raise RuntimeError("tools probe boom")
         return self._supports_tools
 
     async def close(self) -> None:
@@ -205,19 +229,23 @@ async def test_test_provider_records_active_and_tools(service):
     creds = LLMCredentials(
         api_key="sk-abc", base_url="https://api.openai.com/v1", default_model="gpt-4o"
     )
-    fake = _FakeProbeProvider(fail=False, supports_tools=True)
+    fake = _FakeProbeProvider(model_ids=["gpt-4o", "gpt-4o-mini"], supports_tools=True)
     with (
         patch(
             "agentcore.llm.provider_service.resolve_provider_credentials",
             AsyncMock(return_value=creds),
         ),
-        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake) as build,
         patch.object(service, "_encryptor", return_value=_enc()),
         capture_logs() as caps,
     ):
         view = await service.test_provider("u1", "prov-1")
-    assert fake.probe_model == "gpt-4o"
+    build.assert_called_once()
+    assert build.call_args.kwargs.get("display_name") == "DeepSeek"
+    assert fake.list_models_called is True
+    assert fake.probe_called is False
     assert view.status == "active"
+    assert view.message is None
     service._repo.update_status.assert_awaited_once_with("prov-1", "active")
     service._repo.update_supports_tools.assert_awaited_once_with("prov-1", True)
     start = next(c for c in caps if c.get("event") == "llm_provider.test.start")
@@ -226,6 +254,120 @@ async def test_test_provider_records_active_and_tools(service):
     assert start["base_url"] == "https://api.openai.com/v1"
     ok = next(c for c in caps if c.get("event") == "llm_provider.test.ok")
     assert ok["supports_tools"] is True
+
+
+async def test_test_provider_soft_warns_when_default_model_missing_from_list(service):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x", label="My Gateway"),
+            _row(api_key_enc=b"x", status="active", supports_tools=None),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://gw.example/v1", default_model="stale-model"
+    )
+    fake = _FakeProbeProvider(model_ids=["gpt-4o"], supports_tools=None)
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake) as build,
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert build.call_args.kwargs.get("display_name") == "My Gateway"
+    assert view.status == "active"
+    assert view.message is not None
+    assert "stale-model" in view.message
+    assert "不在上游列表" in view.message
+    assert fake.probe_called is False
+    service._repo.update_status.assert_awaited_once_with("prov-1", "active")
+
+
+async def test_test_provider_list_models_auth_error_is_hard_failure(service):
+    from agentcore.core.errors import LLMAuthError
+
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="error"),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-bad", base_url="https://api.deepseek.com", default_model=DEEPSEEK_V4_FLASH
+    )
+    fake = _FakeProbeProvider(
+        list_models_error=LLMAuthError(provider_name="DeepSeek"),
+        supports_tools=None,
+    )
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert view.status == "error"
+    assert "API Key" in (view.message or "")
+    assert fake.probe_called is False
+
+
+async def test_test_provider_falls_back_to_probe_when_list_models_fails(service):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="active", supports_tools=True),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://api.openai.com/v1", default_model="gpt-4o"
+    )
+    fake = _FakeProbeProvider(
+        list_models_error=LLMError("列出模型失败（HTTP 500）"),
+        fail=False,
+        supports_tools=True,
+    )
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert fake.probe_model == "gpt-4o"
+    assert view.status == "active"
+    assert view.message is None
+
+
+async def test_test_provider_tools_failure_does_not_error_status(service):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="active", supports_tools=None),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://api.openai.com/v1", default_model="gpt-4o"
+    )
+    fake = _FakeProbeProvider(model_ids=["gpt-4o"], probe_tools_raises=True)
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert view.status == "active"
+    service._repo.update_supports_tools.assert_awaited_once_with("prov-1", None)
 
 
 async def test_test_provider_logs_probe_failure(service):
@@ -238,7 +380,11 @@ async def test_test_provider_logs_probe_failure(service):
     creds = LLMCredentials(
         api_key="sk-bad", base_url="https://api.deepseek.com", default_model=DEEPSEEK_V4_FLASH
     )
-    fake = _FakeProbeProvider(fail=True, supports_tools=None)
+    fake = _FakeProbeProvider(
+        list_models_error=LLMError("no /models"),
+        fail=True,
+        supports_tools=None,
+    )
     with (
         patch(
             "agentcore.llm.provider_service.resolve_provider_credentials",
@@ -255,6 +401,29 @@ async def test_test_provider_logs_probe_failure(service):
     assert failed["provider_id"] == "prov-1"
     assert failed["model"] == DEEPSEEK_V4_FLASH
     assert "bad key" in failed["error"]
+
+
+async def test_test_provider_empty_label_uses_generic_display_name(service):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x", label=""),
+            _row(api_key_enc=b"x", label="", status="active"),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://api.openai.com/v1", default_model="gpt-4o"
+    )
+    fake = _FakeProbeProvider(model_ids=["gpt-4o"], supports_tools=None)
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake) as build,
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        await service.test_provider("u1", "prov-1")
+    assert build.call_args.kwargs.get("display_name") == "服务商"
 
 
 async def test_test_provider_missing_raises(service):

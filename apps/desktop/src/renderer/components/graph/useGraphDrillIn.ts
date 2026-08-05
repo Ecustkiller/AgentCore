@@ -34,6 +34,7 @@ export function useGraphDrillIn(
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
 
   const showRunDetailHere = useCallback(
     (runId: string) => {
@@ -99,7 +100,7 @@ export function useGraphDrillIn(
           onEndpointSelect(taskMessage.id, "提问", "prompt");
           return;
         }
-        focusMessage(taskMessage.id);
+        focusMessage(taskMessage.id, conversationId);
         if (interactive) onClose?.();
         return;
       }
@@ -109,7 +110,7 @@ export function useGraphDrillIn(
           onEndpointSelect(finalAnswer.id, "最终回答", "answer");
           return;
         }
-        focusMessage(finalAnswer.id);
+        focusMessage(finalAnswer.id, conversationId);
         if (interactive) onClose?.();
         return;
       }
@@ -129,6 +130,7 @@ export function useGraphDrillIn(
       taskMessage,
       captainRun,
       focusMessage,
+      conversationId,
       interactive,
       onClose,
     ],

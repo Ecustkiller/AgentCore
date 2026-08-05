@@ -2,7 +2,7 @@
 
 The engine runs the SAME code locally and in the cloud; everything host-specific is
 injected behind a port. This module is the in-code mirror of 执行引擎架构设计 §8.6 —
-a single catalog of the seams a fully-offline Sidecar (06-规划/远期规划 §一.1 完全离线)
+a single catalog of the seams a fully-offline Sidecar (完全离线 ⏳；见双模式工作区)
 would swap for local implementations (SQLite / in-memory / in-proc). The Sidecar itself
 has landed (hybrid: local engine, cloud persistence/billing — see 双模式工作区 §十); these
 ports go local only when offline drives it.
@@ -25,7 +25,7 @@ Landed as Protocols here:
   will swap ``OutboxStore`` (as-built: 执行引擎 §8.6; 双模式工作区 §10.3).
 
 The remaining §8.6 ports stay as their concrete implementations until 完全离线
-(06-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
+(⏳；详细提案不在公开仓) needs them swappable — Protocol-izing them now, with
 no second implementation to satisfy, would be premature abstraction:
 
 - InferenceGateway → ``llm`` provider (``llm/factory.build_provider`` → OpenAICompatibleProvider)

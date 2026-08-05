@@ -63,15 +63,15 @@ class LLMTimeoutError(LLMError):
 
 
 class LLMInsufficientBalanceError(LLMError):
-    """The user's own DeepSeek key reached the API but the account balance is
-    exhausted, so the upstream refuses the call with HTTP 402 Insufficient Balance.
+    """Configured API key reached the upstream but the account balance is
+    exhausted (typically HTTP 402 Insufficient Balance) — any OpenAI-compatible
+    vendor, not DeepSeek-only.
 
     Distinct from ``BYOKKeyMissingError`` (no key at all, refused at the route
     preflight before the stream opens): here a *valid* key fails mid-turn, so the
     error surfaces as an inline ``error`` event rather than a 402 JSON response. Not
-    retryable — an immediate retry just re-fails until the user tops up — and it
-    carries a user-facing Chinese message pointing at DeepSeek's billing page, not
-    AgentCore's key settings (the key is fine; the balance is not).
+    retryable — an immediate retry just re-fails until the user tops up. Copy is
+    vendor-neutral (the key is fine; the balance is not).
     """
 
     code = ErrorCode.LLM_INSUFFICIENT_BALANCE
@@ -79,9 +79,20 @@ class LLMInsufficientBalanceError(LLMError):
 
     def __init__(
         self,
-        message: str = ("DeepSeek 账户余额不足，请前往 DeepSeek 开放平台充值后重试。"),
+        message: str | None = None,
+        *,
+        provider_name: str | None = None,
         **kwargs,
     ):
+        if message is None:
+            name = (provider_name or "").strip()
+            label = name if name and name not in {"user", "platform"} else "当前模型"
+            message = f"{label} API Key 有效，但账户余额不足，请充值后重试。"
+        if provider_name is not None and "provider_name" not in kwargs:
+            kwargs["provider_name"] = provider_name
+        if "credential_source" not in kwargs:
+            name = (provider_name or "").strip()
+            kwargs["credential_source"] = "platform" if name == "platform" else "user"
         super().__init__(message, **kwargs)
 
 

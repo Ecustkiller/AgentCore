@@ -1,6 +1,6 @@
 import { getTokens } from "@/api/client";
 import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
-import { Brain } from "lucide-react";
+import { Brain, ChevronRight, Cloud, Folder } from "lucide-react";
 // 文件 tab home — the cross-workspace file overview (手机端布局重构 · 跨工作区文件总览).
 //
 // Lists the user's CLOUD workspaces (= folders); tapping one drills into its file tree
@@ -61,20 +61,28 @@ export function WorkspacesPage() {
           <span className="file-icon" aria-hidden>
             <Brain size={16} />
           </span>
-          <span className="file-name">AI 记忆</span>
+          <span className="file-row-main">
+            <span className="file-name">AI 记忆</span>
+            <span className="file-sub">跨对话长期记忆</span>
+          </span>
           <span className="file-chevron" aria-hidden>
-            ›
+            <ChevronRight size={18} />
           </span>
         </button>
 
         {items === null && !error && <p className="muted hint">加载中…</p>}
         {error && <p className="error hint">{error}</p>}
         {items !== null && clouds.length === 0 && !error && (
-          <p className="muted hint">
-            {hasLocalOnly
-              ? "云端工作区为空。本地工作区请在桌面端查看。"
-              : "还没有工作区。开始对话并产出文件后，工作区会出现在这里。"}
-          </p>
+          <div className="file-empty">
+            <p className="file-empty-title">
+              {hasLocalOnly ? "还没有云端工作区" : "还没有工作区"}
+            </p>
+            <p className="muted hint">
+              {hasLocalOnly
+                ? "本地工作区请在桌面端查看。开始云端对话并产出文件后，会出现在这里。"
+                : "开始对话并产出文件后，工作区会出现在这里。"}
+            </p>
+          </div>
         )}
         {clouds.map((ws) => (
           <button
@@ -87,13 +95,15 @@ export function WorkspacesPage() {
               })
             }
           >
-            <span className="file-icon" aria-hidden>
-              ▸
+            {/* 手机只列云端：云标识并进文件夹图标角标，避免「云端工作区」独占一行 */}
+            <span className="file-icon file-icon-cloud-ws" aria-hidden>
+              <Folder size={16} />
+              <Cloud size={9} className="file-icon-badge" />
             </span>
             <span className="file-name">{ws.name}</span>
             {!ws.hasFiles && <span className="file-tag">空</span>}
             <span className="file-chevron" aria-hidden>
-              ›
+              <ChevronRight size={18} />
             </span>
           </button>
         ))}

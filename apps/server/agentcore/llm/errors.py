@@ -171,6 +171,23 @@ _AUTH_BODY_MARKERS = re.compile(
     r"key[\s_-]?expired|expired|鉴权|无效.*key|key.*无效)",
     re.IGNORECASE,
 )
+# Upstream 404 that names a missing / denied *model* (not a wrong base_url path).
+_MODEL_404_CODES = frozenset(
+    {
+        "resource_not_found",
+        "model_not_found",
+        "model_not_available",
+        "invalid_model",
+        "unknown_model",
+    }
+)
+_MODEL_404_MARKERS = re.compile(
+    r"(not\s+found\s+the\s+model|model[\s_-]?(not[\s_-]?found|does[\s_-]?not[\s_-]?exist|"
+    r"unknown|invalid|unavailable)|resource_not_found|"
+    r"permission\s+denied.*model|model.*permission\s+denied|"
+    r"找不到.*模型|模型.*(不存在|不可用|未找到|无权限))",
+    re.IGNORECASE,
+)
 
 
 def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
@@ -190,16 +207,38 @@ def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
     return bool(_AUTH_BODY_MARKERS.search(extracted))
 
 
+def is_model_not_found_404(body: bytes | str | None) -> bool:
+    """True when an HTTP 404 body points at a missing/denied model id (not a path)."""
+    preview = body_preview(body)
+    code = (_extract_upstream_code(preview) or "").lower()
+    if code in _MODEL_404_CODES:
+        return True
+    extracted = _extract_upstream_message(preview) or ""
+    if extracted and _MODEL_404_MARKERS.search(extracted):
+        return True
+    # Non-JSON body / raw text still mentioning the model.
+    return bool(preview and _MODEL_404_MARKERS.search(preview))
+
+
 def client_error_message(
     provider_name: str, status_code: int, body: bytes | str | None
 ) -> str:
     extracted = _extract_upstream_message(body_preview(body))
+    if status_code == 404:
+        if is_model_not_found_404(body):
+            if extracted:
+                return (
+                    f"{provider_name} {extracted}。"
+                    "请更换默认模型后重试"
+                )
+            return f"{provider_name} 指定的模型不可用（404），请更换默认模型后重试"
+        if extracted:
+            return f"{provider_name} {extracted}"
+        return f"{provider_name} 接口地址不可达（404），请检查 base_url 配置"
     if extracted:
         return f"{provider_name} {extracted}"
     if status_code == 400:
         return f"{provider_name} 请求格式被拒绝（400），请检查模型与参数配置"
-    if status_code == 404:
-        return f"{provider_name} 接口地址不可达（404），请检查 base_url 配置"
     return f"{provider_name} 请求被拒绝（{status_code}），请稍后再试"
 
 
