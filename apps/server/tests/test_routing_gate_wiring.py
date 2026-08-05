@@ -1,8 +1,7 @@
 """Escalation Gate wiring: ``apply_escalation_gate`` + worker ``react_loop`` path.
 
-Misclassification that stays ``continue`` would silently swallow a worker scheme
-escalation — these tests lock emit + sink accumulation for scheme hits, and
-silence for execution-layer failures. Captain role must not wire the gate.
+Gate 不再因工具输出方案层词产 scheme_escalation；本文件钉死 wiring 静默，
+以及结构化 SCOPE payload 仍可走既有 live banner 语义（见 unit 映射单测）。
 """
 
 from __future__ import annotations
@@ -99,7 +98,31 @@ class _RecordingSink(EventSink):
         super().emit(event)
 
 
-def test_apply_escalation_gate_scheme_emits_and_accumulates():
+def test_apply_escalation_gate_yuequan_report_is_silent():
+    """写报告类输出含「越权」不得 live run_escalation kind=scope。"""
+    sink = _RecordingSink()
+    gate_sink: list[dict] = []
+    apply_escalation_gate(
+        attempts=[ToolAttempt("fp1", "file_write", success=True)],
+        tool_results=[
+            LLMMessage(
+                role="tool",
+                content="报告结论：存在越权风险，超出权限边界。",
+                tool_call_id="c1",
+            )
+        ],
+        sink=sink,
+        run_id="run-w",
+        agent_id="worker-1",
+        gate_escalation_sink=gate_sink,
+    )
+
+    assert gate_sink == []
+    assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)
+    assert not any(e.type == EventType.RUN_ESCALATION for e in sink.emitted)
+
+
+def test_apply_escalation_gate_scheme_flavored_output_is_silent():
     sink = _RecordingSink()
     gate_sink: list[dict] = []
     apply_escalation_gate(
@@ -113,45 +136,9 @@ def test_apply_escalation_gate_scheme_emits_and_accumulates():
         gate_escalation_sink=gate_sink,
     )
 
-    assert len(gate_sink) == 1
-    assert gate_sink[0]["gate_kind"] == "contract"
-    assert gate_sink[0]["kind"] == "scope"
-    assert gate_sink[0]["layer"] == "scheme"
-
-    gate_events = [e for e in sink.emitted if e.type == EventType.RUN_ESCALATION_GATE]
-    assert len(gate_events) == 1
-    assert gate_events[0].payload["action"] == "escalate"
-    assert gate_events[0].payload["layer"] == "scheme"
-
-    banners = [e for e in sink.emitted if e.type == EventType.RUN_ESCALATION]
-    assert len(banners) == 1
-    assert "契约" in banners[0].payload.get("question", "") or "权限" in banners[
-        0
-    ].payload.get("question", "")
-
-
-def test_apply_escalation_gate_dedupes_same_question_across_rounds():
-    """同 run 内相同 question 只 live 上报一次（对齐 harvest 去重）。"""
-    sink = _RecordingSink()
-    gate_sink: list[dict] = []
-    attempt = ToolAttempt("fp1", "file_write", success=False)
-    msg = LLMMessage(role="tool", content="超出权限，需改接口契约", tool_call_id="c1")
-    kwargs = dict(
-        attempts=[attempt],
-        tool_results=[msg],
-        sink=sink,
-        run_id="run-w",
-        agent_id="worker-1",
-        gate_escalation_sink=gate_sink,
-    )
-    apply_escalation_gate(**kwargs)
-    apply_escalation_gate(**kwargs)
-
-    assert len(gate_sink) == 1
-    banners = [e for e in sink.emitted if e.type == EventType.RUN_ESCALATION]
-    assert len(banners) == 1
-    gate_events = [e for e in sink.emitted if e.type == EventType.RUN_ESCALATION_GATE]
-    assert len(gate_events) == 1
+    assert gate_sink == []
+    assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)
+    assert not any(e.type == EventType.RUN_ESCALATION for e in sink.emitted)
 
 
 def test_apply_escalation_gate_execution_is_silent():
@@ -195,10 +182,10 @@ def test_apply_escalation_gate_ignores_non_tool_attempt_objects():
     assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)
 
 
-async def test_worker_react_loop_scheme_output_fills_gate_sink():
+async def test_worker_react_loop_scheme_output_does_not_fill_gate_sink():
     tool = _OutputTool(
         "file_write",
-        "继续执行会破坏对外契约 / 改接口契约",
+        "继续执行会破坏对外契约 / 改接口契约 / 越权",
         success=False,
     )
     provider = _ScriptedProvider(
@@ -223,10 +210,9 @@ async def test_worker_react_loop_scheme_output_fills_gate_sink():
     )
 
     assert tool.calls == 1
-    assert len(gate_sink) == 1
-    assert gate_sink[0]["gate_kind"] == "contract"
-    assert any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)
-    assert any(e.type == EventType.RUN_ESCALATION for e in sink.emitted)
+    assert gate_sink == []
+    assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)
+    assert not any(e.type == EventType.RUN_ESCALATION for e in sink.emitted)
 
 
 async def test_worker_react_loop_execution_failure_does_not_escalate():

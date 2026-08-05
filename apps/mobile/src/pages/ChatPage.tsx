@@ -50,6 +50,7 @@ import {
 } from "@/components/AssistantView";
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
+import { CollapsibleUserText } from "@/components/CollapsibleUserText";
 import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
@@ -65,6 +66,7 @@ import { StageCard } from "@/components/StageCard";
 import { EscalationAnswer } from "@/components/TeamView";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
+import { composerTrailingSlots } from "@/lib/composerTrailing";
 import {
   type ErrorAction,
   StreamHttpError,
@@ -87,6 +89,7 @@ import {
   upsertQueuedTurn,
   useQueuedTurns,
 } from "@/lib/queuedTurns";
+import { clearLiveTurnEvents, removeLiveTurn } from "@/lib/reconnectLiveTurn";
 import {
   createHarvestRefreshScheduler,
   dropSettledLiveTurns,
@@ -150,7 +153,14 @@ import {
   Square,
   SquarePen,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 // One-shot handoff from a draft send (at `/`) to the freshly-created conversation's first
@@ -219,7 +229,9 @@ function UserTurnBubble({
       data-queued={queued ? "true" : undefined}
       data-testid={queued ? "user-queued-bubble" : undefined}
     >
-      {turn.userText}
+      <CollapsibleUserText contentKey={turn.userText}>
+        {turn.userText}
+      </CollapsibleUserText>
       <AttachmentChips items={turn.attachments ?? []} />
       {queueLabel && (
         <div
@@ -1088,8 +1100,8 @@ export function ChatPage() {
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
-  // The composer text input — focused after tapping a 下一步 chip so the user can edit/send.
-  const composerInputRef = useRef<HTMLInputElement>(null);
+  // The composer textarea — focused after tapping a 下一步 chip so the user can edit/send.
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
@@ -2019,20 +2031,15 @@ export function ChatPage() {
   // replay + live tail. On "none" the detached run already finished — reload the persisted
   // transcript so the live turn is replaced by its saved reply. A second drop offers a
   // manual 重连.
+  // 排队插泡后队尾可能是未开跑 turn——目标须跟 activeTurnIdRef（与投影约定一致），禁 turns[-1]。
   async function reconnect() {
     if (!conversationId) return;
     setError(null);
     clearStopping();
     setSending(true);
-    const reconnectTurnId =
-      turns.length > 0 ? turns[turns.length - 1].id : null;
+    const reconnectTurnId = activeTurnIdRef.current;
     if (reconnectTurnId) setActiveTurn(reconnectTurnId);
-    setTurns((t) => {
-      if (t.length === 0) return t;
-      const next = t.slice();
-      next[next.length - 1] = { ...next[next.length - 1], events: [] };
-      return next;
-    });
+    setTurns((t) => clearLiveTurnEvents(t, reconnectTurnId));
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -2042,7 +2049,7 @@ export function ChatPage() {
         ac.signal,
       );
       if (outcome === "none" && abortRef.current === ac) {
-        setTurns((t) => t.slice(0, -1));
+        setTurns((t) => removeLiveTurn(t, reconnectTurnId));
         const {
           messages,
           hasMoreBefore: more,
@@ -2298,8 +2305,8 @@ export function ChatPage() {
     } catch (e) {
       if (isAbort(e)) return;
       if (e instanceof StreamHttpError && e.status === 422) {
-        // 检定失败：撤回空回合，卡保持 pending（inline 报错由 StageCard 承接）
-        setTurns((t) => (t.length > 0 ? t.slice(0, -1) : t));
+        // 检定失败：撤回本空回合（按 id，禁 slice(-1)——期间可能已插排队泡）
+        setTurns((t) => removeLiveTurn(t, turnId));
         setSending(false);
         abortRef.current = null;
         throw e;
@@ -2319,6 +2326,24 @@ export function ChatPage() {
     profileDisplayLabel(modelProfiles, currentProfileId) ?? "默认组合";
   const permissionLabel = axesShortLabel(permissionAxes);
   const composerLocked = history === null || stopPhase === "stopping";
+  const hasDraft = Boolean(input.trim());
+  const trailing = composerTrailingSlots({
+    busy,
+    hasDraft,
+    voiceSupported: voice.isSupported,
+    voiceActive: voice.isRecording || voice.state === "processing",
+  });
+
+  // Auto-grow textarea (cap ~5 lines) so multi-line drafts don't steal the button row.
+  // useLayoutEffect + assign `el.value = input` so the dep is real (not a fake trigger)
+  // and programmatic setInput (voice/chip/clear) still remeasures before paint.
+  useLayoutEffect(() => {
+    const el = composerInputRef.current;
+    if (!el) return;
+    el.value = input;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input]);
 
   return (
     <div className="screen">
@@ -2413,7 +2438,11 @@ export function ChatPage() {
             }
             return (
               <div key={m.id} className="bubble user">
-                {m.content}
+                {m.content ? (
+                  <CollapsibleUserText contentKey={m.content}>
+                    {m.content}
+                  </CollapsibleUserText>
+                ) : null}
                 <AttachmentChips items={atts} />
               </div>
             );
@@ -2657,6 +2686,31 @@ export function ChatPage() {
         />
       )}
 
+      {/* 生成中有草稿：排队入口收到行外轻链（对齐桌面 Ctrl+Enter，不挤主槽）。 */}
+      {trailing.showQueueHint && (
+        <div
+          className="composer-delivery-hint"
+          data-testid="composer-delivery-hint"
+        >
+          <span>发送将插入当前回合</span>
+          <button
+            type="button"
+            className="queue-link"
+            onClick={() => void sendForcedQueue()}
+            disabled={history === null || stopPhase === "stopping"}
+            aria-label={interruptible ? "强制排队" : "排队发送"}
+            title={
+              interruptible
+                ? "强制排队（绕过插话）"
+                : "排队发送（下一回合执行）"
+            }
+            data-testid="force-queue-btn"
+          >
+            {interruptible ? "强制排队" : "改为排队"}
+          </button>
+        </div>
+      )}
+
       <div className="composer">
         <input
           ref={attachInputRef}
@@ -2676,85 +2730,83 @@ export function ChatPage() {
         >
           ＋
         </button>
-        <input
+        <textarea
           ref={composerInputRef}
+          className="composer-input"
+          rows={1}
           placeholder={history === null ? "加载中…" : "说点什么…"}
           value={input}
           disabled={composerLocked}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
+            if (e.key !== "Enter" || e.shiftKey) return;
             // IME 组合态（中文选词等）：Enter 确认候选，勿当发送。
             if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
               return;
+            e.preventDefault();
             void onSubmit();
           }}
         />
-        {voice.isSupported && (
-          <VoiceButton
-            state={voice.state}
-            disabled={composerLocked}
-            onClick={voice.toggle}
-          />
-        )}
-        {busy ? (
-          <>
-            <button
-              type="button"
-              className="send-btn"
-              onClick={() => void onSubmit()}
-              disabled={
-                history === null || !input.trim() || stopPhase === "stopping"
-              }
-              aria-label={interruptible ? "发送插话" : "插入发送"}
-              title={interruptible ? "发送插话" : "插入发送"}
-            >
-              <Send size={18} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="queue-btn"
-              onClick={() => void sendForcedQueue()}
-              disabled={
-                history === null || !input.trim() || stopPhase === "stopping"
-              }
-              aria-label={interruptible ? "强制排队" : "排队发送"}
-              title={
-                interruptible
-                  ? "强制排队（绕过插话）"
-                  : "排队发送（下一回合执行）"
-              }
-              data-testid="force-queue-btn"
-            >
-              排队
-            </button>
-            <button
-              type="button"
-              className={`stop${stopPhase === "stopping" ? " stopping" : ""}`}
-              onClick={stop}
-              aria-label={stopButtonLabel(stopPhase)}
-              title={stopButtonLabel(stopPhase)}
-              aria-busy={stopPhase === "stopping"}
-            >
-              {stopPhase === "stopping" ? (
-                <Loader2 size={18} className="voice-spin" aria-hidden />
-              ) : (
-                <Square size={16} aria-hidden />
-              )}
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="send-btn"
-            onClick={() => void onSubmit()}
-            disabled={history === null || !input.trim()}
-            aria-label="发送"
-            title="发送"
-          >
-            <Send size={18} aria-hidden />
-          </button>
-        )}
+        {/* 态敏主槽：空闲空草稿=麦；有字=发送；生成中=Stop（有草稿时旁挂弱插入）。 */}
+        {trailing.row.map((slot) => {
+          if (slot === "steer-send") {
+            return (
+              <button
+                key={slot}
+                type="button"
+                className="send-btn send-btn-secondary"
+                onClick={() => void onSubmit()}
+                disabled={history === null || stopPhase === "stopping"}
+                aria-label={interruptible ? "发送插话" : "插入发送"}
+                title={interruptible ? "发送插话" : "插入发送"}
+              >
+                <Send size={18} aria-hidden />
+              </button>
+            );
+          }
+          if (slot === "send") {
+            return (
+              <button
+                key={slot}
+                type="button"
+                className="send-btn"
+                onClick={() => void onSubmit()}
+                disabled={history === null || !hasDraft}
+                aria-label="发送"
+                title="发送"
+              >
+                <Send size={18} aria-hidden />
+              </button>
+            );
+          }
+          if (slot === "stop") {
+            return (
+              <button
+                key={slot}
+                type="button"
+                className={`stop${stopPhase === "stopping" ? " stopping" : ""}`}
+                onClick={stop}
+                aria-label={stopButtonLabel(stopPhase)}
+                title={stopButtonLabel(stopPhase)}
+                aria-busy={stopPhase === "stopping"}
+              >
+                {stopPhase === "stopping" ? (
+                  <Loader2 size={18} className="voice-spin" aria-hidden />
+                ) : (
+                  <Square size={16} aria-hidden />
+                )}
+              </button>
+            );
+          }
+          return (
+            <VoiceButton
+              key={slot}
+              state={voice.state}
+              disabled={composerLocked}
+              onClick={voice.toggle}
+            />
+          );
+        })}
       </div>
 
       {moreOpen && (

@@ -1,3 +1,4 @@
+import { CollapsibleUserText } from "@/components/CollapsibleUserText";
 import {
   interjectionStatusLabel,
   interjectionStatusTone,
@@ -44,7 +45,11 @@ export function InterjectionBubbles({
                 ))}
               </div>
             ) : null}
-            <div className="bubble user">{item.content}</div>
+            <div className="bubble user">
+              <CollapsibleUserText contentKey={item.content}>
+                {item.content}
+              </CollapsibleUserText>
+            </div>
             <div
               className={`interjection-status tone-${tone}`}
               data-testid={`interjection-status-${item.interjectionId}`}

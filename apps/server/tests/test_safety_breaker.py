@@ -20,6 +20,8 @@ from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.safety_breaker import (
     BreakerVerdict,
+    SensitivePathClass,
+    classify_sensitive_path,
     evaluate_tool_call,
     fuse_aligned_deny_rule_ids,
     git_forbidden_subcommands,
@@ -121,23 +123,34 @@ def test_scan_git_push_feature_branch_ok():
         ".env.production",
         "config/.env",
         "apps/server/.env",
-        "id_rsa",
-        ".ssh/id_ed25519",
-        "certs/server.pem",
-        "secrets/app.key",
         "credentials.json",
         ".aws/credentials",
         ".npmrc",
     ],
 )
-def test_sensitive_paths(path: str):
+def test_ask_sensitive_paths(path: str):
+    assert classify_sensitive_path(path) is SensitivePathClass.ASK
+    assert is_sensitive_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "id_rsa",
+        ".ssh/id_ed25519",
+        "certs/server.pem",
+        "secrets/app.key",
+    ],
+)
+def test_deny_sensitive_paths(path: str):
+    assert classify_sensitive_path(path) is SensitivePathClass.DENY
     assert is_sensitive_path(path) is True
 
 
 def test_sensitive_globs():
-    assert is_sensitive_path(".env*") is True
-    assert is_sensitive_path("*.pem") is True
-    assert is_sensitive_path("config/.env.*") is True
+    assert classify_sensitive_path(".env*") is SensitivePathClass.ASK
+    assert classify_sensitive_path("*.pem") is SensitivePathClass.DENY
+    assert classify_sensitive_path("config/.env.*") is SensitivePathClass.ASK
 
 
 @pytest.mark.parametrize(
@@ -147,20 +160,46 @@ def test_sensitive_globs():
         "src/main.py",
         ".gitignore",
         "env.example",
+        ".env.example",
+        "apps/mobile/.env.example",
+        ".env.sample",
+        ".env.template",
+        "deploy/config/production.env.example",
         "packages/contract-types/src/events.generated.ts",
         ".",
         "",
     ],
 )
 def test_non_sensitive_paths(path: str):
+    assert classify_sensitive_path(path) is SensitivePathClass.NONE
     assert is_sensitive_path(path) is False
 
 
-def test_evaluate_file_read_sensitive_denies():
+def test_evaluate_file_read_credential_asks():
     hit = evaluate_tool_call("file_read", {"path": ".env.local"})
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+    assert hit.rule_id == "sensitive.path_read_ask"
+    assert "模型上下文" in hit.reason
+    assert "并非完整拦截" in hit.reason
+    assert "粘贴" not in hit.reason
+
+
+def test_evaluate_file_read_key_material_denies():
+    hit = evaluate_tool_call("file_read", {"path": "id_rsa"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "sensitive.path_read"
+    assert "私钥" in hit.reason or "密钥材料" in hit.reason
+    assert "并非完整拦截" in hit.reason
+    # Steer away from chat paste; must not invite「粘贴所需片段」.
+    assert "粘贴所需" not in hit.reason
+    assert "不要把密钥" in hit.reason
+
+
+def test_evaluate_file_read_template_passes():
+    assert evaluate_tool_call("file_read", {"path": "apps/mobile/.env.example"}) is None
+    assert evaluate_tool_call("file_write", {"path": ".env.example", "content": "A=\n"}) is None
 
 
 def test_evaluate_file_read_normal_passes():
@@ -168,7 +207,7 @@ def test_evaluate_file_read_normal_passes():
 
 
 def test_evaluate_file_write_sensitive_path_denies():
-    """案 image-gen B：敏感路径写盘与读盘同拒。"""
+    """案 image-gen B：敏感路径写盘硬拒（含凭据 Ask 类路径）。"""
     hit = evaluate_tool_call("file_write", {"path": ".env", "content": "FOO=1"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
@@ -637,7 +676,156 @@ async def test_full_trust_auto_pass_bypassed_for_destructive_via_tool_exec():
     assert "circuit_breaker_hint" in required[0].payload["arguments"]
 
 
-async def test_sensitive_file_read_denied_as_policy_failure():
+async def test_sensitive_credential_read_forces_approval():
+    """Ask-class credential read → FORCE_APPROVAL; keys preview on card, not model."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-ask",
+        registry=registry,
+        timeout_seconds=5.0,
+        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+    )
+    secret_body = "PREVIEW_ONLY_KEY=super-secret-value\nOTHER=1\n"
+    executed_args: dict[str, Any] = {}
+
+    class _Backend:
+        location = "local"
+        root = Path(".")
+
+        async def read(self, path: str) -> str:
+            assert path == ".env"
+            return secret_body
+
+    class _ReadTool:
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_read",
+                description="t",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.NEVER,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            executed_args.update(arguments)
+            return ToolResult(tool_call_id="", success=True, output="SECRET=1")
+
+    tools = ToolRegistry()
+    tools.register(_ReadTool())
+    ctx = ToolContext(
+        execution_id="exec-ask",
+        run_id="run-ask",
+        agent_id="a",
+        backend=_Backend(),  # type: ignore[arg-type]
+        user_id="u",
+        conversation_id="conv-ask",
+    )
+    tc = ToolCall(
+        id="tc-read-ask",
+        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+    )
+
+    async def _approve() -> None:
+        await _resolve_when_ready(
+            registry, "tc-read-ask", ApprovalDecision.APPROVE, "conv-ask"
+        )
+
+    approve_task = asyncio.create_task(_approve())
+    messages, _, attempts = await tool_exec_mod.execute_tools(
+        [tc], tools, ctx, sink, approval_gate=gate, run_id="run-ask"
+    )
+    await approve_task
+    assert attempts[0].success is True
+    assert "SECRET=1" in messages[0].content
+    required = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
+    assert len(required) == 1
+    gate_args = required[0].payload["arguments"]
+    hint = gate_args["circuit_breaker_hint"]
+    # Key assertion: preview lands only on approval args.circuit_breaker_hint;
+    # file body must not be fed to the model via hint / gate args / execute args.
+    assert "键名预览" in hint
+    assert "PREVIEW_ONLY_KEY" in hint
+    assert "OTHER" in hint
+    assert "super-secret-value" not in hint
+    assert "super-secret-value" not in str(gate_args)
+    assert secret_body not in str(gate_args)
+    assert "super-secret-value" not in (messages[0].content or "")
+    assert executed_args.get("path") == ".env"
+    assert "circuit_breaker_hint" not in executed_args
+    assert "super-secret-value" not in str(executed_args)
+
+
+async def test_sensitive_credential_preview_soft_fail_still_asks():
+    """Preview read failure must not block FORCE_APPROVAL (reason-only hint)."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-soft",
+        registry=registry,
+        timeout_seconds=5.0,
+        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+    )
+
+    class _Backend:
+        location = "local"
+        root = Path(".")
+
+        async def read(self, path: str) -> str:
+            raise FileNotFoundError(path)
+
+    class _ReadTool:
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_read",
+                description="t",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.NEVER,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            return ToolResult(tool_call_id="", success=True, output="ok")
+
+    tools = ToolRegistry()
+    tools.register(_ReadTool())
+    ctx = ToolContext(
+        execution_id="exec-soft",
+        run_id="run-soft",
+        agent_id="a",
+        backend=_Backend(),  # type: ignore[arg-type]
+        user_id="u",
+        conversation_id="conv-soft",
+    )
+    tc = ToolCall(
+        id="tc-read-soft",
+        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+    )
+
+    async def _approve() -> None:
+        await _resolve_when_ready(
+            registry, "tc-read-soft", ApprovalDecision.APPROVE, "conv-soft"
+        )
+
+    approve_task = asyncio.create_task(_approve())
+    messages, _, attempts = await tool_exec_mod.execute_tools(
+        [tc], tools, ctx, sink, approval_gate=gate, run_id="run-soft"
+    )
+    await approve_task
+    assert attempts[0].success is True
+    assert messages[0].content == "ok"
+    required = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
+    assert len(required) == 1
+    hint = required[0].payload["arguments"]["circuit_breaker_hint"]
+    assert "并非完整拦截" in hint
+    assert "键名预览" not in hint
+
+
+async def test_sensitive_key_read_denied_as_policy_failure():
     sink = EventSink()
 
     class _ReadTool:
@@ -652,18 +840,18 @@ async def test_sensitive_file_read_denied_as_policy_failure():
             )
 
         async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-            raise AssertionError("must not execute sensitive read")
+            raise AssertionError("must not execute key-material read")
 
     tools = ToolRegistry()
     tools.register(_ReadTool())
     ctx = _ctx()
     tc = ToolCall(
         id="tc-read-1",
-        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+        function=ToolCallFunction(name="file_read", arguments='{"path": "id_rsa"}'),
     )
     messages, _, attempts = await tool_exec_mod.execute_tools(
         [tc], tools, ctx, sink, approval_gate=None, run_id="run-r"
     )
     assert attempts[0].success is False
     assert attempts[0].policy_failure is True
-    assert "敏感" in messages[0].content or "凭据" in messages[0].content
+    assert "敏感" in messages[0].content or "私钥" in messages[0].content or "密钥" in messages[0].content

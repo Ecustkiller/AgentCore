@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from agentcore.conversation.inference_rate_limit import (
@@ -142,3 +144,60 @@ async def test_proxy_rate_limit_refused_turn_not_claimed(monkeypatch):
         await enforce_inference_proxy_rate_limit(
             "u1", message_id="turn-b", limiter=limiter, turn_claims=claims, now=2.0
         )
+
+
+@pytest.mark.asyncio
+async def test_proxy_rate_limit_concurrent_same_message_id_counts_once(monkeypatch):
+    """check→await→claim must not double-charge when concurrent tasks yield mid-enforce."""
+    monkeypatch.setattr(
+        "agentcore.conversation.inference_rate_limit.settings.rate_limit_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        "agentcore.conversation.rate_limit.settings.rate_limit_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        "agentcore.conversation.rate_limit.settings.user_message_rate_limit_max",
+        20,
+    )
+
+    from agentcore.conversation.rate_limit import (
+        enforce_user_message_rate_limit as real_enforce,
+    )
+
+    async def yielding_enforce(*args, **kwargs):
+        # Force a scheduling point so gather interleaves before claim (old TOCTOU).
+        await asyncio.sleep(0)
+        return await real_enforce(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "agentcore.conversation.inference_rate_limit.enforce_user_message_rate_limit",
+        yielding_enforce,
+    )
+
+    limiter = SlidingWindowRateLimiter(max_requests=8, window_seconds=60.0)
+    check_calls = {"n": 0}
+    real_check = limiter.check
+
+    def counting_check(key: str, *, now: float | None = None):
+        check_calls["n"] += 1
+        return real_check(key, now=now)
+
+    limiter.check = counting_check  # type: ignore[method-assign]
+    claims = _TurnClaimGate(ttl_seconds=7200.0)
+
+    await asyncio.gather(
+        *[
+            enforce_inference_proxy_rate_limit(
+                "u1",
+                message_id="turn-concurrent",
+                limiter=limiter,
+                turn_claims=claims,
+                now=0.0,
+            )
+            for _ in range(8)
+        ]
+    )
+    assert check_calls["n"] == 1
+    assert claims.already_claimed("u1:turn-concurrent", now=0.0)

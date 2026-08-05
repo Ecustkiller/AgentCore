@@ -10,8 +10,10 @@ namespace AgentTown.Town
     /// <summary>
     /// Resolves the API base / access token / run id at launch (§8). Precedence, low → high:
     /// built-in default → desktop <c>session.json</c> (§8.2) → desktop CLI args (§8.1) →
-    /// WebGL URL query (<c>?api=&amp;token=&amp;run=&amp;demo=&amp;pack=&amp;shoot=</c>, §8.1). CLI / URL win so a launcher can
-    /// always override the persisted session.
+    /// WebGL URL (<c>?api=&amp;run=&amp;demo=…</c> + fragment <c>#token=…</c>, §8.1).
+    /// Token prefers the URL fragment (not Referer / access logs); query <c>token</c> remains
+    /// as a compatibility fallback. CLI / URL win so a launcher can always override the
+    /// persisted session.
     /// </summary>
     public readonly struct AgentTownLaunchConfig
     {
@@ -143,18 +145,24 @@ namespace AgentTown.Town
             ref int episode)
         {
             string url = Application.absoluteURL;
-            if (string.IsNullOrEmpty(url) || !url.Contains("?"))
+            if (string.IsNullOrEmpty(url) || (!url.Contains("?") && !url.Contains("#")))
             {
                 return;
             }
 
             Dictionary<string, string> query = ParseQuery(url);
+            Dictionary<string, string> fragment = ParseFragment(url);
             if (query.TryGetValue("api", out string api) && !string.IsNullOrEmpty(api))
             {
                 apiBase = api;
             }
 
-            if (query.TryGetValue("token", out string t) && !string.IsNullOrEmpty(t))
+            // Prefer fragment token (not sent in Referer / most access logs).
+            if (fragment.TryGetValue("token", out string fragTok) && !string.IsNullOrEmpty(fragTok))
+            {
+                token = fragTok;
+            }
+            else if (query.TryGetValue("token", out string t) && !string.IsNullOrEmpty(t))
             {
                 token = t;
             }
@@ -318,7 +326,35 @@ namespace AgentTown.Town
                 query = query.Substring(0, hash);
             }
 
-            foreach (string pair in query.Split('&'))
+            FillDecodedPairs(result, query);
+            return result;
+        }
+
+        /// <summary>
+        /// Parse a URL fragment (<c>#key=value&amp;…</c>) into decoded pairs. Used for
+        /// <c>token</c> so credentials stay out of query/Referer/access logs.
+        /// </summary>
+        public static Dictionary<string, string> ParseFragment(string url)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(url))
+            {
+                return result;
+            }
+
+            int hash = url.IndexOf('#');
+            if (hash < 0 || hash + 1 >= url.Length)
+            {
+                return result;
+            }
+
+            FillDecodedPairs(result, url.Substring(hash + 1));
+            return result;
+        }
+
+        private static void FillDecodedPairs(Dictionary<string, string> result, string raw)
+        {
+            foreach (string pair in raw.Split('&'))
             {
                 if (string.IsNullOrEmpty(pair))
                 {
@@ -336,8 +372,6 @@ namespace AgentTown.Town
                 string value = Uri.UnescapeDataString(pair.Substring(eq + 1));
                 result[key] = value;
             }
-
-            return result;
         }
     }
 }

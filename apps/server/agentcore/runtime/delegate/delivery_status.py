@@ -30,6 +30,13 @@ CEO finish；写盘通道挂仍可在备注里诚实归因。
 ``evidence_gap`` + ``search_policy=academic_literature``（兼容旧
 ``evidence_deficit`` 戳）；不扫完成话术词，不套 ``parallel_brief``。
 
+已声明复核落盘（``form=files`` + ``reviews/``）：声明路径未 accepted / 拒收 /
+空壳 → ``reason=thin_review`` blocking（见
+``research_quality.collect_thin_review_gaps``）；不扫角色名；有合格报告则短
+handoff 不硬降档。``requires_draft_ack`` 扩至 ``evidence_deficit`` /
+``thin_review`` / ``verify_failed`` / ``node_failed`` / ``artifact_rejected``
+（契约硬失败·节点 FAILED·拒收产物同 thin_review 闩；正向缺口承认，不扩姿势 A 词表）。
+
 挂在 drive 的各收尾路径旁路（正常终态 / 验收未满足 / 部分失败 stash / replan(stop)），
 永不抛错；纯 prose 成功批次（无落盘文件、无缺口）保持无声，不发事件。
 折叠语义：同 ``execution_id`` 保最新——反映最近一批委派的对账（多批场景下 FileArtifactsCard
@@ -61,6 +68,12 @@ REASON_FILES_NOT_LANDED = "files_not_landed"
 REASON_VERIFY_FAILED = "verify_failed"
 # Literature-report evidence deficit (research_quality.REASON_EVIDENCE_DEFICIT).
 REASON_EVIDENCE_DEFICIT = "evidence_deficit"
+# Declared reviews/ report missing / rejected / shell (research_quality.REASON_THIN_REVIEW).
+REASON_THIN_REVIEW = "thin_review"
+# Plan node terminal FAILED (incl. contract.failed → RunPhase.FAILED).
+REASON_NODE_FAILED = "node_failed"
+# Path-level file_acceptance rejected (cite-tier / FAILED landings / …).
+REASON_ARTIFACT_REJECTED = "artifact_rejected"
 # Unresolved write-ownership collision (closing_posture P0-B · structured only).
 REASON_WRITE_OWNERSHIP = "write_ownership_conflict"
 # Keep in sync with runtime.runs.cutoff.REASON_DEGRADED_HANDOFF (wire gap reason).
@@ -68,6 +81,17 @@ REASON_DEGRADED_HANDOFF = "degraded_handoff"
 _WRITING_CUTOFF_REASONS = frozenset({"token_budget", "worker_timeout"})
 _SOFT_GAP_REASONS = frozenset(
     {REASON_UNVERIFIED_NOTE, REASON_PATH_HINT, REASON_FILES_NOT_LANDED}
+)
+# Gaps that latch finish_guard draft acknowledgment (扩出文献 evidence_deficit /
+# 能力4：契约硬失败 / 节点 FAILED / rejected 产物 —— 不扩姿势 A 词表).
+_DRAFT_ACK_GAP_REASONS = frozenset(
+    {
+        REASON_EVIDENCE_DEFICIT,
+        REASON_THIN_REVIEW,
+        REASON_VERIFY_FAILED,
+        REASON_NODE_FAILED,
+        REASON_ARTIFACT_REJECTED,
+    }
 )
 # 刀1：有落盘时 degraded_handoff 并入 soft（见 _soften_landed_degraded_gaps）。
 _PLAN_CUTOFF_SKIP_DESC = "未执行（计划收口时跳过）"
@@ -89,8 +113,25 @@ class DeliveryVerdict:
     state: str
     delivered_files: tuple[str, ...]
     execution_id: str
-    # True when gaps include evidence_deficit (literature draft framing required).
+    # True when gaps include evidence_deficit / thin_review / verify_failed /
+    # node_failed / artifact_rejected (draft / gap acknowledgment required).
     requires_draft_ack: bool = False
+
+
+def _gaps_require_draft_ack(gaps: list[Any] | tuple[Any, ...] | None) -> bool:
+    """True when any gap reason latches requires_draft_ack."""
+    return any(
+        isinstance(g, dict) and str(g.get("reason") or "") in _DRAFT_ACK_GAP_REASONS
+        for g in (gaps or [])
+    )
+
+
+def acceptance_counts(results: dict[str, RunState]) -> tuple[int, int]:
+    """Path-deduped ``(accepted, rejected)`` from ``file_acceptance`` — synthesis 同源."""
+    arts = _collect_artifacts(results)
+    accepted = sum(1 for a in arts if a.get("status") == "accepted")
+    rejected = sum(1 for a in arts if a.get("status") == "rejected")
+    return accepted, rejected
 
 
 current_delivery_verdict: ContextVar[DeliveryVerdict | None] = ContextVar(
@@ -199,6 +240,32 @@ def _collect_artifacts(results: dict[str, RunState]) -> list[dict[str, Any]]:
                 order.append(path)
             by_path[path] = row
     return [by_path[p] for p in order][:_MAX_FILES]
+
+
+def _artifact_rejected_gaps(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Structured gaps for path-level rejected artifacts (能力4 · draft_ack 闩).
+
+    One summary row — does not scan prose; truth = ``file_acceptance`` rejected.
+    """
+    rejected = [
+        a
+        for a in artifacts
+        if isinstance(a, dict) and a.get("status") == "rejected" and a.get("path")
+    ]
+    if not rejected:
+        return []
+    paths = [str(a["path"]).strip() for a in rejected if str(a.get("path") or "").strip()]
+    if not paths:
+        return []
+    shown = "、".join(f"`{p}`" for p in paths[:6])
+    more = f" 等 {len(paths)} 个" if len(paths) > 6 else ""
+    return [
+        _annotate_gap(
+            "验收",
+            f"产物未通过验收：{shown}{more}",
+            reason=REASON_ARTIFACT_REJECTED,
+        )
+    ]
 
 
 def _has_completed_revision(run_id: str, results: dict[str, RunState]) -> bool:
@@ -316,7 +383,9 @@ def _node_gaps(plan: RunPlan, results: dict[str, RunState]) -> list[dict[str, An
         if state.phase is RunPhase.FAILED:
             err = (state.error or "").strip()
             desc = f"未完成（失败：{err}）" if err else "未完成（失败）"
-            gaps.append({"role": role, "description": desc})
+            gaps.append(
+                {"role": role, "description": desc, "reason": REASON_NODE_FAILED}
+            )
         elif state.phase is RunPhase.SKIPPED:
             # Prefer first-class delivery_gaps (turn-ceiling honesty: 未目验 / 未跑
             # web_quality / {{…}}); fall back to a generic skip row.
@@ -458,8 +527,10 @@ def _member_files_not_landed_gap(
 ) -> dict[str, Any]:
     """Per-worker soft tip: 本队员本波未交卷（定案 B · 终态可见性）.
 
-    Keeps ``severity=warning`` / ``files_not_landed`` so CEO can see *who*
-    skipped landing without flipping the batch to blocked / criteria_unmet.
+    Keeps ``severity=warning`` so CEO can see *who* skipped landing without
+    flipping the batch to blocked / criteria_unmet. When the source gap was
+    ``node_failed`` (契约硬失败 / FAILED)，保留该 reason 以闩 ``requires_draft_ack``
+    （能力4）；其余零落盘仍用 ``files_not_landed``。
     """
     raw = str(source.get("description") or "").strip()
     # Strip FAILED node wrapper so the soft tip stays notes, not「未完成（失败）」.
@@ -475,10 +546,17 @@ def _member_files_not_landed_gap(
         from agentcore.runtime.runs.contract import zero_files_gap_message
 
         text = zero_files_gap_message(landing_failure_kind=failure_kind)
+    # 能力4：零落盘 soft 投影仍保留 node_failed reason → draft_ack 闩不断。
+    src_reason = str(source.get("reason") or "").strip()
+    reason = (
+        REASON_NODE_FAILED
+        if src_reason == REASON_NODE_FAILED
+        else REASON_FILES_NOT_LANDED
+    )
     return {
         "role": role,
         "description": text,
-        "reason": REASON_FILES_NOT_LANDED,
+        "reason": reason,
         "severity": "warning",
     }
 
@@ -648,7 +726,10 @@ def build_delivery_status(
     # parallel_brief 不套。blocking → 不得 delivered（partial/blocked）；不扫完成话术词。
     # 接缝真源：web_search / RunState.evidence_gap（academic_literature）；gap reason
     # 仍为 evidence_deficit（交付卡契约）。
-    from agentcore.runtime.runs.research_quality import collect_evidence_deficit_gaps
+    from agentcore.runtime.runs.research_quality import (
+        collect_evidence_deficit_gaps,
+        collect_thin_review_gaps,
+    )
 
     for row in collect_evidence_deficit_gaps(plan.nodes, results):
         text = str(row.get("description") or "").strip()
@@ -657,6 +738,17 @@ def build_delivery_status(
         reason = str(row.get("reason") or REASON_EVIDENCE_DEFICIT).strip()
         raw_gaps.append(
             _annotate_gap("验收", text, reason=reason or REASON_EVIDENCE_DEFICIT)
+        )
+    # ①c2 已声明复核落盘未对齐合格报告（案 thin-review A′）——blocking thin_review；
+    # 不扫角色名；有 accepted 合格报告则豁免短 handoff。
+    for row in collect_thin_review_gaps(plan.nodes, results):
+        text = str(row.get("description") or "").strip()
+        if not text:
+            continue
+        reason = str(row.get("reason") or REASON_THIN_REVIEW).strip()
+        role = str(row.get("role") or "").strip() or "验收"
+        raw_gaps.append(
+            _annotate_gap(role, text, reason=reason or REASON_THIN_REVIEW)
         )
     # ①d 未解写权冲突（案 ghost-owner P0-B）——denied_paths 仍被他人持锁 → blocking；
     # 不扫「定稿|闭环」正文；真源=账本结构化信号。
@@ -691,6 +783,9 @@ def build_delivery_status(
             raw_gaps.append(_annotate_gap("验收", text))
     # ③ 失败 / 未执行 / 取消的计划节点（热修已接手的取消节点不算缺口）。
     raw_gaps.extend(_node_gaps(plan, results))
+    # ③b 拒收产物（file_acceptance rejected）→ 结构化 gap + draft_ack（能力4 残差）。
+    # 与 delivered_files / synthesis「已验收」同源；不扫盘上「缺席」散文。
+    raw_gaps.extend(_artifact_rejected_gaps(artifacts))
     # 用户面：零落盘按队员 soft 投影（本队员本波未交卷）；仅批次谓词时合并。
     gaps = _project_user_gaps(raw_gaps, results)[:_MAX_GAPS]
     # 刀1 / 方案 A：有 accepted 落盘时 degraded_handoff 降为 warning 备注。
@@ -810,16 +905,12 @@ def maybe_emit_delivery_status(
         if payload is None:
             return
         gaps = payload.get("gaps") or []
-        requires_draft_ack = any(
-            isinstance(g, dict) and str(g.get("reason") or "") == REASON_EVIDENCE_DEFICIT
-            for g in gaps
-        )
         current_delivery_verdict.set(
             DeliveryVerdict(
                 state=str(payload["state"]),
                 delivered_files=tuple(payload.get("delivered_files") or ()),
                 execution_id=execution_id,
-                requires_draft_ack=requires_draft_ack,
+                requires_draft_ack=_gaps_require_draft_ack(gaps),
             )
         )
         from agentcore.runtime.closing_posture import (
@@ -894,10 +985,7 @@ def _payload_to_verdict(payload: dict[str, Any]) -> DeliveryVerdict | None:
         state=state,
         delivered_files=tuple(str(p) for p in files if p),
         execution_id=execution_id,
-        requires_draft_ack=any(
-            isinstance(g, dict) and str(g.get("reason") or "") == REASON_EVIDENCE_DEFICIT
-            for g in (payload.get("gaps") or [])
-        ),
+        requires_draft_ack=_gaps_require_draft_ack(payload.get("gaps") or []),
     )
 
 

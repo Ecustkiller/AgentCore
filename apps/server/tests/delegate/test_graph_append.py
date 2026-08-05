@@ -248,6 +248,159 @@ async def test_delegate_append_reuses_execution_id(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_delegate_append_completed_same_seat_same_artifact_admits(monkeypatch):
+    """跨回合：宿主已完成同座+同路径 → 入闸放行并 auto-replaces（勿整图 sibling 误拒）。"""
+    from agentcore.runtime.runs.types import Deliverable
+
+    register_graph_host("exec-host", "m-host")
+
+    host_plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="del_old_fe_1",
+                agent_id="w_old",
+                role="前端",
+                task="第一棒 site/index.html",
+                deliverable=Deliverable(artifacts=["site/index.html"]),
+            ),
+        ]
+    )
+    seed = {"del_old_fe_1": RunState(phase=RunPhase.COMPLETED, content="done")}
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
+        return "m-host"
+
+    async def fake_load(host_message_id: str):
+        return host_plan, seed
+
+    async def fake_open_writer(**kwargs):  # noqa: ANN003
+        return TurnJournalWriter(
+            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
+        )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
+        captured["node_ids"] = [n.run_id for n in plan.nodes]
+        captured["replaces"] = {
+            n.run_id: (n.replaces_run_id or "")
+            for n in plan.nodes
+            if n.run_id != "del_old_fe_1"
+        }
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
+        fake_open_writer,
+    )
+    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
+
+    t = tool(Provider(["X"]))
+    t._message_id = "m-new"
+    t._conversation_id = "c"
+    t._base_tool_context.execution_id = "exec-fresh"
+
+    result = await t.execute(
+        {
+            "tasks": [
+                {
+                    "role": "前端",
+                    "task": "第二棒增量 site/index.html",
+                    "deliverable": {"artifacts": ["site/index.html"]},
+                }
+            ],
+            "append_to_execution_id": "exec-host",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True, result.error
+    assert "del_old_fe_1" in captured["node_ids"]
+    assert len(captured["node_ids"]) == 2
+    assert list(captured["replaces"].values()) == ["del_old_fe_1"]
+    assert EventType.GRAPH_APPEND in [e.type for e in t._sink._history]
+    assert EventType.RUN_PLAN in [e.type for e in t._sink._history]
+
+
+@pytest.mark.asyncio
+async def test_delegate_append_incomplete_same_seat_rejects(monkeypatch):
+    """跨回合：宿主同座仍未完成 → 座位重叠拒收，无 run_plan。"""
+    from agentcore.runtime.runs.types import Deliverable
+
+    register_graph_host("exec-host", "m-host")
+
+    host_plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="del_live_fe_1",
+                agent_id="w_live",
+                role="前端",
+                task="仍在跑",
+                deliverable=Deliverable(artifacts=["site/index.html"]),
+            ),
+        ]
+    )
+    seed: dict[str, RunState] = {}  # 未终端 → incomplete
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
+        return "m-host"
+
+    async def fake_load(host_message_id: str):
+        return host_plan, seed
+
+    async def fake_open_writer(**kwargs):  # noqa: ANN003
+        return TurnJournalWriter(
+            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
+        )
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
+        fake_open_writer,
+    )
+
+    t = tool(Provider(["X"]))
+    t._message_id = "m-new"
+    t._conversation_id = "c"
+    t._base_tool_context.execution_id = "exec-fresh"
+
+    result = await t.execute(
+        {
+            "tasks": [
+                {
+                    "role": "前端",
+                    "task": "抢座位",
+                    "deliverable": {"artifacts": ["site/index.html"]},
+                }
+            ],
+            "append_to_execution_id": "exec-host",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is False
+    assert result.contract_failure is True
+    assert "队员追加已拒绝" in (result.error or "")
+    assert [e for e in t._sink._history if e.type is EventType.RUN_PLAN] == []
+    assert [e for e in t._sink._history if e.type is EventType.GRAPH_APPEND] == []
+
+
+@pytest.mark.asyncio
 async def test_delegate_append_resolves_depends_on_host_node(monkeypatch):
     """跨批 append：depends_on 宿主图已有 run_id → build 成功并保留边。"""
     register_graph_host("exec-host", "m-host")

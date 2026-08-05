@@ -5,7 +5,12 @@
 // `Authorization: Bearer` (never cookie credentials). session_id is always
 // pinned so multi-tab frames cannot cross-wire (desktop may omit; mobile does not).
 
-import { apiUrl, authHeader, getTokens, refreshTokens } from "@/api/client";
+import {
+  apiUrl,
+  authHeader,
+  fetchWithAuthRefresh,
+  getTokens,
+} from "@/api/client";
 import { clientHeaders } from "@/lib/clientBuildInfo";
 
 /** One live jpeg frame (envelope `type:"browser_live_frame"` payload). */
@@ -103,23 +108,26 @@ export function startBrowserLive(
   async function runStream(signal: AbortSignal): Promise<StreamOutcome> {
     let response: Response;
     try {
-      response = await fetch(url, {
-        method: "GET",
-        headers: {
-          ...clientHeaders(),
-          Accept: "text/event-stream",
-          ...authHeader(),
-        },
-        signal,
-      });
+      // Shared 401 policy (refresh once + replay; still-401 clears tokens) —
+      // same as stream/midFlight; avoid reconnect-loop that never clears.
+      response = await fetchWithAuthRefresh(() =>
+        fetch(url, {
+          method: "GET",
+          headers: {
+            ...clientHeaders(),
+            Accept: "text/event-stream",
+            ...authHeader(),
+          },
+          signal,
+        }),
+      );
     } catch {
       return "reconnect";
     }
 
     if (response.status === 401) {
-      const renewed = await refreshTokens();
-      if (renewed) return "reconnect";
-      // auth dead → tokens cleared; transient → keep tokens and retry.
+      // Policy already tried refresh+replay (and cleared on still-401).
+      // Dead session → stop; transient refresh failure → keep tokens and retry.
       if (!getTokens()) return "stop";
       return "reconnect";
     }

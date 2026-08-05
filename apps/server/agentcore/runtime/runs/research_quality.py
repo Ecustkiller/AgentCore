@@ -21,6 +21,11 @@ draft 不进 ``file_acceptance`` / artifacts 主清单。
 ``delivered``（仅 partial/blocked）。**不**扫「综述已完成」等完成话术词；**不**套
 ``parallel_brief``。消费学术搜索块真源 ``evidence_gap``（见接缝常量；
 ``evidence_deficit`` 仍兼容）。
+
+已声明复核落盘对账（案 thin-review A′）：``form=files`` + ``reviews/`` artifacts
+未 accepted / 拒收 / 空壳 → ``reason=thin_review`` blocking；不扫角色名；有合格
+accepted 报告则短 handoff 豁免。``requires_draft_ack`` 与 evidence_deficit /
+verify_failed 同闩。
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agentcore.workspace.stage_dirs import (
+    DEBATE_DIR,
+    DEBATE_PREFIX,
     RESEARCH_DIR,
     RESEARCH_PREFIX,
     REVIEWS_DIR,
@@ -123,6 +130,11 @@ def _path_under_research(path: str) -> bool:
     return p == RESEARCH_DIR or p.startswith(RESEARCH_PREFIX)
 
 
+def _path_under_debate(path: str) -> bool:
+    p = (path or "").strip().lstrip("/")
+    return p == DEBATE_DIR or p.startswith(DEBATE_PREFIX)
+
+
 def deliverable_declares_reviews_files(deliverable: Any) -> bool:
     """True when deliverable already declares files under ``reviews/`` (no role scan)."""
     if not _deliverable_files_shaped(deliverable):
@@ -135,6 +147,38 @@ def deliverable_declares_research_files(deliverable: Any) -> bool:
     if not _deliverable_files_shaped(deliverable):
         return False
     return any(_path_under_research(p) for p in _deliverable_candidate_paths(deliverable))
+
+
+def deliverable_declares_debate_files(deliverable: Any) -> bool:
+    """True when deliverable already declares files under ``debate/`` (no role scan)."""
+    if not _deliverable_files_shaped(deliverable):
+        return False
+    return any(_path_under_debate(p) for p in _deliverable_candidate_paths(deliverable))
+
+
+def deliverable_is_report_delivery(deliverable: Any) -> bool:
+    """Structured report-landing post for delivery_idle (never strip search).
+
+    OR of structured stamps / path declarations only — no role-name regex, no bare
+    ``files_expected`` / ``form=files`` (those would mis-classify repair/build).
+    """
+    if deliverable is None:
+        return False
+    if isinstance(deliverable, dict):
+        if deliverable.get("code_audit_gate"):
+            return True
+        if deliverable.get("citation_mode") == "two_phase":
+            return True
+    else:
+        if getattr(deliverable, "code_audit_gate", False):
+            return True
+        if getattr(deliverable, "citation_mode", None) == "two_phase":
+            return True
+    return (
+        deliverable_declares_reviews_files(deliverable)
+        or deliverable_declares_research_files(deliverable)
+        or deliverable_declares_debate_files(deliverable)
+    )
 
 
 def batch_declares_review_files(tasks: object) -> bool:
@@ -702,3 +746,148 @@ def collect_evidence_deficit_gaps(
             "reason": REASON_EVIDENCE_DEFICIT,
         }
     ]
+
+
+# ── 已声明复核落盘对账（案 thin-review-claim-pass A′）────────────────────
+# 只认 deliverable form=files + reviews/ artifacts（或 artifact_dir）；不扫角色名。
+# 声明路径未 accepted / 拒收 / 空壳信号 → blocking thin_review → partial + draft-ack。
+# 有合格 accepted 报告时短 handoff 不硬降档（厚度仅作缺口文案备注）。
+# 不推翻刀1：有落盘时 degraded_handoff 仍可 soft。
+
+REASON_THIN_REVIEW = "thin_review"
+
+# 空壳：骨架占位硬软信号 / 合同 min_length 软篇幅提醒（已有 warnings，不重读盘）。
+_REVIEW_SHELL_MARKERS: tuple[str, ...] = (
+    "含未替换骨架占位",
+    "篇幅提醒（软）",
+)
+
+
+def _review_artifact_patterns(deliverable: Any) -> list[str]:
+    """Declared reviews/ paths (artifacts + artifact_dir under reviews/)."""
+    return [p for p in _deliverable_candidate_paths(deliverable) if _path_under_reviews(p)]
+
+
+def _acceptance_rows(state: Any) -> list[dict[str, Any]]:
+    rows = getattr(state, "file_acceptance", None) or []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _accepted_workspace_paths(state: Any) -> list[str]:
+    from agentcore.runtime.runs.file_acceptance import accepted_paths
+
+    return list(accepted_paths(_acceptance_rows(state)))
+
+
+def _state_signals_review_shell(state: Any) -> bool:
+    """True when warnings/delivery_gaps already note skeleton or soft length shortfall."""
+    surfaces: list[str] = [str(w) for w in (getattr(state, "warnings", None) or [])]
+    for row in getattr(state, "delivery_gaps", None) or []:
+        if isinstance(row, dict):
+            surfaces.append(str(row.get("description") or ""))
+    return any(any(m in s for m in _REVIEW_SHELL_MARKERS) for s in surfaces)
+
+
+def _is_reviews_dir_pattern(path: str) -> bool:
+    p = (path or "").strip().replace("\\", "/").rstrip("/")
+    return p == REVIEWS_DIR
+
+
+def _review_paths_gap_bits(
+    deliverable: Any,
+    state: Any,
+) -> list[str]:
+    """Human bits when declared reviews paths are missing / rejected / shell."""
+    from agentcore.runtime.runs.contract import artifact_present, missing_artifacts
+
+    patterns = _review_artifact_patterns(deliverable)
+    if not patterns:
+        return []
+    accepted = _accepted_workspace_paths(state)
+    bits: list[str] = []
+
+    # File-shaped artifacts vs directory-only (artifact_dir == reviews/).
+    file_patterns = [p for p in patterns if not _is_reviews_dir_pattern(p)]
+
+    if file_patterns:
+        missing = missing_artifacts(file_patterns, accepted)
+        if missing:
+            listed = "、".join(f"`{p}`" for p in missing[:4])
+            more = f" 等 {len(missing)} 处" if len(missing) > 4 else ""
+            bits.append(f"声明复核路径未验收通过：{listed}{more}")
+    else:
+        # artifact_dir / reviews/：任一 accepted 落在 reviews/ 即过。
+        if not any(_path_under_reviews(p) for p in accepted):
+            bits.append("已声明 reviews/ 落盘契约，但无验收通过的复核报告路径")
+
+    rejected: list[str] = []
+    for row in _acceptance_rows(state):
+        if str(row.get("status") or "") != "rejected":
+            continue
+        path = str(row.get("path") or "").strip()
+        if not path or not _path_under_reviews(path):
+            continue
+        if not file_patterns or any(artifact_present(pat, [path]) for pat in file_patterns):
+            rejected.append(path)
+    if rejected:
+        listed = "、".join(f"`{p}`" for p in rejected[:4])
+        bits.append(f"复核报告路径被拒收：{listed}")
+
+    # 空壳：路径已 accepted 仍带骨架/篇幅软提醒 → 不得当合格报告。
+    if (
+        not bits
+        and _state_signals_review_shell(state)
+        and (
+            (file_patterns and not missing_artifacts(file_patterns, accepted))
+            or (not file_patterns and any(_path_under_reviews(p) for p in accepted))
+        )
+    ):
+        bits.append("声明复核报告疑似空壳（骨架占位或篇幅不足）")
+
+    return bits
+
+
+def collect_thin_review_gaps(
+    plan_nodes: object,
+    results: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Blocking gaps when a node declared reviews/ files but lacks a qualified report.
+
+    Predicate（结构契约，不扫角色名 / 完成话术）：
+    ``deliverable_declares_reviews_files`` ∧（声明路径未 accepted ∨ 拒收 ∨ 空壳信号）。
+    Handoff 厚度不单独硬降档；有合格 accepted 报告则豁免。
+    """
+    from agentcore.runtime.runs.types import RunPhase
+
+    if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
+        return []
+    out: list[dict[str, str]] = []
+    for node in plan_nodes:
+        deliverable = _node_deliverable(node)
+        if not deliverable_declares_reviews_files(deliverable):
+            continue
+        if isinstance(node, dict):
+            rid = str(node.get("run_id") or node.get("id") or "")
+        else:
+            rid = str(getattr(node, "run_id", "") or "")
+        if not rid:
+            continue
+        state = (results or {}).get(rid)
+        if state is None or getattr(state, "phase", None) is not RunPhase.COMPLETED:
+            continue
+        bits = _review_paths_gap_bits(deliverable, state)
+        if not bits:
+            continue
+        role = _node_role(node) or rid or "复核"
+        detail = "；".join(bits)
+        out.append(
+            {
+                "description": (
+                    f"已声明复核落盘契约未对齐合格报告（{detail}）——"
+                    "不得无承认宣称全链路/复核通过；请补 reviews/ 短报告或开场承认缺口"
+                ),
+                "reason": REASON_THIN_REVIEW,
+                "role": role,
+            }
+        )
+    return out

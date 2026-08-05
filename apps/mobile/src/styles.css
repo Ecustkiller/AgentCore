@@ -631,6 +631,41 @@ button.link {
   background: var(--user);
 }
 
+/* 用户气泡长文折叠：约 7 行夹高 + 渐隐 + 展开/收起（对齐桌面 CollapsibleSpeech 语义，略紧）。 */
+.collapsible-user-text {
+  min-width: 0;
+}
+
+.collapsible-user-text-body.is-clamped {
+  position: relative;
+  max-height: 10.5em; /* 7 × line-height 1.5 */
+  overflow: hidden;
+}
+
+.collapsible-user-text-fade {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2rem;
+  background: linear-gradient(to top, var(--user), transparent);
+}
+
+.collapsible-user-toggle {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.collapsible-user-toggle:active {
+  opacity: 0.75;
+}
+
 .interjection-timeline {
   display: flex;
   flex-direction: column;
@@ -2974,16 +3009,37 @@ dialog.run-detail::backdrop {
 
 .composer {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--border);
 }
 
-.composer input {
+.composer-input {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 10px 14px;
+  font-size: 16px; /* >=16px avoids iOS zoom-on-focus */
+  line-height: 1.35;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  touch-action: manipulation;
+  font-family: inherit;
+}
+
+.composer-input:focus {
+  border-color: var(--accent);
+}
+
+.composer-input:disabled {
+  opacity: 0.55;
 }
 
 /* 发送 / 停止：固定方槽图标钮，窄宽不挤出视口（flex-shrink: 0 + 输入可收缩）。 */
@@ -3000,6 +3056,13 @@ dialog.run-detail::backdrop {
   padding: 0;
 }
 
+/* 生成中弱插入：中性表面，主槽视觉留给 Stop。 */
+.composer .send-btn-secondary {
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
 /* 停止与发送并排（busy 插话）：中性表面，读作中断而非主操作。 */
 .composer .stop {
   color: var(--fg);
@@ -3007,21 +3070,34 @@ dialog.run-detail::backdrop {
   border: 1px solid var(--border);
 }
 
-/* 强制排队（协调可插时）：文字钮，与 Stop 同高，明示 FIFO。 */
-.composer .queue-btn {
-  flex: 0 0 auto;
-  flex-shrink: 0;
-  min-height: 44px;
-  padding: 0 10px;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--fg);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
+/* 生成中草稿旁：排队入口（对齐桌面 Ctrl+Enter，不占主行）。 */
+.composer-delivery-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 12px 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
 }
 
-.composer .queue-btn:disabled {
+.composer-delivery-hint .queue-link {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+}
+
+.composer-delivery-hint .queue-link:disabled {
   opacity: 0.45;
 }
 
@@ -3110,7 +3186,10 @@ dialog.run-detail::backdrop {
 /* 附件「＋」: a neutral square that opens the file picker, sized to the composer row. */
 .composer .attach-btn {
   flex: 0 0 auto;
-  width: 40px;
+  align-self: flex-end;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
   font-size: 22px;
   line-height: 1;
@@ -3124,13 +3203,16 @@ dialog.run-detail::backdrop {
 }
 
 /* --- 语音输入 (手机端语音 · 桌面交互形态对齐) --- */
-/* composer 行内麦克风按钮：中性方块，与附件「＋」同尺寸；录音态转 error 红 + 脉冲。 */
+/* composer 行内麦克风按钮：中性方块，与发送同触控尺寸；录音态转 error 红 + 脉冲。 */
 .composer .voice-btn {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 40px;
+  align-self: flex-end;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
   color: var(--fg);
   background: var(--panel);

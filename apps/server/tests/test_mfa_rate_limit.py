@@ -142,7 +142,11 @@ async def test_confirm_setup_success_under_limit(monkeypatch):
     )
     result = await svc.confirm_setup(user_id="admin-3", code=pyotp.TOTP(secret).now())
     assert len(result.recovery_codes) == 8
+    assert all(len(c) == 16 for c in result.recovery_codes)
     repo.enable.assert_awaited_once()
+    stored_hashes = repo.enable.await_args.kwargs["recovery_codes_hash"]
+    assert len(stored_hashes) == 8
+    assert all(h.startswith("$argon2") for h in stored_hashes)
 
 
 async def test_verify_recovery_code_rate_limited(monkeypatch):

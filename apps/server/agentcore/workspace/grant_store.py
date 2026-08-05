@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import threading
 
+from sqlalchemy.exc import IntegrityError
+
 from agentcore.workspace.external_mounts import (
     ExternalMount,
     ExternalMountMode,
+    alias_is_routable,
     normalize_mount_mode,
     uniquify_alias,
 )
@@ -27,6 +30,10 @@ _lock = threading.Lock()
 _cache: dict[str, dict[str, ExternalMount]] = {}
 # Test-only memory backend (no DB). Enabled by ``clear_all_for_tests``.
 _memory: dict[str, dict[str, ExternalMount]] | None = None
+
+# Concurrent insert races hit uq_(conv,alias) / uq_(conv,root); retry with a
+# fresh cache + recomputed alias (or same-root refresh) instead of a bare 500.
+_MAX_GRANT_UPSERT_ATTEMPTS = 5
 
 
 def _row_to_mount(row) -> ExternalMount:
@@ -108,6 +115,8 @@ async def add_grant(
                     return updated
             taken = set(by_alias)
             alias = uniquify_alias(alias_hint or label, taken)
+            if not alias_is_routable(alias):
+                raise ValueError(f"external alias not routable: {alias!r}")
             mount = ExternalMount(
                 alias=alias,
                 root_id=root_id,
@@ -118,34 +127,51 @@ async def add_grant(
             by_alias[alias] = mount
             return mount
 
-    current = await _ensure_cached(conversation_id)
-    existing_alias: str | None = None
-    for m in current.values():
-        if m.root_id == root_id:
-            existing_alias = m.alias
-            break
-    if existing_alias is not None:
-        alias = existing_alias
-    else:
-        alias = uniquify_alias(alias_hint or label, set(current))
-
     from agentcore.db.base import async_session_factory
     from agentcore.db.repositories.external_grants import ExternalGrantRepository
 
-    async with async_session_factory() as session:
-        row = await ExternalGrantRepository(session).upsert(
-            conversation_id=conversation_id,
-            root_id=root_id,
-            alias=alias,
-            label=label or alias,
-            mode=resolved_mode,
-        )
-        mount = _row_to_mount(row)
-    _invalidate(conversation_id)
-    with _lock:
-        by_alias = _cache.setdefault(conversation_id, {})
-        by_alias[mount.alias] = mount
-    return mount
+    last_conflict: IntegrityError | None = None
+    for _ in range(_MAX_GRANT_UPSERT_ATTEMPTS):
+        current = await _ensure_cached(conversation_id)
+        existing_alias: str | None = None
+        for m in current.values():
+            if m.root_id == root_id:
+                existing_alias = m.alias
+                break
+        if existing_alias is not None:
+            alias = existing_alias
+        else:
+            alias = uniquify_alias(alias_hint or label, set(current))
+            if not alias_is_routable(alias):
+                raise ValueError(f"external alias not routable: {alias!r}")
+
+        try:
+            async with async_session_factory() as session:
+                row = await ExternalGrantRepository(session).upsert(
+                    conversation_id=conversation_id,
+                    root_id=root_id,
+                    alias=alias,
+                    label=label or alias,
+                    mode=resolved_mode,
+                )
+                mount = _row_to_mount(row)
+        except IntegrityError as exc:
+            # Peer won on (conversation_id, alias) or (conversation_id, root_id).
+            # Drop stale cache so the next attempt sees the winner and either
+            # refreshes the same root or uniquifies a free alias.
+            last_conflict = exc
+            _invalidate(conversation_id)
+            continue
+
+        _invalidate(conversation_id)
+        with _lock:
+            by_alias = _cache.setdefault(conversation_id, {})
+            by_alias[mount.alias] = mount
+        return mount
+
+    raise RuntimeError(
+        "external grant upsert conflict after retries"
+    ) from last_conflict
 
 
 async def revoke_grant(

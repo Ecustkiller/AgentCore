@@ -22,6 +22,10 @@ overlap still requires incomplete live nodes.
 Same-batch sibling artifact crosses are rejected at dispatch (name the pair),
 **before** durable ``run_plan`` emit (admit → commit → execute).
 
+Cross-turn ``append_to_execution_id`` admits the **new batch only** against the
+host plan + journal completed seed (auto-``replaces`` on free seats) — never
+sibling-scan host∪new as one batch.
+
 ``replan.adds`` on an active coordination live plan reuses the same admit
 (``admit_added_nodes``) + ``declare_plan_artifacts`` path as append merge.
 

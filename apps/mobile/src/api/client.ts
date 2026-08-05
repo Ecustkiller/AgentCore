@@ -164,6 +164,24 @@ export function refreshTokens(): Promise<boolean> {
 }
 
 /**
+ * Shared 401 policy for Bearer fetch (JSON + SSE): refresh once and replay.
+ * If the replay is still 401, clear tokens so route guards drop to login —
+ * mirrors desktop `replay_still_401` / notifyUnauthorized. Refresh itself
+ * failing keeps the three-state semantics in {@link refreshTokens} (only
+ * 401/403 on refresh clear; transient failures keep the pair).
+ */
+export async function fetchWithAuthRefresh(
+  doFetch: () => Promise<Response>,
+): Promise<Response> {
+  let res = await doFetch();
+  if (res.status === 401 && (await refreshTokens())) {
+    res = await doFetch();
+    if (res.status === 401) clearTokens();
+  }
+  return res;
+}
+
+/**
  * Bearer-authenticated fetch for JSON endpoints. On 401 it refreshes once and
  * replays; a still-401 leaves tokens cleared so the caller routes back to login.
  * The SSE stream reads the body itself and mirrors this policy (see stream.ts).
@@ -172,14 +190,10 @@ export async function apiFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const run = () =>
+  return fetchWithAuthRefresh(() =>
     fetch(apiUrl(path), {
       ...init,
       headers: { ...clientHeaders(), ...(init.headers ?? {}), ...authHeader() },
-    });
-  let res = await run();
-  if (res.status === 401 && (await refreshTokens())) {
-    res = await run();
-  }
-  return res;
+    }),
+  );
 }

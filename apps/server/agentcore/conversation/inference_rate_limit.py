@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from agentcore.config import settings
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
@@ -18,11 +21,29 @@ class _TurnClaimGate:
     first request must not mark the turn as claimed (that would bypass the cap on
     retry). TTL tracks the inference-token lifetime so a long agent loop is not
     re-charged mid-turn when the message-rate window rolls.
+
+    Concurrent callers for the same turn key serialize via ``hold`` so
+    check → await enforce → claim cannot double-charge across the await yield.
     """
 
     def __init__(self, *, ttl_seconds: float) -> None:
         self._ttl = ttl_seconds
         self._claimed: dict[str, float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, key: str) -> asyncio.Lock:
+        # Sync map update is atomic on the asyncio event loop (no await between get/set).
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
+
+    @asynccontextmanager
+    async def hold(self, key: str) -> AsyncIterator[None]:
+        """Serialize check/enforce/claim for one turn key across await points."""
+        async with self._lock_for(key):
+            yield
 
     def already_claimed(self, key: str, *, now: float) -> bool:
         ts = self._claimed.get(key)
@@ -38,9 +59,16 @@ class _TurnClaimGate:
         if len(self._claimed) > 10_000:
             cutoff = now - self._ttl
             self._claimed = {k: t for k, t in self._claimed.items() if t > cutoff}
+            # Keep locks still held by in-flight check→enforce (not yet claimed).
+            self._locks = {
+                k: lock
+                for k, lock in self._locks.items()
+                if k in self._claimed or lock.locked()
+            }
 
     def reset(self) -> None:
         self._claimed.clear()
+        self._locks.clear()
 
 
 # Sidecar turns outlive the 60s message window; align claim TTL with token life.
@@ -98,10 +126,11 @@ async def enforce_inference_proxy_rate_limit(
 
     if message_id:
         turn_key = f"{user_id}:{message_id}"
-        if claims.already_claimed(turn_key, now=now):
-            return
+        async with claims.hold(turn_key):
+            if claims.already_claimed(turn_key, now=now):
+                return
+            await enforce_user_message_rate_limit(user_id, limiter=limiter, now=now)
+            claims.claim(turn_key, now=now)
+        return
 
     await enforce_user_message_rate_limit(user_id, limiter=limiter, now=now)
-
-    if message_id:
-        claims.claim(f"{user_id}:{message_id}", now=now)

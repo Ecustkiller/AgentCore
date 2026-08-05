@@ -495,6 +495,9 @@ async def execute_agent_node(
         # Short-round repair posture tool strip retired (no-op kept for compat).
         # CEO / repair_code may still stamp max_rounds; tools stay full surface.
         files_expected = _files_expected(deliverable)
+        from agentcore.runtime.runs.research_quality import deliverable_is_report_delivery
+
+        report_delivery = deliverable_is_report_delivery(deliverable)
         product_landing_artifacts: list[str] | None = (
             list(deliverable.artifacts)
             if deliverable is not None and deliverable.artifacts
@@ -833,6 +836,7 @@ async def execute_agent_node(
                     controller_seed=pass_controller_seed,
                     controller_seed_sink=controller_seed_out,
                     files_expected=files_expected,
+                    report_delivery=report_delivery,
                     short_write_posture=short_write_posture,
                     tighten_verify_exec_thrash=tighten_verify_exec_thrash,
                     form_prose=deliverable_form == "prose",
@@ -1458,12 +1462,15 @@ async def execute_agent_node(
             # A contract miss still produced a deliverable + (often) a 交接简报: surface it so
             # the run-detail shows the author's wrap-up beside the failure (the infra-failure
             # except path below has no reliable content, so it carries none).
+            # 分脸：结构/格式闸 → format「格式未过」；内容/结论 → quality「未达标」。
+            from agentcore.runtime.runs.contract import contract_run_failure_kind
+
             env.sink.emit(
                 run_failed(
                     spec.run_id,
                     agent_id,
                     reason,
-                    failure_kind="quality",
+                    failure_kind=contract_run_failure_kind(verdict),
                     debrief=debrief,
                     execution_id=env.execution_id,
                 )

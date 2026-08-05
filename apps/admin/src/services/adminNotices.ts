@@ -20,6 +20,7 @@ export type ListNoticesParams = {
 /** Admin roster of product notices. */
 export async function listNotices(
   params: ListNoticesParams = {},
+  signal?: AbortSignal,
 ): Promise<NoticeListResponse> {
   const search = new URLSearchParams();
   if (params.status) search.set("status", params.status);
@@ -28,6 +29,7 @@ export async function listNotices(
   const qs = search.toString();
   return api.get<NoticeListResponse>(
     `/v1/admin/notices${qs ? `?${qs}` : ""}`,
+    signal ? { signal } : undefined,
   );
 }
 

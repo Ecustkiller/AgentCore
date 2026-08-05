@@ -27,6 +27,7 @@ from .delegate import (
     _multi_agent_delegate,
     _multi_agent_worker_deliverable_reset,
     _multi_agent_worker_failed_debrief,
+    _multi_agent_worker_failed_format,
     _multi_agent_worker_output_reset,
     _multi_agent_worker_process_timeline,
     _multi_agent_worker_tool,
@@ -210,6 +211,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_worker_failed_debrief": (
         "多 Agent：worker 未过契约（run_failed）但调 handoff 交了交接简报——失败节点也 surface debrief",
         _multi_agent_worker_failed_debrief,
+    ),
+    "multi_agent_worker_failed_format": (
+        "多 Agent：worker 结构/格式闸失败 → run_failed.failure_kind=format（协作图「格式未过」）",
+        _multi_agent_worker_failed_format,
     ),
     "multi_agent_run_skipped_cascade": (
         "多 Agent·未执行收口：级联跳过 run_skipped(cascade) + graceful abort run_skipped(abort)，"

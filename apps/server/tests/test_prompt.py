@@ -306,6 +306,10 @@ def test_core_teaches_split_criterion_over_count():
     assert "playbook_args.topic" in hint
     assert "立刻派 ≠ 立刻全量" in hint or "立刻全量" in hint
     assert "MVP" in hint or "契约" in hint
+    assert "多屏" in hint and ("大原型" in hint or "单文件" in hint)
+    assert "完整可玩" in hint
+    assert "规格已齐 ≠ 全量" in hint or "规格已齐≠全量" in hint
+    assert "明示" in hint  # 用户明示一次做完豁免
     assert "问还是派·中性" in hint or "不偏" in hint
     # P3 路由探针硬错对治：贴码写回强制派、点名实体扇出。
     assert "写回" in hint and "必须" in hint and "delegate" in hint
@@ -356,6 +360,10 @@ def test_core_teaches_split_criterion_over_count():
     assert "跨域合成" in skill or "按工种" in skill
     assert "必读锚点" in skill or "≤2–3" in skill or "≤2-3" in skill
     assert "第一棒" in skill or "壳层" in skill
+    assert "多屏" in skill and ("大原型" in skill or "单文件" in skill)
+    assert "完整可玩" in skill
+    assert "规格已齐 ≠ 全量" in skill or "规格已齐≠全量" in skill
+    assert "明示" in skill  # 用户明示一次做完豁免
     assert "设计波" in skill or "案卷说明" in skill
 
 def test_catalog_preamble_matches_core_consult_intensity():

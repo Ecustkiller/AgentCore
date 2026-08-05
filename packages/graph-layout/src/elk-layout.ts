@@ -346,20 +346,34 @@ export async function computeLayout(
   }
 
   // Bbox is finalized after group chrome (below) so topPad cannot escape the frame.
+  // Include nested sub-team parents/leaves (and their revision chains) so an
+  // outer __group__* chrome wraps the inner compound — direct memberIds alone
+  // miss eng leaves under a captain member and leave a right/bottom gap.
+  // Edge ownership stays OUTERMOST (layoutHints); this only expands chrome geometry.
+  const collectChromeNodes = (st: SubTeamInput, into: Set<string>): void => {
+    const addWithRevisions = (id: string): void => {
+      into.add(id);
+      for (const rev of revisionDescendantsOf(id)) into.add(rev);
+    };
+    addWithRevisions(st.parentId);
+    for (const memberId of st.memberIds) {
+      addWithRevisions(memberId);
+      const nested = subTeamByParent.get(memberId);
+      if (nested) collectChromeNodes(nested, into);
+    }
+  };
   const pad = 12;
   const topPad = 32;
   for (const g of groups) {
     const st = subTeams.find((s) => s.groupId === g.groupId);
     if (!st) continue;
-    const teamNodes = new Set<string>([st.parentId, ...st.memberIds]);
-    for (const base of [st.parentId, ...st.memberIds])
-      for (const rev of revisionDescendantsOf(base)) teamNodes.add(rev);
-    const memberIds = [...teamNodes];
+    const teamNodes = new Set<string>();
+    collectChromeNodes(st, teamNodes);
     let minGX = Number.POSITIVE_INFINITY;
     let minGY = Number.POSITIVE_INFINITY;
     let maxGX = Number.NEGATIVE_INFINITY;
     let maxGY = Number.NEGATIVE_INFINITY;
-    for (const id of memberIds) {
+    for (const id of teamNodes) {
       if (!positions[id]) continue;
       const s = sizeOf(id);
       minGX = Math.min(minGX, positions[id].x);

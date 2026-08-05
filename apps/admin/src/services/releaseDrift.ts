@@ -4,6 +4,9 @@ const CDN_DESKTOP_LATEST =
   "https://downloads.fashitianxia.xyz/desktop/latest.json";
 const WEBSITE_RELEASE = "https://fashitianxia.xyz/api/desktop-release";
 
+/** External CDN / website fetch budget — avoid hanging SystemPage Promise.all forever. */
+export const RELEASE_DRIFT_FETCH_TIMEOUT_MS = 8_000;
+
 export interface ReleaseDriftSnapshot {
   /** Brand CDN desktop/latest.json version (user-facing installers + updater). */
   desktopCdnVersion: string | null;
@@ -12,7 +15,10 @@ export interface ReleaseDriftSnapshot {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(RELEASE_DRIFT_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }

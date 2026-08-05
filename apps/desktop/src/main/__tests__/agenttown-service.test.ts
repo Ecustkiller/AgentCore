@@ -44,6 +44,25 @@ vi.mock("node:child_process", () => ({
       unref: vi.fn(),
     };
   }),
+  execFile: vi.fn(
+    (
+      _file: string,
+      _args?: readonly string[] | null,
+      _opts?: unknown,
+      callback?: (err: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      const cb =
+        typeof _opts === "function"
+          ? (_opts as (
+              err: Error | null,
+              stdout: string,
+              stderr: string,
+            ) => void)
+          : callback;
+      queueMicrotask(() => cb?.(null, "", ""));
+      return {} as never;
+    },
+  ),
 }));
 
 import { readFileSync } from "node:fs";

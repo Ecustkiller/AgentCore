@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -141,3 +143,111 @@ async def test_drains_legacy_proxy_spend_dir(monkeypatch, ledger_queue, tmp_path
     )
     assert await ledger_queue.drain_once() == 1
     assert calls[0]["runs"][0]["run_id"] == "legacy-run"
+
+
+async def test_oserror_on_read_leaves_file_for_retry(monkeypatch, ledger_queue, tmp_path):
+    """Transient OSError must not quarantine to .corrupt (leave for retry)."""
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
+    qdir.mkdir(parents=True)
+    path = qdir / "transient.json"
+    path.write_text(
+        json.dumps(
+            {
+                "id": "t1",
+                "user_id": "u1",
+                "conversation_id": "c1",
+                "runs": _sample_runs(run_id="run-os"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    real_read = Path.read_text
+    calls = {"n": 0}
+
+    def flaky_read(self, *args, **kwargs):
+        if self == path and calls["n"] == 0:
+            calls["n"] += 1
+            raise OSError("simulated share violation")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read)
+
+    assert await ledger_queue.drain_once() == 0
+    assert path.exists()
+    assert list(qdir.glob("*.corrupt")) == []
+
+    # Second attempt succeeds after OSError clears.
+    written: list = []
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **kw):
+            written.append(kw)
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    assert await ledger_queue.drain_once() == 1
+    assert written[0]["runs"][0]["run_id"] == "run-os"
+    assert not path.exists()
+
+
+async def test_bad_json_still_quarantines(ledger_queue, tmp_path):
+    """Malformed JSON remains poison → .corrupt, never retried as valid."""
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
+    qdir.mkdir(parents=True)
+    path = qdir / "bad.json"
+    path.write_text("{not-json", encoding="utf-8")
+
+    assert await ledger_queue.drain_once() == 0
+    assert not path.exists()
+    corrupt = list(qdir.glob("*.corrupt"))
+    assert len(corrupt) == 1
+    assert corrupt[0].read_text(encoding="utf-8") == "{not-json"
+
+
+async def test_invalid_payload_still_quarantines(ledger_queue, tmp_path):
+    """Valid JSON missing required fields still quarantines."""
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
+    qdir.mkdir(parents=True)
+    path = qdir / "invalid.json"
+    path.write_text(
+        json.dumps({"id": "x", "user_id": "u1", "runs": [], "calls": []}),
+        encoding="utf-8",
+    )
+
+    assert await ledger_queue.drain_once() == 0
+    assert not path.exists()
+    assert list(qdir.glob("*.corrupt"))
+
+
+async def test_stop_cancels_before_final_drain(monkeypatch, ledger_queue, tmp_path):
+    """stop: cancel loop first, then single-threaded final drain (no stop∩loop race)."""
+    order: list[str] = []
+    barrier = asyncio.Event()
+
+    async def slow_drain_loop():
+        order.append("loop_enter")
+        barrier.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            order.append("loop_cancelled")
+            raise
+
+    async def tracking_drain_once():
+        order.append("final_drain")
+        return 0
+
+    ledger_queue._task = asyncio.create_task(slow_drain_loop(), name="cost_ledger_drain")
+    await barrier.wait()
+    monkeypatch.setattr(ledger_queue, "drain_once", tracking_drain_once)
+
+    await ledger_queue.stop()
+
+    assert order == ["loop_enter", "loop_cancelled", "final_drain"]
+    assert ledger_queue._task is None

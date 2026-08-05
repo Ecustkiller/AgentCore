@@ -827,6 +827,84 @@ async def test_empty_response_retries_same_model_and_recovers():
     assert finish_override == []  # recovered → not degraded
 
 
+async def test_length_empty_degrades_immediately_without_continue():
+    """finish_reason=length + empty + no tools → DEGRADED on round 0 (no Continue)."""
+    provider = _ModelRecordingProvider([[LLMChunk(finish_reason="length")]])
+    profile = make_profile_params(max_rounds=20)
+    finish_override: list[FinishReason] = []
+    sink = _RecordingSink()
+    content, _r, _u, rounds = await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=provider,
+        tools=_registry(_StubTool()),
+        sink=sink,
+        tool_context=_context(),
+        profile=profile,
+        turn_model="primary",
+        finish_override_sink=finish_override,
+    )
+
+    assert content == ""
+    assert rounds == 1
+    assert provider.models == ["primary"]  # no second Continue round
+    assert finish_override == [FinishReason.DEGRADED]
+    errs = _errors(sink)
+    assert errs
+    assert "多次空响应" not in (errs[0].payload.get("message") or "")
+    assert "截断" in (errs[0].payload.get("message") or "")
+
+
+async def test_length_empty_not_exempted_for_captain_coordination(monkeypatch):
+    """Active coordination listen exemption must NOT cover length+empty."""
+    from types import SimpleNamespace
+
+    async def _no_inject(messages):  # noqa: ANN001
+        return []
+
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.wait.await_coordination_injection",
+        _no_inject,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.session.active_coordination",
+        lambda: SimpleNamespace(active=True, execution_id="e-len"),
+    )
+    provider = _ModelRecordingProvider([[LLMChunk(finish_reason="length")]])
+    profile = make_profile_params(max_rounds=20)
+    finish_override: list[FinishReason] = []
+    content, _r, _u, rounds = await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=provider,
+        tools=_registry(_StubTool()),
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+        turn_model="primary",
+        finish_override_sink=finish_override,
+        role="captain",
+        run_id="cap",
+    )
+    assert content == ""
+    assert rounds == 1
+    assert finish_override == [FinishReason.DEGRADED]
+
+
+async def test_length_with_partial_content_does_not_hard_cut_empty_ladder():
+    """Non-empty truncated content is a normal answer path — not the empty gate."""
+    provider = _ModelRecordingProvider(
+        [[LLMChunk(delta_content="半截", finish_reason="length")]]
+    )
+    profile = make_profile_params(max_rounds=20)
+    finish_override: list[FinishReason] = []
+    content, _r, _u, rounds = await _run_loop(
+        provider, profile, finish_override_sink=finish_override
+    )
+
+    assert content == "半截"
+    assert rounds == 1
+    assert finish_override == []
+
+
 async def test_consecutive_empty_finishes_degraded():
     # Two consecutive empty rounds hit the threshold → degraded finish (no blank end_turn).
     provider = _ModelRecordingProvider([[], []])

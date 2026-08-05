@@ -619,3 +619,155 @@ def test_finalize_replaces_journal_with_complete_result_entries(tmp_path):
     body = to_record_turn_body(record)
     assert body["journal"][0]["kind"] == "process_reasoning"
 
+
+def test_concurrent_turns_isolate_context_and_salvage_onto_umid(tmp_path):
+    """C1: overlapping binds must not steal umid; stop seals umid file with user text."""
+    store = OutboxStore(tmp_path / "outbox")
+    base = tmp_path / "outbox"
+
+    async def run() -> None:
+        # Turn A (pause→continue style open record).
+        store.bind_turn(
+            conversation_id="c1",
+            user_message_id="uA",
+            user_message="hello A",
+            message_id="mA",
+            trace_id="a" * 32,
+        )
+        await store.begin_turn(conversation_id="c1", message_id="mA", trace_id="a" * 32)
+        await store.append_journal(
+            turn_id="mA",
+            seq=0,
+            conversation_id="c1",
+            trace_id="a" * 32,
+            entry={"kind": "run_started", "payload": {"id": "rA"}, "ts": None},
+        )
+        await store.checkpoint(conversation_id="c1", message_id="mA", content="partial A")
+
+        # Turn B binds while A is still live (old global _ctx would overwrite A).
+        store.bind_turn(
+            conversation_id="c1",
+            user_message_id="uB",
+            user_message="hello B",
+            message_id="mB",
+            trace_id="b" * 32,
+        )
+        await store.begin_turn(conversation_id="c1", message_id="mB", trace_id="b" * 32)
+        await store.append_journal(
+            turn_id="mB",
+            seq=0,
+            conversation_id="c1",
+            trace_id="b" * 32,
+            entry={"kind": "run_started", "payload": {"id": "rB"}, "ts": None},
+        )
+
+        # A continues after B stole the old single slot — must still hit uA.json.
+        await store.append_journal(
+            turn_id="mA",
+            seq=1,
+            conversation_id="c1",
+            trace_id="a" * 32,
+            entry={"kind": "tool_use_start", "payload": {"id": "t1"}, "ts": None},
+        )
+        await store.checkpoint(conversation_id="c1", message_id="mA", content="partial A+")
+
+        # Stop A while B is still the "latest" bind.
+        await store.salvage(
+            journal=[{"kind": "turn_cancelled", "payload": {}}],
+            content="partial A+",
+            conversation_id="c1",
+            trace_id="a" * 32,
+            message_id="mA",
+        )
+
+        # B keeps going then finalizes.
+        await store.checkpoint(conversation_id="c1", message_id="mB", content="B draft")
+        await store.finalize(
+            mode="local",
+            conversation_id="c1",
+            user_message="hello B",
+            user_message_id="uB",
+            assistant_content="B done",
+            message_id="mB",
+            trace_id="b" * 32,
+            finish_reason="stop",
+        )
+
+    _drive(run())
+
+    a = json.loads((base / "uA.json").read_text(encoding="utf-8"))
+    assert a["phase"] == PHASE_READY
+    assert a["user_message"] == "hello A"
+    assert a["user_message_id"] == "uA"
+    assert a["finish_reason"] == "cancelled"
+    assert "salvage" in a["ops"]
+    assert a["journal"]["0"]["kind"] == "run_started"
+    assert a["journal"]["1"]["kind"] == "tool_use_start"
+
+    b = json.loads((base / "uB.json").read_text(encoding="utf-8"))
+    assert b["phase"] == PHASE_READY
+    assert b["user_message"] == "hello B"
+    assert b["content"] == "B done"
+
+    # No assistant-id keyed ready dead letters.
+    assert not (base / "mA.json").exists()
+    assert not (base / "mB.json").exists()
+
+
+def test_salvage_after_clear_turn_merges_umid_file(tmp_path):
+    """C1: clear_turn drops bind; salvage still seals via on-disk message_id→umid."""
+    store = OutboxStore(tmp_path / "outbox")
+    base = tmp_path / "outbox"
+
+    async def run() -> None:
+        store.bind_turn(
+            conversation_id="c1",
+            user_message_id="u1",
+            user_message="keep me",
+            message_id="m1",
+            trace_id="c" * 32,
+        )
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="c" * 32)
+        await store.append_journal(
+            turn_id="m1",
+            seq=0,
+            conversation_id="c1",
+            trace_id="c" * 32,
+            entry={"kind": "run_started", "payload": {}, "ts": None},
+        )
+        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
+        # Simulate host finally clearing bind before cancel salvage races.
+        store.clear_turn("m1")
+        await store.salvage(
+            journal=[],
+            content="partial+",
+            conversation_id="c1",
+            trace_id="c" * 32,
+            message_id="m1",
+        )
+
+    _drive(run())
+    record = json.loads((base / "u1.json").read_text(encoding="utf-8"))
+    assert record["phase"] == PHASE_READY
+    assert record["user_message"] == "keep me"
+    assert record["user_message_id"] == "u1"
+    assert not (base / "m1.json").exists()
+
+
+def test_salvage_without_umid_does_not_create_assistant_id_ready(tmp_path):
+    """C1: unbound salvage must not invent message_id.json with empty user_message."""
+    store = OutboxStore(tmp_path / "outbox")
+    base = tmp_path / "outbox"
+
+    async def run() -> None:
+        await store.salvage(
+            journal=[{"kind": "x"}],
+            content="orphan",
+            conversation_id="c1",
+            trace_id="d" * 32,
+            message_id="m-orphan",
+        )
+
+    _drive(run())
+    assert list(base.glob("*.json")) == []
+

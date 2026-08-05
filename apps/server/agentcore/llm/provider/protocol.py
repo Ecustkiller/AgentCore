@@ -84,7 +84,7 @@ class LLMRequest:
     tool_choice: Literal["auto", "none", "required"] = "auto"
     stream: bool = True
     scenario: str = "chat"
-    # None = omit (provider default). False/True → DeepSeek V4 ``thinking.type``.
+    # None = omit (provider default). False/True → DeepSeek V4 / Hy3 ``thinking.type``.
     thinking: bool | None = None
 
 

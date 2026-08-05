@@ -11,6 +11,15 @@ vi.mock("@/api/client", () => ({
   authHeader: () => ({ Authorization: "Bearer test-access" }),
   getTokens: () => getTokens(),
   refreshTokens: () => refreshTokens(),
+  // Mirror client.fetchWithAuthRefresh so still-401 clearing is exercised via mocks.
+  fetchWithAuthRefresh: async (doFetch: () => Promise<Response>) => {
+    let res = await doFetch();
+    if (res.status === 401 && (await refreshTokens())) {
+      res = await doFetch();
+      if (res.status === 401) getTokens.mockReturnValue(null);
+    }
+    return res;
+  },
 }));
 
 vi.mock("@/lib/clientBuildInfo", () => ({
@@ -130,9 +139,7 @@ describe("startBrowserLive · auth + session pin", () => {
     expect((signal as AbortSignal).aborted).toBe(true);
   });
 
-  it("401 → refresh success → reconnect", async () => {
-    vi.useFakeTimers();
-    vi.spyOn(Math, "random").mockReturnValue(0);
+  it("401 → refresh success → replay opens (no delayed reconnect)", async () => {
     refreshTokens.mockResolvedValue(true);
     fetchMock
       .mockResolvedValueOnce(new Response(null, { status: 401 }))
@@ -140,10 +147,10 @@ describe("startBrowserLive · auth + session pin", () => {
     const h = handlers();
     const client = startBrowserLive("c1", "s1", h);
 
-    await vi.advanceTimersByTimeAsync(0);
-    expect(refreshTokens).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(conn(h)).toContain("open"));
+    expect(conn(h)).not.toContain("reconnecting");
     client.stop();
   });
 
@@ -158,6 +165,22 @@ describe("startBrowserLive · auth + session pin", () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(5000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    client.stop();
+  });
+
+  it("401 → refresh ok but replay still 401 → stop (clears tokens)", async () => {
+    vi.useFakeTimers();
+    refreshTokens.mockResolvedValue(true);
+    fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+    const h = handlers();
+    const client = startBrowserLive("c1", "s1", h);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+    expect(getTokens()).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     client.stop();
   });
 });

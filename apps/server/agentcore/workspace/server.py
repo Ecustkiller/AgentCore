@@ -39,6 +39,7 @@ from agentcore.workspace.external_mounts import (
     build_external_env,
     external_mutation_allowed,
     external_ns,
+    is_external_namespace,
     parse_external_path,
     route_external,
 )
@@ -225,7 +226,7 @@ class ServerWorkspace:
         """
         needs = False
         for path in paths:
-            if parse_external_path(path) is None:
+            if not is_external_namespace(path):
                 continue
             routed = route_external(path, self._mounts)
             if routed is None:
@@ -302,8 +303,7 @@ class ServerWorkspace:
                     return mount_root.resolve()
                 raise OutsideWorkspace(rel)
             return resolved
-        parsed = parse_external_path(rel)
-        if parsed is not None:
+        if is_external_namespace(rel):
             routed = route_external(rel, self._mounts)
             if routed is None:
                 raise PathNotFound(rel)

@@ -12,7 +12,7 @@
  *   node apps/town/scripts/serve-webgl.mjs                 # serve Builds/WebGL, pick 8080→4173, open Offline Demo
  *   node apps/town/scripts/serve-webgl.mjs --pack festival # different story pack (price_surge|festival|town_hall)
  *   node apps/town/scripts/serve-webgl.mjs --no-open       # serve only, do not open a browser
- *   node apps/town/scripts/serve-webgl.mjs --open "<url>"  # open a specific URL (e.g. live ?api=&token=&run=)
+ *   node apps/town/scripts/serve-webgl.mjs --open "<url>"  # open a specific URL (e.g. live ?api=&run=#token=)
  *   node apps/town/scripts/serve-webgl.mjs --port 8080 --strict-port --no-open   # bind exactly :8080 (spike; CORS-listed)
  *
  * Flags:
@@ -231,7 +231,7 @@ async function main() {
   console.log(`Serving ${root}`);
   console.log(`Offline Demo: ${demoUrl}`);
   console.log(`Packs:        ${base}/?demo=1&pack=festival  (or town_hall; default price_surge)`);
-  console.log(`Live (needs backend): ${base}/?api=http%3A%2F%2Flocalhost%3A8000&token=TOKEN&run=RUN_ID`);
+  console.log(`Live (needs backend): ${base}/?api=http%3A%2F%2Flocalhost%3A8000&run=RUN_ID#token=TOKEN`);
   console.log(`LISTENING ${base}`);
   console.log("");
 

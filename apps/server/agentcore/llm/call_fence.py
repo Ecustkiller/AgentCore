@@ -4,6 +4,12 @@ Observes every logical ``complete`` / ``stream`` invocation (success → ``llm.c
 failure → ``llm.call_failed``). Does **not** retry, swap models, or alter chunk
 contracts (``stream_reset`` / ``aborted`` pass through unchanged).
 
+Stream interrupt salvage: consumer ``aclose`` / mid-stream exception still emit
+``llm.call`` (and thus meter) when a chunk already carried billable usage; with
+no seen usage they stay observation-only (``llm.call_failed`` / no fabricated
+bill). Chat SSE ``detach_on_disconnect`` is unaffected — this fence only sees
+leaf stream lifecycle, not HTTP client detach.
+
 Also forwards leaf-only helpers used outside the chat path (``probe`` /
 ``probe_tools`` / ``list_models`` for BYOK 设置·测试) — the fence must not
 strip those methods.
@@ -110,6 +116,11 @@ class ObservingLLMProvider:
             out["upstream_body_preview"] = preview
         return out
 
+    @staticmethod
+    def _billable_usage(usage: TokenUsage | None) -> bool:
+        """True when a stream chunk already carried real tokens (no fabrication)."""
+        return usage is not None and bool(usage.input_tokens or usage.output_tokens)
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         from agentcore.llm.turn_auth_dead import mark_turn_auth_dead, raise_if_turn_auth_dead
 
@@ -211,6 +222,10 @@ class ObservingLLMProvider:
             )
             raise
         finally:
+            # Metering: only ``log_llm_call`` enqueues spend. On consumer aclose /
+            # mid-stream failure, still bill **already-seen** usage; never invent
+            # tokens when none arrived. Complete streams stay on the ``ok`` path.
+            latency_ms = int((time.monotonic() - start) * 1000)
             if outcome == "ok":
                 log_llm_call(
                     scenario=request.scenario,
@@ -218,7 +233,7 @@ class ObservingLLMProvider:
                     usage=usage,
                     finish_reason=finish_reason
                     or ("aborted" if aborted else ("tool_calls" if tool_names else "stop")),
-                    latency_ms=int((time.monotonic() - start) * 1000),
+                    latency_ms=latency_ms,
                     stream=True,
                     messages=request.messages,
                     content="".join(content_parts) or None,
@@ -228,14 +243,47 @@ class ObservingLLMProvider:
                     attempt=1,
                 )
             elif outcome == "closed":
-                log_llm_call_failed(
+                if self._billable_usage(usage):
+                    log_llm_call(
+                        scenario=request.scenario,
+                        model=request.model,
+                        usage=usage,
+                        finish_reason=finish_reason
+                        or ("aborted" if aborted else "stream_closed"),
+                        latency_ms=latency_ms,
+                        stream=True,
+                        messages=request.messages,
+                        content="".join(content_parts) or None,
+                        reasoning="".join(reasoning_parts) or None,
+                        tool_names=tool_names or None,
+                        provider_name=self._provider_name(),
+                        attempt=1,
+                    )
+                else:
+                    log_llm_call_failed(
+                        scenario=request.scenario,
+                        model=request.model,
+                        latency_ms=latency_ms,
+                        attempt=1,
+                        error="stream_closed_by_consumer",
+                        error_type="GeneratorExit",
+                        stream=True,
+                    )
+            elif outcome == "failed" and self._billable_usage(usage):
+                # ``log_llm_call_failed`` already ran in ``except``; salvage spend only.
+                log_llm_call(
                     scenario=request.scenario,
                     model=request.model,
-                    latency_ms=int((time.monotonic() - start) * 1000),
-                    attempt=1,
-                    error="stream_closed_by_consumer",
-                    error_type="GeneratorExit",
+                    usage=usage,
+                    finish_reason=finish_reason or "error",
+                    latency_ms=latency_ms,
                     stream=True,
+                    messages=request.messages,
+                    content="".join(content_parts) or None,
+                    reasoning="".join(reasoning_parts) or None,
+                    tool_names=tool_names or None,
+                    provider_name=self._provider_name(),
+                    attempt=1,
                 )
 
 

@@ -52,14 +52,26 @@ class AdminMfaRepository:
         await self._session.refresh(row)
         return row
 
-    async def consume_recovery_code(self, user_id: str, code_hash: str) -> bool:
+    async def consume_recovery_code(self, user_id: str, code: str) -> bool:
+        """Consume one matching recovery code (argon2id or legacy SHA-256).
+
+        ``code`` is the normalized plaintext (lowercase hex, no dashes).
+        """
+        # Lazy: top-level import cycles auth ↔ db.repositories via AuthService→mfa.
+        from agentcore.auth.recovery_codes import recovery_code_matches
+
         row = await self.get_by_user_id(user_id)
         if row is None or not row.recovery_codes_hash:
             return False
         hashes: list[str] = json.loads(row.recovery_codes_hash)
-        if code_hash not in hashes:
+        match_idx: int | None = None
+        for i, stored in enumerate(hashes):
+            if recovery_code_matches(code, stored):
+                match_idx = i
+                break
+        if match_idx is None:
             return False
-        hashes.remove(code_hash)
+        hashes.pop(match_idx)
         await self._session.execute(
             update(AdminMfa)
             .where(AdminMfa.user_id == user_id)

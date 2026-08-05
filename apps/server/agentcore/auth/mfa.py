@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 from dataclasses import dataclass
 
 import pyotp
 
 from agentcore.auth.mfa_rate_limit import enforce_mfa_verify_rate_limit
+from agentcore.auth.recovery_codes import (
+    generate_recovery_codes,
+    hash_recovery_code,
+)
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError, ValidationError
 from agentcore.core.logging import get_logger
@@ -16,10 +18,6 @@ from agentcore.db.repositories.admin_mfa import AdminMfaRepository
 from agentcore.security.keys import KeyEncryptor
 
 logger = get_logger(__name__)
-
-
-def _hash_recovery_code(code: str) -> str:
-    return hashlib.sha256(code.encode()).hexdigest()
 
 
 def _encryptor() -> KeyEncryptor | None:
@@ -71,10 +69,11 @@ class AdminMfaService:
         secret = self._decrypt_secret(row.totp_secret_enc)
         if not pyotp.TOTP(secret).verify(code, valid_window=1):
             raise AuthenticationError("验证码无效或已过期")
-        recovery_codes = [secrets.token_hex(4) for _ in range(8)]
+        # Re-enrollment replaces prior recovery hashes (作废重发).
+        recovery_codes = generate_recovery_codes()
         await self._mfa.enable(
             user_id,
-            recovery_codes_hash=[_hash_recovery_code(c) for c in recovery_codes],
+            recovery_codes_hash=[hash_recovery_code(c) for c in recovery_codes],
         )
         # Audit enrollment confirmation only — never log TOTP secret / recovery codes.
         logger.info("auth.mfa_enrolled", user_id=user_id)
@@ -93,7 +92,7 @@ class AdminMfaService:
         normalized = code.strip().replace("-", "").lower()
         if not normalized:
             return False
-        return await self._mfa.consume_recovery_code(user_id, _hash_recovery_code(normalized))
+        return await self._mfa.consume_recovery_code(user_id, normalized)
 
     def _decrypt_secret(self, ciphertext: bytes) -> str:
         enc = _encryptor()

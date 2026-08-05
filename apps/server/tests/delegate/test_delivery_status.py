@@ -373,7 +373,8 @@ def test_zero_landing_gap_attributes_channel_dead_from_transcript():
     payload = build_delivery_status(plan, results, execution_id="e-dead")
     assert payload is not None
     gap = payload["gaps"][0]
-    assert gap["reason"] == "files_not_landed"
+    # 能力4：FAILED 零落盘 soft 仍保留 node_failed（draft_ack 闩），不退回 files_not_landed。
+    assert gap["reason"] == "node_failed"
     assert gap["severity"] == "warning"
     assert gap["role"] == "工程师"
     assert payload["state"] == "notes"
@@ -427,7 +428,8 @@ def test_zero_landing_gap_attributes_write_failed_from_transcript():
     payload = build_delivery_status(plan, results, execution_id="e-wfail")
     assert payload is not None
     gap = payload["gaps"][0]
-    assert gap["reason"] == "files_not_landed"
+    # 能力4：FAILED 零落盘 soft 仍保留 node_failed（draft_ack 闩）。
+    assert gap["reason"] == "node_failed"
     assert gap["severity"] == "warning"
     assert gap["role"] == "工程师"
     assert payload["state"] == "notes"
@@ -1388,9 +1390,10 @@ def test_literature_worker_delivery_gap_evidence_deficit_depresses():
 
 def test_literature_adequate_evidence_stays_delivered():
     """学术源充足且无先验缺口 → 不误伤，仍可为 delivered。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
+    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     main = f"{RESEARCH_PREFIX}报告.md"
+    review_path = f"{REVIEWS_PREFIX}审校报告.md"
     plan = _literature_report_plan()
     results = {
         "write": RunState(
@@ -1404,12 +1407,18 @@ def test_literature_adequate_evidence_stays_delivered():
                 {"url": "https://doi.org/10.1000/xyz", "title": "C"},
             ],
         ),
-        "review": RunState(phase=RunPhase.COMPLETED, content="引用规范可接受"),
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="引用规范可接受",
+            files_touched=[review_path],
+            file_acceptance=_accepted(review_path),
+        ),
     }
     payload = build_delivery_status(plan, results, execution_id="e-ev-ok")
     assert payload is not None
     assert payload["state"] == "delivered"
     assert all(g.get("reason") != "evidence_deficit" for g in payload["gaps"])
+    assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
 
 
 def test_parallel_brief_junk_citations_not_evidence_deficit():
@@ -1473,4 +1482,322 @@ def test_non_literature_landed_files_unaffected():
     assert payload is not None
     assert payload["state"] == "delivered"
     assert all(g.get("reason") != "evidence_deficit" for g in payload["gaps"])
+
+
+def _thin_review_plan(report_path: str):
+    """Declared reviews/ files contract on the independent review node (no role scan)."""
+    from agentcore.runtime.runs.types import Deliverable
+
+    return _plan(
+        RunSpec(
+            run_id="fix",
+            task="修 bug",
+            role="修复工程师",
+            deliverable=Deliverable(form="files", requires_files=True, artifacts=["src/a.ts"]),
+        ),
+        RunSpec(
+            run_id="review",
+            task="独立复核并落盘短报告",
+            role="独立复核员",
+            depends_on=["fix"],
+            deliverable=Deliverable(
+                form="files",
+                requires_files=True,
+                artifacts=[report_path],
+                min_length=80,
+            ),
+        ),
+    )
+
+
+def test_thin_review_missing_report_partial_and_draft_ack():
+    """案 A′：已声明 reviews/ 无合格报告 → partial + thin_review + requires_draft_ack。"""
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
+
+    report = f"{REVIEWS_PREFIX}M1-复核报告.md"
+    plan = _thin_review_plan(report)
+    results = {
+        "fix": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已修",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+        ),
+        # COMPLETED + 短 handoff + 写了别的路径，声明复核报告未 accepted。
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="通过",
+            debrief={"summary": "全链路通过"},
+            files_touched=["docs/wrong-path.md"],
+            file_acceptance=_accepted("docs/wrong-path.md"),
+        ),
+    }
+    current_delivery_verdict.set(None)
+    payload = build_delivery_status(plan, results, execution_id="e-thin-miss")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert any(g.get("reason") == "thin_review" for g in payload["gaps"])
+    assert any("复核落盘契约" in (g.get("description") or "") for g in payload["gaps"])
+
+    sink = EventSink()
+    maybe_emit_delivery_status(sink, plan, results, execution_id="e-thin-miss")
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.state == "partial"
+    assert verdict.requires_draft_ack is True
+    current_delivery_verdict.set(None)
+
+
+def test_thin_review_accepted_report_short_handoff_not_hurt():
+    """有合格 accepted 报告时短 handoff 不误伤降档。"""
+    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
+
+    report = f"{REVIEWS_PREFIX}M1-复核报告.md"
+    plan = _thin_review_plan(report)
+    results = {
+        "fix": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已修",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+        ),
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",  # 短 handoff 叙事
+            debrief={"summary": "通过"},
+            files_touched=[report],
+            file_acceptance=_accepted(report),
+        ),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-thin-ok")
+    assert payload is not None
+    assert payload["state"] == "delivered"
+    assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
+
+
+def test_thin_review_shell_report_depresses():
+    """声明路径已 accepted 但骨架/篇幅软提醒 → 空壳 thin_review。"""
+    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
+
+    report = f"{REVIEWS_PREFIX}审校报告.md"
+    plan = _thin_review_plan(report)
+    results = {
+        "fix": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已修",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+        ),
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="骨架",
+            files_touched=[report],
+            file_acceptance=_accepted(report),
+            warnings=["篇幅提醒（软）：产出 12 字，少于要求的 80 字"],
+        ),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-thin-shell")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert any(g.get("reason") == "thin_review" for g in payload["gaps"])
+    assert any("空壳" in (g.get("description") or "") for g in payload["gaps"])
+
+
+def test_thin_review_does_not_expand_posture_a():
+    """A′ 不扩姿势 A：裸「全链路通过」仍不进姿势 A 闭集。"""
+    from agentcore.runtime.closing_posture import claims_posture_a
+
+    assert not claims_posture_a("审阅 → 修复 → 复核 → 打包，全链路通过 ✅")
+    assert not claims_posture_a("独立复核通过")
+
+
+def test_verify_failed_latches_requires_draft_ack():
+    """丙轴 verify_failed 与 draft-ack 共用闩（可与 soft latch 并存）。"""
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+
+    plan = _plan(RunSpec(run_id="w1", task="修并验证", role="工程师"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已修好",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+            transcript=_failed_test_run_transcript(),
+        )
+    }
+    current_delivery_verdict.set(None)
+    sink = EventSink()
+    maybe_emit_delivery_status(sink, plan, results, execution_id="e-vf-ack")
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.state != "delivered"
+    assert verdict.requires_draft_ack is True
+    current_delivery_verdict.set(None)
+
+
+def test_undeclared_review_role_not_thin_review():
+    """未 stamp form=files+reviews/ 的「独立复核员」不因角色名抬 thin_review。"""
+    plan = _plan(
+        RunSpec(run_id="fix", task="修", role="修复工程师"),
+        RunSpec(run_id="review", task="只读复核", role="独立复核员", depends_on=["fix"]),
+    )
+    results = {
+        "fix": RunState(phase=RunPhase.COMPLETED, content="ok"),
+        "review": RunState(phase=RunPhase.COMPLETED, content="通过"),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-no-stamp")
+    # 纯 prose 成功批保持无声，或即便有卡也无 thin_review。
+    if payload is None:
+        return
+    assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
+
+
+def test_node_failed_latches_requires_draft_ack():
+    """能力4：contract.failed → RunPhase.FAILED → node_failed + requires_draft_ack。"""
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+
+    plan = _plan(
+        RunSpec(run_id="ok", task="写 A", role="模块A"),
+        RunSpec(run_id="bad", task="写 B", role="模块B"),
+    )
+    results = {
+        "ok": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        ),
+        "bad": RunState(
+            phase=RunPhase.FAILED,
+            content="半成品",
+            error="缺少必备章节：结论；severity 枚举非法",
+            files_touched=[],
+            file_acceptance=[],
+        ),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-node-fail")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert any(g.get("reason") == "node_failed" for g in payload["gaps"])
+
+    current_delivery_verdict.set(None)
+    maybe_emit_delivery_status(EventSink(), plan, results, execution_id="e-node-fail")
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.state == "partial"
+    assert verdict.requires_draft_ack is True
+    current_delivery_verdict.set(None)
+
+
+def test_artifact_rejected_latches_requires_draft_ack():
+    """能力4：rejected 产物 → artifact_rejected gap + requires_draft_ack；至少 partial。"""
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+    from agentcore.runtime.runs.file_acceptance import (
+        build_file_acceptance,
+        path_rejections_from_contract_messages,
+    )
+
+    cite_msg = (
+        "`paper.md`：正文出现学位论文/期刊式著录标记（[D]）但未就地绑定本回合台账 #rN——"
+        "属于未核验或编造引用。"
+    )
+    path_rej = path_rejections_from_contract_messages([cite_msg])
+    acceptance = build_file_acceptance(
+        ["paper.md", "outline.md"],
+        phase=RunPhase.COMPLETED,
+        path_rejections=path_rej,
+    )
+    plan = _plan(RunSpec(run_id="w1", task="写综述", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已落盘",
+            files_touched=["paper.md", "outline.md"],
+            file_acceptance=acceptance,
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-rej-ack")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert any(g.get("reason") == "artifact_rejected" for g in payload["gaps"])
+    assert "paper.md" not in payload["delivered_files"]
+    assert "outline.md" in payload["delivered_files"]
+
+    current_delivery_verdict.set(None)
+    maybe_emit_delivery_status(EventSink(), plan, results, execution_id="e-rej-ack")
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.requires_draft_ack is True
+    current_delivery_verdict.set(None)
+
+
+def test_failed_zero_landing_soft_preserves_node_failed_draft_ack():
+    """甲⁺零落盘 soft 投影仍保留 node_failed → draft_ack（不丢闩）。"""
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+    from agentcore.runtime.runs.contract import zero_files_gap_message
+
+    tip = zero_files_gap_message()
+    plan = _plan(
+        RunSpec(run_id="ok", task="写 A", role="模块A"),
+        RunSpec(run_id="bad", task="写 B", role="模块B"),
+    )
+    results = {
+        "ok": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        ),
+        "bad": RunState(
+            phase=RunPhase.FAILED,
+            content="",
+            error=tip,
+            files_touched=[],
+        ),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-soft-fail")
+    assert payload is not None
+    assert any(g.get("reason") == "node_failed" for g in payload["gaps"])
+
+    current_delivery_verdict.set(None)
+    maybe_emit_delivery_status(EventSink(), plan, results, execution_id="e-soft-fail")
+    verdict = current_delivery_verdict.get()
+    assert verdict is not None
+    assert verdict.requires_draft_ack is True
+    current_delivery_verdict.set(None)
+
+
+def test_acceptance_counts_match_delivered_and_rejected():
+    """条数同源：acceptance_counts ↔ delivered_files / rejected artifacts。"""
+    from agentcore.runtime.delegate.delivery_status import acceptance_counts
+    from agentcore.runtime.runs.file_acceptance import (
+        build_file_acceptance,
+        path_rejections_from_contract_messages,
+    )
+
+    cite_msg = "`x.md`：未核验引用。"
+    path_rej = path_rejections_from_contract_messages([cite_msg])
+    acceptance = build_file_acceptance(
+        ["x.md", "y.md"],
+        phase=RunPhase.COMPLETED,
+        path_rejections=path_rej,
+    )
+    plan = _plan(RunSpec(run_id="w1", task="写", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["x.md", "y.md"],
+            file_acceptance=acceptance,
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-counts")
+    assert payload is not None
+    accepted_n, rejected_n = acceptance_counts(results)
+    assert accepted_n == len(payload["delivered_files"])
+    assert rejected_n == sum(
+        1 for a in payload["artifacts"] if a.get("status") == "rejected"
+    )
+    assert accepted_n + rejected_n == len(payload["artifacts"])
 

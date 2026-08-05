@@ -122,7 +122,27 @@ class LlmRoundOutput:
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
     aborted: bool = False
+    finish_reason: str | None = None
 
+
+def _fact_finish_reason(
+    *,
+    aborted: bool,
+    upstream: str | None,
+    has_tool_calls: bool,
+) -> str:
+    """Resolve LlmCallFact finish_reason without erasing upstream ``length``.
+
+    Semantic boundaries retained: ``aborted`` always wins; when upstream is
+    missing, fall back to tool_calls/stop invention (same as call_fence).
+    """
+    if aborted:
+        return "aborted"
+    if upstream:
+        return upstream
+    if has_tool_calls:
+        return "tool_calls"
+    return "stop"
 
 @dataclass(frozen=True)
 class LlmRoundFailure:
@@ -203,6 +223,19 @@ async def run_llm_round(
     usage = streamed.usage
     empty_diagnosis = streamed.empty_diagnosis
     empty_raw_preview = streamed.empty_raw_preview
+    upstream_finish = streamed.finish_reason
+
+    # Provider path usually stamps diagnosis; scripted/test streams may only send
+    # finish_reason — backfill so user-facing copy can distinguish truncation.
+    if (
+        not round_content
+        and not round_tool_calls
+        and upstream_finish == "length"
+        and not empty_diagnosis
+    ):
+        from agentcore.llm.errors import EmptyResponseDiagnosis
+
+        empty_diagnosis = EmptyResponseDiagnosis.LENGTH_EMPTY.value
 
     record_turn_fact(
         LlmCallFact(
@@ -212,10 +245,10 @@ async def run_llm_round(
             reasoning_content=round_reasoning,
             tool_calls=tool_calls_to_dicts(round_tool_calls),
             usage=usage.as_dict() if usage else {},
-            finish_reason=(
-                "aborted"
-                if streamed.aborted
-                else ("tool_calls" if round_tool_calls else "stop")
+            finish_reason=_fact_finish_reason(
+                aborted=streamed.aborted,
+                upstream=upstream_finish,
+                has_tool_calls=bool(round_tool_calls),
             ),
         ).to_fact()
     )
@@ -237,6 +270,7 @@ async def run_llm_round(
         reasoning_tokens=usage.reasoning_tokens if usage else 0,
         done=not round_tool_calls and not streamed.aborted,
         aborted=streamed.aborted or None,
+        finish_reason=upstream_finish,
     )
 
     return LlmRoundOutput(
@@ -247,6 +281,7 @@ async def run_llm_round(
         empty_diagnosis=empty_diagnosis,
         empty_raw_preview=empty_raw_preview,
         aborted=streamed.aborted,
+        finish_reason=upstream_finish,
     )
 
 
@@ -298,7 +333,8 @@ def decide_no_tool_round(
     A round that produced text either finishes cleanly (``Return``) or, if
     finish_guard rejects it and reworks remain, is reworked (``Rework``). An empty
     round walks the convergence controller's degraded ladder: finish degraded
-    (``Return`` + DEGRADED) or retry on the same model (``Continue``).
+    (``Return`` + DEGRADED) or retry on the same model (``Continue``). Upstream
+    ``finish_reason=length`` with empty body skips the one-shot Continue.
     """
     if outcome.content:
         from agentcore.runtime.closing_posture import (
@@ -324,9 +360,13 @@ def decide_no_tool_round(
             return Rework()
         return Return()
 
-    action = controller.empty_response_action()
+    action = controller.empty_response_action(finish_reason=outcome.finish_reason)
     if action is Intervention.FINALIZE:
-        logger.warning("engine.degraded")
+        logger.warning(
+            "engine.degraded",
+            finish_reason=outcome.finish_reason,
+            empty_diagnosis=outcome.empty_diagnosis,
+        )
         if tools_offered and supports_tools is False and not outcome.content:
             return Return(
                 finish_reason=FinishReason.ERROR,

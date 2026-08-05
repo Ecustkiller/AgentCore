@@ -339,7 +339,7 @@ def test_build_payload_disables_thinking_for_deepseek_v4_background():
     payload = provider._build_payload(req, stream=False)
     assert payload["thinking"] == {"type": "disabled"}
 
-    # Non-DeepSeek models must not get the DeepSeek-only field.
+    # Non-DeepSeek / non-Hy3 models must not get the thinking-type field.
     other = LLMRequest(
         messages=[LLMMessage(role="user", content="hi")],
         model="gpt-4o",
@@ -354,6 +354,93 @@ def test_build_payload_disables_thinking_for_deepseek_v4_background():
         model=DEEPSEEK_V4_FLASH,
     )
     assert "thinking" not in provider._build_payload(default, stream=False)
+
+
+@pytest.mark.parametrize("model", ["hy3", "hy3-preview", "tokenhub/hy3", "tokenhub/hy3-preview"])
+def test_build_payload_echoes_reasoning_content_for_hy3_tool_turns(model: str):
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[
+            LLMMessage(role="user", content="go"),
+            LLMMessage(
+                role="assistant",
+                content="",
+                reasoning_content="chain",
+                tool_calls=[
+                    ToolCall(
+                        id="tc1",
+                        function=ToolCallFunction(name="search", arguments="{}"),
+                    )
+                ],
+            ),
+            LLMMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="tc2",
+                        function=ToolCallFunction(name="read", arguments="{}"),
+                    )
+                ],
+            ),
+        ],
+        model=model,
+    )
+    payload = provider._build_payload(req, stream=True)
+    assistant_msgs = [m for m in payload["messages"] if m["role"] == "assistant"]
+    assert assistant_msgs[0]["reasoning_content"] == "chain"
+    assert assistant_msgs[1]["reasoning_content"] == ""
+
+
+@pytest.mark.parametrize("model", ["hy3", "hy3-preview"])
+def test_build_payload_thinking_switch_for_hy3(model: str):
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    disabled = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        thinking=False,
+        scenario="title",
+    )
+    assert provider._build_payload(disabled, stream=False)["thinking"] == {"type": "disabled"}
+
+    enabled = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        thinking=True,
+    )
+    assert provider._build_payload(enabled, stream=False)["thinking"] == {"type": "enabled"}
+
+    default = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+    )
+    assert "thinking" not in provider._build_payload(default, stream=False)
+
+
+def test_build_payload_hy_siblings_do_not_get_hy3_dialect():
+    """Other TokenHub hy-* ids must stay clean OpenAI (no reasoning_content / thinking)."""
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[
+            LLMMessage(
+                role="assistant",
+                content=None,
+                reasoning_content="should not leak",
+                tool_calls=[
+                    ToolCall(
+                        id="tc1",
+                        function=ToolCallFunction(name="search", arguments="{}"),
+                    )
+                ],
+            ),
+        ],
+        model="hy-chat",
+        thinking=False,
+    )
+    payload = provider._build_payload(req, stream=False)
+    assistant = payload["messages"][0]
+    assert "reasoning_content" not in assistant
+    assert "thinking" not in payload
 
 
 def test_balance_and_auth_errors_are_not_retryable():

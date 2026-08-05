@@ -188,13 +188,22 @@ def zero_write_warn_prompt(*, rounds: int, prose_idle: bool = False) -> str:
     )
 
 
-def delivery_idle_nudge_prompt(*, rounds: int, recon: bool = False) -> str:
-    """Soft steer for read-idle (files delivery or investigation recon)."""
+def delivery_idle_nudge_prompt(
+    *, rounds: int, recon: bool = False, report: bool = False
+) -> str:
+    """Soft steer for read-idle (repair files, report files, or investigation recon)."""
     if recon:
         return (
             f"[系统提示] 调查空转提醒（已连续 {rounds} 轮仅搜读、无结论交接）："
             "请立即基于已读内容给出结论，或 escalate / handoff 说明阻塞；"
             "禁止继续换文件通读摊大饼。不要为「再确认」再开一轮全仓 typecheck。"
+        )
+    if report:
+        return (
+            f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
+            "任务要求写报告落盘。请立即基于已读证据 file_write 写出报告，"
+            "或 handoff 交接阻塞；禁止继续只搜不写。"
+            "检索工具仍可用，请转入成稿。"
         )
     return (
         f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
@@ -204,7 +213,11 @@ def delivery_idle_nudge_prompt(*, rounds: int, recon: bool = False) -> str:
 
 
 def delivery_idle_narrow_prompt(*, rounds: int) -> str:
-    """After soft nudge: tools narrowed to write/诊断/handoff/必要读 — still not FINALIZE."""
+    """After soft nudge (repair files only): tools narrowed — still not FINALIZE.
+
+    Report-delivery posts never arm this step (``narrow_rounds=0``); do not reuse
+    for report idle.
+    """
     return (
         f"[系统提示] 交文件空转收窄（已连续 {rounds} 轮仅调查、零落盘）："
         "大范围调查类工具已收回；仅保留写盘 / 内环诊断 / handoff / 必要 file_read。"
@@ -524,6 +537,8 @@ class LoopController:
         delivery_idle_narrow_rounds: int = 0,
         # True → nudge prompt is recon (conclude/handoff), not write-disk pressure.
         delivery_idle_recon: bool = False,
+        # True → report-landing files post: nudge催写报告, never narrow away search.
+        delivery_idle_report: bool = False,
         investigation_tools: frozenset[str] = frozenset(),
         product_landing_artifacts: tuple[str, ...] | list[str] | None = None,
     ) -> None:
@@ -562,6 +577,7 @@ class LoopController:
         self._delivery_idle_nudge_rounds = max(0, int(delivery_idle_nudge_rounds))
         self._delivery_idle_narrow_rounds = max(0, int(delivery_idle_narrow_rounds))
         self._delivery_idle_recon = bool(delivery_idle_recon)
+        self._delivery_idle_report = bool(delivery_idle_report)
         # Declared deliverable.artifacts — dossier intermediates count as product
         # only when they match (files zero-write latch). Empty = no whitelist.
         self._product_landing_artifacts: tuple[str, ...] = tuple(
@@ -1128,13 +1144,17 @@ class LoopController:
         ):
             self._pending_path_force_segmented = True
 
-    def empty_response_action(self) -> Intervention:
+    def empty_response_action(self, *, finish_reason: str | None = None) -> Intervention:
         """Decide what to do after an empty round (B2 degraded ladder).
 
-        ``FINALIZE`` once the consecutive-empty streak hits the threshold (the turn
-        ends as degraded rather than blank); else ``CONTINUE`` (retry the round on the
-        same model).
+        ``finish_reason == "length"`` (protocol-proven truncation with empty body +
+        no tools) skips the default one-shot Continue and finalizes immediately —
+        retrying will not grow the output budget. Ordinary silent empties still
+        ``CONTINUE`` once, then ``FINALIZE`` once the consecutive-empty streak hits
+        the threshold (the turn ends as degraded rather than blank).
         """
+        if finish_reason == "length":
+            return Intervention.FINALIZE
         if self._consecutive_empty >= self._empty_threshold:
             return Intervention.FINALIZE
         return Intervention.CONTINUE
@@ -1389,6 +1409,11 @@ class LoopController:
     def delivery_idle_recon(self) -> bool:
         """True when soft nudge uses recon (conclude) copy, not write-disk copy."""
         return self._delivery_idle_recon
+
+    @property
+    def delivery_idle_report(self) -> bool:
+        """True when soft nudge uses report-landing copy (never arms search strip)."""
+        return self._delivery_idle_report
 
     @property
     def delivery_idle_rounds(self) -> int:

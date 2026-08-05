@@ -54,7 +54,7 @@ Invoke-RestMethod -Method POST -Uri http://localhost:8000/v1/auth/token `
   -ContentType application/json -Body '{"username":"dev","password":"devpassword"}'
 ```
 
-无 CLI 时读 `%APPDATA%\AgentCore\session.json`（Desktop 登录后写入）。WebGL：URL query `?api=&token=&run=`；Offline Demo 用 `?demo=1`。
+无 CLI 时读 `%APPDATA%\AgentCore\session.json`（Desktop 登录后写入）。WebGL：`?api=&run=` + fragment `#token=`（token 勿放 query，避免进 Referer/访问日志；query `token` 仅兼容旧链接）；Offline Demo 用 `?demo=1`。
 
 ```powershell
 pnpm town:build:webgl

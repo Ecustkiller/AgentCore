@@ -24,6 +24,7 @@ class EscalationKind(StrEnum):
     NORMAL = "normal"
     SCOPE = "scope"
     DEP = "dep"
+    # gate_kind 保留；wire 不得默认占 scope（见 to_run_escalation_payload）
     CONTRACT = "contract"  # 需改接口契约 / 权限越界
     CONTRADICTION = "contradiction"  # 需求矛盾
 
@@ -59,9 +60,10 @@ class EscalationSignal(BaseModel):
     def to_run_escalation_payload(self) -> dict[str, Any]:
         """Shape compatible with ``RunState.escalations`` / CEO aggregate harvest."""
         kind = self.kind.value
-        # CEO / wave 边界只认 normal|scope|dep；contract/contradiction 映射到 scope
-        # （方案层偏离），避免改动调度契约。
-        wire_kind = kind if kind in ("normal", "scope", "dep") else "scope"
+        # CEO / wave 边界只认 normal|scope|dep。contract/contradiction 不得占 wire
+        # ``scope``（用户面「职责偏离」）——职责偏离只来自结构化 escalate(kind=scope)
+        # 或写路径真越界；其它 gate_kind 诚实落为 normal。
+        wire_kind = kind if kind in ("normal", "scope", "dep") else "normal"
         return {
             "question": self.question,
             "assumption": self.assumption,

@@ -549,12 +549,17 @@ def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) 
             other += 1
     # Surface product-level status (hot-redirect may mark completed even if original cancelled).
     product_failed = sum(1 for p in products if p.get("status") not in ("completed",))
+    # 条数同源：accepted/rejected 与 delivery_status.artifacts 同一 file_acceptance 聚合。
+    from agentcore.runtime.delegate.delivery_status import acceptance_counts
+
+    accepted_n, rejected_n = acceptance_counts(results)
     lines = [
         "\n### 队员终态名册（地面真相——写终稿必须对照，禁止编造「全部交付」）\n"
         f"计划节点：完成 {completed} · 失败 {failed} · 跳过 {skipped} · 取消 {cancelled}"
         + (f" · 其他 {other}" if other else "")
         + f"；综述可见产物 {len(products)} 条"
         + (f"（其中非完成 {product_failed}）" if product_failed else "")
+        + f"；文件验收：已验收 {accepted_n} · 未通过 {rejected_n}"
         + "。"
     ]
     if failed_lines:
@@ -597,8 +602,27 @@ def format_for_ceo(
         collect_worker_gaps,
         format_worker_gaps_block,
     )
+    from agentcore.runtime.runs.research_quality import collect_thin_review_gaps
 
     gaps = collect_worker_gaps(plan, results)
+    # 案 thin-review A′：已声明 reviews/ 契约未对齐 → 并入 CEO 契约缺口表（与 delivery 同谓词）。
+    thin_by_role: dict[str, list[dict[str, str]]] = {}
+    for row in collect_thin_review_gaps(plan.nodes, results):
+        role = str(row.get("role") or "").strip() or "验收"
+        thin_by_role.setdefault(role, []).append(
+            {
+                "description": str(row.get("description") or ""),
+                "reason": str(row.get("reason") or "thin_review"),
+            }
+        )
+    if thin_by_role:
+        # Merge into existing worker rows when role matches; else append.
+        existing_roles = {label: i for i, (label, _) in enumerate(gaps)}
+        for role, rows in thin_by_role.items():
+            if role in existing_roles:
+                gaps[existing_roles[role]][1].extend(rows)
+            else:
+                gaps.append((role, rows))
     audit_off_token = _audit_off_with_token_budget_gap(plan, gaps)
     gaps_block = format_worker_gaps_block(
         gaps, audit_off_with_token_budget=audit_off_token

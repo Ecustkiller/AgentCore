@@ -9,6 +9,11 @@ import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
 // electron-builder 按平台分源：build/icon-win.png · build/icon-mac.png）。
 import icon from "../../resources/icon.png?asset";
 import { registerAgentTownIpc } from "./agenttown-service";
+import {
+  apiOriginForCsp,
+  connectSrcForCsp,
+  decodeAppRelativePath,
+} from "./app-protocol-csp";
 import { registerBrowserIpc, startDesktopBrowserBridge } from "./browser";
 import { WORKSPACE_SCHEME } from "./browser/workspace-paths";
 import {
@@ -112,26 +117,22 @@ const RENDERER_ROOT = join(__dirname, "../renderer");
 // 见 .env.production）。用于把 img-src 精确收窄到「自己 + 后端」——只放行后端头像 / favicon，任意
 // 第三方远程图被 Chromium 拦死。无法解析（极端构建配置缺失）→ 空串 → 退化为「只允许自己 + data:」。
 declare const __API_BASE_URL__: string;
-function apiOriginForCsp(): string {
-  try {
-    return new URL(__API_BASE_URL__).origin;
-  } catch {
-    return "";
-  }
-}
-const API_ORIGIN = apiOriginForCsp();
+const API_ORIGIN = apiOriginForCsp(__API_BASE_URL__);
 
 // connect-src（XSS-001·纵深）: connect-src 管的是渲染层 fetch / SSE / WebSocket 出网。后端源是
 // 【构建期】烘焙的——渲染层 services/api.ts 的 BASE_URL 与本 CSP 的 __API_BASE_URL__ 同出一个
 // VITE_API_URL（见 electron.vite.config.ts），故全应用只有一个后端源、可钉死它。渲染层每个请求都走
 // `${BASE_URL}/...`（REST + fetch 式 SSE；今日无 WebSocket、无跨源 fetch），所以收窄到「自己 + 该源」
 // 对真实流量是 no-op，却把 connect-src 变成 script-src 'self' 背后的【外泄墙】（未来即便出 DOM-XSS 也
-// 无处 POST 数据 / 开 socket）。仅当源不可解析（极端构建缺 env）才【失败放开】退回宽策略——宁宽勿把
-// 自己锁在 API 门外。ws/wss 收同源（后端 http→ws / https→wss），放行未来同主机实时通道。
-const CONNECT_SRC = API_ORIGIN
-  ? `connect-src 'self' ${API_ORIGIN} ${API_ORIGIN.replace(/^http/, "ws")}`
-  : "connect-src 'self' https: http: ws: wss:";
-
+// 无处 POST 数据 / 开 socket）。源不可解析（极端构建缺 env）时【失败收紧】到 `'self'`——与 img-src
+// 失败退化对称，禁止放开 https:/http:/ws:/wss:。ws/wss 收同源（后端 http→ws / https→wss）。
+if (!API_ORIGIN) {
+  console.warn(
+    "[SECURITY][CSP] __API_BASE_URL__ unparseable; connect-src/img-src fail-closed " +
+      "to 'self' (no remote https:/http:/ws:/wss:). Fix the build-time API URL.",
+  );
+}
+const CONNECT_SRC = connectSrcForCsp(API_ORIGIN);
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
@@ -199,8 +200,10 @@ protocol.registerSchemesAsPrivileged([
 function registerAppProtocol(): void {
   protocol.handle(APP_SCHEME, async (request) => {
     const { pathname } = new URL(request.url);
-    const relativePath =
-      pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
+    const relativePath = decodeAppRelativePath(pathname);
+    if (relativePath === null) {
+      return new Response("Bad Request", { status: 400 });
+    }
     const filePath = join(RENDERER_ROOT, relativePath);
     if (!filePath.startsWith(RENDERER_ROOT + sep)) {
       return new Response("Forbidden", { status: 403 });

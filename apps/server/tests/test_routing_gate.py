@@ -1,10 +1,15 @@
-"""Worker 内部路由 Phase 1 — Escalation Gate。"""
+"""Worker 内部路由 Phase 1 — Escalation Gate.
+
+Gate 不再扫工具输出自由文产 scheme_escalation；职责偏离只走结构化 escalate /
+写路径真越界。本文件钉死「越权」等内容词不得升 wire scope，以及 payload 映射诚实性。
+"""
 
 from __future__ import annotations
 
 from agentcore.runtime.loop_controller import ToolAttempt
 from agentcore.runtime.routing import (
     EscalationKind,
+    EscalationSignal,
     ProblemLayer,
     classify_problem,
     evaluate_after_tools,
@@ -22,172 +27,75 @@ def test_execution_layer_tool_failure_continues():
     assert verdict.signals == []
 
 
-def test_scheme_contract_escalates():
-    attempts = [ToolAttempt("fp1", "file_write", success=False)]
-    outputs = ["继续执行会破坏对外契约 / 改接口契约，超出权限"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs, run_id="r1")
-    assert verdict.should_escalate
-    assert verdict.layer is ProblemLayer.SCHEME
-    assert len(verdict.signals) == 1
-    assert verdict.signals[0].kind is EscalationKind.CONTRACT
-    assert "契约" in verdict.signals[0].question or "权限" in verdict.signals[0].question
-
-
-def test_scheme_contradiction_escalates():
-    attempts = [ToolAttempt("fp1", "str_replace", success=True)]
-    outputs = ["需求矛盾：无法同时满足 A 与 B"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.CONTRADICTION
-
-
-def test_scheme_dep_escalates():
-    attempts = [ToolAttempt("fp1", "str_replace", success=False)]
-    outputs = ["卡在缺输入：依赖不存在，还没人产出"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.DEP
-
-
-def test_file_read_corpus_with_contradict_does_not_escalate():
-    """工作区正文含裸词 contradict / 需求矛盾 ≠ 本任务矛盾（与 web_search 同理）。"""
-    attempts = [ToolAttempt("fp1", "file_read", success=True)]
+def test_write_report_yuequan_does_not_scheme_escalate():
+    """样本根因：报告含「越权」不得 → CONTRACT → wire scope → UI 职责偏离。"""
+    attempts = [ToolAttempt("fp1", "file_write", success=True)]
     outputs = [
-        "// courtroom: the witness may contradict earlier testimony\n"
-        "export function noteContradict() { /* 需求矛盾仅作剧情文案 */ }"
+        "# 审计报告\n发现上游步骤存在越权写最终交付物的风险，建议复核权限边界。"
     ]
     verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs, run_id="r1")
     assert not verdict.should_escalate
     assert verdict.layer is ProblemLayer.EXECUTION
+    assert verdict.signals == []
+    assert signals_as_dicts(verdict.signals) == []
 
 
-def test_grep_corpus_with_scheme_phrase_does_not_escalate():
-    attempts = [ToolAttempt("fp1", "grep", success=True)]
-    outputs = ["src/a.ts:12: 无法同时满足 A 与 B（剧情选项）"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert not verdict.should_escalate
+def test_scheme_flavored_tool_outputs_do_not_escalate():
+    """弱内容词扫不得产 scheme_escalation（契约 / 矛盾 / 职责 / 缺输入）。"""
+    cases = [
+        ("file_write", False, "继续执行会破坏对外契约 / 改接口契约，超出权限"),
+        ("str_replace", True, "需求矛盾：无法同时满足 A 与 B"),
+        ("str_replace", False, "卡在缺输入：依赖不存在，还没人产出"),
+        ("file_write", True, "职责偏离：真正该做的是改文档而非改代码"),
+        ("str_replace", False, "this is the wrong scope for the worker"),
+        ("str_replace", True, "these requirements contradict each other; cannot ship both"),
+        ("file_write", False, "this is a breaking change to the api contract"),
+        ("file_write", False, "that is beyond my authority"),
+        ("file_write", False, "违反接口契约，接口不兼容"),
+        ("file_write", False, "this change is out of scope for the worker"),
+    ]
+    for tool, success, text in cases:
+        attempts = [ToolAttempt("fp1", tool, success=success)]
+        verdict = evaluate_after_tools(attempts=attempts, tool_outputs=[text])
+        assert not verdict.should_escalate, text
+        assert verdict.signals == [], text
 
 
-def test_code_search_corpus_with_scope_phrase_does_not_escalate():
-    attempts = [ToolAttempt("fp1", "code_search", success=True)]
-    outputs = ["hit: out of scope comment in legacy module"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert not verdict.should_escalate
-
-
-def test_bare_contradict_in_tool_output_does_not_escalate():
-    """裸词 contradict 不再当方案层；须任务口语短语。"""
-    attempts = [ToolAttempt("fp1", "str_replace", success=True)]
-    outputs = ["note: do not contradict the prior patch style"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert not verdict.should_escalate
-
-
-def test_requirements_contradict_phrase_still_escalates():
-    attempts = [ToolAttempt("fp1", "str_replace", success=True)]
-    outputs = ["these requirements contradict each other; cannot ship both"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.CONTRADICTION
-
-
-def test_escalate_tool_skipped():
-    attempts = [ToolAttempt("fp1", "escalate", success=True)]
-    outputs = ["需求矛盾：故意写在 escalate 结果里也不该再 Gate"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert not verdict.should_escalate
-
-
-def test_classify_problem_helpers():
-    assert classify_problem("ModuleNotFoundError: x") is ProblemLayer.EXECUTION
-    assert classify_problem("超出权限，需改接口契约") is ProblemLayer.SCHEME
-
-
-def test_signals_wire_kind_maps_contract_to_scope():
-    attempts = [ToolAttempt("fp1", "file_write", success=False)]
-    outputs = ["breaking change to api contract"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    payloads = signals_as_dicts(verdict.signals)
-    assert payloads[0]["kind"] == "scope"  # wire for CEO/wave
-    assert payloads[0]["gate_kind"] == "contract"
-    assert payloads[0]["source"] == "escalation_gate"
-    assert payloads[0]["layer"] == "scheme"
-
-
-def test_scheme_scope_escalates():
-    attempts = [ToolAttempt("fp1", "file_write", success=True)]
-    outputs = ["职责偏离：真正该做的是改文档而非改代码"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs, run_id="r1")
-    assert verdict.should_escalate
-    assert verdict.layer is ProblemLayer.SCHEME
-    assert verdict.signals[0].kind is EscalationKind.SCOPE
-    assert "职责" in verdict.signals[0].question or "范围" in verdict.signals[0].question
-
-
-def test_scheme_scope_english_wrong_scope():
-    attempts = [ToolAttempt("fp1", "str_replace", success=False)]
-    outputs = ["this is the wrong scope for the worker"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.SCOPE
-
-
-def test_coordination_tools_skipped_even_with_scheme_text():
-    for name in ("post_note", "read_notes", "amend_note", "handoff", "delegate"):
-        attempts = [ToolAttempt("fp1", name, success=False)]
-        outputs = ["需求矛盾：故意写在协调工具结果里"]
+def test_corpus_and_coordination_tools_stay_silent():
+    for name in (
+        "file_read",
+        "grep",
+        "code_search",
+        "web_search",
+        "read_url",
+        "escalate",
+        "post_note",
+        "read_notes",
+        "amend_note",
+        "handoff",
+        "delegate",
+    ):
+        attempts = [ToolAttempt("fp1", name, success=True)]
+        outputs = ["需求矛盾：无法同时满足 / 职责偏离 / 越权"]
         verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
         assert not verdict.should_escalate, name
 
 
-def test_web_search_snippet_with_contradiction_does_not_escalate():
-    """检索原文含「互相矛盾」≠ 任务本身矛盾 —— 勿误触 Escalation Gate。"""
-    attempts = [ToolAttempt("fp1", "web_search", success=True)]
-    outputs = [
-        "标题：两派观点互相矛盾 / 冲突的要求无法同时满足\n"
-        "摘要：报道称双方需求矛盾，无法同时满足 A 与 B。"
-    ]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs, run_id="r1")
-    assert not verdict.should_escalate
-    assert verdict.layer is ProblemLayer.EXECUTION
-    assert verdict.action == "continue"
-
-
-def test_read_url_body_with_scope_phrase_does_not_escalate():
-    attempts = [ToolAttempt("fp1", "read_url", success=True)]
-    outputs = ["网页正文：有人认为这是职责偏离、与初始计划不符，属于 out of scope。"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert not verdict.should_escalate
-
-
-def test_non_retrieval_tool_with_contradiction_still_escalates():
-    """非语料工具输出仍可触发方案层（回归：跳过仅限语料类输出）。"""
-    attempts = [ToolAttempt("fp1", "str_replace", success=True)]
-    outputs = ["需求矛盾：无法同时满足 A 与 B"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.CONTRADICTION
-    assert verdict.signals[0].tool_name == "str_replace"
-
-
-def test_mixed_attempts_only_scheme_tools_escalate():
+def test_bare_contradict_and_mixed_failures_stay_execution():
     attempts = [
         ToolAttempt("fp1", "code_execute", success=False),
         ToolAttempt("fp2", "file_write", success=False),
     ]
     outputs = [
         "Traceback (most recent call last):\nFileNotFoundError: No such file",
-        "继续执行会破坏对外契约",
+        "继续执行会破坏对外契约 / 越权",
     ]
     verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert len(verdict.signals) == 1
-    assert verdict.signals[0].kind is EscalationKind.CONTRACT
-    assert verdict.signals[0].tool_name == "file_write"
+    assert verdict.layer is ProblemLayer.EXECUTION
+    assert not verdict.should_escalate
 
 
 def test_failure_without_output_stays_execution():
-    """Failed attempt + missing output → execution continue (never silent scheme escalate)."""
     attempts = [ToolAttempt("fp1", "code_execute", success=False)]
     verdict = evaluate_after_tools(attempts=attempts, tool_outputs=None)
     assert verdict.layer is ProblemLayer.EXECUTION
@@ -195,32 +103,61 @@ def test_failure_without_output_stays_execution():
     assert not verdict.should_escalate
 
 
-def test_classify_problem_scope_and_unknown_bias_execution():
-    assert classify_problem("范围不对，与初始计划不符") is ProblemLayer.SCHEME
+def test_classify_problem_never_scheme_from_free_text():
+    assert classify_problem("ModuleNotFoundError: x") is ProblemLayer.EXECUTION
+    assert classify_problem("超出权限，需改接口契约") is ProblemLayer.EXECUTION
+    assert classify_problem("范围不对，与初始计划不符") is ProblemLayer.EXECUTION
     assert classify_problem("completely opaque gibberish xyz") is ProblemLayer.EXECUTION
 
 
-def test_out_of_scope_phrase_classifies_as_scope():
-    """Regression: ``out of scope`` used to be double-listed in the CONTRACT pattern
-    (first match won) and got mis-labeled ``gate_kind=contract``. Scope-flavored
-    wording must yield SCOPE; genuinely contract-flavored wording stays CONTRACT."""
-    attempts = [ToolAttempt("fp1", "file_write", success=False)]
-    outputs = ["this change is out of scope for the worker"]
-    verdict = evaluate_after_tools(attempts=attempts, tool_outputs=outputs)
-    assert verdict.should_escalate
-    assert verdict.signals[0].kind is EscalationKind.SCOPE
-    payloads = signals_as_dicts(verdict.signals)
+def test_signals_wire_kind_contract_maps_to_normal_not_scope():
+    """若仍构造 CONTRACT 信号，wire kind 诚实为 normal，不得占职责偏离。"""
+    signal = EscalationSignal(
+        layer=ProblemLayer.SCHEME,
+        kind=EscalationKind.CONTRACT,
+        question="继续执行可能改动接口契约",
+        evidence="越权",
+        tool_name="file_write",
+        source="escalation_gate",
+    )
+    payloads = signals_as_dicts([signal])
+    assert payloads[0]["kind"] == "normal"
+    assert payloads[0]["gate_kind"] == "contract"
+    assert payloads[0]["kind"] != "scope"
+
+
+def test_signals_wire_kind_contradiction_maps_to_normal_not_scope():
+    signal = EscalationSignal(
+        layer=ProblemLayer.SCHEME,
+        kind=EscalationKind.CONTRADICTION,
+        question="任务需求存在矛盾",
+        source="escalation_gate",
+    )
+    payloads = signals_as_dicts([signal])
+    assert payloads[0]["kind"] == "normal"
+    assert payloads[0]["gate_kind"] == "contradiction"
+
+
+def test_signals_wire_kind_explicit_scope_still_scope():
+    """结构化 escalate(kind=scope) 同源语义：SCOPE 仍占 wire scope。"""
+    signal = EscalationSignal(
+        layer=ProblemLayer.SCHEME,
+        kind=EscalationKind.SCOPE,
+        question="真正该做的与初始计划不符",
+        source="escalate_tool",
+    )
+    payloads = signals_as_dicts([signal])
     assert payloads[0]["kind"] == "scope"
     assert payloads[0]["gate_kind"] == "scope"
 
 
-def test_contract_context_phrases_still_classify_as_contract():
-    for text in (
-        "this is a breaking change to the api contract",
-        "that is beyond my authority",
-        "违反接口契约，接口不兼容",
-    ):
-        attempts = [ToolAttempt("fp1", "file_write", success=False)]
-        verdict = evaluate_after_tools(attempts=attempts, tool_outputs=[text])
-        assert verdict.should_escalate, text
-        assert verdict.signals[0].kind is EscalationKind.CONTRACT, text
+def test_signals_wire_kind_dep_still_dep():
+    signal = EscalationSignal(
+        layer=ProblemLayer.SCHEME,
+        kind=EscalationKind.DEP,
+        question="卡在尚不存在的输入",
+        source="escalate_tool",
+    )
+    payloads = signals_as_dicts([signal])
+    assert payloads[0]["kind"] == "dep"
+    assert payloads[0]["gate_kind"] == "dep"

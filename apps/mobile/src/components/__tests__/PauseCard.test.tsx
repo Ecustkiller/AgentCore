@@ -113,6 +113,25 @@ describe("PauseCard · approval", () => {
     expect(screen.queryByText("本轮内所有文件改动")).toBeNull();
   });
 
+  it("surfaces circuit_breaker_hint (incl. credential key preview) on the card", () => {
+    render(
+      <PauseCard
+        pending={approval({
+          toolName: "file_read",
+          arguments: {
+            path: ".env",
+            circuit_breaker_hint:
+              "该路径疑似凭据。\n键名预览（无值，启发式）：DATABASE_URL（共 1 个）",
+          },
+        })}
+        conversationId={CONV}
+      />,
+    );
+    expect(screen.getByText(/安全熔断升格审批/)).toBeTruthy();
+    expect(screen.getByText(/键名预览（无值/)).toBeTruthy();
+    expect(screen.getByText(/DATABASE_URL/)).toBeTruthy();
+  });
+
   it("surfaces an error and re-enables the card when the POST fails", async () => {
     mockResolve.mockRejectedValueOnce(new Error("放行失败 (500)"));
     render(<PauseCard pending={approval()} conversationId={CONV} />);

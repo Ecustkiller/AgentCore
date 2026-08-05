@@ -151,13 +151,13 @@ export function LoginPage() {
               autoComplete="one-time-code"
               placeholder="验证码（6 位）"
               value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               disabled={submitting}
               autoFocus
             />
             <Button
               type="submit"
-              disabled={submitting || totpCode.length < 6}
+              disabled={submitting || totpCode.length !== 6}
               className="mt-1 w-full"
             >
               {submitting && <Spinner />}

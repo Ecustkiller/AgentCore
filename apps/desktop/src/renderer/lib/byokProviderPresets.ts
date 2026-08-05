@@ -11,6 +11,7 @@ export type ByokProviderId =
   | "moonshot"
   | "zhipu"
   | "doubao"
+  | "hy"
   | "openrouter"
   | "custom";
 
@@ -71,6 +72,20 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     models: ["doubao-pro-32k", "doubao-lite-32k"],
     keyHelpUrl:
       "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+  },
+  {
+    id: "hy",
+    label: "腾讯 Hy (TokenHub)",
+    // Domestic Guangzhou canonical; .cn backup + intl hosts match-only aliases.
+    baseUrl: "https://tokenhub.tencentmaas.com/v1",
+    baseUrlAliases: [
+      "https://tokenhub.tencentmaas.cn/v1",
+      "https://tokenhub-intl.tencentmaas.com/v1",
+      "https://tokenhub-intl.tencentmaas.cn/v1",
+    ],
+    defaultModel: "hy3",
+    models: ["hy3", "hy3-preview"],
+    keyHelpUrl: "https://console.cloud.tencent.com/tokenhub/apikey",
   },
   {
     id: "openrouter",

@@ -112,6 +112,31 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
         ids.filter((id) => !id.startsWith("__")),
       ),
     ).toEqual([]);
+
+    // 外层 __group__mpm 须包住内层组与嵌套叶子（eng*），避免右/底 chrome 缺口。
+    const outer = groups.find((gr) => gr.groupId === "__group__mpm");
+    const inner = groups.find((gr) => gr.groupId === "__group__lead");
+    expect(outer).toBeDefined();
+    expect(inner).toBeDefined();
+    if (!outer || !inner) return;
+    expect(inner.x).toBeGreaterThanOrEqual(outer.x - 0.01);
+    expect(inner.y).toBeGreaterThanOrEqual(outer.y - 0.01);
+    expect(inner.x + inner.width).toBeLessThanOrEqual(
+      outer.x + outer.width + 0.01,
+    );
+    expect(inner.y + inner.height).toBeLessThanOrEqual(
+      outer.y + outer.height + 0.01,
+    );
+    for (const id of ["mpm", "lead", "eng1", "eng2"]) {
+      expect(positions[id].x).toBeGreaterThanOrEqual(outer.x - 0.01);
+      expect(positions[id].y).toBeGreaterThanOrEqual(outer.y - 0.01);
+      expect(positions[id].x + NW).toBeLessThanOrEqual(
+        outer.x + outer.width + 0.01,
+      );
+      expect(positions[id].y + NH).toBeLessThanOrEqual(
+        outer.y + outer.height + 0.01,
+      );
+    }
   });
 
   it("同层双父各带子团队：两支 compound 互不重叠、汇聚点钉末层", async () => {

@@ -230,7 +230,7 @@ export const collaborationChapter: ManualChapterContent = {
           items: [
             {
               title: "谨慎",
-              desc: "改文件逐次问；不预授执行；组团卡按规则。最稳，批量改文件时会很吵。",
+              desc: "改文件逐次问（云端与本地都问）；不预授执行；组团卡按规则。最稳，批量改文件时会很吵。",
             },
             {
               title: "少打断（推荐）",

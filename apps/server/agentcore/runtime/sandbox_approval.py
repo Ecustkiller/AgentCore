@@ -1,9 +1,11 @@
 """Sandbox → approval policy table (安全权限与治理 §三 / §五).
 
 Maps the workspace execution environment to whether GRANTABLE *execution-class*
-tools still need a human approval prompt. File-mutation tools keep their own
-gate posture (local: gated; cloud workers historically ungated via no gate —
-or via tool_exec narrowing when the gate is shared only for MCP/Host).
+tools still need a human approval prompt. File-mutation tools: local workers
+always share the turn gate; cloud workers historically skipped per-call cards
+for server-sandbox tools — **except** when ``file_write=ask`` (谨慎), which
+must still prompt the file-mutation class on cloud (PermissionAxes 优先于
+历史云端免审).
 
 Desktop Client Tools (MCP stdio / Host face) touch the user's machine even when
 the workspace is cloud — they still share the turn ApprovalGate.
@@ -49,15 +51,41 @@ def execution_approval_posture(backend: WorkspaceBackend | None) -> ExecutionApp
 def worker_gate_applies(backend: WorkspaceBackend | None) -> bool:
     """Whether delegated workers share the turn ApprovalGate for *all* GRANTABLE tools.
 
-    Local subprocess: yes (real machine). Cloud: no for server-sandbox tools —
-    either tools are withheld (no sandbox) or gVisor isolates execution (AUTO_PASS);
-    file ops run in the per-user cloud workspace without a per-call gate.
+    Local subprocess: yes (real machine). Cloud: not for the full GRANTABLE set —
+    either tools are withheld (no sandbox) or gVisor isolates execution (AUTO_PASS).
+    File ops on cloud still skip the gate when ``file_write=session``; under
+    ``file_write=ask`` they keep the gate — see :func:`cloud_worker_skips_per_call_gate`.
 
     Desktop-touch tools (MCP / Host) still need the gate on cloud+desktop — see
     :func:`is_desktop_touch_tool`. CEO / captain always gate GRANTABLE regardless
     of backend location (tool_exec only narrows when ``role=="worker"``).
     """
     return backend is not None and backend.location == "local"
+
+
+def cloud_worker_skips_per_call_gate(
+    backend: WorkspaceBackend | None,
+    tool_name: str,
+    *,
+    permission_axes: PermissionAxes | None = None,
+    file_op_tools: frozenset[str] = frozenset(),
+) -> bool:
+    """True when the cloud-worker path may drop ``needs_approval`` for this tool.
+
+    Local workers never skip via this helper (``worker_gate_applies``).
+    Desktop-touch (MCP / Host) never skip. File-mutation class under
+    ``file_write=ask`` never skip (谨慎 must prompt reversible writes on cloud).
+    Other server-sandbox tools on cloud stay historically ungated.
+    """
+    if worker_gate_applies(backend):
+        return False
+    if is_desktop_touch_tool(tool_name):
+        return False
+    return not (
+        permission_axes is not None
+        and not permission_axes.trusts_file_writes
+        and tool_name in file_op_tools
+    )
 
 
 def is_desktop_touch_tool(tool_name: str) -> bool:

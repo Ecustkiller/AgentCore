@@ -64,6 +64,17 @@ skip_if:
 
 **思考开关按角色**：CEO / worker / 单聊 = on；后台 one-shot（title/memory/compaction/followups/file.rewrite）= disabled。无 per-agent 思考强度档。
 
+## 四·附、腾讯 Hy / TokenHub（BYOK 预设）
+
+BYOK 厂商预设 id=`hy`；canonical `https://tokenhub.tencentmaas.com/v1`（广州）；备用 `.cn` 与国际站仅作 base_url 匹配别名。模型目录种子：`hy3`（默认）、`hy3-preview`。
+
+| 项 | 约束 |
+|---|---|
+| 模型名 | `hy3` / `hy3-preview`（wire 精确匹配；其它 TokenHub `hy-*` 不走思考方言） |
+| 思考开关 | 与 DeepSeek 同形：`thinking.type=enabled/disabled`；角色策略同上附 |
+| 工具调用 | 有 tool call 的回合必须回传 `reasoning_content` |
+| 未做 | 不暴露 `reasoning_effort` UI；不做 `hy/` 平台前缀路由 |
+
 ## 五、platform 模式与故障排查
 
 `billing_mode=platform` 走 `PLATFORM_*`；改三项须重启后端。

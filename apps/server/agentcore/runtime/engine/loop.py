@@ -126,6 +126,7 @@ async def react_loop(
     tool_failure_sink: list[dict[str, Any]] | None = None,
     controller_seed_sink: list[dict[str, Any]] | None = None,
     files_expected: bool = False,
+    report_delivery: bool = False,
     short_write_posture: bool = False,
     tighten_verify_exec_thrash: bool = False,
     form_prose: bool = False,
@@ -222,8 +223,9 @@ async def react_loop(
     accumulation byte-identical to before (standalone loops / tests).
 
     ``gate_escalation_sink`` (Worker routing Phase 1): when provided, each tool round
-    runs the Escalation Gate after ``execute_tools``; scheme-layer signals are appended
-    here and emitted as ``run_escalation_gate``. CEO / solo leave it ``None`` (gate inert).
+    runs the Escalation Gate after ``execute_tools`` (execution-layer only; no free-text
+    scheme scan). Structured thrashing / escalate rows may still append here and emit
+    ``run_escalation_gate``. CEO / solo leave it ``None`` (gate inert).
 
     ``token_budget`` (Worker hard ceiling · loose backstop): a cumulative
     input+output token cap for the whole run, checked at the TOP of each round. Once
@@ -316,6 +318,7 @@ async def react_loop(
         investigation_tools,
         seed=controller_seed,
         files_expected=files_expected,
+        report_delivery=report_delivery,
         short_write_posture=short_write_posture,
         tighten_verify_exec_thrash=tighten_verify_exec_thrash,
         max_rounds=profile.max_rounds,
@@ -431,15 +434,19 @@ async def react_loop(
         emit_run_phase(sink, run_id, agent_id, "winding_down")
 
     def _apply_delivery_idle_narrow() -> None:
-        """Narrow to write/诊断/handoff/必要读 after delivery-idle ladder — not wind_down.
+        """Narrow to write/诊断/handoff/必要读 after delivery-idle ladder — repair only.
 
-        Reuses :func:`narrow_tools_for_wind_down` whitelist. Does **not** emit
-        ``engine.wind_down_enter`` / winding_down phase (budget wind_down stays
-        independent). If budget wind_down already active, surface is already
-        narrowed — no-op on allowlist.
+        Repair ``files_expected`` may reuse :func:`narrow_tools_for_wind_down`.
+        Report-delivery posts never arm this path (``narrow_rounds=0``); do **not**
+        call this for report idle. Does **not** emit ``engine.wind_down_enter`` /
+        winding_down phase (budget wind_down stays independent). If budget
+        wind_down already active, surface is already narrowed — no-op on allowlist.
         """
         nonlocal delivery_idle_narrow_active, live_allowed, tool_defs
         if delivery_idle_narrow_active or role != "worker":
+            return
+        # Defense: report posts must never strip search even if a pending latch leaked.
+        if controller is not None and controller.delivery_idle_report:
             return
         delivery_idle_narrow_active = True
         if wind_down_active:
@@ -786,12 +793,18 @@ async def react_loop(
                     tool_calls=round_result.tool_calls,
                     empty_diagnosis=round_result.empty_diagnosis,
                     empty_raw_preview=round_result.empty_raw_preview,
+                    finish_reason=round_result.finish_reason,
                 )
                 # 协调监听豁免：captain 在活跃协调中对纯进展事件保持静默（无正文、无工具）
                 # 是被指引的合法行为，不进 B2 空响应梯子；ALL_COMPLETED 注入即关闭 session，
                 # 终稿阶段的空响应仍按原梯子降级收口。
+                # length+空正文：不再豁免（截断不会因 Continue 变好，避免再挂墙钟）。
                 counts_as_empty = outcome.is_empty
-                if counts_as_empty and role == "captain":
+                if (
+                    counts_as_empty
+                    and role == "captain"
+                    and outcome.finish_reason != "length"
+                ):
                     from agentcore.runtime.coordination.session import active_coordination
 
                     coord_session = active_coordination()
@@ -1070,9 +1083,8 @@ async def react_loop(
                         total_usage = tool_round.total_usage
                         if tool_round.tool_defs_changed:
                             tool_defs = tool_round.tool_defs
-                        # Delivery-idle tool narrow (files_expected久读无写): reuse
-                        # wind_down whitelist, but keep a separate reason/event from
-                        # token/timeout wind_down so budgets stay orthogonal.
+                        # Delivery-idle tool narrow (repair files_expected久读无写):
+                        # may reuse wind_down whitelist; report posts never arm this.
                         if (
                             role == "worker"
                             and controller is not None

@@ -34,12 +34,68 @@ def test_parse_external_path():
     assert parse_external_path("external/reports") == ("reports", "")
     assert parse_external_path("attachments/x") is None
     assert parse_external_path("../evil") is None
+    # Non-ASCII alias under reserved namespace is not parseable (must not fall through).
+    assert parse_external_path("external/项目资料/a.txt") is None
 
 
 def test_sanitize_and_uniquify_alias():
-    assert sanitize_alias("6月报表")
+    from agentcore.workspace.external_mounts import alias_is_routable
+
+    cn = sanitize_alias("6月报表")
+    assert alias_is_routable(cn)
+    assert cn.isascii()
+    assert sanitize_alias("6月报表") == cn  # stable
+    pure = sanitize_alias("项目资料")
+    assert alias_is_routable(pure) and pure.startswith("ext_")
+    assert sanitize_alias("reports") == "reports"
     a = uniquify_alias("reports", {"reports"})
     assert a == "reports_2"
+    # uniquify must stay within alias rules even for long bases
+    long_base = "a" * 64
+    u = uniquify_alias(long_base, {sanitize_alias(long_base)})
+    assert alias_is_routable(u)
+    assert len(u) <= 64
+
+
+@pytest.mark.asyncio
+async def test_grant_chinese_label_produces_routable_alias():
+    m = await grant_store.add_grant("c1", root_id="r1", label="项目资料")
+    from agentcore.workspace.external_mounts import alias_is_routable
+
+    assert alias_is_routable(m.alias)
+    assert parse_external_path(f"external/{m.alias}/x.txt") == (m.alias, "x.txt")
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_rejects_invalid_external_alias_no_workspace_fallback():
+    """``external/<non-ascii>/…`` must PathNotFound — not write under primary ``external/``."""
+    channel = AsyncMock(spec=WorkspaceChannel)
+    channel.root_id = "primary"
+    channel.conversation_id = "c1"
+    channel.request = AsyncMock(return_value="should-not-run")
+    ws = LocalWorkspace(channel)
+    with pytest.raises(PathNotFound):
+        await ws.read("external/项目资料/a.txt")
+    channel.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_server_workspace_rejects_invalid_external_no_primary_fallback(tmp_path: Path):
+    primary = tmp_path / "ws"
+    primary.mkdir()
+
+    class _Sandbox:
+        async def execute(self, req):
+            from agentcore.tools.sandbox.protocol import ExecutionResult
+
+            return ExecutionResult(
+                success=True, stdout="", stderr="", exit_code=0, duration_ms=0
+            )
+
+    ws = ServerWorkspace(primary, _Sandbox(), location="local")
+    with pytest.raises(PathNotFound):
+        await ws.write("external/项目资料/a.txt", "leaked")
+    assert not (primary / "external").exists()
 
 
 @pytest.mark.asyncio
@@ -66,6 +122,178 @@ async def test_grant_store_mode_upgrade():
     )
     assert m2.alias == m.alias
     assert m2.mode == "organize"
+
+
+class _FakeGrantRow:
+    def __init__(self, *, alias: str, root_id: str, label: str, mode: str = "readonly"):
+        self.alias = alias
+        self.root_id = root_id
+        self.label = label
+        self.mode = mode
+
+
+class _FakeSessionCM:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_add_grant_retries_on_alias_integrity_error(monkeypatch):
+    """Concurrent peer took the alias → IntegrityError → uniquify + retry succeeds."""
+    from sqlalchemy.exc import IntegrityError
+
+    import agentcore.workspace.grant_store as gs
+
+    gs._memory = None
+    gs._cache.clear()
+
+    load_n = {"n": 0}
+
+    async def fake_load(conversation_id: str):
+        load_n["n"] += 1
+        if load_n["n"] == 1:
+            return {}
+        # After conflict: peer already owns ``reports``.
+        return {
+            "reports": ExternalMount(
+                alias="reports",
+                root_id="peer-root",
+                label="peer",
+                mode="readonly",
+            )
+        }
+
+    aliases_seen: list[str] = []
+
+    class _Repo:
+        def __init__(self, session):
+            pass
+
+        async def upsert(self, **kwargs):
+            aliases_seen.append(kwargs["alias"])
+            if len(aliases_seen) == 1:
+                raise IntegrityError("INSERT", {}, Exception("uq_alias"))
+            return _FakeGrantRow(
+                alias=kwargs["alias"],
+                root_id=kwargs["root_id"],
+                label=kwargs["label"],
+                mode=kwargs["mode"],
+            )
+
+    monkeypatch.setattr(gs, "_load_from_db", fake_load)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.external_grants.ExternalGrantRepository",
+        _Repo,
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _FakeSessionCM(),
+    )
+
+    m = await gs.add_grant(
+        "c1", root_id="r-new", label="报表", alias_hint="reports"
+    )
+    assert aliases_seen == ["reports", "reports_2"]
+    assert m.alias == "reports_2"
+    assert m.root_id == "r-new"
+
+
+@pytest.mark.asyncio
+async def test_add_grant_retries_on_root_integrity_error(monkeypatch):
+    """Concurrent peer inserted same root → IntegrityError → reload + refresh succeeds."""
+    from sqlalchemy.exc import IntegrityError
+
+    import agentcore.workspace.grant_store as gs
+
+    gs._memory = None
+    gs._cache.clear()
+
+    load_n = {"n": 0}
+
+    async def fake_load(conversation_id: str):
+        load_n["n"] += 1
+        if load_n["n"] == 1:
+            return {}
+        return {
+            "desk": ExternalMount(
+                alias="desk",
+                root_id="r1",
+                label="桌面",
+                mode="readonly",
+            )
+        }
+
+    upsert_n = {"n": 0}
+
+    class _Repo:
+        def __init__(self, session):
+            pass
+
+        async def upsert(self, **kwargs):
+            upsert_n["n"] += 1
+            if upsert_n["n"] == 1:
+                raise IntegrityError("INSERT", {}, Exception("uq_root"))
+            # Same-root refresh path: keep peer's alias.
+            assert kwargs["alias"] == "desk"
+            assert kwargs["root_id"] == "r1"
+            return _FakeGrantRow(
+                alias="desk",
+                root_id="r1",
+                label=kwargs["label"],
+                mode=kwargs["mode"],
+            )
+
+    monkeypatch.setattr(gs, "_load_from_db", fake_load)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.external_grants.ExternalGrantRepository",
+        _Repo,
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _FakeSessionCM(),
+    )
+
+    m = await gs.add_grant("c1", root_id="r1", label="桌面新", alias_hint="desk")
+    assert upsert_n["n"] == 2
+    assert m.alias == "desk"
+    assert m.label == "桌面新"
+
+
+@pytest.mark.asyncio
+async def test_add_grant_exhausts_retries_raises(monkeypatch):
+    """Persistent unique conflicts surface a clear error after limited retries."""
+    from sqlalchemy.exc import IntegrityError
+
+    import agentcore.workspace.grant_store as gs
+
+    gs._memory = None
+    gs._cache.clear()
+
+    async def fake_load(conversation_id: str):
+        return {}
+
+    class _Repo:
+        def __init__(self, session):
+            pass
+
+        async def upsert(self, **kwargs):
+            raise IntegrityError("INSERT", {}, Exception("uq"))
+
+    monkeypatch.setattr(gs, "_load_from_db", fake_load)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.external_grants.ExternalGrantRepository",
+        _Repo,
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _FakeSessionCM(),
+    )
+
+    with pytest.raises(RuntimeError, match="conflict after retries"):
+        await gs.add_grant("c1", root_id="r1", label="x", alias_hint="desk")
 
 
 @pytest.mark.asyncio

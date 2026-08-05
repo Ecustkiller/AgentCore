@@ -86,7 +86,26 @@ function convDir(): string {
   return join(rootDir(), "conversations");
 }
 
-function convPath(id: string): string {
+/**
+ * Conversation id as a single path segment — reject empty / `.` / `..` /
+ * separators / NUL (aligned with `fs/tree` `isValidName` + checkout NUL).
+ * Prevents `convPath` from escaping `<userData>/local-store/conversations/`.
+ */
+export function isSafeLocalStoreConvId(id: string): boolean {
+  return (
+    typeof id === "string" &&
+    id.length > 0 &&
+    id !== "." &&
+    id !== ".." &&
+    !id.includes("/") &&
+    !id.includes("\\") &&
+    !id.includes("\0")
+  );
+}
+
+/** Resolve conversation file path, or `null` when `id` is unsafe. */
+function convPath(id: string): string | null {
+  if (!isSafeLocalStoreConvId(id)) return null;
   return join(convDir(), `${id}.json`);
 }
 
@@ -170,8 +189,10 @@ export function evictLocalStoreIndex(
 }
 
 async function deleteConvFile(id: string): Promise<void> {
+  const path = convPath(id);
+  if (!path) return;
   try {
-    await unlink(convPath(id));
+    await unlink(path);
   } catch {
     /* missing ok */
   }
@@ -200,7 +221,9 @@ async function putOpenedConversation(
       ...payload,
       conversation: row,
     };
-    await writeFileAtomic(convPath(row.id), JSON.stringify(toWrite));
+    const path = convPath(row.id);
+    if (!path) throw new Error("invalid local-store conversation id");
+    await writeFileAtomic(path, JSON.stringify(toWrite));
 
     let meta = await readMeta();
     meta = {
@@ -249,8 +272,10 @@ async function putShellMeta(
 async function getConversation(
   id: string,
 ): Promise<LocalStoreConversationPayload | null> {
+  const path = convPath(id);
+  if (!path) return null;
   try {
-    const raw = await readFile(convPath(id), "utf-8");
+    const raw = await readFile(path, "utf-8");
     return JSON.parse(raw) as LocalStoreConversationPayload;
   } catch {
     return null;

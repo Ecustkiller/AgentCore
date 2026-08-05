@@ -23,6 +23,7 @@ from agentcore.runtime.runs.research_quality import (
     academic_usable_citation_count,
     brief_may_satisfy_body_floor,
     collect_evidence_deficit_gaps,
+    deliverable_is_report_delivery,
     deliverable_signals_long_form,
     has_landed_prose_artifact,
     is_academic_usable_url,
@@ -41,6 +42,39 @@ from agentcore.workspace.server import ServerWorkspace
 
 _PROSE_BODY = "# 报告\n\n" + ("这是实质正文段落。" * 50)
 _SKELETON_BODY = "# 报告\n\n## 一\n\n## 二\n\n<!-- OUTLINE -->\n"
+
+
+def test_deliverable_is_report_delivery_structured_or():
+    """Report-post predicate: gates / citation / dossier paths; not bare form=files."""
+    from agentcore.workspace.stage_dirs import (
+        DEBATE_DIR,
+        RESEARCH_DIR,
+        REVIEWS_DIR,
+    )
+
+    assert deliverable_is_report_delivery(
+        Deliverable(code_audit_gate=True, form="files", artifacts=["x.audit.json"])
+    )
+    assert deliverable_is_report_delivery(
+        Deliverable(citation_mode="two_phase", form="files", artifacts=["a.md"])
+    )
+    assert deliverable_is_report_delivery(
+        Deliverable(form="files", artifacts=[f"{REVIEWS_DIR}/审校.md"])
+    )
+    assert deliverable_is_report_delivery(
+        Deliverable(form="files", artifacts=[f"{RESEARCH_DIR}/报告.md"])
+    )
+    assert deliverable_is_report_delivery(
+        Deliverable(form="files", artifacts=[f"{DEBATE_DIR}/纪要.md"])
+    )
+    # Bare repair/build files — not a report post.
+    assert not deliverable_is_report_delivery(
+        Deliverable(form="files", artifacts=["src/foo.py"], requires_files=True)
+    )
+    assert not deliverable_is_report_delivery(None)
+    assert not deliverable_is_report_delivery(
+        Deliverable(form="prose", min_length=100)
+    )
 
 
 def _ctx(tmp_path: Path, **kwargs) -> ToolContext:

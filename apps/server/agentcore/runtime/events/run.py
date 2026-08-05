@@ -394,7 +394,7 @@ def run_failed(
     product_landed: bool | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "error": error}
-    # Additive machine-readable face class (quality/model/call). Omit when unknown so
+    # Additive machine-readable face class (quality/format/model/call). Omit when unknown so
     # old fixtures stay byte-identical and clients fall back to「失败」/空 error「调用失败」.
     if failure_kind:
         payload["failure_kind"] = failure_kind

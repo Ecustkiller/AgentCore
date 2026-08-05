@@ -9,6 +9,9 @@
 姿势 A = 宣称完整交付 / 全员收卷 / 完整可用 / 修好验绿。
 探测用**闭集**正则，仅作「是否在说 A」的薄信号；**禁止**靠案面加完成话术词修案。
 文献证据降档时用正向「草稿/缺口承认」闭集（``requires_draft_ack``），不靠把「综述已完成」加进黑名单。
+``requires_draft_ack`` 亦闩 ``thin_review``（已声明复核落盘未对齐）、``verify_failed``
+（丙轴验证失败）、以及 ``node_failed`` / ``artifact_rejected``（契约硬失败·节点 FAILED·
+拒收产物）——仍不扩姿势 A 词表。
 无对账卡时，仅拦同条正文 A∪C 自相矛盾（resume 拼接同理）。
 
 resume / plan_review：派工过程 kickoff（方向：派团队…）不进用户可见续写基底与 G6 重灌，
@@ -89,8 +92,9 @@ _TIER_LABEL = {
     "notes": "草稿/备注",
 }
 
-# 硬降档（evidence_deficit → requires_draft_ack）时须承认缺口；普通 partial 不强制。
-# （notes 仅软提醒，仍只拦姿势 A。）
+# 硬降档（evidence_deficit / thin_review / verify_failed / node_failed /
+# artifact_rejected → requires_draft_ack）时须承认缺口；普通 partial 不强制。
+# （notes 仅软提醒时仍只拦姿势 A；FAILED soft 投影保留 node_failed 则亦闩。）
 
 
 def is_formal_complete_tier(state: str | None) -> bool:
@@ -143,7 +147,8 @@ def closing_honesty_rework(
     """档位驱动的收口诚实性回炉项；无档位时退回薄 A∪C。
 
     主路径：``delivery_verdict.state`` ∉ 正式完成 → 不得姿势 A；
-    ``requires_draft_ack``（文献证据降档）另须正文出现草稿/缺口承认（正向要求，不靠加完成词）。
+    ``requires_draft_ack``（evidence_deficit / thin_review / verify_failed /
+    node_failed / artifact_rejected）另须正文出现草稿/缺口承认（正向要求，不靠加完成词）。
     无对账卡：同条不得既 C 又 A（少靠双边大词表；C/A 均为闭集）。
     """
     text = content or ""
@@ -169,7 +174,7 @@ def closing_honesty_rework(
             not claims_draft_acknowledgment(text)
         ):
             return (
-                f"本回合交付对账档位为「{label}」（state={state}，证据降档）——"
+                f"本回合交付对账档位为「{label}」（state={state}，须草稿/缺口承认）——"
                 "正文须在开场承认草稿/部分完成/证据不足或点名未完成项，"
                 "不得仅用字数或「已完成」叙事冒充正式交付。"
                 "请把缺口写在最前面；真源=对账档位，禁止靠加完成话术词修案。"

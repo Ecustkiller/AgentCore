@@ -43,6 +43,23 @@ const CHANNEL_CAPTAIN_REASONING = "captain:reasoning";
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 
+/**
+ * Same spirit as sidecar `_is_safe_id`: reject empty, `..` traversal, and
+ * path separators before joining filesystem paths or URL segments.
+ */
+export function isSafeOutboxId(value: string): boolean {
+  if (typeof value !== "string" || !value || value.includes("..")) return false;
+  return !value.includes("/") && !value.includes("\\") && !value.includes("\0");
+}
+
+let tmpSeq = 0;
+
+/** Unique temp path — a shared `*.json.tmp` lets a concurrent writer steal our rename. */
+function tmpPathFor(target: string): string {
+  tmpSeq += 1;
+  return `${target}.${process.pid}-${tmpSeq}.tmp`;
+}
+
 export function sidecarDataDir(): string {
   return join(app.getPath("userData"), "sidecar");
 }
@@ -236,6 +253,38 @@ export function toolFailuresFromJournal(
 }
 
 /**
+ * Wire placeholder when outbox sealed ready with empty user_message but still
+ * carries process facts (journal / runs / segments). Server
+ * ``RecordTurnRequest.user_message`` requires min_length=1; paired-user reuse
+ * via ``message_id`` ignores this text when the assistant row already exists.
+ * Not a substitute for sidecar identity salvage (C1) — stock / boundary drain only.
+ */
+export const EMPTY_USER_MESSAGE_PLACEHOLDER = "[local-turn recovery]";
+
+/**
+ * Ready rows with empty user_message may still POST when they carry process
+ * projection (journal / runs / stream segments) and a safe umid. Typical stock
+ * dead-letter also has message_id; umid alone is enough once C1 restores identity.
+ */
+export function canPostEmptyUserMessage(record: OutboxRecord): boolean {
+  if (!isSafeOutboxId(record.user_message_id)) return false;
+  return recordHasProcessState(record);
+}
+
+/**
+ * Fill empty user_message for writeback when {@link canPostEmptyUserMessage}.
+ * Returns true when the record now has a non-empty user_message.
+ */
+export function fillEmptyUserMessageForWriteback(
+  record: OutboxRecord,
+): boolean {
+  if ((record.user_message || "").trim()) return true;
+  if (!canPostEmptyUserMessage(record)) return false;
+  record.user_message = EMPTY_USER_MESSAGE_PLACEHOLDER;
+  return true;
+}
+
+/**
  * When hard-kill left content empty, promote captain stream snapshots into
  * content / reasoning_content (incomplete salvage). Returns true when the
  * record has any salvageable body after this fill.
@@ -351,11 +400,19 @@ async function readOutboxRecords(): Promise<OutboxRecord[]> {
   }
   const records: OutboxRecord[] = [];
   for (const name of names) {
-    if (!name.endsWith(".json") || name.endsWith(".tmp")) continue;
+    // Final records are `*.json`; unique temps are `*.json.<pid>-<seq>.tmp`.
+    if (!name.endsWith(".json") || name.includes(".tmp")) continue;
     try {
       const raw = await readFile(join(dir, name), "utf-8");
       const data = JSON.parse(raw) as OutboxRecord;
-      if (data?.user_message_id && data.conversation_id) records.push(data);
+      if (
+        data?.user_message_id &&
+        data.conversation_id &&
+        isSafeOutboxId(data.user_message_id) &&
+        isSafeOutboxId(data.conversation_id)
+      ) {
+        records.push(data);
+      }
     } catch {
       // torn / unreadable — skip
     }
@@ -372,15 +429,24 @@ function pushSynced(payload: OutboxSyncedPayload): void {
 }
 
 async function writeRecord(record: OutboxRecord): Promise<void> {
+  if (!isSafeOutboxId(record.user_message_id)) {
+    throw new Error("unsafe outbox user_message_id");
+  }
   const dir = outboxDir();
   await mkdir(dir, { recursive: true });
   const target = join(dir, `${record.user_message_id}.json`);
-  const tmp = `${target}.tmp`;
-  await writeFile(tmp, JSON.stringify(record), "utf-8");
-  await rename(tmp, target);
+  const tmp = tmpPathFor(target);
+  try {
+    await writeFile(tmp, JSON.stringify(record), "utf-8");
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => undefined);
+    throw err;
+  }
 }
 
 async function deleteRecord(userMessageId: string): Promise<void> {
+  if (!isSafeOutboxId(userMessageId)) return;
   try {
     await unlink(join(outboxDir(), `${userMessageId}.json`));
   } catch {
@@ -398,6 +464,7 @@ async function moveToDeadLetter(
     record.user_message_id,
     status,
   );
+  if (!isSafeOutboxId(record.user_message_id)) return;
   const destDir = deadLetterDir();
   await mkdir(destDir, { recursive: true });
   const src = join(outboxDir(), `${record.user_message_id}.json`);
@@ -486,11 +553,56 @@ async function drainOutboxDetailed(opts?: {
         }
       }
       if (record.phase !== PHASE_READY) continue;
-      if (!(record.user_message || "").trim()) continue;
+      if (!(record.user_message || "").trim()) {
+        // C2: empty user_message + process (journal/…) must not silently stick.
+        // Fill a schema-legal placeholder and POST, or dead-letter with a reason.
+        if (fillEmptyUserMessageForWriteback(record)) {
+          console.warn(
+            "[outbox] empty user_message → placeholder for writeback",
+            record.user_message_id,
+            record.message_id ?? null,
+            {
+              hasJournal: !!(
+                record.journal &&
+                typeof record.journal === "object" &&
+                Object.keys(record.journal).length > 0
+              ),
+              hasRuns: !!(
+                record.runs &&
+                typeof record.runs === "object" &&
+                Object.keys(record.runs as object).length > 0
+              ),
+            },
+          );
+          try {
+            await writeRecord(record);
+          } catch (err) {
+            console.error(
+              "[outbox] empty user_message placeholder persist failed",
+              record.user_message_id,
+              err,
+            );
+            // Still attempt POST with in-memory fill.
+          }
+        } else {
+          console.error(
+            "[outbox] skip empty user_message (not postable) → dead-letter",
+            record.user_message_id,
+            record.message_id ?? null,
+          );
+          await moveToDeadLetter(record, 0);
+          continue;
+        }
+      }
       if (
         !(record.trace_id || "").trim() ||
         (record.trace_id || "").length !== 32
       ) {
+        console.warn(
+          "[outbox] skip invalid trace_id",
+          record.user_message_id,
+          record.trace_id ?? null,
+        );
         continue;
       }
       if (
@@ -504,7 +616,20 @@ async function drainOutboxDetailed(opts?: {
       // Align with salvage / unsynced projection: promote captain segments before POST.
       fillFromCaptainStreamSegments(record);
 
-      const path = `/v1/conversations/${record.conversation_id}/local-turns`;
+      // Defense in depth: readOutboxRecords already filters; keep URL/path safe.
+      if (
+        !isSafeOutboxId(record.user_message_id) ||
+        !isSafeOutboxId(record.conversation_id)
+      ) {
+        console.error(
+          "[outbox] skipping unsafe id",
+          record.user_message_id,
+          record.conversation_id,
+        );
+        continue;
+      }
+
+      const path = `/v1/conversations/${encodeURIComponent(record.conversation_id)}/local-turns`;
       let result: { ok: boolean; status: number; body: unknown };
       try {
         result = await bearerPostJson(path, toRecordTurnBody(record));
@@ -594,11 +719,18 @@ async function readDeadLetterRecords(): Promise<OutboxRecord[]> {
   }
   const records: OutboxRecord[] = [];
   for (const name of names) {
-    if (!name.endsWith(".json") || name.endsWith(".tmp")) continue;
+    if (!name.endsWith(".json") || name.includes(".tmp")) continue;
     try {
       const raw = await readFile(join(dir, name), "utf-8");
       const data = JSON.parse(raw) as OutboxRecord;
-      if (data?.user_message_id && data.conversation_id) records.push(data);
+      if (
+        data?.user_message_id &&
+        data.conversation_id &&
+        isSafeOutboxId(data.user_message_id) &&
+        isSafeOutboxId(data.conversation_id)
+      ) {
+        records.push(data);
+      }
     } catch {
       // torn / unreadable — skip
     }

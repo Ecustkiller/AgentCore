@@ -59,7 +59,7 @@ Bootstrap 运行时自建 `UIDocument` + `TownHudController` 并绑定。Inspect
 ## 6. 启动参数 / 会话
 
 - 桌面：`AgentTown.exe --api <url> --token <token> [--run-id <id>]`；或 `%APPDATA%/AgentCore/session.json`
-- WebGL：`?api=&token=&run=`；Offline Demo：`?demo=1`（`pnpm town:serve:webgl`）；StreamingAssets 走 `UnityWebRequest`
+- WebGL：`?api=&run=` + `#token=`（凭据走 fragment）；Offline Demo：`?demo=1`（`pnpm town:serve:webgl`）；StreamingAssets 走 `UnityWebRequest`
 - WebGL SSE：`Plugins/WebGL/AgentTownSse.jslib`；需后端 CORS 含 Web 宿主源（见 [AgentTown 客户端 §15.2](../../docs/04-前端/AgentTown客户端.md)）
 
 ## 7. 测试

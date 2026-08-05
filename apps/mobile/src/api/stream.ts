@@ -1,4 +1,4 @@
-import { apiUrl, authHeader, refreshTokens } from "@/api/client";
+import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import { StreamHttpError } from "@/lib/errors";
@@ -133,14 +133,10 @@ async function pumpSSE(
   }
 }
 
-/** Run a fetch with the shared 401 policy (refresh once, replay). The SSE channels read
- *  the body themselves, so they can't ride apiFetch — they mirror its policy here. */
+/** Run a fetch with the shared 401 policy (refresh once, replay; still-401 clears
+ *  tokens). The SSE channels read the body themselves, so they can't ride apiFetch. */
 async function sseFetch(doFetch: () => Promise<Response>): Promise<Response> {
-  let response = await doFetch();
-  if (response.status === 401 && (await refreshTokens())) {
-    response = await doFetch();
-  }
-  return response;
+  return fetchWithAuthRefresh(doFetch);
 }
 
 /**

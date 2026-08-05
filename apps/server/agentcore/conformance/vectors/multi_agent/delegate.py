@@ -152,6 +152,45 @@ def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
     ]
 
+
+def _multi_agent_worker_failed_format() -> list[SSEEvent]:
+    """多 Agent：worker 结构/格式闸失败 → run_failed.failure_kind=format（协作图「格式未过」）。
+    与 quality「未达标」分脸；棘轮 fold 投影 ``run.failureKind=format``。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "工程师",
+            "thinking": True,
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "写审计报告", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排审计报告。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "工程师"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="写审计报告",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_output_delta("r1", "w1", '{"findings":[{"severity":"INVALID"}]}'),
+        run_failed(
+            "r1",
+            "w1",
+            "结构闸：findings[0] severity 无效",
+            failure_kind="format",
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项格式未过）。"),
+        content_delta(" 结构字段需按 schema 补齐。"),
+        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
 def _multi_agent_worker_tool() -> list[SSEEvent]:
     """多 Agent：worker 工具调用。worker 的 ``tool_use_start/end`` 与 CEO 的同形地走顶层流，
     但**携 ``run_id``**——三端 process fold 据此把它**排除出 CEO 气泡时间线**（统一团队时间线

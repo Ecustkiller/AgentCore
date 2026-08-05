@@ -60,6 +60,18 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
         models=("doubao-pro-32k", "doubao-lite-32k"),
     ),
     ByokProviderPreset(
+        id="hy",
+        label="腾讯 Hy (TokenHub)",
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        base_url_aliases=(
+            "https://tokenhub.tencentmaas.cn/v1",
+            "https://tokenhub-intl.tencentmaas.com/v1",
+            "https://tokenhub-intl.tencentmaas.cn/v1",
+        ),
+        default_model="hy3",
+        models=("hy3", "hy3-preview"),
+    ),
+    ByokProviderPreset(
         id="openrouter",
         label="OpenRouter",
         base_url="https://openrouter.ai/api/v1",

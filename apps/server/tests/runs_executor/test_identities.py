@@ -139,6 +139,7 @@ async def test_captain_identity_carries_when_to_split_guidance():
     assert "不要为委派而委派" in sys
     assert "3+" in sys and "独立子系统" in sys
     assert "深入实现" in sys
+    assert "单文件" in sys and "强耦合" in sys and "勿扇出" in sys
     assert "4 个 sub-worker" in sys
 
 

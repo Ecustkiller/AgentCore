@@ -56,7 +56,7 @@ describe("PermissionAxesSheet", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("option", { name: /托管/ }));
+    fireEvent.click(screen.getByRole("button", { name: /托管/ }));
     await waitFor(() =>
       expect(mockSetAxes).toHaveBeenCalledWith("c1", RECIPE_AXES.managed),
     );
@@ -76,7 +76,7 @@ describe("PermissionAxesSheet", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("option", { name: /托管/ }));
+    fireEvent.click(screen.getByRole("button", { name: /托管/ }));
     await waitFor(() =>
       expect(onAxesChange).toHaveBeenCalledWith(RECIPE_AXES.managed),
     );

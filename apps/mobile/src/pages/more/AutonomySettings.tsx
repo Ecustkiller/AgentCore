@@ -16,7 +16,8 @@ const OPTIONS: AutonomyOption[] = [
   {
     value: "cautious",
     label: "谨慎",
-    description: "新会话默认：改文件逐次问；不预授执行；组团卡按规则。",
+    description:
+      "新会话默认：改文件逐次问（云端与本地都问）；不预授执行；组团卡按规则。",
   },
   {
     value: "less_interrupt",

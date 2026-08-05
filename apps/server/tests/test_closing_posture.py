@@ -299,6 +299,40 @@ def test_ordinary_partial_without_draft_flag_allows_bare_delivered():
     assert closing_honesty_rework("主页已交付，详见产物卡。", verdict) is None
 
 
+def test_node_failed_draft_ack_blocks_hollow_verified_landing_opening():
+    """能力4：partial+requires_draft_ack 时「全部核实落盘」类开场不能裸过（靠 latch，不加词）。"""
+    from agentcore.runtime.closing_posture import claims_draft_acknowledgment
+    from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
+
+    # 实测漏拦：该句不进姿势 A 闭集——禁加词，靠 draft_ack 闩。
+    hollow = "审计已收口，全部结果已核实落盘。各模块如下。"
+    assert not claims_posture_a(hollow)
+    assert not claims_draft_acknowledgment(hollow)
+
+    verdict = DeliveryVerdict(
+        state="partial",
+        delivered_files=("AgentCore/文档/reviews/a.md",),
+        execution_id="e-cap4",
+        requires_draft_ack=True,
+    )
+    rework = closing_honesty_rework(hollow, verdict)
+    assert rework is not None
+    assert "承认" in rework or "缺口" in rework
+
+    honest = (
+        "部分完成：模块B契约未过，已验收见产物卡，仍有缺口。"
+        "要我续派补跑吗？"
+    )
+    assert claims_draft_acknowledgment(honest)
+    assert closing_honesty_rework(honest, verdict) is None
+
+
+def test_capability4_does_not_expand_posture_a_for_verified_landing():
+    """否决：不得把「核实落盘」加进姿势 A；漏拦走 draft_ack。"""
+    assert not claims_posture_a("全部结果已核实落盘")
+    assert not claims_posture_a("全部核实落盘")
+
+
 def test_thin_review_expansion_withdrawn_from_posture_a():
     """✅ 收窄姿势 A：撤回 20260803「复核/已修复/可玩」扩面；乙修好/验绿仍在。"""
     from agentcore.runtime.delegate.delivery_status import DeliveryVerdict

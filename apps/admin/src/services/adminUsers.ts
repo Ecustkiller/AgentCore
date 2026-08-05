@@ -45,6 +45,7 @@ export interface ListUsersParams {
 
 export async function listUsers(
   params: ListUsersParams,
+  signal?: AbortSignal,
 ): Promise<AdminUserListResponse> {
   const search = new URLSearchParams({
     page: String(params.page),
@@ -61,7 +62,10 @@ export async function listUsers(
   if (params.since) search.set("since", params.since);
   if (params.until) search.set("until", params.until);
   if (params.includeDeleted) search.set("include_deleted", "true");
-  return api.get<AdminUserListResponse>(`/v1/admin/users?${search.toString()}`);
+  return api.get<AdminUserListResponse>(
+    `/v1/admin/users?${search.toString()}`,
+    signal ? { signal } : undefined,
+  );
 }
 
 /**

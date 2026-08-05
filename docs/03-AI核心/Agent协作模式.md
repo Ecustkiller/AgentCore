@@ -47,7 +47,7 @@ worker 唯一向上通道。`blocking=false`（默认）= 报后按假设续跑�
 
 琐碎自修 → 执行层试一轮再 escalate → 方案层立刻 escalate。与用户会话 **PermissionAxes** / 权限配方正交。
 
-Worker 工具后还有确定性 **Escalation Gate**（模型漏报兜底）：扫非语料工具输出的方案层词；`file_read` / `grep` / `code_search` / `web_search` / `read_url` 的正文当语料、不触发（真矛盾走 `escalate` 工具）。同 run 同 question 只 live 上报一次。
+Worker 工具后还有确定性 **Escalation Gate**：只把工具失败当执行层自愈，**不**扫工具输出自由文猜方案层。方案层 /「职责偏离」只走结构化 `escalate(kind=scope|dep|…)`（真写越界由写工具层硬拒）。同 run 同 question 只 live 上报一次。若仍产出内部 `gate_kind=contract|contradiction`，**wire** `kind` 诚实落为 `normal`（保留 `gate_kind`），**不得**占用户面 `scope` 职责偏离——仅结构化 `scope`/`dep` 占对应 wire kind。→ 见代码: `runtime/routing/models.py` · `runtime/routing/gate.py`
 
 ### 便签墙
 

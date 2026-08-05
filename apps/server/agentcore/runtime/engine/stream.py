@@ -62,6 +62,8 @@ class StreamRoundResult:
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
     aborted: bool = False
+    # Upstream choice.finish_reason when present (stop / tool_calls / length / …).
+    finish_reason: str | None = None
 
 
 async def stream_llm_round(
@@ -323,4 +325,5 @@ async def stream_llm_round(
         empty_diagnosis=empty_diagnosis,
         empty_raw_preview=empty_raw_preview,
         aborted=aborted,
+        finish_reason=finish_reason,
     )

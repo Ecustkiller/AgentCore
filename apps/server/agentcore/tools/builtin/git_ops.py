@@ -211,7 +211,8 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
             "description": (
                 "要执行的 git 子命令。"
                 "只读 status/diff/log/fetch/show/blame：需工作区根 `.git`（不扫嵌套、不上溯）；"
-                "无仓 → success + metadata.code=no_repo。"
+                "无仓 → success + metadata.code=no_repo；"
+                "有 `.git` 但 probe 超时/损坏 → 硬失败（timeout/error，禁止当无仓）。"
                 "stash/tag/remote 的 action=list 只读免批；push/pop、create、add 须审批。"
                 "写入 add/commit/branch/checkout/push/pull/merge/rebase/cherry-pick/create_pr："
                 "无仓仍硬错；需用户授权；CEO 路径拒写（须 delegate）。"
@@ -522,6 +523,12 @@ async def _git_failure(
     meta = dict(kwargs.pop("metadata", {}) or {})
     if "超时" in detail:
         meta.setdefault("timeout_layer", "inner")
+        meta.setdefault("code", "timeout")
+        if "勿原样重试" not in detail:
+            detail = (
+                f"{detail}\n"
+                "（活性超时：勿原样重试同一命令；若持续失败可检查 .git/index.lock 或其它 git 占用。）"
+            )
     blob = f"{stderr}\n{stdout}"
     lower = blob.lower()
     if (
@@ -633,12 +640,11 @@ async def _ensure_git_repo(
     stdout, stderr, code = await _run_git(
         ["rev-parse", "--is-inside-work-tree"], cwd=cwd
     )
-    if code != 0 or stdout.strip() != "true":
-        detail = (stderr or stdout or _NO_LOCAL_REPO_MSG).strip()
-        if write:
-            return _error(detail, start)
-        return _ok(detail, start, metadata={"code": _NO_REPO_CODE})
-    return None
+    if code == 0 and stdout.strip() == "true":
+        return None
+    # Local ``.git`` exists but the probe failed: never soft-succeed as ``no_repo``.
+    # Timeout / corrupt / not-a-work-tree are honest errors on both read and write.
+    return await _git_failure(stdout, stderr, code or 1, start)
 
 
 async def _current_branch(cwd: str) -> str:

@@ -110,9 +110,11 @@ class OutboxStore:
 
     def __init__(self, base: Path) -> None:
         self._base = base
-        # Per-turn context bound by the sidecar host before begin_turn (user message
-        # + idempotency anchor are not on the Protocol begin_turn signature).
-        self._ctx: dict[str, Any] | None = None
+        # Per-turn contexts keyed by assistant ``message_id`` (turn id). Concurrent
+        # local turns must not share a single slot — overwriting used to make
+        # salvage fall back to message_id as the file key and seal empty
+        # user_message dead letters that never write back.
+        self._contexts: dict[str, dict[str, Any]] = {}
         # user_message_id → asyncio.Lock for serialized read-modify-write.
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -125,8 +127,13 @@ class OutboxStore:
         message_id: str,
         trace_id: str,
     ) -> None:
-        """Pin the active turn's idempotency keys before begin_turn / pipeline."""
-        self._ctx = {
+        """Pin one turn's idempotency keys before begin_turn / pipeline.
+
+        Contexts are isolated by ``message_id`` so overlapping turns (pause →
+        continue alongside another live turn, or concurrent stops) do not steal
+        each other's ``user_message_id`` / ``user_message``.
+        """
+        self._contexts[message_id] = {
             "conversation_id": conversation_id,
             "user_message_id": user_message_id,
             "user_message": user_message,
@@ -134,8 +141,65 @@ class OutboxStore:
             "trace_id": trace_id,
         }
 
-    def clear_turn(self) -> None:
-        self._ctx = None
+    def clear_turn(self, message_id: str | None = None) -> None:
+        """Drop a bound turn context. ``message_id=None`` clears all (tests only)."""
+        if message_id is None:
+            self._contexts.clear()
+            return
+        self._contexts.pop(message_id, None)
+
+    def _ctx_for(self, message_id: str | None) -> dict[str, Any]:
+        mid = str(message_id or "")
+        if not mid:
+            return {}
+        return self._contexts.get(mid) or {}
+
+    def _resolve_user_message_id(self, message_id: str | None) -> str | None:
+        """Map assistant turn id → outbox file key (``user_message_id``).
+
+        Prefer the in-memory bind; fall back to an on-disk record that already
+        carries this ``message_id``. Never treat the assistant id itself as the
+        file key — that path produced empty-``user_message`` ready dead letters.
+        """
+        mid = str(message_id or "")
+        if not mid:
+            return None
+        ctx = self._ctx_for(mid)
+        umid = str(ctx.get("user_message_id") or "")
+        if umid and _is_safe_id(umid):
+            return umid
+        existing = self._find_umid_record_for_message(mid)
+        if existing is None:
+            return None
+        umid = str(existing.get("user_message_id") or "")
+        if umid and _is_safe_id(umid) and umid != mid:
+            return umid
+        # Allow resume-{turn_id} and other intentional umids that equal mid only
+        # when the record already has a non-empty user_message (not a dead letter).
+        if umid and _is_safe_id(umid) and (existing.get("user_message") or "").strip():
+            return umid
+        return None
+
+    def _find_umid_record_for_message(self, message_id: str) -> dict[str, Any] | None:
+        """Prefer the real umid-keyed open/ready row over an assistant-id dead letter."""
+        if not message_id:
+            return None
+        matches = [
+            r
+            for r in list_outbox_records(self._base)
+            if str(r.get("message_id") or "") == message_id
+        ]
+        if not matches:
+            return None
+
+        def _rank(record: dict[str, Any]) -> tuple[int, int, str]:
+            umid = str(record.get("user_message_id") or "")
+            has_um = 1 if (record.get("user_message") or "").strip() else 0
+            # Prefer umid ≠ assistant id (true optimistic bubble key).
+            distinct = 1 if umid and umid != message_id else 0
+            return (distinct, has_um, umid)
+
+        return max(matches, key=_rank)
 
     def _lock_for(self, user_message_id: str) -> asyncio.Lock:
         lock = self._locks.get(user_message_id)
@@ -226,8 +290,14 @@ class OutboxStore:
         message_id: str,
         trace_id: str,
     ) -> None:
-        ctx = self._ctx or {}
-        user_message_id = str(ctx.get("user_message_id") or message_id)
+        ctx = self._ctx_for(message_id)
+        user_message_id = str(ctx.get("user_message_id") or "")
+        if not user_message_id or not _is_safe_id(user_message_id):
+            logger.warning(
+                "sidecar.outbox_begin_missing_user_message_id",
+                message_id=message_id,
+            )
+            return
         user_message = str(ctx.get("user_message") or "")
 
         def mutate(record: dict[str, Any]) -> None:
@@ -251,8 +321,13 @@ class OutboxStore:
         message_id: str,
         content: str,
     ) -> None:
-        ctx = self._ctx or {}
-        user_message_id = str(ctx.get("user_message_id") or message_id)
+        user_message_id = self._resolve_user_message_id(message_id)
+        if not user_message_id:
+            logger.warning(
+                "sidecar.outbox_checkpoint_missing_user_message_id",
+                message_id=message_id,
+            )
+            return
 
         def mutate(record: dict[str, Any]) -> None:
             if record.get("phase") == PHASE_READY:
@@ -275,8 +350,13 @@ class OutboxStore:
         trace_id: str | None,
         entry: dict[str, Any],
     ) -> int | None:
-        ctx = self._ctx or {}
-        user_message_id = str(ctx.get("user_message_id") or turn_id)
+        user_message_id = self._resolve_user_message_id(turn_id)
+        if not user_message_id:
+            logger.warning(
+                "sidecar.outbox_journal_missing_user_message_id",
+                turn_id=turn_id,
+            )
+            return None
         allocated: list[int | None] = [None]
 
         def mutate(record: dict[str, Any]) -> None:
@@ -433,9 +513,11 @@ class OutboxStore:
     ) -> dict[str, Any] | None:
         del mode  # outbox only ever stages local write-back
         user_message_id = str(kwargs.get("user_message_id") or "")
+        message_id = kwargs.get("message_id")
         if not user_message_id:
-            ctx = self._ctx or {}
-            user_message_id = str(ctx.get("user_message_id") or "")
+            user_message_id = self._resolve_user_message_id(
+                str(message_id) if message_id else None
+            ) or ""
         if not user_message_id:
             logger.warning("sidecar.outbox_finalize_missing_user_message_id")
             return None
@@ -519,9 +601,43 @@ class OutboxStore:
         trace_id: str,
         message_id: str | None,
     ) -> None:
-        ctx = self._ctx or {}
-        user_message_id = str(ctx.get("user_message_id") or message_id or "")
+        """Seal an open umid-keyed record as cancelled+ready (stop / crash).
+
+        Merges onto the existing ``user_message_id`` file only. Refuses to create
+        a new ready dead letter keyed by the assistant ``message_id`` with an
+        empty ``user_message`` (that broke local→cloud journal write-back).
+        """
+        user_message_id = self._resolve_user_message_id(message_id)
         if not user_message_id:
+            logger.warning(
+                "sidecar.outbox_salvage_missing_user_message_id",
+                message_id=message_id,
+            )
+            return
+
+        ctx = self._ctx_for(message_id)
+        bound_user_message = str(ctx.get("user_message") or "")
+        existing = self._read_sync(user_message_id)
+        prior_um = (
+            str(existing.get("user_message") or "").strip() if existing else ""
+        )
+        if existing is None and not bound_user_message:
+            logger.warning(
+                "sidecar.outbox_salvage_refused_empty_dead_letter",
+                user_message_id=user_message_id,
+                message_id=message_id,
+            )
+            return
+        if (
+            user_message_id == str(message_id or "")
+            and not prior_um
+            and not bound_user_message
+        ):
+            logger.warning(
+                "sidecar.outbox_salvage_refused_empty_dead_letter",
+                user_message_id=user_message_id,
+                message_id=message_id,
+            )
             return
 
         def mutate(record: dict[str, Any]) -> None:
@@ -530,6 +646,9 @@ class OutboxStore:
             record["conversation_id"] = conversation_id or record.get("conversation_id")
             record["message_id"] = message_id or record.get("message_id")
             record["trace_id"] = trace_id or record.get("trace_id")
+            record["user_message_id"] = user_message_id
+            if bound_user_message:
+                record["user_message"] = bound_user_message
             record["content"] = pick_monotonic_content(record.get("content"), content)
             journal_map = record.setdefault("journal", {})
             for i, entry in enumerate(journal or []):
@@ -549,14 +668,7 @@ class OutboxStore:
 
     def _user_message_id_for_turn(self, turn_id: str) -> str | None:
         """Resolve outbox file key for a stream-segment turn_id (assistant message_id)."""
-        ctx = self._ctx or {}
-        user_message_id = str(ctx.get("user_message_id") or "")
-        if not user_message_id:
-            return None
-        ctx_mid = ctx.get("message_id")
-        if ctx_mid and str(ctx_mid) != turn_id:
-            return None
-        return user_message_id
+        return self._resolve_user_message_id(turn_id)
 
     async def upsert_stream_segments(
         self,

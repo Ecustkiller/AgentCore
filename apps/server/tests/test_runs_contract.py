@@ -170,6 +170,20 @@ def test_is_format_repairable_for_section_only():
     assert not is_format_repairable(check_contract("ok 内容足够长", None))
 
 
+def test_contract_run_failure_kind_format_vs_quality():
+    from agentcore.runtime.runs.contract import contract_run_failure_kind
+
+    section = check_contract(
+        "正文里没有章节", RunContract(required_sections=["结论"])
+    )
+    assert contract_run_failure_kind(section) == "format"
+    empty = check_contract("", None)
+    assert contract_run_failure_kind(empty) == "quality"
+    bad_json = check_contract("not json", RunContract(output_format="json"))
+    assert not bad_json.ok
+    assert contract_run_failure_kind(bad_json) == "format"
+
+
 def test_format_light_repair_feedback_carries_prior_and_skips_reinvestigate():
     v = check_contract("草稿缺章", RunContract(required_sections=["结论"], min_length=5))
     # min_length soft；缺章节仍 hard → light repair 只谈章节。

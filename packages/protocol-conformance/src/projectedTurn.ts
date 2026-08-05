@@ -64,7 +64,7 @@ export type RunStatus =
   | "skipped";
 
 /** `run_failed.failure_kind` — collaboration-graph face class (additive). */
-export type RunFailureKind = "quality" | "model" | "call";
+export type RunFailureKind = "quality" | "format" | "model" | "call";
 
 /** A web source consulted for the assistant message (citations event). */
 export interface ProjectedCitation {

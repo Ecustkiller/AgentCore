@@ -572,7 +572,11 @@ export interface RunPhasePayload {
 
 export type EscalationKind = "normal" | "scope" | "dep";
 
-export type RunFailureKind = "quality" | "model" | "call";
+export type RunFailureKind =
+  | "quality"
+  | "format"
+  | "model"
+  | "call";
 
 /** 升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
  * 

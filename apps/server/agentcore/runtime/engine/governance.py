@@ -207,8 +207,9 @@ def maybe_inject_delivery_idle(
     round_idx: int,
     role: str,
 ) -> Literal["none", "nudge", "narrow"]:
-    """Files_expected read-idle: soft nudge then tool-narrow pending (not FINALIZE).
+    """Files read-idle: soft nudge; repair posts may arm tool-narrow (not FINALIZE).
 
+    Report posts (``delivery_idle_report``) nudge only — never pending narrow.
     Orthogonal to token/timeout wind_down and to the retired zero-write DEGRADED
     escalate. Narrow allowlist apply is consumed by the react loop via
     :meth:`LoopController.take_delivery_idle_narrow_apply`.
@@ -238,7 +239,9 @@ def maybe_inject_delivery_idle(
     if controller.delivery_idle_nudge_due():
         controller.mark_delivery_idle_nudged()
         prompt = delivery_idle_nudge_prompt(
-            rounds=rounds, recon=controller.delivery_idle_recon
+            rounds=rounds,
+            recon=controller.delivery_idle_recon,
+            report=controller.delivery_idle_report,
         )
         logger.info(
             "engine.delivery_idle_nudge",
@@ -247,6 +250,7 @@ def maybe_inject_delivery_idle(
             nudge_bar=controller.delivery_idle_nudge_rounds,
             narrow_bar=controller.delivery_idle_narrow_rounds,
             recon=controller.delivery_idle_recon,
+            report=controller.delivery_idle_report,
         )
         messages.append(LLMMessage(role="user", content=prompt))
         record_turn_fact(
@@ -546,6 +550,7 @@ def create_loop_controller(
     *,
     seed: Mapping[str, Any] | None = None,
     files_expected: bool = False,
+    report_delivery: bool = False,
     short_write_posture: bool = False,
     tighten_verify_exec_thrash: bool = False,
     max_rounds: int | None = None,
@@ -558,9 +563,10 @@ def create_loop_controller(
     thrash; see :meth:`LoopController.apply_seed`); omit on a fresh turn.
 
     Zero-write / prose_idle mid-loop warn→FINALIZE is **retired** (always off).
-    Soft delivery_idle (nudge → tool narrow) opens for ``files_expected`` and not
-    ``form_prose``. Non-landing workers get recon-idle **nudge only** (no narrow)
-    so diagnose/research 摊大饼 gets a conclude/handoff steer without write pressure.
+    Soft delivery_idle opens for ``files_expected`` and not ``form_prose``.
+    Repair posts: nudge → tool narrow (may reuse wind_down allowlist).
+    Report posts (``report_delivery``): nudge only (``narrow_rounds=0``) — never
+    strip search. Non-landing workers get recon-idle **nudge only** (no narrow).
     Orthogonal to token/timeout wind_down and never stamps DEGRADED / FAILED for
     read-idle.
     Delivery pressure otherwise stays on round/token hard ceilings + convergence
@@ -587,9 +593,15 @@ def create_loop_controller(
     delivery_idle_nudge = 0
     delivery_idle_narrow = 0
     delivery_idle_recon = False
+    delivery_idle_report = False
     if files_expected and not form_prose:
         delivery_idle_nudge = int(settings.engine_delivery_idle_nudge_rounds or 0)
-        delivery_idle_narrow = int(settings.engine_delivery_idle_narrow_rounds or 0)
+        if report_delivery:
+            # Report posts: nudge催写报告; never narrow away grep/code_search.
+            delivery_idle_narrow = 0
+            delivery_idle_report = delivery_idle_nudge > 0
+        else:
+            delivery_idle_narrow = int(settings.engine_delivery_idle_narrow_rounds or 0)
     elif not form_prose:
         delivery_idle_nudge = int(settings.engine_recon_idle_nudge_rounds or 0)
         delivery_idle_narrow = 0
@@ -609,6 +621,7 @@ def create_loop_controller(
         delivery_idle_nudge_rounds=delivery_idle_nudge,
         delivery_idle_narrow_rounds=delivery_idle_narrow,
         delivery_idle_recon=delivery_idle_recon,
+        delivery_idle_report=delivery_idle_report,
         investigation_tools=investigation_tools,
         product_landing_artifacts=product_landing_artifacts,
     )

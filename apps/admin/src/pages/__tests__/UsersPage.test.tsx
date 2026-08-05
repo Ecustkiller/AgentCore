@@ -88,9 +88,9 @@ function listResp(
   return { data, total, page: 1, page_size: 20 };
 }
 
-function renderUsers() {
+function renderUsers(initialEntry = "/users") {
   return render(
-    <MemoryRouter initialEntries={["/users"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/users" element={<UsersPage />} />
         <Route path="/users/:userId" element={<UsersPage />} />
@@ -177,5 +177,111 @@ describe("UsersPage", () => {
     expect(await screen.findByText("服务器开小差")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(await screen.findByText("Bob")).toBeTruthy();
+  });
+
+  it("末页删光后钳回合法页并重新拉列表", async () => {
+    const page2Only = userItem({
+      id: "u21",
+      username: "last",
+      display_name: "LastOnPage2",
+    });
+    const page1Users = Array.from({ length: 20 }, (_, i) =>
+      userItem({
+        id: `u${i + 1}`,
+        username: `user${i + 1}`,
+        display_name: `User${i + 1}`,
+      }),
+    );
+    vi.mocked(listUsers).mockImplementation(async (opts) => {
+      if (opts.page === 2) return listResp([page2Only], 21);
+      return listResp(page1Users, 20);
+    });
+    vi.mocked(deleteUser).mockResolvedValue({
+      id: "u21",
+      deleted_at: "2026-08-06T00:00:00Z",
+    } as unknown as AdminUser);
+
+    renderUsers("/users?page=2");
+    expect(await screen.findByText("LastOnPage2")).toBeTruthy();
+    expect(screen.getByText(/第 2 \/ 2 页/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "注销" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认注销" }));
+
+    await waitFor(() => {
+      expect(deleteUser).toHaveBeenCalledWith("u21");
+      expect(screen.getByText(/第 1 \/ 1 页/)).toBeTruthy();
+      expect(screen.getByText("User1")).toBeTruthy();
+      expect(screen.queryByText("LastOnPage2")).toBeNull();
+      expect(screen.queryByText("没有匹配的用户")).toBeNull();
+    });
+    expect(vi.mocked(listUsers).mock.calls.some((c) => c[0].page === 1)).toBe(
+      true,
+    );
+  });
+
+  it("search on ?page>1 keeps table aligned with page=1 (stale page>1 response ignored)", async () => {
+    type Deferred = {
+      resolve: (v: AdminUserListResponse) => void;
+      promise: Promise<AdminUserListResponse>;
+    };
+    const deferreds: Deferred[] = [];
+    vi.mocked(listUsers).mockImplementation(() => {
+      let resolve!: (v: AdminUserListResponse) => void;
+      const promise = new Promise<AdminUserListResponse>((r) => {
+        resolve = r;
+      });
+      deferreds.push({ resolve, promise });
+      return promise;
+    });
+
+    renderUsers("/users?page=2");
+    await waitFor(() => expect(deferreds.length).toBe(1));
+    deferreds[0]!.resolve(
+      listResp(
+        [userItem({ id: "p2", username: "page2user", display_name: "Page2User" })],
+        40,
+      ),
+    );
+    expect(await screen.findByText("Page2User")).toBeTruthy();
+    expect(screen.getByText(/第 2 \/ 2 页/)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("搜索用户名 / 昵称"), {
+      target: { value: "alice" },
+    });
+
+    // Debounce (300ms) → filter effect may load page=2+q before setPage(1) settles.
+    // Wait until the clamped page=1 fetch is actually in flight (not merely ≥2 calls).
+    await waitFor(
+      () => {
+        const last = vi.mocked(listUsers).mock.calls.at(-1)?.[0];
+        expect(last?.page).toBe(1);
+        expect(last?.q).toBe("alice");
+      },
+      { timeout: 2000 },
+    );
+
+    const page2Stale = listResp(
+      [userItem({ id: "stale", username: "stale", display_name: "StalePage2" })],
+      40,
+    );
+    const page1Fresh = listResp(
+      [userItem({ id: "a1", username: "alice", display_name: "AliceHit" })],
+      1,
+    );
+
+    // Resolve newest first, then an older in-flight response — table must stay on page-1 data.
+    const newest = deferreds[deferreds.length - 1]!;
+    newest.resolve(page1Fresh);
+    expect(await screen.findByText("AliceHit")).toBeTruthy();
+
+    for (let i = 1; i < deferreds.length - 1; i++) {
+      deferreds[i]!.resolve(page2Stale);
+    }
+    await waitFor(() => {
+      expect(screen.getByText("AliceHit")).toBeTruthy();
+      expect(screen.queryByText("StalePage2")).toBeNull();
+      expect(screen.getByText(/第 1 \/ 1 页/)).toBeTruthy();
+    });
   });
 });

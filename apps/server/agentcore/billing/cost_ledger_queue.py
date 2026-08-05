@@ -212,20 +212,20 @@ class CostLedgerQueue:
         logger.debug("cost.ledger_drainer_started", queue_dir=str(_queue_dir()))
 
     async def stop(self) -> None:
-        """Drain remaining files once, then cancel the loop (app shutdown)."""
+        """Cancel the loop first, then drain remaining files once (app shutdown).
+
+        Cancel-before-final-drain avoids stop∩loop concurrent ``drain_once``
+        (noisy mislabeled errors); single-threaded final drain is enough.
+        """
         self._stopping = True
         self._wake.set()
-        if self._task is None:
-            await self.drain_once()
-            return
-        try:
-            await self.drain_once()
-        finally:
+        if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-            logger.debug("cost.ledger_drainer_stopped")
+        await self.drain_once()
+        logger.debug("cost.ledger_drainer_stopped")
 
     def _pending_paths(self) -> list[Path]:
         paths: list[Path] = []
@@ -264,24 +264,39 @@ class CostLedgerQueue:
             else:
                 await asyncio.sleep(0)
 
+    def _quarantine(self, path: Path) -> None:
+        poison = path.with_suffix(".corrupt")
+        try:
+            os.replace(path, poison)
+        except OSError:
+            logger.error(
+                "cost.ledger_corrupt_quarantine_failed",
+                path=str(path),
+            )
+
     async def _drain_file(self, path: Path) -> bool:
         try:
             raw = path.read_text(encoding="utf-8")
+        except OSError as e:
+            # Transient IO (locking, share violation, etc.): leave file for retry.
+            # Never rename to .corrupt — that permanently drops a possibly-valid record.
+            logger.warning(
+                "cost.ledger_record_read_failed",
+                path=str(path),
+                error=str(e),
+            )
+            await asyncio.sleep(_DRAIN_RETRY_BACKOFF_S)
+            return False
+
+        try:
             payload = json.loads(raw)
-        except (OSError, json.JSONDecodeError) as e:
+        except json.JSONDecodeError as e:
             logger.error(
                 "cost.ledger_record_corrupt",
                 path=str(path),
                 error=str(e),
             )
-            poison = path.with_suffix(".corrupt")
-            try:
-                os.replace(path, poison)
-            except OSError:
-                logger.error(
-                    "cost.ledger_corrupt_quarantine_failed",
-                    path=str(path),
-                )
+            self._quarantine(path)
             return False
 
         user_id = payload.get("user_id")
@@ -294,14 +309,7 @@ class CostLedgerQueue:
                 path=str(path),
                 record_id=payload.get("id"),
             )
-            poison = path.with_suffix(".corrupt")
-            try:
-                os.replace(path, poison)
-            except OSError:
-                logger.error(
-                    "cost.ledger_corrupt_quarantine_failed",
-                    path=str(path),
-                )
+            self._quarantine(path)
             return False
 
         trace_id = payload.get("trace_id")

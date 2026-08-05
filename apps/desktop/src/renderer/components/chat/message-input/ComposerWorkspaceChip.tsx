@@ -68,29 +68,31 @@ function BoundChip({ conversationId }: { conversationId: string }) {
       : "云端对话";
 
   return (
-    <Popover open={pop} onOpenChange={setPop}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          aria-label={boundTitle}
-          title={boundTitle}
-          className="h-auto min-w-0 max-w-[220px] shrink gap-1 px-1.5 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"
-          data-testid="composer-workspace-chip"
-        >
-          <WorkspaceModeTrigger
-            effective={state.effective}
-            className="text-xs"
+    <div className="relative shrink-0">
+      <Popover open={pop} onOpenChange={setPop}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={boundTitle}
+            title={boundTitle}
+            className="inline-flex h-8 max-w-[220px] items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            data-testid="composer-workspace-chip"
+          >
+            <WorkspaceModeTrigger
+              effective={state.effective}
+              className="text-xs"
+            />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-0">
+          <WorkspaceModeMenu
+            state={state}
+            conversationId={conversationId}
+            onActionDone={() => setPop(false)}
           />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-0">
-        <WorkspaceModeMenu
-          state={state}
-          conversationId={conversationId}
-          onActionDone={() => setPop(false)}
-        />
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 
@@ -165,143 +167,145 @@ function DraftChip() {
   };
 
   return (
-    <Popover
-      open={pop}
-      onOpenChange={(o) => {
-        setPop(o);
-        if (!o) {
-          setQuery("");
-          setView("pick");
-        }
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          aria-label="在哪工作"
-          title={text}
-          className="h-auto min-w-0 max-w-[200px] shrink gap-1 px-1.5 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"
-        >
-          {icon === "cloud" ? (
-            <Cloud size={13} className="shrink-0" />
-          ) : icon === "local" ? (
-            <HardDrive size={13} className="shrink-0" />
-          ) : (
-            <FolderOpen size={13} className="shrink-0" />
-          )}
-          <span className="min-w-0 truncate">{text}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="start"
-        // Keep side when switching pick→create (taller cascade); flip feels like a jump.
-        avoidCollisions={false}
-        className={view === "create" ? "w-auto p-0" : "w-72 p-0"}
-        onCloseAutoFocus={(e) => e.preventDefault()}
+    <div className="relative shrink-0">
+      <Popover
+        open={pop}
+        onOpenChange={(o) => {
+          setPop(o);
+          if (!o) {
+            setQuery("");
+            setView("pick");
+          }
+        }}
       >
-        {view === "create" ? (
-          <div>
-            <div className="flex items-center gap-1 border-b border-border px-1 py-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground"
-                onClick={() => setView("pick")}
-              >
-                <ChevronLeft size={14} />
-                在哪工作
-              </Button>
-              <span className="px-1 text-xs font-medium text-foreground">
-                新建项目
-              </span>
-            </div>
-            <CreateFolderCascadePanel onClose={closePick} />
-          </div>
-        ) : (
-          <>
-            <div className="border-b border-border px-3 py-2.5">
-              <div className="text-xs font-medium text-foreground">
-                在哪工作
-              </div>
-              {!isDesktop ? (
-                <div className="text-xs text-muted-foreground">
-                  Web 默认云端草稿；仅云项目可选
-                </div>
-              ) : null}
-            </div>
-            <div className="max-h-[360px] overflow-y-auto p-1.5">
-              <DraftRow
-                icon={<Cloud size={14} />}
-                label="快速对话"
-                hint="云端草稿（默认）"
-                selected={intent.kind === "quick_cloud"}
-                onClick={pickQuickCloud}
-              />
-              {isDesktop ? (
-                <DraftRow
-                  icon={<HardDrive size={14} />}
-                  label="本机草稿"
-                  hint="落本机容器；本机执行更快，推理需联网"
-                  selected={intent.kind === "quick_local"}
-                  onClick={pickQuickLocal}
-                />
-              ) : null}
-              {isDesktop ? (
-                <DraftRow
-                  icon={<FolderOpen size={14} />}
-                  label="打开本地项目…"
-                  hint="选本机文件夹 · 新会话（可发现入口）"
-                  onClick={() => {
-                    closePick();
-                    void pickAndOpenLocalProject(navigate);
-                  }}
-                />
-              ) : null}
-
-              <div className="my-1 border-t border-border" />
-              <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  项目
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="在哪工作"
+            title={text}
+            className="inline-flex h-8 max-w-[200px] items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          >
+            {icon === "cloud" ? (
+              <Cloud size={13} className="shrink-0" />
+            ) : icon === "local" ? (
+              <HardDrive size={13} className="shrink-0" />
+            ) : (
+              <FolderOpen size={13} className="shrink-0" />
+            )}
+            <span className="min-w-0 truncate">{text}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="bottom"
+          align="start"
+          // Keep side when switching pick→create (taller cascade); flip feels like a jump.
+          avoidCollisions={false}
+          className={view === "create" ? "w-auto p-0" : "w-72 p-0"}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
+          {view === "create" ? (
+            <div>
+              <div className="flex items-center gap-1 border-b border-border px-1 py-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground"
+                  onClick={() => setView("pick")}
+                >
+                  <ChevronLeft size={14} />
+                  在哪工作
+                </Button>
+                <span className="px-1 text-xs font-medium text-foreground">
+                  新建项目
                 </span>
-                <SearchField
-                  value={query}
-                  onValueChange={setQuery}
-                  placeholder="筛选…"
-                  aria-label="筛选项目"
-                  className="min-w-0 flex-1"
-                  inputClassName="text-xs"
+              </div>
+              <CreateFolderCascadePanel onClose={closePick} />
+            </div>
+          ) : (
+            <>
+              <div className="border-b border-border px-3 py-2.5">
+                <div className="text-xs font-medium text-foreground">
+                  在哪工作
+                </div>
+                {!isDesktop ? (
+                  <div className="text-xs text-muted-foreground">
+                    Web 默认云端草稿；仅云项目可选
+                  </div>
+                ) : null}
+              </div>
+              <div className="max-h-[360px] overflow-y-auto p-1.5">
+                <DraftRow
+                  icon={<Cloud size={14} />}
+                  label="快速对话"
+                  hint="云端草稿（默认）"
+                  selected={intent.kind === "quick_cloud"}
+                  onClick={pickQuickCloud}
+                />
+                {isDesktop ? (
+                  <DraftRow
+                    icon={<HardDrive size={14} />}
+                    label="本机草稿"
+                    hint="落本机容器；本机执行更快，推理需联网"
+                    selected={intent.kind === "quick_local"}
+                    onClick={pickQuickLocal}
+                  />
+                ) : null}
+                {isDesktop ? (
+                  <DraftRow
+                    icon={<FolderOpen size={14} />}
+                    label="打开本地项目…"
+                    hint="选本机文件夹 · 新会话（可发现入口）"
+                    onClick={() => {
+                      closePick();
+                      void pickAndOpenLocalProject(navigate);
+                    }}
+                  />
+                ) : null}
+
+                <div className="my-1 border-t border-border" />
+                <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    项目
+                  </span>
+                  <SearchField
+                    value={query}
+                    onValueChange={setQuery}
+                    placeholder="筛选…"
+                    aria-label="筛选项目"
+                    className="min-w-0 flex-1"
+                    inputClassName="text-xs"
+                  />
+                </div>
+                {filtered.map((f) => (
+                  <DraftRow
+                    key={f.id}
+                    icon={<FolderOpen size={14} />}
+                    label={f.name}
+                    hint={folderLocationHint(f)}
+                    selected={
+                      intent.kind === "project" && intent.folderId === f.id
+                    }
+                    onClick={() => pickProject(f.id)}
+                  />
+                ))}
+                {filtered.length === 0 && (
+                  <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                    {query.trim() ? "没有匹配的项目" : "还没有项目"}
+                  </p>
+                )}
+
+                <div className="my-1 border-t border-border" />
+                <DraftRow
+                  icon={<Plus size={14} />}
+                  label="新建项目…"
+                  onClick={() => setView("create")}
                 />
               </div>
-              {filtered.map((f) => (
-                <DraftRow
-                  key={f.id}
-                  icon={<FolderOpen size={14} />}
-                  label={f.name}
-                  hint={folderLocationHint(f)}
-                  selected={
-                    intent.kind === "project" && intent.folderId === f.id
-                  }
-                  onClick={() => pickProject(f.id)}
-                />
-              ))}
-              {filtered.length === 0 && (
-                <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                  {query.trim() ? "没有匹配的项目" : "还没有项目"}
-                </p>
-              )}
-
-              <div className="my-1 border-t border-border" />
-              <DraftRow
-                icon={<Plus size={14} />}
-                label="新建项目…"
-                onClick={() => setView("create")}
-              />
-            </div>
-          </>
-        )}
-      </PopoverContent>
-    </Popover>
+            </>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 

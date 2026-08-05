@@ -199,6 +199,14 @@ def test_files_zero_write_retired_always_off():
     assert standard.zero_write_finalize_rounds == 0
     assert standard.delivery_idle_nudge_rounds > 0
     assert standard.delivery_idle_narrow_rounds > 0
+    report = create_loop_controller(
+        frozenset({"file_read", "grep"}),
+        files_expected=True,
+        report_delivery=True,
+    )
+    assert report.delivery_idle_nudge_rounds > 0
+    assert report.delivery_idle_narrow_rounds == 0
+    assert report.delivery_idle_report is True
     short_files = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=True,

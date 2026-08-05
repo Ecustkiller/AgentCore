@@ -35,6 +35,24 @@ namespace AgentTown.Tests
         }
 
         [Test]
+        public void ParseFragment_ReadsTokenOutOfHash()
+        {
+            Dictionary<string, string> frag =
+                AgentTownLaunchConfig.ParseFragment(
+                    "https://town.example/app?api=http%3A%2F%2Fh%3A8000&run=r9#token=secret.jwt&extra=1");
+
+            Assert.AreEqual("secret.jwt", frag["token"]);
+            Assert.AreEqual("1", frag["extra"]);
+            Assert.IsFalse(frag.ContainsKey("api"), "query params must not leak into fragment map");
+        }
+
+        [Test]
+        public void ParseFragment_EmptyWhenNoHash()
+        {
+            Assert.IsEmpty(AgentTownLaunchConfig.ParseFragment("https://town.example/app?api=x"));
+        }
+
+        [Test]
         public void ParseCommandLine_NullSafe()
         {
             Assert.IsEmpty(AgentTownLaunchConfig.ParseCommandLine(null));

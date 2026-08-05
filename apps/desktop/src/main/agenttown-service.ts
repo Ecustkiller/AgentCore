@@ -1,8 +1,15 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access } from "node:fs/promises";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import {
   AGENTTOWN_CHANNELS,
   type AgentTownLaunchResult,
@@ -12,6 +19,8 @@ import {
 } from "@shared/agenttown-contract";
 import { app, ipcMain, session } from "electron";
 import { isRecord } from "./ipc-validate";
+
+const execFileAsync = promisify(execFile);
 
 const ACCESS_COOKIE = "access_token";
 const REFRESH_COOKIE = "refresh_token";
@@ -28,6 +37,26 @@ function defaultApiBase(): string {
 
 function sessionFilePath(): string {
   return join(app.getPath("appData"), "AgentCore", "session.json");
+}
+
+/** Best-effort: owner-only ACL so other OS users cannot read the token file. */
+async function hardenSessionFileAcl(filePath: string): Promise<void> {
+  if (process.platform === "win32") {
+    const user = process.env.USERNAME?.trim();
+    if (!user) return;
+    try {
+      await execFileAsync("icacls", [filePath, "/inheritance:r"]);
+      await execFileAsync("icacls", [filePath, "/grant:r", `${user}:(R,W)`]);
+    } catch {
+      /* best-effort; write already succeeded */
+    }
+    return;
+  }
+  try {
+    await chmod(filePath, 0o600);
+  } catch {
+    /* best-effort */
+  }
 }
 
 function jwtExpiresAtIso(token: string): string | undefined {
@@ -155,7 +184,11 @@ export async function writeSessionFile(
   const filePath = sessionFilePath();
   try {
     await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+    await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    await hardenSessionFileAcl(filePath);
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

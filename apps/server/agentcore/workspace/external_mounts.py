@@ -9,12 +9,15 @@ the same guard.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Literal
 
 EXTERNAL_PREFIX = "external/"
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_ALIAS_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区"
 _ORGANIZE_DENY_MSG = (
     "整理授权不允许此操作（仅 list/read/grep/stat + move/copy/mkdir + 回收站删除）"
@@ -95,34 +98,81 @@ class RoutedExternal:
     rel: str
 
 
+def is_external_namespace(path: str) -> bool:
+    """True when ``path`` claims the reserved ``external/`` mount namespace.
+
+    Any such path must be routed (or rejected) — never fall through to the
+    primary workspace root (would silently write under ``external/…`` there).
+    """
+    raw = (path or "").strip().replace("\\", "/").lstrip("/")
+    return raw == "external" or raw.startswith(EXTERNAL_PREFIX)
+
+
+def alias_is_routable(alias: str) -> bool:
+    """True when ``alias`` matches the path-router ASCII whitelist."""
+    return bool(alias and _ALIAS_RE.match(alias))
+
+
+def _ascii_fold_digest(s: str) -> str:
+    """Stable short base32 digest (lowercase, no padding) for non-ASCII names."""
+    digest = hashlib.sha256(s.encode("utf-8")).digest()[:5]
+    return base64.b32encode(digest).decode("ascii").rstrip("=").lower()
+
+
 def sanitize_alias(raw: str) -> str:
-    """Derive a stable alias from a folder display name."""
+    """Derive a stable alias from a folder display name.
+
+    Output always matches ``_ALIAS_RE`` (ASCII only). Non-ASCII display names
+    fold to ``[<ascii_slug>_]<base32digest>`` or ``ext_<digest>`` so grant
+    storage and path routing share one charset — never store an alias the
+    router cannot parse.
+    """
     s = (raw or "").strip().replace("\\", "/").rstrip("/")
     if "/" in s:
         s = s.rsplit("/", 1)[-1]
-    s = re.sub(r"[^\w.-]+", "_", s, flags=re.UNICODE).strip("._-")
-    if not s:
-        s = "folder"
-    if s[0].isdigit():
-        s = f"d_{s}"
-    return s[:64]
+    ascii_part = _ALIAS_SAFE_RE.sub("_", s).strip("._-")
+    needs_fold = (not ascii_part) or any(ord(c) > 127 for c in s)
+    if needs_fold:
+        enc = _ascii_fold_digest(s or "folder")
+        alias = f"{ascii_part[:24]}_{enc}" if ascii_part else f"ext_{enc}"
+    else:
+        alias = ascii_part
+    alias = alias.strip("._-") or "folder"
+    if alias[0].isdigit():
+        alias = f"d_{alias}"
+    alias = alias[:64]
+    if not _ALIAS_RE.match(alias):
+        # Last-resort: pure digest (always ASCII / valid length).
+        alias = f"ext_{_ascii_fold_digest(s or 'folder')}"[:64]
+    return alias
 
 
 def uniquify_alias(base: str, taken: set[str]) -> str:
-    """Ensure ``base`` is unique within ``taken`` (append ``_2``, ``_3``, …)."""
+    """Ensure ``base`` is unique within ``taken`` (append ``_2``, ``_3``, …).
+
+    Suffix must not push the result past 64 chars or outside ``_ALIAS_RE``.
+    """
     alias = sanitize_alias(base)
     if alias not in taken:
         return alias
     n = 2
-    while f"{alias}_{n}" in taken:
+    while True:
+        suffix = f"_{n}"
+        candidate = f"{alias[: 64 - len(suffix)]}{suffix}"
+        if candidate[0].isdigit():
+            candidate = f"d{candidate[1:]}"[:64]
+        if _ALIAS_RE.match(candidate) and candidate not in taken:
+            return candidate
         n += 1
-    return f"{alias}_{n}"
 
 
 def parse_external_path(path: str) -> tuple[str, str] | None:
     """If ``path`` is under ``external/<alias>/…``, return ``(alias, rel)``.
 
     ``rel`` is ``""`` when the path names the mount root itself.
+    Invalid / non-ASCII aliases under ``external/`` return ``None`` — callers
+    that see ``is_external_namespace`` must treat that as ``PathNotFound``,
+    not as a primary-workspace relative path.
     """
     raw = (path or "").strip().replace("\\", "/").lstrip("/")
     if not raw.startswith(EXTERNAL_PREFIX):

@@ -118,6 +118,9 @@ export function UsersPage() {
   // The account the operator is about to 注销 (null = no dialog open).
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const skipFilterPageReset = useRef(true);
+  // Debounced filter + page clamp can fire two loads; only the latest response wins.
+  const loadGenRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   // Debounce text filters; a new query always restarts at page 1 (skip mount).
   useEffect(() => {
@@ -139,28 +142,39 @@ export function UsersPage() {
   }, [debouncedQ, debouncedIp, setPage]);
 
   const load = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
+    const gen = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await listUsers({
-        page,
-        pageSize: PAGE_SIZE,
-        q: debouncedQ,
-        role: role === "all" ? undefined : role,
-        status: status === "all" ? undefined : status,
-        ip: debouncedIp,
-        since: sinceDate ? dateToSince(sinceDate) : undefined,
-        until: untilDate ? dateToUntil(untilDate) : undefined,
-        sort,
-        order,
-        includeDeleted,
-      });
+      const res = await listUsers(
+        {
+          page,
+          pageSize: PAGE_SIZE,
+          q: debouncedQ,
+          role: role === "all" ? undefined : role,
+          status: status === "all" ? undefined : status,
+          ip: debouncedIp,
+          since: sinceDate ? dateToSince(sinceDate) : undefined,
+          until: untilDate ? dateToUntil(untilDate) : undefined,
+          sort,
+          order,
+          includeDeleted,
+        },
+        ac.signal,
+      );
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setUsers(res.data);
       setTotal(res.total);
     } catch (err) {
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted && gen === loadGenRef.current) {
+        setLoading(false);
+      }
     }
   }, [
     page,
@@ -192,6 +206,9 @@ export function UsersPage() {
 
   useEffect(() => {
     void load();
+    return () => {
+      loadAbortRef.current?.abort();
+    };
   }, [load]);
 
   const patchRow = useCallback(
@@ -222,17 +239,28 @@ export function UsersPage() {
 
   // After 注销: the default roster hides tombstones, so drop the row (and adjust the
   // count); in the audit view, swap in the returned tombstone so its state is honest.
+  // If the last row on page>1 is removed, clamp page so we don't sit on an empty page.
   const onDeleted = useCallback(
     (updated: AdminUser) => {
-      setUsers((prev) =>
-        includeDeleted
-          ? prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u))
-          : prev.filter((u) => u.id !== updated.id),
-      );
-      if (!includeDeleted) setTotal((t) => Math.max(0, t - 1));
+      if (includeDeleted) {
+        setUsers((prev) =>
+          prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)),
+        );
+        setDeleting(null);
+        return;
+      }
+      const nextTotal = Math.max(0, total - 1);
+      setUsers((prev) => {
+        const next = prev.filter((u) => u.id !== updated.id);
+        if (next.length === 0 && page > 1) {
+          setPage(Math.max(1, Math.ceil(nextTotal / PAGE_SIZE)));
+        }
+        return next;
+      });
+      setTotal(nextTotal);
       setDeleting(null);
     },
-    [includeDeleted],
+    [includeDeleted, total, page, setPage],
   );
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

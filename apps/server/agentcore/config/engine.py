@@ -22,8 +22,9 @@ class EngineSettings(BaseModel):
     # 保留字段兼容旧配置/测试；默认 0 = 不开。硬顶 thrashing 走 ceiling_backstop。
     engine_zero_write_finalize_rounds: int = 0
     # 交文件队员久读无写（与 token/timeout wind_down 解耦；不做 FINALIZE/FAILED）：
-    # 连续纯调查轮达 nudge → soft「先改或交接」；达 narrow → 复用 wind_down 白名单收窄工具。
-    # 仅 files_expected 且非 prose 开启。≤0 关闭对应阶。
+    # 修码 files_expected：连续纯调查轮 nudge → soft「先改或交接」；达 narrow →
+    # 复用 wind_down 白名单收窄工具（卸检索）。报告岗（结构化谓词）仅 nudge 催写报告，
+    # narrow_rounds=0，永不卸检索。仅 files_expected 且非 prose 开启。≤0 关闭对应阶。
     # 默认 4/6：摸仓留足空间，又在绝对收敛顶（48）与 spin（3）之间形成交付压力。
     engine_delivery_idle_nudge_rounds: int = 4
     engine_delivery_idle_narrow_rounds: int = 6

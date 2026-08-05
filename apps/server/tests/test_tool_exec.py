@@ -1049,3 +1049,142 @@ async def test_captain_browser_click_skips_approval_gate():
         approval_gate=_GateThatMustNotPrompt(),  # type: ignore[arg-type]
     )
     assert tool.executed is True
+
+
+def _drain_events(sink: EventSink) -> list:
+    events = []
+    while not sink._queue.empty():  # noqa: SLF001
+        events.append(sink._queue.get_nowait())
+    return events
+
+
+async def test_cloud_worker_file_write_ask_still_prompts():
+    """云端 worker + file_write=ask：写文件类必须走审批（谨慎名副其实）。"""
+    import asyncio
+
+    from agentcore.core.types import AutonomyPolicy, ToolApproval, recipe_to_axes
+    from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+    from agentcore.runtime.interaction import InteractionRegistry
+    from agentcore.tools.builtin import approval_class_tool_names
+
+    class _WriteTool:
+        executed = False
+
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_write",
+                description="stub",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.GRANTABLE,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            self.executed = True
+            return ToolResult(tool_call_id="", success=True, output="wrote")
+
+    sink = EventSink()
+    registry = InteractionRegistry()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-cloud-ask",
+        registry=registry,
+        timeout_seconds=5.0,
+        file_op_tools=approval_class_tool_names(),
+        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+    )
+    tool = _WriteTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+
+    async def _approve() -> None:
+        for _ in range(2000):
+            if registry.resolve(
+                "tc-cloud-ask", ApprovalDecision.APPROVE, conversation_id="conv-cloud-ask"
+            ):
+                return
+            await asyncio.sleep(0)
+        raise AssertionError("approval never pending")
+
+    approve_task = asyncio.create_task(_approve())
+    messages, terminal, attempts = await execute_tools(
+        [_call("tc-cloud-ask", "file_write", '{"path":"a.md","content":"x"}')],
+        reg,
+        _ctx(),  # ServerWorkspace → location=server
+        sink,
+        approval_gate=gate,
+        run_id="worker-1",
+        role="worker",
+    )
+    await approve_task
+    assert terminal is None
+    assert tool.executed is True
+    assert attempts[0].success is True
+    assert messages[0].content == "wrote"
+    required = [e for e in _drain_events(sink) if e.type is EventType.APPROVAL_REQUIRED]
+    assert len(required) == 1
+
+
+async def test_cloud_worker_file_write_session_still_ungated():
+    """云端 worker + file_write=session：写文件仍免逐次卡（少打断/托管）。"""
+    from agentcore.core.types import AutonomyPolicy, ToolApproval, recipe_to_axes
+    from agentcore.runtime.approvals import ApprovalGate
+    from agentcore.runtime.interaction import InteractionRegistry
+    from agentcore.tools.builtin import approval_class_tool_names
+
+    class _WriteTool:
+        executed = False
+
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_write",
+                description="stub",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.GRANTABLE,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            self.executed = True
+            return ToolResult(tool_call_id="", success=True, output="wrote")
+
+    sink = EventSink()
+    registry = InteractionRegistry()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-cloud-session",
+        registry=registry,
+        timeout_seconds=5.0,
+        file_op_tools=approval_class_tool_names(),
+        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+    )
+    # Cloud session path must drop needs_approval before authorize/will_prompt.
+    gate.will_prompt = (  # type: ignore[method-assign]
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("session cloud file_write must not prompt")
+        )
+    )
+    gate.authorize = (  # type: ignore[method-assign]
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("session cloud file_write must not authorize")
+        )
+    )
+
+    tool = _WriteTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+    messages, terminal, attempts = await execute_tools(
+        [_call("tc-cloud-sess", "file_write", '{"path":"a.md","content":"x"}')],
+        reg,
+        _ctx(),
+        sink,
+        approval_gate=gate,
+        run_id="worker-1",
+        role="worker",
+    )
+    assert terminal is None
+    assert tool.executed is True
+    assert attempts[0].success is True
+    assert messages[0].content == "wrote"

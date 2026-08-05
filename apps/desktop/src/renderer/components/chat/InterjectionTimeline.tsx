@@ -1,3 +1,4 @@
+import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import {
   INTERJECTION_TONE_CLASS,
   interjectionStatusLabel,
@@ -7,6 +8,9 @@ import type { UserInterjection } from "@/stores/execution";
 import { useExecutionStore } from "@/stores/execution";
 
 const EMPTY: readonly UserInterjection[] = [];
+
+/** 与 UserMessage 一致：约 6–8 行（偏 ChatGPT 紧）。 */
+const USER_BUBBLE_COLLAPSED_MAX_H = "max-h-36";
 
 /**
  * S2：协调插话主时间线呈现——普通用户气泡 + 轻量状态标记。
@@ -48,7 +52,14 @@ function InterjectionUserBubble({ item }: { item: UserInterjection }) {
         </div>
       )}
       <div className="max-w-[80%] rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
-        <p className="whitespace-pre-wrap break-words">{item.content}</p>
+        <CollapsibleSpeech
+          contentKey={item.content}
+          fadeToClass="from-muted"
+          collapsedMaxHClass={USER_BUBBLE_COLLAPSED_MAX_H}
+          sceneKey={`interjection:${item.interjectionId}`}
+        >
+          <p className="whitespace-pre-wrap break-words">{item.content}</p>
+        </CollapsibleSpeech>
       </div>
       <span
         className={`inline-flex max-w-[80%] rounded-full border px-1.5 py-0.5 text-xs ${INTERJECTION_TONE_CLASS[tone]}`}

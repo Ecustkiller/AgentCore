@@ -158,6 +158,19 @@ _METADATA: dict[str, ModelMeta] = {
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=128_000,
     ),
+    "hy3": ModelMeta(
+        display_name="Hy3",
+        vendor="腾讯 Hy",
+        capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=256_000,
+    ),
+    # Exact entry so family-prefix does not collapse display to plain「Hy3」.
+    "hy3-preview": ModelMeta(
+        display_name="Hy3 Preview",
+        vendor="腾讯 Hy",
+        capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=256_000,
+    ),
 }
 
 # Vendor guesses by leading provider prefix / substring for unknown ids, so a

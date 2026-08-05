@@ -12,6 +12,7 @@ import {
   templateToFormSeed,
   type NoticeTemplate,
 } from "@/lib/noticeTemplates";
+import { useAdminListPage } from "@/hooks/useAdminListPage";
 import {
   type CreateNoticeRequest,
   type Notice,
@@ -28,6 +29,8 @@ import {
 } from "@/services/adminNotices";
 import {
   Archive,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Megaphone,
   Pencil,
@@ -36,7 +39,14 @@ import {
   Send,
   X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 type Tone = "success" | "neutral" | "warning" | "destructive" | "primary";
@@ -161,6 +171,7 @@ function asStatus(raw: string): NoticeStatus {
 export function NoticesPage() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useAdminListPage();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -192,27 +203,47 @@ export function NoticesPage() {
     });
   };
 
+  // Status filter + page change can overlap; only the latest response wins.
+  const loadGenRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
+    const gen = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await listNotices({
-        status: statusFilter === "all" ? undefined : statusFilter,
-        limit: PAGE_SIZE,
-        offset: 0,
-      });
+      const res = await listNotices(
+        {
+          status: statusFilter === "all" ? undefined : statusFilter,
+          limit: PAGE_SIZE,
+          offset: (page - 1) * PAGE_SIZE,
+        },
+        ac.signal,
+      );
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setNotices(res.data);
       setTotal(res.total);
     } catch (err) {
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted && gen === loadGenRef.current) {
+        setLoading(false);
+      }
     }
-  }, [statusFilter]);
+  }, [page, statusFilter]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadAbortRef.current?.abort();
+    };
   }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const upsertLocal = (updated: Notice) => {
     setNotices((prev) => {
@@ -302,7 +333,10 @@ export function NoticesPage() {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as StatusFilter);
+            setPage(1);
+          }}
           aria-label="按状态筛选"
           className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -438,6 +472,32 @@ export function NoticesPage() {
           </div>
         )}
       </div>
+
+      {!loading && !error && totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage(Math.max(1, page - 1))}
+            aria-label="上一页"
+          >
+            <ChevronLeft size={14} />
+          </Button>
+          <span className="text-muted-foreground text-sm tabular-nums">
+            {page} / {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages}
+            onClick={() => setPage(page + 1)}
+            aria-label="下一页"
+          >
+            <ChevronRight size={14} />
+          </Button>
+        </div>
+      )}
 
       {editing && (
         <NoticeFormDialog

@@ -739,9 +739,18 @@ async def execute_tools(
             )
             # Surface a preview-only hint on the approval card (arguments are already
             # truncated for SSE; tools execute the original ``args`` unchanged).
+            hint = breaker.reason
+            if breaker.rule_id == "sensitive.path_read_ask" and isinstance(args, dict):
+                from agentcore.runtime.credential_preview import build_keys_preview_line
+
+                keys_line = await build_keys_preview_line(
+                    context.backend, tool_name=name, arguments=args
+                )
+                if keys_line:
+                    hint = f"{hint}\n{keys_line}"
             args_for_gate = {
                 **args,
-                "circuit_breaker_hint": breaker.reason,
+                "circuit_breaker_hint": hint,
             }
         else:
             args_for_gate = args
@@ -760,24 +769,24 @@ async def execute_tools(
             and name != "browser_screenshot"
         ):
             needs_approval = False
-        # Cloud *workers* historically ungated for server-sandbox tools. When
-        # resolve_worker_gate shares the turn gate only for MCP/Host, narrow
-        # prompts to desktop-touch tools (file_write etc. stay ungated on cloud
-        # root). CEO / captain always keep full GRANTABLE gating — do not key
-        # off backend.location alone.
+        # Cloud *workers* historically ungated for server-sandbox tools (MCP/Host
+        # still gated). ``file_write=ask`` overrides that ungate for the
+        # file-mutation class so 谨慎 prompts reversible writes on cloud too.
+        # CEO / captain always keep full GRANTABLE gating — do not key off
+        # backend.location alone.
         if (
             needs_approval
             and not force_breaker
             and approval_gate is not None
             and role == "worker"
         ):
-            from agentcore.runtime.sandbox_approval import (
-                is_desktop_touch_tool,
-                worker_gate_applies,
-            )
+            from agentcore.runtime.sandbox_approval import cloud_worker_skips_per_call_gate
 
-            if not worker_gate_applies(context.backend) and not is_desktop_touch_tool(
-                name
+            if cloud_worker_skips_per_call_gate(
+                context.backend,
+                name,
+                permission_axes=approval_gate.permission_axes,
+                file_op_tools=approval_gate.file_op_tools,
             ):
                 needs_approval = False
         if needs_approval:

@@ -5,7 +5,7 @@
  * 缓冲后续帧直至主路空闲，再续流 turn2——对齐桌面 midFlight / 发送即有流。
  * ``delivery`` 必填（缺 → 422）。
  */
-import { apiUrl, authHeader, refreshTokens } from "@/api/client";
+import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
 import { StreamHttpError } from "@/lib/errors";
 import type { MessageDelivery } from "@/lib/messageDelivery";
@@ -160,10 +160,7 @@ export async function sendMidFlightMessage(
     });
 
   try {
-    let response = await doFetch();
-    if (response.status === 401 && (await refreshTokens())) {
-      response = await doFetch();
-    }
+    const response = await fetchWithAuthRefresh(doFetch);
     if (response.status === 409) {
       const err = await streamErrorFromResponse(response);
       return {

@@ -1,4 +1,4 @@
-"""Worker Escalation Gate: scheme-layer signals after a tool round."""
+"""Worker Escalation Gate: post-tool-round check (exec layer; no free-text scheme scan)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,11 @@ def apply_escalation_gate(
     agent_id: str,
     gate_escalation_sink: list[dict[str, Any]],
 ) -> None:
-    """Run Escalation Gate after a tool round; emit + accumulate scheme-layer signals."""
+    """Run Escalation Gate after a tool round; emit + accumulate only if scheme signals exist.
+
+    Live Gate no longer produces scheme signals from tool-output word scans; this
+    path stays for thrashing / future structured producers sharing the sink.
+    """
     from agentcore.runtime.loop_controller import ToolAttempt
 
     typed_attempts = [a for a in attempts if isinstance(a, ToolAttempt)]

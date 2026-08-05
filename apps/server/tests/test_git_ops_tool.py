@@ -266,6 +266,64 @@ async def test_no_git_anywhere_reports_structured_no_repo(tmp_path: Path):
         assert "无提交" not in result.output
 
 
+async def test_status_ensure_timeout_is_hard_error_not_no_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """``.git`` present + rev-parse hang → error/timeout, never soft ``no_repo``."""
+    import agentcore.tools.builtin.git_ops as git_mod
+
+    repo = _init_repo(tmp_path / "repo")
+
+    async def _fake_run(
+        args: list[str],
+        *,
+        cwd: str,
+        timeout: float = 20.0,
+        extra_env: dict[str, str] | None = None,
+    ) -> tuple[str, str, int]:
+        if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+            return "", "git 操作超时（rev-parse --is-inside-work-tree）", 1
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(git_mod, "_run_git", _fake_run)
+    result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
+    assert result.success is False
+    assert result.metadata.get("code") == "timeout"
+    assert result.metadata.get("timeout_layer") == "inner"
+    assert "超时" in (result.error or "")
+    assert "勿原样重试" in (result.error or "")
+
+
+async def test_status_ensure_probe_failure_not_soft_no_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """``.git`` present but not a work tree → hard fail, not soft ``no_repo``."""
+    import agentcore.tools.builtin.git_ops as git_mod
+
+    repo = _init_repo(tmp_path / "repo")
+
+    async def _fake_run(
+        args: list[str],
+        *,
+        cwd: str,
+        timeout: float = 20.0,
+        extra_env: dict[str, str] | None = None,
+    ) -> tuple[str, str, int]:
+        if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+            return (
+                "",
+                "fatal: not a git repository (or any of the parent directories): .git",
+                128,
+            )
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(git_mod, "_run_git", _fake_run)
+    result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
+    assert result.success is False
+    assert result.metadata.get("code") != "no_repo"
+    assert "not a git repository" in (result.error or "").lower()
+
+
 async def test_write_without_repo_still_hard_fails(tmp_path: Path):
     bare = tmp_path / "not_a_repo"
     bare.mkdir()

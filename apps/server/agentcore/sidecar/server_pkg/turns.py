@@ -258,7 +258,7 @@ class TurnExecutionMixin:
             await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
         finally:
             if outbox is not None:
-                outbox.clear_turn()
+                outbox.clear_turn(message_id)
             self._unregister_turn(turn_id)
 
     async def _outbox_finalize(
@@ -379,7 +379,7 @@ class TurnExecutionMixin:
                 if self._paused_store is not None:
                     await self._paused_store.rollback_claim(turn_id)
                 if outbox is not None:
-                    outbox.clear_turn()
+                    outbox.clear_turn(turn_id)
                 self._unregister_turn(turn_id)
                 logger.warning(
                     "sidecar.resume_settlement_prewrite_failed",
@@ -551,7 +551,7 @@ class TurnExecutionMixin:
                 await self._paused_store.confirm_claim(turn_id)
         finally:
             if outbox is not None:
-                outbox.clear_turn()
+                outbox.clear_turn(turn_id)
             self._unregister_turn(turn_id)
 
     async def _pump(self, turn_id: str, sink: EventSink) -> None:

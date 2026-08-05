@@ -123,7 +123,10 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 「先设计再实现」小CRUD/骨架 → 默认 1 人两段（先交设计验收再实现）；设计很重或要点名评审再升 2 人串。\
 前端 UI / 壳层强耦合改造（目标追踪 + Toast + 多面板空状态等同系统多面）→ 同默认：1 人两段，\
 或 wave1 只交设计 / API 契约（`form=files`），实现波再落盘 + `playbook_args.verify` / task 写清怎么验；\
-**禁止**第一棒塞「设计 + 双子系统 + 壳层 + build」。
+**禁止**第一棒塞「设计 + 双子系统 + 壳层 + build」。\
+**多屏 UI / 单文件大原型** → 默认 MVP 或同上 1 人两段 / wave1=`form=files`；\
+**禁止**首 grant「完整可玩 N 屏」（用户明示一次做完除外）；**规格已齐 ≠ 全量**。\
+单页 / 落地页仍可一人整页（`build_website`）；勿误伤 light+finalize 小活 / 短文落盘。
 
 形状词汇（按任务结构选、可组合）：
 - 并列对象分组：每对象一员（重档升 lead 内拆维度），尾挂横向汇总；\
@@ -539,7 +542,8 @@ _ASK_USER_KICKOFF = """\
 【缺主体短问】三路/多路调研未点名主体 → `questions`【必须】预填 `default`；用户 continue = \
 确认该 default，派工标「按确认默认」；无 default 不得 continue 派工（再问/停派）；禁借继续另拟 topic。\
 方向 / 方案 choice 的 `label` / `detail` / `message` 写清**本轮交付边界**（如「先出设计契约」/\
-「MVP：仅目标追踪条」）；选完仍立刻派，范围跟选项走——**禁止**暗示「选完即全仓开工」。
+「MVP：仅目标追踪条」/ 多屏原型「MVP：先 1～2 屏」）；选完仍立刻派，范围跟选项走——\
+**禁止**暗示「选完即全仓开工」或默认选项写成「完整可玩 N 屏」（用户明示一次做完除外）。
 
 【字段】普通 `ask_user`（**不填** `card`，除非途中专用卡）：
 - `message`：说清缺口即可（勿长篇方案墙）。
@@ -852,7 +856,9 @@ _BUILD_WEBSITE = f"""\
 【禁止】套营销 hero / pricing 皮。省略 style（或 `marketing`）= 营销/落地页。
 5. playbook 三串：文案 → 前端（一人包 DESIGN.md + 整页 HTML/CSS/JS + 轻量 CONTRACT）→ 独立 QA；\
 含 `web_quality_scan` / DESIGN 风格 id 质量契约 / catalog / visual critic；\
-`sections` 仅覆盖清单，不扇出分区节点。
+`sections` 仅覆盖清单，不扇出分区节点。\
+【划界】单页 / 落地页 = 一人整页；**多屏 UI / 单文件大原型**勿套本「一人整页」口径——\
+走 MVP 切片（见主提示「立刻派 ≠ 立刻全量」），勿扩本 playbook 语义。
 
 组队进阶旋钮（协调墙 / deliverable 等）见 `consult_skill(team_orchestration_advanced)`。
 </build_website>"""

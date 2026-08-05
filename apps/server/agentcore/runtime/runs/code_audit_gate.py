@@ -16,20 +16,28 @@ _VERDICTS = frozenset({"属实", "误报", "部分属实", "待核实"})
 _SEVERITIES = frozenset({"高", "中", "低", "观察·工程"})
 _SECURITY_CATEGORIES = frozenset({"安全", "路径", "注入"})
 
-# 常见英文同义 → 中文闭集（精确匹配，大小写不敏感；禁复合怪写 / 万能清洗）。
+# 用户脸 / 契约分脸：本闸失败文案统一此前缀（禁前端扫正文猜脸；后端按前缀归 ``format``）。
+STRUCTURE_FAILURE_PREFIX = "结构闸："
+
+# 常见英文 / P 级同义 → 中文闭集（精确匹配，大小写不敏感；禁复合怪写 / 万能清洗）。
+# P0–P3 钉死：P0→高，P1→中，P2→低，P3→观察·工程（与 critical/high/info 惯例对齐）。
 _SEVERITY_SYNONYMS: dict[str, str] = {
     "high": "高",
     "critical": "高",
+    "p0": "高",
     "medium": "中",
     "med": "中",
     "moderate": "中",
+    "p1": "中",
     "low": "低",
+    "p2": "低",
     "info": "观察·工程",
     "informational": "观察·工程",
     "observation": "观察·工程",
     "observational": "观察·工程",
     "notice": "观察·工程",
     "engineering": "观察·工程",
+    "p3": "观察·工程",
 }
 _VERDICT_SYNONYMS: dict[str, str] = {
     "confirmed": "属实",
@@ -73,6 +81,27 @@ def _normalize_closed(value: str, *, chinese: frozenset[str], synonyms: dict[str
     return synonyms.get(raw.lower(), raw)
 
 
+def normalize_audit_severity(value: str) -> str:
+    """Normalize severity input to Chinese authority (or stripped raw if unknown)."""
+    return _normalize_closed(
+        value, chinese=_SEVERITIES, synonyms=_SEVERITY_SYNONYMS
+    )
+
+
+def normalize_audit_verdict(value: str) -> str:
+    """Normalize verdict input to Chinese authority (or stripped raw if unknown)."""
+    return _normalize_closed(value, chinese=_VERDICTS, synonyms=_VERDICT_SYNONYMS)
+
+
+def is_code_audit_structure_failure(message: str) -> bool:
+    """True when ``message`` was stamped by this gate (structure-face classifier)."""
+    return str(message or "").strip().startswith(STRUCTURE_FAILURE_PREFIX)
+
+
+def _structure_fail(detail: str) -> str:
+    return f"{STRUCTURE_FAILURE_PREFIX}{detail}"
+
+
 def parse_audit_json(text: str) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(obj, error)``. ``error`` set when unparseable or not an object."""
     raw = text.strip()
@@ -97,24 +126,16 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     findings = data.get("findings")
     if not isinstance(findings, list):
-        return ["audit JSON 缺少 findings 数组"]
+        return [_structure_fail("audit JSON 缺少 findings 数组")]
 
     for i, item in enumerate(findings):
         prefix = f"findings[{i}]"
         if not isinstance(item, dict):
-            failures.append(f"{prefix} 须为对象")
+            failures.append(_structure_fail(f"{prefix} 须为对象"))
             continue
-        sev = _normalize_closed(
-            _as_str(item.get("severity")),
-            chinese=_SEVERITIES,
-            synonyms=_SEVERITY_SYNONYMS,
-        )
+        sev = normalize_audit_severity(_as_str(item.get("severity")))
         ver = _as_str(item.get("verification"))
-        verd = _normalize_closed(
-            _as_str(item.get("verdict")),
-            chinese=_VERDICTS,
-            synonyms=_VERDICT_SYNONYMS,
-        )
+        verd = normalize_audit_verdict(_as_str(item.get("verdict")))
         evidence = _as_str(item.get("evidence"))
         summary = _as_str(item.get("summary") or item.get("id"))
         category = _as_str(item.get("category"))
@@ -122,31 +143,40 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
         trigger = _as_str(item.get("trigger_path"))
 
         if not summary:
-            failures.append(f"{prefix} 缺少 summary 或 id")
+            failures.append(_structure_fail(f"{prefix} 缺少 summary 或 id"))
         if sev not in _SEVERITIES:
-            failures.append(f"{prefix} severity 无效（须为 高|中|低|观察·工程）")
+            failures.append(
+                _structure_fail(
+                    f"{prefix} severity 无效（须为 高|中|低|观察·工程；"
+                    "亦接受 P0–P3 / high|medium|low|info 等同义）"
+                )
+            )
         if ver not in _VERIFICATIONS:
-            failures.append(f"{prefix} verification 无效")
+            failures.append(_structure_fail(f"{prefix} verification 无效"))
         if verd not in _VERDICTS:
-            failures.append(f"{prefix} verdict 无效")
+            failures.append(_structure_fail(f"{prefix} verdict 无效"))
         if not evidence:
-            failures.append(f"{prefix} 缺少 evidence")
+            failures.append(_structure_fail(f"{prefix} 缺少 evidence"))
 
         # 未读全 / 待核实 → 不得中+
         if (ver == "静态推断·未读全" or verd == "待核实") and sev in {"高", "中"}:
             failures.append(
-                f"{prefix} 验证方式未读全或定案待核实时不得标中/高（现 severity={sev}）"
+                _structure_fail(
+                    f"{prefix} 验证方式未读全或定案待核实时不得标中/高（现 severity={sev}）"
+                )
             )
 
         # 高必须有触发路径
         if sev == "高" and not trigger:
-            failures.append(f"{prefix} severity=高 须写 trigger_path")
+            failures.append(_structure_fail(f"{prefix} severity=高 须写 trigger_path"))
 
         # 可达性：安全/路径/注入 或 高
         need_reach = sev == "高" or category in _SECURITY_CATEGORIES
         if need_reach and not reach:
             failures.append(
-                f"{prefix} 安全/路径/注入类或 severity=高 须写 reachability"
+                _structure_fail(
+                    f"{prefix} 安全/路径/注入类或 severity=高 须写 reachability"
+                )
             )
 
         # L3：超时充中+
@@ -154,8 +184,10 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
             blob = f"{summary}\n{evidence}\n{_as_str(item.get('detail'))}"
             if _TIMEOUT_AS_DEFECT.search(blob):
                 failures.append(
-                    f"{prefix} 禁止把全量 typecheck/pytest 超时当作中+缺陷证据"
-                    "（应标观察·工程）"
+                    _structure_fail(
+                        f"{prefix} 禁止把全量 typecheck/pytest 超时当作中+缺陷证据"
+                        "（应标观察·工程）"
+                    )
                 )
 
     return failures
@@ -169,7 +201,7 @@ def code_audit_json_failures(
 ) -> list[str]:
     """Locate ``*.audit.json`` among declared artifacts / contents and validate."""
     if artifact_contents is None:
-        return ["code_audit 结构闸需要读取 audit JSON 文件内容"]
+        return [_structure_fail("code_audit 结构闸需要读取 audit JSON 文件内容")]
 
     declared = [
         p.replace("\\", "/").strip()
@@ -192,17 +224,17 @@ def code_audit_json_failures(
             p.replace("\\", "/").strip() == pat or p.replace("\\", "/").endswith("/" + pat)
             for p in workspace_paths
         ):
-            return [f"无法读取 audit JSON：`{pat}`"]
-        return [f"缺少 audit JSON 产物：`{pat}`"]
+            return [_structure_fail(f"无法读取 audit JSON：`{pat}`")]
+        return [_structure_fail(f"缺少 audit JSON 产物：`{pat}`")]
 
     if not candidates:
         candidates = [
             k for k in artifact_contents if k.replace("\\", "/").endswith(".audit.json")
         ]
     if not candidates and declared:
-        return [f"缺少 audit JSON 产物：`{declared[0]}`"]
+        return [_structure_fail(f"缺少 audit JSON 产物：`{declared[0]}`")]
     if not candidates:
-        return ["code_audit 结构闸未找到 *.audit.json 内容"]
+        return [_structure_fail("code_audit 结构闸未找到 *.audit.json 内容")]
 
     failures: list[str] = []
     seen: set[str] = set()
@@ -213,7 +245,7 @@ def code_audit_json_failures(
         seen.add(nk)
         data, err = parse_audit_json(artifact_contents[key])
         if err:
-            failures.append(f"`{nk}` {err}")
+            failures.append(_structure_fail(f"`{nk}` {err}"))
             continue
         assert data is not None
         failures.extend(validate_code_audit_payload(data))
@@ -225,7 +257,11 @@ def _as_str(value: Any) -> str:
 
 
 __all__ = [
+    "STRUCTURE_FAILURE_PREFIX",
     "code_audit_json_failures",
+    "is_code_audit_structure_failure",
+    "normalize_audit_severity",
+    "normalize_audit_verdict",
     "parse_audit_json",
     "validate_code_audit_payload",
 ]

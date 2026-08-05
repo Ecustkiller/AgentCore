@@ -200,6 +200,15 @@ def test_empty_response_continues_then_finalizes():
     assert c.empty_response_action() is Intervention.FINALIZE
 
 
+def test_length_empty_finalizes_without_continue():
+    """finish_reason=length + empty skips the default one-shot Continue."""
+    c = LoopController(empty_threshold=2)
+    c.note_empty_round(True)  # streak=1 would normally CONTINUE
+    assert c.empty_response_action(finish_reason="length") is Intervention.FINALIZE
+    # Ordinary silent empty still Continues on the first hit.
+    assert c.empty_response_action(finish_reason="stop") is Intervention.CONTINUE
+
+
 def test_empty_streak_resets_on_nonempty_round():
     # A real answer / tool call between empties breaks the streak, so only
     # *consecutive* empties escalate.
@@ -1538,6 +1547,94 @@ def test_recon_idle_nudge_prompt_does_not_demand_writes():
     files = delivery_idle_nudge_prompt(rounds=4, recon=False)
     assert "交文件空转提醒" in files
     assert "str_replace" in files
+    report = delivery_idle_nudge_prompt(rounds=4, report=True)
+    assert "写报告" in report
+    assert "检索工具仍可用" in report
+    assert "已收回" not in report
+    assert "收窄调查" not in report
+
+
+def test_report_delivery_idle_nudge_without_search_narrow():
+    """code_audit_gate / report posts: idle may nudge, never arms wind_down strip."""
+    from agentcore.runtime.engine.governance import (
+        create_loop_controller,
+        maybe_inject_delivery_idle,
+    )
+    from agentcore.runtime.runs.cutoff import (
+        WIND_DOWN_ALLOWED_TOOLS,
+        narrow_tools_for_wind_down,
+    )
+
+    report = create_loop_controller(
+        frozenset({"grep", "file_read", "code_search"}),
+        files_expected=True,
+        report_delivery=True,
+    )
+    assert report.delivery_idle_report is True
+    assert report.delivery_idle_nudge_rounds > 0
+    assert report.delivery_idle_narrow_rounds == 0
+    assert report.delivery_idle_recon is False
+
+    live = ["grep", "code_search", "file_read", "file_write", "handoff"]
+    # Contrast: repair wind_down whitelist would strip grep.
+    stripped = narrow_tools_for_wind_down(
+        set(live), allowed=live, keep_file_read=True
+    )
+    assert "grep" not in stripped
+    assert "grep" not in WIND_DOWN_ALLOWED_TOOLS
+
+    bar = report.delivery_idle_nudge_rounds
+    for i in range(bar):
+        report.record(
+            [ToolAttempt(fingerprint=f"g{i}", tool_name="grep", success=True)]
+        )
+    messages: list = []
+    assert (
+        maybe_inject_delivery_idle(
+            report, messages=messages, run_id="audit", round_idx=bar, role="worker"
+        )
+        == "nudge"
+    )
+    assert any("写报告" in str(m.content) for m in messages)
+    assert any("检索工具仍可用" in str(m.content) for m in messages)
+
+    # Far past former narrow bar — still never pending apply / never strip.
+    for i in range(bar, bar + 20):
+        report.record(
+            [ToolAttempt(fingerprint=f"g{i}", tool_name="grep", success=True)]
+        )
+    assert (
+        maybe_inject_delivery_idle(
+            report, messages=[], run_id="audit", round_idx=bar + 20, role="worker"
+        )
+        == "none"
+    )
+    assert not report.delivery_idle_narrow_due()
+    assert not report.take_delivery_idle_narrow_apply()
+    # Live allowlist unchanged (simulate loop skip of narrow_tools_for_wind_down).
+    assert "grep" in live
+    assert "code_search" in live
+
+    repair = create_loop_controller(
+        frozenset({"grep", "file_read"}),
+        files_expected=True,
+        report_delivery=False,
+    )
+    assert repair.delivery_idle_report is False
+    assert repair.delivery_idle_narrow_rounds > 0
+    narrow_bar = repair.delivery_idle_narrow_rounds
+    for i in range(narrow_bar):
+        repair.record(
+            [ToolAttempt(fingerprint=f"r{i}", tool_name="file_read", success=True)]
+        )
+    assert repair.delivery_idle_narrow_due()
+    assert (
+        maybe_inject_delivery_idle(
+            repair, messages=[], run_id="fix", round_idx=narrow_bar, role="worker"
+        )
+        == "narrow"
+    )
+    assert repair.take_delivery_idle_narrow_apply() is True
 
 
 def test_landing_success_latches_for_wind_down():

@@ -74,6 +74,19 @@ describe("statusFaceLabel", () => {
         undefined,
         null,
         false,
+        "结构闸：findings[0] severity 无效",
+        null,
+        null,
+        "format",
+      ).text,
+    ).toBe("格式未过");
+    expect(
+      statusFaceLabel(
+        "failed",
+        null,
+        undefined,
+        null,
+        false,
         "LLM 流在收尾时中断",
         null,
         null,

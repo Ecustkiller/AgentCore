@@ -111,13 +111,14 @@ const RUN_STATUS: Record<RunStatus, { label: string; tone: string }> = {
 };
 
 /** Prefer `failureKind`; thin error-text fallback for old journals (align desktop). */
-function failureFaceLabel(
+export function failureFaceLabel(
   error: string | null | undefined,
   failureKind: ProjectedRun["failureKind"],
   productLanded?: boolean | null,
 ): string {
   if (productLanded) return "产出已落盘";
   if (failureKind === "quality") return "未达标";
+  if (failureKind === "format") return "格式未过";
   if (failureKind === "model") return "模型中断";
   if (failureKind === "call") return "调用失败";
   const raw = (error ?? "").trim();

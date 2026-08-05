@@ -3,9 +3,9 @@
 This module is a **defense-in-depth blacklist**, not a security boundary. Patterns
 are intentionally narrow and honest: they catch common catastrophic shapes
 (``rm -rf /``, force-push to protected branches, raw-device writes, etc.) and
-block reads of obvious credential paths. They do **not** intercept every
-dangerous command — comments, audit copy, and approval-card hints must not claim
-otherwise.
+gate obvious credential / key-material paths (template allow → credential ask →
+key deny). They do **not** intercept every dangerous command — comments, audit
+copy, and approval-card hints must not claim otherwise.
 
 Permission presets (including ``full_trust``), kickoff grants, and turn-wide
 「本轮放行」never override these rules. Aligns with Claude Code's practice that
@@ -52,7 +52,7 @@ class BreakerVerdict(StrEnum):
     """Destructive / irreversible shape — always ask a human; grants do not apply."""
 
     DENY = "deny"
-    """Sensitive read (or equivalent) — refuse and steer the model away."""
+    """Key material / non-grantable shape — refuse and steer the model away."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +163,22 @@ def fuse_aligned_deny_rule_ids() -> frozenset[str]:
     """Destructive rule ids that host_shell fuse covers → breaker DENY on host_shell."""
     return FUSE_ALIGNED_DENY_RULE_IDS
 
-# ── Sensitive path heuristics ────────────────────────────────────────────────
+# ── Sensitive path heuristics (allow / ask / deny) ───────────────────────────
+#
+# Templates (``.env.example`` …) → allow. Credential/env files → ask on read
+# (FORCE_APPROVAL, single tool-call). Key material / ``.ssh`` → hard DENY on
+# read. Writes to ask|deny paths stay DENY (no plaintext secret scaffolding).
 
-_SENSITIVE_BASENAME_EXACT: frozenset[str] = frozenset(
+
+class SensitivePathClass(StrEnum):
+    """Heuristic class for a filesystem path (defense-in-depth, not complete)."""
+
+    NONE = "none"
+    ASK = "ask"
+    DENY = "deny"
+
+
+_ASK_BASENAME_EXACT: frozenset[str] = frozenset(
     {
         ".env",
         ".env.local",
@@ -179,14 +192,6 @@ _SENSITIVE_BASENAME_EXACT: frozenset[str] = frozenset(
         "secrets.json",
         "secrets.yml",
         "secrets.yaml",
-        "id_rsa",
-        "id_dsa",
-        "id_ecdsa",
-        "id_ed25519",
-        "id_rsa.pub",  # still credential-adjacent; deny read by default
-        "id_ed25519.pub",
-        "authorized_keys",
-        "known_hosts",
         ".npmrc",
         ".pypirc",
         "netrc",
@@ -196,21 +201,48 @@ _SENSITIVE_BASENAME_EXACT: frozenset[str] = frozenset(
     }
 )
 
-_SENSITIVE_BASENAME_PREFIXES: tuple[str, ...] = (".env.",)
-_SENSITIVE_BASENAME_SUFFIXES: tuple[str, ...] = (
+_DENY_BASENAME_EXACT: frozenset[str] = frozenset(
+    {
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "id_rsa.pub",
+        "id_ed25519.pub",
+        "authorized_keys",
+        "known_hosts",
+    }
+)
+
+_ASK_BASENAME_PREFIXES: tuple[str, ...] = (".env.",)
+_DENY_BASENAME_SUFFIXES: tuple[str, ...] = (
     ".pem",
     ".key",
     ".p12",
     ".pfx",
     ".jks",
 )
-_SENSITIVE_PATH_SEGMENTS: frozenset[str] = frozenset(
-    {".ssh", ".gnupg", ".aws", ".azure", ".gcloud", "private-keys", "private_keys"}
+# Committed templates / samples — never treat as credentials.
+_TEMPLATE_BASENAME_SUFFIXES: tuple[str, ...] = (
+    ".example",
+    ".sample",
+    ".template",
+    ".dist",
+)
+_ASK_PATH_SEGMENTS: frozenset[str] = frozenset({".aws", ".azure", ".gcloud"})
+_DENY_PATH_SEGMENTS: frozenset[str] = frozenset(
+    {".ssh", ".gnupg", "private-keys", "private_keys"}
 )
 
-_SENSITIVE_DENY_REASON = (
-    "该路径疑似包含凭据或密钥类敏感文件，默认拒绝读取（启发式兜底，并非完整拦截）。"
-    "请改用用户明示提供的非敏感配置，或请用户在对话中粘贴所需片段。"
+_SENSITIVE_ASK_READ_REASON = (
+    "该路径疑似凭据或环境配置文件。读入后内容会进入模型上下文"
+    "（启发式兜底，并非完整拦截）。需人工确认后才能读取；"
+    "也可改用设置页凭据、本机环境变量，或只告知无密钥的配置键名。"
+)
+
+_SENSITIVE_DENY_READ_REASON = (
+    "该路径疑似私钥/密钥材料，默认拒绝读取（启发式兜底，并非完整拦截）。"
+    "请改用本机密钥代理或设置页凭据；不要把密钥内容贴进对话。"
 )
 
 _SENSITIVE_WRITE_DENY_REASON = (
@@ -219,44 +251,63 @@ _SENSITIVE_WRITE_DENY_REASON = (
 )
 
 
-def is_sensitive_path(path: str) -> bool:
-    """True when ``path`` looks like a credential / secret file (heuristic)."""
+def classify_sensitive_path(path: str) -> SensitivePathClass:
+    """Classify ``path`` as NONE / ASK / DENY (heuristic; templates → NONE)."""
     raw = (path or "").strip()
     if not raw or raw in {".", "./", ".\\"}:
-        return False
+        return SensitivePathClass.NONE
     # Normalize separators; PurePosixPath keeps drive letters oddly, so try both.
     candidates = [PurePosixPath(raw.replace("\\", "/"))]
     if "\\" in raw or re.match(r"^[A-Za-z]:", raw):
         candidates.append(PureWindowsPath(raw))
+    worst = SensitivePathClass.NONE
     for p in candidates:
         parts = [part for part in p.parts if part not in {"/", ".", ""}]
         if not parts:
             continue
         for part in parts[:-1]:
-            if part.lower() in _SENSITIVE_PATH_SEGMENTS:
-                return True
-        name = parts[-1]
-        if _basename_is_sensitive(name):
-            return True
-    return False
+            low = part.lower()
+            if low in _DENY_PATH_SEGMENTS:
+                return SensitivePathClass.DENY
+            if low in _ASK_PATH_SEGMENTS:
+                worst = SensitivePathClass.ASK
+        name_class = _basename_sensitive_class(parts[-1])
+        if name_class is SensitivePathClass.DENY:
+            return SensitivePathClass.DENY
+        if name_class is SensitivePathClass.ASK:
+            worst = SensitivePathClass.ASK
+    return worst
 
 
-def _basename_is_sensitive(name: str) -> bool:
+def is_sensitive_path(path: str) -> bool:
+    """True when ``path`` is ASK or DENY (credential / key heuristic)."""
+    return classify_sensitive_path(path) is not SensitivePathClass.NONE
+
+
+def _basename_sensitive_class(name: str) -> SensitivePathClass:
     lower = name.lower()
-    if lower in _SENSITIVE_BASENAME_EXACT or name in _SENSITIVE_BASENAME_EXACT:
-        return True
-    if any(lower.startswith(prefix) for prefix in _SENSITIVE_BASENAME_PREFIXES):
-        return True
-    if any(lower.endswith(suffix) for suffix in _SENSITIVE_BASENAME_SUFFIXES):
-        return True
-    # Globs that clearly target credential basenames (``.env*``, ``*.pem``).
+    if any(lower.endswith(suffix) for suffix in _TEMPLATE_BASENAME_SUFFIXES):
+        return SensitivePathClass.NONE
+    if lower in _DENY_BASENAME_EXACT or name in _DENY_BASENAME_EXACT:
+        return SensitivePathClass.DENY
+    if any(lower.endswith(suffix) for suffix in _DENY_BASENAME_SUFFIXES):
+        return SensitivePathClass.DENY
+    if lower in _ASK_BASENAME_EXACT or name in _ASK_BASENAME_EXACT:
+        return SensitivePathClass.ASK
+    if any(lower.startswith(prefix) for prefix in _ASK_BASENAME_PREFIXES):
+        return SensitivePathClass.ASK
+    # Globs that clearly target credential / key basenames (``.env*``, ``*.pem``).
     if "*" in name or "?" in name:
         approx = re.sub(r"[*?]+", "", name)
-        if approx and _basename_is_sensitive(approx):
-            return True
+        if approx:
+            approx_class = _basename_sensitive_class(approx)
+            if approx_class is not SensitivePathClass.NONE:
+                return approx_class
+        if lower.endswith(".pem") or lower.endswith(".key") or "*.pem" in lower:
+            return SensitivePathClass.DENY
         if lower.startswith(".env") or lower.endswith(".env") or ".env." in lower:
-            return True
-    return False
+            return SensitivePathClass.ASK
+    return SensitivePathClass.NONE
 
 
 _TOP_TREE_REASON = (
@@ -427,20 +478,27 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
     args = arguments or {}
     name = (tool_name or "").strip()
 
-    # Sensitive reads first (deny — never escalate to approval).
+    # Sensitive path reads: templates allow; credentials ASK; key material DENY.
     if name in {"file_read", "grep", "code_search"}:
         for path in _path_args_for_tool(name, args):
-            if is_sensitive_path(path):
+            kind = classify_sensitive_path(path)
+            if kind is SensitivePathClass.DENY:
                 return BreakerHit(
                     verdict=BreakerVerdict.DENY,
                     rule_id="sensitive.path_read",
-                    reason=_SENSITIVE_DENY_REASON,
+                    reason=_SENSITIVE_DENY_READ_REASON,
+                )
+            if kind is SensitivePathClass.ASK:
+                return BreakerHit(
+                    verdict=BreakerVerdict.FORCE_APPROVAL,
+                    rule_id="sensitive.path_read_ask",
+                    reason=_SENSITIVE_ASK_READ_REASON,
                 )
 
     # Sensitive writes + pasted-key content (案 20260803-image-gen-byok-egress-boundary B).
     if name in {"file_write", "file_append", "str_replace", "write_section"}:
         for path in _path_args_for_tool(name, args):
-            if is_sensitive_path(path):
+            if classify_sensitive_path(path) is not SensitivePathClass.NONE:
                 return BreakerHit(
                     verdict=BreakerVerdict.DENY,
                     rule_id="sensitive.path_write",

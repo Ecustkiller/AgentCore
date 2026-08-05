@@ -1,3 +1,4 @@
+import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import { runRegenerate } from "@/services/turns";
@@ -18,6 +19,9 @@ import {
 import { SyncStatusHint } from "./SyncStatusHint";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
+
+/** 用户气泡折叠阈值：约 6–8 行（偏 ChatGPT 紧）。 */
+const USER_BUBBLE_COLLAPSED_MAX_H = "max-h-36";
 
 export function UserMessage({ message }: MessageBubbleProps) {
   const isGenerating = useActiveGenerating();
@@ -150,7 +154,14 @@ export function UserMessage({ message }: MessageBubbleProps) {
         }`}
         data-queued={queued ? "true" : undefined}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        <CollapsibleSpeech
+          contentKey={message.content}
+          fadeToClass={queued ? "from-muted/50" : "from-muted"}
+          collapsedMaxHClass={USER_BUBBLE_COLLAPSED_MAX_H}
+          sceneKey={`user:${message.id}`}
+        >
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        </CollapsibleSpeech>
         {queueLabel && (
           <div
             className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"

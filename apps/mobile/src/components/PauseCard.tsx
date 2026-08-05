@@ -102,10 +102,19 @@ function ApprovalBody({
 }) {
   const headline = primaryArg(pending.arguments);
   const label = TOOL_LABELS[pending.toolName] ?? pending.toolName;
+  const circuitBreakerHint =
+    typeof pending.arguments.circuit_breaker_hint === "string"
+      ? pending.arguments.circuit_breaker_hint.trim()
+      : "";
   return (
     <>
       <div className="pause-title">Agent 请求执行 · {label}</div>
       {headline && <div className="pause-arg">{headline}</div>}
+      {circuitBreakerHint ? (
+        <div className="pause-hint">
+          安全熔断升格审批（启发式兜底，并非完整拦截）：{circuitBreakerHint}
+        </div>
+      ) : null}
       <div className="pause-actions">
         <Btn tone="primary" disabled={busy} onClick={() => onDecide("approve")}>
           允许一次

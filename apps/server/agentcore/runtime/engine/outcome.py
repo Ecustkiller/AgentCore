@@ -36,6 +36,8 @@ class RoundOutcome:
     error_context: dict | None = None
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
+    # Upstream provider finish_reason when known (stop / length / tool_calls / …).
+    finish_reason: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:

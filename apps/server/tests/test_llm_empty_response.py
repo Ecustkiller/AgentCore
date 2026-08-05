@@ -49,6 +49,19 @@ def test_diagnose_silent_empty():
     )
 
 
+def test_diagnose_length_empty():
+    """finish_reason=length + empty body → LENGTH_EMPTY (protocol field only)."""
+    body = json.dumps(
+        {
+            "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+        }
+    )
+    assert (
+        diagnose_empty_response(raw_body=body, finish_reason="length")
+        is EmptyResponseDiagnosis.LENGTH_EMPTY
+    )
+
+
 def test_diagnose_format_mismatch():
     assert (
         diagnose_empty_response(raw_body="not-json {{{", format_mismatch=True)
@@ -76,3 +89,10 @@ def test_empty_response_event_message_appends_diagnosis():
     msg = empty_response_event_message(EmptyResponseDiagnosis.SILENT_EMPTY)
     assert msg.startswith("模型多次空响应")
     assert "模型返回空内容" in msg
+
+
+def test_empty_response_event_message_length_is_not_multiple():
+    """Truncation hard-cutoff copy must not say「多次空响应」."""
+    msg = empty_response_event_message(EmptyResponseDiagnosis.LENGTH_EMPTY)
+    assert "多次空响应" not in msg
+    assert "截断" in msg

@@ -182,6 +182,18 @@ async def test_loop_records_round_boundary_and_llm_call_per_round():
     assert text_round["finish_reason"] == "stop"
 
 
+async def test_llm_call_fact_preserves_upstream_length_finish_reason():
+    """Engine must not rewrite upstream finish_reason=length to stop on LlmCallFact."""
+    provider = _ScriptedProvider(
+        [[LLMChunk(delta_content="半截", finish_reason="length")]]
+    )
+    facts, content, _messages = await _run(provider, _StubTool())
+    assert content == "半截"
+    calls = [f for f in facts if f["kind"] == FactKind.LLM_CALL]
+    assert len(calls) == 1
+    assert calls[0]["payload"]["finish_reason"] == "length"
+
+
 async def test_single_ordered_log_interleaves_display_and_execution_facts():
     # The sink's display facts (tool_use_start/end) and the engine's execution facts
     # land in ONE log, in emission order: rb0, llm0(tool), tool_use_start/end, rb1, llm1.

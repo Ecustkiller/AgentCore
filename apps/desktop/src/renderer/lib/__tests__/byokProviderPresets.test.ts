@@ -39,6 +39,21 @@ describe("resolveByokProviderFromConfig", () => {
     );
   });
 
+  it("matches Hy TokenHub domestic, backup, and intl base_urls", () => {
+    expect(
+      resolveByokProviderFromConfig("https://tokenhub.tencentmaas.com/v1"),
+    ).toBe("hy");
+    expect(
+      resolveByokProviderFromConfig("https://tokenhub.tencentmaas.cn/v1"),
+    ).toBe("hy");
+    expect(
+      resolveByokProviderFromConfig("https://tokenhub-intl.tencentmaas.com/v1"),
+    ).toBe("hy");
+    expect(
+      resolveByokProviderFromConfig("https://tokenhub-intl.tencentmaas.cn/v1/"),
+    ).toBe("hy");
+  });
+
   it("falls back to custom for unknown endpoints", () => {
     expect(resolveByokProviderFromConfig("https://my-proxy.example/v1")).toBe(
       "custom",
@@ -71,5 +86,21 @@ describe("getByokProviderPreset", () => {
     expect(preset.models).toEqual(["kimi-k2.6", "kimi-k3", "kimi-k2.5"]);
     expect(preset.models).not.toContain("kimi-k2");
     expect(preset.models).not.toContain("moonshot-v1-8k");
+  });
+
+  it("returns Hy TokenHub domestic metadata", () => {
+    const preset = getByokProviderPreset("hy");
+    expect(preset.label).toBe("腾讯 Hy (TokenHub)");
+    expect(preset.baseUrl).toBe("https://tokenhub.tencentmaas.com/v1");
+    expect(preset.baseUrlAliases).toEqual([
+      "https://tokenhub.tencentmaas.cn/v1",
+      "https://tokenhub-intl.tencentmaas.com/v1",
+      "https://tokenhub-intl.tencentmaas.cn/v1",
+    ]);
+    expect(preset.defaultModel).toBe("hy3");
+    expect(preset.models).toEqual(["hy3", "hy3-preview"]);
+    expect(preset.keyHelpUrl).toBe(
+      "https://console.cloud.tencent.com/tokenhub/apikey",
+    );
   });
 });

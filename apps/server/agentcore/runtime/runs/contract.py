@@ -40,7 +40,7 @@ import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from agentcore.runtime.runs.placeholder_scan import (
     is_content_deliverable_path,
@@ -721,6 +721,57 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
     return True
 
 
+# JSON 结构不可解析（与 code_audit / 缺章节同属「格式/结构」脸，非结论质量）。
+_JSON_STRUCTURE_FAILURES = frozenset(
+    {
+        "产出不是可解析的 JSON",
+    }
+)
+_JSON_STRUCTURE_PREFIXES = (
+    "交付物文件不是可解析的 JSON：",
+    "交付物文件无法读取以校验 JSON：",
+)
+
+
+def is_contract_structure_failure(message: str) -> bool:
+    """True when a hard-failure string is structure/format (not conclusion quality).
+
+    Classifies **backend-stamped** gate messages only (code_audit ``结构闸：`` prefix,
+    section format markers, JSON parse gates). Callers must not regex-scan model prose.
+    """
+    from agentcore.runtime.runs.code_audit_gate import is_code_audit_structure_failure
+
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if is_code_audit_structure_failure(text):
+        return True
+    if text.startswith(_FORMAT_REPAIR_SECTION_PREFIX):
+        return True
+    if text.startswith(_FORMAT_REPAIR_KEYWORD_PREFIX):
+        return True
+    if _FORMAT_REPAIR_TOO_SHORT_MARKER in text:
+        return True
+    if text in _JSON_STRUCTURE_FAILURES:
+        return True
+    return any(text.startswith(p) for p in _JSON_STRUCTURE_PREFIXES)
+
+
+def contract_run_failure_kind(
+    verdict: ContractVerdict,
+) -> Literal["format", "quality"]:
+    """Wire ``run_failed.failure_kind`` for contract hard-fail.
+
+    ``format`` = every failure is structure/schema（code_audit / 缺章节 / JSON 形）→
+    UI「格式未过」；``quality`` = 内容/结论/硬缺口/空交付或混合 →「未达标」。
+    """
+    if not verdict.failures:
+        return "quality"
+    if all(is_contract_structure_failure(f) for f in verdict.failures):
+        return "format"
+    return "quality"
+
+
 def format_light_repair_feedback(
     verdict: ContractVerdict,
     *,
@@ -995,6 +1046,7 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
     if deliverable.code_audit_gate:
         lines.append(
             "- 须另交配套 `*.audit.json`（findings：severity/verification/verdict/evidence；"
+            "severity 权威=高|中|低|观察·工程，亦接受 P0–P3 / high|medium|low|info 等同义归一；"
             "高须 trigger_path；安全类或高须 reachability）；"
             "未读全/待核实不得标中+；全量 tsc/pytest 超时不得标中+；结构闸硬拒违规"
         )

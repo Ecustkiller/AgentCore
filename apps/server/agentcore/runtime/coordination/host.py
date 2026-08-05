@@ -61,6 +61,28 @@ def should_defer_run_plan_emit_to_merge(
     return existing is not None and existing.active
 
 
+def _seed_terminal_sets(
+    seed_completed: dict[str, Any] | None,
+) -> tuple[set[str], set[str]]:
+    """Journal seed → ``(completed_run_ids, vacated_run_ids)`` for cross-turn admit."""
+    from agentcore.runtime.runs.types import RunPhase
+
+    completed: set[str] = set()
+    vacated: set[str] = set()
+    if not seed_completed:
+        return completed, vacated
+    hard = {RunPhase.FAILED, RunPhase.SKIPPED, RunPhase.CANCELLED}
+    for rid, state in seed_completed.items():
+        rid_s = str(rid).strip()
+        if not rid_s:
+            continue
+        completed.add(rid_s)
+        phase = getattr(state, "phase", None)
+        if phase in hard:
+            vacated.add(rid_s)
+    return completed, vacated
+
+
 def admit_before_run_plan_emit(
     tool: DelegateTool,
     plan: RunPlan,
@@ -68,13 +90,20 @@ def admit_before_run_plan_emit(
     execution_id: str,
     finalize: bool = False,
     call_idx: int | None = None,
+    host_plan: RunPlan | None = None,
+    seed_completed: dict[str, Any] | None = None,
 ) -> ToolResult | None:
     """Sibling / append / isomorphic gates before durable ``run_plan`` emit.
+
+    ``plan`` must be the **new batch only** (not host∪new). Cross-turn append
+    passes ``host_plan`` + journal ``seed_completed`` so completed seats get
+    auto-``replaces`` instead of a false sibling reject on the merged graph.
 
     Returns a contract-failure :class:`ToolResult` when the batch must not become
     a graph member; ``None`` means admitted (caller may emit then execute).
     """
     from agentcore.runtime.coordination.append_guard import (
+        admit_added_nodes,
         append_overlap_reject_message,
         apply_vacated_seat_replaces,
         find_append_overlaps,
@@ -174,6 +203,85 @@ def admit_before_run_plan_emit(
                     success=False,
                     output="",
                     error=msg,
+                    effect=ToolEffect.CONTINUE,
+                    contract_failure=True,
+                ),
+                node_count=len(plan.nodes),
+                has_deps=any(n.depends_on for n in plan.nodes),
+            )
+        return None
+
+    # Cross-turn append: no live session — admit new batch vs host journal state.
+    # Do **not** sibling-scan host∪new (completed same-seat + same artifact is
+    # legitimate续派; sibling is same-batch only).
+    if (
+        host_plan is not None
+        and int(getattr(tool, "_depth", 0) or 0) == 0
+        and not finalize
+    ):
+        from agentcore.runtime.coordination.isomorphic import (
+            is_isomorphic_redelegation,
+            isomorphic_reject_message,
+        )
+
+        completed_ids, vacated_ids = _seed_terminal_sets(seed_completed)
+        if is_isomorphic_redelegation(
+            plan,
+            host_plan,
+            completed_run_ids=completed_ids,
+        ):
+            logger.info(
+                "delegate.isomorphic_rejected",
+                execution_id=execution_id,
+                nodes=len(plan.nodes),
+                completed=len(completed_ids),
+                total=len(host_plan.nodes),
+                call=call_idx,
+                via="pre_emit_cross_turn",
+            )
+            msg = isomorphic_reject_message(
+                plan,
+                completed=len(completed_ids),
+                total=len(host_plan.nodes),
+            )
+            return annotate_batch_meta(
+                ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=msg,
+                    effect=ToolEffect.CONTINUE,
+                    contract_failure=True,
+                ),
+                node_count=0,
+                has_deps=False,
+            )
+
+        reject = admit_added_nodes(
+            plan,
+            host_plan,
+            completed_run_ids=completed_ids,
+            vacated_run_ids=vacated_ids,
+            ownership=None,
+            force=False,
+            total_workers=len(host_plan.nodes),
+        )
+        if reject is not None:
+            logger.info(
+                "coordination.append_overlap_rejected",
+                execution_id=execution_id,
+                overlaps=1,
+                completed=len(completed_ids),
+                total=len(host_plan.nodes),
+                call=call_idx,
+                via="pre_emit_cross_turn",
+            )
+            return annotate_batch_meta(
+                ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=reject,
                     effect=ToolEffect.CONTINUE,
                     contract_failure=True,
                 ),

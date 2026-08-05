@@ -37,6 +37,8 @@ def test_code_audit_single_module_one_auditor():
     assert d["form"] == "files"
     assert d["strict"] is True
     assert d["code_audit_gate"] is True
+    assert "P0" in t["task"] and "P3" in t["task"]
+    assert "观察·工程" in t["task"]
     assert len(d["artifacts"]) == 2
     assert d["artifacts"][0].startswith(f"{REVIEWS_DIR}/code-audit-")
     assert d["artifacts"][1].endswith(".audit.json")

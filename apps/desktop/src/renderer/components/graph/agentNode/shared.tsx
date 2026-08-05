@@ -169,9 +169,9 @@ export function statusLabel(status: RunStatus): string {
 }
 
 /**
- * Short face label for a failed worker (quality / model interrupt / call failure).
+ * Short face label for a failed worker (quality / format / model interrupt / call).
  * Prefer machine-readable ``failureKind``; keep a thin error-text fallback for old journals.
- * Full `error` stays in peek / run detail.
+ * Full `error` stays in peek / run detail. Do not regex-guess format vs quality from error text.
  */
 export function failureFaceLabel(
   error: string | null | undefined,
@@ -181,6 +181,7 @@ export function failureFaceLabel(
   // Files already on disk before the terminal failure — don't imply empty failure.
   if (productLanded) return "产出已落盘";
   if (failureKind === "quality") return "未达标";
+  if (failureKind === "format") return "格式未过";
   if (failureKind === "model") return "模型中断";
   if (failureKind === "call") return "调用失败";
   const raw = (error ?? "").trim();
@@ -403,7 +404,11 @@ export type EscalationDisplayKind =
   | "dep"
   | "contradiction";
 
-/** Gate maps contradiction → wire `kind=scope`; question carries「需求矛盾」文案. */
+/**
+ * Legacy-tape display: older Gate runs mapped contradiction → wire `kind=scope`
+ * with「需求矛盾」in the question. Live Gate no longer does that; keep this so
+ * old recordings still label honestly instead of「职责偏离」.
+ */
 export function isContradictionEscalation(e: {
   kind?: string;
   question?: string;

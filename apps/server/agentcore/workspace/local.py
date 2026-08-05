@@ -41,7 +41,7 @@ from agentcore.workspace.external_mounts import (
     ExternalMount,
     external_mutation_allowed,
     external_ns,
-    parse_external_path,
+    is_external_namespace,
     route_external,
 )
 from agentcore.workspace.indexing.maintainer import IndexMaintainer
@@ -176,15 +176,17 @@ class LocalWorkspace:
         Unknown ``external/<alias>`` → ``PathNotFound``. Mutations gated by mount
         ``mode`` (readonly vs organize whitelist; permanent delete always denied).
         """
-        parsed = parse_external_path(path)
-        if parsed is None:
+        if is_external_namespace(path):
+            # Reserved namespace: never fall through to the primary workspace
+            # (invalid / unknown alias would otherwise write under ``external/…``).
+            routed = route_external(path, self._mounts)
+            if routed is None:
+                raise PathNotFound(path)
+        else:
             # Same contract as ServerWorkspace.resolve_safe_path / desktop pathGuard:
             # bare `/`/`\` → `.`; `/<root_label>/…` strip — before the channel sees it.
             norm = normalize_workspace_path(path, root_label=self.root_label)
             return None, self._in(norm), None
-        routed = route_external(path, self._mounts)
-        if routed is None:
-            raise PathNotFound(path)
         if write:
             err = external_mutation_allowed(
                 routed.mount,

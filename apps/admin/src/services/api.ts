@@ -70,23 +70,37 @@ function csrfHeaders(method: string): Record<string, string> {
 // session yet) — they must NOT trigger the refresh-replay-then-logout flow.
 const isAuthPath = (path: string): boolean => path.startsWith("/v1/auth/");
 
+// Single in-flight refresh shared by every concurrent 401 caller (desktop
+// tryRefresh parity). Refresh tokens rotate on first use — racing multiple
+// POSTs would trip reuse detection and revoke the family. Backend grace is the
+// cross-tab backstop; we only collapse same-process bursts here.
+let refreshInFlight: Promise<boolean> | null = null;
+
 /**
  * Silent cookie refresh. Exported for cold-start bootstrap: `/v1/auth/me` is an
  * auth path so {@link request} will not auto-refresh on its 401 — bootstrap must
  * call this explicitly, then retry `/me`. Regular API 401s still go through the
  * in-request refresh below (non-auth paths only, to avoid refresh recursion).
+ *
+ * Single-flight: concurrent callers share one `/refresh` round-trip.
  */
-export async function tryRefresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-    });
-    captureCsrf(res);
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      captureCsrf(res);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 async function request<T>(
@@ -130,7 +144,7 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init ?? {}),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: "POST",

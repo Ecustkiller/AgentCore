@@ -18,7 +18,10 @@ from agentcore.core.types import (
     validate_permission_axes,
 )
 from agentcore.runtime.kickoff.gate import needs_capability_auth, should_kickoff
-from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
+from agentcore.runtime.sandbox_approval import (
+    cloud_worker_skips_per_call_gate,
+    execution_tool_auto_passes,
+)
 from agentcore.tools.builtin import build_worker_registry
 
 # Explicit kickoff-command axes for授/开工卡 tests (no longer a built-in recipe).
@@ -38,6 +41,15 @@ _KICKOFF_SKIP = PermissionAxes(
 
 class _LocalBackend:
     location = "local"
+
+
+class _ServerBackend:
+    location = "server"
+
+
+_FILE_OP_CLASS = frozenset(
+    {"file_write", "file_append", "str_replace", "write_section", "git"}
+)
 
 
 def test_default_axes_are_less_interrupt():
@@ -293,3 +305,68 @@ def test_command_ask_no_capability_auth():
     # rules + plan_preview still hangs team card (组团按 rules)
     assert should_kickoff(plan_preview=True, local_gate=True, axes=axes) is True
     assert axes.host_disabled is True
+
+
+def test_cloud_worker_honors_file_write_ask():
+    """云端 worker：file_write=ask 仍弹写文件类；session 仍免逐次卡。"""
+    cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+    session = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+    cloud = _ServerBackend()
+
+    assert (
+        cloud_worker_skips_per_call_gate(
+            cloud,
+            "file_write",
+            permission_axes=cautious,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is False
+    )
+    assert (
+        cloud_worker_skips_per_call_gate(
+            cloud,
+            "write_section",
+            permission_axes=cautious,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is False
+    )
+    assert (
+        cloud_worker_skips_per_call_gate(
+            cloud,
+            "file_write",
+            permission_axes=session,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is True
+    )
+    # Non-file server tools stay historically ungated even under 谨慎.
+    assert (
+        cloud_worker_skips_per_call_gate(
+            cloud,
+            "web_search",
+            permission_axes=cautious,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is True
+    )
+    # Local never skips via this helper (full gate shared).
+    assert (
+        cloud_worker_skips_per_call_gate(
+            _LocalBackend(),
+            "file_write",
+            permission_axes=cautious,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is False
+    )
+    # Desktop-touch keeps the gate on cloud regardless of file_write axis.
+    assert (
+        cloud_worker_skips_per_call_gate(
+            cloud,
+            "mcp_filesystem_write",
+            permission_axes=session,
+            file_op_tools=_FILE_OP_CLASS,
+        )
+        is False
+    )

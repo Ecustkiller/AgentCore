@@ -120,16 +120,34 @@ def _is_tools_unsupported_rejection(status: int, body: str) -> bool:
     return bool(_TOOLS_PARAM_MARKERS.search(body) and _TOOLS_REJECT_MARKERS.search(body))
 
 
+def _wire_model_leaf(model: str) -> str:
+    """Strip optional ``provider/`` prefix; compare on the leaf id only."""
+    return model.rsplit("/", 1)[-1].lower()
+
+
 def _is_deepseek_model(model: str) -> bool:
     """True for DeepSeek ids (incl. ``provider/deepseek-…`` routed names)."""
-    name = model.rsplit("/", 1)[-1].lower()
-    return name.startswith("deepseek")
+    return _wire_model_leaf(model).startswith("deepseek")
 
 
 def _is_deepseek_v4(model: str) -> bool:
     """True for DeepSeek V4 ids (incl. ``provider/deepseek-v4-…`` routed names)."""
-    name = model.rsplit("/", 1)[-1].lower()
-    return name.startswith("deepseek-v4")
+    return _wire_model_leaf(model).startswith("deepseek-v4")
+
+
+def _is_hy3_model(model: str) -> bool:
+    """True for Hy3 ids only (``hy3`` / ``hy3-preview``), not other TokenHub ``hy-*``."""
+    return _wire_model_leaf(model) in {"hy3", "hy3-preview"}
+
+
+def _uses_reasoning_content_echo(model: str) -> bool:
+    """Upstream expects assistant+tool_calls turns to echo ``reasoning_content``."""
+    return _is_deepseek_model(model) or _is_hy3_model(model)
+
+
+def _uses_thinking_type_switch(model: str) -> bool:
+    """Upstream honors ``thinking: {type: enabled|disabled}`` (DeepSeek V4 / Hy3)."""
+    return _is_deepseek_v4(model) or _is_hy3_model(model)
 
 
 def _usage_from(usage_data: dict) -> TokenUsage:
@@ -633,10 +651,10 @@ class OpenAICompatibleProvider:
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 
     def _build_payload(self, request: LLMRequest, *, stream: bool) -> dict:
-        # Default wire shape is clean OpenAI Chat Completions. DeepSeek thinking
+        # Default wire shape is clean OpenAI Chat Completions. DeepSeek/Hy3 thinking
         # dialect (reasoning_content echo) is gated by model id — broadcasting it
         # to Claude/other relays triggers invalid_request on multi-turn tool loops.
-        deepseek = _is_deepseek_model(request.model)
+        echo_reasoning = _uses_reasoning_content_echo(request.model)
         messages = []
         for msg in request.messages:
             m: dict = {"role": msg.role}
@@ -656,11 +674,11 @@ class OpenAICompatibleProvider:
                 ]
             if msg.tool_call_id:
                 m["tool_call_id"] = msg.tool_call_id
-            if deepseek:
+            if echo_reasoning:
                 if msg.reasoning_content is not None:
                     m["reasoning_content"] = msg.reasoning_content
                 elif msg.role == "assistant" and msg.tool_calls:
-                    # DeepSeek thinking mode: assistant tool-call turns must echo
+                    # Thinking mode: assistant tool-call turns must echo
                     # reasoning_content (empty string when the model omitted it).
                     m["reasoning_content"] = ""
             messages.append(m)
@@ -678,12 +696,12 @@ class OpenAICompatibleProvider:
             payload["tool_choice"] = request.tool_choice
         if stream:
             payload["stream_options"] = {"include_usage": True}
-        # DeepSeek V4 defaults to thinking on. Background one-shots (title / memory / …)
+        # DeepSeek V4 / Hy3 default thinking on. Background one-shots (title / memory / …)
         # must disable it or a tight max_tokens budget is spent on reasoning_content and
         # the JSON body comes back empty → fallback_title = raw user input in the sidebar.
-        if request.thinking is False and _is_deepseek_v4(request.model):
+        if request.thinking is False and _uses_thinking_type_switch(request.model):
             payload["thinking"] = {"type": "disabled"}
-        elif request.thinking is True and _is_deepseek_v4(request.model):
+        elif request.thinking is True and _uses_thinking_type_switch(request.model):
             payload["thinking"] = {"type": "enabled"}
         return payload
 

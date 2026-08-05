@@ -795,13 +795,39 @@ class DelegateTool:
         self._coordination = coordination
         self._seed_notes = seed_notes
 
-        # 跨回合同图追加：宿主计划已在 build 前加载；此处合并新节点并绑定生长 divert。
+        # 跨回合同图追加：先对「仅新批次」入闸（用宿主 journal completed），再合并进旧图。
+        # 禁止先 merge 再 sibling 整图——会把已完成同座+同路径误判成同批交叉。
         added_nodes_for_anchor: list = list(plan.nodes)
         graph_redirect = None
         graph_redirect_token = None
 
+        finalize_flag = bool(arguments.get("finalize"))
+        from agentcore.runtime.coordination.host import (
+            admit_before_run_plan_emit,
+            should_defer_run_plan_emit_to_merge,
+        )
+
         if append_to:
+            from agentcore.runtime.coordination.session import current_execution_id
             from agentcore.runtime.runs.plan import RunPlanError
+
+            # Workers / registry must see host eid before admit / emit.
+            self._base_tool_context.execution_id = append_to
+            # Turn teardown clears via current_execution_id — keep it on the host
+            # so the append coordination session is not orphaned under a fresh id.
+            current_execution_id.set(append_to)
+
+            admitted_reject = admit_before_run_plan_emit(
+                self,
+                plan,
+                execution_id=append_to,
+                finalize=finalize_flag,
+                call_idx=call_idx,
+                host_plan=host_plan_for_append,
+                seed_completed=append_seed,
+            )
+            if admitted_reject is not None:
+                return admitted_reject
 
             old_plan = host_plan_for_append
             assert old_plan is not None  # loaded before build_run_plan
@@ -827,36 +853,19 @@ class DelegateTool:
                     contract_failure=True,
                 )
             plan = old_plan
-            # Workers / coordination registry must see the host execution_id before
-            # admission / emit (reject must not leave graph_append / run_plan).
-            self._base_tool_context.execution_id = append_to
-            from agentcore.runtime.coordination.session import current_execution_id
-
-            # Turn teardown clears via current_execution_id — keep it on the host
-            # so the append coordination session is not orphaned under a fresh id.
-            current_execution_id.set(append_to)
-
-        execution_id = (
-            append_to
-            if append_to
-            else (self._base_tool_context.execution_id or new_id())
-        )
-        finalize_flag = bool(arguments.get("finalize"))
-        from agentcore.runtime.coordination.host import (
-            admit_before_run_plan_emit,
-            should_defer_run_plan_emit_to_merge,
-        )
-
-        # 准入→提交→执行：sibling / 追加重叠 / 同构闸在 durable run_plan 之前。
-        admitted_reject = admit_before_run_plan_emit(
-            self,
-            plan,
-            execution_id=execution_id,
-            finalize=finalize_flag,
-            call_idx=call_idx,
-        )
-        if admitted_reject is not None:
-            return admitted_reject
+            execution_id = append_to
+        else:
+            execution_id = self._base_tool_context.execution_id or new_id()
+            # 准入→提交→执行：sibling / 追加重叠 / 同构闸在 durable run_plan 之前。
+            admitted_reject = admit_before_run_plan_emit(
+                self,
+                plan,
+                execution_id=execution_id,
+                finalize=finalize_flag,
+                call_idx=call_idx,
+            )
+            if admitted_reject is not None:
+                return admitted_reject
 
         if append_to:
             from agentcore.core.log_context import get_log_value

@@ -5,7 +5,9 @@ import { sendMidFlightMessage } from "../midFlight";
 vi.mock("@/api/client", () => ({
   apiUrl: (path: string) => `http://test${path}`,
   authHeader: () => ({ Authorization: "Bearer t" }),
-  refreshTokens: vi.fn(async () => false),
+  // Passthrough — midFlight tests exercise SSE/queue paths, not the 401 policy
+  // (see fetchWithAuthRefresh.test.ts for replay-still-401 clearing).
+  fetchWithAuthRefresh: async (doFetch: () => Promise<Response>) => doFetch(),
 }));
 
 function sseBody(events: SSEEvent[]): ReadableStream<Uint8Array> {

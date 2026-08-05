@@ -1,7 +1,7 @@
 /**
  * AgentTown WebGL jslib SSE smoke (§15.2).
  *
- * Loads Builds/WebGL with ?api=&token=&run=, wraps fetch to observe the
+ * Loads Builds/WebGL with ?api=&run=#token=, wraps fetch to observe the
  * AgentTownSse.jslib stream (Unity status text stays in HUD, not console),
  * and optionally advances a tick so sim.tick_* frames appear.
  *

@@ -146,6 +146,144 @@ async def test_fence_stream_failure_emits_llm_call_failed():
     assert failed["stream"] is True
     assert failed["attempt"] == 1
     assert "stream-down" in failed["error"]
+    assert not any(c.get("event") == "llm.call" for c in caps)
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_aclose_with_seen_usage_still_meters(monkeypatch):
+    """Consumer aclose after a usage chunk must bill seen tokens (no fabrication)."""
+    enqueued: list[TokenUsage] = []
+
+    def _capture_enqueue(*, model, usage, duration_ms, scenario, credential_source):
+        enqueued.append(usage)
+        return "run-1"
+
+    monkeypatch.setattr(
+        "agentcore.billing.call_meter.maybe_enqueue_inprocess_call",
+        _capture_enqueue,
+    )
+
+    class _UsageThenHang(_FakeLeaf):
+        async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+            yield LLMChunk(delta_content="partial")
+            yield LLMChunk(usage=TokenUsage(input_tokens=10, output_tokens=4))
+            yield LLMChunk(delta_content="more")  # aclose lands here
+
+    provider = observe_provider(_UsageThenHang())
+    with capture_logs() as caps:
+        gen = provider.stream(_req(scenario="chat"))
+        assert (await gen.__anext__()).delta_content == "partial"
+        assert (await gen.__anext__()).usage is not None
+        await gen.aclose()
+
+    call = next(c for c in caps if c.get("event") == "llm.call")
+    assert call["stream"] is True
+    assert call["input_tokens"] == 10
+    assert call["output_tokens"] == 4
+    assert call["finish_reason"] == "stream_closed"
+    assert not any(c.get("event") == "llm.call_failed" for c in caps)
+    assert len(enqueued) == 1
+    assert enqueued[0].input_tokens == 10
+    assert enqueued[0].output_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_aclose_without_usage_does_not_fabricate_bill(monkeypatch):
+    """Pure mid-stream aclose with no usage chunk → failed log only, no meter."""
+    enqueued: list[object] = []
+
+    def _capture_enqueue(**kwargs):
+        enqueued.append(kwargs)
+        return "run-1"
+
+    monkeypatch.setattr(
+        "agentcore.billing.call_meter.maybe_enqueue_inprocess_call",
+        _capture_enqueue,
+    )
+
+    class _ContentOnly(_FakeLeaf):
+        async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+            yield LLMChunk(delta_content="x")
+            yield LLMChunk(delta_content="y")
+
+    provider = observe_provider(_ContentOnly())
+    with capture_logs() as caps:
+        gen = provider.stream(_req())
+        assert (await gen.__anext__()).delta_content == "x"
+        await gen.aclose()
+
+    failed = next(c for c in caps if c.get("event") == "llm.call_failed")
+    assert failed["error"] == "stream_closed_by_consumer"
+    assert failed["error_type"] == "GeneratorExit"
+    assert not any(c.get("event") == "llm.call" for c in caps)
+    assert enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_failure_with_seen_usage_salvages_meter(monkeypatch):
+    """Exception after a usage chunk still meters; failure log remains."""
+    enqueued: list[TokenUsage] = []
+
+    def _capture_enqueue(*, model, usage, duration_ms, scenario, credential_source):
+        enqueued.append(usage)
+        return "run-1"
+
+    monkeypatch.setattr(
+        "agentcore.billing.call_meter.maybe_enqueue_inprocess_call",
+        _capture_enqueue,
+    )
+
+    class _UsageThenBoom(_FakeLeaf):
+        async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+            yield LLMChunk(
+                finish_reason="stop",
+                usage=TokenUsage(input_tokens=7, output_tokens=2),
+            )
+            raise LLMUpstreamError("after-usage", upstream_status=502, retry_attempts=0)
+
+    provider = observe_provider(_UsageThenBoom())
+    with capture_logs() as caps, pytest.raises(LLMUpstreamError):
+        async for _ in provider.stream(_req()):
+            pass
+
+    assert any(c.get("event") == "llm.call_failed" for c in caps)
+    call = next(c for c in caps if c.get("event") == "llm.call")
+    assert call["input_tokens"] == 7
+    assert call["output_tokens"] == 2
+    assert call["finish_reason"] == "stop"
+    assert len(enqueued) == 1
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_aborted_with_usage_meters_like_ok(monkeypatch):
+    """Post-commit aborted marker + prior usage → normal llm.call (not call_failed)."""
+    enqueued: list[TokenUsage] = []
+
+    def _capture_enqueue(*, model, usage, duration_ms, scenario, credential_source):
+        enqueued.append(usage)
+        return "run-1"
+
+    monkeypatch.setattr(
+        "agentcore.billing.call_meter.maybe_enqueue_inprocess_call",
+        _capture_enqueue,
+    )
+
+    class _AbortWithUsage(_FakeLeaf):
+        async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+            yield LLMChunk(delta_content="kept")
+            yield LLMChunk(usage=TokenUsage(input_tokens=3, output_tokens=1))
+            yield LLMChunk(aborted=True)
+
+    provider = observe_provider(_AbortWithUsage())
+    with capture_logs() as caps:
+        chunks = [c async for c in provider.stream(_req())]
+    assert chunks[-1].aborted is True
+    call = next(c for c in caps if c.get("event") == "llm.call")
+    assert call["finish_reason"] == "aborted"
+    assert call["input_tokens"] == 3
+    assert call["output_tokens"] == 1
+    assert not any(c.get("event") == "llm.call_failed" for c in caps)
+    assert len(enqueued) == 1
 
 
 def test_build_provider_wraps_with_fence(monkeypatch):
