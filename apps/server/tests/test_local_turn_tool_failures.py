@@ -56,6 +56,16 @@ def test_local_turn_tool_failure_schema_normalizes_and_truncates():
     assert len(row.message) == 200
 
 
+def test_record_turn_request_accepts_empty_user_message():
+    """Process-only salvage may omit real um (ffafc42b)."""
+    body = RecordTurnRequest(
+        user_message="",
+        user_message_id="u1",
+        trace_id=_TRACE,
+    )
+    assert body.user_message == ""
+
+
 def test_record_turn_request_tool_failures_optional_default_empty():
     body = RecordTurnRequest(
         user_message="hi",

@@ -200,6 +200,11 @@ _MODEL_404_MARKERS = re.compile(
     r"找不到.*模型|模型.*(不存在|不可用|未找到|无权限))",
     re.IGNORECASE,
 )
+# Structured upstream error.message only (already extracted) — not free-text hard gate.
+_TEMPERATURE_DEPRECATED_MARKERS = re.compile(
+    r"`?temperature`?\s+is\s+deprecated",
+    re.IGNORECASE,
+)
 
 
 def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
@@ -247,6 +252,12 @@ def client_error_message(
         if extracted:
             return f"{provider_name} {extracted}"
         return f"{provider_name} 接口地址不可达（404），请检查 base_url 配置"
+    if (
+        status_code == 400
+        and extracted
+        and _TEMPERATURE_DEPRECATED_MARKERS.search(extracted)
+    ):
+        return f"{provider_name} 当前模型不接受 temperature 参数，请重试或更换模型"
     if extracted:
         return f"{provider_name} {extracted}"
     if status_code == 400:

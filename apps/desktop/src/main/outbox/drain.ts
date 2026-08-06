@@ -12,6 +12,7 @@ import { BrowserWindow, app, ipcMain } from "electron";
 import { bearerPostJson, refreshAccessToken } from "../auth-client";
 import {
   type OutboxRecord,
+  EMPTY_USER_MESSAGE_PLACEHOLDER,
   PHASE_OPEN,
   PHASE_READY,
   computeBackoffDelayMs,
@@ -109,12 +110,14 @@ async function drainOutboxDetailed(opts?: {
         }
       }
       if (record.phase !== PHASE_READY) continue;
-      if (!(record.user_message || "").trim()) {
-        // C2: empty user_message + process (journal/…) must not silently stick.
-        // Fill a schema-legal placeholder and POST, or dead-letter with a reason.
+      if (!(record.user_message || "").trim() ||
+        (record.user_message || "").trim() === EMPTY_USER_MESSAGE_PLACEHOLDER
+      ) {
+        // C2: empty / legacy-placeholder um + process (journal/…) must POST so
+        // assistant/journal can settle — server skips inserting a user bubble.
         if (fillEmptyUserMessageForWriteback(record)) {
           console.warn(
-            "[outbox] empty user_message → placeholder for writeback",
+            "[outbox] empty user_message → writeback without user bubble",
             record.user_message_id,
             record.message_id ?? null,
             {
@@ -134,11 +137,11 @@ async function drainOutboxDetailed(opts?: {
             await writeRecord(record);
           } catch (err) {
             console.error(
-              "[outbox] empty user_message placeholder persist failed",
+              "[outbox] empty user_message normalize persist failed",
               record.user_message_id,
               err,
             );
-            // Still attempt POST with in-memory fill.
+            // Still attempt POST with in-memory empty um.
           }
         } else {
           console.error(

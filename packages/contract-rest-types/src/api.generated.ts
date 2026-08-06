@@ -9284,6 +9284,9 @@ export interface components {
          *     matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
          *     authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
          *     write-back persists content only.
+         *
+         *     ``user_message`` may be empty for process-only salvage (journal/runs): the server
+         *     must not insert a visible user row when there is no real user intent.
          */
         RecordTurnRequest: {
             /**
@@ -9340,7 +9343,10 @@ export interface components {
             tool_failures?: components["schemas"]["LocalTurnToolFailure"][];
             /** Trace Id */
             trace_id: string;
-            /** User Message */
+            /**
+             * User Message
+             * @default
+             */
             user_message: string;
             /** User Message Id */
             user_message_id: string;

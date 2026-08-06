@@ -9255,7 +9255,7 @@
         "type": "object"
       },
       "RecordTurnRequest": {
-        "description": "A finished local (sidecar) turn to persist: the user message + assistant reply.\n\nCarries the assistant outcome the local pipeline returned (content / reasoning /\ncitations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored\nids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /\nreasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row\nmatches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered\nauthoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this\nwrite-back persists content only.",
+        "description": "A finished local (sidecar) turn to persist: the user message + assistant reply.\n\nCarries the assistant outcome the local pipeline returned (content / reasoning /\ncitations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored\nids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /\nreasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row\nmatches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered\nauthoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this\nwrite-back persists content only.\n\n``user_message`` may be empty for process-only salvage (journal/runs): the server\nmust not insert a visible user row when there is no real user intent.",
         "properties": {
           "cache_hit_tokens": {
             "default": 0,
@@ -9391,8 +9391,8 @@
             "type": "string"
           },
           "user_message": {
+            "default": "",
             "maxLength": 32000,
-            "minLength": 1,
             "title": "User Message",
             "type": "string"
           },
@@ -9404,7 +9404,6 @@
           }
         },
         "required": [
-          "user_message",
           "user_message_id",
           "trace_id"
         ],
@@ -14892,7 +14891,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.38"
+    "version": "0.3.39"
   },
   "openapi": "3.1.0",
   "paths": {

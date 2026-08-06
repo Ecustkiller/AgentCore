@@ -150,6 +150,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='chat.local_turn_idempotent_race'),
     EventSpec(name='chat.local_turn_recorded'),
     EventSpec(name='chat.local_turn_reuse_paired_user'),
+    EventSpec(name='chat.local_turn_skip_synthetic_user'),
     EventSpec(name='chat.local_turn_tool_failures'),
     EventSpec(name='chat.message_edited'),
     EventSpec(name='chat.message_recalled'),

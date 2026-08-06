@@ -150,6 +150,25 @@ def _uses_thinking_type_switch(model: str) -> bool:
     return _is_deepseek_v4(model) or _is_hy3_model(model)
 
 
+# Anthropic effort / sampling-restricted leaf markers — wire rejects ``temperature``
+# (Opus 4.7+, Opus 5, Fable/Mythos 5). Keep narrow; do not blanket all ``claude-*``.
+_TEMPERATURE_OMIT_MARKERS = (
+    "opus-4-7",
+    "opus-4.7",
+    "opus-4-8",
+    "opus-4.8",
+    "opus-5",
+    "fable-5",
+    "mythos-5",
+)
+
+
+def _omits_temperature(model: str) -> bool:
+    """True when upstream rejects wire ``temperature`` for this model id."""
+    leaf = _wire_model_leaf(model)
+    return any(marker in leaf for marker in _TEMPERATURE_OMIT_MARKERS)
+
+
 def _usage_from(usage_data: dict) -> TokenUsage:
     """Wire-usage parse — both DeepSeek and OpenAI prompt-cache dialects (protocol.py)."""
     return TokenUsage.from_openai_wire(usage_data)
@@ -687,8 +706,10 @@ class OpenAICompatibleProvider:
             "model": request.model,
             "messages": messages,
             "stream": stream,
-            "temperature": request.temperature,
         }
+        # Claude Opus 4.7+ / Opus 5 family reject temperature → omit (not default).
+        if not _omits_temperature(request.model):
+            payload["temperature"] = request.temperature
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
         if request.tools:

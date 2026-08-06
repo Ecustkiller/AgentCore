@@ -234,11 +234,10 @@ export function toolFailuresFromJournal(
 }
 
 /**
- * Wire placeholder when outbox sealed ready with empty user_message but still
- * carries process facts (journal / runs / segments). Server
- * ``RecordTurnRequest.user_message`` requires min_length=1; paired-user reuse
- * via ``message_id`` ignores this text when the assistant row already exists.
- * Not a substitute for sidecar identity salvage (C1) — stock / boundary drain only.
+ * Legacy wire marker when older clients filled empty user_message to satisfy
+ * ``RecordTurnRequest.user_message`` min_length=1. Server treats this (and empty
+ * um) as no real user intent and will not insert a visible user row. New drains
+ * POST empty string instead — do not write this into outbox / history.
  */
 export const EMPTY_USER_MESSAGE_PLACEHOLDER = "[local-turn recovery]";
 
@@ -253,16 +252,20 @@ export function canPostEmptyUserMessage(record: OutboxRecord): boolean {
 }
 
 /**
- * Fill empty user_message for writeback when {@link canPostEmptyUserMessage}.
- * Returns true when the record now has a non-empty user_message.
+ * Gate for empty-um writeback when {@link canPostEmptyUserMessage}.
+ * Does **not** fill a visible placeholder (ffafc42b) — leaves user_message empty.
+ * Returns true when the record is postable (non-empty um, or empty+process).
  */
 export function fillEmptyUserMessageForWriteback(
   record: OutboxRecord,
 ): boolean {
-  if ((record.user_message || "").trim()) return true;
-  if (!canPostEmptyUserMessage(record)) return false;
-  record.user_message = EMPTY_USER_MESSAGE_PLACEHOLDER;
-  return true;
+  const um = (record.user_message || "").trim();
+  if (um && um !== EMPTY_USER_MESSAGE_PLACEHOLDER) return true;
+  // Normalize legacy placeholder off the record so POST / disk stay empty.
+  if (um === EMPTY_USER_MESSAGE_PLACEHOLDER) {
+    record.user_message = "";
+  }
+  return canPostEmptyUserMessage(record);
 }
 
 /**
@@ -349,8 +352,11 @@ export function shouldDeleteOutboxAfterAck(
 export function toRecordTurnBody(
   record: OutboxRecord,
 ): Record<string, unknown> {
+  const rawUm = record.user_message || "";
+  const userMessage =
+    rawUm.trim() === EMPTY_USER_MESSAGE_PLACEHOLDER ? "" : rawUm;
   const body: Record<string, unknown> = {
-    user_message: record.user_message || "",
+    user_message: userMessage,
     user_message_id: record.user_message_id,
     content: record.content || "",
     reasoning_content: record.reasoning_content ?? null,

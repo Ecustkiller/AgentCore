@@ -319,7 +319,7 @@ describe("drainOutbox", () => {
     expect(body.user_message).not.toBe(EMPTY_USER_MESSAGE_PLACEHOLDER);
   });
 
-  it("ready + empty user_message + journal POSTs with placeholder (C2)", async () => {
+  it("ready + empty user_message + journal POSTs empty um (C2, no placeholder bubble)", async () => {
     writeReady("u-empty-um", {
       user_message: "",
       message_id: "m-assist",
@@ -350,7 +350,8 @@ describe("drainOutbox", () => {
         journal?: unknown[];
         message_id?: string | null;
       };
-      expect(body.user_message).toBe(EMPTY_USER_MESSAGE_PLACEHOLDER);
+      expect(body.user_message).toBe("");
+      expect(body.user_message).not.toBe(EMPTY_USER_MESSAGE_PLACEHOLDER);
       expect(body.message_id).toBe("m-assist");
       expect(Array.isArray(body.journal) && body.journal.length).toBe(2);
       expect(status.pending).toEqual([]);
@@ -359,9 +360,43 @@ describe("drainOutbox", () => {
         warnSpy.mock.calls.some(
           (c) =>
             typeof c[0] === "string" &&
-            c[0].includes("empty user_message → placeholder"),
+            c[0].includes("empty user_message → writeback without user bubble"),
         ),
       ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("ready + legacy placeholder um + journal normalizes to empty POST (C2)", async () => {
+    writeReady("u-legacy-ph", {
+      user_message: EMPTY_USER_MESSAGE_PLACEHOLDER,
+      message_id: "m-legacy",
+      content: "",
+      runs: null,
+      finish_reason: "cancelled",
+      journal: {
+        "0": { kind: "run_started", payload: { id: "r1" }, ts: "t0" },
+      },
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-legacy-ph",
+        assistant_message_id: "m-legacy",
+        title: null,
+      },
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await drainOutbox();
+      expect(h.bearerPostJson).toHaveBeenCalledOnce();
+      const body = h.bearerPostJson.mock.calls[0]?.[1] as {
+        user_message?: string;
+      };
+      expect(body.user_message).toBe("");
+      expect(body.user_message).not.toBe(EMPTY_USER_MESSAGE_PLACEHOLDER);
     } finally {
       warnSpy.mockRestore();
     }
@@ -396,7 +431,7 @@ describe("drainOutbox", () => {
     }
   });
 
-  it("fillEmptyUserMessageForWriteback only fills when process exists", () => {
+  it("fillEmptyUserMessageForWriteback gates on process; never fills placeholder", () => {
     const withJournal = {
       user_message_id: "u1",
       conversation_id: "c1",
@@ -404,7 +439,16 @@ describe("drainOutbox", () => {
       journal: { "0": { kind: "run_started", payload: {} } },
     };
     expect(fillEmptyUserMessageForWriteback(withJournal)).toBe(true);
-    expect(withJournal.user_message).toBe(EMPTY_USER_MESSAGE_PLACEHOLDER);
+    expect(withJournal.user_message).toBe("");
+
+    const legacy = {
+      user_message_id: "u-legacy",
+      conversation_id: "c1",
+      user_message: EMPTY_USER_MESSAGE_PLACEHOLDER,
+      journal: { "0": { kind: "run_started", payload: {} } },
+    };
+    expect(fillEmptyUserMessageForWriteback(legacy)).toBe(true);
+    expect(legacy.user_message).toBe("");
 
     const empty = {
       user_message_id: "u2",

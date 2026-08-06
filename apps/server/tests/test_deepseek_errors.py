@@ -443,6 +443,41 @@ def test_build_payload_hy_siblings_do_not_get_hy3_dialect():
     assert "thinking" not in payload
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-opus-5",
+        "platform/claude-opus-5",
+        "claude-opus-4-7",
+        "claude-opus-4.8",
+        "anthropic/claude-fable-5",
+        "claude-mythos-5",
+    ],
+)
+def test_build_payload_omits_temperature_for_restricted_models(model: str):
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        temperature=0.7,
+    )
+    payload = provider._build_payload(req, stream=False)
+    assert "temperature" not in payload
+    assert payload["model"] == model
+
+
+def test_build_payload_keeps_temperature_for_ordinary_models():
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    for model in ("gpt-4o", "deepseek-v4-flash", "claude-opus-4-20250514", "hy3"):
+        req = LLMRequest(
+            messages=[LLMMessage(role="user", content="hi")],
+            model=model,
+            temperature=0.3,
+        )
+        payload = provider._build_payload(req, stream=False)
+        assert payload["temperature"] == 0.3, model
+
+
 def test_balance_and_auth_errors_are_not_retryable():
     assert LLMInsufficientBalanceError().retryable is False
     assert LLMAuthError().retryable is False
@@ -487,3 +522,24 @@ def test_client_error_message_404_path_with_unrelated_message():
     # Unrelated 404 with a body: surface upstream text, do not invent base_url blame
     # unless body is empty (path-style guess).
     assert msg.startswith("网关 ")
+
+
+def test_client_error_message_temperature_deprecated_product_copy():
+    from agentcore.llm.errors import client_error_message
+
+    body = (
+        b'{"error":{"message":"user `temperature` is deprecated for this model. '
+        b'(request id: req_abc)"}}'
+    )
+    msg = client_error_message("平台", 400, body)
+    assert "不接受 temperature" in msg
+    assert "request id" not in msg
+    assert "`temperature` is deprecated" not in msg
+
+
+def test_client_error_message_400_unrelated_still_passthrough():
+    from agentcore.llm.errors import client_error_message
+
+    body = b'{"error":{"message":"max_tokens too large"}}'
+    msg = client_error_message("平台", 400, body)
+    assert msg == "平台 max_tokens too large"

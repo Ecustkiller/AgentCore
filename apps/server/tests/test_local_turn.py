@@ -666,3 +666,115 @@ async def test_record_local_turn_does_not_persist_followups(monkeypatch):
 
     assert not any(e[0] == "followups" for e in events)
     assert result["followups"] is None
+
+
+async def test_record_local_turn_empty_um_with_journal_skips_user_create(monkeypatch):
+    """ffafc42b: empty um + process settles assistant/journal; no visible user row."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="",
+        assistant_content="",
+        journal=[
+            {"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"},
+            {"kind": "run_completed", "payload": {"id": "r1"}, "ts": None},
+        ],
+        user_message_id=_USER_MSG_ID,
+        message_id="m-empty-um",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.CANCELLED.value,
+    )
+
+    assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert any(e[0] == "journal" for e in events)
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["user_message_id"] == _USER_MSG_ID
+    assert result["noop"] is False
+
+
+async def test_record_local_turn_placeholder_um_skips_user_create(monkeypatch):
+    """Legacy ``[local-turn recovery]`` must not become a new user bubble."""
+    from agentcore.conversation.store.cloud import LOCAL_TURN_RECOVERY_PLACEHOLDER
+
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message=LOCAL_TURN_RECOVERY_PLACEHOLDER,
+        assistant_content="",
+        journal=[{"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"}],
+        user_message_id=_USER_MSG_ID,
+        message_id="m-placeholder",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.CANCELLED.value,
+    )
+
+    assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert result["assistant_message_id"] == "assistant-id"
+
+
+async def test_record_local_turn_placeholder_umid_eq_message_id_skips_user(
+    monkeypatch,
+):
+    """Dirty sample: umid≈message_id + placeholder must not insert a user row."""
+    from agentcore.conversation.store.cloud import LOCAL_TURN_RECOVERY_PLACEHOLDER
+
+    events: list = []
+    collision_id = "4bb278a6-5557-4c70-a01e-0b77305b7aca"
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message=LOCAL_TURN_RECOVERY_PLACEHOLDER,
+        assistant_content="",
+        journal=[{"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"}],
+        user_message_id=collision_id,
+        message_id=collision_id,
+        trace_id=_TRACE,
+        finish_reason=FinishReason.CANCELLED.value,
+    )
+
+    assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert any(e[0] == "journal" for e in events)
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["noop"] is False
+
+
+async def test_record_local_turn_placeholder_still_reuses_paired_user(monkeypatch):
+    """Paired-user reuse remains when assistant exists; placeholder ignored."""
+    from agentcore.conversation.store.cloud import LOCAL_TURN_RECOVERY_PLACEHOLDER
+
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        existing_ids={"m-pause"},
+        existing_usage={"m-pause": {"status": "running", "paused": True}},
+        existing_content={"m-pause": "partial"},
+        paired_user_by_assistant={"m-pause": _USER_MSG_ID},
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message=LOCAL_TURN_RECOVERY_PLACEHOLDER,
+        assistant_content="partial again",
+        user_message_id="fresh-client-user-id",
+        message_id="m-pause",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.PAUSED.value,
+    )
+
+    assert not any(e[0] == "msg" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert result["user_message_id"] == _USER_MSG_ID

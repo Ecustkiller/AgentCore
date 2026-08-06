@@ -815,9 +815,14 @@ class RecordTurnRequest(BaseModel):
     matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
     authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
     write-back persists content only.
+
+    ``user_message`` may be empty for process-only salvage (journal/runs): the server
+    must not insert a visible user row when there is no real user intent.
     """
 
-    user_message: str = Field(..., min_length=1, max_length=32000)
+    # Empty allowed for process-only write-back (journal/runs salvage): server must
+    # not insert a visible user row when there is no real user intent (ffafc42b).
+    user_message: str = Field("", max_length=32000)
     content: str = Field("", max_length=500_000)
     reasoning_content: str | None = Field(None, max_length=500_000)
     citations: list[Citation] = Field(default_factory=list, max_length=50)

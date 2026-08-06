@@ -50,6 +50,9 @@ from agentcore.workspace.snapshots import create_snapshot
 logger = get_logger(__name__)
 
 _RUN_ERROR_MESSAGE_CAP = 2000
+# Desktop outbox C2 historically filled this to pass min_length=1; must never become
+# a new visible user bubble (ffafc42b · local-turn recovery placeholder).
+LOCAL_TURN_RECOVERY_PLACEHOLDER = "[local-turn recovery]"
 _SKIP_DERIVED_FINISH = frozenset(
     {
         FinishReason.PAUSED.value,
@@ -62,6 +65,12 @@ _SKIP_DERIVED_FINISH = frozenset(
 def _incomplete_body(content: str) -> str:
     """Streamed captain text only; interrupt chrome is metadata + UI, not body copy."""
     return (content or "").strip()
+
+
+def _is_synthetic_local_user_message(user_message: str) -> bool:
+    """True when write-back has no real user intent (empty or recovery placeholder)."""
+    text = (user_message or "").strip()
+    return not text or text == LOCAL_TURN_RECOVERY_PLACEHOLDER
 
 
 def _ensure_structured_run_error(
@@ -715,11 +724,19 @@ class CloudStore:
         is_incomplete = finish_value == FinishReason.CANCELLED.value
         skip_derived = finish_value in _SKIP_DERIVED_FINISH
 
+        synthetic_user = _is_synthetic_local_user_message(user_message)
+        # Observability for the ffafc42b dirty sample (umid keyed as assistant id).
+        dirty_umid_collision = bool(
+            message_id and user_message_id and user_message_id == message_id
+        )
+
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
             existing_user = await msg_repo.get_by_id(
                 user_message_id, conversation_id=conversation_id
             )
+            if existing_user is not None and getattr(existing_user, "role", None) != "user":
+                existing_user = None
             existing_assistant = (
                 await msg_repo.get_by_id(message_id, conversation_id=conversation_id)
                 if message_id
@@ -743,22 +760,34 @@ class CloudStore:
 
         user_msg_id = turn_user.id if turn_user is not None else user_message_id
         if turn_user is None:
-            try:
-                async with async_session_factory() as session:
-                    user_msg = await MessageRepository(session).create(
-                        conversation_id=conversation_id,
-                        role="user",
-                        content=user_message,
-                        message_id=user_message_id,
-                    )
-                    user_msg_id = user_msg.id
-            except IntegrityError:
+            # No real user intent → do not insert a visible recovery/empty user row
+            # (ffafc42b). Still settle assistant/journal below when should_settle.
+            # Covers umid≈message_id dirty samples when content is synthetic.
+            if synthetic_user:
                 logger.info(
-                    "chat.local_turn_idempotent_race",
+                    "chat.local_turn_skip_synthetic_user",
                     conversation_id=conversation_id,
                     message_id=message_id,
+                    user_message_id=user_message_id,
+                    dirty_umid_collision=dirty_umid_collision,
                 )
-                user_msg_id = user_message_id
+            else:
+                try:
+                    async with async_session_factory() as session:
+                        user_msg = await MessageRepository(session).create(
+                            conversation_id=conversation_id,
+                            role="user",
+                            content=user_message,
+                            message_id=user_message_id,
+                        )
+                        user_msg_id = user_msg.id
+                except IntegrityError:
+                    logger.info(
+                        "chat.local_turn_idempotent_race",
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                    )
+                    user_msg_id = user_message_id
 
         assistant_message_id: str | None = None
         if is_paused:
@@ -926,6 +955,10 @@ class CloudStore:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             needs_title = bool(conv and not conv.title)
             existing_title = conv.title if conv else None
+
+        # Synthetic / empty um has no real user intent — never mint title from it.
+        if synthetic_user:
+            needs_title = False
 
         # Parallel auto-title (desktop REST) may already be minting — skip write-back
         # mint to avoid a second LLM call; ``update_title_if_empty`` is the write guard.

@@ -884,8 +884,14 @@ def delete_outbox_record(base: Path, user_message_id: str) -> None:
 
 def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
     """Project an outbox record into the ``RecordTurnRequest`` wire shape."""
+    from agentcore.conversation.store.cloud import LOCAL_TURN_RECOVERY_PLACEHOLDER
+
+    raw_um = str(record.get("user_message") or "")
+    user_message = (
+        "" if raw_um.strip() == LOCAL_TURN_RECOVERY_PLACEHOLDER else raw_um
+    )
     body: dict[str, Any] = {
-        "user_message": record.get("user_message") or "",
+        "user_message": user_message,
         "user_message_id": record["user_message_id"],
         "content": record.get("content") or "",
         "reasoning_content": record.get("reasoning_content"),
