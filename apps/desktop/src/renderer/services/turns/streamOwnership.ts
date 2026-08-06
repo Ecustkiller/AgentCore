@@ -2,7 +2,7 @@
  * 会话级 SSE 主路所有权（发送即有流 · midFlight 双连接防交叉）。
  *
  * turn1 的 POST/attach/sidecar 泵持有 primary；midFlight 经典排队在 ``turn_queued``
- * 之后缓冲后续帧，直到 primary 栈清空（turn1 含 followups/turn_saved 的整段泵结束）
+ * 之后缓冲后续帧，直到 primary 栈清空（turn1 含 turn_saved 等 meta 的整段泵结束）
  * 再放行 ``message_start``——避免 drain 边界处 resetAssistant 与 turn1 收口帧交错
  * 污染末条气泡。
  *

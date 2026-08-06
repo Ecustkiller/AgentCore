@@ -942,12 +942,13 @@ async def test_ceo_str_replace_miss_still_audience_deny():
     assert "form=prose" not in content
 
 
-async def test_write_allowlist_deny_no_handoff_as_write():
+@pytest.mark.parametrize("name", ["str_replace", "write_section", "file_copy"])
+async def test_write_allowlist_deny_no_handoff_as_write(name: str):
     """写盘工具不在 allowlist 时说明缺授权，勿劝 handoff 正文冒充落盘。"""
     reg = ToolRegistry()
-    reg.register(_OkTool("str_replace"))
+    reg.register(_OkTool(name))
     messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "str_replace", "{}")],
+        [_call("c1", name, "{}")],
         reg,
         _ctx(),
         EventSink(),
@@ -956,6 +957,7 @@ async def test_write_allowlist_deny_no_handoff_as_write():
     )
     content = messages[0].content or ""
     assert "不在本 run 的允许列表" in content or "未授权" in content
+    assert "勿用正文冒充落盘" in content
     assert "产物请改经 handoff 正文回报" not in content
     assert attempts[0].success is False
     assert attempts[0].policy_failure is True

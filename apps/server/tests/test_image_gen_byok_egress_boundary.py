@@ -12,7 +12,26 @@ def test_redact_secrets_masks_openai_style_key():
 
 def test_contains_secret_detects_key_shape():
     assert contains_secret("sk-abcdEFGH1234567890") is True
+    assert contains_secret("OPENAI_API_KEY=sk-abcdEFGH1234567890") is True
+    assert contains_secret("Authorization: Bearer abcDEF123456._-x") is True
+    assert contains_secret("tvly-abcd1234efgh5678") is True
+    assert contains_secret("gsk_abcd1234EFGH5678ijkl") is True
+    assert contains_secret("xai-ABCDabcd12345678") is True
+    assert contains_secret("AIzaSyA0bCdEfGhIjKlMnOpQr") is True
+    assert contains_secret("ghp_abcdefghij0123456789ABCD") is True
     assert contains_secret("os.environ['OPENAI_API_KEY']") is False
+
+
+def test_contains_secret_ignores_erp_field_names():
+    """Word-boundary lookbehind: md/表字段名不得误命中 sk_/gsk_/… 形。"""
+    for field in (
+        "task_created_at",
+        "task_priority",
+        "risk_score_total",
+        "ask_created_at",
+        "| task_created_at | datetime |",
+    ):
+        assert contains_secret(field) is False, field
 
 
 def test_artifact_manifest_end_preview_redacts_key():

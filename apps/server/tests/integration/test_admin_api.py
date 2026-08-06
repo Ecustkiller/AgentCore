@@ -20,9 +20,14 @@ from agentcore.db.repositories import (
     UserRepository,
 )
 from agentcore.llm.pricing import NANO_PER_CNY
-from tests.integration.conftest import login_admin, register_and_login
+from tests.integration.conftest import (
+    client_platform_headers,
+    login_admin,
+    register_and_login,
+)
 
 _PW = "password123"
+_DESKTOP = client_platform_headers()
 
 
 async def _seed_spend(session_factory, *, user_id: str, total: int, role: str = "captain") -> None:
@@ -481,12 +486,17 @@ async def test_admin_resets_user_password(client, new_client, make_admin):
     # the old password no longer logs in; the one-off temp password does
     async with new_client() as fresh:
         assert (
-            await fresh.post("/v1/auth/login", json={"username": "forgetful", "password": _PW})
+            await fresh.post(
+                "/v1/auth/login",
+                json={"username": "forgetful", "password": _PW},
+                headers=_DESKTOP,
+            )
         ).status_code == 401
         assert (
             await fresh.post(
                 "/v1/auth/login",
                 json={"username": "forgetful", "password": temp},
+                headers=_DESKTOP,
             )
         ).status_code == 200
         me = (await fresh.get("/v1/auth/me")).json()
@@ -530,12 +540,17 @@ async def test_admin_sets_user_password(client, new_client, make_admin):
 
     async with new_client() as fresh:
         assert (
-            await fresh.post("/v1/auth/login", json={"username": "settarget", "password": _PW})
+            await fresh.post(
+                "/v1/auth/login",
+                json={"username": "settarget", "password": _PW},
+                headers=_DESKTOP,
+            )
         ).status_code == 401
         assert (
             await fresh.post(
                 "/v1/auth/login",
                 json={"username": "settarget", "password": _CUSTOM_PW},
+                headers=_DESKTOP,
             )
         ).status_code == 200
         me = (await fresh.get("/v1/auth/me")).json()
@@ -561,6 +576,7 @@ async def test_set_password_force_change_false(client, new_client, make_admin):
             await fresh.post(
                 "/v1/auth/login",
                 json={"username": "permuser", "password": _CUSTOM_PW},
+                headers=_DESKTOP,
             )
         ).status_code == 200
         me = (await fresh.get("/v1/auth/me")).json()

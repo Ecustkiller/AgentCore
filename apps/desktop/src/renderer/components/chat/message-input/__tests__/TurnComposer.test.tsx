@@ -159,12 +159,20 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
     handlePaste: vi.fn(),
   }),
 }));
+
+// isGenerating 来自 activeRuntime().isGenerating（非顶层字段），构造完整 runtime 太脆，
+// 直接 mock 这个 hook；其余 store 行为（setState / getState）保留真实实现。
+const genMock = vi.hoisted(() => ({ value: false }));
+const handleSendMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/components/chat/message-input/useComposerSend", () => ({
-  useComposerSend: () => ({ handleSend: vi.fn() }),
+  useComposerSend: () => ({ handleSend: handleSendMock }),
 }));
 vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
   useMentionMenu: () => ({
     menuMode: null,
+    sections: [],
+    flatItems: [],
     items: [],
     activeIndex: 0,
     indexLoading: false,
@@ -177,6 +185,7 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
     syncMention: vi.fn(),
     handleMenuNavKey: () => false,
     attachEntry: vi.fn(),
+    selectItem: vi.fn(),
     setActiveIndex: vi.fn(),
     setQuery: vi.fn(),
     handleAddRoot: vi.fn(),
@@ -184,9 +193,6 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
   }),
 }));
 
-// isGenerating 来自 activeRuntime().isGenerating（非顶层字段），构造完整 runtime 太脆，
-// 直接 mock 这个 hook；其余 store 行为（setState / getState）保留真实实现。
-const genMock = vi.hoisted(() => ({ value: false }));
 vi.mock("@/stores/conversation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/stores/conversation")>();
   return { ...actual, useActiveGenerating: () => genMock.value };
@@ -208,6 +214,7 @@ function renderComposer(variant?: "card" | "bar") {
 
 beforeEach(async () => {
   genMock.value = false;
+  handleSendMock.mockClear();
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
@@ -288,32 +295,62 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     expect(screen.queryByRole("button", { name: "插入" })).toBeNull();
     expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
 
-  it("generating + draft (classic): muted 插入 + solid 停止生成", async () => {
+  it("generating + draft: primary 排队发送 covers 停止生成, with 插队 entry", async () => {
+    genMock.value = true;
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue("__draft__", "下一句");
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插入" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "插队" }));
+    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "steer" });
+
+    handleSendMock.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "排队发送" }));
+    expect(handleSendMock).toHaveBeenCalledWith();
+  });
+
+  it("generating + draft: canvas card also shows 排队发送 + 插队", async () => {
+    genMock.value = true;
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue("__draft__", "下一句");
+    renderComposer();
+    expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+  });
+
+  it("generating + draft: Ctrl/Cmd+Enter forces steer", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "插一句");
     renderComposer("bar");
-    expect(screen.getByRole("button", { name: "插入" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
-    expect(screen.getByText(/Enter 或点发送将插入当前回合/)).toBeTruthy();
+    const textarea = screen.getByPlaceholderText(/输入消息/);
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "steer" });
   });
 
-  it("generating + draft: canvas card also exposes muted 插入 + 停止", async () => {
-    genMock.value = true;
+  it("idle: Ctrl/Cmd+Enter matches Enter (no fake queue)", async () => {
     const { useComposerDraftStore } = await import("@/stores/composer");
-    useComposerDraftStore.getState().setValue("__draft__", "插一句");
-    renderComposer();
-    expect(screen.getByRole("button", { name: "插入" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
+    useComposerDraftStore.getState().setValue("__draft__", "hello");
+    renderComposer("bar");
+    const textarea = screen.getByPlaceholderText(/输入消息/);
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    expect(handleSendMock).toHaveBeenCalledWith();
   });
 
   it("idle: single 发送, no mid-flight / 停止", () => {
     renderComposer("bar");
     expect(screen.queryByRole("button", { name: "插入" })).toBeNull();
     expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
   });

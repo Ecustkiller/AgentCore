@@ -886,24 +886,12 @@ def try_start_coordination(
             _bind_session_host_journal(session)
         set_active_coordination(session)
 
-    # C3: first arm declares ownership after admission; resume keeps snapshot.
+    # C3: first arm declares ownership after admission; resume keeps snapshot ledger.
     if file_ownership_v2_enabled() and fresh_session:
         from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
 
         declare_plan_artifacts(
             plan,
-            session.ensure_file_ownership(),
-            force=force,
-            completed_run_ids=session.completed_run_ids,
-        )
-        record_coordination_snapshot(session)
-    elif file_ownership_v2_enabled() and session.file_ownership is None:
-        # Resume without ownership in snapshot (legacy frame) — backfill from live plan.
-        from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
-
-        live = session.live_plan or plan
-        declare_plan_artifacts(
-            live,
             session.ensure_file_ownership(),
             force=force,
             completed_run_ids=session.completed_run_ids,

@@ -73,7 +73,8 @@ class AskUserTool:
     base_system_prompt: str = ""
     user_message: str = ""
     # Prior conversation turns (same shape as DelegateTool._history); captured on
-    # suspend for resume parity. Kickoff skip is journal checkpoint_resolved only.
+    # suspend for resume parity. ask_user ⊥ kickoff/team_preview — no skip via
+    # journal checkpoint_resolved.
     history: list[dict[str, Any]] | None = None
     message_id: str | None = None
     suspension_saver: SuspensionSaver | None = None
@@ -148,15 +149,33 @@ class AskUserTool:
                     "grant_organize_folder=开整理授权（可移动/重命名/复制/删进回收站、仅本对话）。"
                 ),
             }
+            option_properties["well_known"] = {
+                "type": "string",
+                "enum": ["desktop", "downloads", "documents"],
+                "description": (
+                    "仅 grant_* 有意义。用户点名桌面/下载/文档时填写对应值，"
+                    "桌面尽量不弹空白选择器直授；位置完全模糊才省略（走选择器兜底）。"
+                ),
+            }
+            option_properties["target_name"] = {
+                "type": "string",
+                "description": (
+                    "仅 grant_* 有意义。已知子目录/压缩包名模糊词（短字符串，禁 / 与 \\）；"
+                    "有 well_known 时桌面在其下唯一匹配则直授，歧义才 picker。"
+                    "任务说明写 message，勿手填绝对路径。"
+                ),
+            }
             questions_desc += (
                 " 打开本机目录当项目→open_local_project；本会话只要本机执行→"
                 "bind_local_folder；区外只读/整理→grant_*"
                 "（action=open_local_project / bind_local_folder / "
-                "grant_readonly_folder / grant_organize_folder）。"
+                "grant_readonly_folder / grant_organize_folder）；"
+                "点名桌面/下载/文档时带 well_known，已知子名带 target_name。"
             )
             tool_desc += (
                 " 桌面在线时可标 open_local_project / bind_local_folder / "
-                "grant_readonly_folder / grant_organize_folder（按意图分流）。"
+                "grant_readonly_folder / grant_organize_folder（按意图分流）；"
+                "grant_* 可加 well_known / target_name。"
             )
 
         return ToolSchema(
@@ -339,6 +358,8 @@ class AskUserTool:
                 for opt in q.get("options") or []:
                     if isinstance(opt, dict):
                         opt.pop("action", None)
+                        opt.pop("well_known", None)
+                        opt.pop("target_name", None)
 
         # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
         # any suspend / durable-frame machinery — it shares none of it.

@@ -19,13 +19,13 @@ describe("composerDelivery", () => {
     expect(resolveDefaultDelivery(false, CID)).toBe("steer");
   });
 
-  it("经典 in-flight（无 plan）→ steer（P1 可 soft-insert）", () => {
+  it("经典 in-flight（无 plan）→ queue", () => {
     useConversationStore.getState().createAssistantMessage(CID);
     expect(isCoordinationActive(CID)).toBe(false);
-    expect(resolveDefaultDelivery(true, CID)).toBe("steer");
+    expect(resolveDefaultDelivery(true, CID)).toBe("queue");
   });
 
-  it("协调活跃（有 plan）→ steer", () => {
+  it("协调活跃（有 plan）→ queue", () => {
     useConversationStore.getState().createAssistantMessage(CID);
     const messages = useConversationStore.getState().byId[CID]?.messages ?? [];
     const aid = messages[0]?.id;
@@ -53,6 +53,6 @@ describe("composerDelivery", () => {
       },
     });
     expect(isCoordinationActive(CID)).toBe(true);
-    expect(resolveDefaultDelivery(true, CID)).toBe("steer");
+    expect(resolveDefaultDelivery(true, CID)).toBe("queue");
   });
 });

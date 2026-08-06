@@ -3,9 +3,20 @@
   "id": "dogfood-decision-loop",
   "title": "Dogfood 决策闭环金标",
   "slot_count": 20,
-  "dimensions": ["routing", "deliverable", "citation"],
-  "kinds": ["synthetic_fill", "pending_label"],
-  "evidence_tiers": ["L1_synthetic", "dogfood", "R_repo"],
+  "dimensions": [
+    "routing",
+    "deliverable",
+    "citation"
+  ],
+  "kinds": [
+    "synthetic_fill",
+    "pending_label"
+  ],
+  "evidence_tiers": [
+    "L1_synthetic",
+    "dogfood",
+    "R_repo"
+  ],
   "gate_policy": "observe_only",
   "orthogonal_to": "apps/server/agentcore/evals/cases/gold/labels.json",
   "entries": [
@@ -18,9 +29,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 0, "note": "应直答，误走 delegate"},
-        "deliverable": {"score": "N/A", "note": "无文件交付诉求"},
-        "citation": {"score": "N/A", "note": "无检索成篇诉求"}
+        "routing": {
+          "score": 0,
+          "note": "应直答，误走 delegate"
+        },
+        "deliverable": {
+          "score": "N/A",
+          "note": "无文件交付诉求"
+        },
+        "citation": {
+          "score": "N/A",
+          "note": "无检索成篇诉求"
+        }
       },
       "notes": "合成示范：routing 失败形态"
     },
@@ -33,9 +53,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 2, "note": "委派调研合理"},
-        "deliverable": {"score": 1, "note": "有成篇但可信度虚"},
-        "citation": {"score": 0, "note": "弱引/无台账绑定"}
+        "routing": {
+          "score": 2,
+          "note": "委派调研合理"
+        },
+        "deliverable": {
+          "score": 1,
+          "note": "有成篇但可信度虚"
+        },
+        "citation": {
+          "score": 0,
+          "note": "弱引/无台账绑定"
+        }
       },
       "notes": "合成示范：citation 失败形态"
     },
@@ -48,9 +77,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 2, "note": "派写码/调研合理"},
-        "deliverable": {"score": 0, "note": "约定产物未落盘"},
-        "citation": {"score": "N/A", "note": "本场景不考引用"}
+        "routing": {
+          "score": 2,
+          "note": "派写码/调研合理"
+        },
+        "deliverable": {
+          "score": 0,
+          "note": "约定产物未落盘"
+        },
+        "citation": {
+          "score": "N/A",
+          "note": "本场景不考引用"
+        }
       },
       "notes": "合成示范：deliverable 过硬失败"
     },
@@ -63,9 +101,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 0, "note": "过派/跨域乱派"},
-        "deliverable": {"score": 1, "note": "或有碎片产物，整体不硬"},
-        "citation": {"score": "N/A", "note": "非调研成篇"}
+        "routing": {
+          "score": 0,
+          "note": "过派/跨域乱派"
+        },
+        "deliverable": {
+          "score": 1,
+          "note": "或有碎片产物，整体不硬"
+        },
+        "citation": {
+          "score": "N/A",
+          "note": "非调研成篇"
+        }
       },
       "notes": "合成示范：过派形态"
     },
@@ -78,9 +125,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 2, "note": "该直答且直答"},
-        "deliverable": {"score": "N/A", "note": "无文件交付"},
-        "citation": {"score": "N/A", "note": "无检索成篇"}
+        "routing": {
+          "score": 2,
+          "note": "该直答且直答"
+        },
+        "deliverable": {
+          "score": "N/A",
+          "note": "无文件交付"
+        },
+        "citation": {
+          "score": "N/A",
+          "note": "无检索成篇"
+        }
       },
       "notes": "合成示范：routing 正例"
     },
@@ -93,9 +149,18 @@
       "conversation_id": null,
       "trace_id": null,
       "labels": {
-        "routing": {"score": 2, "note": "该调研且委派得当"},
-        "deliverable": {"score": 2, "note": "约定报告已落盘"},
-        "citation": {"score": 2, "note": "成篇引用可溯"}
+        "routing": {
+          "score": 2,
+          "note": "该调研且委派得当"
+        },
+        "deliverable": {
+          "score": 2,
+          "note": "约定报告已落盘"
+        },
+        "citation": {
+          "score": 2,
+          "note": "成篇引用可溯"
+        }
       },
       "notes": "合成示范：三维正例"
     },
@@ -268,16 +333,16 @@
       "id": "df_pend_18_ask_user_then_wrong_route",
       "kind": "pending_label",
       "evidence_tier": "dogfood",
-      "scenario": "澄清后仍选错直答/委派路径。",
-      "intended_coverage": "澄清后仍误路由",
-      "conversation_id": null,
-      "trace_id": null,
+      "scenario": "探讨开口→选项导向完整成文→research_report 满编；用户中途 stop。",
+      "intended_coverage": "讨论→确认卡→成文满编（research_report）",
+      "conversation_id": "2eebb16d-c34a-4bad-b0b0-5d6a4177c48d",
+      "trace_id": "01ad92e747c546cbaf5d5ec70588530e",
       "labels": {
         "routing": null,
         "deliverable": null,
         "citation": null
       },
-      "notes": "待 logs 补"
+      "notes": "维护者 dogfood：成文委派段 pack=logs/packs/2eebb16d-delegate；先段探路+ask_user trace=88987b12d8e545158e8b86502566f89b（同 conversation）。三维分待人工。用户中途 stop。"
     },
     {
       "id": "df_pend_19_legal_optin_dispatch",

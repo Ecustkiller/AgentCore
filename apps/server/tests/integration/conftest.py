@@ -46,6 +46,11 @@ _MASTER_KEY = "ab" * 32
 TEST_PASSWORD = "password123"
 
 
+def client_platform_headers(platform: str = "desktop") -> dict[str, str]:
+    """Auth login/token require an explicit ``X-Client-Platform`` (fail-closed)."""
+    return {"X-Client-Platform": platform}
+
+
 async def register_and_login(
     client: httpx.AsyncClient,
     username: str,
@@ -65,7 +70,7 @@ async def register_and_login(
     r = await client.post(
         "/v1/auth/login",
         json={"username": username, "password": password},
-        headers={"X-Client-Platform": platform},
+        headers=client_platform_headers(platform),
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -79,10 +84,11 @@ async def login_admin(client: httpx.AsyncClient, username: str, password: str) -
     """Complete admin login (password + TOTP) on the admin client platform."""
     import pyotp
 
+    admin_headers = client_platform_headers("admin")
     r = await client.post(
         "/v1/auth/login",
         json={"username": username, "password": password},
-        headers={"X-Client-Platform": "admin"},
+        headers=admin_headers,
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -91,6 +97,7 @@ async def login_admin(client: httpx.AsyncClient, username: str, password: str) -
         r = await client.post(
             "/v1/auth/login/mfa",
             json={"pending_token": body["pending_token"], "code": code},
+            headers=admin_headers,
         )
         assert r.status_code == 200, r.text
 

@@ -5,7 +5,7 @@ with the same per-origin billing decision: ``model_origin=byok`` requires the
 user's own key (no quota check); ``model_origin=platform`` enforces quota then
 runs on the global key.
 
-Background product chrome (title / memory / compaction / followups) resolves
+Background product chrome (title / memory / compaction) resolves
 platform-first via ``resolve_and_gate_background``: platform spend always passes
 ``enforce_quota`` (no BYOK freeload); quota exhaustion returns ``None`` so
 best-effort callers degrade instead of 429-ing the user turn.

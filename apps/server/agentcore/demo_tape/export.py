@@ -63,8 +63,8 @@ class TapeExportRefusedError(ValueError):
 def _followups_from_recording(recording: dict[str, Any]) -> list[str] | None:
     """Last non-empty ``followups_generated`` payload on the recording (if any).
 
-    Chips do not enter the tape event stream (``TAPE_EXCLUDED_KINDS``); they ride
-    ``meta.followups`` so replay can re-emit with the current turn's message_id.
+    Chips do not enter the tape event stream (``TAPE_EXCLUDED_KINDS``); they may still
+    ride ``meta.followups`` for old-tape fidelity. Replay ignores them (mint offline).
     """
     found: list[str] | None = None
     for segment in recording.get("segments") or []:

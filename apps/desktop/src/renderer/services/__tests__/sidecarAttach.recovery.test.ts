@@ -193,6 +193,46 @@ describe("projectUnsyncedTurns (D5)", () => {
     expect(assistant?.isStreaming).toBe(false);
     expect(assistant?.finishReason).toBe("interrupted");
   });
+
+  it("empty cancelled ready keeps cancelled finish (B5 空泡脸)", () => {
+    useConversationStore.getState().switchConversation(CID);
+    projectUnsyncedTurns(CID, [
+      unsyncedReady({
+        user_message_id: "u-cancel",
+        message_id: "a-cancel",
+        phase: "ready",
+        content: "",
+        finish_reason: "cancelled",
+        runs: { events: [], finish_reason: "cancelled", process: null },
+      }),
+    ]);
+    const assistant = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-cancel");
+    expect(assistant?.content).toBe("");
+    expect(assistant?.isStreaming).toBe(false);
+    expect(assistant?.status).toBe("incomplete");
+    expect(assistant?.finishReason).toBe("cancelled");
+  });
+
+  it("empty dead seals as interrupted (B5 orphan)", () => {
+    useConversationStore.getState().switchConversation(CID);
+    projectUnsyncedTurns(CID, [
+      unsyncedReady({
+        user_message_id: "u-dead",
+        message_id: "a-dead",
+        phase: "dead",
+        content: "",
+        finish_reason: null,
+        runs: null,
+      }),
+    ]);
+    const assistant = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-dead");
+    expect(assistant?.finishReason).toBe("interrupted");
+    expect(assistant?.status).toBe("incomplete");
+  });
 });
 
 describe("attachSidecarTurn (D4)", () => {

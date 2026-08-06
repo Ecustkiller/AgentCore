@@ -40,11 +40,6 @@ import {
   type OutboxSyncedPayload,
 } from "@shared/outbox-contract";
 import {
-  PREVIEW_CHANNELS,
-  type PreviewApi,
-  type PreviewNavState,
-} from "@shared/preview-contract";
-import {
   PROCESS_CHANNELS,
   type ProcessApi,
   type ProcessEventPush,
@@ -95,11 +90,25 @@ const fsApi: FsApi = {
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
-  grantSessionReadonlyRoot: (conversationId, mode) =>
-    ipcRenderer.invoke(FS_CHANNELS.grantSessionReadonlyRoot, {
-      conversationId,
-      mode: mode ?? "readonly",
-    }),
+  grantSessionReadonlyRoot: (conversationIdOrParams, mode) => {
+    const params =
+      typeof conversationIdOrParams === "string"
+        ? {
+            conversationId: conversationIdOrParams,
+            mode: mode ?? "readonly",
+          }
+        : {
+            conversationId: conversationIdOrParams.conversationId,
+            mode: conversationIdOrParams.mode ?? "readonly",
+            ...(conversationIdOrParams.wellKnown
+              ? { wellKnown: conversationIdOrParams.wellKnown }
+              : {}),
+            ...(conversationIdOrParams.targetName
+              ? { targetName: conversationIdOrParams.targetName }
+              : {}),
+          };
+    return ipcRenderer.invoke(FS_CHANNELS.grantSessionReadonlyRoot, params);
+  },
   listSessionReadonlyRoots: (conversationId) =>
     ipcRenderer.invoke(FS_CHANNELS.listSessionReadonlyRoots, {
       conversationId,
@@ -323,23 +332,6 @@ const mcpApi: McpApi = {
   testServer: (id) => ipcRenderer.invoke(MCP_CHANNELS.testServer, id),
 };
 
-const previewApi: PreviewApi = {
-  open: (input) => ipcRenderer.invoke(PREVIEW_CHANNELS.open, input),
-  embedShow: (input) => ipcRenderer.invoke(PREVIEW_CHANNELS.embedShow, input),
-  embedSetBounds: (bounds) =>
-    ipcRenderer.send(PREVIEW_CHANNELS.embedSetBounds, bounds),
-  embedHide: () => ipcRenderer.send(PREVIEW_CHANNELS.embedHide),
-  embedReload: () => ipcRenderer.send(PREVIEW_CHANNELS.embedReload),
-  embedBack: () => ipcRenderer.send(PREVIEW_CHANNELS.embedBack),
-  embedClose: () => ipcRenderer.send(PREVIEW_CHANNELS.embedClose),
-  onNavState: (cb) => {
-    const listener = (_e: unknown, payload: PreviewNavState) => cb(payload);
-    ipcRenderer.on(PREVIEW_CHANNELS.embedNavState, listener);
-    return () =>
-      ipcRenderer.removeListener(PREVIEW_CHANNELS.embedNavState, listener);
-  },
-};
-
 const browserApi: BrowserApi = {
   show: (input) => ipcRenderer.invoke(BROWSER_CHANNELS.show, input),
   setBounds: (bounds) => ipcRenderer.send(BROWSER_CHANNELS.setBounds, bounds),
@@ -412,7 +404,6 @@ try {
   contextBridge.exposeInMainWorld("notificationApi", notificationApi);
   contextBridge.exposeInMainWorld("hostApi", hostApi);
   contextBridge.exposeInMainWorld("mcpApi", mcpApi);
-  contextBridge.exposeInMainWorld("previewApi", previewApi);
   contextBridge.exposeInMainWorld("browserApi", browserApi);
   contextBridge.exposeInMainWorld("windowApi", windowApi);
   contextBridge.exposeInMainWorld("floatWindowApi", floatWindowApi);

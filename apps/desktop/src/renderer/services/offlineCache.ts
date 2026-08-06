@@ -7,7 +7,10 @@ import {
   type GroupedConversations,
   getConversations,
 } from "@/hooks/useConversations";
-import { visibleMessageText } from "@/lib/errors";
+import {
+  syntheticErrorForEmptyFailure,
+  visibleMessageText,
+} from "@/lib/errors";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import type { FolderMeta } from "@/services/folders";
@@ -24,6 +27,28 @@ import type {
   LocalStoreSnapshot,
   LocalStoreUser,
 } from "@shared/local-store-contract";
+
+const PREVIEW_SLICE = 80;
+
+/**
+ * Sidebar / opened-cache preview from the trusted window's last row.
+ * When the last row exists but has no visible text, never keep a stale list
+ * preview — prefer the same synthetic empty-failure face as the message bubble.
+ */
+function previewFromOpenedWindow(
+  last: Message | undefined,
+  listedPreview: string | null | undefined,
+): string | null {
+  if (!last) return listedPreview ?? null;
+  const text = visibleMessageText(last);
+  if (text) return text.slice(0, PREVIEW_SLICE);
+  const finishReason = last.finishReason ?? last.runs?.finishReason;
+  const synthetic = syntheticErrorForEmptyFailure(
+    finishReason,
+    last.runs?.error?.code,
+  );
+  return synthetic?.message ? synthetic.message.slice(0, PREVIEW_SLICE) : null;
+}
 
 function api() {
   return typeof window !== "undefined" ? window.localStoreApi : undefined;
@@ -178,24 +203,22 @@ export async function persistOpenedCache(
 ): Promise<void> {
   const listed = getConversations().find((c) => c.id === id);
   const last = messages.at(-1);
-  const previewFromMessages = last
-    ? (() => {
-        const text = visibleMessageText(last);
-        return text ? text.slice(0, 80) : null;
-      })()
-    : null;
+  const lastMessagePreview = previewFromOpenedWindow(
+    last,
+    listed?.lastMessagePreview,
+  );
   const conversation = listed
     ? {
         ...listed,
         messageCount: messages.length,
-        lastMessagePreview: previewFromMessages ?? listed.lastMessagePreview,
+        lastMessagePreview,
       }
     : {
         id,
         title: "对话",
         updatedAt: new Date().toISOString(),
         messageCount: messages.length,
-        lastMessagePreview: previewFromMessages,
+        lastMessagePreview,
       };
   await cacheOpenedConversation({
     conversation,

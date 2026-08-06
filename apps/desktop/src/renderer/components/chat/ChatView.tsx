@@ -13,7 +13,6 @@ import {
 } from "@/services/messages";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
-  useActiveGenerating,
   useActiveHasMoreAfter,
   useActiveHasMoreBefore,
   useActiveLoadingNewer,
@@ -28,7 +27,6 @@ import { ApprovalPrompt } from "./ApprovalPrompt";
 import { ConversationDecisionPrompts } from "./ConversationDecisionPrompts";
 import { ConversationOutline } from "./ConversationOutline";
 import { FindBar } from "./FindBar";
-import { FollowupChips } from "./FollowupChips";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { RetryBanner } from "./RetryBanner";
@@ -38,7 +36,6 @@ import { StreamingIndicator } from "./StreamingIndicator";
 export function ChatView() {
   const messages = useActiveMessages();
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const isGenerating = useActiveGenerating();
   const hasMessages = messages.length > 0;
   const conversations = useConversations();
   // 草稿态（未落库对话）才可能进居中欢迎态。已落库对话切换时会先经历一个「历史尚未
@@ -113,20 +110,6 @@ export function ChatView() {
     ? `${last.id}-${last.content.length}-${last.reasoning?.length ?? 0}`
     : "";
 
-  // 下一步推荐 chips: surface the latest finished assistant turn's followups directly above
-  // the composer — the 「what next」 affordance belongs where you type and stays put regardless
-  // of scroll. Persisted (messages.followups) so a refresh replays them; a NEW turn retires the
-  // prior turn's chips (they leave the last-message slot). Soft-unavailable is live-only.
-  const followups =
-    !isGenerating && last?.role === "assistant" && !last.isStreaming
-      ? (last.followups ?? [])
-      : [];
-  const followupsUnavailable =
-    !isGenerating &&
-    last?.role === "assistant" &&
-    !last.isStreaming &&
-    Boolean(last?.followupsUnavailable) &&
-    followups.length === 0;
   const { scrollRef, atBottom, jumpToBottom } = useChatScroll({
     messages,
     resetKey: conversationId,
@@ -224,10 +207,6 @@ export function ChatView() {
               />
               <RetryBanner />
               <StageCardDock />
-              <FollowupChips
-                followups={followups}
-                unavailable={followupsUnavailable}
-              />
               <StreamingIndicator />
             </>
           )}

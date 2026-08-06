@@ -15,7 +15,7 @@ BACKOFF_MULTIPLIER = 2.0
 CONNECT_MAX_RETRIES = 2
 CONNECT_INITIAL_BACKOFF = 1.0
 # Turn-scale scenarios invert that trade-off: a background one-shot (title /
-# followups / memory) only loses its own cheap output, but a chat turn or a
+# memory / compaction) only loses its own cheap output, but a chat turn or a
 # delegated worker loses the whole run — teammates' prose, coordination state,
 # minutes of wall clock — and the turn ends with no assistant message at all.
 # So connect failures there get a real exponential chain, sized to ride out a
@@ -31,8 +31,8 @@ TURN_SCALE_SCENARIOS = frozenset({"chat", "agent"})
 # Retry-After chains (2→4→8…) are actually waited, not abandoned on the 3rd hit.
 RATE_LIMIT_MAX_RETRIES = 6
 # Honor HTTP Retry-After up to this many seconds. Upstream sometimes returns
-# hour-scale values (e.g. 3600) that starve short outer budgets (title 20s /
-# followups 15s) even though a second-scale retry then succeeds — past this
+# hour-scale values (e.g. 3600) that starve short outer budgets (title 20s)
+# even though a second-scale retry then succeeds — past this
 # cap we fall back to exponential backoff and log the raw header separately.
 MAX_RETRY_AFTER = 30.0
 

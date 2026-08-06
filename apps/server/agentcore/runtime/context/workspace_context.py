@@ -121,7 +121,7 @@ class ChannelProfile:
     """Single source for channel capabilities derived from ``X-Client-Platform``.
 
     Orthogonal to workspace ``location`` (local/server) and to auth audience
-    (``parse_client_platform`` may still legacy-default desktop for login aud).
+    (``parse_client_platform`` also fail-closes on missing / unknown headers).
     Missing / unknown headers fail closed — never pretend the web can drive Host.
     """
 
@@ -152,8 +152,8 @@ def desktop_client_can_bind(x_client_platform: str | None) -> bool:
     """Thin fail-closed wrapper: folder AskOption actions need a desktop client.
 
     Covers ``open_local_project`` / ``bind_local_folder`` / ``grant_*``. ``None`` /
-    unknown → ``False`` (unlike auth ``parse_client_platform``, which may legacy-
-    default desktop for JWT aud).
+    unknown → ``False`` (same fail-closed spirit as auth ``parse_client_platform``,
+    which raises rather than inventing a desktop audience).
     """
     return resolve_channel_profile(x_client_platform).can_bind_folder
 
@@ -269,9 +269,12 @@ def build_workspace_context(
             "`external/<别名>/…` 访问（经桌面通道、仅本次对话、可撤销）。"
             "与工作区绑定正交——不必先改绑或打开本地项目。"
             "「看桌面/看本机某目录」只走 grant_*：立即发卡，勿纯文本劝授权；"
-            "已点名常见目录+模糊指代+明确任务 → 首动单 choice grant_*，"
-            "禁止首轮文本题要文件名/路径（先同意再发现；授权后匹配，0/多歧义再问）；"
-            "禁止要用户手填绝对路径；禁止用 code_execute/terminal 探主机家目录找路径。"
+            "已点名常见目录+任务 → 首动单 choice grant_*，带 well_known"
+            "（desktop/downloads/documents），已知子名带 target_name；"
+            "禁止首轮文本题要文件名/绝对路径（授权后发现；授权后在 external/ 匹配，"
+            "0/多歧义再问）；仅位置完全模糊才不带 well_known（选择器兜底）；"
+            "禁止要用户手填绝对路径；禁止用 code_execute/terminal/host_shell "
+            "探主机家目录找路径。"
         )
         if is_local:
             desktop_line = (
@@ -360,6 +363,10 @@ def build_workspace_context(
 
         # Registry: include_browser = include_execution ∧ browser_execution_enabled_for.
         browser_on = exec_on and browser_execution_enabled_for(backend)
+    # B1：装配事实闩锁 → 收口禁在未装配时声称已开浏览器（结构化对账，非扫气泡）。
+    from agentcore.runtime.closing_posture import note_browser_assembled
+
+    note_browser_assembled(browser_on)
     # local_open = 本机工作区可让用户直接打开产物（非 L3 浏览器工具；与 location 同事实）。
     local_open_on = is_local
     # Host 已装配 ⇔ host≠off ∧ 桌面回填通道可达（desktop_online）。

@@ -85,20 +85,76 @@ describe("ProviderForm", () => {
     expect(patch.default_model).toBe("deepseek-v4-flash");
   });
 
-  it("exposes an editable default model on non-custom presets", () => {
+  it("exposes a preset model dropdown with 其他… for non-custom presets", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
-    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
-    expect(modelInput.value).toBe("deepseek-v4-flash");
-    fireEvent.change(modelInput, { target: { value: "deepseek-v4" } });
-    expect(modelInput.value).toBe("deepseek-v4");
+    const modelSelect = screen.getByLabelText(
+      "默认模型名",
+    ) as HTMLSelectElement;
+    expect(modelSelect.tagName).toBe("SELECT");
+    expect(modelSelect.value).toBe("deepseek-v4-flash");
+    expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "__other__",
+    ]);
+    expect(screen.queryByLabelText("自定义默认模型名")).toBeNull();
+
+    fireEvent.change(modelSelect, { target: { value: "deepseek-v4-pro" } });
+    expect(modelSelect.value).toBe("deepseek-v4-pro");
   });
 
-  it("prefills Moonshot with kimi-k2.6 and saves an edited default model", async () => {
+  it("shows a free-text field when 其他… is selected", async () => {
+    mockCreate.mockResolvedValue({
+      ...SAVED,
+      default_model: "deepseek-custom",
+    });
+    const onSaved = vi.fn();
+    render(<ProviderForm onSaved={onSaved} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("默认模型名"), {
+      target: { value: "__other__" },
+    });
+    const customInput = screen.getByLabelText(
+      "自定义默认模型名",
+    ) as HTMLInputElement;
+    fireEvent.change(customInput, { target: { value: "deepseek-custom" } });
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-test" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ default_model: "deepseek-custom" }),
+    );
+  });
+
+  it("auto-selects 其他… when the stored model is not in the preset list", () => {
+    render(
+      <ProviderForm
+        provider={{
+          ...SAVED,
+          default_model: "already-saved-custom",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(
+      (screen.getByLabelText("默认模型名") as HTMLSelectElement).value,
+    ).toBe("__other__");
+    expect(
+      (screen.getByLabelText("自定义默认模型名") as HTMLInputElement).value,
+    ).toBe("already-saved-custom");
+  });
+
+  it("prefills Moonshot and saves a listed default model from the dropdown", async () => {
     mockCreate.mockResolvedValue({
       id: "prov-moon",
       label: "Kimi (Moonshot)",
       base_url: "https://api.moonshot.cn/v1",
-      default_model: "kimi-k2.6",
+      default_model: "kimi-k2.5",
       status: "unchecked",
     });
     const onSaved = vi.fn();
@@ -107,10 +163,18 @@ describe("ProviderForm", () => {
     fireEvent.change(screen.getByLabelText("厂商"), {
       target: { value: "moonshot" },
     });
-    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
-    expect(modelInput.value).toBe("kimi-k2.6");
+    const modelSelect = screen.getByLabelText(
+      "默认模型名",
+    ) as HTMLSelectElement;
+    expect(modelSelect.value).toBe("kimi-k2.6");
+    expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
+      "kimi-k2.6",
+      "kimi-k3",
+      "kimi-k2.5",
+      "__other__",
+    ]);
 
-    fireEvent.change(modelInput, { target: { value: "kimi-k2.5" } });
+    fireEvent.change(modelSelect, { target: { value: "kimi-k2.5" } });
     fireEvent.change(screen.getByLabelText("API Key"), {
       target: { value: "sk-moon" },
     });
@@ -123,5 +187,83 @@ describe("ProviderForm", () => {
       default_model: "kimi-k2.5",
       label: "Kimi (Moonshot)",
     });
+  });
+
+  it("prefills JiuRelay endpoint, model dropdown, and key/model tip", () => {
+    render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("厂商"), {
+      target: { value: "jiurelay" },
+    });
+
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "jiurelay",
+    );
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
+      "JiuRelay",
+    );
+    const modelSelect = screen.getByLabelText(
+      "默认模型名",
+    ) as HTMLSelectElement;
+    expect(modelSelect.value).toBe("glm-5.2");
+    expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
+      "glm-5.2",
+      "deepseek-v4-flash-0731",
+      "grok-4.5",
+      "__other__",
+    ]);
+    expect(screen.getByText("领取的 Key 须与所选模型对应")).toBeTruthy();
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "https://jiurelay.com/openai/v1",
+    );
+  });
+
+  it("resets the default model when switching presets", () => {
+    render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("默认模型名"), {
+      target: { value: "deepseek-v4-pro" },
+    });
+    fireEvent.change(screen.getByLabelText("厂商"), {
+      target: { value: "jiurelay" },
+    });
+
+    expect(
+      (screen.getByLabelText("默认模型名") as HTMLSelectElement).value,
+    ).toBe("glm-5.2");
+    expect(screen.queryByLabelText("自定义默认模型名")).toBeNull();
+  });
+
+  it("uses a free-text default model for custom providers", () => {
+    render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("厂商"), {
+      target: { value: "custom" },
+    });
+
+    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
+    expect(modelInput.tagName).toBe("INPUT");
+    fireEvent.change(modelInput, { target: { value: "my-custom-model" } });
+    expect(modelInput.value).toBe("my-custom-model");
+  });
+
+  it("resolves jiurelay base URL when editing an existing provider", () => {
+    render(
+      <ProviderForm
+        provider={{
+          id: "prov-jiu",
+          label: "JiuRelay",
+          base_url: "https://jiurelay.com/openai/v1",
+          default_model: "glm-5.2",
+          status: "unchecked",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "jiurelay",
+    );
   });
 });

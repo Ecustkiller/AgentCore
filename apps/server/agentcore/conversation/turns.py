@@ -67,6 +67,7 @@ async def stream_chat(
     llm_credentials: LLMCredentials | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
+    agent_mentions: list[dict] | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply."""
     try:
@@ -145,6 +146,7 @@ async def stream_chat(
                 board_id=board_id,
                 llm_supports_tools=llm_supports_tools,
                 x_client_platform=x_client_platform,
+                agent_mentions=agent_mentions,
             )
             # Pillar D1: delay sink.close while a detached coordination drive is live
             # (symmetric with sidecar _run_turn). Exception / cancel skip this.

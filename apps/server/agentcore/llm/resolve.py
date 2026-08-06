@@ -26,10 +26,10 @@ from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 logger = get_logger(__name__)
 
 ProviderPurpose = Literal["user_facing", "platform_internal"]
-ModelPurpose = str  # chat | title | memory | compaction | file.rewrite | followups | ...
+ModelPurpose = str  # chat | title | memory | compaction | file.rewrite | ...
 ModelOrigin = Literal["byok", "platform"]
 
-_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction", "followups"})
+_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction"})
 
 __all__ = [
     "ModelConfig",
@@ -406,7 +406,7 @@ async def resolve_model_config(
     (``preflight_llm_credentials`` / ``resolve_and_gate_background`` /
     ``run_background_llm``) is the authorization choke point.
 
-    Background purposes (title/memory/compaction/followups) are **platform-first**
+    Background purposes (title/memory/compaction) are **platform-first**
     product chrome (industry-aligned: Cursor-style) when
     :func:`platform_catalog_visible`. BYOK is the fallback when the platform gate
     is off (dormant billing / missing credentials) **or** upstream auth rejection

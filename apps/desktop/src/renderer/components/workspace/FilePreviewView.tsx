@@ -138,8 +138,8 @@ export function FilePreviewView({
       setOpeningInBrowser(false);
     }
   };
-  // 应用内「完整预览」内置浏览器 tab：主进程经 preview:// 代理会话工作区字节，主窗口内嵌
-  // 隔离 WebContents 里完整跑 JS + 相对资源。云端源专属（openInAppPreview 仅对话侧栏云端源挂）。
+  // 应用内「完整预览」：右坞 BrowserPanel + workspace:// 代理会话工作区字节。
+  // 云端源专属（openInAppPreview 仅对话侧栏云端源挂）。
   const onOpenInAppPreview = async () => {
     if (openingPreview || !source.openInAppPreview) return;
     setOpeningPreview(true);

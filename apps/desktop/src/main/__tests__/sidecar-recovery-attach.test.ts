@@ -19,7 +19,8 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
-import { SidecarManager, type Transport } from "../sidecar-service";
+import { SidecarManager } from "../sidecar/manager";
+import type { Transport } from "../sidecar/transport";
 
 /** Fake stdio transport: complete initialize, hang startTurn/resume, inject notifications. */
 function hangingTransport() {

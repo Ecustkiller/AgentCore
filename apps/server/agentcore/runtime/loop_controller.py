@@ -16,499 +16,95 @@ Design grounding (see 规划/收敛治理-loop_controller.md): hard round caps a
 tripwire, not a convergence mechanism; detection must be enforced in code, not
 via prompt; and an injected reflection must be anchored to an external signal
 (the observed repetition) or it diverges into self-flagellation / sycophancy.
+
+Thin facade — implementation split by axis:
+
+* ``loop_controller_types`` — shared types / constants / fingerprint
+* ``loop_controller_stuck`` — stuck / intervention detector
+* ``loop_controller_circuit`` — tool-failure circuit breaker
+* ``loop_controller_write_reject`` — same-path write-reject streak 策略机
+
+Public import paths stay stable via re-exports below.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import Counter, deque
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
-DEFAULT_WINDOW = 8
-DEFAULT_THRESHOLD = 3
-# Consecutive empty-response rounds that trip a degraded finish (B2). The fallback
-# retry sits inside this streak, so the default 2 = one empty → fallback retry → if
-# still empty, degraded.
-DEFAULT_EMPTY_THRESHOLD = 2
-# Tool failure circuit breaker (B2): cumulative (run-scoped, args-agnostic) failure
-# counts per tool. At the warn threshold the model is told to stop retrying that
-# tool; at the disable threshold the tool is removed from the toolset for the rest
-# of the run. Unlike REPEATED_FAILURE detection (which keys on the exact call
-# fingerprint within the sliding window), this counts a tool failing *any* way and
-# never resets — it catches "this tool just isn't working out, no matter the args".
-DEFAULT_TOOL_FAILURE_WARN = 2
-DEFAULT_TOOL_FAILURE_DISABLE = 3
-# Same-path consecutive classified write rejects → force_segmented early (策略机),
-# before the cumulative per-tool disable threshold. Covers prose-append / code
-# integrity / severe-shrink hard rejects (contract_failure) that skip the normal
-# failure tally.
-DEFAULT_PATH_WRITE_REJECT_STREAK = 2
-# Validation / contract self-correct: same fingerprint consecutive failures →
-# stop that path (steer), tool stays available (not a parallel disable tally).
-DEFAULT_VALIDATION_PATH_STREAK = 2
-# Error-class diversion (permanent / permission / validation / transient).
-ERROR_CLASS_PERMANENT = "permanent"
-ERROR_CLASS_PERMISSION = "permission"
-ERROR_CLASS_VALIDATION = "validation"
-ERROR_CLASS_TRANSIENT = "transient"
-_PERMANENT_RETIRE_STEER = (
-    "因不可恢复错误已停用——请换路径推进，禁止原样重试该工具。"
+from agentcore.runtime.loop_controller_circuit import ToolCircuitBreakerMixin
+from agentcore.runtime.loop_controller_stuck import StuckInterventionMixin
+from agentcore.runtime.loop_controller_types import (
+    _PERMANENT_RETIRE_STEER,
+    _VALIDATION_PATH_STOP_STEER,
+    DEFAULT_EMPTY_THRESHOLD,
+    DEFAULT_PATH_WRITE_REJECT_STREAK,
+    DEFAULT_THRESHOLD,
+    DEFAULT_TOOL_FAILURE_DISABLE,
+    DEFAULT_TOOL_FAILURE_WARN,
+    DEFAULT_UNPRODUCTIVE_THRESHOLD,
+    DEFAULT_VALIDATION_PATH_STREAK,
+    DEFAULT_WINDOW,
+    ERROR_CLASS_PERMANENT,
+    ERROR_CLASS_PERMISSION,
+    ERROR_CLASS_TRANSIENT,
+    ERROR_CLASS_VALIDATION,
+    FORCE_SEGMENTED_NARROW_TOOLS,
+    LANDING_TOOLS,
+    ORCHESTRATION_TOOLS,
+    PATH_SEGMENT_FORCE_TOOLS,
+    PROGRESS_TOOLS,
+    CircuitBreak,
+    Intervention,
+    StuckReason,
+    StuckSignal,
+    ToolAttempt,
+    classify_segmented_write_reject,
+    delivery_idle_narrow_prompt,
+    delivery_idle_nudge_prompt,
+    fingerprint_tool_call,
+    resolve_error_class,
 )
-_VALIDATION_PATH_STOP_STEER = (
-    "同因参数/契约错误已连续出现：请停止原样重试该调用路径，"
-    "修正参数或换策略后再试；工具保持可用。"
-)
-# Consecutive *unproductive* rounds that trip an early stop (B2 无产出早停). An
-# unproductive round = the model called ≥1 tool, every call FAILED, and it produced
-# no content — it is "working" but getting nowhere. Distinct from an empty round
-# (no tool call at all → degraded ladder).
-DEFAULT_UNPRODUCTIVE_THRESHOLD = 3
-# Progress tools that reset same-target investigation spin when a recent round
-# succeeded (stage advance / delivery / handoff / ask). ``str_replace`` /
-# ``write_section`` count: coding repair lands via patch, not only whole-file write.
-# (Periodic B2 进度复盘 inject was retired — soft cadence had little effect and
-# false-nagged interactive browser runs.)
-PROGRESS_TOOLS = frozenset(
-    {
-        "delegate",
-        "file_write",
-        "file_append",
-        "str_replace",
-        "write_section",
-        "handoff",
-        "ask_user",
-    }
-)
-# Workspace landing tools: success clears zero-write thrashing; any attempt is
-# "落盘意图" and exempts that round from the zero-write clock.
-# Keep in sync with serialize._FILE_PRODUCT_ARG (product-landing path tools).
-LANDING_TOOLS = frozenset(
-    {
-        "file_write",
-        "file_append",
-        "str_replace",
-        "write_section",
-        "file_move",
-        "file_copy",
-    }
-)
-# Write tools that enter force_segmented when same-path reject streak trips
-# (keep str_replace / write_section as the preferred segmented pens).
-PATH_SEGMENT_FORCE_TOOLS = frozenset({"file_write", "file_append"})
-# Dangerous landing action narrowed (disabled) once force_segmented latches —
-# keep file_write / str_replace; stop append thrashing on prose / broken bodies.
-FORCE_SEGMENTED_NARROW_TOOLS = frozenset({"file_append"})
-# CEO orchestration primitives: parse-only thrashing must not retire them
-# (same posture as LANDING_TOOLS keeping the pen — keep the dispatcher).
-ORCHESTRATION_TOOLS = frozenset({"delegate", "ask_user"})
+from agentcore.runtime.loop_controller_write_reject import WriteRejectStreakMixin
+
+__all__ = [
+    "DEFAULT_EMPTY_THRESHOLD",
+    "DEFAULT_PATH_WRITE_REJECT_STREAK",
+    "DEFAULT_THRESHOLD",
+    "DEFAULT_TOOL_FAILURE_DISABLE",
+    "DEFAULT_TOOL_FAILURE_WARN",
+    "DEFAULT_UNPRODUCTIVE_THRESHOLD",
+    "DEFAULT_VALIDATION_PATH_STREAK",
+    "DEFAULT_WINDOW",
+    "ERROR_CLASS_PERMANENT",
+    "ERROR_CLASS_PERMISSION",
+    "ERROR_CLASS_TRANSIENT",
+    "ERROR_CLASS_VALIDATION",
+    "FORCE_SEGMENTED_NARROW_TOOLS",
+    "LANDING_TOOLS",
+    "ORCHESTRATION_TOOLS",
+    "PATH_SEGMENT_FORCE_TOOLS",
+    "PROGRESS_TOOLS",
+    "CircuitBreak",
+    "Intervention",
+    "LoopController",
+    "StuckReason",
+    "StuckSignal",
+    "ToolAttempt",
+    "classify_segmented_write_reject",
+    "delivery_idle_narrow_prompt",
+    "delivery_idle_nudge_prompt",
+    "fingerprint_tool_call",
+    "resolve_error_class",
+]
 
 
-def classify_segmented_write_reject(
-    tool_name: str,
-    *,
-    error: str = "",
-    contract_failure: bool = False,
-) -> str | None:
-    """Classify a hard write reject that feeds the same-path force_segmented streak.
-
-    Returns a stable class id (``prose_append`` / ``code_integrity`` /
-    ``severe_shrink``) or ``None``.
-    Does **not** cover length/oversized rejects (those hard gates were removed).
-    Soft ``integrity_nudge`` is success-path only and never reaches here.
-    """
-    if not contract_failure or tool_name not in {"file_write", "file_append"}:
-        return None
-    text = error or ""
-    if tool_name == "file_append" and "已落成篇正文" in text:
-        return "prose_append"
-    if tool_name == "file_write" and "拒绝整篇截断覆盖" in text:
-        return "severe_shrink"
-    if "结构不完整" in text or "省略标记" in text:
-        return "code_integrity"
-    return None
-
-
-def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> dict[str, object]:
-    """Collapse empty-required-field / no-op edit calls so stuck detection sees one path.
-
-    Distinct ``path`` / ``new_string`` with empty ``old_string`` must not mint a new
-    fingerprint each time — that let workers burn token budgets on free validation
-    retries. Non-empty identical ``old_string``/``new_string`` collapses per path
-    (longdoc revise thrash: different noop payloads still melt). Sentinel shape is
-    stable and intentional (not a real tool schema).
-    """
-    if name == "str_replace":
-        old = parsed.get("old_string")
-        if old is None or (isinstance(old, str) and not old.strip()):
-            return {"__malformed__": "old_string"}
-        path = parsed.get("path")
-        if path is None or (isinstance(path, str) and not path.strip()):
-            return {"__malformed__": "path"}
-        new = parsed.get("new_string")
-        if (
-            isinstance(old, str)
-            and isinstance(new, str)
-            and old == new
-        ):
-            path_key = path.strip().replace("\\", "/") if isinstance(path, str) else ""
-            return {"__malformed__": "identical_edit", "path": path_key}
-    if name in {"file_write", "file_append"}:
-        path = parsed.get("path")
-        if path is None or (isinstance(path, str) and not path.strip()):
-            return {"__malformed__": "path"}
-    return parsed
-
-
-def _norm_write_reject_path(path: object) -> str:
-    if not isinstance(path, str):
-        return ""
-    return path.strip().replace("\\", "/")
-
-
-def zero_write_warn_prompt(*, rounds: int, prose_idle: bool = False) -> str:
-    """Hard steer before idle FINALIZE (files zero-write or prose short idle).
-
-    Dormant with the retired zero-write ladder; prefer
-    :func:`delivery_idle_nudge_prompt` for the soft files-expected path.
-    """
-    if prose_idle:
-        return (
-            f"[系统提示] 只读不交卷告警（已连续 {rounds} 轮仅调查、无散文交付）："
-            "请立即基于已读内容写出短诊断/验证结论（或 handoff 交接），"
-            "禁止继续换文件通读空转。下一轮仍无正文将强制收口。"
-        )
-    return (
-        f"[系统提示] 只读空转告警（已连续 {rounds} 轮仅调查、零落盘）："
-        "任务要求写盘交付。请立即 str_replace / file_write 落地，或 handoff 诚实说明阻塞；"
-        "禁止继续换文件通读空转。下一轮仍无落盘将强制收口。"
-    )
-
-
-def delivery_idle_nudge_prompt(
-    *, rounds: int, recon: bool = False, report: bool = False
-) -> str:
-    """Soft steer for read-idle (repair files, report files, or investigation recon)."""
-    if recon:
-        return (
-            f"[系统提示] 调查空转提醒（已连续 {rounds} 轮仅搜读、无结论交接）："
-            "请立即基于已读内容给出结论，或 escalate / handoff 说明阻塞；"
-            "禁止继续换文件通读摊大饼。不要为「再确认」再开一轮全仓 typecheck。"
-        )
-    if report:
-        return (
-            f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
-            "任务要求写报告落盘。请立即基于已读证据 file_write 写出报告，"
-            "或 handoff 交接阻塞；禁止继续只搜不写。"
-            "检索工具仍可用，请转入成稿。"
-        )
-    return (
-        f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
-        "任务要求写盘交付。请立即 str_replace / file_write 落地改动，或 handoff 交接阻塞；"
-        "禁止继续大范围搜读空转。仍不落地将收窄调查类工具。"
-    )
-
-
-def delivery_idle_narrow_prompt(*, rounds: int) -> str:
-    """After soft nudge (repair files only): tools narrowed — still not FINALIZE.
-
-    Report-delivery posts never arm this step (``narrow_rounds=0``); do not reuse
-    for report idle.
-    """
-    return (
-        f"[系统提示] 交文件空转收窄（已连续 {rounds} 轮仅调查、零落盘）："
-        "大范围调查类工具已收回；仅保留写盘 / 内环诊断 / handoff / 必要 file_read。"
-        "请立即改文件或交接，勿再展开新调研。"
-    )
-
-
-def zero_write_finalize_prompt(*, rounds: int, prose_idle: bool = False) -> str:
-    """Injected on idle FINALIZE so salvage answers name the idle pattern."""
-    if prose_idle:
-        return (
-            f"[系统提示] 只读不交卷强制收口（连续 {rounds} 轮调查且无散文交付）："
-            "请基于已读内容写出根因/结论并 handoff，勿再展开新调研。"
-        )
-    return (
-        f"[系统提示] 只读空转强制收口（连续 {rounds} 轮调查且零落盘）："
-        "请基于已读内容交接当前缺口，勿再展开新调研。"
-    )
-
-
-class StuckReason(StrEnum):
-    """Which mechanical loop pattern was observed."""
-
-    REPEATED_CALL = "repeated_call"
-    ALTERNATING = "alternating"
-    REPEATED_FAILURE = "repeated_failure"
-
-
-class Intervention(StrEnum):
-    """What the engine should do this round."""
-
-    CONTINUE = "continue"
-    NUDGE = "nudge"
-    FINALIZE = "finalize"
-
-
-@dataclass(frozen=True)
-class ToolAttempt:
-    """One executed tool call in a round; ``success`` carries the failure signal."""
-
-    fingerprint: str
-    tool_name: str
-    success: bool
-    # Policy/environment/governance blocks (SSRF, egress breaker, approval denial) are
-    # honest tool failures for the model but must not trip the run-scoped circuit
-    # breaker — the tool itself is fine; the call was refused upstream.
-    policy_failure: bool = False
-    # Arguments string failed ``json.loads`` before the tool ran — still counts toward
-    # the run-scoped breaker, but steers must not say「换不同的输入」(that pushes the
-    # model to shorten/rewrite a DAG that only needed quote-escaping).
-    parse_failure: bool = False
-    # 参数契约拒绝: a deterministic argument-contract rejection (e.g. web_search A3 query
-    # 过长/过多) whose error already tells the model exactly how to fix it. Like
-    # ``policy_failure`` it is invisible to the run-scoped circuit breaker — a same-round
-    # fan-out of over-long queries must not burn the disable threshold before the model can
-    # act on the fix tip — but unlike it, this names a self-correctable参数打回, not an
-    # upstream block. It still lands in the sliding window as an honest failure, so
-    # REPEATED_FAILURE detection, unproductive early-stop, and round recording are unchanged;
-    # only the cumulative warn/disable tally (``_tool_failures``) skips it.
-    contract_failure: bool = False
-    # Short error text for honest finalize / CEO synthesis (ignored on success /
-    # policy_failure). Capped when recorded on the controller.
-    error_summary: str = ""
-    # Optional tool-result metadata forwarded for governance (e.g. delegate batch shape).
-    meta: dict[str, Any] = field(default_factory=dict)
-
-
-def resolve_error_class(attempt: ToolAttempt) -> str | None:
-    """Classify a failed attempt for breaker diversion (or ``None`` on success).
-
-    Prefer explicit ``meta.error_class``; else infer from existing markers
-    (``retire_tools`` / ``liveness_timeout`` / ``policy_failure`` /
-    ``contract_failure`` / ``parse_failure``). Unknown failures stay transient.
-    """
-    if attempt.success:
-        return None
-    meta = attempt.meta or {}
-    raw = meta.get("error_class")
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip()
-    if meta.get("retire_tools") or meta.get("liveness_timeout"):
-        return ERROR_CLASS_PERMANENT
-    if attempt.policy_failure:
-        return ERROR_CLASS_PERMISSION
-    if attempt.contract_failure or attempt.parse_failure:
-        return ERROR_CLASS_VALIDATION
-    return ERROR_CLASS_TRANSIENT
-
-
-@dataclass(frozen=True)
-class StuckSignal:
-    """A detected stuck pattern plus the facts needed to anchor a nudge."""
-
-    reason: StuckReason
-    tool_name: str
-    count: int
-
-    def reflection_message(self) -> str:
-        """Steer message anchored to the concrete observation.
-
-        Anchoring to the real fact ("you called X 3 times") rather than a vague
-        "think harder" is what keeps the injected reflection from diverging.
-        """
-        if self.reason is StuckReason.REPEATED_FAILURE:
-            return (
-                f"[系统提示] 工具 `{self.tool_name}` 已用相同方式失败 {self.count} 次，"
-                "继续重试只会再次失败。请不要再以相同参数调用它："
-                "改用不同的输入、换一个工具，或基于已有信息直接给出最终答案。"
-            )
-        if self.reason is StuckReason.ALTERNATING:
-            return (
-                f"[系统提示] 你在两个动作之间来回循环（其中之一是 `{self.tool_name}`）"
-                "却没有取得进展。请跳出循环：选定一个能真正推进到答案的具体下一步，"
-                "或现在就给出最终答案。"
-            )
-        return (
-            f"[系统提示] 你已用相同参数调用 `{self.tool_name}` {self.count} 次，"
-            "没有任何新进展。请停止重复：要么换一种实质不同的做法或参数，"
-            "要么基于现有信息直接给出最终答案。"
-        )
-
-
-@dataclass(frozen=True)
-class CircuitBreak:
-    """Tools that crossed a cumulative-failure threshold this round (B2 熔断).
-
-    ``warned`` hit the warn threshold (tell the model to stop retrying them);
-    ``disabled`` hit the disable threshold (the engine removes them from the
-    toolset for the rest of the run). Each is a tuple of tool names; both empty
-    means nothing tripped this round.
-
-    ``parse_only`` names tools whose failures so far are *all* argument-JSON parse
-    failures — their steer text must guide format/strategy, never「换不同的输入」.
-
-    ``force_segmented`` names write/landing tools that hit the disable threshold
-    *or* the same-path classified write-reject streak, but stay enabled — steer
-    forces skeleton + section writes instead of retiring the pen（长文落盘定案：
-    失败换分段，不关写文件）. ``apply_circuit_breaker`` may still narrow
-    ``file_append`` out of the live toolset while keeping ``file_write`` /
-    ``str_replace``.
-
-    ``retire_message`` is an optional hard-stop steer (e.g. browser egress
-    unavailable) that replaces the generic「已多次失败」disable copy when set.
-
-    ``liveness_warned`` names tools whose latest counted failure was a hang /
-    no-response timeout (活性挂起) — warn steer forbids identical retry.
-
-    ``validation_stop`` is a one-shot steer when the same validation fingerprint
-    first hits the path-stop streak (tool stays available). A later re-hit of an
-    already-stopped fingerprint latches thrashing / mid-loop hard stop instead of
-    another steer (see :meth:`LoopController.take_validation_hard_stop`).
-    """
-
-    warned: tuple[str, ...] = ()
-    disabled: tuple[str, ...] = ()
-    parse_only: frozenset[str] = frozenset()
-    force_segmented: frozenset[str] = frozenset()
-    retire_message: str | None = None
-    liveness_warned: frozenset[str] = frozenset()
-    validation_stop: str | None = None
-
-    def __bool__(self) -> bool:
-        return bool(
-            self.warned
-            or self.disabled
-            or self.force_segmented
-            or self.validation_stop
-        )
-
-    def message(self) -> str | None:
-        """The single ``[系统提示]`` to inject this round, or ``None``.
-
-        Anchored to the concrete fact (which tool, what now happens) like the
-        nudge messages — disable first (the stronger action), then force-segmented
-        write steer, then warn. Parse-only write failures steer to segmented
-        landing (not「原样重发」). ``read_url`` disable/warn uses a research-specific
-        stop-read steer (do not say「换不同的输入」— that encourages URL thrashing
-        after egress storms).
-        """
-        parts: list[str] = []
-        if self.disabled:
-            if self.retire_message:
-                parts.append(self.retire_message.strip())
-            else:
-                parse_d = tuple(n for n in self.disabled if n in self.parse_only)
-                other_d = tuple(n for n in self.disabled if n not in self.parse_only)
-                read_d = tuple(n for n in other_d if n == "read_url")
-                other_d = tuple(n for n in other_d if n != "read_url")
-                if read_d:
-                    from agentcore.tools.builtin.web._net import READ_URL_RETIRE_STEER
-
-                    parts.append(READ_URL_RETIRE_STEER)
-                if other_d:
-                    names = "、".join(f"`{n}`" for n in other_d)
-                    parts.append(
-                        f"工具 {names} 已多次失败，本回合起停用，无法再调用——"
-                        "请改用其他工具或基于已有信息推进。"
-                    )
-                if parse_d:
-                    names = "、".join(f"`{n}`" for n in parse_d)
-                    parts.append(
-                        f"工具 {names} 因参数不是合法 JSON 已多次失败，本回合起停用，无法再调用——"
-                        "请改用其他工具或基于已有信息推进。"
-                    )
-        if self.force_segmented:
-            names = "、".join(f"`{n}`" for n in self.force_segmented)
-            parts.append(
-                f"工具 {names} 连续写盘失败：写文件能力保持可用（`file_write` / `str_replace`）。"
-                "【强制】改用短骨架 file_write + 按节 str_replace 落盘；"
-                "`file_append` 已收窄，禁止再整篇一次写入；勿向用户讲解 JSON 转义。"
-            )
-        if self.warned:
-            parse_w = tuple(n for n in self.warned if n in self.parse_only)
-            other_w = tuple(n for n in self.warned if n not in self.parse_only)
-            read_w = tuple(n for n in other_w if n == "read_url")
-            other_w = tuple(n for n in other_w if n != "read_url")
-            if read_w:
-                parts.append(
-                    "工具 `read_url` 已多次失败，请不要再换 URL / 同策略空转重读——"
-                    "改用已有 web_search 摘要与已读材料推进写作，或换一个非外网读页工具。"
-                )
-            if other_w:
-                live_w = tuple(n for n in other_w if n in self.liveness_warned)
-                plain_w = tuple(n for n in other_w if n not in self.liveness_warned)
-                if live_w:
-                    names = "、".join(f"`{n}`" for n in live_w)
-                    parts.append(
-                        f"工具 {names} 已多次活性挂起（无响应超时），请不要原样重试："
-                        "缩小范围、换路径策略或换工具，基于已有信息推进。"
-                    )
-                if plain_w:
-                    names = "、".join(f"`{n}`" for n in plain_w)
-                    parts.append(
-                        f"工具 {names} 已多次失败，请不要再以相同方式调用它："
-                        "换不同的输入、换一个工具，或基于已有信息直接推进。"
-                    )
-            if parse_w:
-                write_pw = tuple(n for n in parse_w if n in LANDING_TOOLS)
-                orch_pw = tuple(n for n in parse_w if n in ORCHESTRATION_TOOLS)
-                other_pw = tuple(
-                    n for n in parse_w if n not in LANDING_TOOLS and n not in ORCHESTRATION_TOOLS
-                )
-                if write_pw:
-                    names = "、".join(f"`{n}`" for n in write_pw)
-                    parts.append(
-                        f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败"
-                        "（常见于整篇正文塞进一次调用）："
-                        "【强制】改用短骨架 + 分段 file_append / str_replace 落盘，"
-                        "不要原样重发整段，也不要整篇一次 file_write。"
-                    )
-                if orch_pw:
-                    names = "、".join(f"`{n}`" for n in orch_pw)
-                    parts.append(
-                        f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败："
-                        "【强制】只发单一合法 JSON（禁止 XML/<parameter> 混入），"
-                        "按 schema 精简重试；工具保持可用，勿改用空回复交差。"
-                    )
-                if other_pw:
-                    names = "、".join(f"`{n}`" for n in other_pw)
-                    parts.append(
-                        f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败："
-                        "请修复 JSON 格式（尤其是字符串内引号转义）后原样重发全部参数，"
-                        "不要改写、缩短或删减内容；也可换一个工具或基于已有信息直接推进。"
-                    )
-        if self.validation_stop:
-            parts.append(self.validation_stop.strip())
-        if not parts:
-            return None
-        return "[系统提示] " + " ".join(parts)
-
-
-def fingerprint_tool_call(name: str, arguments: str) -> str:
-    """Stable hash of ``(tool_name, normalized args)``.
-
-    Args are normalized via key-sorted JSON so semantically identical calls map
-    to one fingerprint; malformed JSON falls back to the raw argument string so
-    verbatim repeats are still caught. Empty required fields and identical
-    str_replace no-ops collapse to a stable sentinel (see
-    ``_collapse_malformed_required_args``).
-    """
-    try:
-        parsed = json.loads(arguments) if arguments else {}
-        if isinstance(parsed, dict):
-            parsed = _collapse_malformed_required_args(name, parsed)
-        normalized = json.dumps(parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    except (json.JSONDecodeError, TypeError):
-        normalized = arguments or ""
-    return hashlib.sha1(f"{name}\x00{normalized}".encode()).hexdigest()
-
-
-class LoopController:
+class LoopController(
+    StuckInterventionMixin,
+    ToolCircuitBreakerMixin,
+    WriteRejectStreakMixin,
+):
     """Sliding-window stuck detector with a two-strike intervention policy.
 
     One instance per ReAct run — the window and the "already nudged" flag are
@@ -528,11 +124,9 @@ class LoopController:
         unproductive_threshold: int = DEFAULT_UNPRODUCTIVE_THRESHOLD,
         convergence_finalize_rounds: int = 0,
         convergence_spin_rounds: int = DEFAULT_THRESHOLD,
-        zero_write_finalize_rounds: int = 0,
-        prose_idle: bool = False,
         form_prose: bool = False,
-        # Soft files-expected ladder (nudge → tool narrow); orthogonal to retired
-        # zero-write FINALIZE and to token/timeout wind_down. ≤0 disables each step.
+        # Soft files-expected ladder (nudge → tool narrow); orthogonal to
+        # token/timeout wind_down. ≤0 disables each step.
         delivery_idle_nudge_rounds: int = 0,
         delivery_idle_narrow_rounds: int = 0,
         # True → nudge prompt is recon (conclude/handoff), not write-disk pressure.
@@ -566,25 +160,20 @@ class LoopController:
         # disables the absolute cap; ``spin_rounds <= 0`` disables spinning detection.
         self._convergence_finalize_rounds = max(0, convergence_finalize_rounds)
         self._convergence_spin_rounds = max(0, convergence_spin_rounds)
-        # Delivery-idle thrashing: investigation-only with no delivery success.
-        # Files mode = landing write; prose_idle = handoff (or landing if present).
-        # ``<= 0`` disables. Landing/handoff *attempt* resets; success latches done.
-        # Soft delivery_idle (nudge/narrow) reuses the same idle-round counter when
-        # enabled — still never arms the retired mid-loop FINALIZE/DEGRADED path.
-        self._zero_write_finalize_rounds = max(0, zero_write_finalize_rounds)
-        self._prose_idle = bool(prose_idle)
+        # Delivery-idle thrashing: investigation-only with no landing success.
+        # Soft delivery_idle (nudge/narrow) uses this idle-round counter.
+        # Landing *attempt* resets; success latches done.
         self._form_prose = bool(form_prose)
         self._delivery_idle_nudge_rounds = max(0, int(delivery_idle_nudge_rounds))
         self._delivery_idle_narrow_rounds = max(0, int(delivery_idle_narrow_rounds))
         self._delivery_idle_recon = bool(delivery_idle_recon)
         self._delivery_idle_report = bool(delivery_idle_report)
         # Declared deliverable.artifacts — dossier intermediates count as product
-        # only when they match (files zero-write latch). Empty = no whitelist.
+        # only when they match (delivery-idle landing latch). Empty = no whitelist.
         self._product_landing_artifacts: tuple[str, ...] = tuple(
             a for a in (product_landing_artifacts or ()) if a
         )
-        self._zero_write_investigation_rounds = 0
-        self._zero_write_warned = False
+        self._idle_investigation_rounds = 0
         self._delivery_idle_nudged = False
         self._delivery_idle_narrowed = False
         self._delivery_idle_narrow_apply_pending = False
@@ -855,19 +444,14 @@ class LoopController:
         round_progress = any(
             attempt.success and attempt.tool_name in PROGRESS_TOOLS for attempt in attempts
         )
-        # Files zero-write / soft delivery_idle: any successful landing-tool write
-        # latches success / clears the idle clock (dossier notes under
-        # research/reviews/debate count as product). Missing meta.path stays
-        # compatible (counts as product). Failed landing intent still resets the
-        # idle clock.
+        # Soft delivery_idle: any successful landing-tool write latches success /
+        # clears the idle clock (dossier notes under research/reviews/debate count
+        # as product). Missing meta.path stays compatible (counts as product).
+        # Failed landing intent still resets the idle clock.
         delivery_idle_tracking = (
             self._delivery_idle_nudge_rounds > 0 or self._delivery_idle_narrow_rounds > 0
         )
-        files_product_gate = (
-            (self._zero_write_finalize_rounds > 0 or delivery_idle_tracking)
-            and not self._prose_idle
-            and not self._form_prose
-        )
+        files_product_gate = delivery_idle_tracking and not self._form_prose
         if files_product_gate:
             landing_success = any(
                 self._is_product_landing_success(a) for a in attempts
@@ -889,17 +473,9 @@ class LoopController:
             landing_attempt = any(
                 attempt.tool_name in LANDING_TOOLS for attempt in attempts
             )
-        handoff_success = any(
-            attempt.success and attempt.tool_name == "handoff" for attempt in attempts
-        )
-        delivery_success = landing_success or (self._prose_idle and handoff_success)
-        delivery_attempt = landing_attempt or (
-            self._prose_idle and any(a.tool_name == "handoff" for a in attempts)
-        )
-        if delivery_success:
+        if landing_success:
             self._landing_succeeded = True
-            self._zero_write_investigation_rounds = 0
-            self._zero_write_warned = False
+            self._idle_investigation_rounds = 0
             self._delivery_idle_nudged = False
             # Keep narrow latch: tools stay narrowed once applied this run.
         if round_progress:
@@ -1063,15 +639,12 @@ class LoopController:
                     self._same_target_investigation_streak = 0
                 self._prev_investigation_fps = current
 
-        # Delivery-idle thrashing (files zero-write / soft delivery_idle /
-        # prose short idle): investigation-only round with no delivery attempt
-        # bumps the streak; delivery intent/success resets.
+        # Soft delivery_idle: investigation-only round with no landing attempt
+        # bumps the streak; landing intent/success resets.
         # Non-investigation rounds (ask / progress / exec) clear the idle clock.
         # (Historical: dossier notes once counted as non-product idle; they now latch
         # as product via landing_product — dossier_note_only stays unreachable.)
-        idle_tracking = (
-            self._zero_write_finalize_rounds > 0 or delivery_idle_tracking
-        ) and not self._landing_succeeded
+        idle_tracking = delivery_idle_tracking and not self._landing_succeeded
         if idle_tracking:
             tool_names = {a.tool_name for a in attempts if a.tool_name}
             investigation_only = bool(tool_names) and tool_names <= self._investigation_tools
@@ -1088,488 +661,14 @@ class LoopController:
                     for a in attempts
                     if a.tool_name
                 )
-            if delivery_attempt or delivery_success:
-                self._zero_write_investigation_rounds = 0
-                self._zero_write_warned = False
+            if landing_attempt or landing_success:
+                self._idle_investigation_rounds = 0
                 if not self._delivery_idle_narrowed:
                     self._delivery_idle_nudged = False
             elif investigation_only or dossier_note_only:
-                self._zero_write_investigation_rounds += 1
+                self._idle_investigation_rounds += 1
             elif tool_names:
                 # Mixed / non-investigation activity — not pure read-idle.
-                self._zero_write_investigation_rounds = 0
-                self._zero_write_warned = False
+                self._idle_investigation_rounds = 0
                 if not self._delivery_idle_narrowed:
                     self._delivery_idle_nudged = False
-
-    def note_empty_round(self, is_empty: bool) -> None:
-        """Track consecutive empty-response rounds (B2).
-
-        An empty round = the model produced no content and called no tool. A
-        non-empty round (real answer OR a tool call) resets the streak — so only
-        *consecutive* empties escalate toward a degraded finish.
-        """
-        self._consecutive_empty = self._consecutive_empty + 1 if is_empty else 0
-
-    def _note_path_write_reject(self, attempt: ToolAttempt) -> None:
-        """Bump / reset same-path classified write-reject streak for force_segmented."""
-        path = _norm_write_reject_path((attempt.meta or {}).get("path"))
-        if not path or attempt.tool_name not in PATH_SEGMENT_FORCE_TOOLS:
-            return
-        if attempt.success:
-            self._path_write_rejects.pop(path, None)
-            return
-        if attempt.policy_failure:
-            return
-        reject_class = (attempt.meta or {}).get("segmented_write_reject")
-        if not isinstance(reject_class, str) or not reject_class.strip():
-            reject_class = classify_segmented_write_reject(
-                attempt.tool_name,
-                error=attempt.error_summary or "",
-                contract_failure=bool(attempt.contract_failure),
-            )
-        else:
-            reject_class = reject_class.strip()
-        if not reject_class:
-            # Other write failure on this path breaks the classified streak.
-            self._path_write_rejects.pop(path, None)
-            return
-        prev = self._path_write_rejects.get(path)
-        streak = (
-            prev[1] + 1 if prev is not None and prev[0] == reject_class else 1
-        )
-        self._path_write_rejects[path] = (reject_class, streak)
-        if streak >= self._path_write_reject_streak and not (
-            self._tool_segmented_forced >= PATH_SEGMENT_FORCE_TOOLS
-        ):
-            self._pending_path_force_segmented = True
-
-    def empty_response_action(self, *, finish_reason: str | None = None) -> Intervention:
-        """Decide what to do after an empty round (B2 degraded ladder).
-
-        ``finish_reason == "length"`` (protocol-proven truncation with empty body +
-        no tools) skips the default one-shot Continue and finalizes immediately —
-        retrying will not grow the output budget. Ordinary silent empties still
-        ``CONTINUE`` once, then ``FINALIZE`` once the consecutive-empty streak hits
-        the threshold (the turn ends as degraded rather than blank).
-        """
-        if finish_reason == "length":
-            return Intervention.FINALIZE
-        if self._consecutive_empty >= self._empty_threshold:
-            return Intervention.FINALIZE
-        return Intervention.CONTINUE
-
-    def tool_circuit_breaker(self) -> CircuitBreak:
-        """Tools whose cumulative failures crossed a threshold (call after ``record``).
-
-        Returns the tools that *newly* hit the warn / disable threshold this round
-        (each transition fires once per tool per run). The engine injects the
-        :meth:`CircuitBreak.message` and removes any ``disabled`` tools from the
-        toolset for the remaining rounds. A tool that leaps straight to the disable
-        count is only disabled (no redundant warn).
-
-        Landing / write tools (``LANDING_TOOLS``) are never circuit-disabled **except**
-        when the local workspace channel is sticky-dead (``_workspace_channel_dead``):
-        then pens are disabled with the rest of the workspace IO family. Otherwise
-        hitting the disable threshold yields ``force_segmented`` instead (keep the
-        pen, force skeleton + section writes). Orchestration tools (``ORCHESTRATION_TOOLS``)
-        are never disabled on **parse-only** failures either (keep the dispatcher;
-        typed JSON-format steer). Non-landing tools (e.g. ``read_url`` via
-        ``retire_tools``) still disable normally.
-
-        Same-path consecutive classified write rejects (prose-append / code integrity
-        / severe_shrink) also enter ``force_segmented`` via the same latch — early
-        strategy upgrade, not a second breaker.
-        """
-        newly_warned: list[str] = []
-        newly_disabled: list[str] = []
-        newly_force_segmented: list[str] = []
-        for name, count in self._tool_failures.items():
-            if (
-                name in self._tool_disabled
-                or name in self._tool_segmented_forced
-                or name in self._tool_parse_kept
-            ):
-                continue
-            if count >= self._tool_failure_disable:
-                parse_only_tool = (
-                    self._tool_failures[name] > 0
-                    and self._tool_parse_failures.get(name, 0) == self._tool_failures[name]
-                )
-                if name in LANDING_TOOLS and not self._workspace_channel_dead:
-                    self._tool_segmented_forced.add(name)
-                    self._tool_warned.discard(name)
-                    newly_force_segmented.append(name)
-                    continue
-                if name in LANDING_TOOLS and self._workspace_channel_dead:
-                    # Channel dead: writing cannot succeed — disable pens with family.
-                    self._tool_disabled.add(name)
-                    self._tool_warned.discard(name)
-                    newly_disabled.append(name)
-                    continue
-                if name in ORCHESTRATION_TOOLS and parse_only_tool:
-                    # Keep delegate/ask_user available; one-shot format steer via warn path.
-                    self._tool_parse_kept.add(name)
-                    if name not in self._tool_warned:
-                        self._tool_warned.add(name)
-                        newly_warned.append(name)
-                    continue
-                self._tool_disabled.add(name)
-                self._tool_warned.discard(name)
-                newly_disabled.append(name)
-            elif count >= self._tool_failure_warn and name not in self._tool_warned:
-                self._tool_warned.add(name)
-                newly_warned.append(name)
-        if self._pending_path_force_segmented:
-            self._pending_path_force_segmented = False
-            for name in sorted(PATH_SEGMENT_FORCE_TOOLS):
-                if name in self._tool_disabled or name in self._tool_segmented_forced:
-                    continue
-                self._tool_segmented_forced.add(name)
-                self._tool_warned.discard(name)
-                newly_force_segmented.append(name)
-        tripped = (*newly_warned, *newly_disabled, *newly_force_segmented)
-        parse_only = frozenset(
-            name
-            for name in tripped
-            if self._tool_failures.get(name, 0) > 0
-            and self._tool_parse_failures.get(name, 0) == self._tool_failures[name]
-        )
-        retire_message = None
-        if newly_disabled and self._pending_retire_message:
-            retire_message = self._pending_retire_message
-            self._pending_retire_message = None
-        elif newly_force_segmented and self._pending_retire_message:
-            # Landing tools convert permanent retire → force_segmented; drop the
-            # pending hard-stop copy so it cannot leak onto a later unrelated disable.
-            self._pending_retire_message = None
-        validation_stop = None
-        if self._pending_validation_stop:
-            validation_stop = self._pending_validation_stop
-            self._pending_validation_stop = None
-        return CircuitBreak(
-            warned=tuple(newly_warned),
-            disabled=tuple(newly_disabled),
-            parse_only=parse_only,
-            force_segmented=frozenset(newly_force_segmented),
-            retire_message=retire_message,
-            liveness_warned=frozenset(
-                n for n in newly_warned if self._tool_liveness_last.get(n)
-            ),
-            validation_stop=validation_stop,
-        )
-
-    def tool_failure_count(self, tool_name: str) -> int:
-        """Cumulative failure count for one tool in this run (circuit breaker input)."""
-        return int(self._tool_failures.get(tool_name, 0))
-
-    def tool_failure_facts(self) -> list[Any]:
-        """Per-tool failure facts for tools that failed at least once this run.
-
-        Returns :class:`~agentcore.runtime.tool_failures.ToolFailureFact` instances
-        (typed as Any here to keep this module import-light at class body time).
-        """
-        from agentcore.runtime.tool_failures import ToolFailureFact
-
-        facts: list[ToolFailureFact] = []
-        for name, count in sorted(self._tool_failures.items()):
-            if count <= 0:
-                continue
-            facts.append(
-                ToolFailureFact(
-                    tool_name=name,
-                    failure_count=int(count),
-                    last_error=self._tool_last_error.get(name, ""),
-                    succeeded_after=bool(self._tool_succeeded_after_fail.get(name, False)),
-                )
-            )
-        return facts
-
-    def outstanding_tool_failures(self) -> list[Any]:
-        """Failures not cancelled by a later success of the same tool."""
-        return [f for f in self.tool_failure_facts() if f.outstanding]
-
-    def note_round_productivity(
-        self,
-        *,
-        had_tool_calls: bool,
-        all_failed: bool,
-        had_content: bool,
-        all_parse_failures: bool = False,
-    ) -> None:
-        """Track consecutive *unproductive* rounds (B2 无产出早停).
-
-        An unproductive round = the model called ≥1 tool, every call failed, and it
-        produced no content. Any productive round — content this round, a tool
-        success, or a no-tool round (handled by the empty/degraded path) — resets
-        the streak, so only a sustained all-failing-no-output run escalates.
-
-        Pure protocol failures（仅 ``args_parse_failed`` / ``parse_failure``）不计入
-        streak（既不递增也不重置），避免因纯协议失败触发 UNPRODUCTIVE。
-        """
-        if all_parse_failures:
-            return
-        unproductive = had_tool_calls and all_failed and not had_content
-        self._consecutive_unproductive = self._consecutive_unproductive + 1 if unproductive else 0
-
-    def unproductive_early_stop(self) -> bool:
-        """True once the consecutive-unproductive streak hits the threshold."""
-        return self._consecutive_unproductive >= self._unproductive_threshold
-
-    def take_validation_hard_stop(self) -> bool:
-        """Consume a one-shot mid-loop hard stop after a stopped validation fp re-hit.
-
-        Distinct from the first-trip ``validation_stop`` steer: re-hitting an already
-        path-stopped fingerprint latches thrashing and requests Finalize this round
-        so the run does not burn out ``max_rounds``. Ceiling routing still uses
-        :meth:`is_thrashing` (sticky latch; not consumed here).
-        """
-        if not self._pending_validation_hard_stop:
-            return False
-        self._pending_validation_hard_stop = False
-        return True
-
-    @property
-    def validation_thrash_latched(self) -> bool:
-        """True after a stopped validation fingerprint was re-hit (sticky)."""
-        return self._validation_thrash_latched
-
-    @property
-    def investigation_tool_names(self) -> frozenset[str]:
-        """Read-only investigation tool names classified for this run."""
-        return self._investigation_tools
-
-    @property
-    def investigation_calls(self) -> int:
-        """Cumulative read-only investigation calls this run (finalize-log diagnostic)."""
-        return self._investigation_calls
-
-    @property
-    def local_recon_calls(self) -> int:
-        """Cumulative local peek calls (file_list / file_read / grep) this run."""
-        return self._local_recon_calls
-
-    @property
-    def investigation_rounds(self) -> int:
-        """Rounds with >=1 read-only investigation call (the safety net's batch-robust clock)."""
-        return self._investigation_rounds
-
-    @property
-    def zero_write_finalize_rounds(self) -> int:
-        """Configured delivery-idle thrashing threshold (0 = disabled)."""
-        return self._zero_write_finalize_rounds
-
-    @property
-    def prose_idle(self) -> bool:
-        """True when idle ladder is prose short-budget mode (handoff = delivery)."""
-        return self._prose_idle
-
-    @property
-    def form_prose(self) -> bool:
-        """True when deliverable.form=prose (reflection must not urge write tools)."""
-        return self._form_prose
-
-    @property
-    def zero_write_investigation_rounds(self) -> int:
-        """Consecutive investigation-only rounds with no delivery (landing / handoff)."""
-        return self._zero_write_investigation_rounds
-
-    @property
-    def landing_succeeded(self) -> bool:
-        """True once delivery succeeded (landing write, or handoff in prose_idle)."""
-        return self._landing_succeeded
-
-    def zero_write_warn_due(self) -> bool:
-        """True once at threshold−1 (one-shot); caller injects hard warn then latches."""
-        bar = self._zero_write_finalize_rounds
-        if bar <= 1 or self._landing_succeeded or self._zero_write_warned:
-            return False
-        return self._zero_write_investigation_rounds >= bar - 1
-
-    def mark_zero_write_warned(self) -> None:
-        """Latch the one-shot zero-write warn so it cannot re-fire."""
-        self._zero_write_warned = True
-
-    @property
-    def zero_write_warned(self) -> bool:
-        """True after the one-shot zero-write warn was injected."""
-        return self._zero_write_warned
-
-    @property
-    def delivery_idle_nudge_rounds(self) -> int:
-        """Configured soft nudge threshold for files_expected read-idle (0 = off)."""
-        return self._delivery_idle_nudge_rounds
-
-    @property
-    def delivery_idle_narrow_rounds(self) -> int:
-        """Configured tool-narrow threshold for files_expected read-idle (0 = off)."""
-        return self._delivery_idle_narrow_rounds
-
-    @property
-    def delivery_idle_recon(self) -> bool:
-        """True when soft nudge uses recon (conclude) copy, not write-disk copy."""
-        return self._delivery_idle_recon
-
-    @property
-    def delivery_idle_report(self) -> bool:
-        """True when soft nudge uses report-landing copy (never arms search strip)."""
-        return self._delivery_idle_report
-
-    @property
-    def delivery_idle_rounds(self) -> int:
-        """Consecutive investigation-only rounds with no landing (shared idle clock)."""
-        return self._zero_write_investigation_rounds
-
-    @property
-    def delivery_idle_nudged(self) -> bool:
-        """True after the soft delivery-idle nudge was injected."""
-        return self._delivery_idle_nudged
-
-    @property
-    def delivery_idle_narrowed(self) -> bool:
-        """True after the delivery-idle narrow steer was latched."""
-        return self._delivery_idle_narrowed
-
-    def delivery_idle_nudge_due(self) -> bool:
-        """True when idle rounds hit the soft nudge bar (one-shot)."""
-        bar = self._delivery_idle_nudge_rounds
-        if bar <= 0 or self._landing_succeeded or self._delivery_idle_nudged:
-            return False
-        if self._delivery_idle_narrowed:
-            return False
-        return self._zero_write_investigation_rounds >= bar
-
-    def mark_delivery_idle_nudged(self) -> None:
-        """Latch the one-shot delivery-idle soft nudge."""
-        self._delivery_idle_nudged = True
-
-    def delivery_idle_narrow_due(self) -> bool:
-        """True when idle rounds hit the tool-narrow bar (one-shot; not FINALIZE)."""
-        bar = self._delivery_idle_narrow_rounds
-        if bar <= 0 or self._landing_succeeded or self._delivery_idle_narrowed:
-            return False
-        return self._zero_write_investigation_rounds >= bar
-
-    def mark_delivery_idle_narrowed(self) -> None:
-        """Latch narrow steer + pending allowlist apply for the react loop."""
-        self._delivery_idle_narrowed = True
-        self._delivery_idle_nudged = True
-        self._delivery_idle_narrow_apply_pending = True
-
-    def take_delivery_idle_narrow_apply(self) -> bool:
-        """Consume one-shot pending tool-surface narrow (loop applies whitelist)."""
-        if not self._delivery_idle_narrow_apply_pending:
-            return False
-        self._delivery_idle_narrow_apply_pending = False
-        return True
-
-    def convergence_action(self) -> Intervention:
-        """Over-investigation finalize: progress-aware spinning, zero-write, absolute cap.
-
-        Spinning = consecutive investigation-only rounds re-reading the same targets
-        (same tool+args fingerprints, or a subset of the prior round). Reading new
-        files each round does not trip spinning. Zero-write (files-expected only)
-        trips when investigation-only rounds accumulate with no landing success.
-        The absolute ``finalize_rounds`` cap is a hard backstop for true runaways.
-        Each path disabled when its threshold <= 0.
-        """
-        if (
-            self._convergence_spin_rounds > 0
-            and self._same_target_investigation_streak >= self._convergence_spin_rounds
-        ):
-            return Intervention.FINALIZE
-        if (
-            self._zero_write_finalize_rounds > 0
-            and not self._landing_succeeded
-            and self._zero_write_investigation_rounds >= self._zero_write_finalize_rounds
-        ):
-            return Intervention.FINALIZE
-        if self._convergence_finalize_rounds <= 0:
-            return Intervention.CONTINUE
-        if self._investigation_rounds >= self._convergence_finalize_rounds:
-            return Intervention.FINALIZE
-        return Intervention.CONTINUE
-
-    @property
-    def same_target_investigation_streak(self) -> int:
-        """Consecutive investigation-only rounds re-reading the same targets."""
-        return self._same_target_investigation_streak
-
-    def is_thrashing(self) -> bool:
-        """Read-only run-health verdict for a HARD-CEILING termination boundary.
-
-        When a hard ceiling (token backstop / max rounds) forces the run to stop —
-        as opposed to the model choosing to finish — this routes the finalize: a
-        *thrashing* run (sustained all-failing-no-output rounds, over-investigation
-        spinning / absolute-cap, files-expected zero-write idle, or a validation
-        fingerprint re-hit after path-stop steer) should finish DEGRADED and surface
-        an observable signal, while an *on-track* run (made real progress, just ran
-        out of budget) should finalize normally and deliver.
-
-        Distinct from the per-round governance triggers (which stop the loop
-        mid-run): those already fired earlier if they were going to, so at a natural
-        max-rounds exit this is usually ``False`` (= deliver). It matters most for the
-        token backstop, which can break the loop at any round. No side effects.
-        """
-        if self._validation_thrash_latched:
-            return True
-        if self.unproductive_early_stop():
-            return True
-        return self.convergence_action() is Intervention.FINALIZE
-
-    def detect(self) -> StuckSignal | None:
-        """Return the strongest stuck signal in the window, or ``None``.
-
-        Priority: repeated failure (most actionable) > repeated call > A-B-A-B.
-        """
-        if len(self._recent) < self._threshold:
-            return None
-
-        fail_counts = Counter(a.fingerprint for a in self._recent if not a.success)
-        for attempt in reversed(self._recent):
-            if not attempt.success and fail_counts[attempt.fingerprint] >= self._threshold:
-                return StuckSignal(
-                    StuckReason.REPEATED_FAILURE,
-                    attempt.tool_name,
-                    fail_counts[attempt.fingerprint],
-                )
-
-        all_counts = Counter(a.fingerprint for a in self._recent)
-        for attempt in reversed(self._recent):
-            if all_counts[attempt.fingerprint] >= self._threshold:
-                return StuckSignal(
-                    StuckReason.REPEATED_CALL,
-                    attempt.tool_name,
-                    all_counts[attempt.fingerprint],
-                )
-
-        if len(self._recent) >= 4:
-            w, x, y, z = (
-                self._recent[-4],
-                self._recent[-3],
-                self._recent[-2],
-                self._recent[-1],
-            )
-            if (
-                w.fingerprint == y.fingerprint
-                and x.fingerprint == z.fingerprint
-                and w.fingerprint != x.fingerprint
-            ):
-                return StuckSignal(StuckReason.ALTERNATING, z.tool_name, 2)
-
-        return None
-
-    def decide(self, signal: StuckSignal | None) -> Intervention:
-        """Map a signal to an action via a two-strike ladder.
-
-        First trip → ``NUDGE`` and clear the window, giving the model a clean
-        slate to recover (so stale repeats don't immediately re-trigger). A
-        subsequent trip → ``FINALIZE``.
-        """
-        if signal is None:
-            return Intervention.CONTINUE
-        if not self._nudged:
-            self._nudged = True
-            self._recent.clear()
-            return Intervention.NUDGE
-        return Intervention.FINALIZE

@@ -10,18 +10,28 @@ export interface StoredRoot {
   sessionOnly?: boolean;
   conversationId?: string;
   /**
-   * Session access mode. Prefer over legacy ``readonly``.
+   * Session access mode.
    * ``readonly`` = W3 read-only; ``organize`` = move/copy/mkdir/trash-delete.
    */
   mode?: "readonly" | "organize";
-  /** @deprecated Prefer ``mode``. Kept for older in-memory session roots. */
-  readonly?: boolean;
   /** Model-facing alias under ``external/<alias>/``. */
   alias?: string;
 }
 
+/** Raw disk row — may still carry a legacy ``readonly`` boolean (migrated on load). */
+type SessionGrantDiskRow = {
+  id?: string;
+  name?: string;
+  absPath?: string;
+  sessionOnly?: boolean;
+  conversationId?: string;
+  mode?: unknown;
+  readonly?: unknown;
+  alias?: string;
+};
+
 /** On-disk shape: conversationId → session grant rows (paths stay on desktop). */
-type SessionGrantsFile = Record<string, StoredRoot[]>;
+type SessionGrantsFile = Record<string, SessionGrantDiskRow[]>;
 
 let roots = new Map<string, StoredRoot>();
 let rootsReady: Promise<void> | null = null;
@@ -34,6 +44,16 @@ function sessionGrantsFilePath(): string {
   return join(app.getPath("userData"), "fs-session-grants.json");
 }
 
+/** One-shot coerce: explicit mode wins; legacy boolean-only rows → mode. */
+function coerceSessionMode(
+  mode: unknown,
+  legacyReadonly: unknown,
+): "readonly" | "organize" {
+  if (mode === "organize" || mode === "readonly") return mode;
+  if (legacyReadonly === false) return "organize";
+  return "readonly";
+}
+
 function sessionRootPayload(r: StoredRoot): StoredRoot {
   return {
     id: r.id,
@@ -41,9 +61,24 @@ function sessionRootPayload(r: StoredRoot): StoredRoot {
     absPath: r.absPath,
     sessionOnly: true,
     conversationId: r.conversationId,
-    mode: r.mode ?? (r.readonly ? "readonly" : undefined),
-    readonly: r.readonly ?? r.mode === "readonly",
+    mode: coerceSessionMode(r.mode, undefined),
     alias: r.alias,
+  };
+}
+
+function fromDiskRow(
+  row: SessionGrantDiskRow,
+  conversationId: string,
+): StoredRoot | null {
+  if (!row?.id || !row?.absPath) return null;
+  return {
+    id: row.id,
+    name: typeof row.name === "string" ? row.name : row.id,
+    absPath: row.absPath,
+    sessionOnly: true,
+    conversationId: row.conversationId ?? conversationId,
+    mode: coerceSessionMode(row.mode, row.readonly),
+    alias: typeof row.alias === "string" ? row.alias : undefined,
   };
 }
 
@@ -54,11 +89,8 @@ async function loadSessionGrants(): Promise<void> {
     for (const [conversationId, arr] of Object.entries(data)) {
       if (!Array.isArray(arr)) continue;
       for (const row of arr) {
-        if (!row?.id || !row?.absPath) continue;
-        roots.set(row.id, {
-          ...sessionRootPayload(row),
-          conversationId: row.conversationId ?? conversationId,
-        });
+        const normalized = fromDiskRow(row, conversationId);
+        if (normalized) roots.set(normalized.id, normalized);
       }
     }
   } catch {
@@ -210,11 +242,8 @@ export const __test = {
     for (const [conversationId, arr] of Object.entries(data)) {
       if (!Array.isArray(arr)) continue;
       for (const row of arr) {
-        if (!row?.id || !row?.absPath) continue;
-        roots.set(row.id, {
-          ...sessionRootPayload(row),
-          conversationId: row.conversationId ?? conversationId,
-        });
+        const normalized = fromDiskRow(row, conversationId);
+        if (normalized) roots.set(normalized.id, normalized);
       }
     }
   },

@@ -53,9 +53,10 @@ class AdminMfaRepository:
         return row
 
     async def consume_recovery_code(self, user_id: str, code: str) -> bool:
-        """Consume one matching recovery code (argon2id or legacy SHA-256).
+        """Consume one matching argon2id recovery code.
 
         ``code`` is the normalized plaintext (lowercase hex, no dashes).
+        Legacy bare SHA-256 hashes no longer match (re-enroll required).
         """
         # Lazy: top-level import cycles auth ↔ db.repositories via AuthService→mfa.
         from agentcore.auth.recovery_codes import recovery_code_matches

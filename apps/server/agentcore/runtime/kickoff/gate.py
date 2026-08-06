@@ -1,4 +1,4 @@
-"""Kickoff trigger rules — single copy for delegate + debate + ask_user kickoff."""
+"""Kickoff trigger rules — single copy for delegate + debate team_preview."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 from agentcore.core.types import PermissionAxes
 
 # Short verbal affirmations (governance filters these out of "real user intent"
-# chunks). Not used to skip kickoff — only journal ``checkpoint_resolved`` settles.
+# chunks). Never used to skip team_preview — ask ⊥ kickoff.
 _AFFIRM_RE = re.compile(
     r"^(好的?|可以|行|没问题|同意|认可|就这样|按这个|按此|按方案|开干|继续|开始吧?|"
     r"ok|okay|yes|yep|sure|go|lgtm)[.!！。…]*$",
@@ -20,8 +20,9 @@ def should_preview_delegate_plan(plan: Any, *, finalize: bool) -> bool:
     """Whether the *plan half* of a delegate kickoff would show (ignores autonomy).
 
     Hang when ≥2 workers. Skip single-worker + finalize (zero-friction solo path).
-    Nested depth / resume / ask_user skip / full_auto are decided by
-    :func:`should_kickoff` and the caller.
+    Nested depth / resume / ``team_kickoff`` / full_auto are decided by
+    :func:`should_kickoff` and the caller. Confirmed ``ask_user`` does **not**
+    skip this half (ask ⊥ team_preview).
 
     When any node has ``checkpoint_after``, the plan-preview half yields — mid-batch
     outline / plan_review cards own that拍板; capability-auth half is independent.
@@ -78,14 +79,6 @@ def should_kickoff(
     return needs_capability_auth(local_gate=local_gate, axes=axes)
 
 
-def _sink_journal(tool: Any) -> list[dict[str, Any]]:
-    sink = getattr(tool, "_sink", None) or getattr(tool, "sink", None)
-    if sink is None:
-        return []
-    journal = sink.execution_journal()
-    return list(journal) if journal else []
-
-
 def is_short_affirmation(text: str) -> bool:
     """True for short verbal affirmations (e.g. 「好的」「认可」).
 
@@ -95,25 +88,3 @@ def is_short_affirmation(text: str) -> bool:
     if not compact or len(compact) > 24:
         return False
     return _AFFIRM_RE.match(compact) is not None
-
-
-def user_confirmed_kickoff_decisions(tool: Any) -> bool:
-    """Whether kickoff-class decisions are already settled (skip re-asking).
-
-    Unified skip predicate for:
-    - delegate / debate team-preview kickoff cards
-    - ``ask_user`` with kickoff intent (开工提案卡)
-
-    Settled only when this CEO turn's journal already has ``checkpoint_resolved``
-    (blocking ask settled). Verbal affirmation alone does not skip kickoff.
-    """
-    journal = _sink_journal(tool)
-    return any(e.get("type") == "checkpoint_resolved" for e in journal)
-
-
-def skip_after_confirmed_ask(tool: Any) -> bool:
-    """Skip kickoff when user already settled kickoff-class decisions.
-
-    See :func:`user_confirmed_kickoff_decisions` (journal ``checkpoint_resolved`` only).
-    """
-    return user_confirmed_kickoff_decisions(tool)

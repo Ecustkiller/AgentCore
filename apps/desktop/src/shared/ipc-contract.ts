@@ -12,10 +12,8 @@ export interface FsRoot {
   name: string;
   /** W3 session grant alias under ``external/<alias>/`` (omit for permanent roots). */
   alias?: string;
-  /** Session access mode (readonly | organize). Prefer over ``readonly``. */
+  /** Session access mode (readonly | organize); omit for permanent roots. */
   mode?: "readonly" | "organize";
-  /** @deprecated Prefer ``mode``. */
-  readonly?: boolean;
   sessionOnly?: boolean;
 }
 
@@ -273,6 +271,21 @@ export type CheckoutArchiveResult =
   | { ok: false; reason: "cancelled" }
   | { ok: false; reason: "error"; message: string };
 
+/**
+ * {@link FsApi.addRoot} 结果。
+ * - `cancelled`：用户关闭选择器（非错误）
+ * - `dialog_failed`：系统未能弹出目录选择器
+ * - `unauthorized`：所选路径无法访问/登记为授权根
+ */
+export type AddRootResult =
+  | { ok: true; root: FsRoot }
+  | { ok: false; reason: "cancelled" }
+  | {
+      ok: false;
+      reason: "dialog_failed" | "unauthorized";
+      message: string;
+    };
+
 /** {@link FsApi.saveFile} 结果。`cancelled` = 用户在保存对话框里放弃（非错误）。 */
 export type SaveFileResult =
   | { ok: true; fileName: string }
@@ -283,6 +296,20 @@ export type SaveFileResult =
 export type PreviewArchiveResult =
   | { ok: true; fileCount: number }
   | { ok: false; reason: "error"; message: string };
+
+/** Electron `app.getPath` keys accepted as grant_* well-known roots. */
+export type GrantSessionWellKnown = "desktop" | "downloads" | "documents";
+
+/**
+ * IPC / FsApi params for {@link FsApi.grantSessionReadonlyRoot}.
+ * Absolute paths never leave the main process; hints only.
+ */
+export interface GrantSessionReadonlyRootParams {
+  conversationId: string;
+  mode?: "readonly" | "organize";
+  wellKnown?: GrantSessionWellKnown;
+  targetName?: string;
+}
 
 /** 引用即驻留：落盘到对话工作区 attachments/ 的目标。 */
 export interface StageAttachmentDest {
@@ -310,7 +337,7 @@ export interface StagedAttachment {
  * `move` 的 `destRelPath` 语义为「目标目录」，源对象将被移动进该目录。
  */
 export interface FsApi {
-  addRoot(): Promise<FsRoot | null>;
+  addRoot(): Promise<AddRootResult>;
   /**
    * 取得（必要时自动创建 + 授权）默认本地容器根（`~/Documents/AgentCore`）。
    *
@@ -340,9 +367,13 @@ export interface FsApi {
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<SaveFileResult>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
-  /** W3/P1: folder picker → session root (readonly | organize) bound to conversation. */
+  /**
+   * W3/P1: session root (readonly | organize) bound to conversation.
+   * Accepts legacy `(conversationId, mode?)` or a params object with optional
+   * `wellKnown` / `targetName` hints (direct grant or picker with defaultPath).
+   */
   grantSessionReadonlyRoot(
-    conversationId: string,
+    conversationIdOrParams: string | GrantSessionReadonlyRootParams,
     mode?: "readonly" | "organize",
   ): Promise<FsRoot | null>;
   listSessionReadonlyRoots(conversationId: string): Promise<FsRoot[]>;

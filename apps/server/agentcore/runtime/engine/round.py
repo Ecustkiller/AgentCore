@@ -46,6 +46,10 @@ def build_request_window(
     round_idx: int,
 ) -> list[LLMMessage]:
     """Project the LLM window with optional tool-result / write-args clearing."""
+    # B1：在投影清理前用完整 transcript 闩锁 browser_* 成功（收口对账真源）。
+    from agentcore.runtime.closing_posture import note_browser_tool_success_from_messages
+
+    note_browser_tool_success_from_messages(messages)
     window = messages
     if investigation_tools:
         cleared = project_cleared_window(

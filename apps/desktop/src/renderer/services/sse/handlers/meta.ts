@@ -3,8 +3,6 @@ import { useConversationStore } from "@/stores/conversation";
 import type {
   CitationsPayload,
   EvidenceLedgerPayload,
-  FollowupsGeneratedPayload,
-  FollowupsUnavailablePayload,
   SSEEvent,
   TitleGeneratedPayload,
   TurnSavedPayload,
@@ -25,20 +23,11 @@ export function handleMetaEvent(
       });
       return true;
     }
-    case "followups_generated": {
-      const payload = event.payload as FollowupsGeneratedPayload;
-      useConversationStore
-        .getState()
-        .attachFollowups(payload.followups, payload.message_id, conversationId);
+    // Feature retired: ignore live/historical chips events (must return true so
+    // dispatchSSEEvent's assertNever does not trip on known contract types).
+    case "followups_generated":
+    case "followups_unavailable":
       return true;
-    }
-    case "followups_unavailable": {
-      const payload = event.payload as FollowupsUnavailablePayload;
-      useConversationStore
-        .getState()
-        .markFollowupsUnavailable(payload.message_id, conversationId);
-      return true;
-    }
     case "turn_saved": {
       const payload = event.payload as TurnSavedPayload;
       useConversationStore

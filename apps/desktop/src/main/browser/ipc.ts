@@ -2,7 +2,6 @@
  * 本机浏览器 IPC 注册（须在 app ready 后调用）。
  *
  * 装 `browser:*` 句柄；畸形入参 / 缺 conversationId 在边界拒（fail-closed）。
- * 不触碰 preview IPC / lockPreviewNavigation。
  *
  * show / hide 经同一串行队列，保证 detach 与 attach 顺序（无残影竞态）。
  */

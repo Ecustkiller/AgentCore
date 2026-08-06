@@ -589,7 +589,7 @@ def create_loop_controller(
         tool_failure_disable = min(int(tool_failure_disable), 2)
         unproductive_threshold = min(int(unproductive_threshold), 2)
 
-    # Soft read-idle ladder (not the retired zero-write FINALIZE).
+    # Soft read-idle ladder (nudge → optional tool narrow).
     delivery_idle_nudge = 0
     delivery_idle_narrow = 0
     delivery_idle_recon = False
@@ -614,9 +614,6 @@ def create_loop_controller(
         unproductive_threshold=unproductive_threshold,
         convergence_finalize_rounds=settings.engine_convergence_finalize_rounds,
         convergence_spin_rounds=settings.engine_convergence_spin_rounds,
-        # 零写 / prose_idle 整条已退役 — 不开计数与中途 FINALIZE。
-        zero_write_finalize_rounds=0,
-        prose_idle=False,
         form_prose=form_prose,
         delivery_idle_nudge_rounds=delivery_idle_nudge,
         delivery_idle_narrow_rounds=delivery_idle_narrow,

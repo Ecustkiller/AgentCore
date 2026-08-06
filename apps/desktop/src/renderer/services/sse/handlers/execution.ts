@@ -46,7 +46,7 @@ import {
   noteGraphAppendRedirect,
   routeHintFromPayload,
 } from "../helpers";
-import { refreshAfterExecutionCompleted } from "../refreshAfterExecutionCompleted";
+import { refreshAfterBackgroundExecution } from "../refreshAfterBackgroundExecution";
 import type { DispatchContext } from "../types";
 
 /** Stamp an escalation process marker (required or raised) onto the CEO lane. */
@@ -261,7 +261,7 @@ export function handleExecutionEvent(
           .getState()
           .setExecutionDetached(event.payload as ExecutionDetachedPayload, mid);
       }
-      refreshAfterExecutionCompleted(conversationId);
+      refreshAfterBackgroundExecution(conversationId);
       return true;
     }
     // 后台执行终态：清后台 chrome、按 payload.status 落 execution 终态（缺省 completed），
@@ -285,7 +285,7 @@ export function handleExecutionEvent(
           exec.setStatus(next, mid);
         }
       }
-      refreshAfterExecutionCompleted(conversationId);
+      refreshAfterBackgroundExecution(conversationId);
       return true;
     }
     // 交付状态（能力闸门与交付诚实性）：delegate 批次收尾的结构化交付对账。DURABLE——
@@ -536,7 +536,6 @@ export function handleExecutionEvent(
     }
     case "debate_pretrial_started":
     case "debate_pretrial_orders":
-    case "debate_pretrial_progress":
     case "debate_pretrial_completed": {
       const mid = execMessageId(
         conversationId,

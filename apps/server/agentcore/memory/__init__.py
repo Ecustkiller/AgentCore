@@ -22,16 +22,7 @@ from agentcore.memory.episodic import (
     clamp_summary,
     should_run_semantic,
 )
-from agentcore.memory.followups import (
-    FOLLOWUPS_ITEM_MAX_CHARS,
-    FOLLOWUPS_MAX,
-    FollowupInput,
-    FollowupsGenerator,
-    LLMFollowupsGenerator,
-    format_motion_card_followup,
-    merge_motion_card_followup,
-    select_motion_card_from_journal,
-)
+from agentcore.memory.followups import select_motion_card_from_journal
 from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_memory_topics
 from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.rules_injection import (
@@ -86,13 +77,6 @@ __all__ = [
     "TitleGenerator",
     "LLMTitleGenerator",
     "TITLE_MAX_CHARS",
-    "FollowupInput",
-    "FollowupsGenerator",
-    "LLMFollowupsGenerator",
-    "FOLLOWUPS_MAX",
-    "FOLLOWUPS_ITEM_MAX_CHARS",
-    "format_motion_card_followup",
-    "merge_motion_card_followup",
     "select_motion_card_from_journal",
     "MEMORY_SECTIONS",
     "PREFERENCES_SECTIONS",

@@ -7,7 +7,7 @@ beforeEach(() => {
   useOverlayStore.setState({ count: 0 });
 });
 
-describe("overlay obstruction counter（内嵌预览遮挡计数）", () => {
+describe("overlay obstruction counter（本机浏览器遮挡计数）", () => {
   it("push 累加、pop 递减（支持多层叠加）", () => {
     pushOverlay();
     pushOverlay();

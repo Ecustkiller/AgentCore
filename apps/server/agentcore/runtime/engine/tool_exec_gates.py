@@ -1,0 +1,333 @@
+"""Approval + destructive baseline gates for one tool call (pre-execute)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from agentcore.core.logging import get_logger
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall
+from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
+from agentcore.runtime.events import EventSink, tool_use_end
+from agentcore.runtime.loop_controller import ToolAttempt
+from agentcore.tools.protocol import ToolContext, ToolSchema
+
+from .tool_exec_args import _attempt_meta_with_landing_path, _failed_tool_message
+
+logger = get_logger(__name__)
+
+
+async def _apply_local_destructive_baseline_gate(
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    context: ToolContext,
+    existing: Any,
+) -> Any:
+    """P0a/b: Local destructive delete without zip baseline → FORCE_APPROVAL.
+
+    Regular :func:`~agentcore.workspace.turn_baseline.maybe_capture_turn_baseline`
+    remains non-blocking. This gate only upgrades the breaker hit when the call
+    matches a destructive_fs heuristic, the backend is Local, and no usable zip
+    can be ensured. Cloud staging deletes-not-written-back are unchanged
+    (``location != local`` skips). ``registry_egress`` rw-bind deletes are out of
+    scope (footnote / tests).
+
+    Does not stack a second card when ``existing`` is already DENY or
+    FORCE_APPROVAL — still best-effort ensures a baseline so post-approval
+    restore remains possible.
+    """
+    from agentcore.runtime.safety_breaker import (
+        BreakerVerdict,
+        command_text_for_tool,
+        no_turn_baseline_hit,
+    )
+    from agentcore.workspace.destructive_fs import (
+        requires_destructive_baseline_gate,
+        scan_destructive_fs,
+    )
+    from agentcore.workspace.turn_baseline import ensure_local_baseline_for_destructive
+
+    if getattr(context.backend, "location", None) != "local":
+        return existing
+    name = (tool_name or "").strip()
+    if name not in {"terminal", "code_execute", "host_shell"}:
+        return existing
+    if name == "terminal":
+        sub = str(args.get("subcommand") or "").strip().lower()
+        if sub and sub != "start":
+            return existing
+
+    fs_hit = scan_destructive_fs(command_text_for_tool(name, args))
+    if not requires_destructive_baseline_gate(fs_hit):
+        return existing
+
+    # Fuse-aligned DENY already owns the card — do not zip or stack.
+    if existing is not None and existing.verdict is BreakerVerdict.DENY:
+        return existing
+
+    # Prefer ServerWorkspace.root (sidecar Local). Channel-only LocalWorkspace
+    # has no Path root here — fail closed to FORCE_APPROVAL when we cannot zip.
+    workspace_root = getattr(context.backend, "root", None)
+    from agentcore.runtime.journal.writer import current_journal_writer
+
+    writer = current_journal_writer.get()
+    message_id = (writer.turn_id if writer is not None else "") or ""
+
+    ready = False
+    if workspace_root is not None and message_id:
+        try:
+            ready = await ensure_local_baseline_for_destructive(
+                user_id=context.user_id or "",
+                conversation_id=context.conversation_id or "",
+                message_id=message_id,
+                workspace_root=workspace_root,
+            )
+        except Exception:
+            logger.warning(
+                "turn.local_baseline_failed",
+                conversation_id=context.conversation_id,
+                message_id=message_id,
+                phase="destructive_ensure",
+                exc_info=True,
+            )
+            ready = False
+
+    if ready:
+        return existing
+
+    # Already forcing approval (e.g. P2 top-tree) — keep that card (no stack).
+    if existing is not None and existing.verdict is BreakerVerdict.FORCE_APPROVAL:
+        return existing
+    return no_turn_baseline_hit()
+
+
+@dataclass(frozen=True)
+class _ToolGateDenied:
+    """Early exit from safety/approval gates (no tool execute)."""
+
+    message: LLMMessage
+    attempt: ToolAttempt
+
+
+async def _check_safety_and_approval_gates(
+    *,
+    name: str,
+    args: Any,
+    tool_schema: ToolSchema,
+    tc: ToolCall,
+    context: ToolContext,
+    sink: EventSink,
+    event_run_id: str,
+    run_id: str,
+    role: str,
+    fingerprint: str,
+    approval_gate: ApprovalGate | None,
+) -> _ToolGateDenied | None:
+    """P3 breaker + Local destructive baseline + approval authorize.
+
+    Returns a deny outcome, or ``None`` when the call may proceed to execute.
+    """
+    # P3 safety circuit breaker — last-line heuristic (not a security boundary).
+    # full_trust / kickoff / turn grants never override FORCE_APPROVAL or DENY.
+    from agentcore.runtime.safety_breaker import BreakerVerdict, evaluate_tool_call
+
+    breaker = evaluate_tool_call(name, args)
+    # P0a/b: Local destructive_fs without usable zip → FORCE_APPROVAL (分轨).
+    # Runs after sync evaluate so P2 top-tree / fuse DENY stay single-card;
+    # still best-effort ensures baseline when already forcing.
+    if isinstance(args, dict):
+        breaker = await _apply_local_destructive_baseline_gate(
+            tool_name=name,
+            args=args,
+            context=context,
+            existing=breaker,
+        )
+    if breaker is not None and breaker.verdict is BreakerVerdict.DENY:
+        from agentcore.runtime.audit.hooks import on_circuit_breaker
+
+        on_circuit_breaker(
+            tool_name=name,
+            tool_call_id=tc.id,
+            rule_id=breaker.rule_id,
+            verdict=breaker.verdict.value,
+            reason=breaker.reason,
+            run_id=run_id or None,
+        )
+        denial = (
+            f"工具 '{name}' 被安全熔断拒绝：{breaker.reason}"
+            "请改用其他方案，不要原样重试该路径。"
+        )
+        sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=event_run_id))
+        logger.info(
+            "tool.execute_end",
+            tool=name,
+            status="circuit_breaker_deny",
+            rule_id=breaker.rule_id,
+            duration_ms=0,
+        )
+        return _ToolGateDenied(
+            message=_failed_tool_message(tc.id, denial),
+            attempt=ToolAttempt(
+                fingerprint,
+                name,
+                success=False,
+                policy_failure=True,
+                meta=_attempt_meta_with_landing_path(name, args),
+            ),
+        )
+
+    # Bool flag for later gates; attribute access stays under the narrowed `if`
+    # so mypy does not treat `breaker` as still optional inside the block.
+    force_breaker = (
+        breaker is not None and breaker.verdict is BreakerVerdict.FORCE_APPROVAL
+    )
+    if breaker is not None and breaker.verdict is BreakerVerdict.FORCE_APPROVAL:
+        from agentcore.runtime.audit.hooks import on_circuit_breaker
+
+        on_circuit_breaker(
+            tool_name=name,
+            tool_call_id=tc.id,
+            rule_id=breaker.rule_id,
+            verdict=breaker.verdict.value,
+            reason=breaker.reason,
+            run_id=run_id or None,
+        )
+        # Surface a preview-only hint on the approval card (arguments are already
+        # truncated for SSE; tools execute the original ``args`` unchanged).
+        hint = breaker.reason
+        if breaker.rule_id == "sensitive.path_read_ask" and isinstance(args, dict):
+            from agentcore.runtime.credential_preview import build_keys_preview_line
+
+            keys_line = await build_keys_preview_line(
+                context.backend, tool_name=name, arguments=args
+            )
+            if keys_line:
+                hint = f"{hint}\n{keys_line}"
+        args_for_gate = {
+            **args,
+            "circuit_breaker_hint": hint,
+        }
+    else:
+        args_for_gate = args
+
+    needs_approval = force_breaker or (
+        approval_gate is not None
+        and tool_call_requires_approval(name, tool_schema.approval, args)
+    )
+    # CEO 短操作：captain 直调 browser_*（navigate/click/type/scroll/snapshot）
+    # 不弹审批（force_breaker 仍拦）；screenshot 仅 worker，不走本分支。
+    if (
+        needs_approval
+        and not force_breaker
+        and role == "captain"
+        and name.startswith("browser_")
+        and name != "browser_screenshot"
+    ):
+        needs_approval = False
+    # Cloud *workers* historically ungated for server-sandbox tools (MCP/Host
+    # still gated). ``file_write=ask`` overrides that ungate for the
+    # file-mutation class so 谨慎 prompts reversible writes on cloud too.
+    # CEO / captain always keep full GRANTABLE gating — do not key off
+    # backend.location alone.
+    if needs_approval and not force_breaker and approval_gate is not None and role == "worker":
+        from agentcore.runtime.sandbox_approval import cloud_worker_skips_per_call_gate
+
+        if cloud_worker_skips_per_call_gate(
+            context.backend,
+            name,
+            permission_axes=approval_gate.permission_axes,
+            file_op_tools=approval_gate.file_op_tools,
+        ):
+            needs_approval = False
+    if needs_approval:
+        from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
+
+        if approval_gate is None:
+            # Forced destructive shape but no human gate available — fail closed.
+            denial = (
+                f"工具 '{name}' 触发安全熔断且当前路径无法人工确认，已拒绝执行。"
+                f"{breaker.reason if breaker else ''}"
+                "请改用其他方案。"
+            )
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=denial, run_id=event_run_id)
+            )
+            logger.info(
+                "tool.execute_end",
+                tool=name,
+                status="circuit_breaker_no_gate",
+                duration_ms=0,
+            )
+            return _ToolGateDenied(
+                message=_failed_tool_message(tc.id, denial),
+                attempt=ToolAttempt(
+                    fingerprint,
+                    name,
+                    success=False,
+                    policy_failure=True,
+                    meta=_attempt_meta_with_landing_path(name, args),
+                ),
+            )
+
+        auto_pass = (not force_breaker) and execution_tool_auto_passes(
+            context.backend, name, permission_axes=approval_gate.permission_axes
+        )
+        # INFO（非 debug）：round_end 后若长时间无 execute_end，靠此定位卡在审批还是执行。
+        # will_prompt peeks kickoff/session/_granted/_denied short-circuits so
+        # awaiting_approval is not true when authorize would silently pass.
+        awaiting_approval = (not auto_pass) and approval_gate.will_prompt(
+            tool_name=name,
+            arguments=args_for_gate,
+            execution_id=context.execution_id,
+            force=force_breaker,
+        )
+        logger.info(
+            "tool.execute_start",
+            tool=name,
+            tool_call_id=tc.id,
+            run_id=run_id or "",
+            awaiting_approval=awaiting_approval,
+        )
+        if auto_pass:
+            logger.info("approval.sandbox_auto_pass", tool=name)
+        else:
+            decision = await approval_gate.authorize(
+                tool_name=name,
+                tool_call_id=tc.id,
+                arguments=args_for_gate,
+                execution_id=context.execution_id,
+                force=force_breaker,
+            )
+            if decision is ApprovalDecision.DENY:
+                # Denial is a governance signal (user refuse / timeout), not an execution
+                # failure — mark policy_failure so the run-scoped circuit breaker ignores it.
+                denial = (
+                    f"工具 '{name}' 未获用户授权，该操作未执行。"
+                    "请改用其他方案或询问如何继续，不要再调用此工具。"
+                )
+                sink.emit(
+                    tool_use_end(
+                        tc.id, name, success=False, output=denial, run_id=event_run_id
+                    )
+                )
+                logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
+                return _ToolGateDenied(
+                    message=_failed_tool_message(tc.id, denial),
+                    attempt=ToolAttempt(
+                        fingerprint,
+                        name,
+                        success=False,
+                        policy_failure=True,
+                        meta=_attempt_meta_with_landing_path(name, args),
+                    ),
+                )
+    else:
+        logger.info(
+            "tool.execute_start",
+            tool=name,
+            tool_call_id=tc.id,
+            run_id=run_id or "",
+            awaiting_approval=False,
+        )
+    return None

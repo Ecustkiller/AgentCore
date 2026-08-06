@@ -84,7 +84,7 @@ def test_coordination_snapshot_roundtrip():
         pending_events=[{"kind": "worker_completed", "payload": {"run_id": "a"}}],
     )
     raw = snap.to_dict()
-    # Wave3a：新快照不再双写合计键；属性合计仍可由两池推导。
+    # Wave3a：新快照不再双写合计键；budget_remaining 属性仅为两池合计便利读。
     assert "budget_remaining" not in raw
     assert raw["progress_budget_remaining"] == 2
     assert raw["decision_budget_remaining"] == 1
@@ -194,24 +194,33 @@ def test_terminal_settlement_ok_when_attached_inject():
     clear_active_coordination("e-ok")  # no error
 
 
-def test_legacy_single_pool_snapshot_splits_into_two_pools():
-    """向后兼容：含旧键 ``budget_remaining`` 的快照仍可读并恢复两池（合计不变）。"""
+def test_single_pool_snapshot_rejected():
+    """开发期：仅含旧合计键 ``budget_remaining`` 的快照不可恢复。"""
+    assert (
+        CoordinationSnapshot.from_dict(
+            {"execution_id": "leg", "budget_remaining": 9, "total_workers": 3}
+        )
+        is None
+    )
+
+
+def test_flat_file_ownership_ignored():
+    """开发期：flat path→owner 不 coerce；仅 v2 nested 入账。"""
     snap = CoordinationSnapshot.from_dict(
-        {"execution_id": "leg", "budget_remaining": 9, "total_workers": 3}
+        {
+            "execution_id": "own",
+            "progress_budget_remaining": 4,
+            "decision_budget_remaining": 2,
+            "file_ownership": {"docs/a.md": "w1"},
+        }
     )
     assert snap is not None
-    assert snap.budget_remaining == 9  # 合计不变（不扩容）
-    assert snap.progress_budget_remaining + snap.decision_budget_remaining == 9
-    assert snap.decision_budget_remaining >= 3  # 决策池保底
-    # from_snapshot 也带着切分后的两池。
-    session = CoordinationSession.from_snapshot(snap)
-    assert session.progress_budget_remaining == snap.progress_budget_remaining
-    assert session.decision_budget_remaining == snap.decision_budget_remaining
+    assert snap.file_ownership == {}
 
 
 def test_coordination_from_journal():
-    """旧 journal 帧仅含合计键时仍能 fold 出两池合计。"""
-    fact = CoordinationSnapshotFact(
+    """journal 帧须带两池键才能 fold；仅合计键 → 拒绝。"""
+    legacy = CoordinationSnapshotFact(
         snapshot={
             "execution_id": "ex",
             "draft": "d",
@@ -221,11 +230,25 @@ def test_coordination_from_journal():
             "active": True,
         }
     ).to_fact()
+    assert coordination_from_journal([legacy.entry()]) is None
+
+    fact = CoordinationSnapshotFact(
+        snapshot={
+            "execution_id": "ex",
+            "draft": "d",
+            "completed_run_ids": [],
+            "progress_budget_remaining": 3,
+            "decision_budget_remaining": 2,
+            "total_workers": 2,
+            "active": True,
+        }
+    ).to_fact()
     snap = coordination_from_journal([fact.entry()])
     assert snap is not None
     assert snap.draft == "d"
+    assert snap.progress_budget_remaining == 3
+    assert snap.decision_budget_remaining == 2
     assert snap.budget_remaining == 5
-    assert snap.progress_budget_remaining + snap.decision_budget_remaining == 5
 
 
 def test_necessary_decision_points():

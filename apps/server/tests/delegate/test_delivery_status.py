@@ -879,6 +879,36 @@ def _failed_test_run_transcript():
     ]
 
 
+def _budget_exhausted_test_run_transcript():
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+
+    return [
+        LLMMessage(
+            role="assistant",
+            tool_calls=[
+                ToolCall(
+                    id="trb1",
+                    type="function",
+                    function=ToolCallFunction(
+                        name="test_run",
+                        arguments='{"check":"test","scope":"all"}',
+                    ),
+                )
+            ],
+        ),
+        LLMMessage(
+            role="tool",
+            content=(
+                "## 验证结果：未完成（预算耗尽）\n"
+                "- 说明：验证未在 300s 预算内完成；这是验证未完成，不是执行工具故障。\n"
+                "验证未在 300s 预算内完成（验证未完成，非工具故障）\n"
+                "<!--agentcore:tool_failed-->"
+            ),
+            tool_call_id="trb1",
+        ),
+    ]
+
+
 def _failed_verify_tsc_transcript():
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 
@@ -938,6 +968,57 @@ def test_verify_failed_test_run_depresses_delivered():
     assert payload is not None
     assert payload["state"] != "delivered"
     assert any(g.get("reason") == "verify_failed" for g in payload["gaps"])
+
+
+def test_verify_budget_exhausted_gap_not_still_running():
+    """预算耗尽 → verify_budget 缺口；文案明示已中止、非仍在跑。"""
+    from agentcore.runtime.closing_posture import (
+        clear_verify_budget_exhausted,
+        closing_honesty_rework,
+        note_verify_budget_from_delivery,
+        turn_has_verify_budget_exhausted,
+    )
+    from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
+
+    clear_verify_budget_exhausted()
+    plan = _plan(RunSpec(run_id="w1", task="跑测", role="验证员"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="还在等验证",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+            transcript=_budget_exhausted_test_run_transcript(),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-vf-budget")
+    assert payload is not None
+    assert payload["state"] != "delivered"
+    budget_gaps = [g for g in payload["gaps"] if g.get("reason") == "verify_budget"]
+    assert budget_gaps
+    desc = budget_gaps[0]["description"]
+    assert "预算耗尽" in desc
+    assert "非仍在跑" in desc or "已中止" in desc
+    assert "仍在进行" not in desc
+    assert not any(
+        g.get("reason") == "verify_failed" and "测试未通过" in g.get("description", "")
+        for g in payload["gaps"]
+    )
+
+    note_verify_budget_from_delivery(payload["gaps"])
+    assert turn_has_verify_budget_exhausted()
+    rework = closing_honesty_rework(
+        "验证员仍在进行，请继续等待结果。",
+        DeliveryVerdict(
+            state="partial",
+            delivered_files=("src/a.ts",),
+            execution_id="e-vf-budget",
+            requires_draft_ack=True,
+        ),
+    )
+    assert rework is not None
+    assert "仍在进行" in rework or "预算耗尽" in rework
+    clear_verify_budget_exhausted()
 
 
 def test_verify_failed_tsc_depresses_delivered():
@@ -1800,4 +1881,61 @@ def test_acceptance_counts_match_delivered_and_rejected():
         1 for a in payload["artifacts"] if a.get("status") == "rejected"
     )
     assert accepted_n + rejected_n == len(payload["artifacts"])
+
+
+def test_b1_empty_handoff_storm_forces_partial():
+    """e94dcd6b：多席空交接 → empty_handoff_storm blocking + partial/blocked."""
+    from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
+        turn_has_empty_handoff_storm,
+    )
+    from agentcore.runtime.delegate.delivery_status import REASON_EMPTY_HANDOFF_STORM
+
+    clear_b1_closing_latches()
+    specs = [RunSpec(run_id=f"w{i}", task="审", role=f"席{i}") for i in range(5)]
+    plan = _plan(*specs)
+    results = {
+        f"w{i}": RunState(
+            phase=RunPhase.COMPLETED,
+            content="",
+            delivery_gaps=[{"description": "交接说明不够完整", "reason": "degraded_handoff"}],
+        )
+        for i in range(5)
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-storm")
+    assert payload is not None
+    assert payload["state"] in ("partial", "blocked")
+    assert any(g.get("reason") == REASON_EMPTY_HANDOFF_STORM for g in payload["gaps"])
+    assert turn_has_empty_handoff_storm()
+    clear_b1_closing_latches()
+
+
+def test_b1_cancel_zero_emits_checklist_gap():
+    """7ad17043：cancel + 零落盘 → cancelled 缺口清单 + draft_ack latch."""
+    from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
+        turn_has_cancel_zero_output,
+    )
+    from agentcore.runtime.delegate.delivery_status import (
+        REASON_CANCELLED,
+        _gaps_require_draft_ack,
+    )
+
+    clear_b1_closing_latches()
+    plan = _plan(
+        RunSpec(run_id="a", task="梳理", role="调研员"),
+        RunSpec(run_id="b", task="评审", role="审校"),
+    )
+    results = {
+        "a": RunState(phase=RunPhase.CANCELLED),
+        "b": RunState(phase=RunPhase.CANCELLED),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-cancel0")
+    assert payload is not None
+    assert payload["state"] == "blocked"
+    assert any(g.get("reason") == REASON_CANCELLED for g in payload["gaps"])
+    assert any("未交付清单" in str(g.get("description") or "") for g in payload["gaps"])
+    assert _gaps_require_draft_ack(payload["gaps"])
+    assert turn_has_cancel_zero_output()
+    clear_b1_closing_latches()
 

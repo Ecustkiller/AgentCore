@@ -259,8 +259,7 @@ export interface ProjectedTeamNote {
 }
 
 /** Mid-flight user interjection into a live coordination turn (`user_interjection`).
- * Same `interjectionId` keeps latest `status` (received → addressed / queued / failed).
- * Legacy `delivered` is accepted as alias of `received`. */
+ * Same `interjectionId` keeps latest `status` (received → addressed / queued / failed). */
 export interface ProjectedUserInterjectionAttachment {
   name: string;
   workspacePath?: string;
@@ -271,7 +270,7 @@ export interface ProjectedUserInterjection {
   interjectionId: string;
   executionId: string;
   content: string;
-  status: "received" | "addressed" | "queued" | "failed" | "delivered" | string;
+  status: "received" | "addressed" | "queued" | "failed" | string;
   note: string | null;
   attachments?: ProjectedUserInterjectionAttachment[];
 }

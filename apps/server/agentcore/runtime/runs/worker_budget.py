@@ -39,9 +39,6 @@ __all__ = [
     "is_outer_verify_role",
     "is_research_root",
     "is_short_write_posture",
-    "resolve_prose_idle_finalize_rounds",
-    "should_enable_prose_idle",
-    "should_enable_zero_write",
     "should_tighten_verify_exec_thrash",
 ]
 
@@ -151,61 +148,6 @@ def is_short_write_posture(*, max_rounds: int | None) -> bool:
     return max_rounds is not None and max_rounds > 0
 
 
-def should_enable_zero_write(
-    *,
-    files_expected: bool,
-    short_write_posture: bool | None = None,
-    max_rounds: int | None = None,
-    form_prose: bool = False,
-) -> bool:
-    """Files zero-write催写 — **retired** (always off).
-
-    Product: do not nudge/finalize solely because landing files are still zero
-    after N investigation rounds (standard or short/light). Delivery pressure
-    stays on round/token ceilings + user stop. 真纯丙后不再有「白名单缺写盘 →
-    补写工具」半成品路径。
-
-    Call-site kwargs retained for compatibility. Prose idle ladder is also retired
-    (:func:`should_enable_prose_idle` always false).
-    """
-    _ = (files_expected, short_write_posture, max_rounds, form_prose)
-    return False
-
-
-def should_enable_prose_idle(
-    *,
-    files_expected: bool,
-    short_write_posture: bool | None = None,
-    max_rounds: int | None = None,
-) -> bool:
-    """Prose short-budget idle ladder — **retired** (always off).
-
-    Formerly: short-stamped prose workers (diagnose/verify) shared the zero_write
-    warn→FINALIZE counter with handoff as delivery. Mid-loop DEGRADED from idle
-    reads is gone; hard ceilings + convergence spin remain. Kwargs kept for
-    call-site compatibility.
-    """
-    _ = (files_expected, short_write_posture, max_rounds)
-    return False
-
-
-def resolve_prose_idle_finalize_rounds(max_rounds: int | None) -> int:
-    """Retired helper: prose idle bar derivation (always 0 with default settings).
-
-    Kept for tests/compat; ``create_loop_controller`` no longer enables the ladder.
-    """
-    from agentcore.config import settings
-
-    _ = max_rounds
-    base = max(0, int(settings.engine_zero_write_finalize_rounds))
-    if base <= 0:
-        return 0
-    # settings override only — production default is 0 (ladder retired).
-    if max_rounds is not None and max_rounds > 0:
-        return max(2, min(base, max_rounds - 1))
-    return max(2, min(base, 4))
-
-
 def should_tighten_verify_exec_thrash(
     *,
     short_write_posture: bool,
@@ -217,8 +159,8 @@ def should_tighten_verify_exec_thrash(
     Applies when the worker is short-budget (CEO / repair_code stamped max_rounds),
     holds execution tools, and is **not** a files-landing node (verify / diagnose
     prose). Reuses LoopController repeated-failure / circuit-breaker / unproductive
-    paths — does **not** add a parallel fuse. Files short-write nodes no longer use
-    zero-write催写 (retired); they still skip this verify tighten path.
+    paths — does **not** add a parallel fuse. Files short-write nodes skip this
+    verify tighten path (delivery pressure stays on round/token ceilings).
     """
     return bool(
         short_write_posture and has_execution_tools and not files_expected

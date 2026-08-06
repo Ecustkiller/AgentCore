@@ -6,7 +6,6 @@ import {
 import {
   StreamError,
   describeStreamError,
-  isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
 import { notifyInfo } from "@/lib/toast";
@@ -16,6 +15,7 @@ import {
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
 import {
+  type OutgoingAgentMention,
   type OutgoingAttachment,
   streamConversation,
 } from "@/services/streamConversation";
@@ -35,7 +35,7 @@ import {
   isAbort,
   isTransportDrop,
 } from "./helpers";
-import { rejoinLiveTurn } from "./recovery";
+import { rejoinLiveTurn, settleOrphanEmptyAssistants } from "./recovery";
 import { runRegenerate } from "./regenerate";
 import { claimPrimaryStream, releasePrimaryStream } from "./streamOwnership";
 
@@ -43,6 +43,7 @@ export interface SendTurnSpec {
   conversationId: string;
   content: string;
   attachments: OutgoingAttachment[];
+  agentMentions?: OutgoingAgentMention[];
   /** Optimistic client id of the user bubble (already added to the store).
    * After `turn_saved` reconciles it, this id is gone — the signal that the
    * turn is persisted and a retry must regenerate rather than resend. */
@@ -52,13 +53,13 @@ export interface SendTurnSpec {
 }
 
 /**
- * Stream a freshly-sent user message, with a self-reinstalling retry.
+ * Stream a freshly-sent user message.
  *
  * The user bubble is added optimistically by the caller before this runs. On a
- * transport failure it raises a banner whose retry re-invokes this function.
- * The retry is persistence-aware: once the backend has saved the turn (its
- * `turn_saved` swaps the optimistic id for the real one), resending would
- * duplicate the user turn, so we regenerate from the saved message instead.
+ * transport failure it raises an error banner (no one-click re-send). Once the
+ * backend has saved the turn (`turn_saved` swaps the optimistic id), a later
+ * regenerate from the saved message is the persistence-aware re-run path —
+ * resending would duplicate the user turn.
  *
  * 发送即有流：POST 恒返回 SSE；in-flight 时先到 ``turn_queued``（dispatch 呈现
  * 「已排队」），drain 后同连接续流——不再有 202 JSON / 另行 attach 守望。
@@ -68,6 +69,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     conversationId,
     content,
     attachments,
+    agentMentions = [],
     optimisticUserId,
     delivery = "steer",
   } = spec;
@@ -80,6 +82,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   // Implicit「忽略」: a new turn closes any recoverable 救火 projection
   // (audit + clearExecution) without an explicit abandon click.
   dismissRecoverableExecutions(conversationId);
+
+  // Orphan empty placeholder (1a69f9dc): prior incomplete/streaming blank must
+  // become「已中断」before we append the new user→assistant pair.
+  settleOrphanEmptyAssistants(conversationId);
 
   // Snapshot the pre-bump position so we can undo the optimistic bump if the
   // send fails before the server ever persisted the turn.
@@ -126,8 +132,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // 路由（双模式工作区 §一.1）：开关开（默认开）+ 会话绑定本机本地根 + 无附件 → 走本地
     // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
     // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
+    // agent_mentions 同理：sidecar 未接，有点名时走云。
     const sidecarTarget =
-      attachments.length === 0
+      attachments.length === 0 && agentMentions.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
     throwIfCannotOpenStream(conversationId, ac.signal);
@@ -197,6 +204,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           conversationId,
           content,
           attachments,
+          agentMentions,
           delivery,
           signal: ac.signal,
         });
@@ -212,6 +220,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         conversationId,
         content,
         attachments,
+        agentMentions,
         delivery,
         signal: ac.signal,
       });
@@ -248,10 +257,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     }
     const msg = describeStreamError(err);
     if (msg) {
-      const retry = isRetriableStreamError(err)
-        ? () => void sendTurn(spec)
-        : null;
-      s.setError(msg, retry, conversationId, streamErrorAction(err));
+      s.setError(msg, null, conversationId, streamErrorAction(err));
     }
     traceTurnEnd(conversationId, "error");
   } finally {
@@ -266,7 +272,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 /** 续写被截断的回答 (对话基础功能补齐): the latest reply ended early (用户叫停 / 达最大轮次),
  * so「继续生成」sends a minimal continuation turn — with the transcript in context, the model
  * picks up where it left off. Mirrors the composer's optimistic-send shape (add the user
- * bubble, then stream) so the retry-banner / reconcile paths work unchanged. No-op while a
+ * bubble, then stream). No-op while a
  * turn is already streaming. */
 export async function continueTurn(conversationId: string): Promise<void> {
   if (getRuntime(conversationId).isGenerating) return;

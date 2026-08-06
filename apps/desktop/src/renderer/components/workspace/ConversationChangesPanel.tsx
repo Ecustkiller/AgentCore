@@ -14,6 +14,8 @@ import {
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
 import { gitTrackHasWork } from "@/lib/gitRepoStatus";
+import { queryClient } from "@/lib/queryClient";
+import { workspaceKeys } from "@/lib/queryKeys";
 import { useConversationStore } from "@/stores/conversation";
 import {
   assistantProjectionId,
@@ -106,6 +108,13 @@ export function ConversationChangesPanel() {
     if (!focusMessageId) return;
     focusRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusMessageId, turns]);
+
+  // 有 AI 文件改动时刷新工作区轨，避免中枢仍藏着尚未列出的 conv scratch（与列表对齐）。
+  useEffect(() => {
+    if (turns.some((t) => t.artifacts.length > 0)) {
+      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
+    }
+  }, [turns]);
 
   if (!conversationId) {
     return (

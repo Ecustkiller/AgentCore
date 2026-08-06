@@ -134,6 +134,40 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     expect(onBindResolve).not.toHaveBeenCalled();
   });
 
+  it("forwards well_known / target_name hints to grant helper", async () => {
+    const onBindResolve = vi.fn(async () => {});
+    pickAndGrantReadonlyFolder.mockResolvedValue({
+      ok: false,
+      reason: "cancelled",
+    });
+    const content: AskUserContent = {
+      ...grantDefaultContent,
+      questions: [
+        {
+          ...grantDefaultContent.questions[0],
+          options: [
+            {
+              label: "授权桌面报表",
+              action: "grant_readonly_folder",
+              well_known: "desktop",
+              target_name: "报表",
+            },
+          ],
+          default: "授权桌面报表",
+        },
+      ],
+    };
+    render(<Harness content={content} onBindResolve={onBindResolve} />);
+    fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
+
+    await waitFor(() => {
+      expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith("conv-1", {
+        wellKnown: "desktop",
+        targetName: "报表",
+      });
+    });
+  });
+
   it("picker cancel stays on card — no resume / no bare grant copy", async () => {
     const onContinue = vi.fn();
     const onBindResolve = vi.fn(async () => {});

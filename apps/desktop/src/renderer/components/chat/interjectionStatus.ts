@@ -1,6 +1,6 @@
 import type { UserInterjectionStatus } from "@/stores/execution";
 
-/** S2 四态文案（legacy `delivered` ≡ `received`）。心智：只对主 Agent 说话。 */
+/** S2 四态文案。心智：只对主 Agent 说话。 */
 export function interjectionStatusLabel(
   status: UserInterjectionStatus | string | null | undefined,
 ): string {
@@ -12,7 +12,6 @@ export function interjectionStatusLabel(
     case "addressed":
       return "主 Agent 已回应";
     case "received":
-    case "delivered":
       return "主 Agent 已收到";
     default:
       return "主 Agent 已收到";
@@ -25,7 +24,7 @@ export type InterjectionStatusTone =
   | "failed"
   | "addressed";
 
-/** Visual tone — addressed 勿假绿成功；delivered 跟 received。 */
+/** Visual tone — addressed 勿假绿成功。 */
 export function interjectionStatusTone(
   status: UserInterjectionStatus | string | null | undefined,
 ): InterjectionStatusTone {

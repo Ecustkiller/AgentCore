@@ -170,13 +170,10 @@ def _patch_persistence(
     monkeypatch.setattr(cloud_mod, "mint_title", _fake_title)
     # Keep local_turn import path stable for any residual patches.
     monkeypatch.setattr(local_turn_mod, "get_cloud_store", cloud_mod.get_cloud_store)
-
-    async def _fake_followups(**_kw):
-        from agentcore.conversation.common import FollowupsMintResult
-
-        return FollowupsMintResult(items=["建议一", "建议二"])
-
-    monkeypatch.setattr(cloud_mod, "mint_followups", _fake_followups)
+    monkeypatch.setattr(
+        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
+        AsyncMock(return_value=None),
+    )
     return consolidation_calls
 
 
@@ -651,7 +648,7 @@ async def test_record_local_turn_prefers_progressive_journal_over_runs(monkeypat
     assert result["assistant_message_id"] == "assistant-id"
 
 
-async def test_record_local_turn_persists_followups(monkeypatch):
+async def test_record_local_turn_does_not_persist_followups(monkeypatch):
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
@@ -667,5 +664,5 @@ async def test_record_local_turn_persists_followups(monkeypatch):
         finish_reason=FinishReason.END_TURN.value,
     )
 
-    assert ("followups", "assistant-id", ["建议一", "建议二"]) in events
-    assert result["followups"] == ["建议一", "建议二"]
+    assert not any(e[0] == "followups" for e in events)
+    assert result["followups"] is None

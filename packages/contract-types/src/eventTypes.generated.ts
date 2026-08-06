@@ -17,7 +17,6 @@ export type SSEEventType =
   | "coordination_wait"
   | "debate_pretrial_completed"
   | "debate_pretrial_orders"
-  | "debate_pretrial_progress"
   | "debate_pretrial_started"
   | "debate_result"
   | "debate_round"

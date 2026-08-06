@@ -240,6 +240,22 @@ def test_evaluate_str_replace_secret_new_string_denies():
     assert hit.rule_id == "sensitive.secret_write"
 
 
+def test_evaluate_file_write_erp_field_names_not_secret_deny():
+    """ERP md 表字段（task_created_at 等）不得误触发 sensitive.secret_write。"""
+    hit = evaluate_tool_call(
+        "file_write",
+        {
+            "path": "docs/erp-schema.md",
+            "content": (
+                "| field | type |\n"
+                "| task_created_at | datetime |\n"
+                "| task_priority | int |\n"
+            ),
+        },
+    )
+    assert hit is None or hit.rule_id != "sensitive.secret_write"
+
+
 def test_evaluate_file_write_safe_scaffold_passes():
     assert (
         evaluate_tool_call(

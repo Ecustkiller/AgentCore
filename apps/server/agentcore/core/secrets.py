@@ -12,10 +12,11 @@ import re
 
 # OpenAI/DeepSeek/Anthropic/Moonshot/Stripe ``sk[-_]…``, Tavily ``tvly-…``, Groq
 # ``gsk_…``, xAI ``xai-…``, Google ``AIza…``, GitHub ``gh?_…``, plus ``Bearer <token>``.
+# ``(?<![A-Za-z0-9])`` avoids mid-token false positives (e.g. ``task_created_at`` → ``sk_…``).
 SECRET_RE = re.compile(
-    r"(?:sk|tvly|gsk|xai)[-_][A-Za-z0-9._-]{8,}"
-    r"|AIza[A-Za-z0-9._-]{16,}"
-    r"|gh[opsru]_[A-Za-z0-9]{16,}"
+    r"(?<![A-Za-z0-9])(?:sk|tvly|gsk|xai)[-_][A-Za-z0-9._-]{8,}"
+    r"|(?<![A-Za-z0-9])AIza[A-Za-z0-9._-]{16,}"
+    r"|(?<![A-Za-z0-9])gh[opsru]_[A-Za-z0-9]{16,}"
     r"|[Bb]earer\s+[A-Za-z0-9._-]{8,}"
 )
 

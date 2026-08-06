@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
+import { surfaceMutedPanel } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { copyText } from "@/lib/clipboard";
@@ -116,7 +117,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const displayError =
     message.error ??
     (!message.isStreaming && !(message.content ?? "").trim()
-      ? syntheticErrorForEmptyFailure(finishReason)
+      ? syntheticErrorForEmptyFailure(finishReason, message.runs?.error?.code)
       : null);
   const errorAction = displayError
     ? errorActionForCode(displayError.code, {
@@ -124,8 +125,13 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         message: displayError.message,
       })
     : null;
+  // Empty interrupted = layer-1 composer recoverability only (no bubble retry).
+  // Empty cancelled = neutral「已停止」(no main regenerate / 排查包 CTA).
+  const isUserStopped = displayError?.code === "TURN_CANCELLED";
   const showRetry =
     !!displayError &&
+    !isUserStopped &&
+    displayError.code !== "TURN_INTERRUPTED" &&
     (isConnectivityErrorCode(displayError.code) || !errorAction);
   const supportDiagnosticText = formatSupportDiagnosticText({
     conversationId,
@@ -361,47 +367,56 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           journal={message.runs}
         />
       )}
-      {displayError && (
-        <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-            {formatAssistantErrorMessage(displayError)}
-            {connectivityEscalationSuffix(displayError.code, message.id, {
-              message: displayError.message,
-              upstreamStatus: message.error?.context?.upstream_status,
-            })}
-          </p>
-          {supportDiagnosticText && (
-            <Button
-              variant="ghost"
-              className="shrink-0 text-destructive hover:bg-destructive/15"
-              icon={<Copy size={13} />}
-              onClick={copySupportDiagnostics}
-            >
-              复制排查包
-            </Button>
-          )}
-          {errorAction && (
-            <Button
-              variant="destructive"
-              className="shrink-0"
-              icon={<KeyRound size={13} />}
-              onClick={() => navigate(errorAction.href)}
-            >
-              {errorAction.label}
-            </Button>
-          )}
-          {showRetry && (
-            <Button
-              variant="danger"
-              className="shrink-0 border border-destructive/40"
-              icon={<RefreshCw size={13} />}
-              onClick={handleRegenerate}
-            >
-              重试
-            </Button>
-          )}
+      {displayError && isUserStopped ? (
+        <div
+          className={`mt-2 px-3 py-2.5 text-sm text-muted-foreground ${surfaceMutedPanel}`}
+          data-testid="assistant-stopped-notice"
+        >
+          {formatAssistantErrorMessage(displayError)}
         </div>
+      ) : (
+        displayError && (
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+              {formatAssistantErrorMessage(displayError)}
+              {connectivityEscalationSuffix(displayError.code, message.id, {
+                message: displayError.message,
+                upstreamStatus: message.error?.context?.upstream_status,
+              })}
+            </p>
+            {supportDiagnosticText && (
+              <Button
+                variant="ghost"
+                className="shrink-0 text-destructive hover:bg-destructive/15"
+                icon={<Copy size={13} />}
+                onClick={copySupportDiagnostics}
+              >
+                复制排查包
+              </Button>
+            )}
+            {errorAction && (
+              <Button
+                variant="destructive"
+                className="shrink-0"
+                icon={<KeyRound size={13} />}
+                onClick={() => navigate(errorAction.href)}
+              >
+                {errorAction.label}
+              </Button>
+            )}
+            {showRetry && (
+              <Button
+                variant="danger"
+                className="shrink-0 border border-destructive/40"
+                icon={<RefreshCw size={13} />}
+                onClick={handleRegenerate}
+              >
+                重新生成
+              </Button>
+            )}
+          </div>
+        )
       )}
       {message.executionId === null ? (
         <SingleAgentDeliveryAndFiles
@@ -466,6 +481,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         </div>
       )}
       {!message.isStreaming &&
+        displayError?.code !== "TURN_INTERRUPTED" &&
         (message.content.length > 0 ||
           !!displayError ||
           // runs.error may still ride the export duck type before / beside message.error lift.

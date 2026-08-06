@@ -798,14 +798,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             debate_pretrial["orders"] = list(p.get("orders") or [])
 
-        elif etype == "debate_pretrial_progress":
-            if debate_pretrial is not None:
-                debate_pretrial["evidenceLedgerCount"] = int(
-                    p.get("evidence_ledger_count")
-                    or debate_pretrial.get("evidenceLedgerCount")
-                    or 0
-                )
-
         elif etype == "debate_pretrial_completed":
             completeness = p.get("completeness") or "empty"
             debate_pretrial = {

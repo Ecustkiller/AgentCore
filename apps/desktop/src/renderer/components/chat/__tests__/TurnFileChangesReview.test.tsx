@@ -10,6 +10,7 @@ const {
   getLocalTurnFilesDiff,
   restoreLocalTurnBaseline,
   restoreSnapshot,
+  downloadWorkspaceFile,
   notifySuccess,
   useConversationWorkspace,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   getLocalTurnFilesDiff: vi.fn(),
   restoreLocalTurnBaseline: vi.fn(),
   restoreSnapshot: vi.fn(),
+  downloadWorkspaceFile: vi.fn(),
   notifySuccess: vi.fn(),
   useConversationWorkspace: vi.fn((): WorkspaceInfo | null => null) as Mock<
     () => WorkspaceInfo | null
@@ -28,7 +30,10 @@ vi.mock("@/services/turnFilesDiff", () => ({
   getLocalTurnFilesDiff,
   restoreLocalTurnBaseline,
 }));
-vi.mock("@/services/workspace", () => ({ restoreSnapshot }));
+vi.mock("@/services/workspace", () => ({
+  restoreSnapshot,
+  downloadWorkspaceFile,
+}));
 vi.mock("@/lib/toast", () => ({
   notifySuccess,
   notifyActionError: vi.fn(),
@@ -371,5 +376,56 @@ describe("TurnFileChangesReview A2′ rollback", () => {
       );
     });
     expect(restoreSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("binary change offers direct download instead of workspace-only dead end", async () => {
+    downloadWorkspaceFile.mockResolvedValue(undefined);
+    getTurnFilesDiff.mockResolvedValue({
+      messageId: "m1",
+      baselineSnapshotId: "snap-1",
+      available: true,
+      changes: [
+        {
+          path: "独立站整改.zip",
+          changeType: "added",
+          baseSha: null,
+          resultSha: "r1",
+          isBinary: true,
+          content: null,
+          sizeBytes: 2048,
+          baseContent: null,
+        },
+      ],
+      total: 1,
+      added: 1,
+      modified: 0,
+      deleted: 0,
+    });
+
+    render(
+      <TooltipProvider>
+        <TurnFileChangesReview
+          conversationId="c1"
+          messageId="m1"
+          artifacts={[]}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("独立站整改.zip")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("独立站整改.zip"));
+    expect(screen.getByText(/可直接下载到本机/)).toBeTruthy();
+    expect(screen.queryByText(/请在工作区打开/)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("下载 独立站整改.zip"));
+    await waitFor(() => {
+      expect(downloadWorkspaceFile).toHaveBeenCalledWith(
+        "c1",
+        "独立站整改.zip",
+        "独立站整改.zip",
+      );
+    });
   });
 });

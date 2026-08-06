@@ -40,8 +40,6 @@ async def team_preview_before_workers(
         await_team_preview,
         needs_capability_auth,
         should_kickoff,
-        should_preview_plan,
-        skip_after_confirmed_ask,
     )
     from agentcore.runtime.sandbox_approval import worker_gate_applies
 
@@ -53,7 +51,6 @@ async def team_preview_before_workers(
         local_gate=local_gate, axes=axes
     ):
         return None
-    plan_preview = should_preview_plan(plan, finalize=finalize)
     if not should_kickoff(
         plan, finalize=finalize, local_gate=local_gate, axes=axes
     ):
@@ -69,14 +66,7 @@ async def team_preview_before_workers(
         ):
             tool._auto_grant_pending = True  # type: ignore[attr-defined]
         return None
-    # Plan half skipped after confirmed ask; capability half may still need a card.
-    # If only plan would have shown, skip entirely (legacy dual-card avoidance).
-    if (
-        skip_after_confirmed_ask(tool)
-        and not needs_capability_auth(local_gate=local_gate, axes=axes)
-        and plan_preview
-    ):
-        return None
+    # ask_user checkpoint_resolved 不跳 team_preview（澄清卡 ⊥ 开工卡）。
     # 批 B：stage_card research_first 决议 → 当次 MLR 一次性 pre-auth（不得泛化）。
     if playbook_name == "multi_lens_research":
         from agentcore.runtime.kickoff.stage_card import (

@@ -34,6 +34,60 @@ def test_normalize_options_preserves_bind_local_folder_action():
     assert out[5]["action"] == "grant_organize_folder"
 
 
+def test_normalize_options_passthrough_well_known_and_target_name():
+    out = normalize_options(
+        [
+            {
+                "label": "授权桌面",
+                "action": "grant_readonly_folder",
+                "well_known": "desktop",
+                "target_name": "咨询报告",
+            },
+            {
+                "label": "授权下载",
+                "action": "grant_organize_folder",
+                "well_known": "Downloads",  # case-insensitive
+                "target_name": "foo.zip",
+            },
+            {
+                "label": "坏路径名",
+                "action": "grant_readonly_folder",
+                "well_known": "documents",
+                "target_name": "a/b",
+            },
+            {
+                "label": "未知 well_known",
+                "action": "grant_readonly_folder",
+                "well_known": "home",
+                "target_name": "ok",
+            },
+            {
+                "label": "非 grant 不透传",
+                "action": "bind_local_folder",
+                "well_known": "desktop",
+                "target_name": "x",
+            },
+            {
+                "label": "反斜杠拒绝",
+                "action": "grant_readonly_folder",
+                "well_known": "desktop",
+                "target_name": r"a\b",
+            },
+        ]
+    )
+    assert out[0]["well_known"] == "desktop"
+    assert out[0]["target_name"] == "咨询报告"
+    assert out[1]["well_known"] == "downloads"
+    assert out[1]["target_name"] == "foo.zip"
+    assert out[2]["well_known"] == "documents"
+    assert "target_name" not in out[2]  # path separators rejected
+    assert "well_known" not in out[3]
+    assert out[3]["target_name"] == "ok"
+    assert "well_known" not in out[4]
+    assert "target_name" not in out[4]
+    assert "target_name" not in out[5]
+
+
 def test_normalize_questions_passthrough_to_checkpoint_shape():
     qs = normalize_questions(
         [
@@ -201,6 +255,8 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
         "items"
     ]["properties"]
     assert "action" not in props
+    assert "well_known" not in props
+    assert "target_name" not in props
     assert "bind_local_folder" not in plain.schema.description
 
     advertised = AskUserTool(**base, advertise_bind_local_folder=True)
@@ -213,6 +269,8 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
         "grant_readonly_folder",
         "grant_organize_folder",
     ]
+    assert props2["well_known"]["enum"] == ["desktop", "downloads", "documents"]
+    assert "target_name" in props2
     assert "open_local_project" in advertised.schema.description
     assert "bind_local_folder" in advertised.schema.description
     assert "grant_readonly_folder" in advertised.schema.description

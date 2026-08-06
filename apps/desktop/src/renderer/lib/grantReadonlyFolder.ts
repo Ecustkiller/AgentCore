@@ -1,7 +1,11 @@
 import { hasLocalFiles } from "@/lib/capabilities";
+import type { GrantFolderHints } from "@/lib/grantFolderHints";
 import { revokeExternalGrant } from "@/lib/revokeExternalGrant";
 import { ApiError, api } from "@/services/api";
 import type { FsRoot } from "@shared/ipc-contract";
+
+export type { GrantFolderHints } from "@/lib/grantFolderHints";
+export { grantHintsFromAskOption } from "@/lib/grantFolderHints";
 
 export type GrantReadonlyResult =
   | {
@@ -30,17 +34,24 @@ export function formatGrantReadonlyFolderAnswer(
 }
 
 /**
- * OS folder picker → session read-only root → POST grant to server.
- * Orthogonal to workspace binding: works for cloud scratch when desktop is online.
+ * OS folder picker (or well-known / target hint) → session read-only root →
+ * POST grant to server. Orthogonal to workspace binding: works for cloud scratch
+ * when desktop is online.
  */
 export async function pickAndGrantReadonlyFolder(
   conversationId: string,
+  hints?: GrantFolderHints,
 ): Promise<GrantReadonlyResult> {
   if (!hasLocalFiles() || !window.fsApi?.grantSessionReadonlyRoot) {
     return { ok: false, reason: "unavailable" };
   }
   try {
-    const root = await window.fsApi.grantSessionReadonlyRoot(conversationId);
+    const root = await window.fsApi.grantSessionReadonlyRoot({
+      conversationId,
+      mode: "readonly",
+      ...(hints?.wellKnown ? { wellKnown: hints.wellKnown } : {}),
+      ...(hints?.targetName ? { targetName: hints.targetName } : {}),
+    });
     if (!root) return { ok: false, reason: "cancelled" };
     try {
       const body = await api.post<{

@@ -9,22 +9,22 @@ export function composerTrailingSlots(opts: {
   voiceActive: boolean;
 }): {
   /** 主行右侧控件（顺序即渲染序）。 */
-  row: Array<"steer-send" | "send" | "stop" | "voice">;
-  /** 行外排队轻链（仅 busy + 有草稿）。 */
-  showQueueHint: boolean;
+  row: Array<"send" | "stop" | "voice">;
+  /** 行外插队轻链（仅 busy + 有草稿）；点了传 delivery: steer。 */
+  showSteerHint: boolean;
 } {
   const { busy, hasDraft, voiceSupported, voiceActive } = opts;
 
   if (busy) {
     return {
-      row: hasDraft ? ["steer-send", "stop"] : ["stop"],
-      showQueueHint: hasDraft,
+      row: hasDraft ? ["send", "stop"] : ["stop"],
+      showSteerHint: hasDraft,
     };
   }
 
   if (voiceSupported && (voiceActive || !hasDraft)) {
-    return { row: ["voice"], showQueueHint: false };
+    return { row: ["voice"], showSteerHint: false };
   }
 
-  return { row: ["send"], showQueueHint: false };
+  return { row: ["send"], showSteerHint: false };
 }

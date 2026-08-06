@@ -1,3 +1,8 @@
+import type {
+  MentionMenuSection,
+  MentionMenuSelectable,
+} from "@/components/chat/MentionMenu";
+import { getConversations } from "@/hooks/useConversations";
 import { hasLocalFiles } from "@/lib/capabilities";
 import {
   type IndexedEntry,
@@ -7,7 +12,8 @@ import {
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
 import { fetchMessageWindow } from "@/services/messages";
-import { searchAll } from "@/services/search";
+import { useConversationStore } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
 import {
   type Dispatch,
   type KeyboardEvent,
@@ -21,10 +27,16 @@ import {
 } from "react";
 import {
   CONV_MENTION_MSG_LIMIT,
+  EMPTY_MENTION_INDEX_LIMIT,
+  MAX_AGENT_MENTIONS,
+  type MentionSectionId,
+  type PendingAgentMention,
   type PendingAttachment,
   buildMentionSources,
   detectMention,
   formatConversationContext,
+  parseMentionFilter,
+  pickRecentConversations,
 } from "./composerAttachments";
 import {
   pickLocalFileAttachment,
@@ -38,12 +50,38 @@ export type AttachmentProjectHint = {
   folderName: string;
 };
 
+function isAgentItem(
+  item: MentionMenuSelectable,
+): item is { kind: "agent"; agentId: string; role: string } {
+  return "kind" in item && item.kind === "agent" && "agentId" in item;
+}
+
+/** 从当前会话由近及远找最新带 agents 的 execution（诚实降级：无则空）。 */
+function pickTeamAgents(
+  messages: ReadonlyArray<{ id: string; role: string }>,
+  byId: ReturnType<typeof useExecutionStore.getState>["byId"],
+): { id: string; role: string }[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const agents = byId[m.id]?.plan?.agents;
+    if (agents && agents.length > 0) {
+      return agents.map((a) => ({ id: a.id, role: a.role }));
+    }
+  }
+  return [];
+}
+
+const EMPTY_MESSAGES: { id: string; role: string }[] = [];
+
 export function useMentionMenu({
   conversationId,
   value,
   setValue,
   attachments,
   setAttachments,
+  agentMentions,
+  setAgentMentions,
   textareaRef,
   onAttachmentProjectHint,
 }: {
@@ -52,6 +90,8 @@ export function useMentionMenu({
   setValue: Dispatch<SetStateAction<string>>;
   attachments: PendingAttachment[];
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
+  agentMentions: PendingAgentMention[];
+  setAgentMentions: Dispatch<SetStateAction<PendingAgentMention[]>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   /** Draft-only: @ / browse attach from a project → suggest filing into it (B4). */
   onAttachmentProjectHint?: (hint: AttachmentProjectHint) => void;
@@ -64,64 +104,132 @@ export function useMentionMenu({
   const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
   const [sourceCount, setSourceCount] = useState(0);
   const [indexLoading, setIndexLoading] = useState(false);
-  const [convItems, setConvItems] = useState<IndexedEntry[]>([]);
+  const [convTick, setConvTick] = useState(0);
   const indexLoadedRef = useRef(false);
   const sourcesRef = useRef<Map<string, FileSource>>(new Map());
   const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const entries = useMemo(
-    () =>
-      [...dirIndex, ...fileIndex].sort((a, b) =>
-        a.display.localeCompare(b.display, "zh"),
-      ),
-    [dirIndex, fileIndex],
-  );
-  const fileItems = useMemo(
-    () => filterEntries(entries, query),
-    [entries, query],
-  );
-  const items = useMemo(
-    () => [...convItems, ...fileItems],
-    [convItems, fileItems],
+  const messages = useConversationStore((s) => {
+    if (!conversationId) return EMPTY_MESSAGES;
+    return s.byId[conversationId]?.messages ?? EMPTY_MESSAGES;
+  });
+  const execById = useExecutionStore((s) => s.byId);
+
+  const teamAgents = useMemo(
+    () => pickTeamAgents(messages, execById),
+    [messages, execById],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode are intentional re-run keys
+  const { section: sectionFilter, filter: filterText } = useMemo(
+    () => parseMentionFilter(query),
+    [query],
+  );
+
+  // 缓存列表变动时（发送/新建）刷新对话分区；tick 作轻量失效键。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key
+  useEffect(() => {
+    if (!menuMode) return;
+    setConvTick((n) => n + 1);
+  }, [menuMode, conversationId]);
+
+  const convItems = useMemo(() => {
+    void convTick;
+    if (menuMode === "browse" && !filterText.trim() && !sectionFilter) {
+      // browse 空搜不强推对话；有过滤词或类型前缀时再出。
+      if (!query.trim()) return [];
+    }
+    return pickRecentConversations(
+      getConversations(),
+      conversationId,
+      filterText,
+      EMPTY_MENTION_INDEX_LIMIT,
+    );
+  }, [convTick, menuMode, filterText, sectionFilter, query, conversationId]);
+
+  const emptyLimit = sectionFilter === null ? EMPTY_MENTION_INDEX_LIMIT : 50;
+
+  const folderItems = useMemo(() => {
+    const dirs = filterEntries(dirIndex, filterText, emptyLimit);
+    return dirs;
+  }, [dirIndex, filterText, emptyLimit]);
+
+  const fileItems = useMemo(() => {
+    const files = filterEntries(fileIndex, filterText, emptyLimit);
+    return files;
+  }, [fileIndex, filterText, emptyLimit]);
+
+  const agentItems = useMemo((): MentionMenuSelectable[] => {
+    const q = filterText.trim().toLowerCase();
+    let agents = teamAgents;
+    if (q) {
+      agents = agents.filter(
+        (a) =>
+          a.role.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
+      );
+    }
+    return agents.map((a) => ({
+      kind: "agent" as const,
+      agentId: a.id,
+      role: a.role,
+    }));
+  }, [teamAgents, filterText]);
+
+  const sections = useMemo((): MentionMenuSection[] => {
+    const show = (id: MentionSectionId) =>
+      sectionFilter === null || sectionFilter === id;
+
+    const out: MentionMenuSection[] = [];
+
+    // browse：不强推团队空态；mention 始终可出团队分区。
+    if (menuMode === "mention" && show("team")) {
+      out.push({
+        id: "team",
+        label: "团队",
+        items: agentItems,
+        emptyHint:
+          agentItems.length === 0 ? "多 Agent 回合后可点名" : undefined,
+      });
+    } else if (menuMode === "browse" && show("team") && agentItems.length > 0) {
+      out.push({ id: "team", label: "团队", items: agentItems });
+    }
+
+    if (
+      show("conversation") &&
+      (convItems.length > 0 || sectionFilter === "conversation")
+    ) {
+      out.push({
+        id: "conversation",
+        label: "对话",
+        items: convItems,
+      });
+    }
+
+    if (show("folder")) {
+      out.push({
+        id: "folder",
+        label: "文件夹",
+        items: folderItems,
+      });
+    }
+
+    if (show("file")) {
+      out.push({
+        id: "file",
+        label: "文件",
+        items: fileItems,
+      });
+    }
+
+    return out;
+  }, [menuMode, sectionFilter, agentItems, convItems, folderItems, fileItems]);
+
+  const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode/sections are intentional re-run keys
   useEffect(() => {
     setActiveIndex(0);
-  }, [query, menuMode]);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (!menuMode || !q) {
-      setConvItems([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void searchAll(q, { types: ["conversation"], limit: 6 })
-        .then((res) => {
-          if (cancelled) return;
-          const section = res.sections.find((s) => s.type === "conversation");
-          const candidates = (section?.items ?? []).map<IndexedEntry>((it) => ({
-            sourceId: "conversation",
-            sourceLabel: "对话",
-            relPath: it.id,
-            name: it.title || "未命名对话",
-            display: it.title || "未命名对话",
-            kind: "conversation",
-          }));
-          setConvItems(candidates);
-        })
-        .catch(() => {
-          if (!cancelled) setConvItems([]);
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [query, menuMode]);
+  }, [query, menuMode, flatItems.length]);
 
   const ensureIndex = useCallback(async () => {
     if (indexLoadedRef.current) return;
@@ -155,6 +263,23 @@ export function useMentionMenu({
     setMenuError(null);
     mentionRangeRef.current = null;
   }, []);
+
+  const stripMentionQuery = useCallback(() => {
+    const range = mentionRangeRef.current;
+    if (menuMode === "mention" && range) {
+      const updated = value.slice(0, range.start) + value.slice(range.end);
+      setValue(updated);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.selectionStart = el.selectionEnd = range.start;
+        }
+      });
+    } else {
+      textareaRef.current?.focus();
+    }
+  }, [menuMode, value, setValue, textareaRef]);
 
   const openMention = useCallback(
     (start: number, end: number, q: string) => {
@@ -192,12 +317,33 @@ export function useMentionMenu({
     [menuMode, openMention, closeMenu],
   );
 
+  const selectAgent = useCallback(
+    (agentId: string, role: string) => {
+      if (agentMentions.some((a) => a.agentId === agentId)) {
+        stripMentionQuery();
+        closeMenu();
+        return;
+      }
+      if (agentMentions.length >= MAX_AGENT_MENTIONS) {
+        setMenuError(`最多点名 ${MAX_AGENT_MENTIONS} 个角色`);
+        return;
+      }
+      setAgentMentions((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), agentId, role },
+      ]);
+      stripMentionQuery();
+      closeMenu();
+    },
+    [agentMentions, setAgentMentions, stripMentionQuery, closeMenu],
+  );
+
   const attachEntry = useCallback(
     async (entry: IndexedEntry) => {
       const key = `${entry.kind}:${entry.sourceId}:${entry.relPath}`;
       if (attachments.some((a) => a.key === key)) {
+        stripMentionQuery();
         closeMenu();
-        textareaRef.current?.focus();
         return;
       }
 
@@ -316,39 +462,34 @@ export function useMentionMenu({
         if (resolved) onAttachmentProjectHint(resolved);
       }
 
-      const range = mentionRangeRef.current;
-      if (menuMode === "mention" && range) {
-        const updated = value.slice(0, range.start) + value.slice(range.end);
-        setValue(updated);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (el) {
-            el.focus();
-            el.selectionStart = el.selectionEnd = range.start;
-          }
-        });
-      } else {
-        textareaRef.current?.focus();
-      }
+      stripMentionQuery();
       closeMenu();
     },
     [
       attachments,
       conversationId,
       fileIndex,
-      value,
-      menuMode,
       closeMenu,
       onAttachmentProjectHint,
       setAttachments,
-      setValue,
-      textareaRef,
+      stripMentionQuery,
     ],
   );
 
+  const selectItem = useCallback(
+    (item: MentionMenuSelectable) => {
+      if (isAgentItem(item)) {
+        selectAgent(item.agentId, item.role);
+        return;
+      }
+      void attachEntry(item);
+    },
+    [selectAgent, attachEntry],
+  );
+
   const handleAddRoot = useCallback(async () => {
-    const root = await window.fsApi.addRoot();
-    if (!root) return;
+    const picked = await window.fsApi.addRoot();
+    if (!picked.ok) return;
     indexLoadedRef.current = false;
     await ensureIndex();
   }, [ensureIndex]);
@@ -404,23 +545,25 @@ export function useMentionMenu({
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setActiveIndex((i) => Math.min(i + 1, Math.max(items.length - 1, 0)));
+          setActiveIndex((i) =>
+            Math.min(i + 1, Math.max(flatItems.length - 1, 0)),
+          );
           return true;
         case "ArrowUp":
           e.preventDefault();
           setActiveIndex((i) => Math.max(i - 1, 0));
           return true;
         case "Enter":
-          if (items[activeIndex]) {
+          if (flatItems[activeIndex]) {
             e.preventDefault();
-            void attachEntry(items[activeIndex]);
+            selectItem(flatItems[activeIndex]);
             return true;
           }
           return false;
         case "Tab":
-          if (items[activeIndex]) {
+          if (flatItems[activeIndex]) {
             e.preventDefault();
-            void attachEntry(items[activeIndex]);
+            selectItem(flatItems[activeIndex]);
             return true;
           }
           return false;
@@ -433,12 +576,15 @@ export function useMentionMenu({
           return false;
       }
     },
-    [menuMode, items, activeIndex, attachEntry, closeMenu, textareaRef],
+    [menuMode, flatItems, activeIndex, selectItem, closeMenu, textareaRef],
   );
 
   return {
     menuMode,
-    items,
+    sections,
+    flatItems,
+    /** @deprecated 兼容旧调用；等同 flatItems */
+    items: flatItems,
     activeIndex,
     indexLoading,
     menuError,
@@ -451,6 +597,7 @@ export function useMentionMenu({
     openBrowse,
     syncMention,
     attachEntry,
+    selectItem,
     closeMenu,
     handleMenuNavKey,
     handleAddRoot,

@@ -1,4 +1,3 @@
-import { formatCrossModelRosterLine } from "@/components/chat/debate/model";
 import { shouldHostPreviewInGraph } from "@/components/chat/debatePreviewPlacement";
 import {
   ResolvedDecisionRecord,
@@ -6,6 +5,10 @@ import {
   teamPendingMarkerLabel,
   teamResolvedOutcome,
 } from "@/components/chat/decision";
+import {
+  DebatePreviewBody,
+  WorkerPreviewRows,
+} from "@/components/chat/teamPreview";
 import { Button } from "@/components/ui";
 import {
   Popover,
@@ -66,125 +69,6 @@ function summarySuffix(preview: TeamPreviewDisplay): string {
   return `${preview.workers.length} 名队员`;
 }
 
-export function WorkerRows({ preview }: { preview: TeamPreviewDisplay }) {
-  return (
-    <div className="mt-2 space-y-1.5">
-      {preview.workers.map((w) => (
-        <div
-          key={w.run_id}
-          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-        >
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="text-xs font-medium text-foreground">{w.role}</p>
-            {w.write_capability_label && (
-              <span
-                className={
-                  w.write_capability === "text_only"
-                    ? "text-xs font-medium text-muted-foreground"
-                    : "text-xs text-muted-foreground"
-                }
-              >
-                {w.write_capability_label}
-              </span>
-            )}
-            {w.depends_on.length > 0 && (
-              <span className="text-xs text-muted-foreground">
-                依赖 {w.depends_on.length} 步
-              </span>
-            )}
-          </div>
-          {w.task && (
-            <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">
-              {w.task}
-            </p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** Debate motion / round budget / sides — shared by standalone card and graph header. */
-export function DebateBody({ preview }: { preview: TeamPreviewDisplay }) {
-  const budget =
-    preview.maxRounds > 0
-      ? preview.thorough
-        ? `认真辩透 · 上限 ${preview.maxRounds} 轮`
-        : `快速对碰 · ${preview.maxRounds} 轮`
-      : preview.thorough
-        ? "认真辩透"
-        : "快速对碰";
-
-  const rosterLine = formatCrossModelRosterLine(preview.sides, {
-    model: preview.moderatorModel,
-    origin: preview.moderatorOrigin,
-  });
-
-  return (
-    <div className="mt-2 space-y-1.5">
-      {preview.motion && (
-        <p className="whitespace-pre-wrap text-xs text-foreground">
-          {preview.motion}
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">{budget}</p>
-      {rosterLine && (
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="debate-roster-line"
-        >
-          {rosterLine}
-        </p>
-      )}
-      {preview.sameModelDebate && (
-        <p className="text-xs text-muted-foreground">同模型辩论</p>
-      )}
-      {preview.modelCandidates && preview.modelCandidates.length > 0 && (
-        <div
-          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-          data-testid="debate-model-candidates"
-        >
-          <p className="text-xs font-medium text-foreground">
-            模型消歧失败 · 请从目录候选重选（勿再问「是不是当前主模型」）
-          </p>
-          <ul className="mt-1 space-y-0.5">
-            {preview.modelCandidates.map((c, i) => (
-              <li
-                key={`${c.origin}-${c.model}-${c.provider_id ?? ""}-${i}`}
-                className="text-xs text-muted-foreground"
-              >
-                {c.label || c.model}
-                {" · "}
-                {c.origin}/{c.model}
-                {c.provider_id ? `（provider=${c.provider_id}）` : ""}
-                {c.side_key ? ` · ${c.side_key}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {preview.sides.map((s) => (
-        <div
-          key={s.key}
-          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-        >
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="text-xs font-medium text-foreground">{s.name}</p>
-            {s.is_subject && (
-              <span className="text-xs text-muted-foreground">方案方</span>
-            )}
-          </div>
-          {s.stance && (
-            <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">
-              {s.stance}
-            </p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function graphPreviewSummary(preview: TeamPreviewDisplay): string {
   if (isDebate(preview)) {
     const n = preview.sides.length;
@@ -196,7 +80,7 @@ function graphPreviewSummary(preview: TeamPreviewDisplay): string {
 
 /**
  * Secondary ghost control for StatusStrip — Popover hosts 辩题 / 分工 details
- * (DebateBody / WorkerRows + optional note). No DecisionCard shell; does not
+ * (DebatePreviewBody / WorkerPreviewRows + optional note). No DecisionCard shell; does not
  * navigate to the debate room. Mounted only on the inline StatusStrip path.
  */
 export function GraphTeamPreview({
@@ -219,9 +103,9 @@ export function GraphTeamPreview({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-3 [&>*:first-child]:mt-0">
         {isDebate(preview) ? (
-          <DebateBody preview={preview} />
+          <DebatePreviewBody debate={preview} />
         ) : (
-          <WorkerRows preview={preview} />
+          <WorkerPreviewRows workers={preview.workers} />
         )}
         {preview.note && (
           <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
@@ -254,9 +138,9 @@ function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
       summary={summary}
     >
       {isDebate(preview) ? (
-        <DebateBody preview={preview} />
+        <DebatePreviewBody debate={preview} />
       ) : (
-        <WorkerRows preview={preview} />
+        <WorkerPreviewRows workers={preview.workers} />
       )}
       {preview.note && (
         <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">

@@ -28,18 +28,16 @@ class CreateStandingTaskRequest(BaseModel):
     goal: str = Field(default="", min_length=0)
     folder_id: str
     trigger_kind: TriggerKind = "schedule"
-    # Desktop wire: schedule_preset (+ cron when custom). ``preset`` accepted as alias.
+    # Desktop wire: schedule_preset (+ cron when custom).
     cron: str | None = None
     schedule_preset: str | None = None
-    preset: str | None = Field(None, exclude=True)
     permission_axes: PermissionAxesModel | None = None
     enabled: bool = True
     workflow_id: str | None = None
 
     @model_validator(mode="after")
     def _require_schedule_or_webhook(self) -> "CreateStandingTaskRequest":
-        preset = self.schedule_preset or self.preset
-        object.__setattr__(self, "schedule_preset", preset)
+        preset = self.schedule_preset
         if not (self.goal or "").strip() and not self.workflow_id:
             raise ValueError("未绑定工作流时须提供 goal")
         if self.trigger_kind == "webhook":
@@ -73,7 +71,6 @@ class UpdateStandingTaskRequest(BaseModel):
     trigger_kind: TriggerKind | None = None
     cron: str | None = None
     schedule_preset: str | None = None
-    preset: str | None = Field(None, exclude=True)
     permission_axes: PermissionAxesModel | None = None
     enabled: bool | None = None
     template_config: StandingTaskTemplateConfig | None = None
@@ -82,9 +79,7 @@ class UpdateStandingTaskRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_schedule(self) -> "UpdateStandingTaskRequest":
-        preset = self.schedule_preset or self.preset
-        if preset is not None:
-            object.__setattr__(self, "schedule_preset", preset)
+        preset = self.schedule_preset
         if self.trigger_kind == "webhook" and (self.cron or preset):
             raise ValueError("切换到 webhook 时不要传 schedule_preset / cron")
         if (

@@ -42,6 +42,7 @@ class PendingTurnSteer:
     content: str
     user_id: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
+    agent_mentions: list[dict[str, Any]] = field(default_factory=list)
     requires_tools: bool = False
     x_client_platform: str | None = None
     llm_credentials: Any = None
@@ -139,6 +140,7 @@ def try_enqueue(
     content: str,
     user_id: str = "",
     attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
     llm_credentials: Any = None,
@@ -154,6 +156,7 @@ def try_enqueue(
         content=content,
         user_id=user_id,
         attachments=list(attachments or []),
+        agent_mentions=list(agent_mentions or []),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
         llm_credentials=llm_credentials,
@@ -264,6 +267,7 @@ def promote_leftovers_to_queue(leftovers: list[PendingTurnSteer]) -> int:
                 content=item.content,
                 user_id=item.user_id,
                 attachments=item.attachments,
+                agent_mentions=item.agent_mentions,
                 requires_tools=item.requires_tools,
                 x_client_platform=item.x_client_platform,
                 llm_credentials=item.llm_credentials,

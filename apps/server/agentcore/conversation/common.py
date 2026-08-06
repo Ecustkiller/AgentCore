@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +28,6 @@ from agentcore.llm.resolve import (
 from agentcore.memory import (
     TITLE_MAX_CHARS,
     ChatMessage,
-    FollowupInput,
-    LLMFollowupsGenerator,
     LLMTitleGenerator,
     TitleInput,
     TitleResult,
@@ -346,78 +343,6 @@ def schedule_title_generation(
         )
     _title_tasks.add(task)
     task.add_done_callback(_title_tasks.discard)
-
-
-@dataclass(frozen=True)
-class FollowupsMintResult:
-    """Minted chips plus optional soft-unavailable reason (None = legitimate empty)."""
-
-    items: list[str]
-    unavailable_reason: str | None = None
-
-
-async def generate_followups(
-    *,
-    provider: LLMProvider | None,
-    conversation_id: str,
-    user_message: str,
-    assistant_reply: str,
-    model: str | None = None,
-    motion_card: dict | None = None,
-) -> FollowupsMintResult:
-    """Best-effort turn-level「下一步」suggestions; never raises except ``LLMAuthError``.
-
-    Pure garnish (CEO→user quick-reply chips). Non-auth failures collapse to empty
-    chips + ``unavailable_reason``. ``LLMAuthError`` re-raises so
-    ``run_background_llm`` can try user BYOK once.
-
-    When ``motion_card`` is a compliant worker proposition card, a deterministic「开辩」
-    chip is always prepended (even if the LLM path yields nothing).
-    """
-    from agentcore.llm.background_failure import classify_background_llm_failure
-    from agentcore.memory.followups import (
-        format_motion_card_followup,
-        merge_motion_card_followup,
-    )
-
-    if not assistant_reply.strip():
-        return FollowupsMintResult(items=[])
-
-    injected: str | None = None
-    if isinstance(motion_card, dict):
-        motion = str(motion_card.get("motion") or "").strip()
-        if motion:
-            injected = format_motion_card_followup(motion_card)
-
-    messages: list[ChatMessage] = []
-    if user_message.strip():
-        messages.append({"role": "user", "content": user_message})
-    messages.append({"role": "assistant", "content": assistant_reply})
-
-    llm_items: list[str] = []
-    fail_reason: str | None = None
-    if provider is not None:
-        try:
-            llm_items = await LLMFollowupsGenerator(provider, model=model).generate(
-                FollowupInput(conversation_id=conversation_id, messages=messages)
-            )
-        except LLMAuthError:
-            # Must surface so ``run_background_llm`` can try user BYOK once.
-            raise
-        except Exception as e:
-            fail_reason = classify_background_llm_failure(e)
-            logger.warning(
-                "chat.followups_failed",
-                conversation_id=conversation_id,
-                error=str(e),
-                reason=fail_reason,
-            )
-            llm_items = []
-
-    items = merge_motion_card_followup(injected, llm_items)
-    if items:
-        return FollowupsMintResult(items=items)
-    return FollowupsMintResult(items=[], unavailable_reason=fail_reason)
 
 
 async def resolve_turn_profiles(

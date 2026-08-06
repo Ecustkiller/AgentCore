@@ -135,13 +135,30 @@ async def detect_workspace_profile(backend: WorkspaceBackend) -> WorkspaceProfil
                     languages.append("javascript")
             pm = _js_package_manager(content)
             package_managers.append(pm)
-            if '"test"' in content:
+            try:
+                pkg = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                pkg = None
+            scripts = pkg.get("scripts") if isinstance(pkg, dict) else None
+            if isinstance(scripts, dict) and "test" in scripts:
+                # Prefer pm test (whitelist argv for test_run); framework comes from
+                # scripts.test body (vitest/jest) — never invent jest from key alone.
                 test_commands.append("npm test" if pm == "npm" else f"{pm} test")
-            if '"typecheck"' in content or '"type-check"' in content:
-                script = "typecheck" if '"typecheck"' in content else "type-check"
-                typecheck_commands.append(_format_js_run_command(pm, script))
-            if '"build"' in content:
-                build_commands.append(_format_js_run_command(pm, "build"))
+            elif '"test"' in content:
+                # Loose fallback when JSON parse failed but key is present.
+                test_commands.append("npm test" if pm == "npm" else f"{pm} test")
+            if isinstance(scripts, dict):
+                if "typecheck" in scripts or "type-check" in scripts:
+                    script = "typecheck" if "typecheck" in scripts else "type-check"
+                    typecheck_commands.append(_format_js_run_command(pm, script))
+                if "build" in scripts:
+                    build_commands.append(_format_js_run_command(pm, "build"))
+            else:
+                if '"typecheck"' in content or '"type-check"' in content:
+                    script = "typecheck" if '"typecheck"' in content else "type-check"
+                    typecheck_commands.append(_format_js_run_command(pm, script))
+                if '"build"' in content:
+                    build_commands.append(_format_js_run_command(pm, "build"))
             run_commands.extend(_detect_js_run_commands(content, pm))
     except Exception:
         pass

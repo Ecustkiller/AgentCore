@@ -60,6 +60,22 @@ def _isolate_coordination_registry():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_b1_closing_latches():
+    """Clear turn-scoped B1 closing latches around every test.
+
+    ``note_empty_handoff_storm`` / ``note_cancel_zero_output`` / over-seat latches are
+    ContextVars set as side effects of delivery_status emission. Without a reset,
+    later ``finish_guard`` / ``closing_honesty_rework`` calls in the same worker
+    inherit a stale storm and inject spurious「超席/空交接」reworks (xdist flake).
+    """
+    from agentcore.runtime.closing_posture import clear_b1_closing_latches
+
+    clear_b1_closing_latches()
+    yield
+    clear_b1_closing_latches()
+
+
+@pytest.fixture(autouse=True)
 def _pin_cloud_execution_posture_to_defaults(monkeypatch):
     """Pin the cloud code-execution flags to their production defaults for every test.
 

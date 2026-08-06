@@ -224,14 +224,14 @@ async def _replay_check(tape_path: Path, report: dict) -> None:
     if not done:
         report["errors"].append(f"resume did not complete: {result2['finish_reason']}")
 
-    expected_followups = list((tape.get("meta") or {}).get("followups") or [])
+    # Chips product-offline: replay must not re-attach meta.followups onto result.
     actual_followups = list(result2.get("followups") or [])
-    ok_followups = actual_followups == expected_followups
-    report["checks"]["replay_followups_match_meta"] = ok_followups
+    ok_followups = actual_followups == []
+    report["checks"]["replay_followups_ignored"] = ok_followups
     if not ok_followups:
         report["errors"].append(
-            f"replay followups mismatch: meta={expected_followups!r} "
-            f"result={actual_followups!r}"
+            f"replay unexpectedly attached followups: {actual_followups!r} "
+            f"(meta had {(tape.get('meta') or {}).get('followups')!r})"
         )
 
     resolved = [e for e in sink2._history if e.type is EventType.TEAM_PREVIEW_RESOLVED]

@@ -76,8 +76,9 @@ async def run_and_persist(
     board_id: str | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
+    agent_mentions: list[dict] | None = None,
 ) -> None:
-    """Run the pipeline, then persist the assistant reply (+ followups / derived)."""
+    """Run the pipeline, then persist the assistant reply (+ derived title / stage_card)."""
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
 
@@ -239,6 +240,7 @@ async def run_and_persist(
                         llm_supports_tools=llm_supports_tools,
                         message_id=message_id,
                         x_client_platform=x_client_platform,
+                        agent_mentions=agent_mentions,
                     )
                 except asyncio.CancelledError:
                     # Hard cancel / lifespan → terminal incomplete + release.

@@ -18,9 +18,6 @@ class EngineSettings(BaseModel):
     engine_convergence_finalize_rounds: int = 48
     # Consecutive investigation-only rounds re-reading the same targets before finalize.
     engine_convergence_spin_rounds: int = 3
-    # 零写整条已退役（files 催写 + prose_idle 梯子 + 中途 FINALIZE/DEGRADED）。
-    # 保留字段兼容旧配置/测试；默认 0 = 不开。硬顶 thrashing 走 ceiling_backstop。
-    engine_zero_write_finalize_rounds: int = 0
     # 交文件队员久读无写（与 token/timeout wind_down 解耦；不做 FINALIZE/FAILED）：
     # 修码 files_expected：连续纯调查轮 nudge → soft「先改或交接」；达 narrow →
     # 复用 wind_down 白名单收窄工具（卸检索）。报告岗（结构化谓词）仅 nudge 催写报告，

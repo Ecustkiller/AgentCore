@@ -45,13 +45,7 @@ PROFILES: dict[str, ProfileParams] = {
     "memory": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "compaction": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1, thinking=False),
-    # max_tokens=1024: BYOK reasoning models (e.g. *.5.2) may spend budget on
-    # reasoning_content even when thinking=False (only honored for DeepSeek V4);
-    # 64 was enough for flash, 256 still hit finish_reason=length with EMPTY content
-    # on *.5.2 (协作图压测: reasoning ate the whole budget, chips silently missing).
-    # The garnish output itself is <100 tokens — the headroom is all for reasoning.
     "title": ProfileParams(temperature=0.3, max_tokens=1024, max_rounds=1, thinking=False),
-    "followups": ProfileParams(temperature=0.5, max_tokens=1024, max_rounds=1, thinking=False),
 }
 
 _DEFAULT_PROFILE = "chat"

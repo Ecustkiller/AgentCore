@@ -6,11 +6,16 @@ import {
   type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
 import { PendingInteractionChrome } from "@/components/InteractionSheet";
+import { LocalPickerFailureCard } from "@/components/ask/LocalPickerFailureCard";
 import { composeAnswer } from "@/components/ask/composeAnswer";
 import {
   RISK_SEVERITY_TAG,
   parseRiskLabel,
 } from "@/components/ask/parseRiskLabel";
+import {
+  type LocalPickerFailureKind,
+  isDesktopFolderAction,
+} from "@/lib/localPickerFailure";
 // Durable resume card — the actionable surface for a turn that paused at a checkpoint then
 // lost its live stream (结构化挂起 2b). Unlike PauseCard (which settles a LIVE fold
 // `interactions[]` over the still-open SSE via resolveInteraction), this reads a
@@ -19,7 +24,8 @@ import {
 //
 // Mobile's own UI (cross-platform-frontend.mdc). ask_user intent 专用面：
 // organize_plan / daily_review 勾选墙；proposal_pick 行式单选；risk_ack 行式多选；
-// decision/kickoff = default 预选 + compose 答复模型 +「其他」逃逸（本机目录 action 不做）。
+// decision/kickoff = default 预选 + compose 答复模型 +「其他」逃逸；
+// 本机目录 action 可点 → LocalPickerFailureCard（unavailable），禁灰掉无解释。
 // Delegate team_preview：纳入开关 + 写盘单向收紧（开工组队有限否决 · 块 C）。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
 // Dense kinds use Latch + Interaction Sheet so long worker lists never inflate .screen.
@@ -149,15 +155,6 @@ function pickedCount(answers: Record<string, string[]>): number {
   let n = 0;
   for (const labels of Object.values(answers)) n += labels.length;
   return n;
-}
-
-function isDesktopFolderAction(action: string | null | undefined): boolean {
-  return (
-    action === "open_local_project" ||
-    action === "bind_local_folder" ||
-    action === "grant_readonly_folder" ||
-    action === "grant_organize_folder"
-  );
 }
 
 type PreviewWorker = {
@@ -383,6 +380,10 @@ function ResumeCardBody({
   });
   const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
   const [otherText, setOtherText] = useState<Record<string, string>>({});
+  const [pickerFailure, setPickerFailure] = useState<{
+    kind: LocalPickerFailureKind;
+    message?: string;
+  } | null>(null);
   const isDebateKickoff =
     isTeamPreview && (paused as { primitive?: string }).primitive === "debate";
   const isDelegateKickoff = isTeamPreview && !isDebateKickoff;
@@ -510,7 +511,39 @@ function ResumeCardBody({
     });
   };
 
+  /** 当前选中（含 default 预选）落在须本机履约的 option 上时，Continue 不得退化成口头「已授权」。 */
+  const findPendingFolderOption = (): boolean => {
+    if (!isDecisionAsk) return false;
+    for (const q of questions) {
+      const id = str(q, "id") ?? str(q, "prompt") ?? "";
+      if (!id || otherOn[id]) continue;
+      const options = Array.isArray(q.options) ? q.options : [];
+      for (const label of answers[id] ?? []) {
+        const opt = options.find(
+          (o) =>
+            o &&
+            typeof o === "object" &&
+            !Array.isArray(o) &&
+            optionLabel(o) === label,
+        );
+        if (
+          opt &&
+          typeof opt === "object" &&
+          !Array.isArray(opt) &&
+          isDesktopFolderAction(str(opt as Record<string, unknown>, "action"))
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const submit = (decision: CheckpointDecision) => {
+    if (decision === "continue" && findPendingFolderOption()) {
+      setPickerFailure({ kind: "unavailable" });
+      return;
+    }
     const selected = collectSelected(decision);
     const amendments = collectAmendments(decision);
     let n = note.trim();
@@ -849,12 +882,11 @@ function ResumeCardBody({
                   if (!label) return null;
                   const detail = str(o, "detail") ?? undefined;
                   const action = str(o, "action");
-                  const folderOnly = isDesktopFolderAction(action);
+                  const folderAction = isDesktopFolderAction(action);
                   const recommended = Boolean(o.recommended);
-                  const selected = !folderOnly && picked.includes(label);
-                  const hint = folderOnly
-                    ? "仅桌面端可用"
-                    : recommended && def !== label
+                  const selected = !folderAction && picked.includes(label);
+                  const hint =
+                    !folderAction && recommended && def !== label
                       ? "推荐"
                       : undefined;
                   return (
@@ -862,16 +894,17 @@ function ResumeCardBody({
                       key={label}
                       type="button"
                       aria-pressed={selected}
-                      disabled={folderOnly}
                       className={
                         selected
                           ? "ask-check-row ask-check-row-active"
-                          : folderOnly
-                            ? "ask-check-row ask-check-row-muted"
-                            : "ask-check-row"
+                          : "ask-check-row"
                       }
                       onClick={() => {
-                        if (folderOnly) return;
+                        if (folderAction) {
+                          setPickerFailure({ kind: "unavailable" });
+                          return;
+                        }
+                        setPickerFailure(null);
                         toggleChoice(id, label, multiple);
                       }}
                     >
@@ -901,7 +934,10 @@ function ResumeCardBody({
                       ? "ask-check-row ask-check-row-active"
                       : "ask-check-row ask-check-row-muted"
                   }
-                  onClick={() => toggleOther(id, multiple)}
+                  onClick={() => {
+                    setPickerFailure(null);
+                    toggleOther(id, multiple);
+                  }}
                 >
                   <span
                     className={
@@ -935,6 +971,12 @@ function ResumeCardBody({
             </div>
           );
         })}
+      {pickerFailure && (
+        <LocalPickerFailureCard
+          kind={pickerFailure.kind}
+          message={pickerFailure.message}
+        />
+      )}
       {isPlanReview && (paused.steps?.length ?? 0) > 0 && (
         <div className="pause-steps">
           {(paused.steps ?? []).map((s, i) => {

@@ -527,9 +527,7 @@ class DebateTool:
         from agentcore.runtime.kickoff import (
             await_kickoff,
             debate_kickoff_summary,
-            needs_capability_auth,
             should_kickoff,
-            skip_after_confirmed_ask,
         )
         from agentcore.runtime.sandbox_approval import worker_gate_applies
 
@@ -561,11 +559,7 @@ class DebateTool:
                 motion=config.motion[:80],
             )
             return None
-        if (
-            skip_after_confirmed_ask(self)
-            and not needs_capability_auth(local_gate=local_gate, axes=axes)
-        ):
-            return None
+        # ask_user checkpoint_resolved 不跳 team_preview（澄清卡 ⊥ 开工卡）。
 
         # Capability half stays False for debate (read-only debaters) — never list tools.
         summary = debate_kickoff_summary(config, arguments=arguments, tools=[])
@@ -858,7 +852,6 @@ class DebateTool:
             from agentcore.runtime.events import (
                 debate_pretrial_completed,
                 debate_pretrial_orders,
-                debate_pretrial_progress,
                 debate_pretrial_started,
             )
 
@@ -867,19 +860,6 @@ class DebateTool:
 
             async def _pt_orders(p: dict) -> None:
                 self._sink.emit(debate_pretrial_orders(**p))
-
-            async def _pt_progress(p: dict) -> None:
-                self._sink.emit(
-                    debate_pretrial_progress(
-                        execution_id=execution_id,
-                        moderator_run_id=moderator_run_id,
-                        **{
-                            k: v
-                            for k, v in p.items()
-                            if k not in ("execution_id", "moderator_run_id")
-                        },
-                    )
-                )
 
             async def _pt_completed(p: dict) -> None:
                 self._sink.emit(debate_pretrial_completed(**p))
@@ -892,7 +872,6 @@ class DebateTool:
                 complete_json=moderator._complete_json,
                 on_started=_pt_started,
                 on_orders=_pt_orders,
-                on_progress=_pt_progress,
                 on_completed=_pt_completed,
             )
 

@@ -162,6 +162,7 @@ from .llm_provider import (
 from .messages import (
     AcceptRunOutcomeRequest,
     AcceptRunOutcomeResponse,
+    AgentMention,
     Citation,
     EvidenceLedgerEntryRest,
     LocalTurnToolFailure,
@@ -171,7 +172,6 @@ from .messages import (
     MessageDetail,
     MessageListResponse,
     PausedTurnSummary,
-    PendingApprovalSummary,
     PendingInteractionSummary,
     RecordTurnRequest,
     RecordTurnResponse,
@@ -504,6 +504,7 @@ __all__ = [
     "SharedMountListResponse",
     "SharedMountResponse",
     # messages + interactions + turns
+    "AgentMention",
     "MessageAttachment",
     "StoredAttachment",
     "SendMessageRequest",
@@ -526,7 +527,6 @@ __all__ = [
     "AcceptRunOutcomeRequest",
     "AcceptRunOutcomeResponse",
     "PausedTurnSummary",
-    "PendingApprovalSummary",
     "PendingInteractionSummary",
     "TurnRecoveryResponse",
     "Citation",

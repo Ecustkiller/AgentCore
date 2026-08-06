@@ -23,7 +23,6 @@ import type {
   DebateNarrativeRound,
   DebatePretrialCompletedPayload,
   DebatePretrialOrdersPayload,
-  DebatePretrialProgressPayload,
   DebatePretrialStartedPayload,
   DebateResultPayload,
   DebateRoundPayload,
@@ -35,10 +34,8 @@ import type {
   EscalationResolvedPayload,
   EvidenceLedgerEntry,
   EvidenceLedgerPayload,
-  FollowupsGeneratedPayload,
   GraphAppendPayload,
   MessageEndPayload,
-  MessageStartPayload,
   PlanAgentPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
@@ -283,7 +280,6 @@ function foldDebatePretrial(
   type:
     | "debate_pretrial_started"
     | "debate_pretrial_orders"
-    | "debate_pretrial_progress"
     | "debate_pretrial_completed",
   payload: unknown,
 ): DebatePretrialProjection | null {
@@ -308,15 +304,6 @@ function foldDebatePretrial(
         })),
         source: o.source ?? "empty",
       })),
-    };
-  }
-  if (type === "debate_pretrial_progress") {
-    if (!current) return null;
-    const p = payload as DebatePretrialProgressPayload;
-    return {
-      ...current,
-      evidenceLedgerCount:
-        p.evidence_ledger_count ?? current.evidenceLedgerCount,
     };
   }
   const p = payload as DebatePretrialCompletedPayload;
@@ -1012,7 +999,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "debate_pretrial_started":
       case "debate_pretrial_orders":
-      case "debate_pretrial_progress":
       case "debate_pretrial_completed": {
         debatePretrial = foldDebatePretrial(debatePretrial, type, ev.payload);
         break;
@@ -1334,53 +1320,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   };
 }
 
-/**
- * 下一步推荐 (CEO→用户): pull a finished turn's followup suggestions straight off its raw SSE
- * events — a transport-only sibling of {@link fold}, deliberately kept OUT of the normalized
- * {@link ProjectedTurn}. Followups are DERIVED-persisted on `Message.followups` (reload via
- * MessageDetail); the live path rides `followups_generated`. Conformance fold still no-ops
- * the event (ProjectedTurn does not carry chips).
- *
- * Identity seam: chips are matched by `message_id` against this turn's `message_start`.
- * Missing `message_id` → empty (never fall back to「last batch」). A mismatched id (late
- * event appended to the wrong live turn after a fast consecutive send) is also empty.
- */
-export function extractFollowups(events: SSEEvent[]): string[] {
-  let turnMessageId: string | null = null;
-  for (const ev of events) {
-    if (ev.type === "message_start") {
-      turnMessageId = (ev.payload as MessageStartPayload).message_id;
-    }
-  }
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].type !== "followups_generated") continue;
-    const p = events[i].payload as FollowupsGeneratedPayload;
-    if (!p.message_id) return [];
-    if (turnMessageId && p.message_id !== turnMessageId) continue;
-    return p.followups;
-  }
-  return [];
-}
-
-/** Soft empty when followups mint failed (live-only; no chips). */
-export function extractFollowupsUnavailable(events: SSEEvent[]): boolean {
-  if (extractFollowups(events).length > 0) return false;
-  let turnMessageId: string | null = null;
-  for (const ev of events) {
-    if (ev.type === "message_start") {
-      turnMessageId = (ev.payload as MessageStartPayload).message_id;
-    }
-  }
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].type !== "followups_unavailable") continue;
-    const p = events[i].payload as { message_id?: string };
-    if (!p.message_id) return false;
-    if (turnMessageId && p.message_id !== turnMessageId) continue;
-    return true;
-  }
-  return false;
-}
-
 /** 单条 FIFO 排队态（传输态 sibling——不进 {@link ProjectedTurn}）。 */
 export type TurnQueuedState = {
   position: number;
@@ -1523,7 +1462,7 @@ export function extractEvidenceLedger(
 /**
  * 工具执行阶段进度 (联网搜索前端展示优化): the LATEST coarse phase per still-running tool call,
  * pulled straight off a live turn's raw SSE events — a transport-only sibling of {@link fold}
- * (twin of {@link extractFollowups} / {@link extractAsks}), deliberately kept OUT of the
+ * (twin of {@link extractAsks}), deliberately kept OUT of the
  * normalized {@link ProjectedTurn} (so the conformance golden stays phase-less, exactly like the
  * `tool_use_progress` no-op inside the fold). Keyed by `tool_call_id`; an entry is CLEARED on the
  * matching `tool_use_end` so a finished tool shows no stale phase. web_search fires querying /
@@ -1531,7 +1470,7 @@ export function extractEvidenceLedger(
  *
  * Only a LIVE turn carries these events (they are never journaled), so history replay yields an
  * empty map and tool rows fall back to their plain running/done status — the same live-only
- * semantics as the followups / asks siblings.
+ * semantics as the asks sibling.
  */
 export function extractToolPhases(events: SSEEvent[]): Map<string, ToolPhase> {
   const phases = new Map<string, ToolPhase>();
@@ -1585,7 +1524,7 @@ export interface NonBlockingAsk {
 
 /**
  * 非阻塞提问 (CEO→用户, blocking=false): pull a turn's `question_posted` cards off its raw SSE
- * events — a transport-only sibling of {@link fold} (twin of {@link extractFollowups}),
+ * events — a transport-only sibling of {@link fold},
  * keyed/ordered by `ask_id`. Mirrors the desktop `nonBlockingAsksFromEvents` projection.
  *
  * Only LIVE turns and MULTI-agent history carry these events (a single-agent turn persists

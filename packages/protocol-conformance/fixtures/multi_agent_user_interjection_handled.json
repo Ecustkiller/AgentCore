@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_user_interjection_handled",
-  "description": "协调插话入图：user_interjection(delivered) → update_synthesis，折到 userInterjections",
+  "description": "协调插话入图：user_interjection(received) → update_synthesis，折到 userInterjections",
   "events": [
     {
       "type": "message_start",

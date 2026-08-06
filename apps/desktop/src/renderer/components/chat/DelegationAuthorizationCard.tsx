@@ -1,3 +1,4 @@
+import { toolLabelZh } from "@/components/chat/toolLabelsZh";
 import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import { decideDelegationAuthorization } from "@/services/delegationAuth";
@@ -9,24 +10,6 @@ import {
 import type { DelegationAuthorizationDecision } from "@/types/events";
 import { CheckCheck, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
-
-const TOOL_LABELS: Record<string, string> = {
-  file_write: "写入文件",
-  file_append: "追加文件",
-  str_replace: "修改文件",
-  file_delete: "删除文件",
-  file_move: "移动文件",
-  file_copy: "复制文件",
-  mkdir: "创建目录",
-  file_batch: "批量文件操作",
-  code_execute: "执行代码",
-  test_run: "运行测试",
-  desktop_notify: "系统通知",
-};
-
-function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
-}
 
 export function DelegationAuthorizationPrompt() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -110,7 +93,7 @@ function DelegationAuthorizationCard({
               <div className="mt-1 flex flex-wrap gap-1">
                 {authorization.tools.map((tool) => (
                   <Badge key={tool} tone="muted" className="font-normal">
-                    {toolLabel(tool)}
+                    {toolLabelZh(tool)}
                   </Badge>
                 ))}
               </div>

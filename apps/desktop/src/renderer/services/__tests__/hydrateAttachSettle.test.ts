@@ -10,12 +10,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   attachOnOpen,
   settleCloudRunningAssistant,
+  settleOrphanEmptyAssistants,
   attachSidecarTurn,
   projectUnsyncedTurns,
   projectPausedRuns,
 } = vi.hoisted(() => ({
   attachOnOpen: vi.fn(async () => {}),
   settleCloudRunningAssistant: vi.fn(async () => "ghost" as const),
+  settleOrphanEmptyAssistants: vi.fn(),
   attachSidecarTurn: vi.fn(async () => true),
   projectUnsyncedTurns: vi.fn(),
   projectPausedRuns: vi.fn(),
@@ -24,6 +26,7 @@ const {
 vi.mock("../turns/recovery", () => ({
   attachOnOpen,
   settleCloudRunningAssistant,
+  settleOrphanEmptyAssistants,
 }));
 
 vi.mock("../turns/sidecarAttach", () => ({
@@ -84,6 +87,7 @@ beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   attachOnOpen.mockClear();
   settleCloudRunningAssistant.mockClear();
+  settleOrphanEmptyAssistants.mockClear();
   attachSidecarTurn.mockClear();
   projectUnsyncedTurns.mockClear();
   projectPausedRuns.mockClear();
@@ -150,6 +154,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
 
     expect(branch).toBe("local");
     expect(projectUnsyncedTurns).toHaveBeenCalledTimes(1);
+    expect(settleOrphanEmptyAssistants).toHaveBeenCalledWith(CID);
     expect(attachSidecarTurn).toHaveBeenCalledTimes(1);
     // Hydrate 不传页级 signal（切会话 ≠ 卸观察泵）。
     expect(attachSidecarTurn).toHaveBeenCalledWith(CID);
@@ -185,11 +190,12 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(branch).toBe("local");
     expect(attachSidecarTurn).not.toHaveBeenCalled();
     expect(projectUnsyncedTurns).toHaveBeenCalledTimes(1);
+    expect(settleOrphanEmptyAssistants).toHaveBeenCalledWith(CID);
     expect(projectPausedRuns).toHaveBeenCalledTimes(1);
     expect(projectPausedRuns).toHaveBeenCalledWith(CID, pausedRuns);
   });
 
-  it("cloud complete assistant does not attach or settle", async () => {
+  it("cloud complete assistant settles orphans but does not attach/ghost", async () => {
     seedMessages({ role: "assistant", status: "complete" });
 
     await runHydrateAttachSettle(CID, {
@@ -202,6 +208,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
 
     expect(attachOnOpen).not.toHaveBeenCalled();
     expect(settleCloudRunningAssistant).not.toHaveBeenCalled();
+    expect(settleOrphanEmptyAssistants).toHaveBeenCalledWith(CID);
   });
 
   it("prefers runtime tail over a stale window (warm memory newer)", async () => {

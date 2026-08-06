@@ -162,7 +162,6 @@ interface ExecutionState {
     type:
       | "debate_pretrial_started"
       | "debate_pretrial_orders"
-      | "debate_pretrial_progress"
       | "debate_pretrial_completed",
     payload: unknown,
     messageId: string,
@@ -722,7 +721,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           } else if (
             event.type === "debate_pretrial_started" ||
             event.type === "debate_pretrial_orders" ||
-            event.type === "debate_pretrial_progress" ||
             event.type === "debate_pretrial_completed"
           ) {
             debatePretrial = foldDebatePretrial(

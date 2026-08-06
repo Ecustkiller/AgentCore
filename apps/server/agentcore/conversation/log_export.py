@@ -137,7 +137,6 @@ def _render_journal_entry(entry: Mapping[str, Any]) -> list[str]:
         "debate_round_started",
         "debate_pretrial_started",
         "debate_pretrial_orders",
-        "debate_pretrial_progress",
         "debate_pretrial_completed",
     }:
         lines = ["#### Debate", ""]

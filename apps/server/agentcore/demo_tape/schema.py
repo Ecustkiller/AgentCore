@@ -79,10 +79,8 @@ CLIENT_TOOL_REQUIRED_KINDS = frozenset(
 #   emit_message_start=False — alignment, not a private lifecycle);
 # - recorded pause settlements — the player re-emits the LIVE resolve on resume;
 # - per-turn route/meta chrome (turn_saved / title / followups_generated / citations)
-#   — turn_saved / title stay live-minted; followups_generated is cut from the event
-#   stream because chips ride ``meta.followups`` (survive reload via Message.followups;
-#   replay re-emits followups_generated with the *current* turn message_id in
-#   persist_turn_result — unlike citations, which cannot survive reload);
+#   — turn_saved / title stay live-minted; followups_generated stays cut for old-tape
+#   compatibility (chips mint offline; meta.followups on replay is ignored);
 # - error — a transient banner from the source run must not replay as a real error;
 # - transport-only client-tool requests — replaying them would drive REAL side
 #   effects on the attached desktop (file ops / board mutations / OS notifications).

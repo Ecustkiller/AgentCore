@@ -3,9 +3,9 @@
  *
  * 安全不变量（L1b · 对话硬隔离）：
  * - 外网页：**非持久** {@link browserPartitionFor}；工作区 HTML：**非持久**
- *   {@link workspacePartitionFor}——二者按 conversationId 切开，≠ PREVIEW / defaultSession；
+ *   {@link workspacePartitionFor}——二者按 conversationId 切开，≠ defaultSession；
  * - sandbox:true、**无 preload**、nodeIntegration 关、contextIsolation 开、webviewTag 关；
- * - 导航策略见 navigation.ts（按 web | workspace 模式；不改 lockPreviewNavigation）；
+ * - 导航策略见 navigation.ts（按 web | workspace 模式）；
  * - web `window.open`：popup → 同 partition 子窗；target=_blank → 同壳新页签（见 openTab IPC）。
  *
  * 多页：一 client pageId 一 view；仅激活页 show+bounds，其余 hide；关页销毁 view。

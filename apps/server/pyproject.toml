@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.3.38"
+version = "0.3.39"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -115,9 +115,14 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/runtime/delegate/drive.py" = ["E501"]
 "agentcore/tools/builtin/delegate/tool.py" = ["E501"]
 "agentcore/runtime/runs/executor_node.py" = ["E501"]
+"agentcore/runtime/runs/executor_setup.py" = ["E501"]
+"agentcore/runtime/runs/executor_loop.py" = ["E501"]
+"agentcore/runtime/runs/executor_retry.py" = ["E501"]
+"agentcore/runtime/runs/executor_hooks.py" = ["E501"]
+"agentcore/runtime/runs/executor_terminal.py" = ["E501"]
 "agentcore/runtime/runs/executor_escalation.py" = ["E501"]
 "agentcore/tools/protocol.py" = ["E501"]
-"agentcore/tools/builtin/git_ops.py" = ["E501"]
+"agentcore/tools/builtin/git_ops/**" = ["E501"]
 "agentcore/tools/builtin/revise.py" = ["E501"]
 "agentcore/sidecar/server_pkg/handlers.py" = ["E501"]
 "tests/**" = ["E501", "B017", "N818", "UP031"]
@@ -314,6 +319,11 @@ module = [
     "agentcore.runtime.resolve.prepare",
     "agentcore.runtime.runs.executor_captain",
     "agentcore.runtime.runs.executor_node",
+    "agentcore.runtime.runs.executor_setup",
+    "agentcore.runtime.runs.executor_loop",
+    "agentcore.runtime.runs.executor_retry",
+    "agentcore.runtime.runs.executor_hooks",
+    "agentcore.runtime.runs.executor_terminal",
     "agentcore.runtime.runs.executor_shared",
     "agentcore.runtime.runs.wave",
     "agentcore.runtime.safety_breaker",

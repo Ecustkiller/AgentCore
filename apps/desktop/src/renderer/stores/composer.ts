@@ -1,4 +1,7 @@
-import type { PendingAttachment } from "@/components/chat/message-input/composerAttachments";
+import type {
+  PendingAgentMention,
+  PendingAttachment,
+} from "@/components/chat/message-input/composerAttachments";
 import { registerConversationUiClearer, uiGet, uiSet } from "@/lib/uiStorage";
 import { useConversationStore } from "@/stores/conversation";
 import type { SetStateAction } from "react";
@@ -21,21 +24,27 @@ import { create } from "zustand";
  * (indexed by ``stagingId``); we never put file bytes into localStorage. Preview
  * ``text`` is truncated for the quota; stale staging is honest at send time.
  *
- * 回填 channel: follow-up chips / 下一步推荐 (non-blocking ask no longer writes chips)
- * chip ({@link FollowupChips}) drops its pick into the ACTIVE conversation's draft via
- * {@link fill}. `append` (the default) adds the text as a new line after any existing
- * draft so a user can stack answers to several questions; `replace` overwrites.
+ * 回填 channel: ask card / run-detail / debate drop text into the ACTIVE conversation's
+ * draft via {@link fill}. `append` (the default) adds the text as a new line after any
+ * existing draft so a user can stack answers to several questions; `replace` overwrites.
  * `fillToken` is a monotonic focus hint — the mounted composer refocuses its textarea
  * when it changes (the draft text itself arrives through the store subscription).
  */
 export interface ComposerDraft {
   value: string;
   attachments: PendingAttachment[];
+  /** Pending `@Agent` chips（旁路 attachments）。 */
+  agentMentions: PendingAgentMention[];
   /** Last edit (ms epoch) — recency key for the persistence cap. */
   updatedAt: number;
 }
 
-const EMPTY_DRAFT: ComposerDraft = { value: "", attachments: [], updatedAt: 0 };
+const EMPTY_DRAFT: ComposerDraft = {
+  value: "",
+  attachments: [],
+  agentMentions: [],
+  updatedAt: 0,
+};
 
 const COMPOSER_DRAFTS_KEY = "composer-drafts";
 /** Persist at most this many drafts (most recently edited win). */
@@ -43,6 +52,8 @@ const PERSIST_LIMIT = 30;
 const PERSIST_DEBOUNCE_MS = 300;
 /** Cap attachment metadata per draft so ``composer-drafts`` stays bounded. */
 const PERSIST_ATTACH_MAX = 8;
+/** Cap agent mention chips per draft. */
+const PERSIST_AGENT_MAX = 10;
 /** Truncate preview text when writing to uiStorage (full preview stays in-memory). */
 const PERSIST_ATTACH_TEXT_CAP = 8 * 1024;
 
@@ -80,6 +91,15 @@ function sanitizeAttachment(raw: unknown): PendingAttachment | null {
   return out;
 }
 
+function sanitizeAgentMention(raw: unknown): PendingAgentMention | null {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Record<string, unknown>;
+  if (typeof a.id !== "string" || !a.id) return null;
+  if (typeof a.agentId !== "string" || !a.agentId) return null;
+  if (typeof a.role !== "string" || !a.role) return null;
+  return { id: a.id, agentId: a.agentId, role: a.role };
+}
+
 function serializeAttachments(
   attachments: PendingAttachment[],
 ): PendingAttachment[] {
@@ -110,9 +130,13 @@ function serializeAttachments(
 }
 
 function draftHasContent(
-  d: Pick<ComposerDraft, "value" | "attachments">,
+  d: Pick<ComposerDraft, "value" | "attachments" | "agentMentions">,
 ): boolean {
-  return Boolean(d.value) || d.attachments.length > 0;
+  return (
+    Boolean(d.value) ||
+    (d.attachments?.length ?? 0) > 0 ||
+    (d.agentMentions?.length ?? 0) > 0
+  );
 }
 
 function loadDrafts(): Record<string, ComposerDraft> {
@@ -125,10 +149,12 @@ function loadDrafts(): Record<string, ComposerDraft> {
       value,
       updatedAt,
       attachments: rawAtts,
+      agentMentions: rawAgents,
     } = entry as {
       value?: unknown;
       updatedAt?: unknown;
       attachments?: unknown;
+      agentMentions?: unknown;
     };
     const valueStr = typeof value === "string" ? value : "";
     const attachments = Array.isArray(rawAtts)
@@ -137,10 +163,18 @@ function loadDrafts(): Record<string, ComposerDraft> {
           .filter((a): a is PendingAttachment => a !== null)
           .slice(0, PERSIST_ATTACH_MAX)
       : [];
-    if (!valueStr && attachments.length === 0) continue;
+    const agentMentions = Array.isArray(rawAgents)
+      ? rawAgents
+          .map(sanitizeAgentMention)
+          .filter((a): a is PendingAgentMention => a !== null)
+          .slice(0, PERSIST_AGENT_MAX)
+      : [];
+    if (!valueStr && attachments.length === 0 && agentMentions.length === 0)
+      continue;
     out[key] = {
       value: valueStr,
       attachments,
+      agentMentions,
       updatedAt: typeof updatedAt === "number" ? updatedAt : 0,
     };
   }
@@ -157,9 +191,13 @@ function persistDrafts(drafts: Record<string, ComposerDraft>): void {
         value: string;
         updatedAt: number;
         attachments?: PendingAttachment[];
+        agentMentions?: PendingAgentMention[];
       } = { value: d.value, updatedAt: d.updatedAt };
       if (d.attachments.length > 0) {
         payload.attachments = serializeAttachments(d.attachments);
+      }
+      if ((d.agentMentions?.length ?? 0) > 0) {
+        payload.agentMentions = d.agentMentions.slice(0, PERSIST_AGENT_MAX);
       }
       return [key, payload] as const;
     });
@@ -200,6 +238,10 @@ interface ComposerDraftState {
     key: string,
     action: SetStateAction<PendingAttachment[]>,
   ) => void;
+  setAgentMentions: (
+    key: string,
+    action: SetStateAction<PendingAgentMention[]>,
+  ) => void;
   /** 回填 the active conversation's draft with `text` (default: append as a new line). */
   fill: (text: string, mode?: "append" | "replace") => void;
   /** Arm the one-shot center→bottom dock-flip for the imminent first-send promote. */
@@ -227,7 +269,20 @@ export const useComposerDraftStore = create<ComposerDraftState>((set) => ({
       return {
         drafts: write(s.drafts, key, {
           ...prev,
-          attachments: resolve(action, prev.attachments),
+          agentMentions: prev.agentMentions ?? [],
+          attachments: resolve(action, prev.attachments ?? []),
+          updatedAt: Date.now(),
+        }),
+      };
+    }),
+  setAgentMentions: (key, action) =>
+    set((s) => {
+      const prev = s.drafts[key] ?? EMPTY_DRAFT;
+      return {
+        drafts: write(s.drafts, key, {
+          ...prev,
+          attachments: prev.attachments ?? [],
+          agentMentions: resolve(action, prev.agentMentions ?? []),
           updatedAt: Date.now(),
         }),
       };

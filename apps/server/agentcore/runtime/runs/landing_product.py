@@ -70,20 +70,21 @@ def filter_product_landing_paths(
 
 
 def landing_tool_path_from_args(tool_name: str, args: dict | None) -> str | None:
-    """Extract workspace path from landing-tool args (``file_move`` → destination).
+    """Extract workspace path from landing-tool args (``file_move`` / ``file_copy`` → destination).
 
     Applies :func:`sanitize_write_relpath` so harvested paths match what write
-    tools actually land on disk.
+    tools actually land on disk. Keys align with ``serialize._FILE_PRODUCT_ARG``.
     """
     if not isinstance(args, dict):
         return None
-    key = "destination" if tool_name == "file_move" else "path"
+    key = "destination" if tool_name in {"file_move", "file_copy"} else "path"
     if tool_name not in {
         "file_write",
         "file_append",
         "str_replace",
         "write_section",
         "file_move",
+        "file_copy",
     }:
         return None
     raw = args.get(key)

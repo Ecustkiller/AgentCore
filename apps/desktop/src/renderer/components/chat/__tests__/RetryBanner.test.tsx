@@ -8,13 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RetryBanner } from "../RetryBanner";
 
 const clearError = vi.fn();
-const retry = vi.fn();
 let error: string | null = null;
-let hasRetry = true;
 
 vi.mock("@/stores/conversation", () => ({
   useActiveError: () => error,
-  useActiveRetry: () => (hasRetry ? retry : null),
   useActiveErrorAction: () => null,
   useConversationStore: (
     sel: (s: { clearError: typeof clearError }) => unknown,
@@ -28,33 +25,39 @@ vi.mock("react-router-dom", () => ({
 afterEach(() => {
   cleanup();
   clearError.mockReset();
-  retry.mockReset();
   error = null;
-  hasRetry = true;
 });
 
-describe("RetryBanner reconnect label", () => {
-  it("shows 重连 when the banner is the reconnect drop copy", () => {
-    error = RECONNECT_BANNER;
+describe("RetryBanner", () => {
+  it("renders error copy and close, without 重试 or 重连", () => {
+    error = "发送失败，请稍后重试";
     render(<RetryBanner />);
-    expect(screen.getByRole("button", { name: "重连" })).toBeTruthy();
+    expect(screen.getByText("发送失败，请稍后重试")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "重连" }));
-    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(clearError).toHaveBeenCalledOnce();
   });
 
-  it("shows 重试 for unknown-cloud settle banner (not 重连)", () => {
+  it("shows reconnect drop copy without a 重连 button", () => {
+    error = RECONNECT_BANNER;
+    render(<RetryBanner />);
+    expect(screen.getByText(RECONNECT_BANNER)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  });
+
+  it("shows unknown-cloud settle copy without a 重试 button", () => {
     error = UNKNOWN_CLOUD_BANNER;
     render(<RetryBanner />);
     expect(screen.getByText(UNKNOWN_CLOUD_BANNER)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
   });
 
-  it("keeps 重试 for other retryable failures", () => {
-    error = "发送失败，请稍后重试";
-    render(<RetryBanner />);
-    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+  it("renders nothing when there is no error", () => {
+    error = null;
+    const { container } = render(<RetryBanner />);
+    expect(container.firstChild).toBeNull();
   });
 });

@@ -4,6 +4,7 @@
  *
  *   pnpm publish:notice -- --title "…" --body "…" [--severity high] [--surface both|modal]
  *   [--dismiss once] [--end-hours N|none] [--body-file path]
+ *   [--cta-label "…"] [--cta-url "https://…"]
  *
  * Uses DEPLOY_SSH_* from deploy/.env.deploy.local. Runs create+publish inside
  * the live api container (no admin password needed). Template copy →
@@ -35,15 +36,21 @@ const endHours =
   endHoursRaw === "" || endHoursRaw === "none" || endHoursRaw === "0"
     ? null
     : Number(endHoursRaw);
+const ctaLabel = arg("cta-label").trim();
+const ctaUrl = arg("cta-url").trim();
 
 if (!title || !body) {
   console.error(
-    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path]',
+    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path] [--cta-label "…"] [--cta-url "https://…"]',
   );
   process.exit(1);
 }
 if (endHours != null && (!Number.isFinite(endHours) || endHours <= 0)) {
   console.error("--end-hours must be a positive number, or none/0");
+  process.exit(1);
+}
+if ((ctaLabel && !ctaUrl) || (!ctaLabel && ctaUrl)) {
+  console.error("--cta-label and --cta-url must be set together");
   process.exit(1);
 }
 
@@ -55,6 +62,8 @@ const payload = JSON.stringify({
   surface,
   dismiss,
   end_hours: endHours,
+  cta_label: ctaLabel || null,
+  cta_url: ctaUrl || null,
 });
 
 const deployDir = process.env.AGENTCORE_DEPLOY_DIR?.trim() || "";
@@ -111,6 +120,8 @@ async def main() -> None:
             dismiss_policy=SPEC["dismiss"],
             created_by=str(admin.user_id),
             end_at=end_at,
+            cta_label=SPEC.get("cta_label"),
+            cta_url=SPEC.get("cta_url"),
         )
         first = row.status != "published"
         published = await repo.publish(row.id)

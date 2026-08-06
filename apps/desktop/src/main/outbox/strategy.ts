@@ -1,0 +1,430 @@
+/**
+ * Outbox writeback — pure strategy / path / record IO helpers.
+ *
+ * Mirrors server ``normalize_local_turn_tool_failure_code`` etc.; no drain loop.
+ */
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { join } from "node:path";
+import { app } from "electron";
+
+export const PHASE_READY = "ready";
+export const PHASE_OPEN = "open";
+
+const CHANNEL_CAPTAIN_CONTENT = "captain:content";
+const CHANNEL_CAPTAIN_REASONING = "captain:reasoning";
+
+/** Per-record writeback backoff: base 2s, double each failure, cap 5 min + jitter. */
+const BACKOFF_BASE_MS = 2_000;
+const BACKOFF_MAX_MS = 5 * 60_000;
+
+/**
+ * Same spirit as sidecar `_is_safe_id`: reject empty, `..` traversal, and
+ * path separators before joining filesystem paths or URL segments.
+ */
+export function isSafeOutboxId(value: string): boolean {
+  if (typeof value !== "string" || !value || value.includes("..")) return false;
+  return !value.includes("/") && !value.includes("\\") && !value.includes("\0");
+}
+
+let tmpSeq = 0;
+
+/** Unique temp path — a shared `*.json.tmp` lets a concurrent writer steal our rename. */
+export function tmpPathFor(target: string): string {
+  tmpSeq += 1;
+  return `${target}.${process.pid}-${tmpSeq}.tmp`;
+}
+
+export function sidecarDataDir(): string {
+  return join(app.getPath("userData"), "sidecar");
+}
+
+export function outboxDir(): string {
+  return join(sidecarDataDir(), "outbox");
+}
+
+export function pausedDir(): string {
+  return join(sidecarDataDir(), "paused");
+}
+
+export function deadLetterDir(): string {
+  return join(sidecarDataDir(), "dead-letter");
+}
+
+export interface OutboxRecord {
+  schema_version?: number;
+  user_message_id: string;
+  conversation_id: string;
+  message_id?: string | null;
+  trace_id?: string;
+  user_message?: string;
+  content?: string;
+  reasoning_content?: string | null;
+  citations?: unknown[];
+  runs?: unknown;
+  /** seq(str) → {kind,payload,ts} — progressive journal; crash salvage has no runs. */
+  journal?: Record<string, unknown>;
+  /**
+   * Mid-stream channel snapshots from StreamCheckpointer (D6).
+   * channel → { text, generation }; desktop restart salvage reads captain:* when content is empty.
+   */
+  stream_segments?: Record<string, { text?: string; generation?: number }>;
+  input_tokens?: number;
+  output_tokens?: number;
+  reasoning_tokens?: number;
+  cache_hit_tokens?: number;
+  cache_miss_tokens?: number;
+  rounds?: number;
+  finish_reason?: string | null;
+  phase?: string;
+  updated_at?: number;
+  /**
+   * Desktop-owned retry bookkeeping (optional). Absent on fresh sidecar files;
+   * written by writebacker after transient failures.
+   */
+  retry_count?: number;
+  /** Epoch ms — skip POST until this time (unless flushTurn bypasses). */
+  next_attempt_at?: number;
+}
+
+/**
+ * HTTP 4xx except 401/408/429 → permanent (dead-letter).
+ * 401/408/429/5xx/network (status 0) → transient (backoff retry).
+ */
+export function isPermanentHttpFailure(status: number): boolean {
+  if (status < 400 || status >= 500) return false;
+  return status !== 401 && status !== 408 && status !== 429;
+}
+
+/** Delay after `retryCount` failures (1-based). Caps at 5 min; adds up to 25% jitter. */
+export function computeBackoffDelayMs(
+  retryCount: number,
+  random: () => number = Math.random,
+): number {
+  const failures = Math.max(1, retryCount);
+  const exp = Math.min(failures - 1, 20);
+  const base = Math.min(BACKOFF_BASE_MS * 2 ** exp, BACKOFF_MAX_MS);
+  const jitter = Math.floor(random() * base * 0.25);
+  return base + jitter;
+}
+
+export function journalEntriesFromMap(
+  journal: Record<string, unknown> | undefined,
+): unknown[] | undefined {
+  if (!journal || typeof journal !== "object") return undefined;
+  const keys = Object.keys(journal).sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  if (keys.length === 0) return undefined;
+  return keys.map((k) => journal[k]);
+}
+
+const TOOL_FAILURE_MESSAGE_MAX = 200;
+
+/** Coarse write-back failure codes (mirrors server ``normalize_local_turn_tool_failure_code``). */
+export function normalizeToolFailureCode(
+  message: string,
+  code?: string | null,
+): string {
+  const rawCode = (code || "").trim();
+  if (
+    rawCode === "searxng_unreachable" ||
+    rawCode === "egress_connect" ||
+    rawCode === "other"
+  ) {
+    return rawCode;
+  }
+  const text = (message || "").toLowerCase();
+  const raw = message || "";
+  if (
+    text.includes("searxng") ||
+    raw.includes("搜索服务") ||
+    (text.includes("unreachable") && text.includes("searx"))
+  ) {
+    return "searxng_unreachable";
+  }
+  if (
+    [
+      "connecterror",
+      "connect timeout",
+      "connecttimeout",
+      "egress",
+      "network is unreachable",
+    ].some((n) => text.includes(n)) ||
+    ["无法建立连接", "出网受限", "连接超时", "连接失败"].some((n) =>
+      raw.includes(n),
+    )
+  ) {
+    return "egress_connect";
+  }
+  return "other";
+}
+
+function truncateToolFailureMessage(message: string): string {
+  if (!message) return "";
+  return message.length <= TOOL_FAILURE_MESSAGE_MAX
+    ? message
+    : message.slice(0, TOOL_FAILURE_MESSAGE_MAX);
+}
+
+/**
+ * Project failed tool facts into ``RecordTurnRequest.tool_failures``.
+ * Prefers journal ``tool_call`` success=false; falls back to ``tool_use_end`` status=error.
+ */
+export function toolFailuresFromJournal(
+  entries: unknown[] | undefined,
+): Array<{ tool: string; code: string; message: string }> {
+  if (!entries || entries.length === 0) return [];
+
+  const row = (
+    tool: string,
+    message: string,
+  ): { tool: string; code: string; message: string } | null => {
+    const name = (tool || "").trim();
+    if (!name) return null;
+    const msg = truncateToolFailureMessage(message);
+    return {
+      tool: name.slice(0, 128),
+      code: normalizeToolFailureCode(msg),
+      message: msg,
+    };
+  };
+
+  const fromFacts: Array<{ tool: string; code: string; message: string }> = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (e.kind !== "tool_call") continue;
+    const payload =
+      e.payload && typeof e.payload === "object"
+        ? (e.payload as Record<string, unknown>)
+        : null;
+    if (!payload || payload.success !== false) continue;
+    const built = row(String(payload.name || ""), String(payload.result || ""));
+    if (built) fromFacts.push(built);
+  }
+  if (fromFacts.length > 0) return fromFacts;
+
+  const fromEnds: Array<{ tool: string; code: string; message: string }> = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (e.kind !== "tool_use_end") continue;
+    const payload =
+      e.payload && typeof e.payload === "object"
+        ? (e.payload as Record<string, unknown>)
+        : null;
+    if (!payload || (payload.status ?? "success") === "success") continue;
+    const built = row(
+      String(payload.tool_name || ""),
+      String(payload.result || ""),
+    );
+    if (built) fromEnds.push(built);
+  }
+  return fromEnds;
+}
+
+/**
+ * Wire placeholder when outbox sealed ready with empty user_message but still
+ * carries process facts (journal / runs / segments). Server
+ * ``RecordTurnRequest.user_message`` requires min_length=1; paired-user reuse
+ * via ``message_id`` ignores this text when the assistant row already exists.
+ * Not a substitute for sidecar identity salvage (C1) — stock / boundary drain only.
+ */
+export const EMPTY_USER_MESSAGE_PLACEHOLDER = "[local-turn recovery]";
+
+/**
+ * Ready rows with empty user_message may still POST when they carry process
+ * projection (journal / runs / stream segments) and a safe umid. Typical stock
+ * dead-letter also has message_id; umid alone is enough once C1 restores identity.
+ */
+export function canPostEmptyUserMessage(record: OutboxRecord): boolean {
+  if (!isSafeOutboxId(record.user_message_id)) return false;
+  return recordHasProcessState(record);
+}
+
+/**
+ * Fill empty user_message for writeback when {@link canPostEmptyUserMessage}.
+ * Returns true when the record now has a non-empty user_message.
+ */
+export function fillEmptyUserMessageForWriteback(
+  record: OutboxRecord,
+): boolean {
+  if ((record.user_message || "").trim()) return true;
+  if (!canPostEmptyUserMessage(record)) return false;
+  record.user_message = EMPTY_USER_MESSAGE_PLACEHOLDER;
+  return true;
+}
+
+/**
+ * When hard-kill left content empty, promote captain stream snapshots into
+ * content / reasoning_content (incomplete salvage). Returns true when the
+ * record has any salvageable body after this fill.
+ */
+export function fillFromCaptainStreamSegments(record: OutboxRecord): boolean {
+  const segs = record.stream_segments;
+  if (!segs || typeof segs !== "object") {
+    return (
+      !!(record.content || "").trim() ||
+      !!(record.reasoning_content || "").trim()
+    );
+  }
+  const contentSeg = segs[CHANNEL_CAPTAIN_CONTENT];
+  const contentText =
+    contentSeg && typeof contentSeg === "object"
+      ? String(contentSeg.text || "")
+      : "";
+  if (!(record.content || "").trim() && contentText.trim()) {
+    record.content = contentText;
+  }
+  const reasoningSeg = segs[CHANNEL_CAPTAIN_REASONING];
+  const reasoningText =
+    reasoningSeg && typeof reasoningSeg === "object"
+      ? String(reasoningSeg.text || "")
+      : "";
+  if (!(record.reasoning_content || "").trim() && reasoningText.trim()) {
+    record.reasoning_content = reasoningText;
+  }
+  return (
+    !!(record.content || "").trim() || !!(record.reasoning_content || "").trim()
+  );
+}
+
+/** True when the turn carried process projection (must not treat null assistant as success). */
+export function recordHasProcessState(record: OutboxRecord): boolean {
+  const runs = record.runs;
+  if (runs && typeof runs === "object" && Object.keys(runs).length > 0) {
+    return true;
+  }
+  const journal = record.journal;
+  if (
+    journal &&
+    typeof journal === "object" &&
+    Object.keys(journal).length > 0
+  ) {
+    return true;
+  }
+  const segs = record.stream_segments;
+  if (segs && typeof segs === "object") {
+    for (const entry of Object.values(segs)) {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        String(entry.text || "").trim()
+      ) {
+        return true;
+      }
+    }
+  }
+  return !!(record.reasoning_content || "").trim();
+}
+
+/**
+ * Delete outbox only when assistant truly landed, or server explicitly marked noop.
+ * HTTP 200 + `assistant_message_id==null` with process state is a false ack.
+ */
+export function shouldDeleteOutboxAfterAck(
+  body: {
+    assistant_message_id?: string | null;
+    noop?: boolean | null;
+  },
+  record: OutboxRecord,
+): boolean {
+  if (body.assistant_message_id) return true;
+  if (body.noop === true) return true;
+  // Legacy servers omit `noop`: empty true-no-op (no process) may still delete.
+  if (!recordHasProcessState(record)) return true;
+  return false;
+}
+
+export function toRecordTurnBody(
+  record: OutboxRecord,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    user_message: record.user_message || "",
+    user_message_id: record.user_message_id,
+    content: record.content || "",
+    reasoning_content: record.reasoning_content ?? null,
+    citations: record.citations || [],
+    runs: record.runs ?? null,
+    message_id: record.message_id ?? null,
+    input_tokens: record.input_tokens ?? 0,
+    output_tokens: record.output_tokens ?? 0,
+    reasoning_tokens: record.reasoning_tokens ?? 0,
+    cache_hit_tokens: record.cache_hit_tokens ?? 0,
+    cache_miss_tokens: record.cache_miss_tokens ?? 0,
+    rounds: record.rounds ?? 0,
+    trace_id: record.trace_id || "",
+    finish_reason: record.finish_reason ?? null,
+  };
+  const journal = journalEntriesFromMap(record.journal);
+  if (journal) body.journal = journal;
+  const failures = toolFailuresFromJournal(journal);
+  if (failures.length > 0) body.tool_failures = failures;
+  return body;
+}
+
+export async function readOutboxRecords(): Promise<OutboxRecord[]> {
+  const dir = outboxDir();
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const records: OutboxRecord[] = [];
+  for (const name of names) {
+    // Final records are `*.json`; unique temps are `*.json.<pid>-<seq>.tmp`.
+    if (!name.endsWith(".json") || name.includes(".tmp")) continue;
+    try {
+      const raw = await readFile(join(dir, name), "utf-8");
+      const data = JSON.parse(raw) as OutboxRecord;
+      if (
+        data?.user_message_id &&
+        data.conversation_id &&
+        isSafeOutboxId(data.user_message_id) &&
+        isSafeOutboxId(data.conversation_id)
+      ) {
+        records.push(data);
+      }
+    } catch {
+      // torn / unreadable — skip
+    }
+  }
+  return records;
+}
+
+export async function writeRecord(record: OutboxRecord): Promise<void> {
+  if (!isSafeOutboxId(record.user_message_id)) {
+    throw new Error("unsafe outbox user_message_id");
+  }
+  const dir = outboxDir();
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, `${record.user_message_id}.json`);
+  const tmp = tmpPathFor(target);
+  try {
+    await writeFile(tmp, JSON.stringify(record), "utf-8");
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => undefined);
+    throw err;
+  }
+}
+
+export async function deleteRecord(userMessageId: string): Promise<void> {
+  if (!isSafeOutboxId(userMessageId)) return;
+  try {
+    await unlink(join(outboxDir(), `${userMessageId}.json`));
+  } catch {
+    /* already gone */
+  }
+}

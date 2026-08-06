@@ -88,4 +88,40 @@ describe("fs-session-grants payload", () => {
     expect(row?.mode).toBe("organize");
     expect(row?.sessionOnly).toBe(true);
   });
+
+  it("migrates legacy readonly-boolean grants to mode-only on load", () => {
+    rootsTest.applySessionFilePayload({
+      "c-legacy": [
+        {
+          id: "legacy-ro",
+          name: "old",
+          absPath: "C:\\old",
+          sessionOnly: true,
+          conversationId: "c-legacy",
+          readonly: true,
+          alias: "old",
+        },
+        {
+          id: "legacy-org",
+          name: "desk",
+          absPath: "C:\\desk",
+          sessionOnly: true,
+          conversationId: "c-legacy",
+          readonly: false,
+          alias: "desk",
+        },
+      ],
+    });
+    const map = rootsTest.getMap();
+    expect(map.get("legacy-ro")?.mode).toBe("readonly");
+    expect(map.get("legacy-org")?.mode).toBe("organize");
+    expect(map.get("legacy-ro")).not.toHaveProperty("readonly");
+    expect(map.get("legacy-org")).not.toHaveProperty("readonly");
+
+    const payload = rootsTest.buildSessionFilePayload();
+    for (const row of payload["c-legacy"] ?? []) {
+      expect(row).not.toHaveProperty("readonly");
+      expect(row.mode === "readonly" || row.mode === "organize").toBe(true);
+    }
+  });
 });

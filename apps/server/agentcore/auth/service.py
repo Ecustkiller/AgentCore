@@ -706,7 +706,9 @@ class AuthService:
         when provided so the session list reflects latest activity location."""
         raw_platform = record.client_platform
         platform: ClientPlatform | None = (
-            raw_platform if raw_platform in ("desktop", "mobile", "admin") else None  # type: ignore[assignment]
+            raw_platform
+            if raw_platform in ("desktop", "mobile", "admin", "web")
+            else None  # type: ignore[assignment]
         )
         if request_meta is None:
             return SessionMeta(

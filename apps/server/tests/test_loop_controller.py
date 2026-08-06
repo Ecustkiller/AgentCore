@@ -1319,80 +1319,39 @@ def test_progress_tool_resets_spin_streak():
     assert c.convergence_action() is Intervention.CONTINUE
 
 
-# --- zero-write / prose_idle ladder retired (factory always off) ---
+# --- delivery_idle soft ladder (no mid-loop FINALIZE from idle reads) ---
 
 
-def test_zero_write_and_prose_idle_retired_no_mid_loop_cut():
-    """Factory never opens zero_write/prose_idle; idle reads do not FINALIZE mid-loop."""
-    from agentcore.runtime.engine.directive import Finalize
-    from agentcore.runtime.engine.governance import (
-        create_loop_controller,
-        govern_after_tools,
-    )
-    from agentcore.runtime.engine.outcome import RoundOutcome
+def test_delivery_idle_does_not_finalize_mid_loop():
+    """Factory opens soft delivery_idle; idle reads do not FINALIZE mid-loop."""
+    from agentcore.runtime.engine.governance import create_loop_controller
 
     c = create_loop_controller(
         frozenset({"file_read", "file_list", "grep"}),
         files_expected=True,
         short_write_posture=False,
     )
-    assert c.zero_write_finalize_rounds == 0
-    assert c.prose_idle is False
-    # Soft delivery_idle replaces retired zero-write FINALIZE (nudge/narrow only).
     assert c.delivery_idle_nudge_rounds > 0
     assert c.delivery_idle_narrow_rounds > 0
     for i in range(12):
         c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
     assert c.convergence_action() is Intervention.CONTINUE
     assert not c.is_thrashing()
-    assert not c.zero_write_warn_due()
     assert c.delivery_idle_rounds == 12
     assert c.delivery_idle_nudge_due()
     assert c.delivery_idle_narrow_due()
 
-    prose = create_loop_controller(
+    recon = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=False,
         short_write_posture=True,
         max_rounds=4,
     )
-    assert prose.zero_write_finalize_rounds == 0
-    assert prose.prose_idle is False
+    assert recon.delivery_idle_nudge_rounds > 0
+    assert recon.delivery_idle_narrow_rounds == 0
     for i in range(6):
-        prose.record([ToolAttempt(fingerprint=f"p{i}", tool_name="file_read", success=True)])
-    assert prose.convergence_action() is Intervention.CONTINUE
-
-    # Manually arm dormant counter: controller may still FINALIZE via zero_write
-    # path, but govern no longer stamps DEGRADED / injects 零写 prompts.
-    armed = LoopController(
-        convergence_finalize_rounds=30,
-        convergence_spin_rounds=0,
-        zero_write_finalize_rounds=3,
-        investigation_tools=frozenset({"file_read"}),
-    )
-    for i in range(3):
-        armed.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
-    assert armed.convergence_action() is Intervention.FINALIZE
-    messages: list = []
-    directive = govern_after_tools(
-        RoundOutcome(
-            content="",
-            reasoning="",
-            usage=None,
-            tool_calls=[],
-            tool_results=[],
-            attempts=[],
-        ),
-        armed,
-        messages=messages,
-        round_idx=3,
-        run_id="r1",
-        breaker_message=None,
-    )
-    assert isinstance(directive, Finalize)
-    assert directive.reason == "convergence"
-    assert directive.finish_reason is None
-    assert not any("零写" in str(getattr(m, "content", "") or "") for m in messages)
+        recon.record([ToolAttempt(fingerprint=f"p{i}", tool_name="file_read", success=True)])
+    assert recon.convergence_action() is Intervention.CONTINUE
 
 
 def test_delivery_idle_nudge_then_narrow_without_finalize():
@@ -1412,7 +1371,6 @@ def test_delivery_idle_nudge_then_narrow_without_finalize():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         delivery_idle_nudge_rounds=2,
         delivery_idle_narrow_rounds=3,
         investigation_tools=inv,
@@ -1642,7 +1600,6 @@ def test_landing_success_latches_for_wind_down():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read"}),
     )
     c.record([ToolAttempt(fingerprint="f0", tool_name="file_read", success=True)])
@@ -1655,7 +1612,6 @@ def test_landing_attempt_does_not_require_zero_write_bar():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read"}),
     )
     c.record(
@@ -1675,7 +1631,6 @@ def test_reviews_md_landing_latches():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read", "file_list", "grep"}),
     )
     c.record(
@@ -1693,7 +1648,6 @@ def test_reviews_md_landing_latches():
     c2 = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read"}),
     )
     c2.record(
@@ -1709,7 +1663,6 @@ def test_declared_research_artifact_latches_landing():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read"}),
         product_landing_artifacts=(art,),
     )
@@ -1732,7 +1685,6 @@ def test_different_targets_no_longer_trip_zero_write():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        zero_write_finalize_rounds=0,
         investigation_tools=frozenset({"file_read", "file_list", "grep"}),
     )
     for i in range(8):

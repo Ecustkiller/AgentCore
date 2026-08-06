@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // 隔离断言 sendTurn / runResume「探活 → 路由 / 降级收敛」这一段的可观察契约：
 // sendTurn——探活 ok 走 sidecar、首探失败(probed)走云+提示一次、bad 缓存命中(!probed)静默走云、
 // 回合启动期失败(recoverable)降级并标坏、中途失败(!recoverable)不自动降级；
-// runResume——探活 ok 走 sidecar 续跑、探活失败保留续跑卡 + 出横幅、绝不降级走云（本机帧云端没有）。
+// runResume——探活 ok 走 sidecar 续跑、探活失败保留续跑卡 + 出横幅（无 banner retry）、
+// 404/PAUSED_TURN_NOT_FOUND 丢卡、绝不降级走云（本机帧云端没有）。
 // 协作者全 mock；conversation / pausedTurn store 用真实，使 stillOptimistic / 截断 / 帧认领忠实。
 vi.mock("@/hooks/useConversations", () => ({
   getConversations: vi.fn(() => []),
@@ -349,7 +350,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
-  it("请求被拒(404) → 恢复续跑卡 + 横幅", async () => {
+  it("请求被拒(404) → 丢续跑卡 + 横幅（无 retry）", async () => {
     resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
@@ -357,7 +358,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     resumeConversationMock.mockRejectedValue(
       new StreamError("http", 404, {
         code: "not_found",
-        serverMessage: "暂停帧不存在",
+        serverMessage: "挂起的回合不存在或已处理",
       }),
     );
 
@@ -365,14 +366,39 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
       StreamError,
     );
 
-    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
-    expect(usePausedTurnStore.getState().pending[0]?.messageId).toBe("m1");
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.error).toContain(
-      "暂停帧不存在",
+      "挂起的回合不存在或已处理",
     );
+    expect(useConversationStore.getState().byId.c1?.retry).toBeNull();
   });
 
-  it("请求被拒(409 turn_in_progress) → 恢复续跑卡 + 明确文案", async () => {
+  it("sidecar PAUSED_TURN_NOT_FOUND → 丢续跑卡 + 横幅（无 retry）", async () => {
+    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    probeSidecarMock.mockResolvedValue({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    resumeViaSidecarMock.mockRejectedValue(
+      new StreamError("sidecar", undefined, {
+        serverMessage: "本地引擎出错：挂起的回合不存在或已处理",
+        recoverable: true,
+      }),
+    );
+
+    await expect(runResume("m1", "continue", "")).rejects.toBeInstanceOf(
+      StreamError,
+    );
+
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "挂起的回合不存在或已处理",
+    );
+    expect(useConversationStore.getState().byId.c1?.retry).toBeNull();
+  });
+
+  it("请求被拒(409 turn_in_progress) → 恢复续跑卡 + 明确文案（无 retry）", async () => {
     resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
@@ -389,6 +415,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(useConversationStore.getState().byId.c1?.error).toContain(
       "正在进行的回合",
     );
+    expect(useConversationStore.getState().byId.c1?.retry).toBeNull();
   });
 
   it("流中断(network) → 不恢复续跑卡", async () => {
@@ -427,7 +454,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(useConversationStore.getState().byId.c1?.isGenerating).toBe(false);
   });
 
-  it("探活失败横幅的「重试」清缓存强制重探（非死按钮）", async () => {
+  it("探活失败横幅清缓存（下次续跑可重探，无 banner retry）", async () => {
     resolveSidecarRootMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: false,
@@ -439,15 +466,9 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
       /sidecar probe failed/,
     );
     expect(probeSidecarMock).toHaveBeenCalledTimes(1);
-
-    const retry = useConversationStore.getState().byId.c1?.retry;
-    expect(retry).toBeTypeOf("function");
-    retry?.(); // 用户点「重试」
-    expect(clearSidecarHealthMock).toHaveBeenCalledTimes(1); // 同步先清缓存
-
-    // 清缓存后重试会真重探（生产里 clearSidecarHealth 清 map → probeSidecar 不再命中 bad）。
-    await vi.waitFor(() => expect(probeSidecarMock).toHaveBeenCalledTimes(2));
-    expect(usePausedTurnStore.getState().pending).toHaveLength(1); // 仍未续成功 → 帧保留
+    expect(clearSidecarHealthMock).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().byId.c1?.retry).toBeNull();
+    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
   });
 
   it("有冷卡 + isGenerating → 先收口再续跑（不挡死）", async () => {

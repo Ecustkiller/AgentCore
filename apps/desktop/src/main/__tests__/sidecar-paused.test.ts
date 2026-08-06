@@ -22,7 +22,7 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
-import { SidecarManager } from "../sidecar-service";
+import { SidecarManager } from "../sidecar/manager";
 
 const pausedDir = join(h.dir, "sidecar", "paused");
 

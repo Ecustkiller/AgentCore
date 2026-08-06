@@ -118,10 +118,6 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "庭前主辩点单——各方取证任务 + 对称取证员数量",
     ),
-    EventType.DEBATE_PRETRIAL_PROGRESS: (
-        Disposition.DURABLE,
-        "庭前取证员进度增量——台账条目实时计数",
-    ),
     EventType.DEBATE_PRETRIAL_COMPLETED: (
         Disposition.DURABLE,
         "庭前取证收口——done/skipped/degraded + evidence_ledger_delta",

@@ -1,6 +1,6 @@
 /**
  * 同对话再发 · delivery（运行时三模型 · Steer/Queue）。
- * 默认一律 steer（含 busy）；强制 queue 仅由 UI 显式入口传入。
+ * busy 默认 queue；空闲默认 steer。显式插队由 UI 轻链传入 steer。
  * 经典无 accepting 窗口时服务端回落 queue（`degraded_from=steer`）。
  */
 import type { ProjectedTurn } from "@agentcore/protocol-conformance";
@@ -22,11 +22,7 @@ export function isLiveInterruptible(
   return false;
 }
 
-/** 默认 delivery：空闲 / busy 均 steer；强制 queue 由 UI 显式传入。 */
-export function defaultDelivery(_opts?: {
-  busy?: boolean;
-  /** @deprecated 不再影响默认；仅保留调用方兼容 */
-  interruptible?: boolean;
-}): MessageDelivery {
-  return "steer";
+/** 默认 delivery：busy → queue；空闲 → steer。插队由 UI 显式传入 steer。 */
+export function defaultDelivery(opts?: { busy?: boolean }): MessageDelivery {
+  return opts?.busy ? "queue" : "steer";
 }

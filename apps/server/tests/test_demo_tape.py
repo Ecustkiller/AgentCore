@@ -945,8 +945,8 @@ async def test_recording_to_tape_to_replay_closed_loop(monkeypatch, tmp_path: Pa
     """合成回合闭环：真实 EventSink 发流 → tap 录制 → 出磁带 → player 回放。
 
     覆盖录制层重构的验收面：磁带无生命周期/结算事件、暂停点如期挂起、回放身份
-    重铸（≠录制 id）、resume 后正文/辩手输出逐字节回放、live resolve 恰好一次、
-    followups 经 meta 保真透传。
+    重铸（≠录制 id）、resume 后正文/辩手输出逐字节回放、live resolve 恰好一次。
+    旧磁带 meta.followups 仍可导出；回放不再挂到 result（chips 已下线）。
     """
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
@@ -1077,8 +1077,8 @@ async def test_recording_to_tape_to_replay_closed_loop(monkeypatch, tmp_path: Pa
     assert result2["finish_reason"] is FinishReason.END_TURN
     # Persist-shaped: live finish joins at the durable-pause seam.
     assert result2["content"] == "案情简介。\n\n最终汇总。"
-    assert result2["followups"] == chips
-    # Player does not emit followups_generated — persist_turn_result does.
+    # Chips offline: player ignores meta.followups (no result attach / no emit).
+    assert result2.get("followups") is None
     assert EventType.FOLLOWUPS_GENERATED not in [e.type for e in sink2._history]
     types2 = [e.type for e in sink2._history]
     assert types2.count(EventType.TEAM_PREVIEW_RESOLVED) == 1
@@ -1091,8 +1091,8 @@ async def test_recording_to_tape_to_replay_closed_loop(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_tape_followups_persist_emits_and_skips_mint(monkeypatch, tmp_path: Path):
-    """meta.followups → END_TURN result → persist set_followups + emit, no mint_followups."""
+async def test_tape_followups_ignored_on_persist(monkeypatch, tmp_path: Path):
+    """meta.followups on tape is ignored: no set_followups, no followups_generated emit."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -1150,11 +1150,10 @@ async def test_tape_followups_persist_emits_and_skips_mint(monkeypatch, tmp_path
         trace_id="d" * 32,
     )
     assert result["finish_reason"] is FinishReason.END_TURN
-    assert result["followups"] == chips
+    assert result.get("followups") is None
     assert EventType.FOLLOWUPS_GENERATED not in [e.type for e in sink._history]
 
     stored: list[tuple] = []
-    mint = AsyncMock(return_value=["should-not-mint"])
 
     class FakeRepo:
         def __init__(self, _session):
@@ -1190,7 +1189,10 @@ async def test_tape_followups_persist_emits_and_skips_mint(monkeypatch, tmp_path
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
-    monkeypatch.setattr(cloud_mod, "mint_followups", mint)
+    monkeypatch.setattr(
+        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr(
         cloud_mod.settings, "workspace_snapshot_enabled", False, raising=False
     )
@@ -1214,12 +1216,13 @@ async def test_tape_followups_persist_emits_and_skips_mint(monkeypatch, tmp_path
         duration_ms=1,
     )
 
-    mint.assert_not_awaited()
-    assert stored == [("msg-live", "conv-fu", chips)]
+    assert stored == []
     fu_events = [e for e in persist_sink._history if e.type is EventType.FOLLOWUPS_GENERATED]
-    assert len(fu_events) == 1
-    assert fu_events[0].payload["followups"] == chips
-    assert fu_events[0].payload["message_id"] == "msg-live"
+    assert fu_events == []
+    unavailable = [
+        e for e in persist_sink._history if e.type is EventType.FOLLOWUPS_UNAVAILABLE
+    ]
+    assert unavailable == []
 
 
 # ── player ───────────────────────────────────────────────────────────────
@@ -3229,7 +3232,7 @@ async def test_multi_act_advances_cursor_and_unbinds_on_last(
     )
     assert r0["finish_reason"] is FinishReason.END_TURN
     assert r0["content"] == "A"
-    assert r0["followups"] == ["chip-a"]
+    assert r0.get("followups") is None  # chips offline; per-turn followups ignored
     mid = peek_binding("conv-multi")
     assert mid is not None and mid.turn_index == 1
 

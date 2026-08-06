@@ -11,14 +11,7 @@ import type { OutboxSyncedPayload } from "@shared/outbox-contract";
 const SYNCED_HINT_MS = 2500;
 
 function applySynced(payload: OutboxSyncedPayload): void {
-  const {
-    conversationId,
-    userMessageId,
-    cloudUserMessageId,
-    assistantMessageId,
-    title,
-    followups,
-  } = payload;
+  const { conversationId, userMessageId, cloudUserMessageId, title } = payload;
   if (!conversationId) return;
   const store = useConversationStore.getState();
   try {
@@ -29,10 +22,6 @@ function applySynced(payload: OutboxSyncedPayload): void {
         cloudUserMessageId || userMessageId,
         conversationId,
       );
-    }
-    // Local live path: write chips onto the assistant row by id (no「last」fallback).
-    if (followups?.length && assistantMessageId) {
-      store.attachFollowups(followups, assistantMessageId, conversationId);
     }
     // Flip local hint: pending → brief "已同步", then clear.
     const anchor = cloudUserMessageId || userMessageId;

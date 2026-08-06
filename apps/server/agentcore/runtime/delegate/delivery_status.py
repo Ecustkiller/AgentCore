@@ -66,6 +66,8 @@ REASON_PATH_HINT = "path_hint"
 REASON_FILES_NOT_LANDED = "files_not_landed"
 # Verify-shaped tool failure (browser_navigate / test_run / verify 形 code_execute·terminal).
 REASON_VERIFY_FAILED = "verify_failed"
+# test_run verify-budget incomplete（进程已中止，非仍在跑）.
+REASON_VERIFY_BUDGET = "verify_budget"
 # Literature-report evidence deficit (research_quality.REASON_EVIDENCE_DEFICIT).
 REASON_EVIDENCE_DEFICIT = "evidence_deficit"
 # Declared reviews/ report missing / rejected / shell (research_quality.REASON_THIN_REVIEW).
@@ -78,6 +80,10 @@ REASON_ARTIFACT_REJECTED = "artifact_rejected"
 REASON_WRITE_OWNERSHIP = "write_ownership_conflict"
 # Keep in sync with runtime.runs.cutoff.REASON_DEGRADED_HANDOFF (wire gap reason).
 REASON_DEGRADED_HANDOFF = "degraded_handoff"
+# B1：超席/空交接风暴；cancel 且零落盘须缺口清单（draft_ack）。
+REASON_EMPTY_HANDOFF_STORM = "empty_handoff_storm"
+REASON_CANCELLED = "cancelled"
+REASON_OVER_SEAT = "over_seat"
 _WRITING_CUTOFF_REASONS = frozenset({"token_budget", "worker_timeout"})
 _SOFT_GAP_REASONS = frozenset(
     {REASON_UNVERIFIED_NOTE, REASON_PATH_HINT, REASON_FILES_NOT_LANDED}
@@ -89,8 +95,12 @@ _DRAFT_ACK_GAP_REASONS = frozenset(
         REASON_EVIDENCE_DEFICIT,
         REASON_THIN_REVIEW,
         REASON_VERIFY_FAILED,
+        REASON_VERIFY_BUDGET,
         REASON_NODE_FAILED,
         REASON_ARTIFACT_REJECTED,
+        REASON_EMPTY_HANDOFF_STORM,
+        REASON_CANCELLED,
+        REASON_OVER_SEAT,
     }
 )
 # 刀1：有落盘时 degraded_handoff 并入 soft（见 _soften_landed_degraded_gaps）。
@@ -410,8 +420,118 @@ def _node_gaps(plan: RunPlan, results: dict[str, RunState]) -> list[dict[str, An
         elif state.phase is RunPhase.CANCELLED and not _has_completed_revision(
             node.run_id, results
         ):
-            gaps.append({"role": role, "description": "未完成（中途取消）"})
+            gaps.append(
+                {
+                    "role": role,
+                    "description": "未完成（中途取消）",
+                    "reason": REASON_CANCELLED,
+                }
+            )
     return gaps
+
+
+def _count_empty_or_degraded_nodes(
+    plan: RunPlan,
+    results: dict[str, RunState],
+) -> tuple[int, int, list[str]]:
+    """Return (emptyish_count, terminal_count, role_labels) for empty-handoff storm.
+
+    emptyish = cancelled(no revision) / failed / completed+degraded_handoff /
+    completed with zero files and empty content.
+    """
+    emptyish = 0
+    terminal = 0
+    roles: list[str] = []
+    for node in plan.nodes:
+        state = results.get(node.run_id)
+        if state is None:
+            continue
+        role = str(node.role or node.agent_name or node.run_id)
+        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(
+            node.run_id, results
+        ):
+            terminal += 1
+            emptyish += 1
+            roles.append(role)
+            continue
+        if state.phase is RunPhase.FAILED:
+            terminal += 1
+            emptyish += 1
+            roles.append(role)
+            continue
+        if state.phase is not RunPhase.COMPLETED:
+            continue
+        terminal += 1
+        files = bool(state.files_touched) or any(
+            isinstance(a, dict) and a.get("status") == "accepted"
+            for a in (state.file_acceptance or [])
+        )
+        degraded = False
+        for row in getattr(state, "delivery_gaps", None) or []:
+            if isinstance(row, dict) and str(row.get("reason") or "") == REASON_DEGRADED_HANDOFF:
+                degraded = True
+                break
+        if not degraded and state.warnings:
+            degraded = any("交接说明不够完整" in str(w) for w in state.warnings)
+        debrief = state.debrief if isinstance(state.debrief, dict) else None
+        if debrief and debrief.get("degraded"):
+            degraded = True
+        body = (state.content or "").strip()
+        if degraded or (not files and len(body) < 40):
+            emptyish += 1
+            roles.append(role)
+    return emptyish, terminal, roles
+
+
+def _empty_handoff_storm_gap(
+    plan: RunPlan,
+    results: dict[str, RunState],
+    *,
+    files_landed: bool,
+) -> dict[str, Any] | None:
+    """B1：空交接占比高 → blocking PARTIAL gap（禁『仍在进行』空悬）."""
+    if files_landed:
+        return None
+    emptyish, terminal, roles = _count_empty_or_degraded_nodes(plan, results)
+    if emptyish < 3 and not (terminal >= 5 and emptyish * 2 >= terminal):
+        return None
+    shown = "、".join(roles[:6]) if roles else "多席"
+    extra = f"等 {len(roles)} 席" if len(roles) > 6 else shown
+    return _annotate_gap(
+        "验收",
+        f"空交接/未交付席位过多（{emptyish}/{terminal}）：{extra}——"
+        "须同回合 PARTIAL 终稿（已完成摘要 + 缺口清单 + 下一步），禁止『仍在进行』空悬",
+        reason=REASON_EMPTY_HANDOFF_STORM,
+    )
+
+
+def _cancel_zero_output_checklist_gap(
+    plan: RunPlan,
+    results: dict[str, RunState],
+    *,
+    files_landed: bool,
+) -> dict[str, Any] | None:
+    """B1：cancel + 零落盘 → 结构化未交付清单（须 draft_ack）."""
+    if files_landed:
+        return None
+    cancelled_roles: list[str] = []
+    for node in plan.nodes:
+        state = results.get(node.run_id)
+        if state is None:
+            continue
+        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(
+            node.run_id, results
+        ):
+            cancelled_roles.append(str(node.role or node.agent_name or node.run_id))
+    if not cancelled_roles:
+        return None
+    shown = "、".join(cancelled_roles[:8])
+    extra = f"等 {len(cancelled_roles)} 项" if len(cancelled_roles) > 8 else shown
+    return _annotate_gap(
+        "验收",
+        f"取消且零落盘——未交付清单：{extra}；请给出可继续动作，禁止仅『重新派工』短句",
+        reason=REASON_CANCELLED,
+    )
 
 
 def _soften_landed_degraded_gaps(
@@ -696,6 +816,16 @@ def build_delivery_status(
     delivered = _delivered_files(results)
     artifacts = _collect_artifacts(results)
 
+    # B1：worker 转录里 browser_* 成功 → 闩锁（CEO 综收可对账；非气泡启发式）。
+    from agentcore.runtime.closing_posture import note_browser_tool_success_from_messages
+
+    for run_state in results.values():
+        if run_state is None:
+            continue
+        transcript = getattr(run_state, "transcript", None)
+        if transcript:
+            note_browser_tool_success_from_messages(transcript)
+
     raw_gaps: list[dict[str, Any]] = []
     # ① 契约 / 交接残差（软接受后仍未对齐的声明交付物、degraded 交接、预算/超时掐断…）。
     for role, rows in collect_worker_gaps(plan, results):
@@ -786,6 +916,21 @@ def build_delivery_status(
     # ③b 拒收产物（file_acceptance rejected）→ 结构化 gap + draft_ack（能力4 残差）。
     # 与 delivered_files / synthesis「已验收」同源；不扫盘上「缺席」散文。
     raw_gaps.extend(_artifact_rejected_gaps(artifacts))
+    # ③c B1：空交接风暴 / cancel·0 产出 → blocking + draft_ack（强制 PARTIAL 缺口清单）。
+    storm = _empty_handoff_storm_gap(plan, results, files_landed=bool(delivered))
+    if storm is not None:
+        raw_gaps.append(storm)
+        from agentcore.runtime.closing_posture import note_empty_handoff_storm
+
+        note_empty_handoff_storm()
+    cancel_gap = _cancel_zero_output_checklist_gap(
+        plan, results, files_landed=bool(delivered)
+    )
+    if cancel_gap is not None:
+        raw_gaps.append(cancel_gap)
+        from agentcore.runtime.closing_posture import note_cancel_zero_output
+
+        note_cancel_zero_output()
     # 用户面：零落盘按队员 soft 投影（本队员本波未交卷）；仅批次谓词时合并。
     gaps = _project_user_gaps(raw_gaps, results)[:_MAX_GAPS]
     # 刀1 / 方案 A：有 accepted 落盘时 degraded_handoff 降为 warning 备注。
@@ -917,11 +1062,13 @@ def maybe_emit_delivery_status(
             downgrade_verdict_for_unresolved_write_ownership,
             note_cloud_web_verify_gap_from_delivery,
             note_cutoff_delivery_gap_from_delivery,
+            note_verify_budget_from_delivery,
         )
 
         # P0-B belt: latch already stamped in build; ensure delivered cannot stick.
         downgrade_verdict_for_unresolved_write_ownership(execution_id=execution_id)
         note_cloud_web_verify_gap_from_delivery(gaps, criteria_gaps=criteria_gaps)
+        note_verify_budget_from_delivery(gaps)
         # B′：token_budget / writing cutoff → CEO 综收软横幅 latch（真源=结构化 gaps）。
         note_cutoff_delivery_gap_from_delivery(gaps)
         from agentcore.runtime.events import delivery_status

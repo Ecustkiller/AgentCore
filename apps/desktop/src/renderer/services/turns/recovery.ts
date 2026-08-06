@@ -51,8 +51,8 @@ function clearAfterUserForReplay(
  * partial assistant bubble (the replay re-sends the full transcript-so-far, so
  * keeping the partial would double it), then attaches: replay + live tail. On
  * `"none"` the run already finished — reload the persisted transcript (its reply
- * is saved). If reconnect itself drops, surface a banner whose retry reconnects
- * again (never resends).
+ * is saved). If reconnect itself drops, surface a banner explaining the drop
+ * (no one-click reconnect; auto rejoin / reopen remain available).
  *
  * Returns `true` when handled (reattached / reloaded a saved reply / banner shown);
  * `false` only when there is no turn to rejoin and nothing was persisted, so the
@@ -109,18 +109,13 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
       s.finalizeLastMessage(conversationId);
     }
     clearInteractionPrompts(conversationId);
-    // A reconnect drop → manual「重连」(never resend); an auth failure stays silent
-    // (the api layer already redirected to login).
+    // A reconnect drop → explain (never resend); an auth failure stays silent
+    // (the api layer already redirected to login). No one-click reconnect.
     const msg = isTransportDrop(err)
       ? RECONNECT_BANNER
       : describeStreamError(err);
     if (msg) {
-      s.setError(
-        msg,
-        () => void rejoinLiveTurn(conversationId),
-        conversationId,
-        streamErrorAction(err),
-      );
+      s.setError(msg, null, conversationId, streamErrorAction(err));
     }
     return true;
   } finally {
@@ -131,7 +126,8 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
 /**
  * Mark a dead-lease ghost (``usage.status=running`` but recovery has no live run
  * and no pause) as interrupted so the bubble stops spinning. Empty body → layer 1
- * recoverability (send a new turn / composer hint); no message-level retry row.
+ * recoverability (send a new turn / composer hint + synthetic「已中断」face); no
+ * message-level retry row.
  *
  * Also drops any resume card painted from a stale ``usage.paused`` latch + journal
  * residual (ask_user fact still in journal after the user already continued).
@@ -165,6 +161,60 @@ export function markGhostInterrupted(conversationId: string): void {
 }
 
 /**
+ * Orphan empty-assistant settle (1a69f9dc · 方案 A).
+ *
+ * When a new turn starts (or hydrate finishes), any prior empty assistant that
+ * never completed (streaming / running / abandoned incomplete) must not stay as
+ * a blank product face. Rewrite to ``interrupted`` so
+ * {@link syntheticErrorForEmptyFailure} paints「已中断」; do not hard-block input.
+ *
+ * Leaves ``cancelled`` / ``error`` / ``unproductive`` alone (those already have
+ * product faces). Skips assistants with body or a real error payload.
+ */
+export function settleOrphanEmptyAssistants(conversationId: string): void {
+  const store = useConversationStore.getState();
+  const msgs = getRuntime(conversationId).messages;
+  for (const m of msgs) {
+    if (m.role !== "assistant") continue;
+    if ((m.content ?? "").trim()) continue;
+    if (m.error?.message?.trim()) continue;
+    if (m.runs?.error?.message?.trim()) continue;
+    const fr = m.finishReason ?? m.runs?.finishReason;
+    // Already has a synthesizable terminal finish — keep it.
+    if (
+      fr === "cancelled" ||
+      fr === "error" ||
+      fr === "unproductive" ||
+      fr === "interrupted"
+    ) {
+      if (!m.isStreaming && m.status !== "running") continue;
+    }
+    const needsSettle =
+      m.isStreaming ||
+      m.status === "running" ||
+      m.status === "incomplete" ||
+      // Settled blank with no finish (abandoned placeholder before message_end).
+      (!fr && m.status !== "complete" && m.status !== "failed");
+    if (!needsSettle) continue;
+    store.updateMessage(
+      m.id,
+      {
+        isStreaming: false,
+        status: "incomplete",
+        finishReason: "interrupted",
+        runs: m.runs ? { ...m.runs, finishReason: "interrupted" } : m.runs,
+      },
+      conversationId,
+    );
+    const exec = useExecutionStore.getState();
+    exec.clearExecution(m.id);
+    if (m.serverMessageId && m.serverMessageId !== m.id) {
+      exec.clearExecution(m.serverMessageId);
+    }
+  }
+}
+
+/**
  * Cloud-path settle for a last assistant with ``status===running``.
  *
  * Open-time hydrate races ``loadRecovery`` against ``fetchMessageWindow``;
@@ -178,15 +228,18 @@ export function markGhostInterrupted(conversationId: string): void {
  * - paused≥1 → hold + clear generating/streaming (card + isGenerating is illegal)
  * - cloudKnown ∧ !live ∧ paused=0 → real dead-lease / TTL degrade → ghost
  *   (also covers stale ``usage.paused`` latch with no ``paused_turns`` frame)
- * - !cloudKnown → unknown (request failed); never ghost — hold + {@link UNKNOWN_CLOUD_BANNER}
- *   (retry re-settles / loadRecovery; never resend; not {@link RECONNECT_BANNER})
+ * - !cloudKnown → unknown (request failed); never ghost — hold; keep a prior
+ *   non-empty non-{@link UNKNOWN_CLOUD_BANNER} error, else set that banner
+ *   (plain banner; never resend; not {@link RECONNECT_BANNER})
  */
 export async function settleCloudRunningAssistant(
   conversationId: string,
   recovery: ConversationRecovery,
 ): Promise<"rejoin" | "ghost" | "hold"> {
   const store = useConversationStore.getState();
-  store.clearError(conversationId);
+  // Do not clearError at entry — a prior concrete banner (e.g. stream drop)
+  // must survive an unknown-cloud hold. Clear only on branches that change
+  // turn state (rejoin / ghost / paused finalize).
 
   let snap = recovery;
   // Empty or unknown cloud facts: one refresh before deciding (same race as pause).
@@ -194,25 +247,27 @@ export async function settleCloudRunningAssistant(
     snap = await loadRecovery(conversationId);
   }
   if (snap.cloudLive && snap.pausedCount === 0) {
+    store.clearError(conversationId);
     void rejoinLiveTurn(conversationId);
     return "rejoin";
   }
   if (!snap.cloudKnown) {
-    // Failure ≠ confirmed idle — leave the running assistant alone, but give an
-    // honest retry affordance (not "连接中断"). Retry re-settles, never resends.
-    store.setError(
-      UNKNOWN_CLOUD_BANNER,
-      () => void settleCloudRunningAssistant(conversationId, snap),
-      conversationId,
-      null,
-    );
+    // Failure ≠ confirmed idle — leave the running assistant alone. Keep a
+    // prior non-empty, non-UNKNOWN banner; otherwise explain honestly (not
+    // "连接中断"). No one-click re-settle from the banner.
+    const prior = (getRuntime(conversationId).error ?? "").trim();
+    if (!prior || prior === UNKNOWN_CLOUD_BANNER) {
+      store.setError(UNKNOWN_CLOUD_BANNER, null, conversationId, null);
+    }
     return "hold";
   }
   if (!snap.cloudLive && snap.pausedCount === 0) {
+    store.clearError(conversationId);
     markGhostInterrupted(conversationId);
     return "ghost";
   }
   // paused≥1: force clear even if pausedTurns lag the recovery snap.
+  store.clearError(conversationId);
   finalizeGeneratingForPausedConversation(conversationId, { force: true });
   return "hold";
 }
@@ -246,12 +301,7 @@ export async function attachOnOpen(conversationId: string): Promise<void> {
     // and we lost it); a pre-event drop / 204 stays silent.
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
-      s.setError(
-        RECONNECT_BANNER,
-        () => void rejoinLiveTurn(conversationId),
-        conversationId,
-        null,
-      );
+      s.setError(RECONNECT_BANNER, null, conversationId, null);
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);

@@ -2,6 +2,7 @@ import { type DiffLine, lineDiff } from "@/components/chat/toolResult/diff";
 import { Button } from "@/components/ui";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import type { FileArtifact, FileChangePreview } from "@/lib/fileArtifacts";
+import { baseName } from "@/lib/fileSource";
 import { notifyActionError, notifySuccess } from "@/lib/toast";
 import {
   type TurnFileChange,
@@ -9,8 +10,16 @@ import {
   getTurnFilesDiff,
   restoreLocalTurnBaseline,
 } from "@/services/turnFilesDiff";
-import { restoreSnapshot } from "@/services/workspace";
-import { ChevronDown, ChevronRight, Loader2, RotateCcw } from "lucide-react";
+import { downloadWorkspaceFile, restoreSnapshot } from "@/services/workspace";
+import { saveBlob } from "@/services/workspaceHttp";
+import type { WorkspaceOpName } from "@shared/ipc-contract";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Loader2,
+  RotateCcw,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 /**
@@ -254,7 +263,114 @@ function ArtifactChangeRow({ artifact }: { artifact: FileArtifact }) {
   );
 }
 
-function TrueDiffRow({ change }: { change: TurnFileChange }) {
+/** Download a local-workspace file via sidecar `read_bytes` → save dialog. */
+async function downloadLocalWorkspaceFile(
+  rootId: string,
+  subpath: string,
+  relPath: string,
+  filename: string,
+): Promise<void> {
+  const fsApi = window.fsApi;
+  if (!fsApi?.workspaceOp) {
+    throw new Error("本机文件接口不可用");
+  }
+  const base = subpath.replace(/^\/+|\/+$/g, "");
+  const path = base ? `${base}/${relPath}` : relPath;
+  const res = await fsApi.workspaceOp(rootId, "read_bytes" as WorkspaceOpName, {
+    path,
+  });
+  if (!res.ok || typeof res.value !== "string") {
+    throw new Error(
+      !res.ok ? res.error.detail || res.error.kind : "读取本机文件失败",
+    );
+  }
+  const bin = atob(res.value);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  await saveBlob(new Blob([bytes]), filename);
+}
+
+function BinaryChangeBody({
+  change,
+  conversationId,
+  isLocal,
+  localRootId,
+  localSubpath,
+}: {
+  change: TurnFileChange;
+  conversationId: string | null;
+  isLocal: boolean;
+  localRootId: string | null;
+  localSubpath: string;
+}) {
+  const [downloading, setDownloading] = useState(false);
+  const filename = baseName(change.path) || change.path;
+  const canDownload =
+    change.changeType !== "deleted" &&
+    ((isLocal && !!localRootId) || (!isLocal && !!conversationId));
+
+  const onDownload = async () => {
+    if (!canDownload || downloading) return;
+    setDownloading(true);
+    try {
+      if (isLocal && localRootId) {
+        await downloadLocalWorkspaceFile(
+          localRootId,
+          localSubpath,
+          change.path,
+          filename,
+        );
+      } else if (conversationId) {
+        await downloadWorkspaceFile(conversationId, change.path, filename);
+      }
+      notifySuccess(`已下载 ${filename}`);
+    } catch (e) {
+      notifyActionError("下载失败", e);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground">
+      <p>
+        二进制文件（{change.sizeBytes} 字节）
+        {canDownload ? "— 可直接下载到本机" : "— 暂无法下载（工作区未就绪）"}
+      </p>
+      {canDownload && (
+        <Button
+          variant="neutral"
+          size="sm"
+          disabled={downloading}
+          onClick={() => void onDownload()}
+          aria-label={`下载 ${filename}`}
+          className="h-7 gap-1.5 px-2 text-xs"
+        >
+          {downloading ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Download size={13} />
+          )}
+          下载
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function TrueDiffRow({
+  change,
+  conversationId,
+  isLocal,
+  localRootId,
+  localSubpath,
+}: {
+  change: TurnFileChange;
+  conversationId: string | null;
+  isLocal: boolean;
+  localRootId: string | null;
+  localSubpath: string;
+}) {
   const [open, setOpen] = useState(false);
   const editDiff = useMemo(() => {
     if (
@@ -303,9 +419,13 @@ function TrueDiffRow({ change }: { change: TurnFileChange }) {
         change.content != null && <WriteBody content={change.content} />}
       {open && change.changeType === "deleted" && <MetaBody detail="已删除" />}
       {open && change.isBinary && change.changeType !== "deleted" && (
-        <div className="rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground">
-          二进制文件（{change.sizeBytes} 字节）— 请在工作区打开查看
-        </div>
+        <BinaryChangeBody
+          change={change}
+          conversationId={conversationId}
+          isLocal={isLocal}
+          localRootId={localRootId}
+          localSubpath={localSubpath}
+        />
       )}
     </div>
   );
@@ -494,7 +614,14 @@ export function TurnFileChangesReview({
             </p>
           ) : (
             trueChanges.map((c) => (
-              <TrueDiffRow key={`${c.changeType}:${c.path}`} change={c} />
+              <TrueDiffRow
+                key={`${c.changeType}:${c.path}`}
+                change={c}
+                conversationId={conversationId}
+                isLocal={isLocal}
+                localRootId={isLocal ? (ws?.rootId ?? null) : null}
+                localSubpath={ws?.subpath ?? ""}
+              />
             ))
           )}
         </>

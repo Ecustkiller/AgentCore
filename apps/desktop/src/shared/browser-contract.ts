@@ -1,9 +1,8 @@
 /**
  * 右坞「本机浏览器」IPC 契约（LocalChromiumHost）。
  *
- * 与旧 {@link PreviewApi}（preview:// 预览 tab）**刻意分立**：外网页 / 工作区 HTML 各用
- * 独立非持久 partition（按 conversationId 切开）+ 新导航策略，禁止改 `lockPreviewNavigation`
- * 放行 http。本契约驱动主窗口内嵌 WebContentsView（多页签）。
+ * 外网页 / 工作区 HTML 各用独立非持久 partition（按 conversationId 切开）+ 新导航策略。
+ * 本契约驱动主窗口内嵌 WebContentsView（多页签）；完整预览走 `openWorkspaceHtml`。
  *
  * Bridge（sidecar → main）见 main/browser/bridge.ts，不经本 IPC。
  */

@@ -31,7 +31,7 @@ export const RETIRED_TERMS: RetiredTerm[] = [
   },
   {
     term: "重跑",
-    reason: "整轮重答用「重新生成」等三词，弃用游离「重跑」",
+    reason: "整轮重答用「重新生成」等，弃用游离「重跑」",
   },
   {
     term: "凭证",

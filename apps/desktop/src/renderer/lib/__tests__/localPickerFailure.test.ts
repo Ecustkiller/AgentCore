@@ -1,0 +1,188 @@
+// @vitest-environment jsdom
+import {
+  isLocalPickerFailureKind,
+  localPickerFailureCopy,
+  pickAndBindLocalFolder,
+  pickLocalFolderRoot,
+} from "@/lib/bindLocalFolder";
+import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/capabilities", () => ({
+  hasLocalFiles: vi.fn(() => true),
+}));
+
+vi.mock("@/hooks/useFolders", () => ({
+  getFolders: vi.fn(() => []),
+  addFolderCache: vi.fn(),
+}));
+
+vi.mock("@/lib/newConversation", () => ({
+  startNewConversation: vi.fn(),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  notifyError: vi.fn(),
+  notifySuccess: vi.fn(),
+}));
+
+vi.mock("@/services/folders", () => ({
+  createFolder: vi.fn(),
+  findLocalFolderByBinding: vi.fn(() => null),
+}));
+
+vi.mock("@/services/workspaceBinding", () => ({
+  bindLocalWorkspace: vi.fn(),
+}));
+
+vi.mock("@/hooks/useConversations", () => ({
+  getConversations: vi.fn(() => []),
+  patchConversationCache: vi.fn(),
+}));
+
+vi.mock("@/hooks/useWorkspaces", () => ({
+  patchConversationScratch: vi.fn(),
+}));
+
+vi.mock("@/stores/backgroundTasks", () => ({
+  useBackgroundTasksStore: { setState: vi.fn() },
+}));
+
+describe("localPickerFailureCopy", () => {
+  it("exposes fixed titles for dialog / auth / package.json", () => {
+    expect(localPickerFailureCopy("dialog_failed").title).toContain(
+      "未弹出文件夹选择器",
+    );
+    expect(localPickerFailureCopy("unauthorized").title).toContain(
+      "未能授权本机目录",
+    );
+    expect(localPickerFailureCopy("no_package_json").title).toContain(
+      "package.json",
+    );
+    expect(isLocalPickerFailureKind("cancelled")).toBe(false);
+    expect(isLocalPickerFailureKind("dialog_failed")).toBe(true);
+  });
+});
+
+describe("pickLocalFolderRoot structured failures", () => {
+  beforeEach(() => {
+    window.fsApi = {
+      addRoot: vi.fn(),
+      listDir: vi.fn(),
+    } as unknown as typeof window.fsApi;
+  });
+
+  it("maps dialog_failed from addRoot", async () => {
+    vi.mocked(window.fsApi.addRoot).mockResolvedValue({
+      ok: false,
+      reason: "dialog_failed",
+      message: "系统未能打开文件夹选择器",
+    });
+    const result = await pickLocalFolderRoot();
+    expect(result).toEqual({
+      ok: false,
+      reason: "dialog_failed",
+      message: "系统未能打开文件夹选择器",
+    });
+  });
+
+  it("maps unauthorized from addRoot", async () => {
+    vi.mocked(window.fsApi.addRoot).mockResolvedValue({
+      ok: false,
+      reason: "unauthorized",
+      message: "所选目录无法访问，未能完成本机授权",
+    });
+    const result = await pickLocalFolderRoot();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("unauthorized");
+  });
+
+  it("keeps cancelled silent (no structured kind)", async () => {
+    vi.mocked(window.fsApi.addRoot).mockResolvedValue({
+      ok: false,
+      reason: "cancelled",
+    });
+    await expect(pickLocalFolderRoot()).resolves.toEqual({
+      ok: false,
+      reason: "cancelled",
+    });
+  });
+});
+
+describe("pickAndOpenLocalProject no_package_json", () => {
+  beforeEach(() => {
+    window.fsApi = {
+      addRoot: vi.fn().mockResolvedValue({
+        ok: true,
+        root: { id: "r1", name: "empty-app" },
+      }),
+      listDir: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [{ name: "README.md", relPath: "README.md", kind: "file" }],
+      }),
+    } as unknown as typeof window.fsApi;
+  });
+
+  it("fails with no_package_json when root has no package.json", async () => {
+    const result = await pickAndOpenLocalProject(vi.fn(), {
+      notifyOnFailure: false,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "no_package_json",
+    });
+    expect(window.fsApi.listDir).toHaveBeenCalledWith("r1", "");
+  });
+
+  it("proceeds when package.json is present", async () => {
+    vi.mocked(window.fsApi.listDir).mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          name: "package.json",
+          relPath: "package.json",
+          kind: "file",
+          size: 12,
+          modifiedMs: null,
+        },
+      ],
+    });
+    const { createFolder } = await import("@/services/folders");
+    vi.mocked(createFolder).mockResolvedValue({
+      folder: {
+        id: "f1",
+        name: "empty-app",
+        mode: "local",
+        localRootId: "r1",
+        localSubpath: null,
+      },
+      created: true,
+    });
+
+    const result = await pickAndOpenLocalProject(vi.fn(), {
+      notifyOnFailure: false,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("pickAndBindLocalFolder structured failures", () => {
+  beforeEach(() => {
+    window.fsApi = {
+      addRoot: vi.fn().mockResolvedValue({
+        ok: false,
+        reason: "dialog_failed",
+        message: "系统未能打开文件夹选择器",
+      }),
+    } as unknown as typeof window.fsApi;
+  });
+
+  it("surfaces dialog_failed instead of treating as cancel", async () => {
+    const result = await pickAndBindLocalFolder("conv-1");
+    expect(result).toEqual({
+      ok: false,
+      reason: "dialog_failed",
+      message: "系统未能打开文件夹选择器",
+    });
+  });
+});

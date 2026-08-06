@@ -27,10 +27,10 @@ describe("visibleMessageText", () => {
       visibleMessageText({
         content: "  ",
         error: {
-          message: "上游限流，暂时无法继续本回合。请稍后再试或点重试。",
+          message: "上游限流，暂时无法继续本回合。请稍后再试。",
         },
       }),
-    ).toBe("上游限流，暂时无法继续本回合。请稍后再试或点重试。");
+    ).toBe("上游限流，暂时无法继续本回合。请稍后再试。");
   });
 
   it("falls back to runs.error.message when message.error is absent", () => {
@@ -76,7 +76,28 @@ describe("syntheticErrorForEmptyFailure", () => {
   it("keeps upstream rate-limit product copy when code is known", () => {
     expect(syntheticErrorForEmptyFailure("error", "LLM_RATE_LIMIT")).toEqual({
       code: "LLM_RATE_LIMIT",
-      message: "上游限流，暂时无法继续本回合。请稍后再试或点重试。",
+      message: "上游限流，暂时无法继续本回合。请稍后再试。",
+    });
+  });
+
+  it("synthesizes cancelled / interrupted empty faces (B5 空泡)", () => {
+    expect(syntheticErrorForEmptyFailure("cancelled")).toEqual({
+      code: "TURN_CANCELLED",
+      message: "已停止",
+    });
+    expect(syntheticErrorForEmptyFailure("interrupted")).toEqual({
+      code: "TURN_INTERRUPTED",
+      message: "已中断。直接发送下一条即可重试。",
+    });
+  });
+
+  it("auth code wins over cancelled finish (platform face align)", () => {
+    expect(
+      syntheticErrorForEmptyFailure("cancelled", "LLM_KEY_INVALID"),
+    ).toEqual({
+      code: "LLM_KEY_INVALID",
+      message:
+        "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
     });
   });
 

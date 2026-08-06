@@ -2,19 +2,17 @@
 
 对齐 playbook ``multi_lens_research``：CEO delegate → team_preview →
 4 异质透镜并行 → 汇总分析师 depends_on 四路（handoff 携 ``motion_card``）→
-CEO 收尾呈报「建议开辩」→ ``followups_generated`` 首条开辩芯片。
+CEO 收尾呈报「建议开辩」（开辩入口是 stage_card，不是 followups chips）。
 
 流式中间态刻意留足：四路并行推进中、汇总未开跑、汇总进行中。
 """
 
 from __future__ import annotations
 
-from agentcore.memory.followups import format_motion_card_followup
 from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
     content_delta,
-    followups_generated,
     message_end,
     message_start,
     run_completed,
@@ -110,10 +108,9 @@ def _preview_workers() -> list[dict]:
 
 
 def _multi_agent_multi_lens_research() -> list[SSEEvent]:
-    """幕 1 全链路：team_preview(delegate) → 4 透镜并行流式 → 汇总+motion_card → 开辩芯片。"""
+    """幕 1 全链路：team_preview(delegate) → 4 透镜并行流式 → 汇总+motion_card → CEO 建议开辩。"""
     agents = _agents()
     plan_runs = _plan_runs()
-    open_chip = format_motion_card_followup(_MOTION_CARD)
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta(f"我将按多视角深度调研推进「{_TOPIC}」。"),
@@ -288,13 +285,4 @@ def _multi_agent_multi_lens_research() -> list[SSEEvent]:
             "若你同意，可开一场正反辩论；本回合我不会直接开辩，请你拍板。"
         ),
         message_end(FinishReason.END_TURN, input_tokens=9200, output_tokens=1600, cost=_COST),
-        followups_generated(
-            [
-                open_chip,
-                "把四路调研要点整理成一页决策纪要",
-                "先补核代言合同全文与库存数字",
-            ],
-            conversation_id=_CONV,
-            message_id="m1",
-        ),
     ]

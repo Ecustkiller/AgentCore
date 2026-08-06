@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import {
+  type AddRootResult,
   FS_CHANNELS,
   type FsResult,
   type FsRoot,
   type FsWriteInput,
   type FsWriteResult,
+  type GrantSessionWellKnown,
   type WorkspaceOpName,
 } from "@shared/ipc-contract";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
@@ -18,6 +20,7 @@ import {
   requiresOpenConfirm,
 } from "./execGate";
 import { coerceIpcBytes } from "./ipcBytes";
+import { matchTargetName } from "./matchTargetName";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import {
   clearSessionRoots,
@@ -60,6 +63,150 @@ function parseStageDest(p: unknown): StageDest | undefined {
   };
 }
 
+const WELL_KNOWN_PATHS = new Set<GrantSessionWellKnown>([
+  "desktop",
+  "downloads",
+  "documents",
+]);
+
+function parseWellKnown(p: unknown): GrantSessionWellKnown | undefined {
+  if (!isRecord(p) || typeof p.wellKnown !== "string") return undefined;
+  return WELL_KNOWN_PATHS.has(p.wellKnown as GrantSessionWellKnown)
+    ? (p.wellKnown as GrantSessionWellKnown)
+    : undefined;
+}
+
+function parseTargetName(p: unknown): string | undefined {
+  if (!isRecord(p) || typeof p.targetName !== "string") return undefined;
+  const trimmed = p.targetName.trim();
+  return trimmed || undefined;
+}
+
+async function realpathOrSelf(absPath: string): Promise<string> {
+  try {
+    return await fs.realpath(absPath);
+  } catch {
+    return absPath;
+  }
+}
+
+/** Folder picker; optional `defaultPath` (never returned to renderer). */
+async function pickOpenDirectory(defaultPath?: string): Promise<string | null> {
+  const win =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const opts: Electron.OpenDialogOptions = {
+    properties: ["openDirectory"],
+    ...(defaultPath ? { defaultPath } : {}),
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, opts)
+    : await dialog.showOpenDialog(opts);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return realpathOrSelf(result.filePaths[0]);
+}
+
+/**
+ * Given an absolute path, create or upgrade a conversation-scoped session root.
+ * Returns FsRoot (id/name/alias/mode only — never absPath).
+ */
+async function createOrUpgradeSessionRoot(
+  conversationId: string,
+  absPathIn: string,
+  mode: "readonly" | "organize",
+): Promise<FsRoot> {
+  const absPath = await realpathOrSelf(absPathIn);
+  const name = basename(absPath) || absPath;
+  const aliasBase =
+    name.replace(/[^\w.-]+/g, "_").replace(/^[^A-Za-z]/, "d_") || "folder";
+  const taken = new Set(
+    listSessionRoots(conversationId)
+      .map((r) => r.alias)
+      .filter(Boolean) as string[],
+  );
+  let alias = aliasBase.slice(0, 64);
+  let n = 2;
+  while (taken.has(alias)) {
+    alias = `${aliasBase.slice(0, 60)}_${n}`;
+    n += 1;
+  }
+
+  // Same abs path: upgrade/downgrade mode (re-auth card already shown by client).
+  const same = listSessionRoots(conversationId).find(
+    (r) => r.absPath === absPath,
+  );
+  if (same) {
+    setRoot({
+      ...same,
+      mode,
+    });
+    await saveSessionGrants();
+    return {
+      id: same.id,
+      name: same.name,
+      alias: same.alias,
+      mode,
+      sessionOnly: true,
+    };
+  }
+
+  const id = randomUUID();
+  setRoot({
+    id,
+    name,
+    absPath,
+    sessionOnly: true,
+    conversationId,
+    mode,
+    alias,
+  });
+  await saveSessionGrants();
+  return {
+    id,
+    name,
+    alias,
+    mode,
+    sessionOnly: true,
+  };
+}
+
+/** Resolve grant target from wellKnown (+ optional targetName) or blank picker. */
+async function resolveGrantAbsPath(
+  wellKnown: GrantSessionWellKnown | undefined,
+  targetName: string | undefined,
+): Promise<string | null> {
+  if (!wellKnown) {
+    return pickOpenDirectory();
+  }
+
+  let wellKnownAbs: string;
+  try {
+    wellKnownAbs = await realpathOrSelf(app.getPath(wellKnown));
+  } catch {
+    return pickOpenDirectory();
+  }
+
+  if (!targetName) {
+    // Direct-grant the well-known root; no picker.
+    return wellKnownAbs;
+  }
+
+  // One-level match under wellKnown; unresolved → picker with defaultPath.
+  try {
+    const dirents = await fs.readdir(wellKnownAbs, { withFileTypes: true });
+    const entries = dirents.map((d) => ({
+      name: d.name,
+      isDirectory: d.isDirectory(),
+    }));
+    const matched = matchTargetName(entries, targetName);
+    if (matched?.isDirectory) {
+      return realpathOrSelf(join(wellKnownAbs, matched.name));
+    }
+  } catch {
+    // readdir failed — still offer picker at wellKnown
+  }
+  return pickOpenDirectory(wellKnownAbs);
+}
+
 // IPC-004（第五轮 IPC 权限面审计）：边界结构校验失败时回给 renderer 的统一信封。畸形入参
 // 仅可能来自被攻破的 renderer——正常 renderer 由共享 TS 契约保证形状。各句柄按其契约回应：
 // 判别式 `FsResult`/`FsWriteResult` 句柄返回 `{ok:false}`，workspaceOp 返回 `opErr`。
@@ -79,31 +226,51 @@ const invalidWriteResult = (): FsWriteResult => ({
 export function registerFsIpc(): void {
   initRoots();
 
-  ipcMain.handle(FS_CHANNELS.addRoot, async (): Promise<FsRoot | null> => {
+  ipcMain.handle(FS_CHANNELS.addRoot, async (): Promise<AddRootResult> => {
     await ensureReady();
     const win =
       BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    const result = win
-      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
-    if (result.canceled || result.filePaths.length === 0) return null;
+    let result: Electron.OpenDialogReturnValue;
+    try {
+      result = win
+        ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
+        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    } catch (e) {
+      return {
+        ok: false,
+        reason: "dialog_failed",
+        message:
+          e instanceof Error && e.message.trim()
+            ? e.message
+            : "系统未能打开文件夹选择器",
+      };
+    }
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, reason: "cancelled" };
+    }
 
     let absPath: string;
     try {
       absPath = await fs.realpath(result.filePaths[0]);
+      await fs.access(absPath);
     } catch {
-      absPath = result.filePaths[0];
+      return {
+        ok: false,
+        reason: "unauthorized",
+        message: "所选目录无法访问，未能完成本机授权",
+      };
     }
 
     const existing = findRootByAbsPath(absPath);
-    if (existing && !existing.sessionOnly)
-      return { id: existing.id, name: existing.name };
+    if (existing && !existing.sessionOnly) {
+      return { ok: true, root: { id: existing.id, name: existing.name } };
+    }
 
     const id = randomUUID();
     const name = basename(absPath) || absPath;
     setRoot({ id, name, absPath });
     await saveRoots();
-    return { id, name };
+    return { ok: true, root: { id, name } };
   });
 
   // 桌面默认本地容器根（双模式工作区 §八.7）：显式「本机草稿」裸聊与本地项目创建
@@ -191,6 +358,8 @@ export function registerFsIpc(): void {
 
   // W3/P1: conversation-scoped root (readonly | organize) — persisted to
   // fs-session-grants.json (not permanent fs-roots.json).
+  // Optional wellKnown / targetName: direct-grant or resolve under well-known;
+  // abs paths never returned to renderer.
   ipcMain.handle(
     FS_CHANNELS.grantSessionReadonlyRoot,
     async (_e, p: unknown): Promise<FsRoot | null> => {
@@ -202,77 +371,13 @@ export function registerFsIpc(): void {
           : "readonly";
       const mode: "readonly" | "organize" =
         modeRaw === "organize" ? "organize" : "readonly";
+      const wellKnown = parseWellKnown(p);
+      const targetName = parseTargetName(p);
       await ensureReady();
-      const win =
-        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-      const result = win
-        ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
-      if (result.canceled || result.filePaths.length === 0) return null;
 
-      let absPath: string;
-      try {
-        absPath = await fs.realpath(result.filePaths[0]);
-      } catch {
-        absPath = result.filePaths[0];
-      }
-
-      const name = basename(absPath) || absPath;
-      const aliasBase =
-        name.replace(/[^\w.-]+/g, "_").replace(/^[^A-Za-z]/, "d_") || "folder";
-      const taken = new Set(
-        listSessionRoots(args.conversationId)
-          .map((r) => r.alias)
-          .filter(Boolean) as string[],
-      );
-      let alias = aliasBase.slice(0, 64);
-      let n = 2;
-      while (taken.has(alias)) {
-        alias = `${aliasBase.slice(0, 60)}_${n}`;
-        n += 1;
-      }
-
-      // Same abs path: upgrade/downgrade mode (re-auth card already shown by client).
-      const same = listSessionRoots(args.conversationId).find(
-        (r) => r.absPath === absPath,
-      );
-      if (same) {
-        setRoot({
-          ...same,
-          mode,
-          readonly: mode === "readonly",
-        });
-        await saveSessionGrants();
-        return {
-          id: same.id,
-          name: same.name,
-          alias: same.alias,
-          mode,
-          readonly: mode === "readonly",
-          sessionOnly: true,
-        };
-      }
-
-      const id = randomUUID();
-      setRoot({
-        id,
-        name,
-        absPath,
-        sessionOnly: true,
-        conversationId: args.conversationId,
-        mode,
-        readonly: mode === "readonly",
-        alias,
-      });
-      await saveSessionGrants();
-      return {
-        id,
-        name,
-        alias,
-        mode,
-        readonly: mode === "readonly",
-        sessionOnly: true,
-      };
+      const absPath = await resolveGrantAbsPath(wellKnown, targetName);
+      if (!absPath) return null;
+      return createOrUpgradeSessionRoot(args.conversationId, absPath, mode);
     },
   );
 
@@ -286,8 +391,7 @@ export function registerFsIpc(): void {
         id: r.id,
         name: r.name,
         alias: r.alias,
-        mode: r.mode ?? (r.readonly ? "readonly" : undefined),
-        readonly: r.readonly ?? r.mode === "readonly",
+        mode: r.mode === "organize" ? "organize" : "readonly",
         sessionOnly: true,
       }));
     },

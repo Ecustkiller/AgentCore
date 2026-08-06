@@ -23,12 +23,15 @@ import {
   SharedSpaceSection,
 } from "@/components/files/sharedSpaces/SharedSpaceSection";
 import { SearchField } from "@/components/ui";
-import { useConversations } from "@/hooks/useConversations";
+import { getConversations, useConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import { useSharedSpaces } from "@/hooks/useSharedSpaces";
 import type { FileSource } from "@/lib/fileSource";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
+import { queryClient } from "@/lib/queryClient";
+import { workspaceKeys } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
+import { bareConversationScratchSubpath } from "@/services/bareScratchPath";
 import {
   type SharedSpaceSummary,
   canWriteSharedSpace,
@@ -48,6 +51,7 @@ import {
   resolveWorkspaceSource,
 } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
+import { useConversationStore } from "@/stores/conversation";
 import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -182,12 +186,43 @@ export function FileWorkbench({
     [sharedQuery.data],
   );
   const conversations = useConversations();
-
-  /** Project + bare scratch only — `shared:` rows come from {@link useSharedSpaces}. */
-  const personalWorkspaces = useMemo(
-    () => workspaces.filter((w) => !w.wsId.startsWith("shared:")),
-    [workspaces],
+  const currentConversationId = useConversationStore(
+    (s) => s.currentConversationId,
   );
+
+  // AI 写入后服务端列表可能仍 stale（30s）——进中枢即拉新，避免「改动」有、左侧无。
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
+  }, []);
+
+  /** Project + bare scratch only — `shared:` rows come from {@link useSharedSpaces}.
+   * If the active bare chat already produced files but `/v1/workspaces` has not
+   * listed `conv:<id>` yet, synthesize a rail row so the tree is reachable. */
+  const personalWorkspaces = useMemo(() => {
+    const base = workspaces.filter((w) => !w.wsId.startsWith("shared:"));
+    if (!currentConversationId) return base;
+    const wsId = `conv:${currentConversationId}`;
+    if (base.some((w) => w.wsId === wsId)) return base;
+    const conv =
+      conversations.find((c) => c.id === currentConversationId) ??
+      getConversations().find((c) => c.id === currentConversationId) ??
+      null;
+    if (!conv || conv.folderId) return base;
+    const rootId = conv.localRootId || conv.localContainerRootId || null;
+    const local = !!rootId;
+    const synthetic: WorkspaceInfo = {
+      wsId,
+      name: conv.title || "未命名对话",
+      location: local ? "local" : "cloud",
+      rootId,
+      subpath:
+        local && rootId && rootId === conv.localContainerRootId
+          ? bareConversationScratchSubpath(currentConversationId)
+          : "",
+      hasFiles: true,
+    };
+    return [synthetic, ...base];
+  }, [workspaces, currentConversationId, conversations]);
 
   const toggleWs = useCallback((wsId: string) => {
     setExpandedWs((prev) => {

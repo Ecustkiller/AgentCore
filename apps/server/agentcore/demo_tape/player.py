@@ -240,22 +240,12 @@ def _result_from_sink(
 def _attach_turn_followups(
     result: dict[str, Any], act: dict[str, Any]
 ) -> dict[str, Any]:
-    """On END_TURN, surface this act's ``followups`` on the pipeline result.
+    """No-op: CEO→user followups chips are offline (stage_card is the open-debate path).
 
-    Player itself never emits ``followups_generated`` — cloud ``persist_turn_result``
-    uses this list to set_followups + emit with the *current* turn message_id.
-    Paused / cancelled results are left unchanged. Multi-act: each act carries its
-    own chips (aligned with stock ``meta.followups`` for single-act tapes).
+    Older tapes may still carry ``act.followups`` / ``meta.followups``; they are ignored
+    on replay so persist never set_followups / emit ``followups_generated``.
     """
-    if result.get("finish_reason") is not FinishReason.END_TURN:
-        return result
-    raw = act.get("followups")
-    if not isinstance(raw, list) or not raw:
-        return result
-    followups = [str(x) for x in raw if str(x).strip()]
-    if not followups:
-        return result
-    result["followups"] = followups
+    del act  # legacy tape field ignored
     return result
 
 

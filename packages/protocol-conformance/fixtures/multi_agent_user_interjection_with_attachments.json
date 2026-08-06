@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_user_interjection_with_attachments",
-  "description": "协调带附件插话：user_interjection(delivered) 携带 attachments 元数据 → userInterjections",
+  "description": "协调带附件插话：user_interjection(received) 携带 attachments 元数据 → userInterjections",
   "events": [
     {
       "type": "message_start",

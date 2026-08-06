@@ -170,7 +170,7 @@ async def ensure_standing_task_template(
         if body.cron is None and body.schedule_preset is None:
             cron = resolve_cron(cron=catalog.default_cron)
         else:
-            cron = resolve_cron(cron=body.cron, preset=body.schedule_preset)
+            cron = resolve_cron(cron=body.cron, schedule_preset=body.schedule_preset)
         next_at = next_run_after(cron, datetime.now(UTC))
     except CronError as e:
         raise ValidationError(str(e)) from e
@@ -245,7 +245,7 @@ async def create_standing_task(
         )
 
     try:
-        cron = resolve_cron(cron=body.cron, preset=body.schedule_preset)
+        cron = resolve_cron(cron=body.cron, schedule_preset=body.schedule_preset)
         next_at = next_run_after(cron, datetime.now(UTC))
     except CronError as e:
         raise ValidationError(str(e)) from e
@@ -358,11 +358,11 @@ async def update_standing_task(
                 }
             )
         else:
-            # Switch webhook → schedule: wipe webhook; require cron/preset.
-            if "cron" not in fields and "schedule_preset" not in fields and "preset" not in fields:
+            # Switch webhook → schedule: wipe webhook; require cron/schedule_preset.
+            if "cron" not in fields and "schedule_preset" not in fields:
                 raise ValidationError("切换到定时触发时须提供 schedule_preset 或 cron")
             try:
-                cron = resolve_cron(cron=body.cron, preset=body.schedule_preset)
+                cron = resolve_cron(cron=body.cron, schedule_preset=body.schedule_preset)
                 next_at = next_run_after(cron, datetime.now(UTC))
             except CronError as e:
                 raise ValidationError(str(e)) from e
@@ -376,16 +376,16 @@ async def update_standing_task(
                 }
             )
     elif target_kind == "schedule" and (
-        "cron" in fields or "schedule_preset" in fields or "preset" in fields
+        "cron" in fields or "schedule_preset" in fields
     ):
         try:
-            cron = resolve_cron(cron=body.cron, preset=body.schedule_preset)
+            cron = resolve_cron(cron=body.cron, schedule_preset=body.schedule_preset)
             kwargs["cron"] = cron
             kwargs["next_run_at"] = next_run_after(cron, datetime.now(UTC))
         except CronError as e:
             raise ValidationError(str(e)) from e
     elif target_kind == "webhook" and (
-        "cron" in fields or "schedule_preset" in fields or "preset" in fields
+        "cron" in fields or "schedule_preset" in fields
     ):
         raise ValidationError("webhook 任务不可设置 cron / schedule_preset")
 

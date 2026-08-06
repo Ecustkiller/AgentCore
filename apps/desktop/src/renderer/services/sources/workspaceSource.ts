@@ -92,12 +92,35 @@ interface CloudFileClient {
   listFileIndex?(): Promise<string[]>;
 }
 
+function toFileNodes(files: WorkspaceFile[]): FileNode[] {
+  return files.map((f) => ({
+    path: f.path,
+    name: baseName(f.path),
+    isDir: f.isDir,
+  }));
+}
+
+/** Direct children of `dir` from a flat listing (root when `dir` is ""). */
+function oneLevelFrom(all: FileNode[], dir: string): FileNode[] {
+  const prefix = dir ? `${dir}/` : "";
+  return all.filter((n) => {
+    if (!n.path.startsWith(prefix)) return false;
+    const rest = n.path.slice(prefix.length);
+    return rest.length > 0 && !rest.includes("/");
+  });
+}
+
 /**
- * Build a cloud {@link FileSource} over a {@link CloudFileClient}. The server lists
- * recursively in one call, so `listTree` is the natural primitive and `listDir`
- * derives one level from it. Shared by both cloud factories below so the hub
- * (ws id) and chat panel (conversation id) stay byte-for-byte identical on
- * everything but addressing.
+ * Build a cloud {@link FileSource} over a {@link CloudFileClient}. Shared by both
+ * cloud factories so the hub (ws id) and chat panel (conversation id) stay
+ * byte-for-byte identical on everything but addressing.
+ *
+ * Listing strategy (fc35aece): do **not** eager-`listTree` via recursive REST.
+ * Server recursive list is hard-capped (~100, alphabetical); a large `site/` tree
+ * can push root-level AI zips/media out of the budget so the file panel looks
+ * empty while「改动」still sees the paths. Root uses non-recursive list; subdirs
+ * best-effort filter a recursive call (same cap). Omit `listTree` so {@link
+ * FileTree} stays lazy and always hits the root non-recursive path first.
  */
 function makeCloudSource(
   key: string,
@@ -105,13 +128,11 @@ function makeCloudSource(
   client: CloudFileClient,
   caps: typeof CLOUD_CAPS | typeof CLOUD_READONLY_CAPS = CLOUD_CAPS,
 ): FileSource {
-  const listTree = async (): Promise<FileNode[]> => {
-    const files = await client.listFiles(true);
-    return files.map((f) => ({
-      path: f.path,
-      name: baseName(f.path),
-      isDir: f.isDir,
-    }));
+  const listDir = async (dir: string): Promise<FileNode[]> => {
+    if (!dir) {
+      return toFileNodes(await client.listFiles(false));
+    }
+    return oneLevelFrom(toFileNodes(await client.listFiles(true)), dir);
   };
 
   const fileIndex = client.listFileIndex;
@@ -119,8 +140,7 @@ function makeCloudSource(
     id: `workspace:${key}`,
     label,
     caps,
-    listTree,
-    listDir: (dir) => oneLevel(listTree, dir),
+    listDir,
     // Feeds the @ index (文件中枢统一 F4) — flat, files-only, server-pruned/capped.
     ...(fileIndex ? { listFileIndex: fileIndex } : {}),
     read: (path) => client.read(path).then(adaptPreview),
@@ -227,21 +247,6 @@ export function createCloudWorkspaceSource(
     },
     readonly ? CLOUD_READONLY_CAPS : CLOUD_CAPS,
   );
-}
-
-/** Derive a single directory level from a source's recursive `listTree`
- * (cloud workspaces have no per-dir endpoint). Shared by both cloud sources. */
-async function oneLevel(
-  listTree: () => Promise<FileNode[]>,
-  dir: string,
-): Promise<FileNode[]> {
-  const all = await listTree();
-  const prefix = dir ? `${dir}/` : "";
-  return all.filter((n) => {
-    if (!n.path.startsWith(prefix)) return false;
-    const rest = n.path.slice(prefix.length);
-    return rest.length > 0 && !rest.includes("/");
-  });
 }
 
 /**

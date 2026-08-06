@@ -6,7 +6,9 @@
 import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { ASK_INTENT_META } from "@/components/chat/decision";
 import {
+  type LocalPickerFailureKind,
   formatBindLocalFolderAnswer,
+  isLocalPickerFailureKind,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -14,6 +16,7 @@ import {
   guideDesktopDownload,
   isDesktopFolderAction,
 } from "@/lib/desktopDownload";
+import { grantHintsFromAskOption } from "@/lib/grantFolderHints";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -32,8 +35,14 @@ import { AskCardFooter, AskCardShell, AskSectionLabel } from "./AskCardShell";
 import { CommenceNote } from "./AskCommenceParts";
 import { type AskRow, AskRowGroup } from "./AskOptionRow";
 import type { AskUserContent, useAskAnswer } from "./AskUserFields";
+import { LocalPickerFailureCard } from "./LocalPickerFailureCard";
 
 const META = ASK_INTENT_META.decision;
+
+type PickerFailureState = {
+  kind: LocalPickerFailureKind;
+  message?: string;
+};
 
 export function AskDecisionBody({
   content,
@@ -59,10 +68,27 @@ export function AskDecisionBody({
   const navigate = useNavigate();
   const [bindBusyLabel, setBindBusyLabel] = useState<string | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
+  const [pickerFailure, setPickerFailure] = useState<PickerFailureState | null>(
+    null,
+  );
   const [noteOpen, setNoteOpen] = useState(false);
 
   const canLocalFs = hasLocalFiles() && !!window.fsApi;
   const canBindAction = !!conversationId && !!onBindResolve && canLocalFs;
+
+  const clearPickerFeedback = () => {
+    setBindError(null);
+    setPickerFailure(null);
+  };
+
+  const applyPickerFailure = (reason: string, message?: string) => {
+    if (reason === "cancelled") return;
+    if (isLocalPickerFailureKind(reason)) {
+      setPickerFailure({ kind: reason, message });
+      return;
+    }
+    setBindError(message ?? "本机目录操作失败");
+  };
 
   /** 当前选中（含 default 预选）落在须本机履约的 option 上时返回之；Continue 不得退化成口头「已授权」。 */
   const findPendingFolderOption = (): {
@@ -87,13 +113,15 @@ export function AskDecisionBody({
     if (opt.action === "open_local_project") {
       if (!canLocalFs) return;
       setBindBusyLabel(opt.label);
-      setBindError(null);
-      const result = await pickAndOpenLocalProject(navigate);
+      clearPickerFeedback();
+      const result = await pickAndOpenLocalProject(navigate, {
+        notifyOnFailure: false,
+      });
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
-          setBindError("打开本地项目仅桌面端可用");
-        }
+        applyPickerFailure(
+          result.reason,
+          result.reason === "cancelled" ? undefined : result.message,
+        );
         setBindBusyLabel(null);
         return;
       }
@@ -104,10 +132,13 @@ export function AskDecisionBody({
 
     if (!conversationId || !onBindResolve) return;
     setBindBusyLabel(opt.label);
-    setBindError(null);
+    clearPickerFeedback();
 
     if (opt.action === "grant_readonly_folder") {
-      const result = await pickAndGrantReadonlyFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantReadonlyFolder(conversationId, hints)
+        : await pickAndGrantReadonlyFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {
@@ -133,7 +164,10 @@ export function AskDecisionBody({
     }
 
     if (opt.action === "grant_organize_folder") {
-      const result = await pickAndGrantOrganizeFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantOrganizeFolder(conversationId, hints)
+        : await pickAndGrantOrganizeFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {
@@ -159,7 +193,10 @@ export function AskDecisionBody({
 
     const result = await pickAndBindLocalFolder(conversationId);
     if (!result.ok) {
-      if (result.reason === "error") setBindError(result.message);
+      applyPickerFailure(
+        result.reason,
+        result.reason === "cancelled" ? undefined : result.message,
+      );
       setBindBusyLabel(null);
       return;
     }
@@ -187,16 +224,13 @@ export function AskDecisionBody({
     const { q, opt } = pending;
     if (!hasLocalFiles()) {
       setBindError(guideDesktopDownload());
+      setPickerFailure(null);
       return;
     }
     const canRunFolder =
       opt.action === "open_local_project" ? canLocalFs : canBindAction;
     if (!canRunFolder) {
-      setBindError(
-        opt.action === "open_local_project"
-          ? "打开本地项目仅桌面端可用"
-          : "本机目录授权仅桌面端可用",
-      );
+      applyPickerFailure("unavailable");
       return;
     }
     void handleBindOption(q, opt);
@@ -236,17 +270,14 @@ export function AskDecisionBody({
           // Web / 无本地文件：禁止退化成 toggleChoice（假确认）。
           if (!hasLocalFiles()) {
             setBindError(guideDesktopDownload());
+            setPickerFailure(null);
             return;
           }
           if (canRunFolder) {
             void handleBindOption(q, opt);
             return;
           }
-          setBindError(
-            opt.action === "open_local_project"
-              ? "打开本地项目仅桌面端可用"
-              : "本机目录授权仅桌面端可用",
-          );
+          applyPickerFailure("unavailable");
         },
       };
     });
@@ -343,6 +374,14 @@ export function AskDecisionBody({
           </div>
         ))}
 
+        {pickerFailure && (
+          <div className="px-2">
+            <LocalPickerFailureCard
+              kind={pickerFailure.kind}
+              message={pickerFailure.message}
+            />
+          </div>
+        )}
         {bindError && (
           <p className="px-2 text-xs text-destructive">{bindError}</p>
         )}

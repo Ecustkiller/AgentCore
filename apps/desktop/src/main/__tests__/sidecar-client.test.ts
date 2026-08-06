@@ -1,19 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-// sidecar-service imports electron (+ fs-service, which also imports electron) at
-// module load for IPC wiring it does not run here. Stub it so the transport-
-// decoupled SidecarClient can be exercised in isolation.
-vi.mock("electron", () => ({
-  app: { on: vi.fn(), getAppPath: () => "" },
-  ipcMain: { handle: vi.fn() },
-  BrowserWindow: { getAllWindows: () => [] },
-}));
-
-import {
-  SidecarClient,
-  SidecarRpcError,
-  type Transport,
-} from "../sidecar-service";
+import { SidecarClient, SidecarRpcError } from "../sidecar/client";
+import type { Transport } from "../sidecar/transport";
 
 /** A fake line transport: capture outbound lines, inject inbound ones, fake close. */
 function fakeTransport() {

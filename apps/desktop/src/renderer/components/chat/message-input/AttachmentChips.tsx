@@ -1,19 +1,53 @@
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { Folder, MessageSquare, Paperclip, X } from "lucide-react";
-import type { PendingAttachment } from "./composerAttachments";
+import { Folder, MessageSquare, Paperclip, Users, X } from "lucide-react";
+import type {
+  PendingAgentMention,
+  PendingAttachment,
+} from "./composerAttachments";
+
+const KIND_LABEL: Record<PendingAttachment["kind"], string> = {
+  file: "文件",
+  dir: "文件夹",
+  conversation: "对话",
+};
 
 export function AttachmentChips({
   attachments,
+  agentMentions = [],
   onRemove,
+  onRemoveAgent,
 }: {
   attachments: PendingAttachment[];
+  agentMentions?: PendingAgentMention[];
   onRemove: (id: string) => void;
+  onRemoveAgent?: (id: string) => void;
 }) {
-  if (attachments.length === 0) return null;
+  if (attachments.length === 0 && agentMentions.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+      {agentMentions.map((a) => (
+        <span
+          key={a.id}
+          className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
+        >
+          <Users size={12} className="shrink-0" />
+          <span className="shrink-0 text-muted-foreground">角色</span>
+          <SimpleTooltip label={a.role}>
+            <span className="truncate">{a.role}</span>
+          </SimpleTooltip>
+          {onRemoveAgent && (
+            <IconButton
+              onClick={() => onRemoveAgent(a.id)}
+              aria-label="移除角色点名"
+              className="size-5 shrink-0"
+            >
+              <X size={12} />
+            </IconButton>
+          )}
+        </span>
+      ))}
       {attachments.map((a) => (
         <span
           key={a.id}
@@ -26,6 +60,9 @@ export function AttachmentChips({
           ) : (
             <Paperclip size={12} className="shrink-0" />
           )}
+          <span className="shrink-0 text-muted-foreground">
+            {KIND_LABEL[a.kind]}
+          </span>
           <SimpleTooltip
             label={a.kind === "conversation" ? "引用对话" : a.path}
           >

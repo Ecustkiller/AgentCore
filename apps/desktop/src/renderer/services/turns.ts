@@ -12,6 +12,7 @@ export {
   attachOnOpen,
   markGhostInterrupted,
   settleCloudRunningAssistant,
+  settleOrphanEmptyAssistants,
 } from "./turns/recovery";
 export { runHydrateAttachSettle } from "./turns/hydrateAttachSettle";
 export { attachSidecarTurn } from "./turns/sidecarAttach";

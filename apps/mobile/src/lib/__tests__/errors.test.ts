@@ -162,6 +162,15 @@ describe("resolveEmptyFailureNotice (ChatPage gate)", () => {
       }),
     ).toBeNull();
   });
+
+  it("empty cancelled does not synthesize a failure notice", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "cancelled",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("degradedFinishChipLabel", () => {

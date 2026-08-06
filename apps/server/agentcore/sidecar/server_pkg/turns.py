@@ -274,12 +274,22 @@ class TurnExecutionMixin:
         """Seal the outbox record as ready for main-process writeback."""
         journal_entries = result.get("journal_entries")
         runs = runs_from_entries(journal_entries) if journal_entries else None
+        finish = _finish_str(result)
+        content = result.get("content") or ""
+        # Empty cancelled must not write a blank product face: keep finish_reason
+        # on runs so desktop syntheticErrorForEmptyFailure can paint the card.
+        # (Do not expand into closing_posture / server 收口.)
+        if finish == "cancelled" and not str(content).strip():
+            if runs is None:
+                runs = {"events": [], "finish_reason": "cancelled"}
+            elif isinstance(runs, dict) and not runs.get("finish_reason"):
+                runs = {**runs, "finish_reason": "cancelled"}
         await outbox.finalize(
             mode="local",
             conversation_id=conversation_id,
             user_message=user_message,
             user_message_id=user_message_id,
-            assistant_content=result.get("content") or "",
+            assistant_content=content,
             assistant_reasoning=result.get("reasoning_content"),
             citations=result.get("citations") or [],
             runs=runs,
@@ -293,7 +303,7 @@ class TurnExecutionMixin:
             cache_miss_tokens=int(result.get("cache_miss_tokens", 0) or 0),
             rounds=int(result.get("rounds", 0) or 0),
             trace_id=trace_id,
-            finish_reason=_finish_str(result),
+            finish_reason=finish,
         )
 
     async def _run_resume(

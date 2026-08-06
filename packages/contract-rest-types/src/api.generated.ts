@@ -5963,6 +5963,19 @@ export interface components {
             usage: components["schemas"]["UsageBreakdown"];
         };
         /**
+         * AgentMention
+         * @description Conversation-page soft Agent mention (not IM ``mentions``, not attachment kind).
+         *
+         *     Soft prompt only: CEO/worker system prompt may note the named Agent; does **not**
+         *     force delegate / hard-route.
+         */
+        AgentMention: {
+            /** Agent Id */
+            agent_id: string;
+            /** Role */
+            role: string;
+        };
+        /**
          * AnnounceRequest
          * @description Post an admin announcement into a chat as a centered system_card (官方公告).
          */
@@ -7169,8 +7182,6 @@ export interface components {
             /** Name */
             name: string;
             permission_axes?: components["schemas"]["PermissionAxesModel"] | null;
-            /** Preset */
-            preset?: string | null;
             /** Schedule Preset */
             schedule_preset?: string | null;
             /**
@@ -9338,8 +9349,8 @@ export interface components {
          * RecordTurnResponse
          * @description The persisted ids for a recorded local turn (the desktop reconciles its
          *     optimistic user/assistant bubbles against these; ``title`` is set only when this
-         *     turn minted the conversation's first title; ``followups`` mirrors the live
-         *     ``followups_generated`` chips when this turn minted them).
+         *     turn minted the conversation's first title; ``followups`` is always null on new
+         *     turns — chips mint is offline; historical rows may still carry the column).
          *
          *     ``noop=True`` means the server intentionally skipped an assistant row (empty
          *     body + no process state). Desktop may delete the outbox only when
@@ -9952,6 +9963,8 @@ export interface components {
         };
         /** SendMessageRequest */
         SendMessageRequest: {
+            /** Agent Mentions */
+            agent_mentions?: components["schemas"]["AgentMention"][];
             /** Attachments */
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
@@ -11256,8 +11269,6 @@ export interface components {
             /** Name */
             name?: string | null;
             permission_axes?: components["schemas"]["PermissionAxesModel"] | null;
-            /** Preset */
-            preset?: string | null;
             /** Schedule Preset */
             schedule_preset?: string | null;
             template_config?: components["schemas"]["StandingTaskTemplateConfig"] | null;

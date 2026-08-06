@@ -730,9 +730,8 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
             "content": "done",
             "finish_reason": FinishReason.END_TURN,
             "rounds": 1,
-            # Tape path skips LLM followup mint so the test stays hermetic.
-            "followups": ["next"],
         },
+
         conversation_id="c-folder",
         user_id="u1",
         folder_id="folder-42",
@@ -804,11 +803,6 @@ async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
-    )
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -901,11 +895,6 @@ async def test_finalize_local_synthesizes_error_when_missing(monkeypatch):
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
-    )
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -994,11 +983,6 @@ async def test_finalize_local_merges_error_into_incomplete_progressive_journal(
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
-    )
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -1100,11 +1084,6 @@ async def test_finalize_local_keeps_existing_partial_on_empty_error(monkeypatch)
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
-    )
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -1278,7 +1257,7 @@ async def test_finalize_local_fills_journal_via_persist(monkeypatch):
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
-    async def _run_bg(user_id, *, purpose="followups", runner):
+    async def _run_bg(user_id, *, purpose="title", runner):
         from agentcore.billing.gate import BackgroundLlmResult
         from agentcore.llm.credentials import LLMCredentials
 
@@ -1293,10 +1272,9 @@ async def test_finalize_local_fills_journal_via_persist(monkeypatch):
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
     monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
+        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
+        AsyncMock(return_value=None),
     )
 
     result = await CloudStore().finalize(
@@ -1379,8 +1357,8 @@ async def test_finalize_local_persists_raw_journal_when_runs_missing(monkeypatch
     assert journal_calls[0]["entries"] == facts
 
 
-async def test_finalize_local_mints_followups(monkeypatch):
-    """Local finalize (non-skip_derived) persists followups like cloud (no SSE)."""
+async def test_finalize_local_does_not_mint_followups(monkeypatch):
+    """Local finalize never mints / persists followups chips (feature offline)."""
     followup_calls: list[dict] = []
 
     class MsgRepo:
@@ -1428,28 +1406,9 @@ async def test_finalize_local_mints_followups(monkeypatch):
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
-
-    async def _run_bg(user_id, *, purpose="followups", runner):
-        from agentcore.billing.gate import BackgroundLlmResult
-        from agentcore.llm.credentials import LLMCredentials
-
-        creds = LLMCredentials(
-            api_key="sk", base_url="https://x", default_model="m", source="platform"
-        )
-        value = await runner(creds)
-        return BackgroundLlmResult(value=value, credentials=creds)
-
-    monkeypatch.setattr(cloud_mod, "run_background_llm", _run_bg)
     monkeypatch.setattr(
-        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
-    )
-    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod,
-        "mint_followups",
-        AsyncMock(return_value=FollowupsMintResult(items=["下一步 A", "下一步 B"])),
+        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
+        AsyncMock(return_value=None),
     )
 
     result = await CloudStore().finalize(
@@ -1465,20 +1424,13 @@ async def test_finalize_local_mints_followups(monkeypatch):
         finish_reason=FinishReason.END_TURN.value,
     )
     assert result is not None
-    assert followup_calls == [
-        {
-            "message_id": "m1",
-            "conversation_id": "c1",
-            "followups": ["下一步 A", "下一步 B"],
-        }
-    ]
-    assert result["followups"] == ["下一步 A", "下一步 B"]
+    assert followup_calls == []
+    assert result["followups"] is None
 
 
-async def test_finalize_local_skips_followups_when_not_end_turn(monkeypatch):
-    """Positive gate: only end_turn + non-empty body mints; degraded/etc. do not."""
-    followup_calls: list[dict] = []
-    mint = AsyncMock(return_value=["不应出现"])
+async def test_finalize_local_skips_stage_when_not_end_turn(monkeypatch):
+    """Stage card (and former followups) only on end_turn + non-empty body."""
+    stage = AsyncMock(return_value="sc_1")
 
     class MsgRepo:
         def __init__(self, _s):
@@ -1496,14 +1448,8 @@ async def test_finalize_local_skips_followups_when_not_end_turn(monkeypatch):
         async def user_message_for_assistant(self, **_k):
             return None
 
-        async def set_followups(self, message_id, *, conversation_id, followups):
-            followup_calls.append(
-                {
-                    "message_id": message_id,
-                    "conversation_id": conversation_id,
-                    "followups": followups,
-                }
-            )
+        async def set_followups(self, *_a, **_k):
+            raise AssertionError("set_followups must not run")
 
     class ConvRepo:
         def __init__(self, _s):
@@ -1526,10 +1472,8 @@ async def test_finalize_local_skips_followups_when_not_end_turn(monkeypatch):
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
+        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion", stage
     )
-    monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    monkeypatch.setattr(cloud_mod, "mint_followups", mint)
 
     result = await CloudStore().finalize(
         mode="local",
@@ -1544,8 +1488,7 @@ async def test_finalize_local_skips_followups_when_not_end_turn(monkeypatch):
         finish_reason=FinishReason.DEGRADED.value,
     )
     assert result is not None
-    assert followup_calls == []
-    assert mint.await_count == 0
+    stage.assert_not_awaited()
     assert result["followups"] is None
 
 

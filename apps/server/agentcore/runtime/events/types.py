@@ -160,7 +160,6 @@ class EventType(StrEnum):
     # 庭前取证阶段（§二之二）：开赛后、首轮立论前；DURABLE 结构化 + 增量。
     DEBATE_PRETRIAL_STARTED = "debate_pretrial_started"
     DEBATE_PRETRIAL_ORDERS = "debate_pretrial_orders"
-    DEBATE_PRETRIAL_PROGRESS = "debate_pretrial_progress"
     DEBATE_PRETRIAL_COMPLETED = "debate_pretrial_completed"
     # 提问确认交互统一：热路 pending 交互失效（假卡消灭）。payload={interaction_id, kind}。
     INTERACTION_ORPHANED = "interaction_orphaned"

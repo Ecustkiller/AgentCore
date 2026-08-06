@@ -21,7 +21,13 @@ export function QueuedTurnsBar({
       className="flex flex-col gap-1 px-1 pb-1"
       data-testid="queued-turns-bar"
       aria-live="polite"
+      aria-label={`已排队 ${items.length} 条`}
     >
+      {items.length > 1 && (
+        <div className="px-2 text-xs text-muted-foreground">
+          已排队 {items.length} 条
+        </div>
+      )}
       {items.map((item) => (
         <QueuedTurnRow key={item.queueId} item={item} />
       ))}

@@ -64,12 +64,13 @@ PLAYBOOKS: dict[str, Playbook] = {
     "parallel_brief": Playbook(
         name="parallel_brief",
         summary=(
-            "【对齐推进·默认多角协作】N 路并行摸底→方向笔记落盘→交回 CEO 对话综述；"
-            "无提纲/撰稿/审校（一起弄懂/多路摸清默认；未明示成文勿升 research_report；"
-            "angles 宜少扇出常 2）"
+            "【对齐推进·A 摸清】一起弄懂/多路摸清/讨论对齐默认："
+            "N 路并行摸底→方向笔记落盘→交回 CEO 对话综述；无提纲/撰稿/审校"
+            "（未明示成文勿升 research_report；angles 宜少扇出常 2）"
         ),
         slots=(
             "topic(必填,主题) / angles(必填,≥2 个可并行摸底方向;宜少扇出常 2；"
+            "讨论对齐/摸清用本槽，勿当成长文大纲扇出；"
             "超过扇出上限时末尾自动折叠到最后一节点并标注、不丢弃)"
         ),
         build=parallel_brief,
@@ -77,15 +78,18 @@ PLAYBOOKS: dict[str, Playbook] = {
     "research_report": Playbook(
         name="research_report",
         summary=(
-            "【成文专线】仅用户明示要报告/论文/落盘成文时："
-            "调研→提纲→写作→审校（N 路并行调研，汇拢成纲再成文；"
-            "成篇验收钉死单一主文件 `.md`；要 PDF/可分享则 md→md_to_pdf→handoff，"
-            "禁 HTML 顶替/禁 reportlab 主路径）。一起弄懂/多路摸清/仅提论文开源当资料"
-            "请用 parallel_brief，勿一上来三路成文"
+            "【成文专线·B/重】仅用户明示成文且需正式长文/可提交"
+            "（或已确认要审校满编）时用：调研→提纲→写作→审校"
+            "（N 路并行调研汇拢成纲再成文；成篇验收钉死单一主文件 `.md`；"
+            "要 PDF/可分享则 md→md_to_pdf→handoff，禁 HTML 顶替/禁 reportlab 主路径）。"
+            "讨论/形态未定勿首派；普通构想勿默认学术审校；"
+            "一起弄懂/多路摸清/仅提论文开源当资料请用 parallel_brief"
         ),
         slots=(
-            "topic(必填,主题) / angles(可选,调研子方向数组,各派一名调研员;"
-            "明示成文后再扇出；超过扇出上限时末尾自动折叠到最后一节点并标注、不丢弃) / "
+            "topic(必填,正式长文/可提交主题;讨论或形态未定请先 parallel_brief) / "
+            "angles(可选,调研子方向数组,各派一名调研员;"
+            "仅明示成文且走本专线后再扇出；宜少；"
+            "超过扇出上限时末尾自动折叠到最后一节点并标注、不丢弃) / "
             "checkpoint(可选,成纲后写作前暂停过目,默认 true) / audience(可选,读者) / "
             "deliverable(可选,产出形态) / "
             "output_path(可选,成篇主文件路径,默认 AgentCore/文档/research/报告.md；验收只认此路径)"

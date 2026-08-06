@@ -387,6 +387,8 @@ describe("ResumePrompt · team_preview debate", () => {
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByPlaceholderText(/开赛嘱咐/)).toBeTruthy();
+    // cold Badge 与 hot DebateBody 共用 formatDebateBudgetLabel（含「上限」）
+    expect(screen.getByText("认真辩透 · 上限 5 轮")).toBeTruthy();
   });
 
   it("主按钮带嘱咐发 continue；辩论不附修正字段", () => {

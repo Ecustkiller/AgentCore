@@ -14,7 +14,7 @@ function mapExternalMounts(sessionRoots: StoredRoot[]) {
       rootId: r.id,
       label: r.name,
       absPath: r.absPath,
-      mode: r.mode ?? (r.readonly ? "readonly" : "readonly"),
+      mode: r.mode === "organize" ? "organize" : "readonly",
     }));
 }
 

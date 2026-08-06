@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_user_interjection_queued",
-  "description": "协调插话转排队：user_interjection delivered→queued（同 id 保最新）+ queue_user_message",
+  "description": "协调插话转排队：user_interjection received→queued（同 id 保最新）+ queue_user_message",
   "events": [
     {
       "type": "message_start",

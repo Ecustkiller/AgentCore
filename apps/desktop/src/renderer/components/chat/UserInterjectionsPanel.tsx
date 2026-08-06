@@ -7,7 +7,7 @@ import type { UserInterjection } from "@/stores/execution";
 
 /**
  * 团队块内插话追溯（S2：主叙事在主时间线 InterjectionTimeline；此处可折叠追溯）。
- * 四态文案与主时间线对齐；legacy delivered ≡ received。
+ * 四态文案与主时间线对齐。
  */
 export function UserInterjectionsPanel({
   items,

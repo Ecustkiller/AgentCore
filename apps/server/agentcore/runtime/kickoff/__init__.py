@@ -19,8 +19,6 @@ from agentcore.runtime.kickoff.gate import (
     needs_capability_auth,
     should_kickoff,
     should_preview_delegate_plan,
-    skip_after_confirmed_ask,
-    user_confirmed_kickoff_decisions,
 )
 from agentcore.runtime.kickoff.pause import await_kickoff, kickoff_tools
 from agentcore.runtime.kickoff.research_first import (
@@ -82,9 +80,7 @@ __all__ = [
     "should_offer_research_first",
     "should_preview_delegate_plan",
     "should_recommend_research_first",
-    "skip_after_confirmed_ask",
     "turn_keeps_stage_card",
-    "user_confirmed_kickoff_decisions",
     "validate_team_preview_veto",
     "validate_team_preview_veto_workers",
 ]

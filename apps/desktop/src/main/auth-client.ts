@@ -310,8 +310,8 @@ export async function bearerPostJson(
 /**
  * GET (or custom-method) with pure Bearer auth (no Cookie header); on 401, refresh
  * once and retry. Returns the **raw** {@link Response} (caller streams bytes + reads
- * headers) — used by the `preview://` protocol proxy to relay 会话工作区 file bytes
- * without ever exposing the access token to the renderer or the preview session.
+ * headers) — used by the `workspace://` protocol proxy to relay 会话工作区 file bytes
+ * without ever exposing the access token to the renderer or the workspace session.
  *
  * `credentials: "omit"` is REQUIRED (same reason as {@link bearerPostJson}): a
  * main-process net.fetch has no document origin, so Electron would coerce the default

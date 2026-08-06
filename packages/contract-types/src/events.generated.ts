@@ -199,10 +199,15 @@ export interface AskAssumption {
  * that project — never rewrites the current session's ``folder_id``;
  * `bind_local_folder` renders as a folder picker that binds the bare-chat scratch
  * workspace (``conversations/<id>``) for local execution — not 「打开项目」;
- * `grant_readonly_folder` renders as a folder picker that grants a session-scoped
- * read-only mount under ``external/<alias>/`` (W3; orthogonal to workspace binding —
- * cloud scratch + desktop online is enough; does not change binding);
+ * `grant_readonly_folder` grants a session-scoped read-only mount under
+ * ``external/<alias>/`` (W3; orthogonal to workspace binding — cloud scratch + desktop
+ * online is enough; does not change binding);
  * `grant_organize_folder` is the organize-mode counterpart (move/copy/mkdir/trash-delete).
+ * For ``grant_*`` only: optional ``well_known`` (``desktop`` / ``downloads`` /
+ * ``documents``) lets the desktop one-click a common folder — resolve when possible and
+ * grant directly; optional ``target_name`` (short basename fuzzy token, no path
+ * separators) narrows to a unique child under that folder before granting; ambiguity or
+ * absent ``well_known`` falls back to the native folder picker (may seed ``defaultPath``).
  * Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry organize_plan
  * items for plan-bound ``file_batch``. ``review_kind`` / ``body`` / ``slug`` / ``section``
  * carry daily_review proposals for server-side apply on confirm. */
@@ -211,6 +216,10 @@ export interface AskOption {
   detail?: string;
   recommended?: boolean;
   action?: "open_local_project" | "bind_local_folder" | "grant_readonly_folder" | "grant_organize_folder";
+  /** 仅 grant_*：常见目录一键提示；桌面可解析则直授，否则 picker 兜底。 */
+  well_known?: "desktop" | "downloads" | "documents";
+  /** 仅 grant_*：子目录/压缩包名模糊词（无路径分隔符）；有 well_known 时尽量直授唯一匹配。 */
+  target_name?: string;
   op?: "move" | "copy" | "delete" | "mkdir";
   source?: string;
   destination?: string;
@@ -795,13 +804,12 @@ export interface UserInterjectionAttachment {
 
 /** Mid-flight user message into a live coordination turn (CEO routes).
  * 
- * Lifecycle (S1): ``received`` → ``addressed`` / ``queued`` / ``failed``.
- * Legacy wire may still carry ``delivered`` (= ``received``); folds accept both. */
+ * Lifecycle (S1): ``received`` → ``addressed`` / ``queued`` / ``failed``. */
 export interface UserInterjectionPayload {
   interjection_id: string;
   execution_id: string;
   content: string;
-  status: "received" | "addressed" | "queued" | "failed" | "delivered";
+  status: "received" | "addressed" | "queued" | "failed";
   note?: string;
   attachments?: UserInterjectionAttachment[];
 }
@@ -1312,13 +1320,6 @@ export interface DebatePretrialOrdersPayload {
   incomplete?: boolean;
   /** External-evidence plan (mode=skip + reason/budget); production emits skip only. */
   external_evidence?: Record<string, unknown>;
-}
-
-/** 庭前台账计数增量（legacy；生产热路径不再发射）。 */
-export interface DebatePretrialProgressPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  evidence_ledger_count?: number;
 }
 
 export interface DebatePretrialCompletedPayload {
@@ -1849,7 +1850,6 @@ export type SSEPayloadMap = {
   debate_round: DebateRoundPayload;
   debate_pretrial_started: DebatePretrialStartedPayload;
   debate_pretrial_orders: DebatePretrialOrdersPayload;
-  debate_pretrial_progress: DebatePretrialProgressPayload;
   debate_pretrial_completed: DebatePretrialCompletedPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;

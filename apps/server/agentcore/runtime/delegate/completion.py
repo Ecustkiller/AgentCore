@@ -619,6 +619,24 @@ def _browser_navigate_failed_in_transcript(transcript: list[LLMMessage]) -> bool
             return True
     return False
 
+def _test_run_budget_exhausted_in_transcript(transcript: list[LLMMessage]) -> bool:
+    """True when a ``test_run`` result reports verify-budget incomplete (已中止)."""
+    if not transcript:
+        return False
+    calls = _tool_call_args_map(transcript)
+    for msg in transcript:
+        if msg.role != "tool" or not msg.tool_call_id:
+            continue
+        name, _ = calls.get(msg.tool_call_id, ("", ""))
+        if name != "test_run":
+            continue
+        content = msg.content or ""
+        if "预算耗尽" in content or "验证未完成" in content:
+            return True
+        if "未完成（预算耗尽）" in content:
+            return True
+    return False
+
 def _test_run_failed_in_transcript(transcript: list[LLMMessage]) -> bool:
     """True when a ``test_run`` was attempted and none succeeded (未过)."""
     if not transcript:
@@ -662,20 +680,51 @@ def _verify_shaped_command_failed_in_transcript(transcript: list[LLMMessage]) ->
         return False
     return not _terminal_verify_succeeded_in_transcript(transcript)
 
-def _verify_failure_descriptions(transcript: list[LLMMessage]) -> list[str]:
-    """Human one-liners for verify-shaped tool failures present in ``transcript``."""
-    out: list[str] = []
+_VERIFY_FAILED_REASON = "verify_failed"
+_VERIFY_BUDGET_REASON = "verify_budget"
+_VERIFY_BUDGET_GAP_DESC = (
+    "验证未完成（预算耗尽，进程已中止，非仍在跑）"
+)
+
+def _verify_failure_rows(transcript: list[LLMMessage]) -> list[dict[str, str]]:
+    """Structured verify-failure gap rows (description + reason) for one transcript."""
+    out: list[dict[str, str]] = []
     if _browser_navigate_failed_in_transcript(transcript):
-        out.append("浏览器验证失败（browser_navigate 未成功打开目标页）")
-    if _test_run_failed_in_transcript(transcript):
-        out.append("测试未通过（test_run 未全部通过）")
+        out.append(
+            {
+                "description": "浏览器验证失败（browser_navigate 未成功打开目标页）",
+                "reason": _VERIFY_FAILED_REASON,
+            }
+        )
+    if _test_run_budget_exhausted_in_transcript(transcript):
+        out.append(
+            {
+                "description": _VERIFY_BUDGET_GAP_DESC,
+                "reason": _VERIFY_BUDGET_REASON,
+            }
+        )
+    elif _test_run_failed_in_transcript(transcript):
+        out.append(
+            {
+                "description": "测试未通过（test_run 未全部通过）",
+                "reason": _VERIFY_FAILED_REASON,
+            }
+        )
     if _verify_shaped_command_failed_in_transcript(transcript):
         out.append(
-            "验证命令未通过（verify 形 code_execute / terminal 非零退出或执行失败）"
+            {
+                "description": (
+                    "验证命令未通过（verify 形 code_execute / terminal "
+                    "非零退出或执行失败）"
+                ),
+                "reason": _VERIFY_FAILED_REASON,
+            }
         )
     return out
 
-_VERIFY_FAILED_REASON = "verify_failed"
+def _verify_failure_descriptions(transcript: list[LLMMessage]) -> list[str]:
+    """Human one-liners for verify-shaped tool failures present in ``transcript``."""
+    return [row["description"] for row in _verify_failure_rows(transcript)]
 
 def collect_verify_failure_gaps(
     plan: RunPlan,
@@ -685,20 +734,18 @@ def collect_verify_failure_gaps(
 
     Scans worker transcripts for ``browser_navigate`` / ``test_run`` / verify-shaped
     ``code_execute``·``terminal`` failures. Each hit becomes a blocking gap row with
-    ``reason=verify_failed`` so ``build_delivery_status`` cannot stay ``delivered``.
+    ``reason=verify_failed`` (or ``verify_budget`` for budget-exhausted incomplete)
+    so ``build_delivery_status`` cannot stay ``delivered``.
     """
     out: list[tuple[str, list[dict[str, str]]]] = []
     for node in plan.nodes:
         state = results.get(node.run_id)
         if state is None or state.phase is not RunPhase.COMPLETED:
             continue
-        descriptions = _verify_failure_descriptions(state.transcript or [])
-        if not descriptions:
+        rows = _verify_failure_rows(state.transcript or [])
+        if not rows:
             continue
         label = node.role or node.run_id
-        rows = [
-            {"description": text, "reason": _VERIFY_FAILED_REASON} for text in descriptions
-        ]
         out.append((label, rows))
     return out
 

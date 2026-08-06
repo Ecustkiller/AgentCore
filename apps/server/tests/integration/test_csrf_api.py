@@ -3,8 +3,10 @@
 import pytest
 
 from agentcore.middleware.csrf import CSRF_HEADER
+from tests.integration.conftest import client_platform_headers
 
 _PW = "password123"
+_DESKTOP = client_platform_headers()
 
 
 @pytest.mark.csrf
@@ -16,6 +18,7 @@ async def test_login_issues_csrf_and_allows_mutating_request(client):
     login = await client.post(
         "/v1/auth/login",
         json={"username": "csrfint", "password": _PW},
+        headers=_DESKTOP,
     )
     assert login.status_code == 200
     csrf = login.headers.get(CSRF_HEADER)
@@ -39,7 +42,11 @@ async def test_me_reissues_csrf_for_resumed_session(client):
     )
     # Login establishes the access cookie in the client jar; we deliberately ignore
     # the CSRF header it returns to mimic a client that has none yet.
-    await client.post("/v1/auth/login", json={"username": "csrfme", "password": _PW})
+    await client.post(
+        "/v1/auth/login",
+        json={"username": "csrfme", "password": _PW},
+        headers=_DESKTOP,
+    )
 
     me = await client.get("/v1/auth/me")
     assert me.status_code == 200

@@ -2568,68 +2568,6 @@ dialog.run-detail::backdrop {
   color: var(--success);
 }
 
-/* 下一步推荐 (CEO→用户): one-tap quick-reply chips above the composer for a finished turn —
-   tapping fills the input (review/edit before send). Transport-only; retires on the next turn.
-   Mobile: single-row horizontal strip (nowrap + ellipsis) so 2–4 long chips don't eat the
-   viewport; full text still fills the composer on tap. */
-.followups {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 0 0;
-}
-
-.followups-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 16px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.followups-row {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  padding: 0 16px;
-}
-
-.followups-row::-webkit-scrollbar {
-  display: none;
-}
-
-.followups-empty {
-  padding: 0 16px;
-  font-size: 12px;
-}
-
-.followup-chip {
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  max-width: min(72vw, 18rem);
-  min-height: 32px;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg);
-  text-align: left;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.followup-chip:active:not(:disabled) {
-  background: var(--border);
-}
-
 /* 阶段推进卡（批 B）— 紧凑列表呈现；pending 进 interaction-sheet 时去重外盒 margin */
 .stage-card {
   margin: 8px 12px;
@@ -2923,6 +2861,29 @@ dialog.run-detail::backdrop {
   border-color: var(--accent);
 }
 
+.local-picker-failure-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+  border-radius: 12px;
+}
+
+.local-picker-failure-title {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.local-picker-failure-detail {
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--error) 90%, var(--fg));
+}
+
 .ask-chips {
   display: flex;
   flex-wrap: wrap;
@@ -3070,7 +3031,7 @@ dialog.run-detail::backdrop {
   border: 1px solid var(--border);
 }
 
-/* 生成中草稿旁：排队入口（对齐桌面 Ctrl+Enter，不占主行）。 */
+/* 生成中草稿旁：插队入口（对齐桌面 Ctrl+Enter，不占主行）。 */
 .composer-delivery-hint {
   display: flex;
   align-items: center;
@@ -3234,7 +3195,7 @@ dialog.run-detail::backdrop {
   animation: voice-rotate 0.9s linear infinite;
 }
 
-/* 录音态提示条：贴 composer 上方 (与 followups / attach-tray 同侧)，error 红强调「正在录音」。 */
+/* 录音态提示条：贴 composer 上方 (与 attach-tray 同侧)，error 红强调「正在录音」。 */
 .voice-bar {
   display: flex;
   flex-direction: column;

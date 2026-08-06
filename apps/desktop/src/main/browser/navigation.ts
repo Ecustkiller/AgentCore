@@ -1,12 +1,11 @@
 /**
- * LocalChromiumHost **顶级导航策略**（新模块 —— 禁止改 preview/navigation.lockPreviewNavigation）。
+ * LocalChromiumHost **顶级导航策略**。
  *
  * 两种页模式（L1b 分 partition，锁也分）：
  * - **web**：仅放行 `http:` / `https:` 与 `about:blank`；`window.open` 按 disposition
  *   分流（popup → 同 partition 子窗；target=_blank → 同壳新页签；危险 scheme deny）；
  * - **workspace**：仅放行 `workspace://` 与 `about:blank`；安全 http(s) 外链转
- *   `shell.openExternal`（与旧 preview 外链行为同形，**不经** lockPreviewNavigation）；
- *   其余拒；`window.open` 同规则。
+ *   `shell.openExternal`；其余拒；`window.open` 同规则。
  *
  * 下载默认拒绝（见 {@link attachLocalBrowserDownloadGuard}，L1）。
  * URL 判定纯函数见 navigation-policy.ts。

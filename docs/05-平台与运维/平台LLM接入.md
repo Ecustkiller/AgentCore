@@ -29,7 +29,7 @@ skip_if:
 `llm/resolve.py` 单点：
 
 - **主对话**：用户 key 优先；无 key 才 platform。
-- **后台档**（title/memory/compaction/followups）：**平台优先** + 必过 `enforce_quota`（防白嫖）；平台不可用（配置缺失 **或** 上游 auth 拒绝）才回落用户 BYOK。统一入口 `billing/gate.py::run_background_llm`（`resolve_and_gate_background` 解析 + 一次 auth→BYOK；耗尽 / 两边都失败 → `None`，不 429 主回合）。禁止调用点各自 try/except 拼回落、禁止进程内 auth 熔断缓存。
+- **后台档**（title/memory/compaction）：**平台优先** + 必过 `enforce_quota`（防白嫖）；平台不可用（配置缺失 **或** 上游 auth 拒绝）才回落用户 BYOK。统一入口 `billing/gate.py::run_background_llm`（`resolve_and_gate_background` 解析 + 一次 auth→BYOK；耗尽 / 两边都失败 → `None`，不 429 主回合）。禁止调用点各自 try/except 拼回落、禁止进程内 auth 熔断缓存。原 followups（「下一步」chips）已下线，不再走后台档。
 - **回合内鉴权死短路（甲+乙）**：同一用户回合首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）后，`llm/turn_auth_dead.py` 回合级死位短路后续未启动的 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
 - **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member` 按 Worker 槽重解析。
@@ -62,7 +62,7 @@ skip_if:
 | 工具调用 | 有 tool call 的回合必须原样回传 `reasoning_content`，否则 400 |
 | 其它 | 不支持强制 `tool_choice=required`（probe 遇 400 回退）；无 `developer` role |
 
-**思考开关按角色**：CEO / worker / 单聊 = on；后台 one-shot（title/memory/compaction/followups/file.rewrite）= disabled。无 per-agent 思考强度档。
+**思考开关按角色**：CEO / worker / 单聊 = on；后台 one-shot（title/memory/compaction/file.rewrite）= disabled。无 per-agent 思考强度档。
 
 ## 四·附、腾讯 Hy / TokenHub（BYOK 预设）
 

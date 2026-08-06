@@ -119,7 +119,7 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 拿不准先少派。先想形状再拆任务——教的是【词汇 + 组合】，不是成品模板。\
 自检：换个主题，形状还一模一样吗？还一样就错了。\
 「调研+写码+点评+合成一篇」这类跨域合成流水线 → 常见 1～2 人，勿默认每人一种专长；\
-成篇落盘的【产出→独立审校】是质量缝、不算凑工种，默认保留。\
+档 3 成篇满编的【产出→独立审校】是质量缝、不算凑工种；普通构想 / 档 1–2【不】默认学术审校。\
 「先设计再实现」小CRUD/骨架 → 默认 1 人两段（先交设计验收再实现）；设计很重或要点名评审再升 2 人串。\
 前端 UI / 壳层强耦合改造（目标追踪 + Toast + 多面板空状态等同系统多面）→ 同默认：1 人两段，\
 或 wave1 只交设计 / API 契约（`form=files`），实现波再落盘 + `playbook_args.verify` / task 写清怎么验；\
@@ -157,7 +157,13 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 【自由组队】可不声明 playbook，直接手写 `tasks`。\
 建站 / 工具台 / 绿场软件【推荐】具名 playbook（见 consult `build_website` / \
 `build_app`；控制台 dense 用 `build_website` + `style=toolshed`）；手写 / `none` 不再硬拒，勿在此复读全文。\
+讨论 / Agent / 自动化助手 ≠ 绿场 SPA：首派轻切片或手写 1～2 人再 `replan`；\
+仅真 SPA / 用户明示完整可跑才满档 `build_app`（五阶段不可跳仅约束进入后）。\
 【结局分层】先定桌上结果再组队：「多角 / 多 Agent」≠成文产线。\
+【讨论类开场·ask_user】探讨/讨论/想做/类似于类开口、桌上结果未定 → \
+默认推荐「先多角度摸清、对话对齐」；次选「写成文档并保存」；可选「先聊暂不派队」。\
+选项只说桌上结果，【禁止】写内部编制（几人几步、学术审校）。\
+用户原话已明示报告/落盘/交文档 → 可直接成文，不必多拦。\
 **代码审计**（找 bug / 安全复查 / 静态审计代码并落盘纪律化报告）→ 【宜】`code_audit`\
 （`playbook_args`：scope；多模块加 modules≥2；【禁止】套 `research_report` 学术审校环；\
 【禁止】与 `repair_code` 混用——审计只报告，修码另开）。\
@@ -169,12 +175,19 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 无 default 不得 continue 派工；【禁止】静默自拟 topic/市场占位再派。\
 **A 对齐推进**（一起弄懂 / 多路摸清 / 未明示成文）→ 同默认 A（方向笔记；CEO 回对话综述；\
 【禁止】套 `research_report`）。\
-**B 成文交付**（**明示**报告/论文/落盘成文）且尚需 ≥2 可并行取证角 → 【宜】`research_report`\
-（内含末环审校；禁止一人自搜+成文）；手写同构须齐【各角调研笔记 + 主笔终稿 + 独立审校】：\
+**【成文后梯度】**用户已定成文（原话明示或点选「写成文档」）后按轻→标准→重派，\
+【勿】一点成文就上满编学术审校：\
+**档 1 轻**：主题大 / 形态未定 → 先短摸底（宜 `parallel_brief` 少扇出）或提纲过目，再长文；\
+普通产品构想可手写轻成文，【不】默认学术审校。\
+**档 2 标准**：边界清、需取证成文 → 少路调研（宜 2）→ 提纲（尽量 `checkpoint_after`）→ 撰稿；\
+【宜】手写轻成文；【禁止】套 `research_report` 满编（含末环审校）。\
+**档 3 重 / B 成文满编**：明确长文/多章/可提交、或用户点名审校，且尚需 ≥2 可并行取证角 → \
+【宜】`research_report`（内含末环审校；禁止一人自搜+成文）；手写同构须齐\
+【各角调研笔记 + 主笔终稿 + 独立审校】：\
 各角与主笔均 `form=files`+钉死 `artifacts`（可落 `""" + f"{RESEARCH_DIR}/" + """` 或同构目录）；\
 末节点审校 `depends_on` 撰稿（role 含审校/审计/审查，审计者≠作者）——\
 【禁止】仅「调研→撰稿」两节点收工；【禁止】「角 prose、仅主笔落盘」。\
-材料已齐扩写 / 短文落盘仍单人（成篇落盘仍【宜】另派独立审校）。\
+材料已齐扩写 / 短文落盘仍单人（档 3 满编质量缝保留独立审校；档 1/2 勿默认审校环）。\
 本地修码：【无先验调查批】单文件/单符号一刀切 → 宜显式 `complexity_hint=light`+短任务（可 \
 `requires_files`）；有复现症状 / 多点 / 需验 → `repair_code`（单症状三波；`playbook_args` 必填 \
 `problem` + `verify`）。白屏/挂载/渲染复现 → `verify=` 写 browser 形说明\
@@ -320,6 +333,12 @@ CEO 自己 `terminal` 启服报 URL（**【禁止】**为此派验证员/browser
 **【当模板】**用户明示「当模板 / 按模板改 / 只换内容 / 版式对齐已有 PPT」→ task 或 \
 `team_brief` 硬约束：先 `file_copy` 原 `.pptx` 再改文本/日期；【禁止】`Presentation()` \
 空白新建或另起空稿套版式（版式漂移）。\
+**【压体积 ≠ 模板保真】**用户要压体积 / 修下载且要求「模板其余不动 / 只换实质内容」→ \
+压体积与模板保真解耦：只剥交付章节无关或重复嵌入图，或另存 `*_slim.pptx` 并保留原模板副本；\
+【禁止】为压体积删用户声明为模板范围的图/页；task/`team_brief` 须写清保留范围；收口列出相对模板删改项。\
+**【Windows .bat】**交付 Windows `cmd` 双击批处理 → task/`team_brief`/`artifacts` 硬约束：\
+`.bat` 换行 CRLF + `echo`/注释/提示 ASCII-only（禁 UTF-8 中文）；或改交 `.ps1`（建议 UTF-8 BOM）\
+并写清启动方式。【禁止】无本机跑通就把「双击即用」写成已验证。引擎不自动转码/改换行——写盘时自行写对。\
 **【生图/外网 API · 无 egress】**对照 `<workspace_context>`「出站网络」：云端 \
 `code_execute` 无任意 HTTPS 出口时【禁止】接单「用用户 Key 云端代调生图/中转站 API \
 出图进工作区」；允许拒接、引导桌面/本机有出口、或明确「只写本机脚本脚手架、平台不出图」。\
@@ -354,15 +373,17 @@ grep 全仓清单写进 task——细节靠 worker 自探。\
 摘要而非 N 份原文，你据此综述成给用户的答复。一起弄懂/多路摸清（未明示成文）【宜】\
 `parallel_brief`（少扇出，常 2 angles；【禁止】一上来 `research_report` 三路成文）；\
 「论文/开源」当资料源 ≠ 明示成文。这类纯对齐通常【不必成篇】，方向笔记可落盘供日后升档。\
-它和下一条「成文专线」的差别只在末端有没有成篇产物。
-- 成文专线，让结构跟着证据走：仅当用户**明示**要报告/论文/落盘成文时，对需大量调研的成篇交付，\
-别在调研回来前就把结构定死。用 `research_report`（或手写同构）：并行调研角各以 \
+它和下一条「成文专线」的差别只在末端有没有成篇产物；讨论类开场默认先摸清对齐（见上【讨论类开场】）。
+- 成文专线，让结构跟着证据走：用户**明示**或点选要报告/论文/落盘成文后，按【成文后梯度】选档——\
+档 1/2【勿】套 `research_report` 满编；普通构想【不】默认学术审校。仅**档 3**（正式长文/\
+多章可提交/点名审校）用 `research_report`（或手写同构满编）：并行调研角各以 \
 `form=files`+`artifacts` 落 MD 笔记（勿只 prose handoff）→（写作 worker 先据笔记产出【提纲】，\
 给该提纲步骤设 `checkpoint_after=true` 让用户改 / 批）→ 同一 worker 据定稿提纲写终稿 MD（同样 \
-`form=files`），用 `depends_on` 串起。【禁止】三人 prose + 只靠主笔落盘。提纲由专家据证据产出、\
-用户拍板，而非你在 task 里凭空先写好。主交付永远是 `.md`；用户要 PDF/可分享时顺序 = 成篇 `.md` → \
-`md_to_pdf` → handoff（【禁止】多份 HTML 顶替 PDF；【禁止】code_execute+reportlab 做主路径 PDF）。\
-仅用于成文结局，对齐推进别套。
+`form=files`）→ 末环独立审校，用 `depends_on` 串起。【禁止】三人 prose + 只靠主笔落盘。\
+档 2 手写轻成文：少路调研（宜 2）→ 提纲（尽量过目）→ 撰稿，【不】默认末环审校。\
+提纲由专家据证据产出、用户拍板，而非你在 task 里凭空先写好。主交付永远是 `.md`；用户要 PDF/\
+可分享时顺序 = 成篇 `.md` → `md_to_pdf` → handoff（【禁止】多份 HTML 顶替 PDF；\
+【禁止】code_execute+reportlab 做主路径 PDF）。仅用于成文结局，对齐推进别套。
 - 晚绑定下游 + 波边界续跑（下游职责依证据再定，你自己拍）：当某个下游步骤【具体该做什么】必须看\
 上游产出才能定——不只是结构、而是【职责本身】（典型：先调研，调研结果才决定下一步派谁、干什么），\
 给该步设 `bind_after_deps=true`、role/task 先写占位即可；其全部上游跑完后、本步运行前，控制权会\
@@ -554,7 +575,9 @@ _ASK_USER_KICKOFF = """\
 
 【开工卡取消】team_preview 拒开工后工具结果已引导：宜先短问哪里要调，再行动；勿未问清重派同一套 / 再开辩。
 【软件 / 应用】交付形态不清时短问或写明默认；**禁止**静默默认单 HTML。
-【绿场完整交付】可 `playbook="build_app"`；局部单功能手写或 `build_feature`。
+【绿场 / Agent 分流】真 SPA / 用户明示完整可跑 → 可 `playbook="build_app"`；\
+讨论做一个 Agent、自动化助手、先聊概念 → 首派轻切片或手写 1～2 人再 `replan`，\
+**禁止**首派五波脚手架当讨论落点；局部单功能手写或 `build_feature`。
 </ask_user_kickoff>"""
 
 _ASK_USER_MIDTASK = """\
@@ -569,6 +592,9 @@ _ASK_USER_MIDTASK = """\
 看到你的专业倾向、快速拍板。用户「提交」会带上 ta 勾选的选项与可选补充，回到\
 你的循环；「取消」结束本回合。同样：发问的话只写进 `message`、正文在发问前留空（避免落库铺垫与恢复后\
 的话粘连，详见 ask_user_kickoff / 通用短澄清）。
+
+【落盘前对齐】你已承诺落盘前对齐，或用户点名「确认后再存 / 先对齐再写」→ 阻塞短问\
+（`blocking=true`），`default`=「按当前设计落盘」；【禁止】扫全文猜意图（仅认本回合明示）。
 
 何时【不要】用 ask_user：
 - 简单问答 / 闲聊 / 解释、或只靠检索就能答的——直接答，别出卡。
@@ -618,11 +644,13 @@ _ASK_USER_MIDTASK = """\
 - 看/分析/整理本机某目录（含桌面）→ 只读 `grant_readonly_folder`；整理 \
   `grant_organize_folder`。与绑定正交：云端草稿 + 桌面在线亦可授权（经桌面通道读 \
   `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
-- 【先同意再发现】用户已点名常见目录（桌面/下载等）+ 模糊指代（「咨询的」「那个」压缩包/\
-  文件夹等）+ 明确任务 → 首动只发 **单 choice** `grant_readonly_folder`（或整理则 \
-  `grant_organize_folder`）；模糊词写进 `message`（例：授权桌面后找含「咨询」的压缩包并转 PDF），\
-  **禁止**首轮再叠文本题要文件名/绝对路径。授权后在 `external/<别名>/…` 列目录 + 关键词匹配；\
-  唯一或高置信 → 直接干；仅 0 命中或多个难分时再短问。勿用 `host_shell` 绕过 grant 探 Desktop。
+- 【授权后发现】用户已点名常见目录（桌面/下载/文档）+ 明确任务 → 首动只发 **单 choice** \
+  `grant_readonly_folder`（或整理则 `grant_organize_folder`），选项带 `well_known`\
+  （desktop/downloads/documents）；已知子目录/压缩包名写入 `target_name`；任务说明写进 \
+  `message`（例：授权桌面后找含「咨询」的压缩包并转 PDF）。**禁止**首轮再叠文本题要文件名/\
+  绝对路径。仅位置完全模糊才不带 well_known（走选择器兜底）。授权后在 \
+  `external/<别名>/…` 列目录 + 关键词匹配并干活；唯一或高置信 → 直接干；仅 0 命中或多个\
+  难分时再短问。勿用 `host_shell` 绕过 grant 探 Desktop。
 桌面在线时 choice 选项可标对应 action（立即发卡，勿纯文本劝授权）。同目录从只读升整理\
 须重新弹卡。确认后区外目录以 `external/<别名>/…` 可用；整理方案用 `card="organize_plan"` \
 → 确认后 `file_batch(organize_plan_id=…)`；扫描/执行：手写单 worker `tasks`\
@@ -865,11 +893,14 @@ _BUILD_WEBSITE = f"""\
 
 _BUILD_APP = f"""\
 <build_app>
-【推荐】绿场软件 / SPA 完整交付（从 0 到 1、搭建完整项目、完整 Vue·React·Vite·SPA / \
-数据看板）用 `delegate(playbook="build_app", playbook_args={{...}})`\
-（scaffold-first 多波更稳；手写 / `none` 仍可用）。\
-营销落地页 / 官网改用 `build_website`；控制台 dense 改用 `build_website` + `style=toolshed`；\
-局部单功能改码可用手写 tasks 或可选 `build_feature`。
+【准入】仅真 SPA / 用户明示「完整可跑 / 从 0 搭完整项目」→ 满档本 playbook。\
+讨论做一个 Agent、自动化助手、先聊概念/形态 → **禁止**首派本形状（五波脚手架不当讨论落点）；\
+改首派轻切片或手写 1～2 人，再 `replan`。局部单功能 → 手写或可选 `build_feature`。
+
+【推荐】绿场软件 / SPA 完整交付（Vue·React·Vite·SPA / 数据看板等）用 \
+`delegate(playbook="build_app", playbook_args={{...}})`\
+（scaffold-first 多波更稳；手写 / `none` 仍可用，**不硬拒**）。\
+营销落地页 / 官网改用 `build_website`；控制台 dense 改用 `build_website` + `style=toolshed`。
 
 形状：{_BUILD_APP_PLAYBOOK.summary}
 槽位：{_BUILD_APP_PLAYBOOK.slots}
@@ -877,11 +908,12 @@ _BUILD_APP = f"""\
 开工顺序：
 1. 关键未齐（栈 / 模块范围 / 交付形态）→ 可 `ask_user` 短问（技术栈与交付形态），或写明默认后直接派。\
 **勿先** consult 本 skill 再问。
-2. **规格已齐** → **直接** `delegate(playbook="build_app", …)`，`playbook_args.app` 填应用简述；\
+2. **规格已齐且已准入** → **直接** `delegate(playbook="build_app", …)`，`playbook_args.app` 填应用简述；\
 可选 `modules` / `stack`（默认 Vue3+Vite+TS）/ `root`。默认仅 1 个业务模块（瘦启动）；\
 要多模块再显式传 `modules`（超限会折叠，勿一次铺满）。
-3. 五阶段不可跳（scaffold → shared → N×module → integrate → smoke），但模块默认可少；\
-禁单 worker 包整站；router/入口引用的页面须同波创建（可 stub）。
+3. **进入本 playbook 后**：五阶段不可跳（scaffold → shared → N×module → integrate → smoke），\
+但模块默认可少；禁单 worker 包整站；router/入口引用的页面须同波创建（可 stub）。\
+五阶段纪律只约束本形状内部，不强迫一切绿场进本 playbook。
 4. 批次会自动扫 `.ts/.tsx/.vue` import 图（`graph_consistent`）；冒烟优先云端 \
 `test_run` check=install → build（装不了再结构自检 / `export_to_local` 本机装包）。\
 云端不能代跑 install→build/test 时：【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」；\
@@ -1065,8 +1097,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="build_app",
         summary=(
-            "绿场软件/SPA 完整交付：推荐 playbook=build_app；"
-            "默认 1 模块瘦启动（五阶段不可跳）；局部单功能改用 build_feature"
+            "真 SPA/明示完整可跑【推荐】playbook=build_app（手写/none 不硬拒）；"
+            "进入后五阶段不可跳、默认 1 模块；讨论/Agent/自动化勿首派本形状"
         ),
         body=_BUILD_APP,
         requires_tools=("delegate",),
@@ -1207,7 +1239,8 @@ def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str
         "规格已齐的落地页/作品集可直接 delegate(playbook=build_website, "
         "playbook_args.topic=简述)，不必先查；"
         "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
-        "绿场软件/SPA 完整交付必须 build_app（禁 none 手糊）；"
+        "真 SPA / 用户明示完整可跑【推荐】build_app（手写/none 不硬拒）；"
+        "讨论/做 Agent/自动化助手 → 首派轻切片或手写 1～2 人再 replan，禁首派五波脚手架；"
         "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature）：",
     ]
     lines.extend(f"- {skill.name}：{skill.summary}" for skill in skills)

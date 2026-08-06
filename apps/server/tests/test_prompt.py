@@ -258,13 +258,23 @@ def test_core_teaches_split_criterion_over_count():
     assert "拿不准先少派" in hint
     assert "可分解" in hint and "质量面" in hint
     assert "finalize=true" in hint and "机械单步" in hint
-    # 结局分层：默认 A parallel_brief（未明示成文）；B research_report 仅明示成文
+    # 结局分层：讨论开场 ask 摸清对齐；未明示成文宜 A parallel_brief；
+    # 明示成文可 research_report，但须成文梯度（档 2 轻成文勿满编；档 3 才满编）
     assert "结局分层" in hint
+    assert "讨论开场" in hint
+    assert "先多角度摸清" in hint
+    assert "写成文档" in hint
+    assert "暂不派队" in hint
+    assert "内部编制" in hint
+    assert "明示成文不拦" in hint
     assert "parallel_brief" in hint
     assert "对齐推进" in hint or "默认走 A" in hint or "默认 A" in hint
     assert "research_report" in hint
-    assert "成文交付" in hint or "成文专线" in hint or "成篇" in hint
-    assert "禁止" in hint and "research_report" in hint  # A 禁套 B
+    assert "成文交付" in hint or "成文梯度" in hint or "成篇" in hint
+    assert "禁止" in hint and "research_report" in hint  # A / 档 2 禁套满编
+    assert "成文梯度" in hint
+    assert "档 2" in hint and "轻成文" in hint
+    assert "学术审校" in hint
     assert "少扇出" in hint or "常 2" in hint
     assert "论文" in hint and ("资料" in hint or "开源" in hint)  # 论文/开源 ≠ 明示成文
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
@@ -310,6 +320,13 @@ def test_core_teaches_split_criterion_over_count():
     assert "完整可玩" in hint
     assert "规格已齐 ≠ 全量" in hint or "规格已齐≠全量" in hint
     assert "明示" in hint  # 用户明示一次做完豁免
+    # 混合分流：讨论/Agent/自动化 ≠ 绿场 SPA 满档 build_app；五阶段仅进入后
+    assert "build_app" in hint
+    assert "不硬拒" in hint
+    assert "Agent" in hint or "自动化" in hint
+    assert "轻切片" in hint or "1～2" in hint
+    assert "五波" in hint or "脚手架" in hint
+    assert "五阶段" in hint
     assert "问还是派·中性" in hint or "不偏" in hint
     # P3 路由探针硬错对治：贴码写回强制派、点名实体扇出。
     assert "写回" in hint and "必须" in hint and "delegate" in hint
@@ -650,6 +667,10 @@ def test_core_teaches_presentation_honesty():
     assert "当模板" in hint or "按模板" in hint
     assert "Presentation()" in hint
     assert "再派" in hint or "ask_user" in hint
+    # 案 1eb5eb99 A：压体积与模板保真解耦（另存 slim / 列删改）
+    assert "压体积" in hint and "模板保真" in hint
+    assert "*_slim.pptx" in hint or "slim.pptx" in hint
+    assert "相对模板" in hint
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
     assert "format_options" not in kickoff
     assert "style_options" not in kickoff
@@ -661,6 +682,50 @@ def test_core_teaches_presentation_honesty():
     assert "Presentation()" in orch
     assert "再派" in orch and "跑脚本" in orch
     assert ".py" in orch and "不算" in orch
+    assert "压体积" in orch and "模板保真" in orch
+    assert "*_slim.pptx" in orch or "slim.pptx" in orch
+
+
+def test_core_teaches_short_edit_not_m2a_kickoff_template():
+    """案 7e9d2d4b：短改稿禁套 M2A 开工模板（提示/结构字段，非意图分类器）。"""
+    hint = _CEO_CORE_HINT
+    assert "短改稿" in hint
+    assert "M2A" in hint
+    assert "任务卡" in hint
+    assert "开工模板" in hint or "规格已冻结" in hint
+    assert "扫长文猜意图" in hint or "禁止扫" in hint
+
+
+def test_core_teaches_explicit_confirm_before_disk_write():
+    """案 79789150：明示确认后再落盘 → ask_user(blocking)+default；禁扫全文猜意图。"""
+    hint = _CEO_CORE_HINT
+    assert "明示确认后再落盘" in hint
+    assert "确认后再落盘" in hint or "先对齐再写" in hint
+    assert "ask_user" in hint and "blocking" in hint
+    assert "default" in hint
+    assert "扫全文猜意图" in hint
+
+
+def test_shared_base_and_core_teach_windows_bat_crlf_ascii():
+    """案 261bfc46 A：Windows .bat → CRLF+ASCII 或改 ps1；禁写盘自动转码。"""
+    from agentcore.runtime.resolve.prompt import _DEFAULT_SYSTEM_PROMPT
+
+    base = _DEFAULT_SYSTEM_PROMPT
+    assert "Windows" in base and ".bat" in base
+    assert "CRLF" in base
+    assert "ASCII" in base
+    assert ".ps1" in base
+    assert "不" in base and ("转码" in base or "改换行" in base)
+    hint = _CEO_CORE_HINT
+    assert ".bat" in hint
+    assert "CRLF" in hint
+    assert "双击即用" in hint
+    assert "自动转码" in hint
+    orch = _TEAM_ORCHESTRATION_ADVANCED
+    assert ".bat" in orch and "CRLF" in orch
+    assert "ASCII" in orch
+    assert ".ps1" in orch
+    assert "双击即用" in orch
 
 
 def test_core_teaches_image_gen_egress_and_key_boundary():
@@ -781,8 +846,9 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "grant_readonly_folder" in hint
     assert "grant_organize_folder" in hint
     assert "ask_user" in hint
-    # 先同意再发现：模糊指代禁首轮要文件名。
-    assert "先同意再发现" in hint
+    # 授权后发现：带 well_known；模糊指代禁首轮要文件名。
+    assert "授权后发现" in hint
+    assert "well_known" in hint
     assert "禁止" in hint and "文件名" in hint
     # 不得无条件鼓动「立即发卡」——本机 Host/区外叙述只留在 workspace_context。
     assert "立即发卡" not in hint
@@ -790,7 +856,8 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert mid is not None
     assert "开只读授权" in mid.body or "区外目录" in mid.body
     assert "organize_plan" in mid.body
-    assert "先同意再发现" in mid.body
+    assert "授权后发现" in mid.body
+    assert "well_known" in mid.body
     assert "禁止" in mid.body and "文件名" in mid.body
 
 

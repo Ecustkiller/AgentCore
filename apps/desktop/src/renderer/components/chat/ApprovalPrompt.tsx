@@ -6,6 +6,7 @@ import {
   fencedCodeMarkdown,
   isPreviewTruncated,
 } from "@/components/chat/codeExecuteApproval";
+import { toolLabelZh } from "@/components/chat/toolLabelsZh";
 import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
@@ -49,31 +50,12 @@ import { type ComponentPropsWithoutRef, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
-const TOOL_LABELS: Record<string, string> = {
-  file_write: "写入文件",
-  file_append: "追加文件",
-  str_replace: "修改文件",
-  file_delete: "删除文件",
-  file_move: "移动文件",
-  file_copy: "复制文件",
-  mkdir: "创建目录",
-  file_batch: "批量文件操作",
-  code_execute: "执行代码",
-  test_run: "运行测试",
-  terminal: "终端",
-  desktop_notify: "系统通知",
-};
-
 const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
   typeof ReactMarkdown
 >["rehypePlugins"] = [[rehypeHighlight, { ignoreMissing: true }]];
 
 /** Consecutive same-tool approval prompts before nudging full_trust. */
 const FULL_TRUST_HINT_AFTER = 3;
-
-function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
-}
 
 function batchOpLine(item: Record<string, unknown>): string {
   const op = String(item.op ?? "").trim();
@@ -477,7 +459,7 @@ export function ApprovalCard({
               <span className="font-medium">Agent 请求执行</span>
               <span className="text-muted-foreground"> · </span>
               <span className="font-medium">
-                {toolLabel(approval.toolName)}
+                {toolLabelZh(approval.toolName)}
               </span>
             </p>
             <ManualHelpLink to={MANUAL_HELP.autonomy} />

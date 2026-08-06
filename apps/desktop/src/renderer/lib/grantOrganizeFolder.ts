@@ -1,7 +1,10 @@
 import { hasLocalFiles } from "@/lib/capabilities";
+import type { GrantFolderHints } from "@/lib/grantFolderHints";
 import { revokeExternalGrant } from "@/lib/revokeExternalGrant";
 import { ApiError, api } from "@/services/api";
 import type { FsRoot } from "@shared/ipc-contract";
+
+export type { GrantFolderHints } from "@/lib/grantFolderHints";
 
 export type GrantOrganizeResult =
   | {
@@ -30,21 +33,25 @@ export function formatGrantOrganizeFolderAnswer(
 }
 
 /**
- * OS folder picker → session organize root → POST grant to server.
- * Orthogonal to workspace binding (cloud scratch + desktop online is enough).
- * Same root upgrading from readonly requires this fresh card (mode updated on re-grant).
+ * OS folder picker (or well-known / target hint) → session organize root →
+ * POST grant to server. Orthogonal to workspace binding (cloud scratch + desktop
+ * online is enough). Same root upgrading from readonly requires this fresh card
+ * (mode updated on re-grant).
  */
 export async function pickAndGrantOrganizeFolder(
   conversationId: string,
+  hints?: GrantFolderHints,
 ): Promise<GrantOrganizeResult> {
   if (!hasLocalFiles() || !window.fsApi?.grantSessionReadonlyRoot) {
     return { ok: false, reason: "unavailable" };
   }
   try {
-    const root = await window.fsApi.grantSessionReadonlyRoot(
+    const root = await window.fsApi.grantSessionReadonlyRoot({
       conversationId,
-      "organize",
-    );
+      mode: "organize",
+      ...(hints?.wellKnown ? { wellKnown: hints.wellKnown } : {}),
+      ...(hints?.targetName ? { targetName: hints.targetName } : {}),
+    });
     if (!root) return { ok: false, reason: "cancelled" };
     try {
       const body = await api.post<{

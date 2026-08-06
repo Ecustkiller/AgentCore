@@ -95,17 +95,17 @@ export function isTransportDrop(err: unknown): boolean {
 }
 
 /** zh banner for a reconnect that could not be held — the run is still alive in
- * the background, so the action reconnects rather than resends. */
+ * the background (auto rejoin / reopen may pick it up; no one-click banner action). */
 export const RECONNECT_BANNER =
-  "连接中断，回合仍在后台继续。点击「重连」继续查看。";
+  "连接中断，回合仍在后台继续。稍后查看或重新打开对话即可接上。";
 
 /**
  * zh banner when recovery could not confirm cloud live/idle (``!cloudKnown``).
- * Not a transport drop — do not reuse {@link RECONNECT_BANNER}. Retry re-settles
- * (refresh facts); never ghost, never resend.
+ * Not a transport drop — do not reuse {@link RECONNECT_BANNER}. Never ghost,
+ * never resend; reopen / later settle may refresh facts (no one-click banner action).
  */
 export const UNKNOWN_CLOUD_BANNER =
-  "暂时无法确认回合状态。点击「重试」再查一次。";
+  "暂时无法确认回合状态。请稍后再试或重新打开对话。";
 
 /** The latest user message of a conversation's slice, or null. */
 export function lastUserMessageOf(conversationId: string): Message | null {

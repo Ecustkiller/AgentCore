@@ -1,4 +1,4 @@
-"""Classify side-path LLM failures for observability (title / followups / memory).
+"""Classify side-path LLM failures for observability (title / memory / compaction).
 
 Buckets are product-chrome oriented: auth vs upstream blip vs timeout vs other.
 Quota skips stay on ``billing.background_quota_skip`` — callers pass

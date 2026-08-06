@@ -1,4 +1,4 @@
-"""Regression tests for GitTool safety guards (``tools/builtin/git_ops.py``).
+"""Regression tests for GitTool safety guards (``tools/builtin/git_ops``).
 
 Pins the write-path hard rejects that catalog/approval tests do not cover:
 forbidden subcommands, protected-branch commits, add-path policy, CEO write ban,
@@ -285,7 +285,7 @@ async def test_status_ensure_timeout_is_hard_error_not_no_repo(
             return "", "git 操作超时（rev-parse --is-inside-work-tree）", 1
         raise AssertionError(f"unexpected git args: {args}")
 
-    monkeypatch.setattr(git_mod, "_run_git", _fake_run)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _fake_run)
     result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
     assert result.success is False
     assert result.metadata.get("code") == "timeout"
@@ -317,7 +317,7 @@ async def test_status_ensure_probe_failure_not_soft_no_repo(
             )
         raise AssertionError(f"unexpected git args: {args}")
 
-    monkeypatch.setattr(git_mod, "_run_git", _fake_run)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _fake_run)
     result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
     assert result.success is False
     assert result.metadata.get("code") != "no_repo"
@@ -738,7 +738,7 @@ async def test_pull_passes_ff_only_flag(tmp_path: Path, monkeypatch: pytest.Monk
     _run_git(repo, "remote", "add", "origin", str(bare))
 
     seen: list[list[str]] = []
-    real_run = git_mod._run_git
+    real_run = git_mod.spawn._run_git
 
     async def _spy(
         args: list[str],
@@ -750,7 +750,7 @@ async def test_pull_passes_ff_only_flag(tmp_path: Path, monkeypatch: pytest.Monk
         seen.append(list(args))
         return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
 
-    monkeypatch.setattr(git_mod, "_run_git", _spy)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
         {"subcommand": "pull", "remote": "origin"},
         _worker_ctx(repo),
@@ -828,7 +828,7 @@ async def test_network_cmds_inject_extra_env_when_cloud_pat(
     _run_git(repo, "remote", "add", "origin", str(bare))
 
     seen_extra: list[dict[str, str] | None] = []
-    real_run = git_mod._run_git
+    real_run = git_mod.spawn._run_git
 
     async def _spy(
         args: list[str],
@@ -841,7 +841,7 @@ async def test_network_cmds_inject_extra_env_when_cloud_pat(
             seen_extra.append(extra_env)
         return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
 
-    monkeypatch.setattr(git_mod, "_run_git", _spy)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
         {"subcommand": subcommand, "remote": "origin"},
         _worker_ctx(repo, location="server"),
@@ -870,7 +870,7 @@ async def test_network_cmds_no_extra_env_without_pat(
     _run_git(repo, "remote", "add", "origin", str(bare))
 
     seen_extra: list[dict[str, str] | None] = []
-    real_run = git_mod._run_git
+    real_run = git_mod.spawn._run_git
 
     async def _spy(
         args: list[str],
@@ -883,7 +883,7 @@ async def test_network_cmds_no_extra_env_without_pat(
             seen_extra.append(extra_env)
         return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
 
-    monkeypatch.setattr(git_mod, "_run_git", _spy)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
         {"subcommand": subcommand, "remote": "origin"},
         _worker_ctx(repo, location="server"),
@@ -912,7 +912,7 @@ async def test_network_cmds_local_no_extra_env_even_with_pat(
     _run_git(repo, "remote", "add", "origin", str(bare))
 
     seen_extra: list[dict[str, str] | None] = []
-    real_run = git_mod._run_git
+    real_run = git_mod.spawn._run_git
 
     async def _spy(
         args: list[str],
@@ -925,7 +925,7 @@ async def test_network_cmds_local_no_extra_env_even_with_pat(
             seen_extra.append(extra_env)
         return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
 
-    monkeypatch.setattr(git_mod, "_run_git", _spy)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
         {"subcommand": subcommand, "remote": "origin"},
         _worker_ctx(repo, location="local"),
@@ -968,7 +968,7 @@ async def test_show_truncates_long_output(
 ):
     from agentcore.tools.builtin import git_ops as git_mod
 
-    monkeypatch.setattr(git_mod, "_DIFF_OUTPUT_LIMIT", 80)
+    monkeypatch.setattr(git_mod.policy, "_DIFF_OUTPUT_LIMIT", 80)
     repo = _init_repo(tmp_path / "repo")
     (repo / "big.txt").write_text("x" * 400 + "\n", encoding="utf-8")
     _run_git(repo, "add", "big.txt")
@@ -987,7 +987,7 @@ async def test_blame_truncates_long_output(
 ):
     from agentcore.tools.builtin import git_ops as git_mod
 
-    monkeypatch.setattr(git_mod, "_BLAME_LINE_LIMIT", 3)
+    monkeypatch.setattr(git_mod.policy, "_BLAME_LINE_LIMIT", 3)
     repo = _init_repo(tmp_path / "repo")
     (repo / "lines.txt").write_text(
         "\n".join(f"line-{i}" for i in range(8)) + "\n", encoding="utf-8"
@@ -1052,7 +1052,7 @@ async def test_status_hides_untracked_by_default(tmp_path: Path):
 async def test_status_truncates_long_porcelain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from agentcore.tools.builtin import git_ops as git_mod
 
-    monkeypatch.setattr(git_mod, "_STATUS_LINE_LIMIT", 3)
+    monkeypatch.setattr(git_mod.policy, "_STATUS_LINE_LIMIT", 3)
     repo = _init_repo(tmp_path / "repo")
     for i in range(6):
         (repo / f"f{i}.txt").write_text(f"{i}\n", encoding="utf-8")

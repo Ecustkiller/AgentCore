@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LOCAL_BROWSER_BLANK,
@@ -260,20 +258,5 @@ describe("normalizeBrowserBounds", () => {
     expect(
       normalizeBrowserBounds({ x: 0, y: 0, width: "a", height: 1 }),
     ).toBeNull();
-  });
-});
-
-describe("lockPreviewNavigation 未改（M3a 禁区）", () => {
-  it("preview/navigation.ts 仍只放行 preview://（未放行 http / workspace）", () => {
-    const src = readFileSync(
-      join(__dirname, "../preview/navigation.ts"),
-      "utf8",
-    );
-    expect(src).toContain("lockPreviewNavigation");
-    expect(src).toContain("PREVIEW_SCHEME");
-    expect(src).toMatch(/target\.startsWith\(`\$\{PREVIEW_SCHEME\}:\/\//);
-    expect(src).not.toContain("workspace");
-    expect(src).not.toContain("http:");
-    expect(src).not.toContain("BROWSER_PARTITION");
   });
 });

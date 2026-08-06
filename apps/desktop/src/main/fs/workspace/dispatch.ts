@@ -91,10 +91,10 @@ const ORGANIZE_DENY_MSG =
 const PERMANENT_EXTERNAL_MSG =
   "区外目录禁止永久删除；请使用可逆删除（进回收站）";
 
-/** Resolve explicit mode; fall back to legacy ``readonly`` boolean for old session roots. */
+/** Resolve session-root mode (missing mode on sessionOnly → readonly). */
 export function resolveSessionMode(root: StoredRoot): SessionRootMode | null {
   if (root.mode === "organize" || root.mode === "readonly") return root.mode;
-  if (root.sessionOnly || root.readonly) return "readonly";
+  if (root.sessionOnly) return "readonly";
   return null;
 }
 

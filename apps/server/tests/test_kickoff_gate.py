@@ -34,8 +34,6 @@ from agentcore.runtime.kickoff import (
     needs_capability_auth,
     should_kickoff,
     should_preview_delegate_plan,
-    skip_after_confirmed_ask,
-    user_confirmed_kickoff_decisions,
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
@@ -72,7 +70,6 @@ async def test_ask_user_allows_after_verbal_affirm():
         user_message="认可",
         history=history,
     )
-    assert user_confirmed_kickoff_decisions(tool) is False
     result = await tool.execute(
         {"message": "交付形态再确认一下？", "assumptions": ["按四路并行开干"]},
         ToolContext(
@@ -109,9 +106,6 @@ async def test_ask_user_allows_after_team_preview_resolved():
         timeout_seconds=1.0,
         user_message="继续",
     )
-    # Gate predicate still ignores team_preview_resolved (incremental delegate must kickoff).
-    assert user_confirmed_kickoff_decisions(tool) is False
-    assert skip_after_confirmed_ask(tool) is False
 
     result = await tool.execute(
         {"message": "交付形态再确认一下？"},
@@ -127,18 +121,135 @@ async def test_ask_user_allows_after_team_preview_resolved():
     assert "勿再开开工提案卡" not in (result.error or "")
 
 
-def test_skip_after_confirmed_ask_ignores_team_preview_resolved():
-    """B3: gate skip side must NOT treat team_preview_resolved as settled ask."""
-    tool = SimpleNamespace(
-        _sink=SimpleNamespace(
-            execution_journal=lambda: [
-                {"type": "team_preview_required", "payload": {}},
-                {"type": "team_preview_resolved", "payload": {"decision": "continue"}},
-            ]
-        )
+async def test_confirmed_ask_does_not_skip_delegate_team_preview():
+    """选项 A：同回合阻塞 ask continue（checkpoint_resolved）后 ≥2 worker 仍挂开工卡。"""
+    from agentcore.runtime.coordination.session import clear_active_coordination
+
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    sink.seed_journal(
+        [
+            {
+                "type": EventType.CHECKPOINT_REQUIRED.value,
+                "payload": {"checkpoint_id": "ask1"},
+                "timestamp": "t0",
+            },
+            {
+                "type": EventType.CHECKPOINT_RESOLVED.value,
+                "payload": {"checkpoint_id": "ask1", "decision": "continue"},
+                "timestamp": "t1",
+            },
+        ]
     )
-    assert skip_after_confirmed_ask(tool) is False
-    assert user_confirmed_kickoff_decisions(tool) is False
+    saved: list[TeamPreviewSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["AOUT", "BOUT"]), sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog()
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        result = await t.execute(
+            {
+                "tasks": [
+                    {"role": "研究员", "task": "做A"},
+                    {"role": "写手", "task": "做B"},
+                ],
+            },
+            ctx(),
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert result.effect is ToolEffect.SUSPEND
+    assert len(saved) == 1
+    assert any(e.type is EventType.TEAM_PREVIEW_REQUIRED for e in sink._history)
+    clear_active_coordination()
+
+
+async def test_confirmed_ask_does_not_skip_debate_team_preview():
+    """选项 A：同回合 ask continue 后顶层 debate 仍挂开工卡。"""
+    registry = InteractionRegistry()
+    sink = EventSink()
+    sink.seed_journal(
+        [
+            {
+                "type": EventType.CHECKPOINT_REQUIRED.value,
+                "payload": {"checkpoint_id": "ask1"},
+                "timestamp": "t0",
+            },
+            {
+                "type": EventType.CHECKPOINT_RESOLVED.value,
+                "payload": {"checkpoint_id": "ask1", "decision": "continue"},
+                "timestamp": "t1",
+            },
+        ]
+    )
+    saved: list[TeamPreviewSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    tool = _debate_tool(sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="辩一下"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_debate",
+                    function=ToolCallFunction(name="debate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog()
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        result = await tool.execute(
+            {
+                "motion": "该不该上四天工作制？",
+                "form": "debate",
+                "sides": [
+                    {"key": "pro", "name": "正方", "stance": "应推广"},
+                    {"key": "con", "name": "反方", "stance": "暂缓"},
+                ],
+                "thorough": True,
+            },
+            ctx(),
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert result.effect is ToolEffect.SUSPEND
+    assert len(saved) == 1
+    assert any(e.type is EventType.TEAM_PREVIEW_REQUIRED for e in sink._history)
 
 
 def test_full_auto_releases_plan_half():

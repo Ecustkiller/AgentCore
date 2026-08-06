@@ -46,12 +46,52 @@ def test_landing_tool_path_from_args():
         landing_tool_path_from_args("file_write", {"path": "a.py"}) == "a.py"
     )
     assert (
+        landing_tool_path_from_args("write_section", {"path": "sec.md"})
+        == "sec.md"
+    )
+    assert (
         landing_tool_path_from_args(
             "file_move", {"source": "a.py", "destination": "b.py"}
         )
         == "b.py"
     )
+    assert (
+        landing_tool_path_from_args(
+            "file_copy", {"source": "a.py", "destination": "out/b.py"}
+        )
+        == "out/b.py"
+    )
+    # file_copy / file_move use destination, not source / path.
+    assert (
+        landing_tool_path_from_args(
+            "file_copy", {"source": "a.py", "path": "wrong.py"}
+        )
+        is None
+    )
     assert landing_tool_path_from_args("file_read", {"path": "a.py"}) is None
+
+
+def test_file_product_tables_aligned_with_serialize():
+    """tip allowlist / landing path / LANDING_TOOLS 须与 serialize._FILE_PRODUCT_ARG 同集。"""
+    from agentcore.runtime.engine.tool_exec_args import _FILE_PRODUCT_TOOL_NAMES
+    from agentcore.runtime.loop_controller import LANDING_TOOLS
+    from agentcore.runtime.runs.serialize import _FILE_PRODUCT_ARG
+
+    expected = frozenset(_FILE_PRODUCT_ARG)
+    assert expected == _FILE_PRODUCT_TOOL_NAMES
+    assert expected == LANDING_TOOLS
+    for name, key in _FILE_PRODUCT_ARG.items():
+        if key == "destination":
+            assert (
+                landing_tool_path_from_args(
+                    name, {"source": "src", "destination": "dst.txt"}
+                )
+                == "dst.txt"
+            )
+        else:
+            assert (
+                landing_tool_path_from_args(name, {"path": "p.txt"}) == "p.txt"
+            )
 
 
 def test_landing_tool_path_sanitizes_dossier_nested():

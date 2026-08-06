@@ -76,6 +76,7 @@ async def run_chat_pipeline(
     llm_supports_tools: bool | None = None,
     message_id: str | None = None,
     x_client_platform: str | None = None,
+    agent_mentions: list[dict] | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -110,8 +111,8 @@ async def run_chat_pipeline(
     …). Gates ``ask_user``'s ``action=bind_local_folder`` advertisement and the
     ``<workspace_context>`` desktop-online line — cloud web/mobile must not see the bind
     action. ``None`` / absent / unknown → fail-closed via ``resolve_channel_profile``
-    (``desktop_online=False``); do **not** confuse with auth ``parse_client_platform``,
-    which may still legacy-default desktop for JWT aud.
+    (``desktop_online=False``). Auth ``parse_client_platform`` likewise fail-closes
+    (raises) on missing / unknown — it does not invent a desktop JWT aud.
 
     ``profile_set`` is the turn's per-scenario model set — which model each scenario
     (chat / agent / ...) runs this turn — resolved by the caller from the user's
@@ -222,6 +223,7 @@ async def run_chat_pipeline(
             llm_credentials=llm_credentials,
             x_client_platform=x_client_platform,
             profiles=profiles,
+            agent_mentions=agent_mentions,
         )
         if latency_probe is not None:
             latency_probe.mark_prepare(int((time.monotonic() - prepare_t0) * 1000))
@@ -408,11 +410,11 @@ async def run_chat_pipeline(
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here. The pipeline is a *producer* on a sink it did not
         # create; closing it would silently drop the post-turn tail (title_generated /
-        # followups_generated), which persist_turn_result emits AFTER this returns —
+        # stage_card_required), which persist_turn_result emits AFTER this returns —
         # emit() is a no-op once closed (sink.py). The sink's OWNER (the coordinator that
         # created it: stream_chat / regenerate_chat / resume_chat / handoff / sidecar)
         # closes it, so the tail reaches the client. (Title survived the old early-close
-        # via its DB write; transport-only followups vanished — the 「下一步推荐」 bug.)
+        # via its DB write; transport-only events vanished without that ownership.)
         if llm is not None:
             with contextlib.suppress(Exception):
                 await llm.close()

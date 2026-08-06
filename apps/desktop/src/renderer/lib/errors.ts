@@ -84,7 +84,7 @@ export function degradedFinishChipLabel(
 
 /** Product copy for upstream 429 (mirrors backend LLMRateLimitError / history 注记). */
 export const LLM_RATE_LIMIT_MESSAGE =
-  "上游限流，暂时无法继续本回合。请稍后再试或点重试。";
+  "上游限流，暂时无法继续本回合。请稍后再试。";
 
 /** Product copy when the desktop client is below the server force-update floor. */
 export const CLIENT_TOO_OLD_MESSAGE = "桌面端版本过旧，请更新后再试";
@@ -207,6 +207,23 @@ export function resetSessionConnectivityFailures(): void {
 export const LLM_UNPRODUCTIVE_MESSAGE =
   "工具连续无有效进展或参数无效，请重试。";
 
+/** Empty cancelled (user Stop) — neutral「已停止」face; not a failure card. */
+export const TURN_CANCELLED_EMPTY_MESSAGE = "已停止";
+
+/**
+ * Empty interrupted / preempted placeholder — layer-1 recoverability
+ * (send next turn); keep in sync with composerContinueHint copy.
+ */
+export const TURN_INTERRUPTED_EMPTY_MESSAGE =
+  "已中断。直接发送下一条即可重试。";
+
+/**
+ * Platform auth dead product sentence (align byok/platform 甲; not byok main fix).
+ * Used when empty cancelled/error carries ``LLM_KEY_INVALID`` without a live message.
+ */
+export const PLATFORM_AUTH_UNAVAILABLE_MESSAGE =
+  "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。";
+
 /**
  * Visible sentence for preview / export / canvas outlets that otherwise only
  * read `content`. Non-empty trimmed content wins (partial deliverable); pure
@@ -231,9 +248,12 @@ export function visibleMessageText(msg: {
 
 /**
  * When reload lost the error payload but left an empty failure-finished bubble
- * (`error` / `unproductive`), synthesize a minimal card so the user still sees
- * an explanation + retry — same surface as a real `message.error` card.
- * Known ``LLM_RATE_LIMIT`` keeps the upstream-限流 product copy.
+ * (`error` / `unproductive` / `cancelled` / `interrupted`), synthesize a minimal
+ * card so the user still sees an explanation — same surface as a real
+ * `message.error` card for true failures; ``cancelled`` keeps code
+ * ``TURN_CANCELLED`` but UI must render a neutral「已停止」face.
+ * Known ``LLM_RATE_LIMIT`` / ``LLM_KEY_INVALID`` keep upstream product copy
+ * (auth face may align byok sentence).
  */
 export function syntheticErrorForEmptyFailure(
   finishReason: string | undefined,
@@ -245,10 +265,29 @@ export function syntheticErrorForEmptyFailure(
   if (finishReason === "unproductive") {
     return { code: "LLM_UNPRODUCTIVE", message: LLM_UNPRODUCTIVE_MESSAGE };
   }
-  if (finishReason !== "error") return null;
+  // Auth code wins even when local settle stamped cancelled (9b54940b).
   if (code === "LLM_RATE_LIMIT") {
     return { code: "LLM_RATE_LIMIT", message: LLM_RATE_LIMIT_MESSAGE };
   }
+  if (code === "LLM_KEY_INVALID") {
+    return {
+      code: "LLM_KEY_INVALID",
+      message: PLATFORM_AUTH_UNAVAILABLE_MESSAGE,
+    };
+  }
+  if (finishReason === "interrupted") {
+    return {
+      code: "TURN_INTERRUPTED",
+      message: TURN_INTERRUPTED_EMPTY_MESSAGE,
+    };
+  }
+  if (finishReason === "cancelled") {
+    return {
+      code: "TURN_CANCELLED",
+      message: TURN_CANCELLED_EMPTY_MESSAGE,
+    };
+  }
+  if (finishReason !== "error") return null;
   return {
     code: "LLM_ERROR",
     message: "模型调用失败，请重试。",
@@ -407,7 +446,7 @@ function resolveMessage(f: ErrorFacts): string {
   if (f.code === "INFERENCE_TOKEN_EXPIRED") {
     return (
       f.serverMessage ??
-      "本地与云端的推理凭证已失效或过期。请点击重试（将自动换新凭证）；仍失败请重新登录后再试。"
+      "本地与云端的推理凭证已失效或过期。请稍后再试（将自动换新凭证）；仍失败请重新登录后再试。"
     );
   }
   // Legacy engine builds still surface the English JWT rejection under LLM_KEY_INVALID.
@@ -415,7 +454,7 @@ function resolveMessage(f: ErrorFacts): string {
     f.serverMessage &&
     /invalid or expired inference token/i.test(f.serverMessage)
   ) {
-    return "本地与云端的推理凭证已失效或过期。请点击重试（将自动换新凭证）；仍失败请重新登录后再试。";
+    return "本地与云端的推理凭证已失效或过期。请稍后再试（将自动换新凭证）；仍失败请重新登录后再试。";
   }
   if (f.code === "ADMIN_PRODUCT_FORBIDDEN") {
     return "此账号为管理员账号，请使用管理后台登录";

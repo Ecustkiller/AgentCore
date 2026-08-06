@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -13,7 +11,6 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.delegate.preview import (
     should_preview,
-    skip_after_confirmed_ask,
     worker_rows,
 )
 from agentcore.runtime.delegate.steer import apply_steer
@@ -55,47 +52,68 @@ def test_should_preview_skips_solo_even_with_runtime_tags():
     assert should_preview(plan, finalize=False) is False
 
 
-def test_skip_after_confirmed_ask():
-    tool = SimpleNamespace(
-        _sink=SimpleNamespace(
-            execution_journal=lambda: [
-                {"type": "checkpoint_required", "payload": {}},
-                {"type": "checkpoint_resolved", "payload": {"decision": "continue"}},
-            ]
-        )
+async def test_confirmed_ask_still_suspends_team_preview():
+    """选项 A：journal 已有 checkpoint_resolved 时 ≥2 worker 仍挂 team_preview。"""
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    sink.seed_journal(
+        [
+            {
+                "type": EventType.CHECKPOINT_REQUIRED.value,
+                "payload": {"checkpoint_id": "ask1"},
+                "timestamp": "t0",
+            },
+            {
+                "type": EventType.CHECKPOINT_RESOLVED.value,
+                "payload": {"checkpoint_id": "ask1", "decision": "continue"},
+                "timestamp": "t1",
+            },
+        ]
     )
-    assert skip_after_confirmed_ask(tool) is True
-    tool_nb = SimpleNamespace(
-        _sink=SimpleNamespace(
-            execution_journal=lambda: [{"type": "question_posted", "payload": {}}]
-        )
-    )
-    assert skip_after_confirmed_ask(tool_nb) is False
-    tool_empty = SimpleNamespace(_sink=SimpleNamespace(execution_journal=lambda: None))
-    assert skip_after_confirmed_ask(tool_empty) is False
+    saved: list[TeamPreviewSuspension] = []
 
+    async def _save(frame):
+        saved.append(frame)
 
-def test_skip_after_verbal_affirm_of_plan_no_longer_skips():
-    """Prior-turn verbal「认可」after a plan outline does NOT skip kickoff."""
-    history = [
-        {"role": "user", "content": "讨论下协作结构"},
-        {
-            "role": "assistant",
-            "content": "下面是完整协作方案：四路并行调研员 + 汇总，分工如下……",
-        },
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["AOUT", "BOUT"]), sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
     ]
-    tool = SimpleNamespace(
-        _sink=SimpleNamespace(execution_journal=lambda: None),
-        user_message="认可",
-        history=history,
-    )
-    assert skip_after_confirmed_ask(tool) is False
-    tool_no_plan = SimpleNamespace(
-        _sink=SimpleNamespace(execution_journal=lambda: None),
-        user_message="认可",
-        history=[{"role": "user", "content": "你好"}],
-    )
-    assert skip_after_confirmed_ask(tool_no_plan) is False
+    log = TurnFactLog()
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        result = await t.execute(
+            {
+                "tasks": [
+                    {"role": "研究员", "task": "做A"},
+                    {"role": "写手", "task": "做B"},
+                ],
+            },
+            ctx(),
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert result.effect is ToolEffect.SUSPEND
+    assert len(saved) == 1
+    assert any(e.type is EventType.TEAM_PREVIEW_REQUIRED for e in sink._history)
+    clear_active_coordination()
 
 
 def test_worker_rows_shape():

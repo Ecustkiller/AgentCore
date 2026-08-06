@@ -317,7 +317,7 @@ async def emit_stage_card_for_motion(
                 trace_id=trace_id,
                 event=event,
             )
-        except Exception as exc:  # noqa: BLE001 — journal 失败 → 双无，保留 followup 芯片
+        except Exception as exc:  # noqa: BLE001 — journal 失败 → 不发 SSE（无耐久事实）
             logger.warning(
                 "stage_card.journal_write_failed",
                 stage_card_id=payload["stage_card_id"],

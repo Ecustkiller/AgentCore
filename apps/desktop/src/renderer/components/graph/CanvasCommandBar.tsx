@@ -1,14 +1,9 @@
-import { FollowupChips } from "@/components/chat/FollowupChips";
 import { QueuedTurnsBar } from "@/components/chat/QueuedTurnsBar";
 import { TurnComposer } from "@/components/chat/message-input/TurnComposer";
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
-import {
-  useActiveGenerating,
-  useActiveMessages,
-  useConversationStore,
-} from "@/stores/conversation";
+import { useConversationStore } from "@/stores/conversation";
 import { ChevronDown, PenLine } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -23,8 +18,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * Draft awareness (collapsed): the trigger mirrors the shared per-conversation
  * composer draft ({@link useComposerDraftStore}) — non-empty drafts show a first-line
- * preview + highlight, so 回填 from run-detail / debate / FollowupChips is visible
- * even while the bar is tucked away. Switching 聊天 ⇄ 画布 keeps the same draft.
+ * preview + highlight, so 回填 from run-detail / debate / ask is visible even while
+ * the bar is tucked away. Switching 聊天 ⇄ 画布 keeps the same draft.
  *
  * Host-specific bits: the boss-facing placeholder, the 自动跟随 waiting hint, and
  * `onDispatch` — ConversationCanvas follows the new round in place when a
@@ -35,8 +30,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * 后台云端 toggle (`allowBackground`): offered ONLY where the resulting 后台云端任务
  * card is afterward visible (the overview's 指挥台 feed).
- *
- * 下一步推荐 chips sit above the composer when expanded (same gate as ChatView).
  */
 export function CanvasCommandBar({
   onDispatch,
@@ -50,8 +43,6 @@ export function CanvasCommandBar({
   /** No turns yet — start expanded so the first order can be typed in place. */
   emptyConversation?: boolean;
 }) {
-  const messages = useActiveMessages();
-  const isGenerating = useActiveGenerating();
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const draftKey = draftKeyFor(conversationId);
   const draftValue = useComposerDraftStore(
@@ -61,12 +52,6 @@ export function CanvasCommandBar({
   const draftPreview = hasDraft
     ? (draftValue.trim().split(/\r?\n/, 1)[0] ?? "")
     : "";
-
-  const last = messages[messages.length - 1];
-  const followups =
-    !isGenerating && last?.role === "assistant" && !last.isStreaming
-      ? (last.followups ?? [])
-      : [];
 
   const [expanded, setExpanded] = useState(emptyConversation);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -139,7 +124,6 @@ export function CanvasCommandBar({
                 <ChevronDown size={16} />
               </IconButton>
             </div>
-            <FollowupChips followups={followups} />
             <QueuedTurnsBar conversationId={conversationId} />
             <TurnComposer
               placeholder="向 CEO 下达下一步指令…"

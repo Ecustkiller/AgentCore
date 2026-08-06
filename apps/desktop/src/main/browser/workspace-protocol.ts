@@ -2,7 +2,7 @@
  * `workspace://` 自定义协议 —— Local Browser 工作区 HTML 字节来源（L1b）。
  *
  * 请求 `workspace://<conversationId>/<path>` → 主进程 Bearer 代理会话工作区文件端点
- * （与 preview:// 同形安全不变量：路径穿越防护 / CSP / nosniff / 权限全拒）。
+ * （与 workspace 同形安全不变量：路径穿越防护 / CSP / nosniff / 权限全拒）。
  *
  * 处理器按 **conversation 分区** 注册（`workspacePartitionFor(cid)`）；
  * URL host **必须等于**该 partition 绑定的 cid，否则 403（防跨对话灌 HTML）。

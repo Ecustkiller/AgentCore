@@ -381,13 +381,12 @@ class UserInterjectionPayload(WirePayload):
     """Mid-flight user message into a live coordination turn (CEO routes).
 
     Lifecycle (S1): ``received`` → ``addressed`` / ``queued`` / ``failed``.
-    Legacy wire may still carry ``delivered`` (= ``received``); folds accept both.
     """
 
     interjection_id: str
     execution_id: str
     content: str
-    status: Literal["received", "addressed", "queued", "failed", "delivered"]
+    status: Literal["received", "addressed", "queued", "failed"]
     note: str | None = absent()
     attachments: list[UserInterjectionAttachment] | None = absent()
 

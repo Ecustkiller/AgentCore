@@ -131,6 +131,7 @@ def enqueue_interjection_to_fifo(
                 content=content,
                 user_id=str(stashed.get("user_id") or ""),
                 attachments=list(stashed.get("attachments") or []),
+                agent_mentions=list(stashed.get("agent_mentions") or []),
                 requires_tools=bool(stashed.get("requires_tools")),
                 x_client_platform=stashed.get("x_client_platform"),
                 llm_credentials=stashed.get("llm_credentials"),

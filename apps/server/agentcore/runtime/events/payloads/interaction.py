@@ -72,10 +72,15 @@ class AskOption(WirePayload):
     that project — never rewrites the current session's ``folder_id``;
     `bind_local_folder` renders as a folder picker that binds the bare-chat scratch
     workspace (``conversations/<id>``) for local execution — not 「打开项目」;
-    `grant_readonly_folder` renders as a folder picker that grants a session-scoped
-    read-only mount under ``external/<alias>/`` (W3; orthogonal to workspace binding —
-    cloud scratch + desktop online is enough; does not change binding);
+    `grant_readonly_folder` grants a session-scoped read-only mount under
+    ``external/<alias>/`` (W3; orthogonal to workspace binding — cloud scratch + desktop
+    online is enough; does not change binding);
     `grant_organize_folder` is the organize-mode counterpart (move/copy/mkdir/trash-delete).
+    For ``grant_*`` only: optional ``well_known`` (``desktop`` / ``downloads`` /
+    ``documents``) lets the desktop one-click a common folder — resolve when possible and
+    grant directly; optional ``target_name`` (short basename fuzzy token, no path
+    separators) narrows to a unique child under that folder before granting; ambiguity or
+    absent ``well_known`` falls back to the native folder picker (may seed ``defaultPath``).
     Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry organize_plan
     items for plan-bound ``file_batch``. ``review_kind`` / ``body`` / ``slug`` / ``section``
     carry daily_review proposals for server-side apply on confirm."""
@@ -92,6 +97,12 @@ class AskOption(WirePayload):
         ]
         | None
     ) = absent()
+    well_known: Literal["desktop", "downloads", "documents"] | None = absent(
+        "仅 grant_*：常见目录一键提示；桌面可解析则直授，否则 picker 兜底。"
+    )
+    target_name: str | None = absent(
+        "仅 grant_*：子目录/压缩包名模糊词（无路径分隔符）；有 well_known 时尽量直授唯一匹配。"
+    )
     op: Literal["move", "copy", "delete", "mkdir"] | None = absent()
     source: str | None = absent()
     destination: str | None = absent()

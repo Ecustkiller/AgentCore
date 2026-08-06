@@ -33,6 +33,7 @@ _INTERJECTION_SNAPSHOT_KEYS = frozenset(
         "user_id",
         "conversation_id",
         "attachments",
+        "agent_mentions",
         "requires_tools",
         "x_client_platform",
         "llm_supports_tools",
@@ -64,19 +65,17 @@ DEFAULT_PROGRESS_BUDGET, DEFAULT_DECISION_BUDGET = split_coordination_budget(
 MAX_PROGRESS_BUDGET, MAX_DECISION_BUDGET = split_coordination_budget(MAX_COORDINATION_BUDGET)
 
 
-def _budget_pools_from_dict(data: dict[str, Any]) -> tuple[int, int]:
-    """Read the two-pool budget from a snapshot dict, tolerating legacy snapshots.
+def _budget_pools_from_dict(data: dict[str, Any]) -> tuple[int, int] | None:
+    """Read the two-pool budget from a snapshot dict.
 
-    新快照只带 ``progress_budget_remaining`` + ``decision_budget_remaining``（Wave3a 起
-    不再双写合计）；旧快照只有单一 ``budget_remaining`` → 用
-    :func:`split_coordination_budget` 切分，让旧的持久化快照也能干净恢复。
+    只认 ``progress_budget_remaining`` / ``decision_budget_remaining``；缺两池键则拒绝
+    （开发期不兼容旧单池 ``budget_remaining`` 快照）。
     """
-    if "progress_budget_remaining" in data or "decision_budget_remaining" in data:
-        progress = int(data.get("progress_budget_remaining", DEFAULT_PROGRESS_BUDGET))
-        decision = int(data.get("decision_budget_remaining", DEFAULT_DECISION_BUDGET))
-        return max(0, progress), max(0, decision)
-    legacy = int(data.get("budget_remaining", DEFAULT_COORDINATION_BUDGET))
-    return split_coordination_budget(legacy)
+    if "progress_budget_remaining" not in data and "decision_budget_remaining" not in data:
+        return None
+    progress = int(data.get("progress_budget_remaining", DEFAULT_PROGRESS_BUDGET))
+    decision = int(data.get("decision_budget_remaining", DEFAULT_DECISION_BUDGET))
+    return max(0, progress), max(0, decision)
 
 
 # Fallback per-worker wall-clock before a timeout *notification* (CEO decides; no auto-cancel).
@@ -147,7 +146,7 @@ class CoordinationSnapshot:
     draft: str = ""
     conversation_id: str = ""
     completed_run_ids: list[str] = field(default_factory=list)
-    # 两池遥测计数（进度池 + 决策池）。旧快照只有单一 ``budget_remaining`` → from_dict 兼容切分。
+    # 两池遥测计数（进度池 + 决策池）。快照只序列化分池键，无合计双轨。
     progress_budget_remaining: int = DEFAULT_PROGRESS_BUDGET
     decision_budget_remaining: int = DEFAULT_DECISION_BUDGET
     total_workers: int = 0
@@ -168,12 +167,12 @@ class CoordinationSnapshot:
     turn_attached: bool = True
     user_stopped: bool = False
     saw_first_completion: bool = False
-    # C3: ownership ledger snapshot (v2 nested ``{owners, written}`` or legacy flat).
+    # C3: ownership ledger snapshot — v2 nested ``{_v, owners, written, …}`` only.
     file_ownership: dict[str, Any] = field(default_factory=dict)
 
     @property
     def budget_remaining(self) -> int:
-        """两池合计（向后兼容读法；分池语义见 progress_/decision_budget_remaining）。"""
+        """两池合计（便利读；不参与序列化）。"""
         return self.progress_budget_remaining + self.decision_budget_remaining
 
     def to_dict(self) -> dict[str, Any]:
@@ -184,8 +183,6 @@ class CoordinationSnapshot:
             "completed_run_ids": list(self.completed_run_ids),
             "progress_budget_remaining": self.progress_budget_remaining,
             "decision_budget_remaining": self.decision_budget_remaining,
-            # Wave3a：停写合计字段 ``budget_remaining``（开发期减噪）。旧读者仍靠
-            # ``from_dict`` / ``split_coordination_budget`` 读兼容——勿删读路径。
             "total_workers": self.total_workers,
             "active": self.active,
             "cancel_run_ids": list(self.cancel_run_ids),
@@ -211,7 +208,10 @@ class CoordinationSnapshot:
         execution_id = str(data.get("execution_id") or "").strip()
         if not execution_id:
             return None
-        progress, decision = _budget_pools_from_dict(data)
+        pools = _budget_pools_from_dict(data)
+        if pools is None:
+            return None
+        progress, decision = pools
         live_plan = data.get("live_plan")
         if live_plan is not None and not isinstance(live_plan, dict):
             live_plan = None
@@ -220,16 +220,10 @@ class CoordinationSnapshot:
             settled_via = str(settled_via).strip() or None
         raw_own = data.get("file_ownership")
         file_ownership: dict[str, Any] = {}
-        if isinstance(raw_own, dict):
-            # Pass through v2 nested snapshots; coerce legacy flat path→owner.
-            if raw_own.get("_v") == 2 or isinstance(raw_own.get("owners"), dict):
-                file_ownership = dict(raw_own)
-            else:
-                file_ownership = {
-                    str(k): str(v)
-                    for k, v in raw_own.items()
-                    if isinstance(k, str) and v is not None and str(v).strip()
-                }
+        if isinstance(raw_own, dict) and (
+            raw_own.get("_v") == 2 or isinstance(raw_own.get("owners"), dict)
+        ):
+            file_ownership = dict(raw_own)
         return cls(
             execution_id=execution_id,
             draft=str(data.get("draft") or ""),
@@ -1111,7 +1105,7 @@ class CoordinationSession:
 
     @property
     def budget_remaining(self) -> int:
-        """两池合计（向后兼容读法；分池语义见 progress_/decision_budget_remaining）。"""
+        """两池合计（便利读；不参与序列化）。"""
         return self.progress_budget_remaining + self.decision_budget_remaining
 
     def consume_progress_budget(self) -> bool:
@@ -1377,7 +1371,7 @@ class CoordinationSession:
                 from agentcore.runtime.runs.serialize import plan_from_json
 
                 session.live_plan = plan_from_json(snap.live_plan)
-            except Exception:  # noqa: BLE001 — tolerate corrupt legacy snapshots
+            except Exception:  # noqa: BLE001 — tolerate corrupt plan payload
                 logger.warning(
                     "coordination.live_plan_restore_failed",
                     execution_id=snap.execution_id,
@@ -1408,10 +1402,13 @@ class CoordinationSession:
             session.pending_interjections[iid] = payload
         if snap.saw_first_completion or snap.completed_run_ids:
             session._saw_first_completion = True
-        if snap.file_ownership:
+        raw_own = snap.file_ownership
+        if raw_own and (
+            raw_own.get("_v") == 2 or isinstance(raw_own.get("owners"), dict)
+        ):
             from agentcore.workspace.write_claims import WriteCoordinator
 
-            session.file_ownership = WriteCoordinator.from_dict(snap.file_ownership)
+            session.file_ownership = WriteCoordinator.from_dict(raw_own)
         return session
 
     def close(self) -> None:

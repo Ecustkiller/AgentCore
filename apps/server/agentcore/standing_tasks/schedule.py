@@ -156,7 +156,7 @@ def next_run_after(cron: str, after: datetime, *, max_steps: int = 366 * 24 * 60
 
 
 # Named presets → cron (product shortcuts; stored as cron on the row).
-# Desktop wire uses schedule_preset names; keep short aliases for older callers.
+# Desktop wire uses schedule_preset names only (no short aliases).
 CRON_PRESETS: dict[str, str] = {
     "hourly": "0 * * * *",
     "daily": "0 9 * * *",
@@ -164,9 +164,6 @@ CRON_PRESETS: dict[str, str] = {
     "weekly_mon": "0 9 * * 1",
     "weekly_fri": "0 9 * * 5",
     "monthly_1": "0 9 1 * *",
-    # Aliases
-    "weekly": "0 9 * * 1",
-    "monthly": "0 9 1 * *",
 }
 
 # Prefer these when reversing cron → schedule_preset for API responses.
@@ -189,13 +186,15 @@ def infer_schedule_preset(cron: str) -> str:
     return "custom"
 
 
-def resolve_cron(*, cron: str | None = None, preset: str | None = None) -> str:
+def resolve_cron(
+    *, cron: str | None = None, schedule_preset: str | None = None
+) -> str:
     """Resolve a cron expression from either an explicit cron or a named preset.
 
-    ``preset="custom"`` is not a cron map key — callers must pass ``cron`` alone.
+    ``schedule_preset="custom"`` is not a cron map key — callers must pass ``cron`` alone.
     """
-    if preset:
-        key = preset.strip().lower()
+    if schedule_preset:
+        key = schedule_preset.strip().lower()
         if key == "custom":
             if not cron:
                 raise CronError("schedule_preset=custom 时须提供 cron")
@@ -203,7 +202,7 @@ def resolve_cron(*, cron: str | None = None, preset: str | None = None) -> str:
         if cron:
             raise CronError("命名 schedule_preset 时不要同时传 cron")
         if key not in CRON_PRESETS:
-            raise CronError(f"未知 schedule_preset: {preset!r}")
+            raise CronError(f"未知 schedule_preset: {schedule_preset!r}")
         return CRON_PRESETS[key]
     if not cron:
         raise CronError("须提供 schedule_preset 或 cron")

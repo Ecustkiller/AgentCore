@@ -10,7 +10,7 @@ import {
 } from "../../__tests__/execution/fixtures";
 
 describe("foldDebatePretrial", () => {
-  it("started → running（组卷轻态）；orders/progress 只更任务单与台账；completed 权威覆盖", () => {
+  it("started → running（组卷轻态）；orders 只更任务单；completed 权威覆盖", () => {
     let state = foldDebatePretrial(null, "debate_pretrial_started", {
       thorough: true,
       sides: [
@@ -42,11 +42,6 @@ describe("foldDebatePretrial", () => {
     expect(state?.completeness).toBeUndefined();
     expect(state?.incomplete).toBeUndefined();
 
-    state = foldDebatePretrial(state, "debate_pretrial_progress", {
-      evidence_ledger_count: 2,
-    });
-    expect(state?.evidenceLedgerCount).toBe(2);
-
     state = foldDebatePretrial(state, "debate_pretrial_completed", {
       status: "done",
       thorough: true,
@@ -69,6 +64,7 @@ describe("foldDebatePretrial", () => {
     });
     expect(state?.status).toBe("done");
     expect(state?.evidenceReady).toBe(true);
+    expect(state?.evidenceLedgerCount).toBe(2);
     expect(state?.completeness).toBe("full");
     expect(state?.incomplete).toBe(false);
   });
@@ -187,14 +183,6 @@ describe("foldDebatePretrial", () => {
     expect(state?.externalEvidenceMode).toBe("skip");
     expect(state?.externalEvidenceReason).toBe("evidence_pack_partial");
     expect(state?.completeness).toBe("partial");
-  });
-
-  it("progress 在 started 之前不落态", () => {
-    expect(
-      foldDebatePretrial(null, "debate_pretrial_progress", {
-        evidence_ledger_count: 1,
-      }),
-    ).toBeNull();
   });
 });
 

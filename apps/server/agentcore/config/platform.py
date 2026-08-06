@@ -12,7 +12,7 @@ class PlatformSettings(BaseModel):
     platform_api_key: str = ""
     platform_base_url: str = "https://api.deepseek.com"
     platform_model: str = "deepseek-v4-flash"
-    # Background purposes (title/memory/compaction/followups); empty = follow platform_model.
+    # Background purposes (title/memory/compaction); empty = follow platform_model.
     platform_background_model: str = ""
     # Explicit platform model catalog allowlist (运营配置, 成本配额与计费 §〇·六 F3):
     # comma-separated ids the operator subsidizes on the partner relay. Empty = fall

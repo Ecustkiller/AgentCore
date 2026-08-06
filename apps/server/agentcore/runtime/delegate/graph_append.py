@@ -68,7 +68,6 @@ _GROWTH_EVENT_TYPES: frozenset[EventType] = frozenset(
         EventType.DEBATE_RESULT,
         EventType.DEBATE_PRETRIAL_STARTED,
         EventType.DEBATE_PRETRIAL_ORDERS,
-        EventType.DEBATE_PRETRIAL_PROGRESS,
         EventType.DEBATE_PRETRIAL_COMPLETED,
     }
 )

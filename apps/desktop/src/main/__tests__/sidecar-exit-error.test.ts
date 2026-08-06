@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSidecarExitError } from "../sidecar-service";
+import { formatSidecarExitError } from "../sidecar/transport";
 
 describe("formatSidecarExitError", () => {
   it("surfaces ImportError from stderr instead of bare exit code", () => {

@@ -148,11 +148,10 @@ async def run_pretrial_phase(
     complete_json: CompleteJson,
     on_started: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_orders: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    on_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_completed: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> PretrialResult:
     """庭前阶段编排入口（无调查员 spawn）。"""
-    del complete_json, on_progress  # 点单 LLM / 进度回调不再使用
+    del complete_json  # 点单 LLM 不再使用
     from agentcore.runtime.debate.evidence_pack import resolve_external_evidence_plan
 
     base_payload = {

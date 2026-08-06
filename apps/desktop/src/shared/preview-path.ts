@@ -1,7 +1,7 @@
 /**
  * 预览 / workspace 协议共用的相对路径守卫（纯逻辑，无 electron）。
  *
- * 主进程 `preview://` 与 `workspace://`、渲染层「系统浏览器打开」共用同一 fail-closed 规则，
+ * 主进程 `workspace://` 与渲染层「系统浏览器打开」共用同一 fail-closed 规则，
  * 禁止各入口私有复制。
  */
 
@@ -36,7 +36,7 @@ export function normalizePreviewPath(pathname: string): string | null {
   const parts = cleaned.split("/").filter((s) => s && s !== ".");
   if (parts.length === 0) return null;
   if (parts.some((s) => s === "..")) return null;
-  // Windows 盘符 / UNC 兜底（正常 preview:// path 不会出现，纵深）。
+  // Windows 盘符 / UNC 兜底（正常 workspace:// path 不会出现，纵深）。
   if (/^[a-zA-Z]:$/.test(parts[0]) || /^[a-zA-Z]:/.test(parts[0])) return null;
   return parts.join("/");
 }

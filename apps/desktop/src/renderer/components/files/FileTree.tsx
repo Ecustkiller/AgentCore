@@ -127,6 +127,19 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       };
     }, [source, expanded, data]);
 
+    // Cloud / no-watch sources never push mutations — re-pull when the window
+    // regains focus so AI writes land in the panel without a manual refresh
+    // (fc35aece: stale empty tree while「改动」already saw the files).
+    useEffect(() => {
+      if (source.caps.watch) return;
+      const onFocus = () => {
+        data.reload("");
+        for (const dir of expanded) data.reload(dir);
+      };
+      window.addEventListener("focus", onFocus);
+      return () => window.removeEventListener("focus", onFocus);
+    }, [source.caps.watch, data, expanded]);
+
     const toggle = useCallback(
       (dir: string) => {
         setExpanded((prev) => {

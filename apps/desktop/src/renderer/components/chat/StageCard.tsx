@@ -3,7 +3,6 @@ import { bumpConversationCache } from "@/hooks/useConversations";
 import {
   StreamError,
   describeStreamError,
-  isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
 import { cn } from "@/lib/utils";
@@ -123,10 +122,7 @@ export function StageCard({ entry }: { entry: InteractionEntry }) {
       finalizeGeneratingIfNeeded(conversationId);
       const msg = describeStreamError(err);
       if (msg) {
-        const retry = isRetriableStreamError(err)
-          ? () => void submit(decision, motionOverride)
-          : null;
-        store.setError(msg, retry, conversationId, streamErrorAction(err));
+        store.setError(msg, null, conversationId, streamErrorAction(err));
       }
     } finally {
       setBusy(false);

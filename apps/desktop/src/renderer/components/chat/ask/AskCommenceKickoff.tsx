@@ -9,6 +9,7 @@ import {
   formatBindLocalFolderAnswer,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
+import { grantHintsFromAskOption } from "@/lib/grantFolderHints";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -78,7 +79,10 @@ export function AskCommenceKickoffBody({
     setBindError(null);
 
     if (opt.action === "grant_readonly_folder") {
-      const result = await pickAndGrantReadonlyFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantReadonlyFolder(conversationId, hints)
+        : await pickAndGrantReadonlyFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {
@@ -101,7 +105,10 @@ export function AskCommenceKickoffBody({
     }
 
     if (opt.action === "grant_organize_folder") {
-      const result = await pickAndGrantOrganizeFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantOrganizeFolder(conversationId, hints)
+        : await pickAndGrantOrganizeFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {

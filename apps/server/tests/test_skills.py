@@ -146,6 +146,23 @@ def test_directory_preamble_carves_out_product_help_consult():
     assert "- product_help_faq：" in out
 
 
+def test_directory_preamble_recommends_build_app_not_hard_forbid_none():
+    """能力目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；Agent≠绿场 SPA。"""
+    out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
+    assert "推荐" in out and "build_app" in out
+    assert "不硬拒" in out or "手写/none 不硬拒" in out
+    assert "必须 build_app" not in out
+    assert "禁 none 手糊" not in out
+    assert "Agent" in out or "自动化" in out
+    assert "轻切片" in out or "1～2" in out or "1~2" in out
+    assert "五波" in out or "脚手架" in out
+    assert "- build_app：" in out
+    skill = build_system_skill_registry().get("build_app")
+    assert skill is not None
+    assert "不硬拒" in skill.summary
+    assert "Agent" in skill.summary or "自动化" in skill.summary
+
+
 def test_directory_omits_gated_skills_on_autonomous_path():
     reg = build_system_skill_registry()
     out = render_skill_directory(reg, _NO_LIVE_USER)
@@ -312,13 +329,18 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "成文交付" in body or "成文专线" in body or "成篇" in body
     assert "默认 A" in body or "少扇出" in body
     assert "材料已齐" in body
+    # 混合分流：推荐具名不硬拒；讨论/Agent ≠ 满档 build_app
+    assert "不再硬拒" in body or "不硬拒" in body
+    assert "讨论" in body and ("Agent" in body or "自动化" in body)
+    assert "轻切片" in body or "1～2" in body
+    assert "五阶段不可跳仅约束进入后" in body or "进入后" in body
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in body
     assert "静默自拟" in body
     assert "按确认默认" in body
     assert "default" in body
     assert "不得 continue 派工" in body or "无 default" in body
-    # B 成文：落盘文档 + ≥2 角 → 各角与主笔均 files + 末环独立审校
+    # 档 3 满编：落盘文档 + ≥2 角 → 各角与主笔均 files + 末环独立审校
     assert "角 prose" in body and "仅主笔落盘" in body
     assert "form=files" in body and "artifacts" in body
     assert "独立审校" in body
@@ -329,6 +351,30 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "白屏" in body or "挂载" in body
     assert "verify=" in body and "browser" in body
     assert "tsc" in body or "pytest" in body
+
+
+def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
+    """开场桌上结果 + 成文后梯度 + 审校不默认（与 CEO 常驻对齐的 HOW）。"""
+    body = _body("team_orchestration_advanced")
+    # 讨论类 ask_user：默认摸清对齐；成文次选；选项不写编制
+    assert "讨论类开场" in body
+    assert "先多角度摸清" in body
+    assert "对话对齐" in body
+    assert "写成文档并保存" in body
+    assert "内部编制" in body
+    assert "几人几步" in body
+    # 成文后轻→标准→重；满编 research_report 仅档 3
+    assert "成文后梯度" in body
+    assert "轻→标准→重" in body
+    assert "档 1" in body and "档 2" in body and "档 3" in body
+    assert "research_report" in body
+    assert "满编" in body
+    assert "套 `research_report` 满编" in body
+    # 普通构想不默认学术审校
+    assert "【不】默认学术审校" in body
+    # 未明示成文仍宜 parallel_brief（旧 A 语义保留）
+    assert "parallel_brief" in body
+    assert "未明示" in body
 
 
 def test_work_discipline_skill_teaches_design_and_patch_tripwires():
@@ -437,6 +483,7 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
     """有执行须真 pptx；无执行禁再派跑脚本、禁假称 Office 已落盘。
 
     案 20260803-ppt-office A+B + docx-office-exec-capability-lie B/C。
+    案 1eb5eb99 A：压体积与模板保真解耦。
     """
     body = _body("team_orchestration_advanced")
     assert "python-pptx" in body
@@ -449,6 +496,20 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
     assert "Presentation()" in body
     assert "再派" in body and "跑脚本" in body
     assert "不算过闸" in body or "不算" in body
+    assert "压体积" in body and "模板保真" in body
+    assert "*_slim.pptx" in body or "slim.pptx" in body
+    assert "相对模板" in body
+
+
+def test_team_orchestration_skill_teaches_windows_bat_crlf_ascii():
+    """案 261bfc46 A：Windows .bat → CRLF+ASCII 或改 ps1；禁自动转码。"""
+    body = _body("team_orchestration_advanced")
+    assert ".bat" in body
+    assert "CRLF" in body
+    assert "ASCII" in body
+    assert ".ps1" in body
+    assert "双击即用" in body
+    assert "转码" in body or "改换行" in body
 
 
 def test_team_orchestration_skill_teaches_image_gen_key_boundary():
@@ -467,6 +528,22 @@ def test_build_app_skill_teaches_cloud_install_verify_honesty():
     assert "结构自检" in body or "export_to_local" in body
     assert "自检全过" in body or "跑绿" in body
     assert "单测已绿" in body or "跑绿" in body
+
+
+def test_build_app_skill_teaches_admission_and_agent_diversion():
+    """准入：真 SPA/明示完整可跑才满档；讨论/Agent 禁首派五波；五阶段仅形状内。"""
+    body = _body("build_app")
+    assert "准入" in body
+    assert "不硬拒" in body
+    assert "Agent" in body or "自动化" in body
+    assert "轻切片" in body or "1～2" in body
+    assert "五波" in body or "脚手架" in body
+    assert "进入本 playbook 后" in body or "形状内部" in body
+    assert "五阶段不可跳" in body
+    assert "不强迫一切绿场" in body or "不强迫" in body
+    # 无新 playbook 登记：仍只教既有 build_app / build_feature / build_website
+    assert "playbook=\"build_app\"" in body or 'playbook="build_app"' in body
+    assert "build_feature" in body
 
 
 def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline():
@@ -694,6 +771,10 @@ def test_ask_user_kickoff_skill_teaches_software_delivery_not_default_html():
     assert "交付形态" in body
     assert "单 HTML" in body
     assert "build_feature" in body or "build_app" in body
+    # 混合分流：讨论/Agent ≠ 首派五波脚手架
+    assert "Agent" in body or "自动化" in body
+    assert "轻切片" in body or "1～2" in body
+    assert "五波" in body or "脚手架" in body
 
 
 def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
@@ -721,8 +802,10 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "https://fashitianxia.xyz/download" in body
     assert "授权已确认" in body
     assert "本对话已授权区外目录" in body
-    # 先同意再发现：桌面模糊指代禁首轮要文件名
-    assert "先同意再发现" in body
+    # 授权后发现：桌面模糊指代禁首轮要文件名；须带 well_known
+    assert "授权后发现" in body
+    assert "well_known" in body
+    assert "target_name" in body
     assert "禁止" in body and "文件名" in body
     # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检；禁「就好办了」/臆造 Folders
     assert "通道复检" in body
@@ -731,6 +814,11 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "Folders" in body
     assert "打开本地项目" in body
     assert "授权在哪里" in body
+    # 案 79789150：承诺落盘前对齐 / 用户点名确认后再存 → 阻塞短问 + default
+    assert "落盘前对齐" in body
+    assert "按当前设计落盘" in body
+    assert "blocking=true" in body or "阻塞短问" in body
+    assert "扫全文猜意图" in body
 
 
 def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():

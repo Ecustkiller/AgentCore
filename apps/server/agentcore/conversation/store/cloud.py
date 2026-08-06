@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 
 from agentcore.billing.gate import run_background_llm
 from agentcore.config import settings
-from agentcore.conversation.common import generate_followups as mint_followups
 from agentcore.conversation.common import generate_title as mint_title
 from agentcore.conversation.common import log_cost_recorded
 from agentcore.conversation.compaction import schedule_compaction_if_due
@@ -39,12 +38,7 @@ from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory.consolidation import schedule_consolidation
-from agentcore.runtime.events import (
-    EventSink,
-    FinishReason,
-    followups_generated,
-    followups_unavailable,
-)
+from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.journal import (
     KIND_TURN_END,
     journal_entries_from_display_runs,
@@ -642,136 +636,26 @@ class CloudStore:
             with contextlib.suppress(Exception):
                 await self.clear_stream_segments(turn_id=message_id)
 
-        # Demo-tape fidelity: player puts recorded chips on result["followups"].
-        # Non-empty → persist + emit with *this* turn's message_id; skip LLM mint.
-        # Absent / empty → unchanged live mint path (mutually exclusive).
-        tape_followups = result.get("followups")
-        if isinstance(tape_followups, list):
-            tape_followups = [str(x) for x in tape_followups if str(x).strip()]
-        else:
-            tape_followups = []
-
-        wants_followups = (
+        # END_TURN + reply → last compliant motion_card becomes 阶段推进卡.
+        # CEO→user followups chips are offline (no mint / emit / set_followups).
+        wants_stage_card = (
             finish_value == FinishReason.END_TURN.value and bool(assistant_reply.strip())
         )
-
-        if tape_followups and message_id:
-            async with async_session_factory() as session:
-                await MessageRepository(session).set_followups(
-                    message_id,
-                    conversation_id=conversation_id,
-                    followups=tape_followups,
-                )
-            sink.emit(
-                followups_generated(
-                    tape_followups,
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                )
-            )
-        elif wants_followups:
+        if wants_stage_card and message_id:
             from agentcore.memory.followups import select_motion_card_from_journal
             from agentcore.runtime.kickoff.stage_card import emit_stage_card_for_motion
 
-            # Worker debriefs (run_completed / run_failed) already ride journal_entries;
-            # last compliant motion_card → 阶段推进卡（批 B）；停发确定性「开辩」followup 芯片。
             journal_entries = result.get("journal_entries")
             motion_card = select_motion_card_from_journal(journal_entries)
-            stage_emitted = False
-            if isinstance(motion_card, dict) and message_id:
-                stage_emitted = (
-                    await emit_stage_card_for_motion(
-                        sink,
-                        conversation_id=conversation_id,
-                        motion_card=motion_card,
-                        turn_id=str(message_id),
-                        journal_entries=(
-                            journal_entries if isinstance(journal_entries, list) else None
-                        ),
-                    )
-                ) is not None
-            from agentcore.conversation.common import FollowupsMintResult
-            from agentcore.llm.background_failure import classify_background_llm_failure
-
-            motion_card_for_chips = None if stage_emitted else motion_card
-
-            async def _followups_runner(credentials: LLMCredentials) -> FollowupsMintResult:
-                model = resolve_user_model(credentials)
-                provider = build_provider(credentials, purpose="platform_internal")
-                try:
-                    return await mint_followups(
-                        provider=provider,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_reply,
-                        model=model,
-                        # 有推进卡时不再注入开辩芯片（卡即芯片）。
-                        motion_card=motion_card_for_chips,
-                    )
-                finally:
-                    await provider.close()
-
-            mint = FollowupsMintResult(items=[])
-            try:
-                bg = await run_background_llm(
-                    user_id, purpose="followups", runner=_followups_runner
-                )
-                if bg is not None:
-                    mint = bg.value
-                else:
-                    # No creds / auth failed both sides — still emit deterministic chips.
-                    mint = await mint_followups(
-                        provider=None,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_reply,
-                        motion_card=motion_card_for_chips,
-                    )
-                    if not mint.items:
-                        mint = FollowupsMintResult(
-                            items=[], unavailable_reason="provider_unavailable"
-                        )
-            except Exception as e:
-                reason = classify_background_llm_failure(e)
-                logger.warning(
-                    "chat.followups_provider_unavailable",
+            if isinstance(motion_card, dict):
+                await emit_stage_card_for_motion(
+                    sink,
                     conversation_id=conversation_id,
-                    error=str(e),
-                    reason=reason,
-                )
-                mint = await mint_followups(
-                    provider=None,
-                    conversation_id=conversation_id,
-                    user_message=user_message,
-                    assistant_reply=assistant_reply,
-                    motion_card=motion_card_for_chips,
-                )
-                if not mint.items:
-                    mint = FollowupsMintResult(
-                        items=[], unavailable_reason=reason or "provider_unavailable"
-                    )
-            message_id = result.get("message_id")
-            if mint.items and message_id:
-                async with async_session_factory() as session:
-                    await MessageRepository(session).set_followups(
-                        message_id,
-                        conversation_id=conversation_id,
-                        followups=mint.items,
-                    )
-                sink.emit(
-                    followups_generated(
-                        mint.items,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                    )
-                )
-            elif mint.unavailable_reason and message_id:
-                sink.emit(
-                    followups_unavailable(
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        reason=mint.unavailable_reason,
-                    )
+                    motion_card=motion_card,
+                    turn_id=str(message_id),
+                    journal_entries=(
+                        journal_entries if isinstance(journal_entries, list) else None
+                    ),
                 )
 
         schedule_consolidation(conversation_id)
@@ -1052,123 +936,66 @@ class CloudStore:
                 needs_title = False
 
         title: str | None = existing_title
-        minted_followups: list[str] | None = None
-        followups_unavailable_reason: str | None = None
-        wants_followups = (
+        wants_stage_card = (
             finish_value == FinishReason.END_TURN.value
             and bool((assistant_content or "").strip())
             and bool(assistant_message_id)
         )
-        if needs_title or wants_followups:
-            from agentcore.conversation.common import FollowupsMintResult
-            from agentcore.llm.background_failure import classify_background_llm_failure
+        if wants_stage_card:
             from agentcore.memory.followups import select_motion_card_from_journal
             from agentcore.runtime.kickoff.stage_card import emit_stage_card_for_motion
 
-            motion_card = None
-            stage_emitted = False
-            if wants_followups:
-                journal_src = journal
-                if journal_src is None and isinstance(runs, dict):
-                    events = runs.get("events")
-                    journal_src = events if isinstance(events, list) else None
-                motion_card = select_motion_card_from_journal(journal_src)
-                if isinstance(motion_card, dict) and assistant_message_id:
-                    # Local write-back has no live SSE sink; journal via
-                    # prewrite_settlement_direct still lands the durable card.
-                    stage_emitted = (
-                        await emit_stage_card_for_motion(
-                            None,
-                            conversation_id=conversation_id,
-                            motion_card=motion_card,
-                            turn_id=str(assistant_message_id),
-                            journal_entries=(
-                                journal_src if isinstance(journal_src, list) else None
-                            ),
-                        )
-                    ) is not None
-            motion_card_for_chips = None if stage_emitted else motion_card
+            journal_src = journal
+            if journal_src is None and isinstance(runs, dict):
+                events = runs.get("events")
+                journal_src = events if isinstance(events, list) else None
+            motion_card = select_motion_card_from_journal(journal_src)
+            if isinstance(motion_card, dict) and assistant_message_id:
+                # Local write-back has no live SSE sink; journal via
+                # prewrite_settlement_direct still lands the durable card.
+                await emit_stage_card_for_motion(
+                    None,
+                    conversation_id=conversation_id,
+                    motion_card=motion_card,
+                    turn_id=str(assistant_message_id),
+                    journal_entries=(journal_src if isinstance(journal_src, list) else None),
+                )
 
-            async def _derived_runner(
-                credentials: LLMCredentials,
-            ) -> tuple[str | None, FollowupsMintResult | None]:
+        if needs_title:
+            from agentcore.llm.background_failure import classify_background_llm_failure
+
+            async def _title_runner(credentials: LLMCredentials) -> str | None:
                 model = resolve_user_model(credentials)
                 provider = build_provider(credentials, purpose="platform_internal")
                 try:
-                    title_out: str | None = None
-                    followups_out: FollowupsMintResult | None = None
-                    if needs_title:
-                        # Align with cloud early mint: first user message only.
-                        minted = await mint_title(
-                            provider=provider,
-                            conversation_id=conversation_id,
-                            user_message=user_message,
-                            assistant_reply="",
-                            model=model,
-                        )
-                        title_out = minted.title
-                    if wants_followups:
-                        followups_out = await mint_followups(
-                            provider=provider,
-                            conversation_id=conversation_id,
-                            user_message=user_message,
-                            assistant_reply=assistant_content,
-                            model=model,
-                            motion_card=motion_card_for_chips,
-                        )
-                    return title_out, followups_out
+                    # Align with cloud early mint: first user message only.
+                    minted = await mint_title(
+                        provider=provider,
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        assistant_reply="",
+                        model=model,
+                    )
+                    return minted.title
                 finally:
                     await provider.close()
 
             try:
                 bg = await run_background_llm(
-                    user_id,
-                    purpose="title" if needs_title else "followups",
-                    runner=_derived_runner,
+                    user_id, purpose="title", runner=_title_runner
                 )
-                if bg is not None:
-                    title_out, followups_out = bg.value
-                    if needs_title and title_out:
-                        async with async_session_factory() as session:
-                            updated = await ConversationRepository(session).update_title_if_empty(
-                                conversation_id, title_out
+                if bg is not None and bg.value:
+                    async with async_session_factory() as session:
+                        updated = await ConversationRepository(session).update_title_if_empty(
+                            conversation_id, bg.value
+                        )
+                        if updated is not None:
+                            title = updated.title
+                        else:
+                            conv = await ConversationRepository(session).get_by_id_unscoped(
+                                conversation_id
                             )
-                            if updated is not None:
-                                title = updated.title
-                            else:
-                                conv = await ConversationRepository(session).get_by_id_unscoped(
-                                    conversation_id
-                                )
-                                title = conv.title if conv else existing_title
-                    if wants_followups and followups_out is not None:
-                        if followups_out.items and assistant_message_id:
-                            async with async_session_factory() as session:
-                                await MessageRepository(session).set_followups(
-                                    assistant_message_id,
-                                    conversation_id=conversation_id,
-                                    followups=followups_out.items,
-                                )
-                            minted_followups = followups_out.items
-                        elif followups_out.unavailable_reason:
-                            followups_unavailable_reason = followups_out.unavailable_reason
-                elif wants_followups:
-                    mint = await mint_followups(
-                        provider=None,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_content,
-                        motion_card=motion_card_for_chips,
-                    )
-                    if mint.items and assistant_message_id:
-                        async with async_session_factory() as session:
-                            await MessageRepository(session).set_followups(
-                                assistant_message_id,
-                                conversation_id=conversation_id,
-                                followups=mint.items,
-                            )
-                        minted_followups = mint.items
-                    else:
-                        followups_unavailable_reason = "provider_unavailable"
+                            title = conv.title if conv else existing_title
             except Exception as e:
                 reason = classify_background_llm_failure(e)
                 logger.warning(
@@ -1177,24 +1004,6 @@ class CloudStore:
                     error=str(e),
                     reason=reason,
                 )
-                if wants_followups:
-                    mint = await mint_followups(
-                        provider=None,
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        assistant_reply=assistant_content,
-                        motion_card=motion_card_for_chips,
-                    )
-                    if mint.items and assistant_message_id:
-                        async with async_session_factory() as session:
-                            await MessageRepository(session).set_followups(
-                                assistant_message_id,
-                                conversation_id=conversation_id,
-                                followups=mint.items,
-                            )
-                        minted_followups = mint.items
-                    else:
-                        followups_unavailable_reason = reason or "provider_unavailable"
 
         schedule_consolidation(conversation_id)
         await schedule_compaction_if_due(conversation_id, input_tokens)
@@ -1210,8 +1019,7 @@ class CloudStore:
             "user_message_id": user_msg_id,
             "assistant_message_id": assistant_message_id,
             "title": title,
-            "followups": minted_followups,
-            "followups_unavailable_reason": followups_unavailable_reason,
+            "followups": None,
             "noop": noop,
         }
 

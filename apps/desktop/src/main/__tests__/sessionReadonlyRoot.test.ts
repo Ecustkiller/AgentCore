@@ -17,7 +17,7 @@ const readonlyRoot: StoredRoot = {
   absPath: "C:\\tmp\\reports",
   sessionOnly: true,
   conversationId: "c1",
-  readonly: true,
+  mode: "readonly",
   alias: "reports",
 };
 
@@ -107,7 +107,7 @@ describe("buildExternalEnvFromRoots conversation ownership", () => {
     absPath: "C:\\data\\reports",
     sessionOnly: true,
     conversationId: "c1",
-    readonly: true,
+    mode: "readonly",
     alias: "reports",
   };
   const otherConv: StoredRoot = {
@@ -138,7 +138,6 @@ describe("buildExternalEnvFromRoots conversation ownership", () => {
       ...grant,
       id: "ext-org",
       mode: "organize",
-      readonly: false,
     };
     const orgLookup = (id: string) =>
       ({ "ext-1": grant, "ext-org": organize })[id];

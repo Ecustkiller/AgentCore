@@ -116,8 +116,8 @@ def _user_request_anchor_block(user_message: str) -> str:
 def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """A 档·对齐推进：N 路并行摸底 → 方向笔记落盘；无提纲/撰稿/审校（交回 CEO 对话综述）.
 
-    与 ``research_report``（B 成文专线）划界：本形状是调研默认——一起弄懂 / 多路摸清；
-    仅当用户明示要报告/论文/落盘成文时才升 ``research_report``。angles 宜少扇出（常 2）。
+    与 ``research_report``（B/重成文专线）划界：本形状是默认——一起弄懂 / 多路摸清 /
+    讨论对齐；未明示成文勿升 ``research_report``。angles 宜少扇出（常 2）。
     """
     topic = clean_str(args.get("topic"))
     if not topic:
@@ -174,10 +174,10 @@ def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
 
 
 def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """B 成文专线：N×并行调研 → 提纲（默认 checkpoint）→ 写作 → 学术审校.
+    """B/重成文专线：N×并行调研 → 提纲（默认 checkpoint）→ 写作 → 学术审校.
 
-    仅当用户明示要报告/论文/落盘成文时使用；一起弄懂/多路摸清/仅提论文开源当资料
-    默认 ``parallel_brief``，勿一上来三路成文。
+    仅用户明示成文且需正式长文/可提交（或已确认要审校满编）时用；讨论/形态未定勿首派；
+    普通构想勿默认学术审校。一起弄懂/多路摸清/仅提论文开源当资料默认 ``parallel_brief``。
 
     中间环（各路调研 + 提纲）与终稿同走案卷契约：``form=files`` + 钉死
     ``AgentCore/文档/research/`` 下路径（角度名入文件名，对齐 MLR ``{透镜}透镜报告.md``；

@@ -38,6 +38,25 @@ async def test_detects_npm_start_and_dev_scripts():
     profile = await detect_workspace_profile(backend)
     assert profile.run_commands == ["npm run start", "npm run dev"]
     assert "npm" in profile.package_managers
+    assert profile.test_commands == ["npm test"]
+
+
+async def test_detects_vitest_scripts_test_without_inventing_jest_runner():
+    """scripts.test=vitest → test_commands 仍是 pm test（test_run 白名单 argv），不写 npx jest."""
+    backend = _FakeBackend(
+        {
+            "package.json": """{
+  "name": "demo",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "test": "vitest run"
+  }
+}"""
+        }
+    )
+    profile = await detect_workspace_profile(backend)
+    assert profile.test_commands == ["pnpm test"]
+    assert all("jest" not in c for c in profile.test_commands)
 
 
 async def test_detects_pnpm_run_commands():

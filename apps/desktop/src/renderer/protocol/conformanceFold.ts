@@ -396,7 +396,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       }
       case "debate_pretrial_started":
       case "debate_pretrial_orders":
-      case "debate_pretrial_progress":
       case "debate_pretrial_completed": {
         debatePretrial = foldDebatePretrial(
           debatePretrial,

@@ -1,5 +1,10 @@
 import { addFolderCache, getFolders } from "@/hooks/useFolders";
-import { pickLocalFolderRoot } from "@/lib/bindLocalFolder";
+import {
+  type LocalPickerFailureKind,
+  localPickerFailureCopy,
+  notifyLocalPickerFailure,
+  pickLocalFolderRoot,
+} from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
 import { notifyError, notifySuccess } from "@/lib/toast";
@@ -21,8 +26,21 @@ export function formatOpenLocalProjectAnswer(
 
 export type PickAndOpenLocalProjectResult =
   | { ok: true; root: FsRoot; folder: FolderMeta; created: boolean }
-  | { ok: false; reason: "cancelled" | "unavailable" }
-  | { ok: false; reason: "error"; message: string };
+  | { ok: false; reason: "cancelled" }
+  | {
+      ok: false;
+      reason: LocalPickerFailureKind;
+      message: string;
+    };
+
+async function rootHasPackageJson(rootId: string): Promise<boolean> {
+  if (!window.fsApi) return false;
+  const listed = await window.fsApi.listDir(rootId, "");
+  if (!listed.ok) return false;
+  return listed.data.some(
+    (e) => e.kind === "file" && e.name === "package.json",
+  );
+}
 
 /**
  * OS folder picker → create/reuse local Folder (mode=local, empty subpath) →
@@ -30,16 +48,44 @@ export type PickAndOpenLocalProjectResult =
  *
  * Does **not** rewrite the current session's ``folder_id`` (出生定终身).
  * Distinct from {@link pickAndBindLocalFolder} (bare-chat scratch execution bind).
+ *
+ * Failure kinds are fixed (dialog_failed / unauthorized / no_package_json / …);
+ * callers should show the structured card — never loop 「已触发请选择」.
  */
 export async function pickAndOpenLocalProject(
   navigate: NavigateFunction,
+  opts?: { notifyOnFailure?: boolean },
 ): Promise<PickAndOpenLocalProjectResult> {
+  const notifyOnFailure = opts?.notifyOnFailure !== false;
   if (!hasLocalFiles() || !window.fsApi) {
-    return { ok: false, reason: "unavailable" };
+    const message = localPickerFailureCopy("unavailable").detail;
+    if (notifyOnFailure) notifyLocalPickerFailure("unavailable", message);
+    return { ok: false, reason: "unavailable", message };
   }
   try {
     const picked = await pickLocalFolderRoot();
-    if (!picked.ok) return picked;
+    if (!picked.ok) {
+      if (picked.reason === "cancelled") {
+        return { ok: false, reason: "cancelled" };
+      }
+      if (notifyOnFailure) {
+        notifyLocalPickerFailure(picked.reason, picked.message);
+      }
+      return {
+        ok: false,
+        reason: picked.reason,
+        message: picked.message,
+      };
+    }
+
+    const hasPkg = await rootHasPackageJson(picked.root.id);
+    if (!hasPkg) {
+      const message = localPickerFailureCopy("no_package_json").detail;
+      if (notifyOnFailure) {
+        notifyLocalPickerFailure("no_package_json", message);
+      }
+      return { ok: false, reason: "no_package_json", message };
+    }
 
     const existing = findLocalFolderByBinding(
       getFolders(),
@@ -70,7 +116,9 @@ export async function pickAndOpenLocalProject(
     return { ok: true, root: picked.root, folder, created };
   } catch (e) {
     const message = e instanceof Error ? e.message : "打开本地项目失败，请重试";
-    notifyError(e, "打开本地项目失败");
+    if (notifyOnFailure) {
+      notifyError(e, "打开本地项目失败");
+    }
     return { ok: false, reason: "error", message };
   }
 }

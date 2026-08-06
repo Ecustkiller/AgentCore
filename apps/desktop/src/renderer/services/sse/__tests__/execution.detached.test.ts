@@ -1,5 +1,5 @@
 import { handleExecutionEvent } from "@/services/sse/handlers/execution";
-import * as refreshMod from "@/services/sse/refreshAfterExecutionCompleted";
+import * as refreshMod from "@/services/sse/refreshAfterBackgroundExecution";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type ExecutionPlan,
@@ -69,7 +69,7 @@ const rt = () => execRuntime(useExecutionStore.getState(), MID);
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useExecutionStore.setState({ byId: {} });
-  vi.spyOn(refreshMod, "refreshAfterExecutionCompleted").mockImplementation(
+  vi.spyOn(refreshMod, "refreshAfterBackgroundExecution").mockImplementation(
     () => {},
   );
 });
@@ -108,7 +108,9 @@ describe("execution_detached / execution_completed live path", () => {
       host_turn_id: MID,
     });
     expect(rt().status).toBe("running");
-    expect(refreshMod.refreshAfterExecutionCompleted).toHaveBeenCalledWith(CID);
+    expect(refreshMod.refreshAfterBackgroundExecution).toHaveBeenCalledWith(
+      CID,
+    );
   });
 
   it("detached → clears frozen toolProgress / workerToolPhases (D3)", () => {
@@ -194,7 +196,9 @@ describe("execution_detached / execution_completed live path", () => {
 
     expect(rt().executionDetached).toBeNull();
     expect(rt().status).toBe("completed");
-    expect(refreshMod.refreshAfterExecutionCompleted).toHaveBeenCalledWith(CID);
+    expect(refreshMod.refreshAfterBackgroundExecution).toHaveBeenCalledWith(
+      CID,
+    );
   });
 
   it("status=cancelled → runtime cancelled（忠实跟 payload）", () => {
@@ -231,7 +235,9 @@ describe("execution_detached / execution_completed live path", () => {
 
     expect(rt().executionDetached).toBeNull();
     expect(rt().status).toBe("cancelled");
-    expect(refreshMod.refreshAfterExecutionCompleted).toHaveBeenCalledWith(CID);
+    expect(refreshMod.refreshAfterBackgroundExecution).toHaveBeenCalledWith(
+      CID,
+    );
   });
 
   it("failed 保留 executionDetached（失败与后台并陈）", () => {

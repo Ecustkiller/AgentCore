@@ -38,12 +38,12 @@ describe("defaultDelivery", () => {
     expect(defaultDelivery({ busy: false })).toBe("steer");
   });
 
-  it("busy（可插）→ steer", () => {
-    expect(defaultDelivery({ busy: true, interruptible: true })).toBe("steer");
+  it("busy → queue", () => {
+    expect(defaultDelivery({ busy: true })).toBe("queue");
   });
 
-  it("经典 busy（不可插启发式）→ 仍默认 steer", () => {
-    expect(defaultDelivery({ busy: true, interruptible: false })).toBe("steer");
+  it("无 opts → steer", () => {
+    expect(defaultDelivery()).toBe("steer");
   });
 });
 

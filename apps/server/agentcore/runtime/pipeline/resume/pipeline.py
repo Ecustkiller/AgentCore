@@ -575,6 +575,6 @@ async def resume_chat_pipeline(
                     release_turn_coordination(eid)
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
-        # resumed turn's persist_turn_result tail (title / followups) still reaches the client.
+        # resumed turn's persist_turn_result tail (title / stage_card) still reaches the client.
         with contextlib.suppress(Exception):
             await llm.close()

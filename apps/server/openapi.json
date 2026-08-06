@@ -1800,6 +1800,29 @@
         "title": "AgentCostLine",
         "type": "object"
       },
+      "AgentMention": {
+        "description": "Conversation-page soft Agent mention (not IM ``mentions``, not attachment kind).\n\nSoft prompt only: CEO/worker system prompt may note the named Agent; does **not**\nforce delegate / hard-route.",
+        "properties": {
+          "agent_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "role"
+        ],
+        "title": "AgentMention",
+        "type": "object"
+      },
       "AnnounceRequest": {
         "description": "Post an admin announcement into a chat as a centered system_card (官方公告).",
         "properties": {
@@ -4591,17 +4614,6 @@
                 "type": "null"
               }
             ]
-          },
-          "preset": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preset"
           },
           "schedule_preset": {
             "anyOf": [
@@ -9400,7 +9412,7 @@
         "type": "object"
       },
       "RecordTurnResponse": {
-        "description": "The persisted ids for a recorded local turn (the desktop reconciles its\noptimistic user/assistant bubbles against these; ``title`` is set only when this\nturn minted the conversation's first title; ``followups`` mirrors the live\n``followups_generated`` chips when this turn minted them).\n\n``noop=True`` means the server intentionally skipped an assistant row (empty\nbody + no process state). Desktop may delete the outbox only when\n``assistant_message_id`` is set **or** ``noop`` is True — never on a bare null id\nwhen the turn carried runs/journal/segments.",
+        "description": "The persisted ids for a recorded local turn (the desktop reconciles its\noptimistic user/assistant bubbles against these; ``title`` is set only when this\nturn minted the conversation's first title; ``followups`` is always null on new\nturns — chips mint is offline; historical rows may still carry the column).\n\n``noop=True`` means the server intentionally skipped an assistant row (empty\nbody + no process state). Desktop may delete the outbox only when\n``assistant_message_id`` is set **or** ``noop`` is True — never on a bare null id\nwhen the turn carried runs/journal/segments.",
         "properties": {
           "assistant_message_id": {
             "anyOf": [
@@ -10726,6 +10738,14 @@
       },
       "SendMessageRequest": {
         "properties": {
+          "agent_mentions": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMention"
+            },
+            "maxItems": 10,
+            "title": "Agent Mentions",
+            "type": "array"
+          },
           "attachments": {
             "items": {
               "$ref": "#/components/schemas/MessageAttachment"
@@ -13863,17 +13883,6 @@
                 "type": "null"
               }
             ]
-          },
-          "preset": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preset"
           },
           "schedule_preset": {
             "anyOf": [

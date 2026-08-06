@@ -34,6 +34,7 @@ class QueuedTurn:
     queue_id: str
     content: str
     attachments: list[dict[str, Any]] = field(default_factory=list)
+    agent_mentions: list[dict[str, Any]] = field(default_factory=list)
     requires_tools: bool = False
     x_client_platform: str | None = None
     user_id: str = ""
@@ -226,6 +227,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
             llm_credentials=item.llm_credentials,
             llm_supports_tools=item.llm_supports_tools,
             x_client_platform=item.x_client_platform,
+            agent_mentions=item.agent_mentions,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
@@ -236,6 +238,7 @@ def new_queued_turn(
     content: str,
     user_id: str,
     attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
     llm_credentials: Any = None,
@@ -246,6 +249,7 @@ def new_queued_turn(
         queue_id=new_id(),
         content=content,
         attachments=list(attachments or []),
+        agent_mentions=list(agent_mentions or []),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
         user_id=user_id,

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { UserInterjectionsPanel } from "../UserInterjectionsPanel";
 
 describe("UserInterjectionsPanel", () => {
-  it("renders received vs queued badges (legacy delivered still OK)", () => {
+  it("renders received vs queued badges", () => {
     render(
       <UserInterjectionsPanel
         items={[
@@ -77,7 +77,7 @@ describe("UserInterjectionsPanel", () => {
             interjectionId: "a",
             executionId: "e1",
             content: "对照附件",
-            status: "delivered",
+            status: "received",
             note: null,
             attachments: [
               {

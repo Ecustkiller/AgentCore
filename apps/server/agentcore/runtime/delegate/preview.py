@@ -15,7 +15,6 @@ from agentcore.runtime.kickoff import (
     kickoff_tools,
     needs_capability_auth,
     should_preview_delegate_plan,
-    skip_after_confirmed_ask,
 )
 from agentcore.runtime.kickoff import (
     should_kickoff as _should_kickoff_core,
@@ -89,6 +88,5 @@ __all__ = [
     "should_kickoff",
     "should_preview",
     "should_preview_plan",
-    "skip_after_confirmed_ask",
     "worker_rows",
 ]

@@ -1,7 +1,9 @@
 import { Button, Textarea } from "@/components/ui";
 import type { interactiveCheckpointTone } from "@/components/ui/tone-presets";
 import {
+  type LocalPickerFailureKind,
   formatBindLocalFolderAnswer,
+  isLocalPickerFailureKind,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -9,6 +11,7 @@ import {
   guideDesktopDownload,
   isDesktopFolderAction,
 } from "@/lib/desktopDownload";
+import { grantHintsFromAskOption } from "@/lib/grantFolderHints";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -28,6 +31,7 @@ import type {
 import { ChevronRight, FolderOpen, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { LocalPickerFailureCard } from "./LocalPickerFailureCard";
 
 /**
  * Shared 结构化问答内核 — the choice/text question UI + answer-state + answer composition
@@ -181,6 +185,24 @@ export function AskQuestionFields({
   const navigate = useNavigate();
   const [bindBusyLabel, setBindBusyLabel] = useState<string | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
+  const [pickerFailure, setPickerFailure] = useState<{
+    kind: LocalPickerFailureKind;
+    message?: string;
+  } | null>(null);
+
+  const clearPickerFeedback = () => {
+    setBindError(null);
+    setPickerFailure(null);
+  };
+
+  const applyPickerFailure = (reason: string, message?: string) => {
+    if (reason === "cancelled") return;
+    if (isLocalPickerFailureKind(reason)) {
+      setPickerFailure({ kind: reason, message });
+      return;
+    }
+    setBindError(message ?? "本机目录操作失败");
+  };
 
   const handleBindOption = async (q: AskQuestion, opt: AskOption) => {
     if (disabled || bindBusyLabel) return;
@@ -188,13 +210,15 @@ export function AskQuestionFields({
     if (opt.action === "open_local_project") {
       if (!hasLocalFiles() || !window.fsApi) return;
       setBindBusyLabel(opt.label);
-      setBindError(null);
-      const result = await pickAndOpenLocalProject(navigate);
+      clearPickerFeedback();
+      const result = await pickAndOpenLocalProject(navigate, {
+        notifyOnFailure: false,
+      });
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
-          setBindError("打开本地项目仅桌面端可用");
-        }
+        applyPickerFailure(
+          result.reason,
+          result.reason === "cancelled" ? undefined : result.message,
+        );
         setBindBusyLabel(null);
         return;
       }
@@ -204,9 +228,12 @@ export function AskQuestionFields({
 
     if (!conversationId || !onBindResolve) return;
     setBindBusyLabel(opt.label);
-    setBindError(null);
+    clearPickerFeedback();
     if (opt.action === "grant_readonly_folder") {
-      const result = await pickAndGrantReadonlyFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantReadonlyFolder(conversationId, hints)
+        : await pickAndGrantReadonlyFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {
@@ -228,7 +255,10 @@ export function AskQuestionFields({
       return;
     }
     if (opt.action === "grant_organize_folder") {
-      const result = await pickAndGrantOrganizeFolder(conversationId);
+      const hints = grantHintsFromAskOption(opt);
+      const result = hints
+        ? await pickAndGrantOrganizeFolder(conversationId, hints)
+        : await pickAndGrantOrganizeFolder(conversationId);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         else if (result.reason === "unavailable") {
@@ -251,7 +281,10 @@ export function AskQuestionFields({
     }
     const result = await pickAndBindLocalFolder(conversationId);
     if (!result.ok) {
-      if (result.reason === "error") setBindError(result.message);
+      applyPickerFailure(
+        result.reason,
+        result.reason === "cancelled" ? undefined : result.message,
+      );
       setBindBusyLabel(null);
       return;
     }
@@ -291,10 +324,20 @@ export function AskQuestionFields({
           onToggleOther={() => answer.toggleOther(q)}
           onSetOther={(v) => answer.setOtherValue(q, v)}
           onBindOption={(opt) => void handleBindOption(q, opt)}
-          onFolderUnavailable={(msg) => setBindError(msg)}
+          onFolderUnavailable={(msg) => {
+            setPickerFailure(null);
+            setBindError(msg);
+          }}
+          onLocalFsUnavailable={() => applyPickerFailure("unavailable")}
         />
       ))}
 
+      {pickerFailure && (
+        <LocalPickerFailureCard
+          kind={pickerFailure.kind}
+          message={pickerFailure.message}
+        />
+      )}
       {bindError && <p className="text-xs text-destructive">{bindError}</p>}
     </div>
   );
@@ -398,6 +441,7 @@ function QuestionField({
   onSetOther,
   onBindOption,
   onFolderUnavailable,
+  onLocalFsUnavailable,
 }: {
   index: number;
   numbered: boolean;
@@ -416,6 +460,8 @@ function QuestionField({
   onBindOption?: (opt: AskOption) => void;
   /** 本机目录 action 不可履约时展示文案（Web 会附带打开下载页）；禁止 toggleChoice。 */
   onFolderUnavailable?: (message: string) => void;
+  /** Desktop 无 fs / 无会话绑定能力时的固定失败卡。 */
+  onLocalFsUnavailable?: () => void;
 }) {
   const canLocalFs = hasLocalFiles() && !!window.fsApi;
   const canBindAction = !!conversationId && !!onBindOption && canLocalFs;
@@ -481,11 +527,7 @@ function QuestionField({
                           onBindOption?.(opt);
                           return;
                         }
-                        onFolderUnavailable?.(
-                          opt.action === "open_local_project"
-                            ? "打开本地项目仅桌面端可用"
-                            : "本机目录授权仅桌面端可用",
-                        );
+                        onLocalFsUnavailable?.();
                       }}
                       className={`h-auto w-full justify-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs font-normal disabled:opacity-40 ${
                         (

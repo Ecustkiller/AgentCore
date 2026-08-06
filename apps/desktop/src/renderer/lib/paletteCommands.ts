@@ -1,5 +1,9 @@
 import { getConversations } from "@/hooks/useConversations";
-import { pickAndBindLocalFolder } from "@/lib/bindLocalFolder";
+import {
+  isLocalPickerFailureKind,
+  notifyLocalPickerFailure,
+  pickAndBindLocalFolder,
+} from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { pickAndGrantReadonlyFolder } from "@/lib/grantReadonlyFolder";
 import { startNewConversation } from "@/lib/newConversation";
@@ -307,16 +311,12 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
             ],
             hint: "新会话 · 本机文件夹",
             run: () => {
-              void pickAndOpenLocalProject(navigate).then((result) => {
-                if (!result.ok) {
-                  if (result.reason === "cancelled") return;
-                  if (result.reason === "unavailable") {
-                    notifyError("打开本地项目仅桌面端可用");
-                    return;
-                  }
-                  if (result.reason === "error") {
-                    notifyError(result.message);
-                  }
+              void pickAndOpenLocalProject(navigate, {
+                notifyOnFailure: false,
+              }).then((result) => {
+                if (result.ok || result.reason === "cancelled") return;
+                if (isLocalPickerFailureKind(result.reason)) {
+                  notifyLocalPickerFailure(result.reason, result.message);
                 }
               });
             },
@@ -351,20 +351,16 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
                 return;
               }
               void pickAndBindLocalFolder(id).then((result) => {
-                if (!result.ok) {
-                  if (result.reason === "cancelled") return;
-                  if (result.reason === "unavailable") {
-                    notifyError("绑定本机执行环境仅桌面端可用");
-                    return;
-                  }
-                  if (result.reason === "error") {
-                    notifyError(result.message);
-                  }
+                if (result.ok) {
+                  notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
+                    description: "仅本会话；≠打开本地项目",
+                  });
                   return;
                 }
-                notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
-                  description: "仅本会话；≠打开本地项目",
-                });
+                if (result.reason === "cancelled") return;
+                if (isLocalPickerFailureKind(result.reason)) {
+                  notifyLocalPickerFailure(result.reason, result.message);
+                }
               });
             },
           },

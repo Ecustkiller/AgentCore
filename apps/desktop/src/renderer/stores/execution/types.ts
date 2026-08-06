@@ -476,14 +476,12 @@ export interface Execution {
 }
 
 /** Mid-flight user interjection into live coordination (`user_interjection`).
- * Same interjectionId keeps latest status (received → addressed / queued / failed).
- * Legacy `delivered` ≡ `received`. */
+ * Same interjectionId keeps latest status (received → addressed / queued / failed). */
 export type UserInterjectionStatus =
   | "received"
   | "addressed"
   | "queued"
   | "failed"
-  | "delivered"
   | string;
 
 export interface UserInterjectionAttachment {

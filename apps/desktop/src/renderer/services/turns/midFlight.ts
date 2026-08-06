@@ -8,6 +8,7 @@ import {
 } from "@/services/api";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import {
+  type OutgoingAgentMention,
   type OutgoingAttachment,
   pumpSseBody,
 } from "@/services/streamConversation";
@@ -54,9 +55,13 @@ export async function sendMidFlightMessage(
   content: string,
   attachments: OutgoingAttachment[] | undefined,
   delivery: MessageDelivery,
+  agentMentions?: OutgoingAgentMention[],
 ): Promise<MidFlightSendResult> {
   const body: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) body.attachments = attachments;
+  if (agentMentions && agentMentions.length > 0) {
+    body.agent_mentions = agentMentions;
+  }
 
   const ac = new AbortController();
   let abortRegistered = false;

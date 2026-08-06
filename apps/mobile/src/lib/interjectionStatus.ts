@@ -1,4 +1,4 @@
-/** S2 四态文案（legacy `delivered` ≡ `received`）。心智：只对主 Agent 说话。 */
+/** S2 四态文案。心智：只对主 Agent 说话。 */
 export function interjectionStatusLabel(
   status: string | null | undefined,
 ): string {
@@ -10,7 +10,6 @@ export function interjectionStatusLabel(
     case "addressed":
       return "主 Agent 已回应";
     case "received":
-    case "delivered":
       return "主 Agent 已收到";
     default:
       return "主 Agent 已收到";

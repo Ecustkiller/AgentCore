@@ -22,7 +22,7 @@ vi.mock("electron", () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }));
 
-import { resolveSpawnConfig, scrubSocksProxyEnv } from "../sidecar-service";
+import { resolveSpawnConfig, scrubSocksProxyEnv } from "../sidecar/transport";
 
 describe("scrubSocksProxyEnv", () => {
   it("removes socks5(h) proxy vars and keeps http proxies", () => {

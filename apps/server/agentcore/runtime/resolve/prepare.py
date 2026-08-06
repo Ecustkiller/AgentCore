@@ -559,3 +559,47 @@ async def _build_attachment_context(
         f"{body}\n"
         "</attached_files>"
     )
+
+
+def _build_agent_mention_context(
+    agent_mentions: list[dict] | None,
+) -> str | None:
+    """Render conversation-page Agent soft mentions into a prompt block.
+
+    Soft hint only — does not force delegate / hard-route. Empty / missing → None
+    so the turn stays byte-identical to today's no-mention assembly.
+    """
+    if not agent_mentions:
+        return None
+    lines: list[str] = []
+    for raw in agent_mentions:
+        if not isinstance(raw, dict):
+            continue
+        agent_id = str(raw.get("agent_id") or "").strip()
+        role = str(raw.get("role") or "").strip()
+        if not agent_id or not role:
+            continue
+        lines.append(f"- {role} (id={agent_id})")
+    if not lines:
+        return None
+    return (
+        "<agent_mentions>\n"
+        "用户点名关注以下 Agent（软提示，非强制派单/非硬路由）：\n"
+        + "\n".join(lines)
+        + "\n</agent_mentions>"
+    )
+
+
+def merge_attachment_and_mention_context(
+    attachment_context: str | None,
+    agent_mentions: list[dict] | None,
+) -> str | None:
+    """Join file attachment block with optional Agent soft-mention block.
+
+    Mentions ride the same ATTACHMENT volatile tail (紧邻 / 并入) so CEO and
+    workers that already consume ``attachment_context`` stay in sync.
+    """
+    mention = _build_agent_mention_context(agent_mentions)
+    if attachment_context and mention:
+        return f"{attachment_context}\n\n{mention}"
+    return attachment_context or mention

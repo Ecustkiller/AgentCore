@@ -530,6 +530,10 @@ def _flat_plan(
         # 拒绝整批时把「怎么分」算好回给 CEO：无依赖批纯按数量装箱，指明本次传前 max_tasks
         # 个、其余下次 delegate 再传，让重来那一轮照做即可、不必重想编排（见 trace 4d715ea0：
         # CEO 首轮派 18 撞上限后要整轮重规划才拆两批）。
+        # B1：闩锁超席 → 同回合收口须 PARTIAL + 缺口，禁『仍在进行』空悬。
+        from agentcore.runtime.closing_posture import note_over_seat_reject
+
+        note_over_seat_reject(task_count=len(tasks_raw), max_tasks=max_tasks)
         overflow = len(tasks_raw) - max_tasks
         batches = (len(tasks_raw) + max_tasks - 1) // max_tasks
         return RunPlan(), [
@@ -592,6 +596,9 @@ def _dag_plan(
     if len(tasks_raw) > max_tasks:
         # 有依赖批不能按数量硬切（会拆断依赖链），给依赖感知的分批指引：独立子团队拆到不同次
         # 调用、有依赖的留同一次或用 depends_on 跨批衔接，让 CEO 重来那轮一次到位。
+        from agentcore.runtime.closing_posture import note_over_seat_reject
+
+        note_over_seat_reject(task_count=len(tasks_raw), max_tasks=max_tasks)
         return RunPlan(), [
             f"任务数 {len(tasks_raw)} 超过单次委派上限 {max_tasks}。分多次 delegate 调用："
             f"把互相独立的子团队（彼此无 depends_on）拆到不同次调用、每次 ≤{max_tasks}；"

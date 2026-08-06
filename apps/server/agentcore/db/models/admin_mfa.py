@@ -19,7 +19,7 @@ class AdminMfa(Base):
     totp_secret_enc: Mapped[bytes] = mapped_column(LargeBinary)
     # Set once the admin confirms the first valid code during enrollment.
     enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # JSON array of SHA-256 hashes of one-time recovery codes (never plaintext).
+    # JSON array of argon2id hashes of one-time recovery codes (never plaintext).
     recovery_codes_hash: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

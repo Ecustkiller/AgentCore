@@ -108,13 +108,31 @@ export function projectUnsyncedTurns(
       if (existing.has(row.id)) continue;
       const msg = toMessage(row);
       // Open ghost (sidecar died mid-turn): surface as interrupted, not streaming.
-      if (
-        row.role === "assistant" &&
-        u.phase === "open" &&
-        msg.status === "incomplete"
-      ) {
-        msg.isStreaming = false;
-        msg.finishReason = msg.finishReason ?? "interrupted";
+      // Empty cancelled/dead: keep terminal finish (cancelled → synthetic cancelled
+      // face; blank dead → interrupted「已中断」) so product face is never blank.
+      if (row.role === "assistant") {
+        const empty = !(msg.content ?? "").trim();
+        if (u.phase === "open" && msg.status === "incomplete") {
+          msg.isStreaming = false;
+          msg.finishReason = msg.finishReason ?? "interrupted";
+        } else if (empty && !msg.error?.message?.trim()) {
+          const fr = u.finish_reason ?? msg.finishReason;
+          if (fr === "cancelled") {
+            msg.isStreaming = false;
+            msg.status = "incomplete";
+            msg.finishReason = "cancelled";
+            if (msg.runs) {
+              msg.runs = { ...msg.runs, finishReason: "cancelled" };
+            }
+          } else if (u.phase === "dead" || (!fr && u.phase === "ready")) {
+            msg.isStreaming = false;
+            msg.status = "incomplete";
+            msg.finishReason = "interrupted";
+            if (msg.runs) {
+              msg.runs = { ...msg.runs, finishReason: "interrupted" };
+            }
+          }
+        }
       }
       store.addMessage(msg, conversationId);
       existing.add(row.id);

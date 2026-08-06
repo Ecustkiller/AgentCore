@@ -1,0 +1,138 @@
+"""Workspace error / ToolResult mapping for file_ops tools."""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from agentcore.tools.protocol import ToolResult
+from agentcore.workspace.limits import (
+    FILE_TOO_LARGE_DETAIL,
+    OFFICE_EXTRACT_MAX_BYTES,
+    WORKSPACE_READ_MAX_BYTES,
+    channel_dead_error_message,
+    channel_dead_retire_metadata,
+    is_file_too_large_detail,
+    is_liveness_timeout_detail,
+)
+from agentcore.workspace.protocol import WorkspaceError
+
+
+def _error(
+    error: str,
+    start: float,
+    *,
+    contract_failure: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> ToolResult:
+    """Build a failed ToolResult with elapsed timing.
+
+    ``contract_failure`` marks a self-correctable argument-contract rejection (e.g. a
+    concurrent-write collision the model fixes by renaming) so the run-scoped tool
+    circuit breaker skips normal failure tallies — see
+    :class:`~agentcore.tools.protocol.ToolResult`. Explicit ``retire_tools`` in
+    ``metadata`` still hard-disables named tools (e.g. workspace channel dead).
+    """
+    return ToolResult(
+        tool_call_id="",
+        success=False,
+        output="",
+        error=error,
+        duration_ms=int((time.monotonic() - start) * 1000),
+        contract_failure=contract_failure,
+        metadata=dict(metadata or {}),
+    )
+
+
+def _file_too_large_error(path: str, start: float) -> ToolResult:
+    """Capacity contract: oversized whole-file read (cloud + local share detail)."""
+    max_mib = WORKSPACE_READ_MAX_BYTES // (1024 * 1024)
+    return _error(
+        (
+            f"`{path}` {FILE_TOO_LARGE_DETAIL}（上限 {max_mib} MiB）。"
+            "请改用 offset/limit 精读、grep 定位后局部读，或请用户提供更小片段 / 先转文本；"
+            "禁止原样重试整文件读取。"
+        ),
+        start,
+        contract_failure=True,
+        metadata={"capacity_contract": "bytes"},
+    )
+
+
+def _office_extract_budget_error(path: str, size: int, start: float) -> ToolResult:
+    """Capacity contract: Office/PDF extract cost pre-check (avoid burning liveness)."""
+    max_mib = OFFICE_EXTRACT_MAX_BYTES // (1024 * 1024)
+    size_mib = max(1, (size + 1024 * 1024 - 1) // (1024 * 1024))
+    return _error(
+        (
+            f"`{path}` 体积约 {size_mib} MiB，超过透明抽取预算（{max_mib} MiB）。"
+            "请请用户提供更小文件、先转 `.md`/文本后再 file_read，或改用已有 "
+            "attachments 旁路摘要；禁止原样重试抽取。"
+        ),
+        start,
+        contract_failure=True,
+        metadata={"capacity_contract": "extract_bytes"},
+    )
+
+
+def _liveness_workspace_error(detail: str, start: float) -> ToolResult:
+    """Liveness hang on the local workspace channel (permanent first-fail retire)."""
+    return _error(
+        channel_dead_error_message(detail),
+        start,
+        metadata=channel_dead_retire_metadata(),
+    )
+
+
+def _maybe_channel_dead_error(exc: WorkspaceError, start: float) -> ToolResult | None:
+    """Stamp retire meta when a backend failure is channel liveness / sticky-dead."""
+    detail = str(exc)
+    if is_liveness_timeout_detail(detail):
+        return _liveness_workspace_error(detail, start)
+    return None
+
+
+def _map_workspace_read_error(exc: WorkspaceError, *, path: str, start: float) -> ToolResult:
+    """Map backend read failures to capacity vs liveness vs generic I/O."""
+    detail = str(exc)
+    if is_file_too_large_detail(detail):
+        return _file_too_large_error(path, start)
+    dead = _maybe_channel_dead_error(exc, start)
+    if dead is not None:
+        return dead
+    return _error(f"读取文件失败：{exc}", start)
+
+
+def _file_read_path_ceiling_error(error: str, start: float) -> ToolResult:
+    """Reject a same-path over-cap read (path-scoped; does not retire ``file_read``)."""
+    return _error(
+        error,
+        start,
+        contract_failure=True,
+    )
+
+
+def _outside_workspace_msg(path: str, *, location: str | None = None) -> str:
+    """Actionable OutsideWorkspace text.
+
+    Path contract lives in ``normalize_workspace_path`` / ``resolve_safe_path``;
+    this message only points at remaining rejects (true out-of-root absolutes).
+
+    On cloud (``location=server``), point at open_local_project / bind_local_folder
+    by intent when the model was reaching for the user's machine.
+    """
+    relative_fix = (
+        "请使用工作区相对路径（如 AgentCore/文档/research/report.md；"
+        "`.` 或裸 `/` 表示整仓）；勿使用工作区外的绝对路径（如 /etc、盘符）。"
+    )
+    if location == "server":
+        return (
+            f"路径 '{path}' 超出了工作区范围。"
+            "若要把该本机目录当【本地项目】打开：桌面在线时立即发 ask_user 卡"
+            "（action=open_local_project；新建会话，不改本会话 folder_id）；"
+            "若本会话仅需本机执行环境：action=bind_local_folder（≠打开项目）；"
+            "勿用纯文本询问。"
+            f"若本意是工作区内文件：{relative_fix}"
+        )
+    return f"路径 '{path}' 超出了工作区范围。{relative_fix}"
+

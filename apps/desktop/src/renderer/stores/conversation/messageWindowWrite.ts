@@ -34,7 +34,6 @@ export function messageRichnessScore(m: Message): number {
     (m.process?.length ?? 0) +
     (m.attachments?.length ?? 0) +
     (m.evidenceLedger?.length ?? 0) +
-    (m.followups?.length ?? 0) +
     (m.captainContext?.length ?? 0)
   );
 }

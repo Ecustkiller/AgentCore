@@ -36,7 +36,6 @@ import { useServerHealthStore } from "@/stores/serverHealth";
 import {
   Cloud,
   CloudUpload,
-  Loader2,
   Paperclip,
   Plus,
   Send,
@@ -59,7 +58,10 @@ import {
   ServerStatusIndicator,
 } from "./ServerStatusIndicator";
 import { VoiceButton } from "./VoiceButton";
-import type { PendingAttachment } from "./composerAttachments";
+import type {
+  PendingAgentMention,
+  PendingAttachment,
+} from "./composerAttachments";
 import { useComposerDrop } from "./useComposerDrop";
 import { useComposerSend } from "./useComposerSend";
 import type { AttachmentProjectHint } from "./useMentionMenu";
@@ -67,6 +69,7 @@ import { useMentionMenu } from "./useMentionMenu";
 import { useVoiceInput } from "./useVoiceInput";
 
 const EMPTY_ATTACHMENTS: PendingAttachment[] = [];
+const EMPTY_AGENT_MENTIONS: PendingAgentMention[] = [];
 
 // 输入框自增高边界：card 空/单行草稿保底 ~2 行（text-sm 20px 行高 + pt-3/pb-1 = 56px）；
 // bar 默认一行高（20px 行高 + py-2 = 36px）。上限 200px 后转内部滚动。
@@ -95,7 +98,7 @@ export type TurnComposerVariant = "card" | "bar";
  *
  * Draft state (text + attachments) lives in {@link useComposerDraftStore} keyed by
  * conversation, NOT in component state — switching 聊天 ⇄ 画布 swaps the mounted skin
- * but keeps the half-typed order, and 回填 (ask card / 下一步推荐 chips) lands in the
+ * but keeps the half-typed order, and 回填 (ask card / run-detail / debate) lands in the
  * draft even across that swap. The textarea stays typable while a turn is generating
  * (queue up the next order); only sending is gated, with 停止 in the send slot.
  *
@@ -104,7 +107,7 @@ export type TurnComposerVariant = "card" | "bar";
  * has a conversation).
  */
 export function TurnComposer({
-  placeholder = "输入消息，@ 引用文件…",
+  placeholder = "输入消息，@ 引用文件或点名角色…",
   allowBackground = true,
   onDispatch,
   variant = "card",
@@ -175,6 +178,9 @@ export function TurnComposer({
   const attachments = useComposerDraftStore(
     (s) => s.drafts[draftKey]?.attachments ?? EMPTY_ATTACHMENTS,
   );
+  const agentMentions = useComposerDraftStore(
+    (s) => s.drafts[draftKey]?.agentMentions ?? EMPTY_AGENT_MENTIONS,
+  );
   const setValue = useCallback(
     (action: SetStateAction<string>) =>
       useComposerDraftStore.getState().setValue(draftKey, action),
@@ -183,6 +189,11 @@ export function TurnComposer({
   const setAttachments = useCallback(
     (action: SetStateAction<PendingAttachment[]>) =>
       useComposerDraftStore.getState().setAttachments(draftKey, action),
+    [draftKey],
+  );
+  const setAgentMentions = useCallback(
+    (action: SetStateAction<PendingAgentMention[]>) =>
+      useComposerDraftStore.getState().setAgentMentions(draftKey, action),
     [draftKey],
   );
 
@@ -223,6 +234,8 @@ export function TurnComposer({
     setValue,
     attachments,
     setAttachments,
+    agentMentions,
+    setAgentMentions,
     textareaRef,
     onAttachmentProjectHint: conversationId
       ? undefined
@@ -269,6 +282,8 @@ export function TurnComposer({
     setValue,
     attachments,
     setAttachments,
+    agentMentions,
+    setAgentMentions,
     isGenerating,
     backgroundMode,
     isLocal,
@@ -375,6 +390,13 @@ export function TurnComposer({
     [setAttachments],
   );
 
+  const removeAgentMention = useCallback(
+    (id: string) => {
+      setAgentMentions((prev) => prev.filter((a) => a.id !== id));
+    },
+    [setAgentMentions],
+  );
+
   const stopGeneration = useCallback(() => {
     useConversationStore.getState().stopGeneration();
   }, []);
@@ -419,9 +441,13 @@ export function TurnComposer({
 
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      // 生成中强制 queue；空闲与 Enter 同路径（默认 steer），勿伪装传 queue。
+      // 生成中强制 steer（插队）；空闲与 Enter 同路径（默认 steer），勿伪装传 queue。
       if (serverUnhealthy) return;
-      void handleSend(isGenerating ? { delivery: "queue" } : undefined);
+      if (isGenerating) {
+        void handleSend({ delivery: "steer" });
+      } else {
+        void handleSend();
+      }
       return;
     }
 
@@ -429,7 +455,7 @@ export function TurnComposer({
       e.preventDefault();
       // N4-A：离线硬禁用（与发送按钮一致；handleSend 仍有兜底）。
       if (serverUnhealthy) return;
-      // P1：空闲 / 生成中默认 steer（「插入」）；强制 queue 见 Ctrl/Cmd+Enter。
+      // 空闲默认 steer；生成中默认 queue（排队）。插队见 Ctrl/Cmd+Enter / 「插队」。
       void handleSend();
     }
   };
@@ -473,27 +499,44 @@ export function TurnComposer({
     </SimpleTooltip>
   ) : null;
 
-  // 生成中：主槽位只留停止（实心）；有草稿时次要弱发送 = 插入（steer）。
+  // 生成中：主槽一位——无草稿=停止；有草稿=主色排队发送覆盖停止（清空即可再停）。
+  // 插队为旁路轻量入口（显式 steer），不把主槽改成 Stop&send。
   // N4-A：只读离线硬禁用发送。
   const sendBlocked = serverUnhealthy;
   const hasDraft = Boolean(value.trim());
-  const interjectDisabled = !hasDraft || sendBlocked;
-  const midFlightLabel = "插入";
-  const midFlightHint = "插入当前回合（Enter）；Ctrl/Cmd+Enter 强制排队";
+  const queueDisabled = !hasDraft || sendBlocked;
+  const midFlightLabel = "排队发送";
+  const midFlightHint = "排队发送（Enter）；Ctrl/Cmd+Enter 插队";
   const sendControls = isGenerating ? (
-    <>
-      {hasDraft ? (
+    hasDraft ? (
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="shrink-0 rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          onClick={() => void handleSend({ delivery: "steer" })}
+          disabled={queueDisabled}
+          aria-label="插队"
+          title={
+            sendBlocked
+              ? "离线时无法发送"
+              : "插队插入当前回合（Ctrl/Cmd+Enter）"
+          }
+          data-testid="composer-steer-link"
+        >
+          插队
+        </button>
         <IconButton
           size="md"
-          tone="default"
+          tone="primary"
           onClick={() => void handleSend()}
-          disabled={interjectDisabled}
+          disabled={queueDisabled}
           aria-label={midFlightLabel}
           title={sendBlocked ? "离线时无法发送" : midFlightHint}
         >
           <Send size={14} />
         </IconButton>
-      ) : null}
+      </div>
+    ) : (
       <IconButton
         size="md"
         tone="destructive"
@@ -503,7 +546,7 @@ export function TurnComposer({
       >
         <Square size={14} />
       </IconButton>
-    </>
+    )
   ) : (
     <IconButton
       size="md"
@@ -605,18 +648,21 @@ export function TurnComposer({
       )}
       {menuOpen && (
         <MentionMenu
-          items={mention.items}
+          sections={mention.sections}
+          flatItems={mention.flatItems}
           activeIndex={mention.activeIndex}
           loading={mention.indexLoading}
           error={mention.menuError}
           query={mention.query}
           showSearch={mention.menuMode === "browse"}
-          noRoots={mention.indexLoadedRef.current && mention.sourceCount === 0}
+          noFileSources={
+            mention.indexLoadedRef.current && mention.sourceCount === 0
+          }
           onQueryChange={mention.setQuery}
           onKeyDown={(e) => {
             mention.handleMenuNavKey(e);
           }}
-          onSelect={(entry) => void mention.attachEntry(entry)}
+          onSelect={(item) => mention.selectItem(item)}
           onHover={mention.setActiveIndex}
           onAddRoot={mention.handleAddRoot}
           searchInputRef={mention.searchInputRef}
@@ -632,7 +678,12 @@ export function TurnComposer({
         />
       )}
 
-      <AttachmentChips attachments={attachments} onRemove={removeAttachment} />
+      <AttachmentChips
+        attachments={attachments}
+        agentMentions={agentMentions}
+        onRemove={removeAttachment}
+        onRemoveAgent={removeAgentMention}
+      />
 
       {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
       <ComposerConnectionNotice />
@@ -651,18 +702,6 @@ export function TurnComposer({
           className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
         >
           {COMPOSER_EMPTY_INTERRUPTED_HINT}
-        </div>
-      )}
-
-      {/* 生成中再发提示：有草稿时出现；主按钮仍是停止；P1 默认插入。 */}
-      {isGenerating && hasDraft && !showPendingHint && (
-        <div
-          aria-live="polite"
-          data-testid="composer-midflight-hint"
-          className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
-        >
-          <Loader2 size={12} className="shrink-0 animate-spin" />
-          Enter 或点发送将插入当前回合；Ctrl/Cmd+Enter 强制排队
         </div>
       )}
 

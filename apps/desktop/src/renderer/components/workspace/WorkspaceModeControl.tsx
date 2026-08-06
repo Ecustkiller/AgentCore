@@ -8,6 +8,8 @@ import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import {
   WORKSPACE_BINDING_CHANGED,
+  isLocalPickerFailureKind,
+  notifyLocalPickerFailure,
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -229,18 +231,16 @@ export function WorkspaceModeMenu({
 
   const runOpenLocalProject = () => {
     setActionBusy(true);
-    void pickAndOpenLocalProject(navigate)
+    void pickAndOpenLocalProject(navigate, { notifyOnFailure: false })
       .then((result) => {
-        if (!result.ok) {
-          if (result.reason === "cancelled") return;
-          if (result.reason === "unavailable") {
-            notifyError("打开本地项目仅桌面端可用");
-            return;
-          }
-          if (result.reason === "error") notifyError(result.message);
+        if (result.ok) {
+          onActionDone?.();
           return;
         }
-        onActionDone?.();
+        if (result.reason === "cancelled") return;
+        if (isLocalPickerFailureKind(result.reason)) {
+          notifyLocalPickerFailure(result.reason, result.message);
+        }
       })
       .finally(() => setActionBusy(false));
   };
@@ -255,11 +255,9 @@ export function WorkspaceModeMenu({
       .then((result) => {
         if (!result.ok) {
           if (result.reason === "cancelled") return;
-          if (result.reason === "unavailable") {
-            notifyError("绑定本机执行环境仅桌面端可用");
-            return;
+          if (isLocalPickerFailureKind(result.reason)) {
+            notifyLocalPickerFailure(result.reason, result.message);
           }
-          if (result.reason === "error") notifyError(result.message);
           return;
         }
         notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {

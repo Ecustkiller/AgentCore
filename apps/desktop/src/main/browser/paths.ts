@@ -2,7 +2,7 @@
  * LocalChromiumHost 外网页分区工厂 + bounds 归一化（纯逻辑，无 electron）。
  *
  * L1b：外网 http(s) 与工作区 HTML **均**按 conversationId 切开（见 §2.2）；
- * 绝不复用 PREVIEW_PARTITION / defaultSession，也绝不复用彼此。
+ * 绝不复用 defaultSession，也绝不复用彼此。
  */
 
 import type { BrowserBounds } from "@shared/browser-contract";

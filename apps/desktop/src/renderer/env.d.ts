@@ -10,7 +10,6 @@ import type { LogApi } from "@shared/log-contract";
 import type { McpApi } from "@shared/mcp-contract";
 import type { NotificationApi } from "@shared/notification-contract";
 import type { OutboxApi } from "@shared/outbox-contract";
-import type { PreviewApi } from "@shared/preview-contract";
 import type { ProcessApi } from "@shared/process-contract";
 import type { PtyApi } from "@shared/pty-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
@@ -50,9 +49,6 @@ declare global {
     hostApi?: HostApi;
     /** 本机 MCP Client（stdio Server 配置 + ClientTool 回填）；纯浏览器 / 单测可能缺失。 */
     mcpApi?: McpApi;
-    /** @deprecated M3b：旧子窗 / embed（preview://）协议实现保留；产品完整预览走 browserApi。
-     *  web / 单测可缺失。 */
-    previewApi?: PreviewApi;
     /** 右坞本机浏览器（LocalChromiumHost + openWorkspaceHtml）；仅 Electron；web / 单测可 mock。 */
     browserApi?: BrowserApi;
     windowApi: WindowApi;

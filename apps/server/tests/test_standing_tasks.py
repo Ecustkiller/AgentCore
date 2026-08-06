@@ -31,7 +31,7 @@ class TestCronNextRun:
 
     def test_hourly_preset(self):
         after = datetime(2026, 7, 28, 10, 15, tzinfo=UTC)
-        cron = resolve_cron(preset="hourly")
+        cron = resolve_cron(schedule_preset="hourly")
         assert cron == CRON_PRESETS["hourly"]
         nxt = next_run_after(cron, after)
         assert nxt == datetime(2026, 7, 28, 11, 0, tzinfo=UTC)
@@ -45,17 +45,21 @@ class TestCronNextRun:
         with pytest.raises(CronError):
             validate_cron("not a cron")
         with pytest.raises(CronError):
-            resolve_cron(cron="0 9 * * *", preset="daily")
+            resolve_cron(cron="0 9 * * *", schedule_preset="daily")
 
     def test_desktop_schedule_presets(self):
-        assert resolve_cron(preset="weekly_mon") == "0 9 * * 1"
-        assert resolve_cron(preset="weekly_fri") == "0 9 * * 5"
-        assert resolve_cron(preset="monthly_1") == "0 9 1 * *"
-        assert resolve_cron(preset="custom", cron="30 8 * * 2") == "30 8 * * 2"
+        assert resolve_cron(schedule_preset="weekly_mon") == "0 9 * * 1"
+        assert resolve_cron(schedule_preset="weekly_fri") == "0 9 * * 5"
+        assert resolve_cron(schedule_preset="monthly_1") == "0 9 1 * *"
+        assert resolve_cron(schedule_preset="custom", cron="30 8 * * 2") == "30 8 * * 2"
         from agentcore.standing_tasks.schedule import infer_schedule_preset
 
         assert infer_schedule_preset("0 9 * * 1") == "weekly_mon"
         assert infer_schedule_preset("15 3 * * *") == "custom"
+        with pytest.raises(CronError):
+            resolve_cron(schedule_preset="weekly")
+        with pytest.raises(CronError):
+            resolve_cron(schedule_preset="monthly")
 
 class TestLeaseClaimable:
     def test_due_and_unlocked_is_claimable(self):

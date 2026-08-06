@@ -11,6 +11,8 @@ from typing import Any
 _MAX_QUESTIONS = 5  # 开场重点问题最多 5 个（对齐 Cursor 2.1 的 3–5）
 _MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
 _MAX_OPTION_DETAIL = 120  # 单个选项的权衡说明上限（一行内）
+_MAX_TARGET_NAME = 120  # grant_* target_name 截断上限
+_WELL_KNOWN_DIRS = frozenset({"desktop", "downloads", "documents"})
 _MAX_ASSUMPTIONS = 10
 
 # Presentation metadata belongs in ``recommended``, not the answer-valued label.
@@ -134,8 +136,10 @@ def normalize_options(
     ``detail`` (the trade-off shown under the label), ``recommended`` (the asker's
     advised option — advisory only, never a pre-selection), and ``action`` (a desktop
     client action such as ``open_local_project`` / ``bind_local_folder`` — unknown values
-    drop so a hallucinated action never reaches the wire). Empty-label entries drop, and
-    only the FIRST
+    drop so a hallucinated action never reaches the wire). For ``grant_*`` actions only,
+    ``well_known`` (``desktop`` / ``downloads`` / ``documents``) and ``target_name``
+    (basename fuzzy token; path separators rejected; truncated ≤120) pass through.
+    Empty-label entries drop, and only the FIRST
     ``recommended`` survives (至多一个推荐项), so the card shows one clear「推荐」without
     a wall of badges. Labels that embed recommendation markup (e.g. ``（推荐）``) raise
     :class:`OptionLabelError` — no silent strip.
@@ -165,6 +169,14 @@ def normalize_options(
                 "grant_organize_folder",
             ):
                 opt["action"] = action
+            # grant_* hints for desktop one-click / resolve-then-grant (drop otherwise).
+            if action in ("grant_readonly_folder", "grant_organize_folder"):
+                well_known = str(it.get("well_known") or "").strip().lower()
+                if well_known in _WELL_KNOWN_DIRS:
+                    opt["well_known"] = well_known
+                target_name = str(it.get("target_name") or "").strip()
+                if target_name and "/" not in target_name and "\\" not in target_name:
+                    opt["target_name"] = target_name[:_MAX_TARGET_NAME]
             # organize_plan structured fields (passed through for plan binding).
             op = str(it.get("op") or "").strip()
             if op in ("move", "copy", "delete", "mkdir"):

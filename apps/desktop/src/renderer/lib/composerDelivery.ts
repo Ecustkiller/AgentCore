@@ -25,15 +25,15 @@ export function isCoordinationActive(
 }
 
 /**
- * 默认 delivery（P1）：
+ * 默认 delivery：
  * - 空闲 → steer
- * - 生成中（经典 / 协调）→ steer（「插入」）
- * 强制 queue 仅 Ctrl/Cmd+Enter / 显式 opts.delivery。
+ * - 生成中（经典 / 协调）→ queue（主发送 / Enter）
+ * 显式插队（Ctrl/Cmd+Enter / 「插队」入口）传 ``delivery=steer``。
  * 不可注入时由服务端降级 ``turn_queued`` + ``degraded_from=steer``。
  */
 export function resolveDefaultDelivery(
-  _isGenerating: boolean,
+  isGenerating: boolean,
   _conversationId: string | null | undefined,
 ): MessageDelivery {
-  return "steer";
+  return isGenerating ? "queue" : "steer";
 }

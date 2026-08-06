@@ -506,8 +506,6 @@ async def test_drive_mlr_preauth_skips_team_preview(monkeypatch):
 
     monkeypatch.setattr(preview_mod, "await_team_preview", _fake_await)
     monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
-    monkeypatch.setattr(preview_mod, "should_preview_plan", lambda *a, **k: True)
-    monkeypatch.setattr(preview_mod, "skip_after_confirmed_ask", lambda *_a, **_k: False)
     monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
     monkeypatch.setattr(
         "agentcore.runtime.sandbox_approval.worker_gate_applies", lambda *_a, **_k: False
@@ -681,8 +679,6 @@ async def test_mlr_stop_clears_keep_flag(monkeypatch):
 
     monkeypatch.setattr(preview_mod, "await_team_preview", _stop)
     monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
-    monkeypatch.setattr(preview_mod, "should_preview_plan", lambda *a, **k: True)
-    monkeypatch.setattr(preview_mod, "skip_after_confirmed_ask", lambda *_a, **_k: False)
     monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
     monkeypatch.setattr(
         "agentcore.runtime.sandbox_approval.worker_gate_applies", lambda *_a, **_k: False

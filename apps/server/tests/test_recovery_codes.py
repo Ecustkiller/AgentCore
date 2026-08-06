@@ -1,4 +1,4 @@
-"""Recovery code hashing: argon2id for new codes, legacy SHA-256 verify."""
+"""Recovery code hashing: argon2id only (legacy SHA-256 rejected)."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ def test_hash_recovery_code_is_argon2():
     assert not recovery_code_matches("aabbccddeeff0012", h)
 
 
-def test_legacy_sha256_recovery_still_matches():
+def test_legacy_sha256_recovery_no_longer_matches():
     code = "deadbeef"
     legacy = hashlib.sha256(code.encode()).hexdigest()
-    assert recovery_code_matches(code, legacy)
+    assert not recovery_code_matches(code, legacy)
     assert not recovery_code_matches("cafebabe", legacy)

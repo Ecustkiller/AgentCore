@@ -9,12 +9,13 @@ import { useState } from "react";
 
 // 添加 / 编辑一个 BYOK 服务商 (设置·模型配置). Mobile-local vendor presets (no shared package
 // with desktop) prefill the endpoint / label / default model; 「自定义」also requires Base URL.
-// Preset vendors: main path = vendor + name + Key + editable default model (连接测试 / 目录兜底).
+// Preset vendors: main path = vendor + name + Key + default model select (models +「其他…」).
 // Base URL override lives under 高级. Chat model pick lives in 模型组合, not this form.
 
 /** Mobile-local BYOK presets. */
 type ProviderId =
   | "deepseek"
+  | "jiurelay"
   | "openai"
   | "moonshot"
   | "zhipu"
@@ -28,7 +29,12 @@ type ProviderPreset = {
   baseUrl: string;
   baseUrlAliases?: readonly string[];
   defaultModel: string;
+  /** Common model IDs for the preset dropdown (aligned with desktop byokProviderPresets). */
+  models: readonly string[];
 };
+
+/** Sentinel `<select>` value for free-text default model. */
+const OTHER_MODEL_VALUE = "__other__";
 
 const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
@@ -37,12 +43,21 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api.deepseek.com",
     baseUrlAliases: ["https://api.deepseek.com/v1"],
     defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+  },
+  {
+    id: "jiurelay",
+    label: "JiuRelay",
+    baseUrl: "https://jiurelay.com/openai/v1",
+    defaultModel: "glm-5.2",
+    models: ["glm-5.2", "deepseek-v4-flash-0731", "grok-4.5"],
   },
   {
     id: "openai",
     label: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     defaultModel: "gpt-4o",
+    models: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
   },
   {
     id: "moonshot",
@@ -50,24 +65,32 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api.moonshot.cn/v1",
     baseUrlAliases: ["https://api.moonshot.ai/v1"],
     defaultModel: "kimi-k2.6",
+    models: ["kimi-k2.6", "kimi-k3", "kimi-k2.5"],
   },
   {
     id: "zhipu",
     label: "智谱 GLM",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4-plus",
+    models: ["glm-4-plus", "glm-4-flash", "glm-4-air"],
   },
   {
     id: "doubao",
     label: "豆包 (火山方舟)",
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     defaultModel: "doubao-pro-32k",
+    models: ["doubao-pro-32k", "doubao-lite-32k"],
   },
   {
     id: "openrouter",
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
     defaultModel: "openrouter/auto",
+    models: [
+      "openrouter/auto",
+      "anthropic/claude-sonnet-4",
+      "google/gemini-2.5-pro",
+    ],
   },
 ];
 
@@ -100,6 +123,10 @@ function getPreset(id: Exclude<ProviderId, "custom">): ProviderPreset {
   return preset;
 }
 
+function isListedModel(preset: ProviderPreset, model: string): boolean {
+  return preset.models.includes(model);
+}
+
 export function ProviderForm({
   provider,
   onSaved,
@@ -129,6 +156,14 @@ export function ProviderForm({
   const [defaultModel, setDefaultModel] = useState(
     () => initialModel.trim() || defaultPreset.defaultModel,
   );
+  const [modelOther, setModelOther] = useState(() => {
+    if (!editing) return false;
+    const id = resolveProvider(initialBaseUrl);
+    if (id === "custom") return false;
+    const model = initialModel.trim();
+    if (!model) return false;
+    return !isListedModel(getPreset(id), model);
+  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,8 +194,18 @@ export function ProviderForm({
       const p = getPreset(next);
       setBaseUrl(p.baseUrl);
       setDefaultModel(p.defaultModel);
+      setModelOther(false);
       setLabel(p.label);
     }
+  }
+
+  function selectListedModel(next: string) {
+    if (next === OTHER_MODEL_VALUE) {
+      setModelOther(true);
+      return;
+    }
+    setModelOther(false);
+    setDefaultModel(next);
   }
 
   async function save() {
@@ -193,6 +238,12 @@ export function ProviderForm({
       setSaving(false);
     }
   }
+
+  const showModelOtherInput = isCustom || modelOther;
+  const modelSelectValue =
+    preset != null && !modelOther && isListedModel(preset, defaultModel)
+      ? defaultModel
+      : OTHER_MODEL_VALUE;
 
   return (
     <div className="section-card">
@@ -286,16 +337,40 @@ export function ProviderForm({
         <label className="field-label" htmlFor="llm-default-model">
           默认模型名
         </label>
-        <input
-          id="llm-default-model"
-          type="text"
-          value={defaultModel}
-          onChange={(e) => setDefaultModel(e.target.value)}
-          placeholder="model-name"
-          autoComplete="off"
-          spellCheck={false}
-          className="text-input"
-        />
+        {!isCustom && preset != null && (
+          <select
+            id="llm-default-model"
+            value={modelSelectValue}
+            onChange={(e) => selectListedModel(e.target.value)}
+            className="text-input"
+          >
+            {preset.models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            <option value={OTHER_MODEL_VALUE}>其他…</option>
+          </select>
+        )}
+        {showModelOtherInput && (
+          <input
+            id={isCustom ? "llm-default-model" : "llm-default-model-other"}
+            type="text"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            placeholder={preset?.defaultModel ?? "model-name"}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-input"
+            style={!isCustom ? { marginTop: 8 } : undefined}
+            aria-label={isCustom ? undefined : "自定义默认模型名"}
+          />
+        )}
+        {providerId === "jiurelay" && (
+          <p className="section-note" style={{ marginTop: 4 }}>
+            领取的 Key 须与所选模型对应
+          </p>
+        )}
         <p className="section-note" style={{ marginTop: 4 }}>
           连接测试与目录兜底用；日常选用请到「模型组合」。
         </p>

@@ -407,6 +407,7 @@ async def send_message(
             assert coord is not None
             interjection_id = new_id()
             raw_attachments = [a.model_dump() for a in body.attachments]
+            raw_agent_mentions = [m.model_dump() for m in body.agent_mentions]
             # Delivered path: persist now so CEO / queue_user_message see workspace_path.
             # Stash keeps inline text; a later drain re-pass is idempotent (path set → skip write).
             from agentcore.workspace.attachments import interjection_attachment_meta
@@ -425,6 +426,7 @@ async def send_message(
                     "user_id": user.user_id,
                     "conversation_id": conversation_id,
                     "attachments": attachments,
+                    "agent_mentions": raw_agent_mentions,
                     "requires_tools": needs_tools,
                     "x_client_platform": x_client_platform,
                     "llm_credentials": preflight.credentials,
@@ -473,11 +475,13 @@ async def send_message(
         elif body.delivery == "steer":
             # 经典 in-flight + steer → 挂到 live turn pending；无 accepting 窗口 → 回落 queue。
             raw_attachments = [a.model_dump() for a in body.attachments]
+            raw_agent_mentions = [m.model_dump() for m in body.agent_mentions]
             parked = try_enqueue_steer(
                 conversation_id=conversation_id,
                 content=body.content,
                 user_id=user.user_id,
                 attachments=raw_attachments,
+                agent_mentions=raw_agent_mentions,
                 requires_tools=needs_tools,
                 x_client_platform=x_client_platform,
                 llm_credentials=preflight.credentials,
@@ -518,6 +522,7 @@ async def send_message(
                 content=body.content,
                 user_id=user.user_id,
                 attachments=[a.model_dump() for a in body.attachments],
+                agent_mentions=[m.model_dump() for m in body.agent_mentions],
                 requires_tools=needs_tools,
                 x_client_platform=x_client_platform,
                 llm_credentials=preflight.credentials,
@@ -544,6 +549,7 @@ async def send_message(
             user_id=user.user_id,
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
+            agent_mentions=[m.model_dump() for m in body.agent_mentions],
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,
             x_client_platform=x_client_platform,

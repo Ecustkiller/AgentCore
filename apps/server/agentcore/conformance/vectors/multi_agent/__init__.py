@@ -116,15 +116,15 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_timeout_hard_gaps,
     ),
     "multi_agent_user_interjection_handled": (
-        "协调插话入图：user_interjection(delivered) → update_synthesis，折到 userInterjections",
+        "协调插话入图：user_interjection(received) → update_synthesis，折到 userInterjections",
         _multi_agent_user_interjection_handled,
     ),
     "multi_agent_user_interjection_queued": (
-        "协调插话转排队：user_interjection delivered→queued（同 id 保最新）+ queue_user_message",
+        "协调插话转排队：user_interjection received→queued（同 id 保最新）+ queue_user_message",
         _multi_agent_user_interjection_queued,
     ),
     "multi_agent_user_interjection_with_attachments": (
-        "协调带附件插话：user_interjection(delivered) 携带 attachments 元数据 → userInterjections",
+        "协调带附件插话：user_interjection(received) 携带 attachments 元数据 → userInterjections",
         _multi_agent_user_interjection_with_attachments,
     ),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
@@ -145,7 +145,7 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     ),
     "multi_agent_multi_lens_research": (
         "多 Agent·多视角深度调研幕1：team_preview(delegate) → 4 透镜并行流式 → "
-        "汇总分析师 debrief.motion_card → CEO 呈报建议开辩 → followups 首条开辩芯片",
+        "汇总分析师 debrief.motion_card → CEO 呈报建议开辩（开辩入口 stage_card）",
         _multi_agent_multi_lens_research,
     ),
     "multi_agent_mlr_debate_acts": (

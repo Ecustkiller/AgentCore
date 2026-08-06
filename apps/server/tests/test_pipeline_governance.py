@@ -171,13 +171,12 @@ def _message_end(events):
 
 async def test_pipeline_leaves_sink_open_for_post_turn_tail(monkeypatch):
     """The pipeline must NOT close the sink — its owner (the coordinator) does — so the
-    post-turn tail (title_generated / followups_generated, emitted by persist_turn_result
+    post-turn tail (title_generated / stage_card_required, emitted by persist_turn_result
     AFTER the pipeline returns) still reaches the client.
 
-    Regression for the dropped 「下一步推荐」: run_chat_pipeline used to close the sink in
+    Regression for dropped post-turn SSE: run_chat_pipeline used to close the sink in
     its finally, so the tail hit an already-closed sink and was silently dropped (emit is a
-    no-op once closed). Title survived via its DB write; the transport-only followups —
-    whose ONLY delivery channel is this SSE event — vanished entirely ("从没出现过").
+    no-op once closed). Title survived via its DB write; transport-only events vanished.
     """
     registry = ToolRegistry()
     registry.register(_StubTool(name="noop", success=True))  # unused: one clean content round

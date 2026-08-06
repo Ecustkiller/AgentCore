@@ -238,11 +238,9 @@ class MessageRepository:
     async def set_followups(
         self, message_id: str, *, conversation_id: str, followups: list[str]
     ) -> None:
-        """Backfill the post-turn 下一步推荐 chips onto an existing assistant row.
+        """Update ``messages.followups`` (historical / admin; live mint path retired).
 
-        The followups World B task mints them AFTER the row is created (same finalize tail
-        as the title), so persistence is a targeted UPDATE rather than a create arg. Scoped
-        by conversation_id (defense in depth); a no-match id is a harmless no-op.
+        Scoped by conversation_id (defense in depth); a no-match id is a harmless no-op.
         """
         await self._session.execute(
             update(Message)

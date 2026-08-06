@@ -2,7 +2,6 @@ import type {
   DebateNarrativeRound,
   DebatePretrialCompletedPayload,
   DebatePretrialOrdersPayload,
-  DebatePretrialProgressPayload,
   DebatePretrialStartedPayload,
 } from "@/types/events";
 import type { DebatePretrialProjection } from "@agentcore/protocol-conformance";
@@ -95,7 +94,6 @@ export function foldDebatePretrial(
   type:
     | "debate_pretrial_started"
     | "debate_pretrial_orders"
-    | "debate_pretrial_progress"
     | "debate_pretrial_completed",
   payload: unknown,
 ): DebatePretrialState | null {
@@ -121,16 +119,6 @@ export function foldDebatePretrial(
         })),
         source: o.source ?? "empty",
       })),
-    };
-  }
-  if (type === "debate_pretrial_progress") {
-    // 与 oracle 一致：无 started 时 progress 不落态。
-    if (!current) return null;
-    const p = payload as DebatePretrialProgressPayload;
-    return {
-      ...current,
-      evidenceLedgerCount:
-        p.evidence_ledger_count ?? current.evidenceLedgerCount,
     };
   }
   // completed — authoritative replace

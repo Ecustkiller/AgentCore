@@ -2,7 +2,6 @@ import { bumpConversationCache } from "@/hooks/useConversations";
 import {
   StreamError,
   describeStreamError,
-  isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
 import type { PlanReviewUserDecision } from "@/services/planReview";
@@ -40,7 +39,8 @@ function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
 
 /**
  * Resume request was refused before any SSE opened (404/409/410/5xx, or sidecar
- * never started). Caller should restore the optimistic-removed resume card.
+ * never started). Transient refusals may restore the optimistic-removed resume
+ * card; frame-gone refusals must not (协议：帧不存在应丢卡).
  * Mid-stream drops / user abort are NOT refusals — the turn may already be running.
  */
 function isResumeRequestRefused(err: unknown): boolean {
@@ -53,13 +53,32 @@ function isResumeRequestRefused(err: unknown): boolean {
 }
 
 /**
+ * Paused frame is gone / already settled — keep the card dropped and show a
+ * plain banner (no one-click resume retry). Covers cloud resume 404/410,
+ * product copy「挂起的回合不存在或已处理」, and sidecar PAUSED_TURN_NOT_FOUND.
+ */
+function isPausedFrameGone(err: unknown): boolean {
+  if (!(err instanceof StreamError)) return false;
+  if (err.kind === "http" && (err.status === 404 || err.status === 410)) {
+    return true;
+  }
+  const msg = `${err.serverMessage ?? ""} ${err.message ?? ""}`;
+  if (msg.includes("挂起的回合不存在或已处理")) return true;
+  if (msg.includes("PAUSED_TURN_NOT_FOUND") || /-32003\b/.test(msg)) {
+    return true;
+  }
+  const code = (err.code ?? "").toLowerCase();
+  return code === "not_found" || code === "paused_turn_not_found";
+}
+
+/**
  * Re-run a turn from an existing (persisted) user message.
  *
- * Backs the message-level regenerate / edit-and-resend actions, and the retry
- * path once a send has been persisted. Drops everything after the user message,
- * opens a fresh assistant bubble, then streams the new reply; the backend
- * truncates the same range so persisted history stays consistent. On a transport
- * failure it raises a retry banner that re-runs the same regenerate.
+ * Backs the message-level regenerate / edit-and-resend actions. Drops everything
+ * after the user message, opens a fresh assistant bubble, then streams the new
+ * reply; the backend truncates the same range so persisted history stays
+ * consistent. On a transport failure it raises an error banner (no one-click
+ * regenerate from the banner — bubble regenerate remains).
  */
 export async function runRegenerate(
   userMessageId: string,
@@ -101,12 +120,9 @@ export async function runRegenerate(
     clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
-      const retry = isRetriableStreamError(err)
-        ? () => void runRegenerate(userMessageId, content)
-        : null;
       useConversationStore
         .getState()
-        .setError(msg, retry, conversationId, streamErrorAction(err));
+        .setError(msg, null, conversationId, streamErrorAction(err));
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
@@ -124,13 +140,14 @@ export async function runRegenerate(
  * projection key).
  *
  * Card lifecycle: remove the resume card as soon as the request is about to fire;
- * restore it only when the request is refused before any stream opens (404/409/410/
- * 5xx / sidecar never started). Mid-stream interrupt and user abort leave the card
- * gone (the turn is already running — reconnect / banner paths handle that).
+ * restore it only on transient refusals before any stream opens (409/5xx / sidecar
+ * never started). Frame-gone refusals (404/410 / PAUSED_TURN_NOT_FOUND) keep the
+ * card dropped. Mid-stream interrupt and user abort leave the card gone (the turn
+ * is already running — rejoin / banner paths handle that).
  *
  * Sidecar frames never degrade to cloud resume (双模式工作区 §10.4 — cloud has no
  * local frame → guaranteed 404). Missing sidecar target or failed probe keeps the
- * card and raises a retry banner.
+ * card and raises a plain banner (no one-click resume from the banner).
  */
 export async function runResume(
   messageId: string,
@@ -177,28 +194,15 @@ export async function runResume(
   const origin = resolveResumeOrigin(conversationId, resumeMessageId);
   const viaSidecar = shouldResumeViaSidecar(origin);
 
-  /** Banner「重试」：错误已在 runResume 内 setError；吞掉 rejection 避免未处理 Promise。 */
-  const retryResume = () => {
-    void runResume(
-      resumeMessageId,
-      decision,
-      note,
-      selected,
-      corrections,
-    ).catch(() => {});
-  };
-
   const raiseSidecarUnavailable = (detail: string | null) => {
+    // Drop the bad-health cache so the next ResumePrompt submit re-probes
+    // (banner no longer one-click retries).
+    clearSidecarHealth();
     store.setError(
       detail
         ? `${detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
         : "本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试",
-      // 手动重试 = 用户「我修好环境了，再试一次」——先清会话级健康缓存强制重探，
-      // 否则重试必命中刚记下的 bad 缓存、变成死按钮。
-      () => {
-        clearSidecarHealth();
-        retryResume();
-      },
+      null,
       conversationId,
       null,
     );
@@ -212,7 +216,7 @@ export async function runResume(
     throw new Error("resume blocked: sidecar unavailable");
   }
 
-  // Probe first: if the env can't start, keep the resume card and raise a retry
+  // Probe first: if the env can't start, keep the resume card and raise a
   // banner — never a guaranteed-404 cloud resume.
   if (viaSidecar && sidecarTarget) {
     const probe = await probeSidecar(sidecarTarget);
@@ -225,7 +229,7 @@ export async function runResume(
   if (isClientOnlyResumeKey(conversationId, resumeMessageId)) {
     store.setError(
       "续跑键无效（缺少服务端消息 ID），无法继续这次暂停的回合，请稍后重试",
-      retryResume,
+      null,
       conversationId,
       null,
     );
@@ -242,7 +246,7 @@ export async function runResume(
 
   // Optimistic: drop the pausedTurns shell as the request fires. InteractionStore
   // cold pending stays in submitting via submitInteraction; restore shell only
-  // when the request is refused before any stream opens.
+  // when the request is refused before any stream opens (and the frame still exists).
   const pendingSnapshot = pending;
   const hadPausedFrame = pendingSnapshot != null;
   if (hadPausedFrame) {
@@ -297,8 +301,14 @@ export async function runResume(
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
       return;
     }
-    // Request refused before any stream opened → put the shell back for retry.
-    if (isResumeRequestRefused(err) && hadPausedFrame && pendingSnapshot) {
+    // Transient refusal before any stream opened → put the shell back.
+    // Frame-gone (404 / PAUSED_TURN_NOT_FOUND) → keep dropped (协议：帧不存在应丢卡).
+    if (
+      isResumeRequestRefused(err) &&
+      hadPausedFrame &&
+      pendingSnapshot &&
+      !isPausedFrameGone(err)
+    ) {
       usePausedTurnStore.getState().addLiveResume(pendingSnapshot);
     }
     const s = useConversationStore.getState();
@@ -310,8 +320,7 @@ export async function runResume(
     clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
-      const retry = isRetriableStreamError(err) ? retryResume : null;
-      s.setError(msg, retry, conversationId, streamErrorAction(err));
+      s.setError(msg, null, conversationId, streamErrorAction(err));
     }
     // Re-throw so submitInteraction does not markResolved (假成功).
     throw err;

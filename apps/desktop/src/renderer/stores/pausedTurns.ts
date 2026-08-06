@@ -189,11 +189,21 @@ const toAssumptions = (
     value: String(a.value ?? ""),
   }));
 
-/** Options rehydrate as `{label, detail?, recommended?, action?}` from the backend. */
+/** Options rehydrate as `{label, detail?, recommended?, action?, well_known?, target_name?}` from the backend. */
 const toOptions = (raw: unknown): AskOption[] =>
   Array.isArray(raw)
     ? raw.map((o) => {
         const obj = (o ?? {}) as Record<string, unknown>;
+        const wellKnown =
+          obj.well_known === "desktop" ||
+          obj.well_known === "downloads" ||
+          obj.well_known === "documents"
+            ? obj.well_known
+            : undefined;
+        const targetName =
+          typeof obj.target_name === "string" && obj.target_name.trim()
+            ? obj.target_name.trim()
+            : undefined;
         return {
           label: String(obj.label ?? ""),
           ...(obj.detail ? { detail: String(obj.detail) } : {}),
@@ -210,6 +220,8 @@ const toOptions = (raw: unknown): AskOption[] =>
                   | "grant_organize_folder",
               }
             : {}),
+          ...(wellKnown ? { well_known: wellKnown } : {}),
+          ...(targetName ? { target_name: targetName } : {}),
         };
       })
     : [];

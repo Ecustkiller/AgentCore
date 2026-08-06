@@ -115,8 +115,6 @@ import {
   extractAsks,
   extractEscalationSlots,
   extractEvidenceLedger,
-  extractFollowups,
-  extractFollowupsUnavailable,
   extractGraphAppendActKinds,
   extractGraphAppendAuthorizedBy,
   extractHotDecisionTraces,
@@ -149,7 +147,6 @@ import {
   Loader2,
   Menu,
   Send,
-  Sparkles,
   Square,
   SquarePen,
 } from "lucide-react";
@@ -683,6 +680,7 @@ function AssistantBubble({
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 对齐桌面：空正文 + 结构化 error / error·unproductive → 可见失败说明。
   const finishReason = live ? null : (chrome.finishReason ?? p.finishReason);
+  const stopped = finishReason === "cancelled";
   const failureNotice = resolveEmptyFailureNotice({
     content: p.content,
     finishReason,
@@ -722,7 +720,9 @@ function AssistantBubble({
       <div className="bubble assistant">
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {empty && !failureNotice ? (
-          <span className="muted">{live ? "…" : ""}</span>
+          <span className="muted">
+            {live ? "…" : stopped ? STOPPED_LABEL : ""}
+          </span>
         ) : empty && failureNotice ? (
           <FinishReasonChip
             reason={finishReason}
@@ -964,8 +964,8 @@ function HistoryAssistant({
       })
     : null;
   const supportIds = historySupportIds(m, conversationId);
-  const showRetry =
-    !!onRetry && isLast && (interrupted || stopped || !!failureNotice);
+  // Stopped empty = neutral「已停止」only — no main 重试 CTA (interrupted may keep recover).
+  const showRetry = !!onRetry && isLast && (interrupted || !!failureNotice);
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
     errorMessage,
@@ -996,6 +996,8 @@ function HistoryAssistant({
             reason={finishReason}
             diagnosisLabel={finishDiagnosis}
           />
+        ) : emptyBody && stopped && !failureNotice ? (
+          <span className="muted">{STOPPED_LABEL}</span>
         ) : (
           <AssistantContent
             process={process}
@@ -1056,7 +1058,7 @@ function HistoryAssistant({
           conversationId={conversationId}
           messageId={m.id}
         />
-        {(interrupted || stopped) && showRetry && !failureNotice && (
+        {interrupted && showRetry && !failureNotice && (
           <button type="button" className="retry-btn" onClick={onRetry}>
             重试
           </button>
@@ -1100,7 +1102,7 @@ export function ChatPage() {
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
-  // The composer textarea — focused after tapping a 下一步 chip so the user can edit/send.
+  // The composer textarea — focused after ask / debate handoff fill so the user can edit/send.
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
@@ -1591,7 +1593,7 @@ export function ChatPage() {
     [liveTurn],
   );
   const interruptible = isLiveInterruptible(liveProjection);
-  // busy 默认一律 steer（defaultDelivery）；interruptible 仅作文案启发式。
+  // busy 默认 queue（defaultDelivery）；插队轻链显式 steer；interruptible 仅作文案启发式。
   // 挂起即收口 (②, Phase 3): hot-path cards resolve live in-stream; cold path
   // (ask_user / plan_review / team_preview) finalizes and uses ResumeCard.
   const liveInteractions = busy
@@ -1644,30 +1646,6 @@ export function ChatPage() {
       .filter((x): x is NonNullable<typeof x> => x != null);
   }, [recoveredInteractions, busy]);
 
-  // 下一步推荐 chips: live path matches followups_generated.message_id to this turn's
-  // message_start; reload (no live turn) replays MessageDetail.followups on the latest
-  // finished assistant. Retire when the next turn starts (`busy`).
-  const followups = useMemo(() => {
-    if (busy) return [];
-    if (liveTurn) return extractFollowups(liveTurn.events);
-    const last =
-      history && history.length > 0 ? history[history.length - 1] : null;
-    if (
-      last?.role === "assistant" &&
-      last.followups &&
-      last.followups.length > 0
-    ) {
-      return last.followups;
-    }
-    return [];
-  }, [busy, liveTurn, history]);
-
-  const followupsUnavailable = useMemo(() => {
-    if (busy || followups.length > 0) return false;
-    if (liveTurn) return extractFollowupsUnavailable(liveTurn.events);
-    return false;
-  }, [busy, liveTurn, followups.length]);
-
   // Stage picked files as text attachments (composer 附件). Each is read on the spot (the
   // pick is the grant); images / binaries are refused with a reason and skipped. The input
   // is reset so re-picking the same file fires onChange again.
@@ -1691,9 +1669,9 @@ export function ChatPage() {
     setAttachments((prev) => prev.filter((a) => a.name !== name));
   }
 
-  // Tap a 下一步 chip → fill the composer (don't auto-send: let the user edit first, like
-  // desktop). Appends after a space when text is already typed, so a chip never clobbers it.
-  function fillFollowup(text: string) {
+  // Ask / debate handoff → fill the composer (don't auto-send: let the user edit first).
+  // Appends after a space when text is already typed, so a fill never clobbers it.
+  function fillComposer(text: string) {
     setInput((prev) => (prev.trim() ? `${prev} ${text}` : text));
     composerInputRef.current?.focus();
   }
@@ -1761,15 +1739,15 @@ export function ChatPage() {
 
   // Submit dispatch: a draft creates-then-routes (startDraft); an open conversation streams
   // in place (send). The composer / Enter both go through here.
-  // 生成中：态敏默认 delivery；强制 queue 走 sendForcedQueue。
+  // 生成中：默认 queue；显式插队走 sendForcedSteer。
   const onSubmit = (deliveryOverride?: MessageDelivery) => {
     if (conversationId) void send(undefined, deliveryOverride);
     else void startDraft();
   };
 
-  const sendForcedQueue = () => {
+  const sendForcedSteer = () => {
     if (!conversationId || !input.trim()) return;
-    void send(undefined, "queue");
+    void send(undefined, "steer");
   };
 
   /** 取消 FIFO 排队项（Stop ≠ 取消排队）。
@@ -2416,7 +2394,7 @@ export function ChatPage() {
                   key={m.id}
                   m={m}
                   conversationId={conversationId ?? null}
-                  onFill={fillFollowup}
+                  onFill={fillComposer}
                   isLast={i === history.length - 1 && turns.length === 0}
                   onRetry={
                     i === history.length - 1 && turns.length === 0
@@ -2471,7 +2449,7 @@ export function ChatPage() {
                     turn={turn}
                     live={isLiveStream}
                     conversationId={conversationId ?? null}
-                    onFill={fillFollowup}
+                    onFill={fillComposer}
                     onOpenBrowserLive={
                       conversationId ? openBrowserLive : undefined
                     }
@@ -2612,32 +2590,6 @@ export function ChatPage() {
         </div>
       )}
 
-      {(followups.length > 0 || followupsUnavailable) && (
-        <div className="followups">
-          <div className="followups-label">
-            <Sparkles size={12} />
-            <span>下一步</span>
-          </div>
-          {followups.length === 0 ? (
-            <div className="followups-empty muted">推荐暂时不可用</div>
-          ) : (
-            <div className="followups-row">
-              {followups.map((text) => (
-                <button
-                  key={text}
-                  type="button"
-                  className="followup-chip"
-                  title={text}
-                  onClick={() => fillFollowup(text)}
-                >
-                  {text}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {attachments.length > 0 && (
         <div className="attach-tray">
           {attachments.map((a) => (
@@ -2686,27 +2638,25 @@ export function ChatPage() {
         />
       )}
 
-      {/* 生成中有草稿：排队入口收到行外轻链（对齐桌面 Ctrl+Enter，不挤主槽）。 */}
-      {trailing.showQueueHint && (
+      {/* 生成中有草稿：插队入口收到行外轻链（对齐桌面 Ctrl+Enter，不挤主槽）。 */}
+      {trailing.showSteerHint && (
         <div
           className="composer-delivery-hint"
           data-testid="composer-delivery-hint"
         >
-          <span>发送将插入当前回合</span>
+          <span>发送将排队至下一回合</span>
           <button
             type="button"
             className="queue-link"
-            onClick={() => void sendForcedQueue()}
+            onClick={() => void sendForcedSteer()}
             disabled={history === null || stopPhase === "stopping"}
-            aria-label={interruptible ? "强制排队" : "排队发送"}
+            aria-label={interruptible ? "插话" : "插队"}
             title={
-              interruptible
-                ? "强制排队（绕过插话）"
-                : "排队发送（下一回合执行）"
+              interruptible ? "插话（插入当前回合）" : "插队（插入当前回合）"
             }
-            data-testid="force-queue-btn"
+            data-testid="force-steer-btn"
           >
-            {interruptible ? "强制排队" : "改为排队"}
+            插队
           </button>
         </div>
       )}
@@ -2747,23 +2697,8 @@ export function ChatPage() {
             void onSubmit();
           }}
         />
-        {/* 态敏主槽：空闲空草稿=麦；有字=发送；生成中=Stop（有草稿时旁挂弱插入）。 */}
+        {/* 态敏主槽：空闲空草稿=麦；有字=发送；生成中=Stop（有草稿时主发=queue，行外插队）。 */}
         {trailing.row.map((slot) => {
-          if (slot === "steer-send") {
-            return (
-              <button
-                key={slot}
-                type="button"
-                className="send-btn send-btn-secondary"
-                onClick={() => void onSubmit()}
-                disabled={history === null || stopPhase === "stopping"}
-                aria-label={interruptible ? "发送插话" : "插入发送"}
-                title={interruptible ? "发送插话" : "插入发送"}
-              >
-                <Send size={18} aria-hidden />
-              </button>
-            );
-          }
           if (slot === "send") {
             return (
               <button

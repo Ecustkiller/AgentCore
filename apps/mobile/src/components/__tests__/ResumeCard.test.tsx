@@ -85,6 +85,37 @@ describe("ResumeCard · ask_user", () => {
     );
   });
 
+  it("本机目录 action 可点 → LocalPickerFailureCard unavailable（不灰掉、不提交）", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={summary({
+          intent: "decision",
+          questions: [
+            {
+              id: "q0",
+              prompt: "工作区",
+              kind: "choice",
+              multiple: false,
+              options: [
+                { label: "打开本地项目", action: "open_local_project" },
+                { label: "继续用云端" },
+              ],
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    const folderBtn = screen.getByRole("button", { name: /打开本地项目/ });
+    expect((folderBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(folderBtn);
+    const card = screen.getByTestId("local-picker-failure-card");
+    expect(card.getAttribute("data-failure-kind")).toBe("unavailable");
+    expect(card.textContent).toContain("本机目录仅桌面端可用");
+    expect(onResume).not.toHaveBeenCalled();
+  });
+
   it("proposal_pick 行选映射进 selected；CTA 采用此方案", () => {
     const onResume = vi.fn();
     render(

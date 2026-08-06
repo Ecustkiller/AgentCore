@@ -1,3 +1,4 @@
+import { LocalPickerFailureCard } from "@/components/chat/ask/LocalPickerFailureCard";
 import { CreateFolderCascadePanel } from "@/components/folders/CreateFolderMenu";
 import { Button, SearchField } from "@/components/ui";
 import {
@@ -11,6 +12,10 @@ import {
   useWorkspaceModeState,
 } from "@/components/workspace/WorkspaceModeControl";
 import { useGroupedConversations } from "@/hooks/useConversations";
+import {
+  type LocalPickerFailureKind,
+  isLocalPickerFailureKind,
+} from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
@@ -126,6 +131,10 @@ function DraftChip() {
   const [query, setQuery] = useState("");
   /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
   const [view, setView] = useState<"pick" | "create">("pick");
+  const [pickerFailure, setPickerFailure] = useState<{
+    kind: LocalPickerFailureKind;
+    message?: string;
+  } | null>(null);
   const intent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const setIntent = useFoldersStore((s) => s.setDraftWorkspaceIntent);
   const isDesktop = hasLocalFiles();
@@ -150,6 +159,22 @@ function DraftChip() {
     setView("pick");
   };
 
+  const openLocalProject = () => {
+    closePick();
+    setPickerFailure(null);
+    void pickAndOpenLocalProject(navigate, { notifyOnFailure: false }).then(
+      (result) => {
+        if (result.ok || result.reason === "cancelled") return;
+        if (isLocalPickerFailureKind(result.reason)) {
+          setPickerFailure({
+            kind: result.reason,
+            message: result.message,
+          });
+        }
+      },
+    );
+  };
+
   const pickQuickLocal = () => {
     setIntent({ kind: "quick_local" });
     void ensureDefaultContainerRoot();
@@ -168,6 +193,14 @@ function DraftChip() {
 
   return (
     <div className="relative shrink-0">
+      {pickerFailure ? (
+        <div className="absolute bottom-full left-0 z-20 mb-1 w-72">
+          <LocalPickerFailureCard
+            kind={pickerFailure.kind}
+            message={pickerFailure.message}
+          />
+        </div>
+      ) : null}
       <Popover
         open={pop}
         onOpenChange={(o) => {
@@ -255,10 +288,7 @@ function DraftChip() {
                     icon={<FolderOpen size={14} />}
                     label="打开本地项目…"
                     hint="选本机文件夹 · 新会话（可发现入口）"
-                    onClick={() => {
-                      closePick();
-                      void pickAndOpenLocalProject(navigate);
-                    }}
+                    onClick={openLocalProject}
                   />
                 ) : null}
 

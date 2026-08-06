@@ -392,6 +392,47 @@ async def _file_exists(backend: WorkspaceBackend, path: str) -> bool:
         return False
 
 
+def _framework_from_command_text(text: str) -> Framework | None:
+    """Infer framework from a command / scripts.test body (not bare ``npm test``)."""
+    lowered = (text or "").lower()
+    if not lowered.strip():
+        return None
+    if "pytest" in lowered:
+        return "pytest"
+    if "vitest" in lowered:
+        return "vitest"
+    if "jest" in lowered:
+        return "jest"
+    return None
+
+
+def _decode_backend_text(raw: Any) -> str:
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return str(raw or "")
+
+
+async def _framework_from_package_scripts(backend: WorkspaceBackend) -> Framework | None:
+    """Parse ``package.json`` ``scripts.test`` body for vitest/jest/pytest."""
+    try:
+        raw = await backend.read("package.json")
+    except (PathNotFound, Exception):
+        return None
+    text = _decode_backend_text(raw)
+    if not text.strip():
+        return None
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    return _framework_from_command_text(str(scripts.get("test") or ""))
+
+
 async def _detect_framework(
     backend: WorkspaceBackend,
     profile: WorkspaceProfile,
@@ -401,13 +442,14 @@ async def _detect_framework(
         return framework_arg  # type: ignore[return-value]
 
     for cmd in profile.test_commands:
-        lowered = cmd.lower()
-        if "pytest" in lowered:
-            return "pytest"
-        if "vitest" in lowered:
-            return "vitest"
-        if "jest" in lowered or "npm test" in lowered or "pnpm test" in lowered:
-            return "jest"
+        # Bare ``npm|pnpm|yarn test`` is not enough — scripts.test body decides.
+        hit = _framework_from_command_text(cmd)
+        if hit is not None:
+            return hit
+
+    from_scripts = await _framework_from_package_scripts(backend)
+    if from_scripts is not None:
+        return from_scripts
 
     for name in _VITEST_CONFIG_NAMES:
         if await _file_exists(backend, name):
@@ -420,9 +462,7 @@ async def _detect_framework(
     if await _file_exists(backend, "pyproject.toml"):
         return "pytest"
 
-    if await _file_exists(backend, "package.json"):
-        return "jest"
-
+    # Forbidden: bare package.json → default jest (vitest repos were mis-routed).
     return None
 
 
@@ -434,6 +474,28 @@ def _base_command(framework: Framework, profile: WorkspaceProfile) -> list[str]:
     if framework == "vitest":
         return ["npx", "vitest", "run"]
     return ["npx", "jest"]
+
+
+def _profile_test_argv(profile: WorkspaceProfile) -> list[str] | None:
+    """First whitelist-ok argv from ``profile.test_commands`` (repo script preference)."""
+    for cmd in profile.test_commands:
+        argv = _parse_command(cmd)
+        if argv and _is_allowed_verify_argv(argv):
+            return argv
+    return None
+
+
+def _extend_test_targets(argv: list[str], targets: list[str]) -> list[str]:
+    """Append test file targets; insert ``--`` for npm/pnpm/yarn script runners."""
+    if not targets:
+        return argv
+    if (
+        len(argv) >= 2
+        and argv[0] in ("npm", "pnpm", "yarn")
+        and argv[1] in ("test", "run")
+    ):
+        return [*argv, "--", *targets]
+    return [*argv, *targets]
 
 
 def _infer_test_candidates(source_path: str) -> list[str]:
@@ -628,6 +690,16 @@ def _note_install_network_unavailable() -> None:
         pass
 
 
+def _note_verify_budget_exhausted() -> None:
+    """Stamp structured verify-budget latch（禁『仍在跑』收口；不扫自由文）."""
+    try:
+        from agentcore.runtime.closing_posture import note_verify_budget_exhausted
+
+        note_verify_budget_exhausted()
+    except Exception:  # noqa: BLE001 — side channel must never break verify
+        pass
+
+
 def _js_pm_run(profile: WorkspaceProfile, script: str) -> list[str]:
     pm = "npm"
     for candidate in ("pnpm", "yarn", "npm"):
@@ -685,28 +757,38 @@ async def _resolve_test_argv(
         return None, None, "scope=file 时必须提供 test_file 参数"
 
     framework = await _detect_framework(backend, profile, framework_arg)
-    if framework is None:
+    # Prefer repo-declared test script (profile / package.json scripts.test) over
+    # hardcoded npx jest/vitest — mirrors typecheck/build profile preference.
+    profile_argv = _profile_test_argv(profile)
+    if profile_argv is None and framework is None:
         return (
             None,
             None,
             (
                 "无法检测测试框架。请确认工作区包含 pyproject.toml（pytest）、"
-                "vitest.config.* 或 jest.config.*，或在 framework 参数中显式指定；"
+                "package.json scripts.test（vitest/jest）、vitest.config.* 或 "
+                "jest.config.*，或在 framework 参数中显式指定；"
                 "或改用 check=command 并提供 verify 命令。"
             ),
         )
 
-    argv = _base_command(framework, profile)
-    argv = _append_filter(argv, framework, filter_expr)
+    if profile_argv is not None:
+        argv = list(profile_argv)
+    else:
+        assert framework is not None
+        argv = _base_command(framework, profile)
+
+    if framework is not None:
+        argv = _append_filter(argv, framework, filter_expr)
 
     if scope == "file":
-        argv.append(test_file)
+        argv = _extend_test_targets(argv, [test_file])
     elif scope == "affected":
         affected = await _resolve_affected_paths(backend)
         if affected:
-            argv.extend(affected)
+            argv = _extend_test_targets(argv, affected)
         elif framework == "pytest":
-            argv.append("tests/")
+            argv = _extend_test_targets(argv, ["tests/"])
     return argv, framework, None
 
 
@@ -1000,6 +1082,8 @@ class TestRunTool:
             duration_ms = int((time.monotonic() - start) * 1000)
             duration_s = duration_ms / 1000.0
             budget_exceeded = _is_budget_timeout(exec_result)
+            if budget_exceeded:
+                _note_verify_budget_exhausted()
 
             if check == "test" and framework is not None and not budget_exceeded:
                 parsed = _parse_output(

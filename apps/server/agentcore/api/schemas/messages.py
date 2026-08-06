@@ -44,6 +44,17 @@ class MessageAttachment(BaseModel):
     workspace_path: str | None = None
 
 
+class AgentMention(BaseModel):
+    """Conversation-page soft Agent mention (not IM ``mentions``, not attachment kind).
+
+    Soft prompt only: CEO/worker system prompt may note the named Agent; does **not**
+    force delegate / hard-route.
+    """
+
+    agent_id: str = Field(..., min_length=1, max_length=128)
+    role: str = Field(..., min_length=1, max_length=200)
+
+
 class StoredAttachment(BaseModel):
     """Persisted attachment display metadata (no extracted text).
 
@@ -78,6 +89,9 @@ class SendMessageRequest(BaseModel):
     # 同对话再发分流（运行时三模型 · Steer/Queue）：必填；缺 → 422；开发期无缺省兼容层。
     delivery: Literal["steer", "queue"]
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
+    # Soft Agent @-mentions on the conversation page (软提示，非强制派单). Not IM mentions;
+    # not MessageAttachment.kind. Empty → no prompt injection.
+    agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
     # Soft gate: set when this turn is expected to call orchestration tools (delegate/debate).
     # Triggers a preflight warning (not a block) when probe recorded supports_tools=false.
     # Locality is conversation/project state (birth-time bind), not a per-turn field —
@@ -379,16 +393,6 @@ class PendingInteractionSummary(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class PendingApprovalSummary(BaseModel):
-    """Deprecated alias for import compatibility during P1; prefer PendingInteractionSummary."""
-
-    approval_id: str
-    conversation_id: str
-    tool_call_id: str
-    tool_name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-
-
 class PausedTurnSummary(BaseModel):
     """A turn awaiting resume after a durable plan_review / ask_user / kickoff pause.
 
@@ -574,10 +578,8 @@ class MessageDetail(BaseModel):
     # 回合调研台账（引用即出处 P1, DERIVED）：live 走 ``evidence_ledger`` SSE；落库
     # ``messages.evidence_ledger``。缺字段 / [] = legacy。不含辩论场级台账。
     evidence_ledger: list[EvidenceLedgerEntryRest] = Field(default_factory=list)
-    # 回合级「下一步推荐」chips (下一步推荐, DERIVED 持久化): the assistant row's persisted
-    # quick-reply suggestions (messages.followups column), surfaced so reopening a
-    # conversation replays the last turn's chips — live they ride followups_generated.
-    # Auto-populated from the ORM attribute via from_attributes. [] for user / none-minted.
+    # Historical「下一步」chips column (DERIVED). New turns leave []; live mint/emit
+    # retired. Auto-populated from the ORM attribute via from_attributes.
     followups: list[str] = Field(default_factory=list)
     runs: RunsPayload | None = None
     # 回合 token 用量 + 轮次 (Tier 2 重载持久化): the assistant row's ``usage`` column carries
@@ -857,8 +859,8 @@ class RecordTurnRequest(BaseModel):
 class RecordTurnResponse(BaseModel):
     """The persisted ids for a recorded local turn (the desktop reconciles its
     optimistic user/assistant bubbles against these; ``title`` is set only when this
-    turn minted the conversation's first title; ``followups`` mirrors the live
-    ``followups_generated`` chips when this turn minted them).
+    turn minted the conversation's first title; ``followups`` is always null on new
+    turns — chips mint is offline; historical rows may still carry the column).
 
     ``noop=True`` means the server intentionally skipped an assistant row (empty
     body + no process state). Desktop may delete the outbox only when

@@ -224,44 +224,29 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
 
     const rt = useConversationStore.getState().byId[CID];
     expect(rt.error).toBe(UNKNOWN_CLOUD_BANNER);
-    expect(rt.retry).toBeTypeOf("function");
-
-    // 「重试」再 settle / loadRecovery，不 resend；仍失败则保持 running + banner。
-    apiGet.mockRejectedValueOnce(new Error("still down"));
-    rt.retry?.();
-    await vi.waitFor(() => {
-      expect(apiGet).toHaveBeenCalledTimes(2);
-      expect(useConversationStore.getState().byId[CID].error).toBe(
-        UNKNOWN_CLOUD_BANNER,
-      );
-    });
-    expect(assistant()?.status).toBe("running");
-    expect(assistant()?.finishReason).not.toBe("interrupted");
+    expect(rt.retry).toBeNull();
   });
 
-  it("cloudKnown=false → unknown-banner retry that recovers settles (ghost)", async () => {
+  it("cloudKnown=false with prior concrete error → keep banner, hold, never overwrite", async () => {
     seedRunningAssistant();
-    apiGet.mockRejectedValueOnce(new Error("network down"));
+    const concrete = "上游超时，请稍后重试。";
+    useConversationStore.getState().setError(concrete, null, CID, null);
+    apiGet.mockRejectedValue(new Error("network down"));
 
-    await settleCloudRunningAssistant(CID, {
+    const outcome = await settleCloudRunningAssistant(CID, {
       ...emptyRecovery,
       cloudKnown: false,
     });
-    expect(useConversationStore.getState().byId[CID].error).toBe(
-      UNKNOWN_CLOUD_BANNER,
-    );
 
-    apiGet.mockResolvedValueOnce({
-      live_running: false,
-      paused: [],
-      pending_interactions: [],
-    });
-    useConversationStore.getState().byId[CID].retry?.();
-    await vi.waitFor(() =>
-      expect(assistant()?.finishReason).toBe("interrupted"),
-    );
-    expect(apiGet).toHaveBeenCalledTimes(2);
-    expect(useConversationStore.getState().byId[CID].error).toBeNull();
-    expect(useConversationStore.getState().byId[CID].retry).toBeNull();
+    expect(outcome).toBe("hold");
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(assistant()?.status).toBe("running");
+    expect(assistant()?.finishReason).not.toBe("interrupted");
+    expect(assistant()?.isStreaming).toBe(true);
+    expect(useConversationStore.getState().byId[CID].isGenerating).toBe(true);
+
+    const rt = useConversationStore.getState().byId[CID];
+    expect(rt.error).toBe(concrete);
+    expect(rt.error).not.toBe(UNKNOWN_CLOUD_BANNER);
   });
 });

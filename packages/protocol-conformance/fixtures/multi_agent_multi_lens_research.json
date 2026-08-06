@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_multi_lens_research",
-  "description": "多 Agent·多视角深度调研幕1：team_preview(delegate) → 4 透镜并行流式 → 汇总分析师 debrief.motion_card → CEO 呈报建议开辩 → followups 首条开辩芯片",
+  "description": "多 Agent·多视角深度调研幕1：team_preview(delegate) → 4 透镜并行流式 → 汇总分析师 debrief.motion_card → CEO 呈报建议开辩（开辩入口 stage_card）",
   "events": [
     {
       "type": "message_start",
@@ -621,19 +621,6 @@
         "rounds": 0
       },
       "timestamp": "2026-01-01T00:00:05.220Z"
-    },
-    {
-      "type": "followups_generated",
-      "payload": {
-        "conversation_id": "conv_demo",
-        "message_id": "m1",
-        "followups": [
-          "就『品牌是否应立即终止与该代言人的联名合作』开一场正反辩论",
-          "把四路调研要点整理成一页决策纪要",
-          "先补核代言合同全文与库存数字"
-        ]
-      },
-      "timestamp": "2026-01-01T00:00:05.221Z"
     }
   ],
   "projected": {

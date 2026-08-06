@@ -123,6 +123,17 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
+  it("错误气泡 regenerate 入口文案为「重新生成」而非「重试」", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "重新生成" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  });
+
   it("空正文 + runs.error 时显示 footer", () => {
     renderBubble(
       settledMessage({
@@ -141,5 +152,23 @@ describe("AssistantMessage footer gate", () => {
   it("空正文 + 可合成空失败（finishReason=error）时显示 footer", () => {
     renderBubble(settledMessage({ content: "", finishReason: "error" }));
     expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+  });
+
+  it("空正文 + cancelled / interrupted 合成脸（B5）", () => {
+    renderBubble(settledMessage({ content: "", finishReason: "cancelled" }));
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+    expect(screen.getByTestId("assistant-stopped-notice").textContent).toBe(
+      "已停止",
+    );
+    // Neutral stop face — no failure CTAs on the notice itself.
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
+    expect(screen.queryByText(/本回合已取消或未能完成/)).toBeNull();
+    cleanup();
+    // Interrupted: error card only (layer-1 — no footer regenerate).
+    renderBubble(settledMessage({ content: "", finishReason: "interrupted" }));
+    expect(screen.getByText(/已中断/)).toBeTruthy();
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
   });
 });

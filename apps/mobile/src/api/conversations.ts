@@ -67,8 +67,6 @@ export interface MessageDetail {
   paused?: boolean | null;
   /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
   cost?: Schemas["CostBreakdown"] | null;
-  /** CEO→用户「下一步」chips (DERIVED · messages.followups)；重载重现. */
-  followups?: string[];
   /** 消息来源（如 execution_harvest 系统收口）；正文前缀为旧数据兜底. */
   origin?: string | null;
   /** 回合日志关联 id（messages.trace_id）—「复制排查包」冷启动. */
@@ -271,7 +269,6 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
       truncated: a.truncated,
     })),
     cost: row.cost ?? null,
-    followups: row.followups?.length ? row.followups : undefined,
     origin: row.origin ?? null,
     trace_id: row.trace_id ?? null,
     duration_ms: row.duration_ms ?? null,

@@ -24,7 +24,9 @@ from agentcore.tools.builtin.test_run import (
     _detect_framework,
     _is_allowed_command,
     _is_allowed_verify_argv,
+    _profile_test_argv,
     _python_argv_runner,
+    _resolve_test_argv,
     resolve_verify_budget_seconds,
 )
 from agentcore.tools.protocol import ToolContext
@@ -33,17 +35,19 @@ from agentcore.workspace.protocol import PathNotFound
 
 
 class _FakeBackend:
-    """Minimal workspace stub: ``exists`` set controls which paths ``read`` finds."""
+    """Minimal workspace stub: ``exists`` / ``files`` control ``read``."""
 
     def __init__(
         self,
         exists: set[str] | None = None,
         *,
+        files: dict[str, str] | None = None,
         result: ExecutionResult | None = None,
         location: str = "server",
     ) -> None:
         self.location = location
         self._exists = exists or set()
+        self._files = files or {}
         self.requests: list[ExecutionRequest] = []
         self._result = result or ExecutionResult(
             success=True, stdout="1 passed\n", stderr="", exit_code=0, duration_ms=1
@@ -51,6 +55,10 @@ class _FakeBackend:
 
     async def read(self, path: str) -> bytes:
         norm = path.replace("\\", "/")
+        if norm in self._files:
+            return self._files[norm].encode("utf-8")
+        if path in self._files:
+            return self._files[path].encode("utf-8")
         if norm in self._exists or path in self._exists:
             return b""
         raise PathNotFound(path)
@@ -216,7 +224,8 @@ async def test_execute_rejects_when_command_leaves_whitelist(
     backend = _FakeBackend(exists={"pyproject.toml"})
 
     async def _fake_profile(_backend):
-        return _make_profile(languages=["python"], test_commands=["pytest"])
+        # Empty test_commands so resolve falls back to mocked _base_command.
+        return _make_profile(languages=["python"], test_commands=[])
 
     async def _framework(_backend, _prof, _arg):
         return "pytest"
@@ -267,7 +276,35 @@ async def test_detect_framework_from_profile_test_commands():
     )
     assert (
         await _detect_framework(
+            backend, _make_profile(test_commands=["npx jest"]), "auto"
+        )
+        == "jest"
+    )
+    # Bare npm/pnpm test must NOT imply jest — scripts.test body decides.
+    assert (
+        await _detect_framework(
             backend, _make_profile(test_commands=["npm test"]), "auto"
+        )
+        is None
+    )
+
+
+async def test_detect_framework_from_package_scripts_test_body():
+    vitest_pkg = '{"scripts":{"test":"vitest run"}}'
+    jest_pkg = '{"scripts":{"test":"jest --coverage"}}'
+    assert (
+        await _detect_framework(
+            _FakeBackend(files={"package.json": vitest_pkg}),
+            _make_profile(test_commands=["npm test"]),
+            "auto",
+        )
+        == "vitest"
+    )
+    assert (
+        await _detect_framework(
+            _FakeBackend(files={"package.json": jest_pkg}),
+            _make_profile(test_commands=["pnpm test"]),
+            "auto",
         )
         == "jest"
     )
@@ -292,16 +329,62 @@ async def test_detect_framework_from_config_files():
         )
         == "pytest"
     )
+    # Bare package.json must NOT default to jest.
     assert (
         await _detect_framework(
             _FakeBackend(exists={"package.json"}), _make_profile(), "auto"
         )
-        == "jest"
+        is None
     )
 
 
 async def test_detect_framework_returns_none_when_unknown():
     assert await _detect_framework(_FakeBackend(), _make_profile(), "auto") is None
+
+
+async def test_profile_test_argv_prefers_whitelist_script():
+    assert _profile_test_argv(_make_profile(test_commands=["pnpm test"])) == [
+        "pnpm",
+        "test",
+    ]
+    assert _profile_test_argv(_make_profile(test_commands=["npx vitest run"])) == [
+        "npx",
+        "vitest",
+        "run",
+    ]
+    assert _profile_test_argv(_make_profile(test_commands=["bash -c evil"])) is None
+
+
+async def test_resolve_test_argv_prefers_profile_over_base_command():
+    """Vitest repo with scripts.test must run ``pnpm test``, not ``npx jest``."""
+    backend = _FakeBackend(
+        files={"package.json": '{"scripts":{"test":"vitest run"}}'},
+    )
+    profile = _make_profile(
+        package_managers=["pnpm"],
+        test_commands=["pnpm test"],
+    )
+    argv, framework, err = await _resolve_test_argv(
+        backend=backend,
+        profile=profile,
+        arguments={"scope": "all"},
+    )
+    assert err is None
+    assert framework == "vitest"
+    assert argv == ["pnpm", "test"]
+    assert "jest" not in argv
+
+
+async def test_resolve_test_argv_falls_back_to_base_command_without_profile():
+    backend = _FakeBackend(exists={"vitest.config.ts"})
+    argv, framework, err = await _resolve_test_argv(
+        backend=backend,
+        profile=_make_profile(),
+        arguments={"scope": "all"},
+    )
+    assert err is None
+    assert framework == "vitest"
+    assert argv == ["npx", "vitest", "run"]
 
 
 async def test_execute_fails_cleanly_when_framework_undetectable(

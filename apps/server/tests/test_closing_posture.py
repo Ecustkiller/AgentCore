@@ -650,3 +650,119 @@ def test_unresolved_write_ownership_downgrades_verdict_no_dinggao_hard_reject():
     finally:
         current_delivery_verdict.reset(token2)
         clear_unresolved_write_ownership()
+
+
+# --- B1 收口对账 ---
+
+
+def test_b1_browser_claim_requires_tool_success():
+    """17cafc76：未装配/无 browser_* 成功时禁称已打开右坞."""
+    from agentcore.runtime.closing_posture import (
+        claims_browser_open_or_login,
+        clear_b1_closing_latches,
+        closing_honesty_rework,
+        note_browser_assembled,
+        note_browser_tool_success,
+    )
+
+    clear_b1_closing_latches()
+    note_browser_assembled(False)
+    claim = "登录页已在右坞浏览器打开并渲染成功，请填写用户名。"
+    assert claims_browser_open_or_login(claim)
+    rework = closing_honesty_rework(claim)
+    assert rework is not None
+    assert "未装配" in rework or "browser" in rework.lower()
+
+    note_browser_assembled(True)
+    rework2 = closing_honesty_rework(claim)
+    assert rework2 is not None
+    assert "browser_*" in rework2 or "工具成功" in rework2
+
+    note_browser_tool_success()
+    assert closing_honesty_rework(claim) is None
+    clear_b1_closing_latches()
+
+
+def test_b1_zero_write_forbids_disk_landing_claim_no_banner():
+    """ceo-claim：无 files 对账禁称已落盘；不恢复【落盘说明】横幅."""
+    from agentcore.runtime.closing_posture import (
+        claims_disk_landing,
+        clear_b1_closing_latches,
+        closing_honesty_rework,
+        enforce_ceo_mutation_honesty,
+    )
+
+    clear_b1_closing_latches()
+    claim = "评审报告已落盘 `AgentCore/文档/reviews/v3.md`，验证通过。"
+    assert claims_disk_landing(claim)
+    rework = closing_honesty_rework(claim)
+    assert rework is not None
+    assert "落盘" in rework
+    assert "【落盘说明】" not in enforce_ceo_mutation_honesty(claim)
+    assert "【落盘说明】" not in (rework or "")
+    clear_b1_closing_latches()
+
+
+def test_b1_over_seat_forces_partial_gap_checklist():
+    """e94dcd6b：超席闩锁 → 禁仍在进行 / 须缺口承认."""
+    from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
+        closing_honesty_rework,
+        note_over_seat_reject,
+    )
+
+    clear_b1_closing_latches()
+    note_over_seat_reject(task_count=31, max_tasks=20)
+    hanging = "目前仍在进行第三层审查，尚未形成最终审查结论。"
+    rework = closing_honesty_rework(hanging)
+    assert rework is not None
+    assert "PARTIAL" in rework or "缺口" in rework
+    honest = "部分完成：前 12 席有摘要；其余因超席未跑，缺口清单如下，建议分批续派。"
+    assert closing_honesty_rework(honest) is None
+    clear_b1_closing_latches()
+
+
+def test_b1_ceiling_bans_hollow_teach_invite():
+    """1eb5eb99 C：ceiling 后禁空心请开讲."""
+    from agentcore.runtime.closing_posture import (
+        ceiling_honesty_steer,
+        claims_hollow_teach_invite,
+        clear_cutoff_delivery_gap,
+        enforce_ceiling_closing_honesty,
+        enforce_cutoff_closing_honesty,
+        note_cutoff_delivery_gap,
+    )
+
+    hollow = "好，我在听——请讲，第一部分怎么写。"
+    assert claims_hollow_teach_invite(hollow)
+    steer = ceiling_honesty_steer(reason="token_budget")
+    assert steer is not None
+    assert "请开讲" in steer or "请讲" in steer
+    out = enforce_ceiling_closing_honesty(hollow, reason="token_budget")
+    assert out.startswith("【收口说明】")
+    assert "开讲" in out or "请讲" in out or "硬顶" in out
+
+    clear_cutoff_delivery_gap()
+    note_cutoff_delivery_gap()
+    cut = enforce_cutoff_closing_honesty(hollow)
+    assert cut.startswith("【收口说明】")
+    clear_cutoff_delivery_gap()
+
+
+def test_b1_cancel_zero_requires_gap_ack():
+    """7ad17043：cancel/0 产出闩锁 → 禁仅再派短句."""
+    from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
+        closing_honesty_rework,
+        note_cancel_zero_output,
+    )
+
+    clear_b1_closing_latches()
+    note_cancel_zero_output()
+    thin = "好的，我重新建图派工继续完成。"
+    rework = closing_honesty_rework(thin)
+    assert rework is not None
+    assert "缺口" in rework or "未交付" in rework
+    honest = "部分完成：三份机理评审均未落盘（0/3）；缺口清单：调研员/审校/执笔；建议续派或缩小范围。"
+    assert closing_honesty_rework(honest) is None
+    clear_b1_closing_latches()

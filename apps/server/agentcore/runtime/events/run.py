@@ -795,11 +795,6 @@ def debate_pretrial_orders(**payload: Any) -> SSEEvent:
     return SSEEvent(type=EventType.DEBATE_PRETRIAL_ORDERS, payload=dict(payload))
 
 
-def debate_pretrial_progress(**payload: Any) -> SSEEvent:
-    """庭前台账计数增量（legacy；生产热路径不再发射）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_PROGRESS, payload=dict(payload))
-
-
 def debate_pretrial_completed(**payload: Any) -> SSEEvent:
     """庭前收口（done / skipped / degraded + ledger delta）。"""
     return SSEEvent(type=EventType.DEBATE_PRETRIAL_COMPLETED, payload=dict(payload))

@@ -167,11 +167,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface: "LiveDebateNarrative · 庭前取证",
     reason: "同上",
   },
-  debate_pretrial_progress: {
-    verdict: "simplified",
-    surface: "LiveDebateNarrative · 庭前取证",
-    reason: "同上",
-  },
   debate_pretrial_completed: {
     verdict: "simplified",
     surface: "LiveDebateNarrative · 庭前取证 / DebateView",
@@ -258,14 +253,14 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   // —— 非阻塞提问 (①) ——
   question_posted: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
 
-  // —— 跟进推荐 ——
+  // —— 跟进推荐（手机有意下线 CEO→用户 chips；事件仍 fold no-op / stopLifecycle 放行）——
   followups_generated: {
-    verdict: "ported",
-    surface: "ChatPage · 下一步 chips",
+    verdict: "simplified",
+    reason: "手机有意下线「下一步」chips；事件忽略不展示",
   },
   followups_unavailable: {
-    verdict: "ported",
-    surface: "ChatPage · 跟进不可用标记（fold / stopLifecycle）",
+    verdict: "simplified",
+    reason: "手机有意下线「下一步」chips；不可用标记不再展示",
   },
 
   // —— 收尾 / 错误 ——
@@ -454,7 +449,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface:
       "TurnFileChangesReview（产物卡内展开；仅云 files/diff + restoreSnapshot，无 Local sidecar）",
   },
-  FollowupChips: { verdict: "ported", surface: "ChatPage · 下一步 chips" },
   StageCard: { verdict: "ported", surface: "StageCard" },
   StageCardDock: {
     verdict: "ported",
@@ -525,7 +519,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   "ask/AskDecisionBody": {
     verdict: "ported",
     surface:
-      "ResumeCard · decision/kickoff（default 预选 + compose 答复 +「其他」逃逸；本机目录 action 禁用）",
+      "ResumeCard · decision/kickoff（default 预选 + compose 答复 +「其他」逃逸；本机目录 action → LocalPickerFailureCard unavailable）",
   },
   "ask/AskCommenceKickoff": {
     verdict: "internal",
@@ -556,6 +550,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface:
       "ResumeCard 内嵌 default 预选 +「其他」逃逸 + composeAnswer（答复模型 α）；无独立 AskUserFields 面",
+  },
+  "ask/LocalPickerFailureCard": {
+    verdict: "ported",
+    surface:
+      "ResumeCard · 本机目录 action 点选 / Continue 拦截 → LocalPickerFailureCard（unavailable）",
   },
   "ask/AskCardShell": {
     verdict: "internal",

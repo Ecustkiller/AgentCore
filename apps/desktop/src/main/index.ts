@@ -29,8 +29,6 @@ import { registerLogIpc } from "./log-service";
 import { registerMcpIpc, shutdownAllMcpSessions } from "./mcp-service";
 import { registerNotificationIpc } from "./notification-service";
 import { registerOutboxIpc } from "./outbox-writeback";
-import { registerPreviewIpc } from "./preview/ipc";
-import { PREVIEW_SCHEME } from "./preview/paths";
 // 主进程安全网须最先加载：拦截 updater/net 层未捕获的网络瞬态，避免 Electron 默认错误框。
 // （模块加载时已自注册；此处再调一次幂等，保证入口显式依赖。）
 import { installProcessSafetyNet } from "./process-safety-net";
@@ -167,22 +165,10 @@ protocol.registerSchemesAsPrivileged([
     },
   },
   {
-    // 预览宿主子窗口的字节协议（preview://<conversationId>/<path>，见 preview/protocol.ts）。
-    // standard=true 才有层级 URL 语义 → 相对路径引用（./style.css、img/logo.png）能按文档
-    // URL 正确解析；secure=true 给隔离预览页一个安全上下文；stream 支持大文件流式代理。
-    scheme: PREVIEW_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-  {
     // Local Browser 工作区 HTML（workspace://<conversationId>/<path>；
     // partition 按 conversationId 切开，处理器 per-partition 注册）。
-    // 特权与 preview 同形；不改 lockPreviewNavigation。
+    // standard=true 才有层级 URL 语义 → 相对路径引用能按文档 URL 正确解析；
+    // secure=true 给隔离页安全上下文；stream 支持大文件流式代理。
     scheme: WORKSPACE_SCHEME,
     privileges: {
       standard: true,
@@ -337,7 +323,6 @@ app.whenReady().then(async () => {
   registerNotificationIpc();
   registerHostIpc();
   registerMcpIpc();
-  registerPreviewIpc();
   registerBrowserIpc();
   registerFloatWindowIpc({
     getMainWindow: () => mainWindowRef,

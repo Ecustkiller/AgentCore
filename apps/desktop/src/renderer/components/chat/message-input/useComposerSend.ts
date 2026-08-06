@@ -24,7 +24,10 @@ import {
   setComposerDraftAxes,
 } from "@/services/permissionAxes";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
-import type { OutgoingAttachment } from "@/services/streamConversation";
+import type {
+  OutgoingAgentMention,
+  OutgoingAttachment,
+} from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useComposerDraftStore } from "@/stores/composer";
@@ -32,7 +35,11 @@ import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import type { PendingAttachment } from "./composerAttachments";
+import type {
+  PendingAgentMention,
+  PendingAttachment,
+} from "./composerAttachments";
+import { MAX_AGENT_MENTIONS } from "./composerAttachments";
 import { dispatchBackgroundTask } from "./dispatchBackgroundTask";
 import { ensureAttachmentResident } from "./resideAttachment";
 
@@ -61,6 +68,8 @@ export function useComposerSend({
   setValue,
   attachments,
   setAttachments,
+  agentMentions,
+  setAgentMentions,
   isGenerating,
   backgroundMode,
   isLocal,
@@ -71,6 +80,8 @@ export function useComposerSend({
   setValue: Dispatch<SetStateAction<string>>;
   attachments: PendingAttachment[];
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
+  agentMentions: PendingAgentMention[];
+  setAgentMentions: Dispatch<SetStateAction<PendingAgentMention[]>>;
   isGenerating: boolean;
   backgroundMode: boolean;
   isLocal: boolean;
@@ -82,6 +93,23 @@ export function useComposerSend({
   const addMessage = useConversationStore((s) => s.addMessage);
   const navigate = useNavigate();
 
+  const toOutgoingMentions = useCallback(
+    (pending: PendingAgentMention[]): OutgoingAgentMention[] =>
+      pending.slice(0, MAX_AGENT_MENTIONS).map((a) => ({
+        agent_id: a.agentId,
+        role: a.role,
+      })),
+    [],
+  );
+
+  const clearComposer = useCallback(() => {
+    setValue("");
+    setAttachments([]);
+    setAgentMentions([]);
+    closeMenu();
+  }, [setValue, setAttachments, setAgentMentions, closeMenu]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: closeMenu/setValue/setAgentMentions kept for stable identity when clearComposer path is not taken
   const handleSend = useCallback(
     async (opts?: { delivery?: MessageDelivery }) => {
       const trimmed = value.trim();
@@ -104,6 +132,8 @@ export function useComposerSend({
 
       const delivery: MessageDelivery =
         opts?.delivery ?? resolveDefaultDelivery(isGenerating, activeConvId);
+
+      const outgoingMentions = toOutgoingMentions(agentMentions);
 
       // Mid-flight：生成中发送走独立 POST SSE（steer 插话 / queue 排队）。
       // 排队立即插用户气泡；协调插话不经 addMessage——主时间线由 InterjectionTimeline
@@ -152,15 +182,14 @@ export function useComposerSend({
           trimmed,
           outgoing.length > 0 ? outgoing : undefined,
           delivery,
+          outgoingMentions.length > 0 ? outgoingMentions : undefined,
         );
         if (
           result.kind === "received" ||
           result.kind === "steered" ||
           result.kind === "queued"
         ) {
-          setValue("");
-          setAttachments([]);
-          closeMenu();
+          clearComposer();
           // queued toast / 气泡由 turn_queued → dispatch + midFlight；
           // steered toast 由 turn_steer_accepted → messageStream；
           // received 主时间线走 SSE 投影。
@@ -172,9 +201,7 @@ export function useComposerSend({
 
       if (backgroundMode && isLocal && activeConvId) {
         dispatchBackgroundTask(activeConvId, trimmed);
-        setValue("");
-        setAttachments([]);
-        closeMenu();
+        clearComposer();
         return;
       }
 
@@ -315,9 +342,7 @@ export function useComposerSend({
             }))
           : undefined,
       });
-      setValue("");
-      setAttachments([]);
-      closeMenu();
+      clearComposer();
 
       if (isFirstMessage) {
         patchConversationCache(conversationId, {
@@ -340,6 +365,7 @@ export function useComposerSend({
         conversationId,
         content: trimmed,
         attachments: outgoing,
+        agentMentions: outgoingMentions,
         optimisticUserId: userMsgId,
         delivery: "steer",
       });
@@ -347,6 +373,7 @@ export function useComposerSend({
     [
       value,
       attachments,
+      agentMentions,
       isGenerating,
       addMessage,
       navigate,
@@ -355,7 +382,10 @@ export function useComposerSend({
       isLocal,
       setValue,
       setAttachments,
+      setAgentMentions,
       onDispatch,
+      toOutgoingMentions,
+      clearComposer,
     ],
   );
 

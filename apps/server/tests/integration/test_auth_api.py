@@ -10,9 +10,14 @@ from datetime import timedelta
 from uuid import uuid4
 
 from agentcore.config import settings
-from tests.integration.conftest import login_admin, register_and_login
+from tests.integration.conftest import (
+    client_platform_headers,
+    login_admin,
+    register_and_login,
+)
 
 _PW = "password123"
+_DESKTOP = client_platform_headers()
 
 
 async def test_protected_endpoints_require_auth(client):
@@ -30,7 +35,11 @@ async def test_register_login_me_flow(client):
     body = r.json()
     assert body["username"] == "alice" and body["id"]
 
-    r = await client.post("/v1/auth/login", json={"username": "alice", "password": _PW})
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": "alice", "password": _PW},
+        headers=_DESKTOP,
+    )
     assert r.status_code == 200
     assert "access_token" in client.cookies
     assert "refresh_token" in client.cookies
@@ -134,12 +143,18 @@ async def test_login_lockout_after_repeated_failures(client):
 
     for _ in range(5):
         r = await client.post(
-            "/v1/auth/login", json={"username": "frank", "password": "wrong-pass"}
+            "/v1/auth/login",
+            json={"username": "frank", "password": "wrong-pass"},
+            headers=_DESKTOP,
         )
         assert r.status_code == 401
 
     # Even the correct password is rejected while the account is locked.
-    r = await client.post("/v1/auth/login", json={"username": "frank", "password": _PW})
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": "frank", "password": _PW},
+        headers=_DESKTOP,
+    )
     assert r.status_code == 401
 
 
@@ -163,7 +178,11 @@ async def test_refresh_cookie_path_carries_reverse_proxy_prefix(client, monkeypa
         json={"username": "pat", "password": _PW},
     )
     assert r.status_code == 201, r.text
-    r = await client.post("/v1/auth/login", json={"username": "pat", "password": _PW})
+    r = await client.post(
+        "/v1/auth/login",
+        json={"username": "pat", "password": _PW},
+        headers=_DESKTOP,
+    )
     assert r.status_code == 200
 
     set_cookies = r.headers.get_list("set-cookie")
@@ -187,6 +206,7 @@ async def test_login_default_persist_sets_cookie_max_age(client):
     r = await client.post(
         "/v1/auth/login",
         json={"username": "persist_def", "password": _PW},
+        headers=_DESKTOP,
     )
     assert r.status_code == 200
     set_cookies = r.headers.get_list("set-cookie")
@@ -208,6 +228,7 @@ async def test_login_persist_false_sets_session_cookies(client):
             "password": _PW,
             "persist_session": False,
         },
+        headers=_DESKTOP,
     )
     assert r.status_code == 200
     set_cookies = r.headers.get_list("set-cookie")
@@ -235,6 +256,7 @@ async def test_token_login_persist_false_short_refresh_expires_in(client):
         await client.post(
             "/v1/auth/token",
             json={"username": "ephem_bearer", "password": _PW},
+            headers=_DESKTOP,
         )
     ).json()
     short = (
@@ -245,6 +267,7 @@ async def test_token_login_persist_false_short_refresh_expires_in(client):
                 "password": _PW,
                 "persist_session": False,
             },
+            headers=_DESKTOP,
         )
     ).json()
     assert long["refresh_expires_in"] == settings.jwt_refresh_token_expire_days * 86400
@@ -271,12 +294,17 @@ async def test_change_password_keeps_session_and_rotates_secret(client):
     assert (await client.get("/v1/auth/me")).status_code == 200
     # old password is dead; the new one logs in
     assert (
-        await client.post("/v1/auth/login", json={"username": "harry", "password": _PW})
+        await client.post(
+            "/v1/auth/login",
+            json={"username": "harry", "password": _PW},
+            headers=_DESKTOP,
+        )
     ).status_code == 401
     assert (
         await client.post(
             "/v1/auth/login",
             json={"username": "harry", "password": "newpassword456"},
+            headers=_DESKTOP,
         )
     ).status_code == 200
 
@@ -340,7 +368,11 @@ async def test_delete_account_anonymizes_and_frees_username(client):
     # cookies cleared → unauthenticated, and the old credentials are dead
     assert (await client.get("/v1/auth/me")).status_code == 401
     assert (
-        await client.post("/v1/auth/login", json={"username": "mona", "password": _PW})
+        await client.post(
+            "/v1/auth/login",
+            json={"username": "mona", "password": _PW},
+            headers=_DESKTOP,
+        )
     ).status_code == 401
     # the username was anonymized away → a brand-new account can reclaim it
     r = await client.post(
@@ -373,7 +405,11 @@ async def test_token_login_returns_tokens_and_authorizes_via_bearer(client):
     )
     assert r.status_code == 201, r.text
 
-    r = await client.post("/v1/auth/token", json={"username": "mobile1", "password": _PW})
+    r = await client.post(
+        "/v1/auth/token",
+        json={"username": "mobile1", "password": _PW},
+        headers=_DESKTOP,
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["access_token"] and body["refresh_token"]
@@ -405,7 +441,11 @@ async def test_token_refresh_rotates_via_body_and_detects_reuse(client, monkeypa
         json={"username": "mobile2", "password": _PW},
     )
     tok = (
-        await client.post("/v1/auth/token", json={"username": "mobile2", "password": _PW})
+        await client.post(
+            "/v1/auth/token",
+            json={"username": "mobile2", "password": _PW},
+            headers=_DESKTOP,
+        )
     ).json()
 
     r = await client.post("/v1/auth/token/refresh", json={"refresh_token": tok["refresh_token"]})
@@ -431,7 +471,11 @@ async def test_token_revoke_kills_refresh(client):
         json={"username": "mobile3", "password": _PW},
     )
     tok = (
-        await client.post("/v1/auth/token", json={"username": "mobile3", "password": _PW})
+        await client.post(
+            "/v1/auth/token",
+            json={"username": "mobile3", "password": _PW},
+            headers=_DESKTOP,
+        )
     ).json()
 
     assert (
@@ -497,7 +541,9 @@ async def test_list_sessions_aggregates_and_marks_current(client, new_client):
 
     async with new_client() as other:
         r = await other.post(
-            "/v1/auth/login", json={"username": "sess_alice", "password": _PW}
+            "/v1/auth/login",
+            json={"username": "sess_alice", "password": _PW},
+            headers=_DESKTOP,
         )
         assert r.status_code == 200
 
@@ -535,7 +581,9 @@ async def test_revoke_others_keeps_current(client, new_client):
 
     async with new_client() as other:
         r = await other.post(
-            "/v1/auth/login", json={"username": "sess_carol", "password": _PW}
+            "/v1/auth/login",
+            json={"username": "sess_carol", "password": _PW},
+            headers=_DESKTOP,
         )
         assert r.status_code == 200
         other_refresh = other.cookies.get("refresh_token")

@@ -464,42 +464,6 @@ describe("conversation store", () => {
     });
   });
 
-  describe("attachFollowups", () => {
-    it("stamps chips on the assistant matched by serverMessageId", () => {
-      store().createAssistantMessage();
-      store().setServerMessageIdOnLastMessage("srv-fu");
-      store().finalizeLastMessage();
-      store().createAssistantMessage(); // newer bubble must not steal chips
-      store().finalizeLastMessage();
-
-      store().attachFollowups(["下一步 A", "下一步 B"], "srv-fu");
-
-      expect(rt().messages[0].followups).toEqual(["下一步 A", "下一步 B"]);
-      expect(rt().messages[1].followups).toBeUndefined();
-    });
-
-    it("no-ops when message_id is missing (never hangs on last)", () => {
-      store().createAssistantMessage();
-      store().setServerMessageIdOnLastMessage("srv-fu");
-      store().finalizeLastMessage();
-
-      store().attachFollowups(["不应挂上"], undefined);
-      store().attachFollowups(["不应挂上"], "");
-
-      expect(rt().messages[0].followups).toBeUndefined();
-    });
-
-    it("no-ops when no assistant matches the message_id", () => {
-      store().createAssistantMessage();
-      store().setServerMessageIdOnLastMessage("srv-fu");
-      store().finalizeLastMessage();
-
-      store().attachFollowups(["孤儿"], "srv-other");
-
-      expect(rt().messages[0].followups).toBeUndefined();
-    });
-  });
-
   describe("dropConversationRuntime", () => {
     const userMsg = {
       id: "m1",

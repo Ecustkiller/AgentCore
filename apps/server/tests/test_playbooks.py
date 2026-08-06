@@ -145,10 +145,13 @@ def test_available_playbooks_lists_parallel_brief_before_research_report_semanti
     listing = available_playbooks()
     assert "parallel_brief" in listing
     assert "对齐推进" in listing or "方向笔记" in listing
+    assert "讨论对齐" in listing or "摸清" in listing
     assert "少扇出" in listing or "常 2" in listing
     assert "research_report" in listing
     assert "成文专线" in listing
     assert "明示" in listing
+    assert "正式长文" in listing or "可提交" in listing or "审校满编" in listing
+    assert "形态未定" in listing or "勿默认学术审校" in listing
 
 
 # ── research_report ───────────────────────────────────────────────────────────

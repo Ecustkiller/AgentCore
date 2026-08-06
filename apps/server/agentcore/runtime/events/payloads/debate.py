@@ -346,14 +346,6 @@ class DebatePretrialOrdersPayload(WirePayload):
     )
 
 
-class DebatePretrialProgressPayload(WirePayload):
-    """庭前台账计数增量（legacy；生产热路径不再发射）。"""
-
-    execution_id: str
-    moderator_run_id: str
-    evidence_ledger_count: int = 0
-
-
 class DebatePretrialCompletedPayload(WirePayload):
     execution_id: str
     moderator_run_id: str

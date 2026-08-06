@@ -234,6 +234,7 @@ async def _wire_continuation_toolset(
         material_paths=frozenset(),
     )
     from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
         clear_cloud_web_verify_gap,
         clear_cutoff_delivery_gap,
         clear_unresolved_write_ownership,
@@ -247,6 +248,7 @@ async def _wire_continuation_toolset(
     clear_cloud_web_verify_gap()
     clear_cutoff_delivery_gap()
     clear_unresolved_write_ownership()
+    clear_b1_closing_latches()
     if permission_axes is None:
         permission_axes = DEFAULT_PERMISSION_AXES
     approval_gate = (

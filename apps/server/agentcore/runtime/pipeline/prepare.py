@@ -28,6 +28,7 @@ from agentcore.runtime.resolve.prepare import (
     _build_attachment_context,
     _wire_worker_conversation_log_tools,
     _wire_worker_memory_tools,
+    merge_attachment_and_mention_context,
 )
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
@@ -75,6 +76,7 @@ async def prepare_fresh_turn(
     llm_credentials: LLMCredentials | None,
     x_client_platform: str | None,
     profiles: TurnProfiles | None = None,
+    agent_mentions: list[dict] | None = None,
 ) -> PreparedTurn:
     """Build the stable base prompt, worker tools, channels, and tool context."""
     # Long-term memory injection is gated by the caller-supplied ``memory_enabled``
@@ -162,6 +164,9 @@ async def prepare_fresh_turn(
         user_id=user_id,
         host_conversation_id=conversation_id,
         conversation_history_access=conversation_history_access,
+    )
+    attachment_context = merge_attachment_and_mention_context(
+        attachment_context, agent_mentions
     )
     from agentcore.workspace.sparse_listing import collect_turn_material_paths
 
@@ -274,6 +279,7 @@ async def prepare_fresh_turn(
         material_paths=material_paths,
     )
     from agentcore.runtime.closing_posture import (
+        clear_b1_closing_latches,
         clear_cloud_web_verify_gap,
         clear_cutoff_delivery_gap,
         clear_unresolved_write_ownership,
@@ -288,6 +294,7 @@ async def prepare_fresh_turn(
     clear_cloud_web_verify_gap()
     clear_cutoff_delivery_gap()
     clear_unresolved_write_ownership()
+    clear_b1_closing_latches()
 
     # Pillar B: if a background execution is already live for this conversation,
     # adopt it so the CEO wait path / interjection routing share one registry key.

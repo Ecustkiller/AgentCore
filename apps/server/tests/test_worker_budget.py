@@ -163,40 +163,23 @@ def test_apply_light_round_budgets_is_noop():
     assert plan.nodes[0].max_rounds is None
 
 
-def test_files_zero_write_retired_always_off():
-    """Zero-write / prose_idle retired; soft delivery_idle opens only for files_expected."""
+def test_files_delivery_idle_opens_only_for_files_expected():
+    """Soft delivery_idle opens for files_expected; form_prose and prose-only stay off write pressure."""
     from agentcore.runtime.engine.governance import create_loop_controller
     from agentcore.runtime.runs.worker_budget import (
         LIGHT_REPAIR_MAX_ROUNDS,
         is_short_write_posture,
-        should_enable_prose_idle,
-        should_enable_zero_write,
     )
 
     assert not is_short_write_posture(max_rounds=None)
     assert is_short_write_posture(max_rounds=LIGHT_REPAIR_MAX_ROUNDS)
     assert is_short_write_posture(max_rounds=4)
 
-    assert not should_enable_zero_write(files_expected=True, max_rounds=None)
-    assert not should_enable_zero_write(
-        files_expected=True, max_rounds=LIGHT_REPAIR_MAX_ROUNDS
-    )
-    assert not should_enable_zero_write(files_expected=True, short_write_posture=True)
-    assert not should_enable_zero_write(files_expected=True, short_write_posture=False)
-    assert not should_enable_zero_write(
-        files_expected=True, form_prose=True, short_write_posture=True
-    )
-    assert not should_enable_zero_write(
-        files_expected=False, max_rounds=LIGHT_REPAIR_MAX_ROUNDS
-    )
-    assert not should_enable_prose_idle(files_expected=False, short_write_posture=True)
-
     standard = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=True,
         short_write_posture=False,
     )
-    assert standard.zero_write_finalize_rounds == 0
     assert standard.delivery_idle_nudge_rounds > 0
     assert standard.delivery_idle_narrow_rounds > 0
     report = create_loop_controller(
@@ -212,8 +195,6 @@ def test_files_zero_write_retired_always_off():
         files_expected=True,
         short_write_posture=True,
     )
-    assert short_files.zero_write_finalize_rounds == 0
-    assert short_files.prose_idle is False
     assert short_files.delivery_idle_nudge_rounds > 0
     prose = create_loop_controller(
         frozenset({"file_read"}),
@@ -221,8 +202,6 @@ def test_files_zero_write_retired_always_off():
         short_write_posture=True,
         form_prose=True,
     )
-    assert prose.zero_write_finalize_rounds == 0
-    assert prose.prose_idle is False
     assert prose.delivery_idle_nudge_rounds == 0
     assert prose.delivery_idle_narrow_rounds == 0
     no_files = create_loop_controller(
@@ -331,9 +310,9 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
         tighten_verify_exec_thrash=True,
         max_rounds=4,
     )
-    # Prose idle ladder retired — factory always leaves zero_write/prose_idle off.
-    assert tightened.prose_idle is False
-    assert tightened.zero_write_finalize_rounds == 0
+    # Soft delivery_idle stays off for non-files / form paths at factory.
+    assert tightened.delivery_idle_nudge_rounds > 0  # recon-idle for non-files
+    assert tightened.delivery_idle_narrow_rounds == 0
     # disable<=2：两次同工具失败即 disable（默认 3 才 disable）
     tightened.record(
         [ToolAttempt(fingerprint="fp0", tool_name="code_execute", success=False)]
@@ -377,23 +356,10 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
     assert baseline.unproductive_early_stop()
 
 
-def test_prose_idle_gate_and_scaled_bar():
-    """prose_idle / zero_write 梯子已退役：闸恒关。"""
+def test_factory_delivery_idle_not_finalize():
+    """Factory opens soft delivery_idle / recon-idle only — never mid-loop FINALIZE from idle."""
     from agentcore.runtime.engine.governance import create_loop_controller
-    from agentcore.runtime.runs.worker_budget import (
-        resolve_prose_idle_finalize_rounds,
-        should_enable_prose_idle,
-        should_enable_zero_write,
-    )
-
-    assert not should_enable_prose_idle(files_expected=False, short_write_posture=True)
-    assert not should_enable_prose_idle(files_expected=True, short_write_posture=True)
-    assert not should_enable_prose_idle(files_expected=False, short_write_posture=False)
-    assert not should_enable_zero_write(files_expected=False, short_write_posture=True)
-    assert not should_enable_zero_write(files_expected=True, short_write_posture=True)
-    # Default settings bar is 0 → scaled helper stays 0.
-    assert resolve_prose_idle_finalize_rounds(4) == 0
-    assert resolve_prose_idle_finalize_rounds(6) == 0
+    from agentcore.runtime.loop_controller import Intervention, ToolAttempt
 
     ctrl = create_loop_controller(
         frozenset({"file_read", "grep"}),
@@ -401,8 +367,11 @@ def test_prose_idle_gate_and_scaled_bar():
         short_write_posture=True,
         max_rounds=4,
     )
-    assert ctrl.prose_idle is False
-    assert ctrl.zero_write_finalize_rounds == 0
+    assert ctrl.delivery_idle_nudge_rounds > 0
+    assert ctrl.delivery_idle_narrow_rounds == 0
+    for i in range(12):
+        ctrl.record([ToolAttempt(fingerprint=f"r{i}", tool_name="file_read", success=True)])
+    assert ctrl.convergence_action() is Intervention.CONTINUE
 
     files = create_loop_controller(
         frozenset({"file_read"}),
@@ -410,8 +379,8 @@ def test_prose_idle_gate_and_scaled_bar():
         short_write_posture=True,
         max_rounds=4,
     )
-    assert files.prose_idle is False
-    assert files.zero_write_finalize_rounds == 0
+    assert files.delivery_idle_nudge_rounds > 0
+    assert files.delivery_idle_narrow_rounds > 0
 
 
 def test_narrow_for_light_repair_strips_investigation():

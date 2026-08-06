@@ -10,7 +10,7 @@ describe("composerTrailingSlots", () => {
         voiceSupported: true,
         voiceActive: false,
       }),
-    ).toEqual({ row: ["voice"], showQueueHint: false });
+    ).toEqual({ row: ["voice"], showSteerHint: false });
   });
 
   it("idle draft → send (hides mic)", () => {
@@ -21,10 +21,10 @@ describe("composerTrailingSlots", () => {
         voiceSupported: true,
         voiceActive: false,
       }),
-    ).toEqual({ row: ["send"], showQueueHint: false });
+    ).toEqual({ row: ["send"], showSteerHint: false });
   });
 
-  it("busy empty → stop only, no queue hint", () => {
+  it("busy empty → stop only, no steer hint", () => {
     expect(
       composerTrailingSlots({
         busy: true,
@@ -32,10 +32,10 @@ describe("composerTrailingSlots", () => {
         voiceSupported: true,
         voiceActive: false,
       }),
-    ).toEqual({ row: ["stop"], showQueueHint: false });
+    ).toEqual({ row: ["stop"], showSteerHint: false });
   });
 
-  it("busy draft → steer + stop + queue hint (no inline queue)", () => {
+  it("busy draft → send + stop + steer hint (queue default)", () => {
     expect(
       composerTrailingSlots({
         busy: true,
@@ -43,7 +43,7 @@ describe("composerTrailingSlots", () => {
         voiceSupported: true,
         voiceActive: false,
       }),
-    ).toEqual({ row: ["steer-send", "stop"], showQueueHint: true });
+    ).toEqual({ row: ["send", "stop"], showSteerHint: true });
   });
 
   it("recording keeps voice slot even with draft", () => {
@@ -54,7 +54,7 @@ describe("composerTrailingSlots", () => {
         voiceSupported: true,
         voiceActive: true,
       }),
-    ).toEqual({ row: ["voice"], showQueueHint: false });
+    ).toEqual({ row: ["voice"], showSteerHint: false });
   });
 
   it("idle empty without voice → send slot", () => {
@@ -65,6 +65,6 @@ describe("composerTrailingSlots", () => {
         voiceSupported: false,
         voiceActive: false,
       }),
-    ).toEqual({ row: ["send"], showQueueHint: false });
+    ).toEqual({ row: ["send"], showSteerHint: false });
   });
 });

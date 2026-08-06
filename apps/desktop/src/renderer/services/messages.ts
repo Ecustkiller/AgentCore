@@ -80,11 +80,6 @@ export interface BackendMessage {
     registrant?: string;
     citable?: boolean;
   }[];
-  /** 下一步推荐 chips (下一步推荐, DERIVED 持久化): the assistant row's persisted quick-reply
-   * suggestions (messages.followups column, twin of the title). Replayed onto
-   * `message.followups` so reopening a conversation shows the last turn's chips again — live
-   * they rode `followups_generated`. Empty [] for user / none-minted turns. */
-  followups?: string[];
   /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's rating on this assistant reply
    * (messages.feedback column) — "up" | "down" | null(未评价). Replayed onto
    * `message.feedback` so a reloaded bubble shows the rating the user gave. */
@@ -294,11 +289,6 @@ export function toMessage(m: BackendMessage): Message {
     rounds: m.rounds ?? undefined,
     durationMs: m.duration_ms ?? undefined,
     collab: m.collab ?? undefined,
-    // 下一步推荐 chips (DERIVED 持久化): replay the last turn's persisted chips on reload,
-    // mirroring the live `attachFollowups` stamp (twin of the title). Empty []
-    // server-side → undefined; ChatView / CanvasCommandBar only surface them on the
-    // latest finished turn.
-    followups: m.followups?.length ? m.followups : undefined,
     // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the
     // user's thumbs; null server-side → null (未评价).
     feedback: m.feedback ?? null,

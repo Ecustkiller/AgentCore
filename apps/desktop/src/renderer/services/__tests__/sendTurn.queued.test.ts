@@ -37,6 +37,7 @@ vi.mock("@/services/turns/recovery", () => ({
   attachOnOpen: vi.fn(),
   markGhostInterrupted: vi.fn(),
   settleCloudRunningAssistant: vi.fn(),
+  settleOrphanEmptyAssistants: vi.fn(),
 }));
 
 import { notifyInfo } from "@/lib/toast";

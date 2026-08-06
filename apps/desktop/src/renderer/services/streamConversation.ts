@@ -425,10 +425,17 @@ export interface OutgoingAttachment {
   workspace_path?: string;
 }
 
+/** `@Agent` 点名（与 attachments 并列；不扩展 MessageAttachment.kind）。 */
+export interface OutgoingAgentMention {
+  agent_id: string;
+  role: string;
+}
+
 export interface StreamConversationOptions {
   conversationId: string;
   content: string;
   attachments?: OutgoingAttachment[];
+  agentMentions?: OutgoingAgentMention[];
   /** 必填分流（缺 → 服务端 422）。空闲开跑客户端仍带 ``steer``。 */
   delivery: "steer" | "queue";
   signal?: AbortSignal;
@@ -442,11 +449,15 @@ export async function streamConversation({
   conversationId,
   content,
   attachments,
+  agentMentions,
   delivery,
   signal,
 }: StreamConversationOptions): Promise<void> {
   const payload: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
+  if (agentMentions && agentMentions.length > 0) {
+    payload.agent_mentions = agentMentions;
+  }
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,
     JSON.stringify(payload),

@@ -18,7 +18,11 @@ import {
 import { getRuntime } from "@/stores/conversation";
 import { projectPausedRuns } from "./projectPausedRuns";
 import { projectUnsyncedTurns } from "./projectUnsynced";
-import { attachOnOpen, settleCloudRunningAssistant } from "./recovery";
+import {
+  attachOnOpen,
+  settleCloudRunningAssistant,
+  settleOrphanEmptyAssistants,
+} from "./recovery";
 import { attachSidecarTurn } from "./sidecarAttach";
 
 /**
@@ -53,6 +57,8 @@ export async function runHydrateAttachSettle(
     if (recovery.pausedCount > 0) {
       projectPausedRuns(conversationId, recovery.pausedRuns ?? {});
     }
+    // After unsynced project: seal any blank open/ghost assistants as「已中断」.
+    settleOrphanEmptyAssistants(conversationId);
     if (recovery.sidecarLive && recovery.pausedCount === 0) {
       // 切会话不卸观察泵 — 无页级 signal。
       await attachSidecarTurn(conversationId);
@@ -66,6 +72,9 @@ export async function runHydrateAttachSettle(
       void attachOnOpen(conversationId);
     } else if (last.role === "assistant" && last.status === "running") {
       await settleCloudRunningAssistant(conversationId, recovery);
+    } else {
+      // Warm reopen may leave a mid-slice empty incomplete from a prior preempt.
+      settleOrphanEmptyAssistants(conversationId);
     }
   }
   return "cloud";

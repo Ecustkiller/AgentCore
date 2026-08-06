@@ -550,7 +550,7 @@ async def test_finalize_cloud_and_local_call_if_due(monkeypatch):
     )
 
     sink = SimpleNamespace(emit=lambda *_a, **_k: None)
-    # ERROR path skips followups mint but still schedules compaction.
+    # ERROR path skips derived mint but still schedules compaction.
     await CloudStore().finalize(
         mode="cloud",
         result={
@@ -581,11 +581,6 @@ async def test_finalize_cloud_and_local_call_if_due(monkeypatch):
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    from agentcore.conversation.common import FollowupsMintResult
-
-    monkeypatch.setattr(
-        cloud_mod, "mint_followups", AsyncMock(return_value=FollowupsMintResult(items=[]))
-    )
     await CloudStore().finalize(
         mode="local",
         conversation_id="c-local",
