@@ -92,6 +92,10 @@ export interface TeamPreviewDisplay {
   workers: TeamPreviewWorkerDisplay[];
   /** Grantable tools listed on the kickoff card (may be empty under command=auto). */
   tools: string[];
+  /**
+   * Backend lead（交付档 + 预计人数）. Absent on old payloads → local headcount fallback.
+   */
+  headline?: string;
   motion: string;
   form: string;
   sides: TeamPreviewSideDisplay[];

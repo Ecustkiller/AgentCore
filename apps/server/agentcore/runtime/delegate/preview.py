@@ -58,12 +58,16 @@ async def persist_team_preview(
 ) -> bool:
     """Back-compat: build a delegate KickoffSummary and persist via shared path."""
     from agentcore.runtime.kickoff.pause import persist_kickoff
-    from agentcore.runtime.kickoff.summary import KickoffSummary
+    from agentcore.runtime.kickoff.summary import KickoffSummary, format_kickoff_headline
 
     summary = KickoffSummary(
         primitive="delegate",
         workers=list(workers),
         tools=list(tools or []),
+        headline=format_kickoff_headline(
+            headcount=len(workers),
+            primitive="delegate",
+        ),
     )
     return await persist_kickoff(tool, checkpoint_id, summary, required_event, plan=plan)
 
@@ -76,7 +80,14 @@ async def await_team_preview(
 ) -> CheckpointDecision | None:
     """Pause before the first wave; return the decision, or None if suspended."""
     tools = kickoff_tools(show_capabilities=show_capabilities)
-    summary = delegate_kickoff_summary(plan, tools=tools)
+    # 只读 playbook_args.intensity（结构槽）；不扫用户原文、不改 expand。
+    pb_args = getattr(tool, "_active_playbook_args", None)
+    intensity = None
+    if isinstance(pb_args, dict):
+        raw = pb_args.get("intensity")
+        if isinstance(raw, str) and raw.strip():
+            intensity = raw.strip()
+    summary = delegate_kickoff_summary(plan, tools=tools, intensity=intensity)
     return await await_kickoff(tool, summary, plan=plan)
 
 

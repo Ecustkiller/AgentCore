@@ -3,6 +3,7 @@ import {
   ResolvedDecisionRecord,
   teamCorrectionSuffix,
   teamPendingMarkerLabel,
+  teamPreviewLead,
   teamResolvedOutcome,
 } from "@/components/chat/decision";
 import {
@@ -62,20 +63,22 @@ function isDebate(preview: TeamPreviewDisplay): boolean {
 }
 
 function summarySuffix(preview: TeamPreviewDisplay): string {
-  if (isDebate(preview)) {
-    const n = preview.sides.length;
-    return n > 0 ? `${n} 方` : "辩论";
-  }
-  return `${preview.workers.length} 名队员`;
+  // Marker already has activeCaption; suffix is the delivery/headcount lead.
+  return teamPreviewLead({
+    primitive: preview.primitive,
+    headline: preview.headline,
+    workerCount: preview.workers.length,
+    sideCount: preview.sides.length,
+  });
 }
 
 function graphPreviewSummary(preview: TeamPreviewDisplay): string {
-  if (isDebate(preview)) {
-    const n = preview.sides.length;
-    return n > 0 ? `辩题 · ${n} 方` : "辩题";
-  }
-  const n = preview.workers.length;
-  return n > 0 ? `分工 · ${n} 名队员` : "分工";
+  return teamPreviewLead({
+    primitive: preview.primitive,
+    headline: preview.headline,
+    workerCount: preview.workers.length,
+    sideCount: preview.sides.length,
+  });
 }
 
 /**

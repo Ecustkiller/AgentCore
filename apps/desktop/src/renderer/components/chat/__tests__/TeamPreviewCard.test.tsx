@@ -122,7 +122,7 @@ describe("TeamPreviewCard", () => {
     renderCard(<TeamPreviewCard preview={makePreview()} />);
 
     const toggle = screen.getByRole("button", {
-      name: /已授权开工 · 首波已放行 · 2 名队员/,
+      name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
     });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("研究员")).toBeNull();
@@ -134,14 +134,14 @@ describe("TeamPreviewCard", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 2 名队员/,
+        name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
       }),
     );
 
     expect(
       screen
         .getByRole("button", {
-          name: /已授权开工 · 首波已放行 · 2 名队员/,
+          name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
         })
         .getAttribute("aria-expanded"),
     ).toBe("true");
@@ -162,10 +162,26 @@ describe("TeamPreviewCard", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /已授权开工 · 嘱咐已注入队员 · 2 名队员/,
+        name: /已授权开工 · 嘱咐已注入队员 · 预计 2 人开工/,
       }),
     );
     expect(screen.getByText("先做公开竞品，不做内部访谈")).toBeTruthy();
+  });
+
+  it("wire headline 优先于本地人数回退", () => {
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          status: "pending",
+          decision: null,
+          headline: "MVP主流程 · 预计 2 人",
+        })}
+      />,
+    );
+    const marker = screen.getByTestId("pending-decision-marker");
+    expect(marker.textContent).toContain(
+      "等你确认 · 确认后才会开工（MVP主流程 · 预计 2 人）",
+    );
   });
 
   it("pending 降级为单行拍板标记，无明细、无任何按钮（方案 C）", () => {
@@ -177,7 +193,7 @@ describe("TeamPreviewCard", () => {
 
     const marker = screen.getByTestId("pending-decision-marker");
     expect(marker.textContent).toContain(
-      "等你确认 · 确认后才会开工（2 名队员）",
+      "等你确认 · 确认后才会开工（预计 2 人开工）",
     );
     expect(marker.textContent).toContain("入口在下方拍板卡");
     // 单行标记：完整分工表归 ResumePrompt 拍板中心，这里零展开、零操作。
@@ -187,10 +203,10 @@ describe("TeamPreviewCard", () => {
   });
 
   it.each([
-    ["adjust", "已调整 · 备注已注入队员并开做 · 2 名队员"],
-    ["stop", "已取消 · 团队未启动 · 2 名队员"],
-    ["timeout", "未及时回应，已自动开做 · 2 名队员"],
-    ["orphaned", "已失效（回合已结束或服务已重启） · 2 名队员"],
+    ["adjust", "已调整 · 备注已注入队员并开做 · 预计 2 人开工"],
+    ["stop", "已取消 · 团队未启动 · 预计 2 人开工"],
+    ["timeout", "未及时回应，已自动开做 · 预计 2 人开工"],
+    ["orphaned", "已失效（回合已结束或服务已重启） · 预计 2 人开工"],
   ] as const)("resolved decision=%s 保留既有 label 文案", (decision, label) => {
     renderCard(<TeamPreviewCard preview={makePreview({ decision })} />);
     expect(screen.getByRole("button", { name: label })).toBeTruthy();
@@ -223,7 +239,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 已排除 1 岗 · 已收紧写盘 · 2 名队员/,
+        name: /已授权开工 · 首波已放行 · 已排除 1 岗 · 已收紧写盘 · 预计 2 人开工/,
       }),
     ).toBeTruthy();
   });
@@ -239,7 +255,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 嘱咐已注入队员 · 2 名队员/,
+        name: /已授权开工 · 嘱咐已注入队员 · 预计 2 人开工/,
       }),
     ).toBeTruthy();
   });
@@ -265,7 +281,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开赛 · 嘱咐已注入 · 2 方/,
+        name: /已授权开赛 · 嘱咐已注入 · 预计 2 方开赛/,
       }),
     ).toBeTruthy();
   });
@@ -291,7 +307,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已调整辩题 · 开赛 · 2 方/,
+        name: /已调整辩题 · 开赛 · 预计 2 方开赛/,
       }),
     ).toBeTruthy();
   });
@@ -317,7 +333,7 @@ describe("TeamPreviewCard", () => {
     );
 
     const marker = screen.getByTestId("pending-decision-marker");
-    expect(marker.textContent).toContain("等你确认 · 确认后才会开赛（2 方）");
+    expect(marker.textContent).toContain("等你确认 · 确认后才会开赛（预计 2 方开赛）");
     expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
     expect(screen.queryByText("正方")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
@@ -331,7 +347,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开赛 · 辩论已放行 · 2 方/,
+        name: /已授权开赛 · 辩论已放行 · 预计 2 方开赛/,
       }),
     ).toBeTruthy();
   });
@@ -383,7 +399,7 @@ describe("TeamPreviewCard", () => {
     renderCard(<TeamPreviewCard preview={makePreview()} messageId={MID} />);
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 2 名队员/,
+        name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
       }),
     ).toBeTruthy();
   });
@@ -397,7 +413,7 @@ describe("GraphTeamPreview", () => {
       />,
     );
     const trigger = screen.getByTestId("graph-team-preview");
-    expect(trigger.textContent).toMatch(/辩题 · 2 方/);
+    expect(trigger.textContent).toMatch(/预计 2 方开赛/);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
 
@@ -485,7 +501,7 @@ describe("GraphTeamPreview", () => {
       <GraphTeamPreview preview={makePreview({ note: "先出竞品对照表" })} />,
     );
     const trigger = screen.getByTestId("graph-team-preview");
-    expect(trigger.textContent).toMatch(/分工 · 2 名队员/);
+    expect(trigger.textContent).toMatch(/预计 2 人开工/);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("研究员")).toBeNull();
 

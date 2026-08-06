@@ -320,6 +320,20 @@ def test_core_teaches_split_criterion_over_count():
     assert "完整可玩" in hint
     assert "规格已齐 ≠ 全量" in hint or "规格已齐≠全量" in hint
     assert "明示" in hint  # 用户明示一次做完豁免
+    # 交付档 → intensity / playbook（结构槽，禁意图分类器）
+    assert "交付档" in hint
+    assert "intensity" in hint
+    assert "solo" in hint and "standard" in hint
+    assert "lean" in hint and "full" in hint
+    assert "一页先上" in hint or "一页先上线" in hint
+    assert "品牌站" in hint
+    assert "工具壳" in hint
+    assert "模块流水线" in hint
+    assert "只改一处" in hint
+    assert "桌上结果" in hint or "桌上档" in hint
+    assert "禁止" in hint and ("intensity=full" in hint or "满编" in hint)
+    assert "做个网站" in hint
+    assert "展示页" in hint or "业务应用" in hint
     # 混合分流：讨论/Agent/自动化 ≠ 绿场 SPA 满档 build_app；五阶段仅进入后
     assert "build_app" in hint
     assert "不硬拒" in hint

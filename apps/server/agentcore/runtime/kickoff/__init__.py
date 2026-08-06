@@ -42,6 +42,8 @@ from agentcore.runtime.kickoff.summary import (
     KickoffSummary,
     debate_kickoff_summary,
     delegate_kickoff_summary,
+    format_kickoff_headline,
+    intensity_short_label,
 )
 from agentcore.runtime.kickoff.team_veto import (
     WriteCapabilityOverride,
@@ -66,8 +68,10 @@ __all__ = [
     "delegate_kickoff_summary",
     "discard_mlr_preauth",
     "emit_stage_card_for_motion",
+    "format_kickoff_headline",
     "grant_mlr_preauth",
     "format_kickoff_cancel_result",
+    "intensity_short_label",
     "KICKOFF_CANCEL_GUIDANCE",
     "kickoff_tools",
     "mark_turn_keeps_stage_card",

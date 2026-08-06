@@ -180,7 +180,8 @@ export type TeamPrimitiveMeta = {
 export const TEAM_PRIMITIVE_META = {
   delegate: {
     activeCaption: "等你确认 · 确认后才会开工",
-    resumeLead: "团队尚未开工。等待你确认后才会上场，请过目分工：",
+    // 旧 payload 无 headline 时的兜底导语；有人数时前端会优先「预计 N 人开工」。
+    resumeLead: "预计开工。等待你确认后才会上场，分工如下：",
     resumeCta: "授权并开工",
     notePlaceholder: "可选 · 对全体队员的嘱咐（授权开工时注入）",
     resolved: {
@@ -211,7 +212,7 @@ export const TEAM_PRIMITIVE_META = {
   },
   debate: {
     activeCaption: "等你确认 · 确认后才会开赛",
-    resumeLead: "辩论尚未开赛。等待你确认后才会开赛，请过目辩题与立场：",
+    resumeLead: "预计开赛。等待你确认后才会开赛，辩题与立场如下：",
     resumeCta: "授权开赛",
     notePlaceholder: "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入",
     resolved: {
@@ -243,6 +244,30 @@ export const TEAM_PRIMITIVE_META = {
 } as const satisfies Record<KickoffPrimitive, TeamPrimitiveMeta>;
 
 export type TeamResolvedOutcome = TeamResolvedRow;
+
+/**
+ * Kickoff card lead: prefer backend ``headline``; else local headcount fallback
+ * (旧 payload 无字段不崩，仍可见人数).
+ */
+export function teamPreviewLead(args: {
+  primitive: KickoffPrimitive;
+  headline?: string | null;
+  workerCount: number;
+  sideCount: number;
+}): string {
+  const fromWire = (args.headline ?? "").trim();
+  if (fromWire) return fromWire;
+  if (args.primitive === "debate") {
+    const n = args.sideCount;
+    return n > 0
+      ? `预计 ${n} 方开赛`
+      : TEAM_PRIMITIVE_META.debate.resumeLead;
+  }
+  const n = args.workerCount;
+  return n > 0
+    ? `预计 ${n} 人开工`
+    : TEAM_PRIMITIVE_META.delegate.resumeLead;
+}
 
 export function teamResolvedOutcome(
   primitive: KickoffPrimitive,

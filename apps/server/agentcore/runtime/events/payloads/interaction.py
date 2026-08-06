@@ -269,6 +269,10 @@ class TeamPreviewRequiredPayload(WirePayload):
     model_candidates: list[ModelCandidate] | None = absent(
         "模型消歧候选（model/origin/provider_id/label）；旧帧缺省。"
     )
+    # 主文案：交付档短标 + 预计人数；缺字段（老 journal）→ 前端按人数本地回退。
+    headline: str | None = absent(
+        "开工卡主导语（如「MVP主流程 · 预计 3 人」）；旧帧缺省。"
+    )
 
 
 class WriteCapabilityOverride(WirePayload):

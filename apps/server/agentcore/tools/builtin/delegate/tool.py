@@ -233,6 +233,8 @@ class DelegateTool:
         self._seed_notes: list[dict[str, str]] = []
         # 当前 execute 展开的 playbook 名（team_preview pre-auth 判定用）。
         self._active_playbook: str | None = None
+        # 当前 playbook_args（kickoff headline 只读 intensity；手写 tasks 为 None）。
+        self._active_playbook_args: dict[str, Any] | None = None
         # Per-call force flag for isomorphic re-delegation (set in execute).
         self._delegate_force: bool = False
         # Turn user-message provenance (harvest closing stamps execution_harvest).
@@ -408,6 +410,10 @@ class DelegateTool:
                     contract_failure=True,
                 )
             self._active_playbook = playbook
+            raw_args = arguments.get("playbook_args")
+            self._active_playbook_args = (
+                dict(raw_args) if isinstance(raw_args, dict) else None
+            )
             playbook_notes = collect_playbook_notes(tasks_raw)
             logger.info(
                 "delegate.playbook",
@@ -419,6 +425,7 @@ class DelegateTool:
             # 避免 STOP / 调度失败仍挡住回合收尾 orphan。
         else:
             self._active_playbook = None
+            self._active_playbook_args = None
             playbook_notes = []
             tasks_raw = arguments.get("tasks")
             if not isinstance(tasks_raw, list) or not tasks_raw:

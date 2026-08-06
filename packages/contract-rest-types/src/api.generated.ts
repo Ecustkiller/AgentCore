@@ -9138,6 +9138,11 @@ export interface components {
              * @default
              */
             form: string;
+            /**
+             * Headline
+             * @default
+             */
+            headline: string;
             /** Intent */
             intent?: ("kickoff" | "decision" | "proposal_pick" | "risk_ack" | "organize_plan" | "daily_review") | null;
             kind: components["schemas"]["SuspensionKind"];

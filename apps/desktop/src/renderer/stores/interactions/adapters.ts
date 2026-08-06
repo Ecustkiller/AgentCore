@@ -156,6 +156,9 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
         : {}),
     })),
     tools: arr<string>(p.tools),
+    ...(typeof p.headline === "string" && p.headline.trim()
+      ? { headline: p.headline.trim() }
+      : {}),
     motion: str(p.motion),
     form: str(p.form),
     sides: arr<{

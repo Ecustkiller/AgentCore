@@ -211,8 +211,10 @@ _CEO_CORE_HINT_TEMPLATE = """
 本条激活该卡（靠本条是否含任务卡结构字段或显式点名，**禁止**扫长文猜意图）。与本机菜单假完成分轴。\
 ① 产出类但关键高杠杆没说清 → 用 `ask_user` **短问**澄清（可与检索/读文件穿插；\
 **勿先** consult `ask_user_kickoff` / `build_website`）。可只带 `message`，或配少量 \
-`questions` / `assumptions`；**禁止**开场提案墙（缺信息靠短问，错了再改）。**糊建站 / 落地页 /「做个网站」**：信息够就直接派，\
-不够就短问一句再派——查建站说明只在你需要槽位细节时。\
+`questions` / `assumptions`；**禁止**开场提案墙（缺信息靠短问，错了再改）。\
+**糊建站 /「做个网站」**：短问形态（展示页 / 工具壳 / 业务应用）+ **本轮桌上档**；\
+**禁止**静默满编；查建站 / 绿场说明只在你需要槽位细节时。选项 `label` 只写桌上结果，\
+**【禁止】**写编制名单（几人几步）；**【禁止】**扫原文猜意图再分叉（仅认本回合明示 / 点选）。\
 【问还是派·中性】信息缺口会明显做错 / 返工 → 短问（题【必须】预填可确认 default）；\
 缺口只是小事、或你有稳妥默认且会在正文写明 → 直接派。不偏「尽量少问」，也不偏「凡事先问」。\
 例：「三种风格可选」若产品是啥未说清 → 可短问；风格名单已给则不必再问。\
@@ -272,10 +274,19 @@ default，并标「按确认默认」。卡上【无】default → **禁止** co
 MVP 或 1 人两段 / wave1=`form=files`；**禁止**首 grant 打包「完整可玩 N 屏」——\
 除非用户**明示**一次做完。**规格已齐 ≠ 全量**：阶段与形态写清只证明可立刻派，\
 不授权第一棒全量交付。单页 / 落地页仍可一人整页（见 `build_website`）。\
-【绿场 / Agent 分流】真 SPA / 用户明示完整可跑 → 【推荐】`playbook="build_app"`\
-（手写 / `none` 不硬拒）。讨论做一个 Agent、自动化助手、先聊概念 → 首派 MVP 轻切片或手写 1～2 人，\
-再 `replan`；**【禁止】**把讨论落点当成首派五波脚手架。五阶段不可跳只在已进入 `build_app` 后生效，\
-不强迫一切绿场进该 playbook。\
+**【交付档 → intensity / playbook】**先定桌上结果，再填 `playbook_args.intensity`（结构槽，非意图分类器）。\
+建议档（`ask_user` choice 的 `label`，不必改 schema）：一页先上线；品牌站流水线；工具壳；\
+MVP 主流程可点；模块流水线一次做完；只改一处。映射：一页先上 → `build_website` + `intensity=solo`；\
+品牌站 → `build_website` + `intensity=standard`；工具壳 → `build_website` + `style=toolshed`\
+（intensity 按页复杂度：一页壳用 solo、多分区壳用 standard）；\
+MVP → `build_app` + `intensity=lean`；模块流水线 → `build_app` + `intensity=full` + **显式** `modules`；\
+只改一处 → `build_feature` / 手写 / `repair_code`，**禁止**绿场满编。\
+已确认 MVP / 「先…以后再说」→ **禁止**默认 `intensity=full` 或多 `modules` 满编。\
+【绿场 / Agent 分流】真 SPA / 用户明示完整可跑 / 点选「模块流水线一次做完」→ 【推荐】\
+`playbook="build_app"` + 对应 intensity（手写 / `none` 不硬拒）。讨论做一个 Agent、自动化助手、\
+先聊概念 → 首派 MVP 轻切片（宜 `intensity=lean`）或手写 1～2 人，再 `replan`；\
+**【禁止】**把讨论落点当成首派五波脚手架 / `intensity=full`。五阶段不可跳只在已进入 \
+`build_app`+`full` 后生效，不强迫一切绿场进该 playbook。\
 痛点未答 → `assumptions` / 正文默认最小切片，**禁止**为已选定方向再强制短问一轮。\
 跨域合成关键已齐 → 按自然缝少派（常见 1～2 人），同样勿先查组队说明。\
 消息里已贴代码且要求落盘 / 写回 / 改回文件 → **必须** `delegate`（可贴码内容委派，\
@@ -507,8 +518,8 @@ assumptions；其余仍按上方「问还是派·中性」与「规格已齐→�
 
 进阶机制（辩论、定向修订、向用户发问、工作纪律等）不常驻——见「能力目录」，按需 `consult_skill(name)`。\
 提问卡 / 常见对比 / 单人落盘 / **规格已齐的建站与跨域合成**：直接做；\
-**糊建站可短问再派**，需要槽位细节再查 `build_website`；工具台 dense 同查 `build_website`\
-（`style=toolshed`）/ 辩论细则 / 拿不准怎么拆 / \
+**糊建站短问形态+桌上档再派**（禁静默满编），需要槽位 / intensity 细节再查 `build_website` / \
+`build_app`；工具台 dense 同查 `build_website`（`style=toolshed`）/ 辩论细则 / 拿不准怎么拆 / \
 设计三问与补丁绊线：再查。
 </how_you_work>
 

@@ -296,6 +296,7 @@ def _build_required_event(
             sides=list(payload.get("sides") or []),
             max_rounds=int(payload.get("max_rounds") or 0),
             thorough=bool(payload.get("thorough", True)),
+            headline=str(payload.get("headline") or ""),
         )
     elif et_name == "checkpoint_required":
         intent = payload.get("intent")

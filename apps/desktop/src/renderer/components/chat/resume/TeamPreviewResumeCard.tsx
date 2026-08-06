@@ -1,4 +1,4 @@
-import { TEAM_PRIMITIVE_META } from "@/components/chat/decision";
+import { TEAM_PRIMITIVE_META, teamPreviewLead } from "@/components/chat/decision";
 import {
   DebatePreviewBody,
   WorkerPreviewRows,
@@ -38,6 +38,12 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const { submitting, busy, send } = useColdSubmit(turn);
   const isDebate = turn.primitive === "debate";
   const family = TEAM_PRIMITIVE_META[isDebate ? "debate" : "delegate"];
+  const lead = teamPreviewLead({
+    primitive: isDebate ? "debate" : "delegate",
+    headline: turn.headline,
+    workerCount: turn.workers.length,
+    sideCount: turn.sides.length,
+  });
   const showCapabilities = !isDebate && turn.tools.length > 0;
   const debateBudget = isDebate
     ? formatDebateBudgetLabel(turn.maxRounds, turn.thorough)
@@ -118,8 +124,8 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
             </DecisionCardIcon>
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 text-sm text-foreground">
-                  {family.resumeLead}
+                <p className="min-w-0 flex-1 text-sm font-medium text-foreground">
+                  {lead}
                 </p>
                 {debateBudget && (
                   <Badge tone="muted" className="shrink-0 font-normal">
@@ -135,15 +141,18 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                   motionClassName="whitespace-pre-wrap text-sm text-foreground"
                 />
               ) : (
-                <WorkerPreviewRows
-                  mode="interactive"
-                  workers={turn.workers}
-                  excludedRunIds={excludedRunIds}
-                  onExcludedChange={onExcludedChange}
-                  textOnlyRunIds={textOnlyRunIds}
-                  onTextOnlyChange={onTextOnlyChange}
-                  disabled={busy}
-                />
+                <>
+                  <p className="mt-2 text-xs text-muted-foreground">分工预览</p>
+                  <WorkerPreviewRows
+                    mode="interactive"
+                    workers={turn.workers}
+                    excludedRunIds={excludedRunIds}
+                    onExcludedChange={onExcludedChange}
+                    textOnlyRunIds={textOnlyRunIds}
+                    onTextOnlyChange={onTextOnlyChange}
+                    disabled={busy}
+                  />
+                </>
               )}
 
               {showCapabilities && (

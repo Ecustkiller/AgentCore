@@ -5,6 +5,7 @@ export {
   askResolvedOutcome,
   teamCorrectionSuffix,
   teamPendingMarkerLabel,
+  teamPreviewLead,
   teamResolvedOutcome,
 } from "./meta";
 export type {

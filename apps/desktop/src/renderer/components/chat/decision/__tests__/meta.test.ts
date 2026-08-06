@@ -5,6 +5,7 @@ import {
   askResolvedOutcome,
   teamCorrectionSuffix,
   teamPendingMarkerLabel,
+  teamPreviewLead,
   teamResolvedOutcome,
 } from "../meta";
 
@@ -70,8 +71,8 @@ describe("decision meta", () => {
   });
 
   it("pending marker + resume captions share one table", () => {
-    expect(teamPendingMarkerLabel("delegate", "2 名队员")).toBe(
-      "等你确认 · 确认后才会开工（2 名队员）",
+    expect(teamPendingMarkerLabel("delegate", "预计 2 人开工")).toBe(
+      "等你确认 · 确认后才会开工（预计 2 人开工）",
     );
     expect(TEAM_PRIMITIVE_META.debate.activeCaption).toBe(
       "等你确认 · 确认后才会开赛",
@@ -81,5 +82,32 @@ describe("decision meta", () => {
     expect(ASK_INTENT_META.decision.activeCaption).toBe(
       ASK_INTENT_META.kickoff.activeCaption,
     );
+  });
+
+  it("teamPreviewLead prefers wire headline; falls back to headcount", () => {
+    expect(
+      teamPreviewLead({
+        primitive: "delegate",
+        headline: "MVP主流程 · 预计 3 人",
+        workerCount: 3,
+        sideCount: 0,
+      }),
+    ).toBe("MVP主流程 · 预计 3 人");
+    expect(
+      teamPreviewLead({
+        primitive: "delegate",
+        headline: "",
+        workerCount: 2,
+        sideCount: 0,
+      }),
+    ).toBe("预计 2 人开工");
+    expect(
+      teamPreviewLead({
+        primitive: "debate",
+        headline: null,
+        workerCount: 0,
+        sideCount: 2,
+      }),
+    ).toBe("预计 2 方开赛");
   });
 });

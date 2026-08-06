@@ -11,6 +11,43 @@ if TYPE_CHECKING:
 
 KickoffPrimitive = Literal["delegate", "debate"]
 
+# playbook_args.intensity → 用户可见交付档短标（结构槽，非意图分类）。
+# 未知值不映射——勿假造档名，回退仅人数文案。
+_INTENSITY_SHORT_LABEL: dict[str, str] = {
+    "lean": "MVP主流程",
+    "solo": "一页先上线",
+    "standard": "品牌站流水线",
+    "full": "模块流水线",
+}
+
+
+def intensity_short_label(intensity: str | None) -> str | None:
+    """Map known intensity tokens to Chinese short labels; unknown → None."""
+    if not isinstance(intensity, str):
+        return None
+    key = intensity.strip().lower()
+    return _INTENSITY_SHORT_LABEL.get(key)
+
+
+def format_kickoff_headline(
+    *,
+    headcount: int,
+    intensity: str | None = None,
+    primitive: KickoffPrimitive = "delegate",
+) -> str:
+    """User-facing kickoff lead: delivery tier + headcount (roles stay secondary).
+
+    Delegate: ``{档短标} · 预计 N 人`` when intensity is known; else
+    ``预计 N 人开工``. Debate: ``预计 N 方开赛`` (no delivery-tier inventing).
+    """
+    n = max(0, int(headcount))
+    if primitive == "debate":
+        return f"预计 {n} 方开赛"
+    label = intensity_short_label(intensity)
+    if label:
+        return f"{label} · 预计 {n} 人"
+    return f"预计 {n} 人开工"
+
 
 @dataclass(frozen=True)
 class KickoffSummary:
@@ -20,6 +57,7 @@ class KickoffSummary:
     debate fills ``motion`` / ``sides`` / ``max_rounds`` / ``thorough`` instead
     (``workers`` stays empty). ``debate_arguments`` is the resume blob so
     ``recover_turn`` can re-enter ``DebateTool.execute`` after CONTINUE/ADJUST.
+    ``headline`` is the user-facing lead (交付档 + 人数); empty = old frames.
     """
 
     primitive: KickoffPrimitive
@@ -38,6 +76,8 @@ class KickoffSummary:
     same_model_debate: bool = False
     # §7.5 D：消歧候选（开赛卡展示）；缺省空，旧 journal 兼容。
     model_candidates: list[dict[str, Any]] = field(default_factory=list)
+    # 主文案：交付档短标 + 预计人数；缺省空 = 旧帧 / 前端本地回退。
+    headline: str = ""
 
     def card_payload(self) -> dict[str, Any]:
         """Wire fields for ``team_preview_required`` / suspension extras."""
@@ -51,6 +91,8 @@ class KickoffSummary:
             "max_rounds": self.max_rounds,
             "thorough": self.thorough,
         }
+        if self.headline:
+            out["headline"] = self.headline
         if self.moderator_model:
             out["moderator_model"] = self.moderator_model
             if self.moderator_origin:
@@ -100,11 +142,18 @@ def delegate_kickoff_summary(
     plan: RunPlan,
     *,
     tools: list[str] | None = None,
+    intensity: str | None = None,
 ) -> KickoffSummary:
+    workers = worker_rows(plan)
     return KickoffSummary(
         primitive="delegate",
-        workers=worker_rows(plan),
+        workers=workers,
         tools=list(tools or []),
+        headline=format_kickoff_headline(
+            headcount=len(workers),
+            intensity=intensity,
+            primitive="delegate",
+        ),
     )
 
 
@@ -131,4 +180,8 @@ def debate_kickoff_summary(
         moderator_provider_id=config.moderator_provider_id or "",
         same_model_debate=bool(config.same_model_debate),
         model_candidates=list(getattr(config, "model_candidates", None) or []),
+        headline=format_kickoff_headline(
+            headcount=len(sides),
+            primitive="debate",
+        ),
     )

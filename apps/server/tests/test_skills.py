@@ -544,6 +544,13 @@ def test_build_app_skill_teaches_admission_and_agent_diversion():
     # 无新 playbook 登记：仍只教既有 build_app / build_feature / build_website
     assert "playbook=\"build_app\"" in body or 'playbook="build_app"' in body
     assert "build_feature" in body
+    # 交付档 → lean|full；MVP 禁默升 full
+    assert "intensity" in body
+    assert "lean" in body and "full" in body
+    assert "MVP" in body
+    assert "modules" in body
+    assert "先…以后再说" in body or "以后再说" in body
+    assert "intensity=full" in body or ("禁止" in body and "满编" in body)
 
 
 def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline():
@@ -756,6 +763,21 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default
     assert "决策/澄清短问" in body
     assert "先问你" in body
+    # 交付档：桌上结果 label → intensity/playbook；禁编制/意图分类器
+    assert "交付档" in body
+    assert "桌上结果" in body
+    assert "intensity" in body
+    assert "一页先上线" in body
+    assert "品牌站流水线" in body
+    assert "工具壳" in body
+    assert "MVP 主流程可点" in body
+    assert "模块流水线一次做完" in body
+    assert "只改一处" in body
+    assert "编制" in body
+    assert "意图分类器" in body or "扫原文" in body
+    assert "做个网站" in body
+    assert "展示页" in body or "业务应用" in body
+    assert "intensity=full" in body or "满编" in body
 
 
 def test_ask_user_kickoff_skill_mentions_compat_options_not_ledger():
@@ -775,6 +797,20 @@ def test_ask_user_kickoff_skill_teaches_software_delivery_not_default_html():
     assert "Agent" in body or "自动化" in body
     assert "轻切片" in body or "1～2" in body
     assert "五波" in body or "脚手架" in body
+    assert "intensity" in body
+    assert "lean" in body
+
+
+def test_build_website_skill_teaches_delivery_intensity():
+    body = _body("build_website")
+    assert "intensity" in body
+    assert "solo" in body and "standard" in body
+    assert "一页先上线" in body or "solo" in body
+    assert "品牌站" in body or "standard" in body
+    assert "toolshed" in body
+    assert "做个网站" in body
+    assert "桌上档" in body or "交付档" in body
+    assert "禁静默满编" in body or "静默满编" in body
 
 
 def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():

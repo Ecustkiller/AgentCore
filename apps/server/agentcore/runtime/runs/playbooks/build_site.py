@@ -1,4 +1,4 @@
-"""建站三串 + 整页验收：build_website（style 气质槽）/ verify."""
+"""建站：build_website（style 气质槽 + intensity 编制档）/ verify."""
 
 from __future__ import annotations
 
@@ -43,6 +43,11 @@ _DEFAULT_TOOLSHED_SECTIONS = ("应用外壳", "侧栏导航", "数据表格")
 STYLE_MARKETING = "marketing"
 STYLE_TOOLSHED = "toolshed"
 _ALLOWED_STYLES = frozenset({STYLE_MARKETING, STYLE_TOOLSHED})
+
+# 编制档：默认 standard 三串；solo = 单节点一人整页。
+INTENSITY_SOLO = "solo"
+INTENSITY_STANDARD = "standard"
+_ALLOWED_INTENSITIES = frozenset({INTENSITY_SOLO, INTENSITY_STANDARD})
 
 # 文案包结构化板块（验收用 required_sections，替代高 min_length）
 # 首项对齐 task 里 visual thesis / 信息架构，must_contain_soft 仍软拦。
@@ -120,23 +125,16 @@ def _website_qa_task(
     )
 
 
-def _build_three_chain_site(
+def _prepare_site_inputs(
     args: dict[str, Any],
     *,
     playbook_name: str,
     pack: str,
     anti_slop_domain: str,
     default_sections: tuple[str, ...],
-    visual_thesis: str,
-    domain_hint: str,
-    copy_sections: tuple[str, ...],
     topic_slot_hint: str,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Shared three-chain site pipeline: copy → frontend (DESIGN+page+CONTRACT) → QA.
-
-    ``sections`` is a coverage checklist only — no partition fan-out / assemble.
-    Slot ``topic`` = one-line brief; artifacts always under fixed ``site/``.
-    """
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Shared slot resolve + prompt fragments for standard / solo website builds."""
     from agentcore.runtime.runs.website_catalog import (
         catalog_contract_stub,
         catalog_prompt_block_skeleton,
@@ -151,7 +149,7 @@ def _build_three_chain_site(
 
     topic = clean_str(args.get("topic"))
     if not topic:
-        return [], [
+        return None, [
             f"{playbook_name} 需要 slot『topic』（{topic_slot_hint}；"
             f"产物目录固定 {_BUILD_WEBSITE_DIR}/，不是文件夹槽）"
         ]
@@ -174,6 +172,57 @@ def _build_three_chain_site(
     catalog_shells = catalog_shell_bodies_for_sections(sections, pack=pack)
     catalog_css = catalog_shared_css_for_skeleton(pack=pack)
     catalog_contract = catalog_contract_stub(sections, pack=pack)
+    return {
+        "topic": topic,
+        "sections": sections,
+        "stack_hint": stack_hint,
+        "aud": aud,
+        "all_sections_label": all_sections_label,
+        "anti_slop": anti_slop,
+        "design_block": design_block,
+        "design_md_path": DESIGN_MD_PATH,
+        "catalog_block": catalog_block,
+        "catalog_shells": catalog_shells,
+        "catalog_css": catalog_css,
+        "catalog_contract": catalog_contract,
+    }, []
+
+
+def _build_three_chain_site(
+    args: dict[str, Any],
+    *,
+    playbook_name: str,
+    pack: str,
+    anti_slop_domain: str,
+    default_sections: tuple[str, ...],
+    visual_thesis: str,
+    domain_hint: str,
+    copy_sections: tuple[str, ...],
+    topic_slot_hint: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Shared three-chain site pipeline: copy → frontend (DESIGN+page+CONTRACT) → QA.
+
+    ``sections`` is a coverage checklist only — no partition fan-out / assemble.
+    Slot ``topic`` = one-line brief; artifacts always under fixed ``site/``.
+    """
+    prep, errors = _prepare_site_inputs(
+        args,
+        playbook_name=playbook_name,
+        pack=pack,
+        anti_slop_domain=anti_slop_domain,
+        default_sections=default_sections,
+        topic_slot_hint=topic_slot_hint,
+    )
+    if prep is None:
+        return [], errors
+
+    topic = prep["topic"]
+    all_sections_label = prep["all_sections_label"]
+    stack_hint = prep["stack_hint"]
+    aud = prep["aud"]
+    anti_slop = prep["anti_slop"]
+    design_block = prep["design_block"]
+    design_md_path = prep["design_md_path"]
 
     tasks: list[dict[str, Any]] = [
         {
@@ -212,12 +261,12 @@ def _build_three_chain_site(
                 "颜色 / 字体只引用 DESIGN tokens，【禁止】散写未声明 hex。"
                 f"须覆盖分区：{all_sections_label}。"
                 f"用 file_write 写 `{_BUILD_WEBSITE_HTML}`（语义化分区容器 + 终态内容）、"
-                f"`{_BUILD_WEBSITE_CSS}`（排版 / CSS 变量对齐 `{DESIGN_MD_PATH}` tokens）、"
+                f"`{_BUILD_WEBSITE_CSS}`（排版 / CSS 变量对齐 `{design_md_path}` tokens）、"
                 f"`{_BUILD_WEBSITE_JS}`（交互 wiring）。"
-                f"{catalog_block}"
-                f"{catalog_shells}"
-                f"{catalog_css}"
-                f"{catalog_contract}"
+                f"{prep['catalog_block']}"
+                f"{prep['catalog_shells']}"
+                f"{prep['catalog_css']}"
+                f"{prep['catalog_contract']}"
                 f"另用 file_write 写轻量 `{_BUILD_WEBSITE_CONTRACT}`："
                 "列出各分区 catalog id/指针、id/class、文案键、交互约定——"
                 "可基于上方 CONTRACT 起步表扩写；禁止含糊。"
@@ -276,11 +325,100 @@ def _build_three_chain_site(
     return tasks, []
 
 
-def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """文案 → 前端（DESIGN + 整页 + CONTRACT）→ 独立 QA。
+def _build_solo_site(
+    args: dict[str, Any],
+    *,
+    playbook_name: str,
+    pack: str,
+    anti_slop_domain: str,
+    default_sections: tuple[str, ...],
+    visual_thesis: str,
+    domain_hint: str,
+    copy_sections: tuple[str, ...],
+    topic_slot_hint: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Single-node whole-page: copy + DESIGN + page (+ light self-check) in one frontend task."""
+    prep, errors = _prepare_site_inputs(
+        args,
+        playbook_name=playbook_name,
+        pack=pack,
+        anti_slop_domain=anti_slop_domain,
+        default_sections=default_sections,
+        topic_slot_hint=topic_slot_hint,
+    )
+    if prep is None:
+        return [], errors
 
-    ``style`` 气质槽：默认 marketing（落地页）；``toolshed`` = 控制台 dense /
-    tool pack / 禁营销皮（旧独立 build_toolshed 行为）。
+    topic = prep["topic"]
+    all_sections_label = prep["all_sections_label"]
+    stack_hint = prep["stack_hint"]
+    aud = prep["aud"]
+    anti_slop = prep["anti_slop"]
+    design_block = prep["design_block"]
+    design_md_path = prep["design_md_path"]
+
+    tasks: list[dict[str, Any]] = [
+        {
+            "id": "frontend",
+            "role": "前端开发者",
+            "task": (
+                f"【intensity=solo·单人整页】一人完成文案 + DESIGN + 整页；"
+                "无独立文案 / QA 波，收尾做轻验收自检。"
+                f"{visual_thesis}{domain_hint}"
+                f"{anti_slop}"
+                "任务书只消费事实输入（品牌 / 受众 / 素材 / 用户明示偏好）；"
+                "禁止在文案包里自拟配色色板 / 动效清单当施工图（色板归 DESIGN）。"
+                f"为站点【{topic}】撰写完整文案包{aud}并落盘 `{_BUILD_WEBSITE_COPY}`："
+                "品牌一句话、各区块标题 / 正文 / CTA、SEO 标题与 meta；"
+                f"须覆盖分区：{all_sections_label}。"
+                f"{design_block}"
+                f"再一人包整页实现{stack_hint}：先落 DESIGN（含 style 账 / tokens），"
+                "颜色 / 字体只引用 DESIGN tokens，【禁止】散写未声明 hex。"
+                f"用 file_write 写 `{_BUILD_WEBSITE_HTML}` / `{_BUILD_WEBSITE_CSS}`"
+                f"（对齐 `{design_md_path}` tokens）/ `{_BUILD_WEBSITE_JS}`。"
+                f"{prep['catalog_block']}"
+                f"{prep['catalog_shells']}"
+                f"{prep['catalog_css']}"
+                f"{prep['catalog_contract']}"
+                f"另写轻量 `{_BUILD_WEBSITE_CONTRACT}`（catalog id、id/class、文案键、交互）。"
+                "【轻验收】自检 HTML↔CSS↔JS 接缝、契约 class/id 均有实现、"
+                "文案键落地、色值 ⊆ DESIGN tokens；挂空选择器会被 web_seam 拦下。"
+                "只报告缺口并最小修补，勿另起独立 QA 岗。"
+            ),
+            "deliverable": {
+                "form": "files",
+                "name": (
+                    f"文案 + DESIGN + 整页 + 契约"
+                    f"（{_BUILD_WEBSITE_COPY} / {_BUILD_WEBSITE_DESIGN} / "
+                    f"{_BUILD_WEBSITE_HTML} 等）"
+                ),
+                "artifacts": [
+                    _BUILD_WEBSITE_COPY,
+                    _BUILD_WEBSITE_DESIGN,
+                    _BUILD_WEBSITE_HTML,
+                    _BUILD_WEBSITE_CSS,
+                    _BUILD_WEBSITE_JS,
+                    _BUILD_WEBSITE_CONTRACT,
+                ],
+                "required_sections": list(copy_sections),
+                "must_contain_soft": True,
+                "placeholder_hard_exempt_artifacts": [
+                    _BUILD_WEBSITE_CONTRACT,
+                    _BUILD_WEBSITE_DESIGN,
+                ],
+                "web_quality_scan": True,
+                "strict": True,
+            },
+        },
+    ]
+    return tasks, []
+
+
+def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """建站 DAG：``intensity`` 编制档 + ``style`` 气质槽。
+
+    ``intensity``：默认 ``standard``（文案→前端→独立 QA）；``solo`` = 单节点一人整页。
+    ``style``：默认 marketing（落地页）；``toolshed`` = 控制台 dense / tool pack。
     """
     from agentcore.runtime.runs.website_catalog import PACK_MARKETING, PACK_TOOL_DENSE
 
@@ -292,8 +430,19 @@ def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
             f"可选：{STYLE_MARKETING}（默认）/ {STYLE_TOOLSHED}"
         ]
 
+    raw_intensity = clean_str(args.get("intensity"))
+    intensity = raw_intensity or INTENSITY_STANDARD
+    if intensity not in _ALLOWED_INTENSITIES:
+        return [], [
+            f"build_website 未知 intensity『{intensity}』；"
+            f"可选：{INTENSITY_SOLO} / {INTENSITY_STANDARD}（默认）"
+        ]
+
+    builder = (
+        _build_solo_site if intensity == INTENSITY_SOLO else _build_three_chain_site
+    )
     if style == STYLE_TOOLSHED:
-        return _build_three_chain_site(
+        return builder(
             args,
             playbook_name="build_website",
             pack=PACK_TOOL_DENSE,
@@ -305,7 +454,7 @@ def build_website(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
             topic_slot_hint="要建的控制台 / 工具台一句话简述",
         )
 
-    return _build_three_chain_site(
+    return builder(
         args,
         playbook_name="build_website",
         pack=PACK_MARKETING,

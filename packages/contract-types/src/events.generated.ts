@@ -384,6 +384,8 @@ export interface TeamPreviewRequiredPayload {
   same_model_debate?: boolean;
   /** 模型消歧候选（model/origin/provider_id/label）；旧帧缺省。 */
   model_candidates?: ModelCandidate[];
+  /** 开工卡主导语（如「MVP主流程 · 预计 3 人」）；旧帧缺省。 */
+  headline?: string;
 }
 
 /** 开工卡 continue 修正 / resolved 对账：单向收紧写盘（同效 form=prose）。仅允许 text_only。 */

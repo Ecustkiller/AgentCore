@@ -430,6 +430,8 @@ class PausedTurnSummary(BaseModel):
     sides: list[dict[str, Any]] = Field(default_factory=list)
     max_rounds: int = 0
     thorough: bool = True
+    # 主导语（交付档 + 人数）；缺省空 = 旧帧 / 前端本地回退。
+    headline: str = ""
     # ask_user
     question: str = ""
     context: str = ""

@@ -187,6 +187,7 @@ def team_preview_required(
     moderator_provider_id: str = "",
     same_model_debate: bool = False,
     model_candidates: list[dict[str, Any]] | None = None,
+    headline: str = "",
 ) -> SSEEvent:
     """开工卡：编排原语 fan-out 前的计划预览 + 能力授权（两卡合一）。
 
@@ -194,6 +195,7 @@ def team_preview_required(
     任务摘要 / 依赖；debate：``motion`` / ``sides`` / ``max_rounds`` / ``thorough``。
     ``tools`` = 将授权的执行能力（execution_class；文件改动由会话档信任，不再列入；
     debate 辩手只读 → 常空；full_auto / always_ask 亦可空）。
+    ``headline`` = 主导语（交付档 + 人数）；空则 ABSENT（旧客户端兼容）。
     """
     payload: dict[str, Any] = {
         "checkpoint_id": checkpoint_id,
@@ -207,6 +209,8 @@ def team_preview_required(
         "max_rounds": max_rounds,
         "thorough": thorough,
     }
+    if headline:
+        payload["headline"] = headline
     if moderator_model:
         payload["moderator_model"] = moderator_model
         if moderator_origin:

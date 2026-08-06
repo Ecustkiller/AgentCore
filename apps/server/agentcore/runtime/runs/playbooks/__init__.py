@@ -125,14 +125,18 @@ PLAYBOOKS: dict[str, Playbook] = {
     "build_app": Playbook(
         name="build_app",
         summary=(
-            "绿场软件/SPA：scaffold→shared→N×module→integrate→smoke"
-            "（五阶段不可跳；默认 1 模块瘦启动；modules 超限折叠；禁单 worker 包整站）"
+            "绿场软件/SPA：intensity 编制档——"
+            "默认 lean=scaffold→单实现(公共层+主流程)→smoke；"
+            "full=scaffold→shared→N×module→integrate→smoke"
+            "（full 五阶段不可跳；modules 扇出仅 full；禁扫用户原文猜档）"
         ),
         slots=(
             "app(必填,要搭建的应用/SPA简述——"
             "例:app=\"面向运营的 Vue3 数据看板\") / "
-            "modules(可选,功能模块名数组,各派一名实现;"
-            "默认仅总览页；超过 3 个折叠到末槽) / "
+            "intensity(可选,编制档:lean 默认三节点立刻派;"
+            "full=五阶段满档含 shared/多 module/integrate) / "
+            "modules(可选,功能模块名数组;"
+            "lean=覆盖清单不扇出;full=各派一名实现,默认仅总览页,超过 3 个折叠到末槽) / "
             "stack(可选,技术栈,默认 Vue3+Vite+TS) / "
             "root(可选,项目目录名,默认从 app 简述派生)"
         ),
@@ -141,9 +145,10 @@ PLAYBOOKS: dict[str, Playbook] = {
     "build_website": Playbook(
         name="build_website",
         summary=(
-            "文案→前端(DESIGN.md+整页HTML/CSS/JS+轻量CONTRACT)→独立 QA"
-            "（三串串行；sections 仅覆盖清单不扇出；visual critic；"
-            "默认营销 pack；style=toolshed → tool_dense + 禁营销皮）"
+            "建站 intensity 编制档：默认 standard=文案→前端(DESIGN+整页+CONTRACT)"
+            "→独立 QA 三串；solo=单节点一人整页(文案+DESIGN+页面合并,无独立 copy/qa 波)；"
+            "sections 仅覆盖清单不扇出；visual critic（standard）；"
+            "默认营销 pack；style=toolshed → tool_dense + 禁营销皮"
         ),
         slots=(
             "topic(必填,站点/落地页/控制台一句话简述——"
@@ -151,6 +156,8 @@ PLAYBOOKS: dict[str, Playbook] = {
             "delegate 时写入 playbook_args.topic；"
             "亦接受 purpose/brief/description 同义简述键；不接受旧键 site；"
             "例:topic=\"面向企业客户的智能数据分析 SaaS 中文营销官网\") / "
+            "intensity(可选,编制档:standard 默认三串;"
+            "solo=单节点一人整页) / "
             "style(可选,气质槽:marketing 默认落地页;"
             "toolshed=控制台 dense / tool pack / 禁营销皮) / "
             "sections(可选,页面分区覆盖清单,不扇出节点;"

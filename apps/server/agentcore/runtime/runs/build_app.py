@@ -1,11 +1,12 @@
 """绿场软件 / SPA 完整交付 playbook（scaffold-first 多波 → 结构完整性 → 诚实交付）.
 
-独立模块，避免再胀 ``playbooks.py``。对标 ``build_website`` 硬锁模式：五阶段串起、
-禁单 worker 包整站；``form=files`` + ``strict``；顶层批次由调用方设 criteria
-（含自动 ``graph_consistent``）。
+独立模块，避免再胀 ``playbooks.py``。对标 ``build_website``：``intensity`` 编制档
+（默认 lean 三节点；full = 五阶段满档）；``form=files`` + ``strict``；顶层批次由调用方
+设 criteria（含自动 ``graph_consistent``）。
 
-默认瘦启动：仅 1 个业务模块（scaffold+shared+1×module+integrate+smoke = 5 节点）；
-显式 ``modules`` 经 ``fold_fanout_slots`` 折叠，禁止一次铺满多人。
+``lean``：scaffold → 单实现（公共层+主流程页）→ smoke（≤3 节点）。
+``full``：scaffold→shared→N×module→integrate→smoke；显式 ``modules`` 经
+``fold_fanout_slots`` 折叠，禁止一次铺满多人。
 """
 
 from __future__ import annotations
@@ -16,10 +17,14 @@ from typing import Any
 from agentcore.runtime.runs.playbooks._common import fold_fanout_slots
 
 _DEFAULT_STACK = "Vue3+Vite+TS"
-# 瘦启动：默认只铺一个关键业务模块（阶段仍齐全，勿默认双模块并行）。
+# 默认只铺一个关键业务模块（lean / full 共用覆盖清单起点）。
 _DEFAULT_MODULES = ("总览页",)
-# 模块扇出硬顶（playbook 本地 cap，非全局 max_parallel）。
+# 模块扇出硬顶（仅 full；playbook 本地 cap，非全局 max_parallel）。
 _MAX_MODULE_FANOUT = 3
+
+INTENSITY_LEAN = "lean"
+INTENSITY_FULL = "full"
+_ALLOWED_INTENSITIES = frozenset({INTENSITY_LEAN, INTENSITY_FULL})
 
 _SLUG_RE = re.compile(r"[^\w\-]+", re.UNICODE)
 _CJK_SLUG_RE = re.compile(r"[\u4e00-\u9fff]+")
@@ -64,35 +69,18 @@ def _page_path(root: str, mod: str, index: int) -> str:
     return f"{root}/src/views/{page_slug}.vue"
 
 
-def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """scaffold → shared → N×module_* → integrate → smoke.
-
-    Slots: ``app``(required) / ``modules``(optional) / ``stack``(optional) / ``root``(optional).
-    Default modules = 1（瘦启动）；显式 modules 经 fold 压到 ≤``_MAX_MODULE_FANOUT`` 槽。
-    """
-    app = _clean_str(args.get("app"))
-    if not app:
-        return [], ["build_app 需要 slot『app』（要搭建的应用 / SPA 简述）"]
-
-    modules = _clean_str_list(args.get("modules"), cap=None)
-    if not modules:
-        modules = list(_DEFAULT_MODULES)
-
-    module_slots, fold_note = fold_fanout_slots(
-        modules, limit=_MAX_MODULE_FANOUT, label="功能模块"
+def _scaffold_task(
+    *,
+    app: str,
+    root: str,
+    stack_hint: str,
+    stub_pages: list[str],
+) -> dict[str, Any]:
+    stub_list = "、".join(f"`{p}`" for p in stub_pages)
+    iron_rule = (
+        "【铁律·同波闭合】router / 入口引用的每个页面文件必须在本波同批创建"
+        "（可先 stub 空壳组件），禁止悬空 import；缺页=结构缺口，不得留死链。"
     )
-    fold_hint = f" {fold_note}" if fold_note else ""
-
-    stack = _clean_str(args.get("stack")) or _DEFAULT_STACK
-    root = _derive_root(app, _clean_str(args.get("root")))
-    stack_hint = f"（技术栈：{stack}）"
-
-    # Stub pages for every *logical* module (pre-fold) — router must not dangle even when
-    # several modules fold into one worker.
-    stub_pages: list[str] = []
-    for i, mod in enumerate(modules):
-        stub_pages.append(_page_path(root, mod, i))
-
     scaffold_artifacts = [
         f"{root}/package.json",
         f"{root}/vite.config.ts",
@@ -104,33 +92,124 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         f"{root}/src/router/index.ts",
         *stub_pages,
     ]
-    stub_list = "、".join(f"`{p}`" for p in stub_pages)
+    return {
+        "id": "scaffold",
+        "role": "脚手架工程师",
+        "task": (
+            f"为应用【{app}】在 `{root}/` 落下 Vite+TS 脚手架{stack_hint}："
+            f"`package.json`、`vite.config.ts`、`tsconfig.json` / `tsconfig.node.json`、"
+            f"`index.html`、`src/main.ts`、`src/App.vue`、`src/router/index.ts`"
+            "（或等价入口路由）。"
+            f"{iron_rule}"
+            f"路由表必须挂上全部模块占位页，并同波写出 stub 文件：{stub_list}。"
+            "用 file_write 落盘；勿在本步实现业务逻辑。"
+        ),
+        "deliverable": {
+            "form": "files",
+            "name": f"Vite+TS 脚手架（已落盘 {root}/，含模块 stub）",
+            "artifacts": scaffold_artifacts,
+            "strict": True,
+        },
+    }
 
-    iron_rule = (
-        "【铁律·同波闭合】router / 入口引用的每个页面文件必须在本波同批创建"
-        "（可先 stub 空壳组件），禁止悬空 import；缺页=结构缺口，不得留死链。"
-    )
+
+def _smoke_task(*, root: str, depends_on: list[str]) -> dict[str, Any]:
+    return {
+        "id": "smoke",
+        "role": "冒烟验收",
+        "task": (
+            f"对 `{root}/` 做冒烟：优先云端 `test_run`——"
+            "`check=install`（或 check=command + npm/pnpm/yarn install）再 "
+            "`check=build`（或 typecheck / vue-tsc）；"
+            "装包需受限出网，失败则诚实走结构自检（import 图 / graph_consistent）"
+            "并写明缺口，勿空转、勿改道 code_execute 跑 npm install。"
+            "【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」——"
+            "须点名未装包或未外环验绿，并给本机 install→build/test 或 export_to_local。"
+            "结果与缺口写入 QA 笔记落盘。只报告与最小修补，勿重写整站。"
+        ),
+        "depends_on": depends_on,
+        "deliverable": {
+            "form": "files",
+            "name": f"冒烟 / QA 笔记（{root}/QA.md）",
+            "artifacts": [f"{root}/QA.md"],
+            "requires_files": True,
+        },
+        "timeout_ms": 300_000,
+    }
+
+
+def _build_app_lean(
+    *,
+    app: str,
+    modules: list[str],
+    stack: str,
+    root: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """scaffold → implement（公共层+主流程页一人）→ smoke."""
+    stack_hint = f"（技术栈：{stack}）"
+    stub_pages: list[str] = []
+    for i, mod in enumerate(modules):
+        stub_pages.append(_page_path(root, mod, i))
+    page_hint = "、".join(f"`{p}`" for p in stub_pages)
+    mods_label = "、".join(f"【{m}】" for m in modules)
+    shared_arts = [
+        f"{root}/src/styles/tokens.css",
+        f"{root}/src/components/AppButton.vue",
+        f"{root}/src/stores/app.ts",
+    ]
 
     tasks: list[dict[str, Any]] = [
+        _scaffold_task(
+            app=app, root=root, stack_hint=stack_hint, stub_pages=stub_pages
+        ),
         {
-            "id": "scaffold",
-            "role": "脚手架工程师",
+            "id": "implement",
+            "role": "应用实现",
             "task": (
-                f"为应用【{app}】在 `{root}/` 落下 Vite+TS 脚手架{stack_hint}："
-                f"`package.json`、`vite.config.ts`、`tsconfig.json` / `tsconfig.node.json`、"
-                f"`index.html`、`src/main.ts`、`src/App.vue`、`src/router/index.ts`"
-                "（或等价入口路由）。"
-                f"{iron_rule}"
-                f"路由表必须挂上全部模块占位页，并同波写出 stub 文件：{stub_list}。"
-                "用 file_write 落盘；勿在本步实现业务逻辑。"
+                f"【intensity=lean·单实现】在 `{root}/` 一人完成公共层 + 主流程页"
+                f"（应用【{app}】）{stack_hint}："
+                "设计 token / 公共组件 / store，以及主流程页面与必要子组件；"
+                f"须覆盖模块：{mods_label}；建议主文件 {page_hint}（可按 stack 调整扩展名）。"
+                "严格对接上游 scaffold 路由；发现契约缺口用 post_note(kind=heads_up)，"
+                "勿静默改脚手架约定。"
+                "【禁止】另起独立 shared / 多 module / integrate 专岗——"
+                "本节点内闭合 import 图与路由接线。"
             ),
+            "depends_on": ["scaffold"],
             "deliverable": {
                 "form": "files",
-                "name": f"Vite+TS 脚手架（已落盘 {root}/，含模块 stub）",
-                "artifacts": scaffold_artifacts,
+                "name": f"公共层 + 主流程页（{root}/src）",
+                "artifacts": [*shared_arts, *stub_pages],
                 "strict": True,
             },
         },
+        _smoke_task(root=root, depends_on=["implement"]),
+    ]
+    return tasks, []
+
+
+def _build_app_full(
+    *,
+    app: str,
+    modules: list[str],
+    stack: str,
+    root: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """scaffold → shared → N×module_* → integrate → smoke."""
+    module_slots, fold_note = fold_fanout_slots(
+        modules, limit=_MAX_MODULE_FANOUT, label="功能模块"
+    )
+    fold_hint = f" {fold_note}" if fold_note else ""
+    stack_hint = f"（技术栈：{stack}）"
+
+    stub_pages: list[str] = []
+    for i, mod in enumerate(modules):
+        stub_pages.append(_page_path(root, mod, i))
+
+    tasks: list[dict[str, Any]] = [
+        _scaffold_task(
+            app=app, root=root, stack_hint=stack_hint, stub_pages=stub_pages
+        ),
         {
             "id": "shared",
             "role": "公共层工程师",
@@ -155,7 +234,6 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     ]
 
     module_ids: list[str] = []
-    # Stable index into the pre-fold module list for page path derivation.
     flat_index = 0
     for slot_i, parts in enumerate(module_slots):
         mid = _module_id(slot_i)
@@ -218,29 +296,35 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             },
         }
     )
-
-    tasks.append(
-        {
-            "id": "smoke",
-            "role": "冒烟验收",
-            "task": (
-                f"对 `{root}/` 做冒烟：优先云端 `test_run`——"
-                "`check=install`（或 check=command + npm/pnpm/yarn install）再 "
-                "`check=build`（或 typecheck / vue-tsc）；"
-                "装包需受限出网，失败则诚实走结构自检（import 图 / graph_consistent）"
-                "并写明缺口，勿空转、勿改道 code_execute 跑 npm install。"
-                "【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」——"
-                "须点名未装包或未外环验绿，并给本机 install→build/test 或 export_to_local。"
-                "结果与缺口写入 QA 笔记落盘。只报告与最小修补，勿重写整站。"
-            ),
-            "depends_on": ["integrate"],
-            "deliverable": {
-                "form": "files",
-                "name": f"冒烟 / QA 笔记（{root}/QA.md）",
-                "artifacts": [f"{root}/QA.md"],
-                "requires_files": True,
-            },
-            "timeout_ms": 300_000,
-        }
-    )
+    tasks.append(_smoke_task(root=root, depends_on=["integrate"]))
     return tasks, []
+
+
+def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Expand build_app by ``intensity``: lean (default) or full.
+
+    Slots: ``app``(required) / ``intensity``(optional) / ``modules``(optional) /
+    ``stack``(optional) / ``root``(optional).
+    """
+    app = _clean_str(args.get("app"))
+    if not app:
+        return [], ["build_app 需要 slot『app』（要搭建的应用 / SPA 简述）"]
+
+    raw_intensity = _clean_str(args.get("intensity"))
+    intensity = raw_intensity or INTENSITY_LEAN
+    if intensity not in _ALLOWED_INTENSITIES:
+        return [], [
+            f"build_app 未知 intensity『{intensity}』；"
+            f"可选：{INTENSITY_LEAN}（默认）/ {INTENSITY_FULL}"
+        ]
+
+    modules = _clean_str_list(args.get("modules"), cap=None)
+    if not modules:
+        modules = list(_DEFAULT_MODULES)
+
+    stack = _clean_str(args.get("stack")) or _DEFAULT_STACK
+    root = _derive_root(app, _clean_str(args.get("root")))
+
+    if intensity == INTENSITY_LEAN:
+        return _build_app_lean(app=app, modules=modules, stack=stack, root=root)
+    return _build_app_full(app=app, modules=modules, stack=stack, root=root)

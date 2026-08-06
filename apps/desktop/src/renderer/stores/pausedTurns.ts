@@ -65,6 +65,8 @@ export interface PendingResume {
   tools: string[];
   /** team_preview: orchestration primitive discriminant. */
   primitive: "delegate" | "debate";
+  /** team_preview lead（交付档 + 人数）；旧帧 absent → 前端按人数回退. */
+  headline?: string;
   /** debate kickoff: motion / form / sides / budget. */
   motion: string;
   form: string;
@@ -305,6 +307,10 @@ function entryFromSummary(
         ) as string[])
       : [],
     primitive: toPrimitive((s as { primitive?: unknown }).primitive),
+    ...(() => {
+      const h = (s as { headline?: unknown }).headline;
+      return typeof h === "string" && h.trim() ? { headline: h.trim() } : {};
+    })(),
     motion: String((s as { motion?: unknown }).motion ?? ""),
     form: String((s as { form?: unknown }).form ?? ""),
     sides: toSides((s as { sides?: unknown }).sides),

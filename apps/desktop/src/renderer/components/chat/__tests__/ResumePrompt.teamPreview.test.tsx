@@ -94,12 +94,20 @@ beforeEach(() => {
 });
 
 describe("ResumePrompt · team_preview delegate", () => {
+  it("后端 headline 优先展示在导语", () => {
+    pendingRef.current = [
+      makeTeamPreview({ headline: "MVP主流程 · 预计 1 人" }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.getByText("MVP主流程 · 预计 1 人")).toBeTruthy();
+    expect(screen.getByText("分工预览")).toBeTruthy();
+  });
+
   it("仅两按钮：授权并开工 + 取消；无逐次审批 / 调整", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();
-    expect(
-      screen.getByText("团队尚未开工。等待你确认后才会上场，请过目分工："),
-    ).toBeTruthy();
+    expect(screen.getByText("预计 1 人开工")).toBeTruthy();
+    expect(screen.getByText("分工预览")).toBeTruthy();
     expect(screen.getByText("授权并开工")).toBeTruthy();
     expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
@@ -377,11 +385,7 @@ describe("ResumePrompt · team_preview debate", () => {
   it("仅两按钮：授权开赛 + 取消；无调整 / 逐次审批", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开赛")).toBeNull();
-    expect(
-      screen.getByText(
-        "辩论尚未开赛。等待你确认后才会开赛，请过目辩题与立场：",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("预计 2 方开赛")).toBeTruthy();
     expect(screen.getByText("授权开赛")).toBeTruthy();
     expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();

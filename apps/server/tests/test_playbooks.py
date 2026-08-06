@@ -372,46 +372,98 @@ def test_build_feature_requires_feature():
 # ── build_app ─────────────────────────────────────────────────────────────────
 
 
-def test_build_app_five_waves_default_modules():
+def test_build_app_lean_three_nodes_default():
+    """默认 intensity=lean：scaffold → implement → smoke（≤3 节点）。"""
     tasks, errors = expand_playbook(
         "build_app", {"app": "面向运营的 Vue3 数据看板", "stack": "Vue3+Vite+TS"}
     )
     assert errors == []
     by_id = _by_id(tasks)
-    assert "scaffold" in by_id
-    assert "shared" in by_id
-    assert "module_0" in by_id
-    assert "module_1" not in by_id  # 瘦启动：默认仅 1 模块
-    assert "integrate" in by_id
-    assert "smoke" in by_id
-    assert len(tasks) == 5  # scaffold + shared + 1 module + integrate + smoke
-    assert by_id["shared"]["depends_on"] == ["scaffold"]
-    assert by_id["module_0"]["depends_on"] == ["shared"]
-    assert set(by_id["integrate"]["depends_on"]) == {"module_0"}
-    assert by_id["smoke"]["depends_on"] == ["integrate"]
+    assert set(by_id) == {"scaffold", "implement", "smoke"}
+    assert len(tasks) == 3
+    assert by_id["implement"]["depends_on"] == ["scaffold"]
+    assert by_id["smoke"]["depends_on"] == ["implement"]
+    assert by_id["implement"]["role"] == "应用实现"
+    assert "shared" not in by_id
+    assert "integrate" not in by_id
+    assert "module_0" not in by_id
     assert by_id["scaffold"]["deliverable"]["strict"] is True
     assert "铁律" in by_id["scaffold"]["task"]
     assert "悬空" in by_id["scaffold"]["task"]
     assert "npm" in by_id["smoke"]["task"].lower() or "build" in by_id["smoke"]["task"]
     assert "test_run" in by_id["smoke"]["task"]
     assert "code_execute" not in by_id["smoke"]["task"] or "勿" in by_id["smoke"]["task"]
-    # 案 cloud-web-install-deny A：冒烟禁把结构自检说成跑绿。
     assert "自检全过" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
     assert "单测已绿" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
-    # Scaffold artifacts must include per-module stub views (no dangling router).
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
-    assert len(stub_arts) == 1
-    assert by_id["module_0"]["deliverable"]["artifacts"][0] in scaffold_arts
+    assert len(stub_arts) == 1  # 默认仅总览页 stub
+    impl_arts = by_id["implement"]["deliverable"]["artifacts"]
+    assert stub_arts[0] in impl_arts
+    assert any(a.endswith("tokens.css") for a in impl_arts)
+    assert "总览页" in by_id["implement"]["task"]
 
 
-def test_build_app_custom_modules_and_root():
+def test_build_app_lean_modules_coverage_no_fanout():
+    """lean：modules 只作文案/覆盖清单，不扇出 module_*。"""
     tasks, errors = expand_playbook(
         "build_app",
         {
             "app": "看板",
             "modules": ["仪表盘", "告警"],
             "root": "ops-board",
+        },
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    assert set(by_id) == {"scaffold", "implement", "smoke"}
+    assert "ops-board/" in by_id["scaffold"]["task"]
+    arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    assert any(a.startswith("ops-board/") for a in arts)
+    assert "ops-board/src/views/" in " ".join(arts)
+    assert "ops-board/src/router/index.ts" in arts
+    assert "仪表盘" in by_id["implement"]["task"]
+    assert "告警" in by_id["implement"]["task"]
+    stub_arts = [a for a in arts if "/src/views/" in a and a.endswith(".vue")]
+    assert len(stub_arts) == 2
+
+
+def test_build_app_full_five_waves_default_modules():
+    tasks, errors = expand_playbook(
+        "build_app",
+        {
+            "app": "面向运营的 Vue3 数据看板",
+            "stack": "Vue3+Vite+TS",
+            "intensity": "full",
+        },
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    assert "scaffold" in by_id
+    assert "shared" in by_id
+    assert "module_0" in by_id
+    assert "module_1" not in by_id  # 默认仅 1 模块
+    assert "integrate" in by_id
+    assert "smoke" in by_id
+    assert len(tasks) == 5
+    assert by_id["shared"]["depends_on"] == ["scaffold"]
+    assert by_id["module_0"]["depends_on"] == ["shared"]
+    assert set(by_id["integrate"]["depends_on"]) == {"module_0"}
+    assert by_id["smoke"]["depends_on"] == ["integrate"]
+    scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
+    assert len(stub_arts) == 1
+    assert by_id["module_0"]["deliverable"]["artifacts"][0] in scaffold_arts
+
+
+def test_build_app_full_custom_modules_and_root():
+    tasks, errors = expand_playbook(
+        "build_app",
+        {
+            "app": "看板",
+            "modules": ["仪表盘", "告警"],
+            "root": "ops-board",
+            "intensity": "full",
         },
     )
     assert errors == []
@@ -432,12 +484,14 @@ def test_build_app_custom_modules_and_root():
 
 
 def test_build_app_modules_fold_over_cap():
-    """显式 modules 超过扇出上限 → 折叠到末槽，不丢弃。"""
+    """full：显式 modules 超过扇出上限 → 折叠到末槽，不丢弃。"""
     from agentcore.runtime.runs.build_app import _MAX_MODULE_FANOUT
     from agentcore.runtime.runs.playbooks import collect_playbook_notes
 
     mods = [f"模{i}" for i in range(_MAX_MODULE_FANOUT + 2)]
-    tasks, errors = expand_playbook("build_app", {"app": "大盘", "modules": mods})
+    tasks, errors = expand_playbook(
+        "build_app", {"app": "大盘", "modules": mods, "intensity": "full"}
+    )
     assert errors == []
     by_id = _by_id(tasks)
     module_nodes = [t for t in tasks if str(t["id"]).startswith("module_")]
@@ -445,15 +499,22 @@ def test_build_app_modules_fold_over_cap():
     assert "module_0" in by_id and f"module_{_MAX_MODULE_FANOUT - 1}" in by_id
     assert f"module_{_MAX_MODULE_FANOUT}" not in by_id
     last = by_id[f"module_{_MAX_MODULE_FANOUT - 1}"]
-    # 末槽覆盖折叠进来的多个模块名
     for name in mods[_MAX_MODULE_FANOUT - 1 :]:
         assert name in last["task"]
     notes = collect_playbook_notes(tasks)
     assert notes and "扇出折叠" in notes[0]
-    # stub 仍按逻辑模块全量写入 scaffold（路由不悬空）
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
     assert len(stub_arts) == len(mods)
+
+
+def test_build_app_rejects_unknown_intensity():
+    tasks, errors = expand_playbook(
+        "build_app", {"app": "看板", "intensity": "mega"}
+    )
+    assert tasks == []
+    assert errors and "intensity" in errors[0]
+    assert "mega" in errors[0]
 
 
 def test_build_app_requires_app():
@@ -762,6 +823,64 @@ def test_build_website_rejects_unknown_style():
     assert tasks == []
     assert errors and "style" in errors[0]
     assert "neon" in errors[0]
+
+
+def test_build_website_solo_single_frontend_node():
+    """intensity=solo：单节点 frontend，文案+DESIGN+页面合并，无独立 copy/qa。"""
+    tasks, errors = expand_playbook(
+        "build_website",
+        {"topic": "GEO 单页", "intensity": "solo", "sections": ["英雄区", "CTA"]},
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    assert set(by_id) == {"frontend"}
+    assert len(tasks) == 1
+    fe = by_id["frontend"]
+    assert fe["role"] == "前端开发者"
+    assert fe.get("depends_on") in (None, [], ())
+    arts = fe["deliverable"]["artifacts"]
+    assert arts == [
+        "site/copy.md",
+        "site/DESIGN.md",
+        "site/index.html",
+        "site/styles.css",
+        "site/main.js",
+        "site/CONTRACT.md",
+    ]
+    assert fe["deliverable"].get("web_quality_scan") is True
+    assert fe["deliverable"].get("strict") is True
+    assert "视觉 thesis" in fe["deliverable"]["required_sections"]
+    assert "intensity=solo" in fe["task"] or "单人整页" in fe["task"]
+    assert "英雄区" in fe["task"] and "CTA" in fe["task"]
+    assert "轻验收" in fe["task"]
+    assert "copy" not in by_id
+    assert "qa" not in by_id
+
+
+def test_build_website_solo_toolshed_keeps_style_pack():
+    """solo 仍尊重 style=toolshed pack / domain。"""
+    from agentcore.runtime.runs.website_catalog import PACK_TOOL_DENSE
+
+    tasks, errors = expand_playbook(
+        "build_website",
+        {"topic": "控制台", "intensity": "solo", "style": "toolshed"},
+    )
+    assert errors == []
+    assert len(tasks) == 1
+    fe = tasks[0]
+    assert fe["id"] == "frontend"
+    assert f"pack={PACK_TOOL_DENSE}" in fe["task"]
+    assert "信息架构" in fe["deliverable"]["required_sections"]
+    assert "审美域·工具页" in fe["task"] or "工具台" in fe["task"]
+
+
+def test_build_website_rejects_unknown_intensity():
+    tasks, errors = expand_playbook(
+        "build_website", {"topic": "S", "intensity": "turbo"}
+    )
+    assert tasks == []
+    assert errors and "intensity" in errors[0]
+    assert "turbo" in errors[0]
 
 
 def test_build_website_verify_qa_only_no_rebuild():
@@ -1145,8 +1264,8 @@ def test_every_playbook_expansion_builds_a_valid_run_plan():
         "research_report": 5,
         "build_feature": 3,
         "repair_code": 3,
-        "build_app": 6,  # scaffold + shared + 2 explicit modules + integrate + smoke
-        "build_website": 3,  # copy + frontend + qa
+        "build_app": 3,  # lean 默认：scaffold + implement + smoke
+        "build_website": 3,  # standard 默认：copy + frontend + qa
         "build_website_verify": 1,  # qa only
         "compare_options": 4,
         "multi_lens_research": 5,  # 4 lenses + synthesizer

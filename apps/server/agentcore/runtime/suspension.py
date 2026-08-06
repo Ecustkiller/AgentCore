@@ -372,6 +372,8 @@ class TeamPreviewSuspension(TurnSuspension):
     thorough: bool = True
     # Resume blob for debate.execute (motion/form/sides/thorough).
     debate_arguments: dict[str, Any] = field(default_factory=dict)
+    # 主文案（交付档 + 人数）；缺省空 = 旧帧兼容。
+    headline: str = ""
     # 委派批次协作参数：开工卡挂在 setup_note_wall **之前**，coordination / team_brief /
     # seed_notes 此刻只活在 DelegateTool 实例上（未上墙、未进 journal）。耐久恢复走全新
     # 工具实例（_coordination 缺省 "none"），不随帧回灌则 wall 批降级为 none —— worker 被
@@ -503,6 +505,8 @@ def _team_preview_frame_extras(s: TurnSuspension) -> dict[str, Any]:
         "thorough": s.thorough,
         "debate_arguments": dict(s.debate_arguments),
     }
+    if s.headline:
+        extras["headline"] = s.headline
     # 委派批次协作参数（见类注释）：非缺省才落帧，旧帧读回走缺省。
     if s.coordination != "none":
         extras["coordination"] = s.coordination
@@ -527,6 +531,7 @@ def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
         "max_rounds": int(data.get("max_rounds") or 0),
         "thorough": bool(data.get("thorough", True)),
         "debate_arguments": dict(data.get("debate_arguments") or {}),
+        "headline": str(data.get("headline") or ""),
         "coordination": str(data.get("coordination") or "none"),
         "team_brief": data.get("team_brief") or None,
         "seed_notes": list(data.get("seed_notes") or []),
@@ -535,7 +540,7 @@ def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
 
 def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, TeamPreviewSuspension)
-    return {
+    out: dict[str, Any] = {
         **_EMPTY_SUMMARY_EXTRAS,
         "workers": list(s.workers),
         "tools": list(s.tools),
@@ -546,6 +551,9 @@ def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
         "max_rounds": s.max_rounds,
         "thorough": s.thorough,
     }
+    if s.headline:
+        out["headline"] = s.headline
+    return out
 
 
 def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:

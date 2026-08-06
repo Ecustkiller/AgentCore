@@ -378,6 +378,51 @@ def test_debate_kickoff_summary_shape():
     card = summary.card_payload()
     assert card["primitive"] == "debate"
     assert card["thorough"] is True
+    assert summary.headline == "预计 2 方开赛"
+    assert card["headline"] == "预计 2 方开赛"
+
+
+def test_delegate_kickoff_headline_intensity_and_fallback():
+    from agentcore.runtime.kickoff.summary import (
+        format_kickoff_headline,
+        intensity_short_label,
+    )
+    from agentcore.runtime.kickoff import delegate_kickoff_summary
+
+    assert intensity_short_label("lean") == "MVP主流程"
+    assert intensity_short_label("solo") == "一页先上线"
+    assert intensity_short_label("standard") == "品牌站流水线"
+    assert intensity_short_label("full") == "模块流水线"
+    assert intensity_short_label("unknown") is None
+    assert intensity_short_label(None) is None
+
+    assert format_kickoff_headline(headcount=3, intensity="lean") == (
+        "MVP主流程 · 预计 3 人"
+    )
+    assert format_kickoff_headline(headcount=2) == "预计 2 人开工"
+    assert format_kickoff_headline(
+        headcount=2, intensity="bogus"
+    ) == "预计 2 人开工"
+
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="r1", role="甲", task="做 A", depends_on=[]),
+            RunSpec(run_id="r2", role="乙", task="做 B", depends_on=["r1"]),
+            RunSpec(run_id="r3", role="丙", task="做 C", depends_on=["r2"]),
+        ]
+    )
+    with_tier = delegate_kickoff_summary(plan, intensity="lean")
+    assert with_tier.headline == "MVP主流程 · 预计 3 人"
+    assert with_tier.card_payload()["headline"] == "MVP主流程 · 预计 3 人"
+
+    plain = delegate_kickoff_summary(plan)
+    assert plain.headline == "预计 3 人开工"
+
+    # Old-shaped KickoffSummary without headline stays absent on the wire.
+    from agentcore.runtime.kickoff.summary import KickoffSummary
+
+    legacy = KickoffSummary(primitive="delegate", workers=[{"run_id": "r1"}])
+    assert "headline" not in legacy.card_payload()
 
 
 def _debate_tool(

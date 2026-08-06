@@ -401,6 +401,7 @@ export function surfaceResumeFromAssistant(
           workers: tp.workers,
           tools: tp.tools ?? [],
           primitive: tp.primitive,
+          ...(tp.headline ? { headline: tp.headline } : {}),
           motion: tp.motion,
           form: tp.form,
           sides: tp.sides,

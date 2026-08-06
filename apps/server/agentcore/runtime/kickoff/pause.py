@@ -102,6 +102,7 @@ async def persist_kickoff(
             max_rounds=summary.max_rounds,
             thorough=summary.thorough,
             debate_arguments=dict(summary.debate_arguments),
+            headline=summary.headline or "",
             # 委派批次协作参数：挂起点在 setup_note_wall 之前，这三样只活在工具实例上，
             # 不落帧则耐久恢复（全新工具实例）后 wall 批降级 none、seed 便签丢失。
             # DebateTool 无这些属性 → getattr 缺省（辩论批无便签墙）。
@@ -159,6 +160,7 @@ async def await_kickoff(
         moderator_provider_id=str(card.get("moderator_provider_id") or ""),
         same_model_debate=bool(card.get("same_model_debate")),
         model_candidates=list(card.get("model_candidates") or []) or None,
+        headline=str(card.get("headline") or ""),
     )
     try:
         saved = await persist_kickoff(

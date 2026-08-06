@@ -9008,6 +9008,11 @@
             "title": "Form",
             "type": "string"
           },
+          "headline": {
+            "default": "",
+            "title": "Headline",
+            "type": "string"
+          },
           "intent": {
             "anyOf": [
               {
@@ -14891,7 +14896,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.39"
+    "version": "0.3.40"
   },
   "openapi": "3.1.0",
   "paths": {
