@@ -15,6 +15,8 @@
  * RELEASE_GATE_SERIAL=1 to force the old sequential order.
  * `--from`/`--only`/`--lite` are local iteration aids — a release still requires
  * one uninterrupted **full** (non-lite) pass.
+ * On Windows, RELEASE_GATE_SERIAL defaults to 1 (avoid gen-types write races);
+ * set RELEASE_GATE_SERIAL=0 to opt into contracts∥desktop parallel.
  *
  * Lite skips the ~10min desktop screenshot matrix + webapp smoke (port-fragile);
  * lint / typecheck / vitest / conformance stay. Full gate still runs shoot with
@@ -343,7 +345,18 @@ async function main() {
 
   const doContracts = sectionEnabled("contracts", filter);
   const doDesktop = sectionEnabled("desktop", filter);
-  // Nested --only children set RELEASE_GATE_SERIAL to avoid re-entrant parallel.
+  // Win: default serial — parallel contracts∥desktop often hits UNKNOWN open() on
+  // api.generated.ts (same-checkout write race). Opt into parallel with
+  // RELEASE_GATE_SERIAL=0. Nested --only children already force serial.
+  if (
+    process.platform === "win32" &&
+    process.env.RELEASE_GATE_SERIAL === undefined
+  ) {
+    process.env.RELEASE_GATE_SERIAL = "1";
+    console.log(
+      "  (win32: RELEASE_GATE_SERIAL=1 default; set RELEASE_GATE_SERIAL=0 to parallel)",
+    );
+  }
   const parallelContractsDesktop =
     doContracts &&
     doDesktop &&

@@ -26,4 +26,21 @@ alwaysApply: false
 
 ## 全端发布顺序（速查）
 
-git push → 后端 `pnpm deploy:backend <sha>` →（若桌面已 bump：先 Publish 桌面 release）→ 官网 → 手机 → admin → web 客户端 → 验收 → tag。
+半自动清单（只打印步骤/探针，不替你 Publish）：`pnpm release:ship`（`--track api` = 仅热修轨；`--check` = 探 draft 资产）。
+
+**公告两段式（定案 D）**：开搞后预告 → 收口完成后再发完成态；勿绑进 `deploy:backend` 自动发。
+
+```text
+pnpm release:gate                          # Win 默认串行
+# bump → commit → push
+pnpm release:notice -- --phase preview …   # 预告（约时劝停）
+pnpm deploy:backend <sha>
+# full：Win release:win ∥ Mac GHA → 齐资产后 Publish
+# full：mobile / admin / web →（Publish 后）website deploy:pages
+pnpm release:notice -- --phase done …      # 收口
+# tag prod-* / desktop-v*
+```
+
+手搓顺序仍等价：git push → 后端 `pnpm deploy:backend <sha>` →（若桌面已 bump：先 Publish 桌面 release）→ 官网 → 手机 → admin → web 客户端 → 验收 → tag。
+
+公告 CLI 细节 → [`产品公告文案模板`](/docs/05-平台与运维/产品公告文案模板.md) · `pnpm release:notice --help`。

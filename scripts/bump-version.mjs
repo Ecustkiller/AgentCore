@@ -142,6 +142,27 @@ const DESKTOP_FALLBACK_FILES = [
   join(ROOT, "apps/website/scripts/fetch-release.mjs"),
 ];
 
+const UV_LOCK = join(ROOT, "apps/server/uv.lock");
+
+/** Keep uv.lock [[package]] name=agentcore version in lockstep with pyproject. */
+function syncUvLockVersion(version, { dryRun = false } = {}) {
+  const text = readFileSync(UV_LOCK, "utf8");
+  const next = text.replace(
+    /(\[\[package\]\]\s*\nname = "agentcore"\s*\nversion = ")[^"]+(")/,
+    `$1${version}$2`,
+  );
+  if (next === text) {
+    console.log(`  uv.lock agentcore version already ${version}`);
+    return;
+  }
+  if (dryRun) {
+    console.log(`  would sync uv.lock agentcore → ${version}`);
+    return;
+  }
+  writeFileSync(UV_LOCK, next, "utf8");
+  console.log(`✓ Synced uv.lock agentcore → ${version}`);
+}
+
 function syncDesktopFallbackVersion(version, { dryRun = false } = {}) {
   for (const filePath of DESKTOP_FALLBACK_FILES) {
     const text = readFileSync(filePath, "utf8");
@@ -173,6 +194,7 @@ function main() {
   console.log(`${trackConfig.label}: ${current} → ${next}${dryRun ? " (dry-run)" : ""}`);
 
   if (dryRun) {
+    if (track === "api") syncUvLockVersion(next, { dryRun: true });
     if (track === "desktop") syncDesktopFallbackVersion(next, { dryRun: true });
     if (track === "mobile") {
       console.log(`  would sync android versionName/versionCode → ${next}`);
@@ -182,6 +204,10 @@ function main() {
 
   trackConfig.write(trackConfig.path, next);
   console.log(`✓ Updated ${trackConfig.path}`);
+
+  if (track === "api") {
+    syncUvLockVersion(next);
+  }
 
   if (track === "desktop") {
     syncDesktopFallbackVersion(next);
