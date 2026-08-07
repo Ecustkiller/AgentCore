@@ -727,6 +727,8 @@ def test_revise_skill_teaches_recall_and_delegate_fallback():
     assert "冷委派" in body and "replaces_run_id" in body
     assert "真换职能" in body or "非仅改 title" in body
     assert "补派" in body or "接手" in body
+    # 成篇未写完 → continue_from（短指针，细则在 long_form）。
+    assert "成篇未写完" in body
     # 真纯丙：不再教「声明超集 tools」；默认全开相关工具面。
     assert "只增不减" not in body
     assert "声明超集" not in body
@@ -955,12 +957,23 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "合并责任" in body or "merge" in body.lower()
     assert "各写各的" in body
     assert "建站" in body
+    # 单写手超长分波 + 成篇未写完 continue_from；MD 禁 write_section
+    assert "分波" in body
+    assert "章节范围" in body or "第 1" in body
+    assert "continue_from_run_id" in body
+    assert "成篇未写完" in body
+    assert "write_section" in body and "禁止" in body
+    assert "FILL" in body or "str_replace" in body
+    assert "continue_writing" in body  # 禁复活 CTA
+    assert "replaces_run_id" in body  # 仅冷接手对照
     # MD→PDF：主交付 .md；要分享时 md_to_pdf；禁 HTML/reportlab 主路径
     assert "md_to_pdf" in body
     assert "HTML" in body
     assert "reportlab" in body
     assert "单主文件" in skill.summary or "合并" in skill.summary
     assert "骨架" in skill.summary or "禁止整篇" in skill.summary
+    assert "分波" in skill.summary or "continue_from" in skill.summary
+    assert "write_section" in skill.summary
 
 
 def test_deep_multi_lens_research_listed_and_gated_on_delegate():

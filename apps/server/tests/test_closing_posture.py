@@ -457,11 +457,14 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
     assert steer is not None
     assert "部分落地" in steer
     assert "max_rounds" in steer
+    # 纯轮次顶：诚实收口即可，勿误导成「必须续写长文」。
+    assert "continue_from_run_id" not in steer
 
     dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="max_rounds")
     assert out.startswith("【收口说明】")
     assert "已全部完成" in out
+    assert "continue_from_run_id" not in out
     # 扩面词族已撤回：仅「复核通过/可玩」不再触发横幅。
     thin = "独立复核通过，现在可玩了。"
     assert not claims_posture_a(thin)
@@ -498,6 +501,9 @@ def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds
     assert steer is not None
     assert "token_budget" in steer
     assert "部分落地" in steer
+    assert "continue_from_run_id" in steer
+    assert "replaces_run_id" in steer
+    assert "禁止并行" in steer
     assert ceiling_honesty_steer(reason="other") is None
 
     dishonest = "修复已全部完成，已完整可用。"
@@ -505,6 +511,8 @@ def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds
     assert out.startswith("【收口说明】")
     assert "token" in out.lower() or "预算" in out
     assert "已全部完成" in out
+    assert "continue_from_run_id" in out
+    assert "replaces_run_id" in out
     # 非姿势 A 不因 ceiling banner  alone 改写（「完整落盘」不进姿势 A）。
     complete_landing = "文档已完整落盘（六章全部）。"
     assert not claims_posture_a(complete_landing)
@@ -544,13 +552,17 @@ def test_cutoff_delivery_gap_ceo_soft_banner_not_posture_a_expansion():
     )
     assert turn_has_cutoff_delivery_gap()
 
-    # 本案用户可见句：不进姿势 A，靠结构化 latch 软横幅。
+    # 本案用户可见句：不进姿势 A，靠结构化 latch 软横幅 + continue_from 续作教法。
     dishonest = "文档已完整落盘（六章全部），可直接使用。"
     assert not claims_posture_a(dishonest)
     bannered = enforce_cutoff_closing_honesty(dishonest)
     assert bannered.startswith("【收口说明】")
     assert "部分交付" in bannered
     assert "完整落盘" in bannered
+    assert "continue_from_run_id" in bannered
+    assert "replaces_run_id" in bannered
+    assert "禁止并行" in bannered
+    assert "continue_writing" not in bannered
 
     # 已诚实部分交付 → 不叠横幅。
     honest = "部分交付：前五章已落盘，第六章未闭合，建议续派补齐。"
@@ -738,6 +750,7 @@ def test_b1_ceiling_bans_hollow_teach_invite():
     steer = ceiling_honesty_steer(reason="token_budget")
     assert steer is not None
     assert "请开讲" in steer or "请讲" in steer
+    assert "continue_from_run_id" in steer
     out = enforce_ceiling_closing_honesty(hollow, reason="token_budget")
     assert out.startswith("【收口说明】")
     assert "开讲" in out or "请讲" in out or "硬顶" in out

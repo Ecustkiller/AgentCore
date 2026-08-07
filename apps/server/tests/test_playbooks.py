@@ -214,9 +214,13 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     assert outline_d["artifacts"] == ["AgentCore/文档/research/提纲.md"]
     assert "AgentCore/文档/research/提纲.md" in by_id["outline"]["task"]
     # Artifact-first writer brief: skeleton first; ban half-chapter prose then append.
+    # 定案对齐：分波范围 + continue_from 待续 + md 禁 write_section。
     # （write_task 已在上方绑定；含 MD→PDF 纪律）
     assert "短骨架" in write_task or "首写必须是短骨架" in write_task
     assert "禁止首写半章散文" in write_task
+    assert "write_section" in write_task
+    assert "continue_from_run_id" in write_task
+    assert "章节范围" in write_task or "前几章" in write_task
     assert "artifact manifest" in write_task or "禁止再对本文件" in write_task
     assert "file_read" in write_task
     # each angle is named into its researcher's task so the fan-out doesn't run blind/overlapping.

@@ -526,7 +526,9 @@ _REVISING_A_PRODUCT = """\
 的新任务（例如「把风险那节展开」「换个更正式的语气」「接着实现方案 B」），且仍由原角色
 带着现场来干最合适时，用 `delegate` 并在该 task 上设 `continue_from_run_id`（取自团队执行
 结果里标注的 run_id）——原作者带着 ReAct 轨迹接着干，而不是从零另派看不到旧稿的新人。
-task 正文写清续干指令（改哪里 / 新任务是什么）；可与 depends_on / deliverable 同用。
+task 正文写清续干指令（改哪里 / 新任务是什么）；可与 depends_on / deliverable 同用。\
+【成篇未写完】预算触顶 / 诚实「成篇未写完」→ 同优先 `continue_from_run_id` 续同一主文件（细则见 \
+`long_form_writing`）；勿默认 `replaces_run_id` 换人。
 
 【调查/审查批 → 用户确认按结论修·默认乙】多角调查或审查已收口、用户确认「按结论修」时：\
 【默认】对手头各调查/审查 run 手写 tasks，并设 `continue_from_run_id`（可并行多角；task \
@@ -747,16 +749,30 @@ file_write；一律先短骨架再按节填空。短笔记 / 小配置 / 小片�
 调用 `md_to_pdf`（对主文件）→ handoff。【禁止】用多份 HTML 顶替 PDF；【禁止】把 \
 code_execute + reportlab 当主路径做 PDF（确定性 `md_to_pdf` 才是主路径）。
 
+【单写手超长·跨 delegate 分波】材料已齐、仍走单写手，但预估很长（多章手册 / 合并大规格 /\
+十余章以上）→ **勿**默认一人一次写完全文。按章跨多次 `delegate` 分波：第一波 task \
+**写死章节范围**（如「只填第 1–N 章；其余骨架占位待续」），本波收口后再派下一波续填；\
+短中篇 / 章数少仍可一波写完。
+
+【成篇未写完·续作】预算触顶 / 诚实「成篇未写完」/ 用户要接着写同一交付物 → 下一刀 \
+`delegate` **优先**设 `continue_from_run_id`（同人带现场续写同一主文件）；task 写清续填\
+缺口章节。【禁止】并行再派同角色抢同一主路径。【禁止】复活 `continue_writing` 一键 CTA。\
+`replaces_run_id` **仅**冷接手 / 替换失败节点（现场已淘汰、真换职能等，见 \
+`revising_a_product`）——同交付物续写勿默认 replaces。
+
 推荐编排：
 1. 确认大纲（章节标题 + 每节要点）：用户明文要求把关 → 委派计划给提纲步设 \
 `checkpoint_after=true`（或 `research_report` 成文专线），走结构化 durable 卡，勿纯聊天代卡；\
 自主确认场景（用户未明文 / 任务轻量）才可对话式或自确认，必要时 ask_user。
-2. 单写手：先用一次短 file_write 落【主文件】骨架（标题/锚点，或 `<!-- OUTLINE -->` / \
-章节小标题）；再按节用 file_append 或 str_replace 填空。【禁止】无骨架整篇一次写入。
+2. 单写手：先用一次短 file_write 落【主文件】骨架（标题/锚点，或 `<!-- FILL:… -->` / \
+`<!-- OUTLINE -->` / 章节小标题占位）；再按节用 **str_replace 或 file_append** 填空。\
+【禁止】无骨架整篇一次写入。【禁止】对 Markdown / FILL / 大纲占位调用 `write_section`\
+（那是建站 HTML 的 `<!-- SECTION:sN -->` 分区工具，与成篇 `.md` 无关）。
 3. 多 worker 并行拆章（论文/综述/长报告允许）：各章可写到临时路径以免并发冲突，\
 但【必须】在同一次 delegate 里写死——① 最终主文件同一路径（各章 brief + \
 `deliverable.artifacts` 均指向它）；② 合并责任（末尾 merge worker `depends_on` 各章，\
-或你 CEO 收口合并进主文件）。验收只认合并后的那一篇；禁止「各写各的章节文件就交」。
+或你 CEO 收口合并进主文件）。验收只认合并后的那一篇；禁止「各写各的章节文件就交」。\
+（与上条「单写手分波」二选一形状：要么一人分波串写，要么多章并行+合并——勿混成并行同角色抢锁。）
 4. 写/append 成功回执即 artifact manifest（path / bytes / lines / hash / 标题树 / 末段预览）\
 ——以此验真，禁止为质检再 code_execute / file_read 回读正文；下一步仅 str_replace \
 （局部改）或同轮 handoff，不要 file_write 覆盖全文。用户要 PDF 时在 handoff 前对主文件调 \
@@ -1225,7 +1241,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="long_form_writing",
         summary=(
-            "超长单文档骨架填空：大纲优先；禁止整篇一次写；可并行拆章但验收须单主文件+合并责任"
+            "超长单文档骨架填空：大纲优先；禁止整篇一次写；单写手超长跨 delegate 分波；"
+            "成篇未写完用 continue_from；MD 禁 write_section；可并行拆章但验收须单主文件+合并责任"
         ),
         body=_LONG_FORM_WRITING,
         requires_tools=("delegate",),

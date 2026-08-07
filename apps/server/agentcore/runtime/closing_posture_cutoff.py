@@ -3,6 +3,9 @@
 定稿漂移 B′ · CEO 综收软横幅
 Truth source = structured writing-cutoff gap reasons (or turn-token skip), not
 posture-A word expansion. Does **not** expand the posture-A word list.
+
+Banner teaches executable continuation: ``continue_from_run_id`` same main file;
+no parallel same-role race; ``replaces_run_id`` cold handoff only.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
+from agentcore.runtime.closing_posture_ceiling import _TOKEN_BUDGET_CONTINUE_TEACH
 from agentcore.runtime.closing_posture_core import claims_draft_acknowledgment
 from agentcore.runtime.closing_posture_hollow import (
     _CEILING_HOLLOW_TEACH_BANNER,
@@ -27,7 +31,8 @@ _turn_cutoff_delivery_gap: ContextVar[bool] = ContextVar(
 _CUTOFF_CLOSING_HONESTY_BANNER = (
     "【收口说明】本回合存在预算/掐断类交付缺口（对账为部分交付），"
     "以下不得视为无条件完整收卷——"
-    "请按「部分交付 + 未闭合项」理解。\n\n"
+    "请按「部分交付 + 未闭合项」理解。"
+    f"{_TOKEN_BUDGET_CONTINUE_TEACH}\n\n"
 )
 
 # Positive skip markers: already framed as partial — do not stack the banner.

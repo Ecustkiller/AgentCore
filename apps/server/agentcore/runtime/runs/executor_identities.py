@@ -62,9 +62,11 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
 str_replace（局部修订）或同轮 handoff，勿为空转自检。
 
-【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长先短骨架（标题/锚点/`<!-- SECTION: -->`）\
-再按节 file_append 或 str_replace 填空——禁止先写成篇正文再同文件 append。长文成篇：按章填空——\
-一章写完再下一章；预算不够时停在完整章边界并在 handoff 标明待续，勿章中截断。修订已有成品时按审校 / \
+【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长成篇 MD：先短骨架（大纲 / 章节标题\
+/ FILL 占位），再用 str_replace 或 file_append 按章填空——【禁止】用 `<!-- SECTION: -->` 或 \
+write_section 填成篇 md（二者仅用于建站 site HTML）。禁止先写成篇正文再同文件 append。\
+长文成篇：按章填空——一章写完再下一章；预算不够时停在完整章边界，并在 handoff 标明已完成章节与\
+【待续】章节（从哪一章续写），勿章中截断。修订已有成品时按审校 / \
 续派意见逐条用 str_replace 局部改（优先）；骨架上扩写可用 file_append；整文件 file_write 覆盖允许，\
 但勿惰性省略中段（正文写「……（中间省略，已保留首尾）……」会残缺交付）。仍**禁止**整篇 file_delete \
 后重写长文。
@@ -108,9 +110,11 @@ _WORKER_DELIVERABLE_FORM_FILES = """\
 【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
 str_replace（局部修订）或同轮 handoff，勿为空转自检。
 
-【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长先短骨架（标题/锚点/`<!-- SECTION: -->`）\
-再按节 file_append 或 str_replace 填空——禁止先写成篇正文再同文件 append。长文成篇：按章填空——\
-一章写完再下一章；预算不够时停在完整章边界并在 handoff 标明待续，勿章中截断。修订已有成品时按审校 / \
+【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长成篇 MD：先短骨架（大纲 / 章节标题\
+/ FILL 占位），再用 str_replace 或 file_append 按章填空——【禁止】用 `<!-- SECTION: -->` 或 \
+write_section 填成篇 md（二者仅用于建站 site HTML）。禁止先写成篇正文再同文件 append。\
+长文成篇：按章填空——一章写完再下一章；预算不够时停在完整章边界，并在 handoff 标明已完成章节与\
+【待续】章节（从哪一章续写），勿章中截断。修订已有成品时按审校 / \
 续派意见逐条用 str_replace 局部改（优先）；骨架上扩写可用 file_append；整文件 file_write 覆盖允许，\
 但勿惰性省略中段（正文写「……（中间省略，已保留首尾）……」会残缺交付）。仍**禁止**整篇 file_delete \
 后重写长文。

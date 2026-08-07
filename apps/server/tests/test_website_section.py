@@ -146,6 +146,56 @@ async def test_write_section_content_and_reject_both_sources(tmp_path: Path):
     assert "<p>ok</p>" in (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
 
 
+def test_write_section_schema_states_html_only_not_markdown():
+    desc = WriteSectionTool().schema.description
+    assert "SECTION:sN" in desc
+    assert "非 Markdown" in desc or "FILL" in desc
+    assert ".md" in desc
+    path_desc = WriteSectionTool().schema.parameters["properties"]["path"]["description"]
+    assert ".md" in path_desc
+
+
+@pytest.mark.asyncio
+async def test_write_section_rejects_md_path(tmp_path: Path):
+    md = tmp_path / "notes.md"
+    md.write_text(
+        "<!-- SECTION:s0 START -->\n\n<!-- SECTION:s0 END -->\n",
+        encoding="utf-8",
+    )
+    tool = WriteSectionTool()
+    for path in ("notes.md", "notes.MD", "NOTES.md"):
+        result = await tool.execute(
+            {"path": path, "section": "s0", "content": "<p>x</p>"},
+            _ctx(tmp_path),
+        )
+        assert result.success is False
+        assert result.contract_failure is True
+        err = result.error or ""
+        assert ".md" in err
+        assert "str_replace" in err and "file_append" in err
+    assert (
+        "<!-- SECTION:s0 START -->\n\n<!-- SECTION:s0 END -->\n"
+        == md.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_section_html_still_works(tmp_path: Path):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!-- SECTION:s2 START -->\nplaceholder\n<!-- SECTION:s2 END -->\n",
+        encoding="utf-8",
+    )
+    result = await WriteSectionTool().execute(
+        {"path": "site/index.html", "section": "s2", "content": "<h2>Ready</h2>"},
+        _ctx(tmp_path),
+    )
+    assert result.success is True
+    body = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert "<h2>Ready</h2>" in body
+    assert "SECTION:s2 START" in body and "SECTION:s2 END" in body
+
+
 @pytest.mark.asyncio
 async def test_collect_light_gaps_from_workspace(tmp_path: Path):
     site = tmp_path / "site"

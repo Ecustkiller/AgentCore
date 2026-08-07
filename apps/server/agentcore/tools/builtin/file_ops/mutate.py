@@ -954,19 +954,23 @@ class WriteSectionTool:
         return ToolSchema(
             name="write_section",
             description=(
-                "把 HTML 正文写入已有文件中的一对 SECTION 注释标记之间"
-                "（`<!-- SECTION:sN START -->`…`<!-- SECTION:sN END -->`）。"
-                "用于建站 assemble / 分区填槽：【不必】精确匹配旧占位正文，"
-                "也不怕缩进漂移——只认标记对。content 与 from_file 二选一；"
-                "保留标记注释本身。新建整文件请用 file_write；精确改任意片段请用 "
-                "str_replace。"
+                "仅用于建站 HTML：把片段写入已有文件中的一对 "
+                "`<!-- SECTION:sN START -->`…`<!-- SECTION:sN END -->` 注释标记之间"
+                "（非 Markdown / FILL 章节工具）。【不必】精确匹配旧占位正文，"
+                "也不怕缩进漂移——只认标记对。path 须为含 SECTION 标记的 HTML"
+                "（通常 site/index.html）；对 .md 请改用 str_replace / file_append。"
+                "content 与 from_file 二选一；保留标记注释本身。"
+                "新建整文件请用 file_write；精确改任意片段请用 str_replace。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "含 SECTION 标记的工作区相对路径（通常 site/index.html）",
+                        "description": (
+                            "含 `<!-- SECTION:sN -->` 标记的 HTML 相对路径"
+                            "（通常 site/index.html；勿对 .md 调用）"
+                        ),
                     },
                     "section": {
                         "type": "string",
@@ -1011,6 +1015,13 @@ class WriteSectionTool:
             return _error("须提供 content 或 from_file（分区 HTML 正文来源）", start)
 
         rel_path, rename_note = _prepare_write_relpath(requested_path)
+        if rel_path.lower().endswith(".md"):
+            return _error(
+                "write_section 仅用于建站 HTML 的 `<!-- SECTION:sN -->` 标记，"
+                "不支持 .md；请改用 str_replace 或 file_append。",
+                start,
+                contract_failure=True,
+            )
 
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="file_write.scope_rejected"
