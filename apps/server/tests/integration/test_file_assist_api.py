@@ -107,8 +107,10 @@ def byok(monkeypatch):
 
 @pytest.fixture
 def platform(monkeypatch):
-    """Platform billing → the usage quota is the active 防线 (BYOK 402 is dormant)."""
+    """Platform billing + platform key → catalog visible, origin stays platform, so
+    the usage quota is the active 防线 (BYOK 402 stays dormant)."""
     monkeypatch.setattr(settings, "billing_mode", "platform")
+    monkeypatch.setattr(settings, "platform_api_key", "sk-platform")
 
 
 # --- auth gate ---

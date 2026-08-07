@@ -21,13 +21,17 @@ from tests.integration.conftest import register_and_login
 
 @pytest.fixture(autouse=True)
 def _platform_billing():
-    """Quota is the platform-mode 防线. Force platform billing so the BYOK preflight
-    (default billing_mode="byok", which refuses a keyless turn with 402 first) does
-    not pre-empt the quota gate these tests exercise (成本配额与计费.md §一)."""
-    original = settings.billing_mode
+    """Quota is the platform-mode 防线. Force platform billing + a platform key so
+    ``platform_catalog_visible`` is true and account-default origin stays ``platform``.
+    Without the key, catalog falls back to byok and keyless turns hit 402
+    ``LLM_KEY_REQUIRED`` before ``enforce_quota`` (成本配额与计费.md §〇·五 / §一)."""
+    original_mode = settings.billing_mode
+    original_key = settings.platform_api_key
     settings.billing_mode = "platform"
+    settings.platform_api_key = "sk-platform"
     yield
-    settings.billing_mode = original
+    settings.billing_mode = original_mode
+    settings.platform_api_key = original_key
 
 
 # Above the platform monthly cap (quota_monthly_cost_cny = ¥10) — and also above
