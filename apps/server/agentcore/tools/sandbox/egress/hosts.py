@@ -8,18 +8,20 @@ from urllib.parse import urlsplit
 from agentcore.tools.builtin.package_install import (
     ALLOWED_NPM_HOSTS,
     ALLOWED_NPM_REGISTRIES,
+    ALLOWED_PYPI_HOSTS,
+    ALLOWED_PYPI_REGISTRIES,
 )
 
 
 @lru_cache(maxsize=1)
 def allowed_registry_hosts() -> frozenset[str]:
-    """Lowercased hostnames: registry URLs + ``ALLOWED_NPM_HOSTS`` (CDN ≠ pin registry)."""
+    """Lowercased hostnames: registry URLs + CDN hosts (CDN ≠ pin registry)."""
     hosts: set[str] = set()
-    for raw in ALLOWED_NPM_REGISTRIES:
+    for raw in (*ALLOWED_NPM_REGISTRIES, *ALLOWED_PYPI_REGISTRIES):
         host = (urlsplit(raw).hostname or "").lower().rstrip(".")
         if host:
             hosts.add(host)
-    for raw in ALLOWED_NPM_HOSTS:
+    for raw in (*ALLOWED_NPM_HOSTS, *ALLOWED_PYPI_HOSTS):
         host = (raw or "").lower().strip().rstrip(".")
         if host:
             hosts.add(host)

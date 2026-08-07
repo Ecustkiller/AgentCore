@@ -290,9 +290,13 @@ def test_registry_suggest_names_alias_and_close_match():
     reg = ToolRegistry()
     reg.register(_StubTool("web_search"))
     reg.register(_StubTool("read_url"))
+    reg.register(_StubTool("download_url"))
     reg.register(_StubTool("file_write"))
 
     assert reg.suggest_names("web_read") == ["read_url"]
+    assert reg.suggest_names("fetch") == ["download_url"]
+    assert reg.suggest_names("fetch_url") == ["download_url"]
+    assert reg.suggest_names("web_fetch") == ["download_url"]
     assert reg.suggest_names("write") == ["file_write"]
     assert "web_search" in reg.suggest_names("web_serch")  # typo → close match
     assert reg.suggest_names("totally_unknown_zzzz") == []

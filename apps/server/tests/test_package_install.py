@@ -27,6 +27,17 @@ from agentcore.tools.builtin.package_install import (
         ["npm", "--prefix", "apps/web", "install"],
         ["pnpm", "--dir", "pkg", "ci"],
         ["yarn", "--cwd", "frontend", "install"],
+        ["pip", "install", "-r", "requirements.txt"],
+        ["pip", "install", "."],
+        ["python", "-m", "pip", "install", "-r", "requirements.txt"],
+        ["python3", "-m", "pip", "install", "."],
+        ["uv", "sync"],
+        ["uv", "add", "requests"],
+        ["uv", "pip", "install", "requests"],
+        ["uv", "--directory", "apps/api", "sync"],
+        ["poetry", "install"],
+        ["poetry", "add", "httpx"],
+        ["poetry", "--directory", "svc", "install"],
     ],
 )
 def test_install_shaped_accepted(argv: list[str]):
@@ -42,6 +53,10 @@ def test_install_shaped_accepted(argv: list[str]):
         ["npm", "test"],
         ["bash", "-c", "npm install"],
         ["npm", "--prefix", "../x", "install"],
+        ["uv", "run", "pytest"],
+        ["pip", "list"],
+        ["poetry", "run", "pytest"],
+        ["uv", "--directory", "../x", "sync"],
     ],
 )
 def test_install_shaped_rejected(argv: list[str]):
@@ -50,7 +65,9 @@ def test_install_shaped_rejected(argv: list[str]):
 
 def test_reject_shell_chain():
     assert reject_shell_chain_command("cd foo && npm install") is not None
+    assert reject_shell_chain_command("cd foo && pip install -r requirements.txt") is not None
     assert reject_shell_chain_command("npm install") is None
+    assert reject_shell_chain_command("uv sync") is None
 
 
 def test_reject_registry_override():
@@ -64,6 +81,41 @@ def test_reject_registry_override():
         is not None
     )
     assert reject_registry_override_argv(["npm", "install"]) is None
+
+
+def test_reject_python_index_override():
+    assert (
+        reject_registry_override_argv(
+            ["pip", "install", "-i", "https://evil.example/simple/"]
+        )
+        is not None
+    )
+    assert (
+        reject_registry_override_argv(
+            ["pip", "install", "--index-url", "https://evil.example/simple/"]
+        )
+        is not None
+    )
+    assert (
+        reject_registry_override_argv(
+            ["uv", "sync", "--index-url=https://evil.example/simple/"]
+        )
+        is not None
+    )
+    assert (
+        reject_registry_override_argv(
+            ["uv", "pip", "install", "--extra-index-url", "https://evil/"]
+        )
+        is not None
+    )
+    assert (
+        reject_registry_override_argv(
+            ["poetry", "install", "--source", "evil"]
+        )
+        is not None
+    )
+    assert reject_registry_override_argv(["pip", "install", "-r", "requirements.txt"]) is None
+    assert reject_registry_override_argv(["uv", "sync"]) is None
 
 
 def test_safe_relpath():
@@ -87,9 +139,48 @@ def test_resolve_and_apply_working_directory():
     ]
 
 
+def test_resolve_pure_python_does_not_default_to_npm():
+    assert resolve_install_argv(package_managers=["uv"]) == ["uv", "sync"]
+    assert resolve_install_argv(package_managers=["poetry"]) == ["poetry", "install"]
+    assert resolve_install_argv(package_managers=["pip"]) == [
+        "pip",
+        "install",
+        "-r",
+        "requirements.txt",
+    ]
+    assert resolve_install_argv(
+        package_managers=["uv"], working_directory="apps/api"
+    ) == ["uv", "--directory", "apps/api", "sync"]
+    assert resolve_install_argv(
+        package_managers=["pip"], working_directory="backend"
+    ) == ["pip", "install", "-r", "backend/requirements.txt"]
+    # Mixed JS+Python keeps JS-first (monorepo root).
+    assert resolve_install_argv(package_managers=["uv", "pnpm"]) == ["pnpm", "install"]
+    # Empty / unknown still defaults to npm (legacy).
+    assert resolve_install_argv(package_managers=[]) == ["npm", "install"]
+
+
+def test_apply_working_directory_python():
+    assert apply_working_directory(["uv", "sync"], "apps/api") == [
+        "uv",
+        "--directory",
+        "apps/api",
+        "sync",
+    ]
+    assert apply_working_directory(
+        ["pip", "install", "-r", "requirements.txt"], "backend"
+    ) == ["pip", "install", "-r", "backend/requirements.txt"]
+    assert apply_working_directory(
+        ["python", "-m", "pip", "install", "-r", "requirements.txt"], "svc"
+    ) == ["python", "-m", "pip", "install", "-r", "svc/requirements.txt"]
+
+
 def test_registry_pin_env_points_at_allowlist():
     env = registry_pin_env()
     assert "registry.npmjs.org" in env["NPM_CONFIG_REGISTRY"]
+    assert "pypi.org" in env["PIP_INDEX_URL"]
+    assert env["UV_INDEX_URL"] == env["PIP_INDEX_URL"]
+    assert "pypi.org" in env["POETRY_PYPI_MIRROR_URL"]
 
 
 def test_install_cache_env_points_at_pkg_cache():
@@ -98,3 +189,6 @@ def test_install_cache_env_points_at_pkg_cache():
     env = install_cache_env()
     assert env["NPM_CONFIG_CACHE"] == "/pkg-cache/npm"
     assert env["PNPM_STORE_PATH"] == "/pkg-cache/pnpm"
+    assert env["PIP_CACHE_DIR"] == "/pkg-cache/pip"
+    assert env["UV_CACHE_DIR"] == "/pkg-cache/uv"
+    assert env["POETRY_CACHE_DIR"] == "/pkg-cache/poetry"

@@ -249,6 +249,19 @@ function primaryArg(
   args: Record<string, unknown>,
 ): string | null {
   if (toolName === "git") return gitPrimaryArg(args);
+  if (toolName === "host_package_install") {
+    const manager =
+      typeof args.manager === "string" && args.manager.trim()
+        ? args.manager.trim()
+        : "";
+    const pkg =
+      typeof args.package_id === "string" && args.package_id.trim()
+        ? args.package_id.trim()
+        : "";
+    const cask = args.cask === true ? " (cask)" : "";
+    if (manager && pkg) return `${manager} ${pkg}${cask}`;
+    return pkg || manager || null;
+  }
   if (toolName === "file_batch") {
     const ops = args.operations;
     if (Array.isArray(ops)) return `本次共 ${ops.length} 项`;

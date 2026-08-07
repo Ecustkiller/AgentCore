@@ -81,6 +81,21 @@
             "title": "Body",
             "type": "string"
           },
+          "card_template": {
+            "title": "Card Template",
+            "type": "string"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
           "cta_label": {
             "anyOf": [
               {
@@ -131,6 +146,17 @@
             "title": "Severity",
             "type": "string"
           },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
           "surface": {
             "title": "Surface",
             "type": "string"
@@ -147,6 +173,9 @@
           "severity",
           "surface",
           "dismiss_policy",
+          "card_template",
+          "summary",
+          "cover_url",
           "cta_label",
           "cta_url",
           "published_at",
@@ -4390,6 +4419,33 @@
             "title": "Body",
             "type": "string"
           },
+          "card_template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "service",
+                  "article"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Template"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
           "cta_label": {
             "anyOf": [
               {
@@ -4456,6 +4512,17 @@
               }
             ],
             "title": "Start At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "surface": {
             "default": "both",
@@ -8781,6 +8848,21 @@
             "title": "Body",
             "type": "string"
           },
+          "card_template": {
+            "title": "Card Template",
+            "type": "string"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -8864,6 +8946,17 @@
             "title": "Status",
             "type": "string"
           },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
           "surface": {
             "title": "Surface",
             "type": "string"
@@ -8886,6 +8979,9 @@
           "surface",
           "status",
           "dismiss_policy",
+          "card_template",
+          "summary",
+          "cover_url",
           "cta_label",
           "cta_url",
           "start_at",
@@ -13633,6 +13729,33 @@
             ],
             "title": "Body"
           },
+          "card_template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "service",
+                  "article"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Template"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
           "cta_label": {
             "anyOf": [
               {
@@ -13711,6 +13834,17 @@
               }
             ],
             "title": "Start At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "surface": {
             "anyOf": [
@@ -14896,7 +15030,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.40"
+    "version": "0.3.41"
   },
   "openapi": "3.1.0",
   "paths": {

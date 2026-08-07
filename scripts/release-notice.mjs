@@ -11,6 +11,7 @@
  * 预告 = 人定约时后立刻（工作流 A，与 gate 并行）；收口 = 桌面转正+官网后（或 api-only 验收后）。
  * Win：标题/正文走临时文件（--title-file / --body-file），避免 shell:true 拆碎空格标题。
  * 维护/政策/故障仍走 Admin UI，不进本脚本。
+ * 默认 CTA：检查更新 → /more/about（可用 --no-cta 关闭，或 --cta-label/--cta-url 覆盖）。
  * 文案权威 → docs/05-平台与运维/产品公告文案模板.md
  */
 import { spawnSync } from "node:child_process";
@@ -20,6 +21,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
+
+/** 与 Admin release/hotfix 模板对齐：应用内关于页可检查更新。 */
+const DEFAULT_CTA = {
+  label: "检查更新",
+  url: "/more/about",
+};
 
 function arg(name, fallback = "") {
   const i = process.argv.indexOf(`--${name}`);
@@ -43,6 +50,9 @@ Options:
   --dry-run               只打印标题/正文，不发布
   --surface both|banner|inbox|modal   默认 both
   --severity high|normal|critical     默认 high
+  --cta-label "…"         覆盖默认 CTA 文案（检查更新）
+  --cta-url "…"           覆盖默认 CTA（/more/about；可 https 或应用内路径）
+  --no-cta                不带 CTA（无动作场景）
 `);
 }
 
@@ -112,6 +122,16 @@ function buildHotfixDone({ summary }) {
   return { title, body };
 }
 
+function resolveCta() {
+  if (hasFlag("no-cta")) return { label: "", url: "" };
+  const label = arg("cta-label", DEFAULT_CTA.label).trim();
+  const url = arg("cta-url", DEFAULT_CTA.url).trim();
+  if ((label && !url) || (!label && url)) {
+    throw new Error("--cta-label 与 --cta-url 须成对填写（或用 --no-cta）");
+  }
+  return { label, url };
+}
+
 function main() {
   if (hasFlag("help") || hasFlag("h")) {
     printHelp();
@@ -143,15 +163,28 @@ function main() {
     process.exit(1);
   }
 
+  let cta;
+  try {
+    cta = resolveCta();
+  } catch (err) {
+    console.error(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+
   let built;
-  if (kind === "release" && phase === "preview") {
-    built = buildReleasePreview({ at, highlights });
-  } else if (kind === "release" && phase === "done") {
-    built = buildReleaseDone({ versions });
-  } else if (kind === "hotfix" && phase === "preview") {
-    built = buildHotfixPreview({ at, summary });
-  } else {
-    built = buildHotfixDone({ summary });
+  try {
+    if (kind === "release" && phase === "preview") {
+      built = buildReleasePreview({ at, highlights });
+    } else if (kind === "release" && phase === "done") {
+      built = buildReleaseDone({ versions });
+    } else if (kind === "hotfix" && phase === "preview") {
+      built = buildHotfixPreview({ at, summary });
+    } else {
+      built = buildHotfixDone({ summary });
+    }
+  } catch (err) {
+    console.error(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
   }
 
   const defaultEnd =
@@ -160,7 +193,14 @@ function main() {
 
   console.log(`\n── release:notice ${kind}/${phase} ──`);
   console.log(`title: ${built.title}`);
-  console.log(`surface=${surface} severity=${severity} end-hours=${endHours}`);
+  console.log(
+    `surface=${surface} severity=${severity} end-hours=${endHours} card_template=service`,
+  );
+  if (cta.label && cta.url) {
+    console.log(`cta: ${cta.label} → ${cta.url}`);
+  } else {
+    console.log("cta: (none)");
+  }
   console.log("--- body ---");
   console.log(built.body);
   console.log("------------\n");
@@ -191,7 +231,12 @@ function main() {
     "once",
     "--end-hours",
     endHours,
+    "--card-template",
+    "service",
   ];
+  if (cta.label && cta.url) {
+    args.push("--cta-label", cta.label, "--cta-url", cta.url);
+  }
   const result = spawnSync("pnpm", args, {
     cwd: ROOT,
     stdio: "inherit",

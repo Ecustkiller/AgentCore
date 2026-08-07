@@ -8,7 +8,7 @@ new or changed regular files are copied back under explicit caps
 
 **Install exception** (``registry_egress``) lives in ``gvisor.py``: rw-bind the
 persistent workspace and skip this module's copy-out / base64 wrap. This file
-still skips ``node_modules`` on write-back for any residual staging path.
+still skips ``node_modules`` / ``.venv`` on write-back for any residual staging path.
 
 Why copy-in/copy-out for the default writable path (安全权限与治理.md §五):
 
@@ -219,10 +219,11 @@ def write_back(
         if is_internal_zone_relpath(rel):
             skipped.append(rel)
             continue
-        # Packaging install on the staging path must not write node_modules back
-        # via copy-out (cloud install uses durable rw-bind instead; this skip
-        # remains for non-install staging / residual paths).
-        if "node_modules" in PurePosixPath(rel).parts:
+        # Packaging install on the staging path must not write node_modules /
+        # .venv back via copy-out (cloud install uses durable rw-bind instead;
+        # this skip remains for non-install staging / residual paths).
+        parts = PurePosixPath(rel).parts
+        if "node_modules" in parts or ".venv" in parts:
             skipped.append(rel)
             continue
         src = staging / rel

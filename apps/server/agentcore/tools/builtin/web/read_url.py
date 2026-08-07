@@ -306,6 +306,7 @@ class ReadUrlTool:
                 "max_chars 截断），用于在 web_search 摘要不足、确需深读某条结果时。"
                 "默认摘要优先：多数问题先用 web_search 摘要作答；"
                 "任务要求核对原文或需要正文细节时再调用本工具深读。"
+                "要把 URL 的原始文件/二进制写入工作区时用 download_url，不要用本工具。"
                 "注意：部分大型站点（如百度百科、知乎等）有反爬保护，可能返回 403/失败——"
                 "此时改用 web_search 摘要或换其他来源，不要对同一被拒站点反复重试。"
             ),
@@ -495,9 +496,15 @@ class ReadUrlTool:
                 429,
                 451,
             ):
+                # Anti-crawl / auth wall: keep stop-read + no URL thrash, then name
+                # the next workable moves (public source / summary close, or hand-
+                # brain paste from the user). Never imply a logged-in scrape.
                 hint = (
                     "。该站点反爬 / 拒绝访问，换 URL 或重试都读不到"
                     f"{_STOP_READ_HINT}"
+                    "下一招：改查公开可抓来源，或直接用已有 web_search 摘要收口；"
+                    "若必须站内数据，请用户自行打开页面后贴关键数字/截图（手脑），"
+                    "勿假装已登录抓取。"
                 )
             elif isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 404:
                 hint = f"。页面不存在（404）{_STOP_READ_HINT}"

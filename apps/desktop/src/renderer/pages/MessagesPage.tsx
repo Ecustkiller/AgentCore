@@ -2,6 +2,7 @@ import { ChatList } from "@/components/messages/ChatList";
 import { ChatThread } from "@/components/messages/ChatThread";
 import { ContactsDialog } from "@/components/messages/ContactsDialog";
 import { NewChatDialog } from "@/components/messages/NewChatDialog";
+import { ProductNoticeDetail } from "@/components/messages/ProductNoticeDetail";
 import { UserProfileDialog } from "@/components/messages/UserProfileDialog";
 import { useMessagingStore } from "@/stores/messaging";
 import { Mail } from "lucide-react";
@@ -14,10 +15,16 @@ import { useNavigate, useParams } from "react-router-dom";
  * chat — syncing it into the store (load history + mark read) mirrors how
  * ConversationPage drives the AI 对话 page (消息IM.md §六).
  *
+ * Official product_notice detail: `#/messages/:chatId/notices/:noticeId`
+ * replaces the thread pane (应用内详情，非外开浏览器).
+ *
  * §9.4 surfaces (通讯录 / 资料卡 / 搜人) mount here so any pane can open them.
  */
 export function MessagesPage() {
-  const { chatId } = useParams<{ chatId: string }>();
+  const { chatId, noticeId } = useParams<{
+    chatId: string;
+    noticeId?: string;
+  }>();
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(false);
@@ -49,7 +56,9 @@ export function MessagesPage() {
         onOpenContacts={() => setContactsOpen(true)}
       />
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {chatId ? (
+        {chatId && noticeId ? (
+          <ProductNoticeDetail chatId={chatId} noticeId={noticeId} />
+        ) : chatId ? (
           <ChatThread chatId={chatId} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">

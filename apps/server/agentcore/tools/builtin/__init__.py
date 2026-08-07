@@ -23,10 +23,11 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     Governs the WHOLE class that runs code through the sandbox chain — ``code_execute``
     AND ``test_run`` (a test suite executes arbitrary project code, so it is
     execution-equivalent). Local / sidecar execution stays on; cloud ``location=server``
-    defaults off unless ``GVISOR_ENABLED`` or ``CODE_EXECUTE_CLOUD_ENABLED`` is set (a
-    plain subprocess in the API container is not a real isolation boundary — 安全权限与
-    治理 §5). Keeping both tools behind ONE predicate (not a per-tool special-case) is
-    what makes the production-security posture cover the class consistently.
+    cloud defaults **on** via ``GVISOR_ENABLED`` (code default true；紧急可 false)；
+    or ``CODE_EXECUTE_CLOUD_ENABLED`` escape hatch (a plain subprocess in the API
+    container is not a real isolation boundary — 安全权限与治理 §5). Keeping both
+    tools behind ONE predicate (not a per-tool special-case) is what makes the
+    production-security posture cover the class consistently.
 
     When cloud execution is config-enabled, a boot-time sandbox ``health_check`` result
     (``tools.sandbox.cloud_health``) also gates this predicate: a failed probe withholds

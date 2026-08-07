@@ -5285,6 +5285,10 @@ export interface components {
         ActiveNotice: {
             /** Body */
             body: string;
+            /** Card Template */
+            card_template: string;
+            /** Cover Url */
+            cover_url: string | null;
             /** Cta Label */
             cta_label: string | null;
             /** Cta Url */
@@ -5299,6 +5303,8 @@ export interface components {
             published_at: string | null;
             /** Severity */
             severity: string;
+            /** Summary */
+            summary: string | null;
             /** Surface */
             surface: string;
             /** Title */
@@ -7087,6 +7093,10 @@ export interface components {
         CreateNoticeRequest: {
             /** Body */
             body: string;
+            /** Card Template */
+            card_template?: ("service" | "article") | null;
+            /** Cover Url */
+            cover_url?: string | null;
             /** Cta Label */
             cta_label?: string | null;
             /** Cta Url */
@@ -7107,6 +7117,8 @@ export interface components {
             severity: "critical" | "high" | "normal";
             /** Start At */
             start_at?: string | null;
+            /** Summary */
+            summary?: string | null;
             /**
              * Surface
              * @default both
@@ -9040,6 +9052,10 @@ export interface components {
         NoticeSummary: {
             /** Body */
             body: string;
+            /** Card Template */
+            card_template: string;
+            /** Cover Url */
+            cover_url: string | null;
             /**
              * Created At
              * Format: date-time
@@ -9065,6 +9081,8 @@ export interface components {
             start_at: string | null;
             /** Status */
             status: string;
+            /** Summary */
+            summary: string | null;
             /** Surface */
             surface: string;
             /** Title */
@@ -11223,6 +11241,10 @@ export interface components {
         UpdateNoticeRequest: {
             /** Body */
             body?: string | null;
+            /** Card Template */
+            card_template?: ("service" | "article") | null;
+            /** Cover Url */
+            cover_url?: string | null;
             /** Cta Label */
             cta_label?: string | null;
             /** Cta Url */
@@ -11235,6 +11257,8 @@ export interface components {
             severity?: ("critical" | "high" | "normal") | null;
             /** Start At */
             start_at?: string | null;
+            /** Summary */
+            summary?: string | null;
             /** Surface */
             surface?: ("banner" | "inbox" | "both" | "modal") | null;
             /** Title */

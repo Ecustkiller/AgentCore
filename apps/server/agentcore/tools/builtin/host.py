@@ -34,10 +34,22 @@ _HOST_STORAGE = "host_storage"
 _HOST_POWER = "host_power"
 _HOST_NETWORK = "host_network_summary"
 _HOST_APPS = "host_apps"
+_HOST_OS_LOG_SUMMARY = "host_os_log_summary"
 _HOST_SHELL = "host_shell"
+
+# L1 host_os_log_summary hard caps (desktop clamps again; keep in lockstep).
+_OS_LOG_MINUTES_DEFAULT = 60
+_OS_LOG_MINUTES_MAX = 1440
+_OS_LOG_ENTRIES_DEFAULT = 40
+_OS_LOG_ENTRIES_MAX = 80
+_OS_LOG_BYTES_DEFAULT = 24_000
+_OS_LOG_BYTES_MAX = 48_000
+_OS_LOG_LEVELS = frozenset({"error", "warning", "info", "any"})
+_OS_LOG_SOURCE_MAX = 120
 _HOST_OPEN_SETTINGS = "host_open_settings"
 _HOST_AUDIO_SET_DEFAULT = "host_audio_set_default"
 _HOST_SERVICE_RESTART = "host_service_restart"
+_HOST_PACKAGE_INSTALL = "host_package_install"
 
 # L2 panel whitelist — closed set (安全权限与治理 / Host 定案 P1).
 _OPEN_SETTINGS_PANELS = frozenset({"sound", "display", "network", "apps", "about"})
@@ -46,11 +58,20 @@ _OPEN_SETTINGS_PANELS = frozenset({"sound", "display", "network", "apps", "about
 # Canonical SCM name only; do not expand without architecture sign-off.
 _SERVICE_RESTART_ALLOWLIST = frozenset({"audiosrv"})
 
+# L3 package managers — closed set (桶4 · 点名包；否决任意 exe 静默装).
+_PACKAGE_MANAGERS = frozenset({"winget", "brew", "apt"})
+_PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-/@]{0,199}$")
+
 # P3 host_shell: optional timeout clamp (seconds). Desktop kills the process at this budget.
 _SHELL_TIMEOUT_DEFAULT = 60
 _SHELL_TIMEOUT_MAX = 120
 # Channel suspend budget = command timeout + slack (board_op default is 60s).
 _SHELL_CHANNEL_SLACK_SECONDS = 15.0
+
+# L3 host_package_install: Docker Desktop / VS Code installs often exceed shell 120s.
+_PACKAGE_TIMEOUT_DEFAULT = 600
+_PACKAGE_TIMEOUT_MAX = 900
+_PACKAGE_CHANNEL_SLACK_SECONDS = 30.0
 
 # Heuristic fuse — not a complete security boundary (Host 定案 P3).
 _SHELL_FUSE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
@@ -73,6 +94,25 @@ _SHELL_FUSE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# Silent / unattended installer heuristics — not a complete boundary (桶4).
+# Keep in rough lockstep with desktop ``shellSilentInstallBlocks``.
+_SHELL_SILENT_INSTALL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bmsiexec\b.*(?:/quiet|/qn\b|/passive\b)",
+        r"\bStart-Process\b[\s\S]{0,200}(?:/[Ss]\b|/silent\b|/quiet\b|/qn\b|/verysilent\b)",
+        r"\.(?:exe|msi)\b[^\n]{0,120}(?:/[Ss]\b|/silent\b|/verysilent\b|/quiet\b|/qn\b)",
+        r"\b/VERYSILENT\b",
+        r"\b(?:curl|wget|Invoke-WebRequest)\b[\s\S]{0,160}\.(?:exe|msi)\b",
+    )
+)
+
+_SHELL_SILENT_INSTALL_REASON = (
+    "host_shell 熔断：命令匹配静默安装启发式（msiexec /quiet、Setup /S、"
+    "Start-Process quiet 等）。此为启发式兜底，并非完整拦截；"
+    "请改用结构化 host_package_install（manager∈winget/brew/apt + package id）。"
+)
+
 
 def shell_fuse_blocks(command: str) -> str | None:
     """Return a refusal reason if ``command`` matches a destructive fuse heuristic."""
@@ -89,6 +129,52 @@ def shell_fuse_blocks(command: str) -> str | None:
     return None
 
 
+def shell_silent_install_blocks(command: str) -> str | None:
+    """Return a refusal reason if ``command`` looks like a silent arbitrary installer."""
+    text = command.strip()
+    if not text:
+        return None
+    for pat in _SHELL_SILENT_INSTALL_PATTERNS:
+        if pat.search(text):
+            return _SHELL_SILENT_INSTALL_REASON
+    return None
+
+
+def clamp_package_timeout(raw: Any) -> int:
+    """Parse optional timeout_seconds for package install; default 600, clamp to [60, 900]."""
+    if raw is None or raw == "":
+        return _PACKAGE_TIMEOUT_DEFAULT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _PACKAGE_TIMEOUT_DEFAULT
+    return max(60, min(_PACKAGE_TIMEOUT_MAX, value))
+
+
+def validate_package_install_args(
+    *,
+    manager: str,
+    package_id: str,
+    cask: bool = False,
+) -> str | None:
+    """Return an error string if manager / package id are invalid; else None."""
+    mgr = manager.strip().lower()
+    if mgr not in _PACKAGE_MANAGERS:
+        return (
+            f"host_package_install 不支持 manager={manager!r}；"
+            f"仅允许：{', '.join(sorted(_PACKAGE_MANAGERS))}。"
+        )
+    pkg = package_id.strip()
+    if not pkg or not _PACKAGE_ID_RE.fullmatch(pkg):
+        return (
+            "host_package_install 需要合法 package_id（字母数字开头，"
+            "可含 ._+-/@，最长 200；禁空格与 shell 元字符）。"
+        )
+    if cask and mgr != "brew":
+        return "host_package_install 的 cask=true 仅适用于 manager=brew。"
+    return None
+
+
 # cmd.exe %VAR% — PowerShell does not expand these (prod thrash: %APPDATA% → NOT_FOUND).
 _SHELL_CMD_ENV_RE = re.compile(r"%[A-Za-z_][A-Za-z0-9_]*%")
 
@@ -102,7 +188,7 @@ def shell_cmd_env_blocks(command: str) -> str | None:
         "请改用 $env:APPDATA / $env:LOCALAPPDATA / $env:USERPROFILE 等；"
         "Unix 请用 $VAR 或 ${VAR}。"
         "路径含空格时加引号，例如 "
-        "Get-ChildItem -LiteralPath \"$env:APPDATA\\Cursor\\logs\"。"
+        "Get-ChildItem -LiteralPath \"$env:APPDATA\\Microsoft\\Windows\"。"
     )
 
 
@@ -115,6 +201,45 @@ def clamp_shell_timeout(raw: Any) -> int:
     except (TypeError, ValueError):
         return _SHELL_TIMEOUT_DEFAULT
     return max(1, min(_SHELL_TIMEOUT_MAX, value))
+
+
+def _clamp_os_log_int(raw: Any, *, default: int, lo: int, hi: int) -> int:
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, value))
+
+
+def normalize_os_log_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Clamp / default host_os_log_summary args (server-side; desktop reclamps)."""
+    source = str(arguments.get("source") or "").strip()[:_OS_LOG_SOURCE_MAX]
+    raw_level = str(arguments.get("level") or "warning").strip().lower()
+    level = raw_level if raw_level in _OS_LOG_LEVELS else "warning"
+    return {
+        "source": source,
+        "level": level,
+        "minutes": _clamp_os_log_int(
+            arguments.get("minutes"),
+            default=_OS_LOG_MINUTES_DEFAULT,
+            lo=1,
+            hi=_OS_LOG_MINUTES_MAX,
+        ),
+        "max_entries": _clamp_os_log_int(
+            arguments.get("max_entries"),
+            default=_OS_LOG_ENTRIES_DEFAULT,
+            lo=1,
+            hi=_OS_LOG_ENTRIES_MAX,
+        ),
+        "max_bytes": _clamp_os_log_int(
+            arguments.get("max_bytes"),
+            default=_OS_LOG_BYTES_DEFAULT,
+            lo=1024,
+            hi=_OS_LOG_BYTES_MAX,
+        ),
+    }
 
 
 def _untrusted(payload: dict[str, Any]) -> str:
@@ -361,6 +486,94 @@ class HostAppsTool:
         return await _host_call(context, tool_name=_HOST_APPS, op=HostOp.APPS)
 
 
+class HostOsLogSummaryTool:
+    """L1 — bounded OS event-log summary (NEVER; not a full Event Log dump)."""
+
+    registration = ToolRegistration(
+        surface=ToolSurface.BUILTIN,
+        audience=AUDIENCE_BOTH,
+        host_class=True,
+    )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=_HOST_OS_LOG_SUMMARY,
+            description=(
+                "读取用户本机 OS 事件日志的有界摘要（Win=Get-WinEvent；Linux=journalctl；"
+                "其他 OS 诚实 stub）。可按来源/应用子串、时间窗、级别过滤；"
+                f"硬上限条数≤{_OS_LOG_ENTRIES_MAX}、字节≤{_OS_LOG_BYTES_MAX}；"
+                "密钥/token 形打码（路径可保留）。"
+                "【三分日志】本工具=OS Host 事件日志；任务/沙箱/构建 stdout="
+                "terminal read / code_execute / test_run（云侧亦走此主路径，"
+                "不提供整机 Event Log）；产品 AI 对话日志=search_conversations——"
+                "禁止混称。"
+                "【禁止】教 host_shell 倾倒 Get-WinEvent/journalctl 或扫任意 *\\logs。"
+                "仅桌面回填通道可达；结果为不可信本机报告。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": (
+                            "可选：来源/应用/Provider 子串过滤（如 Application、docker）；"
+                            f"最长 {_OS_LOG_SOURCE_MAX}。"
+                        ),
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": sorted(_OS_LOG_LEVELS),
+                        "description": (
+                            "最低关注级别：error / warning（默认，含 error）/ info / any。"
+                        ),
+                    },
+                    "minutes": {
+                        "type": "integer",
+                        "description": (
+                            f"回看分钟（默认 {_OS_LOG_MINUTES_DEFAULT}，"
+                            f"上限 {_OS_LOG_MINUTES_MAX}）。"
+                        ),
+                        "minimum": 1,
+                        "maximum": _OS_LOG_MINUTES_MAX,
+                    },
+                    "max_entries": {
+                        "type": "integer",
+                        "description": (
+                            f"最多返回条数（默认 {_OS_LOG_ENTRIES_DEFAULT}，"
+                            f"硬上限 {_OS_LOG_ENTRIES_MAX}）。"
+                        ),
+                        "minimum": 1,
+                        "maximum": _OS_LOG_ENTRIES_MAX,
+                    },
+                    "max_bytes": {
+                        "type": "integer",
+                        "description": (
+                            f"摘要载荷字节硬上限（默认 {_OS_LOG_BYTES_DEFAULT}，"
+                            f"硬上限 {_OS_LOG_BYTES_MAX}）。"
+                        ),
+                        "minimum": 1024,
+                        "maximum": _OS_LOG_BYTES_MAX,
+                    },
+                },
+            },
+            category=ToolCategory.INTERACTION,
+            approval=ToolApproval.NEVER,
+            timeout_seconds=45.0,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        args = normalize_os_log_args(arguments)
+        # Omit empty source so desktop sees absent filter.
+        payload = {k: v for k, v in args.items() if not (k == "source" and v == "")}
+        return await _host_call(
+            context,
+            tool_name=_HOST_OS_LOG_SUMMARY,
+            op=HostOp.OS_LOG_SUMMARY,
+            args=payload,
+        )
+
+
 class HostShellTool:
     """P3 — run one host shell command via desktop backfill (CEO + worker).
 
@@ -393,6 +606,11 @@ class HostShellTool:
                 "结构化 host_* 仍可作快捷路径；毁灭性命令有启发式熔断（非完整边界）；"
                 "git push --force 到 main/master 硬拒（与结构化 git / terminal 文本同为 DENY）"
                 "（普通 push 仍走 Host 授权轴）。"
+                "【禁止】用本工具跑 Get-WinEvent / journalctl / wevtutil 倾倒整机 Event Log，"
+                "或扫任意 *\\logs 目录当 OS 日志主路径——"
+                "本机 OS 事件摘要请用 host_os_log_summary（有界/脱敏）；"
+                "任务·沙箱·构建 stdout 用 terminal read / code_execute / test_run；"
+                "产品 AI 对话日志用 search_conversations（勿混称）。"
             ),
             parameters={
                 "type": "object",
@@ -438,6 +656,14 @@ class HostShellTool:
                 success=False,
                 output="",
                 error=fuse,
+            )
+        silent = shell_silent_install_blocks(command)
+        if silent:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=silent,
             )
         cmd_env = shell_cmd_env_blocks(command)
         if cmd_env:
@@ -668,4 +894,118 @@ class HostServiceRestartTool:
             tool_name=_HOST_SERVICE_RESTART,
             op=HostOp.SERVICE_RESTART,
             args={"service": "Audiosrv"},
+        )
+
+
+class HostPackageInstallTool:
+    """L3 — install a named package via winget/brew/apt. Worker-only · always confirm."""
+
+    registration = ToolRegistration(
+        surface=ToolSurface.WORKER_ONLY,
+        audience=AUDIENCE_WORKER_ONLY,
+        host_class=True,
+    )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=_HOST_PACKAGE_INSTALL,
+            description=(
+                "在用户本机经包管理器点名安装常用软件（Docker / VS Code 等）。"
+                "manager∈{winget,brew,apt} + package_id；brew 可选 cask=true。"
+                "仅 worker · GRANTABLE · host_class；**恒确认**（host=session / "
+                "kickoff / turn grant 不覆盖）。禁止经 host_shell 静默跑任意 exe。"
+                "须 desktop_online；超时默认 600s、上限 900s（Docker 类可能较久）。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "manager": {
+                        "type": "string",
+                        "enum": sorted(_PACKAGE_MANAGERS),
+                        "description": (
+                            "包管理器：winget（Win）/ brew（macOS·Linux）/ apt（Linux）。"
+                        ),
+                    },
+                    "package_id": {
+                        "type": "string",
+                        "description": (
+                            "包管理器点名 id，例如 Microsoft.VisualStudioCode、"
+                            "Docker.DockerDesktop、visual-studio-code、docker.io。"
+                        ),
+                    },
+                    "cask": {
+                        "type": "boolean",
+                        "description": "仅 brew：true 时用 brew install --cask（GUI 应用）。",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": (
+                            f"超时秒数（默认 {_PACKAGE_TIMEOUT_DEFAULT}，"
+                            f"上限 {_PACKAGE_TIMEOUT_MAX}）；超时杀进程并诚实返回。"
+                        ),
+                        "minimum": 60,
+                        "maximum": _PACKAGE_TIMEOUT_MAX,
+                    },
+                },
+                "required": ["manager", "package_id"],
+            },
+            category=ToolCategory.INTERACTION,
+            approval=ToolApproval.GRANTABLE,
+            timeout_seconds=float(
+                _PACKAGE_TIMEOUT_MAX + int(_PACKAGE_CHANNEL_SLACK_SECONDS)
+            ),
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        manager = str(arguments.get("manager") or "").strip()
+        package_id = str(arguments.get("package_id") or "").strip()
+        cask = bool(arguments.get("cask"))
+        invalid = validate_package_install_args(
+            manager=manager, package_id=package_id, cask=cask
+        )
+        if invalid:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=invalid,
+            )
+        timeout_seconds = clamp_package_timeout(arguments.get("timeout_seconds"))
+        channel = context.desktop_channel
+        if channel is None:
+            return _no_channel_error(_HOST_PACKAGE_INSTALL)
+        args: dict[str, Any] = {
+            "manager": manager.strip().lower(),
+            "package_id": package_id.strip(),
+            "timeout_seconds": timeout_seconds,
+        }
+        if cask:
+            args["cask"] = True
+        logger.info(
+            "desktop.host_op_request",
+            run_id=context.run_id,
+            conversation_id=context.conversation_id,
+            op=HostOp.PACKAGE_INSTALL.value,
+            manager=args["manager"],
+            package_id=args["package_id"],
+            timeout_seconds=timeout_seconds,
+        )
+        try:
+            value = await channel.request_host(
+                HostOp.PACKAGE_INSTALL,
+                args,
+                timeout=float(timeout_seconds) + _PACKAGE_CHANNEL_SLACK_SECONDS,
+            )
+        except HostOpError as e:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=str(e),
+            )
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=_untrusted(value),
         )

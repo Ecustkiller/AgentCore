@@ -42,8 +42,12 @@ COMPOSE=( docker compose -p agentcore \
   -f "$DEPLOY/docker-compose.server.yml" \
   -f "$DEPLOY/docker-compose.app.yml" \
   --env-file "$ENVF" )
-# 与 finish-server.sh 同口径：GVISOR_ENABLED=true 时叠 sandbox，避免重建 api 抹掉 seccomp/apparmor。
-if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|True|TRUE)[[:space:]]*$' "$ENVF"; then
+# 与 finish-server.sh 同口径：默认叠 sandbox；仅 GVISOR_ENABLED=false 时跳过。
+_gvisor_off=0
+if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(false|0|no|False|FALSE)[[:space:]]*$' "$ENVF"; then
+  _gvisor_off=1
+fi
+if [[ "$_gvisor_off" -eq 0 ]]; then
   _sandbox_yml=""
   for _cand in \
     "$DEPLOY/docker-compose.sandbox.yml" \
@@ -54,7 +58,7 @@ if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|Tru
     fi
   done
   if [[ -z "$_sandbox_yml" ]]; then
-    echo "ERROR: GVISOR_ENABLED=true 但找不到 docker-compose.sandbox.yml"
+    echo "ERROR: 云执行默认开但找不到 docker-compose.sandbox.yml（或设 GVISOR_ENABLED=false）"
     exit 1
   fi
   COMPOSE+=(-f "$_sandbox_yml")

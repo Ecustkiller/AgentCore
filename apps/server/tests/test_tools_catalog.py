@@ -18,6 +18,7 @@ from agentcore.tools.builtin import (
 _EXPECTED_NAMES = {
     "web_search",
     "read_url",
+    "download_url",
     "file_read",
     "file_write",
     "file_append",
@@ -67,6 +68,7 @@ _DELEGATED_MUTATION_NAMES = {
     "md_to_docx",
     "md_to_pdf",
     "archive_extract",
+    "download_url",
     "code_execute",
 }
 
@@ -150,6 +152,7 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
         "md_to_docx",
         "md_to_pdf",
         "archive_extract",
+        "download_url",
     }
     assert "code_execute" not in names
     # Exactly the delegated mutation set minus code_execute (stays in lockstep).

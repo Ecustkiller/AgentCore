@@ -428,6 +428,28 @@ def test_host_shell_fuse_covered_destructive_denies(command: str, rule_id: str):
     assert "硬拒" in hit.reason or "已硬拒" in hit.reason
 
 
+_SILENT_INSTALL_SAMPLES: tuple[str, ...] = (
+    r"msiexec /i Setup.msi /quiet",
+    r".\Setup.exe /S",
+    r"Start-Process foo.exe -ArgumentList '/qn'",
+    r"Installer.exe /VERYSILENT",
+)
+
+
+@pytest.mark.parametrize("command", _SILENT_INSTALL_SAMPLES)
+def test_host_shell_silent_install_denies(command: str):
+    """桶4: silent arbitrary installer heuristics on host_shell → DENY."""
+    from agentcore.tools.builtin.host import shell_silent_install_blocks
+
+    assert shell_silent_install_blocks(command), command
+    hit = evaluate_tool_call("host_shell", {"command": command})
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "host_shell.silent_install"
+    assert "并非完整拦截" in hit.reason
+    assert "host_package_install" in hit.reason
+
+
 @pytest.mark.parametrize("command,rule_id", _FUSE_SUBSET_DENY_SAMPLES)
 def test_terminal_fuse_covered_shapes_still_force_approval(command: str, rule_id: str):
     """terminal has no host fuse — same shapes stay FORCE_APPROVAL."""

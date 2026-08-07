@@ -45,9 +45,14 @@ elif ! docker pull "$IMAGE" 2>/dev/null; then
 fi
 
 COMPOSE=( docker compose -p agentcore -f "$DEPLOY/docker-compose.server.yml" -f "$DEPLOY/docker-compose.app.yml" --env-file "$ENVF" )
-# gVisor 灰度：env 开了就叠 sandbox 层。快照目录若缺 sandbox 则回退仓库 deploy/
-# （remote-build-deploy 已 checkout 的 tree）。
-if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|True|TRUE)[[:space:]]*$' "$ENVF"; then
+# gVisor 默认开（代码/内测默认 true）：除非 env 显式 GVISOR_ENABLED=false，否则叠 sandbox。
+# 快照目录若缺 sandbox 则回退仓库 deploy/（remote-build-deploy 已 checkout 的 tree）。
+_gvisor_off=0
+if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(false|0|no|False|FALSE)[[:space:]]*$' "$ENVF"; then
+  _gvisor_off=1
+  echo "gVisor sandbox overlay OFF（GVISOR_ENABLED=false 紧急关闭）"
+fi
+if [[ "$_gvisor_off" -eq 0 ]]; then
   _sandbox_yml=""
   for _cand in \
     "$DEPLOY/docker-compose.sandbox.yml" \
@@ -58,7 +63,7 @@ if grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|Tru
     fi
   done
   if [[ -z "$_sandbox_yml" ]]; then
-    echo "ERROR: GVISOR_ENABLED=true 但找不到 docker-compose.sandbox.yml"
+    echo "ERROR: 云执行默认开但找不到 docker-compose.sandbox.yml（或设 GVISOR_ENABLED=false）"
     exit 1
   fi
   COMPOSE+=(-f "$_sandbox_yml")

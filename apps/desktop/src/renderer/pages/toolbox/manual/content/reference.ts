@@ -25,8 +25,8 @@ export const referenceChapter: ManualChapterContent = {
               desc: "平台自带，所有 Agent 开箱即用——读文件、搜索、执行等。",
             },
             {
-              title: "白板（已可用）",
-              desc: "工具箱里的独立创作工具：自由摆元素、读图、和团队一起画。",
+              title: "白板（画布可用）",
+              desc: "工具箱里可自由摆元素；AI 指挥白板即将上线。",
             },
             {
               title: "其他创作工具（即将上线）",
@@ -262,7 +262,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "画布是对话里的跨回合空间视图——把多轮协作图画在一张可平移的空间上；白板是工具箱里的独立创作工具，用来自由摆元素、读图协作。",
+                  text: "画布是对话里的跨回合空间视图——把多轮协作图画在一张可平移的空间上；白板是工具箱里的独立创作工具，画布可自由摆元素，AI 指挥白板即将上线。",
                 },
               ],
             },
@@ -587,7 +587,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "工具箱里的独立创作工具（已可用）——自由摆元素、读图协作。≠ 画布。",
+                  text: "工具箱里的独立创作工具——画布可用，自由摆元素；AI 指挥白板即将上线。≠ 画布。",
                 },
               ],
             },

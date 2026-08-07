@@ -62,12 +62,15 @@ class HostOp(StrEnum):
     POWER = "host_power"
     NETWORK_SUMMARY = "host_network_summary"
     APPS = "host_apps"
+    # L1 bounded OS event-log summary (CEO+worker · NEVER · 禁整机倾倒)
+    OS_LOG_SUMMARY = "host_os_log_summary"
     # P3 general host shell (CEO+worker · GRANTABLE · host_class · 禁 kickoff)
     SHELL = "host_shell"
     OPEN_SETTINGS = "host_open_settings"
     # L3 controlled whitelist (worker · GRANTABLE · host_class only)
     AUDIO_SET_DEFAULT = "host_audio_set_default"
     SERVICE_RESTART = "host_service_restart"
+    PACKAGE_INSTALL = "host_package_install"
 
 
 class McpOp(StrEnum):

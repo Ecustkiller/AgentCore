@@ -171,6 +171,8 @@ def _load_declared_tools() -> tuple[type, ...]:
         HostInfoTool,
         HostNetworkSummaryTool,
         HostOpenSettingsTool,
+        HostOsLogSummaryTool,
+        HostPackageInstallTool,
         HostPingTool,
         HostPowerTool,
         HostServiceRestartTool,
@@ -188,6 +190,7 @@ def _load_declared_tools() -> tuple[type, ...]:
     from agentcore.tools.builtin.terminal import TerminalTool
     from agentcore.tools.builtin.test_run import TestRunTool
     from agentcore.tools.builtin.update_project_profile import UpdateProjectProfileTool
+    from agentcore.tools.builtin.web.download_url import DownloadUrlTool
     from agentcore.tools.builtin.web.read_url import ReadUrlTool
     from agentcore.tools.builtin.web.search import WebSearchTool
 
@@ -209,6 +212,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         MdToDocxTool,
         MdToPdfTool,
         ArchiveExtractTool,
+        DownloadUrlTool,
         GrepTool,
         CodeSearchTool,
         CodeDiagnosticsTool,
@@ -232,6 +236,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         HostPowerTool,
         HostNetworkSummaryTool,
         HostAppsTool,
+        HostOsLogSummaryTool,
         HostShellTool,
         # C1 silent read-only external mount (CEO+worker · desktop_online only)
         ExternalMountReadonlyTool,
@@ -247,6 +252,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         # Host L3 受控白名单 (GRANTABLE · worker only · host_class · 禁 execution_class)
         HostAudioSetDefaultTool,
         HostServiceRestartTool,
+        HostPackageInstallTool,
         # L3 团队浏览器截图（worker-only · browser_class · GRANTABLE）
         BrowserScreenshotTool,
         # privacy-gated worker log tools (manual_wire; not auto-registered)

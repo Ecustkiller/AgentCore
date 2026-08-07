@@ -34,6 +34,9 @@ class ProductNoticeRepository:
         surface: str,
         dismiss_policy: str,
         created_by: str,
+        card_template: str = "service",
+        summary: str | None = None,
+        cover_url: str | None = None,
         cta_label: str | None = None,
         cta_url: str | None = None,
         start_at: datetime | None = None,
@@ -47,6 +50,9 @@ class ProductNoticeRepository:
             surface=surface,
             dismiss_policy=dismiss_policy,
             created_by=created_by,
+            card_template=card_template,
+            summary=summary,
+            cover_url=cover_url,
             cta_label=cta_label,
             cta_url=cta_url,
             start_at=start_at,
@@ -94,6 +100,9 @@ class ProductNoticeRepository:
         severity: str | None = None,
         surface: str | None = None,
         dismiss_policy: str | None = None,
+        card_template: str | None = None,
+        summary: str | None | object = ...,
+        cover_url: str | None | object = ...,
         cta_label: str | None | object = ...,
         cta_url: str | None | object = ...,
         start_at: datetime | None | object = ...,
@@ -110,6 +119,12 @@ class ProductNoticeRepository:
             values["surface"] = surface
         if dismiss_policy is not None:
             values["dismiss_policy"] = dismiss_policy
+        if card_template is not None:
+            values["card_template"] = card_template
+        if summary is not ...:
+            values["summary"] = summary
+        if cover_url is not ...:
+            values["cover_url"] = cover_url
         if cta_label is not ...:
             values["cta_label"] = cta_label
         if cta_url is not ...:

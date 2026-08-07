@@ -1,10 +1,10 @@
 """Shared project-verify CLI detection for ``code_execute`` → ``test_run`` routing.
 
-Models often stuff ``npm install`` / ``tsc`` / ``npm test`` into ``code_execute``,
-which hard-caps at 60s. Same shape as :mod:`long_running` (dev servers → terminal):
-hard refuse with ``contract_failure``, tip the bounded verify tool. Keep the list
-the single source of truth. Patterns are command-shaped so imports like
-``from 'vitest'`` / ``from 'vite'`` do not false-positive.
+Models often stuff ``npm install`` / ``pip install`` / ``tsc`` / ``npm test`` into
+``code_execute``, which hard-caps at 60s. Same shape as :mod:`long_running`
+(dev servers → terminal): hard refuse with ``contract_failure``, tip the bounded
+verify tool. Keep the list the single source of truth. Patterns are command-shaped
+so imports like ``from 'vitest'`` / ``from 'vite'`` do not false-positive.
 """
 
 from __future__ import annotations
@@ -15,6 +15,10 @@ _PROJECT_VERIFY_COMMAND_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
         r"\b(?:npm|pnpm|yarn|bun)\s+(?:ci|install)\b",
+        r"\b(?:pip3?|poetry)\s+(?:install|add)\b",
+        r"\buv\s+(?:sync|add)\b",
+        r"\buv\s+pip\s+install\b",
+        r"\b(?:python3?|py)\s+-m\s+pip\s+install\b",
         r"\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|build|typecheck|lint|ci)\b",
         r"\b(?:npx|bunx)\s+tsc\b",
         r"\b(?:pnpm|yarn)\s+exec\s+tsc\b",
@@ -55,7 +59,8 @@ def project_verify_redirect_message(
         f"禁止用 code_execute 跑项目级慢验证（检测到：{matched}）。"
         "本工具约 60s 硬顶，不适配 install / tsc / 全量 test·build。"
         "请改用 test_run（有界项目验证，分钟级预算）："
-        "装包用 check=install（或 check=command + `npm|pnpm|yarn install|ci`，"
-        "子目录用 --prefix/--dir 或 working_directory，禁止 cd&&）；"
+        "装包用 check=install（或 check=command + `npm|pnpm|yarn install|ci` / "
+        "`uv sync` / `pip install` / `poetry install`，"
+        "子目录用 --prefix/--dir/--directory 或 working_directory，禁止 cd&&）；"
         "验绿用 check=test|typecheck|build，或 check=command 填同一命令。"
     )

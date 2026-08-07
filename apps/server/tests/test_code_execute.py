@@ -6,6 +6,8 @@ view (stderr in red, exit-code badge) instead of parsing "stdout:\\n…" text. A
 non-zero exit must still produce a display (so a failed run surfaces its stderr).
 """
 
+import pytest
+
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
@@ -185,6 +187,11 @@ def test_project_verify_command_match_routes_to_test_run():
 
     assert project_verify_command_match("npm install") is not None
     assert project_verify_command_match("pnpm install") is not None
+    assert project_verify_command_match("pip install -r requirements.txt") is not None
+    assert project_verify_command_match("uv sync") is not None
+    assert project_verify_command_match("uv pip install requests") is not None
+    assert project_verify_command_match("poetry install") is not None
+    assert project_verify_command_match("python -m pip install flask") is not None
     assert project_verify_command_match("npx tsc --noEmit") is not None
     assert project_verify_command_match("tsc --noEmit") is not None
     assert project_verify_command_match("npm run build") is not None
@@ -195,6 +202,7 @@ def test_project_verify_command_match_routes_to_test_run():
     assert project_verify_command_match("import { defineConfig } from 'vite'") is None
     assert project_verify_command_match("from 'vitest'") is None
     assert project_verify_command_match("npm run dev") is None  # long_running owns this
+    assert project_verify_command_match("import pip") is None
 
 
 async def test_code_execute_blocks_project_verify_without_sandbox():
@@ -221,6 +229,34 @@ async def test_code_execute_blocks_npm_install_to_test_run():
     )
     result = await CodeExecuteTool(location="server").execute(
         {"code": "npm install", "language": "bash"},
+        _ctx(backend),
+    )
+
+    assert result.success is False
+    assert result.contract_failure is True
+    assert result.metadata.get("code") == "project_verify_redirect"
+    err = result.error or ""
+    assert "test_run" in err
+    assert "check=install" in err
+    assert backend.requests == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "pip install -r requirements.txt",
+        "uv sync",
+        "uv pip install requests",
+        "poetry install",
+        "python -m pip install flask",
+    ],
+)
+async def test_code_execute_blocks_python_install_to_test_run(code: str):
+    backend = _FakeBackend(
+        ExecutionResult(success=True, stdout="should-not-run\n", stderr="", exit_code=0, duration_ms=1)
+    )
+    result = await CodeExecuteTool(location="server").execute(
+        {"code": code, "language": "bash"},
         _ctx(backend),
     )
 

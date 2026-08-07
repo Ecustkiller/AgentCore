@@ -18,6 +18,9 @@ function notice(
   return {
     title: "t",
     body: "b",
+    card_template: "service",
+    cover_url: null,
+    summary: null,
     cta_label: null,
     cta_url: null,
     dismiss_policy: "once",

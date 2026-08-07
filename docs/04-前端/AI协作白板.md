@@ -16,6 +16,8 @@ skip_if:
 
 真白板（无限画布）+ **AI 团队进板**（读图 / 摆元素 / 照白板干活）。人主画、AI 助手。**不做** ConversationCanvas 升级版、不做独立 app。空间 JSON 与「文本典范」不冲突——scene 本质空间，文本表达不了。重叠面（团队图/mermaid/文件列表）不重做。
 
+**前台入口（现状）**：手动画布可用；老板命令栏与选区 AI 动作（整理 / 让团队实现 / 迭代）暂下线，UI 标「即将上线」。`sendBoardTurn` / `board_ops` / `board_read` 协议与注册保留，恢复时不开新契约。工具箱文案：「画布可用 · AI 指挥即将上线」。
+
 ## 关键决策
 
 | # | 决策 |
@@ -26,6 +28,7 @@ skip_if:
 | AI 写 | 结构化 `board_ops`（catalog 工具），非裸 REST、非整图生成 |
 | 读图 | 选区混合：结构→JSON，手绘/截图→栅格化→`VisionReader` |
 | 团队 | 复用 `sendBoardTurn` + CEO `delegate`/`debate`；**零新编排/fold** |
+| 前台闸 | AI 入口暂关（命令栏 + 选区 AI）；画布与后端能力保留 |
 
 **否决**：独立 web app；stock Excalidraw（美学+非原生节点）；tldraw（授权）；Fork Excalidraw（merge 税）；侧栏直达；`briefRegion` 原生形状（brief=选区/`frame`）。
 

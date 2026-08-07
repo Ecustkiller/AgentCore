@@ -1,0 +1,130 @@
+{
+  "name": "carrier_means_consult_html_org_tree",
+  "description": "载体/手段顾问：极宽组织树 HTML 次优载体短对齐 → 推荐折叠/分区 + 保留仍按原样 HTML",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；更适合可折叠树或按部门分区，也可仍按原样 HTML。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "checkpoint_required",
+      "payload": {
+        "checkpoint_id": "cp_carrier_html_tree",
+        "conversation_id": "conv_demo",
+        "question": "组织树 HTML 用哪种呈现？",
+        "context": "次优载体短对齐：框架可保，呈现建议改；坚持原样静态 HTML 亦可。",
+        "assumptions": [],
+        "questions": [
+          {
+            "id": "q0",
+            "prompt": "选哪种 HTML 呈现？",
+            "kind": "choice",
+            "multiple": false,
+            "default": "可折叠树 HTML",
+            "options": [
+              {
+                "label": "可折叠树 HTML",
+                "detail": "保留层级，默认收拢便于看全",
+                "recommended": true
+              },
+              {
+                "label": "按部门分区多页 HTML",
+                "detail": "框架不变，分页降低横向溢出"
+              },
+              {
+                "label": "仍按原样静态 HTML 1:1",
+                "detail": "只翻译、不改框架，接受裁切/滚动"
+              }
+            ]
+          }
+        ],
+        "intent": "decision"
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "paused",
+        "usage": {
+          "input_tokens": 1800,
+          "output_tokens": 140,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    }
+  ],
+  "projected": {
+    "status": "paused",
+    "finishReason": "paused",
+    "content": "",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "checkpoint",
+        "checkpoint_id": "cp_carrier_html_tree"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [],
+    "runs": [],
+    "acts": [],
+    "progress": {
+      "completed": 0,
+      "total": 0
+    },
+    "interactions": [
+      {
+        "kind": "ask_user",
+        "id": "cp_carrier_html_tree",
+        "status": "pending",
+        "question": "组织树 HTML 用哪种呈现？",
+        "context": "次优载体短对齐：框架可保，呈现建议改；坚持原样静态 HTML 亦可。"
+      }
+    ],
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "CNY",
+      "pricing_source": "curated"
+    },
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": null,
+    "turnWarning": null,
+    "teamNotes": [],
+    "userInterjections": []
+  }
+}

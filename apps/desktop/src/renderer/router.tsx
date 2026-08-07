@@ -79,6 +79,11 @@ export const router = createHashRouter([
       { path: "whiteboard/:boardId", element: <WhiteboardCanvasPage /> },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
+      // Official product_notice in-app detail (官方号双模板 · 图文/长文).
+      {
+        path: "messages/:chatId/notices/:noticeId",
+        element: <MessagesPage />,
+      },
       { path: "toolbox", element: <ToolboxPage /> },
       { path: "toolbox/tools", element: <ToolsPage /> },
       { path: "toolbox/guidelines", element: <GuidelinesPage /> },

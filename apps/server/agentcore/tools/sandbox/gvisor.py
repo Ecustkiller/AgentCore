@@ -9,10 +9,10 @@ Execution model (安全权限与治理.md §五, as-built):
   copy-out.
 - **install 专用例外** (``registry_egress=True``): rw-bind the persistent
   workspace (``request.cwd`` / DATA_DIR workspaces) at ``/workspace`` — skip
-  staging copy-out and the whole-tree base64 wrap. ``node_modules`` lands on
-  disk directly; short-lived sandbox only runs the install command (+ netns /
+  staging copy-out and the whole-tree base64 wrap. ``node_modules`` / ``.venv``
+  land on disk directly; short-lived sandbox only runs the install command (+ netns /
   ``/pkg-cache``). Why the exception: install trees are too large for
-  staging↔base64 round-trip, and the product needs nm on the durable workspace.
+  staging↔base64 round-trip, and the product needs them on the durable workspace.
   Non-install writable execution keeps the staging model.
 - **灰度护栏**: a process-global slot limiter caps concurrent executions
   (``GVISOR_MAX_CONCURRENT_EXECUTIONS``), with a bounded grace wait before an
@@ -657,7 +657,7 @@ class GVisorSandbox:
         process_args = self._build_command(request, script_path)
         if install_workspace_rw:
             # Install-only: durable workspace rw-bind. Staging/tmpfs + whole-tree
-            # base64 wrap cannot carry node_modules; sandbox is short-lived for
+            # base64 wrap cannot carry node_modules / .venv; sandbox is short-lived for
             # the install command only. Non-install writable stays below.
             mounts.append(
                 {

@@ -5,6 +5,7 @@
  *   pnpm publish:notice -- --title "…" --body "…" [--severity high] [--surface both|modal]
  *   [--dismiss once] [--end-hours N|none] [--body-file path] [--title-file path]
  *   [--cta-label "…"] [--cta-url "https://…"]
+ *   [--card-template service|article] [--summary "…"] [--cover-url "https://…"]
  *
  * Uses DEPLOY_SSH_* from deploy/.env.deploy.local. Runs create+publish inside
  * the live api container (no admin password needed). Template copy →
@@ -39,10 +40,13 @@ const endHours =
     : Number(endHoursRaw);
 const ctaLabel = arg("cta-label").trim();
 const ctaUrl = arg("cta-url").trim();
+const cardTemplate = arg("card-template", "service").trim() || "service";
+const summary = arg("summary").trim();
+const coverUrl = arg("cover-url").trim();
 
 if (!title || !body) {
   console.error(
-    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path] [--title-file path] [--cta-label "…"] [--cta-url "https://…"]',
+    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path] [--title-file path] [--cta-label "…"] [--cta-url "https://…"] [--card-template service|article] [--summary "…"] [--cover-url "https://…"]',
   );
   process.exit(1);
 }
@@ -52,6 +56,14 @@ if (endHours != null && (!Number.isFinite(endHours) || endHours <= 0)) {
 }
 if ((ctaLabel && !ctaUrl) || (!ctaLabel && ctaUrl)) {
   console.error("--cta-label and --cta-url must be set together");
+  process.exit(1);
+}
+if (cardTemplate !== "service" && cardTemplate !== "article") {
+  console.error("--card-template must be service or article");
+  process.exit(1);
+}
+if (cardTemplate === "article" && !summary) {
+  console.error("--summary is required when --card-template=article");
   process.exit(1);
 }
 
@@ -65,6 +77,9 @@ const payload = JSON.stringify({
   end_hours: endHours,
   cta_label: ctaLabel || null,
   cta_url: ctaUrl || null,
+  card_template: cardTemplate,
+  summary: summary || null,
+  cover_url: coverUrl || null,
 });
 
 const deployDir = process.env.AGENTCORE_DEPLOY_DIR?.trim() || "";
@@ -121,6 +136,9 @@ async def main() -> None:
             dismiss_policy=SPEC["dismiss"],
             created_by=str(admin.user_id),
             end_at=end_at,
+            card_template=SPEC.get("card_template") or "service",
+            summary=SPEC.get("summary"),
+            cover_url=SPEC.get("cover_url"),
             cta_label=SPEC.get("cta_label"),
             cta_url=SPEC.get("cta_url"),
         )
@@ -143,6 +161,9 @@ async def main() -> None:
                 body=published.body,
                 severity=published.severity,
                 surface=published.surface,
+                card_template=published.card_template or "service",
+                summary=published.summary,
+                cover_url=published.cover_url,
                 cta_label=published.cta_label,
                 cta_url=published.cta_url,
             )

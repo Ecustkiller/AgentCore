@@ -111,9 +111,9 @@ gh release edit android-v<ver> --repo Lawofall/AgentCore-releases --draft=false
 node deploy/scripts/sync-release-cdn.mjs --android apps/mobile/release/<ver>/AgentCore-<ver>-android.apk --version <ver>
 ```
 
-7. App 内更新提示：原生壳拉 `https://downloads…/android/latest.json`，与本地 `clientVersion()` 做 semver 比较；仅 Android；`dev` 不提示。官网下载按钮另走 GitHub Releases 资产探测。
+7. App 内更新提示：原生壳用 CapacitorHttp 拉 `https://downloads…/android/latest.json`（绕过 WebView CORS），与本地 `clientVersion()` 做 semver 比较；仅 Android；`dev` 不提示。官网下载按钮另走 GitHub Releases 资产探测。下载站对 `latest.json` 须有公开 CORS（`pnpm sync:release-cdn --install-nginx`），以便旧壳 WebView `fetch` 仍可用。
 
-8. **生产 CORS**：后端 `CORS_ALLOW_ORIGINS` 须含 `https://localhost`（及 `capacitor://localhost` / `http://localhost`）。缺则壳内「无法连接后端」。补洞脚本：`node deploy/scripts/add-capacitor-cors.mjs`。
+8. **生产 API CORS**：后端 `CORS_ALLOW_ORIGINS` 须含 `https://localhost`（及 `capacitor://localhost` / `http://localhost`）。缺则壳内「无法连接后端」。补洞脚本：`node deploy/scripts/add-capacitor-cors.mjs`。
 
 ## FCM 推送（原生）
 

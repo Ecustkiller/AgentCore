@@ -31,6 +31,15 @@ def _reject_modal_never(*, surface: str, dismiss_policy: str) -> None:
         )
 
 
+def _reject_article_without_summary(*, card_template: str, summary: str | None) -> None:
+    """``article`` publish requires a non-empty trimmed summary (card face)."""
+    if card_template == "article" and not (summary or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="article card_template requires summary",
+        )
+
+
 def _summary(row) -> NoticeSummary:
     return NoticeSummary(
         id=row.id,
@@ -40,6 +49,9 @@ def _summary(row) -> NoticeSummary:
         surface=row.surface,
         status=row.status,
         dismiss_policy=row.dismiss_policy,
+        card_template=row.card_template or "service",
+        summary=row.summary,
+        cover_url=row.cover_url,
         cta_label=row.cta_label,
         cta_url=row.cta_url,
         start_at=row.start_at,
@@ -79,6 +91,9 @@ async def create_notice(
         surface=body.surface,
         dismiss_policy=body.dismiss_policy,
         created_by=admin.user_id,
+        card_template=body.card_template or "service",
+        summary=body.summary,
+        cover_url=body.cover_url,
         cta_label=body.cta_label,
         cta_url=body.cta_url,
         start_at=body.start_at,
@@ -117,6 +132,9 @@ async def update_notice(
         severity=body.severity if "severity" in fields else None,
         surface=body.surface if "surface" in fields else None,
         dismiss_policy=body.dismiss_policy if "dismiss_policy" in fields else None,
+        card_template=body.card_template if "card_template" in fields else None,
+        summary=body.summary if "summary" in fields else ...,
+        cover_url=body.cover_url if "cover_url" in fields else ...,
         cta_label=body.cta_label if "cta_label" in fields else ...,
         cta_url=body.cta_url if "cta_url" in fields else ...,
         start_at=body.start_at if "start_at" in fields else ...,
@@ -145,6 +163,10 @@ async def publish_notice(
         raise HTTPException(status_code=404, detail="Notice not found")
     if existing.status == "archived":
         raise HTTPException(status_code=409, detail="Archived notices cannot be published")
+    _reject_article_without_summary(
+        card_template=existing.card_template or "service",
+        summary=existing.summary,
+    )
     first_publish = existing.status != "published"
     row = await repo.publish(notice_id)
     if row is None:
@@ -156,6 +178,9 @@ async def publish_notice(
             body=row.body,
             severity=row.severity,
             surface=row.surface,
+            card_template=row.card_template or "service",
+            summary=row.summary,
+            cover_url=row.cover_url,
             cta_label=row.cta_label,
             cta_url=row.cta_url,
         )

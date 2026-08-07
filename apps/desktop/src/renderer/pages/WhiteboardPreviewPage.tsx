@@ -91,9 +91,6 @@ export function WhiteboardPreviewPage() {
               initialElements={current.elements}
               initialSelectedIds={current.selectedIds}
               onChange={() => {}}
-              onOrganizeSelection={() => {}}
-              onImplementSelection={() => {}}
-              onIterateArtifact={() => {}}
             />
           ) : null}
         </div>

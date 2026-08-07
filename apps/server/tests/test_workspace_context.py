@@ -135,6 +135,7 @@ def test_cloud_scratch_facts():
     assert "本机草稿" in out
     assert "本会话发绑定卡" not in out  # 旧口径：已改为意图分流
     assert "code_execute=未装配" in out
+    assert "package_install=未装配" in out
     assert "terminal=未装配" in out
     assert "browser=未装配" in out
     assert "local_open=未装配" in out
@@ -149,6 +150,8 @@ def test_cloud_scratch_facts():
     assert "browser=未装配" in out
     assert "勿假装" in out or "勿调用 browser_*" in out
     assert "host_info" in out or "host_audio" in out or "本机 Host 指引" in out
+    assert "三分日志" in out
+    assert "host_os_log_summary" in out
     # 案 20260803-image-gen-byok-egress-boundary A：云沙箱无任意 HTTPS 出口事实行
     assert "出站网络" in out
     assert "--network=none" in out
@@ -205,6 +208,7 @@ def test_local_remote_channel_facts():
     assert "执行位置：用户本机（经桌面通道遥控）" in out
     assert "本地目录（根标签 `MyProject`）" in out
     assert "code_execute=已装配" in out
+    assert "package_install=已装配" in out
     assert "terminal=已装配" in out
     assert "browser=未装配" in out
     assert "local_open=已装配" in out
@@ -283,6 +287,31 @@ def test_browser_unassembled_guide_mentions_bind_or_sandbox():
     assert "用浏览器打开" in out
     assert "非右坞浏览器" in out
     assert "静默" in out or "假装" in out
+    # 缺能力 → 同轮可开工排序；人手为一等路径（禁「仅补救/非主路径」）
+    assert "同轮可开工" in out
+    assert "手脑" in out
+    assert "一等" in out or "非补救" in out
+    assert "禁多轮复读" in out or "多轮复读" in out
+    assert "补救，但不是" not in out
+    assert "不是接管流程" not in out
+
+
+def test_host_mcp_unassembled_same_round_workable():
+    """host/mcp 未装配亦同轮可开工排序，禁只硬否。"""
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=False,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+        browser_enabled=False,
+    )
+    assert "host=未装配" in out
+    assert "mcp=未装配" in out
+    assert "同轮可开工" in out
+    assert "手脑" in out
+    assert "禁多轮复读" in out or "多轮复读" in out
+    assert "勿假装" in out or "勿调用 host_*" in out
+    assert "勿调用 mcp_*" in out
 
 
 def test_sidecar_local_without_channel():
@@ -479,3 +508,89 @@ def test_git_absent_soft_tip_does_not_change_should_kickoff():
     # Same inputs as a normal multi-worker plan-preview kickoff — git tip is orthogonal.
     assert should_kickoff(plan_preview=True, local_gate=True, axes=axes) is True
     assert should_kickoff(plan_preview=False, local_gate=False, axes=axes) is False
+
+
+def test_cloud_package_install_tracks_registry_egress(monkeypatch):
+    """云端：code_execute 已装配仍可 package_install=未装配（egress 假）；egress 真则拆位翻开。"""
+    out_off = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+        package_install_enabled=False,
+    )
+    assert "code_execute=已装配" in out_off
+    assert "package_install=未装配" in out_off
+    assert "能跑代码 ≠ 能装依赖" in out_off or "registry_egress" in out_off
+
+    out_on = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+        package_install_enabled=True,
+    )
+    assert "code_execute=已装配" in out_on
+    assert "package_install=已装配" in out_on
+    assert "allowlist egress" in out_on or "netns" in out_on
+
+    monkeypatch.setattr(
+        "agentcore.tools.sandbox.egress.registry_egress_available",
+        lambda: False,
+    )
+    out_probe_off = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+    )
+    assert "package_install=未装配" in out_probe_off
+
+    monkeypatch.setattr(
+        "agentcore.tools.sandbox.egress.registry_egress_available",
+        lambda: True,
+    )
+    out_probe_on = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+    )
+    assert "package_install=已装配" in out_probe_on
+
+
+def test_local_package_install_follows_execution_class():
+    """本机：装依赖跟执行类，不吃主机 registry_egress。"""
+    out = build_workspace_context(
+        _FakeBackend("local", root_label="MyProject", channel=object()),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=True,
+        browser_enabled=False,
+    )
+    assert "code_execute=已装配" in out
+    assert "package_install=已装配" in out
+    assert "不吃主机 registry_egress" in out
+
+    out_off = build_workspace_context(
+        _FakeBackend("local"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "package_install=未装配" in out_off
+
+
+def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
+    """样例 GVISOR_TIMEOUT_MAX_SECONDS 勿钉 60（会夹死外环 600s verify）。"""
+    from pathlib import Path
+
+    roots = [
+        Path(__file__).resolve().parents[3] / "deploy" / "config" / "production.env.example",
+        Path(__file__).resolve().parents[1] / ".env.example",
+    ]
+    for path in roots:
+        text = path.read_text(encoding="utf-8")
+        assert "GVISOR_TIMEOUT_MAX_SECONDS=60" not in text
+        assert "GVISOR_TIMEOUT_MAX_SECONDS=630" in text
+        assert "夹死" in text or "外环" in text

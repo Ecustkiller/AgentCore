@@ -36,6 +36,18 @@ const SHELL_FUSE_PATTERNS: RegExp[] = [
   /\bcipher\s+\/w:/i,
 ];
 
+/**
+ * Silent / unattended installer heuristics — not a complete boundary (桶4).
+ * Keep in rough lockstep with server ``shell_silent_install_blocks``.
+ */
+const SHELL_SILENT_INSTALL_PATTERNS: RegExp[] = [
+  /\bmsiexec\b.*(?:\/quiet|\/qn\b|\/passive\b)/i,
+  /\bStart-Process\b[\s\S]{0,200}(?:\/[Ss]\b|\/silent\b|\/quiet\b|\/qn\b|\/verysilent\b)/i,
+  /\.(?:exe|msi)\b[^\n]{0,120}(?:\/[Ss]\b|\/silent\b|\/verysilent\b|\/quiet\b|\/qn\b)/i,
+  /\/VERYSILENT\b/i,
+  /\b(?:curl|wget|Invoke-WebRequest)\b[\s\S]{0,160}\.(?:exe|msi)\b/i,
+];
+
 function shellFuseBlocks(command: string): string | null {
   const text = command.trim();
   if (!text) return null;
@@ -44,6 +56,21 @@ function shellFuseBlocks(command: string): string | null {
       return (
         "host_shell 熔断：命令匹配毁灭性启发式黑名单（格式化磁盘 / " +
         "rm -rf / / shutdown 等）。此为兜底、非完整安全边界。"
+      );
+    }
+  }
+  return null;
+}
+
+export function shellSilentInstallBlocks(command: string): string | null {
+  const text = command.trim();
+  if (!text) return null;
+  for (const pat of SHELL_SILENT_INSTALL_PATTERNS) {
+    if (pat.test(text)) {
+      return (
+        "host_shell 熔断：命令匹配静默安装启发式（msiexec /quiet、Setup /S、" +
+        "Start-Process quiet 等）。此为启发式兜底，并非完整拦截；" +
+        "请改用结构化 host_package_install（winget/brew/apt 点名包）。"
       );
     }
   }
@@ -98,6 +125,10 @@ export async function hostShell(
   const fuse = shellFuseBlocks(cmd);
   if (fuse) {
     return err(fuse, "HostShellFuse");
+  }
+  const silent = shellSilentInstallBlocks(cmd);
+  if (silent) {
+    return err(silent, "HostShellSilentInstall");
   }
   const idiom = shellPowershellIdiomBlocks(cmd);
   if (idiom) {

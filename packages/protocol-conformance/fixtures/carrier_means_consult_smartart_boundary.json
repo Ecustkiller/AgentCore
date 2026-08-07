@@ -1,0 +1,130 @@
+{
+  "name": "carrier_means_consult_smartart_boundary",
+  "description": "载体/手段顾问：Word SmartArt 能力边界前置 → 诚实做不到 + recommended 可交替代 ask（含仍要 Word 文字版）",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "Word 里做不出带框连线的图形 SmartArt 组织架构图；我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "checkpoint_required",
+      "payload": {
+        "checkpoint_id": "cp_carrier_smartart",
+        "conversation_id": "conv_demo",
+        "question": "组织架构图用哪种可交形态？",
+        "context": "能力边界前置：图形 SmartArt 做不到；推荐更适合的载体，仍可坚持 Word 文字版。",
+        "assumptions": [],
+        "questions": [
+          {
+            "id": "q0",
+            "prompt": "选哪种可交形态？",
+            "kind": "choice",
+            "multiple": false,
+            "default": "交互 HTML 组织图（可折叠）",
+            "options": [
+              {
+                "label": "交互 HTML 组织图（可折叠）",
+                "detail": "宽树也能看全",
+                "recommended": true
+              },
+              {
+                "label": "PPT 带框连线版",
+                "detail": "可打开编辑的图形页"
+              },
+              {
+                "label": "Word 文本层级版（仍要 Word）",
+                "detail": "缩进/表格文字版，非图形 SmartArt"
+              }
+            ]
+          }
+        ],
+        "intent": "decision"
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "paused",
+        "usage": {
+          "input_tokens": 1800,
+          "output_tokens": 140,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    }
+  ],
+  "projected": {
+    "status": "paused",
+    "finishReason": "paused",
+    "content": "",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "checkpoint",
+        "checkpoint_id": "cp_carrier_smartart"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [],
+    "runs": [],
+    "acts": [],
+    "progress": {
+      "completed": 0,
+      "total": 0
+    },
+    "interactions": [
+      {
+        "kind": "ask_user",
+        "id": "cp_carrier_smartart",
+        "status": "pending",
+        "question": "组织架构图用哪种可交形态？",
+        "context": "能力边界前置：图形 SmartArt 做不到；推荐更适合的载体，仍可坚持 Word 文字版。"
+      }
+    ],
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "CNY",
+      "pricing_source": "curated"
+    },
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": null,
+    "turnWarning": null,
+    "teamNotes": [],
+    "userInterjections": []
+  }
+}

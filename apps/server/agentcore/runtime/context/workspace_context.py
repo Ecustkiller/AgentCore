@@ -165,6 +165,7 @@ def build_workspace_context(
     code_execute_enabled: bool | None = None,
     terminal_enabled: bool | None = None,
     browser_enabled: bool | None = None,
+    package_install_enabled: bool | None = None,
     exec_languages: list[str] | tuple[str, ...] | None = None,
     host_axis: HostAxis | str | None = None,
     permission_axes: PermissionAxes | None = None,
@@ -186,6 +187,11 @@ def build_workspace_context(
     ``browser`` so the line never contradicts the worker toolset or identity
     (案 20260803-docx-office-exec-capability-lie A). When ``host_axis`` is omitted,
     it is taken from ``permission_axes.host``.
+
+    ``package_install`` is **not** identical to ``code_execute``: cloud needs
+    ``registry_egress_available`` (gVisor + netns chokepoint); local follows
+    execution-class only (pinned registry env, no host egress gate). Override
+    ``package_install_enabled`` is tests/probes only.
 
     ``exec_languages`` is the probed (local/sidecar) or fixed (cloud) language
     surface advertised on ``code_execute``; when set and execution is on, a one-line
@@ -382,20 +388,60 @@ def build_workspace_context(
     host_on = desktop_online and not host_off
     mcp_on = bool(mcp_enabled) if mcp_label is None else mcp_label == "已装配"
     mcp_cap = mcp_label if mcp_label is not None else ("已装配" if mcp_enabled else "未装配")
+    # 装包 ≠ 跑代码：云端另需 registry_egress（netns）；本机不吃该主机门。
+    if package_install_enabled is not None:
+        pkg_on = package_install_enabled
+    elif not exec_on:
+        pkg_on = False
+    elif is_local:
+        pkg_on = True
+    else:
+        from agentcore.tools.sandbox.egress import registry_egress_available
+
+        pkg_on = registry_egress_available()
     caps: list[str] = []
     caps.append(f"code_execute={'已装配' if exec_on else '未装配'}")
+    caps.append(f"package_install={'已装配' if pkg_on else '未装配'}")
     caps.append(f"terminal={'已装配' if term_on else '未装配'}")
     caps.append(f"browser={'已装配' if browser_on else '未装配'}")
     caps.append(f"local_open={'已装配' if local_open_on else '未装配'}")
     caps.append(f"host={'已装配' if host_on else '未装配'}")
     caps.append(f"mcp={mcp_cap}")
     capability_line = "本回合执行能力：" + "；".join(caps) + "。"
+    if is_local:
+        if pkg_on:
+            package_guide_line = (
+                "装包指引：package_install=已装配（本机执行环境；钉源 env，"
+                "不吃主机 registry_egress）——`test_run` check=install 可装项目依赖；"
+                "装本机软件仍须 host=已装配 + host_package_install。"
+            )
+        else:
+            package_guide_line = (
+                "装包指引：package_install=未装配（本回合无执行环境）——"
+                "勿空转声称可装依赖；对照 code_execute=。"
+            )
+    elif pkg_on:
+        package_guide_line = (
+            "装包指引：package_install=已装配（gVisor 健康 + 包装源 allowlist egress/"
+            "netns）——`test_run` check=install 可装依赖；≠通用 HTTPS 出网"
+            "（对照「出站网络」行）；任意 URL 落盘用 download_url。"
+        )
+    else:
+        package_guide_line = (
+            "装包指引：package_install=未装配（云端能跑代码 ≠ 能装依赖；"
+            "另需 netns/registry_egress chokepoint）——"
+            "勿空转声称可 npm/pip/uv install；走结构自检 / export_to_local / 本机命令；"
+            "【禁止】把仅结构自检说成外环验绿。"
+        )
     if not desktop_online:
         mcp_guide_line = (
             "本机 MCP 指引：mcp=未装配（无桌面回填通道）——"
             "勿调用 mcp_*、勿假装已接本地 MCP Server；"
-            "勿将通道缺失说成用户在用 Web/手机；"
-            "请引导在桌面回填已连接的会话重试。"
+            "勿将通道缺失说成用户在用 Web/手机。"
+            "同轮可开工（按序，禁多轮复读「为什么不行」）："
+            "① 手脑协作——用户可贴工具输出/截图你分析（用户已愿动手时优先；一等路径）；"
+            "② 用不依赖 MCP 的路径推进；"
+            "③ 引导在桌面回填已连接的会话重试。"
         )
     elif mcp_on:
         mcp_guide_line = (
@@ -407,28 +453,47 @@ def build_workspace_context(
         mcp_guide_line = (
             f"本机 MCP 指引：mcp={mcp_cap}——"
             "本回合无可用 MCP 工具（未配置 / 握手失败已降级）；"
-            "勿调用 mcp_*、勿假装已接本地 MCP；纯聊不受影响。"
+            "勿调用 mcp_*、勿假装已接本地 MCP。"
+            "同轮可开工：手脑（用户贴相关输出）或不依赖 MCP 的路径；纯聊不受影响；"
+            "禁多轮复读「为什么不行」。"
         )
     if host_off:
         host_guide_line = (
             "本机 Host 指引：host=未装配（用户已关本机协助 / host=off）——"
             "勿调用 host_*、勿假装已查声卡或本机系统信息；"
             "工作区 terminal / code_execute 仍可能已装配（host=off ≠ 整机只读）。"
+            "【三分日志·勿混称】OS Host 事件日志不可用（host=off）；"
+            "任务/沙箱/构建 stdout → terminal read / code_execute / test_run；"
+            "产品 AI 对话日志 → search_conversations。"
+            "同轮可开工：通识边界内答 / ask_user 换可走能力；禁多轮复读「为什么不行」。"
         )
     elif host_on:
         host_guide_line = (
             "本机 Host 指引：host=已装配（经桌面回填通道，非云进程直探本机）。"
-            "本机排查可先用 L1 host_info / host_audio_devices，也可直接 host_shell"
-            "（短时本机命令，不必先 delegate）；结构化 host_* 仍作快捷路径。"
+            "本机排查可先用 L1 host_info / host_audio_devices / host_os_log_summary，"
+            "也可直接 host_shell（短时本机命令，不必先 delegate）；结构化 host_* 仍作快捷路径。"
+            "装常用软件（Docker/VS Code 等）须 delegate worker 用 host_package_install"
+            "（winget/brew/apt 点名包+恒确认）；禁止 host_shell 静默跑任意 exe。"
             "长驻进程（dev server）用 terminal，禁止 host_shell 启服。"
+            "【三分日志·勿混称】① OS Host 事件日志 → host_os_log_summary（有界/脱敏；"
+            "禁止 host_shell 倾倒 Get-WinEvent/journalctl 或扫任意 *\\logs）；"
+            "② 任务/沙箱/构建 stdout → terminal read / code_execute / test_run"
+            "（云侧任务日志亦走此主路径，不提供整机 Event Log）；"
+            "③ 产品 AI 对话日志 → search_conversations。"
             "禁止用通识 FAQ 冒充已查本机；打开声音设置 / L3 动作用 worker"
-            "（host_open_settings / host_audio_set_default 等）。"
+            "（host_open_settings / host_audio_set_default / host_package_install 等）。"
         )
     else:
         host_guide_line = (
             "本机 Host 指引：host=未装配（无桌面回填通道）——"
-            "勿调用 host_*、勿假装已查声卡或本机系统信息；"
-            "需要本机观测时如实说明限制，可用通识或 ask_user。"
+            "勿调用 host_*、勿假装已查声卡或本机系统信息。"
+            "【三分日志·勿混称】无本机 OS Host 事件日志通道；"
+            "云/沙箱任务日志 = terminal read / code_execute / test_run（既有 stdout 主路径，"
+            "不新建整机 Event Log 工具）；产品 AI 对话日志 = search_conversations。"
+            "同轮可开工（按序，禁多轮复读「为什么不行」）："
+            "① 手脑协作——请用户本机自查后贴现象/截图你分析（用户已愿动手时优先；一等路径）；"
+            "② 通识边界内答或 ask_user；"
+            "③ 引导桌面回填已连接的会话重试。"
         )
     if browser_on:
         if is_local:
@@ -469,36 +534,39 @@ def build_workspace_context(
             "浏览器指引：本回合 browser=未装配（无云端隔离浏览器 / 无本机 Bridge）——"
             "勿调用 browser_*、勿假装已打开或直播页面。"
         )
-        intent_rule = (
-            "用户要「用浏览器打开 / 右坞打开 / 直播 / 接管登录」时："
-            "必须先如实说明未装配；"
-            "可用 read_url / web_search 作文本摘录，但须标明「非右坞浏览器、未直播开页」，"
-            "禁止静默用 read_url 交差让用户以为已打开浏览器。"
-        )
-        product_path = (
-            "装配后的产品路径：CEO 直调 browser_navigate / snapshot / type / click "
-            "打开或短操作目标页（「随便搜」省略过重验收；截图验收仍可 delegate）→"
-            "需要登录则 ask_user(browser_login=true) →"
-            "用户在右坞「浏览器」接管 → 点「已登录，继续」；"
-            "勿把「复制粘贴整页 / 扫本机 Cookie / 系统浏览器代登」说成主产品路径"
-            "（用户主动贴文本可作补救，但不是接管流程）。"
-        )
         if is_local:
             how_enable = (
-                "要启用：本机会话需桌面 Local Chromium Bridge 健康，"
-                "或启用云端沙箱浏览器；"
+                "装配启用：本机会话需桌面 Local Chromium Bridge 健康，"
+                "或启用云端沙箱浏览器。"
             )
         elif desktop_online:
             how_enable = (
-                "要启用：桌面端优先 `bind_local_folder`（本机 Local+Bridge）"
-                "或 `open_local_project`，或启用云端沙箱浏览器；"
+                "装配启用：桌面端优先 `bind_local_folder`（本机 Local+Bridge）"
+                "或 `open_local_project`，或启用云端沙箱浏览器。"
             )
         else:
             how_enable = (
-                "要启用：当前非桌面会话无法绑定本机 Local；"
-                "可换桌面端或启用云端沙箱浏览器；"
+                "装配启用：当前非桌面会话无法绑定本机 Local；"
+                "可换桌面端或启用云端沙箱浏览器。"
             )
-        browser_guide_line = browser_base + intent_rule + how_enable + product_path
+        # 缺能力 → 同轮可开工排序；人手为一等路径（禁「仅补救/非主路径」反信号）。
+        same_round = (
+            "用户要「用浏览器打开 / 右坞打开 / 直播 / 接管登录」时："
+            "一句说明未装配即可，同轮给可开工路径（按序优先，禁多轮复读「为什么不行」）："
+            "① 手脑协作——用户可贴数/截图/复制页面文本，你当脑分析推进"
+            "（用户已愿动手时优先此路；一等可开工路径，非补救）；"
+            "② read_url / web_search 作文本摘录，须标明「非右坞浏览器、未直播开页」，"
+            "禁止静默交差让用户以为已打开浏览器；"
+            "③ " + how_enable
+        )
+        product_path = (
+            "装配后：CEO 直调 browser_navigate / snapshot / type / click "
+            "打开或短操作（「随便搜」省略过重验收；截图验收仍可 delegate）→"
+            "需要登录则 ask_user(browser_login=true) →"
+            "用户在右坞「浏览器」接管 → 点「已登录，继续」；"
+            "勿把扫本机 Cookie / 系统浏览器代登说成产品接管路径。"
+        )
+        browser_guide_line = browser_base + same_round + product_path
 
     # Prefer explicit languages; else a probe cached on the backend.
     langs = exec_languages
@@ -536,6 +604,7 @@ def build_workspace_context(
         grant_line,
         mounts_line,
         capability_line,
+        package_guide_line,
         host_guide_line,
         mcp_guide_line,
         browser_guide_line,

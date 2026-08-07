@@ -28,14 +28,11 @@ import {
   MoveUpRight,
   Pencil,
   Redo2,
-  RefreshCw,
-  Sparkles,
   Square,
   StickyNote,
   Trash2,
   Type,
   Undo2,
-  Users,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -85,16 +82,8 @@ export interface WhiteboardCanvasProps {
   initialSelectedIds?: string[];
   /** Fired on every committed element mutation (host debounces + autosaves). */
   onChange: (elements: SceneElement[], viewport: Viewport) => void;
-  /** Host triggers「整理选区」from the floating selection bar. */
-  onOrganizeSelection?: () => void;
-  /** Host triggers「让团队照这实现」(M3 发起入口) from the floating selection bar. */
-  onImplementSelection?: () => void;
-  /** Host triggers「在产物上迭代」(M3 Slice 4 贴源迭代) — shown only when the selection holds a
-   * crystallized `artifactCard`. */
-  onIterateArtifact?: () => void;
   /** Double-click a crystallized `artifactCard` — open file preview or expand text body. */
   onArtifactActivate?: (el: SceneElement) => void;
-  aiBusy?: boolean;
   className?: string;
 }
 
@@ -391,11 +380,7 @@ export const WhiteboardCanvas = forwardRef<
     initialViewport,
     initialSelectedIds,
     onChange,
-    onOrganizeSelection,
-    onImplementSelection,
-    onIterateArtifact,
     onArtifactActivate,
-    aiBusy = false,
     className,
   },
   ref,
@@ -412,10 +397,8 @@ export const WhiteboardCanvas = forwardRef<
   const [tool, setTool] = useState<Tool>("select");
   const [zoom, setZoom] = useState(1);
   const [selectionCount, setSelectionCount] = useState(0);
-  // M3 Slice 4 (贴源迭代): whether the selection includes a crystallized `artifactCard`, which
-  // gates the「迭代」action in the floating bar.
+  // Crystallized `artifactCard` in selection — gates「复制产物正文 / 展开产物全文」menu items.
   const [selHasArtifact, setSelHasArtifact] = useState(false);
-  const [selHasFrame, setSelHasFrame] = useState(false);
   const [selStyle, setSelStyle] = useState<SelStyle>({});
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [swatches, setSwatches] = useState<string[]>(() => readSwatches());
@@ -437,7 +420,6 @@ export const WhiteboardCanvas = forwardRef<
         setSelectionCount(ids.length);
         setSelStyle(engine.getSelectedStyle());
         setSelHasArtifact(engine.hasSelectedType("artifactCard"));
-        setSelHasFrame(engine.hasSelectedType("frame"));
       },
       onToolChange: (t) => setTool(t),
       onViewportChange: (z) => setZoom(z),
@@ -666,43 +648,9 @@ export const WhiteboardCanvas = forwardRef<
         </IconButton>
       </div>
 
-      {/* Selection floating bar — quick AI + layout actions */}
-      {selectionCount > 0 && onOrganizeSelection ? (
+      {/* Selection floating bar — layout / export only (AI 动作已下线，不留半残入口) */}
+      {selectionCount > 0 ? (
         <div className="absolute bottom-14 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-border bg-card/95 p-1 shadow-md backdrop-blur">
-          <button
-            type="button"
-            disabled={aiBusy}
-            onClick={onOrganizeSelection}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-40"
-          >
-            <Sparkles size={15} />
-            整理选区
-          </button>
-          {onImplementSelection ? (
-            <button
-              type="button"
-              disabled={aiBusy}
-              onClick={onImplementSelection}
-              title="让团队照这块内容实现"
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-40"
-            >
-              <Users size={15} />
-              让团队实现
-            </button>
-          ) : null}
-          {onIterateArtifact && selHasArtifact ? (
-            <button
-              type="button"
-              disabled={aiBusy}
-              onClick={onIterateArtifact}
-              title="在选中的产物上再迭代一版（旧版留痕）"
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-40"
-            >
-              <RefreshCw size={15} />
-              迭代
-            </button>
-          ) : null}
-          <div className="h-5 w-px bg-border" />
           <IconButton
             aria-label="网格布局"
             title="网格布局选区"
@@ -834,26 +782,6 @@ export const WhiteboardCanvas = forwardRef<
               onClick={() => runMenu((e) => e.ungroupSelected())}
             />
             <div className="my-1 h-px bg-border" />
-            {onOrganizeSelection ? (
-              <MenuItem
-                label="整理选区"
-                disabled={selectionCount === 0 || aiBusy}
-                onClick={() => {
-                  setMenu(null);
-                  onOrganizeSelection();
-                }}
-              />
-            ) : null}
-            {onImplementSelection && (selectionCount > 0 || selHasFrame) ? (
-              <MenuItem
-                label="让团队实现"
-                disabled={selectionCount === 0 || aiBusy}
-                onClick={() => {
-                  setMenu(null);
-                  onImplementSelection();
-                }}
-              />
-            ) : null}
             {selHasArtifact ? (
               <>
                 <MenuItem
@@ -888,9 +816,9 @@ export const WhiteboardCanvas = forwardRef<
                     })
                   }
                 />
+                <div className="my-1 h-px bg-border" />
               </>
             ) : null}
-            <div className="my-1 h-px bg-border" />
             <MenuItem
               label="网格布局"
               disabled={selectionCount < 2}

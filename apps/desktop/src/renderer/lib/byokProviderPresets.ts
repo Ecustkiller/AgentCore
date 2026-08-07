@@ -14,6 +14,7 @@ export type ByokProviderId =
   | "doubao"
   | "hy"
   | "openrouter"
+  | "opencode_zen"
   | "custom";
 
 export interface ByokProviderPreset {
@@ -107,6 +108,15 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
       "google/gemini-2.5-pro",
     ],
     keyHelpUrl: "https://openrouter.ai/keys",
+  },
+  {
+    id: "opencode_zen",
+    label: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    defaultModel: "deepseek-v4-flash",
+    // Short seed for discovery-miss; full catalog = GET /models union.
+    models: ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
+    keyHelpUrl: "https://opencode.ai/auth",
   },
 ] as const;
 

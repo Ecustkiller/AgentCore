@@ -582,6 +582,37 @@ async def test_check_install_runs_with_restricted_network_and_registry_pin(
     assert "npm" in req.code and "install" in req.code
 
 
+async def test_check_install_pure_python_resolves_uv_not_npm(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = _FakeBackend(
+        exists={"pyproject.toml"},
+        result=ExecutionResult(
+            success=True, stdout="Resolved\n", stderr="", exit_code=0, duration_ms=50
+        ),
+    )
+
+    async def _fake_profile(_backend):
+        return _make_profile(package_managers=["uv"], languages=["python"])
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.test_run.detect_workspace_profile",
+        _fake_profile,
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.sandbox.egress.registry_egress_available",
+        lambda: True,
+    )
+    result = await TestRunTool().execute({"check": "install"}, _auto_permission_ctx(backend))
+    assert result.success is True
+    req = backend.requests[0]
+    assert "uv" in req.code and "sync" in req.code
+    assert "npm" not in req.code
+    assert req.env is not None
+    assert "pypi.org" in (req.env.get("PIP_INDEX_URL") or "")
+    assert req.env.get("UV_CACHE_DIR", "").startswith("/pkg-cache")
+
+
 async def test_check_install_omits_cache_bucket_without_user_id(
     monkeypatch: pytest.MonkeyPatch,
 ):

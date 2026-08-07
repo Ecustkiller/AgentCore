@@ -16,10 +16,13 @@ from agentcore.tools.protocol import Tool, ToolSchema, tool_schema_to_openai_for
 # is actually registered (did-you-mean message only — never auto-rewrite / execute).
 _KNOWN_TOOL_ALIASES: dict[str, str] = {
     "web_read": "read_url",
-    "web_fetch": "read_url",
-    "fetch_url": "read_url",
-    "fetch": "read_url",
     "browse": "read_url",
+    # fetch* hallucinations → workspace binary download (not HTML deep-read).
+    "web_fetch": "download_url",
+    "fetch_url": "download_url",
+    "fetch": "download_url",
+    "wget": "download_url",
+    "curl": "download_url",
     "write": "file_write",
     "read": "file_read",
     "search": "web_search",

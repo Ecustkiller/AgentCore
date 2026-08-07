@@ -77,14 +77,12 @@ def _isolate_b1_closing_latches():
 
 @pytest.fixture(autouse=True)
 def _pin_cloud_execution_posture_to_defaults(monkeypatch):
-    """Pin the cloud code-execution flags to their production defaults for every test.
+    """Pin cloud execution off for every test (deterministic withheld posture).
 
-    The machine-local ``apps/server/.env`` may enable the dev escape hatch
-    (``CODE_EXECUTE_CLOUD_ENABLED`` + ack — 安全权限与治理 §5.4) so the dev server can run
-    code on cloud workspaces; the suite must stay deterministic and keep asserting the
-    default posture (cloud withheld). Tests that exercise the enabled chain opt in
-    explicitly via ``monkeypatch.setattr(settings, ...)`` — same .env-isolation idiom as
-    ``_disarm_demo_tape_recorder`` below.
+    Production/内测 default is ``gvisor_enabled=true``; the suite still forces false so
+    Windows/dev without runsc stay deterministic. Tests that exercise the enabled chain
+    opt in via ``monkeypatch.setattr(settings, ...)``. Machine-local ``.env`` may also
+    flip escape-hatch flags — same isolation idiom as ``_disarm_demo_tape_recorder``.
     """
     from agentcore.config import settings
 

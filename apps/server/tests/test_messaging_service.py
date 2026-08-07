@@ -1563,6 +1563,7 @@ async def test_publish_product_notice_inbox_posts_system_card():
         "kind": "product_notice",
         "notice_id": "notice-1",
         "severity": "high",
+        "card_template": "service",
         "cta_label": "详情",
         "cta_url": "https://example.com",
     }
@@ -1615,7 +1616,57 @@ async def test_publish_product_notice_modal_posts_system_card():
     assert msg is not None
     assert msg.payload["kind"] == "product_notice"
     assert msg.payload["notice_id"] == "notice-4"
+    assert msg.payload["card_template"] == "service"
     assert len(chats._messages) == 1
+
+
+async def test_publish_product_notice_article_payload_fields():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    await chats.create_official(member_ids=[alice.user_id])
+    msg = await svc.publish_product_notice(
+        notice_id="notice-article",
+        title="图文标题",
+        body="完整正文",
+        severity="normal",
+        surface="inbox",
+        card_template="article",
+        summary="卡面摘要",
+        cover_url="https://cdn.example.com/cover.jpg",
+    )
+    assert msg is not None
+    assert msg.content == "图文标题\n完整正文"
+    assert msg.payload == {
+        "kind": "product_notice",
+        "notice_id": "notice-article",
+        "severity": "normal",
+        "card_template": "article",
+        "summary": "卡面摘要",
+        "cover_url": "https://cdn.example.com/cover.jpg",
+    }
+
+
+async def test_publish_product_notice_service_omits_empty_optional_fields():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    await chats.create_official(member_ids=[alice.user_id])
+    msg = await svc.publish_product_notice(
+        notice_id="notice-service",
+        title="服务卡",
+        body="短告知",
+        severity="normal",
+        surface="inbox",
+        card_template="service",
+        summary=None,
+        cover_url=None,
+    )
+    assert msg is not None
+    assert msg.payload == {
+        "kind": "product_notice",
+        "notice_id": "notice-service",
+        "severity": "normal",
+        "card_template": "service",
+    }
 
 
 async def test_set_chat_flags_updates_and_returns_view():

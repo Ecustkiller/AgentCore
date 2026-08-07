@@ -42,6 +42,15 @@ describe("resolveByokProviderFromConfig", () => {
     );
   });
 
+  it("matches OpenCode Zen base_url", () => {
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/v1")).toBe(
+      "opencode_zen",
+    );
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/v1/")).toBe(
+      "opencode_zen",
+    );
+  });
+
   it("matches Hy TokenHub domestic, backup, and intl base_urls", () => {
     expect(
       resolveByokProviderFromConfig("https://tokenhub.tencentmaas.com/v1"),
@@ -119,5 +128,18 @@ describe("getByokProviderPreset", () => {
     expect(preset.keyHelpUrl).toBe(
       "https://console.cloud.tencent.com/tokenhub/apikey",
     );
+  });
+
+  it("returns OpenCode Zen metadata with short discovery seed", () => {
+    const preset = getByokProviderPreset("opencode_zen");
+    expect(preset.label).toBe("OpenCode Zen");
+    expect(preset.baseUrl).toBe("https://opencode.ai/zen/v1");
+    expect(preset.defaultModel).toBe("deepseek-v4-flash");
+    expect(preset.models).toEqual([
+      "deepseek-v4-flash",
+      "kimi-k2.6",
+      "glm-5.2",
+    ]);
+    expect(preset.keyHelpUrl).toBe("https://opencode.ai/auth");
   });
 });

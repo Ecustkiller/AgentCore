@@ -22,6 +22,9 @@ async def _create_and_publish(
     severity: str = "normal",
     surface: str = "both",
     dismiss_policy: str = "once",
+    card_template: str = "service",
+    summary: str | None = None,
+    cover_url: str | None = None,
     cta_label: str | None = None,
     cta_url: str | None = None,
     start_at: str | None = None,
@@ -33,7 +36,12 @@ async def _create_and_publish(
         "severity": severity,
         "surface": surface,
         "dismiss_policy": dismiss_policy,
+        "card_template": card_template,
     }
+    if summary is not None:
+        payload["summary"] = summary
+    if cover_url is not None:
+        payload["cover_url"] = cover_url
     if cta_label is not None:
         payload["cta_label"] = cta_label
     if cta_url is not None:
@@ -184,6 +192,7 @@ async def test_publish_inbox_writes_official_im_message(client, make_admin):
     assert msg["payload"]["severity"] == "high"
     assert msg["payload"]["cta_label"] == "查看"
     assert msg["payload"]["cta_url"] == "https://example.com/n"
+    assert msg["payload"]["card_template"] == "service"
 
     # Users cannot send into / leave the official chat.
     r = await client.post(
@@ -368,3 +377,100 @@ async def test_modal_never_rejected_on_create_and_update(client, make_admin):
         json={"surface": "modal"},
     )
     assert r.status_code == 400, r.text
+
+
+async def test_default_card_template_is_service(client, make_admin):
+    await _admin_login(client, make_admin, "notice-default-tpl-admin")
+    r = await client.post(
+        "/v1/admin/notices",
+        json={"title": "默认模板", "body": "x", "severity": "normal", "surface": "banner"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["card_template"] == "service"
+    assert r.json()["summary"] is None
+    assert r.json()["cover_url"] is None
+
+
+async def test_article_publish_requires_summary(client, make_admin):
+    await _admin_login(client, make_admin, "notice-article-summary-admin")
+    r = await client.post(
+        "/v1/admin/notices",
+        json={
+            "title": "图文无摘要",
+            "body": "正文",
+            "severity": "normal",
+            "surface": "inbox",
+            "card_template": "article",
+        },
+    )
+    assert r.status_code == 201, r.text
+    notice_id = r.json()["id"]
+    assert r.json()["card_template"] == "article"
+
+    r = await client.post(f"/v1/admin/notices/{notice_id}/publish")
+    assert r.status_code == 400, r.text
+    assert "summary" in r.json()["detail"]
+
+    # Whitespace-only summary still rejected
+    r = await client.patch(
+        f"/v1/admin/notices/{notice_id}",
+        json={"summary": "   "},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"] is None
+    r = await client.post(f"/v1/admin/notices/{notice_id}/publish")
+    assert r.status_code == 400, r.text
+
+
+async def test_article_publish_projects_payload_fields(client, make_admin):
+    await _admin_login(client, make_admin, "notice-article-im-admin")
+    notice_id = await _create_and_publish(
+        client,
+        title="图文 IM",
+        body="长正文",
+        surface="inbox",
+        card_template="article",
+        summary="卡面摘要",
+        cover_url="https://cdn.example.com/a.jpg",
+    )
+
+    await register_and_login(client, "notice-article-im-user", password=_PW)
+
+    r = await client.get("/v1/notices/active")
+    assert r.status_code == 200, r.text
+    hit = next(n for n in r.json()["inbox"] if n["id"] == notice_id)
+    assert hit["card_template"] == "article"
+    assert hit["summary"] == "卡面摘要"
+    assert hit["cover_url"] == "https://cdn.example.com/a.jpg"
+
+    r = await client.get("/v1/messages/chats")
+    official = next((c for c in r.json()["data"] if c["type"] == "official"), None)
+    assert official is not None
+    r = await client.get(f"/v1/messages/chats/{official['id']}/messages")
+    assert r.status_code == 200, r.text
+    msg = next(
+        m
+        for m in r.json()["data"]
+        if m.get("payload", {}).get("kind") == "product_notice"
+        and m["payload"].get("notice_id") == notice_id
+    )
+    assert msg["content"] == "图文 IM\n长正文"
+    assert msg["payload"]["card_template"] == "article"
+    assert msg["payload"]["summary"] == "卡面摘要"
+    assert msg["payload"]["cover_url"] == "https://cdn.example.com/a.jpg"
+
+
+async def test_service_publish_without_summary_ok(client, make_admin):
+    await _admin_login(client, make_admin, "notice-service-ok-admin")
+    notice_id = await _create_and_publish(
+        client,
+        title="服务卡",
+        body="短告知",
+        surface="inbox",
+        card_template="service",
+    )
+    await register_and_login(client, "notice-service-ok-user", password=_PW)
+    r = await client.get("/v1/notices/active")
+    hit = next(n for n in r.json()["inbox"] if n["id"] == notice_id)
+    assert hit["card_template"] == "service"
+    assert hit["summary"] is None

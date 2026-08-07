@@ -10,6 +10,7 @@ import {
   emptySlotValues,
   surfacePublishHint,
   templateToFormSeed,
+  type NoticeCardTemplate,
   type NoticeTemplate,
 } from "@/lib/noticeTemplates";
 import { useAdminListPage } from "@/hooks/useAdminListPage";
@@ -85,6 +86,9 @@ type FormState = {
   severity: NoticeSeverity;
   surface: NoticeSurface;
   dismiss_policy: NoticeDismissPolicy;
+  card_template: NoticeCardTemplate;
+  summary: string;
+  cover_url: string;
   cta_label: string;
   cta_url: string;
   start_at: string;
@@ -97,6 +101,9 @@ const EMPTY_FORM: FormState = {
   severity: "normal",
   surface: "both",
   dismiss_policy: "once",
+  card_template: "service",
+  summary: "",
+  cover_url: "",
   cta_label: "",
   cta_url: "",
   start_at: "",
@@ -121,6 +128,10 @@ function fromLocalInput(value: string): string | null {
   return d.toISOString();
 }
 
+function asCardTemplate(raw: string | null | undefined): NoticeCardTemplate {
+  return raw === "article" ? "article" : "service";
+}
+
 function noticeToForm(n: Notice): FormState {
   return {
     title: n.title,
@@ -128,6 +139,9 @@ function noticeToForm(n: Notice): FormState {
     severity: (n.severity as NoticeSeverity) || "normal",
     surface: (n.surface as NoticeSurface) || "both",
     dismiss_policy: (n.dismiss_policy as NoticeDismissPolicy) || "once",
+    card_template: asCardTemplate(n.card_template),
+    summary: n.summary ?? "",
+    cover_url: n.cover_url ?? "",
     cta_label: n.cta_label ?? "",
     cta_url: n.cta_url ?? "",
     start_at: toLocalInput(n.start_at),
@@ -142,6 +156,9 @@ function buildCreateBody(form: FormState): CreateNoticeRequest {
     severity: form.severity,
     surface: form.surface,
     dismiss_policy: form.dismiss_policy,
+    card_template: form.card_template,
+    summary: form.summary.trim() || null,
+    cover_url: form.cover_url.trim() || null,
     cta_label: form.cta_label.trim() || null,
     cta_url: form.cta_url.trim() || null,
     start_at: fromLocalInput(form.start_at),
@@ -156,6 +173,9 @@ function buildUpdateBody(form: FormState): UpdateNoticeRequest {
     severity: form.severity,
     surface: form.surface,
     dismiss_policy: form.dismiss_policy,
+    card_template: form.card_template,
+    summary: form.summary.trim() || null,
+    cover_url: form.cover_url.trim() || null,
     cta_label: form.cta_label.trim() || null,
     cta_url: form.cta_url.trim() || null,
     start_at: fromLocalInput(form.start_at),
@@ -550,7 +570,12 @@ function NoticeFormDialog({
   const applySlotsToCopy = () => {
     if (!activeTemplate) return;
     const built = buildFromSlots(activeTemplate, slotValues);
-    setForm((prev) => ({ ...prev, title: built.title, body: built.body }));
+    setForm((prev) => ({
+      ...prev,
+      title: built.title,
+      body: built.body,
+      ...(built.summary !== undefined ? { summary: built.summary } : {}),
+    }));
     toast.success("已根据快捷填写生成标题与正文");
   };
 
@@ -572,6 +597,10 @@ function NoticeFormDialog({
     }
     if (!form.body.trim()) {
       toast.error("请填写正文");
+      return;
+    }
+    if (form.card_template === "article" && !form.summary.trim()) {
+      toast.error("图文模板须填写摘要");
       return;
     }
     if (invalidModalNever) {
@@ -746,6 +775,51 @@ function NoticeFormDialog({
               required
               rows={7}
               className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            />
+          </label>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                官方号模板
+              </span>
+              <select
+                value={form.card_template}
+                onChange={(e) =>
+                  set("card_template")(e.target.value as NoticeCardTemplate)
+                }
+                className={selectClass}
+              >
+                <option value="service">服务通知（默认）</option>
+                <option value="article">图文（须摘要）</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 sm:col-span-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                摘要
+                {form.card_template === "article" ? "（图文必填）" : "（可选）"}
+              </span>
+              <Input
+                value={form.summary}
+                onChange={(e) => set("summary")(e.target.value)}
+                placeholder={
+                  form.card_template === "article"
+                    ? "卡面摘要，两句内"
+                    : "服务卡可空，卡面用正文"
+                }
+                required={form.card_template === "article"}
+              />
+            </label>
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              封面 URL（可选）
+            </span>
+            <Input
+              value={form.cover_url}
+              onChange={(e) => set("cover_url")(e.target.value)}
+              placeholder="https://… · 无图勿填占位"
             />
           </label>
 

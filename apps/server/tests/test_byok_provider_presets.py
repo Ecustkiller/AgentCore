@@ -60,3 +60,23 @@ def test_jiurelay_trailing_slash_matches():
         "deepseek-v4-flash-0731",
         "grok-4.5",
     )
+
+
+def test_opencode_zen_preset_defaults_and_seed():
+    preset = match_byok_provider_preset("https://opencode.ai/zen/v1")
+    assert preset is not None
+    assert preset.id == "opencode_zen"
+    assert preset.label == "OpenCode Zen"
+    assert preset.default_model == "deepseek-v4-flash"
+    assert preset.models == ("deepseek-v4-flash", "kimi-k2.6", "glm-5.2")
+
+
+def test_opencode_zen_trailing_slash_matches():
+    preset = match_byok_provider_preset("https://opencode.ai/zen/v1/")
+    assert preset is not None
+    assert preset.id == "opencode_zen"
+    assert preset_models_for_base_url("https://opencode.ai/zen/v1/") == (
+        "deepseek-v4-flash",
+        "kimi-k2.6",
+        "glm-5.2",
+    )

@@ -21,6 +21,7 @@ type ProviderId =
   | "zhipu"
   | "doubao"
   | "openrouter"
+  | "opencode_zen"
   | "custom";
 
 type ProviderPreset = {
@@ -91,6 +92,14 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
       "anthropic/claude-sonnet-4",
       "google/gemini-2.5-pro",
     ],
+  },
+  {
+    id: "opencode_zen",
+    label: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    defaultModel: "deepseek-v4-flash",
+    // Short seed for discovery-miss; full catalog = GET /models union.
+    models: ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
   },
 ];
 

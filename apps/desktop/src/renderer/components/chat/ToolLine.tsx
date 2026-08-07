@@ -88,6 +88,7 @@ const PEEK_SUPPRESSED = new Set([
   "host_open_settings",
   "host_audio_set_default",
   "host_service_restart",
+  "host_package_install",
 ]);
 
 /** 模型流式组装工具调用 JSON 时的心跳行（不持久化）。 */

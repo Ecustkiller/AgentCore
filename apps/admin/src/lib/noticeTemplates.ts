@@ -6,6 +6,13 @@
 export type NoticeTemplateSeverity = "critical" | "high" | "normal";
 export type NoticeTemplateSurface = "banner" | "inbox" | "both" | "modal";
 export type NoticeTemplateDismiss = "once" | "never";
+export type NoticeCardTemplate = "service" | "article";
+
+/** 发版/热修默认 CTA：应用内「关于」可检查更新（桌面 openNoticeCta 认 `/…`）。 */
+export const RELEASE_CHECK_UPDATE_CTA = {
+  cta_label: "检查更新",
+  cta_url: "/more/about",
+} as const;
 
 export type NoticeTemplateSlot = {
   key: string;
@@ -13,6 +20,13 @@ export type NoticeTemplateSlot = {
   placeholder?: string;
   /** 多行输入（亮点、说明等） */
   multiline?: boolean;
+};
+
+export type NoticeTemplateBuild = {
+  title: string;
+  body: string;
+  /** article 卡面摘要；service 模板勿返回 */
+  summary?: string;
 };
 
 export type NoticeTemplate = {
@@ -26,13 +40,17 @@ export type NoticeTemplate = {
   severity: NoticeTemplateSeverity;
   surface: NoticeTemplateSurface;
   dismiss_policy: NoticeTemplateDismiss;
+  /** 官方号双模板；省略 = service */
+  card_template?: NoticeCardTemplate;
+  /** article 套用时的摘要骨架（可空；发布前须填） */
+  summary?: string;
   slots: readonly NoticeTemplateSlot[];
   /** 维护/故障类建议设结束时间的提示 */
   endHint?: string;
   /** 套用时预填 CTA（可选） */
   cta_label?: string;
   cta_url?: string;
-  build: (v: Record<string, string>) => { title: string; body: string };
+  build: (v: Record<string, string>) => NoticeTemplateBuild;
 };
 
 function s(v: Record<string, string>, key: string, fallback: string): string {
@@ -57,6 +75,9 @@ export const NOTICE_TEMPLATES: readonly NoticeTemplate[] = [
     severity: "high",
     surface: "both",
     dismiss_policy: "once",
+    card_template: "service",
+    cta_label: RELEASE_CHECK_UPDATE_CTA.cta_label,
+    cta_url: RELEASE_CHECK_UPDATE_CTA.cta_url,
     slots: [
       { key: "time", label: "预计时间", placeholder: "如 14:30" },
       {
@@ -104,6 +125,9 @@ export const NOTICE_TEMPLATES: readonly NoticeTemplate[] = [
     severity: "high",
     surface: "both",
     dismiss_policy: "once",
+    card_template: "service",
+    cta_label: RELEASE_CHECK_UPDATE_CTA.cta_label,
+    cta_url: RELEASE_CHECK_UPDATE_CTA.cta_url,
     slots: [
       { key: "version", label: "版本号（正文可选）", placeholder: "如 0.4.2，可留空" },
       { key: "time", label: "上线时间", placeholder: "如 14:30" },
@@ -158,6 +182,7 @@ ${highlights}
     severity: "critical",
     surface: "both",
     dismiss_policy: "never",
+    card_template: "service",
     endHint: "建议把结束时间设为窗口结束后约 30 分钟",
     slots: [
       { key: "start", label: "开始", placeholder: "如 02:00" },
@@ -198,6 +223,7 @@ ${highlights}
     severity: "high",
     surface: "modal",
     dismiss_policy: "once",
+    card_template: "service",
     slots: [
       { key: "topic", label: "主题", placeholder: "如「免费额度调整」" },
       { key: "effective", label: "生效", placeholder: "即日起 / 2026-08-10" },
@@ -237,6 +263,7 @@ ${detailLine}如有疑问，打开消息页「AgentCore 官方」查看本条归
     severity: "high",
     surface: "both",
     dismiss_policy: "once",
+    card_template: "service",
     cta_label: "前往 jiurelay 免费配额",
     cta_url: "https://jiurelay.com/",
     endHint: "平台额度恢复后归档，或设结束时间避免过期横幅残留",
@@ -273,6 +300,7 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
     severity: "critical",
     surface: "both",
     dismiss_policy: "never",
+    card_template: "service",
     endHint: "恢复后归档，或设结束时间避免过期横幅残留",
     slots: [
       { key: "scope", label: "异常范围", placeholder: "如「消息发送」" },
@@ -308,6 +336,7 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
     severity: "normal",
     surface: "inbox",
     dismiss_policy: "once",
+    card_template: "service",
     slots: [
       { key: "name", label: "功能名", placeholder: "如「消息编辑」" },
       {
@@ -341,6 +370,7 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
     severity: "high",
     surface: "modal",
     dismiss_policy: "once",
+    card_template: "service",
     slots: [
       { key: "topic", label: "主题", placeholder: "如「密码已重置」" },
       {
@@ -386,6 +416,7 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
     severity: "normal",
     surface: "inbox",
     dismiss_policy: "once",
+    card_template: "service",
     slots: [
       { key: "name", label: "活动名", placeholder: "如「协作图内测」" },
       {
@@ -417,6 +448,108 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
       };
     },
   },
+  {
+    id: "article",
+    label: "功能故事 · 图文",
+    description: "长内容图文卡 · 须填摘要 · 可选封面",
+    title: "…（故事标题）",
+    body: `…（完整正文；用户点「阅读全文」后在应用内详情阅读）
+
+你可以：…（可选入口或下一步）
+欢迎把体验反馈发到设置 → 反馈。`,
+    summary: "…（卡面摘要，两句内）",
+    severity: "normal",
+    surface: "inbox",
+    dismiss_policy: "once",
+    card_template: "article",
+    slots: [
+      { key: "title", label: "标题", placeholder: "如「协作图怎么用」" },
+      {
+        key: "summary",
+        label: "摘要（卡面必填）",
+        placeholder: "两句内，会话矮卡展示",
+        multiline: true,
+      },
+      {
+        key: "body",
+        label: "正文",
+        placeholder: "完整说明，详情页展示",
+        multiline: true,
+      },
+    ],
+    build: (v) => {
+      const title = s(v, "title", "…（故事标题）");
+      const summary = s(v, "summary", "…（卡面摘要，两句内）");
+      const body = s(
+        v,
+        "body",
+        `…（完整正文；用户点「阅读全文」后在应用内详情阅读）
+
+你可以：…（可选入口或下一步）
+欢迎把体验反馈发到设置 → 反馈。`,
+      );
+      return { title, body, summary };
+    },
+  },
+  {
+    id: "changelog",
+    label: "Changelog · 图文",
+    description: "版本亮点长文 · 须填摘要 · 可选封面",
+    title: "版本亮点 · …",
+    body: `本版带来这些用户可感知的变化：
+
+1. …
+2. …
+3. …
+
+升级方式：桌面检查更新，或到官网重新下载；手机 / Web 刷新即可。`,
+    summary: "…（本版一句话亮点）",
+    severity: "normal",
+    surface: "inbox",
+    dismiss_policy: "once",
+    card_template: "article",
+    cta_label: RELEASE_CHECK_UPDATE_CTA.cta_label,
+    cta_url: RELEASE_CHECK_UPDATE_CTA.cta_url,
+    slots: [
+      { key: "version", label: "版本号（可选）", placeholder: "如 0.4.2" },
+      {
+        key: "summary",
+        label: "摘要（卡面必填）",
+        placeholder: "一句话概括本版亮点",
+        multiline: true,
+      },
+      {
+        key: "highlights",
+        label: "亮点（每行一条）",
+        placeholder: "用户能感知的变化",
+        multiline: true,
+      },
+    ],
+    build: (v) => {
+      const version = v.version?.trim() ?? "";
+      const summary = s(v, "summary", "…（本版一句话亮点）");
+      const lines = (v.highlights ?? "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const highlights =
+        lines.length > 0
+          ? lines.map((line, i) => `${i + 1}. ${line}`).join("\n")
+          : "1. …\n2. …\n3. …";
+      const title = version
+        ? `版本亮点 · ${version}`
+        : "版本亮点 · …";
+      return {
+        title,
+        summary,
+        body: `本版带来这些用户可感知的变化：
+
+${highlights}
+
+升级方式：桌面检查更新，或到官网重新下载；手机 / Web 刷新即可。`,
+      };
+    },
+  },
 ];
 
 export type NoticeFormSeed = {
@@ -425,6 +558,9 @@ export type NoticeFormSeed = {
   severity: NoticeTemplateSeverity;
   surface: NoticeTemplateSurface;
   dismiss_policy: NoticeTemplateDismiss;
+  card_template: NoticeCardTemplate;
+  summary: string;
+  cover_url: string;
   cta_label: string;
   cta_url: string;
   start_at: string;
@@ -444,6 +580,9 @@ export function templateToFormSeed(t: NoticeTemplate): NoticeFormSeed {
     severity: t.severity,
     surface: t.surface,
     dismiss_policy: t.dismiss_policy,
+    card_template: t.card_template ?? "service",
+    summary: t.summary ?? "",
+    cover_url: "",
     cta_label: t.cta_label ?? "",
     cta_url: t.cta_url ?? "",
     start_at: "",
@@ -451,11 +590,11 @@ export function templateToFormSeed(t: NoticeTemplate): NoticeFormSeed {
   };
 }
 
-/** 用槽位值生成标题/正文；空槽位保留骨架占位。 */
+/** 用槽位值生成标题/正文（及 article 摘要）；空槽位保留骨架占位。 */
 export function buildFromSlots(
   t: NoticeTemplate,
   values: Record<string, string>,
-): { title: string; body: string } {
+): NoticeTemplateBuild {
   return t.build(values);
 }
 

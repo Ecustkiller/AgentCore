@@ -84,7 +84,7 @@ skip_if:
 
 | 项 | 现状 / 缺口 |
 |---|---|
-| 官方号(C) 推送 | **产品公告 ✅**：Admin `publish` 且 `surface∈{inbox,both,modal}` → 写入全站唯一 `type=official` 会话 1 条共享 `system_card`（`payload.kind=product_notice`），经现有 `chat_message` firehose 扇出；归档/过期不删 IM 历史、不回填。任务完成 / 审批 → 官方号 deep-link **二期 ⏳** |
+| 官方号(C) 推送 | **产品公告 ✅**：Admin `publish` 且 `surface∈{inbox,both,modal}` → 写入全站唯一 `type=official` 会话 1 条共享 `system_card`（`payload.kind=product_notice`），经现有 `chat_message` firehose 扇出；归档/过期不删 IM 历史、不回填。**双模板卡片 ✅**（`service` / `article` + 应用内详情）→ [管理员后台 · 官方号双模板](/docs/05-平台与运维/管理员后台.md#官方号双模板服务通知--图文)。任务完成 / 审批 → 官方号 deep-link **二期 ⏳** |
 | P1 | 已读回执 UI、**在线态 ✅（见 §四）** / 正在输入 ⏳（typing 仍待）、**隐私设置面 ✅**、**好友 / 资料卡 / 通讯录 ✅（§九）**；**基础社交原语 ✅（§八）** |
 | P2 | **人群聊：内测全员群 MVP + 自助管理 + 审核治理 + 富消息（图/文件）✅ 已落地**（`type=group` + `auto_join` 默认进群 + 群线程/发送者名/群标识 + 退群/静音/置顶/成员面板 + 平台 admin 踢人/禁言/公告 + system_card 系统提示 + 图/文件附件复用工作区存储，关键决策见下方）；通用建群 + 群审核仍 ⏳；**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态）已迁提案——详细提案不在公开仓 / 维护者本地 |
 | 多 worker 实时 | firehose / pub-sub 上 Redis / NATS（见 §四） |

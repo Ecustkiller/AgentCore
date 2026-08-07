@@ -97,7 +97,7 @@ TEST_RUN_PARAMETERS: dict[str, Any] = {
             "enum": ["test", "typecheck", "build", "install", "command"],
             "default": "test",
             "description": (
-                "验证种类：install=云端受控装包（npm/pnpm/yarn install|ci，需受限出网）；"
+                "验证种类：install=云端受控装包（npm/pnpm/yarn 或 uv/pip/poetry，需受限出网）；"
                 "test=测试套件；typecheck=类型检查（tsc 等）；build=项目构建；"
                 "command=显式跑 command（用于 playbook_args.verify / task 验收命令）。"
                 "绿场验包优先 check=install 再 build/typecheck。慢 build / 全量 tsc / "
@@ -110,15 +110,17 @@ TEST_RUN_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "description": (
                 "check=command 时必填：要跑的验证命令（如 pnpm test、npx tsc --noEmit、"
-                "npm run build、npm install）。须为项目检查/装包形，禁止长驻进程与 "
-                "cd&& shell 链；子目录用 --prefix/--dir 或 working_directory。"
+                "npm run build、npm install、uv sync、pip install）。须为项目检查/装包形，"
+                "禁止长驻进程与 cd&& shell 链；子目录用 --prefix/--dir/--directory 或 "
+                "working_directory。"
             ),
         },
         "working_directory": {
             "type": "string",
             "description": (
                 "可选：工作区相对子目录（禁止绝对路径 / ..）。装包时注入 "
-                "npm --prefix / pnpm --dir / yarn --cwd；亦可直接在 command 里写这些旗标。"
+                "npm --prefix / pnpm --dir / yarn --cwd / uv|poetry --directory；"
+                "亦可直接在 command 里写这些旗标。"
             ),
         },
         "scope": {
@@ -169,6 +171,17 @@ _ALLOWED_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("pnpm", "--dir"),
     ("pnpm", "-C"),
     ("yarn", "--cwd"),
+    # Python package install (uv / pip / poetry)
+    ("pip", "install"),
+    ("python", "-m", "pip", "install"),
+    ("python3", "-m", "pip", "install"),
+    ("uv", "sync"),
+    ("uv", "add"),
+    ("uv", "pip", "install"),
+    ("uv", "--directory"),
+    ("poetry", "install"),
+    ("poetry", "add"),
+    ("poetry", "--directory"),
     # tests
     ("pytest",),
     ("python", "-m", "pytest"),
@@ -214,6 +227,10 @@ _VERIFY_SHAPED_RE = re.compile(
     r"\b(?:"
     r"tsc\b|vue-tsc\b|typecheck\b|"
     r"(?:npm|pnpm|yarn)\s+(?:ci|install|i|add)\b|"
+    r"(?:pip3?|poetry)\s+(?:install|add)\b|"
+    r"uv\s+(?:sync|add)\b|"
+    r"uv\s+pip\s+install\b|"
+    r"(?:python3?|py)\s+-m\s+pip\s+install\b|"
     r"(?:npm|pnpm|yarn)\s+run\s+(?:test|typecheck|type-check|build|lint)\b|"
     r"(?:npm|pnpm|yarn)\s+test\b|"
     r"pytest\b|vitest\b|\bjest\b|mypy\b|"
@@ -268,6 +285,8 @@ def _is_allowed_command(argv: list[str]) -> bool:
                 ("pnpm", "--dir"),
                 ("pnpm", "-C"),
                 ("yarn", "--cwd"),
+                ("uv", "--directory"),
+                ("poetry", "--directory"),
             )
             if prefix in dir_prefixes:
                 return install_prefix_allowed(argv) and validate_install_argv(argv) is None
@@ -808,9 +827,9 @@ class TestRunTool:
             description=(
                 "有界项目验证：跑工作区声明的检查（受控装包 / 测试 / typecheck / build / "
                 "显式 verify 命令），分钟级预算、可流式输出。适合外环验绿与慢 build、"
-                "全量 tsc、项目测试、npm/pnpm/yarn install——"
+                "全量 tsc、项目测试、npm/pnpm/yarn 或 uv/pip/poetry 装包——"
                 "【不要】用 code_execute 跑这些。云端装包用 check=install（或 "
-                "check=command + npm install），需受限出网；无网时诚实降级，勿空转。"
+                "check=command + npm install / uv sync），需受限出网；无网时诚实降级，勿空转。"
                 "超预算返回「验证未完成」，不是工具故障。长驻进程请用 terminal。"
                 "【范围】修码自检用内环 code_diagnostics；"
                 "全量 typecheck / build / `tsc -b` 仅验收员外环执行——"

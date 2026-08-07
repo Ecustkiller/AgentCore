@@ -61,18 +61,19 @@ COMPOSE_FILES=(
   -f "$REPO_DIR/deploy/docker-compose.server.yml"
   -f "$REPO_DIR/deploy/docker-compose.app.yml"
 )
-# gVisor 灰度：GVISOR_ENABLED=true 时自动叠 sandbox 层（seccomp/apparmor + mem_limit）。
-# 只开 env 不叠层 → 沙箱起不来，启动期健康探测失败不拒启（fail-safe）：打
+# gVisor 默认开：除非 GVISOR_ENABLED=false，否则叠 sandbox（seccomp/apparmor + mem_limit）。
+# 不叠层 → 沙箱起不来，启动期健康探测失败不拒启（fail-safe）：打
 # sandbox.cloud_health_failed warning、执行类整类不装配、能力行如实显示未装配。
-# 脚本自动叠层正是为免此降级，与 部署与运维.md §云端执行灰度 口径一致。
-_gvisor_on=0
-if [[ -f "$ENV_FILE" ]] && grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|True|TRUE)[[:space:]]*$' "$ENV_FILE"; then
-  _gvisor_on=1
+_gvisor_off=0
+if [[ -f "$ENV_FILE" ]] && grep -Eq '^[[:space:]]*GVISOR_ENABLED[[:space:]]*=[[:space:]]*(false|0|no|False|FALSE)[[:space:]]*$' "$ENV_FILE"; then
+  _gvisor_off=1
+fi
+if [[ "$_gvisor_off" -eq 0 ]]; then
   _sandbox_yml="$REPO_DIR/deploy/docker-compose.sandbox.yml"
   if [[ -f "$_sandbox_yml" ]]; then
     COMPOSE_FILES+=(-f "$_sandbox_yml")
   else
-    err "GVISOR_ENABLED=true 但缺少 $_sandbox_yml"
+    err "云执行默认开但缺少 $_sandbox_yml（或设 GVISOR_ENABLED=false）"
     exit 1
   fi
 fi
@@ -81,8 +82,10 @@ dc() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" --env-file "$E
 [[ -f "$ENV_FILE" ]] || { err "env file not found: $ENV_FILE（从 production.env.example 复制并填值）"; exit 1; }
 
 log "AgentCore deploy — ref=$TARGET_REF branch=$GIT_BRANCH home=$AGENTCORE_HOME"
-if [[ "$_gvisor_on" -eq 1 ]]; then
-  log "gVisor sandbox overlay ON（docker-compose.sandbox.yml）"
+if [[ "$_gvisor_off" -eq 0 ]]; then
+  log "gVisor sandbox overlay ON（docker-compose.sandbox.yml；默认）"
+else
+  log "gVisor sandbox overlay OFF（GVISOR_ENABLED=false）"
 fi
 
 # ── 1. 解析目标 SHA（latest=分支 HEAD；否则解析 tag/短 SHA 为具体提交）──

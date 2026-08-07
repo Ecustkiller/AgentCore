@@ -33,6 +33,9 @@ def test_allowed_registry_hosts_from_allowlist():
     assert "registry.npmjs.org" in hosts
     assert "registry.npmmirror.com" in hosts
     assert "cdn.npmmirror.com" in hosts
+    assert "pypi.org" in hosts
+    assert "files.pythonhosted.org" in hosts
+    assert "mirrors.aliyun.com" in hosts
 
 
 @pytest.mark.parametrize(
@@ -43,6 +46,9 @@ def test_allowed_registry_hosts_from_allowlist():
         ("registry.npmmirror.com", True),
         ("cdn.npmmirror.com", True),
         ("CDN.NPMMIRROR.COM", True),
+        ("pypi.org", True),
+        ("files.pythonhosted.org", True),
+        ("mirrors.aliyun.com", True),
         ("evil.example.com", False),
         ("npmjs.org", False),
         ("169.254.169.254", False),
@@ -292,6 +298,31 @@ def test_write_back_skips_node_modules(tmp_path: Path):
     assert "node_modules/left-pad/index.js" in report.skipped
     assert not (ws / "node_modules").exists()
     assert (ws / "src" / "a.js").is_file()
+
+
+def test_write_back_skips_venv(tmp_path: Path):
+    """Same residual-staging skip spirit for Python ``.venv`` trees."""
+    staging = tmp_path / "stage"
+    ws = tmp_path / "ws"
+    staging.mkdir()
+    ws.mkdir()
+    venv_file = staging / ".venv" / "lib" / "site.py"
+    venv_file.parent.mkdir(parents=True)
+    venv_file.write_text("# venv\n", encoding="utf-8")
+    other = staging / "src" / "a.py"
+    other.parent.mkdir(parents=True)
+    other.write_text("ok\n", encoding="utf-8")
+    report = write_back(
+        staging,
+        ws,
+        [".venv/lib/site.py", "src/a.py"],
+        max_bytes=10_000,
+        max_files=50,
+    )
+    assert report.written == ["src/a.py"]
+    assert ".venv/lib/site.py" in report.skipped
+    assert not (ws / ".venv").exists()
+    assert (ws / "src" / "a.py").is_file()
 
 
 def test_oci_install_rw_binds_workspace_without_base64_wrap(tmp_path: Path):

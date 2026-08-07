@@ -150,6 +150,18 @@ def _is_git_remote_publish(tool_name: str, arguments: dict[str, Any]) -> bool:
     return sub in {"push", "create_pr"}
 
 
+def _requires_always_confirm(tool_name: str, arguments: dict[str, Any]) -> bool:
+    """True for calls that must always show a confirm card.
+
+    Covers structured git remote publish and Host package install — ``host=session`` /
+    kickoff / turn grants must not silently cover installing software on the user's
+    machine (桶4 · 恒确认).
+    """
+    if _is_git_remote_publish(tool_name, arguments):
+        return True
+    return tool_name == "host_package_install"
+
+
 # Back-compat alias for callers / tests that imported the old name.
 _is_git_push = _is_git_remote_publish
 
@@ -287,8 +299,8 @@ class ApprovalGate:
         """
         if force:
             return True
-        # Remote publish: never short-circuit via session / kickoff / turn grants.
-        if _is_git_remote_publish(tool_name, arguments):
+        # Always-confirm: never short-circuit via session / kickoff / turn grants.
+        if _requires_always_confirm(tool_name, arguments):
             return tool_name not in self._denied
         if self._delegation_covers(execution_id, tool_name):
             return False
@@ -326,12 +338,16 @@ class ApprovalGate:
         prompts. Callers pass ``force=False`` for ``sensitive.path_read_ask`` so
         APPROVE_ALWAYS may write a same-tool turn grant while still forcing the
         first card via the breaker entrance (read tools are not kickoff/session
-        covered). Structured ``git push`` / ``create_pr`` likewise always prompts
-        (session / kickoff / turn grants do not cover remote publish).
+        covered). Structured ``git push`` / ``create_pr`` and ``host_package_install``
+        likewise always prompt (session / kickoff / turn grants do not cover them).
         """
-        publish = _is_git_remote_publish(tool_name, arguments)
+        always_confirm = _requires_always_confirm(tool_name, arguments)
 
-        if not force and not publish and self._delegation_covers(execution_id, tool_name):
+        if (
+            not force
+            and not always_confirm
+            and self._delegation_covers(execution_id, tool_name)
+        ):
             logger.debug(
                 "approval.delegation_grant",
                 tool=tool_name,
@@ -339,15 +355,23 @@ class ApprovalGate:
             )
             return ApprovalDecision.APPROVE
 
-        if not force and not publish and self._session_file_trust_covers(tool_name, arguments):
+        if (
+            not force
+            and not always_confirm
+            and self._session_file_trust_covers(tool_name, arguments)
+        ):
             logger.debug("approval.session_file_trust", tool=tool_name)
             return ApprovalDecision.APPROVE
 
-        if not force and not publish and self._session_host_trust_covers(tool_name):
+        if (
+            not force
+            and not always_confirm
+            and self._session_host_trust_covers(tool_name)
+        ):
             logger.debug("approval.session_host_trust", tool=tool_name)
             return ApprovalDecision.APPROVE
 
-        if not force and not publish and tool_name in self._granted:
+        if not force and not always_confirm and tool_name in self._granted:
             return ApprovalDecision.APPROVE
 
         # Prior deny (user click or timeout) for this tool this turn: do not re-prompt.
@@ -391,39 +415,39 @@ class ApprovalGate:
         elif decision is ApprovalDecision.APPROVE_ALWAYS:
             refuse_turn_grant = (
                 force
-                or publish
+                or always_confirm
                 or (
                     tool_name in self.per_call_tools
                     and not self._delegation_covers(execution_id, tool_name)
                 )
             )
             if refuse_turn_grant:
-                # force / push / per_call_tools: authorize THIS call only.
+                # force / always-confirm / per_call_tools: authorize THIS call only.
                 logger.info(
                     "approval.turn_grant_refused",
                     tool=tool_name,
                     approval_id=approval_id,
                     force=force,
-                    publish=publish,
+                    always_confirm=always_confirm,
                 )
                 decision = ApprovalDecision.APPROVE
             else:
                 self._granted.add(tool_name)
                 self._sweep_pending_tools(frozenset({tool_name}))
         elif decision is ApprovalDecision.APPROVE_ALWAYS_FILES:
-            if force or publish:
+            if force or always_confirm:
                 logger.info(
                     "approval.file_grant_refused",
                     tool=tool_name,
                     approval_id=approval_id,
-                    publish=publish,
+                    always_confirm=always_confirm,
                 )
                 decision = ApprovalDecision.APPROVE
             else:
                 # Grant the whole file-mutation class for the turn, and sweep every
                 # already-suspended file-op call — so one click clears writes, edits,
                 # deletes and moves together (code_execute is not in the class;
-                # pending git push cards are skipped in ``_sweep_pending_tools``).
+                # pending always-confirm cards are skipped in ``_sweep_pending_tools``).
                 self._granted.update(self.file_op_tools)
                 self._sweep_pending_tools(self.file_op_tools)
         self.sink.emit(
@@ -467,10 +491,12 @@ class ApprovalGate:
                 continue
             if req.payload.get("tool_name") not in tool_names:
                 continue
-            # Never sweep structured git push / create_pr — remote publish needs own card.
+            # Never sweep always-confirm calls (git push/create_pr · host_package_install).
             pending_args = req.payload.get("arguments")
-            if isinstance(pending_args, dict) and _is_git_remote_publish(
-                str(req.payload.get("tool_name") or ""), pending_args
+            pending_tool = str(req.payload.get("tool_name") or "")
+            if pending_tool == "host_package_install" or (
+                isinstance(pending_args, dict)
+                and _requires_always_confirm(pending_tool, pending_args)
             ):
                 continue
             swept.append(

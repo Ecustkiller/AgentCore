@@ -26,11 +26,13 @@ import {
   MoveVertical,
   Network,
   NotebookPen,
+  Package,
   PenLine,
   Pencil,
   Presentation,
   Scale,
   ScanText,
+  ScrollText,
   Search,
   Settings2,
   StickyNote,
@@ -107,10 +109,12 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   host_power: { Icon: Zap, label: "Host power" },
   host_network_summary: { Icon: Network, label: "Network summary" },
   host_apps: { Icon: LayoutGrid, label: "Host apps" },
+  host_os_log_summary: { Icon: ScrollText, label: "OS log summary" },
   host_shell: { Icon: Terminal, label: "Host shell" },
   host_open_settings: { Icon: Settings2, label: "Open settings" },
   host_audio_set_default: { Icon: Volume2, label: "Set default audio" },
   host_service_restart: { Icon: ListRestart, label: "Restart service" },
+  host_package_install: { Icon: Package, label: "Install package" },
 };
 
 /** Tool-group collapse summaries reuse {@link TOOL_META} English labels (same chrome as ToolLine). */

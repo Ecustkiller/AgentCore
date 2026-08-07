@@ -413,6 +413,9 @@ class MessagingService:
         body: str,
         severity: str,
         surface: str,
+        card_template: str = "service",
+        summary: str | None = None,
+        cover_url: str | None = None,
         cta_label: str | None = None,
         cta_url: str | None = None,
     ) -> ChatMessage | None:
@@ -421,6 +424,9 @@ class MessagingService:
         Only ``surface ∈ {inbox, both, modal}`` writes an IM message (banner-only
         stays on the Notice surfaces). One shared ``system_card`` for all members —
         never per-user copies. Returns ``None`` when the surface skips IM.
+
+        ``content`` stays ``title\\nbody`` for old clients; dual-template fields live
+        in ``payload`` (``card_template`` always; ``summary`` / ``cover_url`` when set).
         """
         if surface not in ("inbox", "both", "modal"):
             return None
@@ -429,7 +435,12 @@ class MessagingService:
             "kind": "product_notice",
             "notice_id": notice_id,
             "severity": severity,
+            "card_template": card_template or "service",
         }
+        if summary:
+            payload["summary"] = summary
+        if cover_url:
+            payload["cover_url"] = cover_url
         if cta_label:
             payload["cta_label"] = cta_label
         if cta_url:

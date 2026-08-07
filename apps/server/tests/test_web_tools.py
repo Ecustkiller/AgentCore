@@ -615,8 +615,39 @@ async def test_read_url_403_steers_stop_read(monkeypatch):
     monkeypatch.setattr(read_url_mod, "_safe_request", _forbidden)
     result = await ReadUrlTool().execute({"url": "https://example.com/pay"}, _ctx())
     assert result.success is False
-    assert "403" in (result.error or "")
-    assert "收口" in (result.error or "") or "停止" in (result.error or "")
+    err = result.error or ""
+    assert "403" in err
+    assert "收口" in err or "停止" in err
+    # Actionable next moves (not just stop-URL): public/summary or hand-brain paste.
+    assert "下一招" in err
+    assert "公开" in err or "摘要" in err
+    assert "手脑" in err or "截图" in err
+    assert "勿假装已登录" in err or "已登录抓取" in err
+    assert result.metadata.get("policy_failure") is not True
+
+
+@pytest.mark.parametrize("code", [401, 429, 451])
+async def test_read_url_anti_crawl_steers_next_move(monkeypatch, code):
+    """401/429/451 share the 403 anti-crawl receipt: stop-read + workable next move."""
+
+    async def _allow(_url: str):
+        return None
+
+    async def _blocked(_client, _method, url, **_kwargs):
+        req = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError(
+            "blocked", request=req, response=httpx.Response(code, request=req)
+        )
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _blocked)
+    result = await ReadUrlTool().execute({"url": "https://example.com/pay"}, _ctx())
+    assert result.success is False
+    err = result.error or ""
+    assert str(code) in err
+    assert "停止" in err or "换 URL" in err
+    assert "下一招" in err
+    assert "手脑" in err or "截图" in err
     assert result.metadata.get("policy_failure") is not True
 
 

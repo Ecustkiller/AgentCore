@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NOTICE_TEMPLATES,
+  RELEASE_CHECK_UPDATE_CTA,
   buildFromSlots,
   emptySlotValues,
   surfacePublishHint,
@@ -8,8 +9,8 @@ import {
 } from "../noticeTemplates";
 
 describe("noticeTemplates", () => {
-  it("exposes nine operational templates with required fields", () => {
-    expect(NOTICE_TEMPLATES).toHaveLength(9);
+  it("exposes operational templates with required fields", () => {
+    expect(NOTICE_TEMPLATES).toHaveLength(11);
     for (const t of NOTICE_TEMPLATES) {
       expect(t.id).toBeTruthy();
       expect(t.title.trim().length).toBeGreaterThan(0);
@@ -18,7 +19,31 @@ describe("noticeTemplates", () => {
       expect(["critical", "high", "normal"]).toContain(t.severity);
       expect(["banner", "inbox", "both", "modal"]).toContain(t.surface);
       expect(["once", "never"]).toContain(t.dismiss_policy);
+      expect(["service", "article", undefined]).toContain(t.card_template);
     }
+  });
+
+  it("defaults ops templates to service; article/changelog use article", () => {
+    for (const id of [
+      "hotfix",
+      "release",
+      "maintenance",
+      "policy",
+      "quota_jiurelay",
+      "outage",
+      "feature",
+      "security",
+      "campaign",
+    ]) {
+      const t = NOTICE_TEMPLATES.find((x) => x.id === id)!;
+      expect(t.card_template ?? "service").toBe("service");
+    }
+    expect(NOTICE_TEMPLATES.find((x) => x.id === "article")!.card_template).toBe(
+      "article",
+    );
+    expect(
+      NOTICE_TEMPLATES.find((x) => x.id === "changelog")!.card_template,
+    ).toBe("article");
   });
 
   it("never pairs modal with dismiss=never", () => {
@@ -29,12 +54,25 @@ describe("noticeTemplates", () => {
     }
   });
 
-  it("templateToFormSeed copies recommended fields and clears CTA/window", () => {
-    const seed = templateToFormSeed(NOTICE_TEMPLATES[0]!);
-    expect(seed.title).toBe(NOTICE_TEMPLATES[0]!.title);
-    expect(seed.severity).toBe(NOTICE_TEMPLATES[0]!.severity);
+  it("release/hotfix seed check-update CTA", () => {
+    for (const id of ["hotfix", "release"]) {
+      const seed = templateToFormSeed(NOTICE_TEMPLATES.find((x) => x.id === id)!);
+      expect(seed.cta_label).toBe(RELEASE_CHECK_UPDATE_CTA.cta_label);
+      expect(seed.cta_url).toBe(RELEASE_CHECK_UPDATE_CTA.cta_url);
+      expect(seed.card_template).toBe("service");
+    }
+  });
+
+  it("templateToFormSeed copies recommended fields and clears window", () => {
+    const maintenance = NOTICE_TEMPLATES.find((x) => x.id === "maintenance")!;
+    const seed = templateToFormSeed(maintenance);
+    expect(seed.title).toBe(maintenance.title);
+    expect(seed.severity).toBe(maintenance.severity);
     expect(seed.cta_label).toBe("");
     expect(seed.end_at).toBe("");
+    expect(seed.card_template).toBe("service");
+    expect(seed.summary).toBe("");
+    expect(seed.cover_url).toBe("");
   });
 
   it("quota_jiurelay seeds jiurelay CTA and fixed copy", () => {
@@ -63,6 +101,7 @@ describe("noticeTemplates", () => {
     );
     expect(built.body).toContain("今天约 14:30");
     expect(built.body).toContain("修复消息发送超时");
+    expect(built.summary).toBeUndefined();
   });
 
   it("buildFromSlots keeps skeleton when slots empty", () => {
@@ -86,6 +125,34 @@ describe("noticeTemplates", () => {
     expect(built.body).toContain("2. 撤回优化");
     expect(built.body).toContain("3. 多余行应被截断");
     expect(built.body).not.toContain("不会出现");
+  });
+
+  it("article/changelog build returns summary for card face", () => {
+    const article = NOTICE_TEMPLATES.find((t) => t.id === "article")!;
+    const built = buildFromSlots(article, {
+      title: "协作图入门",
+      summary: "三分钟看懂协作图",
+      body: "正文很长…",
+    });
+    expect(built.title).toBe("协作图入门");
+    expect(built.summary).toBe("三分钟看懂协作图");
+    expect(built.body).toBe("正文很长…");
+    const seed = templateToFormSeed(article);
+    expect(seed.card_template).toBe("article");
+    expect(seed.summary.length).toBeGreaterThan(0);
+
+    const changelog = NOTICE_TEMPLATES.find((t) => t.id === "changelog")!;
+    const ch = buildFromSlots(changelog, {
+      version: "0.5.0",
+      summary: "消息与协作改进",
+      highlights: "消息编辑\n协作图预览",
+    });
+    expect(ch.title).toBe("版本亮点 · 0.5.0");
+    expect(ch.summary).toBe("消息与协作改进");
+    expect(ch.body).toContain("1. 消息编辑");
+    expect(templateToFormSeed(changelog).cta_url).toBe(
+      RELEASE_CHECK_UPDATE_CTA.cta_url,
+    );
   });
 
   it("surfacePublishHint warns on invalid modal+never", () => {

@@ -17,10 +17,12 @@ export type HostOpName =
   | "host_power"
   | "host_network_summary"
   | "host_apps"
+  | "host_os_log_summary"
   | "host_shell"
   | "host_open_settings"
   | "host_audio_set_default"
-  | "host_service_restart";
+  | "host_service_restart"
+  | "host_package_install";
 
 export interface HostOpInput {
   op: HostOpName | string;

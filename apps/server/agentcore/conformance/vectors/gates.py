@@ -351,6 +351,102 @@ def _presentation_kickoff_format_options() -> list[SSEEvent]:
     ]
 
 
+def _carrier_means_consult_smartart_boundary() -> list[SSEEvent]:
+    """载体/手段顾问·能力边界前置（种子 A）：用户要 Word 图形 SmartArt 组织图 → 先诚实说做不到
+    图形 SmartArt，再短 ask 推荐可交替代（交互 HTML / PPT / Word 文本层级）并保留「仍要 Word
+    文字版」；禁先答笼统「可以」再缩水。对照 ``presentation_kickoff_format_options``（普通短澄清）
+    与 ``proposal_pick_checkpoint``（recommended 选项卡）。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta(
+            "Word 里做不出带框连线的图形 SmartArt 组织架构图；"
+            "我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。"
+        ),
+        checkpoint_required(
+            checkpoint_id="cp_carrier_smartart",
+            conversation_id=_CONV,
+            question="组织架构图用哪种可交形态？",
+            context=(
+                "能力边界前置：图形 SmartArt 做不到；推荐更适合的载体，"
+                "仍可坚持 Word 文字版。"
+            ),
+            questions=[
+                {
+                    "id": "q0",
+                    "prompt": "选哪种可交形态？",
+                    "kind": "choice",
+                    "multiple": False,
+                    "default": "交互 HTML 组织图（可折叠）",
+                    "options": [
+                        {
+                            "label": "交互 HTML 组织图（可折叠）",
+                            "detail": "宽树也能看全",
+                            "recommended": True,
+                        },
+                        {
+                            "label": "PPT 带框连线版",
+                            "detail": "可打开编辑的图形页",
+                        },
+                        {
+                            "label": "Word 文本层级版（仍要 Word）",
+                            "detail": "缩进/表格文字版，非图形 SmartArt",
+                        },
+                    ],
+                }
+            ],
+            intent="decision",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1800, output_tokens=140, cost=_COST),
+    ]
+
+
+def _carrier_means_consult_html_org_tree() -> list[SSEEvent]:
+    """载体/手段顾问·次优载体/框架锁定（种子 B）：用户要极宽组织树「只翻译、框架不变、存 HTML」
+    → 短对齐提示静态 1:1 难看全，推荐折叠/分区等更好呈现，并保留「仍按原样 HTML」；非盲跟开做。
+    对照 ``carrier_means_consult_smartart_boundary``（能力边界）与 ``proposal_pick_checkpoint``。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta(
+            "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；"
+            "更适合可折叠树或按部门分区，也可仍按原样 HTML。"
+        ),
+        checkpoint_required(
+            checkpoint_id="cp_carrier_html_tree",
+            conversation_id=_CONV,
+            question="组织树 HTML 用哪种呈现？",
+            context=(
+                "次优载体短对齐：框架可保，呈现建议改；坚持原样静态 HTML 亦可。"
+            ),
+            questions=[
+                {
+                    "id": "q0",
+                    "prompt": "选哪种 HTML 呈现？",
+                    "kind": "choice",
+                    "multiple": False,
+                    "default": "可折叠树 HTML",
+                    "options": [
+                        {
+                            "label": "可折叠树 HTML",
+                            "detail": "保留层级，默认收拢便于看全",
+                            "recommended": True,
+                        },
+                        {
+                            "label": "按部门分区多页 HTML",
+                            "detail": "框架不变，分页降低横向溢出",
+                        },
+                        {
+                            "label": "仍按原样静态 HTML 1:1",
+                            "detail": "只翻译、不改框架，接受裁切/滚动",
+                        },
+                    ],
+                }
+            ],
+            intent="decision",
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1800, output_tokens=140, cost=_COST),
+    ]
+
+
 def _organize_plan_checkpoint() -> list[SSEEvent]:
     """单聊·整理方案卡 (ask_user card=organize_plan)：阻塞挂起，intent=organize_plan，
     恰好 1 个 choice 多选 + options 1–50（原路径→新路径）。"""
@@ -918,5 +1014,13 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "presentation_kickoff_format_options": (
         "退役棘轮：场面 format_options 已拆除；普通短澄清挂起",
         _presentation_kickoff_format_options,
+    ),
+    "carrier_means_consult_smartart_boundary": (
+        "载体/手段顾问：Word SmartArt 能力边界前置 → 诚实做不到 + recommended 可交替代 ask（含仍要 Word 文字版）",
+        _carrier_means_consult_smartart_boundary,
+    ),
+    "carrier_means_consult_html_org_tree": (
+        "载体/手段顾问：极宽组织树 HTML 次优载体短对齐 → 推荐折叠/分区 + 保留仍按原样 HTML",
+        _carrier_means_consult_html_org_tree,
     ),
 }

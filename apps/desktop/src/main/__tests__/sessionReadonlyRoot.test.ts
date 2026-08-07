@@ -187,6 +187,9 @@ describe("pickRegistryEnv", () => {
         npm_config_cache: "/tmp/npm",
         YARN_REGISTRY: "https://registry.npmjs.org/",
         PNPM_STORE_PATH: "/tmp/pnpm",
+        PIP_INDEX_URL: "https://pypi.org/simple/",
+        UV_CACHE_DIR: "/tmp/uv",
+        POETRY_CACHE_DIR: "/tmp/poetry",
         PATH: "/evil",
         LD_PRELOAD: "x",
         SECRET: "no",
@@ -196,6 +199,9 @@ describe("pickRegistryEnv", () => {
       npm_config_cache: "/tmp/npm",
       YARN_REGISTRY: "https://registry.npmjs.org/",
       PNPM_STORE_PATH: "/tmp/pnpm",
+      PIP_INDEX_URL: "https://pypi.org/simple/",
+      UV_CACHE_DIR: "/tmp/uv",
+      POETRY_CACHE_DIR: "/tmp/poetry",
     });
   });
 

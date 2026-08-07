@@ -37,7 +37,7 @@ skip_if:
 
 **全局协作感知**：列表状态点（执行中脉动 / 「等你决策」光环）；跨对话完成 Toast + 原生通知。`finish_reason=paused` ≠ 完成。→ `teamActivityNotifications.ts`。
 
-**产品公告**（运营 Notice，≠ 群公告 / ≠ 站立收件箱）：顶栏 Banner（同时 ≤1，紧急/维护）+ 登录后一次性弹窗（`surface=modal`，关即 dismiss）+ 消息页「AgentCore 官方」只读会话回看；Banner/Modal 软轮询；inbox 走 IM 未读。More「公告」已撤（`#/more/notices` → 官方会话）。契约 → [管理员后台 · 产品公告](/docs/05-平台与运维/管理员后台.md#产品公告全局-notice)、[消息 IM](/docs/05-平台与运维/消息IM.md)。→ `ProductNoticeBanner`、`ProductNoticeModal`、`stores/productNotices.ts`、MessagesPage 官方号。
+**产品公告**（运营 Notice，≠ 群公告 / ≠ 站立收件箱）：顶栏 Banner（同时 ≤1，紧急/维护）+ 登录后一次性弹窗（`surface=modal`，关即 dismiss）+ 消息页「AgentCore 官方」只读会话回看；Banner/Modal 软轮询；inbox 走 IM 未读。More「公告」已撤（`#/more/notices` → 官方会话）。官方号双模板 ✅（`service` 卡面看完 / `article` 摘要进应用内详情）→ [管理员后台 · 官方号双模板](/docs/05-平台与运维/管理员后台.md#官方号双模板服务通知--图文)。契约 → [管理员后台 · 产品公告](/docs/05-平台与运维/管理员后台.md#产品公告全局-notice)、[消息 IM](/docs/05-平台与运维/消息IM.md)。→ `ProductNoticeBanner`、`ProductNoticeModal`、`ProductNoticeCard`、`ProductNoticeDetail`、MessagesPage 官方号。
 
 **团队展示**：多 Agent 走内联 `ProcessTimeline`，协作图嵌在 `delegate`/`debate` 步；单 Agent / 开工挂起零 run **不出图**。形态分工 → [协作图 UX](/docs/04-前端/协作图与双视图UX.md)。
 

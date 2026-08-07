@@ -1,9 +1,10 @@
-"""云端 + gVisor 开启后的整条能力链自洽（灰度上线前钉住的集成链）。
+"""云端 + gVisor 的整条能力链自洽（默认开；紧急关 / 探测失败钉住）。
 
 链条（单一真相源 ``code_execution_enabled_for`` 贯穿）：
-``GVISOR_ENABLED`` → 工具类注册（worker registry）→ ``<workspace_context>`` 能力
-自述「已装配」→ 委派能力闸（硬闸放行、软警告静默）→ 沙箱→审批姿态 ``AUTO_PASS``。
-默认关时整条链反向成立（不注册 / 未装配 / 硬拒 / ``UNAVAILABLE``）。
+``GVISOR_ENABLED``（代码默认 true）→ 工具类注册 → ``<workspace_context>`` 能力
+自述「已装配」→ 委派能力闸 → 沙箱→审批姿态 ``AUTO_PASS``。
+显式关或健康探测失败时整条链反向成立（不注册 / 未装配 / 硬拒 / ``UNAVAILABLE``）。
+单测 conftest 强制 ``gvisor_enabled=False``，故「关」路径用本模块显式断言。
 """
 
 from __future__ import annotations
@@ -45,7 +46,12 @@ def _pptx_plan():
     return plan
 
 
-def test_cloud_default_off_chain_stays_withheld(tmp_path: Path):
+def test_cloud_when_gvisor_off_chain_stays_withheld(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """紧急关闭 / conftest：gvisor 关时云执行类整链扣留。"""
+    monkeypatch.setattr(settings, "gvisor_enabled", False)
+    monkeypatch.setattr(settings, "code_execute_cloud_enabled", False)
     backend = _cloud_backend(tmp_path)
 
     assert code_execution_enabled_for(backend) is False
@@ -57,6 +63,13 @@ def test_cloud_default_off_chain_stays_withheld(tmp_path: Path):
     assert warn is not None
     assert execution_approval_posture(backend) is ExecutionApprovalPosture.UNAVAILABLE
     assert execution_tool_auto_passes(backend, "code_execute") is False
+
+
+def test_settings_gvisor_enabled_defaults_true():
+    """生产/内测默认开：字段默认值 true（conftest 不覆盖本断言的模型字段）。"""
+    from agentcore.config.workspace import WorkspaceSettings
+
+    assert WorkspaceSettings.model_fields["gvisor_enabled"].default is True
 
 
 def test_cloud_escape_hatch_registers_execution_chain(
@@ -89,7 +102,11 @@ def test_cloud_gvisor_on_chain_flips_end_to_end(tmp_path: Path, monkeypatch: pyt
     assert "test_run" in names
 
     # ② 能力自述：workspace_context 能力行翻「已装配」。
-    assert "code_execute=已装配" in build_workspace_context(backend, desktop_online=True)
+    # 装包另位：无 netns egress 时 package_install 保持未装配（能跑 ≠ 能装）。
+    ctx = build_workspace_context(backend, desktop_online=True)
+    assert "code_execute=已装配" in ctx
+    assert "package_install=" in ctx
+
 
     # ③ 委派能力闸：S3 后无 code_verified kind 硬放行；二进制产物启发不再软警告。
     plan = _pptx_plan()

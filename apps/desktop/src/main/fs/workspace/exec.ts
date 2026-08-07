@@ -113,7 +113,7 @@ function resolveLangCmd(
  * Arbitrary env injection from the API is rejected (PATH / LD_* / secrets…).
  */
 const REGISTRY_ENV_KEY =
-  /^(NPM_CONFIG_|npm_config_|YARN_|PNPM_|HTTPS_PROXY|HTTP_PROXY|ALL_PROXY|NO_PROXY|https_proxy|http_proxy|all_proxy|no_proxy)/;
+  /^(NPM_CONFIG_|npm_config_|YARN_|PNPM_|PIP_|UV_|POETRY_|HTTPS_PROXY|HTTP_PROXY|ALL_PROXY|NO_PROXY|https_proxy|http_proxy|all_proxy|no_proxy)/;
 
 export function pickRegistryEnv(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};

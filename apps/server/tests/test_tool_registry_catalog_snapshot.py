@@ -42,6 +42,7 @@ _BUILTIN_ORDER = [
     "md_to_docx",
     "md_to_pdf",
     "archive_extract",
+    "download_url",
     "grep",
     "code_search",
     "code_diagnostics",
@@ -59,6 +60,7 @@ _HOST_L1_ORDER = [
     "host_power",
     "host_network_summary",
     "host_apps",
+    "host_os_log_summary",
 ]
 
 # P3: CEO+worker GRANTABLE exception (builtin surface · host_class · 禁 kickoff).
@@ -102,6 +104,7 @@ _HOST_L2_ORDER = [
 _HOST_L3_ORDER = [
     "host_audio_set_default",
     "host_service_restart",
+    "host_package_install",
 ]
 
 # Privacy-gated worker tools (manual_wire): catalog-advertised, not in default
@@ -158,6 +161,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "md_to_docx": (AVAILABLE_TO_WORKER,),
     "md_to_pdf": (AVAILABLE_TO_WORKER,),
     "archive_extract": (AVAILABLE_TO_WORKER,),
+    "download_url": (AVAILABLE_TO_WORKER,),
     "test_run": (AVAILABLE_TO_WORKER,),
     "code_execute": (AVAILABLE_TO_WORKER,),
     "host_ping": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -167,6 +171,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "host_power": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host_network_summary": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host_apps": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "host_os_log_summary": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host_shell": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "external_mount_readonly": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "escalate": (AVAILABLE_TO_WORKER,),
@@ -178,6 +183,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "host_open_settings": (AVAILABLE_TO_WORKER,),
     "host_audio_set_default": (AVAILABLE_TO_WORKER,),
     "host_service_restart": (AVAILABLE_TO_WORKER,),
+    "host_package_install": (AVAILABLE_TO_WORKER,),
     "search_conversations": (AVAILABLE_TO_WORKER,),
     "read_conversation": (AVAILABLE_TO_WORKER,),
     # CEO orchestration (catalog advertise)
@@ -276,6 +282,7 @@ def test_tool_registry_grant_sets_snapshot():
             "md_to_docx",
             "md_to_pdf",
             "archive_extract",
+            "download_url",
         }
     )
     assert approval_class_tool_names() == file_mutation_tool_names() | frozenset({"git"})

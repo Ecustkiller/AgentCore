@@ -32,6 +32,10 @@ class ProductNoticeRow(Base):
             "dismiss_policy in ('once', 'never')",
             name="ck_product_notices_dismiss_policy",
         ),
+        CheckConstraint(
+            "card_template in ('service', 'article')",
+            name="ck_product_notices_card_template",
+        ),
         Index("ix_product_notices_status", "status"),
     )
 
@@ -42,6 +46,11 @@ class ProductNoticeRow(Base):
     surface: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), server_default=text("'draft'"))
     dismiss_policy: Mapped[str] = mapped_column(String(32))
+    card_template: Mapped[str] = mapped_column(
+        String(32), server_default=text("'service'")
+    )
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     cta_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cta_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

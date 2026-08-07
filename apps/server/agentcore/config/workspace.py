@@ -53,8 +53,10 @@ class WorkspaceSettings(BaseModel):
     code_execute_cloud_unsafe_ack: bool = False
 
     # Cloud (server-location) workers: use gVisor (runsc) for real isolation.
+    # Default ON for 内测/自托管（取消「部署时再想起开开关」）；健康探测失败仍
+    # 诚实不装配执行类。紧急关闭：机上 env ``GVISOR_ENABLED=false``。
     # When true, code_execute is enabled on cloud workers without the unsafe-ack gate.
-    gvisor_enabled: bool = False
+    gvisor_enabled: bool = True
     # Path to the runsc binary (default: on PATH).
     gvisor_runsc_path: str = "runsc"
     # runsc runtime state directory (containers, sandboxes). Must live on the

@@ -75,6 +75,16 @@ BYOK 厂商预设 id=`hy`；canonical `https://tokenhub.tencentmaas.com/v1`（�
 | 工具调用 | 有 tool call 的回合必须回传 `reasoning_content` |
 | 未做 | 不暴露 `reasoning_effort` UI；不做 `hy/` 平台前缀路由 |
 
+## 四·附、OpenCode Zen（BYOK 预设）
+
+BYOK 厂商预设 id=`opencode_zen`；canonical `https://opencode.ai/zen/v1`。品牌对外暴露为「OpenCode Zen」。预设 `models` 仅短种子（发现失败兜底）；全量目录靠上游 `GET /models` 与现有 BYOK 发现合并。用户自备 Zen key，不进平台配额 / `PLATFORM_*`。
+
+| 项 | 约束 |
+|---|---|
+| 协议 | 主路仍 OpenAI `chat/completions`；目录有 ≠ 一定能跑（Claude / GPT 等可能需其它协议） |
+| 计费 | BYOK 自担；估算价卡按现有 BYOK 两层解析 |
+| 未做 | 平台代付；`zen/` 前缀路由；为本网关单独开 Anthropic/Responses 分叉 |
+
 ## 五、platform 模式与故障排查
 
 `billing_mode=platform` 走 `PLATFORM_*`；改三项须重启后端。

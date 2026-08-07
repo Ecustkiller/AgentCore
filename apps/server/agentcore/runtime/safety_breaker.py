@@ -577,6 +577,16 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
             if sub and sub != "start":
                 return None
         command_text = _command_text_for_tool(name, args)
+        if name == "host_shell":
+            from agentcore.tools.builtin.host import shell_silent_install_blocks
+
+            silent = shell_silent_install_blocks(command_text)
+            if silent:
+                return BreakerHit(
+                    verdict=BreakerVerdict.DENY,
+                    rule_id="host_shell.silent_install",
+                    reason=silent,
+                )
         hit = scan_destructive_text(command_text)
         if hit is not None:
             if (

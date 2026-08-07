@@ -66,10 +66,12 @@ const TOOL_LABEL: Record<string, string> = {
   host_power: "Host power",
   host_network_summary: "Network summary",
   host_apps: "Host apps",
+  host_os_log_summary: "OS log summary",
   host_shell: "Host shell",
   host_open_settings: "Open settings",
   host_audio_set_default: "Set default audio",
   host_service_restart: "Restart service",
+  host_package_install: "Install package",
 };
 
 const TOOL_DETAIL_KEYS = [

@@ -415,12 +415,20 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "#/toolbox/manual/" in map_body
     assert "手机" in map_body and "勿承诺" in map_body
     assert "?s=workspace" in map_body or "workspace" in map_body
+    # .md 阅读预览（文件面板）≠ HTML「完整预览」（右坞）
+    assert "阅读预览" in map_body
+    assert "完整预览" in map_body
+    assert "文件」面板" in map_body or "文件面板" in map_body
 
     assert "【FAQ 精华】" in faq_body
     assert "为什么没组团" in faq_body
     assert "?s=faq" in faq_body
     assert "playbook=" not in faq_body
+    assert "怎么打开 .md" in faq_body or ".md" in faq_body and "阅读预览" in faq_body
+    assert "Markdown 是什么" in faq_body or "语法" in faq_body  # 禁科普口径
+    assert "完整预览" in faq_body and "不是一路" in faq_body
 
+    assert "Markdown 语法" in help_body or ".md 怎么打开" in help_body
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
     # Relocated from the old always-on hint: quality contract, output shaping,
@@ -561,7 +569,8 @@ def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline()
     assert "软提醒" in body or "短主题词" in body
     assert "停止" in body or "勿塞细" in body or "细枚举" in body
     assert "取证路径" in body or "机构名" in body
-    assert "Stanford" in body or "McKinsey" in body  # 真跑反例警示
+    assert "字面" in body or "硬门槛" in body or "假失败" in body
+    assert "Stanford" not in body and "McKinsey" not in body
     assert "required_sections" in body
     assert "验收点" in body or "验收项" in body
     assert "2–4" in body or "2-4" in body
@@ -778,12 +787,30 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "做个网站" in body
     assert "展示页" in body or "业务应用" in body
     assert "intensity=full" in body or "满编" in body
+    # 点名载体/手段·顾问短对齐（与规格已齐正交；禁硬闸/format_options；禁单场景剧本）
+    assert "点名载体" in body or "载体/手段" in body
+    assert "顾问" in body
+    assert "recommended" in body
+    assert "零摩擦" in body
+    assert "盖不住" in body or "做不到" in body
+    assert "规格已齐" in body
+    assert "内容齐" in body or "手段已核" in body
+    assert "可读" in body or "可扫" in body or "可编辑" in body
+    assert "不得" in body or "禁止" in body
+    assert "SmartArt" not in body and "DrawingML" not in body
+    assert "话术锚点" not in body
+    assert "极宽" not in body
+    assert "载体" in body
+    assert "format_options" in body  # 禁复活
+    assert "硬闸" in body
 
 
 def test_ask_user_kickoff_skill_mentions_compat_options_not_ledger():
     body = _body("ask_user_kickoff")
     assert "style_options" not in body
-    assert "format_options" not in body
+    # format_options 仅以「禁复活」语境出现，不得当字段教
+    assert "format_options" in body
+    assert "复活" in body or "禁止" in body
     assert "短问" in body or "短澄清" in body
 
 
@@ -799,6 +826,14 @@ def test_ask_user_kickoff_skill_teaches_software_delivery_not_default_html():
     assert "五波" in body or "脚手架" in body
     assert "intensity" in body
     assert "lean" in body
+
+
+def test_ask_user_midtask_skill_teaches_carrier_advisory_crossref():
+    body = _body("ask_user_midtask")
+    assert "载体" in body or "手段" in body
+    assert "顾问" in body or "kickoff" in body
+    assert "零摩擦" in body
+    assert "落地页 HTML" in body or "不打扰" in body
 
 
 def test_build_website_skill_teaches_delivery_intensity():

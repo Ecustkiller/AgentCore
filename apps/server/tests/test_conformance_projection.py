@@ -937,3 +937,93 @@ def test_resume_ask_user_absorb(projected):
     ]
     assert [s["kind"] for s in p["process"]] == ["checkpoint", "content"]
     assert p["process"][-1]["text"] == "收到，继续推进交付。"
+
+
+def _carrier_consult_events(name: str):
+    from agentcore.conformance.vectors import VECTORS
+    from agentcore.runtime.events.types import EventType
+
+    _description, builder = VECTORS[name]
+    return list(builder()), EventType
+
+
+def test_carrier_means_consult_smartart_boundary(projected):
+    """种子 A：能力边界前置 — 诚实做不到图形 SmartArt + ask 含可交替代与「仍要 Word」。"""
+    name = "carrier_means_consult_smartart_boundary"
+    p = projected[name]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    assert p["content"] == ""  # ask 吸收：边界说明进卡片，气泡空
+    assert p["process"] == [{"kind": "checkpoint", "checkpoint_id": "cp_carrier_smartart"}]
+    assert p["interactions"] == [
+        {
+            "kind": "ask_user",
+            "id": "cp_carrier_smartart",
+            "status": "pending",
+            "question": "组织架构图用哪种可交形态？",
+            "context": (
+                "能力边界前置：图形 SmartArt 做不到；推荐更适合的载体，"
+                "仍可坚持 Word 文字版。"
+            ),
+        }
+    ]
+    assert "SmartArt" in p["interactions"][0]["context"]
+
+    events, event_type = _carrier_consult_events(name)
+    deltas = [
+        e.payload.get("delta", "")
+        for e in events
+        if e.type == event_type.CONTENT_DELTA
+    ]
+    assert any("SmartArt" in d and ("做不出" in d or "做不到" in d) for d in deltas)
+    assert not any(d.strip().startswith("可以") for d in deltas)
+
+    cp = next(e for e in events if e.type == event_type.CHECKPOINT_REQUIRED)
+    opts = cp.payload["questions"][0]["options"]
+    labels = [o["label"] for o in opts]
+    assert any(o.get("recommended") for o in opts)
+    assert any("HTML" in label for label in labels)
+    assert any("Word" in label and "仍要" in label for label in labels)
+    assert not any("SmartArt" in label and "已" in label for label in labels)
+
+
+def test_carrier_means_consult_html_org_tree(projected):
+    """种子 B：次优载体短对齐 — 静态 1:1 难看全 + ask 推荐折叠/分区并保留原样 HTML。"""
+    name = "carrier_means_consult_html_org_tree"
+    p = projected[name]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    assert p["content"] == ""
+    assert p["process"] == [{"kind": "checkpoint", "checkpoint_id": "cp_carrier_html_tree"}]
+    assert p["interactions"] == [
+        {
+            "kind": "ask_user",
+            "id": "cp_carrier_html_tree",
+            "status": "pending",
+            "question": "组织树 HTML 用哪种呈现？",
+            "context": (
+                "次优载体短对齐：框架可保，呈现建议改；坚持原样静态 HTML 亦可。"
+            ),
+        }
+    ]
+
+    events, event_type = _carrier_consult_events(name)
+    deltas = [
+        e.payload.get("delta", "")
+        for e in events
+        if e.type == event_type.CONTENT_DELTA
+    ]
+    assert any("1:1" in d and ("看不全" in d or "难看" in d) for d in deltas)
+    # 非盲跟：首轮即挂起 ask，无 delegate / 假交付落盘
+    assert not any(e.type == event_type.RUN_PLAN for e in events)
+    assert not any(
+        e.type == event_type.TOOL_USE_START and e.payload.get("tool_name") == "delegate"
+        for e in events
+    )
+
+    cp = next(e for e in events if e.type == event_type.CHECKPOINT_REQUIRED)
+    opts = cp.payload["questions"][0]["options"]
+    labels = [o["label"] for o in opts]
+    assert any(o.get("recommended") for o in opts)
+    assert any("折叠" in label for label in labels)
+    assert any("原样" in label and "HTML" in label for label in labels)

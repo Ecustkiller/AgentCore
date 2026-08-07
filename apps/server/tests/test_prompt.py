@@ -242,6 +242,9 @@ def test_core_states_coordinator_tool_boundary():
     assert "terminal" in hint
     # OS 排查意图多解才先澄清；「桌面有个××」走 grant 发现，不算盲探、禁先问文件名。
     assert "本机 Host" in hint
+    assert "host_os_log_summary" in hint
+    assert "三分日志" in hint
+    assert "Get-WinEvent" in hint or "journalctl" in hint
     assert "澄清意图" in hint
     assert "扫路径" in hint or "盲探" in hint
     assert "OS 排查" in hint or "排查意图" in hint
@@ -308,6 +311,18 @@ def test_core_teaches_split_criterion_over_count():
     assert "糊建站" in hint or "做个网站" in hint
     assert "短问" in hint or "短澄清" in hint
     assert "提案墙" in hint
+    # 点名载体/手段·顾问短对齐（与规格已齐正交；禁硬闸/format_options；禁单场景剧本）
+    assert "点名载体" in hint or "载体/手段" in hint
+    assert "顾问" in hint
+    assert "recommended" in hint
+    assert "零摩擦" in hint
+    assert "规格已齐" in hint
+    assert "内容齐" in hint or "手段已核" in hint
+    assert "可读" in hint or "可扫" in hint or "可编辑" in hint
+    assert "不得" in hint and ("吞掉" in hint or "delegate" in hint)
+    assert "SmartArt" not in hint and "DrawingML" not in hint
+    assert "极宽" not in hint
+    assert "format_options" in hint  # 禁复活（以禁止语境出现）
     assert "pptx" in hint.lower() and "marp" in hint.lower()
     assert "先设计再实现" in hint
     assert "只留方向句" in hint
@@ -668,6 +683,13 @@ def test_core_teaches_delivery_path_by_workspace_type():
     assert "系统浏览器" in hint
     assert "禁止给本机磁盘路径" in hint or "禁止给本机" in hint
     assert "真实路径" in hint
+    # 缺能力 → 同轮可开工；人手一等；禁堆装配说明书
+    assert "同轮可开工" in hint
+    assert "手脑" in hint
+    assert "假开页" in hint or "勿假装" in hint or "假开页底线" in hint
+    assert "ask_user(browser_login=true)" in hint
+    assert "escalate → 右坞接管" not in hint
+    assert "仅可作标明" not in hint  # 旧：未装配只剩 read_url 摘录
 
 
 def test_core_teaches_presentation_honesty():
@@ -686,7 +708,8 @@ def test_core_teaches_presentation_honesty():
     assert "*_slim.pptx" in hint or "slim.pptx" in hint
     assert "相对模板" in hint
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
-    assert "format_options" not in kickoff
+    # 场面 format_options 已退役；仅允许以「禁复活」语境出现，不得当字段教
+    assert "复活" in kickoff and "format_options" in kickoff
     assert "style_options" not in kickoff
     orch = _TEAM_ORCHESTRATION_ADVANCED
     assert "python-pptx" in orch
@@ -701,13 +724,13 @@ def test_core_teaches_presentation_honesty():
 
 
 def test_core_teaches_short_edit_not_m2a_kickoff_template():
-    """案 7e9d2d4b：短改稿禁套 M2A 开工模板（提示/结构字段，非意图分类器）。"""
+    """案 7e9d2d4b：短改稿禁套任务卡开工模板（提示/结构字段，非意图分类器）。"""
     hint = _CEO_CORE_HINT
     assert "短改稿" in hint
-    assert "M2A" in hint
     assert "任务卡" in hint
     assert "开工模板" in hint or "规格已冻结" in hint
     assert "扫长文猜意图" in hint or "禁止扫" in hint
+    assert "M2A" not in hint  # 原则复用，不绑死单编号族
 
 
 def test_core_teaches_explicit_confirm_before_disk_write():

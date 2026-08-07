@@ -1,7 +1,3 @@
-import {
-  noticeSeverityTone,
-  openNoticeCta,
-} from "@/components/layout/ProductNoticeBanner";
 import { Button, IconButton } from "@/components/ui";
 import {
   ContextMenu,
@@ -9,7 +5,6 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { statusPillInline } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatMessageTimeOfDay } from "@/lib/format";
 import type { ImBubbleLayout } from "@/lib/imMessageLayout";
@@ -23,8 +18,8 @@ import {
 import type { ChatType } from "@/services/messaging";
 import { Download, FileText, Folder, Pencil, Reply, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
 import { ChatImageGallery } from "./ChatImageGallery";
+import { ProductNoticeCard } from "./ProductNoticeCard";
 import {
   avatarInitial,
   avatarSrc,
@@ -33,6 +28,7 @@ import {
   messageMentionsUser,
   splitContentByMentions,
 } from "./chatDisplay";
+import { asProductNoticePayload } from "./productNotice";
 
 interface Props {
   message: ChatMessageDetail;
@@ -67,44 +63,6 @@ interface Props {
   replyTargetRecalled?: boolean;
   /** Group bubble avatar → 资料卡 (消息IM.md §9.4). */
   onAvatarClick?: (userId: string) => void;
-}
-
-const SEVERITY_LABEL: Record<string, string> = {
-  critical: "紧急",
-  high: "重要",
-  normal: "一般",
-};
-
-/** Backend product_notice payload on a system_card (graceful if fields missing). */
-interface ProductNoticePayload {
-  kind: "product_notice";
-  notice_id?: string;
-  severity?: string;
-  cta_label?: string;
-  cta_url?: string;
-}
-
-function asProductNoticePayload(
-  payload: ChatMessageDetail["payload"],
-): ProductNoticePayload | null {
-  if (!payload || typeof payload !== "object") return null;
-  if (payload.kind !== "product_notice") return null;
-  return payload as unknown as ProductNoticePayload;
-}
-
-/** Official publish stores `title\\nbody` in content; degrade when empty. */
-function splitNoticeContent(content: string | null | undefined): {
-  title: string;
-  body: string;
-} {
-  const raw = (content ?? "").trim();
-  if (!raw) return { title: "[公告]", body: "" };
-  const nl = raw.indexOf("\n");
-  if (nl === -1) return { title: raw, body: "" };
-  return {
-    title: raw.slice(0, nl).trim() || "[公告]",
-    body: raw.slice(nl + 1).trim(),
-  };
 }
 
 function textBubbleRadius(
@@ -278,63 +236,6 @@ function MentionBody({
         );
       })}
     </>
-  );
-}
-
-/** Centered product-notice card (title / body / optional CTA). */
-function ProductNoticeCard({
-  message,
-  payload,
-}: {
-  message: ChatMessageDetail;
-  payload: ProductNoticePayload;
-}) {
-  const navigate = useNavigate();
-  const { title, body } = splitNoticeContent(message.content);
-  const severity =
-    typeof payload.severity === "string" ? payload.severity : "normal";
-  const tone = noticeSeverityTone(severity);
-  const ctaLabel =
-    typeof payload.cta_label === "string" ? payload.cta_label : null;
-  const ctaUrl = typeof payload.cta_url === "string" ? payload.cta_url : null;
-  const time = formatMessageTimeOfDay(message.created_at);
-
-  return (
-    <div className="group flex justify-center py-1">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card px-3 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
-            {title}
-          </span>
-          <span className={statusPillInline[tone]}>
-            {SEVERITY_LABEL[severity] ?? severity}
-          </span>
-        </div>
-        {body ? (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
-            {body}
-          </p>
-        ) : null}
-        {ctaLabel && ctaUrl ? (
-          <div className="mt-3">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => openNoticeCta(ctaUrl, navigate)}
-            >
-              {ctaLabel}
-            </Button>
-          </div>
-        ) : null}
-        {time ? (
-          <SimpleTooltip label={new Date(message.created_at).toLocaleString()}>
-            <span className="mt-2 block cursor-default text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-              {time}
-            </span>
-          </SimpleTooltip>
-        ) : null}
-      </div>
-    </div>
   );
 }
 

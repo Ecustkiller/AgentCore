@@ -89,6 +89,14 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
             "google/gemini-2.5-pro",
         ),
     ),
+    ByokProviderPreset(
+        id="opencode_zen",
+        label="OpenCode Zen",
+        base_url="https://opencode.ai/zen/v1",
+        default_model="deepseek-v4-flash",
+        # Short seed for discovery-miss; full catalog = GET /models union.
+        models=("deepseek-v4-flash", "kimi-k2.6", "glm-5.2"),
+    ),
 )
 
 

@@ -73,7 +73,7 @@ const CREATION_TOOLS: ToolboxEntry[] = [
   {
     id: "canvas",
     title: "白板",
-    description: "自由排布、人与 AI 同板协作",
+    description: "自由排布画布可用；AI 指挥白板即将上线",
     icon: Palette,
     color: "canvas",
     to: "/whiteboard",
