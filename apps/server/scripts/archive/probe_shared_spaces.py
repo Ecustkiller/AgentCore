@@ -51,7 +51,10 @@ def _ts() -> str:
 
 
 def _hdr(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-Client-Platform": "desktop",
+    }
 
 
 def _err_code(body: Any) -> str | None:
@@ -96,6 +99,7 @@ async def _login(client: httpx.AsyncClient, base: str, username: str) -> str:
     r = await client.post(
         f"{base}/v1/auth/token",
         json={"username": username, "password": PASSWORD},
+        headers={"X-Client-Platform": "desktop"},
     )
     r.raise_for_status()
     return r.json()["access_token"]

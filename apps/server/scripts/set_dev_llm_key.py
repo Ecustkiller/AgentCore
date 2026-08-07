@@ -32,7 +32,11 @@ DEFAULT_PASSWORD = os.environ.get("DEV_PASSWORD", "devpassword")
 
 
 async def _login(client: httpx.AsyncClient, base_url: str, user: str, pw: str) -> str:
-    r = await client.post(f"{base_url}/v1/auth/token", json={"username": user, "password": pw})
+    r = await client.post(
+        f"{base_url}/v1/auth/token",
+        json={"username": user, "password": pw},
+        headers={"X-Client-Platform": "desktop"},
+    )
     if r.status_code == 401:
         raise SystemExit(
             "登录失败 (401)。先建 dev 账号：uv run python scripts/seed_dev_user.py"

@@ -29,7 +29,7 @@ vi.mock("@/lib/toast", () => ({
 
 vi.mock("@/services/folders", () => ({
   createFolder: vi.fn(),
-  findLocalFolderByBinding: vi.fn(() => null),
+  findLocalFolderByBinding: vi.fn(() => undefined),
 }));
 
 vi.mock("@/services/workspaceBinding", () => ({
@@ -178,7 +178,7 @@ describe("pickAndRegisterLocalProject stays on conversation", () => {
     } as unknown as typeof window.fsApi;
     const { findLocalFolderByBinding } = await import("@/services/folders");
     const { startNewConversation } = await import("@/lib/newConversation");
-    vi.mocked(findLocalFolderByBinding).mockReturnValue(null);
+    vi.mocked(findLocalFolderByBinding).mockReturnValue(undefined);
     vi.mocked(startNewConversation).mockClear();
   });
 

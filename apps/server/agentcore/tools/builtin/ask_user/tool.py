@@ -68,7 +68,7 @@ class AskUserTool:
 
     sink: EventSink
     conversation_id: str
-    timeout_seconds: float
+    timeout_seconds: float | None
     captain_run_id: str | None = None
     base_system_prompt: str = ""
     user_message: str = ""

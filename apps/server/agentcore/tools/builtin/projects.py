@@ -255,7 +255,11 @@ class ResolveProjectTool:
 
         if outcome.status == "resolved":
             project = outcome.matches[0]
-            payload = {"status": "resolved", "query": name, "project": project}
+            payload: dict[str, Any] = {
+                "status": "resolved",
+                "query": name,
+                "project": project,
+            }
             return ToolResult(
                 tool_call_id="",
                 success=True,
