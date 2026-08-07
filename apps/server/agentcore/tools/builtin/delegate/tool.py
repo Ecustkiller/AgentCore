@@ -1226,10 +1226,12 @@ class DelegateTool:
                 origin=plan.origin,
             )
             # 阻塞跑完才记 completed seed；协调 kickoff 时队员未完成，勿伪造成完成。
-            coord_flag = (
-                bool(arguments["coordinate"]) if "coordinate" in arguments else True
-            )
-            if not coord_flag:
+            # 勿仅看 coordinate 入参：默认 true 时 solo 仍走阻塞臂，须记 seed，否则同回合
+            # 二次合入会把已完成节点当成未完成 → 误判同构 / 重跑。
+            from agentcore.runtime.coordination.session import active_coordination
+
+            active = active_coordination(execution_id)
+            if active is None or not active.active:
                 self._last_graph_seed = {
                     n.run_id: _RunState(phase=RunPhase.COMPLETED, content="")
                     for n in plan.nodes

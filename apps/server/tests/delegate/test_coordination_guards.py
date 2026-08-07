@@ -1751,6 +1751,7 @@ def _fake_replan_tool(*, execution_id: str, plan, completed: dict | None = None)
     tool._depth = 0
     tool._delegate_force = False
     tool._topology_lock = False
+    tool._folder_id = "test_birth"
     tool._supervised = SupervisedRun(
         plan=plan,
         completed=completed

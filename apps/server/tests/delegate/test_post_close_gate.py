@@ -157,6 +157,7 @@ def test_same_graph_replan_gap_fill_unchanged():
         _captain_run_id = "cap"
         _depth = 0
         _topology_lock = False
+        _folder_id = "test_birth"
 
     plan = RunPlan(
         nodes=[

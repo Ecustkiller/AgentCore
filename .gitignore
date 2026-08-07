@@ -104,6 +104,8 @@ apps/server/tmp/
 /tmp_*
 /_tmp_*
 /.tmp_*
+# Local scratch dump dir at repo root only (leading slash; not apps/**/.tmp)
+/.tmp/
 apps/server/_tmp_*
 apps/server/tmp_*
 # One-off review / audit scratch (maintainer-local; not published)

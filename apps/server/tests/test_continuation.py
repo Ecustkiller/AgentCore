@@ -27,7 +27,7 @@ from agentcore.tools.protocol import ToolCategory, ToolContext, ToolResult, Tool
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from tests.delegate.conftest import _upstream_body
+from tests.delegate.conftest import _TEST_BIRTH_FOLDER_ID, _upstream_body
 
 
 class _NamedStub:
@@ -84,6 +84,7 @@ def _tool(store: SessionStore, provider: _Provider, sink: EventSink | None = Non
         base_tool_context=_ctx(),
         captain_run_id="CEO",
         session_store=store,
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 
@@ -221,6 +222,7 @@ async def test_resolve_session_loader_miss_copy():
         captain_run_id="CEO",
         session_store=store,
         session_loader=_miss,
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
     try:
         await resolve_session(tool, "ghost", own_run_id="t_2")

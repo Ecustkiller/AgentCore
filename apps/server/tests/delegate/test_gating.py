@@ -33,10 +33,11 @@ async def test_workers_ungated_in_cloud_mode(monkeypatch):
 
 
 async def test_second_call_namespaces_run_ids():
+    # 阻塞臂：同回合二次合入仍为新节点铸独立 run_id（默认协调臂会提前返回，事件未齐）。
     sink = EventSink()
     t = tool(Provider(["X", "Y"]), sink=sink)
-    await t.execute({"tasks": [{"role": "A", "task": "a"}]}, ctx())
-    await t.execute({"tasks": [{"role": "B", "task": "b"}]}, ctx())
+    await t.execute({"tasks": [{"role": "A", "task": "a"}], "coordinate": False}, ctx())
+    await t.execute({"tasks": [{"role": "B", "task": "b"}], "coordinate": False}, ctx())
     sink.close()
     starts = [e async for e in sink if e.type == EventType.RUN_STARTED]
     run_ids = [e.payload["run_id"] for e in starts]

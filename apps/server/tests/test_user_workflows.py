@@ -417,6 +417,8 @@ class _FakeDelegate:
     _captain_run_id = "cap"
     _depth = 0
     _topology_lock = False
+    # 模拟项目会话出生桌，避免 apply_replan 命中裸聊 2b 闸（测的是补跑/拓扑意图）
+    _folder_id = "test_birth"
 
 
 def test_topology_lock_blocks_replan_add_allows_steer():

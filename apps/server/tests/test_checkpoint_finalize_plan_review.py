@@ -29,7 +29,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from tests.delegate.conftest import _upstream_body
+from tests.delegate.conftest import _TEST_BIRTH_FOLDER_ID, _upstream_body
 from tests.llm_helpers import make_profile_params
 
 
@@ -104,6 +104,7 @@ async def test_loop_finalizes_plan_review_to_paused(monkeypatch):
         suspension_saver=saver,
         suspension_deleter=deleter,
         captain_run_id="cap",
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
     reg = ToolRegistry()
     reg.register(delegate)

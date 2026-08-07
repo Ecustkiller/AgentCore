@@ -54,6 +54,10 @@ jobs:
           uv run alembic upgrade head
           uv run python scripts/check_schema_gate.py --live
 
+      # Embedded ripgrep for grep tool / workspace tests (apps/server/bin/rg).
+      - name: Install ripgrep (server)
+        run: uv run python scripts/fetch_ripgrep.py --install-server
+
       - name: Test
         env:
           DATABASE_URL: postgresql+asyncpg://agentcore:agentcore@localhost:5432/agentcore
@@ -136,6 +140,10 @@ jobs:
       # 但语义不清晰且与 mobile job 不一致。
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter agentcore-desktop...
+
+      # Desktop opGrep tests resolve rg from resources/rg or apps/server/bin/rg.
+      - name: Install ripgrep (desktop)
+        run: python3 apps/server/scripts/fetch_ripgrep.py --install-desktop
 
       - name: Lint
         run: pnpm --filter agentcore-desktop lint

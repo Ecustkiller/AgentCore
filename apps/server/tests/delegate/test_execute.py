@@ -503,6 +503,7 @@ async def test_build_plan_validation_contract_failure_skips_circuit_breaker():
 
 
 async def test_worker_usage_accumulates_across_calls():
+    # 显式 coordinate=False：默认协调臂会在同回合二次合入后提前返回，usage 尚未计入。
     usage = TokenUsage(
         input_tokens=10,
         output_tokens=5,
@@ -511,7 +512,9 @@ async def test_worker_usage_accumulates_across_calls():
         cache_miss_tokens=4,
     )
     t = tool(Provider(["X", "Y", "Z", "W"], usage=usage))
-    first = await t.execute({"tasks": [{"role": "A", "task": "a"}]}, ctx())
+    first = await t.execute(
+        {"tasks": [{"role": "A", "task": "a"}], "coordinate": False}, ctx()
+    )
     assert first.metadata["input_tokens"] == 10
     assert first.metadata["cache_hit_tokens"] == 6
     assert t.usage == {
@@ -521,7 +524,9 @@ async def test_worker_usage_accumulates_across_calls():
         "cache_hit": 6,
         "cache_miss": 4,
     }
-    await t.execute({"tasks": [{"role": "B", "task": "b"}]}, ctx())
+    await t.execute(
+        {"tasks": [{"role": "B", "task": "b"}], "coordinate": False}, ctx()
+    )
     assert t.usage == {
         "input": 20,
         "output": 10,

@@ -395,8 +395,13 @@ async def test_delegate_result_carries_this_calls_new_citations(monkeypatch):
     monkeypatch.setattr("agentcore.runtime.runs.build_agent_executor", lambda **kw: _exec)
     t = tool(Provider([]))
 
-    r1 = await t.execute({"tasks": [{"role": "核验", "task": "查法条A"}]}, ctx())
-    r2 = await t.execute({"tasks": [{"role": "核验", "task": "查法条B"}]}, ctx())
+    # 阻塞臂：默认协调下同回合二次合入会提前返回，citations 尚未挂上 ToolResult。
+    r1 = await t.execute(
+        {"tasks": [{"role": "核验", "task": "查法条A"}], "coordinate": False}, ctx()
+    )
+    r2 = await t.execute(
+        {"tasks": [{"role": "核验", "task": "查法条B"}], "coordinate": False}, ctx()
+    )
 
     assert [c["url"] for c in (r1.citations or [])] == ["https://a.com"]
     # second call contributes ONLY the new source — a is deduped against the turn accumulator
