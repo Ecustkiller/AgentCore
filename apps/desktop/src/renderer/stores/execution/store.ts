@@ -15,6 +15,7 @@ import type {
   TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
+import { turnStatusFromFinish } from "@agentcore/protocol-fold-kit";
 import { create } from "zustand";
 import { foldDebatePretrial, upsertDebateRound } from "./debate";
 import type { DebatePretrialState } from "./debate";
@@ -307,16 +308,10 @@ function journalIsNewerThan(
 }
 
 /** Map a persisted turn's `finish_reason` to the terminal execution status the
- * fold needs (a journal is only stored for finished turns). */
+ * fold needs (a journal is only stored for finished turns). SSOT:
+ * `@agentcore/protocol-fold-kit` (`turnStatusFromFinish`). */
 function statusFromFinish(finishReason: string): ExecutionStatus {
-  if (finishReason === "error") return "failed";
-  if (finishReason === "cancelled" || finishReason === "interrupted")
-    return "cancelled";
-  // 挂起即收口 (②): a turn finalized AT a durable checkpoint carries finish_reason=paused;
-  // its graph stayed paused (the resume card drives it), so a hydrate must keep it paused
-  // rather than collapse it to "completed" (mirrors the conformance fold's FINISH_TO_STATUS).
-  if (finishReason === "paused") return "paused";
-  return "completed";
+  return turnStatusFromFinish(finishReason);
 }
 
 /**

@@ -43,6 +43,7 @@ describe("isDesktopFolderAction", () => {
     expect(isDesktopFolderAction("grant_organize_folder")).toBe(true);
     expect(isDesktopFolderAction("bind_local_folder")).toBe(true);
     expect(isDesktopFolderAction("open_local_project")).toBe(true);
+    expect(isDesktopFolderAction("register_local_project")).toBe(true);
     expect(isDesktopFolderAction(undefined)).toBe(false);
     expect(isDesktopFolderAction("continue_cloud")).toBe(false);
   });

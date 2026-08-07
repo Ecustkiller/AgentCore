@@ -40,6 +40,8 @@ from agentcore.llm.resolve import (
     ModelConfig,
     ModelOrigin,
     ModelPurpose,
+    ModelSelection,
+    platform_llm_credentials,
     resolve_background_user_fallback,
     resolve_model_config,
     resolve_user_llm_credentials,
@@ -106,6 +108,37 @@ async def preflight_llm_credentials(
         limits=QuotaLimits.for_user(user),
     )
     return None
+
+
+async def preflight_resolved_llm_credentials(
+    *,
+    session: AsyncSession,
+    user: _BillingGateUser,
+    cost_repo: CostEventRepository,
+    byok_missing_message: str,
+    selection: ModelSelection,
+) -> LLMCredentials | None:
+    """Gate + resolve credentials for standing_tasks / workflows (same shape).
+
+    Runs :func:`preflight_llm_credentials` by ``selection.origin``, then for
+    platform origin replaces the gate's ``None`` with
+    ``platform_llm_credentials(model=selection.model)``.
+
+    **Callers**: ``standing_tasks.runner`` and ``workflows.runner`` only.
+    Handoff must keep its thin ``resolve_user_llm_credentials`` path — do **not**
+    route handoff through this helper (would thicken dispatch into preflight).
+    """
+    credentials = await preflight_llm_credentials(
+        session=session,
+        user=user,
+        cost_repo=cost_repo,
+        byok_missing_message=byok_missing_message,
+        model_origin=selection.origin,
+        provider_id=selection.provider_id,
+    )
+    if selection.origin == "platform":
+        credentials = platform_llm_credentials(model=selection.model)
+    return credentials
 
 
 def _creds_from_cfg(cfg: ModelConfig) -> LLMCredentials:

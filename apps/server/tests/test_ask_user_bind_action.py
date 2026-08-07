@@ -18,20 +18,23 @@ def test_normalize_options_preserves_bind_local_folder_action():
     out = normalize_options(
         [
             {"label": "打开本地项目", "action": "open_local_project", "recommended": True},
+            {"label": "登记本地项目", "action": "register_local_project"},
             {"label": "绑定本机执行环境", "action": "bind_local_folder"},
             {"label": "继续用云端", "detail": "无法打开本机应用"},
             {"label": "坏动作", "action": "hack_the_planet"},
             {"label": "授权只读目录", "action": "grant_readonly_folder"},
             {"label": "授权整理目录", "action": "grant_organize_folder"},
-        ]
+        ],
+        max_options=10,
     )
     assert out[0]["action"] == "open_local_project"
     assert out[0]["recommended"] is True
-    assert out[1]["action"] == "bind_local_folder"
-    assert "action" not in out[2]
-    assert "action" not in out[3]  # unknown actions drop
-    assert out[4]["action"] == "grant_readonly_folder"
-    assert out[5]["action"] == "grant_organize_folder"
+    assert out[1]["action"] == "register_local_project"
+    assert out[2]["action"] == "bind_local_folder"
+    assert "action" not in out[3]
+    assert "action" not in out[4]  # unknown actions drop
+    assert out[5]["action"] == "grant_readonly_folder"
+    assert out[6]["action"] == "grant_organize_folder"
 
 
 def test_normalize_options_passthrough_well_known_and_target_name():
@@ -103,6 +106,130 @@ def test_normalize_questions_passthrough_to_checkpoint_shape():
     )
     assert qs[0]["options"][0]["action"] == "bind_local_folder"
     assert "action" not in qs[0]["options"][1]
+
+
+def test_normalize_questions_promotes_question_level_action_to_default_option_only():
+    """Q-level action must not blanket-fill a sibling skip/oral option."""
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "如何登记本地项目？",
+                "kind": "choice",
+                "action": "register_local_project",
+                "default": "登记并打开",
+                "options": [
+                    {"label": "登记并打开"},
+                    {"label": "不落盘，只在对话里汇报"},
+                ],
+            }
+        ]
+    )
+    assert qs[0]["options"][0]["action"] == "register_local_project"
+    assert "action" not in qs[0]["options"][1]
+    assert "action" not in qs[0]
+
+
+def test_normalize_questions_promotes_question_level_action_to_recommended_without_default():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "如何登记本地项目？",
+                "kind": "choice",
+                "action": "register_local_project",
+                "options": [
+                    {"label": "登记并打开", "recommended": True},
+                    {"label": "不落盘，只在对话里汇报"},
+                ],
+            }
+        ]
+    )
+    assert qs[0]["options"][0]["action"] == "register_local_project"
+    assert "action" not in qs[0]["options"][1]
+
+
+def test_normalize_questions_promotes_question_level_action_to_sole_option():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "登记？",
+                "kind": "choice",
+                "action": "register_local_project",
+                "options": [{"label": "登记为本地项目"}],
+            }
+        ]
+    )
+    assert qs[0]["options"][0]["action"] == "register_local_project"
+
+
+def test_normalize_questions_does_not_blanket_promote_ambiguous_multi_option():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "如何登记本地项目？",
+                "kind": "choice",
+                "action": "register_local_project",
+                "options": [
+                    {"label": "登记并打开"},
+                    {"label": "仅登记"},
+                ],
+            }
+        ]
+    )
+    assert "action" not in qs[0]["options"][0]
+    assert "action" not in qs[0]["options"][1]
+
+
+def test_normalize_questions_does_not_overwrite_option_action():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "如何对齐工作区？",
+                "kind": "choice",
+                "action": "register_local_project",
+                "default": "登记新项目",
+                "options": [
+                    {"label": "打开已有项目", "action": "open_local_project"},
+                    {"label": "登记新项目"},
+                ],
+            }
+        ]
+    )
+    assert qs[0]["options"][0]["action"] == "open_local_project"  # preserved
+    assert qs[0]["options"][1]["action"] == "register_local_project"  # promoted via default
+
+
+def test_normalize_questions_drops_unknown_question_level_action():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "选一项？",
+                "kind": "choice",
+                "action": "hack_the_planet",
+                "options": [
+                    {"label": "A"},
+                    {"label": "B"},
+                ],
+            }
+        ]
+    )
+    assert "action" not in qs[0]["options"][0]
+    assert "action" not in qs[0]["options"][1]
+    assert "action" not in qs[0]
+
+
+def test_normalize_questions_text_ignores_question_level_action():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "补充说明？",
+                "kind": "text",
+                "action": "register_local_project",
+            }
+        ]
+    )
+    assert qs[0]["kind"] == "text"
+    assert qs[0]["options"] == []
+    assert "action" not in qs[0]
 
 
 def test_normalize_questions_accepts_json_encoded_array_string():
@@ -265,6 +392,7 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     ]["items"]["properties"]
     assert props2["action"]["enum"] == [
         "open_local_project",
+        "register_local_project",
         "bind_local_folder",
         "grant_readonly_folder",
         "grant_organize_folder",
@@ -272,6 +400,7 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert props2["well_known"]["enum"] == ["desktop", "downloads", "documents"]
     assert "target_name" in props2
     assert "open_local_project" in advertised.schema.description
+    assert "register_local_project" in advertised.schema.description
     assert "bind_local_folder" in advertised.schema.description
     assert "grant_readonly_folder" in advertised.schema.description
     assert "grant_organize_folder" in advertised.schema.description
@@ -279,6 +408,7 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert "禁止" in advertised.schema.description
     action_desc = props2["action"]["description"]
     assert "open_local_project" in action_desc
+    assert "register_local_project" in action_desc
     assert "本地项目" in action_desc
     assert "bind_local_folder" in action_desc
     assert "external_mount_readonly" in action_desc or "禁止" in action_desc

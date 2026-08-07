@@ -814,6 +814,7 @@ async def test_execute_ignores_retired_completion_criteria_kind():
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
         permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        folder_id="test_birth",
     )
     result = await t.execute(
         {

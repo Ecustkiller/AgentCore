@@ -53,6 +53,7 @@ const SERVER = join(ROOT, "apps", "server");
 const CONTRACT_DRIFT_PATHS = [
   "apps/server/openapi.json",
   "packages/contract-rest-types/src/api.generated.ts",
+  "packages/contract-rest-types/src/paths.generated.ts",
   "packages/contract-types/src/eventTypes.generated.ts",
   "packages/contract-types/src/events.generated.ts",
   "packages/protocol-conformance/fixtures",

@@ -382,7 +382,7 @@ def test_retire_tools_hard_disables_family_on_first_failure():
 
 
 def test_workspace_channel_dead_disables_landing_tools():
-    """Channel dead must disable pens (not force_segmented) + retire family steer."""
+    """Sticky channel-dead must disable pens (not force_segmented) + retire family steer."""
     from agentcore.workspace.limits import (
         WORKSPACE_CHANNEL_DEAD_RETIRE_STEER,
         WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS,
@@ -417,8 +417,55 @@ def test_workspace_channel_dead_disables_landing_tools():
     assert "派需要读写本地文件的队员" in (cb.message() or "")
 
 
+def test_single_op_channel_timeout_does_not_sticky_or_notice():
+    """Single-op settle timeout (channel_op) must not latch sticky-dead or user notice."""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink, EventType
+
+    clear_active_coordination()
+    sink = EventSink()
+    session = CoordinationSession(
+        execution_id="exec-op-timeout",
+        total_workers=1,
+        conversation_id="conv-op-timeout",
+    )
+    session.event_sink = sink
+    set_active_coordination(session)
+    try:
+        c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+        c.record(
+            [
+                ToolAttempt(
+                    "op-to",
+                    "file_read",
+                    success=False,
+                    error_summary="活性挂起",
+                    meta={
+                        "liveness_timeout": True,
+                        "timeout_layer": "channel_op",
+                    },
+                )
+            ]
+        )
+        assert c._workspace_channel_dead is False  # noqa: SLF001
+        assert session.workspace_channel_dead is False
+        assert session.channel_dead_user_notice_emitted is False
+        deltas = [e for e in sink._history if e.type is EventType.CONTENT_DELTA]
+        assert deltas == []
+        # Per-tool permanent retire still applies; family pens stay available.
+        cb = c.tool_circuit_breaker()
+        assert "file_read" in cb.disabled
+        assert "file_write" not in cb.disabled
+    finally:
+        clear_active_coordination()
+
+
 def test_workspace_channel_dead_emits_user_notice_once():
-    """A2: first sticky-dead stamps session + emits short content_delta on host sink."""
+    """A2: sticky-dead stamps session + emits short content_delta on host sink once."""
     from agentcore.runtime.coordination.session import (
         CoordinationSession,
         clear_active_coordination,

@@ -1,14 +1,7 @@
 // SSE event contract — shared source for desktop + mobile folds (前端技术与架构 §十二).
 // Event names: backend EventType → eventTypes.generated.ts
-// Payload shapes: backend payloads/*.py → events.generated.ts (`pnpm gen:types`)
+// Payload shapes (incl. SSEEvent): backend payloads/*.py → events.generated.ts (`pnpm gen:types`)
+//
+// Do not redeclare SSEEvent here — that shadows the generated wire shape.
 
-import type { SSEEventType } from "./eventTypes.generated";
-
-export type { SSEEventType } from "./eventTypes.generated";
 export * from "./events.generated";
-
-export interface SSEEvent<T = unknown> {
-  type: SSEEventType;
-  timestamp: string;
-  payload: T;
-}

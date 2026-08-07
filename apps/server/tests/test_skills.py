@@ -147,20 +147,20 @@ def test_directory_preamble_carves_out_product_help_consult():
 
 
 def test_directory_preamble_recommends_build_app_not_hard_forbid_none():
-    """能力目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；Agent≠绿场 SPA。"""
+    """能力目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；边界未钉≠绿场 SPA。"""
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
     assert "推荐" in out and "build_app" in out
     assert "不硬拒" in out or "手写/none 不硬拒" in out
     assert "必须 build_app" not in out
     assert "禁 none 手糊" not in out
-    assert "Agent" in out or "自动化" in out
-    assert "轻切片" in out or "1～2" in out or "1~2" in out
+    assert "边界未钉" in out or "轻切片" in out or "少节点" in out
+    assert "轻切片" in out or "少节点" in out or "嵌套" in out
     assert "五波" in out or "脚手架" in out
     assert "- build_app：" in out
     skill = build_system_skill_registry().get("build_app")
     assert skill is not None
     assert "不硬拒" in skill.summary
-    assert "Agent" in skill.summary or "自动化" in skill.summary
+    assert "边界未钉" in skill.summary or "满编" in skill.summary
 
 
 def test_directory_omits_gated_skills_on_autonomous_path():
@@ -329,11 +329,18 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "成文交付" in body or "成文专线" in body or "成篇" in body
     assert "默认 A" in body or "少扇出" in body
     assert "材料已齐" in body
-    # 混合分流：推荐具名不硬拒；讨论/Agent ≠ 满档 build_app
+    # 混合分流：推荐具名不硬拒；边界未钉 ≠ 满档 build_app
     assert "不再硬拒" in body or "不硬拒" in body
-    assert "讨论" in body and ("Agent" in body or "自动化" in body)
-    assert "轻切片" in body or "1～2" in body
+    assert "边界未钉" in body or "轻切片" in body
+    assert "轻切片" in body or "少节点" in body or "嵌套" in body
     assert "五阶段不可跳仅约束进入后" in body or "进入后" in body
+    # 真两段结构口径；禁假两段；桌面壳绿场切片
+    assert "真两段" in body or "1 人两段" in body
+    assert "假两段" in body
+    assert "同一 task" in body
+    assert "桌面壳" in body or "多进程" in body
+    assert "playbook=none" in body
+    assert "根委派切片诚实" in body or "嵌套扇出" in body
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in body
     assert "静默自拟" in body
@@ -375,6 +382,11 @@ def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
     # 未明示成文仍宜 parallel_brief（旧 A 语义保留）
     assert "parallel_brief" in body
     assert "未明示" in body
+    # 派摸底验收：手写也要目标·手段·收工；够用即停 + handoff
+    assert "派摸底" in body or "摸底·验收" in body or "了解到什么算够" in body
+    assert "够用即停" in body
+    assert "无限深挖" in body or "更全" in body
+    assert "handoff" in body
 
 
 def test_work_discipline_skill_teaches_design_and_patch_tripwires():
@@ -389,6 +401,9 @@ def test_work_discipline_skill_teaches_design_and_patch_tripwires():
     assert "小问题（路径拼写" not in body
     # 定稿漂移 A′：写 task 须含「已确认约束」
     assert "已确认约束" in body
+    # 小步增量：用户偏好小步时首派更切片，勿一口吞绿场
+    assert "小步" in body or "增量" in body
+    assert "绿场" in body or "切片" in body
 
 
 def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
@@ -429,6 +444,33 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "完整预览" in faq_body and "不是一路" in faq_body
 
     assert "Markdown 语法" in help_body or ".md 怎么打开" in help_body
+
+def test_team_orchestration_skill_teaches_cross_project_parallel():
+    """跨项目并行指挥整条用法（第二教学面；与双模式 §五 / 编排器 delegate 定案一致）。"""
+    body = _body("team_orchestration_advanced")
+    assert "【跨项目并行指挥】" in body
+    assert "list_projects" in body and "resolve_project" in body
+    assert "ask_user" in body and "choice" in body
+    assert "禁止" in body and "最近" in body
+    assert "target_folder_id" in body
+    assert "换桌" in body and "记忆" in body
+    assert "folder_id" in body
+    assert "默认桌" in body
+    assert "scratch" in body
+    assert "create_project" in body
+    assert "register_local_project" in body
+    assert "open_local_project" in body
+    assert "新会话" in body
+    assert "混部" in body
+    assert "多 local" in body and "并行" in body
+    assert "暂不支持" not in body
+    assert "协作图不改" in body or "并行支线" in body
+    # 目录摘要须可触发 consult（多项目 / target_folder）
+    skill = build_system_skill_registry().get("team_orchestration_advanced")
+    assert skill is not None
+    assert "跨项目" in skill.summary
+    assert "target_folder_id" in skill.summary
+
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
     # Relocated from the old always-on hint: quality contract, output shaping,
@@ -539,12 +581,12 @@ def test_build_app_skill_teaches_cloud_install_verify_honesty():
 
 
 def test_build_app_skill_teaches_admission_and_agent_diversion():
-    """准入：真 SPA/明示完整可跑才满档；讨论/Agent 禁首派五波；五阶段仅形状内。"""
+    """准入：真 SPA/明示完整可跑才满档；边界未钉禁首派五波；五阶段仅形状内。"""
     body = _body("build_app")
     assert "准入" in body
     assert "不硬拒" in body
-    assert "Agent" in body or "自动化" in body
-    assert "轻切片" in body or "1～2" in body
+    assert "边界未钉" in body or "轻切片" in body or "嵌套" in body
+    assert "轻切片" in body or "少节点" in body
     assert "五波" in body or "脚手架" in body
     assert "进入本 playbook 后" in body or "形状内部" in body
     assert "五阶段不可跳" in body
@@ -822,9 +864,9 @@ def test_ask_user_kickoff_skill_teaches_software_delivery_not_default_html():
     assert "交付形态" in body
     assert "单 HTML" in body
     assert "build_feature" in body or "build_app" in body
-    # 混合分流：讨论/Agent ≠ 首派五波脚手架
-    assert "Agent" in body or "自动化" in body
-    assert "轻切片" in body or "1～2" in body
+    # 混合分流：边界未钉 ≠ 首派五波脚手架
+    assert "边界未钉" in body or "轻切片" in body or "嵌套" in body
+    assert "轻切片" in body or "少节点" in body
     assert "五波" in body or "脚手架" in body
     assert "intensity" in body
     assert "lean" in body
@@ -868,6 +910,10 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "open_local_project" in body
     assert "≠默认开项目卡" in body or "收窄本轮" in body
     assert "开工前置" in body
+    # 登记留指挥面 + 跨项目整条回指 team_orchestration（勿与 open 分流打架）
+    assert "register_local_project" in body
+    assert "team_orchestration_advanced" in body
+    assert "跨项目并行指挥" in body
     # 已绑定本地工程：「打开项目」=跑当前项目，换目录才开卡。
     assert "已绑定本地工程" in body
     assert "跑" in body and "当前" in body
@@ -939,8 +985,10 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "code_execute" in body
     assert "handoff" in body
     assert "禁止" in body and "file_read" in body
-    assert "禁止" in body and ("整篇一次" in body or "一次 file_write" in body)
-    assert "连续写失败" in body or "分段写" in body
+    # 定案 A：主路径一次完整 write；可选骨架；禁「禁止整篇一次 file_write」硬教条
+    assert "主路径" in body and "完整正文" in body
+    assert "禁止】整篇一次" not in body and "禁止】无骨架整篇一次" not in body
+    assert "连续写失败" in body or "分段" in body
     # B1 轻教法：明文把关 → checkpoint_after / research_report；自主确认才可对话式。
     assert "明文要求" in body
     assert "checkpoint_after" in body
@@ -971,7 +1019,7 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "HTML" in body
     assert "reportlab" in body
     assert "单主文件" in skill.summary or "合并" in skill.summary
-    assert "骨架" in skill.summary or "禁止整篇" in skill.summary
+    assert "一次完整" in skill.summary or "主路径" in skill.summary
     assert "分波" in skill.summary or "continue_from" in skill.summary
     assert "write_section" in skill.summary
 

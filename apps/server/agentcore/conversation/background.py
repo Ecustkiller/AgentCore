@@ -1,4 +1,9 @@
-"""Detached asyncio tasks for fire-and-forget work."""
+"""Detached asyncio tasks for fire-and-forget work.
+
+The only intentionally shared primitive across standing_tasks, workflows, and
+handoff job shells. Credential / pause / result tables stay product-specific
+(see docs/02-架构/后端架构.md · 后台派活三壳).
+"""
 
 import asyncio
 from collections.abc import Coroutine

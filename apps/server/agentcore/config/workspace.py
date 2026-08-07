@@ -33,7 +33,9 @@ class WorkspaceSettings(BaseModel):
     # Local WorkspaceChannel only: max concurrent desktop round-trips (awaiting
     # suspend). Extra ops queue; queue wait counts on the outer tool wall clock.
     # Does not apply to cloud ServerWorkspace / workspace_lock.
-    workspace_channel_max_inflight: int = 2
+    # 16: enough for a multi-worker local file wave without pretending the
+    # desktop bridge is unbounded; still a backpressure valve, not a product cap.
+    workspace_channel_max_inflight: int = 16
     workspace_execute_timeout_slack_seconds: float = 30.0
     workspace_handoff_timeout_seconds: float = 300.0
     # AI 协作白板 (AI协作白板.md §六 M2): how long the BoardChannel waits for the bound

@@ -251,8 +251,10 @@ export function computeTopologicalRunWaves(
 
 /**
  * Top-level worker runs that participate in lane banding (exclude captain +
- * folded nested sub-workers — those live inside a sub-team box). Structural:
- * every such unit is positioned by ELK, so it needs no position filter here.
+ * folded nested sub-workers — those live inside a sub-team box). Pure
+ * continuations (`continuesRunId != null`) stay visible on the graph but do not
+ * enter 委派/波次 strips — only cold-start units count. Structural: every such
+ * unit is positioned by ELK, so it needs no position filter here.
  */
 function laneEligibleRunIds(
   runs: GraphRunLike[],
@@ -262,6 +264,7 @@ function laneEligibleRunIds(
   const out: string[] = [];
   for (const r of runs) {
     if (r.id === captainId) continue;
+    if (r.continuesRunId != null) continue;
     if (fold.folded.has(r.id)) continue;
     if (fold.unitOf.get(r.id) !== r.id) continue;
     out.push(r.id);

@@ -154,6 +154,10 @@ def build_drive_executor(
         captain_recon=captain_recon or None,
         # 回合入口绑定的共享台账（与 CEO 同一对象）；辩论 executor 不经此路径。
         turn_evidence_ledger=_turn_ledger_var.get(),
+        session_folder_id=getattr(tool, "_folder_id", None),
+        local_root_claims=getattr(tool, "_local_root_claims", None),
+        memory_enabled=bool(getattr(tool, "_memory_enabled", True)),
+        permission_axes_obj=getattr(tool, "_permission_axes", None),
     )
 
     async def continuation_aware_executor(spec: RunSpec, completed: dict) -> RunState:

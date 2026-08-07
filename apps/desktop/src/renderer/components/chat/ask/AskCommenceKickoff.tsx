@@ -19,6 +19,10 @@ import {
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import {
+  formatRegisterLocalProjectAnswer,
+  pickAndRegisterLocalProject,
+} from "@/lib/registerLocalProject";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { AskAssumption, AskOption, AskQuestion } from "@/types/events";
 import { ChevronRight, Loader2, OctagonX, Rocket } from "lucide-react";
@@ -77,6 +81,25 @@ export function AskCommenceKickoffBody({
     if (!conversationId || !onBindResolve) return;
     setBindBusyLabel(opt.label);
     setBindError(null);
+
+    if (opt.action === "register_local_project") {
+      const result = await pickAndRegisterLocalProject();
+      if (!result.ok) {
+        if (result.reason === "error") setBindError(result.message);
+        setBindBusyLabel(null);
+        return;
+      }
+      const value = formatRegisterLocalProjectAnswer(
+        opt.label,
+        result.folder.name,
+      );
+      try {
+        await onBindResolve(answer.composeWithAnswer("kickoff", q.id, value));
+      } catch {
+        setBindBusyLabel(null);
+      }
+      return;
+    }
 
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);

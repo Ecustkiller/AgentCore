@@ -135,6 +135,19 @@ def apply_replan(
     if gap_errors:
         return gap_errors
 
+    if adds_list:
+        from agentcore.runtime.delegate.target_desktop import (
+            gate_bare_chat_requires_target,
+        )
+
+        bare_gate = gate_bare_chat_requires_target(
+            session_folder_id=getattr(tool, "_folder_id", None),
+            tasks_raw=adds_list,
+            default_target_folder_id=getattr(tool, "_default_target_folder_id", None),
+        )
+        if bare_gate:
+            return [bare_gate]
+
     valid_tools = {s.name for s in tool._tools.list_all()}
     errors: list[str] = []
     new_specs, add_errors = build_added_nodes(
@@ -143,6 +156,7 @@ def apply_replan(
         valid_tools=valid_tools,
         parent_run_id=tool._captain_run_id,
         depth=tool._depth + 1,
+        default_target_folder_id=getattr(tool, "_default_target_folder_id", None),
     )
     errors.extend(add_errors)
     bind_ops: list[tuple[RunSpec, dict[str, Any]]] = []

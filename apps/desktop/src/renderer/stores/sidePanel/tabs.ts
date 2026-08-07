@@ -8,11 +8,28 @@ import {
   withFloatFocused,
 } from "./helpers";
 import {
+  CHANGES_TAB_ID,
+  COMMAND_TAB_ID,
+  browserDismissKey,
+  type DetailTab,
   type SidePanelGet,
   type SidePanelSet,
   type SidePanelState,
   terminalDismissKey,
+  WORKSPACE_TAB_ID,
 } from "./types";
+
+/** Kinds unloaded on conversation switch (定案 D); terminal / browser shells stay. */
+const CONVERSATION_SCOPED_KINDS = new Set<DetailTab["kind"]>([
+  "run",
+  "content",
+  "simple-turn",
+  "file",
+]);
+
+function isConversationScopedKind(kind: DetailTab["kind"]): boolean {
+  return CONVERSATION_SCOPED_KINDS.has(kind);
+}
 
 type TabsActions = Pick<
   SidePanelState,
@@ -21,6 +38,7 @@ type TabsActions = Pick<
   | "reorderContentTabs"
   | "setActiveTab"
   | "closeContentTabs"
+  | "closeConversationScopedTabs"
 >;
 
 /** Content-tab model: open / close / reorder / cap (floats protected). */
@@ -77,6 +95,9 @@ export function createTabsActions(
       if (closing?.kind === "browser") {
         // 关浏览器 tab = 脱离保活（改 React 状态前显式 hide）。
         void detachLocalBrowserHost();
+        const conversationId =
+          useConversationStore.getState().currentConversationId;
+        get().dismissAutoSurface(browserDismissKey(conversationId));
       }
       if (closing?.kind === "terminal") {
         const conversationId =
@@ -163,6 +184,37 @@ export function createTabsActions(
         // If the dropped tab was active, fall back to a surviving detail tab (e.g. a
         // run drilled in the canvas, kept per §十) else the 工作区 home.
         const activeStillThere = tabs.some((t) => t.id === s.activeTabId);
+        const activeTabId = activeStillThere
+          ? s.activeTabId
+          : (tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose());
+        let focusSurface = s.focusSurface;
+        if (
+          focusSurface.type === "float" &&
+          droppedIds.has(focusSurface.tabId)
+        ) {
+          focusSurface = { type: "dock" };
+        }
+        return { tabs, floats, activeTabId, focusSurface };
+      });
+    },
+
+    closeConversationScopedTabs: () => {
+      set((s) => {
+        const droppedIds = new Set(
+          s.tabs
+            .filter((t) => isConversationScopedKind(t.kind))
+            .map((t) => t.id),
+        );
+        if (droppedIds.size === 0) return s;
+        const tabs = s.tabs.filter((t) => !isConversationScopedKind(t.kind));
+        // Strip float entries for unloaded tabs only; workspace/changes floats
+        // stay until clearFloats (same 切对话 effect can call both).
+        const floats = s.floats.filter((f) => !droppedIds.has(f.tabId));
+        const activeStillThere =
+          s.activeTabId === WORKSPACE_TAB_ID ||
+          s.activeTabId === CHANGES_TAB_ID ||
+          s.activeTabId === COMMAND_TAB_ID ||
+          tabs.some((t) => t.id === s.activeTabId);
         const activeTabId = activeStillThere
           ? s.activeTabId
           : (tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose());

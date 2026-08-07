@@ -123,7 +123,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 
 - **自动标题**：侧边栏 UX，非记忆层；不进 Agent 上下文。云/本地均在首条用户消息可用后并行铸题（只用用户首句，`assistant_reply=""`）。云走 `schedule_title_generation` + SSE `title_generated`；本地 sidecar 无云 SSE，桌面首发并行 `POST …/auto-title`，回合回写仅空标题兜底（`_title_inflight` 时跳过）。禁止首轮后再补铸。
 - **会话摘要记忆层已移除**：跨会话情景对 CEO 分工帮助有限；可复用信号由长期记忆承载。两层协议的「情景沉淀」不注入——与本否决不冲突。
-- **搜索**：取消向量 RAG 作 prompt 自动注入；agentic 检索（`file_read`/`grep`/`code_search`）为主路。`code_search` = 工具后端（**只查**当前 BM25 快照），索引由回合启动 / 写后后台 `IndexMaintainer` 维护；`building`/`stale` 时模型改用 `grep`。非 RAG 层。
+- **搜索**：取消向量 RAG 作 prompt 自动注入；agentic 检索（`file_read`/`grep`/`code_search`）为主路。`code_search` = 工具后端（**只查**当前 BM25 快照），索引由回合启动 / 写后后台 `IndexMaintainer` 维护；`building`/`stale` 时模型改用 `grep`。非 RAG 层。Local 过桥建索：`index_files` 带本机 `mtime_ms`/`size_bytes` 指纹，与库中一致则**跳过**整文 `READ` 过桥（仅变更文件再读）。→ 见代码：`workspace/indexing/manager.py` · 桌面 `opIndexFiles`
 - **远期**：TWM / recall / 委派预算等延后到窗口不足时（DeepSeek 1M 远大于 MVP 用量）。
 
 ---

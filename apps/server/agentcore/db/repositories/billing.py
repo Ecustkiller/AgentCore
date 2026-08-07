@@ -2,8 +2,8 @@
 
 ``cost_calls`` is the authority; ``cost_events`` is the per-run materialized view
 product surfaces read (工资单 / 仪表盘 / 配额). Writes go through the shared
-:class:`~agentcore.billing.cost_ledger_queue.CostLedgerQueue` outbox for
-at-least-once durability.
+Postgres ``cost_ledger_outbox`` (:class:`~agentcore.billing.cost_ledger_queue.CostLedgerQueue`)
+for at-least-once durability.
 """
 
 from collections.abc import Sequence

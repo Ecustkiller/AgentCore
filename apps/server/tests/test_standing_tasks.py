@@ -268,7 +268,7 @@ async def test_run_job_succeeded(monkeypatch):
         AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
     )
     monkeypatch.setattr(
-        runner_mod, "preflight_llm_credentials", AsyncMock(return_value=None)
+        runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(
         runner_mod, "resolve_profile_set", AsyncMock(return_value=None)
@@ -410,7 +410,7 @@ async def test_run_job_awaiting_user(monkeypatch):
         AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
     )
     monkeypatch.setattr(
-        runner_mod, "preflight_llm_credentials", AsyncMock(return_value=None)
+        runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(runner_mod, "resolve_profile_set", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
@@ -437,6 +437,298 @@ async def test_run_job_awaiting_user(monkeypatch):
     monkeypatch.setattr(runner_mod, "_run_pipeline", fake_pipeline)
 
     await runner_mod.run_standing_task_job(run_id="run-2", task_id="task-1", advance_schedule=False)
+    assert "awaiting_user" in run_marks
+    assert "succeeded" not in run_marks
+
+
+@pytest.mark.asyncio
+async def test_run_job_ignores_residual_conversation_pause(monkeypatch):
+    """ST-1: old cold pause on another turn must not mark a successful fire awaiting_user."""
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = SimpleNamespace(
+        id="task-1",
+        user_id="user-1",
+        folder_id="folder-1",
+        goal="周一简报",
+        name="简报",
+        permission_axes={},
+        cron="0 9 * * 1",
+        enabled=True,
+        conversation_id="conv-1",
+        local_root_id=None,
+    )
+    folder = SimpleNamespace(id="folder-1", local_root_id=None)
+    run_marks: dict[str, object] = {}
+    probed: dict[str, str] = {}
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, task_id, user_id=None):
+            return task
+
+        async def clear_lease(self, *a, **k):
+            return None
+
+        async def advance_next_run(self, *a, **k):
+            return None
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def mark_failed(self, run_id, *, error):
+            run_marks["failed"] = error
+
+        async def mark_succeeded(self, run_id, *, summary):
+            run_marks["succeeded"] = summary
+
+        async def mark_awaiting_user(self, run_id, *, summary=None):
+            run_marks["awaiting_user"] = summary
+
+        async def set_conversation_and_message(self, *a, **k):
+            return None
+
+    class _Folders:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, folder_id, user_id=None):
+            return folder
+
+    class _Convs:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, cid):
+            return SimpleNamespace(id=cid, folder_id="folder-1", title="简报")
+
+    class _Msgs:
+        def __init__(self, session):
+            pass
+
+        async def create(self, **kwargs):
+            return SimpleNamespace(id="msg-u1")
+
+        async def list_recent(self, *a, **k):
+            return []
+
+    class _Users:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, uid):
+            return SimpleNamespace(user_id=uid)
+
+    class _Paused:
+        def __init__(self, session):
+            pass
+
+        async def exists_for_conversation(self, cid):
+            # Residual cold pause still present — must NOT drive this fire's status.
+            return True
+
+        async def exists_for_message(self, mid):
+            probed["message_id"] = mid
+            return False
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(runner_mod, "FolderRepository", _Folders)
+    monkeypatch.setattr(runner_mod, "ConversationRepository", _Convs)
+    monkeypatch.setattr(runner_mod, "MessageRepository", _Msgs)
+    monkeypatch.setattr(runner_mod, "PausedTurnRepository", _Paused)
+    monkeypatch.setattr(runner_mod, "UserRepository", _Users)
+    monkeypatch.setattr(
+        runner_mod,
+        "resolve_conversation_model_selection",
+        AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
+    )
+    monkeypatch.setattr(
+        runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        runner_mod, "resolve_profile_set", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        runner_mod, "resolve_conversation_history_access", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
+
+    class _Lock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
+    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
+
+    async def fake_pipeline(**kwargs):
+        return {
+            "finish_reason": FinishReason.END_TURN,
+            "content": "本火成功",
+            "message_id": "turn-this-fire",
+        }
+
+    monkeypatch.setattr(runner_mod, "_run_pipeline", fake_pipeline)
+
+    await runner_mod.run_standing_task_job(run_id="run-new", task_id="task-1", advance_schedule=False)
+    assert probed.get("message_id") == "turn-this-fire"
+    assert "succeeded" in run_marks
+    assert run_marks["succeeded"] == "本火成功"
+    assert "awaiting_user" not in run_marks
+
+
+@pytest.mark.asyncio
+async def test_run_job_awaiting_user_via_this_turn_pause(monkeypatch):
+    """ST-1: this fire's turn still in paused_turns → awaiting_user (even without PAUSED finish)."""
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = SimpleNamespace(
+        id="task-1",
+        user_id="user-1",
+        folder_id="folder-1",
+        goal="需授权",
+        name="授权任务",
+        permission_axes={},
+        cron="0 9 * * *",
+        enabled=True,
+        conversation_id="conv-1",
+    )
+    folder = SimpleNamespace(id="folder-1", local_root_id=None)
+    run_marks: dict[str, object] = {}
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, *a, **k):
+            return task
+
+        async def clear_lease(self, *a, **k):
+            return None
+
+        async def advance_next_run(self, *a, **k):
+            return None
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def mark_failed(self, run_id, *, error):
+            run_marks["failed"] = error
+
+        async def mark_succeeded(self, run_id, *, summary):
+            run_marks["succeeded"] = summary
+
+        async def mark_awaiting_user(self, run_id, *, summary=None):
+            run_marks["awaiting_user"] = summary
+
+        async def set_conversation_and_message(self, *a, **k):
+            return None
+
+    class _Folders:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, *a, **k):
+            return folder
+
+    class _Convs:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, cid):
+            return SimpleNamespace(id=cid, folder_id="folder-1", title="t")
+
+    class _Msgs:
+        def __init__(self, session):
+            pass
+
+        async def create(self, **kwargs):
+            return SimpleNamespace(id="msg-u1")
+
+        async def list_recent(self, *a, **k):
+            return []
+
+    class _Users:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, uid):
+            return SimpleNamespace(user_id=uid)
+
+    class _Paused:
+        def __init__(self, session):
+            pass
+
+        async def exists_for_message(self, mid):
+            return mid == "turn-paused-now"
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(runner_mod, "FolderRepository", _Folders)
+    monkeypatch.setattr(runner_mod, "ConversationRepository", _Convs)
+    monkeypatch.setattr(runner_mod, "MessageRepository", _Msgs)
+    monkeypatch.setattr(runner_mod, "PausedTurnRepository", _Paused)
+    monkeypatch.setattr(runner_mod, "UserRepository", _Users)
+    monkeypatch.setattr(
+        runner_mod,
+        "resolve_conversation_model_selection",
+        AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
+    )
+    monkeypatch.setattr(
+        runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(runner_mod, "resolve_profile_set", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        runner_mod, "resolve_conversation_history_access", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
+
+    class _Lock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
+    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
+
+    async def fake_pipeline(**kwargs):
+        # Production CEO path may omit finish_reason; pause truth is paused_turns.
+        return {"content": "", "message_id": "turn-paused-now"}
+
+    monkeypatch.setattr(runner_mod, "_run_pipeline", fake_pipeline)
+
+    await runner_mod.run_standing_task_job(run_id="run-pause", task_id="task-1", advance_schedule=False)
     assert "awaiting_user" in run_marks
     assert "succeeded" not in run_marks
 
@@ -890,7 +1182,7 @@ async def test_run_job_includes_event_text(monkeypatch):
         "resolve_conversation_model_selection",
         AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
     )
-    monkeypatch.setattr(runner_mod, "preflight_llm_credentials", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_profile_set", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(
@@ -1222,9 +1514,120 @@ async def test_settle_after_turn_keeps_awaiting_on_repause(monkeypatch):
         conversation_id="conv-1",
         finish_reason=FinishReason.PAUSED,
         content="仍需授权",
+        message_id="turn-a",
     )
     assert n == 1
     assert marks["awaiting_user"] == "仍需授权"
+    assert "succeeded" not in marks
+
+
+@pytest.mark.asyncio
+async def test_settle_after_turn_ignores_residual_other_pause(monkeypatch):
+    """ST-1: residual pause on another turn must not keep awaiting after this turn ends."""
+    from agentcore.standing_tasks import inbox as inbox_mod
+
+    marks: dict[str, object] = {}
+    probed: dict[str, str] = {}
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def list_awaiting_for_conversation(self, conversation_id):
+            return [SimpleNamespace(id="run-a", summary="old")]
+
+        async def mark_succeeded(self, run_id, *, summary):
+            marks["succeeded"] = summary
+
+        async def mark_failed(self, run_id, *, error):
+            marks["failed"] = error
+
+        async def mark_awaiting_user(self, run_id, *, summary=None):
+            marks["awaiting_user"] = summary
+
+    class _Paused:
+        def __init__(self, session):
+            pass
+
+        async def exists_for_conversation(self, conversation_id):
+            return True
+
+        async def exists_for_message(self, message_id):
+            probed["message_id"] = message_id
+            return False
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(inbox_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(inbox_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(inbox_mod, "PausedTurnRepository", _Paused)
+
+    n = await inbox_mod.settle_after_turn(
+        conversation_id="conv-1",
+        finish_reason=FinishReason.END_TURN,
+        content="本 turn 已收口",
+        message_id="turn-resumed",
+    )
+    assert n == 1
+    assert probed.get("message_id") == "turn-resumed"
+    assert marks["succeeded"] == "本 turn 已收口"
+    assert "awaiting_user" not in marks
+
+
+@pytest.mark.asyncio
+async def test_settle_after_turn_keeps_awaiting_when_this_turn_still_paused(monkeypatch):
+    """ST-1: this turn still paused in DB → keep awaiting_user."""
+    from agentcore.standing_tasks import inbox as inbox_mod
+
+    marks: dict[str, object] = {}
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def list_awaiting_for_conversation(self, conversation_id):
+            return [SimpleNamespace(id="run-a", summary="old")]
+
+        async def mark_succeeded(self, run_id, *, summary):
+            marks["succeeded"] = summary
+
+        async def mark_failed(self, run_id, *, error):
+            marks["failed"] = error
+
+        async def mark_awaiting_user(self, run_id, *, summary=None):
+            marks["awaiting_user"] = summary
+
+    class _Paused:
+        def __init__(self, session):
+            pass
+
+        async def exists_for_message(self, message_id):
+            return message_id == "turn-repaused"
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(inbox_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(inbox_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(inbox_mod, "PausedTurnRepository", _Paused)
+
+    n = await inbox_mod.settle_after_turn(
+        conversation_id="conv-1",
+        finish_reason=FinishReason.END_TURN,
+        content="又卡住了",
+        message_id="turn-repaused",
+    )
+    assert n == 1
+    assert marks["awaiting_user"] == "又卡住了"
     assert "succeeded" not in marks
 
 
@@ -1604,7 +2007,7 @@ async def test_run_job_without_workflow_uses_ceo_pipeline(monkeypatch):
         "resolve_conversation_model_selection",
         AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
     )
-    monkeypatch.setattr(runner_mod, "preflight_llm_credentials", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_profile_set", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(
@@ -1782,7 +2185,7 @@ async def test_run_job_with_workflow_uses_direct_start(monkeypatch):
         "resolve_conversation_model_selection",
         AsyncMock(return_value=SimpleNamespace(origin="byok", provider_id=None, model="m")),
     )
-    monkeypatch.setattr(runner_mod, "preflight_llm_credentials", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_profile_set", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(

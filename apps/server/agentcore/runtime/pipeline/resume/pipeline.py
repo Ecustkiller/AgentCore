@@ -40,7 +40,7 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     mark_controller_after_settle,
 )
 from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
-from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — wire seam
+from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
 from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver

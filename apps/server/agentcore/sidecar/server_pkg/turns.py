@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from typing import Any
 
+from agentcore.conversation.common import preview
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -18,6 +19,26 @@ from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
 logger = get_logger(__name__)
+
+
+async def load_conversation_folder_id(conversation_id: str) -> str | None:
+    """Same shape as cloud ``conversation/turns.py``: ``conv.folder_id`` via unscoped get.
+
+    Missing conversation → ``None`` (bare/global). Resume inherits via
+    ``suspension.folder_id`` written on the start-turn pause path.
+    """
+    from agentcore.db.base import async_session_factory
+    from agentcore.db.repositories import ConversationRepository
+
+    async with async_session_factory() as session:
+        conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+        if not conv:
+            return None
+        raw = getattr(conv, "folder_id", None)
+        if raw is None:
+            return None
+        cleaned = str(raw).strip()
+        return cleaned or None
 
 
 def _finish_str(result: dict[str, Any]) -> str | None:
@@ -127,12 +148,16 @@ class TurnExecutionMixin:
                 conversation_id=conversation_id,
                 message_id=message_id,
             )
+        # Same shape as cloud conversation/turns.py: conversation.folder_id from DB
+        # (project memory scope + suspension.folder_id). Bare/missing → None.
+        folder_id = await load_conversation_folder_id(conversation_id)
+
         # A1+ local：message_id mint + begin_turn 之后、pipeline 之前打本机基线（resume 不重打）。
         from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
 
         await maybe_capture_turn_baseline(
             user_id=self._user_id,
-            folder_id=None,
+            folder_id=folder_id,
             conversation_id=conversation_id,
             message_id=message_id,
             backend=backend,
@@ -149,7 +174,18 @@ class TurnExecutionMixin:
                     trace_id=trace_id,
                     conversation_id=conversation_id,
                     user_id=self._user_id,
+                    message_id=message_id,
                 ):
+                    # Align with cloud turn_runner chat.turn_start; via ≠ location.
+                    logger.info(
+                        "chat.turn_start",
+                        chars=len(user_message or ""),
+                        preview=preview(user_message),
+                        history=len(history) if isinstance(history, list) else 0,
+                        location=backend.location,
+                        via="sidecar",
+                        message_id=message_id,
+                    )
                     from agentcore.sidecar import server as sidecar_server
                     from agentcore.tools.builtin.web.cloud_fallback import (
                         inference_search_credentials_scope,
@@ -170,6 +206,7 @@ class TurnExecutionMixin:
                             sink=sink,
                             user_id=self._user_id,
                             backend=backend,
+                            folder_id=folder_id,
                             approvals_enabled=self._approvals_enabled,
                             permission_axes=self._permission_axes,
                             llm_credentials=turn_creds,

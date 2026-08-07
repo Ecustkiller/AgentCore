@@ -1,21 +1,43 @@
-"""Git subprocess spawn, reap, auth hints, repo probe."""
+"""Git subprocess spawn, reap, auth hints, repo probe.
+
+ServerWorkspace / Sidecar: same-process ``git`` under ``backend.root``.
+LocalWorkspace (no Path.root): route via ``WorkspaceOp.GIT_RUN`` on the bound
+desktop channel — same allowlisted argv surface, executed on the user machine.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import os
 import signal
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from agentcore.tools.protocol import ToolContext, ToolResult
+from agentcore.workspace.channel import WorkspaceOp
+from agentcore.workspace.protocol import WorkspaceError
 
 from . import policy as policy_mod
-from .policy import _GIT_TIMEOUT, _PROTECTED_BRANCHES
+from .policy import _GIT_KILL_SLACK, _GIT_TIMEOUT, _PROTECTED_BRANCHES
 from .results import _error, _git_failure, _ok
+
+# Bound for the duration of one GitTool.execute when LocalWorkspace has no Path.root.
+_git_channel: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "git_ops_channel", default=None
+)
+_git_backend: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "git_ops_backend", default=None
+)
+
+_NO_CHANNEL_MSG = (
+    "本机工作区未连接桌面通道，无法执行 Git。"
+    "请确认桌面在线且已绑定本地项目后再试。"
+)
 
 
 def _resolve_git_cwd(context: ToolContext) -> str | None:
@@ -27,10 +49,48 @@ def _resolve_git_cwd(context: ToolContext) -> str | None:
     return None
 
 
+@contextlib.contextmanager
+def git_transport_scope(context: ToolContext) -> Iterator[str | None]:
+    """Bind channel transport for LocalWorkspace; yield cwd or ``None`` if unusable.
+
+    Yields:
+      - absolute Path cwd when ``backend.root`` is set (subprocess path);
+      - ``""`` when channel-backed (cwd unused; desktop uses ``root_id``);
+      - ``None`` when neither root nor ``workspace_channel`` is available.
+    """
+    cwd = _resolve_git_cwd(context)
+    channel = None
+    backend = None
+    if cwd is None:
+        channel = context.workspace_channel
+        if channel is None:
+            yield None
+            return
+        backend = context.backend
+        cwd = ""
+    token_ch = _git_channel.set(channel)
+    token_be = _git_backend.set(backend)
+    try:
+        yield cwd
+    finally:
+        _git_channel.reset(token_ch)
+        _git_backend.reset(token_be)
+
+
 def _workspace_has_local_git(cwd: str) -> bool:
     """True only when ``.git`` exists *inside* the workspace root (no parent climb)."""
     return (Path(cwd) / ".git").exists()
 
+
+async def _workspace_has_git_meta(cwd: str) -> bool:
+    """Root ``.git`` probe — Path when local, ``backend.exists`` when channel-backed."""
+    backend = _git_backend.get()
+    if backend is not None:
+        exists = getattr(backend, "exists", None)
+        if exists is None:
+            return False
+        return bool(await exists(".git"))
+    return _workspace_has_local_git(cwd)
 
 
 def _git_spawn_kwargs() -> dict[str, Any]:
@@ -112,6 +172,39 @@ async def _cloud_network_extra_env(context: ToolContext) -> dict[str, str] | Non
     }
 
 
+async def _run_git_via_channel(
+    args: list[str],
+    *,
+    channel: Any,
+    timeout: float,
+) -> tuple[str, str, int]:
+    """Desktop ``git_run`` — returns stdout/stderr/exit_code (never raises WorkspaceError)."""
+    payload: dict[str, Any] = {"argv": list(args)}
+    if timeout != _GIT_TIMEOUT:
+        payload["timeout_seconds"] = float(timeout)
+    try:
+        value = await channel.request(
+            WorkspaceOp.GIT_RUN,
+            payload,
+            timeout=float(timeout) + _GIT_KILL_SLACK,
+        )
+    except WorkspaceError as exc:
+        return "", str(exc) or exc.__class__.__name__, 1
+    except Exception as exc:  # noqa: BLE001 — tool layer wants a process-shaped triple
+        return "", f"git_run 通道失败：{exc}", 1
+    if not isinstance(value, dict):
+        return "", "git_run 返回格式异常", 1
+    try:
+        code = int(value.get("exit_code") or 0)
+    except (TypeError, ValueError):
+        code = 1
+    return (
+        str(value.get("stdout") or ""),
+        str(value.get("stderr") or ""),
+        code,
+    )
+
+
 async def _run_git(
     args: list[str],
     *,
@@ -121,10 +214,16 @@ async def _run_git(
 ) -> tuple[str, str, int]:
     """Run git command, return (stdout, stderr, exit_code).
 
-    ``GIT_CEILING_DIRECTORIES`` is set to the workspace root so discovery never
-    climbs into a parent repo (e.g. workspace nested under the host monorepo).
+    With a bound ``WorkspaceChannel`` (LocalWorkspace), issues ``git_run`` on the
+    desktop. Otherwise spawns local ``git`` under ``cwd`` with
+    ``GIT_CEILING_DIRECTORIES`` so discovery never climbs into a parent repo.
     On timeout / cancel, reaps the process tree (Windows ``taskkill /T``).
     """
+    channel = _git_channel.get()
+    if channel is not None:
+        # Local inherits OS / gh auth on the desktop — never inject cloud PAT env.
+        return await _run_git_via_channel(args, channel=channel, timeout=timeout)
+
     ceiling = str(Path(cwd).resolve())
     env = {
         **os.environ,
@@ -187,7 +286,7 @@ async def _ensure_git_repo(
     cwd: str, start: float, *, write: bool
 ) -> ToolResult | None:
     # Fast path: refuse before any git discovery that could surface a parent repo.
-    if not _workspace_has_local_git(cwd):
+    if not await _workspace_has_git_meta(cwd):
         if write:
             return _error(_NO_LOCAL_REPO_MSG, start)
         return _no_repo_ok(start)
@@ -207,6 +306,7 @@ async def _current_branch(cwd: str) -> str:
         return ""
     return stdout.strip()
 
+
 def _parse_status_sb(stdout: str) -> tuple[str, str]:
     """Parse ``git status -sb`` into (branch_line, body)."""
     lines = stdout.splitlines()
@@ -220,5 +320,3 @@ def _parse_status_sb(stdout: str) -> tuple[str, str]:
         body = "\n".join(lines[1:]).rstrip()
         return branch, body
     return "(无)", stdout.rstrip()
-
-

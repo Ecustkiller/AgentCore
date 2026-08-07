@@ -1,8 +1,15 @@
-"""Dispatch + run a user workflow via the direct-start pipeline (no CEO 编队)."""
+"""Dispatch + run a user workflow via mechanism-direct (no CEO 编队).
+
+Turn envelope is ``run_mechanism_direct_and_persist`` (shared with standing
+bound-workflow): placeholder / lease / log_context / persist. Inner execution
+remains ``run_workflow_pipeline``. Credential preflight shares
+``preflight_resolved_llm_credentials`` with ``standing_tasks.runner``. Shared
+with handoff: only ``spawn_background``. Pause truth is ``paused_turns``.
+"""
 
 from __future__ import annotations
 
-from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.billing.gate import preflight_resolved_llm_credentials
 from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
     default_permission_axes_for_user,
@@ -13,7 +20,6 @@ from agentcore.conversation.common import (
 )
 from agentcore.conversation.history import load_chat_context
 from agentcore.conversation.turn_backend import build_turn_backend
-from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
 from agentcore.core.types import PermissionAxes
 from agentcore.db.base import async_session_factory
@@ -24,8 +30,9 @@ from agentcore.db.repositories import (
     MessageRepository,
     UserRepository,
 )
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.resolve import (
-    platform_llm_credentials,
+    resolve_account_default_model,
     resolve_conversation_model_selection,
 )
 from agentcore.runtime.events import EventSink
@@ -60,7 +67,12 @@ async def dispatch_workflow_run(
     workflow_name: str = "工作流",
     permission_axes: dict | None = None,
 ) -> str:
-    """Validate definition, ensure conversation, spawn background job. Returns conversation id."""
+    """Validate definition, preflight credentials, ensure conversation, spawn job.
+
+    Credential gate runs synchronously (same semantics as conversation turn
+    preflight) before create/spawn so a refused run returns 402/429/503 instead
+    of a 200 「已开跑」 shell. Returns conversation id only after admit.
+    """
     try:
         tasks = expand_workflow_to_tasks(definition)
     except WorkflowDefinitionError as e:
@@ -72,6 +84,9 @@ async def dispatch_workflow_run(
         folder = await FolderRepository(session).get_by_id(folder_id, user_id=user_id)
         if folder is None:
             raise LookupError("工作区不存在")
+        user = await UserRepository(session).get_by_id(user_id)
+        if user is None:
+            raise LookupError("用户不存在")
         axes = permission_axes
         if axes is None:
             axes = (await default_permission_axes_for_user(session, user_id)).to_dict()
@@ -84,7 +99,24 @@ async def dispatch_workflow_run(
                 raise LookupError("对话不存在")
             if conv.folder_id and conv.folder_id != folder_id:
                 raise ValueError("对话不属于所选工作区")
+            selection = await resolve_conversation_model_selection(
+                session, conv, user_id
+            )
         else:
+            # No conversation yet — match turn preflight with conv=None (account default).
+            selection = await resolve_account_default_model(session, user_id)
+
+        # Raise BYOKKeyMissingError / QuotaExceededError / PlatformBillingUnavailableError
+        # before create or spawn (route maps AgentCoreError → 402/429/503).
+        credentials = await preflight_resolved_llm_credentials(
+            session=session,
+            user=user,
+            cost_repo=CostEventRepository(session),
+            byok_missing_message="跑工作流需要可用的模型凭证，请先在设置中配置。",
+            selection=selection,
+        )
+
+        if not conv_id:
             conv = await ConversationRepository(session).create(
                 user_id=user_id,
                 title=workflow_name,
@@ -104,6 +136,7 @@ async def dispatch_workflow_run(
             workflow_name=workflow_name,
             tasks=tasks,
             note=note,
+            llm_credentials=credentials,
         )
     )
     return conv_id
@@ -119,42 +152,23 @@ async def run_workflow_job(
     workflow_name: str,
     tasks: list[dict],
     note: str | None = None,
+    llm_credentials: LLMCredentials | None = None,
 ) -> None:
-    """Background: persist user message + run workflow direct-start pipeline."""
+    """Background: persist user message + mechanism-direct turn envelope.
+
+    Inner pipeline remains ``run_workflow_pipeline``; outer envelope is
+    ``run_mechanism_direct_and_persist`` (same as standing bound-workflow).
+    ``llm_credentials`` come from the sync dispatch preflight (do not re-gate here).
+    """
     sink = EventSink()
     try:
         user_message = build_workflow_user_message(workflow_name=workflow_name, note=note)
         async with async_session_factory() as session:
-            user = await UserRepository(session).get_by_id(user_id)
-            if user is None:
-                logger.error("workflow.run_user_missing", user_id=user_id)
-                return
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             if conv is None:
                 logger.error(
                     "workflow.run_conversation_missing",
                     conversation_id=conversation_id,
-                )
-                return
-            try:
-                selection = await resolve_conversation_model_selection(
-                    session, conv, user_id
-                )
-                credentials = await preflight_llm_credentials(
-                    session=session,
-                    user=user,
-                    cost_repo=CostEventRepository(session),
-                    byok_missing_message="跑工作流需要可用的模型凭证，请先在设置中配置。",
-                    model_origin=selection.origin,
-                    provider_id=selection.provider_id,
-                )
-                if selection.origin == "platform":
-                    credentials = platform_llm_credentials(model=selection.model)
-            except AgentCoreError as e:
-                logger.warning(
-                    "workflow.run_credentials_failed",
-                    conversation_id=conversation_id,
-                    error=e.message or str(e),
                 )
                 return
             profile_set = await resolve_profile_set(session, conv, user_id)
@@ -186,14 +200,11 @@ async def run_workflow_job(
                 history = await load_chat_context(session, conversation_id, max_messages=40)
 
             from agentcore.conversation.turn_runner import (
-                session_callbacks,
-                suspension_callbacks,
+                run_mechanism_direct_and_persist,
             )
-            from agentcore.runtime.pipeline.workflow_run import run_workflow_pipeline
 
-            session_saver, session_loader = session_callbacks(conversation_id)
-            suspension_saver, suspension_deleter = suspension_callbacks()
-            await run_workflow_pipeline(
+            # Shared envelope with standing bound-workflow (placeholder/lease/persist).
+            await run_mechanism_direct_and_persist(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 user_message=user_message,
@@ -208,11 +219,7 @@ async def run_workflow_job(
                 conversation_history_access=conversation_history_access,
                 permission_axes=axes,
                 profile_set=profile_set,
-                llm_credentials=credentials,
-                session_saver=session_saver,
-                session_loader=session_loader,
-                suspension_saver=suspension_saver,
-                suspension_deleter=suspension_deleter,
+                llm_credentials=llm_credentials,
             )
         logger.info(
             "workflow.run_finished",

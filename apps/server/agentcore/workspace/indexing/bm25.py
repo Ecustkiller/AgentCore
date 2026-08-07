@@ -56,10 +56,13 @@ class BM25Index:
                 CREATE TABLE IF NOT EXISTS file_hashes (
                     path TEXT PRIMARY KEY,
                     content_hash TEXT NOT NULL,
-                    indexed_at REAL NOT NULL
+                    indexed_at REAL NOT NULL,
+                    mtime_ms INTEGER,
+                    size_bytes INTEGER
                 )
                 """
             )
+            _ensure_file_hash_fingerprint_columns(conn)
             conn.commit()
 
     @staticmethod
@@ -76,6 +79,52 @@ class BM25Index:
             ).fetchone()
         return str(row["content_hash"]) if row else None
 
+    async def get_file_fingerprint(self, path: str) -> tuple[int, int] | None:
+        """Return ``(mtime_ms, size_bytes)`` when both columns are set; else ``None``.
+
+        Missing columns / NULL values mean "must read" (legacy DBs, partial rows).
+        """
+        return await asyncio.to_thread(self._get_file_fingerprint_sync, path)
+
+    def _get_file_fingerprint_sync(self, path: str) -> tuple[int, int] | None:
+        with self._connect() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT mtime_ms, size_bytes FROM file_hashes WHERE path = ?",
+                    (path,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                # Pre-migration DB without fingerprint columns → treat as unknown.
+                return None
+        if row is None:
+            return None
+        mtime_ms = row["mtime_ms"]
+        size_bytes = row["size_bytes"]
+        if mtime_ms is None or size_bytes is None:
+            return None
+        return int(mtime_ms), int(size_bytes)
+
+    async def set_file_fingerprint(
+        self, path: str, mtime_ms: int, size_bytes: int
+    ) -> None:
+        await asyncio.to_thread(
+            self._set_file_fingerprint_sync, path, mtime_ms, size_bytes
+        )
+
+    def _set_file_fingerprint_sync(
+        self, path: str, mtime_ms: int, size_bytes: int
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE file_hashes
+                SET mtime_ms = ?, size_bytes = ?
+                WHERE path = ?
+                """,
+                (mtime_ms, size_bytes, path),
+            )
+            conn.commit()
+
     async def list_indexed_paths(self) -> set[str]:
         return await asyncio.to_thread(self._list_indexed_paths_sync)
 
@@ -84,10 +133,27 @@ class BM25Index:
             rows = conn.execute("SELECT path FROM file_hashes").fetchall()
         return {str(r["path"]) for r in rows}
 
-    async def upsert_file(self, path: str, content: str, chunks: list[RawChunk]) -> None:
-        await asyncio.to_thread(self._upsert_file_sync, path, content, chunks)
+    async def upsert_file(
+        self,
+        path: str,
+        content: str,
+        chunks: list[RawChunk],
+        *,
+        mtime_ms: int | None = None,
+        size_bytes: int | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._upsert_file_sync, path, content, chunks, mtime_ms, size_bytes
+        )
 
-    def _upsert_file_sync(self, path: str, content: str, chunks: list[RawChunk]) -> None:
+    def _upsert_file_sync(
+        self,
+        path: str,
+        content: str,
+        chunks: list[RawChunk],
+        mtime_ms: int | None,
+        size_bytes: int | None,
+    ) -> None:
         digest = self.content_hash(content)
         now = time.time()
         with self._connect() as conn:
@@ -112,13 +178,15 @@ class BM25Index:
                 )
             conn.execute(
                 """
-                INSERT INTO file_hashes(path, content_hash, indexed_at)
-                VALUES (?, ?, ?)
+                INSERT INTO file_hashes(path, content_hash, indexed_at, mtime_ms, size_bytes)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(path) DO UPDATE SET
                     content_hash = excluded.content_hash,
-                    indexed_at = excluded.indexed_at
+                    indexed_at = excluded.indexed_at,
+                    mtime_ms = excluded.mtime_ms,
+                    size_bytes = excluded.size_bytes
                 """,
-                (path, digest, now),
+                (path, digest, now, mtime_ms, size_bytes),
             )
             conn.commit()
 
@@ -206,6 +274,17 @@ class BM25Index:
             score = max(0.0, min(1.0, raw / max_score))
             results.append((chunk, score))
         return results
+
+
+def _ensure_file_hash_fingerprint_columns(conn: sqlite3.Connection) -> None:
+    """Add mtime_ms / size_bytes to legacy ``file_hashes`` tables (NULL = must read)."""
+    cols = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(file_hashes)").fetchall()
+    }
+    if "mtime_ms" not in cols:
+        conn.execute("ALTER TABLE file_hashes ADD COLUMN mtime_ms INTEGER")
+    if "size_bytes" not in cols:
+        conn.execute("ALTER TABLE file_hashes ADD COLUMN size_bytes INTEGER")
 
 
 def tokenize_query(query: str) -> list[str]:

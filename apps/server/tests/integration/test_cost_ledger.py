@@ -144,6 +144,51 @@ async def test_record_runs_is_idempotent_by_run_id(session_factory):
     assert len(rows) == 1
 
 
+async def test_record_calls_is_idempotent_by_call_id(session_factory):
+    """At-least-once drain retries must not double-bill the same call_id."""
+    from agentcore.db.models import CostCall
+
+    user_id, conv_id, msg_id = new_id(), new_id(), new_id()
+    run_id = new_id()
+    call = _call(f"call_{new_id()}", run_id=run_id, model="deepseek-v4-flash", total=2500)
+
+    async with session_factory() as session:
+        first = await CostEventRepository(session).record_calls(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            calls=[call],
+            materialize_runs=True,
+        )
+    async with session_factory() as session:
+        second = await CostEventRepository(session).record_calls(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            calls=[call],
+            materialize_runs=True,
+        )
+
+    assert first == 1
+    assert second == 0
+
+    async with session_factory() as session:
+        calls = (
+            (await session.execute(select(CostCall).where(CostCall.call_id == call["call_id"])))
+            .scalars()
+            .all()
+        )
+        events = (
+            (await session.execute(select(CostEvent).where(CostEvent.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+    assert len(calls) == 1
+    assert calls[0].cost_total_nano == 2500
+    assert len(events) == 1
+    assert events[0].cost_total_nano == 2500
+
+
 async def test_record_runs_empty_is_noop(session_factory):
     async with session_factory() as session:
         written = await CostEventRepository(session).record_runs(

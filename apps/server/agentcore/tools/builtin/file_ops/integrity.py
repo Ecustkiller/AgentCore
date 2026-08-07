@@ -45,7 +45,7 @@ _OMISSION_RE = re.compile(
 
 # "成篇" threshold: delete gate + classify_write_kind / prose-append / omission hard-reject.
 # file_write whole-file overwrite is allowed (prefer str_replace).
-# Length is advisory only (skill / schema 建议分段) — no hard reject on oversized bodies.
+# Length is advisory only (skill / schema 可选骨架分段) — no hard reject on oversized bodies.
 _SUBSTANTIAL_FILE_CHARS = 400
 
 def is_substantial_existing_body(content: str) -> bool:
@@ -58,7 +58,7 @@ def substantial_delete_rejection(path: str, old_chars: int) -> str:
     return (
         f"拒绝删除成篇草稿：`{path}` 已有约 {old_chars} 字（阈值 "
         f"{_SUBSTANTIAL_FILE_CHARS} 字）。禁止整篇 delete 后重写长文——"
-        "请用 str_replace 局部修订；超长续写须先有短骨架再按节 "
+        "请用 str_replace 局部修订；超长可一次完整写入或先短骨架再按节 "
         "file_append / str_replace；预算不够时停在完整章边界并诚实交接，勿推倒重来。"
     )
 
@@ -281,8 +281,7 @@ def prose_append_rejection(path: str) -> str:
     """Hard reject when appending after a same-run prose ``file_write``."""
     return (
         f"拒绝追加：`{path}` 本 run 已落成篇正文（非骨架）。"
-        "短文件应一次 file_write 写完；长交付物应先短骨架再按节 "
-        "file_append / str_replace 填空；修订请用 str_replace。"
+        "成篇后请用 str_replace 局部修订；骨架填空路径才用 file_append。"
     )
 
 def _norm_rel_path(path: str) -> str:
@@ -309,7 +308,13 @@ def _prepare_write_relpath(path: str) -> tuple[str, str]:
     baseline = normalize_workspace_path(requested, root_label="workspace")
     if _norm_rel_path(actual) == _norm_rel_path(baseline):
         return actual, ""
-    return actual, f"注意：请求路径已清理，实际写入 `{actual}`。"
+    return (
+        actual,
+        f"注意：请求路径已清理，实际写入 `{actual}`。"
+        "案卷区（`AgentCore/文档/` 下 research/reviews/debate/项目）前缀之后"
+        "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
+        "（规范化后常等同）。",
+    )
 
 
 def write_scope_rejection(context: ToolContext, path: str) -> str | None:
@@ -353,8 +358,8 @@ def prose_omission_rejection(path: str) -> str:
     """Hard reject when substantial prose lands with delivery-omission markers."""
     return (
         f"拒绝写入 `{path}`：成篇正文含省略标记（残缺交付）。"
-        "请用短骨架 + `<!-- SECTION: -->` 按节 file_append / str_replace 填空，"
-        "或一次写完完整正文；禁止用「中间省略」等标记交差。"
+        "请一次写完完整正文，或用短骨架 + `<!-- SECTION: -->` 按节 "
+        "file_append / str_replace 填空；禁止用「中间省略」等标记交差。"
     )
 
 def _reject_write_scope(

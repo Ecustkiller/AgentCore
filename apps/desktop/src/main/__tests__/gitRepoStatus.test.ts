@@ -2,7 +2,10 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseGitStatusSb } from "../fs/workspace/gitRepoStatus";
+import {
+  parseGitStatusSb,
+  unquoteGitPath,
+} from "../fs/workspace/gitRepoStatus";
 import {
   evaluateDiscardPath,
   evaluateDiscardPaths,
@@ -70,6 +73,38 @@ describe("parseGitStatusSb", () => {
 
   it("empty stdout → placeholder branch", () => {
     expect(parseGitStatusSb("").branch).toBe("(无)");
+  });
+
+  it("unquotes C-style octal to Chinese Unicode path", () => {
+    // 「中文.md」UTF-8 = e4 b8 ad e6 96 87
+    const quoted = `"\\344\\270\\255\\346\\226\\207.md"`;
+    expect(unquoteGitPath(quoted)).toBe("中文.md");
+    const r = parseGitStatusSb(`## main\n?? ${quoted}\n`);
+    expect(r.unstaged).toEqual([{ path: "中文.md", code: "??" }]);
+  });
+
+  it("keeps literal Chinese when quotepath already off", () => {
+    const r = parseGitStatusSb("## main\n M docs/说明.md\n");
+    expect(r.unstaged).toEqual([{ path: "docs/说明.md", code: " M" }]);
+  });
+
+  it("parses rename -> taking new path (quoted octal both sides)", () => {
+    const oldQ = `"\\344\\270\\255-old.md"`;
+    const newQ = `"\\344\\270\\255-new.md"`;
+    const r = parseGitStatusSb(`## main\nR  ${oldQ} -> ${newQ}\n`);
+    expect(r.staged).toEqual([{ path: "中-new.md", code: "R " }]);
+    expect(r.unstaged).toEqual([]);
+  });
+
+  it("parses plain ASCII rename -> without regressing", () => {
+    const r = parseGitStatusSb("## main\nR  old.ts -> new.ts\n");
+    expect(r.staged).toEqual([{ path: "new.ts", code: "R " }]);
+  });
+
+  it("unquotes paths with spaces", () => {
+    expect(unquoteGitPath('"a b.ts"')).toBe("a b.ts");
+    const r = parseGitStatusSb('## main\n?? "my file.ts"\n');
+    expect(r.unstaged).toEqual([{ path: "my file.ts", code: "??" }]);
   });
 });
 

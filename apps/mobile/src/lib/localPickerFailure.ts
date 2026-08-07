@@ -80,6 +80,7 @@ export function isDesktopFolderAction(
 ): boolean {
   return (
     action === "open_local_project" ||
+    action === "register_local_project" ||
     action === "bind_local_folder" ||
     action === "grant_readonly_folder" ||
     action === "grant_organize_folder"

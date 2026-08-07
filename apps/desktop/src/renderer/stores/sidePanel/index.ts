@@ -16,6 +16,7 @@ export {
   TEAM_BROWSER_TAB_ID,
   TEAM_TERMINAL_TAB_ID,
   terminalDismissKey,
+  browserDismissKey,
   runDetailTabId,
   contentDetailTabId,
   simpleTurnDetailTabId,

@@ -56,6 +56,7 @@ import {
   TEAM_BROWSER_TAB_ID,
   TEAM_TERMINAL_TAB_ID,
   WORKSPACE_TAB_ID,
+  browserDismissKey,
   canFloatTabId,
   terminalDismissKey,
   useSidePanelStore,
@@ -132,6 +133,9 @@ export function SidePanel() {
   const reorderContentTabs = useSidePanelStore((s) => s.reorderContentTabs);
   const floatTab = useSidePanelStore((s) => s.floatTab);
   const clearFloats = useSidePanelStore((s) => s.clearFloats);
+  const closeConversationScopedTabs = useSidePanelStore(
+    (s) => s.closeConversationScopedTabs,
+  );
   const openTerminalTab = useSidePanelStore((s) => s.openTerminalTab);
   const bindTerminalSession = useSidePanelStore((s) => s.bindTerminalSession);
   const openFileTab = useSidePanelStore((s) => s.openFileTab);
@@ -234,14 +238,20 @@ export function SidePanel() {
     }
   }, [command.show, activeTabId, setActiveTab]);
 
-  // 切对话：清深链聚焦 + 清浮窗；桌面须先/并关对应真窗。
+  // 切对话：清深链聚焦 + 清浮窗 + 清对话作用域内容 tab；桌面须先/并关对应真窗。
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentConversationId is an intentional re-run key
   useEffect(() => {
     clearChangesFocus();
     const floated = useSidePanelStore.getState().floats.map((f) => f.tabId);
     clearFloats();
     closeOsFloatWindowsForTabs(floated);
-  }, [currentConversationId, clearChangesFocus, clearFloats]);
+    closeConversationScopedTabs();
+  }, [
+    currentConversationId,
+    clearChangesFocus,
+    clearFloats,
+    closeConversationScopedTabs,
+  ]);
 
   // 「改动」不可见时若仍激活 → 回工作区。
   useEffect(() => {
@@ -276,20 +286,21 @@ export function SidePanel() {
     openTerminalTab({ activate: false, reveal: false });
   }, [tabs, openTerminalTab]);
 
-  // 浏览器活动出现且尚无 browser 内容 tab → 自动补一个（不激活、不强开面板）。
+  // 浏览器「有活动」时自动补壳：用户关掉后记 dismiss，活动清零后才允许再次自动浮出。
   useEffect(() => {
-    if (!browser.show) return;
-    const hasBrowser = useSidePanelStore
-      .getState()
-      .tabs.some((t) => t.kind === "browser");
-    if (hasBrowser) return;
-    useSidePanelStore
-      .getState()
-      .openTab(
-        { kind: "browser", id: TEAM_BROWSER_TAB_ID, title: "浏览器" },
-        { activate: false, reveal: false },
-      );
-  }, [browser.show]);
+    const dismissKey = browserDismissKey(currentConversationId);
+    if (!browser.show) {
+      useSidePanelStore.getState().clearAutoSurfaceDismiss(dismissKey);
+      return;
+    }
+    const sp = useSidePanelStore.getState();
+    if (sp.isAutoSurfaceDismissed(dismissKey)) return;
+    if (sp.tabs.some((t) => t.kind === "browser")) return;
+    sp.openTab(
+      { kind: "browser", id: TEAM_BROWSER_TAB_ID, title: "浏览器" },
+      { activate: false, reveal: false },
+    );
+  }, [browser.show, currentConversationId]);
 
   // Content / simple-turn tabs read message text via narrow slices so a streaming
   // turn (a new `messages` array every tick) never re-renders this dock (收窄订阅).

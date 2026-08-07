@@ -37,7 +37,10 @@ export function FloatWindowPage() {
     useConversationStore.getState().setCurrentConversation(conversationId);
   }, [conversationId]);
 
-  useFloatWindowProjectionConsumer(conversationId, tabId);
+  const syncAvailable = useFloatWindowProjectionConsumer(
+    conversationId,
+    tabId,
+  );
 
   const tabs = useSidePanelStore((s) => s.tabs);
   const title = tabId ? sidePanelFloatTitle(tabId, tabs) : "浮窗";
@@ -70,6 +73,7 @@ export function FloatWindowPage() {
           <FloatWindowEmptyState
             missingParams={!tabId}
             conversationId={conversationId}
+            syncUnavailable={!syncAvailable}
           />
         )}
       </main>
@@ -89,26 +93,60 @@ export function hasFloatTabData(
 function FloatWindowEmptyState({
   missingParams,
   conversationId,
+  syncUnavailable,
 }: {
   missingParams: boolean;
   conversationId: string;
+  syncUnavailable: boolean;
 }) {
+  const { title, detail } = floatWindowEmptyCopy({
+    missingParams,
+    conversationId,
+    syncUnavailable,
+  });
   return (
     <div
       data-testid="float-window-empty"
       className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center"
     >
       <PanelsTopLeft size={26} className="text-muted-foreground/40" />
-      <p className="text-sm text-muted-foreground">
-        {missingParams ? "缺少浮窗参数" : "面板数据尚未同步"}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {missingParams
-          ? "需要 #/float?cid=…&tab=… 才能打开对应面板。"
-          : conversationId
-            ? "正在从主窗同步面板数据…"
-            : "缺少对话 id（cid）；无法同步投影态。"}
-      </p>
+      <p className="text-sm text-muted-foreground">{title}</p>
+      <p className="text-xs text-muted-foreground">{detail}</p>
     </div>
   );
+}
+
+/** Empty-state copy priority: missing tab → missing cid → BC capability → waiting. */
+export function floatWindowEmptyCopy({
+  missingParams,
+  conversationId,
+  syncUnavailable,
+}: {
+  missingParams: boolean;
+  conversationId: string;
+  syncUnavailable: boolean;
+}): { title: string; detail: string } {
+  if (missingParams) {
+    return {
+      title: "缺少浮窗参数",
+      detail: "需要 #/float?cid=…&tab=… 才能打开对应面板。",
+    };
+  }
+  if (!conversationId) {
+    return {
+      title: "面板数据尚未同步",
+      detail: "缺少对话 id（cid）；无法同步投影态。",
+    };
+  }
+  if (syncUnavailable) {
+    return {
+      title: "无法同步面板数据",
+      detail:
+        "当前环境不支持跨窗同步（BroadcastChannel 不可用），浮窗无法从主窗获取面板数据。",
+    };
+  }
+  return {
+    title: "面板数据尚未同步",
+    detail: "正在从主窗同步面板数据…",
+  };
 }

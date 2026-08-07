@@ -7,7 +7,7 @@ is intentionally NOT here: unification is injection-side only (文档「守恒�
 搬家不消失).
 """
 
-from agentcore.runtime.context.assembler import ContextAssembler
+from agentcore.runtime.context.assembler import ContextAssembler, assembly_hash
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
 from agentcore.runtime.context.workspace_context import (
     ChannelProfile,
@@ -27,6 +27,7 @@ __all__ = [
     "PromptContributor",
     "SectionOrder",
     "WorkspaceGitFact",
+    "assembly_hash",
     "build_workspace_context",
     "build_workspace_overview",
     "detect_workspace_git",

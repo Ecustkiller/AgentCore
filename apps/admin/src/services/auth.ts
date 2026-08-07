@@ -1,3 +1,4 @@
+import { restPath } from "@agentcore/contract-rest-types/paths";
 import { api, clearCsrfToken } from "@/services/api";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
@@ -39,7 +40,7 @@ function parseLoginResponse(res: LoginResponse): LoginOutcome {
 
 /** Resolve the current session from the access cookie (throws 401 if absent). */
 export async function fetchMe(): Promise<AuthUser> {
-  return toUser(await api.get<BackendUser>("/v1/auth/me"));
+  return toUser(await api.get<BackendUser>(restPath("/v1/auth/me")));
 }
 
 export async function login(

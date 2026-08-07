@@ -17,7 +17,7 @@ from .policy import (
     _validate_add_paths,
 )
 from .results import _error, _git_failure, _ok
-from .spawn import _current_branch, _workspace_has_local_git
+from .spawn import _current_branch, _workspace_has_git_meta
 
 
 async def cmd_init_baseline(
@@ -27,7 +27,7 @@ async def cmd_init_baseline(
     meta: dict[str, Any],
 ) -> ToolResult:
     """Init repo + first commit when missing; never force-commit a dirty existing tree."""
-    if _workspace_has_local_git(cwd):
+    if await _workspace_has_git_meta(cwd):
         porcelain, stderr, code = await spawn_mod._run_git(
             ["status", "--porcelain"], cwd=cwd
         )

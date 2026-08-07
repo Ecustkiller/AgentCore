@@ -29,6 +29,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "chars": "int",
         "history": "int",
         "location": "str",
+        "via": "str",
     },
     "chat.turn_complete": {
         "finish_reason": "str",
@@ -178,6 +179,14 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "models": "list",
         "by_role": "dict",
     },
+    "cost.prompt_assembled": {
+        "scope": "str",
+        "total_chars": "int",
+        "sections": "dict",
+        "assembly_hash": "str",
+        "over_soft_cap": "bool",
+        "soft_cap": "int",
+    },
     "cost.ledger_write_failed": {"error": "str"},
     "cost.ledger_drain_before_reconcile_failed": {},
     "workspace.snapshot_created": {},
@@ -227,6 +236,11 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "conversation_id": "str",
         "error": "str",
     },
+    "rate_limit.redis_fail_open": {
+        "prefix": "str",
+        "error": "str",
+        "count": "int",
+    },
 }
 
 # S3-retired names: no emit site, kept so old JSONL still validates against the registry.
@@ -265,6 +279,7 @@ KEY_DESC: dict[str, str] = {
     "llm.call_failed": "LLM 调用失败（model/credential_source；可取则带 provider_id）",
     "llm.stream_stalled": "LLM 流式空闲超时（model/credential_source；可取则带 provider_id）",
     "cost.recorded": "回合落账成功（含 by_role 角色拆解）",
+    "cost.prompt_assembled": "系统提示装配观测（段 chars + assembly_hash；零行为副作用）",
     "pipeline.error": "回合管线未捕获异常",
     "http.unhandled_error": "HTTP 层未捕获异常",
     "auth.login_failed": "敏感操作审计：登录失败（password/unknown/locked/mfa/role；无明文凭据）",
@@ -285,6 +300,10 @@ KEY_DESC: dict[str, str] = {
     "compaction.failed": "长对话压缩失败（顶层异常；不推水位）",
     "compaction.timeout": "长对话压缩 LLM 超时（空摘要；不推水位）",
     "compaction.schedule_failed": "压缩调度 due 判定异常",
+    "rate_limit.redis_fail_open": (
+        "Redis 限流请求中途失败 → fail-open 放行本请求（可告警；与 construct 期 "
+        "security.rate_limit_redis_fallback 对偶）"
+    ),
 }
 
 

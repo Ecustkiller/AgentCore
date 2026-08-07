@@ -2,51 +2,23 @@
 //
 // Account default combination lives on `/v1/users/me/llm-model-profiles`
 // (`default_model_profile_id`); this module only covers provider CRUD + deployment caps.
+// REST DTOs track OpenAPI via @agentcore/contract-rest-types.
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /** Settings view of one BYOK provider — never the plaintext key. */
-export interface LlmProviderView {
-  id: string;
-  label: string;
-  base_url: string;
-  default_model: string;
-  /** Connectivity result: unchecked | active | error. */
-  status: string;
-  masked_key?: string | null;
-  message?: string | null;
-  supports_tools?: boolean | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+export type LlmProviderView = Schemas["LlmProviderView"];
 
 /** The full 设置·模型配置 provider state + deployment caps. */
-export interface LlmProvidersResponse {
-  providers: LlmProviderView[];
-  /** Deployment billing mode (byok | platform). */
-  billing_mode: string;
-  /** Whether platform models are available on this deployment. */
-  platform_available: boolean;
-  /** Operator platform model id when platform is available. */
-  platform_model?: string | null;
-  /** Echo of account default combination id (authoritative list is llm-model-profiles). */
-  default_model_profile_id?: string | null;
-}
+export type LlmProvidersResponse = Schemas["LlmProvidersResponse"];
 
 /** Add one provider (first provider auto-becomes the chat default). `api_key` required. */
-export interface CreateLlmProviderInput {
-  api_key: string;
-  base_url?: string | null;
-  default_model?: string | null;
-  label?: string;
-}
+export type CreateLlmProviderInput = Schemas["CreateLlmProviderRequest"];
 
 /** Partial update — omit `api_key` to keep the stored ciphertext (edit endpoint/model). */
-export interface UpdateLlmProviderInput {
-  api_key?: string | null;
-  base_url?: string | null;
-  default_model?: string | null;
-  label?: string | null;
-}
+export type UpdateLlmProviderInput = Schemas["UpdateLlmProviderRequest"];
 
 /** Same phrasing as desktop LoginPage — admin sessions cannot use product APIs. */
 export const ADMIN_PRODUCT_FORBIDDEN_MESSAGE =

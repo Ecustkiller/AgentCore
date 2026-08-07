@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { FloatWindowPage } from "@/pages/FloatWindowPage";
+import {
+  FloatWindowPage,
+  floatWindowEmptyCopy,
+} from "@/pages/FloatWindowPage";
 import {
   type DetailTab,
   WORKSPACE_TAB_ID,
@@ -8,6 +11,7 @@ import {
 } from "@/stores/sidePanel";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { act } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -63,13 +67,70 @@ function renderFloat(search: string) {
   return render(ui);
 }
 
+describe("floatWindowEmptyCopy", () => {
+  it("prioritizes missing params, then cid, then BC capability, then waiting", () => {
+    expect(
+      floatWindowEmptyCopy({
+        missingParams: true,
+        conversationId: "",
+        syncUnavailable: true,
+      }).title,
+    ).toBe("缺少浮窗参数");
+    expect(
+      floatWindowEmptyCopy({
+        missingParams: false,
+        conversationId: "",
+        syncUnavailable: true,
+      }).detail,
+    ).toBe("缺少对话 id（cid）；无法同步投影态。");
+    expect(
+      floatWindowEmptyCopy({
+        missingParams: false,
+        conversationId: "c1",
+        syncUnavailable: true,
+      }),
+    ).toEqual({
+      title: "无法同步面板数据",
+      detail:
+        "当前环境不支持跨窗同步（BroadcastChannel 不可用），浮窗无法从主窗获取面板数据。",
+    });
+    expect(
+      floatWindowEmptyCopy({
+        missingParams: false,
+        conversationId: "c1",
+        syncUnavailable: false,
+      }).detail,
+    ).toBe("正在从主窗同步面板数据…");
+  });
+});
+
 describe("FloatWindowPage", () => {
-  it("renders a thin shell without AppShell chrome and shows empty when tab data missing", () => {
+  it("renders a thin shell without AppShell chrome and shows waiting when tab data missing", () => {
     renderFloat("?cid=conv-1&tab=run:missing");
     expect(screen.getByTestId("float-window-page")).toBeTruthy();
     expect(screen.getByTestId("float-window-empty")).toBeTruthy();
     expect(screen.getByText("面板数据尚未同步")).toBeTruthy();
+    expect(screen.getByText("正在从主窗同步面板数据…")).toBeTruthy();
     expect(screen.queryByTestId("float-body-run:missing")).toBeNull();
+  });
+
+  it("shows structural sync failure when BroadcastChannel is unavailable", () => {
+    const OriginalBC = globalThis.BroadcastChannel;
+    // @ts-expect-error intentional capability probe
+    delete globalThis.BroadcastChannel;
+    try {
+      renderFloat("?cid=conv-1&tab=run:missing");
+      expect(screen.getByText("无法同步面板数据")).toBeTruthy();
+      expect(
+        screen.getByText(
+          "当前环境不支持跨窗同步（BroadcastChannel 不可用），浮窗无法从主窗获取面板数据。",
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByText("正在从主窗同步面板数据…")).toBeNull();
+      expect(screen.queryByText("面板数据尚未同步")).toBeNull();
+    } finally {
+      globalThis.BroadcastChannel = OriginalBC;
+    }
   });
 
   it("renders SidePanelSurfaceBody when workspace tab needs no store row", () => {
@@ -115,5 +176,78 @@ describe("FloatWindowPage", () => {
   it("shows missing-params empty state when tab query is absent", () => {
     renderFloat("?cid=conv-1");
     expect(screen.getByText("缺少浮窗参数")).toBeTruthy();
+    expect(
+      screen.getByText("需要 #/float?cid=…&tab=… 才能打开对应面板。"),
+    ).toBeTruthy();
+  });
+
+  it("shows missing-cid empty state when cid is absent", () => {
+    renderFloat("?tab=run:missing");
+    expect(screen.getByText("面板数据尚未同步")).toBeTruthy();
+    expect(
+      screen.getByText("缺少对话 id（cid）；无法同步投影态。"),
+    ).toBeTruthy();
+    expect(screen.queryByText("正在从主窗同步面板数据…")).toBeNull();
+  });
+
+  it("with BroadcastChannel posts one request and hydrates from one snapshot", () => {
+    const posted: unknown[] = [];
+    let onmessage: ((ev: MessageEvent<unknown>) => void) | null = null;
+    const OriginalBC = globalThis.BroadcastChannel;
+    globalThis.BroadcastChannel = class {
+      constructor(_name: string) {}
+      postMessage(data: unknown) {
+        posted.push(data);
+      }
+      close() {}
+      set onmessage(handler: ((ev: MessageEvent<unknown>) => void) | null) {
+        onmessage = handler;
+      }
+      get onmessage() {
+        return onmessage;
+      }
+    } as unknown as typeof BroadcastChannel;
+
+    try {
+      renderFloat("?cid=conv-1&tab=run:abc");
+      expect(posted).toEqual([
+        { type: "request", conversationId: "conv-1", tabId: "run:abc" },
+      ]);
+      expect(screen.getByText("正在从主窗同步面板数据…")).toBeTruthy();
+
+      act(() => {
+        onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              type: "snapshot",
+              conversationId: "conv-1",
+              tabId: "run:abc",
+              snapshot: {
+                conversationId: "conv-1",
+                tabId: "run:abc",
+                tabs: [
+                  {
+                    id: "run:abc",
+                    kind: "run",
+                    title: "Worker",
+                    messageId: "m1",
+                    runId: "abc",
+                  },
+                ],
+                changesFocusMessageId: null,
+                messages: [],
+                executions: {},
+                interactions: [],
+              },
+            },
+          }),
+        );
+      });
+
+      expect(screen.getByTestId("float-body-run:abc")).toBeTruthy();
+      expect(posted).toHaveLength(1);
+    } finally {
+      globalThis.BroadcastChannel = OriginalBC;
+    }
   });
 });

@@ -6,6 +6,7 @@
  * `handoff`.
  */
 
+import { restPath } from "@agentcore/contract-rest-types/paths";
 import { BASE_URL, api } from "@/services/api";
 import type { PermissionAxes } from "@/services/permissionAxes";
 import {
@@ -468,7 +469,7 @@ function patchBody(input: PatchStandingTaskInput): UpdateStandingTaskWireExt {
 
 /** List the signed-in user's standing tasks. */
 export async function listStandingTasks(): Promise<StandingTask[]> {
-  const res = await api.get<StandingTaskWire[]>("/v1/standing-tasks");
+  const res = await api.get<StandingTaskWire[]>(restPath("/v1/standing-tasks"));
   return (Array.isArray(res) ? res : []).map(toStandingTask);
 }
 
@@ -512,7 +513,9 @@ export async function ensureStandingTaskTemplate(
 }
 
 export async function getStandingTask(id: string): Promise<StandingTask> {
-  const res = await api.get<StandingTaskWire>(`/v1/standing-tasks/${id}`);
+  const res = await api.get<StandingTaskWire>(
+    restPath("/v1/standing-tasks/{task_id}", { task_id: id }),
+  );
   return toStandingTask(res);
 }
 

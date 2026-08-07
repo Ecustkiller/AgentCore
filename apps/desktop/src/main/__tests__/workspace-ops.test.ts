@@ -356,20 +356,40 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     await run("write", { path: "sub/b.md", content: "B" });
     await run("write", { path: "node_modules/dep/index.js", content: "X" }); // pruned
     const res = valOf(await run("index_files", {})) as {
+      entries: Array<{ path: string; mtime_ms: number; size_bytes: number }>;
       paths: string[];
       truncated: boolean;
     };
     expect(res.paths).toEqual(["a.txt", "sub/b.md"]); // node_modules pruned, posix sep
+    expect(res.entries.map((e) => e.path)).toEqual(res.paths);
     expect(res.truncated).toBe(false);
   });
 
   it("index_files on an empty root returns no paths", async () => {
     const res = valOf(await run("index_files", {})) as {
+      entries: unknown[];
       paths: string[];
       truncated: boolean;
     };
     expect(res.paths).toEqual([]);
+    expect(res.entries).toEqual([]);
     expect(res.truncated).toBe(false);
+  });
+
+  it("index_files entries carry local mtime_ms and size_bytes fingerprints", async () => {
+    await run("write", { path: "a.txt", content: "hello" });
+    await run("write", { path: "sub/b.md", content: "world!" });
+    await utimes(join(dir, "a.txt"), 100, 100);
+    await utimes(join(dir, "sub", "b.md"), 200, 200);
+    const res = valOf(await run("index_files", {})) as {
+      entries: Array<{ path: string; mtime_ms: number; size_bytes: number }>;
+      paths: string[];
+    };
+    expect(res.paths).toEqual(["a.txt", "sub/b.md"]);
+    expect(res.entries).toEqual([
+      { path: "a.txt", mtime_ms: 100_000, size_bytes: 5 },
+      { path: "sub/b.md", mtime_ms: 200_000, size_bytes: 6 },
+    ]);
   });
 
   it("index_files order=recent returns newest-first by mtime", async () => {
@@ -382,8 +402,13 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     await utimes(join(dir, "b_new.txt"), 300, 300);
     const recent = valOf(await run("index_files", { order: "recent" })) as {
       paths: string[];
+      entries: Array<{ path: string; mtime_ms: number }>;
     };
     expect(recent.paths).toEqual(["b_new.txt", "c_mid.txt", "a_old.txt"]);
+    expect(recent.entries.map((e) => e.path)).toEqual(recent.paths);
+    expect(recent.entries.map((e) => e.mtime_ms)).toEqual([
+      300_000, 200_000, 100_000,
+    ]);
     // Default order stays alphabetical (the @-mention view), unaffected by mtime.
     const alpha = valOf(await run("index_files", {})) as { paths: string[] };
     expect(alpha.paths).toEqual(["a_old.txt", "b_new.txt", "c_mid.txt"]);

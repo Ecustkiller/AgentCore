@@ -113,11 +113,25 @@ def _user_request_anchor_block(user_message: str) -> str:
     )
 
 
+# A 档摸底验收：写进 parallel_brief task/deliverable（提示词纪律，非完成硬闸）。
+_BRIEF_ACCEPTANCE = (
+    "【摸底验收·够用即停】"
+    "目标：本方向能讲清「定位 / 技术栈或手段 / 进度或开放问题」即算够"
+    "（非工程主题则对应本方向的是什么 / 怎么做 / 到哪了）。"
+    "手段：优先读入口文件与权威入口；Git 可用则看进度与近期变更；"
+    "信息够用即停，【禁止】为更全无限深挖。"
+    "收工：handoff 短摘要【必须】交（精炼结论 + 关键证据指引）；"
+    "方向笔记落盘是叠加、不得替代 handoff；"
+    "只读/零写入摸底时【禁止】落盘改业务代码（本约定方向笔记除外）。"
+)
+
+
 def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """A 档·对齐推进：N 路并行摸底 → 方向笔记落盘；无提纲/撰稿/审校（交回 CEO 对话综述）.
 
     与 ``research_report``（B/重成文专线）划界：本形状是默认——一起弄懂 / 多路摸清 /
     讨论对齐；未明示成文勿升 ``research_report``。angles 宜少扇出（常 2）。
+    验收口径见 ``_BRIEF_ACCEPTANCE``（够用即停 + handoff 必交；非完成硬闸）。
     """
     topic = clean_str(args.get("topic"))
     if not topic:
@@ -153,6 +167,7 @@ def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                 "对关键法条、司法解释、判例等权威出处，须用 read_url 核对原文后再引用，"
                 "勿仅凭搜索摘要断言条文或裁判要旨。"
                 "聚焦本方向、回报精炼结论供 CEO 与用户对齐，不要写成终稿章节。"
+                f"{_BRIEF_ACCEPTANCE}"
                 f"完整要点须用 file_write 落盘到 `{artifact}`"
                 "（内容=本方向完整要点 + 来源，不是 handoff 摘要的复制）；"
                 "handoff 结构化简报照旧，落盘是叠加、不得替代 handoff。"
@@ -162,7 +177,10 @@ def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
             ),
             "deliverable": {
                 "form": "files",
-                "name": f"【{label}】方向笔记 + 来源（已落盘 {artifact}）",
+                "name": (
+                    f"【{label}】方向笔记 + 来源（已落盘 {artifact}）；"
+                    "handoff 短摘要必交；定位/技术栈或手段/进度够用即停"
+                ),
                 "artifacts": [artifact],
                 "citation_mode": "two_phase",
             },
@@ -314,16 +332,17 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 f"【主文件】整篇落盘到 `{main_path}`（验收只认这一路径）；"
                 f"{PAPER_PARALLEL_MERGE_DISCIPLINE}"
                 f"{MD_PDF_EXPORT_DISCIPLINE}"
-                "【成篇落盘纪律·Artifact-first】① 首写必须是短骨架（标题+各章小标题/"
-                "FILL 占位，一次短 file_write）——禁止首写半章散文再 append；"
+                "【成篇落盘纪律·Artifact-first】① 【主路径】一次 file_write 完整正文；"
+                "或先短骨架（标题+各章小标题/FILL 占位）再按节填空——"
+                "禁止首写半章散文再 append；"
                 "Markdown 填空只用 file_append / str_replace，【禁止】write_section"
                 "（及 `<!-- SECTION: -->`，二者仅建站 HTML）；"
-                "② 再按章填空，一章写完再下一章；多章超长时本波只填写死的章节范围"
-                "（或前几章），勿默认一人一次写完全文；③ 中等篇幅可一次 "
-                "file_write 写完全文；④ 预算/token 不够写完下一章时，停在完整章边界，"
+                "② 骨架路径按章填空，一章写完再下一章；多章超长时本波只填写死的章节范围"
+                "（或前几章），勿默认一人一次写完全文；③ 中等篇幅一次 "
+                "file_write 写完全文（与①主路径一致）；④ 预算/token 不够写完下一章时，停在完整章边界，"
                 "handoff 标明已完成与【待续】章节——由主管 `continue_from_run_id` "
                 "同人续写同一主文件，禁止并行同角色抢同一路径；⑤ 禁止整篇 "
-                "file_delete 后重写长文；修订优先 str_replace，整文件 file_write "
+                "file_delete 后重写长文；成篇后修订优先 str_replace，整文件 file_write "
                 "覆盖允许但须完整正文（勿惰性省略）；⑥ 写回执即 artifact manifest，禁止再对本文件 "
                 "file_read 回读正文验真。"
             ),

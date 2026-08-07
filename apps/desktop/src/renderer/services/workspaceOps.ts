@@ -18,6 +18,7 @@ const NON_FILE_CHANNEL_OPS = new Set<string>([
   "probe_exec",
   "git_repo_status",
   "git_scm",
+  "git_run",
 ]);
 
 /**
@@ -71,18 +72,25 @@ async function runLocalOp(
     };
     // 进程 op 直发通道、绕过 LocalWorkspace 的 subpath 前缀（工具不感知 scratch），
     // 且 sidecar 通道不知道桌面根注册表（root_id 恒空）。按会话绑定统一补齐：
-    // root_id 缺失用绑定容器根（与 sidecar respond 寻址同构）；process_start 的
-    // cwd 前缀 scratch 子路径（绑定无 subpath 时为无操作）。read / stop / list
-    // 按 process_id / conversation_id 寻址，root 存在即可。
-    if (!rootId || payload.op === "process_start") {
+    // 仅空 root_id 才回退绑定容器根（与 sidecar respond 寻址同构）；process_start
+    // 的 cwd 仅在落在会话绑定根时前缀 scratch（绑定无 subpath 时为无操作）。
+    // 异桌：payload 已带 worker 目标 root_id → 不得回退会话根，也不得用会话
+    // subpath 盖住 cwd（多 local C0 · 桶 F）。read / stop / list 按 process_id /
+    // conversation_id 寻址，root 存在即可。
+    if (!rootId) {
       const target = await resolveConversationLocalTarget(conversationId);
-      if (!rootId) {
-        if (!target) {
-          return ioError("会话未绑定本地工作区，无法执行后台进程操作");
-        }
-        rootId = target.rootId;
+      if (!target) {
+        return ioError("会话未绑定本地工作区，无法执行后台进程操作");
       }
-      if (payload.op === "process_start" && target?.subpath) {
+      rootId = target.rootId;
+      if (payload.op === "process_start" && target.subpath) {
+        const cwd = String(args.cwd ?? "").trim();
+        args.cwd =
+          cwd && cwd !== "." ? `${target.subpath}/${cwd}` : target.subpath;
+      }
+    } else if (payload.op === "process_start") {
+      const target = await resolveConversationLocalTarget(conversationId);
+      if (target?.subpath && target.rootId === rootId) {
         const cwd = String(args.cwd ?? "").trim();
         args.cwd =
           cwd && cwd !== "." ? `${target.subpath}/${cwd}` : target.subpath;
@@ -105,11 +113,15 @@ async function runLocalOp(
     timeout_ms: timeoutMs ?? null,
   });
   try {
-    const opPromise = fsApi.workspaceOp(
-      rootId,
-      payload.op as WorkspaceOpName,
-      args,
-    );
+    const opPromise =
+      timeoutMs != null
+        ? fsApi.workspaceOp(
+            rootId,
+            payload.op as WorkspaceOpName,
+            args,
+            timeoutMs,
+          )
+        : fsApi.workspaceOp(rootId, payload.op as WorkspaceOpName, args);
     const result = !ac
       ? await opPromise
       : await Promise.race([

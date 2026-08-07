@@ -3,6 +3,7 @@ import {
   groupGitChangesByDir,
   isUntrackedChange,
   primaryStatusChar,
+  shortDirLabel,
   statusCharClass,
 } from "@/components/workspace/GitChangesSection";
 import { describe, expect, it } from "vitest";
@@ -49,5 +50,12 @@ describe("GitChangesSection status helpers", () => {
       "apps/a.ts",
       "apps/b.ts",
     ]);
+  });
+
+  it("shortDirLabel keeps last 1–2 segments", () => {
+    expect(shortDirLabel("")).toBe("仓根");
+    expect(shortDirLabel("apps")).toBe("apps");
+    expect(shortDirLabel("apps/desktop")).toBe("apps/desktop");
+    expect(shortDirLabel("apps/desktop/src/renderer")).toBe("src/renderer");
   });
 });

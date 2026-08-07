@@ -40,11 +40,11 @@ Accept: text/event-stream
 {"content":"<固定 prompt>"}
 ```
 
-- 响应为 **SSE**：跟读至 `message_end` 或 `error`（与 `apps/server/scripts/probe_turn.py` 同口径）。
+- 响应为 **SSE**：跟读至 `message_end` 或 `error`（与 `apps/server/scripts/archive/probe_turn.py` 同口径）。
 - 一键探针（从 `apps/server`）：
 
 ```powershell
-uv run python scripts/probe_turn.py --conversation <id> "<固定 prompt>"
+uv run python scripts/archive/probe_turn.py --conversation <id> "<固定 prompt>"
 # 新建会话可省略 --conversation
 ```
 
@@ -68,7 +68,7 @@ uv run python scripts/probe_turn.py --conversation <id> "<固定 prompt>"
 
 ### 1.5 Resume（API）
 
-挂起后：`POST /v1/conversations/{id}/messages/{message_id}/resume`，body 决策词汇与 live resolve 同形（`continue` / `adjust`+`note` / `stop` 等，见 OpenAPI `Resume` schema）。探针参考：`scripts/probe_resume_memory.py`。
+挂起后：`POST /v1/conversations/{id}/messages/{message_id}/resume`，body 决策词汇与 live resolve 同形（`continue` / `adjust`+`note` / `stop` 等，见 OpenAPI `Resume` schema）。探针参考：`scripts/archive/probe_resume_memory.py`。
 
 ---
 

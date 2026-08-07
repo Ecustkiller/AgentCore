@@ -6,7 +6,6 @@ import { TurnCompare } from "@/components/chat/compare/TurnCompare";
 import { DebateArena } from "@/components/chat/debate/arena/DebateArena";
 import { GraphView } from "@/components/graph/GraphView";
 import { SidePanel } from "@/components/layout/SidePanel";
-import { SidePanelFloatHost } from "@/components/layout/SidePanelFloatHost";
 import { SidePanelToggle } from "@/components/layout/SidePanelToggle";
 import { Button } from "@/components/ui";
 import {
@@ -503,8 +502,6 @@ export function TurnDetailPage() {
 
           <SidePanel />
         </div>
-
-        <SidePanelFloatHost />
 
         {!panelOpen && (
           <div className="absolute right-3 top-2 z-20">

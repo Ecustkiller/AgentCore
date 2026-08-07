@@ -502,10 +502,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
   },
-  StreamingIndicator: {
-    verdict: "ported",
-    surface: "ChatPage · 流式状态条",
-  },
   TurnWarningBanner: {
     verdict: "ported",
     surface: "ChatPage · 预检警告条",

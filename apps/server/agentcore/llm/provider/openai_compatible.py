@@ -899,7 +899,12 @@ class OpenAICompatibleProvider:
                 self._raise_for_status(
                     response.status_code, backoff, response.headers, body=body, attempt=attempt
                 )
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    # 2xx HTML / non-JSON (gateway login page, etc.): not transient —
+                    # retrying the same endpoint just spins. Mirror list_models.
+                    raise LLMError(f"{self._name} 响应格式无效") from e
             except LLMUpstreamError as e:
                 last_error = e
                 if not e.retryable or not self._can_retry_attempt(attempt):

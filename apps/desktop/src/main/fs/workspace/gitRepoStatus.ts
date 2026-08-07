@@ -24,6 +24,74 @@ export type { GitRepoStatusValue };
 const CONFLICT_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 
 /**
+ * 还原 git C-style 引号路径（``"a b"`` / ``"\344\270\255.md"``）。
+ * 八进制转义按 UTF-8 字节解码；未加引号则原样返回。
+ */
+export function unquoteGitPath(raw: string): string {
+  const s = raw.trim();
+  if (s.length < 2 || s[0] !== '"') return s;
+
+  const parts: string[] = [];
+  const byteBuf: number[] = [];
+  const flushBytes = (): void => {
+    if (byteBuf.length === 0) return;
+    parts.push(Buffer.from(byteBuf).toString("utf8"));
+    byteBuf.length = 0;
+  };
+
+  let i = 1;
+  while (i < s.length) {
+    const c = s[i]!;
+    if (c === '"') break;
+    if (c === "\\" && i + 1 < s.length) {
+      const n = s[i + 1]!;
+      if (n >= "0" && n <= "7") {
+        let oct = 0;
+        let count = 0;
+        while (count < 3 && i + 1 < s.length) {
+          const d = s[i + 1]!;
+          if (d < "0" || d > "7") break;
+          oct = (oct << 3) | (d.charCodeAt(0) - 0x30);
+          i++;
+          count++;
+        }
+        byteBuf.push(oct);
+        i++;
+        continue;
+      }
+      flushBytes();
+      const escaped: Record<string, string> = {
+        a: "\x07",
+        b: "\b",
+        t: "\t",
+        n: "\n",
+        v: "\v",
+        f: "\f",
+        r: "\r",
+        "\\": "\\",
+        '"': '"',
+      };
+      parts.push(escaped[n] ?? n);
+      i += 2;
+      continue;
+    }
+    flushBytes();
+    parts.push(c);
+    i++;
+  }
+  flushBytes();
+  return parts.join("");
+}
+
+/** 从 status 行路径段取出最终路径（rename 取 ``->`` 右侧）并 unquote。 */
+function statusPathFromPart(pathPart: string): string {
+  const raw = pathPart.includes(" -> ")
+    ? (pathPart.split(" -> ").pop() ?? pathPart).trim()
+    : pathPart;
+  return unquoteGitPath(raw);
+}
+
+/**
  * 解析 ``git status -sb``：分支、dirty、ahead/behind、staged/unstaged/conflicted。
  */
 export function parseGitStatusSb(stdout: string): {
@@ -82,10 +150,8 @@ export function parseGitStatusSb(stdout: string): {
     if (line.length < 3) continue;
     const xy = line.slice(0, 2);
     const pathPart = line.slice(2).trim();
-    // rename: ``R  old -> new`` / ``RM old -> new``
-    const path = pathPart.includes(" -> ")
-      ? (pathPart.split(" -> ").pop() ?? pathPart).trim()
-      : pathPart;
+    // rename: ``R  old -> new`` / ``RM old -> new``（两侧均可带 C-quote）
+    const path = statusPathFromPart(pathPart);
     if (!path) continue;
 
     if (CONFLICT_CODES.has(xy) || xy.includes("U")) {
@@ -134,13 +200,18 @@ export async function opGitRepoStatus(
   }
 
   try {
-    const { stdout } = await execFileAsync("git", ["status", "-sb"], {
-      cwd: root.absPath,
-      timeout: GIT_TIMEOUT_MS,
-      windowsHide: true,
-      maxBuffer: 1024 * 1024,
-      encoding: "utf8",
-    });
+    // quotepath=false：非 ASCII 直接 UTF-8；解析侧仍 unquote 兜底 octal/空格路径
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-c", "core.quotepath=false", "status", "-sb"],
+      {
+        cwd: root.absPath,
+        timeout: GIT_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+        encoding: "utf8",
+      },
+    );
     const parsed = parseGitStatusSb(String(stdout ?? ""));
     return opOk({
       present: true,

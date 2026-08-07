@@ -5,12 +5,16 @@ per-run materialized view product surfaces (工资单 / 仪表盘 / 配额 SUM) 
 ``persona`` holds the human-facing role label (调研员 / CEO / …) so payroll can
 group beyond the structural captain/member bucket. Old rows may lack call
 details or persona — read side tolerates missing fields (no backfill).
+
+``CostLedgerOutbox`` is the shared DB durable queue (G5 mid-term) drained with
+``FOR UPDATE SKIP LOCKED`` so every API worker can self-drain.
 """
 
 from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Index,
@@ -27,6 +31,7 @@ from agentcore.db.base import Base
 from ._helpers import _new_uuid
 
 _ROLE_CHECK = "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision')"
+_OUTBOX_STATUS_CHECK = "status in ('pending', 'corrupt')"
 
 
 class CostEvent(Base):
@@ -122,6 +127,43 @@ class CostCall(Base):
     currency: Mapped[str] = mapped_column(String(8), default="CNY", server_default=text("'USD'"))
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class CostLedgerOutbox(Base):
+    """Shared durable outbox for ``cost_calls`` / ``cost_events`` ledger writes.
+
+    Enqueue inserts a ``pending`` row (telemetry pool). Drain claims with
+    ``FOR UPDATE SKIP LOCKED``, writes the ledger sink, then deletes the row
+    (at-least-once; ``call_id`` / ``run_id`` UNIQUE on the sink).
+    """
+
+    __tablename__ = "cost_ledger_outbox"
+    __table_args__ = (
+        CheckConstraint(_OUTBOX_STATUS_CHECK, name="ck_cost_ledger_outbox_status"),
+        Index(
+            "ix_cost_ledger_outbox_pending_created",
+            "created_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), nullable=False)
+    message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'turn'"))
+    runs: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    calls: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    materialize_runs: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

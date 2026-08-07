@@ -1,4 +1,10 @@
-"""Local→云 handoff: dispatch a cloud team run (双模式工作区 P2e / e2)."""
+"""Local→云 handoff: dispatch a cloud team run (双模式工作区 P2e / e2).
+
+Shared with standing / workflows: only ``spawn_background``. Credentials stay on
+the thin ``resolve_user_llm_credentials`` path (no billing preflight / no
+``preflight_resolved_llm_credentials``). Pause semantics stay out — no
+``paused_turns`` / awaiting_user on handoff jobs.
+"""
 
 import time
 

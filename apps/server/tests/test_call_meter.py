@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -30,9 +29,14 @@ def _usage() -> TokenUsage:
     return TokenUsage(input_tokens=10, output_tokens=5)
 
 
-def test_maybe_enqueue_skips_proxy_scenario(running_ledger):
+def _pending_rows(queue) -> list[dict]:
+    return [r for r in queue._backend._rows.values() if r.get("status") == "pending"]
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_skips_proxy_scenario(running_ledger):
     """Proxy unary still logs llm.call, but billing is proxy_spend-only."""
-    _queue, tmp_path = running_ledger
+    queue, _tmp_path = running_ledger
     with log_context(user_id="u1", conversation_id="c1"):
         assert (
             maybe_enqueue_inprocess_call(
@@ -42,11 +46,13 @@ def test_maybe_enqueue_skips_proxy_scenario(running_ledger):
             )
             is None
         )
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
+    await queue._await_pending_enqueues()
+    assert _pending_rows(queue) == []
 
 
-def test_maybe_enqueue_records_non_proxy_scenario(running_ledger):
-    _queue, tmp_path = running_ledger
+@pytest.mark.asyncio
+async def test_maybe_enqueue_records_non_proxy_scenario(running_ledger):
+    queue, _tmp_path = running_ledger
     with log_context(user_id="u1", conversation_id="c1"):
         rid = maybe_enqueue_inprocess_call(
             model="deepseek-v4-flash",
@@ -54,8 +60,8 @@ def test_maybe_enqueue_records_non_proxy_scenario(running_ledger):
             scenario="chat",
         )
     assert rid is not None
-    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
-    assert len(files) == 1
-    payload = json.loads(files[0].read_text(encoding="utf-8"))
-    assert payload["source"] == "inprocess_call"
-    assert payload["materialize_runs"] is True
+    await queue._await_pending_enqueues()
+    rows = _pending_rows(queue)
+    assert len(rows) == 1
+    assert rows[0]["source"] == "inprocess_call"
+    assert rows[0]["materialize_runs"] is True

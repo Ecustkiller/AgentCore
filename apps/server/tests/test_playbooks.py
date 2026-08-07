@@ -40,7 +40,7 @@ def test_code_audit_single_module_one_auditor():
     assert "P0" in t["task"] and "P3" in t["task"]
     assert "观察·工程" in t["task"]
     assert len(d["artifacts"]) == 2
-    assert d["artifacts"][0].startswith(f"{REVIEWS_DIR}/code-audit-")
+    assert d["artifacts"][0] == f"{REVIEWS_DIR}/code-audit-audit_0-main.md"
     assert d["artifacts"][1].endswith(".audit.json")
     assert "〇、人审速览" in d["required_sections"]
     assert "验证方式" in d["must_contain"]
@@ -66,6 +66,12 @@ def test_code_audit_multi_module_parallel_plus_synth():
     by_id = _by_id(tasks)
     assert set(by_id) == {"audit_0", "audit_1", "audit_2", "audit_synth"}
     assert all(by_id[i]["role"] == "代码审计员" for i in ("audit_0", "audit_1", "audit_2"))
+    assert by_id["audit_0"]["deliverable"]["artifacts"][0] == (
+        f"{REVIEWS_DIR}/code-audit-audit_0-server.md"
+    )
+    assert by_id["audit_1"]["deliverable"]["artifacts"][0] == (
+        f"{REVIEWS_DIR}/code-audit-audit_1-desktop.md"
+    )
     synth = by_id["audit_synth"]
     assert synth["role"] == "审计主管"
     assert set(synth["depends_on"]) == {"audit_0", "audit_1", "audit_2"}
@@ -75,6 +81,33 @@ def test_code_audit_multi_module_parallel_plus_synth():
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.waves()) >= 2
+
+
+def test_code_audit_artifact_uses_task_id_slug_not_essay_filename():
+    """Long module essays must not become truncated filenames (dogfood d3b6f1b8)."""
+    essay = (
+        "desktop-renderer：apps_desktop_src_renderer 的流式订阅与 UI 更新"
+        "（stores_hooks_services_lib）"
+    )
+    tasks, errors = expand_playbook(
+        "code_audit",
+        {
+            "scope": "前端刷新",
+            "modules": [
+                essay,
+                "desktop-sidecar：apps_desktop_src_main 的 sidecar 事件链",
+            ],
+        },
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    md0 = by_id["audit_0"]["deliverable"]["artifacts"][0]
+    md1 = by_id["audit_1"]["deliverable"]["artifacts"][0]
+    assert md0 == f"{REVIEWS_DIR}/code-audit-audit_0-desktop-renderer.md"
+    assert md1 == f"{REVIEWS_DIR}/code-audit-audit_1-desktop-sidecar.md"
+    assert essay in by_id["audit_0"]["task"]
+    assert md0.endswith(".md")
+    assert by_id["audit_0"]["deliverable"]["artifacts"][1] == md0[:-3] + ".audit.json"
 
 
 def test_code_audit_requires_scope_and_rejects_single_module_list():
@@ -121,6 +154,13 @@ def test_parallel_brief_fans_out_notes_without_write_pipeline():
         assert "方向笔记" in t["task"]
         assert "终稿" in t["task"]
         assert "≤12 词" in t["task"]
+        # 摸底验收：够用即停 + handoff 必交（提示词纪律，非完成硬闸）
+        assert "摸底验收" in t["task"] or "够用即停" in t["task"]
+        assert "定位" in t["task"] and "技术栈" in t["task"]
+        assert "入口" in t["task"]
+        assert "handoff" in t["task"].lower()
+        assert "禁" in t["task"] and "业务代码" in t["task"]
+        assert "够用即停" in d["name"] or "handoff" in d["name"].lower()
         # A 档摸底不盖学术检索挡位
         assert t.get("search_policy") in (None, "", False) or not t.get("search_policy")
         assert "学术检索" not in t["task"]
@@ -147,6 +187,7 @@ def test_available_playbooks_lists_parallel_brief_before_research_report_semanti
     assert "对齐推进" in listing or "方向笔记" in listing
     assert "讨论对齐" in listing or "摸清" in listing
     assert "少扇出" in listing or "常 2" in listing
+    assert "够用即停" in listing or "handoff" in listing
     assert "research_report" in listing
     assert "成文专线" in listing
     assert "明示" in listing
@@ -213,11 +254,13 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     assert outline_d["form"] == "files"
     assert outline_d["artifacts"] == ["AgentCore/文档/research/提纲.md"]
     assert "AgentCore/文档/research/提纲.md" in by_id["outline"]["task"]
-    # Artifact-first writer brief: skeleton first; ban half-chapter prose then append.
+    # Artifact-first writer brief：主路径一次完整 write；可选骨架；禁半章散文再 append。
     # 定案对齐：分波范围 + continue_from 待续 + md 禁 write_section。
     # （write_task 已在上方绑定；含 MD→PDF 纪律）
-    assert "短骨架" in write_task or "首写必须是短骨架" in write_task
+    assert "主路径" in write_task or "一次 file_write 完整" in write_task
+    assert "短骨架" in write_task or "骨架" in write_task
     assert "禁止首写半章散文" in write_task
+    assert "首写必须是短骨架" not in write_task
     assert "write_section" in write_task
     assert "continue_from_run_id" in write_task
     assert "章节范围" in write_task or "前几章" in write_task

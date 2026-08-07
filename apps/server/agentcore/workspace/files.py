@@ -48,7 +48,8 @@ async def list_file_index(
     backend = build_server_workspace(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return await backend.index_files()
+    result = await backend.index_files()
+    return result.paths, result.truncated
 
 
 async def upload_file(

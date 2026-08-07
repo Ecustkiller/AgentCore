@@ -1,4 +1,4 @@
-"""Shared cost ledger durable queue: turn/handoff enqueue + drain."""
+"""Shared cost ledger durable queue: enqueue / drain / idempotency / multi-worker."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agentcore.billing import cost_ledger_queue as queue_mod
+from agentcore.billing.cost_ledger_queue import MemoryOutboxBackend
 
 
 class _FakeSession:
@@ -21,7 +22,8 @@ class _FakeSession:
 
 @pytest.fixture
 def ledger_queue(monkeypatch, tmp_path):
-    queue = queue_mod.reset_cost_ledger_queue_for_tests()
+    backend = MemoryOutboxBackend()
+    queue = queue_mod.reset_cost_ledger_queue_for_tests(backend=backend)
     monkeypatch.setattr(queue_mod.settings, "data_dir", str(tmp_path))
     return queue
 
@@ -43,7 +45,7 @@ def _sample_runs(*, run_id: str = "run-1") -> list[dict]:
     ]
 
 
-async def test_enqueue_runs_then_drain_records(monkeypatch, ledger_queue, tmp_path):
+async def test_enqueue_runs_then_drain_records(monkeypatch, ledger_queue):
     calls: list = []
 
     class Repo:
@@ -66,19 +68,13 @@ async def test_enqueue_runs_then_drain_records(monkeypatch, ledger_queue, tmp_pa
         source="turn",
     )
     assert rid is not None
-    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
-    assert len(files) == 1
-    payload = json.loads(files[0].read_text(encoding="utf-8"))
-    assert payload["source"] == "turn"
-    assert payload["runs"][0]["run_id"] == "run-1"
-
     assert await ledger_queue.drain_once() == 1
     assert calls and calls[0]["message_id"] == "m1"
     assert calls[0]["runs"][0]["run_id"] == "run-1"
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
+    assert await ledger_queue._backend.pending_count() == 0
 
 
-async def test_drain_retries_after_write_failure(monkeypatch, ledger_queue, tmp_path):
+async def test_drain_retries_after_write_failure(monkeypatch, ledger_queue):
     """Sync write failed → enqueue; first drain fails; second drain succeeds."""
     attempts = {"n": 0}
     calls: list = []
@@ -105,12 +101,12 @@ async def test_drain_retries_after_write_failure(monkeypatch, ledger_queue, tmp_
         source="handoff",
     )
     assert await ledger_queue.drain_once() == 0
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
+    assert await ledger_queue._backend.pending_count() == 1
     assert calls == []
 
     assert await ledger_queue.drain_once() == 1
     assert calls[0]["runs"][0]["run_id"] == "run-retry"
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
+    assert await ledger_queue._backend.pending_count() == 0
 
 
 async def test_drains_legacy_proxy_spend_dir(monkeypatch, ledger_queue, tmp_path):
@@ -145,6 +141,39 @@ async def test_drains_legacy_proxy_spend_dir(monkeypatch, ledger_queue, tmp_path
     assert calls[0]["runs"][0]["run_id"] == "legacy-run"
 
 
+async def test_drains_legacy_cost_ledger_disk_dir(monkeypatch, ledger_queue, tmp_path):
+    """Pre-migration cost_ledger_queue/*.json files are drained once."""
+    calls: list = []
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **kw):
+            calls.append(kw)
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
+    qdir.mkdir(parents=True)
+    (qdir / "old.json").write_text(
+        json.dumps(
+            {
+                "id": "disk-1",
+                "user_id": "u1",
+                "conversation_id": "c1",
+                "runs": _sample_runs(run_id="disk-run"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert await ledger_queue.drain_once() == 1
+    assert calls[0]["runs"][0]["run_id"] == "disk-run"
+    assert list(qdir.glob("*.json")) == []
+
+
 async def test_oserror_on_read_leaves_file_for_retry(monkeypatch, ledger_queue, tmp_path):
     """Transient OSError must not quarantine to .corrupt (leave for retry)."""
     qdir = tmp_path / "telemetry" / "cost_ledger_queue"
@@ -177,7 +206,6 @@ async def test_oserror_on_read_leaves_file_for_retry(monkeypatch, ledger_queue, 
     assert path.exists()
     assert list(qdir.glob("*.corrupt")) == []
 
-    # Second attempt succeeds after OSError clears.
     written: list = []
 
     class Repo:
@@ -223,6 +251,120 @@ async def test_invalid_payload_still_quarantines(ledger_queue, tmp_path):
     assert await ledger_queue.drain_once() == 0
     assert not path.exists()
     assert list(qdir.glob("*.corrupt"))
+
+
+async def test_idempotent_redrain_same_run_id(monkeypatch, ledger_queue):
+    """At-least-once: re-processing the same payload reuses run_id (sink dedupes)."""
+    seen: list[str] = []
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **kw):
+            seen.append(kw["runs"][0]["run_id"])
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    await ledger_queue.enqueue_runs_async(
+        user_id="u1",
+        conversation_id="c1",
+        runs=_sample_runs(run_id="run-idem"),
+        source="turn",
+    )
+    assert await ledger_queue.drain_once() == 1
+
+    # Re-insert same logical payload (simulates ack loss / at-least-once retry).
+    await ledger_queue.enqueue_runs_async(
+        user_id="u1",
+        conversation_id="c1",
+        runs=_sample_runs(run_id="run-idem"),
+        source="turn",
+    )
+    assert await ledger_queue.drain_once() == 1
+    assert seen == ["run-idem", "run-idem"]
+
+
+async def test_multi_fake_worker_interleaved_drain(monkeypatch):
+    """Two queue instances sharing one MemoryOutboxBackend never double-drain."""
+    shared = MemoryOutboxBackend()
+    q1 = queue_mod.CostLedgerQueue(backend=shared)
+    q2 = queue_mod.CostLedgerQueue(backend=shared)
+
+    sink_calls: list[str] = []
+    barrier = asyncio.Event()
+    release = asyncio.Event()
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **kw):
+            rid = kw["runs"][0]["run_id"]
+            sink_calls.append(rid)
+            if rid == "run-slow":
+                barrier.set()
+                await release.wait()
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    await shared.insert(
+        {
+            "id": "a",
+            "user_id": "u1",
+            "conversation_id": "c1",
+            "runs": _sample_runs(run_id="run-slow"),
+            "calls": [],
+            "materialize_runs": False,
+            "source": "turn",
+        }
+    )
+    await shared.insert(
+        {
+            "id": "b",
+            "user_id": "u1",
+            "conversation_id": "c1",
+            "runs": _sample_runs(run_id="run-fast"),
+            "calls": [],
+            "materialize_runs": False,
+            "source": "turn",
+        }
+    )
+
+    t1 = asyncio.create_task(q1.drain_once())
+    await barrier.wait()
+    # While q1 holds run-slow in-flight, q2 should only take run-fast.
+    n2 = await q2.drain_once()
+    release.set()
+    n1 = await t1
+
+    assert n1 + n2 == 2
+    assert sorted(sink_calls) == ["run-fast", "run-slow"]
+    assert await shared.pending_count() == 0
+
+
+async def test_enqueue_db_failure_falls_back_to_disk(monkeypatch, ledger_queue, tmp_path):
+    """DB insert failure → disk fallback + observable error log (not silent drop)."""
+
+    async def boom(_payload):
+        raise RuntimeError("outbox unavailable")
+
+    monkeypatch.setattr(ledger_queue._backend, "insert", boom)
+
+    rid = ledger_queue.enqueue_runs(
+        user_id="u1",
+        conversation_id="c1",
+        runs=_sample_runs(run_id="run-fb"),
+        source="turn",
+    )
+    assert rid is not None
+    await ledger_queue._await_pending_enqueues()
+    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
+    assert len(files) == 1
 
 
 async def test_stop_cancels_before_final_drain(monkeypatch, ledger_queue, tmp_path):

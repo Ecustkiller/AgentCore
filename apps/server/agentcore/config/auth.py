@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, computed_field, field_validator
 
 
 class AuthSettings(BaseModel):
@@ -80,9 +80,18 @@ class AuthSettings(BaseModel):
     mfa_issuer_name: str = "AgentCore Admin"
     # When false, admin login is password-only (session isolation still applies).
     admin_mfa_required: bool = True
-    # ``memory`` = process-local counters (dev / single worker). ``redis`` = shared
-    # limiters + CSRF store for multi-worker production.
-    rate_limit_backend: str = "memory"
+    # ``memory`` = process-local counters (dev / single worker only).
+    # ``redis`` = shared limiters + CSRF store. With shared cost_ledger_outbox,
+    # redis unlocks multi-worker API; memory + multi-worker is refused at boot
+    # in non-DEBUG.
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
+
+    @field_validator("rate_limit_backend", mode="before")
+    @classmethod
+    def _normalize_rate_limit_backend(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     @computed_field  # type: ignore[prop-decorator]
     @property

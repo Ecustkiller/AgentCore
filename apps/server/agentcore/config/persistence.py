@@ -41,8 +41,9 @@ class PersistenceSettings(BaseModel):
     # Read-side backstop to the write-side ``memory_section_bullet_cap`` (项目审计-成本性能
     # 专项 COST-001): each always-injected memory file (偏好.md / 画像.md / 项目画像) is
     # DETERMINISTICALLY capped to this many chars before it rides the turn's <rules>. Memory
-    # sits in the stable prefix (SectionOrder.MEMORY) so the cap MUST be deterministic — same
-    # body → same truncation → prefix stays byte-stable for DeepSeek's cache. Generous: only
+    # sits at SectionOrder.MEMORY in the assembler; the cap MUST be deterministic — same
+    # body → same truncation → assembly-layer prefix stays byte-stable (cost optimization for
+    # provider exact-prefix cache hits; see runtime/context). Generous: only
     # fires on abnormal bloat (a normal 偏好/画像 is far smaller). 0/negative = no cap.
     memory_injected_file_char_cap: int = 4_000
 
@@ -86,7 +87,8 @@ class PersistenceSettings(BaseModel):
     standing_task_webhook_idempotency_ttl_seconds: int = 3600
 
     # Assembled system-prompt budget (项目审计-成本性能专项 COST-004). Observe-only today:
-    # ``cost.prompt_assembled`` logs per-section chars + whether the turn's CEO system prompt
-    # exceeds this soft cap, to gather data (无真实数据期 → 先观测, 后开「仅裁易变尾」软闸).
-    # ~120k chars ≈ 数万 token, far below DeepSeek's 1M window but enough to flag abnormal bloat.
+    # ``cost.prompt_assembled`` logs per-section chars, ``assembly_hash``, and whether the
+    # turn's CEO system prompt exceeds this soft cap, to gather data (无真实数据期 → 先观测,
+    # 后开「仅裁易变尾」软闸). ~120k chars ≈ 数万 token, far below DeepSeek's 1M window but
+    # enough to flag abnormal bloat.
     prompt_budget_char_soft_cap: int = 120_000

@@ -7,15 +7,14 @@ hard 429 for every caller (成本配额与计费.md §一). Happy-path fakes pro
 fail-open is scoped to failures and does not blanket-allow.
 """
 
-import logging
-
+from agentcore.middleware import redis_rate_limit as rrl
 from agentcore.middleware.redis_rate_limit import (
     RedisFixedWindowRateLimiter,
     RedisSlidingWindowRateLimiter,
 )
+from tests.conftest import LogSpy
 
 _FAIL_OPEN_LOG = "rate_limit.redis_fail_open"
-_LOGGER = "agentcore.middleware.redis_rate_limit"
 
 
 # --- fakes ---------------------------------------------------------------------------
@@ -152,15 +151,22 @@ class _WorkingSlidingClient:
 # --- fixed window: fail-open ---------------------------------------------------------
 
 
-def test_fixed_window_fails_open_on_redis_error(caplog):
+def test_fixed_window_fails_open_on_redis_error(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(rrl, "logger", spy)
+    monkeypatch.setattr(rrl, "_fail_open_count", 0)
     limiter = RedisFixedWindowRateLimiter(
         client=_FailingClient(), prefix="rl:auth", max_requests=1, window_seconds=60
     )
-    with caplog.at_level(logging.WARNING, logger=_LOGGER):
-        # Even repeated hits past the cap are allowed while the backend is down.
-        assert limiter.allow("ip") is True
-        assert limiter.allow("ip") is True
-    assert _FAIL_OPEN_LOG in caplog.text
+    # Even repeated hits past the cap are allowed while the backend is down.
+    assert limiter.allow("ip") is True
+    assert limiter.allow("ip") is True
+    matches = [kw for name, kw in spy.events if name == _FAIL_OPEN_LOG]
+    assert len(matches) == 2
+    assert matches[0]["prefix"] == "rl:auth"
+    assert "unavailable" in matches[0]["error"]
+    assert matches[0]["count"] == 1
+    assert matches[1]["count"] == 2
 
 
 def test_fixed_window_enforces_when_redis_healthy():
@@ -175,26 +181,32 @@ def test_fixed_window_enforces_when_redis_healthy():
 # --- sliding window: fail-open -------------------------------------------------------
 
 
-def test_sliding_window_fails_open_on_redis_error(caplog):
+def test_sliding_window_fails_open_on_redis_error(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(rrl, "logger", spy)
     limiter = RedisSlidingWindowRateLimiter(
         client=_FailingClient(), prefix="rl:msg", max_requests=1, window_seconds=60
     )
-    with caplog.at_level(logging.WARNING, logger=_LOGGER):
-        decision = limiter.check("u")
+    decision = limiter.check("u")
     assert decision.allowed is True
     assert decision.retry_after == 0.0
-    assert _FAIL_OPEN_LOG in caplog.text
+    kw = spy.get(_FAIL_OPEN_LOG)
+    assert kw["prefix"] == "rl:msg"
+    assert "unavailable" in kw["error"]
 
 
-def test_sliding_window_fails_open_when_backend_dies_mid_check(caplog):
+def test_sliding_window_fails_open_when_backend_dies_mid_check(monkeypatch):
     # The count read says "over limit", but the retry-after lookup fails: still allow.
+    spy = LogSpy()
+    monkeypatch.setattr(rrl, "logger", spy)
     limiter = RedisSlidingWindowRateLimiter(
         client=_OverLimitThenBoomClient(), prefix="rl:msg", max_requests=1, window_seconds=60
     )
-    with caplog.at_level(logging.WARNING, logger=_LOGGER):
-        decision = limiter.check("u")
+    decision = limiter.check("u")
     assert decision.allowed is True
-    assert _FAIL_OPEN_LOG in caplog.text
+    kw = spy.get(_FAIL_OPEN_LOG)
+    assert kw["prefix"] == "rl:msg"
+    assert "mid-check" in kw["error"]
 
 
 def test_sliding_window_enforces_when_redis_healthy():

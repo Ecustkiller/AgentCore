@@ -130,6 +130,23 @@ function multiDelegateExec(): Execution {
   ]);
 }
 
+/** Multi-delegate with a pure continuation stamped on batch2 (must not join lanes). */
+function multiDelegateWithContinuationExec(): Execution {
+  return mkExec([
+    captain,
+    { id: "a", delegateBatch: 1 },
+    { id: "b", dependsOn: ["a"], delegateBatch: 1 },
+    {
+      id: "a_v2",
+      continuesRunId: "a",
+      continuationIndex: 1,
+      delegateBatch: 2,
+    },
+    { id: "c", delegateBatch: 2 },
+    { id: "d", dependsOn: ["c"], delegateBatch: 2 },
+  ]);
+}
+
 /** Same-person continuation chain (hotfix v2/v3) staying top-level (non-debate). */
 function continuationChainExec(): Execution {
   return mkExec([
@@ -274,6 +291,23 @@ describe("buildGraphScene · golden", () => {
     expect(snapshotScene(scene)).toMatchSnapshot();
   });
 
+  it("cold + continuation dual-batch → lanes omit续派, no extra 委派 column", () => {
+    const scene = buildGraphScene(multiDelegateWithContinuationExec(), {
+      inputId: INPUT_ID,
+    });
+    expect(scene.bands.lanes.map((b) => b.label)).toEqual([
+      "第 1 次委派（2 节点）",
+      "第 2 次委派（2 节点）",
+    ]);
+    expect(scene.bands.lanes.map((b) => b.memberRunIds)).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    expect(scene.bands.lanes.flatMap((b) => b.memberRunIds)).not.toContain(
+      "a_v2",
+    );
+  });
+
   it("continuation chain → top-level continuation edges, no sub-team box", () => {
     const scene = buildGraphScene(continuationChainExec(), {
       inputId: INPUT_ID,
@@ -286,6 +320,19 @@ describe("buildGraphScene · golden", () => {
         .map((e) => `${e.source}->${e.target}`)
         .sort(),
     ).toEqual(["w1->w1_v2", "w1_v2->w1_v3"]);
+    // bookend：仅冷开局根接 input；仅链尖汇 CEO（省略中间续的实线 dep）。
+    expect(
+      scene.edges
+        .filter((e) => e.kind === "dep" && e.source === INPUT_ID)
+        .map((e) => e.target)
+        .sort(),
+    ).toEqual(["w1"]);
+    expect(
+      scene.edges
+        .filter((e) => e.kind === "dep" && e.target === "captain")
+        .map((e) => e.source)
+        .sort(),
+    ).toEqual(["w1_v3"]);
     expect(snapshotScene(scene)).toMatchSnapshot();
   });
 

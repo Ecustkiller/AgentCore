@@ -27,6 +27,7 @@ type TurnLifecycleActions = Pick<
   | "setGenerating"
   | "setAbort"
   | "setTurnPhase"
+  | "setExecutionVia"
   | "stopGeneration"
   | "setError"
   | "clearError"
@@ -68,6 +69,9 @@ export function createTurnLifecycleActions(
 
     setTurnPhase: (phase, conversationId) =>
       patchConversation(conversationId, () => ({ turnPhase: phase })),
+
+    setExecutionVia: (via, conversationId) =>
+      patchConversation(conversationId, () => ({ executionVia: via })),
 
     stopGeneration: () => {
       const conversationId = get().currentConversationId;

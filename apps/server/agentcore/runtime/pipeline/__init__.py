@@ -8,11 +8,11 @@ from agentcore.runtime.pipeline.finalize import _build_runs_payload, _journal_en
 from agentcore.runtime.pipeline.resume import resume_chat_pipeline
 from agentcore.runtime.pipeline.run import run_chat_pipeline
 from agentcore.runtime.resolve.prepare import (
-    _assemble_ceo_toolset,
     _build_agent_mention_context,
     _build_attachment_context,
     merge_attachment_and_mention_context,
 )
+from agentcore.tools.ceo_toolset import _assemble_ceo_toolset
 
 __all__ = [
     "build_provider",

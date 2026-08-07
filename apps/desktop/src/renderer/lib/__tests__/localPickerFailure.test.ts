@@ -6,6 +6,7 @@ import {
   pickLocalFolderRoot,
 } from "@/lib/bindLocalFolder";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { pickAndRegisterLocalProject } from "@/lib/registerLocalProject";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/capabilities", () => ({
@@ -163,6 +164,70 @@ describe("pickAndOpenLocalProject no_package_json", () => {
       notifyOnFailure: false,
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("pickAndRegisterLocalProject stays on conversation", () => {
+  beforeEach(async () => {
+    window.fsApi = {
+      addRoot: vi.fn().mockResolvedValue({
+        ok: true,
+        root: { id: "r1", name: "my-repo" },
+      }),
+      listDir: vi.fn(),
+    } as unknown as typeof window.fsApi;
+    const { findLocalFolderByBinding } = await import("@/services/folders");
+    const { startNewConversation } = await import("@/lib/newConversation");
+    vi.mocked(findLocalFolderByBinding).mockReturnValue(null);
+    vi.mocked(startNewConversation).mockClear();
+  });
+
+  it("creates folder without package.json and without startNewConversation", async () => {
+    const { createFolder } = await import("@/services/folders");
+    const { startNewConversation } = await import("@/lib/newConversation");
+    vi.mocked(createFolder).mockResolvedValue({
+      folder: {
+        id: "f2",
+        name: "my-repo",
+        mode: "local",
+        localRootId: "r1",
+        localSubpath: null,
+      },
+      created: true,
+    });
+
+    const result = await pickAndRegisterLocalProject({
+      notifyOnFailure: false,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.folder.id).toBe("f2");
+      expect(result.created).toBe(true);
+    }
+    expect(startNewConversation).not.toHaveBeenCalled();
+    expect(window.fsApi.listDir).not.toHaveBeenCalled();
+  });
+
+  it("reuses existing folder by binding without new conversation", async () => {
+    const { findLocalFolderByBinding } = await import("@/services/folders");
+    const { startNewConversation } = await import("@/lib/newConversation");
+    vi.mocked(findLocalFolderByBinding).mockReturnValue({
+      id: "existing",
+      name: "my-repo",
+      mode: "local",
+      localRootId: "r1",
+      localSubpath: null,
+    });
+
+    const result = await pickAndRegisterLocalProject({
+      notifyOnFailure: false,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.folder.id).toBe("existing");
+      expect(result.created).toBe(false);
+    }
+    expect(startNewConversation).not.toHaveBeenCalled();
   });
 });
 

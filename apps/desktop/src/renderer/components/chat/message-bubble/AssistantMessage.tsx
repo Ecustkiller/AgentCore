@@ -2,6 +2,7 @@ import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { SourceCards } from "@/components/chat/SourceCards";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
+import { isAskSilentResolvedDecision } from "@/components/chat/decision";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button, IconButton } from "@/components/ui";
 import {
@@ -11,9 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
-import { surfaceMutedPanel } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
+import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import { copyText } from "@/lib/clipboard";
 import {
   connectivityEscalationSuffix,
@@ -126,7 +127,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       })
     : null;
   // Empty interrupted = layer-1 composer recoverability only (no bubble retry).
-  // Empty cancelled = neutral「已停止」(no main regenerate / 排查包 CTA).
+  // User-stop: no chat-timeline「已停止」face (P1); team StatusStrip still labels cancelled.
   const isUserStopped = displayError?.code === "TURN_CANCELLED";
   const showRetry =
     !!displayError &&
@@ -191,9 +192,23 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const projectionId = assistantProjectionId(message);
   const { checkpoints, nonBlockingAsks, planReviews, teamPreviews } =
     useMessageInteractionCards(conversationId, projectionId);
+  // 仅「仍会画存根」的 resolved 才藏正文；取消静默（stop / research_first）否则会空泡。
   const hideContentForCheckpoint = checkpoints.some(
-    (c) => c.status === "resolved",
+    (c) =>
+      c.status === "resolved" && !isAskSilentResolvedDecision(c.decision),
   );
+  // absorb/content_reset 后 content 空、问句只在 checkpoint.question：静默 dismiss 时
+  // display-time 回落为普通 Markdown（不写回 store）。
+  const rawContent = message.content ?? "";
+  const displayContent =
+    rawContent.trim() || hideContentForCheckpoint
+      ? rawContent
+      : (checkpoints.find(
+          (c) =>
+            c.status === "resolved" &&
+            isAskSilentResolvedDecision(c.decision) &&
+            c.question.trim(),
+        )?.question ?? rawContent);
   const money =
     pickCostMoney(message.cost) ??
     (cachedTurn
@@ -255,6 +270,12 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (userId) void runRegenerate(userId);
   };
 
+  // Empty user-stop with nothing else to show: MessageBubble also gates this;
+  // keep the early return so direct renders stay clean.
+  if (isEmptyCancelledAssistant(message)) {
+    return null;
+  }
+
   // 回合正文（时间线或答案）：对话页恒为传统聊天平铺（单 Agent 回合不再退化成 CEO 节点卡——
   // 那条「图主界面化」第一刀已撤，图相关体验只在画布；多 Agent 回合协作图内嵌在
   // `team` 标记槽——CEO 导语 content 步之下（协作图时间线落点））。
@@ -270,7 +291,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       composingTool={
         message.executionId === null ? (message.composingTool ?? null) : null
       }
-      fallbackContent={hideContentForCheckpoint ? "" : message.content}
+      fallbackContent={hideContentForCheckpoint ? "" : displayContent}
       messageId={projectionId}
       journal={message.runs}
       conversationId={conversationId}
@@ -295,9 +316,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           it grow; once settled, cap a truly long answer to a fade + 展开全文 so it doesn't
           dominate the viewport (短/中答案原样全展). */}
       {message.isStreaming && !hideContentForCheckpoint ? (
-        (message.content ?? "").trim() ? (
+        displayContent.trim() ? (
           <Markdown
-            content={message.content}
+            content={displayContent}
             citations={citations}
             citationToDisplay={citationDisplay.toDisplay}
             knownLedgerIds={knownLedgerIds}
@@ -305,15 +326,15 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             isStreaming={message.isStreaming}
           />
         ) : null
-      ) : hideContentForCheckpoint || !(message.content ?? "").trim() ? null : (
+      ) : hideContentForCheckpoint || !displayContent.trim() ? null : (
         <CollapsibleSpeech
-          contentKey={message.content}
+          contentKey={displayContent}
           fadeToClass="from-background"
           collapsedMaxHClass="max-h-[40rem]"
           sceneKey={`answer:${message.id}`}
         >
           <Markdown
-            content={message.content}
+            content={displayContent}
             citations={citations}
             citationToDisplay={citationDisplay.toDisplay}
             knownLedgerIds={knownLedgerIds}
@@ -325,7 +346,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {message.isStreaming &&
         (message.composingTool && message.executionId === null ? (
           <ComposingToolLine tool={message.composingTool} />
-        ) : message.content.length === 0 && !hasReasoning ? (
+        ) : displayContent.length === 0 && !hasReasoning ? (
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <ThinkingDots />
             Thinking…
@@ -367,56 +388,47 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           journal={message.runs}
         />
       )}
-      {displayError && isUserStopped ? (
-        <div
-          className={`mt-2 px-3 py-2.5 text-sm text-muted-foreground ${surfaceMutedPanel}`}
-          data-testid="assistant-stopped-notice"
-        >
-          {formatAssistantErrorMessage(displayError)}
+      {displayError && !isUserStopped && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+            {formatAssistantErrorMessage(displayError)}
+            {connectivityEscalationSuffix(displayError.code, message.id, {
+              message: displayError.message,
+              upstreamStatus: message.error?.context?.upstream_status,
+            })}
+          </p>
+          {supportDiagnosticText && (
+            <Button
+              variant="ghost"
+              className="shrink-0 text-destructive hover:bg-destructive/15"
+              icon={<Copy size={13} />}
+              onClick={copySupportDiagnostics}
+            >
+              复制排查包
+            </Button>
+          )}
+          {errorAction && (
+            <Button
+              variant="destructive"
+              className="shrink-0"
+              icon={<KeyRound size={13} />}
+              onClick={() => navigate(errorAction.href)}
+            >
+              {errorAction.label}
+            </Button>
+          )}
+          {showRetry && (
+            <Button
+              variant="danger"
+              className="shrink-0 border border-destructive/40"
+              icon={<RefreshCw size={13} />}
+              onClick={handleRegenerate}
+            >
+              重新生成
+            </Button>
+          )}
         </div>
-      ) : (
-        displayError && (
-          <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-              {formatAssistantErrorMessage(displayError)}
-              {connectivityEscalationSuffix(displayError.code, message.id, {
-                message: displayError.message,
-                upstreamStatus: message.error?.context?.upstream_status,
-              })}
-            </p>
-            {supportDiagnosticText && (
-              <Button
-                variant="ghost"
-                className="shrink-0 text-destructive hover:bg-destructive/15"
-                icon={<Copy size={13} />}
-                onClick={copySupportDiagnostics}
-              >
-                复制排查包
-              </Button>
-            )}
-            {errorAction && (
-              <Button
-                variant="destructive"
-                className="shrink-0"
-                icon={<KeyRound size={13} />}
-                onClick={() => navigate(errorAction.href)}
-              >
-                {errorAction.label}
-              </Button>
-            )}
-            {showRetry && (
-              <Button
-                variant="danger"
-                className="shrink-0 border border-destructive/40"
-                icon={<RefreshCw size={13} />}
-                onClick={handleRegenerate}
-              >
-                重新生成
-              </Button>
-            )}
-          </div>
-        )
       )}
       {message.executionId === null ? (
         <SingleAgentDeliveryAndFiles
@@ -483,15 +495,17 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {!message.isStreaming &&
         displayError?.code !== "TURN_INTERRUPTED" &&
         (message.content.length > 0 ||
-          !!displayError ||
-          // runs.error may still ride the export duck type before / beside message.error lift.
-          !!visibleMessageText({
-            content: "",
-            error: message.error,
-            runs: message.runs as {
-              error?: { message?: string } | null;
-            } | null,
-          })) && (
+          // User-stop has no chat face (P1); don't open footer on cancelled alone.
+          (!isUserStopped &&
+            (!!displayError ||
+              // runs.error may still ride the export duck type before / beside message.error lift.
+              !!visibleMessageText({
+                content: "",
+                error: message.error,
+                runs: message.runs as {
+                  error?: { message?: string } | null;
+                } | null,
+              })))) && (
           <AssistantMessageFooter
             message={message}
             captainContext={captainContext}

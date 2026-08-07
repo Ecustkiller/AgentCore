@@ -73,7 +73,10 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
     // inference / browserBridge) — exact-key sample excludes them.
     assertExactKeys(withInference, [
       ...sidecarIpc.resumeRpcParams.keys.filter(
-        (k) => k !== "excluded_run_ids" && k !== "write_capability_overrides",
+        (k) =>
+          k !== "excluded_run_ids" &&
+          k !== "write_capability_overrides" &&
+          k !== "userId",
       ),
     ]);
     expect(withInference.browserBridge).toEqual({
@@ -88,7 +91,8 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
           k !== "inference" &&
           k !== "browserBridge" &&
           k !== "excluded_run_ids" &&
-          k !== "write_capability_overrides",
+          k !== "write_capability_overrides" &&
+          k !== "userId",
       ),
     ]);
     expect(withoutInference.selected).toEqual(["a"]);
@@ -132,6 +136,30 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
     for (const key of Object.keys(params)) {
       expect(sidecarIpc.resumeRpcParams.keys).toContain(key);
     }
+  });
+
+  it("buildSidecarResumeRpcParams 可选透传 userId", () => {
+    const withUser = buildSidecarResumeRpcParams({
+      messageId: "m-asst",
+      conversationId: "c1",
+      traceId: "abc123",
+      decision: "continue",
+      note: "",
+      selected: [],
+      userId: "acct-uuid-1",
+    });
+    expect(withUser.userId).toBe("acct-uuid-1");
+    expect(sidecarIpc.resumeRpcParams.keys).toContain("userId");
+
+    const withoutUser = buildSidecarResumeRpcParams({
+      messageId: "m-asst",
+      conversationId: "c1",
+      traceId: "abc123",
+      decision: "continue",
+      note: "",
+      selected: [],
+    });
+    expect("userId" in withoutUser).toBe(false);
   });
 
   it("resume IPC request required fields are a superset of renderer routing keys", () => {

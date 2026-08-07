@@ -30,6 +30,11 @@ import { resolveRgBinary } from "./rgBinary";
 
 const FILE_ARG_CHUNK = 200;
 
+/** 单次 rg 子进程墙钟（目录列举/批量搜）；超时 SIGKILL，避免拖到通道 ~60s。 */
+export const RG_CHILD_TIMEOUT_MS = 45_000;
+/** 单文件根（``rg PATTERN FILE``）应毫秒级完成；更短墙钟便于早回传业务错。 */
+export const RG_SINGLE_FILE_TIMEOUT_MS = 10_000;
+
 /** 与服务端 `normalize_glob` 对齐：只保留文件名段。 */
 export function normalizeGlob(globPat: string): string | null {
   let p = globPat.trim().replace(/\\/g, "/");
@@ -87,6 +92,7 @@ function runRg(
   rg: string,
   args: string[],
   cwd: string,
+  timeoutMs: number = RG_CHILD_TIMEOUT_MS,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(rg, args, {
@@ -96,6 +102,25 @@ function runRg(
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // process already gone
+            }
+          }, timeoutMs)
+        : undefined;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) clearTimeout(timer);
+      fn();
+    };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (c: string) => {
@@ -104,9 +129,21 @@ function runRg(
     child.stderr?.on("data", (c: string) => {
       stderr += c;
     });
-    child.on("error", reject);
+    child.on("error", (err) => {
+      finish(() => reject(err));
+    });
     child.on("close", (code) => {
-      resolve({ code: code ?? 2, stdout, stderr });
+      finish(() => {
+        if (timedOut) {
+          reject(
+            new Error(
+              `ripgrep 超时（>${timeoutMs}ms）——已终止子进程，请收窄 path/glob 或简化 pattern`,
+            ),
+          );
+          return;
+        }
+        resolve({ code: code ?? 2, stdout, stderr });
+      });
     });
   });
 }
@@ -183,21 +220,37 @@ function parseCountLine(line: string): { path: string; count: number } | null {
   return { path: m[1], count: Number(m[2]) };
 }
 
+/** Unique Temp dir + empty file for ``rg --regexp`` parse probe (exported for tests). */
+export async function allocateRgRegexpProbe(): Promise<{
+  probeDir: string;
+  probePath: string;
+  cleanup: () => Promise<void>;
+}> {
+  // mkdtemp (not pid+Date.now): concurrent opGrep in one Electron main must not
+  // share a probe path — sibling unlink → rg os error 2 (see dogfood 070ce1).
+  const probeDir = await fs.mkdtemp(join(tmpdir(), "agentcore-rg-probe-"));
+  const probePath = join(probeDir, "probe.txt");
+  await fs.writeFile(probePath, "", "utf8");
+  return {
+    probeDir,
+    probePath,
+    cleanup: async () => {
+      await fs.rm(probeDir, { recursive: true, force: true }).catch(() => undefined);
+    },
+  };
+}
+
 async function validateRegexp(rg: string, pattern: string): Promise<void> {
-  const probe = join(
-    tmpdir(),
-    `agentcore-rg-probe-${process.pid}-${Date.now()}.txt`,
-  );
-  await fs.writeFile(probe, "", "utf8");
+  const { probeDir, probePath, cleanup } = await allocateRgRegexpProbe();
   try {
     const ran = await runRg(
       rg,
-      ["--regexp", pattern, "--", probe],
-      dirname(probe),
+      ["--regexp", pattern, "--", probePath],
+      probeDir,
     );
     handleRgStatus(ran.code, ran.stderr);
   } finally {
-    await fs.unlink(probe).catch(() => undefined);
+    await cleanup();
   }
 }
 
@@ -209,6 +262,7 @@ async function searchPaths(
     cwd: string;
     caseInsensitive: boolean;
     filesOnly: boolean;
+    timeoutMs?: number;
   },
 ): Promise<{ stdout: string; warnings: string[] }> {
   if (opts.paths.length === 0) return { stdout: "", warnings: [] };
@@ -225,11 +279,17 @@ async function searchPaths(
     "--regexp",
     opts.pattern,
   ];
+  const childTimeout = opts.timeoutMs ?? RG_CHILD_TIMEOUT_MS;
   const chunks: string[] = [];
   const warnings: string[] = [];
   for (let i = 0; i < opts.paths.length; i += FILE_ARG_CHUNK) {
     const chunk = opts.paths.slice(i, i + FILE_ARG_CHUNK);
-    const ran = await runRg(rg, [...base, "--", ...chunk], opts.cwd);
+    const ran = await runRg(
+      rg,
+      [...base, "--", ...chunk],
+      opts.cwd,
+      childTimeout,
+    );
     warnings.push(...handleRgStatus(ran.code, ran.stderr));
     if (ran.stdout) chunks.push(ran.stdout);
   }
@@ -279,19 +339,21 @@ export async function opGrep(
   }
 
   const nameGlob = baseIsFile ? null : normalizeGlob(glob);
+  // 单文件：cwd=父目录，path 传绝对路径（勿仅靠 basename——并发/怪异 cwd 下更稳）。
   const searchCwd = baseIsFile ? dirname(baseReal.path) : baseReal.path;
   const toRel = (absFile: string) => toPosix(relative(root.absPath, absFile));
 
   try {
-    await validateRegexp(rg, pattern);
-
     let candidateFiles: string[] = [];
     let scanTruncated = false;
     const softWarnings: string[] = [];
 
     if (baseIsFile) {
-      candidateFiles = [baseReal.path.split(/[/\\]/).pop() ?? baseReal.path];
+      // 单文件根：跳过 ``--files`` 列举与独立 regexp probe（搜该文件时 rg 会验正则）。
+      candidateFiles = [baseReal.path];
     } else {
+      // 空候选时仍需 probe，否则坏正则会与「无匹配」混淆。
+      await validateRegexp(rg, pattern);
       const listArgs = [
         "--files",
         ...commonRgFlags({
@@ -301,7 +363,7 @@ export async function opGrep(
         }),
         ".",
       ];
-      const listed = await runRg(rg, listArgs, searchCwd);
+      const listed = await runRg(rg, listArgs, searchCwd, RG_CHILD_TIMEOUT_MS);
       softWarnings.push(...handleRgStatus(listed.code, listed.stderr));
       candidateFiles = listed.stdout
         .split(/\r?\n/)
@@ -329,6 +391,7 @@ export async function opGrep(
       cwd: searchCwd,
       caseInsensitive,
       filesOnly,
+      timeoutMs: baseIsFile ? RG_SINGLE_FILE_TIMEOUT_MS : RG_CHILD_TIMEOUT_MS,
     });
     softWarnings.push(...searched.warnings);
     const lines = searched.stdout.split(/\r?\n/).filter(Boolean);
@@ -338,6 +401,7 @@ export async function opGrep(
         .map(parseCountLine)
         .filter((x): x is NonNullable<typeof x> => x !== null)
         .map((x) => {
+          // 单文件：rg 可能回绝对路径或 basename；命中路径恒为该文件。
           const abs = baseIsFile ? baseReal.path : join(searchCwd, x.path);
           return [toRel(abs), x.count] as [string, number];
         })

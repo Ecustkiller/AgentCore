@@ -173,6 +173,90 @@ async def test_ensure_code_index_is_incremental(sample_py: Path):
 
 
 @pytest.mark.asyncio
+async def test_ensure_index_skips_read_when_fingerprint_unchanged(
+    sample_py: Path, tmp_path: Path, monkeypatch
+):
+    """Fingerprint match → no backend.read; fingerprint change → read + reindex."""
+    from agentcore.config import settings
+    from agentcore.workspace.channel import WorkspaceOp
+    from agentcore.workspace.local import LocalWorkspace
+    from agentcore.workspace.protocol import IndexFileEntry
+
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
+
+    body = (sample_py / "pkg" / "sample.py").read_text(encoding="utf-8")
+    files = {"pkg/sample.py": body}
+    fingerprint = {"pkg/sample.py": (1_700_000_000_000, len(body.encode("utf-8")))}
+    reads: list[str] = []
+
+    class _FakeChannel:
+        root_id = "root-fp-test"
+
+        async def request(self, op, args, *, timeout=None, root_id=None):
+            _ = (timeout, root_id)
+            if op == WorkspaceOp.INDEX_FILES:
+                entries = [
+                    IndexFileEntry(
+                        path=p, mtime_ms=fp[0], size_bytes=fp[1]
+                    )
+                    for p, fp in fingerprint.items()
+                ]
+                # Simulate desktop wire shape; LocalWorkspace parses the dict.
+                return {
+                    "entries": [
+                        {
+                            "path": e.path,
+                            "mtime_ms": e.mtime_ms,
+                            "size_bytes": e.size_bytes,
+                        }
+                        for e in entries
+                    ],
+                    "truncated": False,
+                }
+            if op == WorkspaceOp.READ:
+                path = str(args["path"]).replace("\\", "/").lstrip("./")
+                reads.append(path)
+                if path not in files:
+                    from agentcore.workspace.protocol import PathNotFound
+
+                    raise PathNotFound(path)
+                return files[path]
+            raise AssertionError(f"unexpected op {op}")
+
+    ws = LocalWorkspace(_FakeChannel(), root_label="proj")
+    assert await ws.ensure_code_index() is True
+    assert reads == ["pkg/sample.py"]
+
+    reads.clear()
+    assert await ws.ensure_code_index() is False
+    assert reads == [], "unchanged fingerprint must not channel-read"
+
+    # Touch fingerprint (mtime) without changing content → must read, content hash
+    # matches so upsert is skipped (ensure returns False) but fingerprint is stored.
+    fingerprint["pkg/sample.py"] = (
+        fingerprint["pkg/sample.py"][0] + 1,
+        fingerprint["pkg/sample.py"][1],
+    )
+    reads.clear()
+    assert await ws.ensure_code_index() is False
+    assert reads == ["pkg/sample.py"]
+
+    reads.clear()
+    assert await ws.ensure_code_index() is False
+    assert reads == []
+
+    # Content + fingerprint change → reindex.
+    files["pkg/sample.py"] = body + "\n# changed\n"
+    fingerprint["pkg/sample.py"] = (
+        fingerprint["pkg/sample.py"][0] + 1,
+        len(files["pkg/sample.py"].encode("utf-8")),
+    )
+    reads.clear()
+    assert await ws.ensure_code_index() is True
+    assert reads == ["pkg/sample.py"]
+
+
+@pytest.mark.asyncio
 async def test_local_workspace_code_search_via_channel(sample_py: Path, tmp_path: Path, monkeypatch):
     """Cloud→desktop LocalWorkspace indexes via channel reads (not a disk stub)."""
     from agentcore.config import settings
@@ -256,6 +340,53 @@ def test_tokenize_query_keeps_identifiers_and_splits_cjk_latin():
     assert any("审批" in t or t.startswith("审") for t in mixed)
     # Adjacent CJK+Latin must not glue into one token.
     assert "审批门控ApprovalGate" not in mixed
+
+
+@pytest.mark.asyncio
+async def test_file_hashes_legacy_db_missing_fingerprint_columns(tmp_path: Path):
+    """Old file_hashes without mtime/size columns migrate; fingerprint reads as None."""
+    import sqlite3
+
+    from agentcore.workspace.indexing.bm25 import BM25Index
+    from agentcore.workspace.indexing.chunker import RawChunk
+
+    db = tmp_path / "legacy.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE file_hashes (
+                path TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL,
+                indexed_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO file_hashes(path, content_hash, indexed_at) VALUES (?, ?, ?)",
+            ("old.py", "abc", 1.0),
+        )
+        conn.commit()
+
+    index = BM25Index(str(db))
+    assert await index.get_file_fingerprint("old.py") is None
+    await index.upsert_file(
+        "old.py",
+        "x = 1\n",
+        [
+            RawChunk(
+                path="old.py",
+                symbol=None,
+                symbol_type=None,
+                start_line=1,
+                end_line=1,
+                language="python",
+                content="x = 1\n",
+            )
+        ],
+        mtime_ms=42,
+        size_bytes=6,
+    )
+    assert await index.get_file_fingerprint("old.py") == (42, 6)
 
 
 @pytest.mark.asyncio

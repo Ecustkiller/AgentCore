@@ -112,7 +112,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               title: "右坞浏览器",
-              desc: "统一浏览器：桌面可 Local，云端 Sandbox；AI 用浏览器时右侧会出现该 tab，可看直播、接管登录。",
+              desc: "统一浏览器：桌面可 Local，云端 Sandbox。需要时用「+」或聊天里的入口打开；AI 浏览过程在对话里可见，点开可看直播、接管登录。",
             },
             {
               title: "文件工作台",
@@ -432,7 +432,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "多半卡在某个队员或外部工具。点停止（界面呈「已停止」）结束本回合，或发消息追问状态；长任务可中途打断，下次从断点续跑。",
+                  text: "多半卡在某个队员或外部工具。点停止结束本回合（协作图呈「已停止」），或发消息追问状态；长任务可中途打断，下次从断点续跑。",
                 },
               ],
             },
@@ -632,7 +632,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "你主动喊停（停止生成）后的状态展示；动作/终态叫「停止 / 已停止」。冷卡次要键「取消」（拒答/拒开工）与此正交，勿混用。",
+                  text: "你主动喊停（停止生成）后的终态；协作图状态条 / 节点呈「停止 / 已停止」。聊天时间线不另占一行。冷卡次要键「取消」（拒答/拒开工）与此正交，勿混用。",
                 },
               ],
             },

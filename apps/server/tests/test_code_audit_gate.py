@@ -70,6 +70,62 @@ def test_validate_accepts_clean_low_finding():
     )
 
 
+def test_validate_accepts_evidence_as_string_list():
+    """Models often emit evidence as string[]; gate normalizes (dogfood d3b6f1b8)."""
+    assert (
+        validate_code_audit_payload(
+            {
+                "findings": [
+                    _ok_finding(
+                        evidence=[
+                            "apps/desktop/src/main/sidecar-event-buffer.ts:132-143",
+                            "apps/desktop/src/main/sidecar/manager.ts:552-569",
+                        ]
+                    ),
+                    _ok_finding(
+                        id="R2",
+                        summary="流式投影",
+                        evidence=[
+                            "apps/desktop/src/renderer/services/sse/dispatch.ts:47-66",
+                        ],
+                    ),
+                ]
+            }
+        )
+        == []
+    )
+
+
+def test_validate_accepts_evidence_path_line_object():
+    assert (
+        validate_code_audit_payload(
+            {"findings": [_ok_finding(evidence={"path": "foo.py", "line": 10})]}
+        )
+        == []
+    )
+
+
+def test_validate_rejects_empty_evidence_shapes():
+    fails = validate_code_audit_payload(
+        {
+            "findings": [
+                _ok_finding(evidence=[]),
+                _ok_finding(evidence=""),
+                _ok_finding(evidence={"path": ""}),
+            ]
+        }
+    )
+    assert sum(1 for f in fails if "evidence 为空或无法归一" in f) >= 3
+
+
+def test_normalize_audit_evidence_joins_list():
+    from agentcore.runtime.runs.code_audit_gate import normalize_audit_evidence
+
+    assert normalize_audit_evidence(["a.ts:1", "b.ts:2"]) == "a.ts:1；b.ts:2"
+    assert normalize_audit_evidence([]) == ""
+    assert normalize_audit_evidence(None) == ""
+
+
 def test_validate_accepts_english_severity_and_verdict():
     assert (
         validate_code_audit_payload(

@@ -12,8 +12,10 @@ from agentcore.workspace.limits import (
     WORKSPACE_READ_MAX_BYTES,
     channel_dead_error_message,
     channel_dead_retire_metadata,
+    is_channel_dead_detail,
     is_file_too_large_detail,
     is_liveness_timeout_detail,
+    op_liveness_timeout_metadata,
 )
 from agentcore.workspace.protocol import WorkspaceError
 
@@ -76,7 +78,7 @@ def _office_extract_budget_error(path: str, size: int, start: float) -> ToolResu
 
 
 def _liveness_workspace_error(detail: str, start: float) -> ToolResult:
-    """Liveness hang on the local workspace channel (permanent first-fail retire)."""
+    """Sticky channel-dead: family retire + steer (after consecutive settle timeouts)."""
     return _error(
         channel_dead_error_message(detail),
         start,
@@ -84,11 +86,25 @@ def _liveness_workspace_error(detail: str, start: float) -> ToolResult:
     )
 
 
+def _op_liveness_timeout_error(detail: str, start: float) -> ToolResult:
+    """Single-op settle timeout: fail this call only (no family sticky / notice)."""
+    return _error(
+        (
+            f"本地工作区通道操作超时（活性挂起）：{detail}。"
+            "请缩小范围或换策略后重试；禁止原样重试同一操作。"
+        ),
+        start,
+        metadata=op_liveness_timeout_metadata(),
+    )
+
+
 def _maybe_channel_dead_error(exc: WorkspaceError, start: float) -> ToolResult | None:
-    """Stamp retire meta when a backend failure is channel liveness / sticky-dead."""
+    """Map channel liveness failures: sticky-dead vs single-op settle timeout."""
     detail = str(exc)
-    if is_liveness_timeout_detail(detail):
+    if is_channel_dead_detail(detail):
         return _liveness_workspace_error(detail, start)
+    if is_liveness_timeout_detail(detail):
+        return _op_liveness_timeout_error(detail, start)
     return None
 
 

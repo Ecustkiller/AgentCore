@@ -1,4 +1,5 @@
 import { InterjectionTimeline } from "@/components/chat/InterjectionTimeline";
+import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
 import {
   assistantProjectionId,
@@ -34,6 +35,10 @@ export const MessageBubble = memo(function MessageBubble({
 
   // 合成收口行：不渲染芯片，也不走用户气泡（避免露出模型提示词）。
   if (isExecutionHarvestMessage(message)) {
+    return null;
+  }
+  // 空停止：聊天时间线不占「已停止」行（协作图 StatusStrip 仍保留）。
+  if (isEmptyCancelledAssistant(message)) {
     return null;
   }
 

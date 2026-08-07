@@ -164,6 +164,16 @@ export function askResolvedOutcome(
   };
 }
 
+/**
+ * ask_user 取消结算（wire `stop`；同档误用的 `research_first`）：桌面时间线不画
+ * toneStub——对齐 PlanReviewCard resolved 静默。meta 文案表仍可返回「已取消本回合」。
+ */
+export function isAskSilentResolvedDecision(
+  decision: CheckpointDecision | null | undefined,
+): boolean {
+  return decision === "stop" || decision === "research_first";
+}
+
 type TeamResolvedRow = { label: string; icon: LucideIcon };
 
 export type TeamPrimitiveMeta = {

@@ -10,6 +10,7 @@ import {
   setTokens,
 } from "@/api/client";
 import { disablePush, enablePush } from "@/api/push";
+import { clientHeaders } from "@/lib/clientBuildInfo";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -33,7 +34,10 @@ export interface RegisterInput {
 export async function register(input: RegisterInput): Promise<User> {
   const res = await fetch(apiUrl("/v1/auth/register"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...clientHeaders(),
+    },
     body: JSON.stringify({
       username: input.username,
       password: input.password,
@@ -49,7 +53,10 @@ export async function register(input: RegisterInput): Promise<User> {
 export async function login(username: string, password: string): Promise<User> {
   const res = await fetch(apiUrl("/v1/auth/token"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...clientHeaders(),
+    },
     body: JSON.stringify({
       username,
       password,
@@ -80,7 +87,10 @@ export async function logout(): Promise<void> {
     await disablePush();
     await fetch(apiUrl("/v1/auth/token/revoke"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...clientHeaders(),
+      },
       body: JSON.stringify({
         refresh_token: tokens.refresh_token,
       } satisfies Schemas["TokenRevokeRequest"]),

@@ -9,9 +9,14 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { notifyInfo } from "@/lib/toast";
-import { markSidecarUnhealthy, probeSidecar } from "@/services/sidecarHealth";
+import {
+  markSidecarUnhealthy,
+  probeSidecar,
+  takeCloudBridgeToastSlot,
+} from "@/services/sidecarHealth";
 import {
   buildSidecarHistory,
+  resolveConversationLocalTarget,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
 import {
@@ -50,6 +55,24 @@ export interface SendTurnSpec {
   optimisticUserId: string;
   /** 必填分流；空闲开跑传 ``steer``。 */
   delivery?: "steer" | "queue";
+}
+
+function setExecutionVia(
+  conversationId: string,
+  via: "sidecar" | "cloud_bridge" | null,
+): void {
+  useConversationStore.getState().setExecutionVia(via, conversationId);
+}
+
+/** 降云过桥提示：force=首探失败/阶段二；否则走节流（bad 缓存续云不再整会话静默）。 */
+function notifyCloudBridge(
+  toastKey: string,
+  message: string,
+  force: boolean,
+): void {
+  if (takeCloudBridgeToastSlot(toastKey, { force })) {
+    notifyInfo(message);
+  }
 }
 
 /**
@@ -133,6 +156,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
     // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
     // agent_mentions 同理：sidecar 未接，有点名时走云。
+    // resolveSidecarRoot 不读健康（续跑/列帧共用绑定判定）；健康由下方 probe 收敛。
     const sidecarTarget =
       attachments.length === 0 && agentMentions.length === 0
         ? await resolveSidecarRoot(conversationId)
@@ -144,9 +168,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         : null,
     });
     // 首次真正走 sidecar 前探活一次（探活增强）：拉起进程 + 握手验证本机环境能起得来。环境起
-    // 不来则本轮落到下方云分支；`probeSidecar` 已按根记下 `bad`，后续回合探活直接命中缓存
-    // （probed:false）→ 静默走云、不再打扰。故只在**首探失败**（probed）时提示一次。已探明 ok
-    // 的根命中缓存直接复用、不重探。
+    // 不来则本轮落到下方云分支；`probeSidecar` 已按根记下 `bad`（带 TTL）。命中缓存时
+    // probed:false——仍走云，但须可感知（节流 toast + executionVia），禁止整会话完全静默。
     const probe = sidecarTarget ? await probeSidecar(sidecarTarget) : null;
     throwIfCannotOpenStream(conversationId, ac.signal);
     if (probe) {
@@ -155,14 +178,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         probed: probe.probed,
       });
     }
-    if (sidecarTarget && probe && !probe.healthy && probe.probed) {
-      notifyInfo(
-        probe.detail
-          ? `${probe.detail}，已自动用云端`
-          : "本地引擎未能在此环境启动，已自动用云端",
-      );
-    }
     if (sidecarTarget && probe?.healthy) {
+      setExecutionVia(conversationId, "sidecar");
       traceTurnMilestone(conversationId, "stream_path", { via: "sidecar" });
       try {
         throwIfCannotOpenStream(conversationId, ac.signal);
@@ -178,10 +195,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         });
       } catch (sidecarErr) {
         // 探活已过、但回合「启动期」仍失败的边缘（拉不起 / 握手失败，一个事件都没派发 →
-        // recoverable）：本轮还没产生任何输出 / 副作用，故安全改走云链路重跑、用户无感。同时标记
-        // 该根坏 → 后续回合 resolveSidecarRoot 直接跳过、不再每轮降级（与探活共用同一「记坏 →
-        // 跳过」出口，不另起一条降级路径）。中途失败（已流式 / 已调工具）与用户停止不在此列——
-        // 照常抛给下方通用处理走「本地引擎出错」横幅 + 重试，绝不重复已发生的副作用。
+        // recoverable）：本轮还没产生任何输出 / 副作用，故安全改走云链路重跑。同时标记
+        // 该根坏 → 后续回合在 TTL 内命中 bad 缓存走云（与探活共用同一「记坏」出口）。
+        // 中途失败（已流式 / 已调工具）与用户停止不在此列——照常抛给下方通用处理走
+        // 「本地引擎出错」横幅 + 重试，绝不重复已发生的副作用。
         if (
           !(sidecarErr instanceof StreamError) ||
           sidecarErr.kind !== "sidecar" ||
@@ -190,7 +207,12 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           throw sidecarErr;
         }
         markSidecarUnhealthy(sidecarTarget);
-        notifyInfo("本地引擎未能启动，已自动用云端完成这次对话");
+        setExecutionVia(conversationId, "cloud_bridge");
+        notifyCloudBridge(
+          `${sidecarTarget.rootId}::${sidecarTarget.subpath}`,
+          "本地引擎未能启动，已自动用云端过桥完成这次对话",
+          true,
+        );
         store.truncateAfter(optimisticUserId, conversationId);
         store.createAssistantMessage(conversationId);
         beginTurnPreflight(conversationId);
@@ -210,10 +232,28 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         });
       }
     } else {
+      // 云链路：探活失败 / bad 缓存 / 关开关 / 附件·点名退云 / 纯云会话。
+      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia +（降云时）节流提示。
+      const bridging =
+        sidecarTarget !== null ||
+        (await resolveConversationLocalTarget(conversationId)) !== null;
+      setExecutionVia(conversationId, bridging ? "cloud_bridge" : null);
+      if (sidecarTarget && probe && !probe.healthy) {
+        const toastKey = `${sidecarTarget.rootId}::${sidecarTarget.subpath}`;
+        notifyCloudBridge(
+          toastKey,
+          probe.detail
+            ? `${probe.detail}，已自动用云端过桥`
+            : probe.probed
+              ? "本地引擎未能在此环境启动，已自动用云端过桥"
+              : "本地引擎暂不可用，本轮走云端过桥",
+          /* force */ probe.probed,
+        );
+      }
       traceTurnMilestone(conversationId, "stream_path", { via: "cloud" });
-      // 云链路（默认，含探活失败的 fallthrough）。本地意向已是会话状态
-      // （Conversation.local_container_root_id，建会话时定型，工作区对称化 D1a），
-      // 服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——回合不再携带容器根。
+      // 本地意向已是会话状态（Conversation.local_container_root_id，建会话时定型，
+      // 工作区对称化 D1a），服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——
+      // 回合不再携带容器根。
       throwIfCannotOpenStream(conversationId, ac.signal);
       enterTurnStreaming(conversationId);
       await streamConversation({

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * ResumePrompt · ask_user browser_login：
- * - pending + browserLogin → 「需要你登录」+ 自动 showBrowser
+ * - pending + browserLogin → 「需要你登录」；不自动 showBrowser，点「打开浏览器」才揭示
  * - 「已登录，继续」走 cold ask_user continue
  * - 有 assumptions →「按假设继续」（冷路 continue + note=假设文案）
  */
@@ -87,7 +87,7 @@ beforeEach(() => {
 });
 
 describe("ResumePrompt · ask_user browser_login", () => {
-  it("renders login card, auto-reveals browser, continues on CTA", async () => {
+  it("renders login card without auto-reveal; continues on CTA", async () => {
     render(
       <MemoryRouter>
         <TooltipProvider>
@@ -98,7 +98,9 @@ describe("ResumePrompt · ask_user browser_login", () => {
 
     expect(screen.getByText(/需要你登录/)).toBeTruthy();
     expect(screen.getByText("请在右坞完成登录")).toBeTruthy();
-    expect(showBrowser).toHaveBeenCalled();
+    expect(showBrowser).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "打开浏览器" }));
+    expect(showBrowser).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "已登录，继续" }));

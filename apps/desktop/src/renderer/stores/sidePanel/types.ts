@@ -90,6 +90,11 @@ export function terminalDismissKey(conversationId: string | null): string {
   return conversationId ? `terminal:${conversationId}` : "terminal";
 }
 
+/** Auto-surface dismiss key for the browser hub (scoped per conversation). */
+export function browserDismissKey(conversationId: string | null): string {
+  return conversationId ? `browser:${conversationId}` : "browser";
+}
+
 /**
  * A run-detail tab — one per revision chain (tab id = chain root) or standalone
  * run. Clicking an inline graph node pins that run here (前端UX设计.md §十);
@@ -343,6 +348,13 @@ export interface SidePanelState {
    * reading context (放大态 exit / canvas→chat).
    */
   closeContentTabs: () => void;
+  /**
+   * 切对话：卸对话作用域内容 tab（run / endpoint content / simple-turn / file），
+   * 保留 terminal / browser 壳；固定 工作区 / 改动 / 指挥台 不在 `tabs` 内故不受影响。
+   * 不改 `open` / `width`；浮窗壳由 {@link clearFloats} 负责，本 API 仅顺带摘掉
+   * 已卸 tab 对应的 float 条目（可与 clearFloats 同 effect 先后调用）。
+   */
+  closeConversationScopedTabs: () => void;
   /**
    * Reveal the panel WITHOUT touching the active tab — used by the 指挥台 tab's
    * auto-surface (前端UX设计.md §6.2) so a newly-arrived decision opens the dock while

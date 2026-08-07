@@ -55,6 +55,8 @@ from agentcore.workspace.protocol import (
     DirEntry,
     GrepQuery,
     GrepResult,
+    IndexFileEntry,
+    IndexFilesResult,
     NoMatch,
     NotADirectory,
     NotAFile,
@@ -804,7 +806,7 @@ class ServerWorkspace:
 
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
-    ) -> tuple[list[str], bool]:
+    ) -> IndexFilesResult:
         """Flat list of file paths for @ mentions (文件中枢统一 F4) + worker manifest.
 
         Files only, ``IGNORED_DIRS`` pruned, capped at ``cap`` (``truncated`` when
@@ -812,7 +814,10 @@ class ServerWorkspace:
         counterpart to the desktop ``fsApi.listFiles`` that indexes local roots, so @
         and the worker manifest behave the same whether a workspace is cloud or local.
         ``order="path"`` (default) = alphabetical (the @ view); ``order="recent"`` =
-        newest-first by mtime (one extra stat/file) for the manifest's relevance budget.
+        newest-first by mtime for the manifest's relevance budget.
+        Each entry carries local-stat ``mtime_ms`` / ``size_bytes`` so
+        ``ensure_index`` can skip unchanged-file reads (same fingerprint contract
+        as desktop ``index_files``).
         Noise dirs (``.git`` / ``node_modules`` / …) plus path-aware
         ``AgentCore/{index,trash,baselines}``, and AI-tier
         suffixes (``*.db`` / media / binaries) are pruned — same rule set as
@@ -821,7 +826,8 @@ class ServerWorkspace:
         cap = cap or _MAX_INDEX_FILES
         recent = order == "recent"
         root = self._root.resolve()
-        collected: list[tuple[str, float]] = []  # (posix_path, mtime); mtime 0 unless recent
+        # (posix_path, sort_mtime, mtime_ms, size_bytes)
+        collected: list[tuple[str, float, int, int]] = []
         truncated = False
         for dirpath, dirnames, filenames in os.walk(root):
             # Prune noise dirs in place so os.walk never descends into them.
@@ -836,18 +842,34 @@ class ServerWorkspace:
                 full = Path(dirpath) / fname
                 if full.is_symlink() or not full.is_file():
                     continue
-                mtime = full.stat().st_mtime if recent else 0.0
-                collected.append((_posix(os.path.relpath(full, root)), mtime))
+                try:
+                    st = full.stat()
+                except OSError:
+                    continue
+                mtime_ms = st.st_mtime_ns // 1_000_000
+                size_bytes = int(st.st_size)
+                sort_mtime = float(st.st_mtime) if recent else 0.0
+                collected.append(
+                    (_posix(os.path.relpath(full, root)), sort_mtime, mtime_ms, size_bytes)
+                )
                 if len(collected) >= cap:
                     truncated = True
                     break
             if truncated:
                 break
         if recent:
-            collected.sort(key=lambda pm: pm[1], reverse=True)  # newest first
+            collected.sort(key=lambda row: row[1], reverse=True)  # newest first
         else:
-            collected.sort(key=lambda pm: pm[0])  # alphabetical
-        return [p for p, _ in collected], truncated
+            collected.sort(key=lambda row: row[0])  # alphabetical
+        entries = tuple(
+            IndexFileEntry(path=p, mtime_ms=ms, size_bytes=sz)
+            for p, _, ms, sz in collected
+        )
+        return IndexFilesResult(
+            paths=[e.path for e in entries],
+            truncated=truncated,
+            entries=entries,
+        )
 
     async def mkdir(self, path: str) -> None:
         if self._external_needs_channel(path):

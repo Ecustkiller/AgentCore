@@ -39,7 +39,13 @@ def make_child(tool: DelegateTool, captain_run_id: str, captain_depth: int) -> D
         checkpoint_enabled=tool._checkpoint_enabled,
         depth=captain_depth,
         permission_axes=tool._permission_axes,
+        folder_id=tool._folder_id,
+        memory_enabled=tool._memory_enabled,
+        conversation_history_access=tool._conversation_history_access,
     )
+    # Nested default desk: prepare_agent_node may overwrite with parent target.
+    child._default_target_folder_id = getattr(tool, "_default_target_folder_id", None)
+    child._local_root_claims = getattr(tool, "_local_root_claims", None)
     tool._children.append(child)
     return child
 

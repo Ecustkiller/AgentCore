@@ -32,6 +32,7 @@ from agentcore.runtime.runs.contract import node_has_dependents
 from agentcore.runtime.runs.executor_context import (
     _build_messages,
     _context_block_payloads,
+    _safe_index_files,
     load_context_inject_files,
 )
 from agentcore.runtime.runs.executor_env import AgentExecutorEnv
@@ -99,8 +100,30 @@ async def prepare_agent_node(
     priced_model, request_model = resolve_run_models(
         env.profiles, spec.model, cost_role=env.cost_role
     )
+    # 跨项目指挥 · 形状甲：有目标 folder → 换 backend + 记忆跟桌（不改会话挂载）。
+    worker_tools_base = env.tools
+    system_prompt = env.system_prompt
+    base_ctx = env.base_tool_context
+    if spec.target_folder_id:
+        from agentcore.runtime.delegate.target_desktop import apply_target_desktop
+
+        applied = await apply_target_desktop(
+            target_folder_id=spec.target_folder_id,
+            session_folder_id=env.session_folder_id,
+            env_system_prompt=env.system_prompt,
+            base_tool_context=env.base_tool_context,
+            worker_tools=env.tools,
+            sink=env.sink,
+            local_root_claims=env.local_root_claims,
+            memory_enabled=env.memory_enabled,
+            permission_axes=env.permission_axes_obj,
+        )
+        worker_tools_base = applied.worker_tools
+        system_prompt = applied.system_prompt
+        base_ctx = applied.tool_ctx
+
     tool_ctx = replace(
-        env.base_tool_context,
+        base_ctx,
         run_id=spec.run_id,
         agent_id=agent_id,
         execution_id=env.execution_id,
@@ -172,7 +195,7 @@ async def prepare_agent_node(
         ),
     )
     # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
-    worker_tools = env.tools
+    worker_tools = worker_tools_base
     # 真纯丙：不再用 spec.tools 做 allow-list；默认全开相关工具面。
     allowed_tools = None
     # A worker may nest a sub-team purely by tree position: any depth below the
@@ -189,7 +212,12 @@ async def prepare_agent_node(
         # (bind_after_deps / 子队员 escalate scope) exactly like the CEO
         # (受监督子计划 B 去特例). Its turn-end dispose runs in the finally below.
         lead_subteam = env.delegate_factory(spec.run_id, spec.depth)
-        worker_tools = _registry_with(env.tools, *lead_subteam.tools)
+        # §4.2b·3：子派默认继承父目标桌（再点名才换）。
+        child_delegate = lead_subteam.tools[0]
+        parent_desk = spec.target_folder_id or env.session_folder_id
+        if parent_desk:
+            child_delegate._default_target_folder_id = parent_desk  # type: ignore[attr-defined]
+        worker_tools = _registry_with(worker_tools, *lead_subteam.tools)
         # allowed_tools stays None — "offer all" already includes lead_subteam
         # tools now living in worker_tools.
     # Topology-split handoff wording + deliverable.form: DAG is known at identity
@@ -206,7 +234,7 @@ async def prepare_agent_node(
         # 能写≠能跑 (能力闸门与交付诚实性): the registry is the capability truth —
         # execution class absent (cloud without sandbox) ⇒ the identity says so,
         # instead of the generic wording implying the worker can run code.
-        can_execute=env.tools.get_optional("code_execute") is not None,
+        can_execute=worker_tools.get_optional("code_execute") is not None,
     )
     if not env.collaboration:
         identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")
@@ -296,10 +324,14 @@ async def prepare_agent_node(
     # opening manifest — a per-turn snapshot walked once and shared by the whole
     # batch (see ``env.preexisting_files``); peer products are layered on per worker
     # from the completion map inside ``_build_messages``.
-    index_paths = await env.preexisting_files()
+    # Target-desktop workers list their own root (not the session default desk).
+    if spec.target_folder_id and tool_ctx.backend is not env.base_tool_context.backend:
+        index_paths = await _safe_index_files(tool_ctx.backend)
+    else:
+        index_paths = await env.preexisting_files()
     # Wave3 B: force-inject skeleton/contract summaries before first file_read.
     context_inject = await load_context_inject_files(
-        env.base_tool_context.backend,
+        tool_ctx.backend,
         list(getattr(spec, "context_inject_files", None) or []),
     )
     # Build the worker's opening (system + task) ONCE; auto-rework then
@@ -343,14 +375,14 @@ async def prepare_agent_node(
             env.plan,
             spec,
             completed,
-            env.system_prompt,
+            system_prompt,
             env.user_message,
             deliverable,
             identity=identity,
             index_paths=index_paths,
             blocks_sink=received_blocks,
             team_brief=env.team_brief,
-            shared_workspace=env.shared_workspace,
+            shared_workspace=bool(tool_ctx.shared_workspace),
             context_inject=context_inject or None,
             captain_recon=env.captain_recon,
         )

@@ -19,7 +19,7 @@ A wrong / unknown name is a soft miss: ``success=True`` (no ``error`` / no red f
 lists the available topic names so the model can retry, and still logs
 ``consult_memory.miss``. Only a missing / empty ``name`` is a real parameter failure
 (``success=False``). Empty topic libraries never wire this tool (see
-``_assemble_ceo_toolset`` / ``_wire_worker_memory_tools``).
+``tools.ceo_toolset`` / ``_wire_worker_memory_tools``).
 """
 
 from __future__ import annotations

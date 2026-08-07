@@ -3,10 +3,12 @@
  * Regenerate all committed frontend contract artifacts from backend sources.
  *
  *   1. OpenAPI → packages/contract-rest-types/src/api.generated.ts
- *   2. EventType enum → packages/contract-types/src/eventTypes.generated.ts
- *   3. SSE payload models → packages/contract-types/src/events.generated.ts
- *   4. InteractionKind + wire table → packages/contract-types/src/interactionKinds.generated.ts
- *   5. ErrorCode → packages/contract-types/src/errorCodes.generated.ts
+ *   2. OpenAPI paths → packages/contract-rest-types/src/paths.generated.ts
+ *   3. EventType enum → packages/contract-types/src/eventTypes.generated.ts
+ *   4. SSE payload models → packages/contract-types/src/events.generated.ts
+ *   5. InteractionKind + wire table → packages/contract-types/src/interactionKinds.generated.ts
+ *   6. ErrorCode → packages/contract-types/src/errorCodes.generated.ts
+ *   7. validate SSE + REST path literal alignment
  *
  * CI runs this then `git diff --exit-code` to block silent drift.
  */
@@ -37,10 +39,16 @@ run("uv", ["run", "python", "scripts/dump_interaction_kinds.py"], { cwd: SERVER 
 console.log("gen:types — dump ErrorCode catalog …");
 run("uv", ["run", "python", "scripts/dump_error_codes.py"], { cwd: SERVER });
 
+console.log("gen:types — dump REST path templates …");
+run("uv", ["run", "python", "scripts/dump_rest_paths.py"], { cwd: SERVER });
+
 console.log("gen:types — openapi-typescript …");
 run("pnpm", ["-C", join(ROOT, "packages", "contract-rest-types"), "gen"]);
 
 console.log("gen:types — validate SSE contract alignment …");
 run("uv", ["run", "python", "scripts/validate_sse_contract.py"], { cwd: SERVER });
+
+console.log("gen:types — validate REST path literals vs OpenAPI …");
+run("uv", ["run", "python", "scripts/validate_rest_paths.py"], { cwd: SERVER });
 
 console.log("gen:types — done");

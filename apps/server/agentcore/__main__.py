@@ -27,6 +27,7 @@ def main() -> None:
     import uvicorn
 
     from agentcore.config import settings
+    from agentcore.main import _validate_single_process_assumptions
     from agentcore.startup_port import ensure_port_available
 
     # Demo-tape record/replay holds multi-minute SSE (原速 ~20min). WatchFiles +
@@ -64,6 +65,9 @@ def main() -> None:
     # bound (and must not print a false "another instance" error).
     if multiprocessing.current_process().name == "MainProcess":
         ensure_port_available(settings.host, settings.port)
+        # G5: refuse memory rate-limit + multi-worker before uvicorn binds (same
+        # check runs again in lifespan). Redis + shared DB outbox may scale.
+        _validate_single_process_assumptions()
 
     uvicorn.run(
         "agentcore.main:app",
@@ -71,6 +75,10 @@ def main() -> None:
         port=settings.port,
         # Hot-reload: DEBUG + AGENTCORE_RELOAD (unless demo tape is armed — see above).
         reload=reload,
+        # Pin single worker when not reloading (reload mode is already one child).
+        # Operators wrapping the image may still set WEB_CONCURRENCY etc.; startup
+        # allows multi-worker only with RATE_LIMIT_BACKEND=redis (+ shared DB outbox).
+        workers=1 if not reload else None,
         # Watch only the app package, not the whole cwd: apps/server also holds
         # test artifacts (.pytmp/.pytest_*) full of .py fixtures whose churn would
         # otherwise trigger endless reloads. (Ignored when reload is off.)

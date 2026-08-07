@@ -31,6 +31,10 @@ import {
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import {
+  formatRegisterLocalProjectAnswer,
+  pickAndRegisterLocalProject,
+} from "@/lib/registerLocalProject";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { AskOption, AskQuestion } from "@/types/events";
 import {
@@ -149,6 +153,37 @@ export function AskDecisionBody({
     setBindBusyLabel(opt.label);
     clearPickerFeedback();
 
+    if (opt.action === "register_local_project") {
+      if (!canLocalFs) {
+        applyPickerFailure("unavailable");
+        setBindBusyLabel(null);
+        return;
+      }
+      const result = await pickAndRegisterLocalProject({
+        notifyOnFailure: false,
+      });
+      if (!result.ok) {
+        applyPickerFailure(
+          result.reason,
+          result.reason === "cancelled" ? undefined : result.message,
+        );
+        setBindBusyLabel(null);
+        return;
+      }
+      const value = formatRegisterLocalProjectAnswer(
+        opt.label,
+        result.folder.name,
+      );
+      try {
+        await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
+      } catch {
+        // resume 失败：留在卡上
+      } finally {
+        setBindBusyLabel(null);
+      }
+      return;
+    }
+
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);
       const result = await pickAndGrantReadonlyFolder(conversationId, hints);
@@ -225,9 +260,10 @@ export function AskDecisionBody({
   };
 
   /**
-   * 继续：普通选项 → 原 onContinue；选中 grant_* / bind_* / open_local_project →
-   * 一键履约（对齐点选项行）。grant 无系统选文件夹；找不到则卡面失败、不提交口头授权。
-   * 同 root 只读已挂仍须点允许走 organize 履约（禁止静默升写）。
+   * 继续：普通选项 → 原 onContinue；选中 grant_* / bind_* / open_local_project /
+   * register_local_project → 一键履约（对齐点选项行）。grant 无系统选文件夹；
+   * 找不到则卡面失败、不提交口头授权。同 root 只读已挂仍须点允许走 organize 履约
+   *（禁止静默升写）。register 履约后 resume 本对话；open 开新会话不 resume。
    */
   const handleContinue = () => {
     if (busy || bindBusyLabel) return;

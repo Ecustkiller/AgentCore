@@ -1,8 +1,9 @@
-"""Semantic (preference / profile / topic) consolidation from undigested episodes.
+"""LLM consolidation of preference / profile / topic memory — NOT vector search.
 
-Always-files (偏好 / 画像) are rewritten as whole documents; topic notes still use
-structured ops. Never runs on a single conversation window — only on episodic digests
-plus the current semantic markdown.
+Rewrites always-files (偏好 / 画像) as whole documents and applies structured ops to
+topic notes from undigested episodic digests + current semantic markdown. Uses a chat
+LLM ``complete()`` pass only; no embeddings, no vector index, no similarity retrieval.
+Never runs on a single conversation window.
 """
 
 from __future__ import annotations

@@ -30,6 +30,7 @@ import {
   TEAM_BROWSER_TAB_ID,
   TEAM_TERMINAL_TAB_ID,
   WORKSPACE_TAB_ID,
+  browserDismissKey,
   contentDetailTabId,
   dismissFocusedFloat,
   fileTabId,
@@ -520,6 +521,78 @@ describe("closeContentTabs", () => {
   });
 });
 
+describe("closeConversationScopedTabs（切对话卸作用域内容 tab）", () => {
+  it("unloads run / file / content / simple-turn; keeps terminal / browser shells", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showFile("src/a.ts", "a.ts");
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
+    panel().showSimpleTurnDetail(MID, "user-1", "asst-1");
+    panel().openTerminalTab();
+    panel().showBrowser();
+    panel().showChanges(MID);
+    useSidePanelStore.setState({ open: true, width: 480 });
+
+    panel().closeConversationScopedTabs();
+
+    expect(panel().tabs.map((t) => t.kind).sort()).toEqual([
+      "browser",
+      "terminal",
+    ]);
+    expect(panel().tabs.map((t) => t.id).sort()).toEqual([
+      TEAM_BROWSER_TAB_ID,
+      TEAM_TERMINAL_TAB_ID,
+    ]);
+    // Fixed tabs are not in `tabs`; active 改动 must survive.
+    expect(panel().activeTabId).toBe(CHANGES_TAB_ID);
+    expect(panel().open).toBe(true);
+    expect(panel().width).toBe(480);
+  });
+
+  it("falls back to a surviving shell when the active scoped tab is dropped", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().openTerminalTab();
+    expect(panel().activeTabId).toBe(TEAM_TERMINAL_TAB_ID);
+    panel().setActiveTab(tabId("run-1"));
+    panel().closeConversationScopedTabs();
+    expect(panel().tabs.map((t) => t.id)).toEqual([TEAM_TERMINAL_TAB_ID]);
+    expect(panel().activeTabId).toBe(TEAM_TERMINAL_TAB_ID);
+  });
+
+  it("falls back to the 工作区 home when no shell survives", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showFile("src/a.ts", "a.ts");
+    panel().closeConversationScopedTabs();
+    expect(panel().tabs).toHaveLength(0);
+    expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
+  });
+
+  it("strips float entries for unloaded tabs without touching clearFloats semantics", () => {
+    panel().openTab(runDetail("run-1"));
+    panel().showFile("src/a.ts", "a.ts");
+    panel().floatTab(tabId("run-1"));
+    panel().floatTab(fileTabId("src/a.ts"));
+    panel().floatTab(WORKSPACE_TAB_ID);
+    panel().openTerminalTab({ activate: false });
+    panel().closeConversationScopedTabs();
+    // Scoped floats gone; workspace float left for clearFloats.
+    expect(panel().tabs.map((t) => t.id)).toEqual([TEAM_TERMINAL_TAB_ID]);
+    expect(panel().floats.map((f) => f.tabId)).toEqual([WORKSPACE_TAB_ID]);
+    expect(panel().focusSurface).toEqual({
+      type: "float",
+      tabId: WORKSPACE_TAB_ID,
+    });
+  });
+
+  it("is a no-op when only shells / nothing scoped is open", () => {
+    panel().openTerminalTab();
+    panel().showBrowser();
+    const before = panel().tabs.map((t) => t.id);
+    panel().closeConversationScopedTabs();
+    expect(panel().tabs.map((t) => t.id)).toEqual(before);
+    expect(panel().activeTabId).toBe(TEAM_BROWSER_TAB_ID);
+  });
+});
+
 describe("showChanges / showFile / openTerminalTab（方案 B 顶栏 IA）", () => {
   it("showChanges reveals the panel on the 改动 tab and stores focus", () => {
     panel().showChanges(MID);
@@ -636,6 +709,25 @@ describe("showChanges / showFile / openTerminalTab（方案 B 顶栏 IA）", () 
 });
 
 describe("showBrowser（浏览器壳 · 可关内容 tab）", () => {
+  it("closeTab on browser hub dismisses auto-surface for this conversation", () => {
+    useConversationStore.setState({ currentConversationId: "conv-browser" });
+    panel().showBrowser();
+    panel().closeTab(TEAM_BROWSER_TAB_ID);
+    expect(panel().tabs.some((t) => t.kind === "browser")).toBe(false);
+    expect(
+      panel().isAutoSurfaceDismissed(browserDismissKey("conv-browser")),
+    ).toBe(true);
+  });
+
+  it("showBrowser clears a prior browser dismiss", () => {
+    useConversationStore.setState({ currentConversationId: "conv-browser" });
+    panel().dismissAutoSurface(browserDismissKey("conv-browser"));
+    panel().showBrowser();
+    expect(
+      panel().isAutoSurfaceDismissed(browserDismissKey("conv-browser")),
+    ).toBe(false);
+  });
+
   it("reveals the panel and opens/activates the browser content tab", () => {
     panel().showBrowser();
     expect(panel().open).toBe(true);

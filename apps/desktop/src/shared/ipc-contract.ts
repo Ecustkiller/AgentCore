@@ -135,6 +135,8 @@ export type FsWriteResult =
  * 云端无 LS 时诚实 ``status=unavailable``，不把通道打挂。
  * ``git_repo_status`` / ``git_scm`` 同样不是 backend 方法——桌面 U1–U3 用户 SCM
  *（只读摘要 + stage/commit/push/pull）；渲染层经 ``workspaceOp`` 直调，服务端/Agent 不发此 op。
+ * ``git_run`` 同样不是 backend 方法——Agent 结构化 ``git`` 在 LocalWorkspace 上经通道
+ * 在本机根执行 allowlisted argv；与 UI SCM 分立。
  */
 export type WorkspaceOpName =
   | "read"
@@ -163,7 +165,15 @@ export type WorkspaceOpName =
   | "process_list"
   | "diagnostics"
   | "git_repo_status"
-  | "git_scm";
+  | "git_scm"
+  | "git_run";
+
+/** ``git_run`` 成功 value —— Agent 结构化 git 通道回填。 */
+export interface GitRunValue {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}
 
 /** U2：单条 Git 变更（path + porcelain XY 片段）。 */
 export interface GitChangeEntry {
@@ -460,11 +470,15 @@ export interface FsApi {
    *
    * `args` 为该 op 的相对路径载荷（如 `{ path }` / `{ directory, pattern }`）；
    * 失败不抛异常，统一以 `WorkspaceOpResult` 的类型化 `error` 返回。
+   *
+   * 可选顶层 `timeoutMs`（勿塞进 `args`）：主进程墙钟 Promise.race，超时先回
+   * `WorkspaceIOError` 活性信封；底层 op 可能继续跑（与渲染 abort 同构）。
    */
   workspaceOp(
     rootId: string,
     op: WorkspaceOpName,
     args: Record<string, unknown>,
+    timeoutMs?: number,
   ): Promise<WorkspaceOpResult>;
   /**
    * 聊天内 RunConfirm「本会话都允许」→ 主进程置 session run flag（进程重启清零）。

@@ -116,6 +116,59 @@ def test_expand_marks_checkpoint_and_deps():
     assert by_id["research"]["deliverable"] == {"form": "notes"}
 
 
+def test_expand_chain_gates_recursive_through_deps():
+    """A→G1→G2→B: recursive through-dep keeps B depending on A (RWF-1)."""
+    definition = {
+        "nodes": [
+            {"id": "a", "kind": "agent_step", "role": "A", "task": "ta"},
+            {"id": "g1", "kind": "human_gate", "label": "审1"},
+            {"id": "g2", "kind": "human_gate", "label": "审2"},
+            {"id": "b", "kind": "agent_step", "role": "B", "task": "tb"},
+        ],
+        "edges": [
+            {"from": "a", "to": "g1"},
+            {"from": "g1", "to": "g2"},
+            {"from": "g2", "to": "b"},
+        ],
+    }
+    tasks = expand_workflow_to_tasks(definition)
+    by_id = {t["id"]: t for t in tasks}
+    assert set(by_id) == {"a", "b"}
+    assert by_id["a"].get("checkpoint_after") is True
+    assert by_id["b"]["depends_on"] == ["a"]
+    assert "checkpoint_after" not in by_id["b"] or by_id["b"].get(
+        "checkpoint_after"
+    ) is not True
+
+
+def test_validate_rejects_gate_to_gate_and_orphan_gate():
+    chained = {
+        "nodes": [
+            {"id": "a", "kind": "agent_step", "role": "A", "task": "ta"},
+            {"id": "g1", "kind": "human_gate", "label": "审1"},
+            {"id": "g2", "kind": "human_gate", "label": "审2"},
+            {"id": "b", "kind": "agent_step", "role": "B", "task": "tb"},
+        ],
+        "edges": [
+            {"from": "a", "to": "g1"},
+            {"from": "g1", "to": "g2"},
+            {"from": "g2", "to": "b"},
+        ],
+    }
+    errs = validate_workflow_definition(chained)
+    assert any("human_gate→human_gate" in e for e in errs)
+
+    orphan = {
+        "nodes": [
+            {"id": "g", "kind": "human_gate", "label": "孤门"},
+            {"id": "b", "kind": "agent_step", "role": "B", "task": "tb"},
+        ],
+        "edges": [{"from": "g", "to": "b"}],
+    }
+    errs2 = validate_workflow_definition(orphan)
+    assert any("无 agent_step 前驱" in e for e in errs2)
+
+
 def test_expand_builds_run_plan_golden():
     tasks = expand_workflow_to_tasks(_qc_definition())
     plan, errors = build_run_plan(tasks, id_prefix="wf")

@@ -29,9 +29,8 @@ export function useElapsedSince(startedAt: number | null | undefined): number {
 }
 
 /**
- * Live coordination-wait chrome for StatusStrip / StreamingIndicator / graph.
- * Pass ``messageId`` when the caller is not inside {@link ExecutionScopeContext}
- * (e.g. bottom StreamingIndicator).
+ * Live coordination-wait chrome for StatusStrip / graph.
+ * Pass ``messageId`` when the caller is not inside {@link ExecutionScopeContext}.
  */
 export function useCoordinationWaitChrome(
   execution: Execution | null | undefined,

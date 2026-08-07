@@ -9,12 +9,14 @@ vi.mock("@/hooks/useConversations", () => ({
 }));
 vi.mock("@/services/sidecarRouting", () => ({
   resolveSidecarRoot: vi.fn(() => Promise.resolve(null)),
+  resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
   buildSidecarHistory: vi.fn(() => []),
 }));
 vi.mock("@/services/sidecarHealth", () => ({
   probeSidecar: vi.fn(),
   markSidecarUnhealthy: vi.fn(),
   clearSidecarHealth: vi.fn(),
+  takeCloudBridgeToastSlot: vi.fn(() => true),
 }));
 vi.mock("@/services/streamConversation", () => ({
   attachConversation: vi.fn(),

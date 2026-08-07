@@ -203,6 +203,11 @@ export interface ConversationState {
   releaseBackgroundSlice: (conversationId: string) => void;
   setAbort: (a: AbortController | null, conversationId?: string | null) => void;
   setTurnPhase: (phase: TurnPhase, conversationId?: string | null) => void;
+  /** Desktop: last turn path — `sidecar` | `cloud_bridge` | null (see ConversationRuntime). */
+  setExecutionVia: (
+    via: ConversationRuntime["executionVia"],
+    conversationId?: string | null,
+  ) => void;
   /** Explicit hard cancel of the in-flight turn (disconnect alone does not cancel). */
   stopGeneration: () => void;
   setError: (

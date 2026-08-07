@@ -1,14 +1,16 @@
 """Execute one standing-task fire (代跑, approvals_enabled=True).
 
-Shape mirrors ``handoff_jobs`` (spawn_background + credentials) but does **not**
-reuse handoff tables/semantics. Pause truth stays in ``paused_turns``.
+Shared with handoff / workflows: only ``spawn_background``. Credential preflight
+matches ``workflows.runner`` (``preflight_resolved_llm_credentials``) — **not**
+handoff's thin ``resolve_user_llm_credentials``. No unified job framework; pause
+truth stays in ``paused_turns`` (not handoff tables).
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.billing.gate import preflight_resolved_llm_credentials
 from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
     resolve_conversation_history_access,
@@ -35,10 +37,7 @@ from agentcore.db.repositories.standing_tasks import (
     StandingTaskRepository,
     StandingTaskRunRepository,
 )
-from agentcore.llm.resolve import (
-    platform_llm_credentials,
-    resolve_conversation_model_selection,
-)
+from agentcore.llm.resolve import resolve_conversation_model_selection
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.standing_tasks.schedule import next_run_after
 from agentcore.standing_tasks.templates import (
@@ -256,16 +255,13 @@ async def run_standing_task_job(
                 selection = await resolve_conversation_model_selection(
                     session, conv, user_id
                 )
-                credentials = await preflight_llm_credentials(
+                credentials = await preflight_resolved_llm_credentials(
                     session=session,
                     user=user,
                     cost_repo=CostEventRepository(session),
                     byok_missing_message="站立任务代跑需要可用的模型凭证，请先在设置中配置。",
-                    model_origin=selection.origin,
-                    provider_id=selection.provider_id,
+                    selection=selection,
                 )
-                if selection.origin == "platform":
-                    credentials = platform_llm_credentials(model=selection.model)
             except AgentCoreError as e:
                 await StandingTaskRunRepository(session).mark_failed(
                     run_id, error=e.message or str(e)
@@ -344,14 +340,20 @@ async def run_standing_task_job(
         summary = _truncate_summary(
             (result or {}).get("content") if isinstance(result, dict) else None
         )
-        paused = False
+        turn_message_id = (
+            (result or {}).get("message_id") if isinstance(result, dict) else None
+        )
+        paused = _finish_is_paused(finish)
 
         async with async_session_factory() as session:
-            paused = await PausedTurnRepository(session).exists_for_conversation(
-                conversation_id
-            )
+            # ST-1 / option B: probe THIS fire's turn only — conversation-level ANY
+            # would mis-label a successful fire when an older cold pause still sits.
+            if not paused and turn_message_id:
+                paused = await PausedTurnRepository(session).exists_for_message(
+                    str(turn_message_id)
+                )
             runs = StandingTaskRunRepository(session)
-            if paused or _finish_is_paused(finish):
+            if paused:
                 await runs.mark_awaiting_user(run_id, summary=summary)
             elif isinstance(result, dict) and (
                 result.get("error")
@@ -390,6 +392,7 @@ async def run_standing_task_job(
             task_id=task_id,
             conversation_id=conversation_id,
             paused=bool(paused) if conversation_id else False,
+            turn_message_id=turn_message_id,
         )
     except Exception as e:
         logger.error(
@@ -412,12 +415,13 @@ async def run_standing_task_job(
 
 
 async def _run_pipeline(**kwargs):
-    """Run the chat turn. Returns a result dict when the test seam patches it;
-    production path uses ``run_and_persist`` (returns None) and status is inferred
-    from ``paused_turns`` / latest assistant message.
+    """Run the chat turn. Returns the pipeline result (incl. ``message_id``).
+
+    Production uses ``run_and_persist``; pause truth for inbox settlement is
+    ``paused_turns`` keyed by that turn's ``message_id`` (not conversation ANY).
     """
     # Production: full persist path (suspension + cost + journal).
-    await run_and_persist(
+    return await run_and_persist(
         conversation_id=kwargs["conversation_id"],
         user_message=kwargs["user_message"],
         user_id=kwargs["user_id"],
@@ -432,16 +436,16 @@ async def _run_pipeline(**kwargs):
         conversation_history_access=kwargs.get("conversation_history_access", True),
         permission_axes=kwargs.get("permission_axes"),
     )
-    return None
 
 
 async def _run_workflow_pipeline(**kwargs):
     """Standing fire with a bound workflow: direct-start (no CEO 编队).
 
-    Test seam: monkeypatch this like ``_run_pipeline``.
+    Shares :func:`~agentcore.conversation.turn_runner.run_mechanism_direct_and_persist`
+    with ``workflows.runner`` (placeholder / lease / persist). Test seam: monkeypatch
+    this like ``_run_pipeline``.
     """
-    from agentcore.conversation.turn_runner import session_callbacks, suspension_callbacks
-    from agentcore.runtime.pipeline.workflow_run import run_workflow_pipeline
+    from agentcore.conversation.turn_runner import run_mechanism_direct_and_persist
     from agentcore.workflows.definition import (
         WorkflowDefinitionError,
         expand_workflow_to_tasks,
@@ -452,11 +456,8 @@ async def _run_workflow_pipeline(**kwargs):
     except WorkflowDefinitionError as e:
         return {"error": str(e), "finish_reason": "error"}
 
-    conversation_id = kwargs["conversation_id"]
-    session_saver, session_loader = session_callbacks(conversation_id)
-    suspension_saver, suspension_deleter = suspension_callbacks()
-    return await run_workflow_pipeline(
-        conversation_id=conversation_id,
+    return await run_mechanism_direct_and_persist(
+        conversation_id=kwargs["conversation_id"],
         user_id=kwargs["user_id"],
         user_message=kwargs["user_message"],
         tasks=tasks,
@@ -471,10 +472,6 @@ async def _run_workflow_pipeline(**kwargs):
         permission_axes=kwargs.get("permission_axes"),
         profile_set=kwargs.get("profile_set"),
         llm_credentials=kwargs["llm_credentials"],
-        session_saver=session_saver,
-        session_loader=session_loader,
-        suspension_saver=suspension_saver,
-        suspension_deleter=suspension_deleter,
     )
 
 

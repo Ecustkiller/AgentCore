@@ -280,6 +280,12 @@ def test_core_teaches_split_criterion_over_count():
     assert "学术审校" in hint
     assert "少扇出" in hint or "常 2" in hint
     assert "论文" in hint and ("资料" in hint or "开源" in hint)  # 论文/开源 ≠ 明示成文
+    # 派摸底验收：手写/playbook=none 也要目标·手段·收工；够用即停 + handoff
+    assert "派摸底" in hint or "摸底·验收" in hint or "了解到什么算够" in hint
+    assert "够用即停" in hint
+    assert "handoff" in hint
+    assert "入口" in hint
+    assert "无限深挖" in hint or "更全" in hint
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in hint
     assert "静默自拟" in hint
@@ -303,7 +309,8 @@ def test_core_teaches_split_criterion_over_count():
     assert "内部术语" in hint
     assert "内部工具名" in hint
     assert "短文" in hint and "存文件" in hint
-    assert "禁止" in hint and "整篇一次" in hint
+    assert "主路径" in hint and "完整" in hint and "file_write" in hint
+    assert "禁止】整篇一次 file_write" not in hint
     assert "贴报错自诊" in hint
     assert "参数不是合法 JSON" in hint
     assert "修引号" in hint or "转义" in hint
@@ -327,14 +334,22 @@ def test_core_teaches_split_criterion_over_count():
     assert "先设计再实现" in hint
     assert "只留方向句" in hint
     assert "1 人两段" in hint or "一人两段" in hint
+    assert "真两段" in hint
+    assert "假两段" in hint
+    assert "同一 task" in hint  # 禁同 task 文案冒充两段
     assert "规格已齐" in hint
     assert "playbook_args.topic" in hint
     assert "立刻派 ≠ 立刻全量" in hint or "立刻全量" in hint
+    assert "根委派切片诚实" in hint or "路径 A" in hint or "路径 B" in hint
+    assert "嵌套扇出" in hint or "单 lead" in hint
     assert "MVP" in hint or "契约" in hint
     assert "多屏" in hint and ("大原型" in hint or "单文件" in hint)
     assert "完整可玩" in hint
     assert "规格已齐 ≠ 全量" in hint or "规格已齐≠全量" in hint
-    assert "明示" in hint  # 用户明示一次做完豁免
+    assert "结构槽" in hint or "playbook_args" in hint
+    assert "桌面壳" in hint or "多进程" in hint
+    assert "playbook=none" in hint
+    assert "可跑闭环" in hint or "核心运行时" in hint
     # 交付档 → intensity / playbook（结构槽，禁意图分类器）
     assert "交付档" in hint
     assert "intensity" in hint
@@ -349,10 +364,10 @@ def test_core_teaches_split_criterion_over_count():
     assert "禁止" in hint and ("intensity=full" in hint or "满编" in hint)
     assert "做个网站" in hint
     assert "展示页" in hint or "业务应用" in hint
-    # 混合分流：讨论/Agent/自动化 ≠ 绿场 SPA 满档 build_app；五阶段仅进入后
+    # 混合分流：边界未钉 ≠ 绿场 SPA 满档 build_app；五阶段仅进入后
     assert "build_app" in hint
     assert "不硬拒" in hint
-    assert "Agent" in hint or "自动化" in hint
+    assert "边界未钉" in hint or "轻切片" in hint or "少节点" in hint
     assert "轻切片" in hint or "1～2" in hint
     assert "五波" in hint or "脚手架" in hint
     assert "五阶段" in hint
@@ -409,8 +424,15 @@ def test_core_teaches_split_criterion_over_count():
     assert "多屏" in skill and ("大原型" in skill or "单文件" in skill)
     assert "完整可玩" in skill
     assert "规格已齐 ≠ 全量" in skill or "规格已齐≠全量" in skill
-    assert "明示" in skill  # 用户明示一次做完豁免
+    assert "结构槽" in skill or "playbook_args" in skill
     assert "设计波" in skill or "案卷说明" in skill
+    assert "真两段" in skill
+    assert "假两段" in skill
+    assert "同一 task" in skill
+    assert "桌面壳" in skill or "多进程" in skill
+    assert "playbook=none" in skill
+    assert "可跑闭环" in skill or "核心运行时" in skill
+    assert "根委派切片诚实" in skill or "嵌套扇出" in skill
 
 def test_catalog_preamble_matches_core_consult_intensity():
     """核与能力目录 preamble 共用同一句按场面强度。"""

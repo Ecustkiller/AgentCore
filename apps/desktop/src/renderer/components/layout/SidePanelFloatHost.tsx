@@ -16,8 +16,9 @@ import {
 import { useCallback, useMemo } from "react";
 
 /**
- * Page-level float layer bound to {@link useSidePanelStore} (UX §十).
- * Mount beside SidePanel, outside `open` — closing the dock must not unmount floats.
+ * Shell-level float layer bound to {@link useSidePanelStore} (UX §十).
+ * Mounted from {@link AppShell} (not conversation pages), outside `open` —
+ * closing the dock must not unmount floats; desktop bridge shares shell lifetime.
  * Desktop Electron → 真 OS 窗（{@link DesktopFloatWindowBridge}）；Web → 应用内 B 浮窗.
  */
 export function SidePanelFloatHost() {

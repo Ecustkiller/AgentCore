@@ -10,6 +10,7 @@ import {
   applyFloatProjectionSnapshot,
   buildFloatProjectionSnapshot,
   isFloatSyncMessage,
+  isFloatSyncSupported,
   openFloatSyncChannel,
   postFloatSync,
 } from "@/lib/floatWindowSync";
@@ -179,13 +180,18 @@ export function closeOsFloatWindowsForTabs(tabIds: readonly string[]): void {
   }
 }
 
-/** Consumer: float window page hydrates stores from main-window snapshots. */
+/**
+ * Consumer: float window page hydrates stores from main-window snapshots.
+ * @returns whether BroadcastChannel sync is available (capability; not a wait).
+ */
 export function useFloatWindowProjectionConsumer(
   conversationId: string,
   tabId: string,
-): void {
+): boolean {
+  const syncAvailable = isFloatSyncSupported();
+
   useEffect(() => {
-    if (!conversationId || !tabId) return;
+    if (!syncAvailable || !conversationId || !tabId) return;
     const channel = openFloatSyncChannel();
     if (!channel) return;
 
@@ -215,5 +221,7 @@ export function useFloatWindowProjectionConsumer(
       channel.onmessage = null;
       channel.close();
     };
-  }, [conversationId, tabId]);
+  }, [conversationId, tabId, syncAvailable]);
+
+  return syncAvailable;
 }

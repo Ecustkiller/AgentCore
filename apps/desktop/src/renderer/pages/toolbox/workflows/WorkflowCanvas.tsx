@@ -10,6 +10,7 @@ import {
   type WorkflowDefinition,
   createAgentStepNode,
   createHumanGateNode,
+  isWorkflowConnectionAllowed,
 } from "@/services/workflowDefinition";
 import {
   Background,
@@ -157,8 +158,29 @@ function WorkflowCanvasInner({
     [onChange],
   );
 
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => {
+      const from = connection.source;
+      const to = connection.target;
+      if (!from || !to) return false;
+      return isWorkflowConnectionAllowed(definition, from, to);
+    },
+    [definition],
+  );
+
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (
+        !connection.source ||
+        !connection.target ||
+        !isWorkflowConnectionAllowed(
+          definition,
+          connection.source,
+          connection.target,
+        )
+      ) {
+        return;
+      }
       setEdges((eds) => {
         const next = addEdge(
           {
@@ -178,7 +200,7 @@ function WorkflowCanvasInner({
         return next;
       });
     },
-    [defMap, emit, setEdges, setNodes],
+    [defMap, definition, emit, setEdges, setNodes],
   );
 
   const addNode = (kind: "agent_step" | "human_gate") => {
@@ -264,6 +286,7 @@ function WorkflowCanvasInner({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
           onSelectionChange={({ nodes: sel }) => {

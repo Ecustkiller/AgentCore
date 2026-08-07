@@ -120,13 +120,22 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 自检：换个主题，形状还一模一样吗？还一样就错了。\
 「调研+写码+点评+合成一篇」这类跨域合成流水线 → 常见 1～2 人，勿默认每人一种专长；\
 档 3 成篇满编的【产出→独立审校】是质量缝、不算凑工种；普通构想 / 档 1–2【不】默认学术审校。\
-「先设计再实现」小CRUD/骨架 → 默认 1 人两段（先交设计验收再实现）；设计很重或要点名评审再升 2 人串。\
-前端 UI / 壳层强耦合改造（同系统多面：状态条、通知、空状态面板等）→ 同默认：1 人两段，\
+「先设计再实现」小CRUD/骨架 → 默认 **真两段** / **1 人两段**（结构拆开：wave1 设计/API +\
+`form=files`+`checkpoint_after` 或交回后再实现；或同批 ≥2 tasks + `depends_on` / \
+同人 `continue_from_run_id`）；**【假两段·禁】**同一 task 写「先交设计再实现」。\
+设计很重或要点名评审再升 2 人串。\
+前端 UI / 壳层强耦合改造（同系统多面：状态条、通知、空状态面板等）→ 同默认真两段，\
 或 wave1 只交设计 / API 契约（`form=files`），实现波再落盘 + `playbook_args.verify` / task 写清怎么验；\
 **禁止**第一棒塞「设计 + 双子系统 + 壳层 + build」。\
-**多屏 UI / 单文件大原型** → 默认 MVP 或同上 1 人两段 / wave1=`form=files`；\
-**禁止**首 grant「完整可玩 N 屏」（用户明示一次做完除外）；**规格已齐 ≠ 全量**。\
+**桌面壳 / 多进程绿场**：`playbook=none` 合理，禁首 grant「设计 + 主进程/渲染/核心运行时 + 可跑闭环」一口吞；\
+先 DESIGN 或更瘦壳，闭环另棒（或单 lead 嵌套再拆）。\
+**多屏 UI / 单文件大原型** → 默认 MVP 或同上真两段 / wave1=`form=files`；\
+**禁止**首 grant「完整可玩 N 屏」（桌上档 / `playbook_args` 等结构槽已点「一次做完」除外；禁扫长文）；\
+**规格已齐 ≠ 全量**。\
 单页 / 落地页仍可一人整页（`build_website`）；勿误伤 light+finalize 小活 / 短文落盘。
+
+**【根委派切片诚实】**方向已定、本轮边界未钉 → 立刻派但须结构表达切片：根多节点 / 具名 playbook / deliverable 钉边界，\
+**或**单 lead 嵌套扇出（路径 B）；禁无边界整锅。
 
 形状词汇（按任务结构选、可组合）：
 - 并列对象分组：每对象一员（重档升 lead 内拆维度），尾挂横向汇总；\
@@ -149,6 +158,18 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 组合：多对象+成篇 → 分组×流水线；构建+并行模块 → 契约共享面+独立验证；\
 审查要改 → 接有界返工环；结论真冲突 → 局部辩论；跨域合成一篇 → 少派串起，勿按工种堆人。
 
+【跨项目并行指挥】用户要多个项目同时推进时（例：「三项目并行…」）——整条用法：
+1. **指认**：`list_projects` / `resolve_project`；唯一命中→用返回 id；0 命中或多名→\
+`ask_user`（kind=choice；选项区分 name/mode 等）；**禁止**静默猜「最近」。
+2. **派工**：同一次 `delegate` 扇出多 task，各填 `target_folder_id=`已解析 id →\
+该 worker **换桌+记忆跟桌**；**不改**本会话 `folder_id`。协作图不改（并行支线即表达）。
+3. **默认桌**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名 → 会被拒**（禁默写 scratch）。
+4. **先建后派**：云→`create_project`（同指挥面）；本地→`ask_user` `action=register_local_project`\
+（登记留本对话）；**勿**用 `open_local_project` 冒充先建后干（那是打开当出生=**新会话**）。\
+与 midtask「打开/登记/bind」分流一致。
+5. **混部**：local+cloud 可同指挥面；多 local 同回合可并行（每目标一桌）；\
+单线无法接通异根时诚实失败该线，勿因一失败拒整锅、勿硬装全成。
+
 三档：默认中档。轻=保底（构建类轻档也要「实现+独立验证」双人）；\
 重=任务规模大或用户点名才上。控税靠选档与按缝拆人，不靠默认单干、也不按工种凑满。
 
@@ -157,8 +178,8 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 【自由组队】可不声明 playbook，直接手写 `tasks`。\
 建站 / 工具台 / 绿场软件【推荐】具名 playbook（见 consult `build_website` / \
 `build_app`；控制台 dense 用 `build_website` + `style=toolshed`）；手写 / `none` 不再硬拒，勿在此复读全文。\
-讨论 / Agent / 自动化助手 ≠ 绿场 SPA：首派轻切片或手写 1～2 人再 `replan`；\
-仅真 SPA / 用户明示完整可跑才满档 `build_app`（五阶段不可跳仅约束进入后）。\
+方向已定但本轮边界未钉 ≠ 绿场 SPA 满档：首派轻切片 / 手写少节点 / 单 lead 嵌套再拆，再 `replan`；\
+仅真 SPA / 用户明示完整可跑 / 点选模块流水线才满档 `build_app`（五阶段不可跳仅约束进入后）。\
 【结局分层】先定桌上结果再组队：「多角 / 多 Agent」≠成文产线。\
 【讨论类开场·ask_user】探讨/讨论/想做/类似于类开口、桌上结果未定 → \
 默认推荐「先多角度摸清、对话对齐」；次选「写成文档并保存」；可选「先聊暂不派队」。\
@@ -250,7 +271,8 @@ task 正文只给【被审材料的文件路径或引用】+【本官审查焦�
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
 决定，见下「广度调查」。）
 - 嵌套委派（lead 下放）——每个 worker **默认**就能再带一层子队（深度上限内自动开、无需声明）；\
-拆活先想【粒度】，同一摊与本层平铺【二选一】、勿双开：\
+与根侧多节点 DAG **等价合法**（根委派切片诚实路径 B）：根可只派单 lead 交成果级目标·约束·验收，\
+由 lead 嵌套扇出补编制。拆活先想【粒度】，同一摊与本层平铺【二选一】、勿双开：\
 ①【交 lead】区够大、够自成一摊、细拆尚不清 → 派少数大模块 lead（典型：前端 / 后端 / 数据各一），\
 交成果级目标，细拆由 lead 上手后自判（它在子队上同样能 replan / 收口）。\
 **【排他】**交了 lead 的那摊，禁止再平铺该 lead 职责范围内的同名 / 同职责角色——勿「组长嵌套 \
@@ -376,7 +398,11 @@ grep 全仓清单写进 task——细节靠 worker 自探。\
 摘要而非 N 份原文，你据此综述成给用户的答复。一起弄懂/多路摸清（未明示成文）【宜】\
 `parallel_brief`（少扇出，常 2 angles；【禁止】一上来 `research_report` 三路成文）；\
 「论文/开源」当资料源 ≠ 明示成文。这类纯对齐通常【不必成篇】，方向笔记可落盘供日后升档。\
-它和下一条「成文专线」的差别只在末端有没有成篇产物；讨论类开场默认先摸清对齐（见上【讨论类开场】）。
+【派摸底·验收】含 `playbook=none` 手写：task/deliverable【必须】带目标·手段·收工——\
+目标写清「了解到什么算够」（工程：定位/技术栈/进度）；手段优先入口文件（Git 可用看进度），\
+够用即停；收工须 handoff 短摘要，【禁止】为更全无限深挖；只读/零写入禁改业务代码。\
+`parallel_brief` 已内嵌同口径。它和下一条「成文专线」的差别只在末端有没有成篇产物；\
+讨论类开场默认先摸清对齐（见上【讨论类开场】）。
 - 成文专线，让结构跟着证据走：用户**明示**或点选要报告/论文/落盘成文后，按【成文后梯度】选档——\
 档 1/2【勿】套 `research_report` 满编；普通构想【不】默认学术审校。仅**档 3**（正式长文/\
 多章可提交/点名审校）用 `research_report`（或手写同构满编）：并行调研角各以 \
@@ -606,9 +632,9 @@ MVP → `build_app` + `intensity=lean`；模块流水线 → `build_app` + `inte
 
 【开工卡取消】team_preview 拒开工后工具结果已引导：宜先短问哪里要调，再行动；勿未问清重派同一套 / 再开辩。
 【软件 / 应用】交付形态不清时短问或写明默认；**禁止**静默默认单 HTML。
-【绿场 / Agent 分流】真 SPA / 用户明示完整可跑 / 点选「模块流水线一次做完」→ \
-可 `playbook="build_app"` + 对应 `intensity`；讨论做一个 Agent、自动化助手、先聊概念 → \
-首派轻切片（宜 `intensity=lean`）或手写 1～2 人再 `replan`，\
+【绿场切片】真 SPA / 用户明示完整可跑 / 点选「模块流水线一次做完」→ \
+可 `playbook="build_app"` + 对应 `intensity`；方向已定但本轮边界未钉 → \
+首派轻切片（宜 `intensity=lean` / 手写少节点）或单 lead 嵌套再拆，再 `replan`，\
 **禁止**首派五波脚手架 / `intensity=full` 当讨论落点；局部单功能手写或 `build_feature`。
 </ask_user_kickoff>"""
 
@@ -670,10 +696,14 @@ _ASK_USER_MIDTASK = """\
 「已知、按用户决定未处理」。
 两种卡都是主拍板（每任务恰好一张，见主拍板纪律）——用了就不再叠另一张专用卡或提纲把关。
 
-【区外目录授权 / 打开项目 / 本机执行】按意图分流，勿混用：
+【区外目录授权 / 打开项目 / 登记项目 / 本机执行】按意图分流，勿混用：
 - 用户要把本机目录当【本地项目】打开（仓库/工程）→ `action=open_local_project`
   （新建会话挂 Folder；禁止改写本会话 folder_id；禁止用 bind 冒充）。
-- 本会话仅需本机执行环境（裸聊 scratch）→ `action=bind_local_folder`（≠打开项目）。
+- 同指挥面【登记】本机目录为项目（先建后派、留本对话）→ `action=register_local_project`
+  （禁新会话；禁止改写本会话 folder_id；与 open 分流，勿用 open 冒充登记）。
+  多项目并行派工整条（列/解析→`target_folder_id`→先建云/本地）→
+  `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
+- 本会话仅需本机执行环境（裸聊 scratch）→ `action=bind_local_folder`（≠打开/登记项目）。
 - 已绑定本地工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
   勿再弹 `open_local_project`；仅用户要换目录/换工程根才 `open_local_project` / ask。
 - 「优化/改项目」≠默认开项目卡：仅当用户要打开本机工程根 → `open_local_project`；\
@@ -733,10 +763,13 @@ _VERIFY_AND_FIX = """\
 
 _LONG_FORM_WRITING = """\
 <long_form_writing>
-## 长文骨架填空（Artifact-first）
+## 长文落盘（Artifact-first）
 
-用户要产出超长单文档（报告、论文、综述、长 README、多章节手册、出行/行程成文）时：【禁止】整篇一次 \
-file_write；一律先短骨架再按节填空。短笔记 / 小配置 / 小片段仍可一次写完。
+用户要产出超长单文档（报告、论文、综述、长 README、多章节手册、出行/行程成文）时：\
+【主路径】一次 `file_write` 写入**完整正文**（含超长、无省略标记）；成篇后修订**只用** \
+`str_replace`。`file_append` **仅**骨架填空路径（本 run 已成篇 prose 则禁 append）。\
+【可选】防截断 / 超大风险时，可先短骨架再按节 `file_append` / `str_replace` 填空——非硬教条。\
+短笔记 / 小配置 / 小片段仍一次写完。
 
 【与多角协作划界】先看结局：一起弄懂/多路摸清（未明示成文）→ `parallel_brief`（默认；少扇出），\
 **不要**本 skill 单写手、也**不要**直接套 `research_report`。仅提「论文/开源」当资料 ≠ 成文。\
@@ -764,9 +797,10 @@ code_execute + reportlab 当主路径做 PDF（确定性 `md_to_pdf` 才是主�
 1. 确认大纲（章节标题 + 每节要点）：用户明文要求把关 → 委派计划给提纲步设 \
 `checkpoint_after=true`（或 `research_report` 成文专线），走结构化 durable 卡，勿纯聊天代卡；\
 自主确认场景（用户未明文 / 任务轻量）才可对话式或自确认，必要时 ask_user。
-2. 单写手：先用一次短 file_write 落【主文件】骨架（标题/锚点，或 `<!-- FILL:… -->` / \
-`<!-- OUTLINE -->` / 章节小标题占位）；再按节用 **str_replace 或 file_append** 填空。\
-【禁止】无骨架整篇一次写入。【禁止】对 Markdown / FILL / 大纲占位调用 `write_section`\
+2. 单写手：【主路径】一次 `file_write` 落【主文件】**完整正文**；成篇后只用 `str_replace` \
+修订。【可选】防截断/超大：先短骨架（标题/锚点，或 `<!-- FILL:… -->` / \
+`<!-- OUTLINE -->` / 章节小标题占位），再按节用 **str_replace 或 file_append** 填空。\
+【禁止】对 Markdown / FILL / 大纲占位调用 `write_section`\
 （那是建站 HTML 的 `<!-- SECTION:sN -->` 分区工具，与成篇 `.md` 无关）。
 3. 多 worker 并行拆章（论文/综述/长报告允许）：各章可写到临时路径以免并发冲突，\
 但【必须】在同一次 delegate 里写死——① 最终主文件同一路径（各章 brief + \
@@ -775,13 +809,14 @@ code_execute + reportlab 当主路径做 PDF（确定性 `md_to_pdf` 才是主�
 （与上条「单写手分波」二选一形状：要么一人分波串写，要么多章并行+合并——勿混成并行同角色抢锁。）
 4. 写/append 成功回执即 artifact manifest（path / bytes / lines / hash / 标题树 / 末段预览）\
 ——以此验真，禁止为质检再 code_execute / file_read 回读正文；下一步仅 str_replace \
-（局部改）或同轮 handoff，不要 file_write 覆盖全文。用户要 PDF 时在 handoff 前对主文件调 \
-`md_to_pdf`。
+（局部改）或同轮 handoff；成篇后勿再用 file_append，整文件覆盖须完整正文。用户要 PDF \
+时在 handoff 前对主文件调 `md_to_pdf`。
 
 纪律：
-- 追加前确认 path 与主文件一致；每节 content 自行带好段落分隔（如 leading `\\n\\n`）。
+- 骨架路径追加前确认 path 与主文件一致；每节 content 自行带好段落分隔（如 leading `\\n\\n`）。
 - 单节仍过长时，再拆成多轮 file_append / str_replace，不要硬塞万行单次调用。
-- 连续写失败（含参数不是合法 JSON）→ 强制改分段写，勿停用写文件，勿教用户修引号转义。
+- 连续写失败（含参数不是合法 JSON）→ 完整一次写入若仍失败则改可选骨架分段，勿停用写文件，\
+勿教用户修引号转义。
 - 本门禁仅约束「一篇成文」交付；调研透镜多报告、代码多文件、建站 site/ 多产物【不】套用。
 </long_form_writing>"""
 
@@ -953,8 +988,9 @@ _BUILD_APP = f"""\
 <build_app>
 【准入】仅真 SPA / 用户明示「完整可跑 / 从 0 搭完整项目」/ 点选「模块流水线一次做完」\
 → 可进本 playbook；满档须 `intensity=full` + 显式 `modules`。\
-讨论做一个 Agent、自动化助手、先聊概念/形态 → **禁止**首派本形状满编（五波脚手架不当讨论落点）；\
-改首派轻切片（宜 `intensity=lean`）或手写 1～2 人，再 `replan`。局部单功能 → 手写或可选 `build_feature`。
+方向已定但本轮边界未钉（讨论形态 / 先 MVP）→ **禁止**首派本形状满编（五波脚手架不当讨论落点）；\
+改首派轻切片（宜 `intensity=lean`）、手写少节点，或单 lead 嵌套再拆，再 `replan`。\
+局部单功能 → 手写或可选 `build_feature`。
 
 【交付档 → intensity】结构槽（非意图分类器）：`intensity=lean|full`。\
 MVP 主流程可点 → `intensity=lean`；模块流水线一次做完 → `intensity=full` + **显式** `modules`；\
@@ -1013,6 +1049,8 @@ _WORK_DISCIPLINE = """\
 【写 task】只写目标·边界·验收；细则进 deliverable，全队共识进 team_brief；用户已拍板项写入固定\
 「已确认约束：…」块（有 ask 槽位则写入、无卡亦须枚举；约束块优先于附件旧表）；执行层细节留给工人。\
 方案层岔路预留 escalate，勿在 task 里替工人选定架构。
+
+【小步增量】用户偏好小步 / 增量交付时，首派更要切片，**禁止**一口吞绿场。
 </work_discipline>"""
 
 
@@ -1124,7 +1162,10 @@ force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 P
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="team_orchestration_advanced",
-        summary="形状词汇组队 / 多 worker 流水线 / 契约 / 嵌套委派 / 协调墙的进阶用法",
+        summary=(
+            "形状词汇组队 / 跨项目并行派工（list·resolve→target_folder_id）/ "
+            "多 worker 流水线 / 契约 / 嵌套委派 / 协调墙的进阶用法"
+        ),
         body=_TEAM_ORCHESTRATION_ADVANCED,
     ),
     SystemSkill(
@@ -1173,7 +1214,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="build_app",
         summary=(
             "绿场 SPA【推荐】build_app（手写/none 不硬拒）：交付档→intensity(lean|full)；"
-            "MVP→lean；模块流水线→full+modules；讨论/Agent 禁首派满编"
+            "MVP→lean；模块流水线→full+modules；边界未钉禁首派满编"
         ),
         body=_BUILD_APP,
         requires_tools=("delegate",),
@@ -1241,8 +1282,9 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="long_form_writing",
         summary=(
-            "超长单文档骨架填空：大纲优先；禁止整篇一次写；单写手超长跨 delegate 分波；"
-            "成篇未写完用 continue_from；MD 禁 write_section；可并行拆章但验收须单主文件+合并责任"
+            "超长单文档成篇：主路径一次完整 file_write；可选骨架填空；成篇后 str_replace；"
+            "单写手超长跨 delegate 分波；成篇未写完用 continue_from；MD 禁 write_section；"
+            "可并行拆章但验收须单主文件+合并责任"
         ),
         body=_LONG_FORM_WRITING,
         requires_tools=("delegate",),
@@ -1316,7 +1358,7 @@ def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str
         "playbook_args.topic=简述, intensity=solo|standard)，不必先查；"
         "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
         "绿场【推荐】build_app（手写/none 不硬拒）：MVP→lean；模块流水线→full+显式 modules；"
-        "讨论/做 Agent/自动化助手 → 首派轻切片或手写 1～2 人再 replan，禁首派五波脚手架；"
+        "边界未钉 → 首派轻切片/少节点或单 lead 嵌套再拆，再 replan，禁首派五波脚手架；"
         "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature）：",
     ]
     lines.extend(f"- {skill.name}：{skill.summary}" for skill in skills)

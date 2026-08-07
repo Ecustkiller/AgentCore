@@ -12,7 +12,7 @@ export type StopUiPhase = "idle" | "stopping";
 export const STOPPING_LABEL = "停止中…";
 export const STOP_BUTTON_LABEL = "停止";
 export const STOP_FAILED_MESSAGE = "停止请求失败，引擎可能仍在运行";
-/** 用户主动停止后的终态文案（团队 summarize / 状态条；气泡不再出 chip）。 */
+/** 用户主动停止后的终态文案（团队 summarize / TeamView / 状态条；聊天气泡不占位）。 */
 export const STOPPED_LABEL = "已停止";
 
 /**

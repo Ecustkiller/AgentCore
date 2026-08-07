@@ -39,7 +39,8 @@ async def reconcile_turn_cost_ledger(
     """Persist the turn's full ledger and return the authoritative per-run rows.
 
     Steps:
-    1. Drain pending ``cost_ledger_queue`` files (at-least-once call details).
+    1. Drain pending ``cost_ledger_outbox`` (shared DB; at-least-once call details)
+       — also awaits this process's in-flight enqueues and legacy disk leftovers.
     2. Upsert ``cost_events`` from all ``cost_calls`` for ``message_id``.
     3. ``record_runs`` any ``cost_runs`` whose ``run_id`` has no call details yet
        (vision / drain race) — DO NOTHING so metered runs stay call-authoritative.
@@ -51,9 +52,10 @@ async def reconcile_turn_cost_ledger(
     try:
         from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
 
-        queue = get_cost_ledger_queue()
-        if queue.running:
-            await queue.drain_once()
+        # Always drain shared pending before materialize — not gated on
+        # ``queue.running`` so finalize sees cross-worker outbox rows even if
+        # this process has not started its background loop (tests / edge).
+        await get_cost_ledger_queue().drain_once()
     except Exception:  # noqa: BLE001 — drain best-effort; materialize still runs
         logger.warning(
             "cost.ledger_drain_before_reconcile_failed",

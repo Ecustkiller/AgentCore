@@ -89,8 +89,8 @@ class AskUserTool:
     # Caller-supplied conversation-log access gate, captured for resume wire parity.
     conversation_history_access: bool = True
     # Advertise desktop-only ask_user option actions (open_local_project /
-    # bind_local_folder / grant_readonly_folder / grant_organize_folder) when the
-    # desktop client can fulfil them.
+    # register_local_project / bind_local_folder / grant_readonly_folder /
+    # grant_organize_folder) when the desktop client can fulfil them.
     advertise_bind_local_folder: bool = False
 
     @property
@@ -135,6 +135,7 @@ class AskUserTool:
                 "type": "string",
                 "enum": [
                     "open_local_project",
+                    "register_local_project",
                     "bind_local_folder",
                     "grant_readonly_folder",
                     "grant_organize_folder",
@@ -143,7 +144,9 @@ class AskUserTool:
                     "可选。按意图分流："
                     "open_local_project=打开本机文件夹为本地项目（新建会话挂 Folder，"
                     "空 subpath；不改本会话 folder_id）；"
-                    "bind_local_folder=本会话绑本机执行环境（裸聊 scratch，≠打开项目）；"
+                    "register_local_project=登记本机文件夹为本地项目并留在本对话"
+                    "（禁新会话；不改本会话 folder_id；建完可 resume 再派）；"
+                    "bind_local_folder=本会话绑本机执行环境（裸聊 scratch，≠打开/登记项目）；"
                     "grant_readonly_folder=（旧帧保留；【禁止】为只读新发——"
                     "只读改用工具 external_mount_readonly）；"
                     "grant_organize_folder=开整理授权（可移动/重命名/复制/删进回收站、仅本对话；"
@@ -168,14 +171,15 @@ class AskUserTool:
                 ),
             }
             questions_desc += (
-                " 打开本机目录当项目→open_local_project；本会话只要本机执行→"
-                "bind_local_folder；区外整理→grant_organize_folder；"
+                " 打开本机目录当项目（新会话）→open_local_project；"
+                "同指挥面登记本机项目（留本对话）→register_local_project；"
+                "本会话只要本机执行→bind_local_folder；区外整理→grant_organize_folder；"
                 "区外只读→工具 external_mount_readonly（【禁止】新发 grant_readonly_folder）；"
                 "点名桌面/下载/文档时带 well_known，已知子名带 target_name。"
             )
             tool_desc += (
-                " 桌面在线时可标 open_local_project / bind_local_folder / "
-                "grant_organize_folder；只读挂载用 external_mount_readonly 工具，"
+                " 桌面在线时可标 open_local_project / register_local_project / "
+                "bind_local_folder / grant_organize_folder；只读挂载用 external_mount_readonly 工具，"
                 "【禁止】为只读新发 grant_readonly_folder；"
                 "grant_* 可加 well_known / target_name。"
             )

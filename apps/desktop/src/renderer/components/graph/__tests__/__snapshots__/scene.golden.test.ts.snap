@@ -21,10 +21,6 @@ exports[`buildGraphScene · golden > continuation chain → top-level continuati
     "continuation:w1->w1_v2",
     "continuation:w1_v2->w1_v3",
     "dep:__input__->w1",
-    "dep:__input__->w1_v2",
-    "dep:__input__->w1_v3",
-    "dep:w1->captain",
-    "dep:w1_v2->captain",
     "dep:w1_v3->captain",
   ],
   "fold": {

@@ -13,14 +13,18 @@ via :func:`nano_to_yuan` (``nano / 1e9``, no FX).
 Pricing layers (call-level ``credential_source``):
 
 - User (BYOK): community estimate table → ``unpriced`` (never Flash/glm fallback)
-- Platform/vendor: curated ``_PRICING`` → community → glm-5.2 fallback + warning
+- Platform/vendor: curated ``_PRICING`` (exact, then date-stem of a dated sibling)
+  → community → glm-5.2 fallback + warning
 
 User path never falls back to the default tier — unknown → ``unpriced`` (0).
 Platform/vendor keep default-tier fallback + warning (quota must not go blank).
+Dated curated revisions log ``cost.pricing_prefix_match`` (match_kind=date_stem);
+wire ``pricing_source`` stays ``curated``.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
@@ -36,7 +40,14 @@ logger = get_logger(__name__)
 # user = BYOK; platform = operator main key; vendor = doubao/kimi/zhipu extras.
 CredentialSource = Literal["user", "platform", "vendor"]
 PricingSource = Literal["curated", "estimated", "unpriced"]
+# How a curated card was chosen (wire ``pricing_source`` stays ``curated``; this is
+# for logs / tests so exact vs dated-stem is observable without expanding the enum).
+CuratedMatchKind = Literal["exact", "date_stem"]
 _VENDOR_PREFIXES = frozenset({"doubao", "kimi", "zhipu"})
+
+# Trailing Volcengine / Anthropic-style date segment on model ids (…-260628 / …-20250514).
+# Month/day must be calendar-plausible so bare ``-123456`` tails do not become stems.
+_DATE_SUFFIX_RE = re.compile(r"^(?P<stem>.+)-(?P<ymd>\d{8}|\d{6})$")
 
 # 1 CNY expressed in nano-CNY. The ledger and API speak integer nano-CNY.
 NANO_PER_CNY = 1_000_000_000
@@ -44,8 +55,8 @@ NANO_PER_CNY = 1_000_000_000
 # 豆包 (Volcengine 方舟) routed model id — keyed WITH the ``doubao/`` prefix because
 # that is the exact string that reaches calculate_cost: the ProviderRouter only strips
 # the prefix when *calling* the vendor, so cost accounting still sees the original id.
-# TODO(Phase 2 定价表): match by vendor prefix so a new dated version (…-2606xx) keeps
-# its price instead of silently degrading to the default tier.
+# Dated revisions (…-2607xx) inherit this card via :func:`curated_pricing_for` stem
+# match — table keys stay exact ids (no separate family/stem rows).
 DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 
 # Qwen-VL-Max (通义千问视觉) — model id constant for vision reader config.
@@ -125,6 +136,78 @@ _DEFAULT_MODEL = PLATFORM_RELAY_GLM_52
 _PER_MILLION_TO_NANO = Decimal(1000)
 
 
+def _plausible_ymd(ymd: str) -> bool:
+    """True when ``ymd`` is 6/8 digits with month 01–12 and day 01–31."""
+    if len(ymd) == 6:
+        mm, dd = int(ymd[2:4]), int(ymd[4:6])
+    elif len(ymd) == 8:
+        mm, dd = int(ymd[4:6]), int(ymd[6:8])
+    else:
+        return False
+    return 1 <= mm <= 12 and 1 <= dd <= 31
+
+
+def _date_stem(model_id: str) -> str | None:
+    """Stem of ``model_id`` if it ends with a plausible ``-YYMMDD`` / ``-YYYYMMDD``."""
+    m = _DATE_SUFFIX_RE.match(model_id)
+    if m is None or not _plausible_ymd(m.group("ymd")):
+        return None
+    stem = m.group("stem")
+    return stem or None
+
+
+def _build_date_stem_index(
+    pricing: dict[str, dict[str, Decimal]],
+) -> dict[str, tuple[dict[str, Decimal], str]]:
+    """Map date-stripped stem → (card, canonical exact key).
+
+    Only curated keys that themselves carry a date suffix contribute. Ambiguous
+    stems (two dated keys, different cards) are omitted — refuse fake prices.
+    """
+    index: dict[str, tuple[dict[str, Decimal], str]] = {}
+    ambiguous: set[str] = set()
+    for key, card in pricing.items():
+        stem = _date_stem(key)
+        if stem is None:
+            continue
+        prior = index.get(stem)
+        if prior is not None and prior[0] != card:
+            ambiguous.add(stem)
+            continue
+        index[stem] = (card, key)
+    for stem in ambiguous:
+        index.pop(stem, None)
+    return index
+
+
+# Secondary index for dated revisions of curated ids (built once at import).
+_DATE_STEM_INDEX = _build_date_stem_index(_PRICING)
+
+
+def curated_pricing_for(
+    model: str,
+) -> tuple[dict[str, Decimal] | None, CuratedMatchKind | None, str | None]:
+    """Curated card lookup: exact id, then date-stem of a dated curated sibling.
+
+    Returns ``(card, match_kind, matched_key)``. No longest-family prefix — wrong
+    prices are worse than falling through to community / default tier.
+    """
+    key = (model or "").strip()
+    if not key:
+        return None, None, None
+    exact = _PRICING.get(key)
+    if exact is not None:
+        return exact, "exact", key
+    stem = _date_stem(key)
+    if stem is None:
+        return None, None, None
+    hit = _DATE_STEM_INDEX.get(stem)
+    if hit is None:
+        return None, None, None
+    card, matched_key = hit
+    return card, "date_stem", matched_key
+
+
 @dataclass(frozen=True)
 class Cost:
     """A run's (or turn's) cost in integer nano-CNY.
@@ -201,7 +284,7 @@ def resolve_price_card(
     """Resolve ``(card, pricing_source, used_flash_fallback)`` for one call.
 
     User: community → unpriced (never default-tier fallback).
-    Platform/vendor: curated → community → glm-5.2 fallback.
+    Platform/vendor: curated (exact, then date-stem) → community → glm-5.2 fallback.
     """
     if credential_source == "user":
         community = community_pricing_for(model)
@@ -209,8 +292,16 @@ def resolve_price_card(
             return community, "estimated", False
         return None, "unpriced", False
 
-    curated = _PRICING.get(model)
+    curated, match_kind, matched_key = curated_pricing_for(model)
     if curated is not None:
+        if match_kind == "date_stem":
+            # Keep ``pricing_source=curated`` on the wire; distinguish via log.
+            logger.info(
+                "cost.pricing_prefix_match",
+                model=model or "(unset)",
+                matched_key=matched_key,
+                match_kind=match_kind,
+            )
         return curated, "curated", False
     community = community_pricing_for(model)
     if community is not None:
@@ -231,8 +322,12 @@ def has_curated_pricing(model: str) -> bool:
     Platform catalog models MUST have one (成本配额与计费 §〇·六 F4): a default-tier
     ``cost.pricing_fallback`` on a platform-billed catalog row is a 漏配缺陷, not a
     graceful degrade. The catalog builder uses this to surface such misconfiguration.
+
+    Dated revisions that share a curated sibling's date-stem count as curated
+    (same card) so an id bump like ``…-260715`` is not flagged as 漏配.
     """
-    return (model or "").strip() in _PRICING
+    card, _kind, _matched = curated_pricing_for(model)
+    return card is not None
 
 
 def pricing_for_model(
@@ -279,6 +374,8 @@ def calculate_cost(
       the whole prompt is priced as a cache miss instead of vanishing.
     - **Fallback visibility** (platform/vendor only): an unknown/unset ``model``
       degrades to the glm-5.2 tier, logged as ``cost.pricing_fallback``.
+      Dated revisions of a curated sibling (``…-YYMMDD``) keep that sibling's
+      card and log ``cost.pricing_prefix_match`` instead of falling back.
     """
     source = resolve_credential_source(
         credential_source=credential_source,

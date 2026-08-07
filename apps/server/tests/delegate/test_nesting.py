@@ -416,6 +416,7 @@ async def test_worker_captain_rejects_sub_fanout_over_cap():
         base_tool_context=ctx(),
         captain_run_id="cap_1",
         depth=1,
+        folder_id="test_birth",
     )
     tasks = [{"role": f"子{i}", "task": f"任务{i}"} for i in range(5)]
     result = await t.execute({"tasks": tasks}, ctx())
@@ -435,6 +436,7 @@ async def test_worker_captain_rejects_cumulative_sub_fanout():
         base_tool_context=ctx(),
         captain_run_id="cap_1",
         depth=1,
+        folder_id="test_birth",
     )
     t._sub_workers_spawned = 4
     result = await t.execute({"tasks": [{"role": "子5", "task": "收尾"}]}, ctx())

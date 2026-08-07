@@ -267,6 +267,32 @@ describe("StatusStrip · team_synthesis_preview draft", () => {
     // 空窗用 execution 完成态补全 blurbs（不依赖过期 preview 的 1/2 workers）。
     expect(screen.getByText(/研究员：调研完成/)).toBeTruthy();
     expect(screen.getByText(/撰写员：撰写完成/)).toBeTruthy();
+    // 系统进度文禁止挂成「CEO 小结」（空窗误挂会闪 + 与上方列表重复）。
+    expect(screen.queryByTestId("team-synthesis-ceo-note")).toBeNull();
+  });
+
+  it("汇总空窗：仅 workers=[] 的真实草稿才挂 CEO 小结", () => {
+    useExecutionStore.getState().startExecution(plan, MID);
+    useExecutionStore.getState().setTeamSynthesisPreview(
+      {
+        execution_id: "exec-1",
+        completed: 2,
+        total: 2,
+        headline: "合成草稿更新 · 已完成 2/2",
+        text: "五路结论已齐，下面按风险优先级出终稿。",
+        workers: [],
+        in_progress: true,
+      },
+      MID,
+    );
+
+    renderStrip(projectExecution(plan, bothWorkersDone, "running"));
+
+    expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
+    expect(screen.getByTestId("team-synthesis-ceo-note")).toBeTruthy();
+    expect(screen.getByTestId("team-synthesis-draft").textContent).toContain(
+      "五路结论已齐",
+    );
   });
 
   it("汇总空窗：无 preview 事件时仍显示确定性进度（不注入 CEO 气泡）", () => {

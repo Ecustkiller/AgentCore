@@ -30,7 +30,7 @@ from agentcore.runtime.pipeline.settle import (
     salvage_pipeline_exception,
     settle_successful_turn,
 )
-from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset  # noqa: F401 — test seam
+from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — test seam
 from agentcore.runtime.runs import RunKind, RunSpec, build_captain_executor
 from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver

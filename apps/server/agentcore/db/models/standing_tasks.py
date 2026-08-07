@@ -2,7 +2,9 @@
 
 ``standing_tasks`` is the user's always-on brief; ``standing_task_runs``
 are the personal inbox rows (success / failure / awaiting_user). Distinct from
-``handoff_jobs`` (local→云交接). Pause truth stays in ``paused_turns``.
+``handoff_jobs`` (local→云交接) — no shared job table/state machine. Shared
+runtime shell with handoff/workflows is only ``spawn_background``; credentials
+align with workflows, not handoff. Pause truth stays in ``paused_turns``.
 
 Trigger is mutually exclusive: ``schedule`` | ``webhook`` (no dual cron+webhook).
 """

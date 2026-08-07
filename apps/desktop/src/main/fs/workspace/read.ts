@@ -373,9 +373,10 @@ export async function opListTree(
 }
 
 // index_files：把绑定根（或其 `base` 子树）扁平索引成相对文件路径列表（忽略目录剪枝 + cap），
-// 返回 {paths, truncated}。服务端 LocalWorkspace.index_files 经此打通，使 @ 提及与 worker
-// 工作区清单在本地根上与云端 ServerWorkspace.index_files 行为一致。`order` 选排序
-// （"recent" 按 mtime 倒序供清单预算，否则字母序）。
+// 返回 {entries, paths, truncated}。`entries` 带本机指纹（mtime_ms / size_bytes，stat 非 hash），
+// 供服务端跳过未变文件整文过桥；`paths` = entries.path 列表，兼容旧读法。
+// 服务端 LocalWorkspace.index_files 经此打通，使 @ 提及与 worker 工作区清单在本地根上与云端
+// ServerWorkspace.index_files 行为一致。`order` 选排序（"recent" 按 mtime 倒序供清单预算，否则字母序）。
 //
 // `base` = 工作区子路径（工作区对称化 D1a）：把索引限定到该子树，并把子路径前缀**拼回**各结果
 // （故返回的是 root-相对路径），服务端 `LocalWorkspace._out` 再剥成工作区相对——与 list/grep
@@ -395,12 +396,22 @@ export async function opIndexFiles(
     if (baseReal.code === "out_of_root") {
       return opErr("OutsideWorkspace", base);
     }
-    return opOk({ paths: [], truncated: false });
+    return opOk({ entries: [], paths: [], truncated: false });
   }
   const { files, truncated } = await collectWorkspaceFiles(
     baseReal.path,
     order,
+    { fingerprint: true },
   );
   const prefix = sub ? `${sub}/` : "";
-  return opOk({ paths: files.map((f) => prefix + f.relPath), truncated });
+  const entries = files.map((f) => ({
+    path: prefix + f.relPath,
+    mtime_ms: Math.trunc(f.mtimeMs),
+    size_bytes: f.sizeBytes,
+  }));
+  return opOk({
+    entries,
+    paths: entries.map((e) => e.path),
+    truncated,
+  });
 }

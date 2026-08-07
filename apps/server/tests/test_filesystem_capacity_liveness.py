@@ -118,11 +118,39 @@ async def test_file_read_office_extract_budget_is_contract(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_file_read_channel_liveness_maps_meta(tmp_path: Path):
+    """Single-op settle timeout: liveness meta only — no family sticky retire."""
+
     class _HangBackend(ServerWorkspace):
         async def read_lines(  # noqa: ARG002
             self, path: str, *, offset: int = 1, limit: int | None = None
         ):
             raise WorkspaceIOError("local workspace op 'read_lines' timed out（活性挂起）")
+
+    result = await FileReadTool().execute(
+        {"path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
+    )
+    assert result.success is False
+    assert result.contract_failure is False
+    assert result.metadata.get("liveness_timeout") is True
+    assert result.metadata.get("timeout_layer") == "channel_op"
+    assert result.metadata.get("workspace_channel_dead") is not True
+    assert not result.metadata.get("retire_tools")
+    assert "活性挂起" in (result.error or "")
+    assert "停用全部本地文件" not in (result.error or "")
+    assert "禁止再调用文件工具" not in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
+    """Sticky channel-dead detail still stamps family retire + workspace_channel_dead."""
+
+    class _HangBackend(ServerWorkspace):
+        async def read_lines(  # noqa: ARG002
+            self, path: str, *, offset: int = 1, limit: int | None = None
+        ):
+            raise WorkspaceIOError(
+                "local workspace op 'read_lines' timed out; channel dead（活性挂起）"
+            )
 
     result = await FileReadTool().execute(
         {"path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
@@ -149,10 +177,10 @@ async def test_file_read_channel_liveness_maps_meta(tmp_path: Path):
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
 )
-async def test_filesystem_tools_channel_liveness_stamps_retire(
+async def test_filesystem_tools_single_timeout_no_family_retire(
     tmp_path: Path, tool, args, method: str
 ):
-    """B2: list / write / mkdir / grep stamp the same channel-dead retire meta as read."""
+    """Plain settle timeout must not stamp channel-dead family retire meta."""
 
     class _HangBackend(ServerWorkspace):
         async def list(self, *a, **k):  # noqa: ANN002, ANN003
@@ -172,6 +200,53 @@ async def test_filesystem_tools_channel_liveness_stamps_retire(
     )
     assert result.success is False
     assert result.metadata.get("liveness_timeout") is True
+    assert result.metadata.get("timeout_layer") == "channel_op"
+    assert result.metadata.get("workspace_channel_dead") is not True
+    assert not result.metadata.get("retire_tools")
+    assert "停用全部本地文件" not in (result.error or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "args", "method"),
+    [
+        (FileListTool(), {"directory": "."}, "list"),
+        (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
+        (MkdirTool(), {"path": "d"}, "mkdir"),
+        (GrepTool(), {"pattern": "x"}, "grep"),
+    ],
+)
+async def test_filesystem_tools_channel_dead_stamps_retire(
+    tmp_path: Path, tool, args, method: str
+):
+    """B2: list / write / mkdir / grep stamp channel-dead retire meta on sticky-dead."""
+
+    class _HangBackend(ServerWorkspace):
+        async def list(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(
+                f"local workspace op '{method}' timed out; channel dead（活性挂起）"
+            )
+
+        async def write(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(
+                f"local workspace op '{method}' timed out; channel dead（活性挂起）"
+            )
+
+        async def mkdir(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(
+                f"local workspace op '{method}' timed out; channel dead（活性挂起）"
+            )
+
+        async def grep(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(
+                f"local workspace op '{method}' timed out; channel dead（活性挂起）"
+            )
+
+    result = await tool.execute(
+        args, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
+    )
+    assert result.success is False
+    assert result.metadata.get("liveness_timeout") is True
     assert result.metadata.get("workspace_channel_dead") is True
     retire = result.metadata.get("retire_tools") or []
     for name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS:
@@ -182,12 +257,35 @@ async def test_filesystem_tools_channel_liveness_stamps_retire(
 
 
 @pytest.mark.asyncio
-async def test_file_write_preread_channel_dead_does_not_pretend_success(tmp_path: Path):
-    """Pre-read liveness must surface channel-dead; must not swallow into write success."""
+async def test_file_write_preread_timeout_does_not_pretend_success(tmp_path: Path):
+    """Pre-read settle timeout surfaces as failure; must not swallow into write success."""
 
     class _HangBackend(ServerWorkspace):
         async def read(self, path: str) -> str:  # noqa: ARG002
             raise WorkspaceIOError("local workspace op 'read' timed out（活性挂起）")
+
+        async def write(self, *a, **k):  # noqa: ANN002, ANN003
+            raise AssertionError("write must not be called after timed-out pre-read")
+
+    result = await FileWriteTool().execute(
+        {"path": "a.txt", "content": "x"},
+        _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox())),
+    )
+    assert result.success is False
+    assert result.metadata.get("liveness_timeout") is True
+    assert result.metadata.get("workspace_channel_dead") is not True
+    assert "活性挂起" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_file_write_preread_channel_dead_does_not_pretend_success(tmp_path: Path):
+    """Pre-read sticky-dead must surface channel-dead; must not swallow into write success."""
+
+    class _HangBackend(ServerWorkspace):
+        async def read(self, path: str) -> str:  # noqa: ARG002
+            raise WorkspaceIOError(
+                "local workspace op 'read' timed out; channel dead（活性挂起）"
+            )
 
         async def write(self, *a, **k):  # noqa: ANN002, ANN003
             raise AssertionError("write must not be called after channel-dead pre-read")

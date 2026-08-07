@@ -2,8 +2,9 @@
 
 Prices one proxied LLM call into a ``CallCost`` detail row (with optional run /
 persona attribution from sidecar headers), then enqueues onto the shared ledger
-outbox. Drain inserts ``cost_calls`` and materializes ``cost_events`` by run_id
-(as-built: 成本配额 §三). Drain / lifespan live on ``CostLedgerQueue``.
+outbox (Postgres ``cost_ledger_outbox``). Drain inserts ``cost_calls`` and
+materializes ``cost_events`` by run_id (as-built: 成本配额 §三). Drain / lifespan
+live on ``CostLedgerQueue``.
 """
 
 from __future__ import annotations

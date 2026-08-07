@@ -324,7 +324,9 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
 # call→result correlation): pure, unit-testable. Nodes with downstream dependents
 # **require** a minimum-quality handoff
 # (executor injects one correction shot; still missing → synthesize_debrief with ``degraded``);
-# leaf nodes (no dependents) may finish without handoff and degrade to ``None``.
+# leaf nodes (no dependents) may finish without handoff when the deliverable is short and
+# tool-free; after substantial work (tools / longer body) they share the same补要 / degraded
+# path so CEO / ``delivery_status`` can see incomplete reports.
 #
 # The tool name is the literal ``"handoff"`` (= ``HANDOFF_TOOL_NAME``); kept inline here to keep
 # this serialization module dependency-light, exactly as ``escalations_from_transcript`` keeps

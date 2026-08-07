@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 开工卡可操作面：delegate / debate 均两键（授权开工·开赛 / 取消）；
+ * 开工卡可操作面：delegate / debate 均两键，底栏左次右主（取消 / 授权开工·开赛）；
  * continue + 非空备注 = 嘱咐注入；debate 无「调整」。
  */
 
@@ -103,13 +103,18 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.getByText("分工预览")).toBeTruthy();
   });
 
-  it("仅两按钮：授权并开工 + 取消；无逐次审批 / 调整", () => {
+  it("仅两按钮：左取消 + 右授权并开工；无逐次审批 / 调整 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();
     expect(screen.getByText("预计 1 人开工")).toBeTruthy();
     expect(screen.getByText("分工预览")).toBeTruthy();
-    expect(screen.getByText("授权并开工")).toBeTruthy();
-    expect(screen.getByText("取消")).toBeTruthy();
+    const cancel = screen.getByRole("button", { name: "取消" });
+    const primary = screen.getByRole("button", { name: "授权并开工" });
+    expect(
+      cancel.compareDocumentPosition(primary) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByText("停止")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.getByText("将授权的执行能力")).toBeTruthy();
@@ -382,12 +387,17 @@ describe("ResumePrompt · team_preview debate", () => {
     ];
   });
 
-  it("仅两按钮：授权开赛 + 取消；无调整 / 逐次审批", () => {
+  it("仅两按钮：左取消 + 右授权开赛；无调整 / 逐次审批 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开赛")).toBeNull();
     expect(screen.getByText("预计 2 方开赛")).toBeTruthy();
-    expect(screen.getByText("授权开赛")).toBeTruthy();
-    expect(screen.getByText("取消")).toBeTruthy();
+    const cancel = screen.getByRole("button", { name: "取消" });
+    const primary = screen.getByRole("button", { name: "授权开赛" });
+    expect(
+      cancel.compareDocumentPosition(primary) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByText("停止")).toBeNull();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByPlaceholderText(/开赛嘱咐/)).toBeTruthy();

@@ -69,6 +69,7 @@ async def test_checkpoint_after_skipped_when_gate_off():
         registry=registry,
         checkpoint_timeout_seconds=5.0,
         checkpoint_enabled=False,
+        folder_id="test_birth",
     )
     result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
     assert "S1OUT" in result.output

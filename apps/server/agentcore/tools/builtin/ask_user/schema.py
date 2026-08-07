@@ -13,6 +13,15 @@ _MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
 _MAX_OPTION_DETAIL = 120  # 单个选项的权衡说明上限（一行内）
 _MAX_TARGET_NAME = 120  # grant_* target_name 截断上限
 _WELL_KNOWN_DIRS = frozenset({"desktop", "downloads", "documents"})
+_ALLOWED_OPTION_ACTIONS = frozenset(
+    {
+        "open_local_project",
+        "register_local_project",
+        "bind_local_folder",
+        "grant_readonly_folder",
+        "grant_organize_folder",
+    }
+)
 _MAX_ASSUMPTIONS = 10
 
 # Presentation metadata belongs in ``recommended``, not the answer-valued label.
@@ -135,8 +144,9 @@ def normalize_options(
     A bare ``"Postgres"`` becomes ``{"label": "Postgres"}``; an object may add a one-line
     ``detail`` (the trade-off shown under the label), ``recommended`` (the asker's
     advised option — advisory only, never a pre-selection), and ``action`` (a desktop
-    client action such as ``open_local_project`` / ``bind_local_folder`` — unknown values
-    drop so a hallucinated action never reaches the wire). For ``grant_*`` actions only,
+    client action such as ``open_local_project`` / ``register_local_project`` /
+    ``bind_local_folder`` — unknown values drop so a hallucinated action never reaches
+    the wire). For ``grant_*`` actions only,
     ``well_known`` (``desktop`` / ``downloads`` / ``documents``) and ``target_name``
     (basename fuzzy token; path separators rejected; truncated ≤120) pass through.
     Empty-label entries drop, and only the FIRST
@@ -162,12 +172,7 @@ def normalize_options(
                 opt["recommended"] = True
                 recommended_taken = True
             action = str(it.get("action") or "").strip()
-            if action in (
-                "open_local_project",
-                "bind_local_folder",
-                "grant_readonly_folder",
-                "grant_organize_folder",
-            ):
+            if action in _ALLOWED_OPTION_ACTIONS:
                 opt["action"] = action
             # grant_* hints for desktop one-click / resolve-then-grant (drop otherwise).
             if action in ("grant_readonly_folder", "grant_organize_folder"):
@@ -252,9 +257,33 @@ def normalize_questions(
         if kind == "choice":
             options = normalize_options(it.get("options"), max_options=max_options)
             multiple = bool(it.get("multiple") or False)
+            default = str(it.get("default") or "").strip()
+            # Models sometimes put a desktop action on the question. Promote only
+            # onto the intended choice — never every option (a sibling "skip /
+            # 口头汇报" must not inherit register/open/bind).
+            q_action = str(it.get("action") or "").strip()
+            if q_action in _ALLOWED_OPTION_ACTIONS:
+                targets: list[dict[str, Any]] = []
+                if default:
+                    targets = [
+                        opt
+                        for opt in options
+                        if opt.get("label") == default and "action" not in opt
+                    ]
+                if not targets:
+                    targets = [
+                        opt
+                        for opt in options
+                        if opt.get("recommended") and "action" not in opt
+                    ]
+                if not targets and len(options) == 1 and "action" not in options[0]:
+                    targets = [options[0]]
+                for opt in targets:
+                    opt["action"] = q_action
         else:
             options = []
             multiple = False
+            default = ""
         out.append(
             {
                 "id": f"q{i}",
@@ -262,7 +291,7 @@ def normalize_questions(
                 "kind": kind,
                 "options": options,
                 "multiple": multiple,
-                "default": str(it.get("default") or "").strip(),
+                "default": default,
             }
         )
     return out

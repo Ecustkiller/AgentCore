@@ -524,6 +524,16 @@ async def _drive_body(
         seed_completed=seed_completed,
         seed_notes=seed_notes,
     )
+    # 跨项目 · 多 local 认领簿（C0 允许多根；仅登记，不拒第二本地根）。
+    if getattr(tool, "_local_root_claims", None) is None:
+        from agentcore.runtime.delegate.target_desktop import LocalRootClaimBook
+
+        tool._local_root_claims = LocalRootClaimBook()
+    claims = tool._local_root_claims
+    backend = getattr(getattr(tool, "_base_tool_context", None), "backend", None)
+    if backend is not None and claims is not None:
+        await claims.seed_from_backend(backend)
+
     worker_gate = resolve_worker_gate(tool)
     executor = build_drive_executor(
         tool,

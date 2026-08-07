@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -77,6 +78,70 @@ _INSECURE_SECRETS = {
 }
 
 
+def _configured_api_worker_count() -> int:
+    """Best-effort configured uvicorn/gunicorn worker count from env.
+
+    Our entrypoint always runs a single process; operators sometimes still set
+    ``WEB_CONCURRENCY`` / ``UVICORN_WORKERS`` / ``AGENTCORE_API_WORKERS`` when
+    wrapping the image. Default 1 when unset or unparseable.
+    """
+    for key in ("AGENTCORE_API_WORKERS", "WEB_CONCURRENCY", "UVICORN_WORKERS"):
+        raw = (os.environ.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            n = int(raw)
+        except ValueError:
+            continue
+        if n >= 1:
+            return n
+    return 1
+
+
+def _validate_single_process_assumptions() -> None:
+    """Fail-loud when process-local assumptions would silently break.
+
+    Mid-term G5 guardrail (成本配额 · 账本 DB outbox / 限流):
+    - Cost ledger uses shared Postgres ``cost_ledger_outbox`` (every worker may
+      self-drain with ``FOR UPDATE SKIP LOCKED``).
+    - Multi-worker API is allowed only when ``RATE_LIMIT_BACKEND=redis``.
+    - ``RATE_LIMIT_BACKEND=memory`` + multi-worker is still refused (process-local
+      limiters under-throttle).
+
+    This does **not** claim full multi-host readiness: approval gates, IM, steer,
+    and journal settlement may still assume a single process.
+
+    DEBUG keeps local iteration runnable: multi-worker + memory is a loud warning
+    only. Non-DEBUG refuses boot for memory + multi-worker.
+    """
+    workers = _configured_api_worker_count()
+    if workers <= 1:
+        return
+
+    backend = settings.rate_limit_backend
+    if backend == "redis":
+        # Shared ledger outbox + shared rate limits → multi-worker API OK.
+        return
+
+    detail = (
+        f"configured API workers={workers} (AGENTCORE_API_WORKERS / "
+        f"WEB_CONCURRENCY / UVICORN_WORKERS) but RATE_LIMIT_BACKEND="
+        f"{backend!r} is process-local (set RATE_LIMIT_BACKEND=redis before "
+        f"scaling). Cost ledger outbox is already shared Postgres; rate-limit "
+        f"memory alone still blocks multi-worker."
+    )
+    event = "security.rate_limit_memory_multi_worker"
+    if settings.debug:
+        get_logger(__name__).warning(
+            event,
+            workers=workers,
+            rate_limit_backend=backend,
+            detail=detail,
+        )
+        return
+    raise RuntimeError(detail)
+
+
 def _validate_jwt_secret() -> None:
     """Refuse known placeholder JWT secrets unless local-dev explicitly opts in.
 
@@ -124,6 +189,7 @@ def _validate_production_security() -> None:
     """Fail fast on insecure config. JWT secret always checked; other guards skip in debug."""
     _validate_jwt_secret()
     _validate_cors_credentials()
+    _validate_single_process_assumptions()
     if settings.debug:
         return
     # byok makes a per-user API key mandatory, so a usable master key is required
@@ -325,10 +391,9 @@ async def lifespan(app: FastAPI):
 
         default_browser_takeover_service()
 
-    # Cost ledger durable drain (as-built: 成本配额 §三): proxy spend always
-    # enqueues; turn/handoff enqueue on sync write failure. Consumer writes
-    # cost_events on the telemetry pool. Single-process only — multi-worker
-    # needs Redis/DB outbox.
+    # Cost ledger durable drain (as-built: 成本配额 §三): shared Postgres
+    # ``cost_ledger_outbox``; each process self-drains (SKIP LOCKED). Multi-worker
+    # API also needs ``RATE_LIMIT_BACKEND=redis`` (startup guardrail).
     from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
 
     cost_ledger_queue = get_cost_ledger_queue()

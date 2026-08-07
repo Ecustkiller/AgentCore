@@ -79,25 +79,10 @@ import type {
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance/projectedTurn";
+import { FINISH_TO_STATUS } from "@agentcore/protocol-fold-kit";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 export type { ProjectedTurn };
-
-const FINISH_TO_STATUS: Record<string, TurnStatus> = {
-  end_turn: "completed",
-  max_rounds: "completed",
-  degraded: "completed",
-  unproductive: "completed",
-  error: "failed",
-  cancelled: "cancelled",
-  // Crash / lease-sweeper salvage (流式回复持久化 P4): incomplete → cancelled-class.
-  interrupted: "cancelled",
-  // 挂起即收口 (②): a turn finalized AT a durable checkpoint ends with finish_reason=paused
-  // — a terminal message_end whose turn is NOT done. Stay paused (gate interactions[] already
-  // parked; this only adds finishReason + cost) so the resume card renders, not a completed
-  // bubble. Without this it'd fall to "completed" below.
-  paused: "paused",
-};
 
 /** Registry-driven message-lane marker fold for `*_required` / question_posted. */
 function foldLaneFromInteractionEvent(

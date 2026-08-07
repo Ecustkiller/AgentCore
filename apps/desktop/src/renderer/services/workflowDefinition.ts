@@ -43,7 +43,9 @@ export interface WorkflowDefinitionIssue {
     | "cycle"
     | "too_many_steps"
     | "duplicate_id"
-    | "invalid_kind";
+    | "invalid_kind"
+    | "gate_to_gate"
+    | "gate_without_agent_pred";
   message: string;
   nodeId?: string;
 }
@@ -98,6 +100,62 @@ function hasCycle(ids: string[], edges: WorkflowDefEdge[]): boolean {
     return false;
   };
   return ids.some((id) => dfs(id));
+}
+
+function kindById(def: WorkflowDefinition): Map<string, WorkflowNodeKind> {
+  const m = new Map<string, WorkflowNodeKind>();
+  for (const n of def.nodes) m.set(n.id, n.kind);
+  return m;
+}
+
+/** Reachable agent_step ancestors walking back through human_gate chains. */
+function agentAncestorsThroughGates(
+  gateId: string,
+  edges: WorkflowDefEdge[],
+  kinds: Map<string, WorkflowNodeKind>,
+): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const stack = [gateId];
+  const visiting = new Set<string>();
+  while (stack.length > 0) {
+    const nid = stack.pop()!;
+    if (visiting.has(nid)) continue;
+    visiting.add(nid);
+    for (const e of edges) {
+      if (e.to !== nid) continue;
+      const srcKind = kinds.get(e.from);
+      if (srcKind === "agent_step") {
+        if (!seen.has(e.from)) {
+          seen.add(e.from);
+          found.push(e.from);
+        }
+      } else if (srcKind === "human_gate" && !visiting.has(e.from)) {
+        stack.push(e.from);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Whether a new canvas connection is allowed (aligns with server edge policy /
+ * tasks_to_workflow_definition normal form).
+ */
+export function isWorkflowConnectionAllowed(
+  def: WorkflowDefinition,
+  fromId: string,
+  toId: string,
+): boolean {
+  const kinds = kindById(def);
+  const srcKind = kinds.get(fromId);
+  const dstKind = kinds.get(toId);
+  if (!srcKind || !dstKind) return false;
+  if (srcKind === "human_gate" && dstKind === "human_gate") return false;
+  if (srcKind === "human_gate" && dstKind === "agent_step") {
+    return agentAncestorsThroughGates(fromId, def.edges, kinds).length > 0;
+  }
+  return true;
 }
 
 /** Structural validation for save / run. */
@@ -159,11 +217,32 @@ export function validateWorkflowDefinition(
     });
   }
 
+  const kinds = kindById(def);
   for (const e of def.edges) {
     if (!seen.has(e.from) || !seen.has(e.to)) {
       issues.push({
         code: "unknown_edge_endpoint",
         message: `连线端点不存在：${e.from} → ${e.to}`,
+      });
+      continue;
+    }
+    const srcKind = kinds.get(e.from);
+    const dstKind = kinds.get(e.to);
+    if (srcKind === "human_gate" && dstKind === "human_gate") {
+      issues.push({
+        code: "gate_to_gate",
+        message: `禁止等人关卡连到等人关卡：${e.from} → ${e.to}`,
+        nodeId: e.from,
+      });
+    } else if (
+      srcKind === "human_gate" &&
+      dstKind === "agent_step" &&
+      agentAncestorsThroughGates(e.from, def.edges, kinds).length === 0
+    ) {
+      issues.push({
+        code: "gate_without_agent_pred",
+        message: `等人关卡 ${e.from} 无队员步骤前驱，不能连到 ${e.to}`,
+        nodeId: e.from,
       });
     }
   }

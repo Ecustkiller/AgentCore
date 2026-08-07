@@ -15,21 +15,30 @@ import {
   shouldSkipWorkspaceEntry,
 } from "./workspaceIgnore";
 
+/** 扁平收集结果：相对路径 + 可选本机指纹（stat，非全文 hash）。 */
+export type CollectedWorkspaceFile = FsFileRef & {
+  mtimeMs: number;
+  sizeBytes: number;
+};
+
 /**
  * 工作区扁平文件索引（共享走法）：广度优先逐层展开 `real` 根，受深度（`LIST_FILES_MAX_DEPTH`）
  * 与总数（`LIST_FILES_CAP`）双重限制；跳过依赖/构建/VCS 目录，不跟随符号链接（避免环路与越界）。
  * `truncated` 表示命中 cap 截断。@ 提及检索（`listFiles`）与 worker 工作区清单（`opIndexFiles`）
  * 共用同一套走法，使本地根与云端 `ServerWorkspace.index_files` 呈现一致的扁平视图。
  *
- * `order`：`"path"`（默认）= 字母序、**不 stat**（@ 提及/选择器走法，延迟敏感）；`"recent"` =
- * 按 mtime 倒序（每文件多一次 `stat`），供 worker 清单在大树里把预算花在最可能相关的新文件上。
+ * `order`：`"path"`（默认）= 字母序；`"recent"` = 按 mtime 倒序（需 stat）。
+ * `fingerprint`：为 true 时对本机文件 `stat` 填 `mtimeMs`/`sizeBytes`（供服务端跳过未变文件）；
+ * @ 提及走法默认 false、且 path 序下不 stat（延迟敏感）。`recent` 本身要 mtime，等同会 stat。
  */
 export async function collectWorkspaceFiles(
   real: string,
   order: "path" | "recent" = "path",
-): Promise<{ files: FsFileRef[]; truncated: boolean }> {
+  opts?: { fingerprint?: boolean },
+): Promise<{ files: CollectedWorkspaceFile[]; truncated: boolean }> {
   const recent = order === "recent";
-  const collected: Array<{ ref: FsFileRef; mtimeMs: number }> = [];
+  const needStat = recent || opts?.fingerprint === true;
+  const collected: CollectedWorkspaceFile[] = [];
   let truncated = false;
   const stack: Array<{ abs: string; rel: string; depth: number }> = [
     { abs: real, rel: "", depth: 0 },
@@ -62,14 +71,22 @@ export async function collectWorkspaceFiles(
       } else if (d.isFile()) {
         if (shouldSkipWorkspaceEntry(d.name, false, cur.rel)) continue;
         let mtimeMs = 0;
-        if (recent) {
+        let sizeBytes = 0;
+        if (needStat) {
           try {
-            mtimeMs = (await fs.stat(join(cur.abs, d.name))).mtimeMs;
+            const st = await fs.stat(join(cur.abs, d.name));
+            mtimeMs = st.mtimeMs;
+            sizeBytes = st.size;
           } catch {
-            mtimeMs = 0; // unreadable stat → sinks to the bottom of the recent sort
+            // unreadable stat → zeros; recent sort sinks to the bottom
           }
         }
-        collected.push({ ref: { relPath: childRel, name: d.name }, mtimeMs });
+        collected.push({
+          relPath: childRel,
+          name: d.name,
+          mtimeMs,
+          sizeBytes,
+        });
         if (collected.length >= LIST_FILES_CAP) {
           truncated = true;
           break;
@@ -80,9 +97,9 @@ export async function collectWorkspaceFiles(
   if (recent) {
     collected.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
   } else {
-    collected.sort((a, b) => a.ref.relPath.localeCompare(b.ref.relPath, "zh"));
+    collected.sort((a, b) => a.relPath.localeCompare(b.relPath, "zh"));
   }
-  return { files: collected.map((c) => c.ref), truncated };
+  return { files: collected, truncated };
 }
 
 export async function listDir(
@@ -142,7 +159,10 @@ export async function listFiles(
   if (!real.ok) return realFail(real);
   try {
     const { files } = await collectWorkspaceFiles(real.path);
-    return { ok: true, data: files };
+    return {
+      ok: true,
+      data: files.map(({ relPath, name }) => ({ relPath, name })),
+    };
   } catch (e) {
     return fromErrno(e);
   }

@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
-import logging
 import math
 import time
 from dataclasses import dataclass
 
-from agentcore.config import settings
+from agentcore.cache.redis import redis_client
+from agentcore.core.logging import get_logger
 from agentcore.core.rate_limit import RateLimitDecision
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# Re-export so callers / tests keep ``from …redis_rate_limit import redis_client``.
+__all__ = [
+    "RedisFixedWindowRateLimiter",
+    "RedisSlidingWindowRateLimiter",
+    "redis_client",
+]
+
+# Process-local tally of request-level fail-opens (ops alert / dashboards).
+# Not a new interception layer — just a countable field on the existing warning.
+_fail_open_count = 0
 
 
 def _warn_fail_open(prefix: str, exc: Exception) -> None:
@@ -20,9 +31,17 @@ def _warn_fail_open(prefix: str, exc: Exception) -> None:
     endpoint into a hard outage. This only relaxes the *rate* defense (requests per
     window); the *total-usage* cap lives in the DB-backed quota defense, which never
     routes through Redis and is unaffected (成本配额与计费.md §一). Logged at WARNING
-    with a stable key so ops can alert on a degraded limiter.
+    with a stable key so ops can alert on a degraded limiter; ``count`` is the
+    cumulative fail-opens in this process since boot.
     """
-    logger.warning("rate_limit.redis_fail_open prefix=%s error=%r", prefix, exc)
+    global _fail_open_count
+    _fail_open_count += 1
+    logger.warning(
+        "rate_limit.redis_fail_open",
+        prefix=prefix,
+        error=str(exc),
+        count=_fail_open_count,
+    )
 
 
 @dataclass(frozen=True)
@@ -31,14 +50,6 @@ class _RedisWindow:
     prefix: str
     max_requests: int
     window_seconds: float
-
-
-def redis_client():
-    import redis
-
-    client = redis.Redis.from_url(settings.redis_url, decode_responses=False)
-    client.ping()
-    return client
 
 
 class RedisFixedWindowRateLimiter:

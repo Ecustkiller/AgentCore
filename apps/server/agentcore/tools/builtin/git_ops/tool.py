@@ -24,7 +24,7 @@ from .policy import (
     git_call_is_write,
 )
 from .results import _error
-from .spawn import _ensure_git_repo, _resolve_git_cwd
+from .spawn import _NO_CHANNEL_MSG, _ensure_git_repo, git_transport_scope
 
 
 class GitTool:
@@ -82,118 +82,118 @@ class GitTool:
         ):
             return _error("Git 写入操作需通过 delegate 委派给 Worker 执行。", start)
 
-        cwd = _resolve_git_cwd(context)
-        if cwd is None:
-            return _error("当前工作区模式不支持 Git 操作（无本地根目录）", start)
+        with git_transport_scope(context) as cwd:
+            if cwd is None:
+                return _error(_NO_CHANNEL_MSG, start)
 
-        if subcommand == "init_baseline":
-            return await cmds_local.cmd_init_baseline(cwd, start, meta=base_meta)
+            if subcommand == "init_baseline":
+                return await cmds_local.cmd_init_baseline(cwd, start, meta=base_meta)
 
-        is_write = git_call_is_write(arguments)
-        # Patchable via spawn._run_git (ensure_repo uses spawn_mod._run_git)
-        repo_err = await _ensure_git_repo(cwd, start, write=is_write)
-        if repo_err is not None:
-            if repo_err.metadata is None:
-                repo_err.metadata = {}
-            repo_err.metadata = {**base_meta, **(repo_err.metadata or {})}
-            return repo_err
+            is_write = git_call_is_write(arguments)
+            # Patchable via spawn._run_git (ensure_repo uses spawn_mod._run_git)
+            repo_err = await _ensure_git_repo(cwd, start, write=is_write)
+            if repo_err is not None:
+                if repo_err.metadata is None:
+                    repo_err.metadata = {}
+                repo_err.metadata = {**base_meta, **(repo_err.metadata or {})}
+                return repo_err
 
-        paths = _normalize_paths(arguments.get("paths"))
+            paths = _normalize_paths(arguments.get("paths"))
 
-        if subcommand == "status":
-            include_untracked = bool(arguments.get("include_untracked", False))
-            return await cmds_read.cmd_status(
-                cwd, paths, start, include_untracked=include_untracked, meta=base_meta
-            )
-        if subcommand == "diff":
-            staged = bool(arguments.get("staged", False))
-            return await cmds_read.cmd_diff(
-                cwd, paths, staged=staged, start=start, meta=base_meta
-            )
-        if subcommand == "log":
-            max_count = int(arguments.get("max_count", 20))
-            max_count = max(1, min(max_count, 100))
-            oneline = bool(arguments.get("oneline", True))
-            return await cmds_read.cmd_log(
-                cwd,
-                paths,
-                max_count=max_count,
-                oneline=oneline,
-                start=start,
-                meta=base_meta,
-            )
-        if subcommand == "fetch":
-            return await cmds_read.cmd_fetch(
-                cwd, arguments, start=start, meta=base_meta, context=context
-            )
-        if subcommand == "show":
-            object_ref = str(arguments.get("object") or "HEAD").strip() or "HEAD"
-            return await cmds_read.cmd_show(
-                cwd, object_ref, paths, start=start, meta=base_meta
-            )
-        if subcommand == "blame":
-            return await cmds_read.cmd_blame(cwd, paths, start=start, meta=base_meta)
-        if subcommand == "add":
-            return await cmds_local.cmd_add(cwd, paths, start, meta=base_meta)
-        if subcommand == "commit":
-            message = str(arguments.get("message", "")).strip()
-            return await cmds_local.cmd_commit(cwd, message, start, meta=base_meta)
-        if subcommand == "branch":
-            branch = str(arguments.get("branch", "")).strip()
-            return await cmds_local.cmd_branch(cwd, branch, start, meta=base_meta)
-        if subcommand == "checkout":
-            branch = str(arguments.get("branch", "")).strip()
-            create = bool(arguments.get("create", False))
-            return await cmds_local.cmd_checkout(
-                cwd, branch, create=create, start=start, meta=base_meta
-            )
-        if subcommand == "push":
-            return await cmds_remote.cmd_push(
-                cwd,
-                arguments,
-                start=start,
-                meta=base_meta,
-                context=context,
-            )
-        if subcommand == "pull":
-            return await cmds_remote.cmd_pull(
-                cwd,
-                arguments,
-                start=start,
-                meta=base_meta,
-                context=context,
-            )
-        if subcommand == "stash":
-            return await cmds_collab.cmd_stash(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "merge":
-            return await cmds_collab.cmd_merge(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "rebase":
-            return await cmds_collab.cmd_rebase(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "cherry-pick":
-            return await cmds_collab.cmd_cherry_pick(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "tag":
-            return await cmds_collab.cmd_tag(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "remote":
-            return await cmds_collab.cmd_remote(
-                cwd, arguments, start=start, meta=base_meta
-            )
-        if subcommand == "create_pr":
-            return await cmds_remote.cmd_create_pr(
-                cwd,
-                arguments,
-                start=start,
-                meta=base_meta,
-                context=context,
-            )
+            if subcommand == "status":
+                include_untracked = bool(arguments.get("include_untracked", False))
+                return await cmds_read.cmd_status(
+                    cwd, paths, start, include_untracked=include_untracked, meta=base_meta
+                )
+            if subcommand == "diff":
+                staged = bool(arguments.get("staged", False))
+                return await cmds_read.cmd_diff(
+                    cwd, paths, staged=staged, start=start, meta=base_meta
+                )
+            if subcommand == "log":
+                max_count = int(arguments.get("max_count", 20))
+                max_count = max(1, min(max_count, 100))
+                oneline = bool(arguments.get("oneline", True))
+                return await cmds_read.cmd_log(
+                    cwd,
+                    paths,
+                    max_count=max_count,
+                    oneline=oneline,
+                    start=start,
+                    meta=base_meta,
+                )
+            if subcommand == "fetch":
+                return await cmds_read.cmd_fetch(
+                    cwd, arguments, start=start, meta=base_meta, context=context
+                )
+            if subcommand == "show":
+                object_ref = str(arguments.get("object") or "HEAD").strip() or "HEAD"
+                return await cmds_read.cmd_show(
+                    cwd, object_ref, paths, start=start, meta=base_meta
+                )
+            if subcommand == "blame":
+                return await cmds_read.cmd_blame(cwd, paths, start=start, meta=base_meta)
+            if subcommand == "add":
+                return await cmds_local.cmd_add(cwd, paths, start, meta=base_meta)
+            if subcommand == "commit":
+                message = str(arguments.get("message", "")).strip()
+                return await cmds_local.cmd_commit(cwd, message, start, meta=base_meta)
+            if subcommand == "branch":
+                branch = str(arguments.get("branch", "")).strip()
+                return await cmds_local.cmd_branch(cwd, branch, start, meta=base_meta)
+            if subcommand == "checkout":
+                branch = str(arguments.get("branch", "")).strip()
+                create = bool(arguments.get("create", False))
+                return await cmds_local.cmd_checkout(
+                    cwd, branch, create=create, start=start, meta=base_meta
+                )
+            if subcommand == "push":
+                return await cmds_remote.cmd_push(
+                    cwd,
+                    arguments,
+                    start=start,
+                    meta=base_meta,
+                    context=context,
+                )
+            if subcommand == "pull":
+                return await cmds_remote.cmd_pull(
+                    cwd,
+                    arguments,
+                    start=start,
+                    meta=base_meta,
+                    context=context,
+                )
+            if subcommand == "stash":
+                return await cmds_collab.cmd_stash(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "merge":
+                return await cmds_collab.cmd_merge(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "rebase":
+                return await cmds_collab.cmd_rebase(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "cherry-pick":
+                return await cmds_collab.cmd_cherry_pick(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "tag":
+                return await cmds_collab.cmd_tag(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "remote":
+                return await cmds_collab.cmd_remote(
+                    cwd, arguments, start=start, meta=base_meta
+                )
+            if subcommand == "create_pr":
+                return await cmds_remote.cmd_create_pr(
+                    cwd,
+                    arguments,
+                    start=start,
+                    meta=base_meta,
+                    context=context,
+                )
 
-        return _error(f"子命令 '{subcommand}' 不在允许列表中", start)
+            return _error(f"子命令 '{subcommand}' 不在允许列表中", start)

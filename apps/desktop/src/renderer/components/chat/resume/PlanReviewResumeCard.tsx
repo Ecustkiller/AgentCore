@@ -8,7 +8,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import type { PendingResume } from "@/stores/pausedTurns";
 import { Check, GitBranch, Loader2, OctagonX, Pencil } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConclusionHero } from "./ConclusionHero";
 import { PlanReviewContextBand } from "./PlanReviewContextBand";
 import { useColdSubmit } from "./useColdSubmit";
@@ -16,6 +16,7 @@ import { useColdSubmit } from "./useColdSubmit";
 /** Cold-path plan_review resume card (拍板中心). */
 export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const { submitting, busy, send } = useColdSubmit(turn);
 
@@ -33,12 +34,16 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
   const reviewedRoles = turn.steps.map((s) => s.role).filter(Boolean);
   const rolesLabel =
     reviewedRoles.length > 0 ? `「${reviewedRoles.join("、")}」` : "这一步";
+  const hasDownstream = turn.pending.length > 0;
+  const title = hasDownstream
+    ? `${rolesLabel}已完成，是否放行下游？`
+    : `${rolesLabel}已完成`;
   const disclosureKey = turn.checkpointId;
   const gateHint = turn.ceoReview?.source === "llm";
 
-  const focusNote = () => {
-    queueMicrotask(() => noteRef.current?.focus());
-  };
+  useEffect(() => {
+    if (noteOpen) noteRef.current?.focus();
+  }, [noteOpen]);
 
   const continueBtn = (
     <Button
@@ -65,11 +70,9 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
               <GitBranch size={16} />
             </DecisionCardIcon>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-primary">
-                计划复核 · 等你确认
-              </p>
+              <p className="text-xs font-medium text-primary">计划复核</p>
               <p className="mt-0.5 text-sm font-semibold text-foreground">
-                {rolesLabel}已完成
+                {title}
               </p>
               {turn.ceoReview?.conclusion && (
                 <ConclusionHero text={turn.ceoReview.conclusion} />
@@ -83,52 +86,60 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
         </div>
 
         <div className="shrink-0 space-y-2 border-t border-border bg-card/95 px-3 py-3 backdrop-blur-sm">
-          <Textarea
-            ref={noteRef}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={busy}
-            rows={2}
-            placeholder="可选备注；调整时必填"
-            className="w-full border-border bg-card/70 focus:border-primary/60"
-            data-testid="plan-review-note"
-          />
-          <div className="flex flex-wrap items-center gap-1.5 pl-6">
-            <Button
-              variant="neutral"
-              icon={spinnerOr("adjust", <Pencil size={13} />)}
+          {noteOpen && (
+            <Textarea
+              ref={noteRef}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
               disabled={busy}
-              onClick={() => {
-                if (!note.trim()) {
-                  focusNote();
-                  return;
-                }
-                send("adjust", [], note.trim());
-              }}
-            >
-              调整
-            </Button>
+              rows={2}
+              placeholder="可选备注；调整时必填"
+              className="w-full border-border bg-card/70 focus:border-primary/60"
+              data-testid="plan-review-note"
+            />
+          )}
+          <div className="flex flex-wrap items-center gap-1.5">
             <Button
-              variant="danger"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
               icon={spinnerOr("stop", <OctagonX size={13} />)}
               disabled={busy}
               onClick={() => send("stop", [], note.trim())}
             >
               取消
             </Button>
-            <span className="ml-auto" />
-            {gateHint ? (
-              <SimpleTooltip label="继续后，把关要点将发给下游">
-                <span
-                  className="inline-flex"
-                  data-testid="plan-review-gate-notes-hint"
-                >
-                  {continueBtn}
-                </span>
-              </SimpleTooltip>
-            ) : (
-              continueBtn
-            )}
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <Button
+                variant="neutral"
+                icon={spinnerOr("adjust", <Pencil size={13} />)}
+                disabled={busy}
+                onClick={() => {
+                  if (!note.trim()) {
+                    if (noteOpen) {
+                      noteRef.current?.focus();
+                    } else {
+                      setNoteOpen(true);
+                    }
+                    return;
+                  }
+                  send("adjust", [], note.trim());
+                }}
+              >
+                调整
+              </Button>
+              {gateHint ? (
+                <SimpleTooltip label="继续后，把关要点将发给下游">
+                  <span
+                    className="inline-flex"
+                    data-testid="plan-review-gate-notes-hint"
+                  >
+                    {continueBtn}
+                  </span>
+                </SimpleTooltip>
+              ) : (
+                continueBtn
+              )}
+            </div>
           </div>
         </div>
       </div>

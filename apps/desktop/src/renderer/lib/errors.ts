@@ -207,7 +207,7 @@ export function resetSessionConnectivityFailures(): void {
 export const LLM_UNPRODUCTIVE_MESSAGE =
   "工具连续无有效进展或参数无效，请重试。";
 
-/** Empty cancelled (user Stop) — neutral「已停止」face; not a failure card. */
+/** Empty cancelled (user Stop) — synthetic code for fold/preview skips; chat timeline omits the face (P1). */
 export const TURN_CANCELLED_EMPTY_MESSAGE = "已停止";
 
 /**
@@ -251,7 +251,7 @@ export function visibleMessageText(msg: {
  * (`error` / `unproductive` / `cancelled` / `interrupted`), synthesize a minimal
  * card so the user still sees an explanation — same surface as a real
  * `message.error` card for true failures; ``cancelled`` keeps code
- * ``TURN_CANCELLED`` but UI must render a neutral「已停止」face.
+ * ``TURN_CANCELLED`` (chat timeline omits the face; team StatusStrip still labels).
  * Known ``LLM_RATE_LIMIT`` / ``LLM_KEY_INVALID`` keep upstream product copy
  * (auth face may align byok sentence).
  */
@@ -426,7 +426,10 @@ function resolveMessage(f: ErrorFacts): string {
     return f.serverMessage ?? "有待拍板的确认卡，先处理或停止当前任务";
   }
   if (f.code === "turn_in_progress") {
-    return f.serverMessage ?? "会话中有正在进行的回合，等它结束后再继续";
+    // Product copy wins over backend detail: cold resume 409 often means the
+    // prior turn is still in finally wrap-up (e.g. index flush), not a vague
+    // "another turn" — keep one honest zh line for RetryBanner / toast.
+    return "回合收尾尚未完成，请稍候或先显式停止后再试";
   }
   // A 402 LLM_KEY_REQUIRED is a deliberate BYOK refusal (no DeepSeek key yet);
   // surface the backend's actionable message (or a config hint), never a

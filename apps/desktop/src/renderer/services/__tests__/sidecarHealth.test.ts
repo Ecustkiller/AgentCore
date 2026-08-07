@@ -9,10 +9,13 @@ vi.mock("@/services/sidecarStatus", () => ({
 import type { SidecarTarget } from "@/services/sidecarRouting";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import {
+  BAD_HEALTH_TTL_MS,
+  BRIDGE_TOAST_COOLDOWN_MS,
   clearSidecarHealth,
   getSidecarHealth,
   markSidecarUnhealthy,
   probeSidecar,
+  takeCloudBridgeToastSlot,
 } from "../sidecarHealth";
 
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
@@ -32,11 +35,13 @@ beforeEach(() => {
   (globalThis as Record<string, unknown>).window = {
     sidecarApi: { probe: probeMock },
   };
+  vi.useRealTimers();
 });
 
 afterEach(() => {
   clearSidecarHealth();
   (globalThis as Record<string, unknown>).window = undefined;
+  vi.useRealTimers();
 });
 
 describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
@@ -86,7 +91,7 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     });
   });
 
-  it("已 bad 的根：再探活直接命中缓存（false、无诊断），不再拉起", async () => {
+  it("已 bad 的根：TTL 内命中缓存（false、无诊断），不再拉起", async () => {
     probeMock.mockRejectedValue(new Error("boom"));
     const t = target("r-bad3");
     await probeSidecar(t); // → bad，probe 调用一次
@@ -96,6 +101,27 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
       detail: null,
     });
     expect(probeMock).toHaveBeenCalledTimes(1); // 未重探
+  });
+
+  it("bad TTL 过期后允许再探", async () => {
+    vi.useFakeTimers();
+    probeMock.mockRejectedValue(new Error("boom"));
+    const t = target("r-ttl");
+    await probeSidecar(t);
+    expect(probeMock).toHaveBeenCalledTimes(1);
+    expect(getSidecarHealth(t)).toBe("bad");
+
+    vi.advanceTimersByTime(BAD_HEALTH_TTL_MS);
+    expect(getSidecarHealth(t)).toBe("unknown");
+
+    probeMock.mockResolvedValue(undefined);
+    await expect(probeSidecar(t)).resolves.toEqual({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    expect(probeMock).toHaveBeenCalledTimes(2);
+    expect(getSidecarHealth(t)).toBe("ok");
   });
 
   it("markSidecarUnhealthy：降级路径直接标 bad，后续探活命中缓存、不拉起", async () => {
@@ -135,5 +161,26 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     await probeSidecar(root);
     expect(getSidecarHealth(root)).toBe("ok");
     expect(getSidecarHealth(sub)).toBe("unknown"); // 独立 key（r-multi:: vs r-multi::pkg/app）
+  });
+});
+
+describe("sidecarHealth — 云端过桥 toast 节流", () => {
+  it("force 必占槽；同 key 冷却内非 force 被拒", () => {
+    expect(takeCloudBridgeToastSlot("k1", { force: true })).toBe(true);
+    expect(takeCloudBridgeToastSlot("k1")).toBe(false);
+    expect(takeCloudBridgeToastSlot("k2")).toBe(true);
+  });
+
+  it("冷却过后可再提示", () => {
+    vi.useFakeTimers();
+    expect(takeCloudBridgeToastSlot("cool")).toBe(true);
+    vi.advanceTimersByTime(BRIDGE_TOAST_COOLDOWN_MS);
+    expect(takeCloudBridgeToastSlot("cool")).toBe(true);
+  });
+
+  it("clearSidecarHealth 重置节流", () => {
+    expect(takeCloudBridgeToastSlot("clr")).toBe(true);
+    clearSidecarHealth();
+    expect(takeCloudBridgeToastSlot("clr")).toBe(true);
   });
 });

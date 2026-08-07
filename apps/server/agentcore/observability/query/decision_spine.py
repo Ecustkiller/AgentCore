@@ -8,6 +8,12 @@ Summary truth = persisted ``turn_metrics`` (or export ``turn_metrics.jsonl``).
 Cost truth = ``cost_events`` by ``trace_id`` (turn_metrics has no cost columns).
 Drift L1 = JSONL-internal ``collab_drift``; Drift L2 = turn_metrics ⋈ JSONL
 close/recompute — never silently pick one side.
+
+Token 口径（复盘必读）：
+- ``llm.input_tokens`` / ``llm.output_tokens`` = 本 trace JSONL 全部 ``llm.call`` 合计
+  （含 pause 前段 / team_preview 前）。
+- ``tail`` / ``turn_metrics`` tokens = 收口折账；``kind=resume`` 时通常只有 resume
+  段 usage（不含 pause 前 captain），与 ``llm`` 合计可能不一致——属两口径，非漂移必修。
 """
 
 from __future__ import annotations
@@ -226,6 +232,8 @@ def _llm_summary(log_events: list[dict[str, Any]]) -> dict[str, Any]:
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cost_nano": cost_nano,
+        # 与 turn_metrics/tail 区分：此处为全 trace ``llm.call`` 合计（含 pause 前）。
+        "token_scope": "full_trace",
     }
 
 
@@ -253,6 +261,12 @@ def _tail_from_close(close: dict[str, Any] | None) -> dict[str, Any]:
         "input_tokens": close.get("input_tokens"),
         "output_tokens": close.get("output_tokens"),
         "reply_preview": close.get("reply_preview"),
+        # jsonl close：turn_complete 常带 tokens；resume_complete 通常不带 → 勿当全 trace。
+        "token_scope": (
+            "settlement_segment"
+            if close.get("event") == "chat.resume_complete"
+            else "settlement"
+        ),
     }
     for col in COLLAB_FIELD_MAP:
         if col in close:
@@ -272,6 +286,11 @@ def _tail_from_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         tail["kind"] = metrics["kind"]
     if "turn_id" in metrics:
         tail["turn_id"] = metrics["turn_id"]
+    # resume 收口折账 ≠ 全 trace llm 合计（pause 前段不在本段 usage）。
+    if metrics.get("kind") == "resume":
+        tail["token_scope"] = "settlement_segment"
+    else:
+        tail["token_scope"] = "settlement"
     return tail
 
 
@@ -429,7 +448,7 @@ def build_decision_spine(
             "source": "chat.turn_start",
             "timestamp": start.get("timestamp", ""),
             "preview": start.get("preview", ""),
-            **_pick(start, ("chars", "history", "location")),
+            **_pick(start, ("chars", "history", "location", "via")),
         }
 
     if turn_metrics is not None:
@@ -463,6 +482,16 @@ def build_decision_spine(
         "drift_l2": drift_l2,
         "turn_metrics_joined": turn_metrics is not None,
         "cost_joined": cost_events is not None,
+        # 复盘用：两口径说明（非 L2 漂移字段）。
+        "token_accounting": {
+            "llm": "full_trace_llm_call_sum",
+            "tail": "turn_metrics_or_jsonl_close_settlement",
+            "resume_note": (
+                "kind=resume / chat.resume_complete：tail·metrics 为收口折账"
+                "（通常不含 pause 前 / team_preview 前段）；"
+                "llm 为同 trace 全部 llm.call 合计"
+            ),
+        },
     }
 
     return {
@@ -523,6 +552,10 @@ def format_decision_spine(spine: dict[str, Any]) -> str:
     ts = str(head.get("timestamp") or "")[:19]
     lines.append(f"  Head  {ts}  \"{preview}\"")
     extras = []
+    if head.get("via") is not None:
+        extras.append(f"via={head['via']}")
+    if head.get("location") is not None:
+        extras.append(f"location={head['location']}")
     if head.get("history") is not None:
         extras.append(f"history={head['history']}")
     if head.get("chars") is not None:
@@ -550,10 +583,12 @@ def format_decision_spine(spine: dict[str, Any]) -> str:
     model_bits = ", ".join(
         f"{m['model']}×{m['calls']}" for m in (llm.get("models") or [])
     )
+    llm_scope = llm.get("token_scope") or "full_trace"
     lines.append(
         f"  LLM  calls={llm.get('calls', 0)} failed={llm.get('failed', 0)}"
         + (f"  [{model_bits}]" if model_bits else "")
         + f"  tok_in={llm.get('input_tokens', 0)} tok_out={llm.get('output_tokens', 0)}"
+        + f"  (scope={llm_scope})"
     )
 
     tail = spine.get("tail") or {}
@@ -561,10 +596,17 @@ def format_decision_spine(spine: dict[str, Any]) -> str:
         f"source={tail.get('source')}",
         f"finish={tail.get('finish_reason')}",
         f"status={tail.get('status')}" if "status" in tail else None,
+        f"kind={tail.get('kind')}" if "kind" in tail else None,
         f"delegated={tail.get('delegated')}" if "delegated" in tail else None,
         f"workers={tail.get('workers')}" if "workers" in tail else None,
         f"rounds={tail.get('rounds')}" if "rounds" in tail else None,
         f"dur_ms={tail.get('duration_ms')}" if "duration_ms" in tail else None,
+        (
+            f"tok_in={tail.get('input_tokens')} tok_out={tail.get('output_tokens')}"
+            if "input_tokens" in tail or "output_tokens" in tail
+            else None
+        ),
+        f"token_scope={tail.get('token_scope')}" if tail.get("token_scope") else None,
     ]
     collab = []
     for col in COLLAB_FIELD_MAP:
@@ -575,6 +617,33 @@ def format_decision_spine(spine: dict[str, Any]) -> str:
         lines.append("         collab: " + " · ".join(collab))
     if tail.get("error"):
         lines.append(f"         error: {tail['error']}")
+
+    # 两口径提示：llm 全 trace vs tail 收口折账（resume 常见差）。
+    llm_in = int(llm.get("input_tokens") or 0)
+    llm_out = int(llm.get("output_tokens") or 0)
+    if "input_tokens" in tail or "output_tokens" in tail:
+        tail_in = int(tail.get("input_tokens") or 0)
+        tail_out = int(tail.get("output_tokens") or 0)
+        if (llm_in, llm_out) != (tail_in, tail_out):
+            resume_hint = ""
+            if (
+                tail.get("kind") == "resume"
+                or tail.get("token_scope") == "settlement_segment"
+            ):
+                resume_hint = "；resume 折账通常不含 pause 前 / team_preview 前"
+            lines.append(
+                f"  Token口径: llm=全trace合计 in={llm_in}/out={llm_out}；"
+                f"tail/metrics=收口折账 in={tail_in}/out={tail_out}"
+                f"{resume_hint}"
+            )
+    elif health.get("token_accounting"):
+        note = (health.get("token_accounting") or {}).get("resume_note")
+        if note and (
+            tail.get("kind") == "resume"
+            or tail.get("event") == "chat.resume_complete"
+            or tail.get("token_scope") == "settlement_segment"
+        ):
+            lines.append(f"  Token口径: {note}")
 
     cost = spine.get("cost") or {}
     if cost.get("source") != "none":

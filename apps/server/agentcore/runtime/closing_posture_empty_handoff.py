@@ -1,22 +1,8 @@
-"""Empty/degraded handoff storm latch (delivery_status → PARTIAL)."""
-
+"""Shim — alias of `agentcore.runtime.closing_posture.empty_handoff` (P3-A import freeze)."""
 from __future__ import annotations
 
-from contextvars import ContextVar
+import sys
 
-_turn_empty_handoff_storm: ContextVar[bool] = ContextVar(
-    "turn_empty_handoff_storm", default=False
-)
+from agentcore.runtime.closing_posture import empty_handoff as _canonical
 
-
-def note_empty_handoff_storm() -> None:
-    """Latch when delivery_status sees many empty/degraded handoffs → PARTIAL."""
-    _turn_empty_handoff_storm.set(True)
-
-
-def clear_empty_handoff_storm() -> None:
-    _turn_empty_handoff_storm.set(False)
-
-
-def turn_has_empty_handoff_storm() -> bool:
-    return bool(_turn_empty_handoff_storm.get())
+sys.modules[__name__] = _canonical

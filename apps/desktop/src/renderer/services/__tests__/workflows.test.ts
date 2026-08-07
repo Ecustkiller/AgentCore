@@ -4,6 +4,7 @@ import {
   createAgentStepNode,
   createHumanGateNode,
   emptyWorkflowDefinition,
+  isWorkflowConnectionAllowed,
   parseWorkflowDefinition,
   validateWorkflowDefinition,
 } from "../workflowDefinition";
@@ -100,6 +101,44 @@ describe("workflowDefinition", () => {
     expect(codes).toContain("empty_role");
     expect(codes).toContain("empty_task");
     expect(codes).toContain("cycle");
+  });
+
+  it("rejects human_gate→human_gate and orphan gate→agent", () => {
+    const a = createAgentStepNode({ id: "a", role: "A", task: "ta" });
+    const g1 = createHumanGateNode({ id: "g1", label: "审1" });
+    const g2 = createHumanGateNode({ id: "g2", label: "审2" });
+    const b = createAgentStepNode({ id: "b", role: "B", task: "tb" });
+    const chained = validateWorkflowDefinition({
+      nodes: [a, g1, g2, b],
+      edges: [
+        { from: "a", to: "g1" },
+        { from: "g1", to: "g2" },
+        { from: "g2", to: "b" },
+      ],
+    });
+    expect(chained.map((i) => i.code)).toContain("gate_to_gate");
+
+    const orphanGate = createHumanGateNode({ id: "g", label: "孤门" });
+    const orphan = validateWorkflowDefinition({
+      nodes: [orphanGate, b],
+      edges: [{ from: "g", to: "b" }],
+    });
+    expect(orphan.map((i) => i.code)).toContain("gate_without_agent_pred");
+
+    expect(
+      isWorkflowConnectionAllowed(
+        { nodes: [a, g1, g2], edges: [{ from: "a", to: "g1" }] },
+        "g1",
+        "g2",
+      ),
+    ).toBe(false);
+    expect(
+      isWorkflowConnectionAllowed(
+        { nodes: [a, g1, b], edges: [{ from: "a", to: "g1" }] },
+        "g1",
+        "b",
+      ),
+    ).toBe(true);
   });
 
   it("parseWorkflowDefinition drops unknown kinds", () => {

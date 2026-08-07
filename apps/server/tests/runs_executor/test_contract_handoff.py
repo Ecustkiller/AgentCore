@@ -291,6 +291,158 @@ async def test_leaf_without_dependents_does_not_force_handoff():
     assert provider.calls == 1
 
 
+async def test_leaf_with_tools_missing_handoff_gets_supplement_or_degraded():
+    """实质工作（工具轮）却无 handoff 的叶子：补要一轮或 degraded/gap 对账可见."""
+    plan, _ = build_run_plan([{"role": "调研", "task": "摸底项目"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_FileWriteTool())
+    reg.register(HandoffTool())
+    # Round 1: tool + short body, no handoff → light-repair 补要.
+    # Round 2: still no handoff → terminal degraded synth + delivery_gaps.
+    rounds = [
+        [
+            LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id="w1",
+                        function_name="file_write",
+                        arguments_delta='{"path": "notes.md", "content": "# notes"}',
+                    )
+                ]
+            )
+        ],
+        [LLMChunk(delta_content="摸底笔记已写入 notes.md，技术栈与入口已标出。")],
+        [LLMChunk(delta_content="补要轮仍未提交 handoff，保持已写笔记。")],
+    ]
+    provider = _ScriptedRounds(rounds)
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="req",
+        execution_id="e-leaf-tool",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert provider.calls >= 2  # at least one 补要 / light-repair pass
+    assert state.debrief is not None
+    assert state.debrief.get("degraded") is True
+    assert any(
+        isinstance(g, dict) and g.get("reason") == "degraded_handoff"
+        for g in (state.delivery_gaps or [])
+    )
+
+
+async def test_leaf_short_body_with_handoff_tool_still_skips_when_no_tools():
+    """短叶子纯正文 + handoff 已装配：仍可无 handoff 完成（勿误伤）."""
+    plan, _ = build_run_plan([{"role": "分析", "task": "一句话结论"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(HandoffTool())
+    provider = _ContentProvider(["调研结论一段"])
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="req",
+        execution_id="e-leaf-short",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert state.debrief is None
+    assert provider.calls == 1
+    assert not any(
+        isinstance(g, dict) and g.get("reason") == "degraded_handoff"
+        for g in (state.delivery_gaps or [])
+    )
+
+
+async def test_leaf_tool_missing_handoff_then_accepted_on_rework():
+    """叶子工具活动缺 handoff → 补要反馈后合格 handoff 过关，非 degraded."""
+    plan, _ = build_run_plan([{"role": "调研", "task": "摸底"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_FileWriteTool())
+    reg.register(HandoffTool())
+
+    class _WriteThenHandoffFeedback:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.requests: list = []
+            self._wrote = False
+
+        async def stream(self, request):  # noqa: ANN001
+            self.calls += 1
+            self.requests.append([(m.role, m.content or "") for m in request.messages])
+            if not self._wrote:
+                self._wrote = True
+                yield LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0,
+                            id="w1",
+                            function_name="file_write",
+                            arguments_delta='{"path": "n.md", "content": "x"}',
+                        )
+                    ]
+                )
+                return
+            if _is_handoff_gate_feedback(request.messages):
+                args = json.dumps(
+                    {
+                        "summary": "这是一段足够长的合格交接结论，涵盖方案要点与下游接手注意。",
+                        "key_points": ["路径 n.md", "技术栈已确认"],
+                    },
+                    ensure_ascii=False,
+                )
+                yield LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0,
+                            id=f"h{self.calls}",
+                            function_name="handoff",
+                            arguments_delta=args,
+                        )
+                    ]
+                )
+                return
+            yield LLMChunk(
+                delta_content=(
+                    "摸底正文：已读入口与 README，技术栈与模块边界已标出，"
+                    "进度与风险亦写明，可直接给主管汇总。"
+                )
+            )
+
+    provider = _WriteThenHandoffFeedback()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="req",
+        execution_id="e-leaf-rework",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert state.debrief is not None
+    assert not state.debrief.get("degraded")
+    assert debrief_meets_minimum(state.debrief)
+    assert any(
+        "实质工作" in "\n".join(c for _, c in req if c)
+        or "尚未调用 handoff" in "\n".join(c for _, c in req if c)
+        for req in provider.requests
+    )
+
 async def test_artifacts_missing_soft_completes_without_write_pass():
     """甲⁺：artifacts 隐含 requires_files；零落盘 soft-complete，不 write_pass / FAILED。
 
@@ -368,8 +520,13 @@ async def test_artifacts_hit_when_file_write_covers_declared_path():
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
-    assert state.warnings == []
-    assert state.files_touched == ["README.md"]
+    assert "README.md" in (state.files_touched or [])
+    # 叶子有落盘却无 handoff → degraded 对账可见（空 registry 无补要轮，仍 stamp gap）。
+    assert state.debrief is not None and state.debrief.get("degraded")
+    assert any(
+        isinstance(g, dict) and g.get("reason") == "degraded_handoff"
+        for g in (state.delivery_gaps or [])
+    )
 
 
 async def test_strict_degraded_handoff_completes_when_files_landed():

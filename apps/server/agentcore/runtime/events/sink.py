@@ -29,8 +29,9 @@ from agentcore.runtime.facts import Fact, record_turn_fact
 # Orchestration tools hand the turn to a sub-team and open a team execution. Their
 # captain-level call is NOT rendered as a tool step — the `team` marker (emitted at
 # run_plan) stands in its place as the collaboration graph's timeline slot. Mirrors
-# the frontend `ORCHESTRATION_TOOLS` (lib/processTimeline.ts); keep the two in lockstep.
-# Shared with the conformance oracle (projection.py) so live + golden agree.
+# the TS SSOT `@agentcore/protocol-fold-kit` (desktop/mobile consume that; keep Python
+# twin in lockstep). Shared with the conformance oracle (projection.py) so live +
+# golden agree.
 ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
 
 # CEO self-calls whose inline-timeline slot is stood in for by a DEDICATED marker, so
@@ -39,8 +40,7 @@ ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
 # (which stays scoped to team/graph semantics). ask_user belongs here because a blocking
 # ask SUSPENDs without a tool_use_end (its card marker represents it), and a rejected ask
 # (card-shape validation) must not leak a red tool-error row — the model self-corrects and
-# re-asks. Mirrors the frontend/mobile fold (processTimeline.ts / fold.ts) + oracle
-# (projection.py); keep all in lockstep.
+# re-asks. Mirrors `@agentcore/protocol-fold-kit` + oracle (projection.py); keep lockstep.
 MARKER_STANDIN_TOOLS = ORCHESTRATION_TOOLS | frozenset({"ask_user"})
 
 logger = get_logger(__name__)

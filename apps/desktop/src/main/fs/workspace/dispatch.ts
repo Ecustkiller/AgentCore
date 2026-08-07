@@ -1,4 +1,5 @@
 import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
+import { logDesktop } from "../../log-service";
 import { toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { ensureReady, getRoot } from "../roots";
@@ -7,6 +8,7 @@ import { opDiagnostics } from "./diagnostics";
 import { opExecute } from "./exec";
 import { probeAvailableLanguages } from "./execCodec";
 import { opGitRepoStatus } from "./gitRepoStatus";
+import { opGitRun } from "./gitRun";
 import { opGitScm } from "./gitScm";
 import { opGrep } from "./grep";
 import {
@@ -85,6 +87,7 @@ const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
   "archive",
   "ensure_turn_baseline",
   "git_scm",
+  "git_run",
 ]);
 
 const READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区";
@@ -139,11 +142,84 @@ async function workspaceOp(req: {
   rootId: string;
   op: WorkspaceOpName;
   args: Record<string, unknown>;
+  timeoutMs?: number;
 }): Promise<WorkspaceOpResult> {
-  await ensureReady();
-  const root = getRoot(req.rootId);
-  if (!root) return opErr("WorkspaceIOError", "本地目录未授权或已移除");
-  return executeWorkspaceOp(root, req.op, req.args);
+  return runWorkspaceOpMain(req, async () => {
+    await ensureReady();
+    const root = getRoot(req.rootId);
+    if (!root) return opErr("WorkspaceIOError", "本地目录未授权或已移除");
+    return executeWorkspaceOp(root, req.op, req.args);
+  });
+}
+
+/**
+ * 主进程 workspaceOp 墙钟 + D3 观测（可单测：注入 `run` 模拟挂起 op）。
+ * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封，底层 promise 可继续跑。
+ */
+export async function runWorkspaceOpMain(
+  req: { rootId: string; op: WorkspaceOpName | string; timeoutMs?: number },
+  run: () => Promise<WorkspaceOpResult>,
+): Promise<WorkspaceOpResult> {
+  const timeoutMs =
+    typeof req.timeoutMs === "number" && req.timeoutMs > 0
+      ? req.timeoutMs
+      : undefined;
+  const t0 = Date.now();
+  logDesktop({
+    level: "info",
+    event: "workspace_op.main_begin",
+    fields: {
+      op: req.op,
+      root_id: req.rootId,
+      timeout_ms: timeoutMs ?? null,
+    },
+  });
+  const opPromise = run();
+  let result: WorkspaceOpResult;
+  if (timeoutMs == null) {
+    result = await opPromise;
+  } else {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      result = await Promise.race([
+        opPromise,
+        new Promise<WorkspaceOpResult>((resolve) => {
+          timer = setTimeout(() => {
+            logDesktop({
+              level: "warn",
+              event: "workspace_op.main_timeout",
+              fields: {
+                op: req.op,
+                root_id: req.rootId,
+                timeout_ms: timeoutMs,
+                duration_ms: Date.now() - t0,
+              },
+            });
+            resolve(
+              opErr(
+                "WorkspaceIOError",
+                "本地工作区 op 活性挂起（主进程 timeout）",
+              ),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer != null) clearTimeout(timer);
+    }
+  }
+  logDesktop({
+    level: result.ok ? "info" : "warn",
+    event: "workspace_op.main_end",
+    fields: {
+      op: req.op,
+      root_id: req.rootId,
+      timeout_ms: timeoutMs ?? null,
+      duration_ms: Date.now() - t0,
+      ok: result.ok,
+    },
+  });
+  return result;
 }
 
 /**
@@ -276,6 +352,8 @@ export async function executeWorkspaceOp(
         return await opGitRepoStatus(root);
       case "git_scm":
         return await opGitScm(root, args);
+      case "git_run":
+        return await opGitRun(root, args);
       default:
         return opErr("WorkspaceIOError", `本地工作区未知的操作：${op}`);
     }

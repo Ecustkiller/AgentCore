@@ -22,6 +22,7 @@ import {
   claimPrimaryStream,
   releasePrimaryStream,
 } from "@/services/turns/streamOwnership";
+import { useAuthStore } from "@/stores/auth";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
   enterTurnStreaming,
@@ -207,6 +208,8 @@ export async function streamConversationViaSidecar({
         subpath,
         turnId,
         traceId,
+        // 登录账号透传；未登录回落 "local"（主进程 initialize / 引擎 resolve 同形）。
+        userId: useAuthStore.getState().user?.id ?? "local",
         userMessage: content,
         userMessageId: optimisticUserId,
         history,
@@ -273,6 +276,7 @@ export async function resumeConversationViaSidecar({
           conversationId,
           messageId,
           traceId,
+          userId: useAuthStore.getState().user?.id ?? "local",
           userMessageId,
           decision,
           note,

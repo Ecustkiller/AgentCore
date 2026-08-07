@@ -20,16 +20,22 @@ import { notifyInfo } from "@/lib/toast";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type { GitChangeEntry } from "@shared/ipc-contract";
 import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
   ChevronDown,
   ChevronRight,
   GitBranch,
   Loader2,
   Minus,
   Plus,
+  RefreshCw,
   Trash2,
   Undo2,
 } from "lucide-react";
 import { useCallback, useState } from "react";
+
+/** 未暂存条目超过此数时，目录分组默认折叠。 */
+const COLLAPSE_DIRS_THRESHOLD = 30;
 
 function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
@@ -42,6 +48,14 @@ function splitRepoPath(path: string): { dir: string; name: string } {
   const i = norm.lastIndexOf("/");
   if (i < 0) return { dir: "", name: norm };
   return { dir: norm.slice(0, i), name: norm.slice(i + 1) };
+}
+
+/** 分组标题短路径：末 1–2 段；空 = 仓根。完整路径用 title。 */
+export function shortDirLabel(dir: string): string {
+  if (!dir) return "仓根";
+  const parts = dir.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length <= 2) return parts.join("/");
+  return parts.slice(-2).join("/");
 }
 
 /** Porcelain XY → 主状态字母（列表侧已拆成 staged/unstaged）。 */
@@ -144,7 +158,7 @@ function DiffPreview({ text }: { text: string }) {
     return <p className="px-2 py-1 text-xs text-muted-foreground">无差异</p>;
   }
   return (
-    <div className="max-h-72 overflow-auto rounded-lg border border-border font-mono text-xs leading-relaxed">
+    <div className="max-h-72 overflow-auto rounded-lg border border-border/60 font-mono text-xs leading-relaxed">
       {rows.map((l, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: positional diff rows
@@ -238,8 +252,8 @@ function ChangeRow({
   }, [rootId, entry.path, subpath, onMutated]);
 
   return (
-    <div className="border-b border-border/50 last:border-b-0">
-      <div className="group flex items-center gap-0.5 px-2 py-0.5">
+    <div>
+      <div className="group flex h-6 items-center gap-0.5 px-1.5 hover:bg-muted/50">
         <button
           type="button"
           className="flex size-5 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -258,14 +272,14 @@ function ChangeRow({
         </span>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-xs hover:text-foreground"
+          className="flex min-w-0 flex-1 items-center gap-1 text-left text-xs"
           onClick={() => onOpenFile(entry.path)}
           title={entry.path}
         >
           <span className="min-w-0 truncate text-foreground">{name}</span>
           {!hideDir && dir ? (
-            <span className="min-w-0 truncate text-xs text-muted-foreground/80">
-              {dir}
+            <span className="min-w-0 truncate text-xs text-muted-foreground/60">
+              {shortDirLabel(dir)}
             </span>
           ) : null}
         </button>
@@ -274,7 +288,7 @@ function ChangeRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 shrink-0 px-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            className="h-5 shrink-0 px-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             disabled={busy}
             onClick={() => void onDeleteUntracked()}
             aria-label="删除未跟踪文件"
@@ -287,7 +301,7 @@ function ChangeRow({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 shrink-0 px-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            className="h-5 shrink-0 px-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             disabled={busy}
             onClick={() => void onDiscard()}
             aria-label="丢弃改动"
@@ -300,7 +314,7 @@ function ChangeRow({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 shrink-0 px-1 opacity-70 group-hover:opacity-100"
+          className="h-5 shrink-0 px-1 opacity-70 group-hover:opacity-100"
           disabled={busy}
           onClick={() => void onToggleStage()}
           aria-label={staged ? "取消暂存" : "暂存"}
@@ -316,7 +330,7 @@ function ChangeRow({
         </Button>
       </div>
       {open && (
-        <div className="px-2 pb-2 pl-7">
+        <div className="px-2 pb-1.5 pl-7">
           {loadingDiff ? (
             <p className="text-xs text-muted-foreground">读取 diff…</p>
           ) : (
@@ -347,6 +361,28 @@ function ChangeGroupList({
 }) {
   const groups = groupGitChangesByDir(entries);
   const multiGroup = groups.length > 1;
+  const defaultDirsCollapsed =
+    !staged && entries.length >= COLLAPSE_DIRS_THRESHOLD;
+  /** 用户显式展开/折叠覆盖默认；未记录的目录走 defaultDirsCollapsed。 */
+  const [dirCollapsedOverride, setDirCollapsedOverride] = useState<
+    Record<string, boolean>
+  >({});
+
+  const isDirCollapsed = (dir: string) => {
+    const key = dir || ".";
+    if (key in dirCollapsedOverride) {
+      return dirCollapsedOverride[key] === true;
+    }
+    return defaultDirsCollapsed;
+  };
+
+  const toggleDir = (dir: string) => {
+    const key = dir || ".";
+    setDirCollapsedOverride((prev) => ({
+      ...prev,
+      [key]: !isDirCollapsed(dir),
+    }));
+  };
 
   return (
     <>
@@ -357,17 +393,38 @@ function ChangeGroupList({
           canDiscardChange(e, staged),
         );
         const untracked = g.entries.filter((e) => isUntrackedChange(e));
+        const collapsed = showHeader && isDirCollapsed(g.dir);
+        const fullDirTitle = g.dir || "仓根";
 
         return (
           <div key={`${keyPrefix}:${g.dir || "."}`} className="group/dir">
             {showHeader ? (
-              <div className="flex items-center gap-0.5 px-2 py-0.5">
-                <span
-                  className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70"
-                  title={g.dir || "仓根"}
+              <div className="flex h-6 items-center gap-0.5 px-1.5 hover:bg-muted/40">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-0.5 text-left"
+                  onClick={() => toggleDir(g.dir)}
+                  aria-expanded={!collapsed}
+                  title={fullDirTitle}
                 >
-                  {g.dir || "仓根"}
-                </span>
+                  {collapsed ? (
+                    <ChevronRight
+                      size={12}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                  ) : (
+                    <ChevronDown
+                      size={12}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                  )}
+                  <span className="min-w-0 truncate text-xs text-muted-foreground/70">
+                    {shortDirLabel(g.dir)}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-xs text-muted-foreground/50">
+                    {g.entries.length}
+                  </span>
+                </button>
                 <Button
                   type="button"
                   variant="ghost"
@@ -425,18 +482,20 @@ function ChangeGroupList({
                 ) : null}
               </div>
             ) : null}
-            {g.entries.map((e) => (
-              <ChangeRow
-                key={`${keyPrefix}:${e.path}:${e.code}`}
-                entry={e}
-                staged={staged}
-                rootId={rootId}
-                subpath={subpath}
-                onMutated={onMutated}
-                onOpenFile={onOpenFile}
-                hideDir={showHeader}
-              />
-            ))}
+            {!collapsed
+              ? g.entries.map((e) => (
+                  <ChangeRow
+                    key={`${keyPrefix}:${e.path}:${e.code}`}
+                    entry={e}
+                    staged={staged}
+                    rootId={rootId}
+                    subpath={subpath}
+                    onMutated={onMutated}
+                    onOpenFile={onOpenFile}
+                    hideDir={showHeader}
+                  />
+                ))
+              : null}
           </div>
         );
       })}
@@ -517,64 +576,66 @@ export function GitChangesSection({
   };
 
   return (
-    <section
-      className="rounded-xl border border-border bg-card"
-      data-testid="git-changes-section"
-    >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+    <section className="border-t border-border/50" data-testid="git-changes-section">
+      <header className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1">
         <GitBranch size={12} className="shrink-0 text-muted-foreground" />
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
           Git · {status.branch}
           {status.ahead > 0 || status.behind > 0 ? (
-            <span className="ml-2 tabular-nums text-muted-foreground/80">
+            <span className="ml-1.5 tabular-nums text-muted-foreground/80">
               {status.ahead > 0 ? `↑${status.ahead}` : ""}
               {status.ahead > 0 && status.behind > 0 ? " " : ""}
               {status.behind > 0 ? `↓${status.behind}` : ""}
             </span>
           ) : null}
         </h3>
-        <div className="flex shrink-0 gap-0.5">
+        <div className="flex shrink-0 gap-0">
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 px-1.5 text-xs"
+            className="size-6 shrink-0 px-0"
             disabled={busy !== null}
             onClick={() => void onFetch()}
+            aria-label="获取"
             title="获取远端（不合并）"
           >
             {busy === "fetch" ? (
               <Loader2 size={12} className="animate-spin" />
             ) : (
-              "Fetch"
+              <RefreshCw size={12} />
             )}
           </Button>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 px-1.5 text-xs"
+            className="size-6 shrink-0 px-0"
             disabled={busy !== null}
             onClick={() => void onPull()}
+            aria-label="拉取"
+            title="拉取并合并"
           >
             {busy === "pull" ? (
               <Loader2 size={12} className="animate-spin" />
             ) : (
-              "Pull"
+              <ArrowDownToLine size={12} />
             )}
           </Button>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 px-1.5 text-xs"
+            className="size-6 shrink-0 px-0"
             disabled={busy !== null}
             onClick={() => void onPush()}
+            aria-label="推送"
+            title="推送到远端"
           >
             {busy === "push" ? (
               <Loader2 size={12} className="animate-spin" />
             ) : (
-              "Push"
+              <ArrowUpFromLine size={12} />
             )}
           </Button>
         </div>
@@ -582,14 +643,14 @@ export function GitChangesSection({
 
       {hasConflict ? (
         <output
-          className="block border-b border-border bg-warning/10 px-3 py-2 text-xs text-foreground"
+          className="block border-b border-border/40 bg-warning/10 px-2 py-1.5 text-xs text-foreground"
           data-testid="git-conflict-banner"
         >
           <p className="font-medium">存在合并冲突</p>
           <p className="mt-0.5 text-muted-foreground">
             请打开文件手动解决后暂存提交（不做三方合并 UI）。
           </p>
-          <ul className="mt-1.5 space-y-0.5">
+          <ul className="mt-1 space-y-0.5">
             {status.conflicted.map((p) => (
               <li key={p}>
                 <button
@@ -599,8 +660,10 @@ export function GitChangesSection({
                 >
                   {basename(p)}
                   {p.includes("/") ? (
-                    <span className="ml-1 text-muted-foreground">
-                      {p.replace(/\\/g, "/").split("/").slice(0, -1).join("/")}
+                    <span className="ml-1 text-muted-foreground/70">
+                      {shortDirLabel(
+                        p.replace(/\\/g, "/").split("/").slice(0, -1).join("/"),
+                      )}
                     </span>
                   ) : null}
                 </button>
@@ -611,38 +674,42 @@ export function GitChangesSection({
       ) : null}
 
       {/* Commit 置顶：对齐 VS Code / JetBrains SCM 工作流入口 */}
-      <div className="space-y-1.5 border-b border-border p-2.5">
-        <Textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="提交说明"
-          rows={2}
-          className="min-h-0 resize-none text-xs"
-          disabled={busy !== null}
-          data-testid="git-commit-message"
-        />
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 w-full"
-          disabled={!hasStaged || !message.trim() || busy !== null}
-          onClick={() => void onCommit()}
-          data-testid="git-commit-button"
-        >
-          {busy === "commit" ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            "提交"
-          )}
-        </Button>
+      <div className="border-b border-border/40 p-1.5">
+        <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/20 focus-within:border-border">
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="提交说明"
+            rows={2}
+            className="min-h-0 resize-none rounded-none border-0 bg-transparent px-2 py-1.5 text-xs shadow-none focus-visible:ring-0"
+            disabled={busy !== null}
+            data-testid="git-commit-message"
+          />
+          <div className="flex items-center justify-end border-t border-border/30 px-1 py-0.5">
+            <Button
+              type="button"
+              size="sm"
+              className="h-6 px-2.5 text-xs"
+              disabled={!hasStaged || !message.trim() || busy !== null}
+              onClick={() => void onCommit()}
+              data-testid="git-commit-button"
+            >
+              {busy === "commit" ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                "提交"
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
 
       {hasStaged ? (
-        <div className="border-b border-border">
-          <div className="flex items-center gap-1 px-1.5 py-1">
+        <div className="border-b border-border/40">
+          <div className="flex items-center gap-0.5 px-1 py-0.5">
             <button
               type="button"
-              className="flex min-w-0 flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left hover:bg-muted/60"
+              className="flex min-w-0 flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left hover:bg-muted/50"
               onClick={() => setStagedOpen((v) => !v)}
               aria-expanded={stagedOpen}
             >
@@ -689,10 +756,10 @@ export function GitChangesSection({
 
       {hasUnstaged ? (
         <div>
-          <div className="flex items-center gap-1 px-1.5 py-1">
+          <div className="flex items-center gap-0.5 px-1 py-0.5">
             <button
               type="button"
-              className="flex min-w-0 flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left hover:bg-muted/60"
+              className="flex min-w-0 flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left hover:bg-muted/50"
               onClick={() => setUnstagedOpen((v) => !v)}
               aria-expanded={unstagedOpen}
             >
@@ -716,16 +783,17 @@ export function GitChangesSection({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-6 shrink-0 px-1.5 text-xs"
+                className="h-6 shrink-0 px-1 text-muted-foreground/70 hover:text-muted-foreground"
                 onClick={() =>
                   void gitDiscard(
                     rootId,
                     discardableUnstaged.map((e) => e.path),
                   ).then((ok) => ok && onRefresh())
                 }
+                aria-label="全部丢弃"
                 title="丢弃全部已跟踪的未暂存改动"
               >
-                全部丢弃
+                <Undo2 size={12} />
               </Button>
             ) : null}
             <Button

@@ -25,7 +25,11 @@ __all__ = [
 def __getattr__(name: str) -> Any:
     # Lazy: importing ``ceo_surface`` / ``prompt`` must not pull the heavy
     # prepare → sessions → runs → debate chain (parallel modules may be mid-edit).
-    if name in ("_assemble_ceo_toolset", "_build_attachment_context"):
+    if name == "_assemble_ceo_toolset":
+        from agentcore.tools.ceo_toolset import _assemble_ceo_toolset as _fn
+
+        return _fn
+    if name == "_build_attachment_context":
         from agentcore.runtime.resolve import prepare as _prepare
 
         return getattr(_prepare, name)

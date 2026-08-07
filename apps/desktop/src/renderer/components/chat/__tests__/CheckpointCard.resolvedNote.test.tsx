@@ -87,4 +87,23 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     expect(screen.getByText("方案 C：外包试点")).toBeTruthy();
     expect(document.body.textContent).toContain("选哪条方案推进？");
   });
+
+  it("stop / research_first resolved 不占时间线存根（无「已取消本回合」）", () => {
+    for (const decision of ["stop", "research_first"] as const) {
+      const { container } = render(
+        <CheckpointCard
+          checkpoint={{
+            ...resolvedKickoff,
+            id: `cp-${decision}`,
+            decision,
+            note: "",
+          }}
+        />,
+      );
+      expect(container.firstChild).toBeNull();
+      expect(screen.queryByText("已取消本回合")).toBeNull();
+      expect(document.body.textContent).not.toContain(resolvedKickoff.question);
+      cleanup();
+    }
+  });
 });

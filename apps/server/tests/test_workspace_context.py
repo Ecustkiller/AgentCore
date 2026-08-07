@@ -109,6 +109,17 @@ def test_cloud_scratch_facts():
     assert "host=已装配" in out
     assert "bind_local_folder" in out
     assert "open_local_project" in out
+    assert "register_local_project" in out
+    # 跨项目指挥事实面（与 skills 第二教学面互补）
+    assert "跨项目指挥" in out
+    assert "list_projects" in out and "resolve_project" in out
+    assert "target_folder_id" in out
+    assert "create_project" in out
+    assert "禁猜最近" in out or "猜最近" in out
+    assert "禁默写 scratch" in out or "scratch" in out
+    assert "多 local" in out and "并行" in out
+    assert "可能降级" not in out
+    assert "协作图不改" in out
     assert "external_mount_readonly" in out
     assert "grant_organize_folder" in out
     assert "与工作区绑定正交" in out

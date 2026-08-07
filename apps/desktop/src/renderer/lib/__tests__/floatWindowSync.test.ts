@@ -3,6 +3,8 @@ import {
   applyFloatProjectionSnapshot,
   buildFloatProjectionSnapshot,
   isFloatSyncMessage,
+  isFloatSyncSupported,
+  openFloatSyncChannel,
 } from "@/lib/floatWindowSync";
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
@@ -12,7 +14,7 @@ import {
   runDetailTabId,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(() => {
   useSidePanelStore.setState({
@@ -211,5 +213,25 @@ describe("floatWindowSync", () => {
     ).toBe(true);
     expect(isFloatSyncMessage({ type: "snapshot" })).toBe(false);
     expect(isFloatSyncMessage(null)).toBe(false);
+  });
+
+  describe("BroadcastChannel capability", () => {
+    const OriginalBC = globalThis.BroadcastChannel;
+
+    afterEach(() => {
+      globalThis.BroadcastChannel = OriginalBC;
+    });
+
+    it("isFloatSyncSupported / openFloatSyncChannel reflect BC presence", () => {
+      expect(isFloatSyncSupported()).toBe(true);
+      const ch = openFloatSyncChannel();
+      expect(ch).not.toBeNull();
+      ch?.close();
+
+      // @ts-expect-error intentional capability probe
+      delete globalThis.BroadcastChannel;
+      expect(isFloatSyncSupported()).toBe(false);
+      expect(openFloatSyncChannel()).toBeNull();
+    });
   });
 });

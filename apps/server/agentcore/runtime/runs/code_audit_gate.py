@@ -102,6 +102,45 @@ def _structure_fail(detail: str) -> str:
     return f"{STRUCTURE_FAILURE_PREFIX}{detail}"
 
 
+def normalize_audit_evidence(value: Any) -> str:
+    """Normalize evidence to a non-empty pointer string when possible.
+
+    Accepts isomorphic shapes models commonly emit:
+    - ``str`` (authority)
+    - ``list[str]`` (joined with ``；``)
+    - single-level ``{"path"|"file", "line"|"lines"|"start"}`` → ``path:line``
+
+    Empty / unknown shapes → ``""`` (caller stamps structure failure).
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                s = item.strip()
+                if s:
+                    parts.append(s)
+            elif isinstance(item, dict):
+                nested = normalize_audit_evidence(item)
+                if nested:
+                    parts.append(nested)
+        return "；".join(parts)
+    if isinstance(value, dict):
+        path = _as_str(value.get("path") or value.get("file"))
+        line = value.get("line")
+        if line is None:
+            line = value.get("lines")
+        if line is None:
+            line = value.get("start")
+        if path and line is not None and isinstance(line, (str, int)):
+            return f"{path}:{str(line).strip()}"
+        if path:
+            return path
+        return ""
+    return ""
+
+
 def parse_audit_json(text: str) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(obj, error)``. ``error`` set when unparseable or not an object."""
     raw = text.strip()
@@ -136,7 +175,7 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
         sev = normalize_audit_severity(_as_str(item.get("severity")))
         ver = _as_str(item.get("verification"))
         verd = normalize_audit_verdict(_as_str(item.get("verdict")))
-        evidence = _as_str(item.get("evidence"))
+        evidence = normalize_audit_evidence(item.get("evidence"))
         summary = _as_str(item.get("summary") or item.get("id"))
         category = _as_str(item.get("category"))
         reach = _as_str(item.get("reachability"))
@@ -156,7 +195,12 @@ def validate_code_audit_payload(data: dict[str, Any]) -> list[str]:
         if verd not in _VERDICTS:
             failures.append(_structure_fail(f"{prefix} verdict 无效"))
         if not evidence:
-            failures.append(_structure_fail(f"{prefix} 缺少 evidence"))
+            failures.append(
+                _structure_fail(
+                    f"{prefix} evidence 为空或无法归一"
+                    "（须为非空 string，或非空 string[] / path+line 对象）"
+                )
+            )
 
         # 未读全 / 待核实 → 不得中+
         if (ver == "静态推断·未读全" or verd == "待核实") and sev in {"高", "中"}:
@@ -260,6 +304,7 @@ __all__ = [
     "STRUCTURE_FAILURE_PREFIX",
     "code_audit_json_failures",
     "is_code_audit_structure_failure",
+    "normalize_audit_evidence",
     "normalize_audit_severity",
     "normalize_audit_verdict",
     "parse_audit_json",

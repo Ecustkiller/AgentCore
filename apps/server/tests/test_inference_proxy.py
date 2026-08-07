@@ -361,7 +361,7 @@ async def test_record_proxy_spend_skips_without_conversation(monkeypatch, tmp_pa
 async def test_record_proxy_spend_enqueue_survives_ledger_failure(monkeypatch, tmp_path):
     """Ledger failure on drain must not raise into the already-streamed response path.
 
-    Enqueue itself succeeds; drain leaves the file for retry (at-least-once).
+    Enqueue itself succeeds; drain leaves the outbox row for retry (at-least-once).
     """
     _calls, queue = _capture_record_runs(monkeypatch, tmp_path, raises=True)
     await inference._record_proxy_spend(
@@ -370,11 +370,8 @@ async def test_record_proxy_spend_enqueue_survives_ledger_failure(monkeypatch, t
         model="deepseek-v4-flash",
         usage=inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
     )
-    assert await queue.drain_once() == 0  # failed write → file retained
-    # File still on disk for the next attempt.
-    from agentcore.billing.cost_ledger_queue import _queue_dir
-
-    assert list(_queue_dir().glob("*.json"))
+    assert await queue.drain_once() == 0  # failed write → row retained
+    assert await queue._ledger._backend.pending_count() == 1
 
 
 def test_usage_from_deepseek_maps_fields():

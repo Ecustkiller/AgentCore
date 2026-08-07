@@ -107,18 +107,48 @@ async def test_memory_topics_summary_skips_chrome_and_section(tmp_path):
     assert topics == [MemoryTopic("部署流程", "先 build 再 deploy")]
 
 
-async def test_injected_memory_caps_oversized_file_deterministically(tmp_path):
+async def test_injected_memory_caps_oversized_file_deterministically(tmp_path, monkeypatch):
     # COST-001 读侧 backstop: an abnormally large memory file is DETERMINISTICALLY capped
     # (head slice + fixed notice), so it can't blow up the <rules> prefix AND the same body
     # yields the same truncation every turn (memory is the stable prefix → cache-safe).
+    # Audit M7 / 02-3.3: one summary log lists truncated file + dropped entry names.
+    import agentcore.memory.injection as injection_mod
+
+    class _LogSpy:
+        def __init__(self) -> None:
+            self.warnings: list[tuple[str, dict]] = []
+
+        def warning(self, event: str, **kwargs: object) -> None:
+            self.warnings.append((event, dict(kwargs)))
+
+        def info(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
+            pass
+
+    spy = _LogSpy()
+    monkeypatch.setattr(injection_mod, "logger", spy)
+
     store = FileMemoryStore(tmp_path)
-    big = "## 沟通偏好\n" + "- 用中文\n" * 5000
+    # Distinct trailing bullets so the discarded-tail entry list is searchable.
+    big = "## 沟通偏好\n" + "- 用中文\n" * 40 + "- 被挤掉的尾条目甲\n- 被挤掉的尾条目乙\n"
     await store.save("u1", PREFERENCES_MEMORY_FILE, big)
-    out1 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=200)
-    out2 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=200)
-    assert out1 == out2  # deterministic → prefix-cache safe
+    out1 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=80)
+    out2 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=80)
+    assert out1 == out2  # deterministic → assembly-layer prefix-stable
     assert "已截断" in out1  # the fixed truncation notice rode along
-    assert len(out1) < 400  # capped to ~200 + short notice, nowhere near the original
+    assert len(out1) < 200  # capped to ~80 + short notice, nowhere near the original
+    assert "被挤掉的尾条目" not in out1
+
+    trunc_logs = [kw for ev, kw in spy.warnings if ev == "memory.injection_truncated"]
+    assert len(trunc_logs) == 2  # one summary per injection call (not per file)
+    for kw in trunc_logs:
+        assert kw["user_id"] == "u1"
+        assert kw["cap"] == 80
+        assert kw["truncated_files_count"] == 1
+        assert PREFERENCES_MEMORY_FILE in str(kw["truncated_files"])
+        # Dropped bullet names are listed for diagnosis ("哪条记忆被挤掉").
+        assert "被挤掉的尾条目" in str(kw["truncated_entries"])
+        assert kw["truncated_entries_count"] >= 1
+        assert kw["truncated_entries_total"] >= kw["truncated_entries_count"]
 
 
 async def test_injected_memory_uncapped_when_no_cap_given(tmp_path):

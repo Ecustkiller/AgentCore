@@ -21,10 +21,12 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
-    debrief_meets_minimum,
+    handoff_expectation_met,
     has_salvageable_half_product,
     node_has_dependents,
+    strip_invalid_ledger_refs_from_debrief,
     synthesize_debrief,
+    worker_expects_handoff,
 )
 from agentcore.runtime.runs.executor_env import AgentExecutorEnv
 from agentcore.runtime.runs.executor_hooks import _stamp_retrieval_evidence_gap
@@ -110,20 +112,33 @@ def build_terminal_run_state(
     # (best-effort; None when it finished without one) so downstream dep injection / CEO
     # synthesis read the author's own 结论 + 建议下一步 instead of re-deriving them from
     # prose. Carried on BOTH terminal states (a worker that failed its contract can still
-    # have submitted a useful brief before failing). Nodes with downstream dependents
-    # that still lack a minimum-quality brief get an engine-synthesized degraded debrief
-    # **only when there is salvageable half-product** (body / disk / qualified brief) —
-    # empty inventory must not mint an empty ``degraded_synth``.
+    # have submitted a useful brief before failing). Nodes that expect a handoff
+    # (has dependents, or leaf after substantial work) but still lack a minimum-quality
+    # brief get an engine-synthesized degraded debrief so CEO / delivery_status can see
+    # 「汇报不完整」. Upstream: only when salvageable half-product (body / disk /
+    # qualified brief) — empty inventory must not mint an empty ``degraded_synth``.
+    # Leaf substantial (tools / longer body): always stamp degraded when missing.
     debrief = debrief_from_transcript(messages)
     touched = files_touched_from_transcript(messages)
     product_touched = filter_product_landing_paths(
         touched, product_landing_artifacts
     )
     author_brief = debrief
+    expects_handoff = worker_expects_handoff(
+        env.plan,
+        spec.run_id,
+        content=content,
+        messages=messages,
+        files_touched=touched,
+    )
+    has_dependents = node_has_dependents(env.plan, spec.run_id)
+    can_synth = has_salvageable_half_product(content, touched, author_brief) or (
+        expects_handoff and not has_dependents
+    )
     if (
-        node_has_dependents(env.plan, spec.run_id)
-        and not debrief_meets_minimum(debrief)
-        and has_salvageable_half_product(content, touched, author_brief)
+        expects_handoff
+        and not handoff_expectation_met(debrief, for_dependents=has_dependents)
+        and can_synth
     ):
         debrief = synthesize_debrief(content, touched)
         logger.info(
@@ -131,6 +146,39 @@ def build_terminal_run_state(
             run_id=spec.run_id,
             had_author_brief=author_brief is not None,
         )
+    # 收口剥离：handoff 简报 / 升格正文也可能带非法 #rN（与 artifacts 闸同口径）。
+    citable_ids = (
+        env.turn_evidence_ledger.draft_citable_ids()
+        if env.turn_evidence_ledger is not None
+        else None
+    )
+    debrief, stripped_debrief = strip_invalid_ledger_refs_from_debrief(
+        debrief, citable_ids
+    )
+    if stripped_debrief:
+        logger.warning(
+            "citations.invalid_ledger_ref",
+            run_id=spec.run_id,
+            markers=stripped_debrief,
+            surface="handoff_debrief",
+            citable_count=len(citable_ids or ()),
+        )
+    if content and citable_ids is not None:
+        from agentcore.runtime.citations import (
+            invalid_ledger_ref_ids,
+            strip_invalid_ledger_refs,
+        )
+
+        bad_body = invalid_ledger_ref_ids(content, citable_ids)
+        if bad_body:
+            content = strip_invalid_ledger_refs(content, set(bad_body))
+            logger.warning(
+                "citations.invalid_ledger_ref",
+                run_id=spec.run_id,
+                markers=bad_body,
+                surface="worker_body",
+                citable_count=len(citable_ids or ()),
+            )
     # Soft web-quality (anti-slop): at most one rework (already spent in the loop).
     # Remaining soft-only hits demote to warnings — never hard-fail the run.
     # P1c visual critic: remaining visual_failures after max reworks → partial.
@@ -306,6 +354,24 @@ def build_terminal_run_state(
             ):
                 content = candidate
                 body_chars = len(candidate)
+    # 升格后正文再剥一次（简报字段已剥；升格可能把 key_points 拼回正文）。
+    if content and citable_ids is not None:
+        from agentcore.runtime.citations import (
+            invalid_ledger_ref_ids,
+            strip_invalid_ledger_refs,
+        )
+
+        bad_promoted = invalid_ledger_ref_ids(content, citable_ids)
+        if bad_promoted:
+            content = strip_invalid_ledger_refs(content, set(bad_promoted))
+            body_chars = len((content or "").strip())
+            logger.warning(
+                "citations.invalid_ledger_ref",
+                run_id=spec.run_id,
+                markers=bad_promoted,
+                surface="promoted_brief",
+                citable_count=len(citable_ids or ()),
+            )
     if node_has_dependents(env.plan, spec.run_id) and not upstream_body_floor_satisfied(
         body_chars=body_chars,
         landed_artifact_kinds=tool_ctx.landed_artifact_kinds,

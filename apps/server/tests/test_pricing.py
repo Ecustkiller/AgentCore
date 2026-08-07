@@ -19,6 +19,7 @@ from agentcore.llm.pricing import (
     PLATFORM_RELAY_KIMI_K25,
     cache_savings,
     calculate_cost,
+    curated_pricing_for,
     has_curated_pricing,
     nano_to_yuan,
     pricing_for_model,
@@ -91,6 +92,62 @@ def test_doubao_does_not_log_pricing_fallback():
     with capture_logs() as logs:
         calculate_cost(DOUBAO_SEED_TURBO, _usage(input_tokens=26163, output_tokens=1499))
     assert _fallback_logs(logs) == []
+
+
+# --- curated date-stem match (M14): dated revision keeps sibling price ---
+
+
+def test_curated_exact_match_kind():
+    card, kind, matched = curated_pricing_for(DOUBAO_SEED_TURBO)
+    assert card is not None
+    assert kind == "exact"
+    assert matched == DOUBAO_SEED_TURBO
+
+
+def test_doubao_dated_revision_keeps_curated_price():
+    # Newer Volcengine date suffix must NOT silently degrade to glm-5.2.
+    newer = "doubao/doubao-seed-2-1-turbo-260715"
+    usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
+    exact = calculate_cost(DOUBAO_SEED_TURBO, usage)
+    stemmed = calculate_cost(newer, usage)
+    assert stemmed == exact
+    assert stemmed.pricing_source == "curated"
+    assert stemmed != calculate_cost(PLATFORM_RELAY_GLM_52, usage)
+    card, kind, matched = curated_pricing_for(newer)
+    assert kind == "date_stem"
+    assert matched == DOUBAO_SEED_TURBO
+    assert card == curated_pricing_for(DOUBAO_SEED_TURBO)[0]
+    assert has_curated_pricing(newer)
+
+
+def test_doubao_date_stem_logs_prefix_match_not_fallback():
+    newer = "doubao/doubao-seed-2-1-turbo-260715"
+    with capture_logs() as logs:
+        calculate_cost(newer, _usage(input_tokens=100, output_tokens=50))
+    assert _fallback_logs(logs) == []
+    prefix = [e for e in logs if e["event"] == "cost.pricing_prefix_match"]
+    assert len(prefix) == 1
+    assert prefix[0]["model"] == newer
+    assert prefix[0]["matched_key"] == DOUBAO_SEED_TURBO
+    assert prefix[0]["match_kind"] == "date_stem"
+
+
+def test_undated_curated_does_not_absorb_fake_date_suffix():
+    # glm-5.2 has no date in the curated key → stem index must not claim glm-5.2-*.
+    fake = "glm-5.2-260715"
+    assert curated_pricing_for(fake) == (None, None, None)
+    assert not has_curated_pricing(fake)
+    with capture_logs() as logs:
+        calculate_cost(fake, _usage(input_tokens=100, output_tokens=50))
+    assert len(_fallback_logs(logs)) == 1
+
+
+def test_unknown_model_still_falls_back_after_stem_miss():
+    usage = _usage(output_tokens=1_000_000)
+    assert calculate_cost("totally-unknown-260715", usage) == calculate_cost(
+        PLATFORM_RELAY_GLM_52, usage
+    )
+    assert curated_pricing_for("totally-unknown-260715") == (None, None, None)
 
 
 # --- cache-split reconciliation: the input bill always matches the prompt ---

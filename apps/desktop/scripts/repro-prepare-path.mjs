@@ -33,7 +33,7 @@ const probe = (page) =>
   page.evaluate(() => {
     const text = (document.body?.innerText ?? "").replace(/\s+/g, " ");
     return {
-      thinking: /Thinking…|Replying…/.test(text),
+      thinking: /Thinking…/.test(text),
       delegating: /Composing\s*Delegate|Delegate/.test(text),
       authorize: /授权开赛/.test(text),
       waitKickoff: /等待开工确认|开工卡/.test(text),

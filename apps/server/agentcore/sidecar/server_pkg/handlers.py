@@ -226,13 +226,27 @@ class HandlerMixin:
     def _refresh_permission_axes(self, params: dict[str, Any]) -> None:
         """Adopt the conversation's CURRENT permission axes from per-turn params.
 
-        Sidecar has no conversation DB — the desktop re-sends axes on every
+        Permission axes stay client-pushed — the desktop re-sends them on every
         startTurn / resume so a mid-session switch applies to the next turn.
+        (folder_id is loaded from conversation DB at startTurn, not from params.)
         Absent / invalid ⇒ keep the current value.
         """
         parsed = self._parse_permission_axes(params)
         if parsed is not None:
             self._permission_axes = parsed
+
+    def _refresh_user_id(self, params: dict[str, Any]) -> None:
+        """Adopt per-turn ``userId`` when present (mirrors permissionAxes / inference).
+
+        Long-lived sidecars may have ``initialize``'d as ``\"local\"`` (probe / pre-login);
+        the desktop re-sends the account id on every startTurn / resume so
+        ``ToolContext.user_id`` / baseline / log_context follow the logged-in principal.
+        Absent key ⇒ keep the initialize-time value.
+        """
+        if "userId" not in params:
+            return
+        raw = params.get("userId")
+        self._user_id = resolve_sidecar_user_id(None if raw is None else str(raw))
 
     async def _on_start_turn(self, request_id: Any, params: dict[str, Any]) -> None:
         if not self._initialized or self._root is None:
@@ -266,6 +280,7 @@ class HandlerMixin:
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
+        self._refresh_user_id(params)
 
         # The response to startTurn is DEFERRED until the turn completes (it carries
         # the final result); the live events flow as ``turn/event`` notifications in
@@ -404,6 +419,11 @@ class HandlerMixin:
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
+        self._refresh_user_id(params)
+        # Per-turn account id wins over the freeze-in-frame value (probe may have
+        # initialized as local; login mid-session must not leave ToolContext on the
+        # alias UUID).
+        suspension.user_id = self._user_id
 
         # Cold peek 无 plan blob → workers 行校验（同云端）；非法修正 rollback claim。
         from agentcore.core.errors import ValidationError as CoreValidationError

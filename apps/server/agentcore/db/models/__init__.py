@@ -18,7 +18,7 @@ from .admin_audit import AdminAuditLog
 from .admin_mfa import AdminMfa
 from .agent_audit import AgentAuditEvent
 from .auth import Credentials, RefreshToken, UserGitCredential, UserLlmProvider
-from .billing import CostCall, CostEvent
+from .billing import CostCall, CostEvent, CostLedgerOutbox
 from .boards import Board
 from .browser import BrowserTakeoverRow
 from .chat import Chat, ChatMember, ChatMessage
@@ -71,6 +71,7 @@ __all__ = [
     "ConversationShare",
     "CostCall",
     "CostEvent",
+    "CostLedgerOutbox",
     "Credentials",
     "Document",
     "FeedbackRow",

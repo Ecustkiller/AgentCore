@@ -139,7 +139,10 @@ export function refreshTokens(): Promise<boolean> {
     try {
       res = await fetch(apiUrl("/v1/auth/token/refresh"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...clientHeaders(),
+        },
         body: JSON.stringify({ refresh_token: tokens.refresh_token }),
       });
     } catch {

@@ -4,9 +4,12 @@
 // directly. Schema matches desktop GET/PUT /v1/users/me/autonomy.
 // Recipes: cautious | less_interrupt | managed (seeds new conversations).
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
 
-export type AutonomyPolicy = "cautious" | "less_interrupt" | "managed";
-export type AutonomyView = { policy: AutonomyPolicy };
+type Schemas = components["schemas"];
+
+export type AutonomyPolicy = Schemas["AutonomyPolicy"];
+export type AutonomyView = Schemas["AutonomyView"];
 
 async function errorMessage(res: Response, fallback: string): Promise<string> {
   try {

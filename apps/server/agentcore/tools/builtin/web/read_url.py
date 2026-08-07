@@ -67,6 +67,11 @@ _STOP_READ_HINT = (
     "不要再空转外网深读。"
     "收口 ≠ 可伪精确逐步菜单：无现行可核证据时，后台点击路径须标「易变/待实测」+ 查找关键词"
 )
+# 401/403/429/451：同拒绝类失败的可执行约束（对齐 retire steer 语气；不拦换公开源）。
+_ANTI_CRAWL_SAME_REJECT_HINT = (
+    "【同拒绝类】勿对本 URL、同站点同策略再调 read_url；"
+    "换公开可抓来源仍可用 read_url。"
+)
 
 
 def _query_len(url: str) -> int:
@@ -499,9 +504,11 @@ class ReadUrlTool:
                 # Anti-crawl / auth wall: keep stop-read + no URL thrash, then name
                 # the next workable moves (public source / summary close, or hand-
                 # brain paste from the user). Never imply a logged-in scrape.
+                # Same-reject-class: forbid same URL / same strategy; allow new public hosts.
                 hint = (
-                    "。该站点反爬 / 拒绝访问，换 URL 或重试都读不到"
+                    "。该站点反爬 / 拒绝访问，换 URL 或同策略重试都读不到"
                     f"{_STOP_READ_HINT}"
+                    f"{_ANTI_CRAWL_SAME_REJECT_HINT}"
                     "下一招：改查公开可抓来源，或直接用已有 web_search 摘要收口；"
                     "若必须站内数据，请用户自行打开页面后贴关键数字/截图（手脑），"
                     "勿假装已登录抓取。"

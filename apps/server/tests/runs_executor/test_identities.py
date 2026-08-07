@@ -191,9 +191,9 @@ async def test_worker_identities_carry_tool_safety_caution():
 async def test_handoff_prompt_splits_by_topology():
     """Identity handoff wording tracks DAG dependents (接力契约 + 增量交代).
 
-    Upstream (has_dependents) gets the imperative「必须调用」; a leaf gets the
-    conditional「有增量才写 / 不必为交而交」— same semantics as the engine gate
-    and the handoff tool description, without fighting either.
+    Upstream (has_dependents) gets the imperative「必须调用」; a leaf gets
+    substantial-work guidance + short-answer exemption「不必为交而交」— aligned
+    with the engine gate and the handoff tool description.
     """
     from agentcore.runtime.runs.executor_identities import build_worker_identity
     from agentcore.tools.builtin.handoff import HandoffTool
@@ -213,6 +213,8 @@ async def test_handoff_prompt_splits_by_topology():
     assert "不必为交而交" in leaf
     assert "接力契约 + 增量交代" in leaf
     assert "必须调用 handoff" not in leaf
+    assert "有工具活动或较长交付" in leaf
+    assert "汇报不完整" in leaf
     assert "权威文档冲突" in leaf
     assert "静默改权威稿" in leaf
 

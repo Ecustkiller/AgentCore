@@ -43,10 +43,14 @@ import { notifyWarning } from "@/lib/toast";
 import { resolveSidecarInference } from "@/services/inferenceToken";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
+import { useAuthStore } from "@/stores/auth";
 import { useConversationStore } from "@/stores/conversation";
 import { useTurnModelStore } from "@/stores/turnModel";
 import { resetSidecarEventPumpForTests } from "../sidecarEventPump";
-import { resumeConversationViaSidecar } from "../streamConversationViaSidecar";
+import {
+  resumeConversationViaSidecar,
+  streamConversationViaSidecar,
+} from "../streamConversationViaSidecar";
 
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
@@ -90,6 +94,7 @@ const baseRequest = {
 
 let onEventCb: ((push: EventPush) => void) | null;
 let resumeMock: ReturnType<typeof vi.fn>;
+let startTurnMock: ReturnType<typeof vi.fn>;
 let cancelMock: ReturnType<typeof vi.fn>;
 let flushTurnMock: ReturnType<typeof vi.fn>;
 
@@ -97,6 +102,7 @@ beforeEach(() => {
   resetSidecarEventPumpForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useTurnModelStore.setState({ byConversation: {} });
+  useAuthStore.setState({ status: "unauthenticated", user: null, reason: null });
   dispatchSSEEventMock.mockReset();
   notifyWarningMock.mockReset();
   takeRecentSidecarFailureMock.mockReturnValue(null);
@@ -106,6 +112,7 @@ beforeEach(() => {
 
   onEventCb = null;
   resumeMock = vi.fn();
+  startTurnMock = vi.fn();
   cancelMock = vi.fn(() => Promise.resolve());
   flushTurnMock = vi.fn(
     async (): Promise<OutboxFlushTurnResult> => ({
@@ -132,7 +139,7 @@ beforeEach(() => {
       }),
       cancel: cancelMock,
       resume: resumeMock,
-      startTurn: vi.fn(),
+      startTurn: startTurnMock,
       respond: vi.fn(),
     },
     outboxApi: {
@@ -169,6 +176,54 @@ function seedOriginalUserBubble(
   );
 }
 
+describe("streamConversationViaSidecar", () => {
+  it("forwards the logged-in account userId on startTurn (not hardcoded local)", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      user: {
+        id: "acct-uuid-42",
+        username: "alice",
+        displayName: "Alice",
+        email: null,
+        role: "user",
+        avatarUrl: null,
+      },
+      reason: null,
+    });
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "acct-uuid-42" }),
+    );
+  });
+
+  it("falls back to local userId on startTurn when unauthenticated", async () => {
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "local" }),
+    );
+  });
+});
+
 describe("resumeConversationViaSidecar", () => {
   it("drives the resume RPC, forwards only this conversation's events, and reconciles the original user bubble on outbox sync", async () => {
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
@@ -204,6 +259,7 @@ describe("resumeConversationViaSidecar", () => {
         selected: [],
         subpath: undefined,
         inference: undefined,
+        userId: "local",
         traceId: expect.any(String),
       }),
     );
@@ -218,6 +274,29 @@ describe("resumeConversationViaSidecar", () => {
       .getState()
       .byId.c1?.messages.find((m) => m.role === "user");
     expect(userMsg?.id).toBe("real-uid");
+  });
+
+  it("forwards the logged-in account userId on resume (not hardcoded local)", async () => {
+    useAuthStore.setState({
+      status: "authenticated",
+      user: {
+        id: "acct-uuid-42",
+        username: "alice",
+        displayName: "Alice",
+        email: null,
+        role: "user",
+        avatarUrl: null,
+      },
+      reason: null,
+    });
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "acct-uuid-42" }),
+    );
   });
 
   it("records the turn's real model and warns (naming it) when it fell back to the local platform model (no token)", async () => {

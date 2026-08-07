@@ -24,6 +24,10 @@ import {
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import {
+  formatRegisterLocalProjectAnswer,
+  pickAndRegisterLocalProject,
+} from "@/lib/registerLocalProject";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AskAssumption,
@@ -232,6 +236,34 @@ export function AskQuestionFields({
     if (!conversationId || !onBindResolve) return;
     setBindBusyLabel(opt.label);
     clearPickerFeedback();
+    if (opt.action === "register_local_project") {
+      if (!hasLocalFiles() || !window.fsApi) {
+        applyPickerFailure("unavailable");
+        setBindBusyLabel(null);
+        return;
+      }
+      const result = await pickAndRegisterLocalProject({
+        notifyOnFailure: false,
+      });
+      if (!result.ok) {
+        applyPickerFailure(
+          result.reason,
+          result.reason === "cancelled" ? undefined : result.message,
+        );
+        setBindBusyLabel(null);
+        return;
+      }
+      const value = formatRegisterLocalProjectAnswer(
+        opt.label,
+        result.folder.name,
+      );
+      try {
+        await onBindResolve(answer.composeWithAnswer("decision", q.id, value));
+      } catch {
+        setBindBusyLabel(null);
+      }
+      return;
+    }
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);
       const result = await pickAndGrantReadonlyFolder(conversationId, hints);

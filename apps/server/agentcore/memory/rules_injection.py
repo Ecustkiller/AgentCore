@@ -14,9 +14,10 @@ authorship (§5.2). This module assembles that block:
 
 Byte-stability: with no user rules and under budget, the composed memory body is identical to the
 legacy ``load_injected_memory`` concatenation, so ``assemble_system_prompt`` takes its existing
-memory-only ``<rules>`` path verbatim — the DeepSeek prefix cache and the memory-only prompt
-tests are unaffected. The new combined path only engages once a user actually has rules (or the
-budget trims), which is the new behavior this phase adds.
+memory-only ``<rules>`` path verbatim — keeps the memory slice deterministic for the
+assembly-layer stable prefix (:class:`~agentcore.runtime.context.contributor.SectionOrder`)
+and the memory-only prompt tests. The new combined path only engages once a user actually
+has rules (or the budget trims), which is the new behavior this phase adds.
 """
 
 from __future__ import annotations

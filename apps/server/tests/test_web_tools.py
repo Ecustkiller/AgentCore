@@ -623,6 +623,9 @@ async def test_read_url_403_steers_stop_read(monkeypatch):
     assert "公开" in err or "摘要" in err
     assert "手脑" in err or "截图" in err
     assert "勿假装已登录" in err or "已登录抓取" in err
+    # Same-reject-class: actionable — no same URL / same strategy; public sources OK.
+    assert "同拒绝类" in err or "本 URL" in err
+    assert "再调 read_url" in err or "勿对" in err
     assert result.metadata.get("policy_failure") is not True
 
 
@@ -648,6 +651,7 @@ async def test_read_url_anti_crawl_steers_next_move(monkeypatch, code):
     assert "停止" in err or "换 URL" in err
     assert "下一招" in err
     assert "手脑" in err or "截图" in err
+    assert "同拒绝类" in err or "本 URL" in err
     assert result.metadata.get("policy_failure") is not True
 
 

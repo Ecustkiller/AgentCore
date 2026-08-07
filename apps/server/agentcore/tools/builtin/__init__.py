@@ -241,7 +241,7 @@ def build_ceo_tool_registry(
     **Browser**: navigate/click/type/scroll/snapshot (GRANTABLE · ``browser_class``),
     gated by ``include_browser`` — same tier as host_shell / terminal; screenshot
     stays worker-only (visual验收).
-    Orchestration primitives are wired separately in ``_assemble_ceo_toolset``.
+    Orchestration primitives are wired separately in ``tools.ceo_toolset``.
     Host tools appear only when ``desktop_online`` ∧ ``host≠off``.
     ``terminal`` appears only when ``backend_location=="local"``.
     """

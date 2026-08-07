@@ -134,6 +134,45 @@ class TreeResult:
 
 
 @dataclass(frozen=True)
+class IndexFileEntry:
+    """One file from ``index_files`` — path plus optional local-stat fingerprint.
+
+    ``mtime_ms`` / ``size_bytes`` both present → fingerprint usable to skip a
+    full-content ``read`` during ``ensure_index``. Either missing → treat as
+    unknown (must read). ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``.
+    """
+
+    path: str
+    mtime_ms: int | None = None
+    size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class IndexFilesResult:
+    """Flat file index from ``index_files`` (paths + optional fingerprints).
+
+    Unpacks as ``(paths, truncated)`` so existing call sites stay valid. Prefer
+    ``entries`` / ``fingerprints()`` when the caller needs mtime/size skip hints.
+    """
+
+    paths: list[str]
+    truncated: bool
+    entries: tuple[IndexFileEntry, ...] = ()
+
+    def __iter__(self):
+        yield self.paths
+        yield self.truncated
+
+    def fingerprints(self) -> dict[str, tuple[int, int]]:
+        """``path → (mtime_ms, size_bytes)`` for entries with both fields set."""
+        out: dict[str, tuple[int, int]] = {}
+        for e in self.entries:
+            if e.mtime_ms is not None and e.size_bytes is not None:
+                out[e.path] = (int(e.mtime_ms), int(e.size_bytes))
+        return out
+
+
+@dataclass(frozen=True)
 class ReplaceOutcome:
     """Result of ``replace``: how many spans changed, and where the first was."""
 
@@ -308,20 +347,22 @@ class WorkspaceBackend(Protocol):
 
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
-    ) -> tuple[list[str], bool]:
+    ) -> IndexFilesResult:
         """Flat, ignore-pruned, capped list of workspace-relative file paths.
 
         Files only (no directories), ``IGNORED_DIRS`` pruned, capped at ``cap``
         (``truncated`` True when the cap was hit; ``cap=None`` uses the backend default).
         ``order`` picks the sort (and thus what survives truncation): ``"path"``
-        (default) is POSIX-alphabetical and stat-free — the @-mention / picker view;
-        ``"recent"`` is newest-first by mtime (one stat/file) so a worker manifest spends
+        (default) is POSIX-alphabetical — the @-mention / picker view;
+        ``"recent"`` is newest-first by mtime so a worker manifest spends
         its budget on the most-likely-relevant files in a big tree, not whatever sorts
-        first. The shared file-discovery primitive behind @ mentions (文件中枢统一 F4) and
+        first. Channel / local backends may fill ``entries`` with ``mtime_ms`` +
+        ``size_bytes`` fingerprints so ``ensure_index`` can skip unchanged-file
+        reads. The shared file-discovery primitive behind @ mentions (文件中枢统一 F4) and
         the worker workspace manifest — so both see the same flat view whether the
         workspace is cloud (``ServerWorkspace``) or local (``LocalWorkspace``, indexed on
         the desktop). Read-only (never sets ``dirty``); an empty / not-yet-promoted
-        workspace returns ``([], False)``.
+        workspace returns an empty ``IndexFilesResult``.
         """
         ...
 

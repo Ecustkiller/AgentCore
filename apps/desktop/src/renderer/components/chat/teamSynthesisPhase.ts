@@ -56,7 +56,7 @@ function formatWaitElapsed(elapsedSec: number | undefined): string {
 }
 
 /**
- * Live ``coordination_wait`` copy for StatusStrip / StreamingIndicator (long form).
+ * Live ``coordination_wait`` copy for StatusStrip (long form).
  * Global only — member names stay on graph worker nodes / captain short caption.
  * ``waitingRoles`` kept in opts for call-site compat; Strip no longer embeds them.
  */

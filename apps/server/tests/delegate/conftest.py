@@ -201,6 +201,10 @@ def local_ctx() -> ToolContext:
     )
 
 
+# 有出生默认：多数委派单测模拟项目会话；裸聊 2b 闸见 test_target_desktop。
+_TEST_BIRTH_FOLDER_ID = "test_birth"
+
+
 def tool(provider: Provider, sink: EventSink | None = None) -> DelegateTool:
     return DelegateTool(
         llm=provider,
@@ -210,6 +214,7 @@ def tool(provider: Provider, sink: EventSink | None = None) -> DelegateTool:
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx(),
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 
@@ -266,6 +271,7 @@ def tool_with_gate(ctx: ToolContext, approval_gate: ApprovalGate) -> DelegateToo
         tools=ToolRegistry(),
         base_tool_context=ctx,
         approval_gate=approval_gate,
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 
@@ -279,6 +285,7 @@ def nesting_tool(provider: NestingProvider, sink: EventSink) -> DelegateTool:
         tools=ToolRegistry(),
         base_tool_context=ctx(),
         captain_run_id="CEO",
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 
@@ -302,6 +309,7 @@ def tool_ckpt(
         registry=registry,
         checkpoint_timeout_seconds=timeout,
         checkpoint_enabled=True,
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 
@@ -311,7 +319,7 @@ def tool_durable(
     registry: InteractionRegistry,
     saver,
     deleter,
-    folder_id: str | None = None,
+    folder_id: str | None = _TEST_BIRTH_FOLDER_ID,
     memory_enabled: bool = True,
 ):
     # Pin CAUTIOUS: keeps command=ask / file_write=ask for approval-path tests.
@@ -353,6 +361,7 @@ def scope_tool(provider: ScopeProvider | DepProvider) -> DelegateTool:
         history=[],
         tools=tools,
         base_tool_context=ctx(),
+        folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
 

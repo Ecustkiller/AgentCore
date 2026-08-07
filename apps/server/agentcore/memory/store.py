@@ -54,8 +54,8 @@ PREFERENCES_MEMORY_FILE = "偏好.md"
 NAVIGATION_MEMORY_FILE = "导航.md"
 
 # The two always-injected GLOBAL core files, in stable injection order (preferences then profile):
-# both ride every prompt's <rules>; ordering is load-bearing for DeepSeek prefix caching.
-# Project layer (画像 then 导航) is appended by injection after these.
+# both ride every prompt's <rules>; order here is content-layer determinism (assembly places
+# the block at SectionOrder.MEMORY — see runtime/context).
 ALWAYS_MEMORY_FILES = (PREFERENCES_MEMORY_FILE, CORE_MEMORY_FILE)
 
 # On-demand topic notes (§三 / §六): ``<scope>/主题/<slug>.md`` — procedural /

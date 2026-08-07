@@ -1,9 +1,9 @@
 """Tests for build_run_plan: raw delegate args → RunPlan (第一阶段内联角色版).
 
-Covers the single/parallel/DAG shape inference, run-id minting (flat numbering vs
-DAG namespacing + edge rewrite), inline-role field mapping, the fan-out sibling
-summary, the tool allow-list filter, knob validation, and the reject-on-error /
-reject-when-none-valid contract.
+Covers the single/parallel/DAG shape inference, run-id minting (flat declared id
+or numbering vs DAG namespacing + edge rewrite), inline-role field mapping, the
+fan-out sibling summary, the tool allow-list filter, knob validation, and the
+reject-on-error / reject-when-none-valid contract.
 """
 
 import agentcore.runtime.runs.builder as builder_mod
@@ -806,45 +806,68 @@ def test_depends_on_role_name_resolves_unambiguously():
     assert set(summary.depends_on) == {"t_service", "t_api"}
 
 
-def test_depends_on_unknown_lists_available_run_ids():
-    """未知依赖报错须可操作：列出当前可用 id/角色。"""
-    tasks = [
-        {"id": "api", "role": "后端API审查员", "task": "审 API"},
-        {
-            "id": "summary",
-            "role": "汇总员",
-            "task": "汇总",
-            "depends_on": ["不存在的审查员"],
-        },
-    ]
-    plan, errs = build_run_plan(tasks, id_prefix="t")
-    assert errs
-    msg = " ".join(errs)
-    assert "不存在的审查员" in msg
-    assert "可用节点" in msg
-    assert "api" in msg
-    assert "后端API审查员" in msg
+def test_flat_preserves_declared_id():
+    """flat 批声明非空 id → 铸 {prefix}_{raw}（与 DAG 同形），非序号。"""
+    plan, errs = build_run_plan(
+        [{"id": "recon", "role": "调研员", "task": "查"}],
+        id_prefix="t",
+    )
+    assert errs == []
+    assert len(plan.nodes) == 1
+    assert plan.nodes[0].run_id == "t_recon"
 
 
-def test_depends_on_ambiguous_role_rejects():
-    tasks = [
-        {"id": "a1", "role": "审查员", "task": "审A"},
-        {"id": "a2", "role": "审查员", "task": "审B"},
-        {"id": "s", "role": "汇总", "task": "汇总", "depends_on": ["审查员"]},
-    ]
-    plan, errs = build_run_plan(tasks, id_prefix="t")
+def test_flat_undeclared_id_still_uses_counter():
+    plan, errs = build_run_plan([{"role": "A", "task": "a"}], id_prefix="t")
+    assert errs == []
+    assert plan.nodes[0].run_id == "t_1"
+
+
+def test_flat_duplicate_declared_id_rejects_batch():
+    plan, errs = build_run_plan(
+        [
+            {"id": "x", "role": "A", "task": "a"},
+            {"id": "x", "role": "B", "task": "b"},
+        ],
+        id_prefix="t",
+    )
     assert errs
-    assert any("歧义" in e for e in errs)
+    assert any("重复的 id" in e for e in errs)
+    assert not plan.nodes
+
+
+def test_flat_then_append_depends_on_declared_id():
+    """验收：flat+id=recon 后再批 depends_on:[recon]+existing_plan → 通。"""
+    host, host_errs = build_run_plan(
+        [{"id": "recon", "role": "调研员", "task": "查"}],
+        id_prefix="del_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
+    assert host_errs == []
+    assert host.by_id("del_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee_recon") is not None
+
+    plan, errs = build_run_plan(
+        [
+            {
+                "id": "write",
+                "role": "写手",
+                "task": "基于调研写",
+                "depends_on": ["recon"],
+            }
+        ],
+        id_prefix="del_ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee",
+        existing_plan=host,
+    )
+    assert errs == []
+    assert plan.nodes[0].depends_on == [
+        "del_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee_recon"
+    ]
 
 
 def test_append_batch_depends_on_previous_batch_id():
     """跨批 append：depends_on 上一批已有节点 id → 成功（对齐 build_added_nodes）。"""
-    # 宿主须走 DAG 铸 id（flat 批会忽略声明 id 改用序号）。
+    # 宿主可走 flat：声明 id 现已保留（不再忽略）。
     host, host_errs = build_run_plan(
-        [
-            {"id": "l2_a", "role": "调研A", "task": "查A"},
-            {"id": "l2_x", "role": "占位", "task": "占位", "depends_on": ["l2_a"]},
-        ],
+        [{"id": "l2_a", "role": "调研A", "task": "查A"}],
         id_prefix="bt",
     )
     assert host_errs == []
@@ -871,10 +894,7 @@ def test_append_batch_depends_on_previous_batch_id():
 def test_append_batch_unknown_dep_lists_host_nodes():
     """append + host plan：未知依赖的「可用节点」须带出历史节点。"""
     host, _ = build_run_plan(
-        [
-            {"id": "l2_a", "role": "调研A", "task": "查A"},
-            {"id": "l2_x", "role": "占位", "task": "占位", "depends_on": ["l2_a"]},
-        ],
+        [{"id": "l2_a", "role": "调研A", "task": "查A"}],
         id_prefix="bt",
     )
     plan, errs = build_run_plan(
@@ -894,6 +914,40 @@ def test_append_batch_unknown_dep_lists_host_nodes():
     assert "可用节点" in msg
     assert "bt_l2_a" in msg
     assert "调研A" in msg
+    assert "下一步" in msg
+    assert 'append_to_execution_id="latest"' in msg
+
+
+def test_depends_on_unknown_lists_available_run_ids():
+    """未知依赖报错须可操作：列出当前可用 id/角色 + 可执行下一步。"""
+    tasks = [
+        {"id": "api", "role": "后端API审查员", "task": "审 API"},
+        {
+            "id": "summary",
+            "role": "汇总员",
+            "task": "汇总",
+            "depends_on": ["不存在的审查员"],
+        },
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    msg = " ".join(errs)
+    assert "不存在的审查员" in msg
+    assert "可用节点" in msg
+    assert "api" in msg
+    assert "后端API审查员" in msg
+    assert "下一步" in msg
+
+
+def test_depends_on_ambiguous_role_rejects():
+    tasks = [
+        {"id": "a1", "role": "审查员", "task": "审A"},
+        {"id": "a2", "role": "审查员", "task": "审B"},
+        {"id": "s", "role": "汇总", "task": "汇总", "depends_on": ["审查员"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs
+    assert any("歧义" in e for e in errs)
 
 
 def test_non_append_unknown_dep_lists_only_current_batch():

@@ -31,7 +31,6 @@ import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { RetryBanner } from "./RetryBanner";
 import { StageCardDock } from "./StageCardDock";
-import { StreamingIndicator } from "./StreamingIndicator";
 
 export function ChatView() {
   const messages = useActiveMessages();
@@ -207,7 +206,6 @@ export function ChatView() {
               />
               <RetryBanner />
               <StageCardDock />
-              <StreamingIndicator />
             </>
           )}
           <div

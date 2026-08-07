@@ -338,6 +338,10 @@ class RunSpec:
     # accumulates (one block per adjust) when a node is steered across multiple
     # checkpoints before it runs. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     steer: str = ""
+    # 跨项目指挥 · 形状甲：本 worker 的目标 Folder id（解析后的项目身份）。
+    # 有值 → prepare_agent_node 另建 backend + 记忆跟该 folder；None → 坐会话默认桌。
+    # 嵌套子派：省略时由 builder 填父目标（再点名才换）。不改会话 folder_id。
+    target_folder_id: str | None = None
 
 
 @dataclass

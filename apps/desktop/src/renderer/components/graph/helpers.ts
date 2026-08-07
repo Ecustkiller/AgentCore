@@ -627,6 +627,8 @@ export function buildGraphStructure(
       continuationsByOriginal.set(r.continuesRunId, list);
     }
   }
+  // 有 continuation 后继的节点：不画 unit→CEO bookend（仅链尖汇入）。
+  const hasContinuationSuccessor = new Set<string>();
   for (const [originalId, continuations] of continuationsByOriginal) {
     if (beatHidden.has(originalId) || !isLayoutVisible(originalId)) continue;
     const ordered = continuations
@@ -640,6 +642,7 @@ export function buildGraphStructure(
         target: cont.id,
         kind: "continuation",
       });
+      hasContinuationSuccessor.add(prev);
       prev = cont.id;
     }
   }
@@ -678,10 +681,12 @@ export function buildGraphStructure(
     for (const r of topWorkers) {
       const unit = unitOf.get(r.id) ?? r.id;
       // 跨幕入口（辩论主持人 parent=汇总员）从锚点生长，不从「你的任务」扇出。
+      // 续节点（continuesRunId）挂原节点后方成链，不接 input——只冷开局根扇出。
       if (
         r.dependsOn.length === 0 &&
         !r.replacesRunId &&
-        !isCrossActParent(r)
+        !isCrossActParent(r) &&
+        !isContinuation(r)
       ) {
         addEdge({
           id: `${inputId}->${unit}`,
@@ -690,7 +695,14 @@ export function buildGraphStructure(
           kind: "dep",
         });
       }
-      if (!dependedOn.has(unit) && !replacedUnits.has(unit)) {
+      // 有 continuation 后继的节点（含冷开局根）不进 CEO；仅链尖 → captain。
+      // 真实 dependsOn / 补派 replaced 仍按原规则跳过。
+      if (
+        !dependedOn.has(unit) &&
+        !replacedUnits.has(unit) &&
+        !hasContinuationSuccessor.has(r.id) &&
+        !hasContinuationSuccessor.has(unit)
+      ) {
         addEdge({
           id: `${unit}->${captainId}`,
           source: unit,

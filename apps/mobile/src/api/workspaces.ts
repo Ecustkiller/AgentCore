@@ -12,7 +12,11 @@ type Schemas = components["schemas"];
 type WorkspaceListResponse = Schemas["WorkspaceListResponse"];
 type WorkspaceFileListResponse = Schemas["WorkspaceFileListResponse"];
 
-/** One of the user's workspaces (a project/folder), as listed for the 文件 tab. */
+/**
+ * One of the user's workspaces (a project/folder), as listed for the 文件 tab.
+ * CamelCase client projection of OpenAPI `WorkspaceSummary` (M17 exemption:
+ * OpenAPI wire is snake_case; mobile 文件 tab uses camelCase like desktop WorkspaceInfo).
+ */
 export interface WorkspaceSummary {
   wsId: string;
   name: string;

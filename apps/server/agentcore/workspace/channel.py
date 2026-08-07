@@ -20,19 +20,22 @@ Flow (one op):
 
 State is in-process (single-worker posture, same as the approval gate); front
 with Redis to scale to multiple workers (see ``config.py``). A result the client
-never delivers fails as a ``WorkspaceIOError`` after the timeout and marks the
+never delivers fails as a ``WorkspaceIOError`` after the timeout. A single settle
+timeout fails only that op; **consecutive** real-op settle timeouts (N=2) mark the
 channel sticky-dead for the turn (sibling inflight settle + later ops fail-fast),
 so a dropped desktop never hangs the turn on cascaded deadlines. Concurrent
-desktop round-trips are capped (``max_inflight``, default 2); extras queue before
+desktop round-trips are capped (``max_inflight``, default 16); extras queue before
 suspend, and queue wait rides the outer tool wall clock.
 """
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, NoReturn
+from typing import Any, Iterator, NoReturn
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -59,6 +62,24 @@ from agentcore.workspace.protocol import (
 )
 
 logger = get_logger(__name__)
+
+# Background IndexMaintainer channel IO: timeouts must not sticky-dead the shared
+# Local file channel (same spirit as ``probe_exec``). Bound around ``ensure_index``.
+_index_io: ContextVar[bool] = ContextVar("workspace_index_io", default=False)
+
+
+@contextmanager
+def index_io_mode() -> Iterator[None]:
+    """Mark the current task as background index IO (no sticky-dead on timeout)."""
+    token = _index_io.set(True)
+    try:
+        yield
+    finally:
+        _index_io.reset(token)
+
+
+def index_io_active() -> bool:
+    return _index_io.get()
 
 
 class WorkspaceOp(StrEnum):
@@ -116,6 +137,10 @@ class WorkspaceOp(StrEnum):
     # never issues these ops (kept in the closed set so ends cannot drift).
     GIT_REPO_STATUS = "git_repo_status"
     GIT_SCM = "git_scm"
+    # Agent structured ``git`` on LocalWorkspace (no Path.root): run allowlisted
+    # argv on the desktop root. Args ``argv`` (+ optional ``timeout_seconds``);
+    # value ``{stdout, stderr, exit_code}``. UI SCM stays on git_repo_status/git_scm.
+    GIT_RUN = "git_run"
 
 
 # Map a serialized error ``kind`` back to its WorkspaceError subclass, so a remote
@@ -152,9 +177,12 @@ def raise_op_error(error: dict[str, Any]) -> NoReturn:
     raise cls(detail)
 
 
-# Shared detail fragment so ``is_liveness_timeout_detail`` keeps matching channel-dead
-# fail-fast / sibling cancel envelopes (capacity contract ≠ liveness).
+# Shared detail fragment so ``is_channel_dead_detail`` / ``is_liveness_timeout_detail``
+# keep matching channel-dead fail-fast / sibling cancel envelopes (capacity ≠ liveness).
 _CHANNEL_DEAD_DETAIL = "local workspace channel dead（活性挂起）"
+
+# Real-op settle timeouts must streak this many times before sticky-dead (success clears).
+_STICKY_AFTER_CONSECUTIVE_TIMEOUTS = 2
 
 
 @dataclass
@@ -166,16 +194,19 @@ class WorkspaceChannel:
     ``LocalWorkspace`` builds the JSON-safe ``args`` and interprets the returned
     ``value`` per op.
 
-    Sticky dead: the first transport ``TimeoutError`` on a **real** workspace op
-    (desktop liveness hang) marks the channel dead for the rest of the turn —
+    Sticky dead: **consecutive** transport ``TimeoutError``s on **real** workspace
+    ops (desktop liveness hang, N=2) mark the channel dead for the rest of the turn —
     subsequent ``request``s fail-fast without SSE, and same-channel inflight ops
     are settled with a failure envelope so they do not burn the remaining deadline.
+    A single settle timeout fails only that op (no sibling cancel, no sticky).
+    A successful settle clears the consecutive-timeout streak.
     ``probe_exec`` (language advertise probe at turn prepare) is exempt: its
     timeout/failure only fail-closes the language surface, and must not sticky-dead
-    the file channel.
+    the file channel. Background index IO (``index_io_mode``) is likewise exempt so
+    an IndexMaintainer hang cannot drag tool-family siblings into channel-dead.
 
     Bounded in-flight: a semaphore caps concurrent desktop round-trips
-    (``max_inflight``, default 2). Extra callers queue before suspend; queue wait
+    (``max_inflight``, default 16). Extra callers queue before suspend; queue wait
     rides the outer tool wall clock (no separate channel timeout stretch).
     """
 
@@ -184,9 +215,10 @@ class WorkspaceChannel:
     registry: ClientRequestBridge
     timeout_seconds: float
     root_id: str = ""  # which desktop FS root this workspace is bound to (P2d)
-    max_inflight: int = 2  # concurrent suspends; settings.workspace_channel_max_inflight
+    max_inflight: int = 16  # concurrent suspends; settings.workspace_channel_max_inflight
     _dead: bool = field(default=False, init=False, repr=False)
     _inflight: set[str] = field(default_factory=set, init=False, repr=False)
+    _consecutive_settle_timeouts: int = field(default=0, init=False, repr=False)
     _sem: asyncio.Semaphore | None = field(default=None, init=False, repr=False)
 
     def _get_sem(self) -> asyncio.Semaphore:
@@ -208,7 +240,7 @@ class WorkspaceChannel:
             self.registry.resolve(rid, envelope, conversation_id=self.conversation_id)
 
     def _mark_dead(self, *, op: str, request_id: str) -> None:
-        """First liveness hang: sticky-dead + cancel siblings (idempotent)."""
+        """Consecutive liveness hangs reached N: sticky-dead + cancel siblings (idempotent)."""
         if self._dead:
             return
         self._dead = True
@@ -217,6 +249,7 @@ class WorkspaceChannel:
             op=op,
             request_id=request_id,
             conversation_id=self.conversation_id,
+            consecutive_timeouts=self._consecutive_settle_timeouts,
         )
         self._fail_inflight_siblings(trigger_request_id=request_id)
 
@@ -262,15 +295,20 @@ class WorkspaceChannel:
         read-only mounts under ``external/<alias>/``); omit to use the workspace
         binding root. Does not change the conversation workspace binding contract.
 
-        After the first real-op liveness timeout the channel stays sticky-dead: new
-        requests raise immediately (no SSE) so a hung desktop cannot cascade into
-        more 60s waits. ``probe_exec`` timeouts do not enter that sticky state.
+        After consecutive real-op liveness timeouts (N=2) the channel stays
+        sticky-dead: new requests raise immediately (no SSE) so a hung desktop
+        cannot cascade into more 60s waits. A single timeout fails only that op.
+        ``probe_exec`` and background index-IO timeouts do not enter that sticky
+        state (and do not advance the consecutive-timeout streak).
 
         Concurrency order: dead-check → acquire slot → dead-check → suspend. A
         waiter that obtains a slot after the channel died fail-fasts without SSE.
         """
         op_name = str(op)
         self._reject_if_dead(op_name)
+        counts_toward_sticky = (
+            op_name != WorkspaceOp.PROBE_EXEC and not index_io_active()
+        )
 
         sem = self._get_sem()
         await sem.acquire()
@@ -315,11 +353,30 @@ class WorkspaceChannel:
                         ),
                     )
                 except TimeoutError as e:
-                    logger.info("workspace.op_timeout", op=op_name, request_id=request_id)
-                    # Language advertise probe only: fail-closed at resolve_exec_languages,
-                    # never sticky-dead the file IO channel (A1).
-                    if op_name != WorkspaceOp.PROBE_EXEC:
-                        self._mark_dead(op=op_name, request_id=request_id)
+                    timeout_fields: dict[str, Any] = {
+                        "op": op_name,
+                        "request_id": request_id,
+                    }
+                    path = args.get("path")
+                    if path is not None:
+                        timeout_fields["path"] = path
+                    directory = args.get("directory")
+                    if directory is not None:
+                        timeout_fields["directory"] = directory
+                    logger.info("workspace.op_timeout", **timeout_fields)
+                    # probe_exec / background index IO: fail the op only — never
+                    # sticky-dead the shared file channel or cancel tool siblings.
+                    if counts_toward_sticky:
+                        self._consecutive_settle_timeouts += 1
+                        if (
+                            self._consecutive_settle_timeouts
+                            >= _STICKY_AFTER_CONSECUTIVE_TIMEOUTS
+                        ):
+                            self._mark_dead(op=op_name, request_id=request_id)
+                            raise WorkspaceIOError(
+                                f"local workspace op '{op_name}' timed out; "
+                                f"channel dead（活性挂起）"
+                            ) from e
                     raise WorkspaceIOError(
                         f"local workspace op '{op_name}' timed out（活性挂起）"
                     ) from e
@@ -327,6 +384,10 @@ class WorkspaceChannel:
                 self._inflight.discard(request_id)
         finally:
             sem.release()
+
+        # Any non-timeout settle clears the hang streak (ok or typed desktop error).
+        if counts_toward_sticky:
+            self._consecutive_settle_timeouts = 0
 
         if not isinstance(result, dict) or not result.get("ok"):
             error = result.get("error") if isinstance(result, dict) else None

@@ -41,6 +41,27 @@ export function isEmptyInterruptedAssistant(
   return finishReason === "interrupted";
 }
 
+/**
+ * Empty user-stop: no chat-timeline「已停止」placeholder (P1).
+ * Keep the bubble when there is process / reasoning / citations / warning —
+ * multi-agent StatusStrip still owns the cancelled face.
+ */
+export function isEmptyCancelledAssistant(
+  message: Message | undefined | null,
+): boolean {
+  if (!message || message.role !== "assistant" || message.isStreaming) {
+    return false;
+  }
+  if ((message.content ?? "").trim().length > 0) return false;
+  if ((message.reasoning ?? "").trim().length > 0) return false;
+  if ((message.process?.length ?? 0) > 0) return false;
+  if (message.turnWarning) return false;
+  if ((message.citations?.length ?? 0) > 0) return false;
+  if (message.error?.code === "TURN_CANCELLED") return true;
+  const finishReason = message.finishReason ?? message.runs?.finishReason;
+  return finishReason === "cancelled";
+}
+
 export const COMPOSER_CONTINUE_PLACEHOLDER = "可输入「继续」接着说…";
 
 /** Light hint above composer — discoverability only; send is the recovery action. */

@@ -43,8 +43,8 @@ from agentcore.runtime.journal.pending_interactions import (
     project_interaction_leaf,
 )
 
-# message_end.finish_reason → terminal TurnStatus (parity with desktop statusFromFinish,
-# extended with the non-error completed reasons the chat turn can carry).
+# message_end.finish_reason → terminal TurnStatus (parity with TS
+# `@agentcore/protocol-fold-kit` turnStatusFromFinish / FINISH_TO_STATUS).
 _FINISH_TO_STATUS: dict[str, str] = {
     "end_turn": "completed",
     "max_rounds": "completed",

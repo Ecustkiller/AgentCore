@@ -104,6 +104,9 @@ export class SidecarManager {
     subpath: string,
     workspaceRoot: string,
     inference: SidecarInference | undefined,
+    /** 首次 initialize 的账号 id；缺省 / 空 → ``"local"``。长活进程的后续回合以
+     *  startTurn/resume 的 per-turn ``userId`` 为准。 */
+    userId?: string,
   ): SidecarEntry {
     const key = entryKey(rootId, subpath);
     const existing = this.entries.get(key);
@@ -121,7 +124,7 @@ export class SidecarManager {
 
     const ready = client
       .request("initialize", {
-        userId: "local",
+        userId: userId?.trim() || "local",
         workspaceRoot,
         approvalsEnabled: SIDECAR_APPROVALS_ENABLED,
         // The app-private data dir for durable pause frames (双模式工作区 §一.1):
@@ -162,6 +165,7 @@ export class SidecarManager {
       req.subpath ?? "",
       workspaceRoot,
       req.inference,
+      req.userId,
     );
     await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
 
@@ -197,6 +201,8 @@ export class SidecarManager {
         // Outbox idempotency anchor (as-built: 双模式工作区 §10.3).
         userMessageId: req.userMessageId,
         history: req.history ?? [],
+        // Per-turn account id (long-lived sidecar may have initialized as "local").
+        ...(req.userId?.trim() ? { userId: req.userId.trim() } : {}),
         // W3: session read-only mounts (abs paths stay in main → sidecar only).
         ...(externalMounts.length > 0 ? { externalMounts } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
@@ -308,6 +314,7 @@ export class SidecarManager {
       req.subpath ?? "",
       workspaceRoot,
       inference,
+      req.userId,
     );
     await entry.ready;
 

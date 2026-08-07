@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.workspace.channel import index_io_mode
 
 if TYPE_CHECKING:
     from agentcore.workspace.indexing.manager import IndexManager
     from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+# Wait for Local tool-channel quiet before index IO; skip+reschedule if still busy.
+_CHANNEL_QUIET_POLL_S = 0.05
+_CHANNEL_QUIET_WAIT_MAX_S = 2.0
 
 
 class IndexMaintainer:
@@ -48,16 +53,64 @@ class IndexMaintainer:
         self._manager.set_building(True)
         self._task = loop.create_task(self._run(), name="code-index-maintain")
 
+    async def drain(self) -> None:
+        """Await until maintenance (including coalesced follow-ups) has settled."""
+        while True:
+            task = self._task
+            if task is not None and not task.done():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # ``_run`` already logs; drain must still clear the chain.
+                    pass
+                continue
+            # ``_run`` finally may clear ``_task`` then ``schedule()`` a follow-up;
+            # yield so that create_task is visible before we decide idle.
+            await asyncio.sleep(0)
+            if self._task is not None and not self._task.done():
+                continue
+            if self._rerun:
+                self.schedule()
+                continue
+            return
+
+    async def _wait_channel_quiet(self, channel: Any) -> bool:
+        """Return True when ``channel._inflight`` is empty; False if still busy at cap."""
+        inflight = getattr(channel, "_inflight", None)
+        if inflight is None:
+            return True
+        deadline = asyncio.get_running_loop().time() + _CHANNEL_QUIET_WAIT_MAX_S
+        while inflight:
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(_CHANNEL_QUIET_POLL_S)
+        return True
+
     async def _run(self) -> None:
         async with self._lock:
             try:
+                channel = getattr(self._backend, "_channel", None)
+                if channel is not None and getattr(channel, "_inflight", None) is not None:
+                    if not await self._wait_channel_quiet(channel):
+                        # Tool hot path still using the shared Local channel — skip
+                        # this round and coalesce a follow-up instead of hard-charging.
+                        logger.info("workspace.index_skip_channel_busy")
+                        self._rerun = True
+                        return
                 force = self._force
                 self._force = False
-                await self._manager.ensure_index(self._backend, force=force)
+                with index_io_mode():
+                    await self._manager.ensure_index(self._backend, force=force)
             except Exception:
                 logger.exception("workspace.index_failed")
             finally:
                 self._manager.set_building(False)
                 if self._rerun:
                     self._rerun = False
+                    # Current task is still "not done" until we exit finally —
+                    # clear so schedule() can spawn the follow-up instead of
+                    # only arming _rerun into a void.
+                    self._task = None
                     self.schedule()

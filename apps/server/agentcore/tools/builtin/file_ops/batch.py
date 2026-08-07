@@ -13,7 +13,7 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
-from agentcore.workspace.limits import is_liveness_timeout_detail
+from agentcore.workspace.limits import is_channel_dead_detail
 from agentcore.workspace.protocol import (
     AlreadyExists,
     OutsideWorkspace,
@@ -22,7 +22,7 @@ from agentcore.workspace.protocol import (
 )
 
 from .errors import _error, _liveness_workspace_error, _outside_workspace_msg
-from .integrity import write_scope_rejection
+from .integrity import _prepare_write_relpath, write_scope_rejection
 
 logger = get_logger(__name__)
 
@@ -165,7 +165,7 @@ class FileBatchTool:
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {label}：{e}")
                 continue
-            if status == "fail" and is_liveness_timeout_detail(detail):
+            if status == "fail" and is_channel_dead_detail(detail):
                 # Channel sticky-dead: stop the batch and stamp family retire.
                 return _liveness_workspace_error(detail, start)
             if status == "ok":
@@ -260,7 +260,10 @@ class FileBatchTool:
         self, op: str, item: dict[str, Any], context: ToolContext
     ) -> tuple[str, str]:
         if op == "mkdir":
-            path = str(item.get("path", "")).strip()
+            requested = str(item.get("path", "")).strip()
+            if not requested:
+                return "fail", "mkdir · path 不能为空"
+            path, rename_note = _prepare_write_relpath(requested)
             if not path:
                 return "fail", "mkdir · path 不能为空"
             scope_err = write_scope_rejection(context, path)
@@ -282,10 +285,16 @@ class FileBatchTool:
                 )
             except WorkspaceError as e:
                 return "fail", f"mkdir {path}：{e}"
-            return "ok", f"mkdir {path}"
+            detail = f"mkdir {path}"
+            if rename_note:
+                detail = f"{detail}。{rename_note}"
+            return "ok", detail
 
         if op == "delete":
-            path = str(item.get("path", "")).strip()
+            requested = str(item.get("path", "")).strip()
+            if not requested:
+                return "fail", "delete · path 不能为空"
+            path, rename_note = _prepare_write_relpath(requested)
             if not path:
                 return "fail", "delete · path 不能为空"
             scope_err = write_scope_rejection(context, path)
@@ -309,14 +318,24 @@ class FileBatchTool:
             except WorkspaceError as e:
                 return "fail", f"delete {path}：{e}"
             mode = "永久删除" if permanent else "可逆删除"
-            return "ok", f"delete {path}（{mode}）"
+            detail = f"delete {path}（{mode}）"
+            if rename_note:
+                detail = f"{detail}。{rename_note}"
+            return "ok", detail
 
         source = str(item.get("source", "")).strip()
-        destination = str(item.get("destination", "")).strip()
-        if not source or not destination:
+        requested_dest = str(item.get("destination", "")).strip()
+        if not source or not requested_dest:
+            return "fail", f"{op} · source 与 destination 均为必填"
+        destination, rename_note = _prepare_write_relpath(requested_dest)
+        if not destination:
             return "fail", f"{op} · source 与 destination 均为必填"
         if source == destination:
-            return "skip", f"{op} {source}（源与目标相同）"
+            # Same as cleaned dest (e.g. flat → nested dossier request): idempotent OK.
+            detail = f"{op} {source} → {destination}（源与目标相同，无需操作）"
+            if rename_note:
+                detail = f"{detail}。{rename_note}"
+            return "ok", detail
         for p in (source, destination) if op == "move" else (destination,):
             scope_err = write_scope_rejection(context, p)
             if scope_err is not None:
@@ -344,4 +363,7 @@ class FileBatchTool:
             )
         except WorkspaceError as e:
             return "fail", f"{op} {source} → {destination}：{e}"
-        return "ok", f"{op} {source} → {destination}"
+        detail = f"{op} {source} → {destination}"
+        if rename_note:
+            detail = f"{detail}。{rename_note}"
+        return "ok", detail

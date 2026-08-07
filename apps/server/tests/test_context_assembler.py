@@ -6,6 +6,7 @@ from agentcore.runtime.context import (
     ContextAssembler,
     PromptContributor,
     SectionOrder,
+    assembly_hash,
 )
 
 
@@ -76,3 +77,70 @@ def test_observe_is_chainable_and_side_effect_free():
     before = asm.render()
     assert asm.observe(scope="test", soft_cap=1000) is asm  # chainable (returns self)
     assert asm.render() == before == "BASE\nATTACH"  # observe trimmed/changed nothing
+
+
+def test_assembly_hash_stable_for_identical_render():
+    # M6 方案1: same sections → same hash (searchable drift signal on cost.prompt_assembled).
+    a = (
+        ContextAssembler()
+        .add("base", "BASE", SectionOrder.BASE)
+        .add("memory", "MEM", SectionOrder.MEMORY)
+        .render()
+    )
+    b = (
+        ContextAssembler()
+        .add("memory", "MEM", SectionOrder.MEMORY)  # contribution order differs
+        .add("base", "BASE", SectionOrder.BASE)
+        .render()
+    )
+    assert a == b
+    assert assembly_hash(a) == assembly_hash(b)
+
+
+def test_assembly_hash_changes_when_section_order_or_body_changes():
+    base = ContextAssembler().add("base", "BASE", SectionOrder.BASE).add(
+        "memory", "MEM", SectionOrder.MEMORY
+    )
+    swapped = ContextAssembler().add("base", "MEM", SectionOrder.BASE).add(
+        "memory", "BASE", SectionOrder.MEMORY
+    )
+    assert assembly_hash(base.render()) != assembly_hash(swapped.render())
+    # Volatile tail content change also busts the product hash (expected).
+    with_tail = (
+        ContextAssembler()
+        .add("base", "BASE", SectionOrder.BASE)
+        .add("attach", "ATT-1", SectionOrder.ATTACHMENT)
+    )
+    with_tail2 = (
+        ContextAssembler()
+        .add("base", "BASE", SectionOrder.BASE)
+        .add("attach", "ATT-2", SectionOrder.ATTACHMENT)
+    )
+    assert assembly_hash(with_tail.render()) != assembly_hash(with_tail2.render())
+
+
+def test_observe_emits_assembly_hash(monkeypatch):
+    captured: list[dict] = []
+
+    class _Spy:
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(
+        "agentcore.runtime.context.assembler.logger",
+        _Spy(),
+    )
+    asm = (
+        ContextAssembler()
+        .add("base", "BASE", SectionOrder.BASE)
+        .add("memory", "MEM", SectionOrder.MEMORY)
+    )
+    expected = assembly_hash(asm.render())
+    asm.observe(scope="unit", soft_cap=None)
+    assert len(captured) == 1
+    row = captured[0]
+    assert row["event"] == "cost.prompt_assembled"
+    assert row["scope"] == "unit"
+    assert row["assembly_hash"] == expected
+    assert row["sections"] == {"base": 4, "memory": 3}
+    assert row["total_chars"] == 7

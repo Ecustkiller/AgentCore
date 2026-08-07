@@ -22,6 +22,8 @@ def _events_delegated_ok(trace_id: str = "a" * 32) -> list[dict]:
             "preview": "请委派写报告",
             "chars": 12,
             "history": 0,
+            "location": "server",
+            "via": "cloud",
         },
         {
             "type": "log",
@@ -80,6 +82,8 @@ def test_build_decision_spine_covers_key_decisions() -> None:
     assert spine["trace_id"] == "a" * 32
     assert spine["conversation_id"] == "conv-1"
     assert "委派" in (spine["head"].get("preview") or "") or spine["head"]["preview"]
+    assert spine["head"]["via"] == "cloud"
+    assert spine["head"]["location"] == "server"
     events = {d["event"] for d in spine["decisions"]}
     assert "delegate.started" in events
     assert "delegate.completion_criteria_unmet" in events  # historical still surfaced
@@ -88,6 +92,39 @@ def test_build_decision_spine_covers_key_decisions() -> None:
     assert spine["tail"]["finish_reason"] == "stop"
     assert spine["tail"]["delegated"] is True
     assert spine["health"]["drift_l2"]["reason"] == "turn_metrics_missing"
+
+
+def test_head_via_orthogonal_to_location() -> None:
+    """via is execution path; location remains workspace locality."""
+    tid = "c" * 32
+    events = [
+        {
+            "type": "log",
+            "event": "chat.turn_start",
+            "timestamp": "2026-07-31T10:00:00Z",
+            "trace_id": tid,
+            "preview": "local sidecar turn",
+            "chars": 5,
+            "history": 1,
+            "location": "local",
+            "via": "sidecar",
+        },
+        {
+            "type": "log",
+            "event": "chat.turn_complete",
+            "timestamp": "2026-07-31T10:00:02Z",
+            "trace_id": tid,
+            "finish_reason": "stop",
+            "delegated": False,
+            "duration_ms": 100,
+        },
+    ]
+    spine = build_decision_spine(events, trace_id=tid)
+    assert spine["head"]["via"] == "sidecar"
+    assert spine["head"]["location"] == "local"
+    text = format_decision_spine(spine)
+    assert "via=sidecar" in text
+    assert "location=local" in text
 
 
 def test_tail_prefers_turn_metrics_and_l2_aligned() -> None:
@@ -174,3 +211,79 @@ def test_format_decision_spine_readable() -> None:
     assert "delegate.completion_criteria_unmet" in text
     assert "historical/S3" in text
     assert "finish=stop" in text
+    assert "via=cloud" in text
+
+
+def test_token_accounting_marks_full_trace_vs_resume_settlement() -> None:
+    """llm = full trace; resume turn_metrics = settlement segment (may diverge)."""
+    tid = "d" * 32
+    events = [
+        {
+            "type": "log",
+            "event": "chat.turn_start",
+            "timestamp": "2026-07-31T10:00:00Z",
+            "trace_id": tid,
+            "preview": "pause then resume",
+        },
+        {
+            "type": "log",
+            "event": "llm.call",
+            "timestamp": "2026-07-31T10:00:01Z",
+            "trace_id": tid,
+            "model": "demo",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost_nano": 1,
+        },
+        {
+            "type": "log",
+            "event": "llm.call",
+            "timestamp": "2026-07-31T10:00:08Z",
+            "trace_id": tid,
+            "model": "demo",
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "cost_nano": 1,
+        },
+        {
+            "type": "log",
+            "event": "chat.resume_complete",
+            "timestamp": "2026-07-31T10:00:10Z",
+            "trace_id": tid,
+            "finish_reason": "stop",
+            "delegated": False,
+            "workers": 0,
+            "rounds": 1,
+            "duration_ms": 1000,
+            "boundary_yields": 0,
+            "scope_signals": 0,
+            "revises": 0,
+            "escalations": 0,
+        },
+    ]
+    metrics = {
+        "trace_id": tid,
+        "finish_reason": "stop",
+        "status": "ok",
+        "kind": "resume",
+        "delegated": False,
+        "workers": 0,
+        "rounds": 1,
+        "duration_ms": 1000,
+        "input_tokens": 20,
+        "output_tokens": 10,
+        "boundary_yields": 0,
+        "scope_signals": 0,
+        "revises": 0,
+        "escalations": 0,
+    }
+    spine = build_decision_spine(events, turn_metrics=metrics)
+    assert spine["llm"]["token_scope"] == "full_trace"
+    assert spine["llm"]["input_tokens"] == 120
+    assert spine["llm"]["output_tokens"] == 60
+    assert spine["tail"]["token_scope"] == "settlement_segment"
+    assert spine["tail"]["input_tokens"] == 20
+    assert spine["health"]["token_accounting"]["llm"] == "full_trace_llm_call_sum"
+    text = format_decision_spine(spine)
+    assert "Token口径" in text
+    assert "全trace" in text or "full_trace" in text or "resume" in text.lower()

@@ -22,6 +22,9 @@ _CEO_ORCHESTRATION = {
     "replan",
     "debate",
     "consult_skill",
+    "list_projects",
+    "resolve_project",
+    "create_project",
     "ask_user",
 }
 # consult_memory is wired for BOTH CEO and workers when memory is on.

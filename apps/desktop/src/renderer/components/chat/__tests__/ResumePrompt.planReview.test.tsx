@@ -4,9 +4,9 @@
  * `plan_review_required.ceo_review` 渲染进 ResumePrompt；absent（旧帧 / 无摘要）
  * 不渲染摘要区（不留空壳）。
  *
- * 三区布局：决策头（眉题+标题+结论）→ 上下文默认收（风险/建议与产出→下游同行
- * 次要 meta）→ 操作区贴底（常驻备注 + 调整/取消/继续）；llm 下发提示收进继续
- * 按钮 tooltip。
+ * 三区布局：决策头（眉题+标题+结论）→ 上下文默认收（风险/建议与「产出 → 下游」同行
+ * 次要 meta）→ 操作区贴底（备注渐进披露 + 取消左 / 调整+继续右）；llm 下发提示
+ * 收进继续按钮 tooltip。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -88,10 +88,11 @@ function makePlanReview(over: Record<string, unknown> = {}) {
 afterEach(() => {
   cleanup();
   pendingRef.current = [];
+  vi.clearAllMocks();
 });
 
 describe("ResumePrompt · plan_review CEO 把关意见", () => {
-  it("有摘要时：结论上提；风险建议与产出同行 meta；详情折叠；备注常驻", () => {
+  it("有摘要时：结论上提；风险建议与产出同行 meta；详情折叠；备注默认隐藏", () => {
     pendingRef.current = [
       makePlanReview({
         ceoReview: {
@@ -114,17 +115,15 @@ describe("ResumePrompt · plan_review CEO 把关意见", () => {
     expect(screen.queryByText("第三方 SLA 未知")).toBeNull();
     expect(screen.queryByText("先小流量灰度")).toBeNull();
 
-    expect(screen.getByText("计划复核 · 等你确认")).toBeTruthy();
-    expect(screen.getByText("「调研」已完成")).toBeTruthy();
-    // 产出摘要默认折叠：角色名可扫，全文不可见
-    expect(screen.getByText(/· 调研/)).toBeTruthy();
-    expect(screen.queryByText("方案就绪")).toBeNull();
-    expect(screen.getByText("下游")).toBeTruthy();
+    expect(screen.getByText("计划复核")).toBeTruthy();
+    expect(screen.queryByText("计划复核 · 等你确认")).toBeNull();
+    expect(screen.getByText("「调研」已完成，是否放行下游？")).toBeTruthy();
+    // 产出 → 下游：一行清晰 meta，角色名可扫，全文不可见
+    expect(screen.getByText(/：调研/)).toBeTruthy();
     expect(screen.getByText("执行")).toBeTruthy();
-    // 备注常驻，无「添加备注」折叠入口
-    expect(screen.getByTestId("plan-review-note")).toBeTruthy();
-    expect(screen.queryByTestId("plan-review-note-toggle")).toBeNull();
-    expect(screen.getByPlaceholderText("可选备注；调整时必填")).toBeTruthy();
+    expect(screen.queryByText("方案就绪")).toBeNull();
+    // 备注渐进：默认不展示
+    expect(screen.queryByTestId("plan-review-note")).toBeNull();
   });
 
   it("展开把关详情后可见全部风险与建议", () => {
@@ -162,8 +161,16 @@ describe("ResumePrompt · plan_review CEO 把关意见", () => {
 
     expect(screen.queryByTestId("ceo-review-summary")).toBeNull();
     expect(screen.queryByTestId("plan-review-gate-notes-hint")).toBeNull();
-    expect(screen.getByText("计划复核 · 等你确认")).toBeTruthy();
+    expect(screen.getByText("计划复核")).toBeTruthy();
     expect(screen.getByText("继续")).toBeTruthy();
+  });
+
+  it("无下游时主标题保留完成态短句", () => {
+    pendingRef.current = [makePlanReview({ pending: [] })];
+    renderPrompt();
+
+    expect(screen.getByText("「调研」已完成")).toBeTruthy();
+    expect(screen.queryByText(/是否放行下游/)).toBeNull();
   });
 
   it("llm 把关时继续按钮携带下发提示", () => {
@@ -258,21 +265,77 @@ describe("ResumePrompt · plan_review CEO 把关意见", () => {
     expect(screen.getByText("收起")).toBeTruthy();
   });
 
-  it("备注输入框默认常驻", () => {
+  it("备注输入框默认不展示", () => {
     pendingRef.current = [makePlanReview()];
     renderPrompt();
 
-    expect(screen.getByTestId("plan-review-note")).toBeTruthy();
-    expect(screen.queryByTestId("plan-review-note-toggle")).toBeNull();
+    expect(screen.queryByTestId("plan-review-note")).toBeNull();
   });
 
-  it("无备注时点「调整」只 focus 备注框而不提交", async () => {
+  it("无备注时点「调整」只展开并 focus 备注框而不提交", async () => {
+    const { submitInteraction } = await import("@/services/interactionSubmit");
+    pendingRef.current = [makePlanReview()];
+    renderPrompt();
+
+    expect(screen.queryByTestId("plan-review-note")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(screen.getByTestId("plan-review-note")).toBeTruthy();
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it("有备注时点「调整」提交 adjust", async () => {
     const { submitInteraction } = await import("@/services/interactionSubmit");
     pendingRef.current = [makePlanReview()];
     renderPrompt();
 
     fireEvent.click(screen.getByRole("button", { name: "调整" }));
-    expect(screen.getByTestId("plan-review-note")).toBeTruthy();
-    expect(submitInteraction).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId("plan-review-note"), {
+      target: { value: "改一下分工" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "adjust",
+          note: "改一下分工",
+        }),
+      }),
+    );
+  });
+
+  it("继续可不填备注直接提交", async () => {
+    const { submitInteraction } = await import("@/services/interactionSubmit");
+    pendingRef.current = [makePlanReview()];
+    renderPrompt();
+
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "continue",
+          note: "",
+        }),
+      }),
+    );
+  });
+
+  it("备注已展开时继续可带可选备注提交", async () => {
+    const { submitInteraction } = await import("@/services/interactionSubmit");
+    pendingRef.current = [makePlanReview()];
+    renderPrompt();
+
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    fireEvent.change(screen.getByTestId("plan-review-note"), {
+      target: { value: "顺带嘱咐一句" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "continue",
+          note: "顺带嘱咐一句",
+        }),
+      }),
+    );
   });
 });

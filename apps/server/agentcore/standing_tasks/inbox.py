@@ -39,8 +39,12 @@ async def settle_after_turn(
     finish_reason: object = None,
     content: str | None = None,
     error: str | None = None,
+    message_id: str | None = None,
 ) -> int:
     """Settle open ``awaiting_user`` inbox rows for a standing conversation.
+
+    Pause probe is scoped to ``message_id`` (this resumed turn), not conversation
+    ANY — a residual cold pause on another turn must not block settlement.
 
     Returns the number of rows updated. No-op when none are open.
     """
@@ -52,10 +56,8 @@ async def settle_after_turn(
             return 0
 
         paused = _finish_is_paused(finish_reason)
-        if not paused:
-            paused = await PausedTurnRepository(session).exists_for_conversation(
-                conversation_id
-            )
+        if not paused and message_id:
+            paused = await PausedTurnRepository(session).exists_for_message(message_id)
 
         finish_value = getattr(finish_reason, "value", finish_reason)
         failed = bool(error) or finish_value in ("error", "cancelled")
@@ -78,5 +80,6 @@ async def settle_after_turn(
         count=updated,
         paused=paused,
         failed=failed and not paused,
+        message_id=message_id,
     )
     return updated

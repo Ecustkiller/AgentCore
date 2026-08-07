@@ -5,7 +5,6 @@ import {
 } from "@/components/chat/ConversationHydrateOverlay";
 import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
 import { SidePanel } from "@/components/layout/SidePanel";
-import { SidePanelFloatHost } from "@/components/layout/SidePanelFloatHost";
 import { SidePanelToggle } from "@/components/layout/SidePanelToggle";
 import { Button } from "@/components/ui";
 import { logEvent } from "@/lib/log";
@@ -416,8 +415,6 @@ export function ConversationPage() {
       )}
       {/* 草稿不挂右坞（不出现、不能打开）；有会话才挂载。 */}
       {id && <SidePanel />}
-      {/* 应用内浮窗宿主 ⊥ SidePanel.open（UX §十）：关主坞不得卸本层。 */}
-      {id && <SidePanelFloatHost />}
     </>
   );
 }

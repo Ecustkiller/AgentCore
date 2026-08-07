@@ -43,7 +43,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 |---|---|
 | **直答** | 单点确认、读已知少量文件、纯问答 / 闲聊、聊天里短文或短改写（未要求存文件）、开工前轻量探路；**本地纯启服 / 重启 / 看长驻是否活着**（`terminal`，勿为此派 `runtime_ready` 批） |
 | **委派** | ① 实质交付物（代码 / 应用 / 要求落盘的成篇文字，哪怕一行）；② 成规模广度调查（横扫多来源、可拆多角度、需对比 / 辩论）——哪怕只读、最终只回一段话。单 worker 能胜任 → `finalize=true`；形状拿不准 → `consult_skill(team_orchestration_advanced)` |
-| **团队形态** | 按活的自然缝拆、能少则少；可独立并行才多派；跨域合成流水线常见 1～2 人，勿默认每人一种专长。广度调查扇出并行调研，task 点明「回报精炼结论」。**结局分层**：先定桌上结果再组队——一起弄懂/多路摸清（未明示成文；「论文/开源」当资料 ≠ 成文）→ `parallel_brief`（方向笔记→CEO 对话综述；少扇出常 2）；明示报告/论文/落盘成文且需正式长文/可提交 → `research_report`（提纲→撰稿→审校）；点选成文但主题大/形态未定 → 先短摸底或提纲过目，勿立刻满编；普通构想不默认学术审校。**讨论类开场卡**：默认推荐「摸清、对话对齐」，次选「写成文档保存」；选项只写桌上结果、不写编制。公共事件多维研判 → `multi_lens_research`；点名开辩 → `debate`。「多角度 / 多 Agent」≠成文产线。`result_handling` 只管上游→下游，**不**影响回到 CEO 的内容。**立刻派 ≠ 立刻全量**：方向/方案选定后仍立刻派，默认 MVP 或设计/API 契约切片；强耦合 UI / **多屏 UI / 单文件大原型**默认 1 人两段或 wave1=`form=files`；禁首 grant「完整可玩 N 屏」（用户明示一次做完除外）；规格已齐≠全量；单页/落地页仍可一人整页（→ 见代码: `runtime/resolve/prompt.py`）。**交付档（一等）**：先定桌上结果再填 `playbook_args.intensity`（结构槽，非意图分类器 / 禁扫用户原文）。建议 ask `label`：一页先上线 / 品牌站流水线 / 工具壳 / MVP 主流程可点 / 模块流水线一次做完 / 只改一处。映射：一页→`build_website`+`solo`；品牌站→`standard`；工具壳→同 playbook+`style=toolshed`；MVP→`build_app`+`lean`（默认）；模块流水线→`full`+显式 `modules`；只改一处→`build_feature`/手写/`repair_code`。`style` 只管气质；编制由 intensity 分支拓扑（→ 见代码: `playbooks/build_site.py` · `runs/build_app.py`） |
+| **团队形态** | 按活的自然缝拆、能少则少；可独立并行才多派；跨域合成流水线常见 1～2 人，勿默认每人一种专长。广度调查扇出并行调研，task 点明「回报精炼结论」。**结局分层**：先定桌上结果再组队——一起弄懂/多路摸清（未明示成文；「论文/开源」当资料 ≠ 成文）→ `parallel_brief`（方向笔记→CEO 对话综述；少扇出常 2）；明示报告/论文/落盘成文且需正式长文/可提交 → `research_report`（提纲→撰稿→审校）；点选成文但主题大/形态未定 → 先短摸底或提纲过目，勿立刻满编；普通构想不默认学术审校。**讨论类开场卡**：默认推荐「摸清、对话对齐」，次选「写成文档保存」；选项只写桌上结果、不写编制。公共事件多维研判 → `multi_lens_research`；点名开辩 → `debate`。「多角度 / 多 Agent」≠成文产线。`result_handling` 只管上游→下游，**不**影响回到 CEO 的内容。**立刻派 ≠ 立刻全量**：方向/方案选定后仍立刻派，默认 MVP 或设计/API 契约切片；强耦合 UI / **多屏 UI / 单文件大原型**默认真两段（1 人两段=同人结构续派）或 wave1=`form=files`；**真两段≠同 task 文案两阶段**（须 wave 拆开 / `depends_on` / `continue_from_run_id`）；Electron/桌面壳可 `playbook=none` 但禁首 grant「设计+主进程/渲染/Agent核+可跑闭环」；禁首 grant「完整可玩 N 屏」（用户明示一次做完除外）；规格已齐≠全量；单页/落地页仍可一人整页（→ 见代码: `runtime/resolve/prompt.py`）。**交付档（一等）**：先定桌上结果再填 `playbook_args.intensity`（结构槽，非意图分类器 / 禁扫用户原文）。建议 ask `label`：一页先上线 / 品牌站流水线 / 工具壳 / MVP 主流程可点 / 模块流水线一次做完 / 只改一处。映射：一页→`build_website`+`solo`；品牌站→`standard`；工具壳→同 playbook+`style=toolshed`；MVP→`build_app`+`lean`（默认）；模块流水线→`full`+显式 `modules`；只改一处→`build_feature`/手写/`repair_code`。`style` 只管气质；编制由 intensity 分支拓扑（→ 见代码: `playbooks/build_site.py` · `runs/build_app.py`） |
 | **认知分工** | 约束归 CEO、专业方案归专家；task 只写【目标·约束·验收】；`contract` 是验收契约非结构蓝图；审查类「重点关注」进 `seed_notes`(kind=heads_up)，勿写进 task 替 worker 作答 |
 
 短文分界：未要求存文件 → 回复直写；明确落盘 → 派 1 人。CEO 绝不为省委派把整份代码贴进正文。
@@ -64,12 +64,15 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点）。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。
 
+**跨项目（✅）**：任务可带已解析的 `target_folder_id` → 该 worker 换到目标项目桌（记忆同批）；不改会话 `folder_id`。CEO 用 `list_projects` / `resolve_project` / `create_project`（云）点名或先建；本地同指挥面登记走 ask `register_local_project`。裸聊未点名目标禁止默写 scratch。工作区绑定心智 → [双模式 · §五](/docs/02-架构/双模式工作区.md)。
+
 | 动作 | 语义 |
 |---|---|
 | 一次塞 N 个 task | 全景计划（一批声明完整分工） |
-| 同回合再调 `delegate` | 并入**【同一张】**协作图（同 `execution_id`）；协调模式下不必等上一批完成 |
-| 跨回合 `append_to_execution_id` | 复用旧图继续生长；默认新回合新建图，仅用户显式延续意图才追加；解析失败禁止静默新建 |
+| 同回合再调 `delegate` | 并入**【同一张】**协作图（同 `execution_id`）；协调中经 `live_plan`、本回合上一张图经自动合入，均可在 `build_run_plan` 前解析宿主节点；`depends_on` 可填本批 / 宿主声明 `id`、无歧义角色名 |
+| 跨回合 `append_to_execution_id` | 复用旧图继续生长；默认新回合新建图，仅用户显式延续意图才追加；解析失败禁止静默新建（同回合二次合入≠跨回合静默吞图） |
 | 并行度 | 由节点 `depends_on` 数据声明（无依赖即同波并行），非靠模型并行 tool call |
+| 任务 `id` | flat / DAG 均保留声明 `id`（铸 `{prefix}_{raw}`）；未声明 flat 仍用序号。跨批依赖靠声明 id 或角色名，勿臆造未声明短 id |
 
 **`finalize=true`**：单 worker 成功时 `HANDOFF` 直出为回合答复，省 CEO 合成轮；多 worker / 失败仍非终态、由 CEO 收尾。
 
@@ -94,7 +97,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 | 字段 / 概念 | 语义要点 |
 |---|---|
-| `depends_on` | 并行 / 串行的唯一开关；空 = 可立即并行；调度器据依赖定并行度 |
+| `depends_on` | 并行 / 串行的唯一开关；空 = 可立即并行；调度器据依赖定并行度。同回合二次委派解析范围 = 本批 ∪ 宿主图（活跃 `live_plan` 或本回合上一张图）；失败回执列可用节点 + 可执行下一步（角色名 / id / `append_to_execution_id="latest"`） |
 | `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述 |
 | `complexity_hint` | `light`/`standard`：编排姿态（如 light 隐含 `coordination=none`），**不**映射 worker token/超时 |
 | `coordination` | 便签墙档；缺省 `none`；权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
@@ -126,6 +129,22 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 - **边界**：仍**不拒收、不自动补 `depends_on`、不改图**；一次性软提示，**禁止**因「软无效」升级硬拒或累计计数。cue 保持窄（队友/上游产出指称）；误伤大则收窄正则，不扩面。
 - **关键取舍**：漏边是真 DAG 危害，接通优于半残日志；否决「只留观测日志当终态」。净负则删闸，不加硬闸。
 - **验收**：同批「吃队友」且 `depends_on` 空 → CEO 当轮结果可见告警文案；委派仍成功入图。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/consumer_deps.py`
+
+### ✅ 接通 design_impl_same_grant 软提示
+
+- **目标**：单 task / 单 grant 同时塞设计+实现（artifacts 设计类+代码类，或 task 文案「阶段 A」+「阶段 B」）且未结构拆开时，软警告进入 **CEO 可见**委派结果尾。
+- **边界**：仍**不拒收、不自动拆 tasks、不改图**；一次性软提示，**禁止**升级硬拒 / 累计计数 / 扫用户长文意图。已拆两波（`depends_on` / `checkpoint_after`）、仅设计、仅代码、轻量单文件小改不命中。
+- **关键取舍**：混装是真波次危害，软提示优于默许；否决硬拒与自动改图。净负则删闸。
+- **验收**：DESIGN+src 同 task → CEO 可见建议拆波文案；委派仍成功。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/design_impl_slice.py`
+
+### ✅ 接通 root_slice_honesty 软提示（根委派切片诚实）
+
+- **目标**：根侧 `depth=0` 单节点手写写工程且无结构钉本轮切片时，软警告进入 **CEO 可见**委派结果尾——把「立刻派 ≠ 立刻全量」落成通用能力（非场景特例）。
+- **命中**（可证明结构）：无具名 playbook ∧ 恰好 1 task ∧ 非 `finalize` ∧ 显式写工程（`form=files` 或 `requires_files=true`；form 省略不算）∧ 无切片钉。
+- **切片钉白名单**（任一豁免）：非空 `artifacts` / `artifact_dir` / `min_length>0` / 非空 `required_sections` / 本 task `checkpoint_after`。
+- **路径**：根多节点 / 具名 playbook / deliverable 钉边界（A）与 **单 lead 嵌套扇出**（B）等价合法；软文案须明示嵌套可用。路径 B 与整锅入口同构 → **接受软提示对 B 亦响**（nudge，非拒）。
+- **边界**：仍**不拒收、不改图**；不做硬拒；不扫用户/task 长文；不用 `write_scope`（非 grant 槽）。阶梯沿用 `design_impl` 先例（提示词后直接软提示）。
+- **验收**：单 task + `form=files` + 无钉 → CEO 可见告警；`finalize` / 具名 playbook / 有 artifacts 等 → 不告警。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/root_slice_honesty.py`
 
 ## 冷启动探索幕
 
@@ -161,6 +180,8 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `host_shell` fuse 改可批可跑（B）/ 仅改文案当终案（D） | **否决** → [安全 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
 | 扫角色名静默改写 deliverable | **已删**（见上节） |
 | `consumer_deps` 软警告只打日志 | **已接通**（见上节） |
+| `design_impl_same_grant` 设计+实现同 grant | **已接通**软提示（见上节）；禁硬拒 / 自动改图 |
+| `root_slice_honesty` 根单节点手写写工程无切片钉 | **已接通**软提示（见上节）；路径 B 嵌套合法且可响；禁硬拒 / 扫长文 / 用 `write_scope` |
 | 载体/手段纠偏靠硬闸 / 意图分类器 / 复活 `format_options` | **否决**；定案为提示词/Skill 顾问短问（见上节 · 载体/手段顾问） |
 
 ## 开场卡 / 检查点

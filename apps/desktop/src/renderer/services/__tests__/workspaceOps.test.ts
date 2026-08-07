@@ -132,6 +132,64 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     });
   });
 
+  it("keeps worker 异根 process_start on the target root and does not hijack cwd with session scratch subpath", async () => {
+    const workspaceOp = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { process_id: "p1", status: "running", output: "" },
+    });
+    stubFsApi(workspaceOp);
+    resolveTarget.mockResolvedValue({
+      rootId: "session-root",
+      subpath: "conversations/c1",
+    });
+
+    await performWorkspaceOp(
+      payload({
+        op: "process_start",
+        root_id: "worker-other-root",
+        args: { command: "pnpm test", cwd: "apps/web" },
+      }),
+      "c1",
+    );
+
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "worker-other-root",
+      "process_start",
+      {
+        command: "pnpm test",
+        cwd: "apps/web",
+        conversation_id: "c1",
+      },
+    );
+  });
+
+  it("still prefixes session scratch when process_start root_id matches the bound root", async () => {
+    const workspaceOp = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { process_id: "p1", status: "running", output: "" },
+    });
+    stubFsApi(workspaceOp);
+    resolveTarget.mockResolvedValue({
+      rootId: "session-root",
+      subpath: "conversations/c1",
+    });
+
+    await performWorkspaceOp(
+      payload({
+        op: "process_start",
+        root_id: "session-root",
+        args: { command: "pnpm dev", cwd: "web" },
+      }),
+      "c1",
+    );
+
+    expect(workspaceOp).toHaveBeenCalledWith("session-root", "process_start", {
+      command: "pnpm dev",
+      cwd: "conversations/c1/web",
+      conversation_id: "c1",
+    });
+  });
+
   it("answers with an IO error when a sidecar process op has no local binding", async () => {
     const workspaceOp = vi.fn();
     stubFsApi(workspaceOp);
@@ -226,6 +284,12 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       "c1",
     );
 
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "root-1",
+      "read",
+      { path: "a.txt" },
+      20,
+    );
     const body = postedBody(fetchMock) as {
       ok: boolean;
       error: { kind: string; detail: string };

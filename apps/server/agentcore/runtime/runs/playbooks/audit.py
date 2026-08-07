@@ -30,7 +30,8 @@ _AUDIT_DISCIPLINE = """
 【每条发现强制字段】验证方式∈全文精读|运行验证|静态推断·未读全|待核实；
 定案∈属实|误报|部分属实|待核实（亦接受常见英文同义如
 confirmed/false_positive/pending，结构闸归一；禁「属实（不进 N）」等带括号后缀的复合写法）；
-证据指针=文件:行或命令+退出码。
+证据指针=文件:行或命令+退出码（JSON ``evidence``：非空 string，或同构 string[] /
+path+line 对象；结构闸归一，勿交空数组）。
 安全/路径/注入类必写可达性（输入是否用户可控+调用链一句话）；其它中+建议写。
 硬规则：验证方式为未读全或定案为待核实 → 不得标中及以上。
 硬规则：验证方式为「静态推断·未读全」且未做运行验证时，失败模式类断言
@@ -58,14 +59,27 @@ P0/critical/high→高，P1/medium→中，P2/low→低，P3/info/observation→
 """.strip()
 
 
-def _safe_label(name: str) -> str:
-    """Filename-safe label (keep CJK; strip path separators)."""
-    s = name.strip().replace("\\", "_").replace("/", "_").replace("..", "_")
-    return s[:80] or "scope"
+# 产物路径权威：``code-audit-{task_id}-{slug}.md``。
+# 长模块作文只进 task【module】正文；禁止把整段描述当文件名再硬截断（易截断扩展名/括弧）。
+_SLUG_MAX = 40
+_SLUG_HEAD_SEPS = ("：", ":", "（", "(", "—", "–", " - ", " — ")
 
 
-def _report_artifact(label: str) -> str:
-    return f"{REVIEWS_DIR}/code-audit-{_safe_label(label)}.md"
+def _module_slug(hint: str) -> str:
+    """Short filename token from a module hint (head before descriptive tail)."""
+    s = hint.strip()
+    for sep in _SLUG_HEAD_SEPS:
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+            break
+    s = s.replace("\\", "_").replace("/", "_").replace("..", "_")
+    s = "_".join(s.split())  # collapse whitespace
+    return (s[:_SLUG_MAX] or "scope")
+
+
+def _report_artifact(task_id: str, hint: str) -> str:
+    """Stable short path: task id disambiguates; slug is human skim only."""
+    return f"{REVIEWS_DIR}/code-audit-{task_id}-{_module_slug(hint)}.md"
 
 
 def _auditor_task_body(
@@ -85,7 +99,8 @@ def _auditor_task_body(
         f"报告落盘除外）。{focus_line}"
         f"{_AUDIT_DISCIPLINE.format(k=k)}"
         f"完整报告用 file_write 落到 `{artifact}`（Markdown）；"
-        f"另交配套 `{json_artifact}`（findings：severity/verification/verdict/evidence 等）。"
+        f"另交配套 `{json_artifact}`（findings：severity/verification/verdict/"
+        f'evidence 等；evidence 例 `"a.ts:10"` 或 `["a.ts:10","b.ts:20"]`）。'
         "handoff 人审速览（可执行摘要，不代落盘）："
         "summary 写共 N 条属实（只计「一、属实缺陷」）与报告路径；"
         "key_points 须覆盖属实缺陷——每条格式 `缺陷id|严重度|一句话`，"
@@ -142,7 +157,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     if not modules:
         label = clean_str(args.get("label")) or "main"
-        artifact = out_override or _report_artifact(label)
+        artifact = out_override or _report_artifact("audit_0", label)
         return [
             {
                 "id": "audit_0",
@@ -170,13 +185,15 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     for i, parts in enumerate(slots):
         merged = len(parts) > 1
         label = " + ".join(parts)
-        artifact = _report_artifact(label)
+        tid = f"audit_{i}"
+        # 路径用短 slug；完整 modules 文案只进 module_desc / deliverable 展示名。
+        path_hint = parts[0] if not merged else f"merged-{i}"
+        artifact = _report_artifact(tid, path_hint)
         module_desc = (
             f"合并模块：{'、'.join(f'【{p}】' for p in parts)}（须全部覆盖）"
             if merged
             else parts[0]
         )
-        tid = f"audit_{i}"
         audit_ids.append(tid)
         body: dict[str, Any] = {
             "id": tid,

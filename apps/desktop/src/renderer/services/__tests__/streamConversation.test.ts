@@ -70,20 +70,20 @@ describe("describeStreamError", () => {
     );
   });
 
-  it("maps turn_in_progress to an explicit zh resume hint", () => {
+  it("maps turn_in_progress to an explicit zh wrap-up hint", () => {
     expect(
       describeStreamError(
         new StreamError("http", 409, { code: "turn_in_progress" }),
       ),
-    ).toBe("会话中有正在进行的回合，等它结束后再继续");
+    ).toBe("回合收尾尚未完成，请稍候或先显式停止后再试");
     expect(
       describeStreamError(
         new StreamError("http", 409, {
           code: "turn_in_progress",
-          serverMessage: "后端自定义文案",
+          serverMessage: "会话有正在进行的回合，先等它结束或显式停止",
         }),
       ),
-    ).toBe("后端自定义文案");
+    ).toBe("回合收尾尚未完成，请稍候或先显式停止后再试");
   });
 
   it("phrases network errors and stays silent on auth", () => {

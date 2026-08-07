@@ -16,6 +16,7 @@
 # 注：worker 容器（部署与运维.md §三 当前容器清单）暂不纳入——当前执行引擎是
 # 进程内 asyncio 协程，无独立 worker 入口；贸然起第二个 `python -m agentcore`
 # 会重复跑后台循环（如 retention sweep），是 bug 而非扩容。待有专用 worker 入口再加。
+# API 短期必须单实例 / 单 uvicorn worker（账本落盘队列进程本地；见部署拓扑 G5）。
 
 # 日志：json-file 驱动 + 轮转，封顶单容器 10m×5=50MB（部署与运维.md §7.8「可观测·日志」）。
 x-logging: &default-logging

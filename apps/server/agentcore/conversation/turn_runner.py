@@ -77,8 +77,13 @@ async def run_and_persist(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
-) -> None:
-    """Run the pipeline, then persist the assistant reply (+ derived title / stage_card)."""
+) -> dict | None:
+    """Run the pipeline, then persist the assistant reply (+ derived title / stage_card).
+
+    Returns the pipeline result dict (including ``message_id`` for this turn) on a
+    normal completion; ``None`` only if the turn never produced a result (cancel /
+    early abort paths that raise instead).
+    """
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
 
@@ -93,6 +98,7 @@ async def run_and_persist(
     latency_probe, latency_token = bind_turn_latency(started)
     lease_stop: asyncio.Event | None = None
     heartbeat_task: asyncio.Task | None = None
+    outcome: dict | None = None
     try:
         with log_context(
             trace_id=trace_id,
@@ -111,6 +117,7 @@ async def run_and_persist(
                 history=len(history),
                 attachments=len(attachments or []),
                 location=backend.location,
+                via="cloud",
                 message_id=message_id,
             )
             await create_assistant_placeholder(
@@ -195,7 +202,8 @@ async def run_and_persist(
                     duration_ms=duration_ms,
                     kind="turn",
                 )
-                return
+                tape_result["message_id"] = message_id
+                return tape_result
 
             if settings.turn_lease_enabled:
                 owner_id = await acquire_turn_lease(
@@ -313,6 +321,11 @@ async def run_and_persist(
                     duration_ms=duration_ms,
                     kind="turn",
                 )
+                if isinstance(result, dict):
+                    result["message_id"] = message_id
+                    outcome = result
+                else:
+                    outcome = {"message_id": message_id}
             finally:
                 if lease_stop is not None:
                     lease_stop.set()
@@ -333,3 +346,205 @@ async def run_and_persist(
                             )
     finally:
         reset_turn_latency(latency_token)
+    return outcome
+
+
+async def run_mechanism_direct_and_persist(
+    *,
+    conversation_id: str,
+    user_message: str,
+    user_id: str,
+    folder_id: str | None,
+    sink: EventSink,
+    history: list[dict],
+    backend: WorkspaceBackend,
+    llm_credentials: LLMCredentials | None,
+    tasks: list[dict],
+    workflow_id: str,
+    workflow_version: int,
+    profile_set: ProfileSet | None = None,
+    memory_enabled: bool = True,
+    conversation_history_access: bool = True,
+    permission_axes=None,
+    board_id: str | None = None,
+    x_client_platform: str | None = None,
+) -> dict | None:
+    """Mechanism-direct turn envelope (workflow / standing-bound-workflow).
+
+    Same outer contract as :func:`run_and_persist` (placeholder · lease ·
+    ``log_context`` · ``persist_turn_result``), but the inner pipeline is
+    :func:`~agentcore.runtime.pipeline.workflow_run.run_workflow_pipeline`
+    (no CEO ``react_loop``). Aligns with ``stage_card_resolve`` posture for
+    debate; callers share this entry so「跑一次」and「绑工作流」do not drift.
+    """
+    from agentcore.runtime.pipeline.workflow_run import run_workflow_pipeline
+
+    session_saver, session_loader = session_callbacks(conversation_id)
+    suspension_saver, suspension_deleter = suspension_callbacks()
+
+    message_id = new_id()
+    attempt_id = new_id()
+    trace_id = new_trace_id()
+    started = time.monotonic()
+    latency_probe, latency_token = bind_turn_latency(started)
+    lease_stop: asyncio.Event | None = None
+    heartbeat_task: asyncio.Task | None = None
+    outcome: dict | None = None
+    try:
+        with log_context(
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            attempt_id=attempt_id,
+            message_id=message_id,
+            agent_id="CEO",
+            cost_role="captain",
+            persona="CEO",
+            workflow_id=workflow_id,
+        ):
+            logger.info(
+                "mechanism_direct.turn_start",
+                chars=len(user_message or ""),
+                preview=preview(user_message),
+                history=len(history),
+                location=backend.location,
+                via="mechanism_direct",
+                message_id=message_id,
+                workflow_id=workflow_id,
+                workflow_version=workflow_version,
+                tasks=len(tasks),
+            )
+            await create_assistant_placeholder(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+            sink.bind_content_checkpoint(
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
+
+            await maybe_capture_turn_baseline(
+                user_id=user_id,
+                folder_id=folder_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                backend=backend,
+            )
+
+            if settings.turn_lease_enabled:
+                owner_id = await acquire_turn_lease(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    phase="running",
+                    meta={
+                        "trace_id": trace_id,
+                        "folder_id": folder_id,
+                        "workflow_id": workflow_id,
+                    },
+                )
+                lease_stop = asyncio.Event()
+                heartbeat_task = asyncio.create_task(
+                    lease_heartbeat_loop(
+                        message_id,
+                        owner_id=owner_id,
+                        interval_seconds=settings.turn_lease_heartbeat_seconds,
+                        stop=lease_stop,
+                    )
+                )
+            release_lease_clean = True
+            try:
+                try:
+                    result = await run_workflow_pipeline(
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        user_message=user_message,
+                        tasks=tasks,
+                        workflow_id=workflow_id,
+                        workflow_version=workflow_version,
+                        sink=sink,
+                        backend=backend,
+                        history=history,
+                        folder_id=folder_id,
+                        board_id=board_id,
+                        memory_enabled=memory_enabled,
+                        conversation_history_access=conversation_history_access,
+                        permission_axes=permission_axes,
+                        profile_set=profile_set,
+                        llm_credentials=llm_credentials,
+                        session_saver=session_saver,
+                        session_loader=session_loader,
+                        suspension_saver=suspension_saver,
+                        suspension_deleter=suspension_deleter,
+                        message_id=message_id,
+                        x_client_platform=x_client_platform,
+                    )
+                except asyncio.CancelledError:
+                    if turn_runs.is_clean_cancel(conversation_id):
+                        closed = await close_user_stop_turn(
+                            sink=sink,
+                            conversation_id=conversation_id,
+                            trace_id=trace_id,
+                            message_id=message_id,
+                        )
+                        release_lease_clean = bool(closed)
+                    else:
+                        release_lease_clean = False
+                    raise
+                finish = result.get("finish_reason")
+                duration_ms = int((time.monotonic() - started) * 1000)
+                delegated, workers = turn_worker_stats(result)
+                logger.info(
+                    "mechanism_direct.turn_complete",
+                    finish_reason=getattr(finish, "value", finish),
+                    rounds=result.get("rounds", 0),
+                    reply_chars=len(result.get("content") or ""),
+                    reply_preview=preview(result.get("content") or ""),
+                    delegated=delegated,
+                    workers=workers,
+                    duration_ms=duration_ms,
+                    error=result.get("error"),
+                    workflow_id=workflow_id,
+                    workflow_version=workflow_version,
+                    **latency_probe.as_log_fields(),
+                )
+                await persist_turn_result(
+                    result=result,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    folder_id=folder_id,
+                    backend=backend,
+                    sink=sink,
+                    user_message=user_message,
+                    llm_credentials=llm_credentials,
+                    trace_id=trace_id,
+                    turn_id=attempt_id,
+                    duration_ms=duration_ms,
+                    kind="turn",
+                )
+                if isinstance(result, dict):
+                    result["message_id"] = message_id
+                    outcome = result
+                else:
+                    outcome = {"message_id": message_id}
+            finally:
+                if lease_stop is not None:
+                    lease_stop.set()
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat_task
+                if settings.turn_lease_enabled:
+                    if release_lease_clean:
+                        await release_turn_lease(message_id)
+                    else:
+                        with contextlib.suppress(asyncio.TimeoutError, Exception):
+                            await asyncio.wait_for(
+                                asyncio.shield(orphan_turn_lease(message_id)),
+                                timeout=2.0,
+                            )
+    finally:
+        reset_turn_latency(latency_token)
+    return outcome

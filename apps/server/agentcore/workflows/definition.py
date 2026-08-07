@@ -3,6 +3,11 @@
 First-period kinds: ``agent_step`` | ``human_gate``.
 ``human_gate`` does not become a worker — it marks every direct predecessor
 ``checkpoint_after=true`` (wave-boundary user review).
+
+Edge policy (aligns with :func:`tasks_to_workflow_definition` normal form):
+``human_gate→human_gate`` is rejected; a gate may feed an agent only when it has
+at least one reachable ``agent_step`` ancestor. Expand still walks gate chains
+recursively for through-deps (defense in depth for legacy toxic graphs).
 """
 
 from __future__ import annotations
@@ -19,103 +24,55 @@ class WorkflowDefinitionError(ValueError):
 
 
 def validate_workflow_definition(definition: dict[str, Any] | None) -> list[str]:
-    """Structural checks for save/create drafts (empty canvas is allowed).
+    """Structural + edge-policy checks for save/create drafts (empty canvas is allowed).
 
     Runnable definitions are enforced by :func:`expand_workflow_to_tasks`
     (must yield ≥1 agent_step). Does not mutate.
     """
-    errors: list[str] = []
-    if not isinstance(definition, dict):
-        return ["definition 必须是对象"]
-
-    nodes = definition.get("nodes")
-    edges = definition.get("edges")
-    if not isinstance(nodes, list):
-        errors.append("nodes 必须是数组")
-        nodes = []
-    if edges is None:
-        edges = []
-    elif not isinstance(edges, list):
-        errors.append("edges 必须是数组")
-        edges = []
-
-    ids: set[str] = set()
-    agent_count = 0
-    for i, raw in enumerate(nodes):
-        if not isinstance(raw, dict):
-            errors.append(f"nodes[{i}] 必须是对象")
-            continue
-        nid = str(raw.get("id") or "").strip()
-        if not nid:
-            errors.append(f"nodes[{i}] 缺少 id")
-            continue
-        if nid in ids:
-            errors.append(f"节点 id 重复：`{nid}`")
-            continue
-        ids.add(nid)
-        kind = str(raw.get("kind") or "").strip()
-        if kind not in _ALLOWED_KINDS:
-            errors.append(f"nodes[{i}] kind 须为 agent_step 或 human_gate")
-            continue
-        if kind == "agent_step":
-            agent_count += 1
-            role = raw.get("role")
-            task = raw.get("task")
-            if not isinstance(role, str) or not role.strip():
-                errors.append(f"agent_step `{nid}` 须有非空 role")
-            if not isinstance(task, str) or not task.strip():
-                errors.append(f"agent_step `{nid}` 须有非空 task")
-            deliverable = raw.get("deliverable")
-            if deliverable is not None and not isinstance(deliverable, dict):
-                errors.append(f"agent_step `{nid}` deliverable 须为对象")
-        elif kind == "human_gate":
-            label = raw.get("label")
-            if label is not None and not isinstance(label, str):
-                errors.append(f"human_gate `{nid}` label 须为字符串")
-
-    if agent_count > MAX_DELEGATION_TASKS:
-        errors.append(f"agent_step 数量不能超过 {MAX_DELEGATION_TASKS}")
-
-    adj: dict[str, list[str]] = {nid: [] for nid in ids}
-    for i, raw in enumerate(edges):
-        if not isinstance(raw, dict):
-            errors.append(f"edges[{i}] 必须是对象")
-            continue
-        src = str(raw.get("from") or "").strip()
-        dst = str(raw.get("to") or "").strip()
-        if not src or not dst:
-            errors.append(f"edges[{i}] 须有 from / to")
-            continue
-        if src not in ids:
-            errors.append(f"edges[{i}] from `{src}` 不存在")
-            continue
-        if dst not in ids:
-            errors.append(f"edges[{i}] to `{dst}` 不存在")
-            continue
-        adj[src].append(dst)
-
+    errors, _nodes, edges, ids, by_id = _collect_structure(definition)
+    # Skip cycle recovery when structure is already broken (incomplete adj).
     if ids and not errors:
+        adj: dict[str, list[str]] = {nid: [] for nid in ids}
+        for raw in edges:
+            if not isinstance(raw, dict):
+                continue
+            src = str(raw.get("from") or "").strip()
+            dst = str(raw.get("to") or "").strip()
+            if src in ids and dst in ids:
+                adj[src].append(dst)
         cycle = _find_cycle(adj)
         if cycle is not None:
             errors.append(f"定义存在环：{' → '.join(cycle)}")
 
+    if by_id:
+        errors.extend(_edge_policy_errors(edges, by_id))
     return errors
 
 
 def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]:
-    """Expand a validated definition into hand-written-delegate-shaped tasks.
+    """Expand a definition into hand-written-delegate-shaped tasks.
 
-    Raises :class:`WorkflowDefinitionError` when invalid.
+    Uses structural checks only (not edge-policy bans) so legacy gate chains still
+    expand with correct through-deps. Raises :class:`WorkflowDefinitionError`
+    when structurally invalid or empty of agent steps.
     """
-    errors = validate_workflow_definition(definition)
+    errors, nodes, edges, ids, by_id = _collect_structure(definition)
+    if ids:
+        adj: dict[str, list[str]] = {nid: [] for nid in ids}
+        for raw in edges:
+            if not isinstance(raw, dict):
+                continue
+            src = str(raw.get("from") or "").strip()
+            dst = str(raw.get("to") or "").strip()
+            if src in ids and dst in ids:
+                adj[src].append(dst)
+        cycle = _find_cycle(adj)
+        if cycle is not None:
+            errors.append(f"定义存在环：{' → '.join(cycle)}")
     if errors:
         raise WorkflowDefinitionError("；".join(errors))
 
-    nodes = list(definition.get("nodes") or [])
-    edges = list(definition.get("edges") or [])
-    by_id = {str(n["id"]).strip(): n for n in nodes if isinstance(n, dict)}
-
-    # Direct predecessors of each human_gate → those agent_steps get checkpoint_after.
+    # Direct agent→gate predecessors get checkpoint_after (gates are not runtime nodes).
     gate_preds: set[str] = set()
     agent_deps: dict[str, list[str]] = {
         nid: [] for nid, n in by_id.items() if str(n.get("kind") or "") == "agent_step"
@@ -135,11 +92,10 @@ def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]
             gate_preds.add(src)
         if src_kind == "agent_step" and dst_kind == "agent_step":
             agent_deps[dst].append(src)
-        # Edges into agent_step from human_gate: treat as through-deps from gate's preds.
+        # Gate → agent: recursive through-deps from all reachable agent ancestors.
         if src_kind == "human_gate" and dst_kind == "agent_step":
-            for pred in _direct_preds(src, edges, by_id):
-                if str(by_id[pred].get("kind") or "") == "agent_step":
-                    agent_deps[dst].append(pred)
+            for pred in _agent_ancestors_through_gates(src, edges, by_id):
+                agent_deps[dst].append(pred)
 
     # Preserve declaration order of agent_steps.
     tasks: list[dict[str, Any]] = []
@@ -166,6 +122,114 @@ def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]
     if not tasks:
         raise WorkflowDefinitionError("至少需要一个 agent_step")
     return tasks
+
+
+def _collect_structure(
+    definition: dict[str, Any] | None,
+) -> tuple[list[str], list[Any], list[Any], set[str], dict[str, dict[str, Any]]]:
+    """Shared node/edge field checks. Returns (errors, nodes, edges, ids, by_id)."""
+    errors: list[str] = []
+    if not isinstance(definition, dict):
+        return ["definition 必须是对象"], [], [], set(), {}
+
+    nodes = definition.get("nodes")
+    edges = definition.get("edges")
+    if not isinstance(nodes, list):
+        errors.append("nodes 必须是数组")
+        nodes = []
+    if edges is None:
+        edges = []
+    elif not isinstance(edges, list):
+        errors.append("edges 必须是数组")
+        edges = []
+
+    ids: set[str] = set()
+    by_id: dict[str, dict[str, Any]] = {}
+    agent_count = 0
+    for i, raw in enumerate(nodes):
+        if not isinstance(raw, dict):
+            errors.append(f"nodes[{i}] 必须是对象")
+            continue
+        nid = str(raw.get("id") or "").strip()
+        if not nid:
+            errors.append(f"nodes[{i}] 缺少 id")
+            continue
+        if nid in ids:
+            errors.append(f"节点 id 重复：`{nid}`")
+            continue
+        ids.add(nid)
+        by_id[nid] = raw
+        kind = str(raw.get("kind") or "").strip()
+        if kind not in _ALLOWED_KINDS:
+            errors.append(f"nodes[{i}] kind 须为 agent_step 或 human_gate")
+            continue
+        if kind == "agent_step":
+            agent_count += 1
+            role = raw.get("role")
+            task = raw.get("task")
+            if not isinstance(role, str) or not role.strip():
+                errors.append(f"agent_step `{nid}` 须有非空 role")
+            if not isinstance(task, str) or not task.strip():
+                errors.append(f"agent_step `{nid}` 须有非空 task")
+            deliverable = raw.get("deliverable")
+            if deliverable is not None and not isinstance(deliverable, dict):
+                errors.append(f"agent_step `{nid}` deliverable 须为对象")
+        elif kind == "human_gate":
+            label = raw.get("label")
+            if label is not None and not isinstance(label, str):
+                errors.append(f"human_gate `{nid}` label 须为字符串")
+
+    if agent_count > MAX_DELEGATION_TASKS:
+        errors.append(f"agent_step 数量不能超过 {MAX_DELEGATION_TASKS}")
+
+    for i, raw in enumerate(edges):
+        if not isinstance(raw, dict):
+            errors.append(f"edges[{i}] 必须是对象")
+            continue
+        src = str(raw.get("from") or "").strip()
+        dst = str(raw.get("to") or "").strip()
+        if not src or not dst:
+            errors.append(f"edges[{i}] 须有 from / to")
+            continue
+        if src not in ids:
+            errors.append(f"edges[{i}] from `{src}` 不存在")
+            continue
+        if dst not in ids:
+            errors.append(f"edges[{i}] to `{dst}` 不存在")
+            continue
+
+    return errors, list(nodes), list(edges), ids, by_id
+
+
+def _edge_policy_errors(
+    edges: list[Any],
+    by_id: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Reject gate→gate and gate→agent with no reachable agent ancestor."""
+    errors: list[str] = []
+    for i, raw in enumerate(edges):
+        if not isinstance(raw, dict):
+            continue
+        src = str(raw.get("from") or "").strip()
+        dst = str(raw.get("to") or "").strip()
+        src_node = by_id.get(src)
+        dst_node = by_id.get(dst)
+        if src_node is None or dst_node is None:
+            continue
+        src_kind = str(src_node.get("kind") or "")
+        dst_kind = str(dst_node.get("kind") or "")
+        if src_kind == "human_gate" and dst_kind == "human_gate":
+            errors.append(
+                f"edges[{i}] 禁止 human_gate→human_gate（`{src}` → `{dst}`）"
+            )
+            continue
+        if src_kind == "human_gate" and dst_kind == "agent_step":
+            if not _agent_ancestors_through_gates(src, edges, by_id):
+                errors.append(
+                    f"edges[{i}] human_gate `{src}` 无 agent_step 前驱，"
+                    f"不能连到 agent_step `{dst}`"
+                )
+    return errors
 
 
 # Task keys that survive the definition canvas (everything else is phase-1 dropped).
@@ -262,21 +326,41 @@ def tasks_dropped_meta_keys(tasks: list[dict[str, Any]]) -> list[str]:
     return sorted(found)
 
 
-def _direct_preds(
-    node_id: str,
+def _agent_ancestors_through_gates(
+    gate_id: str,
     edges: list,
     by_id: dict[str, dict[str, Any]],
 ) -> list[str]:
-    out: list[str] = []
-    for raw in edges:
-        if not isinstance(raw, dict):
+    """Walk inbound edges through human_gate chains; collect reachable agent_steps.
+
+    Order follows first-seen BFS over direct predecessors (deduped).
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    stack: list[str] = [gate_id]
+    visiting: set[str] = set()
+    while stack:
+        nid = stack.pop()
+        if nid in visiting:
             continue
-        if str(raw.get("to") or "").strip() != node_id:
-            continue
-        src = str(raw.get("from") or "").strip()
-        if src in by_id:
-            out.append(src)
-    return out
+        visiting.add(nid)
+        for raw in edges:
+            if not isinstance(raw, dict):
+                continue
+            if str(raw.get("to") or "").strip() != nid:
+                continue
+            src = str(raw.get("from") or "").strip()
+            src_node = by_id.get(src)
+            if src_node is None:
+                continue
+            kind = str(src_node.get("kind") or "")
+            if kind == "agent_step":
+                if src not in seen:
+                    seen.add(src)
+                    found.append(src)
+            elif kind == "human_gate" and src not in visiting:
+                stack.append(src)
+    return found
 
 
 def _find_cycle(adj: dict[str, list[str]]) -> list[str] | None:

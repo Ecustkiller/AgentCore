@@ -24,6 +24,7 @@ from agentcore.tools.builtin.file_ops import (
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
 
 def _ctx(workspace: Path, *, agent_id: str = "a") -> ToolContext:
@@ -673,6 +674,9 @@ async def test_write_prose_then_append_rejected(tmp_path: Path):
     assert blocked.contract_failure is True
     assert "拒绝追加" in (blocked.error or "")
     assert "str_replace" in (blocked.error or "")
+    assert "骨架填空" in (blocked.error or "") or "骨架" in (blocked.error or "")
+    assert "应先短骨架" not in (blocked.error or "")
+    assert "长交付物应先" not in (blocked.error or "")
 
 
 async def test_write_skeleton_then_append_allowed(tmp_path: Path):
@@ -966,8 +970,9 @@ async def test_write_then_append_segmented_path(tmp_path: Path):
 def test_write_schema_teaches_artifact_first():
     write_desc = FileWriteTool().schema.description
     assert "Artifact-first" in write_desc
+    assert "主路径" in write_desc and "完整正文" in write_desc
     assert "短骨架" in write_desc or "骨架" in write_desc
-    assert "按节" in write_desc or "分段" in write_desc
+    assert "可选" in write_desc or "按节" in write_desc or "分段" in write_desc
     assert "不硬拒字数" in write_desc
     assert "成篇省略硬拒" in write_desc or "省略标记" in write_desc
     assert "硬拒绝" in write_desc
@@ -975,18 +980,22 @@ def test_write_schema_teaches_artifact_first():
     assert "manifest" in write_desc
     assert "优先" in write_desc and "str_replace" in write_desc
     assert "整文件覆盖亦允许" in write_desc or "整盖" in write_desc
+    assert "禁止整篇一次" not in write_desc and "仍建议分段" not in write_desc
     content_desc = FileWriteTool().schema.parameters["properties"]["content"]["description"]
-    assert "一次写完" in content_desc or "骨架" in content_desc
+    assert "一次写完" in content_desc or "完整正文" in content_desc
+    assert "骨架" in content_desc
 
     append_desc = FileAppendTool().schema.description
     assert "骨架" in append_desc
     assert "file_write" in append_desc
     assert "成篇" in append_desc or "禁止" in append_desc
+    assert "str_replace" in append_desc
     assert "不硬拒" in append_desc
 
     replace_desc = StrReplaceTool().schema.description
     assert "优先" in replace_desc
     assert "整文件覆盖亦允许" in replace_desc or "整盖" in replace_desc
+    assert "完整正文" in replace_desc
     assert "禁止改用骨架 file_write" not in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
     assert "不硬拒" in new_desc
@@ -1158,14 +1167,32 @@ async def test_move_requires_both_args(tmp_path: Path):
     assert "必填" in result.error
 
 
-async def test_move_rejects_identical_paths(tmp_path: Path):
+async def test_move_identical_paths_is_idempotent(tmp_path: Path):
     (tmp_path / "f.txt").write_text("x", encoding="utf-8")
     result = await FileMoveTool().execute(
         {"source": "f.txt", "destination": "f.txt"}, _ctx(tmp_path)
     )
-    assert result.success is False
-    assert "相同" in result.error
+    assert result.success is True
+    assert "相同" in result.output or "无需" in result.output
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x"
+
+
+async def test_move_identical_after_dossier_flatten(tmp_path: Path):
+    """Source already flat; nested reviews dest sanitizes to same path → idempotent."""
+    flat = f"{REVIEWS_PREFIX}a_b_c.md"
+    nested = f"{REVIEWS_PREFIX}a/b/c.md"
+    flat_path = tmp_path.joinpath(*flat.split("/"))
+    flat_path.parent.mkdir(parents=True, exist_ok=True)
+    flat_path.write_text("review", encoding="utf-8")
+
+    result = await FileMoveTool().execute(
+        {"source": flat, "destination": nested}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "相同" in result.output or "无需" in result.output
+    assert flat_path.read_text(encoding="utf-8") == "review"
+    assert flat_path.exists()
+    assert not tmp_path.joinpath(*nested.split("/")).exists()
 
 
 # --- file_copy / mkdir / file_batch ---
@@ -1187,6 +1214,34 @@ async def test_copy_file_and_tree(tmp_path: Path):
     )
     assert result.success is True
     assert (tmp_path / "tree2" / "sub" / "x.bin").read_bytes() == b"\x00\xff"
+
+
+async def test_copy_identical_paths_is_idempotent(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    result = await FileCopyTool().execute(
+        {"source": "f.txt", "destination": "f.txt"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "相同" in result.output or "无需" in result.output
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x"
+
+
+async def test_copy_identical_after_dossier_flatten(tmp_path: Path):
+    """Source already flat; nested reviews dest sanitizes to same path → idempotent."""
+    flat = f"{REVIEWS_PREFIX}a_b_c.md"
+    nested = f"{REVIEWS_PREFIX}a/b/c.md"
+    flat_path = tmp_path.joinpath(*flat.split("/"))
+    flat_path.parent.mkdir(parents=True, exist_ok=True)
+    flat_path.write_text("review", encoding="utf-8")
+
+    result = await FileCopyTool().execute(
+        {"source": flat, "destination": nested}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "相同" in result.output or "无需" in result.output
+    assert flat_path.read_text(encoding="utf-8") == "review"
+    assert flat_path.exists()
+    assert not tmp_path.joinpath(*nested.split("/")).exists()
 
 
 async def test_copy_refuses_overwrite(tmp_path: Path):

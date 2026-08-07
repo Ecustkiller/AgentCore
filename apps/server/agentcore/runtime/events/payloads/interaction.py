@@ -70,6 +70,9 @@ class AskOption(WirePayload):
     `open_local_project` renders as a folder picker that creates/reuses a local Folder
     (mode=local, empty subpath, root=chosen dir) and starts a **new** conversation under
     that project — never rewrites the current session's ``folder_id``;
+    `register_local_project` renders as a folder picker that creates/reuses a local Folder
+    the same way but **stays on the current conversation** and resumes the ask
+    (no new session; never rewrites ``folder_id``) — 「登记留指挥面」, distinct from open;
     `bind_local_folder` renders as a folder picker that binds the bare-chat scratch
     workspace (``conversations/<id>``) for local execution — not 「打开项目」;
     `grant_readonly_folder` is a **legacy** session read-only mount under
@@ -95,6 +98,7 @@ class AskOption(WirePayload):
     action: (
         Literal[
             "open_local_project",
+            "register_local_project",
             "bind_local_folder",
             "grant_readonly_folder",
             "grant_organize_folder",

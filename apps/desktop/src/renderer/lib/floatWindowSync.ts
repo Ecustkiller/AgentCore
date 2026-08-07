@@ -182,12 +182,20 @@ type ChannelLike = {
   onmessage: ((ev: MessageEvent<unknown>) => void) | null;
 };
 
+/**
+ * Capability: cross-window projection sync requires BroadcastChannel.
+ * Absence is structural failure for the float consumer — not a retryable wait.
+ */
+export function isFloatSyncSupported(): boolean {
+  return typeof BroadcastChannel !== "undefined";
+}
+
 /** Test seam / production BroadcastChannel. */
 export function openFloatSyncChannel(
   factory?: () => ChannelLike,
 ): ChannelLike | null {
   if (factory) return factory();
-  if (typeof BroadcastChannel === "undefined") return null;
+  if (!isFloatSyncSupported()) return null;
   return new BroadcastChannel(
     FLOAT_WINDOW_SYNC_CHANNEL,
   ) as unknown as ChannelLike;

@@ -66,6 +66,9 @@ _ARTIFACT_ROOT_LABEL = "workspace"
 # Handoff minimum when the node has downstream dependents (协作模式 handoff 门禁).
 MIN_HANDOFF_SUMMARY_CHARS = 50
 MIN_HANDOFF_KEY_POINTS = 2
+# Leaf workers: longer prose (no tools) still expects a CEO-facing brief.
+# Short pure-body leaves stay exempt (勿误伤短答).
+LEAF_SUBSTANTIAL_BODY_CHARS = 200
 
 
 @dataclass
@@ -567,6 +570,79 @@ def strip_invalid_ledger_refs_from_surfaces(
             else:
                 new_arts[path] = text
     return new_arts, new_body, sorted(bad)
+
+
+# Handoff brief text surfaces that can carry ``#rN`` into dep injection / promote /
+# run cards — strip in parallel with body/artifacts (not a completion-policy change).
+_DEBRIEF_STR_KEYS = ("summary", "next_steps")
+_DEBRIEF_LIST_KEYS = ("key_points", "assumptions")
+
+
+def strip_invalid_ledger_refs_from_debrief(
+    debrief: dict[str, Any] | None,
+    citable_ids: frozenset[str] | set[str] | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Strip illegal ``#rN`` from handoff debrief text fields + motion_card pointers.
+
+    Covers ``summary`` / ``next_steps`` / ``key_points`` / ``assumptions`` and
+    ``motion_card.fact_pointers``. Returns ``(new_debrief, stripped_ids)``; empty
+    ``stripped_ids`` means unchanged (caller may keep the original dict).
+    """
+    from agentcore.runtime.citations import (
+        invalid_ledger_ref_ids,
+        strip_invalid_ledger_refs,
+    )
+
+    if not debrief or citable_ids is None:
+        return debrief, []
+
+    bad: set[str] = set()
+    for key in _DEBRIEF_STR_KEYS:
+        val = debrief.get(key)
+        if isinstance(val, str) and val.strip():
+            bad.update(invalid_ledger_ref_ids(val, citable_ids))
+    for key in _DEBRIEF_LIST_KEYS:
+        raw = debrief.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if item:
+                    bad.update(invalid_ledger_ref_ids(str(item), citable_ids))
+        elif isinstance(raw, str) and raw.strip():
+            bad.update(invalid_ledger_ref_ids(raw, citable_ids))
+    card = debrief.get("motion_card")
+    if isinstance(card, dict):
+        ptrs = card.get("fact_pointers")
+        if isinstance(ptrs, list):
+            for item in ptrs:
+                if item:
+                    bad.update(invalid_ledger_ref_ids(str(item), citable_ids))
+    if not bad:
+        return debrief, []
+
+    out = dict(debrief)
+    for key in _DEBRIEF_STR_KEYS:
+        val = out.get(key)
+        if isinstance(val, str) and val:
+            out[key] = strip_invalid_ledger_refs(val, bad)
+    for key in _DEBRIEF_LIST_KEYS:
+        raw = out.get(key)
+        if isinstance(raw, list):
+            out[key] = [
+                strip_invalid_ledger_refs(str(item), bad) if item else item
+                for item in raw
+            ]
+        elif isinstance(raw, str) and raw:
+            out[key] = strip_invalid_ledger_refs(raw, bad)
+    if isinstance(card, dict):
+        new_card = dict(card)
+        ptrs = new_card.get("fact_pointers")
+        if isinstance(ptrs, list):
+            new_card["fact_pointers"] = [
+                strip_invalid_ledger_refs(str(item), bad) if item else item
+                for item in ptrs
+            ]
+        out["motion_card"] = new_card
+    return out, sorted(bad)
 
 
 def format_cite_upgrade_feedback(
@@ -1095,19 +1171,89 @@ def debrief_meets_minimum(debrief: dict[str, Any] | None) -> bool:
     return len(points) >= MIN_HANDOFF_KEY_POINTS
 
 
-def format_handoff_feedback(*, present_but_thin: bool = False) -> str:
-    """Correction instruction that forces one handoff (or a richer one) for downstream."""
+def leaf_did_substantial_work(
+    content: str,
+    *,
+    messages: list[Any] | tuple[Any, ...] | None = None,
+    files_touched: list[str] | None = None,
+) -> bool:
+    """True when a leaf ran tools / landed files / wrote longer prose.
+
+    Short pure-body leaves stay False so they may finish without handoff.
+    """
+    if transcript_has_tool_inventory(messages):
+        return True
+    if files_touched:
+        return True
+    return len((content or "").strip()) >= LEAF_SUBSTANTIAL_BODY_CHARS
+
+
+def worker_expects_handoff(
+    plan: Any,
+    run_id: str,
+    *,
+    content: str = "",
+    messages: list[Any] | tuple[Any, ...] | None = None,
+    files_touched: list[str] | None = None,
+) -> bool:
+    """Whether this node should submit a minimum-quality handoff brief.
+
+    Upstream (has dependents) always. Leaves only after substantial work so
+    CEO / ``delivery_status`` can see incomplete reports — not a hard fail of
+    every short leaf body.
+    """
+    if node_has_dependents(plan, run_id):
+        return True
+    return leaf_did_substantial_work(
+        content, messages=messages, files_touched=files_touched
+    )
+
+
+def handoff_expectation_met(
+    debrief: dict[str, Any] | None, *, for_dependents: bool
+) -> bool:
+    """Whether the brief satisfies the node's handoff expectation.
+
+    Upstream needs the information floor (:func:`debrief_meets_minimum`).
+    Leaves only need an author-submitted brief (any non-empty harvest) — thin
+    is still visible to CEO; missing is what we补要 / degrade.
+    """
+    if for_dependents:
+        return debrief_meets_minimum(debrief)
+    return debrief is not None
+
+
+def format_handoff_feedback(
+    *, present_but_thin: bool = False, for_dependents: bool = True
+) -> str:
+    """Correction instruction that forces one handoff (or a richer one).
+
+    ``for_dependents``: upstream relay wording vs leaf→CEO 汇报补要.
+    """
     if present_but_thin:
+        audience = (
+            "下游队员要靠它接手"
+            if for_dependents
+            else "主管要对账看见完整汇报"
+        )
         return (
-            "你提交的 handoff 交接简报信息量不足（下游队员要靠它接手）。"
+            f"你提交的 handoff 交接简报信息量不足（{audience}）。"
             f"请重新调用 handoff：summary 至少 {MIN_HANDOFF_SUMMARY_CHARS} 字，"
             f"或提供不少于 {MIN_HANDOFF_KEY_POINTS} 条具体 key_points"
             "（文件路径 / 关键决定 / 数字，别空泛）。"
             "调用 handoff 即收尾；不要只写正文不交简报。"
         )
+    if for_dependents:
+        return (
+            "你有下游队员依赖本次交接，但尚未调用 handoff。"
+            "请在本轮调用 handoff 提交交接简报："
+            f"summary 至少 {MIN_HANDOFF_SUMMARY_CHARS} 字，"
+            f"或提供不少于 {MIN_HANDOFF_KEY_POINTS} 条具体 key_points"
+            "（文件路径 / 关键决定 / 数字）。调用即代表收尾完成。"
+        )
     return (
-        "你有下游队员依赖本次交接，但尚未调用 handoff。"
-        "请在本轮调用 handoff 提交交接简报："
+        "你已完成实质工作（工具活动或较长产出），但尚未调用 handoff。"
+        "请在本轮调用 handoff 提交交接简报给主管："
         f"summary 至少 {MIN_HANDOFF_SUMMARY_CHARS} 字，"
         f"或提供不少于 {MIN_HANDOFF_KEY_POINTS} 条具体 key_points"
         "（文件路径 / 关键决定 / 数字）。调用即代表收尾完成。"

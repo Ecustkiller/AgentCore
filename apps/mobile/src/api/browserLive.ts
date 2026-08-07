@@ -13,6 +13,10 @@ import {
 } from "@/api/client";
 import { clientHeaders } from "@/lib/clientBuildInfo";
 
+// M17 exemption: browser live is an ephemeral SSE stream — OpenAPI documents the
+// GET path but has no named `components.schemas` for frame/status envelope payloads
+// or the local connection/client handle types below.
+
 /** One live jpeg frame (envelope `type:"browser_live_frame"` payload). */
 export interface BrowserLiveFrame {
   /** jpeg base64 without a data: prefix. */

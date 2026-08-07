@@ -197,6 +197,9 @@ export interface AskAssumption {
  * `open_local_project` renders as a folder picker that creates/reuses a local Folder
  * (mode=local, empty subpath, root=chosen dir) and starts a **new** conversation under
  * that project — never rewrites the current session's ``folder_id``;
+ * `register_local_project` renders as a folder picker that creates/reuses a local Folder
+ * the same way but **stays on the current conversation** and resumes the ask
+ * (no new session; never rewrites ``folder_id``) — 「登记留指挥面」, distinct from open;
  * `bind_local_folder` renders as a folder picker that binds the bare-chat scratch
  * workspace (``conversations/<id>``) for local execution — not 「打开项目」;
  * `grant_readonly_folder` is a **legacy** session read-only mount under
@@ -219,7 +222,7 @@ export interface AskOption {
   label: string;
   detail?: string;
   recommended?: boolean;
-  action?: "open_local_project" | "bind_local_folder" | "grant_readonly_folder" | "grant_organize_folder";
+  action?: "open_local_project" | "register_local_project" | "bind_local_folder" | "grant_readonly_folder" | "grant_organize_folder";
   /** 仅 grant_*：常见目录提示；桌面解析直授，失败明确报错（无 picker 兜底）。 */
   well_known?: "desktop" | "downloads" | "documents";
   /** 仅 grant_*：子目录名模糊词（无路径分隔符）；与 well_known 合用尽量唯一匹配。 */

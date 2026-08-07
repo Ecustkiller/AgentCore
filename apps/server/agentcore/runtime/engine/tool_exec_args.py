@@ -231,9 +231,9 @@ def _format_args_parse_error(
         model_msg = (
             technical
             + trunc_hint
-            + "不要原样重发整段，也不要再整篇一次 file_write / 大块 str_replace；"
-            "改为短骨架 file_write + 按节 file_append / str_replace 分段落盘"
-            "（每节远小于一次输出上限）。"
+            + "不要原样重发整段导致再次截断；可一次完整 file_write（须完整正文）"
+            "或改为短骨架 + 按节 file_append / str_replace 分段落盘"
+            "（每节远小于一次输出上限）；成篇后修订用 str_replace。"
             "勿向用户讲解 JSON 引号转义。"
         )
         return model_msg, _USER_WRITE_PARSE_MSG

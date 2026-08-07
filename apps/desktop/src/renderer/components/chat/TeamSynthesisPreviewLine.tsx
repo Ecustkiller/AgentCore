@@ -56,21 +56,20 @@ export function TeamSynthesisPreviewLine({
       ? "进展中"
       : "团队进展";
 
-  // CEO 里程碑总结为辅：update_synthesis 的自由文草稿（workers=[]）挂在系统进度【之下】。
-  // 系统进度预览通道（workers 有值）的 text 是确定性进度行、非草稿，故不重复展示。
+  // CEO 里程碑总结为辅：仅 update_synthesis 草稿（workers=[]）挂「CEO 小结」。
+  // 系统进度预览（workers 有值）的 text 是确定性进度行——空窗也禁止挂成小结，
+  // 否则会与上方 blurb 列表重复，并随同 key 覆盖 / includes 去重抖动显隐。
   let ceoNote: string | null = null;
-  if (preview && previewWorkers.length === 0 && !synthesizing) {
-    const text = preview.text.trim();
+  if (preview && preview.workers.length === 0) {
+    const hint = synthesizing
+      ? captainSynthesisPreviewText(preview)
+      : preview.text.trim();
     const h = preview.headline.trim();
-    if (text && text !== h && text !== phaseLabel) ceoNote = text;
-  } else if (preview && synthesizing) {
-    // 空窗期：在确定性标题下再挂一截已有草稿（若有且不同于 headline / blurbs）。
-    const hint = captainSynthesisPreviewText(preview);
     if (
       hint &&
+      hint !== h &&
       hint !== phaseLabel &&
-      hint !== preview.headline.trim() &&
-      !blurbs.some((w) => hint.includes(w.summary))
+      !(synthesizing && blurbs.some((w) => hint.includes(w.summary)))
     ) {
       ceoNote = hint;
     }

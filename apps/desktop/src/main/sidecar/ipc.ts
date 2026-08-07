@@ -77,7 +77,7 @@ export function registerSidecarIpc(): void {
           "userMessage",
           "userMessageId",
         ],
-        ["subpath"],
+        ["subpath", "userId"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -150,7 +150,7 @@ export function registerSidecarIpc(): void {
           "decision",
           "note",
         ],
-        ["subpath", "userMessageId"],
+        ["subpath", "userMessageId", "userId"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");

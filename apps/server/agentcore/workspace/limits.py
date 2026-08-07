@@ -70,8 +70,21 @@ def is_liveness_timeout_detail(detail: str | None) -> bool:
     return any(m.lower() in text for m in LIVENESS_TIMEOUT_DETAIL_MARKERS)
 
 
+def is_channel_dead_detail(detail: str | None) -> bool:
+    """True when the failure is sticky channel-dead (not a single-op settle timeout)."""
+    return "channel dead" in (detail or "").lower()
+
+
+def op_liveness_timeout_metadata() -> dict[str, object]:
+    """ToolResult.metadata for a single-op channel settle timeout (no family sticky)."""
+    return {
+        "liveness_timeout": True,
+        "timeout_layer": "channel_op",
+    }
+
+
 def channel_dead_retire_metadata() -> dict[str, object]:
-    """ToolResult.metadata for sticky channel-dead (first-fail retire + steer)."""
+    """ToolResult.metadata for sticky channel-dead (family retire + steer)."""
     return {
         "liveness_timeout": True,
         "timeout_layer": "channel",

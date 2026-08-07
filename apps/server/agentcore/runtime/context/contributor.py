@@ -28,8 +28,10 @@ class SectionOrder(IntEnum):
     One ordering universe so every assembler renders sections in the same relative order
     regardless of the sequence that contributed them. Spaced by 100 to leave room for
     future sections to slot between without renumbering. The tail (workspace overview,
-    attachment) is deliberately LAST so the stable foundation/hint prefix stays
-    byte-identical within a day — load-bearing for DeepSeek's exact-prefix cache.
+    attachment) is deliberately LAST so the foundation/hint prefix can stay byte-identical
+    across turns — a **cost optimization** for exact-prefix cache billing (e.g. DeepSeek),
+    not a product invariant. Discipline: new sections only append after the current tail
+    or insert at a new stable key between existing slots; never reorder existing keys.
     """
 
     BASE = 100

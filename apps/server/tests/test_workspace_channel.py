@@ -23,7 +23,7 @@ import pytest
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
-from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
+from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp, index_io_mode
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import (
     AmbiguousMatch,
@@ -133,6 +133,29 @@ async def test_index_files_parses_paths_and_truncation():
     assert truncated is True
     # Indexing is read-only — it must not schedule an end-of-turn snapshot.
     assert local.dirty is False
+
+
+async def test_index_files_parses_entries_fingerprints():
+    """Desktop contract: entries with mtime_ms/size_bytes (paths optional dual)."""
+    local, registry, sink = _make()
+    response = {
+        "ok": True,
+        "value": {
+            "entries": [
+                {"path": "a.txt", "mtime_ms": 1000, "size_bytes": 12},
+                {"path": "sub/b.md", "mtime_ms": 2000, "size_bytes": 34},
+            ],
+            "paths": ["a.txt", "sub/b.md"],
+            "truncated": False,
+        },
+    }
+    result, _ = await _round_trip(local.index_files(), sink, registry, response)
+    assert result.paths == ["a.txt", "sub/b.md"]
+    assert result.truncated is False
+    assert result.fingerprints() == {
+        "a.txt": (1000, 12),
+        "sub/b.md": (2000, 34),
+    }
 
 
 async def test_index_files_tolerates_empty_envelope():
@@ -261,11 +284,44 @@ async def test_timeout_raises_io_error():
         await local.read("never-answered.txt")
 
 
-async def test_after_timeout_second_request_fail_fast():
-    """Sticky channel-dead: a follow-up op must not wait another full deadline."""
+async def test_single_timeout_keeps_channel_alive_for_next_op():
+    """One settle timeout fails that op only — next op can still succeed."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=CONV,
+        registry=registry,
+        timeout_seconds=0.05,
+        root_id=ROOT_ID,
+    )
+    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+        await channel.request(WorkspaceOp.READ, {"path": "never-answered.txt"})
+    assert channel._dead is False  # noqa: SLF001
+    assert channel._consecutive_settle_timeouts == 1  # noqa: SLF001
+
+    while not sink._queue.empty():  # noqa: SLF001
+        sink._queue.get_nowait()
+
+    task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
+    event = await _await_request(sink)
+    assert event.payload["op"] == "read"
+    assert registry.resolve(
+        event.payload["request_id"],
+        {"ok": True, "value": "alive"},
+        conversation_id=CONV,
+    )
+    assert await task == "alive"
+    assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
+
+
+async def test_after_two_timeouts_third_request_fail_fast():
+    """Sticky channel-dead only after consecutive N=2 settle timeouts."""
     local, _registry, _sink = _make(timeout=2.0)
-    with pytest.raises(WorkspaceIOError, match="活性挂起"):
-        await local.read("never-answered.txt")
+    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+        await local.read("never-answered-1.txt")
+    with pytest.raises(WorkspaceIOError, match=r"timed out; channel dead"):
+        await local.read("never-answered-2.txt")
 
     t0 = asyncio.get_running_loop().time()
     with pytest.raises(WorkspaceIOError, match="channel dead.*活性挂起"):
@@ -306,8 +362,272 @@ async def test_probe_exec_timeout_does_not_sticky_dead_channel():
     assert await task == "alive"
 
 
-async def test_parallel_ops_one_timeout_fails_sibling_as_channel_dead():
-    """First liveness hang settles same-channel inflight without burning deadline."""
+async def test_op_timeout_log_includes_path(monkeypatch):
+    """workspace.op_timeout must carry path (and directory when present) for replay."""
+    from tests.conftest import LogSpy
+    import agentcore.workspace.channel as channel_mod
+
+    spy = LogSpy()
+    monkeypatch.setattr(channel_mod, "logger", spy)
+
+    channel = WorkspaceChannel(
+        sink=EventSink(),
+        conversation_id=CONV,
+        registry=InteractionRegistry(),
+        timeout_seconds=0.05,
+        root_id=ROOT_ID,
+    )
+    path = "logs/reviews/cases/CASE.md"
+    with pytest.raises(WorkspaceIOError, match="活性挂起"):
+        await channel.request(WorkspaceOp.READ, {"path": path})
+
+    fields = spy.get("workspace.op_timeout")
+    assert fields["op"] == "read"
+    assert fields["path"] == path
+    assert "directory" not in fields
+
+    spy.events.clear()
+    channel2 = WorkspaceChannel(
+        sink=EventSink(),
+        conversation_id=CONV,
+        registry=InteractionRegistry(),
+        timeout_seconds=0.05,
+        root_id=ROOT_ID,
+    )
+    with pytest.raises(WorkspaceIOError, match="活性挂起"):
+        await channel2.request(
+            WorkspaceOp.GREP, {"pattern": "x", "directory": "src"}
+        )
+    grep_fields = spy.get("workspace.op_timeout")
+    assert grep_fields["op"] == "grep"
+    assert grep_fields["directory"] == "src"
+
+
+async def test_index_io_timeout_does_not_sticky_dead_channel():
+    """Background index read hang must not drag tool-family siblings into channel-dead."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=CONV,
+        registry=registry,
+        timeout_seconds=0.05,
+        root_id=ROOT_ID,
+    )
+    with index_io_mode():
+        with pytest.raises(WorkspaceIOError, match="read.*活性挂起"):
+            await channel.request(
+                WorkspaceOp.READ,
+                {"path": "logs/reviews/cases/CASE.md"},
+            )
+
+    assert channel._dead is False  # noqa: SLF001
+    while not sink._queue.empty():  # noqa: SLF001
+        sink._queue.get_nowait()
+
+    # Next tool read must still emit SSE (not reject as channel dead).
+    task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
+    event = await _await_request(sink)
+    assert event.payload["op"] == "read"
+    assert registry.resolve(
+        event.payload["request_id"],
+        {"ok": True, "value": "alive"},
+        conversation_id=CONV,
+    )
+    assert await task == "alive"
+
+
+async def test_index_maintainer_skips_when_channel_inflight(monkeypatch):
+    """IndexMaintainer must not hard-charge ensure while Local channel is busy."""
+    import contextlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import agentcore.workspace.indexing.maintainer as maint_mod
+    from agentcore.workspace.indexing.maintainer import IndexMaintainer
+
+    channel = SimpleNamespace(_inflight={"req-busy"})
+    backend = SimpleNamespace(_channel=channel)
+    manager = SimpleNamespace(
+        set_building=lambda _v: None,
+        ensure_index=AsyncMock(return_value=True),
+    )
+    maintainer = IndexMaintainer(manager, backend)  # type: ignore[arg-type]
+    monkeypatch.setattr(maint_mod, "_CHANNEL_QUIET_WAIT_MAX_S", 0.15)
+    try:
+        maintainer.schedule()
+        # Past one quiet-wait cap while inflight stays busy — ensure must not run.
+        await asyncio.sleep(0.25)
+        manager.ensure_index.assert_not_awaited()
+        # Drain inflight so a coalesced follow-up can proceed.
+        channel._inflight.clear()
+        for _ in range(100):
+            if manager.ensure_index.await_count >= 1:
+                break
+            await asyncio.sleep(0.02)
+        manager.ensure_index.assert_awaited()
+    finally:
+        if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+            maintainer._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintainer._task
+
+
+async def test_index_maintainer_waits_then_runs_when_channel_quiets():
+    """When inflight drains within the quiet window, ensure_index proceeds."""
+    import contextlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agentcore.workspace.indexing.maintainer import IndexMaintainer
+
+    channel = SimpleNamespace(_inflight={"req-1"})
+    backend = SimpleNamespace(_channel=channel)
+    manager = SimpleNamespace(
+        set_building=lambda _v: None,
+        ensure_index=AsyncMock(return_value=True),
+    )
+    maintainer = IndexMaintainer(manager, backend)  # type: ignore[arg-type]
+    maintainer.schedule()
+    await asyncio.sleep(0.08)
+    assert manager.ensure_index.await_count == 0
+    channel._inflight.clear()
+    for _ in range(100):
+        if manager.ensure_index.await_count >= 1:
+            break
+        await asyncio.sleep(0.02)
+    manager.ensure_index.assert_awaited()
+    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+        maintainer._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintainer._task
+
+
+async def test_local_mutation_defers_index_schedule_until_flush(tmp_path):
+    """Local mutations mark dirty only; flush schedules + drains (no mid-turn create_task)."""
+    import contextlib
+    from unittest.mock import AsyncMock
+
+    from agentcore.workspace.indexing.maintainer import IndexMaintainer
+    from agentcore.workspace.indexing.manager import IndexManager
+
+    local, registry, sink = _make()
+    manager = IndexManager(str(tmp_path / "idx"))
+    maintainer = IndexMaintainer(manager, local)
+    local._index_manager = manager  # noqa: SLF001
+    local._index_maintainer = maintainer  # noqa: SLF001
+
+    await _round_trip(
+        local.write("out.txt", "hello"),
+        sink,
+        registry,
+        {"ok": True, "value": 5},
+    )
+    assert local.dirty is True
+    assert manager.content_dirty is True
+    assert maintainer.building is False
+    assert maintainer._task is None  # noqa: SLF001 — mutation must not schedule
+
+    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    await local.flush_code_index_maintenance()
+    manager.ensure_index.assert_awaited()
+    assert maintainer.building is False
+    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+        maintainer._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintainer._task
+
+
+async def test_local_start_code_index_maintenance_still_schedules(tmp_path):
+    """Turn-start / code_search kick must still create_task immediately."""
+    import contextlib
+    from unittest.mock import AsyncMock
+
+    from agentcore.workspace.indexing.manager import IndexManager
+
+    local, _registry, _sink = _make()
+    manager = IndexManager(str(tmp_path / "idx"))
+    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    local._index_manager = manager  # noqa: SLF001
+
+    local.start_code_index_maintenance()
+    maintainer = local._index_maintainer  # noqa: SLF001
+    assert maintainer is not None
+    assert maintainer.building or maintainer._task is not None  # noqa: SLF001
+    await maintainer.drain()
+    manager.ensure_index.assert_awaited()
+    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+        maintainer._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintainer._task
+
+
+async def test_local_flush_noops_when_clean():
+    """flush is a no-op when nothing is dirty and no maintainer is running."""
+    local, _registry, _sink = _make()
+    await local.flush_code_index_maintenance()  # no manager / maintainer
+
+
+async def test_server_mutation_still_schedules_index(tmp_path):
+    """ServerWorkspace keeps mid-mutation schedule (no shared Local channel)."""
+    import contextlib
+    from unittest.mock import AsyncMock
+
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.indexing.maintainer import IndexMaintainer
+    from agentcore.workspace.indexing.manager import IndexManager
+    from agentcore.workspace.server import ServerWorkspace
+
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    manager = IndexManager(str(tmp_path / "idx"))
+    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    maintainer = IndexMaintainer(manager, ws)
+    ws._index_manager = manager  # noqa: SLF001
+    ws._index_maintainer = maintainer  # noqa: SLF001
+
+    await ws.write("x.py", "x = 1\n")
+    assert manager.content_dirty is True
+    assert maintainer._task is not None  # noqa: SLF001 — Server still schedules now
+    await maintainer.drain()
+    manager.ensure_index.assert_awaited()
+    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+        maintainer._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintainer._task
+
+
+async def test_parallel_ops_one_timeout_does_not_fail_sibling():
+    """Single settle timeout must not cancel same-channel inflight siblings."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=CONV,
+        registry=registry,
+        timeout_seconds=0.2,
+        root_id=ROOT_ID,
+    )
+    t_a = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
+    t_b = asyncio.create_task(
+        channel.request(WorkspaceOp.READ, {"path": "b.txt"}, timeout=5.0)
+    )
+    events: dict[str, SSEEvent] = {}
+    for _ in range(2):
+        ev = await _await_request(sink)
+        events[ev.payload["args"]["path"]] = ev
+    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+        await t_a
+    assert channel._dead is False  # noqa: SLF001
+    assert registry.resolve(
+        events["b.txt"].payload["request_id"],
+        {"ok": True, "value": "ok-b"},
+        conversation_id=CONV,
+    )
+    assert await t_b == "ok-b"
+
+
+async def test_parallel_ops_second_timeout_sticky_fails_sibling():
+    """Second consecutive hang sticky-deads and settles remaining inflight."""
     sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
@@ -318,7 +638,12 @@ async def test_parallel_ops_one_timeout_fails_sibling_as_channel_dead():
         timeout_seconds=1.0,
         root_id=ROOT_ID,
     )
-    # Short (channel default) vs long: A hangs first; B must not burn its 5s budget.
+    # Seed one prior real-op timeout so the next hang reaches N=2 sticky.
+    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+        await channel.request(WorkspaceOp.READ, {"path": "seed.txt"})
+    while not sink._queue.empty():  # noqa: SLF001
+        sink._queue.get_nowait()
+
     t_a = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
     t_b = asyncio.create_task(
         channel.request(WorkspaceOp.READ, {"path": "b.txt"}, timeout=5.0)
@@ -330,9 +655,10 @@ async def test_parallel_ops_one_timeout_fails_sibling_as_channel_dead():
     results = await asyncio.gather(t_a, t_b, return_exceptions=True)
     elapsed = asyncio.get_running_loop().time() - t0
 
+    assert channel._dead is True  # noqa: SLF001
     assert all(isinstance(r, WorkspaceIOError) for r in results)
     details = [str(r) for r in results]
-    assert any("timed out" in d and "活性挂起" in d for d in details)
+    assert any("timed out" in d and "channel dead" in d for d in details)
     assert any("channel dead" in d and "活性挂起" in d for d in details)
     # Sibling had a 5s budget — channel-dead settle must finish near A's 1s hang.
     assert elapsed < 2.0
@@ -397,7 +723,7 @@ async def test_channel_caps_concurrent_suspends():
 
 
 async def test_queued_waiter_fail_fast_after_channel_dead():
-    """After sticky-dead, a queued waiter that obtains a slot fail-fasts (no SSE)."""
+    """After sticky-dead (N=2), a queued waiter that obtains a slot fail-fasts (no SSE)."""
     sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
@@ -408,6 +734,12 @@ async def test_queued_waiter_fail_fast_after_channel_dead():
         root_id=ROOT_ID,
         max_inflight=1,
     )
+    # Seed streak so the hold timeout is the sticky trigger (N=2).
+    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+        await channel.request(WorkspaceOp.READ, {"path": "seed.txt"})
+    while not sink._queue.empty():  # noqa: SLF001
+        sink._queue.get_nowait()
+
     # Fill the only slot; leave it hanging so the next caller queues.
     t_hold = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "hold.txt"}))
     await _await_request(sink)
@@ -421,9 +753,10 @@ async def test_queued_waiter_fail_fast_after_channel_dead():
     results = await asyncio.gather(t_hold, t_queued, return_exceptions=True)
     elapsed = asyncio.get_running_loop().time() - t0
 
+    assert channel._dead is True  # noqa: SLF001
     assert all(isinstance(r, WorkspaceIOError) for r in results)
     details = [str(r) for r in results]
-    assert any("timed out" in d and "活性挂起" in d for d in details)
+    assert any("timed out" in d and "channel dead" in d for d in details)
     assert any("channel dead" in d and "活性挂起" in d for d in details)
     # Queued waiter fail-fasts after hold's ~1s hang — not another full deadline.
     assert elapsed < 2.0

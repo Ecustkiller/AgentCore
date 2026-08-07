@@ -1,13 +1,12 @@
-"""proxy_spend durable queue: drain, idempotent run_id dedupe, telemetry pool isolation."""
+"""proxy_spend durable queue: drain, idempotent call_id dedupe, telemetry pool isolation."""
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
 from agentcore.billing import cost_ledger_queue as ledger_mod
 from agentcore.billing import proxy_spend_queue as queue_mod
+from agentcore.billing.cost_ledger_queue import MemoryOutboxBackend
 from agentcore.llm.provider.protocol import TokenUsage
 
 
@@ -25,12 +24,13 @@ def _usage() -> TokenUsage:
 
 @pytest.fixture
 def spend_queue(monkeypatch, tmp_path):
-    queue = queue_mod.reset_proxy_spend_queue_for_tests()
+    backend = MemoryOutboxBackend()
+    ledger_mod.reset_cost_ledger_queue_for_tests(backend=backend)
     monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
-    return queue
+    return queue_mod.get_proxy_spend_queue()
 
 
-async def test_enqueue_writes_disk_then_drain_records(monkeypatch, spend_queue, tmp_path):
+async def test_enqueue_then_drain_records(monkeypatch, spend_queue):
     calls: list = []
 
     class Repo:
@@ -59,23 +59,16 @@ async def test_enqueue_writes_disk_then_drain_records(monkeypatch, spend_queue, 
         persona="调研员",
     )
     assert rid is not None
-    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
-    assert len(files) == 1
-    payload = json.loads(files[0].read_text(encoding="utf-8"))
-    assert payload["calls"][0]["persona"] == "调研员"
-    assert payload["calls"][0]["run_id"] == "run-1"
-    assert payload["materialize_runs"] is True
-
     assert await spend_queue.drain_once() == 1
     assert calls and calls[0]["message_id"] == "m1"
     assert calls[0]["calls"][0]["call_id"]
+    assert calls[0]["calls"][0]["persona"] == "调研员"
+    assert calls[0]["calls"][0]["run_id"] == "run-1"
     assert calls[0]["materialize_runs"] is True
-    # Acked — file gone.
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
 
 
-async def test_drain_retry_same_call_id_no_double_bill(monkeypatch, spend_queue, tmp_path):
-    """At-least-once: re-draining the same record must reuse call_id (ledger dedupes)."""
+async def test_drain_retry_same_call_id_no_double_bill(monkeypatch, spend_queue):
+    """At-least-once: re-draining the same logical call reuses call_id (ledger dedupes)."""
     seen_call_ids: list[str] = []
 
     class Repo:
@@ -94,24 +87,26 @@ async def test_drain_retry_same_call_id_no_double_bill(monkeypatch, spend_queue,
         conversation_id="c1",
         model="m",
         usage=_usage(),
+        call_id="call-fixed",
     )
-    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
-    files = list(qdir.glob("*.json"))
-    assert len(files) == 1
-    payload = json.loads(files[0].read_text(encoding="utf-8"))
-    call_id = payload["calls"][0]["call_id"]
-
     assert await spend_queue.drain_once() == 1
-    assert seen_call_ids == [call_id]
+    assert seen_call_ids == ["call-fixed"]
 
-    files[0].write_text(json.dumps(payload), encoding="utf-8")
+    spend_queue.enqueue(
+        user_id="u1",
+        conversation_id="c1",
+        model="m",
+        usage=_usage(),
+        call_id="call-fixed",
+    )
     assert await spend_queue.drain_once() == 1
-    assert seen_call_ids == [call_id, call_id]
+    assert seen_call_ids == ["call-fixed", "call-fixed"]
 
 
-async def test_survives_process_restart_via_disk(monkeypatch, spend_queue, tmp_path):
-    """Files left on disk after a crash are drained by a fresh queue instance."""
+async def test_survives_via_shared_outbox(monkeypatch, tmp_path):
+    """Pending outbox rows survive a queue singleton reset (new process analogue)."""
     calls: list = []
+    shared = MemoryOutboxBackend()
 
     class Repo:
         def __init__(self, _session):
@@ -123,16 +118,20 @@ async def test_survives_process_restart_via_disk(monkeypatch, spend_queue, tmp_p
 
     monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
     monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
 
-    spend_queue.enqueue(
+    first = queue_mod.ProxySpendQueue(
+        ledger_mod.reset_cost_ledger_queue_for_tests(backend=shared)
+    )
+    first.enqueue(
         user_id="u1",
         conversation_id="c1",
         model="m",
         usage=_usage(),
     )
-    # New process = new queue singleton; disk still has the file.
-    restarted = queue_mod.reset_proxy_spend_queue_for_tests()
-    monkeypatch.setattr(ledger_mod.settings, "data_dir", str(tmp_path))
+    await first._ledger._await_pending_enqueues()
+
+    restarted = queue_mod.ProxySpendQueue(ledger_mod.CostLedgerQueue(backend=shared))
     assert await restarted.drain_once() == 1
     assert len(calls) == 1
 

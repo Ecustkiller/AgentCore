@@ -32,6 +32,19 @@ def _reset_conversation_store():
     reset_conversation_store_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _stub_conversation_folder_id(monkeypatch: pytest.MonkeyPatch):
+    """Unit tests without Postgres: bare folder_id=None on startTurn."""
+
+    async def _none(_conversation_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        _none,
+    )
+
+
 def _suspension(
     message_id: str,
     conversation_id: str,

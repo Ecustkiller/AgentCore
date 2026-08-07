@@ -7,6 +7,7 @@ import type { FsRoot } from "@shared/ipc-contract";
 import { describe, expect, it } from "vitest";
 import { formatBindLocalFolderAnswer } from "../bindLocalFolder";
 import { formatOpenLocalProjectAnswer } from "../openLocalProject";
+import { formatRegisterLocalProjectAnswer } from "../registerLocalProject";
 import {
   formatWorkspaceChipLabel,
   resolveEffectiveWorkspace,
@@ -54,6 +55,14 @@ describe("formatOpenLocalProjectAnswer", () => {
   });
 });
 
+describe("formatRegisterLocalProjectAnswer", () => {
+  it("marks registration as staying on the current conversation", () => {
+    expect(formatRegisterLocalProjectAnswer("登记本地项目", "MyRepo")).toBe(
+      "登记本地项目（MyRepo · 已登记为本地项目，仍在本对话）",
+    );
+  });
+});
+
 describe("composeAnswer with bind_local_folder pick", () => {
   const content: AskUserContent = {
     question: "需要本地目录吗？",
@@ -66,6 +75,7 @@ describe("composeAnswer with bind_local_folder pick", () => {
         kind: "choice",
         options: [
           { label: "打开本地项目", action: "open_local_project" },
+          { label: "登记本地项目", action: "register_local_project" },
           { label: "绑定本机执行环境", action: "bind_local_folder" },
           { label: "继续用云端" },
         ],
@@ -104,6 +114,22 @@ describe("composeAnswer with bind_local_folder pick", () => {
     expect(text).toContain(
       "打开本地项目（AgentCore · 已打开为本地项目，新会话）",
     );
+  });
+
+  it("composes register_local_project answer as same-conversation registration", () => {
+    const text = composeAnswer(
+      content,
+      {
+        q0: [formatRegisterLocalProjectAnswer("登记本地项目", "AgentCore")],
+      },
+      {},
+      {},
+      "",
+    );
+    expect(text).toContain(
+      "登记本地项目（AgentCore · 已登记为本地项目，仍在本对话）",
+    );
+    expect(text).not.toContain("新会话");
   });
 });
 

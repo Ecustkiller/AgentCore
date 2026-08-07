@@ -105,7 +105,7 @@ export interface PendingResume {
   questions: AskQuestion[];
   /** ask_user: wire may still send kickoff; UI treats as generic clarification. */
   intent: CheckpointIntent;
-  /** ask_user browser_login=true → login card + auto-reveal 右坞. */
+  /** ask_user browser_login=true → login card；点「打开浏览器」才 reveal 右坞. */
   browserLogin?: boolean;
   /** Where the durable frame lives — drives {@link runResume} sidecar vs server routing. */
   origin: ResumeOrigin;
@@ -211,12 +211,14 @@ const toOptions = (raw: unknown): AskOption[] =>
           ...(obj.detail ? { detail: String(obj.detail) } : {}),
           ...(obj.recommended ? { recommended: true } : {}),
           ...(obj.action === "open_local_project" ||
+          obj.action === "register_local_project" ||
           obj.action === "bind_local_folder" ||
           obj.action === "grant_readonly_folder" ||
           obj.action === "grant_organize_folder"
             ? {
                 action: obj.action as
                   | "open_local_project"
+                  | "register_local_project"
                   | "bind_local_folder"
                   | "grant_readonly_folder"
                   | "grant_organize_folder",

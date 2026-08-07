@@ -255,6 +255,29 @@ def test_assembled_idle_surface_split():
     assert names.isdisjoint(COORDINATION_GATED_TOOLS)
 
 
+def test_assembled_offers_create_project():
+    """跨项目 P1：create_project 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
+    names = set(_assemble().names)
+    assert {"list_projects", "resolve_project", "create_project"} <= names
+
+
+def test_register_always_ceo_tools_declare_loop():
+    """G3：零参/轻参 ALWAYS 走声明循环；delegate/debate 不进该 helper。"""
+    from agentcore.runtime.skills import build_system_skill_registry
+    from agentcore.tools.registration import register_always_ceo_tools
+
+    reg = ToolRegistry()
+    register_always_ceo_tools(reg, skill_registry=build_system_skill_registry())
+    names = set(reg.names)
+    assert {
+        "consult_skill",
+        "list_projects",
+        "resolve_project",
+        "create_project",
+    } <= names
+    assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})
+
+
 def test_assembled_coordination_surface_split():
     """协调态：闸内工具齐全；常驻工具（含 delegate）照旧在。"""
     eid = "exec-assembly"

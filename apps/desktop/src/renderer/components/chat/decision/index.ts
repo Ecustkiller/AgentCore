@@ -3,6 +3,7 @@ export {
   ASK_RESOLVED_DECISION_ICON,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPendingMarkerLabel,
   teamPreviewLead,

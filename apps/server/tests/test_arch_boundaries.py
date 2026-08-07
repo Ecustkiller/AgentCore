@@ -202,3 +202,92 @@ def test_engine_stream_uses_public_retry_constants() -> None:
     assert "MAX_RETRIES" in src
     assert "INITIAL_BACKOFF" in src
     assert "BACKOFF_MULTIPLIER" in src
+
+
+# ---------------------------------------------------------------------------
+# runtime package scale (P3-A)
+# ---------------------------------------------------------------------------
+
+# Soft ceiling for *new* runtime modules. Existing oversized files are
+# grandfathered below; shrink or split them when touching that area — do not
+# grow the exemption set without an explicit decision.
+_RUNTIME_LINE_SOFT_MAX = 800
+
+_RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
+    {
+        # Grandfathered at P3-A land (do not grow this set casually).
+        "browser/registry.py",
+        "coordination/host.py",
+        "coordination/session.py",
+        "debate/models.py",
+        "debate/prompt.py",
+        "debate/rounds.py",
+        "debate/types.py",
+        "delegate/completion.py",
+        "delegate/delivery_status.py",
+        "engine/governance.py",
+        "engine/loop.py",
+        "events/sink.py",
+        "resolve/prompt.py",
+        "runs/builder.py",
+        "runs/contract.py",
+        "runs/executor_context.py",
+        "runs/executor_loop.py",
+        "runs/research_quality.py",
+        "runs/wave.py",
+        "skills.py",
+    }
+)
+
+# Root shims are module aliases (sys.modules swap) — not substantive logic.
+_RUNTIME_ROOT_SHIM_PREFIXES: tuple[str, ...] = (
+    "closing_posture_",
+    "turn_",
+    "suspension_",
+    "loop_controller_",
+)
+
+
+def test_runtime_no_new_oversized_modules_without_exemption() -> None:
+    """Forbid new ``runtime/`` files above the soft line ceiling.
+
+    P3-A keeps a single ``runtime`` package; navigability comes from subpackages
+    + this scale latch. Grandfathered paths are listed in
+    ``_RUNTIME_OVERSIZE_EXEMPT`` — adding to that set requires an explicit
+    decision (prefer split / shrink instead).
+    """
+    root = _PKG_ROOT / "runtime"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(root).as_posix()
+        # Root alias shims stay tiny; skip by convention.
+        if path.parent == root and path.name.startswith(_RUNTIME_ROOT_SHIM_PREFIXES):
+            continue
+        lines = sum(1 for _ in path.open(encoding="utf-8"))
+        if lines <= _RUNTIME_LINE_SOFT_MAX:
+            continue
+        if rel in _RUNTIME_OVERSIZE_EXEMPT:
+            continue
+        offenders.append(f"{rel} ({lines} lines)")
+    assert offenders == [], (
+        "new runtime modules over "
+        f"{_RUNTIME_LINE_SOFT_MAX} lines need a split or an explicit exemption:\n  "
+        + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_runtime_root_shims_are_aliases_not_logic() -> None:
+    """Root ``*_`` cluster shims must stay thin aliases (P3-A import freeze)."""
+    root = _PKG_ROOT / "runtime"
+    fat: list[str] = []
+    for path in root.glob("*.py"):
+        if not path.name.startswith(_RUNTIME_ROOT_SHIM_PREFIXES):
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "sys.modules[__name__]" not in text:
+            fat.append(f"{path.name}: missing module-alias assignment")
+        if text.count("\n") > 20:
+            fat.append(f"{path.name}: too large for a shim ({text.count(chr(10))} lines)")
+    assert fat == [], "runtime root shims drifted from alias form:\n  " + "\n  ".join(fat)

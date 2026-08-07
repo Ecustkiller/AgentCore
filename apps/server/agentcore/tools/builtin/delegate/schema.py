@@ -54,11 +54,14 @@ DELEGATE_DESCRIPTION = (
     "交付形态：给用户【看】→deliverable.form=prose；【用】→form=files。"
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
+    "同回合再调 delegate 默认可 depends_on 本回合已有节点；"
     "跨回合加人 append_to_execution_id=\"latest\"。"
     "playbook 可选（建站推荐 build_website 且必填 playbook_args.topic；"
     "控制台 dense 另加 style=toolshed；绿场软件/SPA 推荐 build_app 且必填 app；"
     "其余可省略直接手写 tasks）；与 tasks 二选一。"
     "交付靠 deliverable.form/artifacts；勿再填已删的 completion_criteria。"
+    "跨项目：tasks[].target_folder_id=已解析项目 id（列/解析后填；裸聊必填；"
+    "有出生省略=默认桌；子派默认继承）。"
     "拿不准怎么拆再 consult_skill(team_orchestration_advanced)。"
 )
 
@@ -85,14 +88,22 @@ DELEGATE_PARAMETERS = {
                     },
                     "objective": {"type": "string"},
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
-                    "id": {"type": "string"},
+                    "id": {
+                        "type": "string",
+                        "description": (
+                            "节点 id（可选）。声明后铸 run_id={prefix}_{id}；"
+                            "同批勿重复；跨批/同回合二次 depends_on 可填此字面值。"
+                        ),
+                    },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
                             "依赖任务 id（DAG）。"
-                            "填同 execution 已有节点的 id 字面值、本批 id、或无歧义角色名；"
-                            "勿手抄 del_* 作为主路径。"
+                            "填本批 id、同回合已有节点 id/无歧义角色名，"
+                            "或跨回合 append 后宿主节点；勿手抄 del_* 作为主路径。"
+                            "同回合二次 delegate 默认可解析本回合已有节点；"
+                            "跨回合须 append_to_execution_id。"
                             "何时填（生产者→消费者）见系统提示路由。"
                         ),
                     },
@@ -115,6 +126,16 @@ DELEGATE_PARAMETERS = {
                         "description": "false=≥1 上游成功即跑；true=须全量。",
                     },
                     "force_continue": {"type": "boolean"},
+                    "target_folder_id": {
+                        "type": "string",
+                        "description": (
+                            "目标项目身份（已解析的 folder id；对用户不可见）。"
+                            "有则该 worker 换到该项目根写盘，记忆/规则跟该项目；"
+                            "嵌套子派默认继承父目标，再点名才换。"
+                            "裸聊（无出生）派写盘任务必须带此字段；"
+                            "有出生且省略 → 坐会话默认桌（同今）。"
+                        ),
+                    },
                 },
                 "required": ["role", "task"],
             },
@@ -125,6 +146,7 @@ DELEGATE_PARAMETERS = {
             "description": (
                 '跨回合追加："latest" 或 execution_id；'
                 "latest 未命中可追加图时自动新建。"
+                "同回合再调一般不必传（活跃图 / 本回合上一张图自动合入）。"
             ),
         },
         "coordinate": {

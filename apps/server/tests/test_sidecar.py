@@ -101,6 +101,24 @@ def _events(sent: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [m["params"]["event"] for m in sent if m.get("method") == "turn/event"]
 
 
+@pytest.fixture(autouse=True)
+def _stub_conversation_folder_id(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """Unit tests without Postgres: bare folder_id=None unless the dedicated DB-mock test."""
+    if request.node.name in {
+        "test_sidecar_start_turn_passes_conversation_folder_id",
+        "test_load_conversation_folder_id_normalizes_blank",
+    }:
+        return
+
+    async def _none(_conversation_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        _none,
+    )
+
+
 def test_initialize_rejects_missing_root(tmp_path):
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
@@ -409,6 +427,126 @@ def test_sidecar_binds_local_backend_with_approvals(tmp_path, monkeypatch):
     asyncio.run(drive())
     assert captured["location"] == "local"
     assert captured["approvals_enabled"] is True
+
+
+def test_sidecar_start_turn_passes_conversation_folder_id(tmp_path, monkeypatch):
+    """startTurn loads conversation.folder_id from DB (cloud-shaped) into the pipeline.
+
+    Hardcoding folder_id=None broke project memory scope + suspension.folder_id on
+    local turns. Mock the unscoped repo lookup; assert run_chat_pipeline gets it.
+    """
+    captured: dict[str, Any] = {}
+
+    class _Conv:
+        folder_id = "folder-from-db"
+
+    class _Repo:
+        def __init__(self, _session: Any) -> None:
+            pass
+
+        async def get_by_id_unscoped(self, conversation_id: str) -> _Conv:
+            assert conversation_id == "c1"
+            return _Conv()
+
+    class _SessionCtx:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["folder_id"] = kwargs.get("folder_id")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def fake_baseline(**kwargs: Any) -> None:
+        captured["baseline_folder_id"] = kwargs.get("folder_id")
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
+        fake_baseline,
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _SessionCtx(),
+    )
+    monkeypatch.setattr(
+        "agentcore.db.repositories.ConversationRepository",
+        _Repo,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "项目里查记忆",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert captured["folder_id"] == "folder-from-db"
+    assert captured["baseline_folder_id"] == "folder-from-db"
+
+
+@pytest.mark.asyncio
+async def test_load_conversation_folder_id_normalizes_blank(monkeypatch):
+    """DB blank / whitespace folder_id → None (bare), never empty str."""
+    from agentcore.sidecar.server_pkg.turns import load_conversation_folder_id
+
+    class _Conv:
+        folder_id = "  "
+
+    class _Repo:
+        def __init__(self, _session: object) -> None:
+            pass
+
+        async def get_by_id_unscoped(self, _conversation_id: str) -> _Conv:
+            return _Conv()
+
+    class _SessionCtx:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _SessionCtx(),
+    )
+    monkeypatch.setattr(
+        "agentcore.db.repositories.ConversationRepository",
+        _Repo,
+    )
+    assert await load_conversation_folder_id("c-blank") is None
 
 
 def test_sidecar_start_turn_passes_desktop_client_platform(tmp_path, monkeypatch):

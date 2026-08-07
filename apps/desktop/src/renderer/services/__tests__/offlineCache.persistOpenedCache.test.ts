@@ -82,7 +82,7 @@ describe("persistOpenedCache preview", () => {
     expect(payload.conversation.lastMessagePreview).not.toBe(STALE_SUCCESS);
   });
 
-  it("uses cancelled synthetic face when empty cancelled finish", async () => {
+  it("uses prior visible text when empty cancelled finish (no「已停止」preview)", async () => {
     getConversations.mockReturnValue([listed("c1", STALE_SUCCESS)]);
     const messages = [
       msg("u1", "user", "你好"),
@@ -97,7 +97,8 @@ describe("persistOpenedCache preview", () => {
     });
 
     const payload = putOpenedConversation.mock.calls[0][0];
-    expect(payload.conversation.lastMessagePreview).toBe("已停止");
+    expect(payload.conversation.lastMessagePreview).toBe("你好");
+    expect(payload.conversation.lastMessagePreview).not.toBe("已停止");
     expect(payload.conversation.lastMessagePreview).not.toBe(STALE_SUCCESS);
   });
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from agentcore.cache.redis import get_redis_client
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 
@@ -16,15 +17,15 @@ async def redis_ready() -> bool:
     """Return whether Redis is reachable when ``rate_limit_backend=redis``.
 
     When the backend is ``memory``, Redis is optional and this returns ``True``.
+    Uses the process-wide client (``get_redis_client``) — does not open a new
+    connection per probe.
     """
     if settings.rate_limit_backend != "redis":
         return True
     try:
-        import redis
 
         def _ping() -> bool:
-            client = redis.Redis.from_url(settings.redis_url)
-            return bool(client.ping())
+            return bool(get_redis_client().ping())
 
         return await asyncio.wait_for(
             asyncio.to_thread(_ping),

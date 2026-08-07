@@ -969,6 +969,7 @@ async def test_delegate_append_rejected_for_nested_lead():
         tools=ToolRegistry(),
         base_tool_context=ctx(),
         depth=1,
+        folder_id="test_birth",
     )
     result = await t.execute(
         {
@@ -1022,6 +1023,7 @@ async def test_delegate_nested_lead_gets_no_execution_id_echo(monkeypatch):
         tools=ToolRegistry(),
         base_tool_context=ctx(),
         depth=1,
+        folder_id="test_birth",
     )
     result = await t.execute(
         {"tasks": [{"role": "研究员", "task": "调研"}], "coordinate": False},

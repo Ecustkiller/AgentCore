@@ -137,6 +137,9 @@ importers:
       '@agentcore/protocol-conformance':
         specifier: workspace:*
         version: link:../../packages/protocol-conformance
+      '@agentcore/protocol-fold-kit':
+        specifier: workspace:*
+        version: link:../../packages/protocol-fold-kit
       '@biomejs/biome':
         specifier: ^1.9.0
         version: 1.9.4
@@ -332,6 +335,9 @@ importers:
       '@agentcore/protocol-conformance':
         specifier: workspace:*
         version: link:../../packages/protocol-conformance
+      '@agentcore/protocol-fold-kit':
+        specifier: workspace:*
+        version: link:../../packages/protocol-fold-kit
       '@aparajita/capacitor-secure-storage':
         specifier: ^8.0.0
         version: 8.0.0
@@ -445,6 +451,15 @@ importers:
       '@agentcore/contract-types':
         specifier: workspace:*
         version: link:../contract-types
+
+  packages/protocol-fold-kit:
+    devDependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.5)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.22.4)(yaml@2.9.0)
 
   packages/town-story-packs: {}
 

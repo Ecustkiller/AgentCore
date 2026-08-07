@@ -6,33 +6,17 @@
 // always-injected core (偏好 全局 + 画像 全局) and the on-demand 主题 notes, plus the
 // cross-conversation「最近更新」feed. The contract mirrors the workspace edit contract:
 // full text + a content-addressed `version` baseline the next write does its CAS against.
+// REST wire DTOs track OpenAPI via @agentcore/contract-rest-types.
 import { apiFetch } from "@/api/client";
 import type { MemoryUpdateItem } from "@/api/conversations";
+import type { components } from "@/types/api.generated";
 
-export interface MemoryDoc {
-  content: string;
-  /** Content-addressed CAS tag; sent back as the write baseline (stale → conflict). */
-  version: string;
-  enabled: boolean;
-}
+type Schemas = components["schemas"];
 
-export interface MemoryFileDoc {
-  content: string;
-  /** Per-file content hash; sent back as the write baseline (stale → conflict). */
-  version: string;
-}
-
-export interface MemoryWriteResult {
-  ok: boolean;
-  version: string;
-  conflict: boolean;
-}
-
-/**
- * A single always-injected memory leaf: 偏好 (preferences, global-only) and 画像
- * (profile). The mobile lite surface edits the GLOBAL layer of each.
- */
-export type MemoryKind = "preferences" | "profile";
+export type MemoryDoc = Schemas["MemoryResponse"];
+export type MemoryFileDoc = Schemas["MemoryFileResponse"];
+export type MemoryWriteResult = Schemas["MemoryWriteResult"];
+export type MemoryKind = Schemas["MemoryKind"];
 
 /**
  * A failed memory REST call, carrying the HTTP status so callers can tell a missing
@@ -108,14 +92,14 @@ export function writeMemoryFile(
 ): Promise<MemoryWriteResult> {
   return putJson<MemoryWriteResult>(
     `/v1/users/me/memory/files/${kind}`,
-    { content, baseline },
+    { content, baseline } satisfies Schemas["MemoryWriteRequest"],
     "保存失败",
   );
 }
 
 /** GLOBAL 主题 note slugs (on-demand notes the agent pulls via consult_memory). */
 export function listMemoryTopics(): Promise<string[]> {
-  return getJson<{ topics: string[] }>(
+  return getJson<Schemas["MemoryTopicsResponse"]>(
     "/v1/users/me/memory/topics",
     "加载主题失败",
   ).then((r) => r.topics);
@@ -140,15 +124,15 @@ export function writeMemoryTopic(
 ): Promise<MemoryWriteResult> {
   return putJson<MemoryWriteResult>(
     `/v1/users/me/memory/topics/${encodeURIComponent(slug)}`,
-    { content, baseline },
+    { content, baseline } satisfies Schemas["MemoryWriteRequest"],
     "保存失败",
   );
 }
 
 /**
  * One offline-consolidation pass in the cross-conversation「最近更新」feed (§1.6).
- * Same applied-change items as the in-conversation card, plus `conversationId` so the
- * feed can jump back to the source thread.
+ * CamelCase client projection of OpenAPI `MemoryUpdateFeedItem` (M17 exemption:
+ * OpenAPI has no camelCase feed-entry schema).
  */
 export interface MemoryUpdateFeedEntry {
   id: string;
@@ -159,22 +143,6 @@ export interface MemoryUpdateFeedEntry {
   items: MemoryUpdateItem[];
 }
 
-interface MemoryUpdateFeedItemWire {
-  id: string;
-  conversation_id: string;
-  created_at: string;
-  kind?: string;
-  summary?: string | null;
-  items?: Array<{
-    action: string;
-    file: string;
-    section: string;
-    scope: string;
-    content: string;
-    target: string;
-  }>;
-}
-
 /**
  * The signed-in user's recent memory updates across ALL conversations, newest-first
  * (记忆更新对话内可见 §1.6 — write-side home on `/memory`). `limit` caps how many
@@ -183,7 +151,7 @@ interface MemoryUpdateFeedItemWire {
 export async function listMemoryUpdates(
   limit = 30,
 ): Promise<MemoryUpdateFeedEntry[]> {
-  const data = await getJson<{ updates: MemoryUpdateFeedItemWire[] }>(
+  const data = await getJson<Schemas["MemoryUpdatesFeedResponse"]>(
     `/v1/users/me/memory/updates?limit=${limit}`,
     "加载记忆更新失败",
   );
@@ -193,13 +161,6 @@ export async function listMemoryUpdates(
     createdAt: u.created_at,
     kind: u.kind === "episodic" ? "episodic" : "semantic",
     summary: u.summary ?? null,
-    items: (u.items ?? []).map((it) => ({
-      action: it.action,
-      file: it.file,
-      section: it.section ?? "",
-      scope: it.scope ?? "global",
-      content: it.content ?? "",
-      target: it.target ?? "",
-    })),
+    items: u.items ?? [],
   }));
 }

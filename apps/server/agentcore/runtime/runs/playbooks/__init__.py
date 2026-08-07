@@ -54,8 +54,9 @@ PLAYBOOKS: dict[str, Playbook] = {
         ),
         slots=(
             "scope(必填,审计范围路径或子系统;亦接受 topic/target) / "
-            "modules(可选,≥2 模块名数组则并行审计+主管速览;单模块省略本槽) / "
-            "focus(可选,侧重如 security|eng) / "
+            "modules(可选,≥2 短模块名/路径则并行审计+主管速览;单模块省略本槽;"
+            "禁把长作文当模块名,侧重进 focus) / "
+            "focus(可选,侧重如 security|eng|流式刷新) / "
             "k(可选,每模块 Phase B 定案上限,默认 8) / "
             "output_path(可选,单模块报告或汇总速览覆盖路径)"
         ),
@@ -66,7 +67,9 @@ PLAYBOOKS: dict[str, Playbook] = {
         summary=(
             "【对齐推进·A 摸清】一起弄懂/多路摸清/讨论对齐默认："
             "N 路并行摸底→方向笔记落盘→交回 CEO 对话综述；无提纲/撰稿/审校"
-            "（未明示成文勿升 research_report；angles 宜少扇出常 2）"
+            "（未明示成文勿升 research_report；angles 宜少扇出常 2；"
+            "够用即停：定位/技术栈或手段/进度；handoff 短摘要必交；"
+            "只读摸底禁改业务代码）"
         ),
         slots=(
             "topic(必填,主题) / angles(必填,≥2 个可并行摸底方向;宜少扇出常 2；"

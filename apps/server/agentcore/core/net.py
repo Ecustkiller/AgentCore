@@ -240,7 +240,7 @@ class URLBlock(Enum):
         "[ERROR] 链接解析到私有/保留地址，已按 SSRF 防护拦截。"
         "疑似本机代理 fake-IP 模式（DNS 将域名应答为 198.18.x.x 占位 IP，Clash/Mihomo 默认行为）；"
         "SSRF 拦截正确、非链接问题。处置：代理 DNS 改 redir-host 或关 fake-ip，"
-        "再跑 apps/server 下 `uv run python scripts/probe_egress.py` 复验。"
+        "再跑 apps/server 下 `uv run python scripts/archive/probe_egress.py` 复验。"
     )
 
 

@@ -8,10 +8,11 @@ N = parallel; any deps = a DAG). Pure and dict-based.
 …），无独立 Agent 实体与 allow-list。``agent_id`` 铸成 == ``run_id``，``agent_name``
 取 ``role``，仅供 ``run_*`` 事件与图展示。
 
-Run-id minting preserves two schemes: a no-deps batch numbers nodes
-``{prefix}_{n}`` so a re-delegate in the same turn never reuses an id, while a
-DAG namespaces each declared id ``{prefix}_{raw}`` and rewrites every
-``depends_on`` ref the same way, so intra-DAG edges survive.
+Run-id minting: a no-deps batch uses ``{prefix}_{raw}`` when the task declares a
+non-empty ``id`` (same shape as DAG) and ``{prefix}_{n}`` when undeclared, so a
+re-delegate in the same turn never reuses a counter id; a DAG always namespaces
+each declared id ``{prefix}_{raw}`` and rewrites every ``depends_on`` ref the
+same way, so intra-DAG and cross-batch (via ``existing_plan``) edges survive.
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
@@ -156,11 +157,15 @@ def _resolve_dep_ref(
     minted_values = set(by_raw_id.values())
     if token in minted_values:
         return token, None
+    next_step = (
+        "下一步：填无歧义角色名、本批或宿主 id 字面值，"
+        '或 append_to_execution_id="latest"。'
+    )
     ambig = (ambiguous_raw_ids or {}).get(token) or []
     if len(ambig) > 1:
         return None, (
             f"depends_on `{token}` 短 id 有歧义（候选 run_id：{'、'.join(ambig)}）。"
-            f"请改用完整 run_id。可用节点：{available_label}"
+            f"请改用完整 run_id。可用节点：{available_label}。{next_step}"
         )
     role_hits = by_role.get(token) or []
     if len(role_hits) == 1:
@@ -168,12 +173,11 @@ def _resolve_dep_ref(
     if len(role_hits) > 1:
         return None, (
             f"depends_on `{token}` 角色名有歧义（候选 run_id：{'、'.join(role_hits)}）。"
-            f"请改用 id 字段字面值。可用节点：{available_label}"
+            f"请改用 id 字段字面值。可用节点：{available_label}。{next_step}"
         )
     return None, (
         f"depends_on `{token}` 无法解析为已知节点。"
-        f"可用节点：{available_label}。"
-        "请填 id 字段字面值，或填无歧义的角色名。"
+        f"可用节点：{available_label}。{next_step}"
     )
 
 
@@ -261,6 +265,7 @@ def build_run_plan(
     complexity_hint: str = "standard",
     existing_plan: RunPlan | None = None,
     code_verified: bool = False,
+    default_target_folder_id: str | None = None,
 ) -> tuple[RunPlan, list[str]]:
     """Build a RunPlan from raw delegate-tool task args.
 
@@ -289,6 +294,9 @@ def build_run_plan(
     ``artifact_dir`` 默认（S3：由 playbook ``repair_code`` 等驱动，不再绑 criteria
     kind）。显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍优先。未改名以免牵动
     builder/artifact_dir 全链。
+
+    ``default_target_folder_id``: nested sub-team inheritance (§4.2b·3) — when a
+    task omits ``target_folder_id``, stamp the parent worker's target desk.
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
@@ -310,10 +318,18 @@ def build_run_plan(
             parent_run_id,
             depth,
             existing_plan=existing_plan,
+            default_target_folder_id=default_target_folder_id,
         )
     else:
         plan, errors = _flat_plan(
-            tasks_raw, valid_tools, prefix, counter_start, max_tasks, parent_run_id, depth
+            tasks_raw,
+            valid_tools,
+            prefix,
+            counter_start,
+            max_tasks,
+            parent_run_id,
+            depth,
+            default_target_folder_id=default_target_folder_id,
         )
     # Fan-out awareness is computed ONCE here, after the shape-specific build, so a
     # flat batch and a DAG share one definition of「sibling」= nodes that fanned out
@@ -351,6 +367,7 @@ def build_added_nodes(
     parent_run_id: str | None = None,
     depth: int = 1,
     max_tasks: int = MAX_DELEGATION_TASKS,
+    default_target_folder_id: str | None = None,
 ) -> tuple[list[RunSpec], list[str]]:
     """Build the RunSpecs for a ``replan(add=[…])`` batch the CEO appends to a paused
     ``plan`` at a wave boundary (受监督的波循环 §7.1 续跑入口).
@@ -485,6 +502,7 @@ def build_added_nodes(
                 valid_tools=valid_tools,
                 parent_run_id=parent_run_id,
                 depth=depth,
+                default_target_folder_id=default_target_folder_id,
             )
         )
     if errors:
@@ -523,9 +541,13 @@ def _flat_plan(
     max_tasks: int,
     parent_run_id: str | None,
     depth: int,
+    *,
+    default_target_folder_id: str | None = None,
 ) -> tuple[RunPlan, list[str]]:
-    """Single / parallel batch (no deps). Invalid items (missing role or task)
-    or an over-cap batch reject the whole plan."""
+    """Single / parallel batch (no deps). Declared non-empty ``id`` mints
+    ``{prefix}_{raw}`` (same shape as DAG); undeclared uses ``{prefix}_{counter}``.
+    Duplicate declared ids reject the whole batch. Invalid items (missing role or
+    task) or an over-cap batch also reject the whole plan."""
     if len(tasks_raw) > max_tasks:
         # 拒绝整批时把「怎么分」算好回给 CEO：无依赖批纯按数量装箱，指明本次传前 max_tasks
         # 个、其余下次 delegate 再传，让重来那一轮照做即可、不必重想编排（见 trace 4d715ea0：
@@ -542,6 +564,7 @@ def _flat_plan(
             f"其余 {overflow} 个在下一次 delegate 调用里传。"
         ]
     errors: list[str] = []
+    seen_declared: set[str] = set()
     for i, item in enumerate(tasks_raw):
         role = item.get("role")
         task = item.get("task")
@@ -553,13 +576,27 @@ def _flat_plan(
         prose_err = prose_form_conflict_error(item)
         if prose_err:
             errors.append(f"tasks[{i}]: {prose_err}")
+        raw_id = str(item.get("id", "")).strip()
+        if raw_id:
+            if raw_id in seen_declared:
+                errors.append(f"tasks[{i}]: 重复的 id '{raw_id}'")
+            seen_declared.add(raw_id)
     if errors:
         return RunPlan(), errors
     plan = RunPlan()
     counter = counter_start
-    for item in tasks_raw:
-        counter += 1
-        run_id = f"{prefix}_{counter}"
+    used_run_ids: set[str] = set()
+    for i, item in enumerate(tasks_raw):
+        raw_id = str(item.get("id", "")).strip()
+        if raw_id:
+            run_id = f"{prefix}_{raw_id}"
+        else:
+            counter += 1
+            run_id = f"{prefix}_{counter}"
+        if run_id in used_run_ids:
+            errors.append(f"tasks[{i}]: 生成的 run_id '{run_id}' 与本批其它节点冲突")
+            continue
+        used_run_ids.add(run_id)
         plan.add(
             _inline_spec(
                 item,
@@ -571,8 +608,11 @@ def _flat_plan(
                 valid_tools=valid_tools,
                 parent_run_id=parent_run_id,
                 depth=depth,
+                default_target_folder_id=default_target_folder_id,
             )
         )
+    if errors:
+        return RunPlan(), errors
     return plan, []
 
 
@@ -585,6 +625,7 @@ def _dag_plan(
     depth: int,
     *,
     existing_plan: RunPlan | None = None,
+    default_target_folder_id: str | None = None,
 ) -> tuple[RunPlan, list[str]]:
     """DAG batch (has deps). Per-run validation collects errors; topology
     (cycle / unknown edge) is checked via ``RunPlan.waves``.
@@ -699,6 +740,7 @@ def _dag_plan(
                 valid_tools=valid_tools,
                 parent_run_id=parent_run_id,
                 depth=depth,
+                default_target_folder_id=default_target_folder_id,
             )
         )
 
@@ -744,8 +786,11 @@ def _inline_spec(
     valid_tools: set[str] | None = None,
     parent_run_id: str | None = None,
     depth: int = 1,
+    default_target_folder_id: str | None = None,
 ) -> RunSpec:
     """Assemble one RunSpec from a task item's inline-role fields (阶段1)."""
+    from agentcore.runtime.delegate.target_desktop import effective_target_folder_id
+
     role = item["role"]
     thinking_raw = item.get("thinking")
     model_raw = item.get("model")
@@ -818,6 +863,10 @@ def _inline_spec(
         verify_policy=_parse_verify_policy(item.get("verify_policy")),
         max_rounds=_parse_max_rounds(item.get("max_rounds")),
         policy=policy,
+        target_folder_id=effective_target_folder_id(
+            item.get("target_folder_id"),
+            default=default_target_folder_id,
+        ),
     )
 
 

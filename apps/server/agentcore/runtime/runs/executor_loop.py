@@ -17,18 +17,19 @@ from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
     check_contract,
-    debrief_meets_minimum,
     format_cite_upgrade_feedback,
     format_feedback,
     format_handoff_feedback,
     format_interrupted_pass_note,
     format_light_repair_feedback,
     format_write_pass_feedback,
+    handoff_expectation_met,
     is_zero_files_gap,
     needs_file_contents,
     node_has_dependents,
     partition_citation_failures,
     strip_invalid_ledger_refs_from_surfaces,
+    worker_expects_handoff,
 )
 from agentcore.runtime.runs.executor_context import (
     _load_artifact_contents,
@@ -428,11 +429,20 @@ async def run_contract_loop(
         # Handoff gate only forces a correction shot when the tool is actually
         # offered (production worker registry). Empty-registry unit tests still
         # get a degraded synth below without burning an extra LLM round.
-        needs_handoff = node_has_dependents(env.plan, spec.run_id)
+        # Leaves: substantial work (tools / longer body) also expects a brief so
+        # CEO / delivery_status can see incomplete reports — short pure-body exempt.
+        has_dependents = node_has_dependents(env.plan, spec.run_id)
+        needs_handoff = worker_expects_handoff(
+            env.plan,
+            spec.run_id,
+            content=content,
+            messages=messages,
+            files_touched=touched_now,
+        )
         handoff_offered = worker_tools.get_optional(HANDOFF_TOOL_NAME) is not None
         handoff_ok = (
             (not needs_handoff)
-            or debrief_meets_minimum(debrief_now)
+            or handoff_expectation_met(debrief_now, for_dependents=has_dependents)
             or not handoff_offered
         )
         checked_files = (
@@ -527,12 +537,11 @@ async def run_contract_loop(
                             checked_files=checked_files,
                         )
                     ]
-                    if needs_handoff and handoff_offered and not debrief_meets_minimum(
-                        debrief_now
-                    ):
+                    if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now, for_dependents=has_dependents):
                         parts.append(
                             format_handoff_feedback(
-                                present_but_thin=debrief_now is not None
+                                present_but_thin=debrief_now is not None,
+                                for_dependents=has_dependents,
                             )
                         )
                     messages.append(
@@ -597,6 +606,16 @@ async def run_contract_loop(
         pass_interrupted = any(
             fr in (FinishReason.ERROR, FinishReason.DEGRADED) for fr in finish_override
         )
+        # 断流收尾且合同已过、仅缺 handoff：勿开 light_repair（会清掉 finish_override），
+        # 直接收口 → terminal 保留 FINISH_INTERRUPT + degraded 对账。
+        if pass_interrupted and verdict.ok and not handoff_ok:
+            logger.info(
+                "contract.retry_skipped_interrupt",
+                run_id=spec.run_id,
+                reason="finish_interrupt_handoff",
+                handoff_ok=False,
+            )
+            break
         if _can_light_repair(
             verdict=verdict,
             handoff_ok=handoff_ok,
@@ -613,11 +632,12 @@ async def run_contract_loop(
                         checked_files=checked_files,
                     )
                 )
-            if needs_handoff and handoff_offered and not debrief_meets_minimum(
-                debrief_now
-            ):
+            if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now, for_dependents=has_dependents):
                 parts.append(
-                    format_handoff_feedback(present_but_thin=debrief_now is not None)
+                    format_handoff_feedback(
+                        present_but_thin=debrief_now is not None,
+                        for_dependents=has_dependents,
+                    )
                 )
             messages.append(_retry_message("\n\n".join(p for p in parts if p)))
             logger.info(
@@ -638,11 +658,12 @@ async def run_contract_loop(
             write_pass_used = True
             light_mode = True  # reuse narrow write/handoff surface + short rounds
             parts = [format_write_pass_feedback(verdict)]
-            if needs_handoff and handoff_offered and not debrief_meets_minimum(
-                debrief_now
-            ):
+            if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now, for_dependents=has_dependents):
                 parts.append(
-                    format_handoff_feedback(present_but_thin=debrief_now is not None)
+                    format_handoff_feedback(
+                        present_but_thin=debrief_now is not None,
+                        for_dependents=has_dependents,
+                    )
                 )
             messages.append(_retry_message("\n\n".join(p for p in parts if p)))
             logger.info(
@@ -672,9 +693,12 @@ async def run_contract_loop(
                     "请用 str_replace / file_append **定向修补** site/ 下既有文件，"
                     "禁止整站重写；修完更新 site/QA.md 与 site/VISUAL_CRITIC.json。"
                 )
-        if needs_handoff and handoff_offered and not debrief_meets_minimum(debrief_now):
+        if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now, for_dependents=has_dependents):
             parts.append(
-                format_handoff_feedback(present_but_thin=debrief_now is not None)
+                format_handoff_feedback(
+                    present_but_thin=debrief_now is not None,
+                    for_dependents=has_dependents,
+                )
             )
         messages.append(_retry_message("\n\n".join(p for p in parts if p)))
         # Citation-related full retry: refresh sticky reread so cleared drafts stay readable.

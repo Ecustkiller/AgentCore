@@ -682,6 +682,43 @@ def test_debrief_meets_minimum_summary_or_key_points():
     assert debrief_meets_minimum({"summary": "短", "key_points": ["a", "b"]})
 
 
+def test_leaf_did_substantial_work_and_worker_expects_handoff():
+    from agentcore.llm.provider.protocol import LLMMessage
+    from agentcore.runtime.runs.contract import (
+        LEAF_SUBSTANTIAL_BODY_CHARS,
+        handoff_expectation_met,
+        leaf_did_substantial_work,
+        worker_expects_handoff,
+    )
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunSpec
+
+    short = "调研结论一段"
+    assert not leaf_did_substantial_work(short)
+    assert leaf_did_substantial_work("x" * LEAF_SUBSTANTIAL_BODY_CHARS)
+    assert leaf_did_substantial_work("", files_touched=["a.md"])
+    msgs = [LLMMessage(role="tool", content="ok: listed")]
+    assert leaf_did_substantial_work("", messages=msgs)
+
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="a", task="t"),
+            RunSpec(run_id="b", task="t", depends_on=["a"]),
+        ]
+    )
+    assert worker_expects_handoff(plan, "a", content=short)  # upstream
+    assert not worker_expects_handoff(plan, "b", content=short)  # short leaf
+    assert worker_expects_handoff(plan, "b", content=short, files_touched=["n.md"])
+    assert worker_expects_handoff(
+        plan, "b", content="x" * LEAF_SUBSTANTIAL_BODY_CHARS
+    )
+
+    # Leaf: any author brief counts; upstream still needs the floor.
+    thin = {"summary": "短"}
+    assert handoff_expectation_met(thin, for_dependents=False)
+    assert not handoff_expectation_met(thin, for_dependents=True)
+    assert not handoff_expectation_met(None, for_dependents=False)
+
 def test_synthesize_debrief_marks_degraded():
     d = synthesize_debrief("正文结论一段", ["a.py", "b.py"])
     assert d["degraded"] is True
@@ -1063,3 +1100,42 @@ def test_strip_invalid_ledger_refs_from_surfaces_skips_without_citable():
     assert stripped == []
     assert arts == {"note.md": "见 #r99。"}
     assert body == "见 #r99。"
+
+
+def test_strip_invalid_ledger_refs_from_debrief_summary_and_pointers():
+    from agentcore.runtime.runs.contract import strip_invalid_ledger_refs_from_debrief
+
+    debrief = {
+        "summary": "结论 #r1 与假引用 #r99",
+        "key_points": ["要点 #r2", "坏 #r88"],
+        "next_steps": "下一步 #r99",
+        "motion_card": {
+            "motion": "命题",
+            "fact_pointers": ["#r1", "#r77", "path/ok.md"],
+        },
+    }
+    cleaned, stripped = strip_invalid_ledger_refs_from_debrief(
+        debrief, frozenset({"#r1", "#r2"})
+    )
+    assert stripped == ["#r77", "#r88", "#r99"]
+    assert cleaned is not None
+    assert "#r99" not in cleaned["summary"]
+    assert "#r1" in cleaned["summary"]
+    assert "#r88" not in cleaned["key_points"][1]
+    assert "#r2" in cleaned["key_points"][0]
+    assert "#r99" not in cleaned["next_steps"]
+    ptrs = cleaned["motion_card"]["fact_pointers"]
+    assert "#r1" in ptrs
+    assert not any("#r77" in str(p) for p in ptrs)
+    assert "path/ok.md" in ptrs
+
+
+def test_strip_invalid_ledger_refs_from_debrief_noop_when_clean():
+    from agentcore.runtime.runs.contract import strip_invalid_ledger_refs_from_debrief
+
+    debrief = {"summary": "仅 #r1", "key_points": ["#r1"]}
+    cleaned, stripped = strip_invalid_ledger_refs_from_debrief(
+        debrief, frozenset({"#r1"})
+    )
+    assert stripped == []
+    assert cleaned == debrief

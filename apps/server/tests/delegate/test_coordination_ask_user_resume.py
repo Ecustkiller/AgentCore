@@ -209,6 +209,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
         tools=ToolRegistry(),
         base_tool_context=base_ctx,
         captain_run_id="cap",
+        folder_id="test_birth",
     )
     ask_tool = AskUserTool(
         sink=sink,
@@ -313,6 +314,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
         tools=ToolRegistry(),
         base_tool_context=resume_ctx,
         captain_run_id="cap",
+        folder_id="test_birth",
     )
 
     settled = await settle_resumed_suspension(

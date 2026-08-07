@@ -298,4 +298,10 @@ export interface ConversationRuntime {
    * 无需再计时），也不进 conformance ProjectedTurn——同 {@link ProcessStep} tool 步的 `phase`
    * 一样是仅生产流盖的短命态。 */
   toolStartedMs: Record<string, number>;
+  /**
+   * 桌面：本会话最近一回合的执行路径（绑本机工作区时有意义）。
+   * `sidecar` = 本地引擎；`cloud_bridge` = 云端过桥（含探活失败 / 关开关 / 附件退云）；
+   * `null` = 纯云会话或尚未判定。不落盘，仅驱动轻量状态指示。
+   */
+  executionVia: "sidecar" | "cloud_bridge" | null;
 }

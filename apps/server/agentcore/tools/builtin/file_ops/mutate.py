@@ -334,17 +334,16 @@ class FileWriteTool:
             name="file_write",
             description=(
                 "把内容写入文件：会创建该文件（含所有上级目录），或【整体覆盖】"
-                "已有文件。用它来【新建】文件；修订时【优先】str_replace 局部改，"
-                "整文件覆盖亦允许（结构性换稿 / 确需整盖时可用）。"
-                "【Artifact-first】短文件可一次写完；长交付物（综述/报告/长文/"
-                "整页 HTML）【建议】分段——先短骨架（标题/锚点/"
-                "`<!-- SECTION: -->`）再按节 file_append 或 str_replace 填空；"
-                "完整无省略的超长正文一次写完亦不硬拒字数，仍建议分段。"
+                "已有文件。用它来【新建】文件；【主路径】一次写入完整正文（含超长、"
+                "无省略；不硬拒字数）；成篇后修订【优先】str_replace 局部改，"
+                "整文件覆盖亦允许（结构性换稿 / 确需整盖时可用，须完整正文）。"
+                "【Artifact-first】【可选】防截断/超大时分段——先短骨架（标题/锚点/"
+                "`<!-- SECTION: -->`）再按节 file_append 或 str_replace 填空。"
                 "成功回执为 artifact manifest（优先以此验真；反复 file_read "
                 "受同 path 次数上限约束）。"
                 "【成篇省略硬拒】成篇体量正文若含省略标记（反例："
                 "「……（中间省略，已保留首尾）……」）→ 硬拒绝："
-                "须短骨架+SECTION 按节填，或一次写完完整正文，禁止省略标记交差。"
+                "须一次写完完整正文，或短骨架+SECTION 按节填，禁止省略标记交差。"
                 "【成篇缩水硬拒】覆盖已有成篇且新稿低于旧稿 50% 且绝对减少 ≥800 字 → "
                 "硬拒绝（防修订时空转砍稿）；请改 str_replace。用户明确要求大幅删减/"
                 "精简/重建时传 allow_shrink=true。中度缩水仍仅软提示。"
@@ -355,20 +354,24 @@ class FileWriteTool:
                 "括号结构不完整或含省略标记 → 硬拒绝（防截断类缺 `}`）。"
                 "只改一部分优先 str_replace；骨架填空才用 file_append。"
                 "路径必须是相对于工作区的相对路径。"
+                "【案卷扁平】`AgentCore/文档/` 下 research/reviews/debate/项目 "
+                "写盘扁平：前缀后嵌套 `/` 压成 `_` 单文件名（非路径损坏）。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区内的相对文件路径",
+                        "description": (
+                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "（前缀后嵌套 `/` → `_` 单文件名）"
+                        ),
                     },
                     "content": {
                         "type": "string",
                         "description": (
-                            "要写入的内容。短文件一次写完；长交付物建议短骨架 + "
-                            "按节填空。完整无省略的一次成篇允许（不硬拒字数）；"
-                            "成篇体量含省略标记则硬拒。"
+                            "要写入的内容。主路径一次写完完整正文（不硬拒字数）；"
+                            "可选短骨架 + 按节填空。成篇体量含省略标记则硬拒。"
                         ),
                     },
                     "allow_shrink": {
@@ -601,10 +604,10 @@ class FileAppendTool:
                 "仅用于骨架填空 / 建站 SECTION 壳：短骨架或 `<!-- SECTION: -->` 落盘后"
                 "按节追加（单次建议一节为宜，不硬拒字数）。禁止对「本 run 已 "
                 "file_write 成篇正文」再 append——"
-                "短文件应一次写完，长交付物宜先骨架再分段填空；修订用 str_replace。"
+                "成篇后修订用 str_replace；整文件覆盖须完整正文（file_write）。"
                 "成功回执为 artifact manifest（优先以此验真；反复 file_read "
                 "受同 path 次数上限约束）。"
-                "若要【整体覆盖】短文件，用 file_write；改中间某段用 "
+                "若要【整体覆盖】，用 file_write（须完整正文）；改中间某段用 "
                 "str_replace。路径必须是相对于工作区的相对路径。"
             ),
             parameters={
@@ -612,7 +615,10 @@ class FileAppendTool:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区内的相对文件路径",
+                        "description": (
+                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "（前缀后嵌套 `/` → `_` 单文件名）"
+                        ),
                     },
                     "content": {
                         "type": "string",
@@ -771,10 +777,11 @@ class StrReplaceTool:
         return ToolSchema(
             name="str_replace",
             description=(
-                "通过替换【完全精确匹配的文本片段】来编辑已有文件。改文件时【优先】"
+                "通过替换【完全精确匹配的文本片段】来编辑已有文件。成篇后修订【优先】"
                 "用它而非 file_write：它只重写匹配到的片段，因此对大文件安全、也"
-                "不会误伤无关内容；整文件覆盖亦允许（结构性换稿时）。在 old_string "
-                "里放足够的上下文，确保在文件中【唯一匹配一次】（包括空白、缩进与换行）。"
+                "不会误伤无关内容；整文件覆盖亦允许（结构性换稿时，须完整正文）。在 "
+                "old_string 里放足够的上下文，确保在文件中【唯一匹配一次】（包括空白、"
+                "缩进与换行）。"
                 "若 old_string 不存在、或匹配多于一次（除非 replace_all=true），则失败；"
                 "失败回执会附带磁盘原文有界片段（模糊候选会标明非精确）——以盘文为真源"
                 "重锚再改；确需整盖可用 file_write（须完整正文，勿残缺骨架交差）。"
@@ -785,7 +792,10 @@ class StrReplaceTool:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区内的相对文件路径",
+                        "description": (
+                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "（前缀后嵌套 `/` → `_` 单文件名）"
+                        ),
                     },
                     "old_string": {
                         "type": "string",

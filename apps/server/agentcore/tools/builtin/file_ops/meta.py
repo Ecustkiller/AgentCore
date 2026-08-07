@@ -172,8 +172,9 @@ class FileMoveTool:
             description=(
                 "在工作区内移动或重命名文件 / 目录。可用于重命名（在同一目录内"
                 "移动）或把路径迁到新位置；目标路径缺失的上级目录会自动创建。若"
-                "目标已存在则失败——【不会覆盖】。两个路径都必须是相对于工作区的"
-                "相对路径。"
+                "目标已存在则失败——【不会覆盖】。案卷前缀下目标路径可能被扁平化；"
+                "与源规范化后相同则视为已到位（幂等成功）。两个路径都必须是相对"
+                "于工作区的相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -204,7 +205,16 @@ class FileMoveTool:
         destination, rename_note = _prepare_write_relpath(requested_dest)
 
         if source == destination:
-            return _error("source 与 destination 相同，无需移动", start)
+            # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
+            output = "source 与 destination 相同，无需移动"
+            if rename_note:
+                output = f"{output}。{rename_note}"
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=output,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
 
         for p in (source, destination):
             scope_denied = _reject_write_scope(
@@ -296,7 +306,9 @@ class FileCopyTool:
             description=(
                 "在工作区内复制文件或【目录树】（含二进制）。目标路径缺失的上级"
                 "目录会自动创建；若目标已存在则失败——【不会覆盖】。不能复制到"
-                "自身或其子目录。两个路径都必须是相对于工作区的相对路径。"
+                "自身或其子目录。案卷前缀下目标路径可能被扁平化；与源规范化后"
+                "相同则视为已到位（幂等成功）。两个路径都必须是相对于工作区的"
+                "相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -327,7 +339,16 @@ class FileCopyTool:
         destination, rename_note = _prepare_write_relpath(requested_dest)
 
         if source == destination:
-            return _error("source 与 destination 相同，无需复制", start)
+            # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
+            output = "source 与 destination 相同，无需复制"
+            if rename_note:
+                output = f"{output}。{rename_note}"
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=output,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
 
         scope_denied = _reject_write_scope(
             context, destination, start, event="file_write.scope_rejected"

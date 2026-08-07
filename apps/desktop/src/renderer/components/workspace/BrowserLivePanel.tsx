@@ -515,7 +515,7 @@ export function BrowserLivePanel({
  * - 或本会话仍有带 URL / serverSession 的页签（用户页 / 冷恢复）→ 自动带上内容 tab。
  *
  * **不做 auto-surface 面板**：AI 用浏览器是高频常态，自动弹面板是打扰；唯一需要抢注意力的是 pending
- * `browser_login`，那条由 `EscalationCard` 单独负责（它调 `showBrowser()` 揭示本 tab）。
+ * `browser_login`，那条由登录卡「打开浏览器」CTA 负责（点按才 `showBrowser()`）。
  *
  * 收窄订阅（同 SidePanel 纪律）：execution 选择器内算布尔；pages 只看本对话是否有实质页签。
  */

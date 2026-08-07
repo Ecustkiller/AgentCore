@@ -3,10 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "OpenAPI 生成的 REST 契约类型（desktop/admin 共享单一源）",
+  "description": "OpenAPI 生成的 REST 契约类型与路径模板（desktop/admin/mobile 共享单一源）",
   "exports": {
     ".": "./src/index.ts",
     "./api.generated": "./src/api.generated.ts",
+    "./paths": "./src/paths.generated.ts",
     "./audit": "./src/audit.ts",
     "./llm-window": "./src/llm-window.ts"
   },

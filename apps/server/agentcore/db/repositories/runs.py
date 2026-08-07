@@ -275,6 +275,15 @@ class PausedTurnRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def exists_for_message(self, message_id: str) -> bool:
+        """Whether this assistant turn (``message_id``) is durably paused."""
+        result = await self._session.execute(
+            select(PausedTurnRow.message_id)
+            .where(PausedTurnRow.message_id == message_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def delete(self, message_id: str) -> None:
         """Drop a paused turn (live in-process resolve / timeout settled it instead)."""
         await self._session.execute(

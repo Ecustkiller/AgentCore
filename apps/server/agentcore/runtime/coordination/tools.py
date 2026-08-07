@@ -202,6 +202,32 @@ class UpdateSynthesisTool:
                 output="",
                 error="update_synthesis 需要非空的 draft。",
             )
+        # 合成预览用户可见：非法 #rN 先剥（与 settle / handoff 收口同口径；非意图分类）。
+        try:
+            from agentcore.runtime.citations import (
+                invalid_ledger_ref_ids,
+                strip_invalid_ledger_refs,
+            )
+            from agentcore.runtime.suspension import turn_evidence_ledger
+
+            led = turn_evidence_ledger.get()
+            if led is not None:
+                citable = led.draft_citable_ids()
+                bad = invalid_ledger_ref_ids(draft, citable)
+                if bad:
+                    draft = strip_invalid_ledger_refs(draft, set(bad))
+                    logger.warning(
+                        "citations.invalid_ledger_ref",
+                        markers=bad,
+                        surface="update_synthesis",
+                        citable_count=len(citable or ()),
+                    )
+        except Exception:
+            logger.warning(
+                "citations.ledger_lookup_failed",
+                surface="update_synthesis",
+                exc_info=True,
+            )
         session.update_draft(draft)
         done = len(session.completed_run_ids)
         total = session.total_workers

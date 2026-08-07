@@ -14,6 +14,15 @@ import type {
   ToolUseProgressPayload,
   ToolUseStartPayload,
 } from "@/types/events";
+import { isMarkerStandinTool } from "@agentcore/protocol-fold-kit";
+
+/** Shared protocol tool sets — SSOT `@agentcore/protocol-fold-kit` (not a fold核). */
+export {
+  MARKER_STANDIN_TOOLS,
+  ORCHESTRATION_TOOLS,
+  isMarkerStandinTool,
+  isOrchestrationTool,
+} from "@agentcore/protocol-fold-kit";
 
 /**
  * Fold one reasoning delta into the timeline: extend the trailing reasoning step
@@ -435,21 +444,6 @@ export type TimelineNode =
   | { kind: "tool"; step: ToolStep }
   | { kind: "tool-group"; tools: ToolStep[] };
 
-/** Tools that hand the turn off to a sub-team and open a team execution: `delegate`
- * (emits `run_plan` type=multi_agent) and `debate`. A multi-agent bubble renders its
- * inline team graph AT this step's position in the timeline (统一团队时间线), so
- * {@link groupToolRuns} keeps such a step an un-grouped boundary node — never folded
- * into a collapsed tool-group where the graph couldn't slot. */
-export const ORCHESTRATION_TOOLS: ReadonlySet<string> = new Set([
-  "delegate",
-  "debate",
-]);
-
-/** Whether a tool name hands the turn to a sub-team (see {@link ORCHESTRATION_TOOLS}). */
-export function isOrchestrationTool(toolName: string): boolean {
-  return ORCHESTRATION_TOOLS.has(toolName);
-}
-
 /**
  * CEO 协调空转工具（`wait`）：无用户可见副作用，只确认继续听团。
  * 过程线降噪用——这类工具步及其紧邻 reasoning 默认不对用户逐段展开。
@@ -534,23 +528,6 @@ export function omitCoordinationIdleSteps(
     out.push(s);
   }
   return changed ? out : process;
-}
-
-/** CEO self-calls whose inline-timeline slot is stood in for by a DEDICATED marker, so they
- * make NO captain tool step: delegate/debate → `team`; ask_user → `checkpoint`/`ask`. Superset
- * of {@link ORCHESTRATION_TOOLS}. ask_user is here because a blocking ask SUSPENDs without a
- * `tool_use_end` (its card marker represents it) and a rejected ask (card-shape validation) must
- * not leak a red tool-error row — the model self-corrects and re-asks. Mirrors the backend
- * sink/oracle `MARKER_STANDIN_TOOLS` + mobile fold — conformance pins this set equal. */
-export const MARKER_STANDIN_TOOLS: ReadonlySet<string> = new Set([
-  ...ORCHESTRATION_TOOLS,
-  "ask_user",
-]);
-
-/** Whether a captain tool's timeline slot is represented by a marker, not a tool step
- * (see {@link MARKER_STANDIN_TOOLS}). */
-export function isMarkerStandinTool(toolName: string): boolean {
-  return MARKER_STANDIN_TOOLS.has(toolName);
 }
 
 /**

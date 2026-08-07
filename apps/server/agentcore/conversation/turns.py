@@ -5,6 +5,7 @@ import contextlib
 import time
 
 from agentcore.config import settings
+from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
     preview,
     resolve_conversation_history_access,
@@ -57,6 +58,44 @@ from agentcore.workspace.locks import workspace_lock
 logger = get_logger(__name__)
 
 
+def _block_code_index_flush(sink: EventSink) -> bool:
+    """True when turn-end must await index flush (non-PAUSED terminals).
+
+    Cold PAUSED (incl. team_preview) must not hold ``turn_runs`` while
+    ``flush_code_index_maintenance`` drains — resume drain would 409.
+    """
+    return sink._stream_finish_reason != FinishReason.PAUSED.value
+
+
+async def _flush_code_index_before_close(
+    backend: object | None,
+    *,
+    block: bool = True,
+) -> None:
+    """Local turn-end: drain deferred index maintenance before closing the sink.
+
+    When ``block`` is False (``FinishReason.PAUSED``), schedule flush
+    fire-and-forget so the turn task can finish and free ``turn_runs``.
+    Non-paused terminals still await (BY-DESIGN).
+    """
+    if backend is None:
+        return
+    flush = getattr(backend, "flush_code_index_maintenance", None)
+    if not callable(flush):
+        return
+
+    async def _run() -> None:
+        try:
+            await flush()
+        except Exception:
+            logger.exception("chat.code_index_flush_failed")
+
+    if block:
+        await _run()
+        return
+    spawn_background(_run())
+
+
 async def stream_chat(
     *,
     conversation_id: str,
@@ -70,6 +109,7 @@ async def stream_chat(
     agent_mentions: list[dict] | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply."""
+    backend = None
     try:
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -166,6 +206,9 @@ async def stream_chat(
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
+            await _flush_code_index_before_close(
+                backend, block=_block_code_index_flush(sink)
+            )
             sink.close()
 
 
@@ -180,6 +223,7 @@ async def regenerate_chat(
     llm_supports_tools: bool | None = None,
 ) -> None:
     """Re-run a turn from an existing user message (regenerate / edit-and-resend)."""
+    backend = None
     try:
         async with async_session_factory() as session:
             conv_repo = ConversationRepository(session)
@@ -269,6 +313,9 @@ async def regenerate_chat(
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
+            await _flush_code_index_before_close(
+                backend, block=_block_code_index_flush(sink)
+            )
             sink.close()
 
 
@@ -298,6 +345,7 @@ async def resume_chat(
     # interrupted_after_decision, not a frame restore (restoring would resurrect the
     # already-authorized card, e.g. the team_preview kickoff reappearing after 停止 mid-run).
     settlement_durable = True
+    backend = None
     try:
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -500,6 +548,7 @@ async def resume_chat(
                                 finish_reason=finish,
                                 content=result.get("content") if isinstance(result, dict) else None,
                                 error=result.get("error") if isinstance(result, dict) else None,
+                                message_id=suspension.message_id,
                             )
                         except Exception as settle_err:  # noqa: BLE001 — resume must not fail
                             logger.error(
@@ -547,4 +596,7 @@ async def resume_chat(
         if not settlement_durable:
             await restore_paused_turn(suspension)
         if not sink._closed:
+            await _flush_code_index_before_close(
+                backend, block=_block_code_index_flush(sink)
+            )
             sink.close()

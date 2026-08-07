@@ -21,6 +21,7 @@ import { CommandPalette } from "./CommandPalette";
 import { ForceUpdateGate } from "./ForceUpdateGate";
 import { ProductNoticeBanner } from "./ProductNoticeBanner";
 import { ProductNoticeModal } from "./ProductNoticeModal";
+import { SidePanelFloatHost } from "./SidePanelFloatHost";
 import { TitleBar } from "./TitleBar";
 import { UpdateAvailableDialog } from "./UpdateAvailableDialog";
 import { WorkspaceChannelBanner } from "./WorkspaceChannelBanner";
@@ -137,6 +138,8 @@ export function AppShell() {
         {!hideSidebar && <Sidebar />}
         <main className="relative flex min-h-0 flex-1 overflow-hidden">
           <Outlet />
+          {/* 浮窗投影壳层常挂（UX §十）：⊥ SidePanel.open；桌面 bridge 与 floats 同生共死。 */}
+          <SidePanelFloatHost />
         </main>
       </div>
 

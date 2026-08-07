@@ -1,6 +1,7 @@
 """Git operations tool — read and write git state within the workspace.
 
-Thin shell over subprocess git in the workspace root (``ServerWorkspace.root``).
+ServerWorkspace / Sidecar: thin shell over subprocess git under ``backend.root``.
+LocalWorkspace (no Path.root): same allowlisted surface via desktop ``git_run``.
 Read subcommands (status / diff / log / fetch / show / blame; stash/tag/remote
 ``action=list``) run without approval; write subcommands (add / commit / branch /
 checkout / push / pull / init_baseline / merge / rebase / cherry-pick /
@@ -23,7 +24,7 @@ porcelain) to keep serial_ops at 2 for the common read path.
 
 Split axes (implementation modules):
 - ``policy`` — allowlists, write detection, argument validators, schema, timeouts
-- ``spawn`` — subprocess spawn/reap, auth hints, repo probe
+- ``spawn`` — subprocess / channel spawn, auth hints, repo probe
 - ``results`` — ToolResult helpers + truncation
 - ``cmds_read`` / ``cmds_local`` / ``cmds_remote`` / ``cmds_collab`` — subcommands
 - ``tool`` — GitTool registration + dispatch
@@ -64,6 +65,7 @@ from agentcore.tools.builtin.git_ops.results import (
 from agentcore.tools.builtin.git_ops.spawn import (
     _AUTH_FAILURE_HINT,
     _AUTH_FAILURE_MARKERS,
+    _NO_CHANNEL_MSG,
     _cloud_network_extra_env,
     _current_branch,
     _ensure_git_repo,
@@ -74,7 +76,9 @@ from agentcore.tools.builtin.git_ops.spawn import (
     _refuse_on_protected_branch,
     _resolve_git_cwd,
     _run_git,
+    _workspace_has_git_meta,
     _workspace_has_local_git,
+    git_transport_scope,
 )
 from agentcore.tools.builtin.git_ops.tool import GitTool
 
@@ -93,6 +97,7 @@ __all__ = [
     "_GIT_KILL_SLACK",
     "_GIT_TIMEOUT",
     "_NETWORK_SUBCOMMANDS",
+    "_NO_CHANNEL_MSG",
     "_PROTECTED_BRANCHES",
     "_STATUS_LINE_LIMIT",
     "_WRITE_SUBCOMMANDS",
@@ -115,8 +120,10 @@ __all__ = [
     "_truncate_line_output",
     "_truncate_status_body",
     "_validate_add_paths",
+    "_workspace_has_git_meta",
     "_workspace_has_local_git",
     "git_call_is_write",
     "git_tool_timeout_seconds",
+    "git_transport_scope",
     "git_write_subcommands",
 ]

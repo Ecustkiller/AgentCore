@@ -13,11 +13,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.billing.gate import (
+    preflight_llm_credentials,
+    preflight_resolved_llm_credentials,
+)
 from agentcore.billing.preference import is_platform_available
 from agentcore.config import settings
 from agentcore.config.platform import parse_platform_model_credentials
 from agentcore.core.errors import PlatformBillingUnavailableError
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.resolve import (
     ModelSelection,
     platform_llm_credentials,
@@ -207,6 +211,52 @@ async def test_gate_platform_available_via_override_key(monkeypatch):
         )
     assert result is None  # platform path (per-model creds resolved at the call site)
     enforce.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_preflight_resolved_platform_returns_per_model_creds(monkeypatch):
+    """standing/workflows helper: platform origin → per-model platform credentials."""
+    monkeypatch.setattr(settings, "platform_api_key", "")
+    monkeypatch.setattr(settings, "platform_model_credentials", _OVERRIDE)
+    monkeypatch.setattr(settings, "billing_mode", "platform")
+    with patch("agentcore.billing.gate.enforce_quota", AsyncMock()):
+        result = await preflight_resolved_llm_credentials(
+            session=MagicMock(),
+            user=_user(),
+            cost_repo=MagicMock(),
+            byok_missing_message="missing",
+            selection=ModelSelection(model="relay-b", origin="platform", provider_id=None),
+        )
+    assert result is not None
+    assert result.source == "platform"
+    assert result.api_key == "sk-relay-b-key"
+
+
+@pytest.mark.asyncio
+async def test_preflight_resolved_byok_returns_gate_creds(monkeypatch):
+    """standing/workflows helper: byok origin → gate credentials unchanged."""
+    byok = LLMCredentials(
+        api_key="sk-user",
+        base_url="https://example/v1",
+        default_model="gpt-test",
+        source="user",
+        provider_id="prov-1",
+    )
+    with patch(
+        "agentcore.billing.gate.preflight_llm_credentials",
+        AsyncMock(return_value=byok),
+    ) as gate:
+        result = await preflight_resolved_llm_credentials(
+            session=MagicMock(),
+            user=_user(),
+            cost_repo=MagicMock(),
+            byok_missing_message="missing",
+            selection=ModelSelection(
+                model="gpt-test", origin="byok", provider_id="prov-1"
+            ),
+        )
+    assert result is byok
+    gate.assert_awaited_once()
 
 
 # --- resolve_model_config platform branch resolves per-model -----------------

@@ -95,7 +95,6 @@ import {
   dropSettledLiveTurns,
 } from "@/lib/refreshAfterExecutionCompleted";
 import {
-  STOPPED_LABEL,
   STOP_FAILED_MESSAGE,
   type StopUiPhase,
   allowsEventWhileStopping,
@@ -548,7 +547,7 @@ function summarize(p: ProjectedTurn): string | null {
   if (tool && tool.kind === "tool" && tool.status === "running")
     return `正在调用 ${tool.tool_name}…`;
   if (p.status === "failed") return "出错了";
-  if (p.status === "cancelled") return STOPPED_LABEL;
+  // 单 Agent 空停：聊天时间线不占「已停止」(P1)；多 Agent 走 TeamView 头。
   return null;
 }
 
@@ -715,14 +714,23 @@ function AssistantBubble({
     chrome.emptyDiagnosis,
     chrome.errorMessage,
   );
+  // 空停止：聊天时间线不占「已停止」行（有团队面时 empty=false，走 TeamView）。
+  if (
+    empty &&
+    stopped &&
+    !live &&
+    !failureNotice &&
+    !turnWarning &&
+    artifacts.length === 0
+  ) {
+    return null;
+  }
   return (
     <>
       <div className="bubble assistant">
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {empty && !failureNotice ? (
-          <span className="muted">
-            {live ? "…" : stopped ? STOPPED_LABEL : ""}
-          </span>
+          <span className="muted">{live ? "…" : ""}</span>
         ) : empty && failureNotice ? (
           <FinishReasonChip
             reason={finishReason}
@@ -943,7 +951,6 @@ function HistoryAssistant({
   const errorCode = chrome.errorCode ?? m.runs?.error?.code ?? undefined;
   const interrupted =
     m.status === "incomplete" || finishReason === "interrupted";
-  const stopped = finishReason === "cancelled";
   const emptyBody =
     !team &&
     (!process || process.length === 0) &&
@@ -964,7 +971,7 @@ function HistoryAssistant({
       })
     : null;
   const supportIds = historySupportIds(m, conversationId);
-  // Stopped empty = neutral「已停止」only — no main 重试 CTA (interrupted may keep recover).
+  // Stopped empty = omit chat-timeline face (P1); interrupted may keep recover.
   const showRetry = !!onRetry && isLast && (interrupted || !!failureNotice);
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
@@ -975,7 +982,6 @@ function HistoryAssistant({
     emptyBody &&
     !turnWarning &&
     !interrupted &&
-    !stopped &&
     !streaming &&
     !failureNotice &&
     userInterjections.length === 0
@@ -996,8 +1002,6 @@ function HistoryAssistant({
             reason={finishReason}
             diagnosisLabel={finishDiagnosis}
           />
-        ) : emptyBody && stopped && !failureNotice ? (
-          <span className="muted">{STOPPED_LABEL}</span>
         ) : (
           <AssistantContent
             process={process}

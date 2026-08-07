@@ -31,6 +31,10 @@ def prod_settings(monkeypatch):
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
     monkeypatch.setattr(settings, "cookie_secure", True)
     monkeypatch.setattr(settings, "cookie_samesite", "none")
+    # G5: isolate from host WEB_CONCURRENCY / UVICORN_WORKERS.
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
     return settings
 
 
@@ -41,6 +45,9 @@ def test_debug_skips_non_jwt_validation(monkeypatch):
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
     monkeypatch.setattr(settings, "billing_mode", "byok")
     monkeypatch.setattr(settings, "encryption_key", "")
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
     _validate_production_security()
 
 
@@ -64,6 +71,9 @@ def test_placeholder_jwt_allowed_for_explicit_local_dev(monkeypatch):
     monkeypatch.setattr(settings, "debug", True)
     monkeypatch.setattr(settings, "jwt_secret_key", _PLACEHOLDER)
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", True)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
     _validate_jwt_secret()
     _validate_production_security()
 
@@ -155,6 +165,9 @@ def test_debug_skips_cloud_code_execute_guard(monkeypatch):
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
     monkeypatch.setattr(settings, "code_execute_cloud_enabled", True)
     monkeypatch.setattr(settings, "code_execute_cloud_unsafe_ack", False)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
     _validate_production_security()  # no raise
 
 
@@ -183,6 +196,9 @@ def test_cors_wildcard_warns_in_debug(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret_key", _GOOD_JWT)
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
     monkeypatch.setattr(settings, "cors_allow_origins", "*")
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
     monkeypatch.setattr("agentcore.main.get_logger", lambda _name: spy)
     _validate_production_security()  # no raise
     detail = spy.get("security.cors_wildcard_credentials")
@@ -197,3 +213,60 @@ def test_cors_explicit_origins_boots(prod_settings, monkeypatch):
         "http://localhost:5173,https://app.example",
     )
     _validate_production_security()  # no raise
+
+
+# --- G5 short-term: single-worker / memory rate-limit guardrails ---------------------
+
+
+def test_multi_worker_memory_rate_limit_refuses_boot_in_production(
+    prod_settings, monkeypatch
+):
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "rate_limit_backend", "memory")
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+    with pytest.raises(RuntimeError, match="RATE_LIMIT_BACKEND"):
+        _validate_production_security()
+
+
+def test_multi_worker_redis_rate_limit_allows_boot_in_production(
+    prod_settings, monkeypatch
+):
+    """Shared DB outbox + redis rate limit unlocks multi-worker API."""
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "rate_limit_backend", "redis")
+    monkeypatch.setenv("AGENTCORE_API_WORKERS", "2")
+    _validate_production_security()  # no raise
+
+
+def test_multi_worker_warns_in_debug(monkeypatch):
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "jwt_secret_key", _GOOD_JWT)
+    monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
+    monkeypatch.setattr(settings, "rate_limit_backend", "memory")
+    monkeypatch.setenv("UVICORN_WORKERS", "3")
+    monkeypatch.setattr("agentcore.main.get_logger", lambda _name: spy)
+    _validate_production_security()  # no raise
+    detail = spy.get("security.rate_limit_memory_multi_worker")
+    assert detail["workers"] == 3
+    assert detail["rate_limit_backend"] == "memory"
+
+
+def test_single_worker_memory_boots_in_production(prod_settings, monkeypatch):
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "rate_limit_backend", "memory")
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
+    _validate_production_security()  # no raise
+
+
+def test_rate_limit_backend_rejects_unknown_value():
+    from pydantic import ValidationError
+
+    from agentcore.config.auth import AuthSettings
+
+    with pytest.raises(ValidationError):
+        AuthSettings(rate_limit_backend="memcache")

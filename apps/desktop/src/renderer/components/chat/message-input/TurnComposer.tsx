@@ -46,6 +46,7 @@ import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
+import { ComposerEngineViaChip } from "./ComposerEngineViaChip";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
@@ -747,6 +748,7 @@ export function TurnComposer({
                   <ModelPicker disabled={isGenerating} />
                   <PermissionAxesBadge disabled={isGenerating} />
                   <ComposerWorkspaceChip conversationId={conversationId} />
+                  <ComposerEngineViaChip conversationId={conversationId} />
                   <ComposerGitStatusChip conversationId={conversationId} />
                   <ComposerNoLocalChip />
                   {backgroundToggle}
@@ -784,6 +786,7 @@ export function TurnComposer({
               <ModelPicker disabled={isGenerating} />
               <PermissionAxesBadge disabled={isGenerating} />
               <ComposerWorkspaceChip conversationId={conversationId} />
+              <ComposerEngineViaChip conversationId={conversationId} />
               <ComposerGitStatusChip conversationId={conversationId} />
               <ComposerNoLocalChip />
               <IconButton

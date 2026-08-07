@@ -136,7 +136,7 @@ jobs:
       - name: Probe · code-must-run (soft)
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
-        run: uv run python scripts/probe_code_execution.py --out eval-reports/probe_code.json
+        run: uv run python scripts/archive/probe_code_execution.py --out eval-reports/probe_code.json
 
       # 把关键指标写进 GitHub 作业摘要（best-effort；jq 在 ubuntu-latest 自带）。
       - name: Write job summary

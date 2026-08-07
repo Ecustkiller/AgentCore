@@ -24,6 +24,8 @@
  * 本地工作区通道 L3（channel dead）：`workspace_op.received` / `workspace_op.dropped`
  *（turnPhase 门丢掉）/ `workspace_op.ipc_begin|end` / `workspace_op.aborted` /
  * `workspace_op.resolve`（`outcome`=ok|stale_404|fail）/ `sse.idle_stall`（泵空闲 60s）。
+ * 主进程墙钟（对齐 desktop.jsonl）：`workspace_op.main_begin` / `workspace_op.main_end`
+ *（`op` / `root_id` / `timeout_ms` / `duration_ms` / `ok`）/ `workspace_op.main_timeout`。
  * 铁律：禁止把 token / 密码 / 消息正文放进 `fields`（只记可观测信号，不记机密与正文）。
  *
  * 与 ipc-contract（文件系统）/ sidecar-contract（本地引擎）/ updater-contract（自动更新）

@@ -10,7 +10,8 @@ import {
 /**
  * Abnormal finish reasons that still warrant a bubble chip.
  * `cancelled` / `interrupted` intentionally omitted — partial body (or team
- * StatusStrip「已停止」) is the terminal signal; no “saved” reassurance chip
+ * StatusStrip「已停止」) is the terminal signal; chat timeline does not paint a
+ * standalone「已停止」row (P1). No “saved” reassurance chip
  * (对齐主流对话 AI · 前端UX设计.md §三).
  */
 export const FINISH_REASON_META: Record<

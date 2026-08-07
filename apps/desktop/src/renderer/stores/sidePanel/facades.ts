@@ -15,6 +15,7 @@ import {
   TEAM_TERMINAL_TAB_ID,
   type TerminalDetailTab,
   WORKSPACE_TAB_ID,
+  browserDismissKey,
   contentDetailTabId,
   fileTabId,
   runDetailTabId,
@@ -230,6 +231,8 @@ export function createFacadeActions(
     showBrowser: () => {
       const conversationId =
         useConversationStore.getState().currentConversationId;
+      // User explicitly opened → allow future auto-surface.
+      get().clearAutoSurfaceDismiss(browserDismissKey(conversationId));
       get().openTab({
         kind: "browser",
         id: TEAM_BROWSER_TAB_ID,

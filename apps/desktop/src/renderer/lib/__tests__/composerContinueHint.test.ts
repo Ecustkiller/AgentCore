@@ -4,6 +4,7 @@ import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
+  isEmptyCancelledAssistant,
   isEmptyInterruptedAssistant,
 } from "../composerContinueHint";
 
@@ -60,6 +61,24 @@ describe("composerContinueHint", () => {
     expect(
       isEmptyInterruptedAssistant(
         msg({ finishReason: "cancelled", content: "" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("detects empty cancelled for timeline omit (P1)", () => {
+    expect(
+      isEmptyCancelledAssistant(msg({ finishReason: "cancelled", content: "" })),
+    ).toBe(true);
+    expect(isEmptyCancelledAssistant(msg({ finishReason: "cancelled" }))).toBe(
+      false,
+    );
+    expect(
+      isEmptyCancelledAssistant(
+        msg({
+          finishReason: "cancelled",
+          content: "",
+          process: [{ kind: "team" }] as Message["process"],
+        }),
       ),
     ).toBe(false);
   });

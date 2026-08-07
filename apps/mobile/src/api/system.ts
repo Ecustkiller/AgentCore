@@ -1,5 +1,8 @@
 // Build provenance for the mobile client (设置·关于). Mirrors the desktop
 // services/system.ts against the backend GET /version probe.
+//
+// M17 exemption: OpenAPI `/version` 200 is an anonymous `Record<string, string>`
+// (no named schema); camelCase {@link VersionInfo} is a client projection.
 import { apiUrl } from "@/api/client";
 
 export interface VersionInfo {
@@ -8,6 +11,7 @@ export interface VersionInfo {
   builtAt: string;
 }
 
+/** Wire shape inferred from the probe body (not a named OpenAPI schema). */
 interface BackendVersion {
   version: string;
   git_sha: string;

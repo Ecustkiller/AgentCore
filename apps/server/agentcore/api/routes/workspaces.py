@@ -308,7 +308,8 @@ async def _shared_move(space_id: str, src: str, dst: str) -> None:
 
 async def _shared_index(space_id: str) -> tuple[list[str], bool]:
     backend = build_shared_workspace(space_id)
-    return await backend.index_files()
+    result = await backend.index_files()
+    return result.paths, result.truncated
 
 
 @router.get("", response_model=WorkspaceListResponse)

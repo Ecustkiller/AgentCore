@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { PendingResume } from "@/stores/pausedTurns";
@@ -6,7 +5,7 @@ import { AlertTriangle, ArrowRight, ChevronRight } from "lucide-react";
 import { CeoReviewList } from "./CeoReviewList";
 
 /**
- * 上下文带（B1）：风险/建议与产出→下游同一行次要 meta，默认全收，点开再展开详情。
+ * 上下文带（B1）：风险/建议与「产出 → 下游」同一行次要 meta，默认全收，点开再展开详情。
  * 结论仍在决策头；testid 保持兼容。
  */
 export function PlanReviewContextBand({
@@ -43,6 +42,8 @@ export function PlanReviewContextBand({
   const roles = turn.steps.map((s) => s.role).filter(Boolean);
   const stepsPreview =
     roles.length > 0 ? roles.join(" · ") : `${turn.steps.length} 步`;
+  const pendingRoles = turn.pending.map((n) => n.role).filter(Boolean);
+  const pendingPreview = pendingRoles.join(" · ");
 
   return (
     <div className="mt-2">
@@ -74,40 +75,34 @@ export function PlanReviewContextBand({
             </button>
           </span>
         )}
-        {hasSteps && (
-          <button
-            type="button"
-            onClick={() => setStepsOpen((v) => !v)}
-            aria-expanded={stepsOpen}
-            data-testid="plan-review-steps-toggle"
-            className="inline-flex max-w-full cursor-pointer items-center gap-1 text-left hover:text-foreground"
-          >
-            <ChevronRight
-              size={13}
-              className={cn(
-                "shrink-0 transition-transform",
-                stepsOpen && "rotate-90",
+        {(hasSteps || hasPending) &&
+          (hasSteps ? (
+            <button
+              type="button"
+              onClick={() => setStepsOpen((v) => !v)}
+              aria-expanded={stepsOpen}
+              data-testid="plan-review-steps-toggle"
+              className="inline-flex max-w-full cursor-pointer items-center gap-1 text-left hover:text-foreground"
+            >
+              <span className="shrink-0 font-medium text-foreground/80">
+                产出
+              </span>
+              {!stepsOpen && (
+                <span className="min-w-0 truncate">：{stepsPreview}</span>
               )}
-            />
-            <span className="shrink-0 font-medium text-foreground/80">
-              产出
+              {hasPending && pendingPreview && (
+                <>
+                  <ArrowRight size={13} className="shrink-0" aria-hidden />
+                  <span className="min-w-0 truncate">{pendingPreview}</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <span className="inline-flex max-w-full items-center gap-1">
+              <ArrowRight size={13} className="shrink-0" aria-hidden />
+              <span className="min-w-0 truncate">{pendingPreview}</span>
             </span>
-            {!stepsOpen && (
-              <span className="min-w-0 truncate">· {stepsPreview}</span>
-            )}
-          </button>
-        )}
-        {hasPending && (
-          <span className="inline-flex flex-wrap items-center gap-1.5">
-            <ArrowRight size={13} className="shrink-0" />
-            <span>下游</span>
-            {turn.pending.map((n) => (
-              <Badge key={n.run_id} tone="muted">
-                {n.role}
-              </Badge>
-            ))}
-          </span>
-        )}
+          ))}
       </div>
       {ceoOpen && hasCeo && review && (
         <div className="mt-1.5 space-y-1 border-l-2 border-border/70 pl-2.5">

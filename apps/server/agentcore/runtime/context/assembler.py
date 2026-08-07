@@ -14,17 +14,27 @@ so:
 
 Behavior-preserving today: with the ``SectionOrder`` values the call sites pass, the
 sorted render reproduces the prior inline order exactly, joined with ``"\\n"`` —
-byte-identical to the old assembly. That byte-identity is load-bearing: the CEO/worker
-system prefix must stay stable within a day or DeepSeek's exact-prefix cache is busted for
-the whole hint stack that follows (see ``runtime.resolve.prompt`` and ``pipeline.run``).
+byte-identical to the old assembly. Keeping that foundation prefix stable across turns is a
+**cost optimization** for providers that discount exact-prefix cache hits (e.g. DeepSeek) —
+not an irrevocable product invariant. Discipline lives here (:class:`SectionOrder`): new
+sections append at the volatile tail or insert at a stable key between existing slots;
+never reorder existing keys. ``observe`` emits ``assembly_hash`` so drift is searchable
+without enforcing a hard PrefixStabilityPolicy.
 """
 
 from __future__ import annotations
+
+import hashlib
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.context.contributor import PromptContributor
 
 logger = get_logger(__name__)
+
+
+def assembly_hash(text: str) -> str:
+    """SHA-256 hex of an assembled prompt (utf-8) — observe / test helper, not a gate."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class ContextAssembler:
@@ -74,21 +84,25 @@ class ContextAssembler:
         return sorted(self._contributors, key=lambda c: c.order)
 
     def observe(self, *, scope: str, soft_cap: int | None = None) -> ContextAssembler:
-        """Log this prompt's assembled size + per-section chars — observe-only (COST-004).
+        """Log assembled size, per-section chars, and ``assembly_hash`` — observe-only (COST-004 / M6).
 
         零行为副作用: 只埋点不改装配 (返回 ``self`` 供链式调用)。``cost.prompt_assembled`` 给出
-        每段 chars 明细 (归因哪段膨胀) + 总 chars + 是否越软闸——为「开发期无真实数据」攒据, 待数据
-        出再据此开「仅裁易变尾 (order≥800)」软闸 (项目审计-成本性能专项 §九)。trace / conversation
-        上下文由 contextvars 自动并入每行日志, 故此处无需显式传。``soft_cap`` 为 None ⇒ 不判越限。
+        每段 chars 明细 (归因哪段膨胀) + 总 chars + 是否越软闸 + 装配产物 ``assembly_hash``
+        (同输入同 hash；段序/正文变则 hash 变)——为「开发期无真实数据」攒据, 并让前缀漂移可检索,
+        待数据出再据此开「仅裁易变尾 (order≥800)」软闸 (项目审计-成本性能专项 §九)。trace /
+        conversation 上下文由 contextvars 自动并入每行日志, 故此处无需显式传。``soft_cap`` 为
+        None ⇒ 不判越限。
         """
         kept = sorted(self._contributors, key=lambda c: c.order)
         sections = {c.key: len(c.text) for c in kept}
         total = sum(sections.values())
+        rendered = "\n".join(c.text for c in kept)
         logger.info(
             "cost.prompt_assembled",
             scope=scope,
             total_chars=total,
             sections=sections,
+            assembly_hash=assembly_hash(rendered),
             over_soft_cap=soft_cap is not None and soft_cap > 0 and total > soft_cap,
             soft_cap=soft_cap,
         )

@@ -34,6 +34,7 @@ from ._helpers import _new_uuid
 # snapshots the result. The team's messages / cost / run journal persist under a
 # dedicated hidden ``mode="handoff"`` conversation (filtered from the sidebar), so
 # the run replays by opening it. e3 then diffs result vs base back to local files.
+# Not a standing/workflows job twin: thin credentials, no pause / paused_turns.
 
 
 class HandoffJob(Base):

@@ -58,7 +58,10 @@ export function HorizontalTabStrip({
 
   return (
     <nav
-      className={cn("relative flex min-w-0 items-center gap-0.5", className)}
+      className={cn(
+        "relative flex min-w-0 items-center gap-0.5 self-stretch",
+        className,
+      )}
       aria-label={ariaLabel}
     >
       {showOverflowButtons && overflow ? (
@@ -73,7 +76,7 @@ export function HorizontalTabStrip({
         </IconButton>
       ) : null}
 
-      <div className="relative min-w-0 flex-1">
+      <div className="relative flex min-w-0 flex-1 items-center self-stretch">
         {canScrollLeft ? (
           <div
             aria-hidden
@@ -86,9 +89,10 @@ export function HorizontalTabStrip({
             className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-card to-transparent"
           />
         ) : null}
+        {/* Hide scrollbar gutter: overflow-x alone can grow this box and shift tabs up. */}
         <div
           ref={scrollRef}
-          className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="min-w-0 w-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0"
         >
           <div
             ref={contentRef}

@@ -33,7 +33,7 @@ skip_if:
 
 侧栏 + 页面自布局；对话页单栏聊天。内嵌图「在画布打开」→ `TurnDetailPage`；点节点 → SidePanel run tab。输入框：空草稿居中，首条后 FLIP 落底。→ `ChatView.tsx`、`useComposerDockFlip.ts`。
 
-**侧栏 IA（方案 C）**：顶=全局置顶（裸聊 + 项目对话均可；按最近活动；零重复）；中=项目分组（Top 5/组、≤6 组；组内仅未置顶）；底=未置顶裸聊扁平（有分组 10 / 无分组 15）。**否决**跨区「最近」、裸聊「未分组」空组、置顶与组内/裸聊双显。三区无标题，分隔线区分。对话出生定终身（不支持事后移入）。归档可撤销；删除对用户永久（无回收站 UI）。「对话」导航 = 新建草稿（`/` 唯一真相）。**草稿不可用右坞**（不出现、快捷键/`openPanel` 等也不能打开；有会话后用户再开）。
+**侧栏 IA（方案 C）**：顶=全局置顶（裸聊 + 项目对话均可；按最近活动；零重复）；中=项目分组（Top 5/组、≤6 组；组内仅未置顶）；底=未置顶裸聊扁平（有分组 10 / 无分组 15）。**否决**跨区「最近」、裸聊「未分组」空组、置顶与组内/裸聊双显。三区无标题，分隔线区分。对话**归属中途不改挂**（不支持事后把对话移入另一项目；要换心智→新开）。**≠**手不能达他项——同对话可跨项目派工。归档可撤销；删除对用户永久（无回收站 UI）。「对话」导航 = 新建草稿（`/` 唯一真相）。**草稿不可用右坞**（不出现、快捷键/`openPanel` 等也不能打开；有会话后用户再开）。
 
 **全局协作感知**：列表状态点（执行中脉动 / 「等你决策」光环）；跨对话完成 Toast + 原生通知。`finish_reason=paused` ≠ 完成。→ `teamActivityNotifications.ts`。
 
@@ -61,7 +61,7 @@ skip_if:
 
 **主坞定义**：未弹出内容的**停靠条 + 右侧布局槽**（非唯一可见/唯一可操作面）。关主坞 = 收起右侧槽，不销毁已弹出浮窗。
 
-**右坞 IA**：顶栏 = `[工作区?] [改动?] | 内容 tabs | [+]`（工作区**不可销毁、可 detach**——在坞内时固定首位；已弹出则坞条不留重复入口，可钉回；**改动按本对话有无 AI 文件改动或本机回合基线条件出现**，出现后在坞内位次靠前、不可关，亦可 detach）。内容 tabs（分隔线右侧）可拖排序；固定/条件固定 tab 不可拖；顶栏条统一横滚与溢出指示。内容 tab 多开并存、只存引用；可关 tab 上限 **12**（固定/条件固定不计；正在 float 的 tab 不被此帽挤掉）。`+` 菜单：文件 / 终端 / 浏览器（**文件**可多开顶栏 tab；**终端 / 浏览器**各一壳，多会话/页签在壳内管理）。**浏览器** = 统一 BrowserSession 壳（可新空白页+地址栏；非「等 AI 才亮」）；产物完整预览并入同壳（桌面 workspace 协议；**否决**平行「预览」tab）。**否决**「团队浏览器 vs 通用浏览器」双入口。画布态另出「指挥台」（条件固定，不进 `+`）。工作区 tab 内保留文件树 + 项目·本地/云端 chip + 新建文件/文件夹等工具栏；点文件开顶栏 File tab（不 swap 掉树）。
+**右坞 IA**：顶栏 = `[工作区?] [改动?] | 内容 tabs | [+]`（工作区**不可销毁、可 detach**——在坞内时固定首位；已弹出则坞条不留重复入口，可钉回；**改动按本对话有无 AI 文件改动或本机回合基线条件出现**，出现后在坞内位次靠前、不可关，亦可 detach）。内容 tabs（分隔线右侧）可拖排序；固定/条件固定 tab 不可拖；顶栏条统一横滚与溢出指示。内容 tab 多开并存、只存引用；可关 tab 上限 **12**（固定/条件固定不计；正在 float 的 tab 不被此帽挤掉）。`+` 菜单：文件 / 终端 / 浏览器（**文件**可多开顶栏 tab；**终端 / 浏览器**各一壳，多会话/页签在壳内管理）。**浏览器** = 统一 BrowserSession 壳（可新空白页+地址栏；非「等 AI 才亮」——`+` 可主动开空白壳）；有 `browser_*` 活动时可静默挂 tab（不抢焦点、不强开右坞），对齐终端；用户关掉后本对话粘性 dismiss，活动清零后再有活动才可再自动挂；显式 `showBrowser`（CTA / `+` / 完整预览 / 登录卡按钮）清除 dismiss。登录卡**不** mount 自动 reveal。产物完整预览并入同壳（桌面 workspace 协议；**否决**平行「预览」tab）。**否决**「团队浏览器 vs 通用浏览器」双入口；**否决**普通 `browser_*` 自动拉开右坞。画布态另出「指挥台」（条件固定，不进 `+`）。工作区 tab 内保留文件树 + 项目·本地/云端 chip + 新建文件/文件夹等工具栏；点文件开顶栏 File tab（不 swap 掉树）。
 
 **「改动」tab**：本对话 AI 文件改动聚合（只读真 diff + 回滚；不做 apply/三方冲突——仍归交接）。行标签=新建/更新/删除（相对回合基线；**否决**工具名「写入/编辑」）。与产物卡「查看改动」同源聚焦（深链可先挂再聚焦）。**出现** = 本对话已有 AI 文件改动记录，或本机存在回合 zip 基线（脚本删亦可进「恢复到本回合开始」），或产物卡深链；**不**空挂常驻（对齐 Cursor 等「有货才审」）。恢复文案诚实：尽力 overlay，非完整镜像。**卸下** = 本对话无改动记录且无 Local 基线（切对话各自推导）；有改动/基线时挂上不抢焦点。**否决**空态常驻入口；**否决**「清空本对话产物」作为卸 tab 条件（清空只抹云 scratch 盘，process/execution 改动史仍在）。文案用「改动」；**否决** tab 名 `diff`。→ `ConversationChangesPanel.tsx` · `conversationFileChanges.ts`
 
@@ -70,12 +70,12 @@ skip_if:
 
 ### ✅ 应用内浮窗（方案 B · Web）
 
-桌面已切方案 C；**Web 长期保留 B**（无真窗）。B 宿主：`SidePanelFloatHost` ⊥ `open`。
+桌面已切方案 C；**Web 长期保留 B**（无真窗）。B/C 宿主均挂 `AppShell`：`SidePanelFloatHost` ⊥ `open`。
 
 | 项 | 现状 |
 |---|---|
 | 语义 | Move；上限 8；可弹 run/工作区/文件/改动 |
-| 宿主 | `SidePanelFloatHost` ⊥ `open`；几何限于应用客户区（盖不住侧栏） |
+| 宿主 | `SidePanelFloatHost` 挂 `AppShell`，⊥ `open`；几何限于应用客户区（盖不住侧栏） |
 | 指针 | `stores/sidePanel.ts`、`FloatingPanelShell` / `SidePanelFloatHost` / `SidePanelSurfaceBody` |
 
 ### ✅ 真 OS 窗（方案 C）
@@ -94,15 +94,16 @@ skip_if:
 | 高亮 | 跟焦点面（含「焦点在某真窗」）；主窗图高亮经 BroadcastChannel 焦点同步 |
 | 数量 | 统一上限 **8** |
 | 状态 | 真窗 = 新 renderer；主窗 SSE 权威，经 BroadcastChannel 推投影快照（禁真窗各自开对话流） |
+| 投影宿主 | **`SidePanelFloatHost` 挂 `AppShell`**（与 `floats`/OS 真窗同生共死）；**否决**绑对话/回合页（离页即零 producer → 真窗假转圈）。无 BC → 结构性失败空态，**否决**重试/超时自愈 |
 | Local Browser | 仍不可弹；单 `hostWin` 附着模型首期不改为多宿主 |
 | 窗控 IPC | 按 **webContents/窗 id** 路由；`float-window:*` + preload `floatWindowApi` |
 | 任务栏（Win） | **单 AppUserModelID**（`com.agentcore.desktop`）分组；主窗最小化时真窗随藏（Float/owner 语义）。**否决**每真窗独立钉选图标 |
 | z-order | **`parent: main`**：OS 保证真窗在主窗之上；开窗 cascade 错位；后开/焦点者在上 |
 | 最小化 | **真窗不提供**：窗控无最小化键、`minimizable: false`、minimize IPC 对真窗 no-op。要收起 → 关闭钉回主坞 |
 
-→ `main/float-window.ts`、`DesktopFloatWindowBridge`、`FloatWindowPage`、`lib/floatWindowSync.ts`
+→ `main/float-window.ts`、`AppShell` + `SidePanelFloatHost`、`DesktopFloatWindowBridge`、`FloatWindowPage`、`lib/floatWindowSync.ts`
 
-**验收**：真窗可拖到副屏；盖过主窗侧栏/外框；两 worker 真窗并排跟流（cascade + 均在主窗之上、开第二窗不闪沉）；无最小化按钮；关窗钉回；切对话清空；审批在真窗可点；Web 仍为应用内浮窗。
+**验收**：真窗可拖到副屏；盖过主窗侧栏/外框；两 worker 真窗并排跟流（cascade + 均在主窗之上、开第二窗不闪沉）；无最小化按钮；关窗钉回；切对话清空；审批在真窗可点；Web 仍为应用内浮窗；**弹出后主窗离开对话路由真窗仍同步**；无 BC 不转圈。
 ## 十一、Agent 可发现性
 
 `public`/`unlisted`/`private`；可发现 ≠ 手选。**否决**用户 Agent/Team 选择器、辩论角色手选实体。

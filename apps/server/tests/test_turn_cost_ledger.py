@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -23,6 +22,10 @@ class _AliveTask:
         return False
 
 
+def _pending_rows(queue) -> list[dict]:
+    return [r for r in queue._backend._rows.values() if r.get("status") == "pending"]
+
+
 @pytest.fixture
 def running_ledger(monkeypatch, tmp_path: Path):
     queue = queue_mod.reset_cost_ledger_queue_for_tests()
@@ -35,8 +38,9 @@ def _usage(*, inp: int = 100, out: int = 20) -> TokenUsage:
     return TokenUsage(input_tokens=inp, output_tokens=out)
 
 
-def test_maybe_enqueue_materializes_runs_and_stamps_member_role(running_ledger):
-    _queue, tmp_path = running_ledger
+@pytest.mark.asyncio
+async def test_maybe_enqueue_materializes_runs_and_stamps_member_role(running_ledger):
+    queue, _tmp_path = running_ledger
     with log_context(
         user_id="u1",
         conversation_id="c1",
@@ -54,9 +58,10 @@ def test_maybe_enqueue_materializes_runs_and_stamps_member_role(running_ledger):
             credential_source="platform",
         )
     assert rid is not None
-    files = list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json"))
-    assert len(files) == 1
-    payload = json.loads(files[0].read_text(encoding="utf-8"))
+    await queue._await_pending_enqueues()
+    rows = _pending_rows(queue)
+    assert len(rows) == 1
+    payload = rows[0]
     assert payload["source"] == "inprocess_call"
     assert payload["materialize_runs"] is True
     call = payload["calls"][0]
@@ -66,9 +71,10 @@ def test_maybe_enqueue_materializes_runs_and_stamps_member_role(running_ledger):
     assert call["persona"] == "调研员"
 
 
-def test_maybe_enqueue_skips_vision_scenario(running_ledger):
+@pytest.mark.asyncio
+async def test_maybe_enqueue_skips_vision_scenario(running_ledger):
     """Vision board_read is billed only via cost_runs orphan — never cost_calls."""
-    _queue, tmp_path = running_ledger
+    queue, _tmp_path = running_ledger
     with log_context(user_id="u1", conversation_id="c1", run_id="cap_1"):
         assert (
             maybe_enqueue_inprocess_call(
@@ -78,7 +84,8 @@ def test_maybe_enqueue_skips_vision_scenario(running_ledger):
             )
             is None
         )
-    assert list((tmp_path / "telemetry" / "cost_ledger_queue").glob("*.json")) == []
+    await queue._await_pending_enqueues()
+    assert _pending_rows(queue) == []
 
 
 def test_log_cost_recorded_by_role_shape():

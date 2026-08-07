@@ -62,6 +62,12 @@ export interface SidecarStartTurnRequest {
    *  （打通气泡↔日志）。 */
   traceId: string;
   /**
+   * 登录账号 ``user.id``（透传至 sidecar ``ToolContext.user_id``）。缺省 / 空 =
+   * 主进程与引擎回落字面量 ``"local"``（再经 ``resolve_sidecar_user_id`` 映射为稳定 UUID）。
+   * 长活 sidecar 按回合重送：进程级 ``initialize`` 只作首次种子，不以它为唯一真相。
+   */
+  userId?: string;
+  /**
    * 本轮用户气泡的乐观 id（干净 UUID）——outbox 幂等锚（as-built: 双模式工作区 §10.3）。
    * 主进程回写器据此组 `RecordTurnRequest.user_message_id`，与云端 finalize 去重对齐。
    */
@@ -199,6 +205,11 @@ export interface SidecarResumeRequest {
   /** 本次续跑的 trace_id（同 {@link SidecarStartTurnRequest.traceId}）：续跑也跑 LLM，故
    *  随云代理调用上报、并随回写落库，使这次续跑的推理↔气泡归并为同一条 trace。 */
   traceId: string;
+  /**
+   * 登录账号 ``user.id``（同 {@link SidecarStartTurnRequest.userId}）：续跑按回合重送，
+   * 覆盖进程级 initialize / 帧内旧 ``suspension.user_id``。
+   */
+  userId?: string;
   /** 挂起时已落库的原始 user 气泡 id —— outbox 幂等锚（同 startTurn.userMessageId）。 */
   userMessageId?: string;
   /** continue（授权并开工）/ adjust / stop / research_first（辩论·先调研再辩）。 */
@@ -307,6 +318,7 @@ export function buildSidecarResumeRpcParams(
     | "decision"
     | "note"
     | "selected"
+    | "userId"
     | "userMessageId"
     | "permissionAxes"
     | "excluded_run_ids"
@@ -322,6 +334,7 @@ export function buildSidecarResumeRpcParams(
     decision: req.decision,
     note: req.note,
     selected: req.selected ?? [],
+    ...(req.userId ? { userId: req.userId } : {}),
     ...(req.userMessageId ? { userMessageId: req.userMessageId } : {}),
     ...(inference ? { inference } : {}),
     // Explicit null clears sticky spawn-env leftovers on the Python side.

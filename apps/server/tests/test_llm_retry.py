@@ -134,6 +134,37 @@ async def test_complete_does_not_retry_400(monkeypatch):
         await provider.close()
 
 
+async def test_complete_2xx_non_json_is_typed_llm_error_no_retry(monkeypatch):
+    """LLM-01 A: 2xx HTML/non-JSON → LLMError(retryable=False), no empty retry spin."""
+    calls = {"n": 0}
+
+    async def fake_sleep(sec: float) -> None:
+        raise AssertionError("should not sleep on non-JSON 2xx")
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            content=b"<html><body>login</body></html>",
+            headers={"content-type": "text/html"},
+        )
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        err = ei.value
+        assert type(err) is LLMError
+        assert err.retryable is False
+        assert "响应格式无效" in err.message
+        assert isinstance(err.__cause__, json.JSONDecodeError)
+        assert calls["n"] == 1
+    finally:
+        await provider.close()
+
+
 async def test_complete_retries_connect_error_then_succeeds(monkeypatch):
     calls = {"n": 0}
     sleeps: list[float] = []

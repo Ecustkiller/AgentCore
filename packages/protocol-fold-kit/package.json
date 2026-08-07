@@ -1,0 +1,19 @@
+{
+  "name": "@agentcore/protocol-fold-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "协议 fold 共享常量/纯谓词（编排工具集、marker 代言、finish→status）；非 fold 实现核",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.6"
+  }
+}

@@ -2,13 +2,15 @@
 
 Mirrors the LLM vendor chain (prefix table + settings ⇒ access): a new built-in
 tool is **implement class (with ``registration``) + append to ``DECLARED_TOOLS``
-+ test**. Runtime registries, the capability catalog, and board wiring **collect**
-from declarations instead of maintaining parallel hand lists.
++ test**. Runtime registries, the capability catalog, and board / zero-arg ALWAYS
+wiring **collect** from declarations instead of maintaining parallel hand lists.
 
-CEO orchestration tools with heavy ``__init__`` deps are still constructed in
-``_assemble_ceo_toolset`` / coordination surface, but **which** tools exist and
-their audience / wire gate come from ``ToolRegistration`` — not a second tuple
-in ``catalog.py``.
+CEO orchestration tools with heavy ``__init__`` deps (delegate / debate / ask_user
+/ memory gates / coordination) are still constructed in
+``tools.ceo_toolset._assemble_ceo_toolset`` / coordination surface, but **which**
+tools exist and their audience / wire gate come from ``ToolRegistration`` — not
+a second tuple in ``catalog.py``. Zero/light-arg ALWAYS tools share
+``register_always_ceo_tools`` (same entry as assemble + resume).
 """
 
 from __future__ import annotations
@@ -105,7 +107,7 @@ def instantiate_declared(
     location: Literal["server", "local"] | None = None,
     languages: tuple[str, ...] | list[str] | None = None,
 ) -> Any:
-    """Zero-arg (or location-aware) construction for builtin / worker-only / board tools."""
+    """Zero-arg (or location-aware) construction for builtin / worker-only / board / ALWAYS tools."""
     reg = tool_registration(cls)
     if reg.needs_location:
         # ``languages`` only applies to ``code_execute`` (probe-trimmed local surface).
@@ -182,6 +184,11 @@ def _load_declared_tools() -> tuple[type, ...]:
     from agentcore.tools.builtin.md_to_docx import MdToDocxTool
     from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
     from agentcore.tools.builtin.post_note import PostNoteTool
+    from agentcore.tools.builtin.projects import (
+        CreateProjectTool,
+        ListProjectsTool,
+        ResolveProjectTool,
+    )
     from agentcore.tools.builtin.read_conversation import ReadConversationTool
     from agentcore.tools.builtin.read_notes import ReadNotesTool
     from agentcore.tools.builtin.remember import RememberTool
@@ -263,6 +270,9 @@ def _load_declared_tools() -> tuple[type, ...]:
         ReplanTool,
         DebateTool,
         ConsultSkillTool,
+        ListProjectsTool,
+        ResolveProjectTool,
+        CreateProjectTool,
         ConsultMemoryTool,
         RememberTool,
         UpdateProjectProfileTool,
@@ -316,6 +326,34 @@ def worker_only_tool_names() -> frozenset[str]:
         for cls in declared_tools()
         if AUDIENCE_CEO not in tool_registration(cls).audience
     )
+
+
+# Heavy-dep ALWAYS tools stay handwritten in ``_assemble_ceo_toolset``.
+# Everything else with ``ceo_wire=ALWAYS`` is declaration-loop wired
+# (zero-arg via ``instantiate_declared``; ``consult_skill`` takes skill_registry).
+_ALWAYS_HAND_WIRE_NAMES = frozenset({"delegate", "debate"})
+
+
+def register_always_ceo_tools(
+    chat_tools: ToolRegistry,
+    *,
+    skill_registry: Any,
+) -> None:
+    """Register zero/light-arg CEO ALWAYS tools — shared by assemble + resume.
+
+    Consumed only from ``tools.ceo_toolset._assemble_ceo_toolset`` so fresh turn
+    and 2b resume cannot diverge. Skips ``delegate`` / ``debate`` (heavy deps).
+    """
+    for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION):
+        if tool_registration(cls).ceo_wire is not CeoWire.ALWAYS:
+            continue
+        name = declared_tool_name(cls)
+        if name in _ALWAYS_HAND_WIRE_NAMES:
+            continue
+        if name == "consult_skill":
+            chat_tools.register(cls(registry=skill_registry))  # type: ignore[call-arg]
+        else:
+            chat_tools.register(instantiate_declared(cls))
 
 
 def register_board_ceo_tools(chat_tools: ToolRegistry) -> None:

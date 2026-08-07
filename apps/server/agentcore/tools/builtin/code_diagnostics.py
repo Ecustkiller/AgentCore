@@ -29,7 +29,9 @@ from agentcore.tools.registration import (
 from agentcore.workspace.limits import (
     channel_dead_error_message,
     channel_dead_retire_metadata,
+    is_channel_dead_detail,
     is_liveness_timeout_detail,
+    op_liveness_timeout_metadata,
 )
 from agentcore.workspace.protocol import WorkspaceError
 
@@ -195,7 +197,7 @@ class CodeDiagnosticsTool:
             payload = await diag_fn(paths)
         except WorkspaceError as e:
             detail = str(e)
-            if is_liveness_timeout_detail(detail):
+            if is_channel_dead_detail(detail):
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -204,6 +206,18 @@ class CodeDiagnosticsTool:
                     duration_ms=int((time.monotonic() - start) * 1000),
                     metadata=channel_dead_retire_metadata(),
                     contract_failure=True,
+                )
+            if is_liveness_timeout_detail(detail):
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=(
+                        f"本地工作区通道操作超时（活性挂起）：{detail}。"
+                        "请缩小范围或换策略后重试；禁止原样重试同一操作。"
+                    ),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    metadata=op_liveness_timeout_metadata(),
                 )
             payload = {
                 "status": "unavailable",

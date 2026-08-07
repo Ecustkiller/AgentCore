@@ -5,7 +5,7 @@
  * reveals after adopt (+ recovery await); this runs in the background (void).
  * Warm reopen keeps the in-memory slice (adopt skips overwrite) but still runs
  * recovery-driven attach/settle so a detached live / ghost running assistant is
- * not left as fake "Replying".
+ * not left stuck in a fake generating state.
  *
  * 观察泵挂在会话切片上：切会话 ≠ 卸观察。本路径不接受页级 AbortSignal；
  * 显式卸观察仅由 `attachSidecarTurn({ signal })` 调用方传入。

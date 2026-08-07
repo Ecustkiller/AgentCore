@@ -3,6 +3,7 @@ import {
   ASK_INTENT_META,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPendingMarkerLabel,
   teamPreviewLead,
@@ -36,6 +37,10 @@ describe("decision meta", () => {
     expect(askResolvedOutcome("kickoff", "research_first").tone).toBe("muted");
     expect(askResolvedOutcome("decision", "stop").label).toBe("已取消本回合");
     expect(askResolvedOutcome("decision", "stop").tone).toBe("muted");
+    expect(isAskSilentResolvedDecision("stop")).toBe(true);
+    expect(isAskSilentResolvedDecision("research_first")).toBe(true);
+    expect(isAskSilentResolvedDecision("continue")).toBe(false);
+    expect(isAskSilentResolvedDecision("timeout")).toBe(false);
   });
 
   it("team debate research_first + continue-with-note overrides", () => {

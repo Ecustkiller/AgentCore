@@ -386,6 +386,7 @@ async def test_coord_drive_session_saver_does_not_shadow_coordination_session():
         base_tool_context=ctx(),
         session_store=store,
         session_saver=_saver,
+        folder_id="test_birth",
     )
     result = await t.execute(
         {
@@ -1186,6 +1187,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
         history=[],
         tools=ToolRegistry(),
         base_tool_context=base_ctx,
+        folder_id="test_birth",
     )
     reg = ToolRegistry()
     reg.register(delegate)
@@ -1762,6 +1764,7 @@ async def test_retired_criteria_kind_still_posts_all_completed_without_host_back
         history=[],
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
+        folder_id="test_birth",
     )
     result = await t.execute(
         {
@@ -1824,6 +1827,7 @@ async def test_retired_criteria_kind_wait_drains_without_shortcircuit(monkeypatc
         history=[],
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
+        folder_id="test_birth",
     )
     await t.execute(
         {

@@ -4,7 +4,7 @@ import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
  * - worker ``escalate(browser_login=true)`` (hot-path EscalationCard)
  * - CEO ``ask_user(browser_login=true)`` (cold-path ResumePrompt)
  *
- * Auto-reveals the right-dock browser shell on mount;「打开浏览器」remains as fallback.
+ * Reveals the right-dock browser shell only when the user clicks「打开浏览器」.
  */
 import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -16,7 +16,6 @@ import {
   OctagonX,
   Radio,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
 
 export type BrowserLoginSubmitKind = "logged_in" | "use_assumption" | "stop";
 
@@ -25,7 +24,6 @@ export function BrowserLoginDecisionCard({
   question,
   assumption,
   conversationId,
-  revealKey,
   busy,
   submitting,
   onLoggedIn,
@@ -37,7 +35,7 @@ export function BrowserLoginDecisionCard({
   question: string;
   assumption?: string;
   conversationId: string | null;
-  /** Dedup key for auto-reveal (escalation.id / checkpointId). */
+  /** Call-site key (escalation.id / checkpointId); retained for API compatibility. */
   revealKey: string;
   busy: boolean;
   submitting: BrowserLoginSubmitKind | null;
@@ -46,14 +44,6 @@ export function BrowserLoginDecisionCard({
   onStop?: () => void;
   kindTag?: string;
 }) {
-  const revealedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!conversationId) return;
-    if (revealedFor.current === revealKey) return;
-    revealedFor.current = revealKey;
-    useSidePanelStore.getState().showBrowser();
-  }, [conversationId, revealKey]);
-
   return (
     <DecisionCard tone="primary" animate>
       <div className="flex items-start gap-2">

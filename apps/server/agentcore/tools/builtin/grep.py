@@ -24,7 +24,9 @@ from agentcore.tools.registration import (
 from agentcore.workspace.limits import (
     channel_dead_error_message,
     channel_dead_retire_metadata,
+    is_channel_dead_detail,
     is_liveness_timeout_detail,
+    op_liveness_timeout_metadata,
 )
 from agentcore.workspace.protocol import (
     GrepQuery,
@@ -144,11 +146,20 @@ class GrepTool:
             return _fail(f"路径不存在：{rel_dir}", start)
         except WorkspaceError as e:
             msg = str(e)
-            if is_liveness_timeout_detail(msg):
+            if is_channel_dead_detail(msg):
                 return _fail(
                     channel_dead_error_message(msg),
                     start,
                     metadata=channel_dead_retire_metadata(),
+                )
+            if is_liveness_timeout_detail(msg):
+                return _fail(
+                    (
+                        f"本地工作区通道操作超时（活性挂起）：{msg}。"
+                        "请缩小范围或换策略后重试；禁止原样重试同一操作。"
+                    ),
+                    start,
+                    metadata=op_liveness_timeout_metadata(),
                 )
             # Surface regex failures without the generic "搜索失败" wrapper so the
             # model sees the dialect hint immediately.

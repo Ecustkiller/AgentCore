@@ -214,7 +214,17 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
             placeholder={family.notePlaceholder}
             className="w-full border-border bg-card/70 focus:border-primary/60"
           />
-          <div className="flex flex-wrap items-center gap-1.5 pl-6">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+              icon={spinnerOr("stop", <OctagonX size={13} />)}
+              disabled={busy}
+              onClick={() => send("stop", [], note.trim())}
+            >
+              取消
+            </Button>
+            <span className="ml-auto" />
             <Button
               variant="primary"
               icon={spinnerOr("continue", <CheckCheck size={13} />)}
@@ -228,14 +238,6 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                 : showCapabilities
                   ? family.resumeCta
                   : "开做"}
-            </Button>
-            <Button
-              variant="danger"
-              icon={spinnerOr("stop", <OctagonX size={13} />)}
-              disabled={busy}
-              onClick={() => send("stop", [], note.trim())}
-            >
-              取消
             </Button>
           </div>
         </div>

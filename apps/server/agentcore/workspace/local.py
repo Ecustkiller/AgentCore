@@ -53,6 +53,8 @@ from agentcore.workspace.protocol import (
     GrepHit,
     GrepQuery,
     GrepResult,
+    IndexFileEntry,
+    IndexFilesResult,
     OutsideWorkspace,
     PathNotFound,
     ReadLinesResult,
@@ -141,17 +143,48 @@ class LocalWorkspace:
         return out
 
     def _mark_mutated(self) -> None:
+        """Mark snapshot + index dirty; do not schedule maintenance mid-turn.
+
+        Local shares one channel with tools — IndexMaintainer must not race
+        mutations. Turn end drains via ``flush_code_index_maintenance`` instead
+        (awaited on normal terminals; fire-and-forget on cold PAUSED so
+        ``turn_runs`` can release before a slow index rebuild).
+        ``start_code_index_maintenance`` / ``code_search`` kicks stay unchanged.
+        """
         self._dirty = True
         if self._index_manager is not None:
             self._index_manager.mark_content_dirty()
-        if self._index_maintainer is not None:
-            self._index_maintainer.schedule()
 
     def start_code_index_maintenance(self) -> None:
         manager = self._get_index_manager()
         if self._index_maintainer is None:
             self._index_maintainer = IndexMaintainer(manager, self)
         self._index_maintainer.schedule()
+
+    async def flush_code_index_maintenance(self) -> None:
+        """Schedule (if dirty) and await index maintenance — turn-end drain.
+
+        Uses workspace ``dirty`` as well as ``content_dirty`` so a mutation that
+        lands while an in-flight ensure clears ``content_dirty`` still gets a
+        follow-up refresh (without mid-turn ``schedule`` / channel contention).
+        """
+        manager = self._index_manager
+        maintainer = self._index_maintainer
+        needs_refresh = self._dirty or (manager is not None and manager.content_dirty)
+        building = maintainer is not None and maintainer.building
+        if not needs_refresh and not building:
+            return
+        if needs_refresh:
+            if manager is None:
+                if not building:
+                    return
+            else:
+                if maintainer is None:
+                    maintainer = IndexMaintainer(manager, self)
+                    self._index_maintainer = maintainer
+                maintainer.schedule()
+        if maintainer is not None:
+            await maintainer.drain()
 
     def _get_index_manager(self) -> IndexManager:
         if self._index_manager is None:
@@ -369,20 +402,21 @@ class LocalWorkspace:
 
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
-    ) -> tuple[list[str], bool]:
+    ) -> IndexFilesResult:
         # The desktop indexes the bound local root (its fsApi.listFiles walk: ignore
-        # dirs pruned, capped) and returns {paths, truncated}, so @ mentions + the
-        # worker manifest see the same flat view as cloud. ``order`` selects the sort
-        # ("path" alphabetical for @, "recent" newest-first for the manifest budget).
-        # ``base`` scopes the walk to this workspace's subtree (工作区对称化 D1a) so a
-        # shared container root indexes only this workspace; returned paths are
-        # stripped back to workspace-relative. Read-only → not dirty.
+        # dirs pruned, capped) and returns {entries|paths, truncated}, so @ mentions +
+        # the worker manifest see the same flat view as cloud. ``entries`` may carry
+        # mtime_ms/size_bytes fingerprints so ensure_index can skip unchanged reads.
+        # ``order`` selects the sort ("path" alphabetical for @, "recent" newest-first
+        # for the manifest budget). ``base`` scopes the walk to this workspace's
+        # subtree (工作区对称化 D1a) so a shared container root indexes only this
+        # workspace; returned paths are stripped back to workspace-relative.
+        # Read-only → not dirty.
         value = await self._channel.request(
             WorkspaceOp.INDEX_FILES, {"cap": cap, "order": order, "base": self._in(".")}
         )
         value = value or {}
-        paths = [self._out(str(p)) for p in value.get("paths", [])]
-        return paths, bool(value.get("truncated", False))
+        return _parse_index_files_value(value, out_path=self._out)
 
     async def mkdir(self, path: str) -> None:
         root_id, rel, _ = self._route(path, write=True, op="mkdir")
@@ -649,3 +683,43 @@ class LocalWorkspace:
             )
             return False
         return isinstance(value, dict) and value.get("ready") is True
+
+
+def _parse_index_files_value(
+    value: dict[str, Any], *, out_path: Any
+) -> IndexFilesResult:
+    """Parse desktop ``index_files`` value: prefer ``entries``, fall back to ``paths``.
+
+    Contract: ``{ entries: [{path, mtime_ms?, size_bytes?}, ...], truncated }``;
+    may still carry ``paths`` for older desktops / dual emission.
+    """
+    truncated = bool(value.get("truncated", False))
+    raw_entries = value.get("entries")
+    if isinstance(raw_entries, list) and raw_entries:
+        entries: list[IndexFileEntry] = []
+        for item in raw_entries:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if path is None:
+                continue
+            raw_mtime = item.get("mtime_ms")
+            raw_size = item.get("size_bytes")
+            entries.append(
+                IndexFileEntry(
+                    path=out_path(str(path)),
+                    mtime_ms=None if raw_mtime is None else int(raw_mtime),
+                    size_bytes=None if raw_size is None else int(raw_size),
+                )
+            )
+        return IndexFilesResult(
+            paths=[e.path for e in entries],
+            truncated=truncated,
+            entries=tuple(entries),
+        )
+    paths = [out_path(str(p)) for p in value.get("paths", [])]
+    return IndexFilesResult(
+        paths=paths,
+        truncated=truncated,
+        entries=tuple(IndexFileEntry(path=p) for p in paths),
+    )

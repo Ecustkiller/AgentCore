@@ -108,8 +108,6 @@ ignore = ["B008", "A002", "E402"]
 # Protocol exception names are stable public API (workspace/storage error taxonomy).
 "agentcore/workspace/protocol.py" = ["N818"]
 "agentcore/storage/protocol.py" = ["N818"]
-# One-off probe script + ops scripts: long log lines / SQL are fine.
-"probe_ask_user.py" = ["E501"]
 "agentcore/runtime/delegate/ceo_format.py" = ["E501"]
 "agentcore/tools/builtin/delegate/schema.py" = ["E501"]
 "agentcore/runtime/delegate/drive.py" = ["E501"]

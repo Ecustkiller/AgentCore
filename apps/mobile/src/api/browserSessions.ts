@@ -2,13 +2,21 @@
 //
 // Light GET …/browser/sessions only (create/navigate/close can land later).
 // Cloud-only on mobile (no Local sidecar branch). Auth is Bearer via apiFetch.
+// Wire DTOs track OpenAPI; camelCase {@link BrowserSessionInfo} is a client
+// projection (OpenAPI has no camelCase schema — M17 exemption).
 
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
 
-export type BrowserHostKind = "sandbox" | "local";
-export type BrowserControl = "agent" | "user";
+type Schemas = components["schemas"];
 
-/** Client projection (camelCase). */
+export type BrowserHostKind = Schemas["BrowserSessionView"]["host_kind"];
+export type BrowserControl = Schemas["BrowserSessionView"]["control"];
+
+type BrowserSessionWire = Schemas["BrowserSessionView"];
+type BrowserSessionListWire = Schemas["BrowserSessionListResponse"];
+
+/** Client projection (camelCase). M17 exemption: not in OpenAPI schemas. */
 export interface BrowserSessionInfo {
   sessionId: string;
   conversationId: string;
@@ -21,27 +29,10 @@ export interface BrowserSessionInfo {
   title?: string | null;
 }
 
+/** Client projection (camelCase). M17 exemption: not in OpenAPI schemas. */
 export interface BrowserSessionList {
   sessions: BrowserSessionInfo[];
   activeSessionId: string | null;
-}
-
-/** Server wire (snake_case). */
-interface BrowserSessionWire {
-  session_id: string;
-  conversation_id: string;
-  host_kind: BrowserHostKind;
-  control: BrowserControl;
-  run_id?: string | null;
-  created_at: number;
-  last_used: number;
-  url?: string | null;
-  title?: string | null;
-}
-
-interface BrowserSessionListWire {
-  data: BrowserSessionWire[];
-  active_session_id?: string | null;
 }
 
 function sessionsPath(conversationId: string): string {

@@ -15,6 +15,7 @@ import {
   pickDebateCrossExamActivateId,
 } from "../helpers";
 import {
+  buildGraphScene,
   computeActBands,
   computeDebateStageBands,
   computeTopologicalRunWaves,
@@ -166,6 +167,64 @@ describe("computeWaves", () => {
     // Cross-axis (row) strips in leftright — not the topo column strips.
     expect(bands[0]?.h).toBeLessThan(bands[0]?.w ?? 0);
     expect(bands[1]?.y).toBeGreaterThan(bands[0]?.y ?? 0);
+  });
+
+  it("ignores pure continuations when batch2 is continuation-only", () => {
+    // Cold a (batch1) + continuation a_v2 stamped batch2 must not open「第 2 次委派」.
+    const execution = minimalExecution([
+      run("a", [], { delegateBatch: 1 }),
+      run("a_v2", [], {
+        continuesRunId: "a",
+        continuationIndex: 1,
+        delegateBatch: 2,
+      }),
+    ]);
+    const bands = computeWaves(
+      execution,
+      { a: { x: 0, y: 0 }, a_v2: { x: 300, y: 0 } },
+      { width: 520, height: 200 },
+      "leftright",
+      "captain",
+    );
+    expect(bands).toEqual([]);
+  });
+
+  it("excludes continuations from 委派 members when cold + continue share a graph", () => {
+    // Two cold batches plus a continuation on batch1 — continuation must not
+    // appear in member lists or inflate node counts / open an extra column.
+    const execution = minimalExecution([
+      run("a", [], { delegateBatch: 1 }),
+      run("b", ["a"], { delegateBatch: 1 }),
+      run("a_v2", [], {
+        continuesRunId: "a",
+        continuationIndex: 1,
+        delegateBatch: 2,
+      }),
+      run("c", [], { delegateBatch: 2 }),
+      run("d", ["c"], { delegateBatch: 2 }),
+    ]);
+    const bands = computeWaves(
+      execution,
+      {
+        a: { x: 0, y: 0 },
+        b: { x: 300, y: 0 },
+        a_v2: { x: 600, y: 0 },
+        c: { x: 0, y: 140 },
+        d: { x: 300, y: 140 },
+      },
+      { width: 720, height: 280 },
+      "leftright",
+      "captain",
+    );
+    expect(bands).toHaveLength(2);
+    expect(bands[0]?.label).toBe("第 1 次委派（2 节点）");
+    expect(bands[1]?.label).toBe("第 2 次委派（2 节点）");
+    const lanes = buildGraphScene(execution).bands.lanes;
+    expect(lanes.map((b) => b.memberRunIds)).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    expect(lanes.flatMap((b) => b.memberRunIds)).not.toContain("a_v2");
   });
 });
 
@@ -914,5 +973,74 @@ describe("buildGraphStructure · bookend sink edges", () => {
     expect(
       rawEdges.some((e) => e.source === "w1" && e.target === "captain"),
     ).toBe(false);
+  });
+
+  it("续链：只根接 input、只链尖汇 CEO；continuation 点线保留", () => {
+    const { rawEdges } = buildGraphStructure(
+      [
+        captain(),
+        run("w1"),
+        run("w1_v2", [], {
+          continuesRunId: "w1",
+          continuationIndex: 1,
+        }),
+        run("w1_v3", [], {
+          continuesRunId: "w1",
+          continuationIndex: 2,
+        }),
+      ],
+      "__input__",
+    );
+    const inputTargets = rawEdges
+      .filter((e) => e.source === "__input__")
+      .map((e) => e.target)
+      .sort();
+    expect(inputTargets).toEqual(["w1"]);
+    expect(sinkTargets(rawEdges)).toEqual(["w1_v3"]);
+    expect(
+      rawEdges
+        .filter((e) => e.kind === "continuation")
+        .map((e) => `${e.source}->${e.target}`)
+        .sort(),
+    ).toEqual(["w1->w1_v2", "w1_v2->w1_v3"]);
+    expect(
+      rawEdges.some((e) => e.source === "w1" && e.target === "captain"),
+    ).toBe(false);
+    expect(
+      rawEdges.some((e) => e.source === "w1_v2" && e.target === "captain"),
+    ).toBe(false);
+  });
+
+  it("续链上有真实 dependsOn 的续仍画 peer dep", () => {
+    const { rawEdges } = buildGraphStructure(
+      [
+        captain(),
+        run("a"),
+        run("a_v2", [], {
+          continuesRunId: "a",
+          continuationIndex: 1,
+        }),
+        run("b", ["a_v2"]),
+      ],
+      "__input__",
+    );
+    expect(
+      rawEdges.some(
+        (e) => e.kind === "dep" && e.source === "a_v2" && e.target === "b",
+      ),
+    ).toBe(true);
+    expect(
+      rawEdges.some(
+        (e) =>
+          e.kind === "continuation" &&
+          e.source === "a" &&
+          e.target === "a_v2",
+      ),
+    ).toBe(true);
+    // a 有续后继不进 CEO；a_v2 被 b dependsOn，也不进；仅 b → captain。
+    expect(sinkTargets(rawEdges)).toEqual(["b"]);
+    expect(
+      rawEdges.filter((e) => e.source === "__input__").map((e) => e.target),
+    ).toEqual(["a"]);
   });
 });

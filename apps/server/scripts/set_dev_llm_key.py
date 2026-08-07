@@ -77,7 +77,7 @@ async def run(args: argparse.Namespace) -> None:
         print(f"test:  status={tj['status']} masked={tj['masked_key']} msg={tj.get('message')}")
         if tj["status"] != "active":
             raise SystemExit("连通性测试未通过——按上面的 msg 排查（密钥/余额/服务端加密配置）。")
-    print("\nOK：dev 账号已可用 DeepSeek。现在可跑 scripts/probe_turn.py 真发一条回合。")
+    print("\nOK：dev 账号已可用 DeepSeek。现在可跑 scripts/archive/probe_turn.py 真发一条回合。")
 
 
 def main() -> None:

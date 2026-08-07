@@ -159,5 +159,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3).status==200 else 1)"]
 
 # 默认启 API（python -m agentcore 从环境读 HOST/PORT/DEBUG；prod DEBUG=false →
-# 单 uvicorn 进程、无 reload）。部署脚本以 `alembic upgrade head` 覆盖命令跑迁移。
+# 单 uvicorn 进程、无 reload；workers=1。勿设 WEB_CONCURRENCY>1——启动会拒）。
+# 部署脚本以 `alembic upgrade head` 覆盖命令跑迁移。
 CMD ["python", "-m", "agentcore"]

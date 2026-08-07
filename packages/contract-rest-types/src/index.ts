@@ -3,3 +3,8 @@ export type { components, operations, paths } from "./api.generated";
 export type * from "./api.generated";
 export type * from "./audit";
 export type * from "./llm-window";
+export {
+  REST_PATH_TEMPLATES,
+  restPath,
+  type RestPathTemplate,
+} from "./paths.generated";

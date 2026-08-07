@@ -23,8 +23,9 @@ ChannelSurface = Literal["desktop", "web", "mobile", "unknown"]
 class WorkspaceGitFact:
     """Root-``.git`` fact for ``<workspace_context>`` (same rule as ``git`` tool).
 
-    ``present=None`` = could not probe (e.g. remote Local without a local root).
+    ``present=None`` = could not probe (exists/root I/O failed).
     Only the workspace root is considered — no nested scan, no parent climb.
+    LocalWorkspace without Path.root still probes via ``backend.exists(".git")``.
     """
 
     present: bool | None
@@ -107,7 +108,8 @@ def format_workspace_git_line(fact: WorkspaceGitFact) -> str:
             f"{readonly}。"
         )
     return (
-        f"版本控制：未能确认根 `.git`（{scope}；远端 Local 等无本地根时 git 工具可能不可用）。"
+        f"版本控制：未能确认根 `.git`（{scope}）。"
+        "有桌面通道时结构化 `git` 经本机执行；无通道则不可用。"
         "写码时若确认无仓，可请用户授权 `git.init_baseline` 建首基线；不挡派工/开工卡。"
         f"{readonly}。"
     )
@@ -299,8 +301,11 @@ def build_workspace_context(
                 "① 用户要把本机目录当【本地项目】打开（仓库/工程根）→ "
                 "`action=open_local_project`（新建会话挂 Folder，空 subpath；"
                 "禁止改写本会话 folder_id；禁止用 bind 冒充打开项目）；"
+                "①b 同指挥面登记本机目录为项目（先建后派、留本对话）→ "
+                "`action=register_local_project`（禁新会话；禁止改写 folder_id；"
+                "勿用 open 冒充登记）；"
                 "② 本会话仅需本机执行环境（继续云端/裸聊 scratch）→ "
-                "`action=bind_local_folder`（绑 conversations/<id>，≠打开项目）；"
+                "`action=bind_local_folder`（绑 conversations/<id>，≠打开/登记项目）；"
                 "③ 看/分析本机某目录 → `external_mount_readonly`（只读静默；"
                 "【禁止】为只读新发 grant_readonly_folder）；整理 → "
                 "`grant_organize_folder`（与①②正交，勿改绑冒充）；"
@@ -320,7 +325,8 @@ def build_workspace_context(
             "打开本地项目、本机文件夹绑定、区外目录授权均须官方桌面客户端且通道已连接，"
             "当前会话无法履约；请引导用户在桌面客户端打开本对话，或前往 "
             "https://fashitianxia.xyz/download 下载安装桌面端后再操作；"
-            "勿发 grant_* / bind_local_folder / open_local_project 选项卡冒充可授权。"
+            "勿发 grant_* / bind_local_folder / open_local_project / "
+            "register_local_project 选项卡冒充可授权。"
             "【通道复检铁律】用户自称「已装桌面 / 正在用客户端 / 现在用的就是」时："
             "必须以本回合能力行 `host`/`local_open` 与本通道行为准复检，口述不得覆盖结构化事实；"
             "`host=未装配` 或 `local_open=未装配` 时禁止「就好办了 / 桌面就好办 / "
@@ -589,6 +595,18 @@ def build_workspace_context(
     resolved_git = git_fact if git_fact is not None else detect_workspace_git_sync(backend)
     git_line = format_workspace_git_line(resolved_git)
 
+    # 跨项目并行指挥（事实面短教；整条 HOW 见 consult team_orchestration_advanced）。
+    # 与 desktop_line 的 open/register/bind 分流互补，不替代。
+    cross_project_line = (
+        "跨项目指挥：多项目并行→`list_projects` / `resolve_project` 得 id"
+        "（歧义 `ask_user` choice，禁猜最近），再 `delegate` 各 task 填"
+        "`target_folder_id`（换桌+记忆跟桌；不改本会话 folder_id）；"
+        "有出生未点名=默认桌，无出生未点名禁默写 scratch；"
+        "先建：云 `create_project`；本地 ask `register_local_project`（留本对话）；"
+        "`open_local_project`=新会话当出生，勿冒充先建后干；"
+        "多 local 同回合可并行；协作图不改。"
+    )
+
     body_lines = [
         location_line,
         identity_line,
@@ -600,6 +618,7 @@ def build_workspace_context(
         dossier_reviews_line,
         dossier_boundary_line,
         git_line,
+        cross_project_line,
         desktop_line,
         grant_line,
         mounts_line,
