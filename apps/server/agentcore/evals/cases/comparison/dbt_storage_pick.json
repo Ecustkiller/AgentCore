@@ -1,14 +1,15 @@
 {
   "id": "dbt_storage_pick",
   "archetype": "debate",
-  "user_message": "为一个高并发计数器选型存储方案，在 Redis INCR、PostgreSQL 行锁、内存+定期落盘三者中给出推荐，并分别说明每种方案在什么场景下会翻车。",
-  "arms": ["single", "team"],
-  "baseline_arm": "single",
+  "user_message": "为一个高并发计数器选型存储方案：在 Redis INCR、PostgreSQL 行锁、内存+定期落盘三者中，请交一篇选型结论（一篇成稿）：须含明确推荐，并分别说明三种方案各在什么场景下会翻车（共三个翻车边界）。",
+  "arms": ["matched_single", "team"],
+  "baseline_arm": "matched_single",
   "mode": "economy",
   "samples": 5,
+  "_note": "等算力对比：matched_single = 与 team 同 compute 预算的 best-of-N 单体。题面测一篇选型结论（推荐+三翻车），非散点罗列。",
   "checks": {
-    "single": [{ "name": "FinishReason" }],
+    "matched_single": [{ "name": "FinishReason" }],
     "team": [{ "name": "Delegated" }]
   },
-  "rubric": "是否给出明确推荐 + 三方案各自的失败/翻车场景共 3 个边界（如 Redis 持久化窗口丢数据、PG 行锁成为热点瓶颈、内存方案进程宕机丢未落盘窗口）覆盖几个；对立方论证是否逼出真实边界失败模式而非空话。简洁正确优先，不因更长而偏好。"
+  "rubric": "主事：是否交出一篇选型结论——含明确推荐 + 三方案各自翻车边界共 3 个（如 Redis 持久化窗口丢数据、PG 行锁热点瓶颈、内存方案宕机丢未落盘窗口）。对立论证须逼出真实边界失败模式而非空话。缺明确推荐或缺任一翻车边界 → 判差。禁注水与过程元话语；不把「越短越好」当主胜负。"
 }

@@ -315,6 +315,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "impossible",
     reason: "桌面 OS 通知为 Electron Client Tool，手机无此通道 (fold no-op)",
   },
+  external_mount_readonly_required: {
+    verdict: "impossible",
+    reason:
+      "区外只读静默挂载为 Electron Client Tool，手机无此通道 (fold no-op)",
+  },
   host_op_required: {
     verdict: "impossible",
     reason: "本机 Host 回填为 Electron Client Tool，手机无此通道 (fold no-op)",

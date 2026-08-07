@@ -357,3 +357,117 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
     });
   });
 });
+
+describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
+  it("force_one_shot fuse card: fuse copy, no turn-grant buttons", () => {
+    renderCard(
+      card({
+        toolName: "terminal",
+        arguments: {
+          command: "rm -rf /",
+          force_one_shot: true,
+          rule_id: "destructive.rm_root",
+          circuit_breaker_hint: "命中毁灭性命令启发式",
+        },
+      }),
+    );
+    expect(
+      screen.getByText(/安全熔断升格审批（启发式兜底，并非完整拦截）/),
+    ).toBeTruthy();
+    expect(screen.getByText(/命中毁灭性命令启发式/)).toBeTruthy();
+    expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /本轮内都允许/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /本轮内允许所有文件改动/ }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: /允许一次/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /拒绝/ })).toBeTruthy();
+  });
+
+  it("force_one_shot file-op fuse: also hides 本轮内允许所有文件改动", () => {
+    renderCard(
+      card({
+        toolName: "file_write",
+        arguments: {
+          path: "a.txt",
+          content: "x",
+          force_one_shot: true,
+          circuit_breaker_hint: "工作区顶层整树删除",
+        },
+      }),
+    );
+    expect(screen.getByText(/安全熔断升格审批/)).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /本轮内允许所有文件改动/ }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /本轮内都允许/ })).toBeNull();
+  });
+
+  it("sensitive.path_read_ask: turn grants + sensitive copy, no fuse boilerplate", () => {
+    renderCard(
+      card({
+        toolName: "file_read",
+        arguments: {
+          path: ".env",
+          rule_id: "sensitive.path_read_ask",
+          circuit_breaker_hint:
+            "读取凭据类路径需确认\n键名预览：API_KEY, DATABASE_URL",
+        },
+      }),
+    );
+    expect(screen.getByText(/敏感路径读升格审批/)).toBeTruthy();
+    expect(screen.getByText(/键名预览：API_KEY, DATABASE_URL/)).toBeTruthy();
+    expect(screen.queryByText(/安全熔断升格审批/)).toBeNull();
+    expect(screen.getByRole("button", { name: /本轮内都允许/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /允许一次/ })).toBeTruthy();
+  });
+
+  it("allow_turn_grant without force_one_shot tracks as sensitive read", () => {
+    renderCard(
+      card({
+        toolName: "file_read",
+        arguments: {
+          path: ".env.local",
+          allow_turn_grant: true,
+          circuit_breaker_hint: "敏感读需确认",
+        },
+      }),
+    );
+    expect(screen.getByText(/敏感路径读升格审批/)).toBeTruthy();
+    expect(screen.queryByText(/安全熔断升格审批/)).toBeNull();
+    expect(screen.getByRole("button", { name: /本轮内都允许/ })).toBeTruthy();
+  });
+
+  it("circuit_breaker_hint alone does not hide turn grants or apply fuse copy", () => {
+    renderCard(
+      card({
+        toolName: "terminal",
+        arguments: {
+          command: "echo hi",
+          circuit_breaker_hint: "孤立 hint 不应当熔断",
+        },
+      }),
+    );
+    expect(screen.queryByText(/安全熔断升格审批/)).toBeNull();
+    expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
+    expect(screen.getByRole("button", { name: /本轮内都允许/ })).toBeTruthy();
+  });
+
+  it("force_one_shot wins over sensitive rule_id / allow_turn_grant", () => {
+    renderCard(
+      card({
+        toolName: "file_read",
+        arguments: {
+          path: ".env",
+          force_one_shot: true,
+          rule_id: "sensitive.path_read_ask",
+          allow_turn_grant: true,
+          circuit_breaker_hint: "冲突时以熔断为准",
+        },
+      }),
+    );
+    expect(screen.getByText(/安全熔断升格审批/)).toBeTruthy();
+    expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /本轮内都允许/ })).toBeNull();
+  });
+});

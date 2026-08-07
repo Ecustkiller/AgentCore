@@ -1,5 +1,6 @@
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import { StreamError } from "@/lib/errors";
+import { logEvent } from "@/lib/log";
 import {
   BASE_URL,
   getCsrfHeaders,
@@ -154,6 +155,11 @@ export async function pumpSseBody(
   const readChunk = (): ReturnType<typeof reader.read> =>
     new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        // L3：空闲 60s 无字节 → 泵自杀；此后 workspace_op 可能无人履行。
+        logEvent("warn", "sse.idle_stall", {
+          conversation_id: conversationId,
+          idle_timeout_ms: IDLE_TIMEOUT_MS,
+        });
         void reader.cancel().catch(() => {});
         reject(new StreamError("network"));
       }, IDLE_TIMEOUT_MS);

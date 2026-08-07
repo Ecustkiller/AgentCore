@@ -72,18 +72,22 @@ class AskOption(WirePayload):
     that project — never rewrites the current session's ``folder_id``;
     `bind_local_folder` renders as a folder picker that binds the bare-chat scratch
     workspace (``conversations/<id>``) for local execution — not 「打开项目」;
-    `grant_readonly_folder` grants a session-scoped read-only mount under
-    ``external/<alias>/`` (W3; orthogonal to workspace binding — cloud scratch + desktop
-    online is enough; does not change binding);
-    `grant_organize_folder` is the organize-mode counterpart (move/copy/mkdir/trash-delete).
+    `grant_readonly_folder` is a **legacy** session read-only mount under
+    ``external/<alias>/`` (orthogonal to binding); **new** read-only mounts use the
+    ``external_mount_readonly`` tool instead — do not newly emit this action for
+    read-only;
+    `grant_organize_folder` confirms organize-mode (move/copy/mkdir/trash-delete);
+    still requires explicit user confirm (not silent).
     For ``grant_*`` only: optional ``well_known`` (``desktop`` / ``downloads`` /
-    ``documents``) lets the desktop one-click a common folder — resolve when possible and
-    grant directly; optional ``target_name`` (short basename fuzzy token, no path
-    separators) narrows to a unique child under that folder before granting; ambiguity or
-    absent ``well_known`` falls back to the native folder picker (may seed ``defaultPath``).
-    Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry organize_plan
-    items for plan-bound ``file_batch``. ``review_kind`` / ``body`` / ``slug`` / ``section``
-    carry daily_review proposals for server-side apply on confirm."""
+    ``documents``) and optional ``target_name`` (short basename, no path separators)
+    resolve on the desktop with **no** system folder picker — failure is structured
+    not_found / not_directory / ambiguous (never picker fallback). Optional ``path``
+    may carry an absolute directory hint for organize confirm (mount-only transport
+    exception; success surfaces never return abs).
+    Structured ``op`` / ``source`` / ``destination`` / ``path`` fields also carry
+    organize_plan items for plan-bound ``file_batch``. ``review_kind`` / ``body`` /
+    ``slug`` / ``section`` carry daily_review proposals for server-side apply on
+    confirm."""
 
     label: str
     detail: str | None = absent()
@@ -98,10 +102,10 @@ class AskOption(WirePayload):
         | None
     ) = absent()
     well_known: Literal["desktop", "downloads", "documents"] | None = absent(
-        "仅 grant_*：常见目录一键提示；桌面可解析则直授，否则 picker 兜底。"
+        "仅 grant_*：常见目录提示；桌面解析直授，失败明确报错（无 picker 兜底）。"
     )
     target_name: str | None = absent(
-        "仅 grant_*：子目录/压缩包名模糊词（无路径分隔符）；有 well_known 时尽量直授唯一匹配。"
+        "仅 grant_*：子目录名模糊词（无路径分隔符）；与 well_known 合用尽量唯一匹配。"
     )
     op: Literal["move", "copy", "delete", "mkdir"] | None = absent()
     source: str | None = absent()

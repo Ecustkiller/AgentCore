@@ -2,9 +2,18 @@ import { hasLocalFiles } from "@/lib/capabilities";
 import type { GrantFolderHints } from "@/lib/grantFolderHints";
 import { revokeExternalGrant } from "@/lib/revokeExternalGrant";
 import { ApiError, api } from "@/services/api";
-import type { FsRoot } from "@shared/ipc-contract";
+import { invalidateExternalGrants } from "@/services/externalGrants";
+import type {
+  FsRoot,
+  GrantSessionReadonlyRootFailReason,
+} from "@shared/ipc-contract";
 
 export type { GrantFolderHints } from "@/lib/grantFolderHints";
+
+export type GrantOrganizeFailReason =
+  | "unavailable"
+  | GrantSessionReadonlyRootFailReason
+  | "error";
 
 export type GrantOrganizeResult =
   | {
@@ -12,9 +21,23 @@ export type GrantOrganizeResult =
       root: FsRoot;
       alias: string;
       namespace: string;
+      displayLabel?: string;
     }
-  | { ok: false; reason: "cancelled" | "unavailable" }
-  | { ok: false; reason: "error"; message: string };
+  | { ok: false; reason: "unavailable" }
+  | {
+      ok: false;
+      reason: Exclude<GrantOrganizeFailReason, "unavailable">;
+      message: string;
+    };
+
+const RESOLVE_FAIL_FALLBACK: Record<
+  Exclude<GrantSessionReadonlyRootFailReason, "invalid">,
+  string
+> = {
+  not_found: "找不到该目录",
+  not_directory: "路径指向的是文件，不是目录",
+  ambiguous: "匹配到多个目录，请说得更具体",
+};
 
 function describeGrantError(e: unknown): string {
   if (e instanceof ApiError && e.status === 404) {
@@ -33,10 +56,9 @@ export function formatGrantOrganizeFolderAnswer(
 }
 
 /**
- * OS folder picker (or well-known / target hint) → session organize root →
- * POST grant to server. Orthogonal to workspace binding (cloud scratch + desktop
- * online is enough). Same root upgrading from readonly requires this fresh card
- * (mode updated on re-grant).
+ * Resolve grant hints → session organize root → POST grant.
+ * Never opens a folder picker; unresolved → not_found (≠ cancelled).
+ * Same root upgrading from readonly still requires this fresh confirm card.
  */
 export async function pickAndGrantOrganizeFolder(
   conversationId: string,
@@ -46,13 +68,29 @@ export async function pickAndGrantOrganizeFolder(
     return { ok: false, reason: "unavailable" };
   }
   try {
-    const root = await window.fsApi.grantSessionReadonlyRoot({
+    const granted = await window.fsApi.grantSessionReadonlyRoot({
       conversationId,
       mode: "organize",
+      ...(hints?.path ? { path: hints.path } : {}),
       ...(hints?.wellKnown ? { wellKnown: hints.wellKnown } : {}),
       ...(hints?.targetName ? { targetName: hints.targetName } : {}),
     });
-    if (!root) return { ok: false, reason: "cancelled" };
+    if (!granted.ok) {
+      const reason = granted.reason;
+      if (reason === "invalid") {
+        return {
+          ok: false,
+          reason: "error",
+          message: granted.message ?? "无效的请求参数",
+        };
+      }
+      return {
+        ok: false,
+        reason,
+        message: granted.message ?? RESOLVE_FAIL_FALLBACK[reason],
+      };
+    }
+    const root = granted.root;
     try {
       const body = await api.post<{
         grant: { alias: string; namespace: string };
@@ -62,11 +100,13 @@ export async function pickAndGrantOrganizeFolder(
         alias_hint: root.alias ?? root.name,
         mode: "organize",
       });
+      invalidateExternalGrants(conversationId);
       return {
         ok: true,
         root,
         alias: body.grant.alias,
         namespace: body.grant.namespace,
+        displayLabel: granted.displayLabel,
       };
     } catch (e) {
       await revokeExternalGrant(conversationId, root.id);

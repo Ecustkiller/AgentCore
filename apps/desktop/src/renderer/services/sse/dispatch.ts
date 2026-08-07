@@ -1,4 +1,5 @@
 import { assertNever } from "@/lib/assertNever";
+import { logEvent } from "@/lib/log";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
 import { allowsSseEvent } from "@/stores/conversation/turnPhase";
@@ -45,7 +46,24 @@ const HANDLERS = [
  */
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   // 停止生命周期事件门：stopping 仍消费 run_*，挡正文突变；terminal 只放行终态/meta。
-  if (!allowsSseEvent(getTurnPhase(ctx.conversationId), event.type)) return;
+  const turnPhase = getTurnPhase(ctx.conversationId);
+  if (!allowsSseEvent(turnPhase, event.type)) {
+    // L3：stopping/terminal 会静默丢掉 workspace_op_required——否则服务端只见超时。
+    if (event.type === "workspace_op_required") {
+      const payload = event.payload as {
+        request_id?: string;
+        op?: string;
+      };
+      logEvent("warn", "workspace_op.dropped", {
+        conversation_id: ctx.conversationId,
+        request_id: payload?.request_id,
+        op: payload?.op,
+        turn_phase: turnPhase,
+        reason: "turn_phase_gate",
+      });
+    }
+    return;
+  }
 
   // Dev-only 时序探针（默认关；DevTools 执行 __sseTrace() 开）：记每个事件的到达顺序，
   // 回合末把到达序与气泡 process[] 并排对账。no-op when disabled / in prod.

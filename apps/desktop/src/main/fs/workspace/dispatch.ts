@@ -24,6 +24,7 @@ import {
   opReadLines,
 } from "./read";
 import { opErr, opOk } from "./result";
+import { opEnsureTurnBaseline } from "./turnBaseline";
 import {
   opAppend,
   opCopy,
@@ -82,6 +83,7 @@ const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
   "execute",
   "process_start",
   "archive",
+  "ensure_turn_baseline",
   "git_scm",
 ]);
 
@@ -258,6 +260,8 @@ export async function executeWorkspaceOp(
         return opOk({ languages: probeAvailableLanguages() });
       case "archive":
         return await opArchive(root, args);
+      case "ensure_turn_baseline":
+        return await opEnsureTurnBaseline(root, args);
       case "process_start":
         return await opProcessStart(root, args);
       case "process_read":

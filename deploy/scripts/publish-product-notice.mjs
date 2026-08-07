@@ -3,7 +3,7 @@
  * Publish a product notice on production (Banner + IM 官方号).
  *
  *   pnpm publish:notice -- --title "…" --body "…" [--severity high] [--surface both|modal]
- *   [--dismiss once] [--end-hours N|none] [--body-file path]
+ *   [--dismiss once] [--end-hours N|none] [--body-file path] [--title-file path]
  *   [--cta-label "…"] [--cta-url "https://…"]
  *
  * Uses DEPLOY_SSH_* from deploy/.env.deploy.local. Runs create+publish inside
@@ -25,7 +25,8 @@ function arg(name, fallback = "") {
   return process.argv[i + 1];
 }
 
-const title = arg("title").trim();
+const titleFile = arg("title-file").trim();
+const title = (titleFile ? readFileSync(titleFile, "utf8") : arg("title")).trim();
 const bodyFile = arg("body-file").trim();
 const body = (bodyFile ? readFileSync(bodyFile, "utf8") : arg("body")).trim();
 const severity = arg("severity", "high").trim() || "high";
@@ -41,7 +42,7 @@ const ctaUrl = arg("cta-url").trim();
 
 if (!title || !body) {
   console.error(
-    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path] [--cta-label "…"] [--cta-url "https://…"]',
+    'usage: pnpm publish:notice -- --title "…" --body "…" [--surface both|modal] [--end-hours N|none] [--body-file path] [--title-file path] [--cta-label "…"] [--cta-url "https://…"]',
   );
   process.exit(1);
 }

@@ -330,6 +330,7 @@ class EvalHarness:
             sink=sink,
             tool_context=ctx,
             profile=profile,
+            turn_model=profiles.model,
             citation_sink=citations,
             finish_override_sink=finish_override,
             # 交付正文只留最终交付 (Fork-B, 全队对称): score the SAME deliverable a real
@@ -362,6 +363,7 @@ class EvalHarness:
             backend=backend,
             approvals_enabled=False,
             profile_set=profiles,
+            llm_credentials=_eval_credentials(),
         )
         return team_outcome(result, sink, latency_ms=_ms(t0), workspace_root=workspace_root)
 

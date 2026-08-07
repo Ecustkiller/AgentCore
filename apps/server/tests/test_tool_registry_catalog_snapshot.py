@@ -66,6 +66,11 @@ _HOST_SHELL_ORDER = [
     "host_shell",
 ]
 
+# C1: CEO+worker NEVER · desktop_online_class（仅 desktop_online 装配；目录仍常挂）
+_DESKTOP_ONLINE_ORDER = [
+    "external_mount_readonly",
+]
+
 # CEO+worker GRANTABLE：browser_*（builtin · browser_class · include_browser 闸；
 # screenshot 仍 worker-only，不在此列表）
 _BROWSER_CEO_ORDER = [
@@ -163,6 +168,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "host_network_summary": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host_apps": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host_shell": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "external_mount_readonly": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "escalate": (AVAILABLE_TO_WORKER,),
     "post_note": (AVAILABLE_TO_WORKER,),
     "read_notes": (AVAILABLE_TO_WORKER,),
@@ -297,6 +303,7 @@ def test_tool_registry_worker_with_host_order():
         _BUILTIN_ORDER
         + _HOST_L1_ORDER
         + _HOST_SHELL_ORDER
+        + _DESKTOP_ONLINE_ORDER
         + _WORKER_ONLY_ORDER
         + _HOST_L2_ORDER
         + _HOST_L3_ORDER
@@ -310,6 +317,7 @@ def test_catalog_order_and_available_to_snapshot():
         _BUILTIN_ORDER
         + _HOST_L1_ORDER
         + _HOST_SHELL_ORDER
+        + _DESKTOP_ONLINE_ORDER
         + _WORKER_ONLY_ORDER
         + _HOST_L2_ORDER
         + _HOST_L3_ORDER

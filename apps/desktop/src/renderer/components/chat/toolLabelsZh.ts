@@ -16,6 +16,7 @@ export const TOOL_LABELS_ZH: Record<string, string> = {
   git: "Git 写入",
   terminal: "终端",
   desktop_notify: "系统通知",
+  external_mount_readonly: "挂载本机目录",
 };
 
 export function toolLabelZh(name: string): string {

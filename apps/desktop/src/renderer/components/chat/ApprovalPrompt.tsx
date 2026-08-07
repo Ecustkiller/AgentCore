@@ -57,6 +57,42 @@ const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
 /** Consecutive same-tool approval prompts before nudging full_trust. */
 const FULL_TRUST_HINT_AFTER = 3;
 
+/** Gate-injected meta on ``approval.arguments`` — not tool args; strip from card preview. */
+const APPROVAL_GATE_META_KEYS = new Set([
+  "circuit_breaker_hint",
+  "force_one_shot",
+  "rule_id",
+  "allow_turn_grant",
+]);
+
+/**
+ * Machine-readable track for FORCE_APPROVAL cards.
+ * Do **not** infer fuse vs sensitive-read from ``circuit_breaker_hint`` alone.
+ */
+function approvalEscalationTrack(args: Record<string, unknown>): {
+  forceOneShot: boolean;
+  sensitivePathReadAsk: boolean;
+  hint: string;
+} {
+  const forceOneShot = args.force_one_shot === true;
+  const ruleId = typeof args.rule_id === "string" ? args.rule_id.trim() : "";
+  const allowTurnGrant = args.allow_turn_grant === true;
+  const hint =
+    typeof args.circuit_breaker_hint === "string"
+      ? args.circuit_breaker_hint.trim()
+      : "";
+  return {
+    forceOneShot,
+    sensitivePathReadAsk:
+      !forceOneShot && (ruleId === "sensitive.path_read_ask" || allowTurnGrant),
+    hint,
+  };
+}
+
+function isApprovalGateMetaKey(key: string): boolean {
+  return APPROVAL_GATE_META_KEYS.has(key);
+}
+
 function batchOpLine(item: Record<string, unknown>): string {
   const op = String(item.op ?? "").trim();
   if (op === "move")
@@ -310,15 +346,21 @@ export function ApprovalCard({
   const isCodeExecute = approval.toolName === "code_execute";
   const isFileBatch = approval.toolName === "file_batch";
   const isExecution = isExecutionTool(approval.toolName);
-  const preferTurnGrant = isExecution && supportsTurnGrant(approval.toolName);
-  const headline = primaryArg(approval.toolName, approval.arguments);
-  const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
   const isFileOp = isFileOpTool(approval.toolName);
-  const circuitBreakerHint =
-    typeof approval.arguments.circuit_breaker_hint === "string"
-      ? approval.arguments.circuit_breaker_hint.trim()
-      : "";
+  const {
+    forceOneShot,
+    sensitivePathReadAsk,
+    hint: escalationHint,
+  } = approvalEscalationTrack(approval.arguments);
+  /** True fuse: no turn-scope grants (approve_always / approve_always_files). */
+  const showTurnGrantButtons = !forceOneShot;
+  const preferTurnGrant =
+    showTurnGrantButtons && isExecution && supportsTurnGrant(approval.toolName);
+  const headline = primaryArg(approval.toolName, approval.arguments);
+  const argEntries = Object.entries(approval.arguments).filter(
+    ([key]) => !isApprovalGateMetaKey(key),
+  );
 
   const sameToolCount = useMemo(
     () => countToolApprovals(approval.conversationId, approval.toolName),
@@ -327,7 +369,8 @@ export function ApprovalCard({
   const showManagedHint =
     sameToolCount >= FULL_TRUST_HINT_AFTER &&
     recipe !== "managed" &&
-    !circuitBreakerHint;
+    !forceOneShot &&
+    !sensitivePathReadAsk;
 
   const batchOps = useMemo(() => {
     if (!isFileBatch) return [];
@@ -353,7 +396,7 @@ export function ApprovalCard({
     return Object.fromEntries(
       Object.entries(approval.arguments).filter(
         ([key]) =>
-          key !== "code" && key !== "purpose" && key !== "circuit_breaker_hint",
+          key !== "code" && key !== "purpose" && !isApprovalGateMetaKey(key),
       ),
     );
   }, [approval.arguments, isCodeExecute]);
@@ -362,13 +405,13 @@ export function ApprovalCard({
     if (isFileBatch) {
       return Object.fromEntries(
         Object.entries(approval.arguments).filter(
-          ([key]) => key !== "circuit_breaker_hint" && key !== "operations",
+          ([key]) => !isApprovalGateMetaKey(key) && key !== "operations",
         ),
       );
     }
     return Object.fromEntries(
       Object.entries(approval.arguments).filter(
-        ([key]) => key !== "circuit_breaker_hint",
+        ([key]) => !isApprovalGateMetaKey(key),
       ),
     );
   }, [approval.arguments, isCodeExecute, isFileBatch, otherArgs]);
@@ -428,16 +471,17 @@ export function ApprovalCard({
       允许一次
     </Button>
   );
-  const turnGrantButton = supportsTurnGrant(approval.toolName) ? (
-    <Button
-      variant={preferTurnGrant ? "primary" : "neutral"}
-      icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
-      disabled={busy}
-      onClick={() => onDecide("approve_always")}
-    >
-      本轮内都允许
-    </Button>
-  ) : null;
+  const turnGrantButton =
+    showTurnGrantButtons && supportsTurnGrant(approval.toolName) ? (
+      <Button
+        variant={preferTurnGrant ? "primary" : "neutral"}
+        icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
+        disabled={busy}
+        onClick={() => onDecide("approve_always")}
+      >
+        本轮内都允许
+      </Button>
+    ) : null;
 
   return (
     <DecisionCard
@@ -497,9 +541,16 @@ export function ApprovalCard({
               ))}
             </div>
           )}
-          {circuitBreakerHint && (
+          {forceOneShot && (
             <p className="mt-1 text-xs text-muted-foreground">
-              安全熔断升格审批（启发式兜底，并非完整拦截）：{circuitBreakerHint}
+              安全熔断升格审批（启发式兜底，并非完整拦截）
+              {escalationHint ? `：${escalationHint}` : ""}
+            </p>
+          )}
+          {sensitivePathReadAsk && (
+            <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">
+              敏感路径读升格审批
+              {escalationHint ? `：${escalationHint}` : ""}
             </p>
           )}
           {showManagedHint && (
@@ -570,7 +621,7 @@ export function ApprovalCard({
             {turnGrantButton}
           </>
         )}
-        {isFileOp && (
+        {isFileOp && showTurnGrantButtons && (
           <Button
             variant="neutral"
             icon={spinnerOr("approve_always_files", <FileCheck size={13} />)}

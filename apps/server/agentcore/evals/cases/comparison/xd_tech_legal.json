@@ -1,14 +1,15 @@
 {
   "id": "xd_tech_legal",
   "archetype": "cross_domain",
-  "user_message": "我们要做一个「用户上传文件、由 AI 分析内容」的功能。请给出：①最简可行的技术实现方案；②隐私合规要点至少 3 条（需分别对应 GDPR 与中国《个人信息保护法》）。",
-  "arms": ["single", "team"],
-  "baseline_arm": "single",
+  "user_message": "我们要做一个「用户上传文件、由 AI 分析内容」的功能。请交一份跨域决策 brief（一篇成稿，方案与合规互相约束、有取舍）：须给出最简可行技术方案，并嵌入 ≥3 条隐私合规要点（分别对应 GDPR 与中国《个人信息保护法》），说明合规如何约束或改写技术选型，勿拆成互不对话的①②清单。",
+  "arms": ["matched_single", "team"],
+  "baseline_arm": "matched_single",
   "mode": "economy",
   "samples": 5,
+  "_note": "等算力对比：matched_single = 与 team 同 compute 预算的 best-of-N 单体。题面测工程+法务互相约束的决策 brief，非两域分列拼盘。",
   "checks": {
-    "single": [{ "name": "FinishReason" }],
+    "matched_single": [{ "name": "FinishReason" }],
     "team": [{ "name": "Delegated" }]
   },
-  "rubric": "工程域：技术方案是否最简可行（上传→存储→AI 分析→返回结果的链路，含关键风险点）。法务域：是否给出 ≥3 条合规要点，且真正对应 GDPR/个保法（如数据最小化收集、明示同意与告知、留存期限与删除/被遗忘权），而非泛泛而谈。两域是否都体现专业深度（工程 + 法务，单一 system prompt 难兼擅）。简洁准确优先，不因更长而偏好。"
+  "rubric": "主事：是否交出一份跨域决策 brief——技术方案与合规要点互相约束、有明确取舍（合规改写/限制技术选型），而非工程/法务各写一截互不对话。工程：上传→存储→AI 分析→返回的最简可行链路，含关键风险点。法务：≥3 条合规要点且真正对应 GDPR/个保法（如最小化收集、明示同意与告知、留存期限与删除/被遗忘权），非泛谈。胜负看整合与法务对应性；不把「短」当主胜负。禁注水与过程元话语。"
 }

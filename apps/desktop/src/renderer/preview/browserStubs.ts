@@ -28,7 +28,11 @@ const fsApi: FsApi = {
   ensureDefaultRoot: async () => ({ id: "web-preview", name: "Web 预览" }),
   listRoots: async () => [],
   removeRoot: async () => {},
-  grantSessionReadonlyRoot: async () => null,
+  grantSessionReadonlyRoot: async () => ({
+    ok: false as const,
+    reason: "not_found" as const,
+    message: "找不到该目录",
+  }),
   listSessionReadonlyRoots: async () => [],
   revokeSessionReadonlyRoot: async () => false,
   clearSessionReadonlyRoots: async () => {},

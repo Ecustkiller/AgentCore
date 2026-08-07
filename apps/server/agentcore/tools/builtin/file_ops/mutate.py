@@ -428,7 +428,12 @@ class FileWriteTool:
             old_content = await context.backend.read(rel_path)
         except PathNotFound:
             old_content = None
-        except WorkspaceError:
+        except WorkspaceError as e:
+            dead = _maybe_channel_dead_error(e, start)
+            if dead is not None:
+                if coordinator is not None and release_on_fail:
+                    coordinator.release(rel_path, context.run_id)
+                return dead
             old_content = None
         except OSError as e:
             if coordinator is not None and release_on_fail:
@@ -660,7 +665,12 @@ class FileAppendTool:
             old_content = await context.backend.read(rel_path)
         except PathNotFound:
             old_content = None
-        except WorkspaceError:
+        except WorkspaceError as e:
+            dead = _maybe_channel_dead_error(e, start)
+            if dead is not None:
+                if coordinator is not None and release_on_fail:
+                    coordinator.release(rel_path, context.run_id)
+                return dead
             old_content = None
 
         # Disk already looks like finished prose and this run wrote it as prose

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { buildPaletteCommands, commandMatches } from "../paletteCommands";
 
 vi.mock("@/services/demoTape", () => ({
@@ -30,10 +30,6 @@ vi.mock("@/lib/capabilities", async (importOriginal) => {
 
 vi.mock("@/hooks/useConversations", () => ({
   getConversations: vi.fn(() => []),
-}));
-
-vi.mock("@/lib/grantReadonlyFolder", () => ({
-  pickAndGrantReadonlyFolder: vi.fn(),
 }));
 
 vi.mock("@/lib/openLocalProject", () => ({
@@ -128,8 +124,9 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(cmds.some((c) => c.id === "bind-local-folder")).toBe(false);
   });
 
-  it("injects grant command on desktop FS", async () => {
+  it("injects grant command on desktop FS (hint only — no blank picker)", async () => {
     const { hasLocalFiles } = await import("../capabilities");
+    const { notifyError } = await import("@/lib/toast");
     vi.mocked(hasLocalFiles).mockReturnValue(true);
     const cmds = buildPaletteCommands(baseCtx);
     const grant = cmds.find((c) => c.id === "grant-readonly-folder");
@@ -137,6 +134,10 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(grant?.title).toContain("授权本机目录");
     if (!grant) return;
     expect(commandMatches(grant, "zhuomian")).toBe(true);
+    grant.run();
+    expect(notifyError).toHaveBeenCalledWith(
+      "请在对话中说明要授权的本机目录（命令面板不再打开系统选文件夹）",
+    );
   });
 
   it("injects open-local-project and bind-local-folder on desktop FS", async () => {

@@ -118,6 +118,7 @@ def build_builtin_registry(
     include_execution_tools: bool = True,
     include_host_tools: bool = False,
     include_browser: bool = False,
+    include_desktop_online_tools: bool = False,
     location: Literal["server", "local"] | None = None,
     languages: tuple[str, ...] | list[str] | None = None,
 ) -> ToolRegistry:
@@ -135,6 +136,9 @@ def build_builtin_registry(
     ``include_host_tools`` gates the Host face (``host_class``): only when the
     desktop backfill channel is reachable and ``host≠off``.
 
+    ``include_desktop_online_tools`` gates ``desktop_online_class`` tools (e.g.
+    ``external_mount_readonly``): desktop online only — not ``host≠off``.
+
     ``include_browser`` gates the L3 browser class on the builtin surface
     (navigate/click/type/scroll/snapshot — CEO+worker; screenshot stays worker-only).
     Default False so a no-Bridge / no-gVisor process does not leak browser tools into the
@@ -151,6 +155,8 @@ def build_builtin_registry(
         if reg.execution_class and not include_execution_tools:
             continue
         if reg.host_class and not include_host_tools:
+            continue
+        if reg.desktop_online_class and not include_desktop_online_tools:
             continue
         if reg.browser_class and not include_browser:
             continue
@@ -191,6 +197,7 @@ def build_worker_registry(
     registry = build_builtin_registry(
         include_execution_tools=include_execution,
         include_host_tools=include_host,
+        include_desktop_online_tools=desktop_online,
         include_browser=include_browser,
         location=location,
         languages=resolved_languages,
@@ -206,6 +213,8 @@ def build_worker_registry(
         if reg.browser_class and not include_browser:
             continue
         if reg.host_class and not include_host:
+            continue
+        if reg.desktop_online_class and not desktop_online:
             continue
         if reg.local_only and (backend is None or backend.location != "local"):
             continue
@@ -243,6 +252,7 @@ def build_ceo_tool_registry(
     )
     full = build_builtin_registry(
         include_host_tools=include_host,
+        include_desktop_online_tools=desktop_online,
         include_browser=include_browser,
         location=location,
     )

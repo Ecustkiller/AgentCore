@@ -166,8 +166,9 @@ def fuse_aligned_deny_rule_ids() -> frozenset[str]:
 # ── Sensitive path heuristics (allow / ask / deny) ───────────────────────────
 #
 # Templates (``.env.example`` …) → allow. Credential/env files → ask on read
-# (FORCE_APPROVAL, single tool-call). Key material / ``.ssh`` → hard DENY on
-# read. Writes to ask|deny paths stay DENY (no plaintext secret scaffolding).
+# (FORCE_APPROVAL entrance; turn grant allowed for same tool after human approve).
+# Key material / ``.ssh`` → hard DENY on read. Writes to ask|deny paths stay DENY
+# (no plaintext secret scaffolding).
 
 
 class SensitivePathClass(StrEnum):

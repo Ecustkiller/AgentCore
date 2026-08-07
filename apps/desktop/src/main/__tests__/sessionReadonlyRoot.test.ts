@@ -34,17 +34,19 @@ describe("session readonly root write refusal", () => {
     }
   });
 
-  it.each(["execute", "process_start", "archive"] as const)(
-    "rejects %s on readonly roots",
-    async (op) => {
-      const r = await executeWorkspaceOp(readonlyRoot, op, {});
-      expect(r.ok).toBe(false);
-      if (!r.ok) {
-        expect(r.error.kind).toBe("OutsideWorkspace");
-        expect(r.error.detail).toContain("只读");
-      }
-    },
-  );
+  it.each([
+    "execute",
+    "process_start",
+    "archive",
+    "ensure_turn_baseline",
+  ] as const)("rejects %s on readonly roots", async (op) => {
+    const r = await executeWorkspaceOp(readonlyRoot, op, {});
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.kind).toBe("OutsideWorkspace");
+      expect(r.error.detail).toContain("只读");
+    }
+  });
 });
 
 describe("session organize root mode whitelist", () => {
@@ -73,20 +75,23 @@ describe("session organize root mode whitelist", () => {
     }
   });
 
-  it.each(["write", "execute", "process_start", "archive"] as const)(
-    "rejects %s under organize",
-    async (op) => {
-      const r = await executeWorkspaceOp(organizeRoot, op, {
-        path: "a.txt",
-        content: "x",
-      });
-      expect(r.ok).toBe(false);
-      if (!r.ok) {
-        expect(r.error.kind).toBe("OutsideWorkspace");
-        expect(r.error.detail).toMatch(/整理授权|不允许/);
-      }
-    },
-  );
+  it.each([
+    "write",
+    "execute",
+    "process_start",
+    "archive",
+    "ensure_turn_baseline",
+  ] as const)("rejects %s under organize", async (op) => {
+    const r = await executeWorkspaceOp(organizeRoot, op, {
+      path: "a.txt",
+      content: "x",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.kind).toBe("OutsideWorkspace");
+      expect(r.error.detail).toMatch(/整理授权|不允许/);
+    }
+  });
 
   it("rejects permanent delete under organize", async () => {
     const r = await executeWorkspaceOp(organizeRoot, "delete", {

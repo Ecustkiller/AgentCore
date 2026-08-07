@@ -1,0 +1,173 @@
+// @vitest-environment jsdom
+/**
+ * FailureStrip error detail (91eb)：execution=failed 但无 failedRun.error 时，
+ * 回退会话级 error（与底栏 RetryBanner 同源），禁止仍写「未获取到具体错误信息。」
+ */
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { conversationKeys } from "@/lib/queryKeys";
+import {
+  type ExecutionPlan,
+  ExecutionScopeContext,
+  type RunFrame,
+  projectExecution,
+} from "@/stores/execution";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { StatusStrip } from "../StatusStrip";
+
+const MID = "msg-failed-error-strip";
+const INTERRUPT_COPY = "模型响应中断，已保留已生成内容，可继续。";
+
+let sessionError: string | null = null;
+
+vi.mock("@/stores/conversation", async () => {
+  const actual = await vi.importActual<typeof import("@/stores/conversation")>(
+    "@/stores/conversation",
+  );
+  return {
+    ...actual,
+    useActiveGenerating: () => false,
+    useActiveTurnPhase: () => "idle",
+    useActiveError: () => sessionError,
+    useConversationStore: (
+      sel: (s: {
+        currentConversationId: string;
+        stopGeneration: () => void;
+      }) => unknown,
+    ) =>
+      sel({
+        currentConversationId: "conv-1",
+        stopGeneration: () => {},
+      }),
+    getActiveRuntime: () => ({ messages: [] }),
+  };
+});
+
+vi.mock("@/services/turns", () => ({
+  lastUserMessageId: () => null,
+  runRegenerate: vi.fn(),
+}));
+
+const plan: ExecutionPlan = {
+  id: "exec-failed-strip",
+  planType: "multi_agent",
+  taskSummary: "并行调研",
+  agents: [
+    { id: "w1", role: "研究员" },
+    { id: "ceo", role: "CEO 汇总" },
+  ],
+  runs: [
+    { id: "r1", agentId: "w1", task: "调研", dependsOn: [] },
+    { id: "r-ceo", agentId: "ceo", task: "汇总", dependsOn: ["r1"] },
+  ],
+};
+
+/** execution=failed but no run_failed frame → no failedRun.error. */
+const completedOnlyFrames: RunFrame[] = [
+  {
+    t: 1,
+    kind: "run_started",
+    runId: "r1",
+    agentId: "w1",
+    parentRunId: null,
+    runKind: "agent",
+    continuesRunId: null,
+  },
+  {
+    t: 2,
+    kind: "run_completed",
+    runId: "r1",
+    agentId: "w1",
+    outputSummary: "调研完成",
+    durationMs: 100,
+  },
+];
+
+const failedWithErrorFrames: RunFrame[] = [
+  {
+    t: 1,
+    kind: "run_started",
+    runId: "r-ceo",
+    agentId: "ceo",
+    parentRunId: null,
+    runKind: "agent",
+    continuesRunId: null,
+  },
+  {
+    t: 2,
+    kind: "run_failed",
+    runId: "r-ceo",
+    agentId: "ceo",
+    error: "工具超时：web_search",
+  },
+];
+
+function renderStrip(execution: ReturnType<typeof projectExecution>) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
+  });
+  client.setQueryData(conversationKeys.grouped, {
+    folders: [],
+    conversations: [],
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ExecutionScopeContext.Provider value={MID}>
+          <StatusStrip
+            execution={execution}
+            expanded
+            onToggle={() => {}}
+            onMaximize={() => {}}
+            onReplay={() => {}}
+          />
+        </ExecutionScopeContext.Provider>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+}
+
+afterEach(() => {
+  sessionError = null;
+  cleanup();
+});
+
+describe("StatusStrip · FailureStrip error detail", () => {
+  it("no failedRun.error + session interrupt → show session copy, not 未获取到", () => {
+    sessionError = INTERRUPT_COPY;
+    const exec = projectExecution(plan, completedOnlyFrames, "failed");
+    expect(exec.status).toBe("failed");
+    expect(exec.runs.find((r) => r.status === "failed")).toBeUndefined();
+
+    renderStrip(exec);
+
+    expect(screen.getByTestId("status-strip-failed")).toBeTruthy();
+    expect(screen.getByText(INTERRUPT_COPY)).toBeTruthy();
+    expect(screen.queryByText("未获取到具体错误信息。")).toBeNull();
+  });
+
+  it("failedRun.error wins over session error", () => {
+    sessionError = INTERRUPT_COPY;
+    const exec = projectExecution(plan, failedWithErrorFrames, "failed");
+    const failed = exec.runs.find((r) => r.status === "failed");
+    expect(failed?.error).toBe("工具超时：web_search");
+
+    renderStrip(exec);
+
+    expect(screen.getByText("工具超时：web_search")).toBeTruthy();
+    expect(screen.queryByText(INTERRUPT_COPY)).toBeNull();
+    expect(screen.queryByText("未获取到具体错误信息。")).toBeNull();
+  });
+
+  it("no run error and no session error → keep 未获取到 fallback", () => {
+    sessionError = null;
+    const exec = projectExecution(plan, completedOnlyFrames, "failed");
+
+    renderStrip(exec);
+
+    expect(screen.getByText("未获取到具体错误信息。")).toBeTruthy();
+  });
+});

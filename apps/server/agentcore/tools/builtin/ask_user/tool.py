@@ -144,37 +144,39 @@ class AskUserTool:
                     "open_local_project=打开本机文件夹为本地项目（新建会话挂 Folder，"
                     "空 subpath；不改本会话 folder_id）；"
                     "bind_local_folder=本会话绑本机执行环境（裸聊 scratch，≠打开项目）；"
-                    "grant_readonly_folder=开只读授权（区外目录、仅本对话；与绑定正交，"
-                    "云端草稿+桌面在线亦可）；"
-                    "grant_organize_folder=开整理授权（可移动/重命名/复制/删进回收站、仅本对话）。"
+                    "grant_readonly_folder=（旧帧保留；【禁止】为只读新发——"
+                    "只读改用工具 external_mount_readonly）；"
+                    "grant_organize_folder=开整理授权（可移动/重命名/复制/删进回收站、仅本对话；"
+                    "仍须用户确认）。"
                 ),
             }
             option_properties["well_known"] = {
                 "type": "string",
                 "enum": ["desktop", "downloads", "documents"],
                 "description": (
-                    "仅 grant_* 有意义。用户点名桌面/下载/文档时填写对应值，"
-                    "桌面尽量不弹空白选择器直授；位置完全模糊才省略（走选择器兜底）。"
+                    "仅 grant_organize_folder（及旧 grant_readonly 帧）有意义。"
+                    "用户点名桌面/下载/文档时填写对应值；位置模糊可省略。"
+                    "解析失败即「找不到」，不再弹系统选文件夹。"
                 ),
             }
             option_properties["target_name"] = {
                 "type": "string",
                 "description": (
                     "仅 grant_* 有意义。已知子目录/压缩包名模糊词（短字符串，禁 / 与 \\）；"
-                    "有 well_known 时桌面在其下唯一匹配则直授，歧义才 picker。"
-                    "任务说明写 message，勿手填绝对路径。"
+                    "有 well_known 时桌面在其下匹配；歧义/找不到 → 明确失败"
+                    "（不再弹系统选文件夹）。任务说明写 message，勿手填绝对路径。"
                 ),
             }
             questions_desc += (
                 " 打开本机目录当项目→open_local_project；本会话只要本机执行→"
-                "bind_local_folder；区外只读/整理→grant_*"
-                "（action=open_local_project / bind_local_folder / "
-                "grant_readonly_folder / grant_organize_folder）；"
+                "bind_local_folder；区外整理→grant_organize_folder；"
+                "区外只读→工具 external_mount_readonly（【禁止】新发 grant_readonly_folder）；"
                 "点名桌面/下载/文档时带 well_known，已知子名带 target_name。"
             )
             tool_desc += (
                 " 桌面在线时可标 open_local_project / bind_local_folder / "
-                "grant_readonly_folder / grant_organize_folder（按意图分流）；"
+                "grant_organize_folder；只读挂载用 external_mount_readonly 工具，"
+                "【禁止】为只读新发 grant_readonly_folder；"
                 "grant_* 可加 well_known / target_name。"
             )
 

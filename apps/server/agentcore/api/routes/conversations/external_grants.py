@@ -61,7 +61,11 @@ async def grant_external_folder(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Register a conversation mount after the user confirms via folder picker."""
+    """Register a conversation external mount (readonly or organize).
+
+    Called after desktop mint (silent ``external_mount_readonly`` or user-confirmed
+    organize grant). Body carries ``root_id`` / label / mode only — never absolute paths.
+    """
     await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     mount = await grant_store.add_grant(
         conversation_id,

@@ -1,14 +1,15 @@
 {
   "id": "xd_landing_page",
   "archetype": "cross_domain",
-  "user_message": "为一款「AI 简历优化」产品做一个落地页，需要同时产出：①一段有说服力的营销文案；②一段可直接运行的 HTML/CSS 首屏代码；③3 个 SEO 关键词。",
-  "arms": ["single", "team"],
-  "baseline_arm": "single",
+  "user_message": "为一款「AI 简历优化」产品交付一套可交付首屏包（一体终稿，勿拆成互不衔接的①②③清单）：须含有说服力的营销文案、可直接运行的 HTML/CSS 首屏代码、以及 3 个 SEO 关键词；文案与代码须一体呈现，或终稿明确包含可运行首屏且文案已落在页面中。",
+  "arms": ["matched_single", "team"],
+  "baseline_arm": "matched_single",
   "mode": "economy",
   "samples": 5,
+  "_note": "等算力对比：matched_single = 与 team 同 compute 预算的 best-of-N 单体。题面测文案+可运行首屏一体交付，非清单拼盘。",
   "checks": {
-    "single": [{ "name": "FinishReason" }],
+    "matched_single": [{ "name": "FinishReason" }],
     "team": [{ "name": "Delegated" }]
   },
-  "rubric": "三个产物是否齐备且各达专业水准：①营销文案是否有说服力与卖点；②HTML/CSS 是否结构完整可直接运行（含 <html>/<style>，能渲染出首屏）；③是否给满 3 个相关 SEO 关键词。文案/前端/SEO 三种技能各自分开评分（单一 system prompt 难同时擅长三者）。简洁正确优先，不因更长而偏好。"
+  "rubric": "主事：是否交付「一套可交付首屏包」（文案与代码一体或终稿明确含可运行首屏，文案已落页）。分项：①营销质量——卖点清晰、有说服力，非空泛口号；②完整度/可运行性——HTML/CSS 结构完整可直接运行（含 <html>/<style>，能渲染出首屏），缺可运行首屏直接判差；③SEO——给出满 3 个相关关键词。勿用「越短越好」压过可运行性与完整度。禁注水与过程元话语。"
 }

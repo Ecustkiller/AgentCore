@@ -853,13 +853,15 @@ def test_ceo_core_workspace_outranks_global_current_project_memory():
 
 
 def test_core_guides_out_of_workspace_absolute_paths():
-    # 区外路径：对照 workspace_context 能力行；仅桌面已装配才授权；操作手册在 ask_user_*。
+    # 区外路径：对照 workspace_context 能力行；仅桌面已装配才挂载/整理；操作手册在 ask_user_*。
     hint = _CEO_CORE_HINT
     assert "工作区外" in hint
     assert "workspace_context" in hint
-    assert "grant_readonly_folder" in hint
+    assert "external_mount_readonly" in hint
     assert "grant_organize_folder" in hint
     assert "ask_user" in hint
+    # 只读禁新发 grant_readonly 卡；整理仍确认。
+    assert "禁止" in hint and "grant_readonly_folder" in hint
     # 授权后发现：带 well_known；模糊指代禁首轮要文件名。
     assert "授权后发现" in hint
     assert "well_known" in hint
@@ -868,11 +870,14 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "立即发卡" not in hint
     mid = build_system_skill_registry().get("ask_user_midtask")
     assert mid is not None
-    assert "开只读授权" in mid.body or "区外目录" in mid.body
+    assert "external_mount_readonly" in mid.body or "区外目录" in mid.body
     assert "organize_plan" in mid.body
     assert "授权后发现" in mid.body
     assert "well_known" in mid.body
     assert "禁止" in mid.body and "文件名" in mid.body
+    assert "选择器兜底" not in mid.body
+    assert "grant_readonly_folder" in mid.body  # 禁新发叙事仍点名旧 action
+    assert "禁止" in mid.body and "grant_readonly_folder" in mid.body
 
 
 def test_core_teaches_narrowed_attachment_scope_must_start():

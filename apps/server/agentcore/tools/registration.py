@@ -66,6 +66,9 @@ class ToolRegistration:
     # Host 第三能力面: gated by ``host≠off`` + desktop backfill channel (desktop_online).
     # Must NOT set ``execution_class`` — L2/L3 never enter kickoff silent grant.
     host_class: bool = False
+    # Desktop-online-only tools (≠ Host face): gated solely by ``desktop_online``
+    # (e.g. ``external_mount_readonly``). Not gated by ``host≠off``.
+    desktop_online_class: bool = False
     # Catalog-gated tools: listed on the roster + capability catalog, but NOT
     # auto-registered by ``build_worker_registry``. Callers wire them after the registry
     # is built when the runtime gate is on (e.g. ``conversation_history_access`` →
@@ -144,6 +147,7 @@ def _load_declared_tools() -> tuple[type, ...]:
     from agentcore.tools.builtin.delegate import DelegateTool
     from agentcore.tools.builtin.desktop_notify import DesktopNotifyTool
     from agentcore.tools.builtin.escalate import EscalateTool
+    from agentcore.tools.builtin.external_mount_readonly import ExternalMountReadonlyTool
     from agentcore.tools.builtin.file_ops import (
         FileAppendTool,
         FileBatchTool,
@@ -229,6 +233,8 @@ def _load_declared_tools() -> tuple[type, ...]:
         HostNetworkSummaryTool,
         HostAppsTool,
         HostShellTool,
+        # C1 silent read-only external mount (CEO+worker · desktop_online only)
+        ExternalMountReadonlyTool,
         # worker_only
         EscalateTool,
         PostNoteTool,

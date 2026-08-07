@@ -319,12 +319,15 @@ class ApprovalGate:
         ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class.
         A prior ``DENY`` for ``tool_name`` this turn short-circuits without re-prompting.
 
-        ``force=True`` (safety circuit breaker): skip kickoff / turn / session-file
-        grants so catastrophic shapes still require a human click even under
-        ``command=auto``. Turn-wide grants from a forced card are refused (one-shot
-        only) so a single click cannot silently clear sibling destructive prompts.
-        Structured ``git push`` / ``create_pr`` likewise always prompts (session /
-        kickoff / turn grants do not cover remote publish).
+        ``force=True`` (true safety-breaker one-shot): skip kickoff / turn /
+        session-file grants so catastrophic shapes still require a human click even
+        under ``command=auto``. Turn-wide grants from a forced card are refused
+        (one-shot only) so a single click cannot silently clear sibling destructive
+        prompts. Callers pass ``force=False`` for ``sensitive.path_read_ask`` so
+        APPROVE_ALWAYS may write a same-tool turn grant while still forcing the
+        first card via the breaker entrance (read tools are not kickoff/session
+        covered). Structured ``git push`` / ``create_pr`` likewise always prompts
+        (session / kickoff / turn grants do not cover remote publish).
         """
         publish = _is_git_remote_publish(tool_name, arguments)
 

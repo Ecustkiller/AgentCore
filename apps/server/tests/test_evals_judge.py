@@ -3,12 +3,19 @@
 零真实 LLM：注入返回固定 JSON 的假 provider 验证 :class:`LLMJudge` 解析/阈值/多采样/容错；
 用合成 ``TurnOutcome`` 验证诊断 Check 落 ``gating=False`` 不影响 ``CaseReport.passed``；纯函数
 验证回归门。真模型留给 nightly。
+
+verbosity 分流：:func:`resolve_verbosity_policy` + 绝对分/成对裁判系统提示按 concise/coverage
+分支（负样本打冗长；正样本不以更短为胜负主轴）。
 """
 
 import asyncio
 import json
 
-from agentcore.evals.judge import LLMJudge
+from agentcore.evals.judge import (
+    LLMJudge,
+    LLMPairwiseJudge,
+    resolve_verbosity_policy,
+)
 from agentcore.evals.report import baseline_regression, report_to_dict
 from agentcore.evals.runner import apply_checks, run_suite
 from agentcore.evals.types import CaseReport, EvalCase, EvalReport, TurnOutcome
@@ -55,6 +62,111 @@ def _outcome(content: str = "答案", **kw) -> TurnOutcome:
     base = {"content": content, "finish_reason": "end_turn", "rounds": 1}
     base.update(kw)
     return TurnOutcome(**base)
+
+
+# --- verbosity 准则分流 -------------------------------------------------------
+
+
+def test_resolve_verbosity_policy_by_archetype():
+    assert resolve_verbosity_policy(archetype="simple") == "concise"
+    assert resolve_verbosity_policy(archetype="cross_domain") == "coverage"
+    assert resolve_verbosity_policy(archetype="parallel_research") == "coverage"
+    assert resolve_verbosity_policy(archetype="debate") == "coverage"
+    assert resolve_verbosity_policy() == "concise"  # 缺省向后兼容
+
+
+def test_resolve_verbosity_policy_neg_case_id_and_markers():
+    assert resolve_verbosity_policy(case_id="neg_qa_oneliner") == "concise"
+    assert resolve_verbosity_policy(case_id="trap_rust_vs_go") == "concise"
+    # 正样本 archetype 仍可被显式 concise 标记压回（校准覆盖）
+    assert (
+        resolve_verbosity_policy(
+            archetype="cross_domain", rubric="… judge_verbosity:concise …"
+        )
+        == "concise"
+    )
+    # 显式 coverage 标记优先于 simple
+    assert (
+        resolve_verbosity_policy(archetype="simple", rubric="覆盖与合成优先")
+        == "coverage"
+    )
+
+
+class _SystemCaptureProvider:
+    """记录 system 提示，返回固定成对/绝对分 JSON。"""
+
+    def __init__(self, *, pairwise: bool = False) -> None:
+        self.system_prompts: list[str] = []
+        self._pairwise = pairwise
+
+    async def complete(self, request):  # noqa: ANN001
+        self.system_prompts.append(request.messages[0].content or "")
+        if self._pairwise:
+            body = {"winner": "X", "rationale": "r", "margin": 1}
+        else:
+            body = {"score": 5, "rationale": "r"}
+        return LLMResponse(content=json.dumps(body))
+
+
+def test_absolute_judge_default_uses_concise_principle():
+    prov = _SystemCaptureProvider()
+    judge = LLMJudge(prov, "m")
+    asyncio.run(judge.score(_case(), _outcome()))
+    sys = prov.system_prompts[0]
+    assert "简洁正确优于冗长堆砌" in sys
+    assert "覆盖与合成优先" not in sys
+
+
+def test_absolute_judge_coverage_marker_switches_principle():
+    prov = _SystemCaptureProvider()
+    judge = LLMJudge(prov, "m")
+    asyncio.run(judge.score(_case(rubric="judge_verbosity:coverage 看覆盖"), _outcome()))
+    sys = prov.system_prompts[0]
+    assert "覆盖与合成优先" in sys
+    assert "不因答案实质更长" in sys
+    assert "简洁正确优于冗长堆砌" not in sys
+
+
+def test_pairwise_judge_simple_archetype_keeps_verbosity_penalty():
+    prov = _SystemCaptureProvider(pairwise=True)
+    judge = LLMPairwiseJudge(prov, "m", swap=False)
+    asyncio.run(
+        judge.compare(
+            rubric="r",
+            user_message="q",
+            subject_arm="team",
+            subject_content="长答案堆砌",
+            baseline_arm="single",
+            baseline_content="短",
+            archetype="simple",
+            case_id="neg_qa_oneliner",
+        )
+    )
+    sys = prov.system_prompts[0]
+    assert "简洁正确优于冗长堆砌" in sys
+    assert "惩罚注水" in sys or "过度堆砌" in sys
+    assert "覆盖与合成优先" not in sys
+
+
+def test_pairwise_judge_cross_domain_does_not_prefer_shorter():
+    prov = _SystemCaptureProvider(pairwise=True)
+    judge = LLMPairwiseJudge(prov, "m", swap=False)
+    asyncio.run(
+        judge.compare(
+            rubric="r",
+            user_message="q",
+            subject_arm="team",
+            subject_content="长而完整的跨域交付",
+            baseline_arm="single",
+            baseline_content="短半成品",
+            archetype="cross_domain",
+            case_id="xd_landing_page",
+        )
+    )
+    sys = prov.system_prompts[0]
+    assert "覆盖与合成优先" in sys
+    assert "不要仅因答案更短就判其更好" in sys
+    assert "简洁正确优于冗长堆砌" not in sys
 
 
 # --- LLMJudge 绝对分 ---------------------------------------------------------

@@ -333,7 +333,9 @@ describe("TeamPreviewCard", () => {
     );
 
     const marker = screen.getByTestId("pending-decision-marker");
-    expect(marker.textContent).toContain("等你确认 · 确认后才会开赛（预计 2 方开赛）");
+    expect(marker.textContent).toContain(
+      "等你确认 · 确认后才会开赛（预计 2 方开赛）",
+    );
     expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
     expect(screen.queryByText("正方")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();

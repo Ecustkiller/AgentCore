@@ -653,30 +653,31 @@ _ASK_USER_MIDTASK = """\
   勿再弹 `open_local_project`；仅用户要换目录/换工程根才 `open_local_project` / ask。
 - 「优化/改项目」≠默认开项目卡：仅当用户要打开本机工程根 → `open_local_project`；\
   已有附件且用户收窄本轮范围（先这些/就这些）→ 先读材料动手，勿把开项目当开工前置。
-- 看/分析/整理本机某目录（含桌面）→ 只读 `grant_readonly_folder`；整理 \
-  `grant_organize_folder`。与绑定正交：云端草稿 + 桌面在线亦可授权（经桌面通道读 \
-  `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
-- 【授权后发现】用户已点名常见目录（桌面/下载/文档）+ 明确任务 → 首动只发 **单 choice** \
-  `grant_readonly_folder`（或整理则 `grant_organize_folder`），选项带 `well_known`\
-  （desktop/downloads/documents）；已知子目录/压缩包名写入 `target_name`；任务说明写进 \
-  `message`（例：授权桌面后找含「咨询」的压缩包并转 PDF）。**禁止**首轮再叠文本题要文件名/\
-  绝对路径。仅位置完全模糊才不带 well_known（走选择器兜底）。授权后在 \
-  `external/<别名>/…` 列目录 + 关键词匹配并干活；唯一或高置信 → 直接干；仅 0 命中或多个\
-  难分时再短问。勿用 `host_shell` 绕过 grant 探 Desktop。
-桌面在线时 choice 选项可标对应 action（立即发卡，勿纯文本劝授权）。同目录从只读升整理\
-须重新弹卡。确认后区外目录以 `external/<别名>/…` 可用；整理方案用 `card="organize_plan"` \
+- 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
+  well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡。\
+  整理/写回 → `grant_organize_folder`（仍确认）。与绑定正交：云端草稿 + 桌面在线亦可\
+  挂载（经桌面通道读 `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
+- 【授权后发现】用户已点名常见目录（桌面/下载/文档）+ 明确任务 → 只读首动 \
+  `external_mount_readonly`（well_known=desktop/downloads/documents；已知子名写入 \
+  `target_name`）；整理则 **单 choice** `grant_organize_folder` 带 well_known/\
+  target_name，任务说明写进 `message`。**禁止**首轮再叠文本题要文件名/绝对路径。\
+  挂载后在 `external/<别名>/…` 列目录 + 关键词匹配并干活；唯一或高置信 → 直接干；\
+  仅 0 命中或多个难分时再短问。勿用 `host_shell` 绕过挂载探 Desktop。
+桌面在线时整理 choice 可标 `grant_organize_folder`（立即发卡，勿纯文本劝授权）。\
+同目录从只读升整理须重新弹卡（只读挂过 ≠ 已授写）。确认/挂载后区外目录以 \
+`external/<别名>/…` 可用；整理方案用 `card="organize_plan"` \
 → 确认后 `file_batch(organize_plan_id=…)`；扫描/执行：手写单 worker `tasks`\
 （`deliverable.form=files`，工具面仅文件类、禁 code_execute/terminal）；勿再点名已删 playbook。\
 禁止要用户手填绝对路径；禁止用 code_execute/terminal 探主机家目录找 Desktop。\
 Web/移动端无法履行——如实说明须用桌面客户端，并引导官网下载 \
 https://fashitianxia.xyz/download ；勿发 grant_*/bind/open_local_project 冒充可授权。\
 铁律：仅当 `<workspace_context>` mounts 行写明「本对话已授权区外目录…」才可声称已授权\
-/可访问本机目录；尚无授权时禁止说「授权已确认」。授权须用户显式确认。\
+/可访问本机目录；尚无挂载时禁止说「授权已确认」。整理须用户显式确认；只读走静默工具。\
 【通道复检·案 cloud-local-root-auth-where A】用户自称「已装桌面 / 正在用客户端」时仍以\
 `<workspace_context>` 通道行与能力行 `host`/`local_open` 为准复检，口述不得覆盖事实；\
 未装配禁止「就好办了 / 桌面就好办」类话术；对齐步骤：官网下载（若尚未）→ 桌面打开【本对话】→\
-状态栏通道已连 →「打开本地项目」（或按意图 bind/grant）；禁臆造「设置→Folders / 侧栏授权页」\
-等非真源入口；问「授权在哪里」且通道未接时只复述上列步骤与下载链。
+状态栏通道已连 →「打开本地项目」（或按意图 bind / external_mount_readonly / organize）；\
+禁臆造「设置→Folders / 侧栏授权页」等非真源入口；问「授权在哪里」且通道未接时只复述上列步骤与下载链。
 </ask_user_midtask>"""
 
 _VERIFY_AND_FIX = """\

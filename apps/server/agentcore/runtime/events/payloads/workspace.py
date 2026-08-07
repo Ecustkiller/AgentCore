@@ -80,6 +80,19 @@ class DesktopNotifyRequiredPayload(WirePayload):
     body: str | None = absent()
 
 
+class ExternalMountReadonlyRequiredPayload(WirePayload):
+    """Transport-only client-tool request: silently mount a local directory read-only
+    (`external_mount_readonly`). Path transport exception — may carry `path` /
+    `well_known`+`target_name` for desktop resolve; success result must not include abs.
+    NOT journaled."""
+
+    request_id: str
+    conversation_id: str
+    path: str | None = absent()
+    well_known: str | None = absent()
+    target_name: str | None = absent()
+
+
 class HostOpRequiredPayload(WirePayload):
     """Transport-only client-tool request: run a Host op on the bound desktop
     (`host_*` tools). NOT journaled."""

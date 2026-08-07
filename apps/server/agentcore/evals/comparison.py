@@ -181,6 +181,8 @@ async def _select_champion(
             subject_content=judged_text(challenger),
             baseline_arm="champion",
             baseline_content=judged_text(champ),
+            archetype=cc.archetype,
+            case_id=cc.id,
         )
         if verdict.winner == "challenger":
             champ = challenger
@@ -298,6 +300,8 @@ async def run_comparison_case(
                         subject_content=judged_text(s_oc),
                         baseline_arm=cc.baseline_arm,
                         baseline_content=judged_text(b_oc),
+                        archetype=cc.archetype,
+                        case_id=cc.id,
                     )
                 )
             pairwise[arm] = verdicts

@@ -113,13 +113,41 @@ describe("PauseCard · approval", () => {
     expect(screen.queryByText("本轮内所有文件改动")).toBeNull();
   });
 
-  it("surfaces circuit_breaker_hint (incl. credential key preview) on the card", () => {
+  it("force_one_shot: fuse copy + only 允许一次/拒绝 (no turn grants)", () => {
+    render(
+      <PauseCard
+        pending={approval({
+          // file_write ∈ FILE_OP_TOOLS — proves both turn-grant buttons hide.
+          toolName: "file_write",
+          arguments: {
+            path: "/tmp/x",
+            force_one_shot: true,
+            rule_id: "destructive.workspace_top_tree",
+            circuit_breaker_hint:
+              "检测到疑似删除工作区顶层整项目目录的命令（启发式兜底，并非完整拦截）。",
+          },
+        })}
+        conversationId={CONV}
+      />,
+    );
+    expect(
+      screen.getByText(/安全熔断升格审批（启发式兜底，并非完整拦截）/),
+    ).toBeTruthy();
+    expect(screen.getByText("允许一次")).toBeTruthy();
+    expect(screen.getByText("拒绝")).toBeTruthy();
+    expect(screen.queryByText("本轮都允许")).toBeNull();
+    expect(screen.queryByText("本轮内所有文件改动")).toBeNull();
+    expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
+  });
+
+  it("sensitive.path_read_ask: no fuse boilerplate, turn grant + key preview", () => {
     render(
       <PauseCard
         pending={approval({
           toolName: "file_read",
           arguments: {
             path: ".env",
+            rule_id: "sensitive.path_read_ask",
             circuit_breaker_hint:
               "该路径疑似凭据。\n键名预览（无值，启发式）：DATABASE_URL（共 1 个）",
           },
@@ -127,9 +155,32 @@ describe("PauseCard · approval", () => {
         conversationId={CONV}
       />,
     );
-    expect(screen.getByText(/安全熔断升格审批/)).toBeTruthy();
+    expect(screen.getByText(/敏感路径读升格审批/)).toBeTruthy();
     expect(screen.getByText(/键名预览（无值/)).toBeTruthy();
     expect(screen.getByText(/DATABASE_URL/)).toBeTruthy();
+    expect(screen.queryByText(/安全熔断升格审批/)).toBeNull();
+    expect(screen.getByText("允许一次")).toBeTruthy();
+    expect(screen.getByText("本轮都允许")).toBeTruthy();
+    expect(screen.getByText("拒绝")).toBeTruthy();
+  });
+
+  it("does not treat bare circuit_breaker_hint as a fuse card", () => {
+    render(
+      <PauseCard
+        pending={approval({
+          toolName: "file_write",
+          arguments: {
+            path: "/tmp/x",
+            circuit_breaker_hint: "legacy hint without machine flags",
+          },
+        })}
+        conversationId={CONV}
+      />,
+    );
+    expect(screen.queryByText(/安全熔断升格审批/)).toBeNull();
+    expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
+    expect(screen.getByText("本轮都允许")).toBeTruthy();
+    expect(screen.getByText("本轮内所有文件改动")).toBeTruthy();
   });
 
   it("surfaces an error and re-enables the card when the POST fails", async () => {

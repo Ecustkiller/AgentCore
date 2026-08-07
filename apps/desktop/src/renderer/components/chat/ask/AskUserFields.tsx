@@ -11,7 +11,10 @@ import {
   guideDesktopDownload,
   isDesktopFolderAction,
 } from "@/lib/desktopDownload";
-import { grantHintsFromAskOption } from "@/lib/grantFolderHints";
+import {
+  grantHintsFromAskOption,
+  organizeConfirmDetail,
+} from "@/lib/grantFolderHints";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -28,7 +31,7 @@ import type {
   AskQuestion,
   CheckpointIntent,
 } from "@/types/events";
-import { ChevronRight, FolderOpen, Loader2 } from "lucide-react";
+import { ChevronRight, FolderOpen, FolderTree, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LocalPickerFailureCard } from "./LocalPickerFailureCard";
@@ -231,20 +234,19 @@ export function AskQuestionFields({
     clearPickerFeedback();
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantReadonlyFolder(conversationId, hints)
-        : await pickAndGrantReadonlyFolder(conversationId);
+      const result = await pickAndGrantReadonlyFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        if (result.reason === "unavailable") {
           setBindError("区外目录授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantReadonlyFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {
@@ -256,20 +258,19 @@ export function AskQuestionFields({
     }
     if (opt.action === "grant_organize_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantOrganizeFolder(conversationId, hints)
-        : await pickAndGrantOrganizeFolder(conversationId);
+      const result = await pickAndGrantOrganizeFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        if (result.reason === "unavailable") {
           setBindError("整理授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantOrganizeFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {
@@ -503,12 +504,14 @@ function QuestionField({
                 const isDefault =
                   !!question.default && opt.label === question.default;
                 const desktopFolder = isDesktopFolderAction(opt.action);
+                const organizeGrant = opt.action === "grant_organize_folder";
                 const canRunFolder =
                   desktopFolder &&
                   (opt.action === "open_local_project"
                     ? canLocalFs
                     : canBindAction);
                 const bindBusy = bindBusyLabel === opt.label;
+                const confirmDetail = organizeConfirmDetail(opt);
                 return (
                   <div key={opt.label} className="flex w-full flex-col">
                     <Button
@@ -545,6 +548,11 @@ function QuestionField({
                               size={14}
                               className="shrink-0 animate-spin text-muted-foreground"
                             />
+                          ) : organizeGrant ? (
+                            <FolderTree
+                              size={14}
+                              className="shrink-0 text-muted-foreground"
+                            />
                           ) : (
                             <FolderOpen
                               size={14}
@@ -566,9 +574,9 @@ function QuestionField({
                         </span>
                       )}
                     </Button>
-                    {opt.detail && (
+                    {confirmDetail && (
                       <span className="mt-0.5 px-2.5 text-xs text-muted-foreground">
-                        {opt.detail}
+                        {confirmDetail}
                       </span>
                     )}
                   </div>

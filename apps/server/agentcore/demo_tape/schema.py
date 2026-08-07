@@ -66,6 +66,7 @@ CLIENT_TOOL_REQUIRED_KINDS = frozenset(
         "board_op_required",
         "board_read_required",
         "desktop_notify_required",
+        "external_mount_readonly_required",
         "host_op_required",
     }
 )

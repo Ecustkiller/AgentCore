@@ -369,7 +369,10 @@ class ComparisonReport:
 
 
 class PairwiseJudge(Protocol):
-    """成对语义裁判：判「主臂 vs 基准臂」哪个更好（盲评、先理由后结论）。"""
+    """成对语义裁判：判「主臂 vs 基准臂」哪个更好（盲评、先理由后结论）。
+
+    ``archetype`` / ``case_id`` 可选：供裁判按正/负样本分流 verbosity 准则（缺省 = concise）。
+    """
 
     async def compare(
         self,
@@ -380,4 +383,6 @@ class PairwiseJudge(Protocol):
         subject_content: str,
         baseline_arm: str,
         baseline_content: str,
+        archetype: str | None = None,
+        case_id: str | None = None,
     ) -> PairwiseVerdict: ...

@@ -259,14 +259,10 @@ export function teamPreviewLead(args: {
   if (fromWire) return fromWire;
   if (args.primitive === "debate") {
     const n = args.sideCount;
-    return n > 0
-      ? `预计 ${n} 方开赛`
-      : TEAM_PRIMITIVE_META.debate.resumeLead;
+    return n > 0 ? `预计 ${n} 方开赛` : TEAM_PRIMITIVE_META.debate.resumeLead;
   }
   const n = args.workerCount;
-  return n > 0
-    ? `预计 ${n} 人开工`
-    : TEAM_PRIMITIVE_META.delegate.resumeLead;
+  return n > 0 ? `预计 ${n} 人开工` : TEAM_PRIMITIVE_META.delegate.resumeLead;
 }
 
 export function teamResolvedOutcome(

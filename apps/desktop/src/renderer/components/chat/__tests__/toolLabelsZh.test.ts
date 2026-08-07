@@ -8,6 +8,7 @@ describe("toolLabelZh", () => {
     expect(toolLabelZh("git")).toBe("Git 写入");
     expect(toolLabelZh("terminal")).toBe("终端");
     expect(toolLabelZh("desktop_notify")).toBe("系统通知");
+    expect(toolLabelZh("external_mount_readonly")).toBe("挂载本机目录");
   });
 
   it("未知工具回退原名", () => {

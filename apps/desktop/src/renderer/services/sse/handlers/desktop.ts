@@ -1,15 +1,17 @@
 import { performDesktopNotify } from "@/services/desktopNotify";
+import { performExternalMountReadonly } from "@/services/externalMountOps";
 import { performHostOp } from "@/services/hostOps";
 import { performMcpOp } from "@/services/mcpOps";
 import type {
   DesktopNotifyRequiredPayload,
+  ExternalMountReadonlyRequiredPayload,
   HostOpRequiredPayload,
   McpOpRequiredPayload,
   SSEEvent,
 } from "@/types/events";
 import type { DispatchContext } from "../types";
 
-/** Desktop Client Tools: OS notify + Host face + MCP Client backfill. */
+/** Desktop Client Tools: OS notify + Host face + MCP Client + external mount. */
 export function handleDesktopEvent(
   event: SSEEvent,
   ctx: DispatchContext,
@@ -17,6 +19,13 @@ export function handleDesktopEvent(
   if (event.type === "desktop_notify_required") {
     void performDesktopNotify(
       event.payload as DesktopNotifyRequiredPayload,
+      ctx.conversationId,
+    );
+    return true;
+  }
+  if (event.type === "external_mount_readonly_required") {
+    void performExternalMountReadonly(
+      event.payload as ExternalMountReadonlyRequiredPayload,
       ctx.conversationId,
     );
     return true;

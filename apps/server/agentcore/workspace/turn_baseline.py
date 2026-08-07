@@ -3,6 +3,8 @@
 Cloud (``run_and_persist``): labeled OSS/FS snapshot, id → ``messages.baseline_snapshot_id``.
 Local (sidecar ``_run_turn``): zip beside the workspace at
 ``AgentCore/baselines/{message_id}.zip`` (id = message_id; no DB required).
+Local (desktop channel ``LocalWorkspace``): same zip path on the user disk via
+``WorkspaceOp.ENSURE_TURN_BASELINE`` — server never pretends to own a Path.root.
 
 失败 / 超限 / 超时只打日志，绝不阻断回合；桌面降级 A1 工具参数预览。
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -53,6 +56,14 @@ class _LocalBackendMarker:
     location = "local"
 
 
+def _path_root(backend: Any, workspace_root: Path | None) -> Path | None:
+    """Sidecar ``ServerWorkspace(location=local).root`` or explicit override."""
+    if workspace_root is not None:
+        return workspace_root
+    root = getattr(backend, "root", None)
+    return root if isinstance(root, Path) else None
+
+
 async def maybe_capture_turn_baseline(
     *,
     user_id: str,
@@ -65,18 +76,36 @@ async def maybe_capture_turn_baseline(
     """Snapshot the workspace before the turn mutates it. Returns snapshot id or None.
 
     ``backend.location == "server"`` → cloud labeled snapshot (+ DB id stamp).
-    ``backend.location == "local"`` → local zip under ``workspace_root`` (sidecar).
+    ``backend.location == "local"`` + Path root → local zip under ``workspace_root``
+    (sidecar).
+    ``backend.location == "local"`` + channel ``LocalWorkspace`` → desktop
+    ``ensure_turn_baseline`` op (no server Path).
 
     Never raises to block the turn — failures log and return ``None``.
     """
     if backend.location == "local":
-        if workspace_root is None:
-            return None
-        return await _capture_local_baseline(
-            workspace_root=workspace_root,
-            conversation_id=conversation_id,
-            message_id=message_id,
-        )
+        root = _path_root(backend, workspace_root)
+        if root is not None:
+            return await _capture_local_baseline(
+                workspace_root=root,
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+        capture = getattr(backend, "capture_turn_baseline", None)
+        if callable(capture):
+            try:
+                sid = await capture(message_id)
+            except Exception:
+                logger.warning(
+                    "turn.local_baseline_failed",
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    phase="channel_maybe_capture",
+                    exc_info=True,
+                )
+                return None
+            return sid if isinstance(sid, str) and sid.strip() else None
+        return None
     if backend.location != "server":
         return None
     return await _capture_cloud_baseline(
@@ -92,29 +121,56 @@ async def ensure_local_baseline_for_destructive(
     user_id: str,
     conversation_id: str,
     message_id: str,
-    workspace_root: Path,
+    workspace_root: Path | None = None,
+    backend: Any | None = None,
 ) -> bool:
     """P0b: ensure a usable Local zip exists before a destructive script/shell call.
 
-    If a zip is already present, returns True without re-zipping. Otherwise attempts
-    the same capture path as :func:`maybe_capture_turn_baseline` (still best-effort
-    internally — never raises). Returns whether a usable zip is available afterward.
+    Path root (sidecar): if a zip is already present, returns True without re-zipping;
+    otherwise attempts the same capture path as :func:`maybe_capture_turn_baseline`
+    (still best-effort internally — never raises). Returns whether a usable zip is
+    available afterward.
+
+    Channel LocalWorkspace (no Path.root): asks the desktop
+    ``ensure_turn_baseline`` op, which must probe a non-empty zip (no fake ready).
 
     Local-only; callers must not route cloud ``restoreSnapshot`` through this path.
     """
-    if local_baseline_ready(workspace_root, message_id):
-        return True
-    sid = await maybe_capture_turn_baseline(
-        user_id=user_id,
-        folder_id=None,
-        conversation_id=conversation_id,
-        message_id=message_id,
-        backend=_LocalBackendMarker(),  # type: ignore[arg-type]
-        workspace_root=workspace_root,
-    )
-    if sid and local_baseline_ready(workspace_root, sid):
-        return True
-    return local_baseline_ready(workspace_root, message_id)
+    mid = (message_id or "").strip()
+    if not mid:
+        return False
+
+    root = _path_root(backend, workspace_root)
+    if root is not None:
+        if local_baseline_ready(root, mid):
+            return True
+        sid = await maybe_capture_turn_baseline(
+            user_id=user_id,
+            folder_id=None,
+            conversation_id=conversation_id,
+            message_id=mid,
+            backend=_LocalBackendMarker(),  # type: ignore[arg-type]
+            workspace_root=root,
+        )
+        if sid and local_baseline_ready(root, sid):
+            return True
+        return local_baseline_ready(root, mid)
+
+    if backend is not None:
+        ensure_fn = getattr(backend, "ensure_turn_baseline_ready", None)
+        if callable(ensure_fn):
+            try:
+                return bool(await ensure_fn(mid))
+            except Exception:
+                logger.warning(
+                    "turn.local_baseline_failed",
+                    conversation_id=conversation_id,
+                    message_id=mid,
+                    phase="destructive_ensure_channel",
+                    exc_info=True,
+                )
+                return False
+    return False
 
 
 async def _capture_cloud_baseline(

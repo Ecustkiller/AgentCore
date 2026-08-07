@@ -16,7 +16,12 @@ import {
   guideDesktopDownload,
   isDesktopFolderAction,
 } from "@/lib/desktopDownload";
-import { grantHintsFromAskOption } from "@/lib/grantFolderHints";
+import {
+  ORGANIZE_CONFIRM_CAPTION,
+  ORGANIZE_CONFIRM_CTA,
+  grantHintsFromAskOption,
+  organizeConfirmDetail,
+} from "@/lib/grantFolderHints";
 import {
   formatGrantOrganizeFolderAnswer,
   pickAndGrantOrganizeFolder,
@@ -28,7 +33,13 @@ import {
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { AskOption, AskQuestion } from "@/types/events";
-import { ChevronRight, FolderOpen, Loader2, Pencil } from "lucide-react";
+import {
+  ChevronRight,
+  FolderOpen,
+  FolderTree,
+  Loader2,
+  Pencil,
+} from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AskCardFooter, AskCardShell, AskSectionLabel } from "./AskCardShell";
@@ -75,6 +86,10 @@ export function AskDecisionBody({
 
   const canLocalFs = hasLocalFiles() && !!window.fsApi;
   const canBindAction = !!conversationId && !!onBindResolve && canLocalFs;
+
+  const hasOrganizeGrantOption = content.questions.some((q) =>
+    q.options.some((o) => o.action === "grant_organize_folder"),
+  );
 
   const clearPickerFeedback = () => {
     setBindError(null);
@@ -136,20 +151,20 @@ export function AskDecisionBody({
 
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantReadonlyFolder(conversationId, hints)
-        : await pickAndGrantReadonlyFolder(conversationId);
+      const result = await pickAndGrantReadonlyFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        // not_found / not_directory / ambiguous / error → 卡面明确失败（≠ cancelled 静默）
+        if (result.reason === "unavailable") {
           setBindError("区外目录授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantReadonlyFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {
@@ -165,20 +180,19 @@ export function AskDecisionBody({
 
     if (opt.action === "grant_organize_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantOrganizeFolder(conversationId, hints)
-        : await pickAndGrantOrganizeFolder(conversationId);
+      const result = await pickAndGrantOrganizeFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        if (result.reason === "unavailable") {
           setBindError("整理授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantOrganizeFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {
@@ -212,7 +226,8 @@ export function AskDecisionBody({
 
   /**
    * 继续：普通选项 → 原 onContinue；选中 grant_* / bind_* / open_local_project →
-   * 一键=弹 picker（对齐点选项行），取消则留在卡上、不提交口头授权文案。
+   * 一键履约（对齐点选项行）。grant 无系统选文件夹；找不到则卡面失败、不提交口头授权。
+   * 同 root 只读已挂仍须点允许走 organize 履约（禁止静默升写）。
    */
   const handleContinue = () => {
     if (busy || bindBusyLabel) return;
@@ -236,10 +251,20 @@ export function AskDecisionBody({
     void handleBindOption(q, opt);
   };
 
+  const organizePending =
+    findPendingFolderOption()?.opt.action === "grant_organize_folder";
+  const shellCaption = hasOrganizeGrantOption
+    ? ORGANIZE_CONFIRM_CAPTION
+    : (caption ?? META.activeCaption);
+  const shellIcon = hasOrganizeGrantOption ? FolderTree : META.icon;
+  const shellCta = organizePending ? ORGANIZE_CONFIRM_CTA : META.cta;
+  const shellCtaIcon = organizePending ? FolderTree : META.ctaIcon;
+
   const questionRows = (q: AskQuestion): AskRow[] => {
     const picked = answer.answers[q.id] ?? [];
     const rows: AskRow[] = q.options.map((opt) => {
       const desktopFolder = isDesktopFolderAction(opt.action);
+      const organizeGrant = opt.action === "grant_organize_folder";
       const canRunFolder =
         desktopFolder &&
         (opt.action === "open_local_project" ? canLocalFs : canBindAction);
@@ -247,11 +272,13 @@ export function AskDecisionBody({
       return {
         key: opt.label,
         label: opt.label,
-        detail: opt.detail,
+        detail: organizeConfirmDetail(opt),
         hint: opt.recommended && q.default !== opt.label ? "推荐" : undefined,
         icon: desktopFolder ? (
           bindBusy ? (
             <Loader2 size={12} className="animate-spin" />
+          ) : organizeGrant ? (
+            <FolderTree size={12} />
           ) : (
             <FolderOpen size={12} />
           )
@@ -296,15 +323,15 @@ export function AskDecisionBody({
   return (
     <AskCardShell
       variant="decision"
-      icon={META.icon}
-      caption={caption ?? META.activeCaption}
+      icon={shellIcon}
+      caption={shellCaption}
       title={content.question}
       subtitle={content.context || undefined}
       extra={<ManualHelpLink to={MANUAL_HELP.checkpoint} />}
       footer={
         <AskCardFooter
-          cta={META.cta}
-          ctaIcon={META.ctaIcon}
+          cta={shellCta}
+          ctaIcon={shellCtaIcon}
           busy={busy || !!bindBusyLabel}
           submitting={submitting}
           onContinue={handleContinue}

@@ -8,6 +8,7 @@ import {
   type FsRoot,
   type FsWriteInput,
   type FsWriteResult,
+  type GrantSessionReadonlyRootResult,
   type GrantSessionWellKnown,
   type WorkspaceOpName,
 } from "@shared/ipc-contract";
@@ -20,8 +21,8 @@ import {
   requiresOpenConfirm,
 } from "./execGate";
 import { coerceIpcBytes } from "./ipcBytes";
-import { matchTargetName } from "./matchTargetName";
 import { readFile, readTextFile, writeTextFile } from "./preview";
+import { resolveGrantAbsPath } from "./resolveGrantAbsPath";
 import {
   clearSessionRoots,
   deleteRoot,
@@ -82,27 +83,18 @@ function parseTargetName(p: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function parseGrantPath(p: unknown): string | undefined {
+  if (!isRecord(p) || typeof p.path !== "string") return undefined;
+  const trimmed = p.path.trim();
+  return trimmed || undefined;
+}
+
 async function realpathOrSelf(absPath: string): Promise<string> {
   try {
     return await fs.realpath(absPath);
   } catch {
     return absPath;
   }
-}
-
-/** Folder picker; optional `defaultPath` (never returned to renderer). */
-async function pickOpenDirectory(defaultPath?: string): Promise<string | null> {
-  const win =
-    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-  const opts: Electron.OpenDialogOptions = {
-    properties: ["openDirectory"],
-    ...(defaultPath ? { defaultPath } : {}),
-  };
-  const result = win
-    ? await dialog.showOpenDialog(win, opts)
-    : await dialog.showOpenDialog(opts);
-  if (result.canceled || result.filePaths.length === 0) return null;
-  return realpathOrSelf(result.filePaths[0]);
 }
 
 /**
@@ -169,43 +161,14 @@ async function createOrUpgradeSessionRoot(
   };
 }
 
-/** Resolve grant target from wellKnown (+ optional targetName) or blank picker. */
-async function resolveGrantAbsPath(
-  wellKnown: GrantSessionWellKnown | undefined,
-  targetName: string | undefined,
-): Promise<string | null> {
-  if (!wellKnown) {
-    return pickOpenDirectory();
-  }
-
-  let wellKnownAbs: string;
-  try {
-    wellKnownAbs = await realpathOrSelf(app.getPath(wellKnown));
-  } catch {
-    return pickOpenDirectory();
-  }
-
-  if (!targetName) {
-    // Direct-grant the well-known root; no picker.
-    return wellKnownAbs;
-  }
-
-  // One-level match under wellKnown; unresolved → picker with defaultPath.
-  try {
-    const dirents = await fs.readdir(wellKnownAbs, { withFileTypes: true });
-    const entries = dirents.map((d) => ({
-      name: d.name,
-      isDirectory: d.isDirectory(),
-    }));
-    const matched = matchTargetName(entries, targetName);
-    if (matched?.isDirectory) {
-      return realpathOrSelf(join(wellKnownAbs, matched.name));
-    }
-  } catch {
-    // readdir failed — still offer picker at wellKnown
-  }
-  return pickOpenDirectory(wellKnownAbs);
-}
+const GRANT_FAIL_MESSAGES: Record<
+  "not_found" | "not_directory" | "ambiguous",
+  string
+> = {
+  not_found: "找不到该目录",
+  not_directory: "路径指向的是文件，不是目录",
+  ambiguous: "匹配到多个目录，请说得更具体",
+};
 
 // IPC-004（第五轮 IPC 权限面审计）：边界结构校验失败时回给 renderer 的统一信封。畸形入参
 // 仅可能来自被攻破的 renderer——正常 renderer 由共享 TS 契约保证形状。各句柄按其契约回应：
@@ -358,13 +321,15 @@ export function registerFsIpc(): void {
 
   // W3/P1: conversation-scoped root (readonly | organize) — persisted to
   // fs-session-grants.json (not permanent fs-roots.json).
-  // Optional wellKnown / targetName: direct-grant or resolve under well-known;
-  // abs paths never returned to renderer.
+  // Optional path / wellKnown / targetName: resolve only (no folder picker);
+  // abs paths never returned to renderer (displayLabel = basename only).
   ipcMain.handle(
     FS_CHANNELS.grantSessionReadonlyRoot,
-    async (_e, p: unknown): Promise<FsRoot | null> => {
+    async (_e, p: unknown): Promise<GrantSessionReadonlyRootResult> => {
       const args = requireStringFields(p, ["conversationId"]);
-      if (!args) return null;
+      if (!args) {
+        return { ok: false, reason: "invalid", message: INVALID_ARGS };
+      }
       const modeRaw =
         p && typeof p === "object" && "mode" in p
           ? String((p as { mode?: unknown }).mode ?? "readonly")
@@ -373,11 +338,32 @@ export function registerFsIpc(): void {
         modeRaw === "organize" ? "organize" : "readonly";
       const wellKnown = parseWellKnown(p);
       const targetName = parseTargetName(p);
+      const pathHint = parseGrantPath(p);
       await ensureReady();
 
-      const absPath = await resolveGrantAbsPath(wellKnown, targetName);
-      if (!absPath) return null;
-      return createOrUpgradeSessionRoot(args.conversationId, absPath, mode);
+      const resolved = await resolveGrantAbsPath({
+        path: pathHint,
+        wellKnown,
+        targetName,
+        resolveWellKnown: async (key) => app.getPath(key),
+      });
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          reason: resolved.reason,
+          message: GRANT_FAIL_MESSAGES[resolved.reason],
+        };
+      }
+      const root = await createOrUpgradeSessionRoot(
+        args.conversationId,
+        resolved.absPath,
+        mode,
+      );
+      return {
+        ok: true,
+        root,
+        displayLabel: resolved.displayLabel,
+      };
     },
   );
 

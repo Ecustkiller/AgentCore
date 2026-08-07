@@ -28,12 +28,12 @@ alwaysApply: false
 
 半自动清单（只打印步骤/探针，不替你 Publish）：`pnpm release:ship`（`--track api` = 仅热修轨；`--check` = 探 draft 资产）。
 
-**公告两段式（定案 D）**：开搞后预告 → 收口完成后再发完成态；勿绑进 `deploy:backend` 自动发。
+**公告两段式（定案 D · 工作流 A）**：人定「今天发 + 约时」后**立刻预告**（与 gate / 修拦阻并行）；门禁不过则改约时或归档预告。收口在验收完成后发。勿绑进 `deploy:backend` 自动发。**部署前**仍须 `release:gate` 全绿。
 
 ```text
-pnpm release:gate                          # Win 默认串行
+pnpm release:notice -- --phase preview …   # 定案约时后立刻（可与下行并行）
+pnpm release:gate                          # Win 默认串行；红灯不得部署
 # bump → commit → push
-pnpm release:notice -- --phase preview …   # 预告（约时劝停）
 pnpm deploy:backend <sha>
 # full：Win release:win ∥ Mac GHA → 齐资产后 Publish
 # full：mobile / admin / web →（Publish 后）website deploy:pages

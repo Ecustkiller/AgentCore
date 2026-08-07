@@ -91,6 +91,19 @@ export function PauseCard({
   );
 }
 
+/** True fuse / destructive FORCE — hide turn grants; keep honest fuse copy. */
+function isForceOneShot(args: Record<string, unknown>): boolean {
+  return args.force_one_shot === true;
+}
+
+/** Sensitive-path ASK read — turn grant OK; no fuse boilerplate. */
+function isSensitivePathReadAsk(args: Record<string, unknown>): boolean {
+  if (isForceOneShot(args)) return false;
+  if (args.rule_id === "sensitive.path_read_ask") return true;
+  // Backend may also stamp allow_turn_grant (desktop parity).
+  return args.allow_turn_grant === true;
+}
+
 function ApprovalBody({
   pending,
   busy,
@@ -106,20 +119,30 @@ function ApprovalBody({
     typeof pending.arguments.circuit_breaker_hint === "string"
       ? pending.arguments.circuit_breaker_hint.trim()
       : "";
+  const forceOneShot = isForceOneShot(pending.arguments);
+  const sensitiveReadAsk = isSensitivePathReadAsk(pending.arguments);
+  // Machine-readable flags only — never branch fuse UX on hint presence alone.
+  // Copy aligns with desktop ApprovalPrompt (parity).
+  const hintLine = forceOneShot
+    ? `安全熔断升格审批（启发式兜底，并非完整拦截）${
+        circuitBreakerHint ? `：${circuitBreakerHint}` : ""
+      }`
+    : sensitiveReadAsk
+      ? `敏感路径读升格审批${
+          circuitBreakerHint ? `：${circuitBreakerHint}` : ""
+        }`
+      : null;
+  const showTurnGrants = !forceOneShot;
   return (
     <>
       <div className="pause-title">Agent 请求执行 · {label}</div>
       {headline && <div className="pause-arg">{headline}</div>}
-      {circuitBreakerHint ? (
-        <div className="pause-hint">
-          安全熔断升格审批（启发式兜底，并非完整拦截）：{circuitBreakerHint}
-        </div>
-      ) : null}
+      {hintLine ? <div className="pause-hint">{hintLine}</div> : null}
       <div className="pause-actions">
         <Btn tone="primary" disabled={busy} onClick={() => onDecide("approve")}>
           允许一次
         </Btn>
-        {!PER_CALL_TOOLS.has(pending.toolName) && (
+        {showTurnGrants && !PER_CALL_TOOLS.has(pending.toolName) && (
           <Btn
             tone="neutral"
             disabled={busy}
@@ -128,7 +151,7 @@ function ApprovalBody({
             本轮都允许
           </Btn>
         )}
-        {FILE_OP_TOOLS.has(pending.toolName) && (
+        {showTurnGrants && FILE_OP_TOOLS.has(pending.toolName) && (
           <Btn
             tone="neutral"
             disabled={busy}

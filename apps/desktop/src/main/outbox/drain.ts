@@ -11,8 +11,8 @@ import {
 import { BrowserWindow, app, ipcMain } from "electron";
 import { bearerPostJson, refreshAccessToken } from "../auth-client";
 import {
-  type OutboxRecord,
   EMPTY_USER_MESSAGE_PLACEHOLDER,
+  type OutboxRecord,
   PHASE_OPEN,
   PHASE_READY,
   computeBackoffDelayMs,
@@ -110,7 +110,8 @@ async function drainOutboxDetailed(opts?: {
         }
       }
       if (record.phase !== PHASE_READY) continue;
-      if (!(record.user_message || "").trim() ||
+      if (
+        !(record.user_message || "").trim() ||
         (record.user_message || "").trim() === EMPTY_USER_MESSAGE_PLACEHOLDER
       ) {
         // C2: empty / legacy-placeholder um + process (journal/…) must POST so

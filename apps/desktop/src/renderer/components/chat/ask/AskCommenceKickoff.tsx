@@ -80,20 +80,19 @@ export function AskCommenceKickoffBody({
 
     if (opt.action === "grant_readonly_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantReadonlyFolder(conversationId, hints)
-        : await pickAndGrantReadonlyFolder(conversationId);
+      const result = await pickAndGrantReadonlyFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        if (result.reason === "unavailable") {
           setBindError("区外目录授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantReadonlyFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {
@@ -106,20 +105,19 @@ export function AskCommenceKickoffBody({
 
     if (opt.action === "grant_organize_folder") {
       const hints = grantHintsFromAskOption(opt);
-      const result = hints
-        ? await pickAndGrantOrganizeFolder(conversationId, hints)
-        : await pickAndGrantOrganizeFolder(conversationId);
+      const result = await pickAndGrantOrganizeFolder(conversationId, hints);
       if (!result.ok) {
-        if (result.reason === "error") setBindError(result.message);
-        else if (result.reason === "unavailable") {
+        if (result.reason === "unavailable") {
           setBindError("整理授权仅桌面端可用");
+        } else {
+          setBindError(result.message);
         }
         setBindBusyLabel(null);
         return;
       }
       const value = formatGrantOrganizeFolderAnswer(
         opt.label,
-        result.root.name,
+        result.displayLabel ?? result.root.name,
         result.namespace,
       );
       try {

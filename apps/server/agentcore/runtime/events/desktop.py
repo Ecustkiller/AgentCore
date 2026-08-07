@@ -26,6 +26,35 @@ def desktop_notify_required(
     )
 
 
+def external_mount_readonly_required(
+    *,
+    request_id: str,
+    conversation_id: str,
+    path: str | None = None,
+    well_known: str | None = None,
+    target_name: str | None = None,
+) -> SSEEvent:
+    """Ask the bound desktop to silently mount a local directory read-only.
+
+    Path transport exception (C1): may carry ``path`` and/or ``well_known``+
+    ``target_name`` for desktop resolve. Success settle must not include abs.
+    """
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "conversation_id": conversation_id,
+    }
+    if path:
+        payload["path"] = path
+    if well_known:
+        payload["well_known"] = well_known
+    if target_name:
+        payload["target_name"] = target_name
+    return SSEEvent(
+        type=EventType.EXTERNAL_MOUNT_READONLY_REQUIRED,
+        payload=payload,
+    )
+
+
 def host_op_required(
     *,
     request_id: str,

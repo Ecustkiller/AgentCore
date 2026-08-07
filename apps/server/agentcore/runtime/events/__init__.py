@@ -31,6 +31,7 @@ from agentcore.runtime.events.chat import (
 )
 from agentcore.runtime.events.desktop import (
     desktop_notify_required,
+    external_mount_readonly_required,
     host_op_required,
     mcp_op_required,
 )
@@ -137,6 +138,7 @@ __all__ = [
     "browser_live_frame",
     "browser_live_status",
     "desktop_notify_required",
+    "external_mount_readonly_required",
     "host_op_required",
     "mcp_op_required",
     "handoff_snapshot_done",

@@ -8,7 +8,8 @@
  *   pnpm release:notice -- --phase preview --kind hotfix --at 14:30 --summary "修复登录超时"
  *   pnpm release:notice -- --dry-run --phase done --kind hotfix
  *
- * 预告 = 开搞后、部署前；收口 = 桌面转正+官网后（或 api-only 验收后）。
+ * 预告 = 人定约时后立刻（工作流 A，与 gate 并行）；收口 = 桌面转正+官网后（或 api-only 验收后）。
+ * Win：标题/正文走临时文件（--title-file / --body-file），避免 shell:true 拆碎空格标题。
  * 维护/政策/故障仍走 Admin UI，不进本脚本。
  * 文案权威 → docs/05-平台与运维/产品公告文案模板.md
  */
@@ -171,13 +172,15 @@ function main() {
 
   const dir = mkdtempSync(join(tmpdir(), "agentcore-notice-"));
   const bodyFile = join(dir, "body.txt");
+  const titleFile = join(dir, "title.txt");
   writeFileSync(bodyFile, `${built.body}\n`, "utf8");
+  writeFileSync(titleFile, `${built.title}\n`, "utf8");
 
   const args = [
     "publish:notice",
     "--",
-    "--title",
-    built.title,
+    "--title-file",
+    titleFile,
     "--body-file",
     bodyFile,
     "--severity",

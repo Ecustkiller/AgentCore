@@ -5,7 +5,6 @@ import {
   pickAndBindLocalFolder,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { pickAndGrantReadonlyFolder } from "@/lib/grantReadonlyFolder";
 import { startNewConversation } from "@/lib/newConversation";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { chord } from "@/lib/shortcuts";
@@ -380,29 +379,12 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
               "quwai",
               "mulu",
             ],
-            hint: "不改工作区绑定",
+            hint: "请在对话中说明目录",
             run: () => {
-              const id = useConversationStore.getState().currentConversationId;
-              if (!id) {
-                notifyError("请先打开一个对话");
-                return;
-              }
-              void pickAndGrantReadonlyFolder(id).then((result) => {
-                if (!result.ok) {
-                  if (result.reason === "cancelled") return;
-                  if (result.reason === "unavailable") {
-                    notifyError("区外目录授权仅桌面端可用");
-                    return;
-                  }
-                  if (result.reason === "error") {
-                    notifyError(result.message);
-                  }
-                  return;
-                }
-                notifySuccess(`已授权「${result.root.name}」只读`, {
-                  description: `${result.namespace} · 仅本对话、可撤销`,
-                });
-              });
+              // C1：禁止空白选目录；区外只读挂载改由对话 path / well_known 解析履约。
+              notifyError(
+                "请在对话中说明要授权的本机目录（命令面板不再打开系统选文件夹）",
+              );
             },
           },
         ]

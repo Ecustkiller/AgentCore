@@ -42,6 +42,7 @@ function summary(over: Partial<PausedTurnSummary> = {}): PausedTurnSummary {
     context: "两条路线各有取舍。",
     // 契约序列化必带（服务端带默认值恒输出；仅 team_preview 开工卡才有具体值）
     form: "",
+    headline: "",
     motion: "",
     primitive: "delegate",
     max_rounds: 0,

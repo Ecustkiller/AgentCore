@@ -82,9 +82,7 @@ describe("ResumePrompt · live InteractionStore authority", () => {
 
     render(<ResumePrompt />);
 
-    expect(
-      screen.getByText("团队尚未开工。等待你确认后才会上场，请过目分工："),
-    ).toBeTruthy();
+    expect(screen.getByText("预计 1 人开工")).toBeTruthy();
     expect(screen.getByText("授权并开工")).toBeTruthy();
     // Must not have required message_end → surfaceResume dual-write.
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);

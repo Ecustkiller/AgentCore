@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace._paths import normalize_workspace_path
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
@@ -60,6 +61,8 @@ from agentcore.workspace.protocol import (
     TreeResult,
 )
 
+logger = get_logger(__name__)
+
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 # Default extra transport budget (seconds) over a code execution's own timeout
@@ -67,6 +70,8 @@ _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 # is built without an explicit slack (e.g. tests); locate.py injects the configured
 # value for real turns.
 _DEFAULT_EXECUTE_TIMEOUT_SLACK = 30.0
+# Align with turn_baseline.LOCAL_BASELINE_TIMEOUT_S / desktop ARCHIVE gate (60s).
+_LOCAL_BASELINE_CHANNEL_TIMEOUT_S = 60.0
 
 
 class LocalWorkspace:
@@ -586,3 +591,61 @@ class LocalWorkspace:
             exit_code=int(value.get("exit_code", 0)),
             duration_ms=int(value.get("duration_ms", 0)),
         )
+
+    async def capture_turn_baseline(self, message_id: str) -> str | None:
+        """Best-effort Local zip via desktop channel (never raises to block a turn).
+
+        Writes ``AgentCore/baselines/{message_id}.zip`` on the user disk. Returns
+        ``message_id`` when a non-empty zip is ready afterward, else ``None``.
+        """
+        mid = (message_id or "").strip()
+        if not mid:
+            return None
+        try:
+            value = await self._channel.request(
+                WorkspaceOp.ENSURE_TURN_BASELINE,
+                {
+                    "message_id": mid,
+                    "directory": self._base,
+                    "capture": True,
+                },
+                timeout=_LOCAL_BASELINE_CHANNEL_TIMEOUT_S,
+            )
+        except Exception:
+            logger.warning(
+                "turn.local_baseline_failed",
+                conversation_id=self._channel.conversation_id,
+                message_id=mid,
+                phase="channel_capture",
+                exc_info=True,
+            )
+            return None
+        if isinstance(value, dict) and value.get("ready") is True:
+            return mid
+        return None
+
+    async def ensure_turn_baseline_ready(self, message_id: str) -> bool:
+        """Ensure a non-empty Local zip exists (capture if missing). Fail-closed."""
+        mid = (message_id or "").strip()
+        if not mid:
+            return False
+        try:
+            value = await self._channel.request(
+                WorkspaceOp.ENSURE_TURN_BASELINE,
+                {
+                    "message_id": mid,
+                    "directory": self._base,
+                    "capture": True,
+                },
+                timeout=_LOCAL_BASELINE_CHANNEL_TIMEOUT_S,
+            )
+        except Exception:
+            logger.warning(
+                "turn.local_baseline_failed",
+                conversation_id=self._channel.conversation_id,
+                message_id=mid,
+                phase="channel_ensure",
+                exc_info=True,
+            )
+            return False
+        return isinstance(value, dict) and value.get("ready") is True

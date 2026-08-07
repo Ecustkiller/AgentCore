@@ -181,6 +181,27 @@ async def test_filesystem_tools_channel_liveness_stamps_retire(
     )
 
 
+@pytest.mark.asyncio
+async def test_file_write_preread_channel_dead_does_not_pretend_success(tmp_path: Path):
+    """Pre-read liveness must surface channel-dead; must not swallow into write success."""
+
+    class _HangBackend(ServerWorkspace):
+        async def read(self, path: str) -> str:  # noqa: ARG002
+            raise WorkspaceIOError("local workspace op 'read' timed out（活性挂起）")
+
+        async def write(self, *a, **k):  # noqa: ANN002, ANN003
+            raise AssertionError("write must not be called after channel-dead pre-read")
+
+    result = await FileWriteTool().execute(
+        {"path": "a.txt", "content": "x"},
+        _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox())),
+    )
+    assert result.success is False
+    assert result.metadata.get("liveness_timeout") is True
+    assert result.metadata.get("workspace_channel_dead") is True
+    assert "活性挂起" in (result.error or "")
+
+
 def test_derive_channel_timeout_from_outer_deadline():
     token = set_tool_deadline(60.0)
     try:

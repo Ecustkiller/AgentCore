@@ -23,6 +23,13 @@ export const workspaceKeys = {
   list: ["workspaces", "list"] as const,
 };
 
+/** Conversation-scoped external directory grants (`external/<alias>/`). */
+export const externalGrantKeys = {
+  all: ["external-grants"] as const,
+  list: (conversationId: string) =>
+    ["external-grants", "list", conversationId] as const,
+};
+
 /** 多人共享空间（`/v1/shared-spaces`）— 列表 / 邀请 / 成员 / 流水 / 会话挂载. */
 export const sharedSpaceKeys = {
   all: ["shared-spaces"] as const,

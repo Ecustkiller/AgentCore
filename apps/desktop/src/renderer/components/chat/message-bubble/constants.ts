@@ -98,6 +98,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   board_ops: { Icon: Presentation, label: "Edit board" },
   board_read: { Icon: Presentation, label: "Read board" },
   desktop_notify: { Icon: Bell, label: "Notify" },
+  external_mount_readonly: { Icon: Folder, label: "Mount folder" },
   // 本机 Host（第三能力面 · 桌面回填）
   host_ping: { Icon: Monitor, label: "Host ping" },
   host_info: { Icon: Monitor, label: "Host info" },

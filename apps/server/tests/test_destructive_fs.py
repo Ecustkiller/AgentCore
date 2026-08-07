@@ -300,6 +300,153 @@ async def test_local_gate_does_not_stack_on_existing_force(tmp_path: Path):
         current_journal_writer.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_local_gate_channel_ready_skips_no_baseline_upgrade():
+    """轨 3: channel LocalWorkspace (no Path.root) + ready → no no_turn_baseline."""
+    backend = SimpleNamespace(
+        location="local",
+        # No Path.root — channel-only desktop Local.
+        ensure_turn_baseline_ready=AsyncMock(return_value=True),
+    )
+    context = SimpleNamespace(
+        backend=backend,
+        user_id="u1",
+        conversation_id="c1",
+    )
+    writer = TurnJournalWriter(turn_id="turn-ch-ok", conversation_id="c1", trace_id=None)
+    token = current_journal_writer.set(writer)
+    try:
+        hit = await _apply_local_destructive_baseline_gate(
+            tool_name="code_execute",
+            args={
+                "language": "python",
+                "code": 'shutil.rmtree("src/legacy")\n',
+            },
+            context=context,  # type: ignore[arg-type]
+            existing=None,
+        )
+        assert hit is None
+        backend.ensure_turn_baseline_ready.assert_awaited_once_with("turn-ch-ok")
+    finally:
+        current_journal_writer.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_local_gate_channel_not_ready_forces():
+    """轨 3: channel Local without ready still FORCE_APPROVAL (fail-closed)."""
+    backend = SimpleNamespace(
+        location="local",
+        ensure_turn_baseline_ready=AsyncMock(return_value=False),
+    )
+    context = SimpleNamespace(
+        backend=backend,
+        user_id="u1",
+        conversation_id="c1",
+    )
+    writer = TurnJournalWriter(turn_id="turn-ch-miss", conversation_id="c1", trace_id=None)
+    token = current_journal_writer.set(writer)
+    try:
+        hit = await _apply_local_destructive_baseline_gate(
+            tool_name="code_execute",
+            args={
+                "language": "python",
+                "code": 'shutil.rmtree("src/legacy")\n',
+            },
+            context=context,  # type: ignore[arg-type]
+            existing=None,
+        )
+        assert hit is not None
+        assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
+        assert hit.rule_id == "destructive.no_turn_baseline"
+    finally:
+        current_journal_writer.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_local_gate_channel_ready_still_keeps_top_tree_force():
+    """轨 3: ready removes no_turn_baseline only — workspace_top_tree still FORCE."""
+    from agentcore.runtime.safety_breaker import BreakerHit
+
+    existing = BreakerHit(
+        verdict=BreakerVerdict.FORCE_APPROVAL,
+        rule_id="destructive.workspace_top_tree",
+        reason="top",
+    )
+    backend = SimpleNamespace(
+        location="local",
+        ensure_turn_baseline_ready=AsyncMock(return_value=True),
+    )
+    context = SimpleNamespace(backend=backend, user_id="u1", conversation_id="c1")
+    writer = TurnJournalWriter(turn_id="turn-ch-top", conversation_id="c1", trace_id=None)
+    token = current_journal_writer.set(writer)
+    try:
+        hit = await _apply_local_destructive_baseline_gate(
+            tool_name="code_execute",
+            args={
+                "language": "python",
+                "code": 'shutil.rmtree("ai-team-workbench")\n',
+            },
+            context=context,  # type: ignore[arg-type]
+            existing=existing,
+        )
+        assert hit is existing
+        assert hit.rule_id == "destructive.workspace_top_tree"
+        backend.ensure_turn_baseline_ready.assert_awaited()
+    finally:
+        current_journal_writer.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_local_gate_channel_whitelist_still_skips():
+    """轨 3: whitelist cleanup never asks ensure / never upgrades."""
+    backend = SimpleNamespace(
+        location="local",
+        ensure_turn_baseline_ready=AsyncMock(return_value=False),
+    )
+    context = SimpleNamespace(backend=backend, user_id="u1", conversation_id="c1")
+    hit = await _apply_local_destructive_baseline_gate(
+        tool_name="code_execute",
+        args={"language": "python", "code": 'shutil.rmtree("node_modules")\n'},
+        context=context,  # type: ignore[arg-type]
+        existing=None,
+    )
+    assert hit is None
+    backend.ensure_turn_baseline_ready.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_channel_backend_ready_without_path_root():
+    backend = SimpleNamespace(
+        location="local",
+        ensure_turn_baseline_ready=AsyncMock(return_value=True),
+    )
+    ok = await ensure_local_baseline_for_destructive(
+        user_id="u1",
+        conversation_id="c1",
+        message_id="msg-ch",
+        backend=backend,
+    )
+    assert ok is True
+    backend.ensure_turn_baseline_ready.assert_awaited_once_with("msg-ch")
+
+
+@pytest.mark.asyncio
+async def test_maybe_capture_uses_channel_capture_when_no_root():
+    backend = SimpleNamespace(
+        location="local",
+        capture_turn_baseline=AsyncMock(return_value="msg-cap-ch"),
+    )
+    sid = await maybe_capture_turn_baseline(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="c1",
+        message_id="msg-cap-ch",
+        backend=backend,
+    )
+    assert sid == "msg-cap-ch"
+    backend.capture_turn_baseline.assert_awaited_once_with("msg-cap-ch")
+
+
 def test_evaluate_still_denies_host_shell_fuse_without_double_card():
     """fuse⊆DENY must remain a single DENY card (no top-tree overlay)."""
     hit = evaluate_tool_call("host_shell", {"command": "rm -rf /"})

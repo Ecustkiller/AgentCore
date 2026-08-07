@@ -14,6 +14,7 @@ from typing import Any
 from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.desktop import (
     desktop_notify_required,
+    external_mount_readonly_required,
     host_op_required,
     mcp_op_required,
 )
@@ -28,6 +29,7 @@ CHANNEL_WORKSPACE = "workspace"
 CHANNEL_BOARD = "board"
 CHANNEL_BOARD_READ = "board_read"
 CHANNEL_NOTIFY = "notify"
+CHANNEL_EXTERNAL_MOUNT = "external_mount"
 
 # Meta keys on the registry payload (not forwarded into the SSE wire body).
 _META_KEYS = frozenset({"channel", "event_type"})
@@ -113,6 +115,25 @@ def build_client_tool_required(req: InteractionRequest) -> SSEEvent | None:
             title=str(params.get("title") or ""),
             body=str(params.get("body") or ""),
         )
+    if channel == CHANNEL_EXTERNAL_MOUNT:
+        path = params.get("path")
+        well_known = params.get("well_known")
+        target_name = params.get("target_name")
+        return external_mount_readonly_required(
+            request_id=rid,
+            conversation_id=cid,
+            path=str(path) if isinstance(path, str) and path.strip() else None,
+            well_known=(
+                str(well_known)
+                if isinstance(well_known, str) and well_known.strip()
+                else None
+            ),
+            target_name=(
+                str(target_name)
+                if isinstance(target_name, str) and target_name.strip()
+                else None
+            ),
+        )
     return None
 
 
@@ -138,4 +159,5 @@ def _channel_from_event_type(event_type: Any) -> str | None:
         "host_op_required": CHANNEL_HOST,
         "mcp_op_required": CHANNEL_MCP,
         "desktop_notify_required": CHANNEL_NOTIFY,
+        "external_mount_readonly_required": CHANNEL_EXTERNAL_MOUNT,
     }.get(event_type)

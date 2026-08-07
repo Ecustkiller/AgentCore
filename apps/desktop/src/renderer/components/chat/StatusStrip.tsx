@@ -18,6 +18,7 @@ import {
 import {
   type TeamPreviewDisplay,
   isTerminalPhase,
+  useActiveError,
   useActiveTurnPhase,
   useConversationStore,
 } from "@/stores/conversation";
@@ -516,11 +517,20 @@ function FailureStrip({
   teamPreview,
 }: StatusStripProps) {
   const detached = useActiveExecField((rt) => rt.executionDetached);
+  // Same session error RetryBanner / 底栏 already shows (e.g. stream interrupt).
+  const sessionError = useActiveError();
 
   const failedRun = execution.runs.find((s) => s.status === "failed") ?? null;
   const failedAgent = failedRun
     ? (execution.agents.find((a) => a.id === failedRun.agentId) ?? null)
     : null;
+
+  // Prefer run.error; else session-level error (底栏同源). Never claim「未获取到」
+  // when the banner already has a concrete product sentence (91eb strip vs banner).
+  const errorDetail =
+    failedRun?.error?.trim() ||
+    sessionError?.trim() ||
+    "未获取到具体错误信息。";
 
   const money = resolveTurnDisplayMoney(
     null,
@@ -587,7 +597,7 @@ function FailureStrip({
           <p className="text-foreground">执行过程中出现错误</p>
         )}
         <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
-          {failedRun?.error ?? "未获取到具体错误信息。"}
+          {errorDetail}
         </p>
       </div>
     </div>

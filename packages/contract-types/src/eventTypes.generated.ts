@@ -31,6 +31,7 @@ export type SSEEventType =
   | "evidence_ledger"
   | "execution_completed"
   | "execution_detached"
+  | "external_mount_readonly_required"
   | "followups_generated"
   | "followups_unavailable"
   | "graph_append"

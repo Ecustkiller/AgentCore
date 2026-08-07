@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ExternalMountsSection } from "./ExternalMountsSection";
 import { FilesSection } from "./FilesSection";
 import { SharedMountsSection } from "./SharedMountsSection";
 import { SnapshotsSection } from "./SnapshotsSection";
@@ -173,6 +174,7 @@ export function WorkspaceMode() {
         />
       </div>
 
+      <ExternalMountsSection conversationId={conversationId} />
       {isCloudWorkspace ? (
         <SharedMountsSection conversationId={conversationId} />
       ) : null}

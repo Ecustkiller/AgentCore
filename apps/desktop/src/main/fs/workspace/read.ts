@@ -89,19 +89,21 @@ export async function opList(
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
-  // 服务端 list：base 非目录（含不存在）一律 NotADirectory。
-  let baseStat: import("node:fs").Stats | undefined;
-  if (baseReal.ok) {
-    try {
-      baseStat = await fs.stat(baseReal.path);
-    } catch {
-      baseStat = undefined;
-    }
-  }
-  if (!baseReal.ok || !baseStat?.isDirectory()) {
-    if (baseReal.ok === false && baseReal.code === "out_of_root") {
+  // 裸聊懒建尚未 mkdir 时 list 与 index_files 同口径：子树不存在 → 空列表；
+  // 路径存在但非目录 → NotADirectory；越界仍硬错。
+  if (!baseReal.ok) {
+    if (baseReal.code === "out_of_root") {
       return opErr("OutsideWorkspace", directory);
     }
+    return opOk([]);
+  }
+  let baseStat: import("node:fs").Stats | undefined;
+  try {
+    baseStat = await fs.stat(baseReal.path);
+  } catch {
+    baseStat = undefined;
+  }
+  if (!baseStat?.isDirectory()) {
     return opErr("NotADirectory", directory);
   }
 
@@ -267,18 +269,26 @@ export async function opListTree(
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
-  let baseStat: import("node:fs").Stats | undefined;
-  if (baseReal.ok) {
-    try {
-      baseStat = await fs.stat(baseReal.path);
-    } catch {
-      baseStat = undefined;
-    }
-  }
-  if (!baseReal.ok || !baseStat?.isDirectory()) {
-    if (baseReal.ok === false && baseReal.code === "out_of_root") {
+  // 裸聊懒建尚未 mkdir 时 list_tree 与 index_files 同口径：子树不存在 → 空列表；
+  // 路径存在但非目录 → NotADirectory；越界仍硬错。
+  if (!baseReal.ok) {
+    if (baseReal.code === "out_of_root") {
       return opErr("OutsideWorkspace", directory);
     }
+    return opOk({
+      entries: [],
+      truncated: false,
+      elided_count: 0,
+      warnings: [],
+    });
+  }
+  let baseStat: import("node:fs").Stats | undefined;
+  try {
+    baseStat = await fs.stat(baseReal.path);
+  } catch {
+    baseStat = undefined;
+  }
+  if (!baseStat?.isDirectory()) {
     return opErr("NotADirectory", directory);
   }
 

@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from agentcore.runtime.events import EventSink
 from agentcore.shared_spaces.types import SharedMountMode
 from agentcore.workspace import grant_store, shared_mount_store
+from agentcore.workspace.hot_attach import attach_grants_to_backend
 from agentcore.workspace.locate import LocalBinding, build_workspace
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -99,32 +100,30 @@ async def build_turn_backend(
         sink=sink,
         local_binding=local_binding,
     )
-    mounts = await grant_store.grants_as_dict(conversation_id)
-    attach = getattr(backend, "attach_external_mounts", None)
-    if mounts and callable(attach):
-        attach(mounts)
-        # Cloud grants carry root_id only (no abs_path). Attach a per-op channel so
-        # ServerWorkspace can reach the desktop for ``external/`` without flipping
-        # location to local (worker_gate stays off).
-        if getattr(backend, "location", None) == "server" and any(
-            not m.abs_path for m in mounts.values()
-        ):
-            from agentcore.config import settings
-            from agentcore.runtime.interaction import default_interaction_registry
-            from agentcore.workspace.channel import WorkspaceChannel
+    # Cloud root_id-only grants: build a channel from sink so external/ ops reach desktop.
+    # (Same helper mid-turn ``external_mount_readonly`` uses after a silent mint.)
+    from agentcore.config import settings
+    from agentcore.runtime.interaction import default_interaction_registry
+    from agentcore.workspace.channel import WorkspaceChannel
 
-            attach_ch = getattr(backend, "attach_external_channel", None)
-            if callable(attach_ch):
-                attach_ch(
-                    WorkspaceChannel(
-                        sink=sink,
-                        conversation_id=conversation_id,
-                        registry=default_interaction_registry(),
-                        timeout_seconds=settings.workspace_op_timeout_seconds,
-                        root_id="",
-                        max_inflight=settings.workspace_channel_max_inflight,
-                    )
-                )
+    bootstrap_ch: WorkspaceChannel | None = None
+    grants = await grant_store.grants_as_dict(conversation_id)
+    if grants and getattr(backend, "location", None) == "server" and any(
+        not m.abs_path for m in grants.values()
+    ):
+        bootstrap_ch = WorkspaceChannel(
+            sink=sink,
+            conversation_id=conversation_id,
+            registry=default_interaction_registry(),
+            timeout_seconds=settings.workspace_op_timeout_seconds,
+            root_id="",
+            max_inflight=settings.workspace_channel_max_inflight,
+        )
+    await attach_grants_to_backend(
+        backend,
+        conversation_id,
+        workspace_channel=bootstrap_ch,
+    )
 
     shared = shared_mount_store.mounts_as_dict(conversation_id)
     if shared:

@@ -120,6 +120,7 @@ export const TOOL_LABELS: Record<string, string> = {
   board_ops: "Edit board",
   board_read: "Read board",
   desktop_notify: "Notify",
+  external_mount_readonly: "Mount folder",
   // 本机 Host（第三能力面）— keep in sync with TOOL_META.
   host_ping: "Host ping",
   host_info: "Host info",

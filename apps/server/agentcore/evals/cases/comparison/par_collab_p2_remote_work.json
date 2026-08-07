@@ -2,13 +2,13 @@
   "id": "par_collab_p2_remote_work",
   "archetype": "cross_domain",
   "user_message": "请写一篇面向大众的深度报告：远程办公对个人职业发展的长期影响。要求有证据支撑、结构清晰，成篇后请安排独立审校并据此修订，最后给我成品。",
-  "arms": ["single", "team"],
-  "baseline_arm": "single",
+  "arms": ["matched_single", "team"],
+  "baseline_arm": "matched_single",
   "mode": "economy",
-  "samples": 2,
-  "_note": "协作基线质量臂·原型2：成篇+独立审查环的质量增益对照。",
+  "samples": 5,
+  "_note": "协作基线质量臂·原型2：成篇+独立审查环的质量增益对照。等算力对比：matched_single = 与 team 同 compute 预算的 best-of-N 单体。",
   "checks": {
-    "single": [
+    "matched_single": [
       { "name": "FinishReason" },
       { "name": "DeliverableIntegrity" }
     ],
@@ -18,5 +18,5 @@
       { "name": "DeliverableIntegrity" }
     ]
   },
-  "rubric": "成篇质量：结构是否清晰、证据是否具体、论证是否自洽；是否像经过审校（少明显空话/自相矛盾）。团队若有独立审查环，应比单体自审更少结构性盲区。简洁有力优先，不因更长而偏好。"
+  "rubric": "主事：成篇完整（结构清晰、证据具体、论证自洽的成品报告）+ 独立审校改进（成品应体现审校修订痕迹或质量提升：少空话/自相矛盾/结构性盲区；团队若有独立审查环，应比单体自审更少结构性盲区）。「简洁」降级为：禁注水、禁过程元话语；不把「越短越好」当主胜负。"
 }

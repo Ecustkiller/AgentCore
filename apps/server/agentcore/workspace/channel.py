@@ -100,6 +100,10 @@ class WorkspaceOp(StrEnum):
     # NOT a WorkspaceBackend method — issued directly by the handoff orchestrator
     # (workspace/handoff.py), not by the engine/tools.
     ARCHIVE = "archive"
+    # Desktop-channel Local turn baseline: zip / probe ``AgentCore/baselines/{id}.zip``
+    # on the user disk (server has no Path.root). NOT a WorkspaceBackend method —
+    # issued by turn_baseline / destructive gate via LocalWorkspace helpers.
+    ENSURE_TURN_BASELINE = "ensure_turn_baseline"
     # Background process ops (双模式工作区 §四): spawn / read / stop / list long-lived
     # processes held by the desktop main process. NOT WorkspaceBackend methods — issued by
     # the worker-only ``terminal`` tool over the same channel (LocalWorkspace + sidecar).

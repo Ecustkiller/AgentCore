@@ -14,6 +14,7 @@ const entries = [
 describe("matchTargetName", () => {
   it("prefers case-insensitive exact basename", () => {
     expect(matchTargetName(entries, "reports")).toEqual({
+      status: "matched",
       name: "Reports",
       isDirectory: true,
     });
@@ -21,6 +22,7 @@ describe("matchTargetName", () => {
 
   it("uses unique contains match when no exact", () => {
     expect(matchTargetName(entries, "photo")).toEqual({
+      status: "matched",
       name: "Photos",
       isDirectory: true,
     });
@@ -28,29 +30,33 @@ describe("matchTargetName", () => {
 
   it("prefers the unique dir among multiple contains matches", () => {
     expect(matchTargetName(entries, "report")).toEqual({
+      status: "matched",
       name: "Reports",
       isDirectory: true,
     });
   });
 
-  it("returns null when contains is ambiguous across dirs", () => {
+  it("returns ambiguous when contains is ambiguous across dirs", () => {
     const multi = [
       { name: "June Reports", isDirectory: true },
       { name: "July Reports", isDirectory: true },
     ];
-    expect(matchTargetName(multi, "Reports")).toBeNull();
+    expect(matchTargetName(multi, "Reports")).toEqual({
+      status: "ambiguous",
+    });
   });
 
-  it("returns null for zero matches", () => {
-    expect(matchTargetName(entries, "nowhere")).toBeNull();
+  it("returns none for zero matches", () => {
+    expect(matchTargetName(entries, "nowhere")).toEqual({ status: "none" });
   });
 
-  it("returns null for blank target", () => {
-    expect(matchTargetName(entries, "  ")).toBeNull();
+  it("returns none for blank target", () => {
+    expect(matchTargetName(entries, "  ")).toEqual({ status: "none" });
   });
 
   it("can uniquely match a file when no dir competes", () => {
     expect(matchTargetName(entries, "notes")).toEqual({
+      status: "matched",
       name: "notes.txt",
       isDirectory: false,
     });

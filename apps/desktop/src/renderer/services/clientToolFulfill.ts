@@ -1,3 +1,4 @@
+import { logEvent } from "@/lib/log";
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 
@@ -27,6 +28,24 @@ export function resetClientToolFulfillmentForTests(): void {
   fulfilled.clear();
 }
 
+function logWorkspaceResolve(
+  conversationId: string,
+  requestId: string,
+  logLabel: string,
+  outcome: "ok" | "stale_404" | "fail",
+  extra?: Record<string, unknown>,
+): void {
+  // 仅本地工作区通道需要 L3 分型；其它 client_tool 保持安静。
+  if (logLabel !== "workspaceOps") return;
+  const level = outcome === "fail" ? "error" : "info";
+  logEvent(level, "workspace_op.resolve", {
+    conversation_id: conversationId,
+    request_id: requestId,
+    outcome,
+    ...extra,
+  });
+}
+
 async function tryResolve(
   conversationId: string,
   requestId: string,
@@ -38,9 +57,20 @@ async function tryResolve(
       kind: "client_tool",
       ...result,
     });
+    logWorkspaceResolve(conversationId, requestId, logLabel, "ok", {
+      result_ok: result.ok,
+    });
     return true;
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return true; // stale — no-op
+    if (err instanceof ApiError && err.status === 404) {
+      logWorkspaceResolve(conversationId, requestId, logLabel, "stale_404");
+      return true; // stale — no-op
+    }
+    const httpStatus = err instanceof ApiError ? err.status : null;
+    logWorkspaceResolve(conversationId, requestId, logLabel, "fail", {
+      http_status: httpStatus,
+      error_name: err instanceof Error ? err.name : "unknown",
+    });
     console.error(`[${logLabel}] 回填失败`, err);
     return false;
   }

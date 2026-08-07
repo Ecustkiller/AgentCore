@@ -18,10 +18,12 @@ from agentcore.core.types import new_id
 from agentcore.runtime.events import (
     EventSink,
     desktop_notify_required,
+    external_mount_readonly_required,
     host_op_required,
     mcp_op_required,
 )
 from agentcore.runtime.events.client_tool_reattach import (
+    CHANNEL_EXTERNAL_MOUNT,
     CHANNEL_HOST,
     CHANNEL_MCP,
     CHANNEL_NOTIFY,
@@ -36,6 +38,10 @@ logger = get_logger(__name__)
 
 class DesktopNotifyError(Exception):
     """A desktop notify request failed (desktop error, drop, or timeout)."""
+
+
+class ExternalMountError(Exception):
+    """An external mount request failed (not found, desktop error, drop, or timeout)."""
 
 
 class HostOpError(Exception):
@@ -127,6 +133,65 @@ class DesktopClientChannel:
             raise DesktopNotifyError(detail or "桌面通知失败")
         value = result.get("value")
         return value if isinstance(value, dict) else {"shown": True}
+
+    async def request_external_mount_readonly(
+        self,
+        *,
+        path: str | None = None,
+        well_known: str | None = None,
+        target_name: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Emit a silent read-only mount request; return desktop ``value`` (no abs)."""
+        request_id = new_id()
+        params: dict[str, Any] = {}
+        if path:
+            params["path"] = path
+        if well_known:
+            params["well_known"] = well_known
+        if target_name:
+            params["target_name"] = target_name
+        deadline = self.timeout_seconds if timeout is None else timeout
+        try:
+            result = await self.registry.suspend(
+                request_id,
+                self.conversation_id,
+                kind=InteractionKind.CLIENT_TOOL,
+                payload=client_tool_payload(
+                    CHANNEL_EXTERNAL_MOUNT,
+                    EventType.EXTERNAL_MOUNT_READONLY_REQUIRED.value,
+                    params=params,
+                ),
+                timeout=deadline,
+                on_suspended=lambda: self.sink.emit(
+                    external_mount_readonly_required(
+                        request_id=request_id,
+                        conversation_id=self.conversation_id,
+                        path=path,
+                        well_known=well_known,
+                        target_name=target_name,
+                    )
+                ),
+            )
+        except TimeoutError as e:
+            logger.info(
+                "desktop.external_mount_timeout",
+                conversation_id=self.conversation_id,
+                request_id=request_id,
+            )
+            raise ExternalMountError("挂载本机目录超时（客户端未响应）") from e
+
+        if not isinstance(result, dict) or not result.get("ok"):
+            detail = ""
+            if isinstance(result, dict):
+                err = result.get("error")
+                if isinstance(err, dict):
+                    detail = str(err.get("detail", "") or "")
+                elif err:
+                    detail = str(err)
+            raise ExternalMountError(detail or "找不到该目录，无法挂载")
+        value = result.get("value")
+        return value if isinstance(value, dict) else {}
 
     async def request_host(
         self,

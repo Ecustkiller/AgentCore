@@ -58,6 +58,7 @@ const TOOL_LABEL: Record<string, string> = {
   board_ops: "Edit board",
   board_read: "Read board",
   desktop_notify: "Notify",
+  external_mount_readonly: "Mount folder",
   host_ping: "Host ping",
   host_info: "Host info",
   host_audio_devices: "Audio devices",

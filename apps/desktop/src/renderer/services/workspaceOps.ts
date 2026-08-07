@@ -1,3 +1,4 @@
+import { logEvent } from "@/lib/log";
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
@@ -95,37 +96,77 @@ async function runLocalOp(
   const ac = timeoutMs != null ? new AbortController() : null;
   const timer =
     ac && timeoutMs != null ? setTimeout(() => ac.abort(), timeoutMs) : null;
+  const t0 = Date.now();
+  logEvent("info", "workspace_op.ipc_begin", {
+    conversation_id: conversationId,
+    request_id: payload.request_id,
+    op: payload.op,
+    root_id: rootId,
+    timeout_ms: timeoutMs ?? null,
+  });
   try {
     const opPromise = fsApi.workspaceOp(
       rootId,
       payload.op as WorkspaceOpName,
       args,
     );
-    if (!ac) return await opPromise;
-    return await Promise.race([
-      opPromise,
-      new Promise<WorkspaceOpResult>((_, reject) => {
-        if (ac.signal.aborted) {
-          reject(new DOMException("workspace op aborted", "AbortError"));
-          return;
-        }
-        ac.signal.addEventListener(
-          "abort",
-          () => reject(new DOMException("workspace op aborted", "AbortError")),
-          { once: true },
-        );
-      }),
-    ]);
+    const result = !ac
+      ? await opPromise
+      : await Promise.race([
+          opPromise,
+          new Promise<WorkspaceOpResult>((_, reject) => {
+            if (ac.signal.aborted) {
+              reject(new DOMException("workspace op aborted", "AbortError"));
+              return;
+            }
+            ac.signal.addEventListener(
+              "abort",
+              () =>
+                reject(new DOMException("workspace op aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+        ]);
+    logEvent("info", "workspace_op.ipc_end", {
+      conversation_id: conversationId,
+      request_id: payload.request_id,
+      op: payload.op,
+      ok: result.ok,
+      duration_ms: Date.now() - t0,
+      error_kind: result.ok ? null : result.error?.kind,
+      // L3：失败 detail 通常是路径/原因短串（非文件正文）
+      error_detail: result.ok
+        ? null
+        : typeof result.error?.detail === "string"
+          ? result.error.detail.slice(0, 200)
+          : null,
+    });
+    return result;
   } catch (e) {
     if (
       (e instanceof DOMException && e.name === "AbortError") ||
       (e instanceof Error && e.name === "AbortError")
     ) {
+      logEvent("warn", "workspace_op.aborted", {
+        conversation_id: conversationId,
+        request_id: payload.request_id,
+        op: payload.op,
+        duration_ms: Date.now() - t0,
+        timeout_ms: timeoutMs ?? null,
+      });
       if (!NON_FILE_CHANNEL_OPS.has(payload.op)) {
         useWorkspaceChannelStore.getState().markNotReady();
       }
       return ioError("本地工作区 op 活性挂起（已按服务端 deadline abort）");
     }
+    logEvent("error", "workspace_op.ipc_end", {
+      conversation_id: conversationId,
+      request_id: payload.request_id,
+      op: payload.op,
+      ok: false,
+      duration_ms: Date.now() - t0,
+      error_kind: "throw",
+    });
     return ioError(e instanceof Error ? e.message : String(e));
   } finally {
     if (timer != null) clearTimeout(timer);

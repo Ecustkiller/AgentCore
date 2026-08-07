@@ -33,6 +33,9 @@ async def _apply_local_destructive_baseline_gate(
     (``location != local`` skips). ``registry_egress`` rw-bind deletes are out of
     scope (footnote / tests).
 
+    Readiness is ``ensure_local_baseline_for_destructive`` (Path root *or*
+    desktop channel ready) — never "does backend have Path.root".
+
     Does not stack a second card when ``existing`` is already DENY or
     FORCE_APPROVAL — still best-effort ensures a baseline so post-approval
     restore remains possible.
@@ -67,21 +70,26 @@ async def _apply_local_destructive_baseline_gate(
         return existing
 
     # Prefer ServerWorkspace.root (sidecar Local). Channel-only LocalWorkspace
-    # has no Path root here — fail closed to FORCE_APPROVAL when we cannot zip.
-    workspace_root = getattr(context.backend, "root", None)
+    # has no Path root — ask desktop ensure_turn_baseline (ready signal), never
+    # invent a server-side Path.root.
+    from pathlib import Path
+
+    raw_root = getattr(context.backend, "root", None)
+    workspace_root = raw_root if isinstance(raw_root, Path) else None
     from agentcore.runtime.journal.writer import current_journal_writer
 
     writer = current_journal_writer.get()
     message_id = (writer.turn_id if writer is not None else "") or ""
 
     ready = False
-    if workspace_root is not None and message_id:
+    if message_id:
         try:
             ready = await ensure_local_baseline_for_destructive(
                 user_id=context.user_id or "",
                 conversation_id=context.conversation_id or "",
                 message_id=message_id,
                 workspace_root=workspace_root,
+                backend=None if workspace_root is not None else context.backend,
             )
         except Exception:
             logger.warning(
@@ -182,6 +190,16 @@ async def _check_safety_and_approval_gates(
     force_breaker = (
         breaker is not None and breaker.verdict is BreakerVerdict.FORCE_APPROVAL
     )
+    # Sensitive credential read stays FORCE at the entrance (needs_approval /
+    # no sandbox auto-pass) but authorize uses force=False so APPROVE_ALWAYS
+    # can write a same-tool turn grant. True destructive / no-baseline / top-tree
+    # FORCE keep force=True (one-shot; turn grant refused).
+    allow_turn_grant = (
+        force_breaker
+        and breaker is not None
+        and breaker.rule_id == "sensitive.path_read_ask"
+    )
+    authorize_force = force_breaker and not allow_turn_grant
     if breaker is not None and breaker.verdict is BreakerVerdict.FORCE_APPROVAL:
         from agentcore.runtime.audit.hooks import on_circuit_breaker
 
@@ -195,6 +213,8 @@ async def _check_safety_and_approval_gates(
         )
         # Surface a preview-only hint on the approval card (arguments are already
         # truncated for SSE; tools execute the original ``args`` unchanged).
+        # Machine-readable rule_id / force_one_shot let clients hide turn-grant
+        # buttons and pick copy without treating hint presence as "fuse".
         hint = breaker.reason
         if breaker.rule_id == "sensitive.path_read_ask" and isinstance(args, dict):
             from agentcore.runtime.credential_preview import build_keys_preview_line
@@ -207,7 +227,10 @@ async def _check_safety_and_approval_gates(
         args_for_gate = {
             **args,
             "circuit_breaker_hint": hint,
+            "rule_id": breaker.rule_id,
         }
+        if authorize_force:
+            args_for_gate["force_one_shot"] = True
     else:
         args_for_gate = args
 
@@ -280,7 +303,7 @@ async def _check_safety_and_approval_gates(
             tool_name=name,
             arguments=args_for_gate,
             execution_id=context.execution_id,
-            force=force_breaker,
+            force=authorize_force,
         )
         logger.info(
             "tool.execute_start",
@@ -297,7 +320,7 @@ async def _check_safety_and_approval_gates(
                 tool_call_id=tc.id,
                 arguments=args_for_gate,
                 execution_id=context.execution_id,
-                force=force_breaker,
+                force=authorize_force,
             )
             if decision is ApprovalDecision.DENY:
                 # Denial is a governance signal (user refuse / timeout), not an execution

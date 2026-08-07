@@ -1,4 +1,7 @@
-import { TEAM_PRIMITIVE_META, teamPreviewLead } from "@/components/chat/decision";
+import {
+  TEAM_PRIMITIVE_META,
+  teamPreviewLead,
+} from "@/components/chat/decision";
 import {
   DebatePreviewBody,
   WorkerPreviewRows,

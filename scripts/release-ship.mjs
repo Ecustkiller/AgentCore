@@ -7,8 +7,9 @@
  *   pnpm release:ship -- --sha abc1234
  *   pnpm release:ship -- --check      # 额外探测：git / 桌面 draft 资产（需 gh）
  *
- * 公告两段式（定案 D）：
- *   预告 = gate 绿、决定开搞后 → pnpm release:notice -- --phase preview …
+ * 公告两段式（定案 D · 工作流 A）：
+ *   预告 = 人定「今天发 + 约时」后立刻 → pnpm release:notice -- --phase preview …
+ *         （与 release:gate / 修拦阻并行；红了改约时或归档预告；部署前仍须 gate 全绿）
  *   收口 = 桌面转正 + 官网（或 api-only 验收）后 → --phase done
  *
  * 权威命令细节 → .cursor/rules/cursor-deploy.mdc · docs/05 发布与门禁 / 产品公告文案模板
@@ -132,7 +133,15 @@ function main() {
   );
 
   let n = 1;
-  printStep(n++, "本地门禁（发布必须全量非 lite）", [
+  printStep(n++, "【公告·预告】人定约时后立刻发（工作流 A · 与门禁并行）", [
+    track === "full"
+      ? `pnpm release:notice -- --phase preview --kind release --at HH:MM --highlights "亮点1；亮点2；亮点3"`
+      : `pnpm release:notice -- --phase preview --kind hotfix --at HH:MM --summary "一句话变更"`,
+    "勿等 gate 全绿才预告；门禁不过 → 改约时或 Admin 归档预告",
+    "dry-run 可先: 同上命令加 --dry-run",
+  ]);
+
+  printStep(n++, "本地门禁（部署前必须全量非 lite 全绿）", [
     win
       ? "Win 默认串行（避免 contracts∥desktop 写盘撞锁）：pnpm release:gate"
       : "pnpm release:gate",
@@ -149,13 +158,6 @@ function main() {
   printStep(n++, "提交 + push", [
     `git add -A && git commit  # 信息示例: release: api ${v.api} / desktop ${v.desktop} / …`,
     "git push origin HEAD",
-  ]);
-
-  printStep(n++, "【公告·预告】决定开搞后立刻发（两段式 D）", [
-    track === "full"
-      ? `pnpm release:notice -- --phase preview --kind release --at HH:MM --highlights "亮点1；亮点2；亮点3"`
-      : `pnpm release:notice -- --phase preview --kind hotfix --at HH:MM --summary "一句话变更"`,
-    "dry-run 可先: 同上命令加 --dry-run",
   ]);
 
   printStep(n++, "后端上线（必须先于客户端）", [

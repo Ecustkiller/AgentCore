@@ -2383,7 +2383,10 @@ export interface paths {
         put?: never;
         /**
          * Grant External Folder
-         * @description Register a conversation mount after the user confirms via folder picker.
+         * @description Register a conversation external mount (readonly or organize).
+         *
+         *     Called after desktop mint (silent ``external_mount_readonly`` or user-confirmed
+         *     organize grant). Body carries ``root_id`` / label / mode only — never absolute paths.
          */
         post: operations["grant_external_folder_v1_conversations__conversation_id__workspace_external_grants_post"];
         /**

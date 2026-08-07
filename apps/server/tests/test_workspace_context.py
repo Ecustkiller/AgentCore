@@ -109,19 +109,22 @@ def test_cloud_scratch_facts():
     assert "host=已装配" in out
     assert "bind_local_folder" in out
     assert "open_local_project" in out
-    assert "grant_readonly_folder" in out
+    assert "external_mount_readonly" in out
     assert "grant_organize_folder" in out
     assert "与工作区绑定正交" in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "云端无法直接授权本机区外路径" not in out
+    # 只读静默：禁新发 grant_readonly 卡；无选择器兜底叙事。
+    assert "禁止" in out and "grant_readonly_folder" in out
+    assert "选择器兜底" not in out
     assert "立即" in out and "勿用纯文本" in out
     # 授权后发现：禁首轮文本题要文件名；须提示 well_known
-    assert "授权后发现" in out
+    assert "授权后发现" in out or "well_known" in out
     assert "well_known" in out
     assert "文件名" in out
     assert "在哪工作" in out
     assert "仅新建会话" in out
-    assert "ask_user" in out  # 本机出路走卡，勿纯文本
+    assert "ask_user" in out  # 本机整理/打开仍走卡
     assert "≠打开项目" in out or "禁止用 bind 冒充" in out
     assert "勿引导用户去设置改模式" in out
     # 定案 A：优化项目 ≠ 默认催开项目；附件收窄范围时先干活。
@@ -371,7 +374,7 @@ def test_no_mounts_forbids_claiming_grant_confirmed():
 
 
 def test_cloud_desktop_online_allows_external_grant_without_bind():
-    """W3 正交：云端 scratch + 桌面在线 → 可直接 grant，勿要求先 bind。"""
+    """W3 正交：云端 scratch + 桌面在线 → 可直接只读静默挂载，勿要求先 bind。"""
     out = build_workspace_context(
         _FakeBackend("server", root_label="conv:x"),
         desktop_online=True,
@@ -379,11 +382,13 @@ def test_cloud_desktop_online_allows_external_grant_without_bind():
         terminal_enabled=False,
     )
     assert "执行位置：云端沙箱" in out
-    assert "grant_readonly_folder" in out
+    assert "external_mount_readonly" in out
     assert "与工作区绑定正交" in out
     assert "看桌面" in out or "本机某目录" in out
     assert "手填绝对路径" in out or "探主机家目录" in out
     assert "区外目录授权需先处在本地工作区" not in out
+    assert "选择器兜底" not in out
+    assert "禁止" in out and "grant_readonly_folder" in out
 
 
 def test_assemble_system_prompt_includes_workspace_facts():

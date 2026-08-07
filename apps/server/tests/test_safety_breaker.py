@@ -689,7 +689,10 @@ async def test_full_trust_auto_pass_bypassed_for_destructive_via_tool_exec():
     assert messages[0].content == "ran"
     required = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
     assert len(required) == 1
-    assert "circuit_breaker_hint" in required[0].payload["arguments"]
+    gate_args = required[0].payload["arguments"]
+    assert "circuit_breaker_hint" in gate_args
+    assert gate_args["rule_id"] == "destructive.rm_root"
+    assert gate_args["force_one_shot"] is True
 
 
 async def test_sensitive_credential_read_forces_approval():
@@ -760,6 +763,8 @@ async def test_sensitive_credential_read_forces_approval():
     assert len(required) == 1
     gate_args = required[0].payload["arguments"]
     hint = gate_args["circuit_breaker_hint"]
+    assert gate_args["rule_id"] == "sensitive.path_read_ask"
+    assert "force_one_shot" not in gate_args
     # Key assertion: preview lands only on approval args.circuit_breaker_hint;
     # file body must not be fed to the model via hint / gate args / execute args.
     assert "键名预览" in hint
@@ -771,7 +776,94 @@ async def test_sensitive_credential_read_forces_approval():
     assert "super-secret-value" not in (messages[0].content or "")
     assert executed_args.get("path") == ".env"
     assert "circuit_breaker_hint" not in executed_args
+    assert "rule_id" not in executed_args
+    assert "force_one_shot" not in executed_args
     assert "super-secret-value" not in str(executed_args)
+
+
+async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
+    """path_read_ask: first card required; APPROVE_ALWAYS → same-tool re-read skips."""
+    sink = EventSink()
+    registry = InteractionRegistry()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-grant",
+        registry=registry,
+        timeout_seconds=5.0,
+        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+    )
+    read_paths: list[str] = []
+
+    class _Backend:
+        location = "local"
+        root = Path(".")
+
+        async def read(self, path: str) -> str:
+            return "KEY=1\n"
+
+    class _ReadTool:
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_read",
+                description="t",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.NEVER,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            read_paths.append(str(arguments.get("path") or ""))
+            return ToolResult(tool_call_id="", success=True, output="ok")
+
+    tools = ToolRegistry()
+    tools.register(_ReadTool())
+    ctx = ToolContext(
+        execution_id="exec-grant",
+        run_id="run-grant",
+        agent_id="a",
+        backend=_Backend(),  # type: ignore[arg-type]
+        user_id="u",
+        conversation_id="conv-grant",
+    )
+
+    tc1 = ToolCall(
+        id="tc-grant-1",
+        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+    )
+
+    async def _approve_always() -> None:
+        await _resolve_when_ready(
+            registry, "tc-grant-1", ApprovalDecision.APPROVE_ALWAYS, "conv-grant"
+        )
+
+    approve_task = asyncio.create_task(_approve_always())
+    messages1, _, attempts1 = await tool_exec_mod.execute_tools(
+        [tc1], tools, ctx, sink, approval_gate=gate, run_id="run-grant"
+    )
+    await approve_task
+    assert attempts1[0].success is True
+    assert messages1[0].content == "ok"
+    assert "file_read" in gate._granted  # noqa: SLF001
+    required1 = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
+    assert len(required1) == 1
+    assert required1[0].payload["arguments"]["rule_id"] == "sensitive.path_read_ask"
+    assert "force_one_shot" not in required1[0].payload["arguments"]
+
+    tc2 = ToolCall(
+        id="tc-grant-2",
+        function=ToolCallFunction(
+            name="file_read", arguments='{"path": ".env.local"}'
+        ),
+    )
+    messages2, _, attempts2 = await tool_exec_mod.execute_tools(
+        [tc2], tools, ctx, sink, approval_gate=gate, run_id="run-grant"
+    )
+    assert attempts2[0].success is True
+    assert messages2[0].content == "ok"
+    required2 = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
+    assert required2 == []
+    assert read_paths == [".env", ".env.local"]
 
 
 async def test_sensitive_credential_preview_soft_fail_still_asks():
@@ -836,7 +928,10 @@ async def test_sensitive_credential_preview_soft_fail_still_asks():
     assert messages[0].content == "ok"
     required = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
     assert len(required) == 1
-    hint = required[0].payload["arguments"]["circuit_breaker_hint"]
+    soft_args = required[0].payload["arguments"]
+    hint = soft_args["circuit_breaker_hint"]
+    assert soft_args["rule_id"] == "sensitive.path_read_ask"
+    assert "force_one_shot" not in soft_args
     assert "并非完整拦截" in hint
     assert "键名预览" not in hint
 

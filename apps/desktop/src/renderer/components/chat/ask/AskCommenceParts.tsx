@@ -9,8 +9,9 @@ import {
   guideDesktopDownload,
   isDesktopFolderAction,
 } from "@/lib/desktopDownload";
+import { organizeConfirmDetail } from "@/lib/grantFolderHints";
 import type { AskAssumption, AskOption, AskQuestion } from "@/types/events";
-import { Check, FolderOpen, Loader2 } from "lucide-react";
+import { Check, FolderOpen, FolderTree, Loader2 } from "lucide-react";
 import type { AskTone } from "./AskUserFields";
 
 /** Kickoff option selection uses primary so chosen cards read clearly vs idle. */
@@ -365,6 +366,7 @@ export function ChoiceQuestion({
             >
               {question.options.map((opt) => {
                 const desktopFolder = isDesktopFolderAction(opt.action);
+                const organizeGrant = opt.action === "grant_organize_folder";
                 const canRunFolder =
                   desktopFolder &&
                   (opt.action === "open_local_project"
@@ -375,7 +377,7 @@ export function ChoiceQuestion({
                   <OptionButton
                     key={opt.label}
                     label={opt.label}
-                    detail={opt.detail}
+                    detail={organizeConfirmDetail(opt)}
                     recommended={opt.recommended}
                     isDefault={
                       !!question.default && opt.label === question.default
@@ -412,6 +414,11 @@ export function ChoiceQuestion({
                           <Loader2
                             size={14}
                             className="shrink-0 animate-spin text-muted-foreground"
+                          />
+                        ) : organizeGrant ? (
+                          <FolderTree
+                            size={14}
+                            className="shrink-0 text-muted-foreground"
                           />
                         ) : (
                           <FolderOpen

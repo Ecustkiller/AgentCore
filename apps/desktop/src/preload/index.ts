@@ -100,6 +100,9 @@ const fsApi: FsApi = {
         : {
             conversationId: conversationIdOrParams.conversationId,
             mode: conversationIdOrParams.mode ?? "readonly",
+            ...(conversationIdOrParams.path
+              ? { path: conversationIdOrParams.path }
+              : {}),
             ...(conversationIdOrParams.wellKnown
               ? { wellKnown: conversationIdOrParams.wellKnown }
               : {}),

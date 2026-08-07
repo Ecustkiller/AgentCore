@@ -383,11 +383,11 @@ def test_debate_kickoff_summary_shape():
 
 
 def test_delegate_kickoff_headline_intensity_and_fallback():
+    from agentcore.runtime.kickoff import delegate_kickoff_summary
     from agentcore.runtime.kickoff.summary import (
         format_kickoff_headline,
         intensity_short_label,
     )
-    from agentcore.runtime.kickoff import delegate_kickoff_summary
 
     assert intensity_short_label("lean") == "MVP主流程"
     assert intensity_short_label("solo") == "一页先上线"

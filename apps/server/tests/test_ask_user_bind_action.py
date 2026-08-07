@@ -275,7 +275,12 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert "bind_local_folder" in advertised.schema.description
     assert "grant_readonly_folder" in advertised.schema.description
     assert "grant_organize_folder" in advertised.schema.description
+    assert "external_mount_readonly" in advertised.schema.description
+    assert "禁止" in advertised.schema.description
     action_desc = props2["action"]["description"]
     assert "open_local_project" in action_desc
     assert "本地项目" in action_desc
     assert "bind_local_folder" in action_desc
+    assert "external_mount_readonly" in action_desc or "禁止" in action_desc
+    assert "选择器兜底" not in props2["well_known"]["description"]
+    assert "picker" not in props2["target_name"]["description"].lower()

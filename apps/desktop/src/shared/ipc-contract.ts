@@ -126,6 +126,9 @@ export type FsWriteResult =
  *
  * ``archive`` 不对应任何 backend 方法——它是本地→云交接（P2e / e1）专用 op：把整个绑定
  * 根打包成单个归档（套用忽略规则）交服务端暂存并快照，由 handoff 编排直接下发。
+ * ``ensure_turn_baseline`` 同样不是 backend 方法——桌面通道 Local 回合 zip 基线
+ *（``AgentCore/baselines/{message_id}.zip``）：探测非空 zip，缺则落盘；服务端无用户盘
+ * Path.root，破坏形闸问 ready 而非 backend 有无 Path。
  * ``probe_exec`` 同样不是 backend 方法——回合准备时探测本机 code_execute 可用解释器，
  * 供服务端裁剪工具 schema（坏 WSL bash 等不进 enum）。
  * ``diagnostics`` 同样不是 backend 方法——本地 TypeScript LanguageService 诊断（写码验证内环）；
@@ -153,6 +156,7 @@ export type WorkspaceOpName =
   | "execute"
   | "probe_exec"
   | "archive"
+  | "ensure_turn_baseline"
   | "process_start"
   | "process_read"
   | "process_stop"
@@ -302,14 +306,35 @@ export type GrantSessionWellKnown = "desktop" | "downloads" | "documents";
 
 /**
  * IPC / FsApi params for {@link FsApi.grantSessionReadonlyRoot}.
- * Absolute paths never leave the main process; hints only.
+ *
+ * Mount-only path transport (C1 §〇): optional absolute `path` / `wellKnown`+
+ * `targetName` may cross renderer→main for resolution. Success never returns abs;
+ * may include `displayLabel` (basename / redacted). Abs must not persist in
+ * renderer or REST grant bodies.
  */
 export interface GrantSessionReadonlyRootParams {
   conversationId: string;
   mode?: "readonly" | "organize";
+  /** Absolute local directory path (C1-wide). Preferred over wellKnown when set. */
+  path?: string;
   wellKnown?: GrantSessionWellKnown;
   targetName?: string;
 }
+
+/** Failure reasons from grant resolve (no picker; not_found ≠ cancelled). */
+export type GrantSessionReadonlyRootFailReason =
+  | "not_found"
+  | "not_directory"
+  | "ambiguous"
+  | "invalid";
+
+/**
+ * Result of {@link FsApi.grantSessionReadonlyRoot}.
+ * Success: root id/name/alias/mode + optional displayLabel — never absPath.
+ */
+export type GrantSessionReadonlyRootResult =
+  | { ok: true; root: FsRoot; displayLabel?: string }
+  | { ok: false; reason: GrantSessionReadonlyRootFailReason; message?: string };
 
 /** 引用即驻留：落盘到对话工作区 attachments/ 的目标。 */
 export interface StageAttachmentDest {
@@ -370,12 +395,13 @@ export interface FsApi {
   /**
    * W3/P1: session root (readonly | organize) bound to conversation.
    * Accepts legacy `(conversationId, mode?)` or a params object with optional
-   * `wellKnown` / `targetName` hints (direct grant or picker with defaultPath).
+   * `path` / `wellKnown` / `targetName` (resolve only — never opens a folder picker).
+   * Failure reasons distinguish not_found / not_directory / ambiguous (≠ cancelled).
    */
   grantSessionReadonlyRoot(
     conversationIdOrParams: string | GrantSessionReadonlyRootParams,
     mode?: "readonly" | "organize",
-  ): Promise<FsRoot | null>;
+  ): Promise<GrantSessionReadonlyRootResult>;
   listSessionReadonlyRoots(conversationId: string): Promise<FsRoot[]>;
   revokeSessionReadonlyRoot(
     conversationId: string,

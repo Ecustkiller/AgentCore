@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Continue 不得把预选 grant_* 退化成口头「已授权」——须先 picker + POST grant。
+ * Continue 不得把预选 grant_* 退化成口头「已授权」——须先解析履约（无 picker）。
+ * 找不到 → 卡面失败文案（≠ cancelled 静默）。
  */
 import { AskDecisionBody } from "@/components/chat/ask/AskDecisionBody";
 import type { AskUserContent } from "@/components/chat/ask/AskUserFields";
@@ -103,7 +104,7 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     pickAndGrantReadonlyFolder.mockReset();
     pickAndGrantOrganizeFolder.mockReset();
     vi.mocked(hasLocalFiles).mockReturnValue(true);
-    // canLocalFs 需要 fsApi；picker 本身已 mock，不必真实现。
+    // canLocalFs 需要 fsApi；履约本身已 mock，不必真实现。
     window.fsApi = {
       grantSessionReadonlyRoot: vi.fn(),
     } as unknown as typeof window.fsApi;
@@ -116,29 +117,35 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     delete (window as { fsApi?: unknown }).fsApi;
   });
 
-  it("preselected grant default + Continue opens picker (not bare onContinue)", async () => {
+  it("preselected grant default + Continue fulfills (not bare onContinue)", async () => {
     const onContinue = vi.fn();
     const onBindResolve = vi.fn(async () => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
       ok: false,
-      reason: "cancelled",
+      reason: "not_found",
+      message: "找不到该目录",
     });
 
     render(<Harness onContinue={onContinue} onBindResolve={onBindResolve} />);
     fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
 
     await waitFor(() => {
-      expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith("conv-1");
+      expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith(
+        "conv-1",
+        undefined,
+      );
     });
     expect(onContinue).not.toHaveBeenCalled();
     expect(onBindResolve).not.toHaveBeenCalled();
+    expect(screen.getByText("找不到该目录")).toBeTruthy();
   });
 
   it("forwards well_known / target_name hints to grant helper", async () => {
     const onBindResolve = vi.fn(async () => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
       ok: false,
-      reason: "cancelled",
+      reason: "not_found",
+      message: "找不到该目录",
     });
     const content: AskUserContent = {
       ...grantDefaultContent,
@@ -166,14 +173,16 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
         targetName: "报表",
       });
     });
+    expect(screen.getByText("找不到该目录")).toBeTruthy();
   });
 
-  it("picker cancel stays on card — no resume / no bare grant copy", async () => {
+  it("not_found stays on card with failure copy — no resume / no bare grant", async () => {
     const onContinue = vi.fn();
     const onBindResolve = vi.fn(async () => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
       ok: false,
-      reason: "cancelled",
+      reason: "not_found",
+      message: "找不到该目录",
     });
 
     render(<Harness onContinue={onContinue} onBindResolve={onBindResolve} />);
@@ -184,11 +193,12 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     });
     expect(onContinue).not.toHaveBeenCalled();
     expect(onBindResolve).not.toHaveBeenCalled();
+    expect(screen.getByText("找不到该目录")).toBeTruthy();
     // 卡仍在：主 CTA 仍可点
     expect(screen.getByRole("button", { name: /^提交$/ })).toBeTruthy();
   });
 
-  it("picker success resumes via onBindResolve with fulfilled answer", async () => {
+  it("resolve success resumes via onBindResolve with fulfilled answer", async () => {
     const onContinue = vi.fn();
     const onBindResolve = vi.fn(async (_answer: string) => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
@@ -196,6 +206,7 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
       root: { id: "r1", name: "报表", alias: "报表" },
       alias: "报表",
       namespace: "external/报表",
+      displayLabel: "报表",
     });
 
     render(<Harness onContinue={onContinue} onBindResolve={onBindResolve} />);
@@ -212,7 +223,7 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     expect(composed).toContain("只读");
   });
 
-  it("picker success clears bindBusy so CTA is not stuck when card stays mounted", async () => {
+  it("resolve success clears bindBusy so CTA is not stuck when card stays mounted", async () => {
     // resume 成功但不卸载卡（例如父级尚未换阶段）——主 CTA 不得永久 busy
     const onBindResolve = vi.fn(async () => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
@@ -247,7 +258,7 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     expect(onBindResolve).not.toHaveBeenCalled();
   });
 
-  it("option-row grant click still fulfills via picker", async () => {
+  it("option-row grant click fulfills without picker", async () => {
     const onBindResolve = vi.fn(async () => {});
     pickAndGrantReadonlyFolder.mockResolvedValue({
       ok: true,
@@ -269,9 +280,105 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     fireEvent.click(screen.getByRole("button", { name: /授权访问本机目录/ }));
 
     await waitFor(() => {
-      expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith("conv-1");
+      expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith(
+        "conv-1",
+        undefined,
+      );
       expect(onBindResolve).toHaveBeenCalled();
     });
+  });
+});
+
+describe("AskDecisionBody organize confirm card", () => {
+  beforeEach(() => {
+    pickAndGrantReadonlyFolder.mockReset();
+    pickAndGrantOrganizeFolder.mockReset();
+    vi.mocked(hasLocalFiles).mockReturnValue(true);
+    window.fsApi = {
+      grantSessionReadonlyRoot: vi.fn(),
+    } as unknown as typeof window.fsApi;
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    // biome-ignore lint/performance/noDelete: 测后清掉 stub，避免污染其它套件
+    delete (window as { fsApi?: unknown }).fsApi;
+  });
+
+  const organizeContent: AskUserContent = {
+    question: "要把桌面「咨询」整理成 pdf 吗？",
+    context: "",
+    assumptions: [],
+    questions: [
+      {
+        id: "q0",
+        prompt: "整理授权",
+        kind: "choice",
+        options: [
+          {
+            label: "授权整理该目录",
+            action: "grant_organize_folder",
+            well_known: "desktop",
+            target_name: "咨询",
+          },
+          { label: "先不整理" },
+        ],
+        multiple: false,
+        default: "授权整理该目录",
+      },
+    ],
+  };
+
+  it("shows 将整理 target and 允许整理 shell before allow", () => {
+    render(<Harness content={organizeContent} />);
+    expect(screen.getByText("将整理：桌面 › 咨询")).toBeTruthy();
+    expect(screen.getByText(/整理确认/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^允许整理$/ })).toBeTruthy();
+    // No picker framing
+    expect(screen.queryByText(/选文件夹/)).toBeNull();
+  });
+
+  it("Continue fulfills organize via helper — no silent upgrade, no picker", async () => {
+    const onContinue = vi.fn();
+    const onBindResolve = vi.fn(async (_answer: string) => {});
+    pickAndGrantOrganizeFolder.mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "咨询", alias: "咨询", mode: "organize" },
+      alias: "咨询",
+      namespace: "external/咨询",
+      displayLabel: "桌面 › 咨询",
+    });
+
+    render(
+      <Harness
+        content={organizeContent}
+        onContinue={onContinue}
+        onBindResolve={onBindResolve}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^允许整理$/ }));
+
+    await waitFor(() => {
+      expect(pickAndGrantOrganizeFolder).toHaveBeenCalledWith("conv-1", {
+        wellKnown: "desktop",
+        targetName: "咨询",
+      });
+    });
+    expect(onContinue).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(onBindResolve).toHaveBeenCalled();
+    });
+    const composed = onBindResolve.mock.calls[0]?.[0] ?? "";
+    expect(composed).toContain("授权整理该目录");
+    expect(composed).toContain("桌面 › 咨询");
+  });
+
+  it("readonly→organize still requires confirm click (does not auto-fulfill on mount)", () => {
+    // Same root may already be readonly-mounted; card must still wait for allow.
+    render(<Harness content={organizeContent} />);
+    expect(pickAndGrantOrganizeFolder).not.toHaveBeenCalled();
+    expect(screen.getByText("将整理：桌面 › 咨询")).toBeTruthy();
   });
 });
 

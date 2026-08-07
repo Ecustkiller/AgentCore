@@ -306,6 +306,51 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     expect(sub?.mtime_ms).toEqual(expect.any(Number));
   });
 
+  it("list / list_tree on a missing relative dir succeed empty (align index_files)", async () => {
+    const listRes = await run("list", {
+      directory: "not-yet-mkdir",
+      pattern: "*",
+    });
+    expect(valOf(listRes)).toEqual([]);
+
+    const treeRes = valOf(
+      await run("list_tree", {
+        directory: "not-yet-mkdir",
+        pattern: "*",
+        max_depth: 3,
+        max_entries: 100,
+      }),
+    ) as {
+      entries: unknown[];
+      truncated: boolean;
+      elided_count: number;
+      warnings: unknown[];
+    };
+    expect(treeRes).toEqual({
+      entries: [],
+      truncated: false,
+      elided_count: 0,
+      warnings: [],
+    });
+  });
+
+  it("list / list_tree on a file path still return NotADirectory", async () => {
+    await run("write", { path: "a-file.txt", content: "x" });
+    expect(
+      errOf(await run("list", { directory: "a-file.txt", pattern: "*" })).kind,
+    ).toBe("NotADirectory");
+    expect(
+      errOf(
+        await run("list_tree", {
+          directory: "a-file.txt",
+          pattern: "*",
+          max_depth: 3,
+          max_entries: 100,
+        }),
+      ).kind,
+    ).toBe("NotADirectory");
+  });
+
   it("index_files returns a flat, ignore-pruned, posix-sorted file list", async () => {
     await run("write", { path: "a.txt", content: "A" });
     await run("write", { path: "sub/b.md", content: "B" });
@@ -494,6 +539,76 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
       const names = await archiveNames(res.archive);
       expect(names).toContain("node_modules/junk.js");
       expect(names).toContain("secret.txt");
+    });
+  });
+
+  describe("ensure_turn_baseline", () => {
+    it("captures non-empty zip and reports ready", async () => {
+      await run("write", { path: "a.txt", content: "hello" });
+      const res = valOf(
+        await run("ensure_turn_baseline", { message_id: "msg-1" }),
+      ) as {
+        ready: boolean;
+        snapshot_id: string;
+        size_bytes: number;
+      };
+      expect(res.ready).toBe(true);
+      expect(res.snapshot_id).toBe("msg-1");
+      expect(res.size_bytes).toBeGreaterThan(0);
+      const zipPath = join(dir, "AgentCore", "baselines", "msg-1.zip");
+      const st = await stat(zipPath);
+      expect(st.size).toBeGreaterThan(0);
+    });
+
+    it("reuses existing zip without rewriting (probe ready)", async () => {
+      await run("write", { path: "a.txt", content: "x" });
+      valOf(await run("ensure_turn_baseline", { message_id: "msg-reuse" }));
+      const zipPath = join(dir, "AgentCore", "baselines", "msg-reuse.zip");
+      const before = await stat(zipPath);
+      await new Promise((r) => setTimeout(r, 20));
+      const again = valOf(
+        await run("ensure_turn_baseline", { message_id: "msg-reuse" }),
+      ) as { ready: boolean; size_bytes: number };
+      expect(again.ready).toBe(true);
+      const after = await stat(zipPath);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+      expect(after.size).toBe(before.size);
+    });
+
+    it("probe-only returns not ready when missing", async () => {
+      const res = valOf(
+        await run("ensure_turn_baseline", {
+          message_id: "msg-miss",
+          capture: false,
+        }),
+      ) as { ready: boolean; reason?: string };
+      expect(res.ready).toBe(false);
+      expect(res.reason).toBe("missing");
+    });
+
+    it("scopes zip to workspace subdirectory", async () => {
+      await run("write", { path: "outside.txt", content: "OUT" });
+      await run("write", { path: "ws/a.txt", content: "A" });
+      const res = valOf(
+        await run("ensure_turn_baseline", {
+          message_id: "msg-sub",
+          directory: "ws",
+        }),
+      ) as { ready: boolean };
+      expect(res.ready).toBe(true);
+      const zipPath = join(dir, "ws", "AgentCore", "baselines", "msg-sub.zip");
+      const st = await stat(zipPath);
+      expect(st.size).toBeGreaterThan(0);
+      const buf = await readFile(zipPath);
+      const zip = await JSZip.loadAsync(buf);
+      expect(Object.keys(zip.files).sort()).toEqual(["a.txt"]);
+    });
+
+    it("rejects invalid message_id", async () => {
+      const r = await run("ensure_turn_baseline", {
+        message_id: "../evil",
+      });
+      expect(r.ok).toBe(false);
     });
   });
 });
