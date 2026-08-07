@@ -10,8 +10,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from agentcore.config import settings
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+
+# Stable OpenAPI example — do NOT use settings.platform_base_url (env-dependent → CI drift).
+_OPENAPI_BASE_URL_EXAMPLE = "https://api.deepseek.com"
 
 
 class CreateLlmProviderRequest(BaseModel):
@@ -31,7 +33,7 @@ class CreateLlmProviderRequest(BaseModel):
         default=None,
         max_length=500,
         description="OpenAI-compatible endpoint including version prefix",
-        examples=[settings.platform_base_url],
+        examples=[_OPENAPI_BASE_URL_EXAMPLE],
     )
     default_model: str | None = Field(
         default=None,

@@ -24,7 +24,8 @@ Thin facade — implementation split by axis (under ``runtime/loop_controller/``
 * ``.circuit`` — tool-failure circuit breaker
 * ``.write_reject`` — same-path write-reject streak 策略机
 
-Public import paths stay stable via re-exports below (root ``loop_controller_*`` shims alias satellites).
+Public import paths stay stable via re-exports below
+(root ``loop_controller_*`` shims alias satellites).
 """
 
 from __future__ import annotations

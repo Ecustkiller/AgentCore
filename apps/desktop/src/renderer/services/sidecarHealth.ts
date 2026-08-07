@@ -53,10 +53,7 @@ function nowMs(): number {
 export function getSidecarHealth(target: SidecarTarget): Health | "unknown" {
   const entry = health.get(keyOf(target));
   if (!entry) return "unknown";
-  if (
-    entry.health === "bad" &&
-    nowMs() - entry.at >= BAD_HEALTH_TTL_MS
-  ) {
+  if (entry.health === "bad" && nowMs() - entry.at >= BAD_HEALTH_TTL_MS) {
     return "unknown";
   }
   return entry.health;

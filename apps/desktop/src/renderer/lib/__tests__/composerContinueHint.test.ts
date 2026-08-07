@@ -67,7 +67,9 @@ describe("composerContinueHint", () => {
 
   it("detects empty cancelled for timeline omit (P1)", () => {
     expect(
-      isEmptyCancelledAssistant(msg({ finishReason: "cancelled", content: "" })),
+      isEmptyCancelledAssistant(
+        msg({ finishReason: "cancelled", content: "" }),
+      ),
     ).toBe(true);
     expect(isEmptyCancelledAssistant(msg({ finishReason: "cancelled" }))).toBe(
       false,

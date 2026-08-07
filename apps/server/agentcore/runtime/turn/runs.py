@@ -301,6 +301,7 @@ async def salvage_turns_on_shutdown(*, timeout: float | None = None) -> None:
         return
     from agentcore.conversation.turn_persistence import close_user_stop_turn
     from agentcore.runtime.leases import orphan_turn_lease, release_turn_lease
+
     from .interrupt import (
         TurnInterruptReason,
         close_turn_interrupted,

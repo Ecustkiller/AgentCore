@@ -206,6 +206,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
 
     from agentcore.conversation.service import stream_chat
     from agentcore.runtime.events import EventSink
+
     from .runs import turn_runs
 
     sink = EventSink()

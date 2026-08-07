@@ -576,7 +576,10 @@ export function GitChangesSection({
   };
 
   return (
-    <section className="border-t border-border/50" data-testid="git-changes-section">
+    <section
+      className="border-t border-border/50"
+      data-testid="git-changes-section"
+    >
       <header className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1">
         <GitBranch size={12} className="shrink-0 text-muted-foreground" />
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">

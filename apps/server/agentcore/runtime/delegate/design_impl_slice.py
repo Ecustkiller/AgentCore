@@ -53,9 +53,7 @@ def is_code_artifact_path(path: str) -> bool:
     parts = [p for p in lower.split("/") if p]
     if "src" in parts or "electron" in parts:
         return True
-    if _CODE_EXT.search(base):
-        return True
-    return False
+    return bool(_CODE_EXT.search(base))
 
 
 def task_text_claims_design_and_impl_phases(task_text: str) -> bool:

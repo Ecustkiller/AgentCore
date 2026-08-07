@@ -3,14 +3,18 @@
  * 回归 a753a22f：``…/__init__.py`` 作 grep 根时本地通道拖到 ~59s 超时。
  */
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
-  app: { getPath: () => tmpdir(), getAppPath: () => tmpdir(), isPackaged: false },
+  app: {
+    getPath: () => tmpdir(),
+    getAppPath: () => tmpdir(),
+    isPackaged: false,
+  },
   dialog: {},
   ipcMain: { handle: vi.fn() },
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
@@ -37,12 +41,12 @@ function resolveTestRg(): string {
     process.env.AGENTCORE_RG_PATH,
     join(here, "..", "..", "..", "resources", "rg", name),
     join(here, "..", "..", "..", "..", "server", "bin", name),
-  ].filter((p): p is string => Boolean(p && p.trim()));
+  ].filter((p): p is string => Boolean(p?.trim()));
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
   throw new Error(
-    `test rg binary missing; set AGENTCORE_RG_PATH or install via fetch_ripgrep.py`,
+    "test rg binary missing; set AGENTCORE_RG_PATH or install via fetch_ripgrep.py",
   );
 }
 
@@ -62,11 +66,15 @@ describe("opGrep single-file directory root", () => {
       'needle = "StandingTask"\n# other\n',
       "utf8",
     );
-    await writeFile(join(dir, "pkg", "sibling.py"), "needle = hidden\n", "utf8");
+    await writeFile(
+      join(dir, "pkg", "sibling.py"),
+      "needle = hidden\n",
+      "utf8",
+    );
   });
 
   afterEach(async () => {
-    if (prevRg === undefined) delete process.env.AGENTCORE_RG_PATH;
+    if (prevRg === undefined) process.env.AGENTCORE_RG_PATH = undefined;
     else process.env.AGENTCORE_RG_PATH = prevRg;
     await rm(dir, { recursive: true, force: true });
   });

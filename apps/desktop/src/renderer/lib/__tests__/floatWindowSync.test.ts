@@ -229,7 +229,7 @@ describe("floatWindowSync", () => {
       ch?.close();
 
       // @ts-expect-error intentional capability probe
-      delete globalThis.BroadcastChannel;
+      globalThis.BroadcastChannel = undefined;
       expect(isFloatSyncSupported()).toBe(false);
       expect(openFloatSyncChannel()).toBeNull();
     });

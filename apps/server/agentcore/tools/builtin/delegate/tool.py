@@ -131,12 +131,13 @@ def _is_same_host_turn_append(active: Any, message_id: str | None) -> bool:
 
 
 def _waves_ids_for_log(
-    plan: "RunPlan",
+    plan: RunPlan,
     *,
-    host_for_cross_batch: "RunPlan | None" = None,
+    host_for_cross_batch: RunPlan | None = None,
 ) -> list[list[str]]:
     """Wave id lists for ``delegate.started``; tolerate new-batch edges into host."""
-    from agentcore.runtime.runs.plan import RunPlan as Plan, RunPlanError
+    from agentcore.runtime.runs.plan import RunPlan as Plan
+    from agentcore.runtime.runs.plan import RunPlanError
 
     try:
         return [[n.run_id for n in wave] for wave in plan.waves()]
@@ -1217,7 +1218,8 @@ class DelegateTool:
             self._last_graph_execution_id = execution_id
             # 同回合二次合入：保留本图节点快照（journal 未命中时仍可作 existing_plan）。
             from agentcore.runtime.runs.plan import RunPlan as _RunPlan
-            from agentcore.runtime.runs.types import RunPhase, RunState as _RunState
+            from agentcore.runtime.runs.types import RunPhase
+            from agentcore.runtime.runs.types import RunState as _RunState
 
             self._last_graph_plan = _RunPlan(
                 nodes=list(plan.nodes),

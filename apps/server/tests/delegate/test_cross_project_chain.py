@@ -24,7 +24,7 @@ from agentcore.tools.builtin.delegate.tool import DelegateTool
 from agentcore.tools.builtin.projects import ListProjectsTool, ResolveProjectTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
-from tests.test_projects_tools import _FakeFolder, _ctx, _patch_list
+from tests.test_projects_tools import _ctx, _FakeFolder, _patch_list
 
 
 def _birth_ctx(

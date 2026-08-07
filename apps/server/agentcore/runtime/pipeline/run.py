@@ -30,7 +30,6 @@ from agentcore.runtime.pipeline.settle import (
     salvage_pipeline_exception,
     settle_successful_turn,
 )
-from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — test seam
 from agentcore.runtime.runs import RunKind, RunSpec, build_captain_executor
 from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
@@ -42,6 +41,7 @@ from agentcore.runtime.suspension import (
     turn_history,
 )
 from agentcore.runtime.turn_latency import get_turn_latency
+from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — test seam
 from agentcore.workspace.protocol import WorkspaceBackend
 
 # Re-exported so tests can monkeypatch lookup sites on this module (see

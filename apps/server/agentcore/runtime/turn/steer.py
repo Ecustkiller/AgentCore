@@ -219,6 +219,7 @@ def _emit_degraded_turn_queued(
     a live sink received the event.
     """
     from agentcore.runtime.events import turn_queued
+
     from .runs import turn_runs
 
     run = turn_runs.get(conversation_id)

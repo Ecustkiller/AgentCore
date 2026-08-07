@@ -56,9 +56,9 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
       }),
     );
     expect(
-      vi.mocked(logDesktop).mock.calls.some(
-        (c) => c[0]?.event === "workspace_op.main_timeout",
-      ),
+      vi
+        .mocked(logDesktop)
+        .mock.calls.some((c) => c[0]?.event === "workspace_op.main_timeout"),
     ).toBe(false);
   });
 
@@ -117,9 +117,9 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
     );
     expect(result).toEqual({ ok: true, value: true });
     expect(
-      vi.mocked(logDesktop).mock.calls.some(
-        (c) => c[0]?.event === "workspace_op.main_timeout",
-      ),
+      vi
+        .mocked(logDesktop)
+        .mock.calls.some((c) => c[0]?.event === "workspace_op.main_timeout"),
     ).toBe(false);
     expect(logDesktop).toHaveBeenCalledWith(
       expect.objectContaining({

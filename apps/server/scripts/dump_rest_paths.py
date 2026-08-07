@@ -29,7 +29,7 @@ def main() -> None:
     if not isinstance(paths, dict) or not paths:
         raise SystemExit("openapi.json has no paths object")
 
-    templates = sorted(str(p) for p in paths.keys())
+    templates = sorted(str(p) for p in paths)
 
     lines = [HEADER.rstrip(), ""]
     lines.append(

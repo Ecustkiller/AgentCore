@@ -119,7 +119,8 @@ function agentAncestorsThroughGates(
   const stack = [gateId];
   const visiting = new Set<string>();
   while (stack.length > 0) {
-    const nid = stack.pop()!;
+    const nid = stack.pop();
+    if (nid === undefined) break;
     if (visiting.has(nid)) continue;
     visiting.add(nid);
     for (const e of edges) {

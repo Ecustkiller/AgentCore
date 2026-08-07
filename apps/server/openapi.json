@@ -4378,7 +4378,7 @@
             ],
             "description": "OpenAI-compatible endpoint including version prefix",
             "examples": [
-              "https://tokenrhythm.studio/v1"
+              "https://api.deepseek.com"
             ],
             "title": "Base Url"
           },

@@ -1032,9 +1032,7 @@ describe("buildGraphStructure · bookend sink edges", () => {
     expect(
       rawEdges.some(
         (e) =>
-          e.kind === "continuation" &&
-          e.source === "a" &&
-          e.target === "a_v2",
+          e.kind === "continuation" && e.source === "a" && e.target === "a_v2",
       ),
     ).toBe(true);
     // a 有续后继不进 CEO；a_v2 被 b dependsOn，也不进；仅 b → captain。

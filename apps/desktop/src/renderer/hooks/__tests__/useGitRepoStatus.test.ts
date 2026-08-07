@@ -36,7 +36,7 @@ describe("useGitRepoStatus", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    delete (window as { fsApi?: unknown }).fsApi;
+    (window as { fsApi?: unknown }).fsApi = undefined;
   });
 
   it("drops stale refresh when a slower request finishes after rootId switch", async () => {
@@ -61,10 +61,14 @@ describe("useGitRepoStatus", () => {
       { initialProps: { rootId: "root-a", enabled: true } },
     );
 
-    await waitFor(() => expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-a"));
+    await waitFor(() =>
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-a"),
+    );
 
     rerender({ rootId: "root-b", enabled: true });
-    await waitFor(() => expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-b"));
+    await waitFor(() =>
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-b"),
+    );
 
     await act(async () => {
       resolveA(present("branch-a"));
@@ -74,9 +78,7 @@ describe("useGitRepoStatus", () => {
     await act(async () => {
       resolveB(present("branch-b"));
     });
-    await waitFor(() =>
-      expect(result.current.status?.branch).toBe("branch-b"),
-    );
+    await waitFor(() => expect(result.current.status?.branch).toBe("branch-b"));
   });
 
   it("watches root and .git when enabled, and unwatches on cleanup", async () => {

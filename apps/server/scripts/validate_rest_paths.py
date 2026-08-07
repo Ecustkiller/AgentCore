@@ -151,9 +151,7 @@ def _should_skip_file(path: Path) -> bool:
     if name == "paths.generated.ts":
         return True
     parts = set(path.parts)
-    if parts & SKIP_DIR_NAMES:
-        return True
-    return False
+    return bool(parts & SKIP_DIR_NAMES)
 
 
 def _line_is_comment(line: str, idx_in_line: int) -> bool:
@@ -161,9 +159,7 @@ def _line_is_comment(line: str, idx_in_line: int) -> bool:
     if "//" in before:
         return True
     stripped = line.lstrip()
-    if stripped.startswith("*") or stripped.startswith("/*"):
-        return True
-    return False
+    return stripped.startswith("*") or stripped.startswith("/*")
 
 
 def _extract_from_text(text: str, file: Path) -> list[Hit]:

@@ -534,14 +534,16 @@ describe("closeConversationScopedTabs（切对话卸作用域内容 tab）", () 
 
     panel().closeConversationScopedTabs();
 
-    expect(panel().tabs.map((t) => t.kind).sort()).toEqual([
-      "browser",
-      "terminal",
-    ]);
-    expect(panel().tabs.map((t) => t.id).sort()).toEqual([
-      TEAM_BROWSER_TAB_ID,
-      TEAM_TERMINAL_TAB_ID,
-    ]);
+    expect(
+      panel()
+        .tabs.map((t) => t.kind)
+        .sort(),
+    ).toEqual(["browser", "terminal"]);
+    expect(
+      panel()
+        .tabs.map((t) => t.id)
+        .sort(),
+    ).toEqual([TEAM_BROWSER_TAB_ID, TEAM_TERMINAL_TAB_ID]);
     // Fixed tabs are not in `tabs`; active 改动 must survive.
     expect(panel().activeTabId).toBe(CHANGES_TAB_ID);
     expect(panel().open).toBe(true);

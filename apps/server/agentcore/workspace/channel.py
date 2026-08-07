@@ -31,11 +31,12 @@ suspend, and queue wait rides the outer tool wall clock.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Iterator, NoReturn
+from typing import Any, NoReturn
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id

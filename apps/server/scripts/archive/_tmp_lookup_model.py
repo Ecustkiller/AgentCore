@@ -4,9 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from sqlalchemy import text
-
 from agentcore.db.session import get_session_factory
+from sqlalchemy import text
 
 PROVIDER_ID = "5a19babf-2825-4caa-bf04-21f1ce0bb1b6"
 CONV_ID = "cf03eb0b-a366-432a-9caf-3578f3690888"

@@ -93,8 +93,7 @@ export async function pickAndRegisterLocalProject(opts?: {
     );
     return { ok: true, root: picked.root, folder, created };
   } catch (e) {
-    const message =
-      e instanceof Error ? e.message : "登记本地项目失败，请重试";
+    const message = e instanceof Error ? e.message : "登记本地项目失败，请重试";
     if (notifyOnFailure) {
       notifyError(e, "登记本地项目失败");
     }

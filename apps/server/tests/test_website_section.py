@@ -174,8 +174,8 @@ async def test_write_section_rejects_md_path(tmp_path: Path):
         assert ".md" in err
         assert "str_replace" in err and "file_append" in err
     assert (
-        "<!-- SECTION:s0 START -->\n\n<!-- SECTION:s0 END -->\n"
-        == md.read_text(encoding="utf-8")
+        md.read_text(encoding="utf-8")
+        == "<!-- SECTION:s0 START -->\n\n<!-- SECTION:s0 END -->\n"
     )
 
 

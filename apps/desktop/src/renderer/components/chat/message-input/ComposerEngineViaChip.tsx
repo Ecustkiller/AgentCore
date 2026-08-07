@@ -1,5 +1,5 @@
-import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { hasLocalEngine } from "@/lib/capabilities";
 import { useConversationStore } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
@@ -18,9 +18,7 @@ export function ComposerEngineViaChip({
 }) {
   const state = useWorkspaceModeState(conversationId);
   const executionVia = useConversationStore((s) =>
-    conversationId
-      ? (s.byId[conversationId]?.executionVia ?? null)
-      : null,
+    conversationId ? (s.byId[conversationId]?.executionVia ?? null) : null,
   );
   const sidecarEnabled = useUIStore((s) => s.sidecarEnabled);
 
@@ -28,8 +26,7 @@ export function ComposerEngineViaChip({
   if (!state?.effective.isLocal || state.effective.rootMissing) return null;
 
   const via =
-    executionVia ??
-    (!sidecarEnabled ? ("cloud_bridge" as const) : null);
+    executionVia ?? (!sidecarEnabled ? ("cloud_bridge" as const) : null);
   if (!via) return null;
 
   const isBridge = via === "cloud_bridge";

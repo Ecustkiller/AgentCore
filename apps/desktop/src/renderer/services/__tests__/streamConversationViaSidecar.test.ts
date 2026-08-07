@@ -102,7 +102,11 @@ beforeEach(() => {
   resetSidecarEventPumpForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useTurnModelStore.setState({ byConversation: {} });
-  useAuthStore.setState({ status: "unauthenticated", user: null, reason: null });
+  useAuthStore.setState({
+    status: "unauthenticated",
+    user: null,
+    reason: null,
+  });
   dispatchSSEEventMock.mockReset();
   notifyWarningMock.mockReset();
   takeRecentSidecarFailureMock.mockReturnValue(null);

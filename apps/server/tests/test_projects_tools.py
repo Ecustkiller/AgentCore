@@ -140,7 +140,7 @@ def test_resolve_project_schema_and_registration():
     reg = tool_registration(ResolveProjectTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
     assert AUDIENCE_CEO in reg.audience
-    assert AUDIENCE_CEO == reg.audience[0]
+    assert reg.audience[0] == AUDIENCE_CEO
     assert len(reg.audience) == 1
     assert reg.ceo_wire is CeoWire.ALWAYS
 

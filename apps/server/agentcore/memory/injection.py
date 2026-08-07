@@ -30,7 +30,11 @@ from agentcore.memory.store import (
     is_topic_path,
     topic_slug,
 )
-from agentcore.memory.user_memory import strip_bullet_timestamp, strip_memory_chrome, topic_summary_line
+from agentcore.memory.user_memory import (
+    strip_bullet_timestamp,
+    strip_memory_chrome,
+    topic_summary_line,
+)
 
 logger = get_logger(__name__)
 

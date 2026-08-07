@@ -235,7 +235,9 @@ export async function allocateRgRegexpProbe(): Promise<{
     probeDir,
     probePath,
     cleanup: async () => {
-      await fs.rm(probeDir, { recursive: true, force: true }).catch(() => undefined);
+      await fs
+        .rm(probeDir, { recursive: true, force: true })
+        .catch(() => undefined);
     },
   };
 }

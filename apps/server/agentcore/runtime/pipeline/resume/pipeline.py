@@ -34,7 +34,6 @@ from agentcore.runtime.pipeline.settle import (
     salvage_failed_captain,
     salvage_pipeline_exception,
 )
-from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
 from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
 from agentcore.runtime.sessions import SessionLoader, SessionSaver
@@ -47,6 +46,7 @@ from agentcore.runtime.suspension import (
     turn_evidence_ledger,
     turn_history,
 )
+from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)

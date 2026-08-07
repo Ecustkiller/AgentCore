@@ -26,8 +26,7 @@ import { SidecarManager } from "../sidecar/manager";
 import type { Transport } from "../sidecar/transport";
 
 function capturingTransport() {
-  const sent: Array<{ method?: string; params?: Record<string, unknown> }> =
-    [];
+  const sent: Array<{ method?: string; params?: Record<string, unknown> }> = [];
   let lineCb: ((line: string) => void) | null = null;
   const transport: Transport = {
     send: (line) => {

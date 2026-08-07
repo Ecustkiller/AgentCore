@@ -6,14 +6,16 @@ P0 桶 A（跨项目并行指挥 §4.5–4.7）：名册与 ``GET /folders`` 同
 
 P1 桶 C（§4.8–4.10）：``create_project`` 经账号 API 同形路径新建 **云** Folder
 （``POST /folders`` mode=cloud）；**不**改 ``conversation.folder_id``、**不**新开会话。
-与 ``open_local_project``（打开当出生=新会话）分流；本地「登记留指挥面」走 ask ``register_local_project``。
+与 ``open_local_project``（打开当出生=新会话）分流；
+本地「登记留指挥面」走 ask ``register_local_project``。
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 from agentcore.api.schemas.conversations import FolderSummary
 from agentcore.core.logging import get_logger

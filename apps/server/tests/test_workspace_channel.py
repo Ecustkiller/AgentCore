@@ -364,8 +364,8 @@ async def test_probe_exec_timeout_does_not_sticky_dead_channel():
 
 async def test_op_timeout_log_includes_path(monkeypatch):
     """workspace.op_timeout must carry path (and directory when present) for replay."""
-    from tests.conftest import LogSpy
     import agentcore.workspace.channel as channel_mod
+    from tests.conftest import LogSpy
 
     spy = LogSpy()
     monkeypatch.setattr(channel_mod, "logger", spy)
@@ -414,12 +414,11 @@ async def test_index_io_timeout_does_not_sticky_dead_channel():
         timeout_seconds=0.05,
         root_id=ROOT_ID,
     )
-    with index_io_mode():
-        with pytest.raises(WorkspaceIOError, match="read.*活性挂起"):
-            await channel.request(
-                WorkspaceOp.READ,
-                {"path": "logs/reviews/cases/CASE.md"},
-            )
+    with index_io_mode(), pytest.raises(WorkspaceIOError, match="read.*活性挂起"):
+        await channel.request(
+            WorkspaceOp.READ,
+            {"path": "logs/reviews/cases/CASE.md"},
+        )
 
     assert channel._dead is False  # noqa: SLF001
     while not sink._queue.empty():  # noqa: SLF001

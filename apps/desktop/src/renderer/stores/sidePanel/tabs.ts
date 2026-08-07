@@ -10,13 +10,13 @@ import {
 import {
   CHANGES_TAB_ID,
   COMMAND_TAB_ID,
-  browserDismissKey,
   type DetailTab,
   type SidePanelGet,
   type SidePanelSet,
   type SidePanelState,
-  terminalDismissKey,
   WORKSPACE_TAB_ID,
+  browserDismissKey,
+  terminalDismissKey,
 } from "./types";
 
 /** Kinds unloaded on conversation switch (定案 D); terminal / browser shells stay. */

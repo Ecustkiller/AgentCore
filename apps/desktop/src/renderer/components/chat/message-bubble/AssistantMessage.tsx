@@ -2,8 +2,8 @@ import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { SourceCards } from "@/components/chat/SourceCards";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
-import { isAskSilentResolvedDecision } from "@/components/chat/decision";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
+import { isAskSilentResolvedDecision } from "@/components/chat/decision";
 import { Button, IconButton } from "@/components/ui";
 import {
   DropdownMenu,
@@ -14,8 +14,8 @@ import {
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
-import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import { copyText } from "@/lib/clipboard";
+import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import {
   connectivityEscalationSuffix,
   degradedFinishChipLabel,
@@ -194,8 +194,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     useMessageInteractionCards(conversationId, projectionId);
   // 仅「仍会画存根」的 resolved 才藏正文；取消静默（stop / research_first）否则会空泡。
   const hideContentForCheckpoint = checkpoints.some(
-    (c) =>
-      c.status === "resolved" && !isAskSilentResolvedDecision(c.decision),
+    (c) => c.status === "resolved" && !isAskSilentResolvedDecision(c.decision),
   );
   // absorb/content_reset 后 content 空、问句只在 checkpoint.question：静默 dismiss 时
   // display-time 回落为普通 Markdown（不写回 store）。

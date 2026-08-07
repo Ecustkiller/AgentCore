@@ -165,9 +165,7 @@ export function PermissionAxesBadge({
           aria-expanded={open}
           className={cn(
             "inline-flex items-center rounded-lg text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-            iconOnly
-              ? "size-8 justify-center"
-              : "h-8 max-w-44 gap-1 px-2",
+            iconOnly ? "size-8 justify-center" : "h-8 max-w-44 gap-1 px-2",
             (disabled || pending) && "cursor-not-allowed opacity-60",
           )}
         >

@@ -41,16 +41,18 @@ export function unquoteGitPath(raw: string): string {
 
   let i = 1;
   while (i < s.length) {
-    const c = s[i]!;
+    const c = s[i];
+    if (c === undefined) break;
     if (c === '"') break;
     if (c === "\\" && i + 1 < s.length) {
-      const n = s[i + 1]!;
+      const n = s[i + 1];
+      if (n === undefined) break;
       if (n >= "0" && n <= "7") {
         let oct = 0;
         let count = 0;
         while (count < 3 && i + 1 < s.length) {
-          const d = s[i + 1]!;
-          if (d < "0" || d > "7") break;
+          const d = s[i + 1];
+          if (d === undefined || d < "0" || d > "7") break;
           oct = (oct << 3) | (d.charCodeAt(0) - 0x30);
           i++;
           count++;

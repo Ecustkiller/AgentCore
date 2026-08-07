@@ -34,6 +34,7 @@ export function useGitRepoStatus(
   }, [enabled, rootId]);
 
   // rootId / enabled 切换或卸载：丢弃在途结果。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps 故意含 enabled/rootId，切换时跑 cleanup bump gen
   useEffect(() => {
     return () => {
       genRef.current += 1;

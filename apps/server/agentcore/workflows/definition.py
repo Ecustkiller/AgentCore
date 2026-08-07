@@ -223,12 +223,15 @@ def _edge_policy_errors(
                 f"edges[{i}] 禁止 human_gate→human_gate（`{src}` → `{dst}`）"
             )
             continue
-        if src_kind == "human_gate" and dst_kind == "agent_step":
-            if not _agent_ancestors_through_gates(src, edges, by_id):
-                errors.append(
-                    f"edges[{i}] human_gate `{src}` 无 agent_step 前驱，"
-                    f"不能连到 agent_step `{dst}`"
-                )
+        if (
+            src_kind == "human_gate"
+            and dst_kind == "agent_step"
+            and not _agent_ancestors_through_gates(src, edges, by_id)
+        ):
+            errors.append(
+                f"edges[{i}] human_gate `{src}` 无 agent_step 前驱，"
+                f"不能连到 agent_step `{dst}`"
+            )
     return errors
 
 

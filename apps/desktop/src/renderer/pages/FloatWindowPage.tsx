@@ -37,10 +37,7 @@ export function FloatWindowPage() {
     useConversationStore.getState().setCurrentConversation(conversationId);
   }, [conversationId]);
 
-  const syncAvailable = useFloatWindowProjectionConsumer(
-    conversationId,
-    tabId,
-  );
+  const syncAvailable = useFloatWindowProjectionConsumer(conversationId, tabId);
 
   const tabs = useSidePanelStore((s) => s.tabs);
   const title = tabId ? sidePanelFloatTitle(tabId, tabs) : "浮窗";

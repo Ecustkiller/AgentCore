@@ -107,7 +107,8 @@ def instantiate_declared(
     location: Literal["server", "local"] | None = None,
     languages: tuple[str, ...] | list[str] | None = None,
 ) -> Any:
-    """Zero-arg (or location-aware) construction for builtin / worker-only / board / ALWAYS tools."""
+    """Zero-arg (or location-aware) construction for builtin / worker-only / board /
+    ALWAYS tools."""
     reg = tool_registration(cls)
     if reg.needs_location:
         # ``languages`` only applies to ``code_execute`` (probe-trimmed local surface).

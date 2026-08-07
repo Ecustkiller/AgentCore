@@ -44,11 +44,9 @@ def _has_slice_nail(task: dict[str, Any]) -> bool:
     if isinstance(min_length, int) and min_length > 0:
         return True
     sections = d.get("required_sections")
-    if isinstance(sections, list) and any(
+    return isinstance(sections, list) and any(
         isinstance(s, str) and s.strip() for s in sections
-    ):
-        return True
-    return False
+    )
 
 
 def root_slice_honesty_soft_message() -> str:

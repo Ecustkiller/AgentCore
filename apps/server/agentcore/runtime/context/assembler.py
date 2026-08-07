@@ -84,7 +84,8 @@ class ContextAssembler:
         return sorted(self._contributors, key=lambda c: c.order)
 
     def observe(self, *, scope: str, soft_cap: int | None = None) -> ContextAssembler:
-        """Log assembled size, per-section chars, and ``assembly_hash`` — observe-only (COST-004 / M6).
+        """Log assembled size, per-section chars, and ``assembly_hash`` — observe-only
+        (COST-004 / M6).
 
         零行为副作用: 只埋点不改装配 (返回 ``self`` 供链式调用)。``cost.prompt_assembled`` 给出
         每段 chars 明细 (归因哪段膨胀) + 总 chars + 是否越软闸 + 装配产物 ``assembly_hash``

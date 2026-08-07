@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  FloatWindowPage,
-  floatWindowEmptyCopy,
-} from "@/pages/FloatWindowPage";
+import { FloatWindowPage, floatWindowEmptyCopy } from "@/pages/FloatWindowPage";
 import {
   type DetailTab,
   WORKSPACE_TAB_ID,
@@ -117,7 +114,7 @@ describe("FloatWindowPage", () => {
   it("shows structural sync failure when BroadcastChannel is unavailable", () => {
     const OriginalBC = globalThis.BroadcastChannel;
     // @ts-expect-error intentional capability probe
-    delete globalThis.BroadcastChannel;
+    globalThis.BroadcastChannel = undefined;
     try {
       renderFloat("?cid=conv-1&tab=run:missing");
       expect(screen.getByText("无法同步面板数据")).toBeTruthy();
@@ -195,7 +192,6 @@ describe("FloatWindowPage", () => {
     let onmessage: ((ev: MessageEvent<unknown>) => void) | null = null;
     const OriginalBC = globalThis.BroadcastChannel;
     globalThis.BroadcastChannel = class {
-      constructor(_name: string) {}
       postMessage(data: unknown) {
         posted.push(data);
       }

@@ -206,17 +206,16 @@ async def test_apply_target_desktop_unknown_folder_errors():
     with patch(
         "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
         new=AsyncMock(return_value=None),
-    ):
-        with pytest.raises(TargetDesktopError, match="不存在或无权"):
-            await apply_target_desktop(
-                target_folder_id="missing",
-                session_folder_id=None,
-                env_system_prompt="P",
-                base_tool_context=ctx,
-                worker_tools=ToolRegistry(),
-                sink=MagicMock(),
-                local_root_claims=None,
-            )
+    ), pytest.raises(TargetDesktopError, match="不存在或无权"):
+        await apply_target_desktop(
+            target_folder_id="missing",
+            session_folder_id=None,
+            env_system_prompt="P",
+            base_tool_context=ctx,
+            worker_tools=ToolRegistry(),
+            sink=MagicMock(),
+            local_root_claims=None,
+        )
 
 
 @pytest.mark.asyncio

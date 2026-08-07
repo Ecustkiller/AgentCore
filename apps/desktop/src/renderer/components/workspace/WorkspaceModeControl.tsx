@@ -78,7 +78,8 @@ export function useWorkspaceModeState(
   // Track which conversation the in-memory binding belongs to. When the id
   // changes, clear synchronously during render so consumers never see the prior
   // session's effective.rootId (composer Git chip flash) before refresh resolves.
-  const [boundConversationId, setBoundConversationId] = useState(conversationId);
+  const [boundConversationId, setBoundConversationId] =
+    useState(conversationId);
   if (conversationId !== boundConversationId) {
     setBoundConversationId(conversationId);
     setBinding(null);
@@ -103,8 +104,7 @@ export function useWorkspaceModeState(
   const refresh = useCallback(async () => {
     if (!conversationId) return;
     const forId = conversationId;
-    const conv =
-      getConversations().find((c) => c.id === forId) ?? null;
+    const conv = getConversations().find((c) => c.id === forId) ?? null;
     setContainerRootId(conv?.localContainerRootId ?? null);
     const folder = conv?.folderId
       ? (getFolders().find((f) => f.id === conv.folderId) ?? null)

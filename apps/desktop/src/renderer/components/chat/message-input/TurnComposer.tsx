@@ -28,14 +28,7 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import {
-  Cloud,
-  CloudUpload,
-  Paperclip,
-  Send,
-  Square,
-  X,
-} from "lucide-react";
+import { Cloud, CloudUpload, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";

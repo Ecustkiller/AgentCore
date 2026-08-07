@@ -6,7 +6,6 @@
  * `handoff`.
  */
 
-import { restPath } from "@agentcore/contract-rest-types/paths";
 import { BASE_URL, api } from "@/services/api";
 import type { PermissionAxes } from "@/services/permissionAxes";
 import {
@@ -14,6 +13,7 @@ import {
   normalizeAxes,
 } from "@/services/permissionAxes";
 import type { components } from "@/types/api.generated";
+import { restPath } from "@agentcore/contract-rest-types/paths";
 
 type Schemas = components["schemas"];
 

@@ -7073,7 +7073,7 @@ export interface components {
             /**
              * Base Url
              * @description OpenAI-compatible endpoint including version prefix
-             * @example https://tokenrhythm.studio/v1
+             * @example https://api.deepseek.com
              */
             base_url?: string | null;
             /**

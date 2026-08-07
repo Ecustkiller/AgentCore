@@ -256,7 +256,8 @@ async def main() -> None:
     print("=" * 84)
     print(f"ask_user 触发率探针 · 每条 ×{REPEATS} · 策略基线=甲(产出类→应开提案卡)")
     print(
-        f"billing_mode={settings.billing_mode} · checkpoint_gate_enabled={settings.checkpoint_gate_enabled}"
+        f"billing_mode={settings.billing_mode} · "
+        f"checkpoint_gate_enabled={settings.checkpoint_gate_enabled}"
     )
     print("=" * 84)
     if not settings.checkpoint_gate_enabled:

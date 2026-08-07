@@ -92,13 +92,16 @@ class IndexMaintainer:
         async with self._lock:
             try:
                 channel = getattr(self._backend, "_channel", None)
-                if channel is not None and getattr(channel, "_inflight", None) is not None:
-                    if not await self._wait_channel_quiet(channel):
-                        # Tool hot path still using the shared Local channel — skip
-                        # this round and coalesce a follow-up instead of hard-charging.
-                        logger.info("workspace.index_skip_channel_busy")
-                        self._rerun = True
-                        return
+                if (
+                    channel is not None
+                    and getattr(channel, "_inflight", None) is not None
+                    and not await self._wait_channel_quiet(channel)
+                ):
+                    # Tool hot path still using the shared Local channel — skip
+                    # this round and coalesce a follow-up instead of hard-charging.
+                    logger.info("workspace.index_skip_channel_busy")
+                    self._rerun = True
+                    return
                 force = self._force
                 self._force = False
                 with index_io_mode():

@@ -179,7 +179,8 @@ class AskUserTool:
             )
             tool_desc += (
                 " 桌面在线时可标 open_local_project / register_local_project / "
-                "bind_local_folder / grant_organize_folder；只读挂载用 external_mount_readonly 工具，"
+                "bind_local_folder / grant_organize_folder；"
+                "只读挂载用 external_mount_readonly 工具，"
                 "【禁止】为只读新发 grant_readonly_folder；"
                 "grant_* 可加 well_known / target_name。"
             )
