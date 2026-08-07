@@ -13,6 +13,10 @@ import {
  *
  * `variant` is chosen by ChatView: `bar` for the session bottom dock, `card`
  * (default) for the centered new-chat composer. Canvas keeps its own full card.
+ *
+ * Workspace / Git / compose actions live inside TurnComposer. When fused under
+ * ApprovalPrompt, ChatView stacks ApprovalPrompt above this input so the
+ * 一体圆角不受打断.
  */
 export function MessageInput({
   className,

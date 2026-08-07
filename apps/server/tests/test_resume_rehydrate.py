@@ -340,6 +340,10 @@ async def test_finish_resume_joins_pre_pause_reasoning_multi_cycle():
         profile=make_profile_params(max_rounds=20),
         citations=[],
         sink=EventSink(),
+        fact_log=None,
+        audit_recorder=SimpleNamespace(drops=0, flush=AsyncMock()),
+        roster_writer=None,
+        journal_writer=SimpleNamespace(flush=AsyncMock()),
         pre_pause_reasoning=accumulated,
     )
     assert result["reasoning_content"] == join_segments(accumulated, live)
@@ -389,6 +393,10 @@ async def test_finish_resume_disposes_open_supervised_and_folds_member_billing()
         profile=make_profile_params(max_rounds=20),
         citations=[],
         sink=EventSink(),
+        fact_log=None,
+        audit_recorder=SimpleNamespace(drops=0, flush=AsyncMock()),
+        roster_writer=None,
+        journal_writer=SimpleNamespace(flush=AsyncMock()),
     )
 
     assert t._supervised is None  # dangling plan released at resume close

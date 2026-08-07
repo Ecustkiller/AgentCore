@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
-from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, ToolEffect, new_id
 from agentcore.llm.credentials import LLMCredentials
@@ -17,14 +14,7 @@ from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.runtime.approvals import ApprovalGate  # noqa: F401 — test seam
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.costing import captain_run_cost_from_state
-from agentcore.runtime.events import (
-    EventSink,
-    FinishReason,
-    content_delta,
-    error_event,
-    message_end,
-)
+from agentcore.runtime.events import EventSink, content_delta
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
@@ -40,6 +30,10 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     mark_controller_after_settle,
 )
 from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
+from agentcore.runtime.pipeline.settle import (
+    salvage_failed_captain,
+    salvage_pipeline_exception,
+)
 from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — wire seam
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
 from agentcore.runtime.session_persistence import SessionRosterWriter, wire_roster_for_turn
@@ -403,59 +397,24 @@ async def resume_chat_pipeline(
         captain_state = await run_captain(captain_spec, messages)
 
         if captain_state.phase is RunPhase.FAILED:
-            err = captain_state.error or "captain resume failed"
-            sink.emit(error_event(ErrorCode.PIPELINE_ERROR, err))
-            sink.emit(message_end(FinishReason.ERROR))
-            with contextlib.suppress(Exception):
-                await sink.flush_stream_state()
-            from agentcore.conversation.store.merge import pick_longest
-            from agentcore.runtime.events.stream_checkpointer import (
-                CHANNEL_CAPTAIN_CONTENT,
-                CHANNEL_CAPTAIN_REASONING,
-            )
-
-            mem = sink.stream_memory_snapshot()
-            post = pick_longest(
-                mem.get(CHANNEL_CAPTAIN_CONTENT),
-                captain_state.content,
-                sink.streamed_content(),
-            )
+            # Same salvage kernel as fresh turn; resume then joins pre_pause into body.
             from agentcore.runtime.closing_posture import reconcile_resume_closing
 
-            salvaged_content = reconcile_resume_closing(pre_pause, post)
-            salvaged_reasoning = pick_longest(
-                mem.get(CHANNEL_CAPTAIN_REASONING),
-                captain_state.reasoning,
-                sink.streamed_reasoning(),
+            result = await salvage_failed_captain(
+                message_id=message_id,
+                captain_run_id=captain_run_id,
+                captain_state=captain_state,
+                vision_cost_sink=wired.vision_cost_sink,
+                sink=sink,
+                audit_recorder=audit_recorder,
+                roster_writer=roster_writer,
             )
-            # Bill the resumed captain's partial spend on a hard failure (B-deep 失败
-            # 计费), same as the fresh-turn path: priced onto captain_state, persisted
-            # by _persist_turn_result even without an assistant reply. No usage → no row.
-            cost_runs = [
-                *(
-                    [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
-                    if captain_state.usage
-                    else []
-                ),
-                # A board_read after the checkpoint may have billed before the captain
-                # died (§九.4 Gap ②): carry those vision rows so the spend isn't lost.
-                *(asdict(r) for r in wired.vision_cost_sink),
-            ]
-            await audit_recorder.flush()
-            if roster_writer is not None:
-                await roster_writer.flush()
-            return {
-                "message_id": message_id,
-                "content": salvaged_content,
-                "reasoning_content": salvaged_reasoning or None,
-                "error": err,
-                "error_code": ErrorCode.PIPELINE_ERROR,
-                "finish_reason": FinishReason.ERROR,
-                "cost_runs": cost_runs,
-                "audit_drops": audit_recorder.drops,
-            }
+            result["content"] = reconcile_resume_closing(pre_pause, result.get("content") or "")
+            return result
 
-        result = await finish_resume_turn(
+        # settle_successful_turn (via finish_resume_turn) already flushes journal /
+        # audit / roster / stream and stamps soft-fail last_turn_error.
+        return await finish_resume_turn(
             message_id=message_id,
             captain_run_id=captain_run_id,
             captain_state=captain_state,
@@ -465,64 +424,32 @@ async def resume_chat_pipeline(
             profile=profile,
             citations=citations,
             sink=sink,
+            fact_log=fact_log,
+            audit_recorder=audit_recorder,
+            roster_writer=roster_writer,
+            journal_writer=journal_writer,
             vision_cost_runs=wired.vision_cost_sink,
-            audit_drops=audit_recorder.drops,
             pre_pause_reasoning=pre_pause_reasoning,
         )
-        # Drain journal → audit projection fully BEFORE 定格 audit_drops (parity with
-        # run_chat_pipeline): the finally re-flush would otherwise drop more audit writes
-        # after drops was read, undercounting turn_metrics.audit_drops. Best-effort.
-        with contextlib.suppress(Exception):
-            await journal_writer.flush()
-        await audit_recorder.flush()
-        if roster_writer is not None:
-            await roster_writer.flush()
-        with contextlib.suppress(Exception):
-            await sink.flush_stream_state()
-        result["audit_drops"] = audit_recorder.drops
-        return result
 
     except Exception as e:
-        logger.error("pipeline.resume_error", error=str(e), exc_info=True)
-        # Preserve a structured AgentCoreError.code that escaped to the resume
-        # boundary instead of flattening every crash to PIPELINE_ERROR (统一错误码).
-        code, message, err_ctx = error_fields_for(
-            e, fallback_code=ErrorCode.PIPELINE_ERROR, fallback_message=str(e)
-        )
-        sink.emit(error_event(code, message, context=err_ctx))
-        sink.emit(message_end(FinishReason.ERROR))
-        with contextlib.suppress(Exception):
-            await sink.flush_stream_state()
-        from agentcore.conversation.store.merge import pick_longest
-        from agentcore.runtime.events.stream_checkpointer import (
-            CHANNEL_CAPTAIN_CONTENT,
-            CHANNEL_CAPTAIN_REASONING,
-        )
-
-        mem = sink.stream_memory_snapshot()
-        post = pick_longest(mem.get(CHANNEL_CAPTAIN_CONTENT), sink.streamed_content())
-        # pre_pause may be unbound if the crash was before it was computed.
+        # Same exception salvage as fresh turn (incl. journal_entries); resume joins
+        # pre_pause into salvaged body. pre_pause defaults to "" if crash was early.
         from agentcore.runtime.closing_posture import reconcile_resume_closing
 
-        salvaged_content = (
+        result = await salvage_pipeline_exception(
+            e=e,
+            message_id=message_id,
+            sink=sink,
+            fact_log=fact_log,
+            audit_recorder=audit_recorder,
+            roster_writer=roster_writer,
+        )
+        post = result.get("content") or ""
+        result["content"] = (
             reconcile_resume_closing(pre_pause, post) if pre_pause or post else ""
         )
-        salvaged_reasoning = pick_longest(
-            mem.get(CHANNEL_CAPTAIN_REASONING),
-            sink.streamed_reasoning(),
-        )
-        await audit_recorder.flush()
-        if roster_writer is not None:
-            await roster_writer.flush()
-        return {
-            "message_id": message_id,
-            "content": salvaged_content,
-            "reasoning_content": salvaged_reasoning or None,
-            "error": str(e),
-            "error_code": code,
-            "finish_reason": FinishReason.ERROR,
-            "audit_drops": audit_recorder.drops,
-        }
+        return result
     finally:
         # 触发点①：resume turn 结束防御性 orphan
         with contextlib.suppress(Exception):

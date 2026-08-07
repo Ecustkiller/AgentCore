@@ -1,14 +1,13 @@
 """Request rate limiting middleware.
 
-A small in-memory fixed-window limiter for the auth endpoints (login, register,
-refresh) to blunt credential-stuffing and registration spam on the public net.
-Per-account lockout already lives in the auth service; this adds per-IP throttling
-across accounts.
+Throttles auth endpoints (login, register, refresh) to blunt credential-stuffing
+and registration spam on the public net. Per-account lockout already lives in the
+auth service; this adds per-IP throttling across accounts.
 
-State is process-local, so it assumes a single server process — front with Redis
-if you scale to multiple workers. Core limiters live in ``agentcore.core.rate_limit``
-(framework-free); this module is the thin ASGI adapter plus settings-backed
-singletons.
+Backend follows ``settings.rate_limit_backend``: ``memory`` (process-local) or
+``redis`` (shared across workers via ``redis_rate_limit``). Core limiter interfaces
+live in ``agentcore.core.rate_limit`` (framework-free); this module is the thin
+ASGI adapter plus settings-backed singletons.
 """
 
 from collections.abc import Awaitable, Callable

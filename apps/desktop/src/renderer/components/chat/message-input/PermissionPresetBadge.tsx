@@ -36,7 +36,14 @@ import { useEffect, useRef, useState } from "react";
  * New chats: draft axes (seeded from 新会话默认配方); existing: read/write
  * ``conversation.permissionAxes``（下一回合生效）.
  */
-export function PermissionAxesBadge({ disabled }: { disabled?: boolean }) {
+export function PermissionAxesBadge({
+  disabled,
+  iconOnly = false,
+}: {
+  disabled?: boolean;
+  /** 二级入口：只显示盾牌图标，标签进 tooltip / aria-label。 */
+  iconOnly?: boolean;
+}) {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const conversations = useConversations();
   const [draftAxes, setDraftAxes] = useState<PermissionAxes>(
@@ -145,10 +152,11 @@ export function PermissionAxesBadge({ disabled }: { disabled?: boolean }) {
   const tip = isCustom
     ? `自定义：${axesCustomTip(axes)}`
     : RECIPE_LABELS[recipe].description;
+  const tipWithLabel = iconOnly ? `${label} — ${tip}` : tip;
 
   return (
     <div ref={rootRef} className="relative shrink-0">
-      <SimpleTooltip label={tip}>
+      <SimpleTooltip label={tipWithLabel}>
         <button
           type="button"
           disabled={disabled || pending}
@@ -156,13 +164,20 @@ export function PermissionAxesBadge({ disabled }: { disabled?: boolean }) {
           aria-label={`权限：${label}`}
           aria-expanded={open}
           className={cn(
-            "inline-flex h-8 max-w-44 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            "inline-flex items-center rounded-lg text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            iconOnly
+              ? "size-8 justify-center"
+              : "h-8 max-w-44 gap-1 px-2",
             (disabled || pending) && "cursor-not-allowed opacity-60",
           )}
         >
           <Shield size={14} className="shrink-0" />
-          <span className="truncate">{label}</span>
-          <ChevronDown size={12} className="shrink-0 opacity-60" />
+          {!iconOnly && (
+            <>
+              <span className="truncate">{label}</span>
+              <ChevronDown size={12} className="shrink-0 opacity-60" />
+            </>
+          )}
         </button>
       </SimpleTooltip>
       {open && (

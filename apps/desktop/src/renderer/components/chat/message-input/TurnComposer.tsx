@@ -1,11 +1,6 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
@@ -37,7 +32,6 @@ import {
   Cloud,
   CloudUpload,
   Paperclip,
-  Plus,
   Send,
   Square,
   X,
@@ -54,10 +48,7 @@ import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionAxesBadge } from "./PermissionPresetBadge";
 import { RecordingBar } from "./RecordingBar";
-import {
-  ComposerConnectionNotice,
-  ServerStatusIndicator,
-} from "./ServerStatusIndicator";
+import { ComposerConnectionNotice } from "./ServerStatusIndicator";
 import { VoiceButton } from "./VoiceButton";
 import type {
   PendingAgentMention,
@@ -95,7 +86,10 @@ export type TurnComposerVariant = "card" | "bar";
  * (placeholder, canvas follow hook, whether 后台云端 applies).
  *
  * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock;
- * default `card` keeps the full toolbar layout (center draft + canvas command bar).
+ * default `card` keeps textarea-above-toolbar layout (center draft + canvas command bar).
+ * Both share the same 底栏左簇：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限(图标) ·
+ * 附件 · 后台云；右簇仍为语音 · 字数 · 发送。离线态靠 {@link ComposerConnectionNotice}
+ * 与发送硬禁，不再用安静连接绿点。
  *
  * Draft state (text + attachments) lives in {@link useComposerDraftStore} keyed by
  * conversation, NOT in component state — switching 聊天 ⇄ 画布 swaps the mounted skin
@@ -120,8 +114,9 @@ export function TurnComposer({
   /** Called when a foreground turn is dispatched (canvas uses it to auto-follow). */
   onDispatch?: () => void;
   /**
-   * `card` = full toolbar under the textarea (default; center draft + canvas).
+   * `card` = textarea above toolbar (default; center draft + canvas).
    * `bar` = compact single-row input (chat bottom dock only).
+   * Both keep the full left-cluster chrome in-card (workspace … model … background).
    */
   variant?: TurnComposerVariant;
   /** Visually fuse with ApprovalPrompt stacked above (工具审批 A · Composer 一体). */
@@ -201,7 +196,6 @@ export function TurnComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isLocal, setIsLocal] = useState(false);
   const [backgroundMode, setBackgroundMode] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const folders = useFolders();
   const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const pendingFolderId =
@@ -500,6 +494,27 @@ export function TurnComposer({
     </SimpleTooltip>
   ) : null;
 
+  // 底栏左簇顺序：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限 · 附件 · 后台
+  const leftCluster = (
+    <>
+      <ComposerWorkspaceChip conversationId={conversationId} />
+      <ComposerGitStatusChip conversationId={conversationId} />
+      <ComposerEngineViaChip conversationId={conversationId} />
+      <ComposerNoLocalChip />
+      <ModelPicker disabled={isGenerating} />
+      <PermissionAxesBadge disabled={isGenerating} iconOnly />
+      <IconButton
+        size="md"
+        onClick={onPaperclipClick}
+        disabled={isGenerating}
+        aria-label="附加文件"
+      >
+        <Paperclip size={16} />
+      </IconButton>
+      {backgroundToggle}
+    </>
+  );
+
   // 生成中：主槽一位——无草稿=停止；有草稿=主色排队发送覆盖停止（清空即可再停）。
   // 插队为旁路轻量入口（显式 steer），不把主槽改成 Stop&send。
   // N4-A：只读离线硬禁用发送。
@@ -713,57 +728,7 @@ export function TurnComposer({
       {isBar ? (
         <div className="flex items-end gap-1 px-2 py-1">
           <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
-            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
-              <PopoverTrigger asChild>
-                <IconButton
-                  size="md"
-                  aria-label="更多选项"
-                  aria-expanded={moreOpen}
-                  title="更多"
-                  className="relative"
-                >
-                  <Plus size={16} />
-                  {serverUnhealthy && (
-                    <span
-                      aria-hidden
-                      className="absolute top-1 right-1 size-1.5 rounded-full bg-destructive"
-                    />
-                  )}
-                </IconButton>
-              </PopoverTrigger>
-              <PopoverContent
-                align="start"
-                side="top"
-                className="w-64 overflow-visible p-2"
-                onInteractOutside={(e) => {
-                  const el = e.target as HTMLElement | null;
-                  // Nested workspace / other portaled popovers live outside this
-                  // content node — keep the more menu open while they are used.
-                  if (el?.closest?.("[data-radix-popper-content-wrapper]")) {
-                    e.preventDefault();
-                  }
-                }}
-              >
-                <div className="flex flex-col gap-1">
-                  <ModelPicker disabled={isGenerating} />
-                  <PermissionAxesBadge disabled={isGenerating} />
-                  <ComposerWorkspaceChip conversationId={conversationId} />
-                  <ComposerEngineViaChip conversationId={conversationId} />
-                  <ComposerGitStatusChip conversationId={conversationId} />
-                  <ComposerNoLocalChip />
-                  {backgroundToggle}
-                  {serverUnhealthy && <ServerStatusIndicator />}
-                </div>
-              </PopoverContent>
-            </Popover>
-            <IconButton
-              size="md"
-              onClick={onPaperclipClick}
-              disabled={isGenerating}
-              aria-label="附加文件"
-            >
-              <Paperclip size={16} />
-            </IconButton>
+            {leftCluster}
           </div>
           {textareaBlock}
           <div className="flex shrink-0 items-center gap-1 pb-0.5">
@@ -783,22 +748,7 @@ export function TurnComposer({
           {textareaBlock}
           <div className="flex items-center justify-between px-4 pb-3">
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              <ModelPicker disabled={isGenerating} />
-              <PermissionAxesBadge disabled={isGenerating} />
-              <ComposerWorkspaceChip conversationId={conversationId} />
-              <ComposerEngineViaChip conversationId={conversationId} />
-              <ComposerGitStatusChip conversationId={conversationId} />
-              <ComposerNoLocalChip />
-              <IconButton
-                size="md"
-                onClick={onPaperclipClick}
-                disabled={isGenerating}
-                aria-label="附加文件"
-              >
-                <Paperclip size={16} />
-              </IconButton>
-              {backgroundToggle}
-              <ServerStatusIndicator />
+              {leftCluster}
             </div>
             <div className="flex items-center gap-3">
               {voice.isSupported && (

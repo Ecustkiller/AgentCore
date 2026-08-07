@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
- * TurnComposer variant smoke: `card` keeps the full toolbar; `bar` collapses
- * extras behind the「更多」entry and exposes `data-composer-variant`.
+ * TurnComposer variant smoke: `card` and `bar` share the same bottom-bar left
+ * cluster (workspace · … · model · permission · paperclip · background) and
+ * right cluster (voice · char count · send).
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -89,6 +90,7 @@ vi.mock("@/hooks/useModels", () => ({
 }));
 vi.mock("@/lib/capabilities", () => ({
   hasLocalFiles: () => false,
+  hasLocalEngine: () => false,
   // Desktop Electron under test — keep the web-only「无本地文件夹」chip off.
   isWebRuntime: () => false,
 }));
@@ -230,48 +232,40 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
+function expectWorkspaceBeforeModel(container: HTMLElement) {
+  const workspace = screen.getByLabelText("在哪工作");
+  const model = screen.getByLabelText(/模型组合：/);
+  const nodes = container.querySelectorAll("button, [aria-label]");
+  const order = [...nodes];
+  expect(order.indexOf(workspace)).toBeGreaterThanOrEqual(0);
+  expect(order.indexOf(model)).toBeGreaterThan(order.indexOf(workspace));
+}
+
 describe("TurnComposer variants", () => {
-  it("defaults to card: toolbar badges visible, no「更多」entry", () => {
+  it("defaults to card: workspace then model in left cluster, no「更多」", () => {
     const { container } = renderComposer();
     expect(
       container.querySelector('[data-composer-variant="card"]'),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "更多选项" })).toBeNull();
+    expect(screen.getByLabelText("在哪工作")).toBeTruthy();
     expect(screen.getByLabelText(/模型组合：/)).toBeTruthy();
+    expect(screen.getByLabelText(/权限：/)).toBeTruthy();
     expect(screen.getByLabelText("附加文件")).toBeTruthy();
+    expectWorkspaceBeforeModel(container);
   });
 
-  it("bar: single-row chrome with「更多」popover hosting the four extras", async () => {
+  it("bar: workspace then model in left cluster (no「更多」popover)", () => {
     const { container } = renderComposer("bar");
     expect(
       container.querySelector('[data-composer-variant="bar"]'),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "更多选项" })).toBeTruthy();
-    expect(screen.getByLabelText("附加文件")).toBeTruthy();
-    // Badges live inside the popover — not in the bar until opened.
-    expect(screen.queryByLabelText(/模型组合：/)).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
-    expect(await screen.findByLabelText(/模型组合：/)).toBeTruthy();
-    expect(screen.getByLabelText(/权限：/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "更多选项" })).toBeNull();
     expect(screen.getByLabelText("在哪工作")).toBeTruthy();
-  });
-
-  it("bar: healthy server shows no status red-dot on「更多」", () => {
-    renderComposer("bar");
-    const more = screen.getByRole("button", { name: "更多选项" });
-    expect(more.querySelector(".bg-destructive")).toBeNull();
-  });
-
-  it("bar: offline server hangs a destructive red-dot on「更多」", () => {
-    useServerHealthStore.setState({
-      status: "offline",
-      reason: "unreachable",
-      justRecovered: false,
-    });
-    renderComposer("bar");
-    const more = screen.getByRole("button", { name: "更多选项" });
-    expect(more.querySelector(".bg-destructive")).toBeTruthy();
+    expect(screen.getByLabelText(/模型组合：/)).toBeTruthy();
+    expect(screen.getByLabelText(/权限：/)).toBeTruthy();
+    expect(screen.getByLabelText("附加文件")).toBeTruthy();
+    expectWorkspaceBeforeModel(container);
   });
 
   it("N4-A: offline hard-disables 发送 even with draft text", async () => {

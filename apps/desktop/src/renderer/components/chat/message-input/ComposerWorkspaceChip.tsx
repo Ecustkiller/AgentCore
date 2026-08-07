@@ -37,7 +37,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 /**
- * Always-on「在哪工作」chip in the turn composer.
+ * Always-on「在哪工作」chip for the TurnComposer 底栏左簇（工作区首位）。
  * Draft: single menu (quick local / cloud / projects / create).
  * Bound conversation: read-only status (+ backup when local).
  */

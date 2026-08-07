@@ -41,6 +41,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
@@ -74,6 +75,23 @@ export function useWorkspaceModeState(
   const [error, setError] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [backupDone, setBackupDone] = useState(false);
+  // Track which conversation the in-memory binding belongs to. When the id
+  // changes, clear synchronously during render so consumers never see the prior
+  // session's effective.rootId (composer Git chip flash) before refresh resolves.
+  const [boundConversationId, setBoundConversationId] = useState(conversationId);
+  if (conversationId !== boundConversationId) {
+    setBoundConversationId(conversationId);
+    setBinding(null);
+    setContainerRootId(null);
+    setProjectName(null);
+    setRoots([]);
+    setError(null);
+  }
+
+  // Guard in-flight refresh: a slow getWorkspaceBinding for conv A must not
+  // write back after the user has already switched to conv B.
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
 
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
 
@@ -84,8 +102,9 @@ export function useWorkspaceModeState(
 
   const refresh = useCallback(async () => {
     if (!conversationId) return;
+    const forId = conversationId;
     const conv =
-      getConversations().find((c) => c.id === conversationId) ?? null;
+      getConversations().find((c) => c.id === forId) ?? null;
     setContainerRootId(conv?.localContainerRootId ?? null);
     const folder = conv?.folderId
       ? (getFolders().find((f) => f.id === conv.folderId) ?? null)
@@ -93,12 +112,14 @@ export function useWorkspaceModeState(
     setProjectName(folder?.name ?? null);
     try {
       const [b, r] = await Promise.all([
-        getWorkspaceBinding(conversationId),
+        getWorkspaceBinding(forId),
         loadRoots(),
       ]);
+      if (conversationIdRef.current !== forId) return;
       setBinding(b);
       setRoots(r);
     } catch {
+      if (conversationIdRef.current !== forId) return;
       setBinding(null);
     }
   }, [conversationId, loadRoots]);

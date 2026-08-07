@@ -80,10 +80,10 @@ class AuthSettings(BaseModel):
     mfa_issuer_name: str = "AgentCore Admin"
     # When false, admin login is password-only (session isolation still applies).
     admin_mfa_required: bool = True
-    # ``memory`` = process-local counters (dev / single worker only).
-    # ``redis`` = shared limiters + CSRF store. With shared cost_ledger_outbox,
-    # redis unlocks multi-worker API; memory + multi-worker is refused at boot
-    # in non-DEBUG.
+    # ``memory`` = process-local rate-limit counters (dev / single worker only).
+    # ``redis`` = shared rate limiters (CSRF stays a signed cookie — no Redis store).
+    # With shared cost_ledger_outbox, redis unlocks multi-worker API; memory +
+    # multi-worker is refused at boot in non-DEBUG.
     rate_limit_backend: Literal["memory", "redis"] = "memory"
 
     @field_validator("rate_limit_backend", mode="before")
