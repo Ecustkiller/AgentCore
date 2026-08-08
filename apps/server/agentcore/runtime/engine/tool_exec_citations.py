@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.citations import (
     annotate_ledger_ids,
     annotate_tool_citations,
@@ -65,11 +65,11 @@ async def apply_round_citation_side_effects(
                 registrant=ledger_registrant,
             )
             message.content = annotate_ledger_ids(
-                message.content or "", message_citations, id_map
+                llm_content_text(message.content), message_citations, id_map
             )
         elif annotate_citations:
             message.content = annotate_tool_citations(
-                message.content or "", message_citations, numbers
+                llm_content_text(message.content), message_citations, numbers
             )
     # Live 台账增量：本轮登记后 drain → 独立通道（不占 citations_event）。
     if turn_evidence_ledger is not None:

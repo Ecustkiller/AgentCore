@@ -321,6 +321,9 @@ async def test_list_marks_user_default_when_system_pin_dormant(monkeypatch):
         background_origin=None,
         background_model=None,
         background_provider_id=None,
+        vision_origin=None,
+        vision_model=None,
+        vision_provider_id=None,
     )
     svc = LlmModelProfileService(MagicMock())
     svc._default_id = AsyncMock(return_value=_glm_preset_id())  # type: ignore[method-assign]
@@ -369,9 +372,80 @@ async def test_expand_dormant_system_falls_to_byok_coherent(monkeypatch):
     assert expanded.main.model == "user-flash"
     assert expanded.main.provider_id == "p1"
     assert expanded.kind == "implicit"
+    assert expanded.vision is None
     assert "GLM-5.2" not in expanded.name
     assert "glm-5.2" not in expanded.name
     assert expanded.profile_id != _glm_preset_id()
+
+
+@pytest.mark.asyncio
+async def test_expand_user_profile_includes_vision_slot(monkeypatch):
+    """User combo with vision columns → expand surfaces vision; empty stays None."""
+    from types import SimpleNamespace
+
+    from agentcore.llm.resolve import ModelSelection
+
+    monkeypatch.setattr(
+        "agentcore.llm.catalog._platform_listable_model_ids",
+        lambda: ["glm-5.2"],
+    )
+    monkeypatch.setattr(
+        "agentcore.billing.preference.platform_catalog_visible",
+        lambda: True,
+    )
+
+    async def _live(_session, _user_id, slot):
+        return ModelSelection(
+            model=slot.model, origin=slot.origin, provider_id=slot.provider_id
+        )
+
+    monkeypatch.setattr(
+        "agentcore.llm.model_profiles._live_selection",
+        _live,
+    )
+
+    row = SimpleNamespace(
+        id="combo-v",
+        name="识图组合",
+        kind="user",
+        main_origin="byok",
+        main_model="gpt-4o",
+        main_provider_id="p-main",
+        worker_origin=None,
+        worker_model=None,
+        worker_provider_id=None,
+        background_origin=None,
+        background_model=None,
+        background_provider_id=None,
+        vision_origin="byok",
+        vision_model="qwen-vl-max",
+        vision_provider_id="p-vision",
+    )
+    svc = LlmModelProfileService(MagicMock())
+    svc._default_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    svc._repo.get = AsyncMock(return_value=row)  # type: ignore[method-assign]
+
+    expanded = await svc.expand("u1", "combo-v")
+    assert expanded.vision is not None
+    assert expanded.vision.model == "qwen-vl-max"
+    assert expanded.vision.origin == "byok"
+    assert expanded.vision.provider_id == "p-vision"
+
+    row_no_vision = SimpleNamespace(**{**row.__dict__, "vision_origin": None, "vision_model": None, "vision_provider_id": None})
+    svc._repo.get = AsyncMock(return_value=row_no_vision)  # type: ignore[method-assign]
+    expanded2 = await svc.expand("u1", "combo-v")
+    assert expanded2.vision is None
+
+
+@pytest.mark.asyncio
+async def test_system_preset_view_vision_always_null(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.llm.catalog._platform_listable_model_ids",
+        lambda: ["glm-5.2"],
+    )
+    svc = LlmModelProfileService(MagicMock())
+    view = svc._view_system(_glm_preset_id(), is_default=True)
+    assert view.vision is None
 
 
 @pytest.mark.asyncio

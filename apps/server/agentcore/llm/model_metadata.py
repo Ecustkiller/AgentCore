@@ -255,3 +255,26 @@ def model_metadata_for(model_id: str) -> ModelMeta:
         vendor=_derive_vendor(key),
         capabilities=_derive_capabilities(key),
     )
+
+
+def model_has_curated_vision(model_id: str) -> bool:
+    """True only when ``vision`` comes from the curated ``_METADATA`` table.
+
+    Keyword-derived capabilities (``_derive_capabilities``) enrich the catalog UI
+    but must **not** open native multimodal routing — a false ``vision`` tag on a
+    text-only upstream (e.g. id containing ``vl`` / ``4o`` substrings) would 400
+    the turn. Exact id and longest family-prefix hits count as curated.
+    """
+    key = _normalize(model_id)
+    if not key:
+        return False
+    exact = _METADATA.get(key)
+    if exact is not None:
+        return CAPABILITY_VISION in exact.capabilities
+    best_key: str | None = None
+    for known in _METADATA:
+        if key.startswith(known) and (best_key is None or len(known) > len(best_key)):
+            best_key = known
+    if best_key is None:
+        return False
+    return CAPABILITY_VISION in _METADATA[best_key].capabilities

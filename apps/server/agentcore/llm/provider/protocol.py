@@ -65,10 +65,51 @@ class ToolCallDelta:
     arguments_delta: str | None = None
 
 
+# OpenAI-compatible multimodal user content: str, or a list of text / image_url parts.
+LLMContent = str | list[dict] | None
+
+
+def llm_content_text(content: LLMContent) -> str:
+    """Extract plain text from ``LLMMessage.content`` (str or multimodal parts).
+
+    Image parts are skipped; used by governance / strip sites that must not assume str.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                chunks.append(part)
+            elif isinstance(part, dict) and part.get("type") == "text":
+                chunks.append(str(part.get("text") or ""))
+        return "".join(chunks)
+    return str(content)
+
+
+def build_multimodal_user_content(
+    text: str, image_parts: list[dict]
+) -> str | list[dict]:
+    """Build user ``content``: plain str when no images; else text + image_url parts."""
+    if not image_parts:
+        return text
+    stripped = (text or "").strip()
+    parts: list[dict] = [
+        {
+            "type": "text",
+            "text": stripped if stripped else "（用户附上了图片）",
+        }
+    ]
+    parts.extend(image_parts)
+    return parts
+
+
 @dataclass
 class LLMMessage:
     role: Literal["system", "user", "assistant", "tool"]
-    content: str | None = None
+    content: LLMContent = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
     reasoning_content: str | None = None

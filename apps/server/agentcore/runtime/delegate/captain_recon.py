@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 
 _RECON_TOOLS = frozenset({"file_list", "file_read", "grep"})
 _MAX_ENTRIES = 6
@@ -50,7 +50,7 @@ def harvest_captain_recon(
         if meta is None:
             continue
         name, label = meta
-        body = (msg.content or "").strip()
+        body = llm_content_text(msg.content).strip()
         if not body:
             continue
         # Skip hard failures — no useful recon to hand down.

@@ -1,4 +1,4 @@
-"""LLM model combination profiles (模型组合 · main / worker / background slots)."""
+"""LLM model combination profiles (模型组合 · main / worker / background / vision)."""
 
 from datetime import datetime
 
@@ -12,11 +12,13 @@ from ._helpers import _new_uuid
 
 
 class LlmModelProfile(Base):
-    """A named model combination: main (required) + optional worker / background.
+    """A named model combination: main (required) + optional worker / background / vision.
 
-    Empty worker / background slots (model NULL) mean ``follow_main``. System presets
-    are virtual (not stored here). ``kind=implicit`` rows are migration-era per-session
-    overrides; ``kind=user`` are user-authored combinations.
+    Empty worker / background slots (model NULL) mean ``follow_main``. Empty vision
+    (NULL) does **not** follow main — VisionReader falls back to platform ``VISION_*``
+    only when ``billing_mode=platform``. System presets are virtual (not stored here).
+    ``kind=implicit`` rows are migration-era per-session overrides; ``kind=user`` are
+    user-authored combinations.
     """
 
     __tablename__ = "llm_model_profiles"
@@ -36,6 +38,10 @@ class LlmModelProfile(Base):
         CheckConstraint(
             "background_origin is null or background_origin in ('platform', 'byok')",
             name="ck_llm_model_profiles_background_origin",
+        ),
+        CheckConstraint(
+            "vision_origin is null or vision_origin in ('platform', 'byok')",
+            name="ck_llm_model_profiles_vision_origin",
         ),
         Index("ix_llm_model_profiles_user", "user_id"),
     )
@@ -66,6 +72,12 @@ class LlmModelProfile(Base):
         PG_UUID(as_uuid=False), nullable=True
     )
     background_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    vision_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vision_provider_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), nullable=True
+    )
+    vision_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

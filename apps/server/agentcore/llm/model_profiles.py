@@ -1,13 +1,15 @@
 """Model combination profiles (模型组合) — CRUD + expand + system presets.
 
-A profile is ``{main, worker?, background?}``. Empty worker / background = follow_main.
+A profile is ``{main, worker?, background?, vision?}``. Empty worker / background =
+follow_main. Empty vision does **not** follow main (VisionReader uses platform
+``VISION_*`` only when ``billing_mode=platform``).
 
 System presets are virtual well-known ids projected from the live platform catalog /
 allowlist (``PLATFORM_MODELS``, or ``[PLATFORM_MODEL, PLATFORM_BACKGROUND_MODEL]`` when
 empty). Each listable platform model id → one system combo (main = that platform model;
-worker / background follow). Display names come from ``model_metadata``. Stable ids use
-``uuid5(NAMESPACE_URL, "agentcore:platform-preset:{model_id}")`` — no hardcoded product
-UUID table.
+worker / background / vision follow-null). Display names come from ``model_metadata``.
+Stable ids use ``uuid5(NAMESPACE_URL, "agentcore:platform-preset:{model_id}")`` — no
+hardcoded product UUID table.
 
 Distinct from scenario ``ProfileParams`` (temperature / rounds) in ``llm/profiles.py``.
 """
@@ -49,7 +51,7 @@ class ProfileSlot:
 
 @dataclass(frozen=True)
 class ExpandedProfile:
-    """Resolved slots after expand (worker/background None = follow_main)."""
+    """Resolved slots after expand (worker/background None = follow_main; vision None ≠ main)."""
 
     profile_id: str
     name: str
@@ -57,6 +59,7 @@ class ExpandedProfile:
     main: ModelSelection
     worker: ModelSelection | None = None
     background: ModelSelection | None = None
+    vision: ModelSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class ModelProfileView:
     main: ProfileSlot
     worker: ProfileSlot | None = None
     background: ProfileSlot | None = None
+    vision: ProfileSlot | None = None
     is_default: bool = False
 
 
@@ -206,6 +210,7 @@ class LlmModelProfileService:
             ),
             worker=None,
             background=None,
+            vision=None,
             is_default=is_default,
         )
 
@@ -222,6 +227,9 @@ class LlmModelProfileService:
             ),
             background=_slot_from_row(
                 row.background_origin, row.background_model, row.background_provider_id
+            ),
+            vision=_slot_from_row(
+                row.vision_origin, row.vision_model, row.vision_provider_id
             ),
             is_default=is_default,
         )
@@ -252,6 +260,7 @@ class LlmModelProfileService:
                 main=v.main,
                 worker=v.worker,
                 background=v.background,
+                vision=v.vision,
                 is_default=(v.id == effective),
             )
             for v in views
@@ -310,6 +319,7 @@ class LlmModelProfileService:
         main: ProfileSlot,
         worker: ProfileSlot | None = None,
         background: ProfileSlot | None = None,
+        vision: ProfileSlot | None = None,
         kind: str = "user",
         set_as_default: bool = False,
     ) -> ModelProfileView:
@@ -321,6 +331,8 @@ class LlmModelProfileService:
             await self._validate_slot(user_id, worker, label="worker")
         if background is not None:
             await self._validate_slot(user_id, background, label="background")
+        if vision is not None:
+            await self._validate_slot(user_id, vision, label="vision")
 
         row = await self._repo.create(
             user_id=user_id,
@@ -341,6 +353,11 @@ class LlmModelProfileService:
                 else None
             ),
             background_model=background.model.strip() if background else None,
+            vision_origin=vision.origin if vision else None,
+            vision_provider_id=(
+                vision.provider_id if vision and vision.origin == "byok" else None
+            ),
+            vision_model=vision.model.strip() if vision else None,
         )
         if set_as_default:
             await self._users.set_default_model_profile(user_id, row.id)
@@ -355,6 +372,7 @@ class LlmModelProfileService:
         main: ProfileSlot | None = None,
         worker: ProfileSlot | None | object = _UNSET,
         background: ProfileSlot | None | object = _UNSET,
+        vision: ProfileSlot | None | object = _UNSET,
         fields_set: set[str],
     ) -> ModelProfileView:
         if is_system_profile_id(profile_id):
@@ -406,6 +424,19 @@ class LlmModelProfileService:
                     background.provider_id if background.origin == "byok" else None
                 )
                 kwargs["background_model"] = background.model.strip()
+        if "vision" in fields_set:
+            if vision is None:
+                kwargs["vision_origin"] = None
+                kwargs["vision_provider_id"] = None
+                kwargs["vision_model"] = None
+            else:
+                assert isinstance(vision, ProfileSlot)
+                await self._validate_slot(user_id, vision, label="vision")
+                kwargs["vision_origin"] = vision.origin
+                kwargs["vision_provider_id"] = (
+                    vision.provider_id if vision.origin == "byok" else None
+                )
+                kwargs["vision_model"] = vision.model.strip()
 
         updated = await self._repo.update(profile_id, user_id=user_id, **kwargs)
         assert updated is not None
@@ -468,6 +499,7 @@ class LlmModelProfileService:
             main=main,
             worker=None,
             background=None,
+            vision=None,
         )
 
     async def expand(
@@ -499,6 +531,7 @@ class LlmModelProfileService:
                 main=main,
                 worker=None,
                 background=None,
+                vision=None,
             )
 
         if not effective:
@@ -531,6 +564,15 @@ class LlmModelProfileService:
             await _live_selection(self._session, user_id, bg_slot) if bg_slot else None
         )
 
+        vision_slot = _slot_from_row(
+            row.vision_origin, row.vision_model, row.vision_provider_id
+        )
+        vision = (
+            await _live_selection(self._session, user_id, vision_slot)
+            if vision_slot
+            else None
+        )
+
         return ExpandedProfile(
             profile_id=row.id,
             name=row.name,
@@ -538,6 +580,7 @@ class LlmModelProfileService:
             main=main,
             worker=worker,
             background=background,
+            vision=vision,
         )
 
     async def expand_for_conversation(

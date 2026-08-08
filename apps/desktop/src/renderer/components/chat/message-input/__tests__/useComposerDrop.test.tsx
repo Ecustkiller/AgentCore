@@ -153,7 +153,7 @@ describe("useComposerDrop dropError lifecycle", () => {
     hasLocal.mockReturnValue(false);
     prepareMock.mockResolvedValue({
       ok: false,
-      reason: "暂不支持图片附件（模型尚无视觉能力）",
+      reason: "文件超过 25MB 上限",
     });
     const { result } = renderHook(() =>
       useComposerDrop(false, [], vi.fn(), "c1"),
@@ -164,6 +164,6 @@ describe("useComposerDrop dropError lifecycle", () => {
         new File(["x"], "a.png", { type: "image/png" }),
       );
     });
-    expect(result.current.dropError).toContain("暂不支持图片");
+    expect(result.current.dropError).toContain("25MB");
   });
 });

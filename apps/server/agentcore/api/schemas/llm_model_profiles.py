@@ -1,7 +1,7 @@
 """Model combination profile (模型组合) API schemas.
 
 Distinct from scenario ``ProfileParams`` (temperature / rounds) — this is the
-account/session selectable ``{main, worker?, background?}`` combination.
+account/session selectable ``{main, worker?, background?, vision?}`` combination.
 """
 
 from datetime import datetime
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ModelProfileSlot(BaseModel):
-    """One slot in a model combination (main / worker / background)."""
+    """One slot in a model combination (main / worker / background / vision)."""
 
     origin: Literal["byok", "platform"] = Field(
         description="Credential origin: byok (user key) or platform (operator catalog)"
@@ -40,6 +40,7 @@ class LlmModelProfileView(BaseModel):
     main: ModelProfileSlot
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
+    vision: ModelProfileSlot | None = None
     is_default: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -55,17 +56,19 @@ class CreateLlmModelProfileRequest(BaseModel):
     main: ModelProfileSlot
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
+    vision: ModelProfileSlot | None = None
     set_as_default: bool = False
 
 
 class UpdateLlmModelProfileRequest(BaseModel):
-    """Partial update. Omitted fields unchanged; explicit null on worker/background clears
-    the slot (follow_main)."""
+    """Partial update. Omitted fields unchanged; explicit null on worker/background/vision
+    clears the slot (worker/background → follow_main; vision → no slot / platform fallback)."""
 
     name: str | None = Field(default=None, max_length=200)
     main: ModelProfileSlot | None = None
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
+    vision: ModelProfileSlot | None = None
 
 
 class SetDefaultModelProfileRequest(BaseModel):

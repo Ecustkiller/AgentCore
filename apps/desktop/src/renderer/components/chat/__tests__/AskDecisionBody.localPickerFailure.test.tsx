@@ -115,11 +115,11 @@ describe("AskDecisionBody local picker failure card", () => {
     expect(card.textContent).toContain("未弹出文件夹选择器");
   });
 
-  it("shows structured card for no_package_json", async () => {
+  it("shows structured card for unauthorized", async () => {
     pickAndOpenLocalProject.mockResolvedValue({
       ok: false,
-      reason: "no_package_json",
-      message: "请选择项目根目录",
+      reason: "unauthorized",
+      message: "所选路径无法访问",
     });
 
     render(<Harness />);
@@ -132,10 +132,10 @@ describe("AskDecisionBody local picker failure card", () => {
       screen
         .getByTestId("local-picker-failure-card")
         .getAttribute("data-failure-kind"),
-    ).toBe("no_package_json");
+    ).toBe("unauthorized");
     expect(
       screen.getByTestId("local-picker-failure-card").textContent,
-    ).toContain("package.json");
+    ).toContain("未能授权本机目录");
   });
 
   it("cancelled stays silent — no failure card", async () => {

@@ -11,6 +11,7 @@ ceiling, still flag missing critical site files and residual ``{{…}}`` slots.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 # Match playbook skeleton artifacts (build_website).
@@ -25,10 +26,21 @@ REASON_WEBSITE_SHELL = "website_shell_incomplete"
 _MUSTACHE_RE = re.compile(r"\{\{[^{}\n]+\}\}")
 _HTML_SUFFIXES = (".html", ".htm")
 _SECTION_ID_RE = re.compile(r"^s?\d+$", re.IGNORECASE)
+# Discover existing markers (START or END); keep encounter order, de-dupe.
+_SECTION_MARK_RE = re.compile(
+    r"<!--\s*SECTION:(s?\d+)\s+(?:START|END)\s*-->",
+    re.IGNORECASE,
+)
 
 
 class SectionMarkerError(ValueError):
     """SECTION START/END pair missing, mismatched, or ambiguous."""
+
+
+def is_valid_section_id(section: str) -> bool:
+    """True when ``section`` matches the ``sN`` / ``N`` contract (non-empty)."""
+    raw = (section or "").strip()
+    return bool(raw) and _SECTION_ID_RE.match(raw) is not None
 
 
 def normalize_section_id(section: str) -> str:
@@ -43,6 +55,51 @@ def normalize_section_id(section: str) -> str:
     if raw[0] in "sS":
         return f"s{int(raw[1:])}"
     return f"s{int(raw)}"
+
+
+def list_section_ids(html: str) -> list[str]:
+    """Return unique SECTION ids found in ``html`` (encounter order, normalized)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _SECTION_MARK_RE.finditer(html or ""):
+        raw = m.group(1)
+        try:
+            slug = normalize_section_id(raw)
+        except SectionMarkerError:
+            continue
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append(slug)
+    return out
+
+
+def _existing_sections_hint(existing: Sequence[str] | None) -> str:
+    if existing is None:
+        return ""
+    if not existing:
+        return (
+            "当前文件未找到 `<!-- SECTION:sN START/END -->` 标记对"
+            "（write_section 仅用于含 SECTION 标记的建站 HTML）。"
+        )
+    return "当前文件已有分区：" + "、".join(existing) + "。"
+
+
+def teachable_section_reject(
+    base: str,
+    *,
+    existing: Sequence[str] | None = None,
+    example: str = "s0",
+) -> str:
+    """Enrich a SECTION contract reject with a legal example + file inventory.
+
+    Teachable feedback only — not an intent classifier (intercept-discipline).
+    """
+    parts = [base.rstrip("。").rstrip() + "。", f'合法示例：section="{example}"。']
+    hint = _existing_sections_hint(existing)
+    if hint:
+        parts.append(hint)
+    return "".join(parts)
 
 
 def section_start_marker(section_id: str) -> str:

@@ -269,11 +269,9 @@ function ProviderCard({
 }) {
   const host = hostFromBaseUrl(provider.base_url);
   const busy = testing;
-  const metaParts = [
-    host || null,
-    provider.masked_key ?? "已配置",
-    provider.default_model ? `默认模型 ${provider.default_model}` : null,
-  ].filter(Boolean);
+  const metaParts = [host || null, provider.masked_key ?? "已配置"].filter(
+    Boolean,
+  );
 
   return (
     <div className="rounded-lg border border-border px-3 py-2.5">

@@ -51,6 +51,7 @@ def _to_response(view: ModelProfileView) -> LlmModelProfileView:
         main=_slot_to_api(view.main),  # type: ignore[arg-type]
         worker=_slot_to_api(view.worker),
         background=_slot_to_api(view.background),
+        vision=_slot_to_api(view.vision),
         is_default=view.is_default,
     )
 
@@ -88,6 +89,7 @@ async def create_model_profile(
         main=_to_service_slot(body.main),
         worker=_to_service_slot(body.worker) if body.worker else None,
         background=_to_service_slot(body.background) if body.background else None,
+        vision=_to_service_slot(body.vision) if body.vision else None,
         set_as_default=body.set_as_default,
     )
     logger.info(
@@ -135,6 +137,9 @@ async def update_model_profile(
         background = (
             _to_service_slot(body.background) if body.background is not None else None
         )
+    vision: ProfileSlot | None | object = _UNSET
+    if "vision" in fields:
+        vision = _to_service_slot(body.vision) if body.vision is not None else None
     return _to_response(
         await service.update_profile(
             user.user_id,
@@ -143,6 +148,7 @@ async def update_model_profile(
             main=_to_service_slot(body.main) if body.main else None,
             worker=worker,
             background=background,
+            vision=vision,
             fields_set=set(fields),
         )
     )

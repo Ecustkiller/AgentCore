@@ -79,8 +79,9 @@ export type ModelKeyFormProps = {
 /**
  * BYOK 服务商表单 — 设置·服务商的「添加服务商」/「编辑服务商」共用单一真相源。
  *
- * 主路径 = 厂商 + 名称 + Key + 默认模型（连接测试与目录兜底；选预设预填，编辑保留已存值）。
- * 预设厂商：Base URL 进高级。自定义端点：Base URL 主路径必填。
+ * 主路径 = 厂商 + 名称 + Key（自定义另有 Base URL）。
+ * 「连接测试用模型」进高级（仍提交 default_model；选预设静默预填，编辑保留已存值）。
+ * 预设厂商：Base URL 也进高级。自定义端点：Base URL 主路径必填。
  * 对话日常选用在「模型组合」/ picker，不在本表单。
  */
 export function ModelKeyForm({
@@ -147,7 +148,10 @@ export function ModelKeyForm({
     !(preset.baseUrlAliases ?? []).some(
       (alias) => normalizeByokBaseUrl(alias) === normalizeByokBaseUrl(baseUrl),
     );
-  const [advancedOpen, setAdvancedOpen] = useState(() => baseUrlOverride);
+  /** 非预设模型或已覆盖 Base URL → 高级默认展开（与既有 baseUrlOverride 同类）。 */
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => baseUrlOverride || useOtherModel,
+  );
 
   const selectProvider = (next: ByokProviderId) => {
     setProviderPreset(next);
@@ -230,7 +234,7 @@ export function ModelKeyForm({
           </select>
           {!isCustom && (
             <p className="mt-1 text-xs text-muted-foreground">
-              选择后将预填名称、端点与默认模型；日常选用请到「模型组合」。
+              选择后将预填名称与端点；日常选用请到「模型组合」。
             </p>
           )}
         </label>
@@ -288,75 +292,16 @@ export function ModelKeyForm({
             />
           </label>
         )}
-        <div>
-          {isCustom ? (
-            <label className="block" htmlFor={defaultModelId}>
-              <span className="text-xs text-muted-foreground">默认模型</span>
-              <Input
-                id={defaultModelId}
-                type="text"
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                placeholder="model-name"
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-1 w-full font-mono"
-              />
-            </label>
-          ) : (
-            <div>
-              <label className="block" htmlFor={defaultModelId}>
-                <span className="text-xs text-muted-foreground">默认模型</span>
-                <select
-                  id={defaultModelId}
-                  value={
-                    useOtherModel ? OTHER_DEFAULT_MODEL_VALUE : defaultModel
-                  }
-                  onChange={(e) => selectDefaultModel(e.target.value)}
-                  className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
-                >
-                  {(preset?.models ?? []).map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                  <option value={OTHER_DEFAULT_MODEL_VALUE}>其他…</option>
-                </select>
-              </label>
-              {useOtherModel && (
-                <Input
-                  id={otherModelId}
-                  type="text"
-                  value={defaultModel}
-                  onChange={(e) => setDefaultModel(e.target.value)}
-                  placeholder={preset?.defaultModel ?? "model-name"}
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-label="自定义默认模型"
-                  className="mt-2 w-full font-mono"
-                />
-              )}
-            </div>
-          )}
-          {providerPreset === "jiurelay" && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              领取的 Key 须与所选模型对应。
-            </p>
-          )}
-          <p className="mt-1 text-xs text-muted-foreground">
-            连接测试与目录兜底用；日常选用请到「模型组合」。
-          </p>
-        </div>
-        {!isCustom && (
-          <details
-            className="rounded-lg border border-border/60 bg-muted/20 p-3"
-            open={advancedOpen}
-            onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
-          >
-            <summary className="cursor-pointer text-xs font-medium text-foreground">
-              高级选项
-            </summary>
-            <div className="mt-3 space-y-3">
+        <details
+          className="rounded-lg border border-border/60 bg-muted/20 p-3"
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-xs font-medium text-foreground">
+            高级选项
+          </summary>
+          <div className="mt-3 space-y-3">
+            {!isCustom && (
               <label className="block" htmlFor={baseUrlId}>
                 <span className="text-xs text-muted-foreground">Base URL</span>
                 <Input
@@ -370,9 +315,72 @@ export function ModelKeyForm({
                   className="mt-1 w-full font-mono"
                 />
               </label>
+            )}
+            <div>
+              {isCustom ? (
+                <label className="block" htmlFor={defaultModelId}>
+                  <span className="text-xs text-muted-foreground">
+                    连接测试用模型
+                  </span>
+                  <Input
+                    id={defaultModelId}
+                    type="text"
+                    value={defaultModel}
+                    onChange={(e) => setDefaultModel(e.target.value)}
+                    placeholder="model-name"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="mt-1 w-full font-mono"
+                  />
+                </label>
+              ) : (
+                <div>
+                  <label className="block" htmlFor={defaultModelId}>
+                    <span className="text-xs text-muted-foreground">
+                      连接测试用模型
+                    </span>
+                    <select
+                      id={defaultModelId}
+                      value={
+                        useOtherModel ? OTHER_DEFAULT_MODEL_VALUE : defaultModel
+                      }
+                      onChange={(e) => selectDefaultModel(e.target.value)}
+                      className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
+                    >
+                      {(preset?.models ?? []).map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                      <option value={OTHER_DEFAULT_MODEL_VALUE}>其他…</option>
+                    </select>
+                  </label>
+                  {useOtherModel && (
+                    <Input
+                      id={otherModelId}
+                      type="text"
+                      value={defaultModel}
+                      onChange={(e) => setDefaultModel(e.target.value)}
+                      placeholder={preset?.defaultModel ?? "model-name"}
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-label="自定义连接测试用模型"
+                      className="mt-2 w-full font-mono"
+                    />
+                  )}
+                </div>
+              )}
+              {providerPreset === "jiurelay" && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  领取的 Key 须与所选模型对应。
+                </p>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                连接测试与目录兜底用；日常选用请到「模型组合」。
+              </p>
             </div>
-          </details>
-        )}
+          </div>
+        </details>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button

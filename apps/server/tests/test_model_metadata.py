@@ -49,3 +49,16 @@ def test_hy3_preview_exact_display_not_family_hy3():
     assert meta.vendor == "腾讯 Hy"
     assert meta.capabilities == frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING})
     assert meta.context_length == 256_000
+
+
+def test_model_has_curated_vision_ignores_keyword_derive():
+    """Native multimodal gate must not trust keyword-inferred vision tags."""
+    from agentcore.llm.model_metadata import model_has_curated_vision
+
+    assert model_has_curated_vision("gpt-4o") is True
+    assert model_has_curated_vision("kimi-k2.5") is True
+    assert model_has_curated_vision("deepseek-v4-pro") is False
+    # Keyword-derived catalog may tag these, but curated gate stays closed.
+    assert CAPABILITY_VISION in model_metadata_for("acme-vl-special").capabilities
+    assert model_has_curated_vision("acme-vl-special") is False
+    assert model_has_curated_vision("mystery-4o-clone") is False

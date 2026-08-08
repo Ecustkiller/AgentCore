@@ -30,6 +30,7 @@ import {
   updateLlmModelProfile,
 } from "@/services/llmModelProfiles";
 import type { LlmProviderView } from "@/services/llmProviders";
+import { type ModelCatalogItem, findCatalogItem } from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -38,6 +39,20 @@ import { SettingsHeader } from "./SettingsHeader";
 
 /** `<select>` 哨兵：进入 BYOK 手填 model id（非 encodePointer 值）。 */
 const CUSTOM_SELECT_VALUE = "__custom__";
+
+/** 草稿主模型是否在 curated 目录标有 vision（贴图可直送主模型）。 */
+function mainHasCuratedVision(
+  main: ModelProfileSlot | null,
+  catalogModels: ModelCatalogItem[],
+): boolean {
+  if (!main) return false;
+  const item = findCatalogItem(catalogModels, {
+    id: main.model,
+    origin: main.origin,
+    providerId: main.provider_id,
+  });
+  return (item?.capabilities ?? []).includes("vision");
+}
 
 /** groups 内所有 group.models 合计为空（有 provider 但 models 空也算）。 */
 function hasSelectableModels(groups: DefaultProviderGroup[]): boolean {
@@ -128,9 +143,43 @@ function NoAvailableModelsGuide({
 /**
  * 模型 (/more/model) — 账号默认组合 + 组合 CRUD。
  *
- * 组合 = `{ main, worker?, background? }`；账号默认组合与会话引用见
+ * 组合 = `{ main, worker?, background?, vision? }`；账号默认组合与会话引用见
  * `/v1/users/me/llm-model-profiles`。凭据与测连见 `/more/providers`。
  */
+
+/** 识图槽：优先只列 catalog 带 `vision` capability 的项；过滤为空则回退全目录。 */
+function catalogForVisionSlot(
+  catalog: ReturnType<typeof useModels>["data"],
+): ReturnType<typeof useModels>["data"] {
+  if (!catalog) return catalog;
+  const visionModels = catalog.models.filter((m) =>
+    (m.capabilities ?? []).includes("vision"),
+  );
+  if (visionModels.length === 0) return catalog;
+  return { ...catalog, models: visionModels };
+}
+
+/**
+ * 识图下拉分组。过滤命中时去掉 provider.default_model，避免无 vision 的默认项渗入；
+ * 过滤为空时与主槽同形（全目录 + BYOK 手填）。
+ */
+function buildVisionProviderGroups(
+  providers: LlmProviderView[],
+  catalog: ReturnType<typeof useModels>["data"],
+  ...slots: (ModelProfileSlot | null | undefined)[]
+): DefaultProviderGroup[] {
+  const visionCatalog = catalogForVisionSlot(catalog);
+  const filtered = visionCatalog !== catalog;
+  const providersForVision = filtered
+    ? providers.map((p) => ({ ...p, default_model: "" }))
+    : providers;
+  return buildDefaultProviderGroups(
+    providersForVision,
+    visionCatalog,
+    ...slots,
+  );
+}
+
 export function ModelSettings() {
   const { data: response, isLoading, isError, error } = useLlmProviders();
   const { data: catalog } = useModels();
@@ -152,8 +201,8 @@ export function ModelSettings() {
         title="模型"
         description={
           platformAvailable
-            ? "选择账号默认组合（主模型 + 可选 Worker / 后台）。可用平台额度直接对话，也可接入服务商。"
-            : "选择账号默认组合（主模型 + 可选 Worker / 后台）。需自行在 jiurelay 免费配额度或接入服务商。"
+            ? "选择账号默认组合（主模型 + 可选 Worker / 后台 / 识图）。可用平台额度直接对话，也可接入服务商。"
+            : "选择账号默认组合（主模型 + 可选 Worker / 后台 / 识图）。需自行在 jiurelay 免费配额度或接入服务商。"
         }
       />
 
@@ -258,7 +307,8 @@ function PlatformStatusLine({
 }
 
 /**
- * 模型组合列表 + 编辑：主必填；Worker / 后台常显，空 = 跟随主模型。
+ * 模型组合列表 + 编辑：主必填；Worker / 后台 / 识图常显。
+ * Worker / 后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
  * 系统预置不可删，可设默认 / 复制为用户组合；用户组合可新建 / 改名 / 删。
  */
 function ModelProfilesSection({
@@ -295,7 +345,13 @@ function ModelProfilesSection({
   const groups = buildDefaultProviderGroups(
     providers,
     catalog,
-    ...manageable.flatMap((p) => [p.main, p.worker, p.background]),
+    ...manageable.flatMap((p) => [p.main, p.worker, p.background, p.vision]),
+  );
+  // 识图槽：过滤后若无 vision 模型则回退全目录（仍可 BYOK 手填）。
+  const visionGroups = buildVisionProviderGroups(
+    providers,
+    catalog,
+    ...manageable.map((p) => p.vision),
   );
 
   const seedMain = (): ModelProfileSlot | null => {
@@ -359,6 +415,7 @@ function ModelProfilesSection({
         main: profile.main,
         worker: profile.worker ?? null,
         background: profile.background ?? null,
+        vision: profile.vision ?? null,
         set_as_default: false,
       });
       setEditingId(created.id);
@@ -388,6 +445,7 @@ function ModelProfilesSection({
         main: draft.main,
         worker: draft.worker,
         background: draft.background,
+        vision: draft.vision,
         set_as_default: false,
       } satisfies CreateLlmModelProfileInput);
       setCreating(false);
@@ -405,6 +463,7 @@ function ModelProfilesSection({
         main: draft.main,
         worker: draft.worker,
         background: draft.background,
+        vision: draft.vision,
       });
       setEditingId(null);
       notifySuccess(`已保存「${name}」`);
@@ -416,7 +475,8 @@ function ModelProfilesSection({
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">模型组合</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            主模型必填；Worker / 后台可留空跟随。改定义后下一回合生效。
+            主模型必填；Worker /
+            后台可留空跟随；识图可留空不配置。改定义后下一回合生效。
           </p>
         </div>
         <Button
@@ -445,12 +505,15 @@ function ModelProfilesSection({
             <ProfileEditor
               title="新建组合"
               groups={groups}
+              visionGroups={visionGroups}
+              catalogModels={catalogModels}
               platformAvailable={platformAvailable}
               initial={{
                 name: "未命名组合",
                 main: seedMain(), // 可能为 null：BYOK 空目录时靠「自定义…」手填
                 worker: null,
                 background: null,
+                vision: null,
               }}
               pending={pending}
               onCancel={() => setCreating(false)}
@@ -464,12 +527,15 @@ function ModelProfilesSection({
                 key={profile.id}
                 title={`编辑「${profile.name}」`}
                 groups={groups}
+                visionGroups={visionGroups}
+                catalogModels={catalogModels}
                 platformAvailable={platformAvailable}
                 initial={{
                   name: profile.name,
                   main: profile.main,
                   worker: profile.worker ?? null,
                   background: profile.background ?? null,
+                  vision: profile.vision ?? null,
                 }}
                 pending={pending}
                 onCancel={() => setEditingId(null)}
@@ -515,6 +581,7 @@ type ProfileDraft = {
   main: ModelProfileSlot | null;
   worker: ModelProfileSlot | null;
   background: ModelProfileSlot | null;
+  vision: ModelProfileSlot | null;
 };
 
 function ProfileListRow({
@@ -615,6 +682,8 @@ function ProfileListRow({
 function ProfileEditor({
   title,
   groups,
+  visionGroups,
+  catalogModels,
   platformAvailable,
   initial,
   pending,
@@ -623,6 +692,8 @@ function ProfileEditor({
 }: {
   title: string;
   groups: DefaultProviderGroup[];
+  visionGroups: DefaultProviderGroup[];
+  catalogModels: ModelCatalogItem[];
   platformAvailable: boolean;
   initial: ProfileDraft;
   pending: boolean;
@@ -633,8 +704,11 @@ function ProfileEditor({
   const [main, setMain] = useState(initial.main);
   const [worker, setWorker] = useState(initial.worker);
   const [background, setBackground] = useState(initial.background);
+  const [vision, setVision] = useState(initial.vision);
   const canChoose = canChooseModel(groups);
+  const canChooseVision = canChooseModel(visionGroups);
   const showEmptyGuide = !canChoose;
+  const mainVisionCapable = mainHasCuratedVision(main, catalogModels);
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/20 px-3 py-3">
@@ -693,6 +767,26 @@ function ProfileEditor({
           标题、记忆等后台任务；留空则跟随主模型。
         </p>
       </label>
+      <label className="block" htmlFor="profile-vision">
+        <span className="text-xs text-muted-foreground">识图模型（可选）</span>
+        <ProviderModelSelect
+          id="profile-vision"
+          groups={visionGroups}
+          value={pointerValue(vision)}
+          disabled={pending || !canChooseVision}
+          followLabel="不配置"
+          onChange={(value) => setVision(decodePointer(value))}
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          主模型目录标有视觉时，贴图走主模型；本槽供无视觉时的眼→文与白板读图。留空=平台
+          VISION_* 兜底或无 reader。
+        </p>
+        {mainVisionCapable && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            当前主模型目录标有视觉；已知多模态模型贴图直送主模型，否则仍走本槽眼→文。本槽仍可供白板/按需深读。
+          </p>
+        )}
+      </label>
 
       <div className="flex justify-end gap-2 pt-1">
         <Button
@@ -715,6 +809,7 @@ function ProfileEditor({
               main,
               worker,
               background,
+              vision,
             })
           }
         >

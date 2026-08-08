@@ -271,12 +271,16 @@ describe("prepareBrowserFileAttachment", () => {
     upload.mockReset();
   });
 
-  it("rejects images", async () => {
+  it("allows images as binary (draft holds fileBlob)", async () => {
     const file = new File(["x"], "pic.png", { type: "image/png" });
     const res = await prepareBrowserFileAttachment(null, file);
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reason).toContain("暂不支持图片");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.binary).toBe(true);
+    expect(res.text).toBe("");
+    expect(res.fileBlob).toBe(file);
+    expect(res.name).toBe("pic.png");
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("rejects oversize files", async () => {

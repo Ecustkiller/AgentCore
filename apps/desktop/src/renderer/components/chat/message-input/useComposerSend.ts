@@ -113,7 +113,7 @@ export function useComposerSend({
   const handleSend = useCallback(
     async (opts?: { delivery?: MessageDelivery }) => {
       const trimmed = value.trim();
-      if (!trimmed) return;
+      if (!trimmed && attachments.length === 0) return;
 
       // N4-A：只读离线硬禁用（按钮已 disabled；此处兜底防键盘/程序化触发）。
       if (isReadOnlyOffline()) {

@@ -3,6 +3,7 @@
 from agentcore.runtime.engine.ask_user_pause_visible import (
     ASK_USER_PAUSE_USER_VISIBLE,
     claims_dispatch_started,
+    claims_install_or_deps_ready,
     ensure_ask_user_pause_body,
     honest_ask_user_message,
 )
@@ -21,6 +22,14 @@ def test_claims_dispatch_started_matches_sample_kickoff():
     assert not claims_dispatch_started("请确认风格偏好")
 
 
+def test_claims_install_or_deps_ready_matches_ac890_sample():
+    assert claims_install_or_deps_ready("依赖已经装完，派两个队员继续")
+    assert claims_install_or_deps_ready("环境已就绪，可以开工")
+    assert claims_install_or_deps_ready("装完了，下一步派工")
+    assert not claims_install_or_deps_ready("依赖还在装，先确认路径")
+    assert not claims_install_or_deps_ready("选哪种风格再开工？")
+
+
 def test_honest_ask_user_message_prefixes_fake_dispatch():
     out = honest_ask_user_message("派 3 个 worker 开工高规格版：")
     assert out.startswith("先确认再派")
@@ -28,6 +37,14 @@ def test_honest_ask_user_message_prefixes_fake_dispatch():
     # Already honest → unchanged
     keep = "先确认再派：选哪种风格？"
     assert honest_ask_user_message(keep) == keep
+
+
+def test_honest_ask_user_message_strips_install_ready_claim():
+    # ac890 ⑥B：卡面不得保留「装完了」再叠尚未开工
+    out = honest_ask_user_message("依赖已经装完，派两个队员")
+    assert "装完" not in out
+    assert "就绪" not in out
+    assert "确认" in out
 
 
 def test_ensure_ask_user_pause_body_forbids_silent_empty():
@@ -62,6 +79,17 @@ def test_ensure_ask_user_pause_body_appends_not_replaces():
 
     keep = f"先确认再派：{short}"
     assert ensure_ask_user_pause_body(keep) == keep
+
+
+def test_ensure_ask_user_pause_body_forbids_ready_vs_not_started_stack():
+    # ac890 ⑥B：禁「装完了/依赖就绪」与「尚未真正开工」并列
+    ready = "依赖已经装完，派两个队员继续推进。"
+    out = ensure_ask_user_pause_body(ready)
+    assert out == ASK_USER_PAUSE_USER_VISIBLE
+    assert "装完" not in out
+
+    stacked = f"{ready}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"
+    assert ensure_ask_user_pause_body(stacked) == ASK_USER_PAUSE_USER_VISIBLE
 
 
 def test_compose_interrupt_redrive_failed_not_silent():

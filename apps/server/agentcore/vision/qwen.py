@@ -68,6 +68,7 @@ class QwenVLReader:
         timeout_seconds: float = 60.0,
         name: str = "qwen-vl",
         transport: httpx.AsyncBaseTransport | None = None,
+        credential_source: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -76,6 +77,8 @@ class QwenVLReader:
         self._name = name
         # Injected only in tests (httpx.MockTransport); None ⇒ real network.
         self._transport = transport
+        # Pricing origin for vision_run_cost: BYOK slot → "user", platform → "platform".
+        self.credential_source = credential_source
 
     async def read(self, png_base64: str, prompt: str) -> VisionReading:
         """Return Qwen-VL's reading of ``png_base64`` guided by ``prompt``.

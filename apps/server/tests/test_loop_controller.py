@@ -5,6 +5,8 @@ detection priority, and the two-strike NUDGE→FINALIZE ladder (including the
 window clear that prevents a stale pattern from finalizing prematurely).
 """
 
+import pytest
+
 from agentcore.runtime.loop_controller import (
     Intervention,
     LoopController,
@@ -809,6 +811,72 @@ def test_govern_validation_rehit_finalizes_without_burning_rounds():
     assert isinstance(directive, Finalize)
     assert directive.reason == "validation_thrash"
     assert directive.finish_reason is FinishReason.UNPRODUCTIVE
+
+
+@pytest.mark.asyncio
+async def test_validation_thrash_finalize_escalates_gap_upward(monkeypatch):
+    """08-08 定案①：validation thrash 早停时向上交缺口（escalation），不重做 e94 PARTIAL。"""
+    from unittest.mock import MagicMock
+
+    from agentcore.llm.provider.protocol import TokenUsage
+    from agentcore.runtime.engine.ceiling import CEILING_BACKSTOP_SOURCE
+    from agentcore.runtime.engine.directive import Finalize
+    from agentcore.runtime.engine.directive_apply import apply_loop_directive
+    from agentcore.runtime.engine.outcome import RoundOutcome
+    from agentcore.runtime.events import EventSink, FinishReason
+
+    async def _fake_finalize(**_kwargs):
+        return "", "", TokenUsage(), 3, None
+
+    monkeypatch.setattr(
+        "agentcore.runtime.engine.directive_apply.force_finalize",
+        _fake_finalize,
+    )
+    sink = EventSink()
+    gate: list[dict] = []
+    finish: list[FinishReason] = []
+    controller = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    result = await apply_loop_directive(
+        directive=Finalize(
+            reason="validation_thrash", finish_reason=FinishReason.UNPRODUCTIVE
+        ),
+        outcome=RoundOutcome(content="", reasoning="", usage=None),
+        messages=[],
+        llm=MagicMock(),
+        tools=MagicMock(),
+        tool_context=MagicMock(agent_id="worker-a"),
+        sink=sink,
+        profile=MagicMock(),
+        active_model="m",
+        base_model="m",
+        allowed_tool_names=None,
+        disabled_tools=set(),
+        emit_content=lambda _d: None,
+        emit_reasoning=lambda _d: None,
+        emit_reset=lambda _r: None,
+        final_content="",
+        final_reasoning="",
+        total_usage=TokenUsage(),
+        round_idx=2,
+        run_id="del_ws",
+        role="worker",
+        finish_override_sink=finish,
+        approval_gate=None,
+        citation_sink=None,
+        annotate_citations=False,
+        turn_evidence_ledger=None,
+        ledger_registrant="",
+        gate_escalation_sink=gate,
+        controller=controller,
+        content_before_round="",
+        finish_guard_reworks=0,
+    )
+    assert result.action == "return"
+    assert finish == [FinishReason.UNPRODUCTIVE]
+    assert len(gate) == 1
+    assert gate[0]["source"] == CEILING_BACKSTOP_SOURCE
+    assert "早停" in gate[0]["question"] or "缺口" in gate[0]["question"]
+    assert "validation_thrash" in gate[0]["evidence"]
 
 
 def test_transient_still_warns_at_two_disables_at_three():

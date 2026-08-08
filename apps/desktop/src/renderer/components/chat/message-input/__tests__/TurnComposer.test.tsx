@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 /**
- * TurnComposer variant smoke: `card` and `bar` share the same bottom-bar left
- * cluster (workspace · … · model · permission · paperclip · background) and
- * right cluster (voice · char count · send).
+ * TurnComposer variants: `card` 摊开左簇；`bar` 用「＋」收纳会话配置，常显仅输入与发送。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -228,14 +232,15 @@ beforeEach(async () => {
   });
   const { useComposerDraftStore } = await import("@/stores/composer");
   useComposerDraftStore.getState().setValue("__draft__", "");
+  useComposerDraftStore.getState().setAttachments("__draft__", []);
 });
 
 afterEach(cleanup);
 
-function expectWorkspaceBeforeModel(container: HTMLElement) {
+function expectWorkspaceBeforeModel(root: ParentNode = document) {
   const workspace = screen.getByLabelText("在哪工作");
   const model = screen.getByLabelText(/模型组合：/);
-  const nodes = container.querySelectorAll("button, [aria-label]");
+  const nodes = root.querySelectorAll("button, [aria-label]");
   const order = [...nodes];
   expect(order.indexOf(workspace)).toBeGreaterThanOrEqual(0);
   expect(order.indexOf(model)).toBeGreaterThan(order.indexOf(workspace));
@@ -255,17 +260,29 @@ describe("TurnComposer variants", () => {
     expectWorkspaceBeforeModel(container);
   });
 
-  it("bar: workspace then model in left cluster (no「更多」popover)", () => {
-    const { container } = renderComposer("bar");
+  it("bar: 「更多选项」收纳左簇；未打开时不占常显", () => {
+    renderComposer("bar");
     expect(
-      container.querySelector('[data-composer-variant="bar"]'),
+      document.querySelector('[data-composer-variant="bar"]'),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "更多选项" })).toBeNull();
+    expect(screen.getByRole("button", { name: "更多选项" })).toBeTruthy();
+    // 收纳前：工作区 / 模型 / 附件不在常显条上
+    expect(screen.queryByLabelText("在哪工作")).toBeNull();
+    expect(screen.queryByLabelText(/模型组合：/)).toBeNull();
+    expect(screen.queryByLabelText("附加文件")).toBeNull();
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
+    const menu = screen.getByTestId("composer-plus-menu");
+    expect(menu).toBeTruthy();
     expect(screen.getByLabelText("在哪工作")).toBeTruthy();
     expect(screen.getByLabelText(/模型组合：/)).toBeTruthy();
     expect(screen.getByLabelText(/权限：/)).toBeTruthy();
     expect(screen.getByLabelText("附加文件")).toBeTruthy();
-    expectWorkspaceBeforeModel(container);
+    // 菜单内附件带可见文案（非整栏 icon-only）
+    expect(within(menu).getByText("附加文件")).toBeTruthy();
+    expect(menu.className).not.toMatch(/\bw-72\b/);
+    expectWorkspaceBeforeModel(menu);
   });
 
   it("N4-A: offline hard-disables 发送 even with draft text", async () => {
@@ -347,5 +364,34 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+  });
+
+  it("idle: attachment-only draft enables 发送 (empty text)", async () => {
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue("__draft__", "");
+    useComposerDraftStore.getState().setAttachments("__draft__", [
+      {
+        id: "a1",
+        key: "file:local:pic.png",
+        name: "pic.png",
+        path: "pic.png",
+        text: "",
+        truncated: false,
+        kind: "file",
+        binary: true,
+        workspacePath: "attachments/pic.png",
+      },
+    ]);
+    renderComposer("bar");
+    const send = screen.getByRole("button", { name: "发送" });
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(send);
+    expect(handleSendMock).toHaveBeenCalledWith();
+  });
+
+  it("idle: empty text and no attachments keeps 发送 disabled", () => {
+    renderComposer("bar");
+    const send = screen.getByRole("button", { name: "发送" });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
   });
 });

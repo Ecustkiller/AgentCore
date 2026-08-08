@@ -11,8 +11,8 @@ import {
  * ({@link import("../graph/CanvasCommandBar").CanvasCommandBar}) is the SAME core in
  * canvas chrome — one composer, two skins, single draft per conversation.
  *
- * `variant` is chosen by ChatView: `bar` for the session bottom dock, `card`
- * (default) for the centered new-chat composer. Canvas keeps its own full card.
+ * `variant` is chosen by ChatView: `bar` for the session bottom dock（＋收纳配置）,
+ * `card` for the centered new-chat composer. Canvas keeps its own full card.
  *
  * Workspace / Git / compose actions live inside TurnComposer. When fused under
  * ApprovalPrompt, ChatView stacks ApprovalPrompt above this input so the

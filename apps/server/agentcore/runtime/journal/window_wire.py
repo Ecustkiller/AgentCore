@@ -10,7 +10,7 @@ from agentcore.api.schemas.llm_window import (
     LlmWindowToolCallFunction,
     RunLlmWindowResponse,
 )
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.facts import FactKind
 from agentcore.runtime.journal import window_from_journal
 
@@ -54,7 +54,7 @@ def _llm_message_to_wire(
         ]
     return LlmWindowMessageLine(
         role=msg.role,
-        content=msg.content,
+        content=llm_content_text(msg.content) if msg.content is not None else None,
         tool_calls=tool_calls,
         tool_call_id=msg.tool_call_id,
         reasoning_content=msg.reasoning_content,

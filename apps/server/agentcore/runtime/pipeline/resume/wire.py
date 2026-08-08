@@ -36,7 +36,7 @@ from agentcore.tools.builtin import (
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import host_class_tool_names, register_board_ceo_tools
 from agentcore.tools.registry import ToolRegistry
-from agentcore.vision import build_vision_reader
+from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -227,8 +227,10 @@ async def _wire_continuation_toolset(
         board_channel=board_channel,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
-        # §九.4: platform + VISION_* → VisionReader; else board_read clean-fails.
-        vision_reader=build_vision_reader(),
+        # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
+        vision_reader=await resolve_vision_reader_for_conversation(
+            user_id=user_id, conversation_id=conversation_id
+        ),
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=frozenset(),

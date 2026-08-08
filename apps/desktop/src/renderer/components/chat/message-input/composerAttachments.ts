@@ -52,26 +52,12 @@ export const MAX_AGENT_MENTIONS = 10;
 /** 空 `@` 时各索引分区默认条数。 */
 export const EMPTY_MENTION_INDEX_LIMIT = 6;
 
-export async function readDroppedFile(
-  file: File,
-): Promise<
-  { ok: true; text: string; truncated: boolean } | { ok: false; reason: string }
-> {
-  if (file.type.startsWith("image/")) {
-    return { ok: false, reason: "暂不支持图片附件（模型尚无视觉能力）" };
-  }
-  const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
-  const bytes = new Uint8Array(head);
-  if (bytes.includes(0)) {
-    return {
-      ok: false,
-      reason: "二进制文件请在桌面端附加（将驻留到工作区）",
-    };
-  }
-  const text = new TextDecoder("utf-8").decode(
-    bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),
-  );
-  return { ok: true, text, truncated: file.size > TEXT_PREVIEW_CAP };
+/** True when the composer can send: non-blank text, or at least one attachment. */
+export function composerHasSendableDraft(
+  value: string,
+  attachments: ReadonlyArray<unknown>,
+): boolean {
+  return Boolean(value.trim()) || attachments.length > 0;
 }
 
 export function formatConversationContext(

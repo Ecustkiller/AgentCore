@@ -75,6 +75,15 @@ class PersistenceSettings(BaseModel):
     # message triggers refuse to schedule until this cooldown elapses. 0 = no cooldown.
     # In-process only (same posture as ``_inflight``); multi-worker skew is acceptable.
     compaction_failure_cooldown_seconds: int = 90
+    # Near model-window pre-turn compact (定案⑦A / aa519): when last-turn input_tokens
+    # reach this fraction of the resolved model ``context_length``, await fold(s)
+    # BEFORE assembling the next turn so the turn sees the new summary — do not wait
+    # for the user to type /compact. Distinct from post-turn fire-and-forget at
+    # ``compaction_trigger_input_tokens``. Absolute floor applies when metadata has
+    # no context_length.
+    compaction_near_context_ratio: float = 0.8
+    compaction_near_context_tokens: int = 200_000
+    compaction_near_max_passes: int = 3
 
     # Standing tasks / 定时自动化 L1: in-process DB poll of next_run_at + lease.
     standing_task_scheduler_enabled: bool = True

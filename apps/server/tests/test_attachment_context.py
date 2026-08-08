@@ -384,3 +384,274 @@ async def test_conversation_truncated_note(monkeypatch):
     assert "CLIENT_SHALLOW" not in out
     # Cap: full huge body must not appear inline.
     assert huge not in out
+
+
+class _StubVisionReader:
+    """Minimal VisionReader duck for attachment eye→text tests."""
+
+    def __init__(
+        self,
+        text: str = "图中有一只猫和一行标题",
+        *,
+        model: str = "qwen-vl-max",
+        input_tokens: int = 100,
+        output_tokens: int = 20,
+        credential_source: str = "user",
+        fail: bool = False,
+    ) -> None:
+        from agentcore.llm.provider.protocol import TokenUsage
+
+        self.text = text
+        self.model = model
+        self.usage = TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens)
+        self.credential_source = credential_source
+        self.fail = fail
+        self.calls: list[tuple[str, str]] = []
+
+    async def read(self, png_base64: str, prompt: str):
+        from agentcore.vision.protocol import VisionReading
+
+        self.calls.append((png_base64, prompt))
+        if self.fail:
+            raise RuntimeError("vision down")
+        return VisionReading(text=self.text, usage=self.usage, model=self.model)
+
+
+class _StubBackend:
+    def __init__(self, blobs: dict[str, bytes] | None = None) -> None:
+        self.blobs = blobs or {}
+
+    async def read_bytes(self, path: str) -> bytes:
+        if path not in self.blobs:
+            raise FileNotFoundError(path)
+        return self.blobs[path]
+
+
+@pytest.mark.asyncio
+async def test_image_with_vision_reader_injects_text_and_bills():
+    reader = _StubVisionReader(credential_source="user")
+    backend = _StubBackend({"attachments/pic.png": b"\x89PNG\r\nfake"})
+    sink: list = []
+
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "pic.png",
+                "path": "attachments/pic.png",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/pic.png",
+            }
+        ],
+        vision_reader=reader,  # type: ignore[arg-type]
+        backend=backend,  # type: ignore[arg-type]
+        cost_sink=sink,
+    )
+    assert out is not None
+    assert "[image / vision]" in out
+    assert "图中有一只猫和一行标题" in out
+    assert "未配置识图" not in out
+    assert "code_execute" not in out
+    assert len(reader.calls) == 1
+    assert len(sink) == 1
+    assert sink[0].role == "vision"
+    assert sink[0].model == "qwen-vl-max"
+    # BYOK slot → user pricing (estimated ledger), not hard-coded platform bill.
+    assert sink[0].cost_estimated_nano > 0
+    assert sink[0].cost_total_nano == 0
+    assert sink[0].cost.get("pricing_source") in ("estimated", "official", "community")
+
+
+@pytest.mark.asyncio
+async def test_image_without_vision_reader_honest_unconfigured():
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "shot.jpg",
+                "path": "attachments/shot.jpg",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/shot.jpg",
+                "mime": "image/jpeg",
+            }
+        ],
+        vision_reader=None,
+        backend=None,
+    )
+    assert out is not None
+    assert "[image]" in out
+    assert "未配置识图" in out
+    assert "vision 槽" in out or "VISION_*" in out
+    assert "code_execute" not in out or "勿默认建议用 code_execute" in out
+    # Must not fall back to the generic binary / delegate code_execute block.
+    assert "[binary]" not in out
+    assert "CEO has no code_execute" not in out
+
+
+@pytest.mark.asyncio
+async def test_non_image_binary_unchanged():
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "report.xlsx",
+                "path": "attachments/report.xlsx",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/report.xlsx",
+            }
+        ],
+        vision_reader=_StubVisionReader(),  # type: ignore[arg-type]
+        backend=_StubBackend(),  # type: ignore[arg-type]
+    )
+    assert out is not None
+    assert "[binary]" in out
+    assert "code_execute" in out
+    assert "[image" not in out
+    assert "未配置识图" not in out
+
+
+@pytest.mark.asyncio
+async def test_heic_routes_to_vision_not_code_execute():
+    """HEIC/HEIF must take eye→text, not the generic [binary]/code_execute path."""
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "photo.heic",
+                "path": "attachments/photo.heic",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/photo.heic",
+                "mime": "image/heic",
+            }
+        ],
+        vision_reader=None,
+        backend=None,
+    )
+    assert out is not None
+    assert "[image]" in out
+    assert "未配置识图" in out
+    assert "[binary]" not in out
+    assert "CEO has no code_execute" not in out
+
+
+@pytest.mark.asyncio
+async def test_heif_ext_without_mime_routes_to_vision():
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "shot.heif",
+                "path": "attachments/shot.heif",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/shot.heif",
+            }
+        ],
+        vision_reader=None,
+        backend=None,
+    )
+    assert out is not None
+    assert "[image]" in out
+    assert "[binary]" not in out
+
+
+@pytest.mark.asyncio
+async def test_generic_image_mime_routes_to_vision():
+    """image/* (non-excluded) follows vision even when subtype is not in the allowlist."""
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "capture.bin",
+                "path": "attachments/capture.bin",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/capture.bin",
+                "mime": "image/tiff",
+            }
+        ],
+        vision_reader=None,
+        backend=None,
+    )
+    assert out is not None
+    assert "[image]" in out
+    assert "[binary]" not in out
+
+
+@pytest.mark.asyncio
+async def test_svg_mime_excluded_from_vision_path():
+    """SVG is image/* but not a raster for eye→text — stay on binary path."""
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "icon.svg",
+                "path": "attachments/icon.svg",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/icon.svg",
+                "mime": "image/svg+xml",
+            }
+        ],
+        vision_reader=_StubVisionReader(),  # type: ignore[arg-type]
+        backend=_StubBackend(),  # type: ignore[arg-type]
+    )
+    assert out is not None
+    assert "[binary]" in out
+    assert "[image" not in out
+
+
+@pytest.mark.asyncio
+async def test_main_native_vision_builds_image_parts_skips_reader():
+    """Main catalog vision → multimodal parts; VisionReader must not be called."""
+    reader = _StubVisionReader(credential_source="user")
+    backend = _StubBackend({"attachments/pic.jpg": b"\xff\xd8\xffjpeg"})
+    parts: list[dict] = []
+    sink: list = []
+
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "pic.jpg",
+                "path": "attachments/pic.jpg",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/pic.jpg",
+            }
+        ],
+        vision_reader=reader,  # type: ignore[arg-type]
+        backend=backend,  # type: ignore[arg-type]
+        cost_sink=sink,
+        main_native_vision=True,
+        native_image_parts=parts,
+    )
+    assert out is not None
+    assert "[image / multimodal]" in out
+    assert "多模态" in out
+    assert reader.calls == []
+    assert sink == []
+    assert len(parts) == 1
+    assert parts[0]["type"] == "image_url"
+    url = parts[0]["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+
+
+def test_build_multimodal_user_content_and_llm_content_text():
+    from agentcore.llm.provider.protocol import (
+        build_multimodal_user_content,
+        llm_content_text,
+    )
+
+    assert build_multimodal_user_content("hi", []) == "hi"
+    parts = build_multimodal_user_content(
+        "look",
+        [{"type": "image_url", "image_url": {"url": "data:image/png;base64,aa"}}],
+    )
+    assert isinstance(parts, list)
+    assert parts[0] == {"type": "text", "text": "look"}
+    assert parts[1]["type"] == "image_url"
+    assert llm_content_text(parts) == "look"
+    assert llm_content_text("plain").strip() == "plain"
+    empty_parts = build_multimodal_user_content(
+        "  ",
+        [{"type": "image_url", "image_url": {"url": "data:image/png;base64,aa"}}],
+    )
+    assert isinstance(empty_parts, list)
+    assert "图片" in empty_parts[0]["text"]

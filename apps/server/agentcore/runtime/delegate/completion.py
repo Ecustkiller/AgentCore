@@ -11,7 +11,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.runs.types import RunPhase, RunState
 
 if TYPE_CHECKING:
@@ -320,7 +320,7 @@ def _code_execute_succeeded_in_transcript(transcript: list[LLMMessage]) -> bool:
             continue
         if call_names.get(msg.tool_call_id) != "code_execute":
             continue
-        content = msg.content or ""
+        content = llm_content_text(msg.content)
         if "退出码" not in content:
             return True
     return False
@@ -342,7 +342,7 @@ def _test_run_succeeded_in_transcript(transcript: list[LLMMessage]) -> bool:
             continue
         if call_names.get(msg.tool_call_id) != "test_run":
             continue
-        content = msg.content or ""
+        content = llm_content_text(msg.content)
         if "测试未通过" in content or "验证未通过" in content:
             continue
         if "预算耗尽" in content or "验证未完成" in content:
@@ -380,7 +380,7 @@ def _terminal_verify_succeeded_in_transcript(transcript: list[LLMMessage]) -> bo
             continue
         if not _VERIFY_COMMAND_RE.search(args_json):
             continue
-        content = msg.content or ""
+        content = llm_content_text(msg.content)
         # Prefer exited 0; also accept matched ready from a one-shot wait_for.
         if "status: exited" in content and "exit_code: 0" in content:
             return True
@@ -408,7 +408,7 @@ def _code_execute_verify_succeeded_in_transcript(transcript: list[LLMMessage]) -
             continue
         if not _VERIFY_COMMAND_RE.search(args_json):
             continue
-        content = msg.content or ""
+        content = llm_content_text(msg.content)
         if re.search(r"退出码[：:]\s*0\b", content):
             return True
     return False
@@ -615,7 +615,7 @@ def _browser_navigate_failed_in_transcript(transcript: list[LLMMessage]) -> bool
         name, _ = calls.get(msg.tool_call_id, ("", ""))
         if name != "browser_navigate":
             continue
-        if _tool_result_failed(msg.content or ""):
+        if _tool_result_failed(llm_content_text(msg.content)):
             return True
     return False
 
@@ -630,7 +630,7 @@ def _test_run_budget_exhausted_in_transcript(transcript: list[LLMMessage]) -> bo
         name, _ = calls.get(msg.tool_call_id, ("", ""))
         if name != "test_run":
             continue
-        content = msg.content or ""
+        content = llm_content_text(msg.content)
         if "预算耗尽" in content or "验证未完成" in content:
             return True
         if "未完成（预算耗尽）" in content:

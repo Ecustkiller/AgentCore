@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 
 # Marker block upserted into the system message for worker/CEO wrap-up.
 _CONSTRAINT_OPEN = "<tool_failure_hard_constraint>"
@@ -130,7 +130,7 @@ def sync_tool_failure_constraint_in_system(
     """
     if not messages or messages[0].role != "system":
         return False
-    body = messages[0].content or ""
+    body = llm_content_text(messages[0].content)
     stripped = _strip_constraint_block(body)
     text = (constraint_text or "").strip()
     if not text and outstanding:

@@ -15,6 +15,7 @@ from agentcore.conversation.common import (
     resolve_profile_set,
     schedule_title_generation,
 )
+from agentcore.conversation.compaction import maybe_compact_near_ceiling
 from agentcore.conversation.history import load_chat_context
 from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_persistence import (
@@ -38,7 +39,7 @@ from agentcore.db.repositories import (
     ConversationRepository,
     MessageRepository,
 )
-from agentcore.llm.resolve import LLMCredentials
+from agentcore.llm.resolve import LLMCredentials, resolve_turn_model
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
 from agentcore.runtime.leases import (
@@ -148,6 +149,11 @@ async def stream_chat(
         ):
             resident_attachments = await persist_attachments(backend, attachments)
 
+            await maybe_compact_near_ceiling(
+                conversation_id,
+                model_id=resolve_turn_model(llm_credentials),
+            )
+
             async with async_session_factory() as session:
                 user_msg = await MessageRepository(session).create(
                     conversation_id=conversation_id,
@@ -231,12 +237,28 @@ async def regenerate_chat(
 
             conv = await conv_repo.get_by_id_unscoped(conversation_id)
             if not conv:
+                logger.warning(
+                    "chat.regenerate_rejected",
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                    reason="conversation_not_found",
+                )
                 sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
                 sink.emit(message_end(FinishReason.ERROR))
                 return
 
             target = await msg_repo.get_by_id(message_id, conversation_id=conversation_id)
             if not target or target.role != "user":
+                # 前端曾用错 id（非用户消息 / 已不存在）时只走 SSE，旧版不落库——苏大大样本难追。
+                logger.warning(
+                    "chat.regenerate_rejected",
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                    reason="missing" if target is None else "not_user",
+                    found_role=None if target is None else target.role,
+                )
                 sink.emit(error_event(ErrorCode.INVALID, "Can only regenerate from a user message"))
                 sink.emit(message_end(FinishReason.ERROR))
                 return
@@ -248,6 +270,14 @@ async def regenerate_chat(
                 conversation_id, after_created_at=target.created_at, commit=False
             )
             await session.commit()
+
+            await maybe_compact_near_ceiling(
+                conversation_id,
+                model_id=resolve_turn_model(llm_credentials),
+            )
+            # Compact writes on its own session — expire so load_chat_context sees
+            # the new summary/watermark instead of a stale ORM identity.
+            session.expire_all()
 
             user_message = edited_content if edited_content is not None else (target.content or "")
             history = await load_chat_context(session, conversation_id, max_messages=40)
@@ -361,6 +391,12 @@ async def resume_chat(
             # switch applies to the resumed continuation.
             permission_axes = await resolve_permission_axes(session, conversation_id)
 
+        await maybe_compact_near_ceiling(
+            conversation_id,
+            model_id=resolve_turn_model(llm_credentials),
+        )
+
+        async with async_session_factory() as session:
             history = await load_chat_context(session, conversation_id, max_messages=40)
             # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
             # carried in the frame) so a board turn paused at a checkpoint regains board_ops

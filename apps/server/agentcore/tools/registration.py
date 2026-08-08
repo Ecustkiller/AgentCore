@@ -191,6 +191,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         ResolveProjectTool,
     )
     from agentcore.tools.builtin.read_conversation import ReadConversationTool
+    from agentcore.tools.builtin.read_image import ReadImageTool
     from agentcore.tools.builtin.read_notes import ReadNotesTool
     from agentcore.tools.builtin.remember import RememberTool
     from agentcore.tools.builtin.replan import ReplanTool
@@ -278,6 +279,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         RememberTool,
         UpdateProjectProfileTool,
         AskUserTool,
+        ReadImageTool,
         BoardOpsTool,
         BoardReadTool,
     )

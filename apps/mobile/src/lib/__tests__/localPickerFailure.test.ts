@@ -13,9 +13,6 @@ describe("localPickerFailureCopy", () => {
     expect(localPickerFailureCopy("unauthorized").title).toContain(
       "未能授权本机目录",
     );
-    expect(localPickerFailureCopy("no_package_json").title).toContain(
-      "package.json",
-    );
     expect(localPickerFailureCopy("unavailable").title).toContain(
       "本机目录仅桌面端可用",
     );

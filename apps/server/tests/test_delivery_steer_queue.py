@@ -26,6 +26,30 @@ def test_send_message_request_accepts_steer_and_queue():
     assert SendMessageRequest(content="hi", delivery="queue").delivery == "queue"
 
 
+def test_send_message_request_allows_empty_content_with_attachments():
+    att = {
+        "name": "pic.png",
+        "path": "pic.png",
+        "text": "",
+        "binary": True,
+        "workspace_path": "attachments/pic.png",
+    }
+    body = SendMessageRequest(content="", delivery="steer", attachments=[att])
+    assert body.content == ""
+    assert len(body.attachments) == 1
+    # Whitespace-only caption also OK when attachments present.
+    body2 = SendMessageRequest(content="  \n", delivery="queue", attachments=[att])
+    assert body2.content == "  \n"
+
+
+def test_send_message_request_rejects_empty_content_without_attachments():
+    with pytest.raises(ValidationError) as exc:
+        SendMessageRequest(content="", delivery="steer")
+    assert "消息内容与附件不能同时为空" in str(exc.value)
+    with pytest.raises(ValidationError):
+        SendMessageRequest(content="   ", delivery="queue")
+
+
 def test_turn_queued_payload_carries_degraded_from():
     from agentcore.runtime.events import turn_queued
     from agentcore.runtime.events.payloads.run import TurnQueuedPayload

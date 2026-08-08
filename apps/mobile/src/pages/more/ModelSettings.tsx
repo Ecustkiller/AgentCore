@@ -17,7 +17,7 @@ import {
   setDefaultModelProfile,
   updateModelProfile,
 } from "@/api/modelProfiles";
-import { type ModelCatalog, useModels } from "@/api/models";
+import { type ModelCatalog, findCatalogItem, useModels } from "@/api/models";
 import { ConfirmDialog } from "@/components/conversations";
 import { ProviderForm } from "@/pages/more/ProviderForm";
 import { useEffect, useState } from "react";
@@ -27,7 +27,22 @@ import "@/pages/more/more.css";
 // 设置·模型配置 — BYOK providers + 模型组合管理.
 //
 // Chat picks combinations only; this page creates/edits combinations (main required;
-// worker/background empty = follow main) and sets the account default.
+// worker/background empty = follow main; vision empty = 不配置, does not follow main)
+
+/** 草稿主模型是否在 curated 目录标有 vision（贴图可直送主模型）。 */
+function mainHasCuratedVision(
+  main: ModelProfileSlot | null,
+  catalog: ModelCatalog | null,
+): boolean {
+  if (!main) return false;
+  const item = findCatalogItem(catalog, {
+    id: main.model,
+    origin: main.origin,
+    providerId: main.provider_id,
+  });
+  return (item?.capabilities ?? []).includes("vision");
+}
+// and sets the account default.
 
 function endpointHost(baseUrl: string): string {
   const trimmed = baseUrl.trim();
@@ -161,6 +176,41 @@ function defaultModelGroups(
     }
   }
   return groups;
+}
+
+/** 识图槽：优先只列 catalog 带 `vision` capability 的项；过滤为空则回退全目录。 */
+function catalogForVisionSlot(
+  catalog: ModelCatalog | null,
+): ModelCatalog | null {
+  if (!catalog) return catalog;
+  const visionModels = catalog.models.filter((m) =>
+    (m.capabilities ?? []).includes("vision"),
+  );
+  if (visionModels.length === 0) return catalog;
+  return { ...catalog, models: visionModels };
+}
+
+/**
+ * 识图下拉分组。过滤命中时去掉 provider.default_model，避免无 vision 的默认项渗入；
+ * 过滤为空时与主槽同形（全目录 + BYOK 手填）。
+ */
+function visionModelGroups(
+  catalog: ModelCatalog | null,
+  providers: LlmProviderView[],
+  platformModel?: string | null,
+  ...slots: (ModelProfileSlot | null | undefined)[]
+): ProviderModelGroup[] {
+  const visionCatalog = catalogForVisionSlot(catalog);
+  const filtered = visionCatalog !== catalog;
+  const providersForVision = filtered
+    ? providers.map((p) => ({ ...p, default_model: "" }))
+    : providers;
+  return defaultModelGroups(
+    visionCatalog,
+    providersForVision,
+    platformModel,
+    ...slots,
+  );
 }
 
 function knownPointerValues(groups: ProviderModelGroup[]): Set<string> {
@@ -328,7 +378,7 @@ export function ModelSettings() {
             <p className="settings-desc">
               {platformMode
                 ? "接入你自己的 OpenAI 兼容服务商为高级选项——不接入也可用平台额度直接对话。可添加多个服务商，按你的端点自担费用。Key 经 AES 加密存储，仅回显后 4 位。"
-                : "需自行在 jiurelay 免费配额度或接入服务商后才能对话。可添加多个 OpenAI 兼容服务商（API Key、Base URL、默认模型名）。Key 经 AES 加密存储，仅回显后 4 位。"}
+                : "需自行在 jiurelay 免费配额度或接入服务商后才能对话。可添加多个 OpenAI 兼容服务商（API Key、Base URL）。日常选用请到「模型组合」。Key 经 AES 加密存储，仅回显后 4 位。"}
             </p>
 
             <ProfilesSection
@@ -448,8 +498,8 @@ function ProfilesSection({
     <div className="section" data-testid="profiles-section">
       <h2 className="section-title">模型组合</h2>
       <p className="section-note">
-        聊天页选择的是组合（主模型 · Worker），不是单个模型。Worker /
-        后台为空时跟随主模型。可设一个账号默认组合。
+        聊天页选择的是组合（主模型 · Worker · 识图），不是单个模型。Worker /
+        后台为空时跟随主模型；识图为空表示不配置（不跟随主模型）。可设一个账号默认组合。
       </p>
 
       {visible.length === 0 ? (
@@ -723,6 +773,12 @@ function ProfileForm({
     profile?.worker,
     profile?.background,
   );
+  const visionGroups = visionModelGroups(
+    catalog,
+    providers,
+    platformModel,
+    profile?.vision,
+  );
   const firstMain =
     groups.find((g) => g.items.length > 0)?.items[0]?.value ??
     (platformModel ? `${PLATFORM_POINTER_ID}::${platformModel}` : "");
@@ -739,8 +795,13 @@ function ProfileForm({
   const [backgroundValue, setBackgroundValue] = useState(
     profile?.background ? encodeSlot(profile.background) : "",
   );
+  const [visionValue, setVisionValue] = useState(
+    profile?.vision ? encodeSlot(profile.vision) : "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mainDecoded = mainValue ? decodeSlot(mainValue) : null;
+  const mainVisionCapable = mainHasCuratedVision(mainDecoded, catalog);
 
   async function save() {
     const trimmed = name.trim();
@@ -755,12 +816,17 @@ function ProfileForm({
     }
     const worker = workerValue ? decodeSlot(workerValue) : null;
     const background = backgroundValue ? decodeSlot(backgroundValue) : null;
+    const vision = visionValue ? decodeSlot(visionValue) : null;
     if (workerValue && !worker) {
       setError("Worker 模型无效");
       return;
     }
     if (backgroundValue && !background) {
       setError("后台模型无效");
+      return;
+    }
+    if (visionValue && !vision) {
+      setError("识图模型无效");
       return;
     }
 
@@ -773,6 +839,7 @@ function ProfileForm({
           main,
           worker,
           background,
+          vision,
         });
       } else {
         const body: CreateLlmModelProfileRequest = {
@@ -780,6 +847,7 @@ function ProfileForm({
           main,
           worker,
           background,
+          vision,
           set_as_default: false,
         };
         await createModelProfile(body);
@@ -866,6 +934,25 @@ function ProfileForm({
         <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
           标题、记忆等便宜任务；空则跟随主模型。
         </p>
+        <SlotModelSelect
+          id="profile-vision"
+          label="识图模型（可选）"
+          groups={visionGroups}
+          providers={providers}
+          value={visionValue}
+          followLabel="不配置"
+          disabled={slotDisabled}
+          onChange={setVisionValue}
+        />
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          主模型目录标有视觉时，贴图走主模型；本槽供无视觉时的眼→文与白板读图。留空=平台
+          VISION_* 兜底或无 reader。
+        </p>
+        {mainVisionCapable && (
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            当前主模型目录标有视觉；已知多模态模型贴图直送主模型，否则仍走本槽眼→文。本槽仍可供白板/按需深读。
+          </p>
+        )}
         {error && <p className="error">{error}</p>}
         <div className="field-actions">
           <button
@@ -977,7 +1064,6 @@ function ProviderCard({
 
       {host && <p className="provider-host muted">{host}</p>}
       <span className="masked-key">{provider.masked_key ?? "已配置"}</span>
-      <p className="provider-model">模型 {provider.default_model}</p>
 
       <div>
         <StatusBadge status={provider.status} message={provider.message} />

@@ -135,13 +135,16 @@ describe("stageAttachment", () => {
     }
   });
 
-  it("rejects image attachments", async () => {
+  it("stages image attachments as binary", async () => {
     const src = join(dir, "photo.png");
-    await writeFile(src, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await writeFile(src, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
     const res = await stageFromAbsPath(src);
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reason).toContain("图片");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.binary).toBe(true);
+    expect(res.data.name).toBe("photo.png");
+    expect(res.data.text).toBe("");
+    expect(res.data.stagingId).toBeTruthy();
   });
 
   it("rejects oversized files", async () => {

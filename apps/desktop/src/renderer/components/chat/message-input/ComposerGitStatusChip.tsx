@@ -3,6 +3,7 @@ import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { GitBranch } from "lucide-react";
+import { useComposerPlusClose } from "./ComposerPlusMenu";
 
 /**
  * U1 会话条只读 Git chip：分支名 + dirty 点 + ahead/behind。
@@ -15,6 +16,7 @@ export function ComposerGitStatusChip({
 }) {
   const state = useWorkspaceModeState(conversationId);
   const showChanges = useSidePanelStore((s) => s.showChanges);
+  const closePlus = useComposerPlusClose();
   const canProbe =
     hasLocalFiles() &&
     !!state?.effective.isLocal &&
@@ -46,7 +48,10 @@ export function ComposerGitStatusChip({
       title={title}
       aria-label={title}
       data-testid="composer-git-status-chip"
-      onClick={() => showChanges()}
+      onClick={() => {
+        closePlus?.();
+        showChanges();
+      }}
     >
       <GitBranch size={12} className="shrink-0" aria-hidden />
       <span className="min-w-0 truncate">{status.branch}</span>

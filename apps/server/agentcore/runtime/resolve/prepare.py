@@ -6,6 +6,10 @@ here for historical import / monkeypatch seams).
 
 from __future__ import annotations
 
+import base64
+from typing import TYPE_CHECKING, Any
+
+from agentcore.core.logging import get_logger
 from agentcore.memory import default_memory_store
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.builtin.read_conversation import ReadConversationTool
@@ -19,6 +23,13 @@ from agentcore.workspace.attachment_parse import (
     extension_of,
     truncate_for_prompt,
 )
+
+if TYPE_CHECKING:
+    from agentcore.runtime.costing import RunCost
+    from agentcore.vision.protocol import VisionReader
+    from agentcore.workspace.protocol import WorkspaceBackend
+
+logger = get_logger(__name__)
 
 # Soft-miss / gate-off notes for conversation attachments (跨会话对话日志访问定案 P1).
 # Never fall back to client shallow ``text`` — that would silently fake a deep read.
@@ -37,6 +48,62 @@ _CONV_ATTACH_HOST = (
 _CONV_ATTACH_TRUNC_NOTE = (
     "\n\n… [truncated for prompt; 完整日志请派查阅 Worker `read_conversation` 续读"
     "（conversation_id={cid}{cursor_part}）]"
+)
+
+# Raster / camera image set for eye→text (desktop inline bitmaps + HEIC/HEIF).
+_IMAGE_EXTENSIONS = frozenset({
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".avif",
+    ".heic",
+    ".heif",
+})
+_IMAGE_MIMES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/avif",
+    "image/x-ms-bmp",
+    "image/heic",
+    "image/heif",
+})
+# Non-raster image/* that must not take the eye→text path (e.g. vector markup).
+_IMAGE_MIME_EXCLUDE = frozenset({
+    "image/svg+xml",
+})
+_EXT_TO_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".avif": "image/avif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+}
+
+# Visible-facts prompt for conversation image attachments (eye→text; main LLM stays text).
+_ATTACHMENT_VISION_PROMPT = (
+    "用中文简要列出这张图片中可见的事实：文字、物体、人物、布局与颜色等。"
+    "只写图上能看见的内容，不要臆测图外信息或作者意图。"
+)
+
+_IMAGE_VISION_UNCONFIGURED = (
+    "未配置识图（组合 vision 槽或 platform VISION_*）：本回合未注入图片可见事实。"
+    "勿把工作区路径当作已读图；勿默认建议用 code_execute 打开图片。"
+)
+
+_IMAGE_NATIVE_INDEX = (
+    "此图已随当前用户消息以多模态附件发送给主模型；"
+    "勿再要求 code_execute 开图，也勿假定未看见像素。"
 )
 
 
@@ -138,12 +205,168 @@ async def _deep_read_conversation_attachment(
     return f"--- Conversation: {title}{note} ---\n{body}"
 
 
+def _attachment_mime(att: dict) -> str:
+    raw = att.get("mime") or att.get("content_type") or att.get("media_type") or ""
+    return str(raw).split(";", 1)[0].strip().lower()
+
+
+def _is_image_attachment(att: dict, *, name: str, ws_path: str | None) -> bool:
+    """True when extension / MIME should take the vision eye→text path.
+
+    Recognizes known raster/HEIC extensions and MIMEs, plus any ``image/*`` that is
+    not explicitly excluded (e.g. ``image/svg+xml``). Non-image MIMEs (xlsx, etc.)
+    never match via the ``image/`` prefix alone.
+    """
+    mime = _attachment_mime(att)
+    if mime:
+        if mime in _IMAGE_MIME_EXCLUDE:
+            return False
+        if mime in _IMAGE_MIMES or mime.startswith("image/"):
+            return True
+    ext = extension_of(name, ws_path if isinstance(ws_path, str) else None)
+    return ext in _IMAGE_EXTENSIONS
+
+
+def _image_data_mime(att: dict, *, name: str, ws_path: str | None) -> str:
+    """MIME for data-URL parts — prefer attachment mime, else extension map."""
+    mime = _attachment_mime(att)
+    if mime.startswith("image/") and mime not in _IMAGE_MIME_EXCLUDE:
+        return mime
+    ext = extension_of(name, ws_path if isinstance(ws_path, str) else None)
+    return _EXT_TO_IMAGE_MIME.get(ext, "image/png")
+
+
+async def _build_native_image_part(
+    *,
+    att: dict,
+    name: str,
+    ws_path: str,
+    backend: WorkspaceBackend,
+) -> dict | None:
+    """Read resident image bytes into an OpenAI ``image_url`` content part."""
+    import base64
+
+    try:
+        raw = await backend.read_bytes(ws_path)
+    except Exception:  # noqa: BLE001 — native path must not break prepare
+        logger.warning("attachment.native_image_read_failed", path=ws_path, exc_info=True)
+        return None
+    if not raw:
+        return None
+    b64 = base64.b64encode(raw).decode("ascii")
+    mime = _image_data_mime(att, name=name, ws_path=ws_path)
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime};base64,{b64}"},
+    }
+
+
+def _vision_credential_source(reader: VisionReader) -> str | None:
+    """Pricing origin stamped on the reader (BYOK→user, platform→platform)."""
+    src = getattr(reader, "credential_source", None)
+    if src in ("user", "platform", "vendor"):
+        return str(src)
+    return None
+
+
+def _bill_attachment_vision(
+    reading: Any,
+    *,
+    cost_sink: list[RunCost] | None,
+    reader: VisionReader,
+    parent_run_id: str | None,
+) -> None:
+    """Append a ``role=vision`` ledger row; never raise into prepare."""
+    if cost_sink is None or not reading.model or reading.usage.total_tokens == 0:
+        return
+    try:
+        from agentcore.runtime.costing import vision_run_cost
+
+        cost_sink.append(
+            vision_run_cost(
+                reading.model,
+                reading.usage,
+                parent_run_id=parent_run_id,
+                credential_source=_vision_credential_source(reader),
+            )
+        )
+    except Exception:  # noqa: BLE001 — billing must never break a successful read
+        logger.warning("attachment.vision_billing_failed", exc_info=True)
+
+
+async def _read_image_attachment_block(
+    *,
+    name: str,
+    path: str,
+    ws_path: str,
+    vision_reader: VisionReader | None,
+    backend: WorkspaceBackend | None,
+    cost_sink: list[RunCost] | None,
+    parent_run_id: str | None,
+) -> str:
+    """Eye→text for a resident image, or an honest unconfigured / failure note."""
+    if vision_reader is None or backend is None:
+        return (
+            f"--- File: {name} ({path}) [image] ---\n"
+            f"{_IMAGE_VISION_UNCONFIGURED}"
+        )
+    try:
+        raw = await backend.read_bytes(ws_path)
+    except Exception as exc:  # noqa: BLE001 — prepare must not crash on one attachment
+        logger.warning(
+            "attachment.vision_read_failed",
+            name=name,
+            path=ws_path,
+            error=str(exc),
+            exc_info=True,
+        )
+        return (
+            f"--- File: {name} ({path}) [image / read failed] ---\n"
+            f"无法读取工作区图片字节：{exc}。本回合未注入可见事实。"
+        )
+    if not raw:
+        return (
+            f"--- File: {name} ({path}) [image / empty] ---\n"
+            "工作区图片为空，本回合未注入可见事实。"
+        )
+    b64 = base64.b64encode(raw).decode("ascii")
+    try:
+        reading = await vision_reader.read(b64, _ATTACHMENT_VISION_PROMPT)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "attachment.vision_read_failed",
+            name=name,
+            path=ws_path,
+            error=str(exc),
+            exc_info=True,
+        )
+        return (
+            f"--- File: {name} ({path}) [image / vision failed] ---\n"
+            f"识图失败：{exc}。工作区路径仍可用，但本回合未注入可见事实。"
+        )
+    _bill_attachment_vision(
+        reading,
+        cost_sink=cost_sink,
+        reader=vision_reader,
+        parent_run_id=parent_run_id,
+    )
+    logger.info("attachment.vision_read", name=name, path=ws_path)
+    body = (reading.text or "").strip() or "(视觉模型未返回可见事实)"
+    return f"--- File: {name} ({path}) [image / vision] ---\n{body}"
+
+
 async def _build_attachment_context(
     attachments: list[dict] | None,
     *,
     user_id: str | None = None,
     host_conversation_id: str | None = None,
     conversation_history_access: bool = True,
+    vision_reader: VisionReader | None = None,
+    backend: WorkspaceBackend | None = None,
+    cost_sink: list[RunCost] | None = None,
+    vision_parent_run_id: str | None = None,
+    main_native_vision: bool = False,
+    native_image_parts: list[dict] | None = None,
 ) -> str | None:
     """Render user-referenced files / dirs / conversations into a prompt block.
 
@@ -152,6 +375,11 @@ async def _build_attachment_context(
     office/PDF that missed pre-parse steer ``file_read`` (transparent extract);
     spreadsheet / unknown binaries carry only a workspace path (CEO must
     ``delegate`` → worker ``code_execute``; CEO has no ``code_execute``).
+    Resident **image** attachments: when ``main_native_vision`` and
+    ``native_image_parts`` is provided, bytes become multimodal ``image_url``
+    parts (no VisionReader); otherwise eye→text via ``vision_reader`` when
+    wired; without a reader the block states识图未配置 honestly (never silent
+    path-only, never「用 code_execute 开图」as primary).
     Directories carry a recursive file listing (paths only);
     ``kind=conversation`` is **server deep-read** via ``log_export``
     (client shallow ``text`` is ignored). A file with a ``workspace_path``
@@ -169,6 +397,7 @@ async def _build_attachment_context(
     has_preparsed = False
     has_conversation = False
     has_resident_missing = False
+    has_image_unconfigured = False
     for att in attachments:
         name = att.get("name") or "untitled"
         kind = att.get("kind") or "file"
@@ -247,11 +476,55 @@ async def _build_attachment_context(
                 block += f"\n\n… [truncated at {len(body)} chars for context]"
             blocks.append(block)
         elif binary or (ws_path and not text):
-            # Binary (or empty-body resident / preparse failed): path only.
+            # Binary (or empty-body resident / preparse failed): path only —
+            # except resident images → native multimodal or VisionReader eye→text.
             path = ws_path or att.get("path") or name
             if ws_path:
                 resident = True
-            ext = extension_of(name, ws_path if isinstance(ws_path, str) else None)
+            ws_str = ws_path if isinstance(ws_path, str) and ws_path else None
+            if (
+                binary
+                and ws_str
+                and _is_image_attachment(att, name=name, ws_path=ws_str)
+            ):
+                if (
+                    main_native_vision
+                    and native_image_parts is not None
+                    and backend is not None
+                ):
+                    part = await _build_native_image_part(
+                        att=att,
+                        name=name,
+                        ws_path=ws_str,
+                        backend=backend,
+                    )
+                    if part is not None:
+                        native_image_parts.append(part)
+                        blocks.append(
+                            f"--- File: {name} ({path}) [image / multimodal] ---\n"
+                            f"{_IMAGE_NATIVE_INDEX}"
+                        )
+                    else:
+                        blocks.append(
+                            f"--- File: {name} ({path}) [image / multimodal failed] ---\n"
+                            "无法读取驻留图片字节，本回合未把该图发给主模型。"
+                        )
+                    continue
+                if vision_reader is None or backend is None:
+                    has_image_unconfigured = True
+                blocks.append(
+                    await _read_image_attachment_block(
+                        name=name,
+                        path=path,
+                        ws_path=ws_str,
+                        vision_reader=vision_reader,
+                        backend=backend,
+                        cost_sink=cost_sink,
+                        parent_run_id=vision_parent_run_id,
+                    )
+                )
+                continue
+            ext = extension_of(name, ws_str)
             if ext in MARKITDOWN_EXTENSIONS:
                 has_office_unparsed = True
                 blocks.append(
@@ -330,6 +603,14 @@ async def _build_attachment_context(
         if has_resident_missing
         else ""
     )
+    image_note = (
+        " Image attachments are eye→text when识图 is configured (profile vision "
+        "slot or platform VISION_*); without a reader, the block states that "
+        "honestly — do not treat a bare path as a reading, and do not default to "
+        "code_execute to open images."
+        if has_image_unconfigured
+        else ""
+    )
     return (
         "<attached_files>\n"
         "The user attached the following files, directories and past "
@@ -340,7 +621,8 @@ async def _build_attachment_context(
         "them by name when relevant. Directory entries list file paths only "
         "(file contents are not included)."
         f"{conversation_note}"
-        f"{resident_note}{binary_note}{office_note}{preparsed_note}{missing_note}\n\n"
+        f"{resident_note}{binary_note}{office_note}{preparsed_note}"
+        f"{missing_note}{image_note}\n\n"
         f"{body}\n"
         "</attached_files>"
     )

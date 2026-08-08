@@ -38,7 +38,7 @@ from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
-from agentcore.vision import build_vision_reader
+from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -56,6 +56,7 @@ class PreparedTurn:
     base_tool_context: ToolContext
     vision_cost_sink: list[RunCost]
     attachment_context: str
+    native_image_parts: list[dict]
     memory_topics: list[str]
     bound_execution_id: str
     execution_id_token: object
@@ -159,11 +160,29 @@ async def prepare_fresh_turn(
         user_rules_markdown=user_rules_markdown,
         workspace_context=workspace_facts,
     )
+    # Resolve vision before attachment context so resident images can eye→text.
+    # Turn-level ``role=vision`` sink is shared by REFERENCE with ToolContext
+    # (board_read + attachment reads; executor ``replace`` keeps the same list).
+    vision_cost_sink: list[RunCost] = []
+    vision_reader = await resolve_vision_reader_for_conversation(
+        user_id=user_id, conversation_id=conversation_id
+    )
+    from agentcore.llm.model_metadata import model_has_curated_vision
+
+    main_model = profiles.model_for("chat") if profiles is not None else ""
+    # Curated table only — never keyword-derived catalog tags (false vision → 400).
+    main_native_vision = model_has_curated_vision(main_model)
+    native_image_parts: list[dict] = []
     attachment_context = await _build_attachment_context(
         attachments,
         user_id=user_id,
         host_conversation_id=conversation_id,
         conversation_history_access=conversation_history_access,
+        vision_reader=None if main_native_vision else vision_reader,
+        backend=backend,
+        cost_sink=None if main_native_vision else vision_cost_sink,
+        main_native_vision=main_native_vision,
+        native_image_parts=native_image_parts if main_native_vision else None,
     )
     attachment_context = merge_attachment_and_mention_context(
         attachment_context, agent_mentions
@@ -240,13 +259,6 @@ async def prepare_fresh_turn(
         conversation_id=conversation_id,
     )
 
-    # AI 协作白板 §九.4 Gap ②: the turn-level vision cost sink. ``board_read`` appends a
-    # priced ``role=vision`` ledger row here per 读图 sub-call. Shared by REFERENCE across
-    # every derived run context (executor uses ``replace``, which copies the list ref), so
-    # a vision call from any run — captain or a delegated worker — lands in this one list,
-    # collected into ``cost_runs`` after the turn. Empty unless a board_read actually billed.
-    vision_cost_sink: list[RunCost] = []
-
     # 深度研究自治：会话旗标 + 自动开辩计数（kickoff / ceo_format 经 ToolContext 读取）。
     from agentcore.runtime.deep_research_auto import load_deep_research_auto_state
 
@@ -272,8 +284,9 @@ async def prepare_fresh_turn(
         board_channel=board_channel,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
-        # §九.4: platform + VISION_* → VisionReader; else board_read clean-fails.
-        vision_reader=build_vision_reader(),
+        # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
+        # Same instance already used for attachment eye→text above.
+        vision_reader=vision_reader,
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=material_paths,
@@ -322,6 +335,7 @@ async def prepare_fresh_turn(
         base_tool_context=base_tool_context,
         vision_cost_sink=vision_cost_sink,
         attachment_context=attachment_context,
+        native_image_parts=native_image_parts,
         memory_topics=memory_topics,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,

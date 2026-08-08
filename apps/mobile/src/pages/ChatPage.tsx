@@ -65,7 +65,12 @@ import { ResumeCard } from "@/components/ResumeCard";
 import { StageCard } from "@/components/StageCard";
 import { EscalationAnswer } from "@/components/TeamView";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
-import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
+import {
+  type MessageAttachment,
+  finalizeAttachmentsForSend,
+  hasSendableDraft,
+  prepareAttachment,
+} from "@/lib/attachments";
 import { composerTrailingSlots } from "@/lib/composerTrailing";
 import {
   type ErrorAction,
@@ -178,12 +183,12 @@ interface Turn {
   id: string;
   userText: string | null;
   events: SSEEvent[];
-  // Display-only chips for files this turn carried (the text rode the send body, not here).
+  // Display-only chips for files this turn carried (text inline and/or workspace resident).
   attachments?: { name: string; truncated?: boolean }[];
 }
 
-/** Attachment context chips on a user bubble (no download — the text rode the send body and
- *  now lives in the conversation workspace). `已截断` flags a file capped at 256KB. */
+/** Attachment context chips on a user bubble (no download — text rode the send body and/or
+ *  bytes were resided into the conversation workspace). `已截断` flags text capped at 256KB. */
 function AttachmentChips({
   items,
 }: {
@@ -1101,8 +1106,8 @@ export function ChatPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [permissionSheetOpen, setPermissionSheetOpen] = useState(false);
   const { data: modelProfiles } = useModelProfiles();
-  // Files staged for the next send: their text rides the body (composer 附件). A pick that
-  // can't be read as text (image / binary) surfaces `attachError` and isn't staged.
+  // Files staged for the next send (composer 附件): text inline and/or binary resident.
+  // Oversized / upload failures surface `attachError` and aren't staged.
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -1650,9 +1655,9 @@ export function ChatPage() {
       .filter((x): x is NonNullable<typeof x> => x != null);
   }, [recoveredInteractions, busy]);
 
-  // Stage picked files as text attachments (composer 附件). Each is read on the spot (the
-  // pick is the grant); images / binaries are refused with a reason and skipped. The input
-  // is reset so re-picking the same file fires onChange again.
+  // Stage picked files (composer 附件). Text is extracted; images/binary are resident-first
+  // (upload when a conversation exists, else hold File until first send). The input is reset
+  // so re-picking the same file fires onChange again.
   async function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -1661,7 +1666,7 @@ export function ChatPage() {
     const added: MessageAttachment[] = [];
     const refused: string[] = [];
     for (const file of files) {
-      const res = await readTextAttachment(file);
+      const res = await prepareAttachment(file, conversationId ?? null);
       if (res.ok) added.push(res.attachment);
       else refused.push(`${file.name}：${res.reason}`);
     }
@@ -1710,7 +1715,7 @@ export function ChatPage() {
   // Keeps the empty-shell-conversation cost off「新建」— the row only exists once you commit.
   async function startDraft() {
     const text = input.trim();
-    if (!text || conversationId || busy) return;
+    if (!hasSendableDraft(text, attachments) || conversationId || busy) return;
     const outgoing = attachments;
     setError(null);
     setSending(true);
@@ -1750,7 +1755,7 @@ export function ChatPage() {
   };
 
   const sendForcedSteer = () => {
-    if (!conversationId || !input.trim()) return;
+    if (!conversationId || !hasSendableDraft(input, attachments)) return;
     void send(undefined, "steer");
   };
 
@@ -1811,7 +1816,8 @@ export function ChatPage() {
     deliveryOverride?: MessageDelivery,
   ) {
     const text = (override?.text ?? input).trim();
-    if (!text || !conversationId) return;
+    const outgoing = override?.attachments ?? attachments;
+    if (!hasSendableDraft(text, outgoing) || !conversationId) return;
     if (stopPhaseRef.current === "stopping") return;
     // Interactive mid-flight while a turn is already streaming.
     if (!override && sending) {
@@ -1819,7 +1825,18 @@ export function ChatPage() {
       void sendWhileBusy(text, delivery);
       return;
     }
-    const outgoing = override?.attachments ?? attachments;
+    let wireAttachments: Array<Omit<MessageAttachment, "fileBlob">> = [];
+    if (outgoing.length > 0) {
+      const finalized = await finalizeAttachmentsForSend(
+        conversationId,
+        outgoing,
+      );
+      if (!finalized.ok) {
+        setAttachError(finalized.reason);
+        return;
+      }
+      wireAttachments = finalized.attachments;
+    }
     if (!override) {
       setInput("");
       setAttachments([]);
@@ -1838,7 +1855,7 @@ export function ChatPage() {
         id: turnId,
         userText: text,
         events: [],
-        attachments: outgoing.map((a) => ({
+        attachments: wireAttachments.map((a) => ({
           name: a.name,
           truncated: a.truncated,
         })),
@@ -1853,7 +1870,7 @@ export function ChatPage() {
         text,
         (event) => appendEventToTurn(turnId, event),
         ac.signal,
-        outgoing.length > 0 ? outgoing : undefined,
+        wireAttachments.length > 0 ? wireAttachments : undefined,
         "steer",
       );
     } catch (e) {
@@ -1890,6 +1907,18 @@ export function ChatPage() {
   async function sendWhileBusy(text: string, delivery: MessageDelivery) {
     if (!conversationId) return;
     const outgoing = attachments;
+    let wireAttachments: Array<Omit<MessageAttachment, "fileBlob">> = [];
+    if (outgoing.length > 0) {
+      const finalized = await finalizeAttachmentsForSend(
+        conversationId,
+        outgoing,
+      );
+      if (!finalized.ok) {
+        setAttachError(finalized.reason);
+        return;
+      }
+      wireAttachments = finalized.attachments;
+    }
     setInput("");
     setAttachments([]);
     setAttachError(null);
@@ -1923,7 +1952,7 @@ export function ChatPage() {
                 id: turnId,
                 userText: text,
                 events: [],
-                attachments: outgoing.map((a) => ({
+                attachments: wireAttachments.map((a) => ({
                   name: a.name,
                   truncated: a.truncated,
                 })),
@@ -1950,7 +1979,7 @@ export function ChatPage() {
                   id: turnId,
                   userText: text,
                   events: [],
-                  attachments: outgoing.map((a) => ({
+                  attachments: wireAttachments.map((a) => ({
                     name: a.name,
                     truncated: a.truncated,
                   })),
@@ -1969,7 +1998,7 @@ export function ChatPage() {
           isPrimaryIdle: () => !primaryActiveRef.current,
           waitPrimaryIdle,
         },
-        outgoing.length > 0 ? outgoing : undefined,
+        wireAttachments.length > 0 ? wireAttachments : undefined,
         ac.signal,
         delivery,
       );
@@ -2308,7 +2337,7 @@ export function ChatPage() {
     profileDisplayLabel(modelProfiles, currentProfileId) ?? "默认组合";
   const permissionLabel = axesShortLabel(permissionAxes);
   const composerLocked = history === null || stopPhase === "stopping";
-  const hasDraft = Boolean(input.trim());
+  const hasDraft = hasSendableDraft(input, attachments);
   const trailing = composerTrailingSlots({
     busy,
     hasDraft,

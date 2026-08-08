@@ -8,14 +8,23 @@ folded into a single rolling, structured summary (已确立事实 / 决策 / 未
 
 Design (mirrors the offline memory consolidation pattern):
 
-- **Trigger (dual)** — after each turn finalize (cloud + local), ``schedule_compaction_if_due``
-  arms a background pass when either (a) ``input_tokens ≥ compaction_trigger_input_tokens``
-  or (b) the DB watermark-after batch yields a non-empty ``_select_fold`` with
-  ``compaction_message_trigger_min_fold``. Never use turn ``history_len`` (summary blocks
-  inflate it). Self-throttle on success: the fold shrinks the foldable tail; next due needs
-  another 16 foldable msgs or 32k tokens. Failure leaves the watermark untouched and arms a
-  short in-process cooldown (``compaction_failure_cooldown_seconds``) so neither trigger
-  re-schedules until it expires (``_inflight`` still dedupes in-flight).
+- **Trigger (dual, post-turn)** — after each turn finalize (cloud + local),
+  ``schedule_compaction_if_due`` arms a background pass when either (a)
+  ``input_tokens ≥ compaction_trigger_input_tokens`` or (b) the DB watermark-after
+  batch yields a non-empty ``_select_fold`` with ``compaction_message_trigger_min_fold``.
+  Never use turn ``history_len`` (summary blocks inflate it). Self-throttle on success:
+  the fold shrinks the foldable tail; next due needs another 16 foldable msgs or 32k
+  tokens. Failure leaves the watermark untouched and arms a short in-process cooldown
+  (``compaction_failure_cooldown_seconds``) so neither trigger re-schedules until it
+  expires (``_inflight_tasks`` still dedupes in-flight).
+- **Near-ceiling (pre-turn, 定案⑦A)** — when last-turn ``input_tokens`` are near the
+  model window (``compaction_near_context_ratio`` of ``context_length``, or absolute
+  ``compaction_near_context_tokens`` when length is unknown), ``maybe_compact_near_ceiling``
+  **awaits** fold pass(es) before history assemble so the upcoming turn sees the new
+  summary. Does not wait for the user to type ``/compact``. Bypass failure cooldown
+  (urgent). Honesty: rolling summary may drop process detail — hard identifiers are
+  kept best-effort; near-ceiling cannot shrink an already-mined recency window of
+  huge verbatim turns.
 - **Watermark** — ``compacted_through`` (the created_at of the last folded message)
   makes a re-fire idempotent and lets a long backlog fold INCREMENTALLY, oldest-first,
   across several passes until it catches up.
@@ -27,8 +36,8 @@ Robust by construction: credentials resolve platform-first via
 ``run_background_llm`` (quota-gated + one BYOK retry on platform auth reject),
 the pass is gated so a trivial fold never spends an LLM call, and ANY failure
 (LLM down, timeout, empty output, quota skip) leaves the stored state untouched
-and returns without raising — the turn already completed; compaction is
-best-effort enrichment.
+and returns without raising — post-turn compaction is best-effort enrichment;
+near-ceiling is best-effort too (turn still proceeds if fold cannot run).
 """
 
 from __future__ import annotations
@@ -44,10 +53,15 @@ from agentcore.core.logging import get_logger
 from agentcore.core.text import truncate_head_tail
 from agentcore.db.base import async_session_factory
 from agentcore.db.models import Message
-from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.db.repositories import (
+    ConversationRepository,
+    MessageRepository,
+    TurnMetricsRepository,
+)
 from agentcore.llm import LLMMessage
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
+from agentcore.llm.model_metadata import model_metadata_for
 from agentcore.llm.profiles import build_request, get_profile
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
@@ -321,11 +335,12 @@ async def compact_conversation(
 
 # --- Trigger (live path) -----------------------------------------------------
 # Fire-and-forget after a due turn, in-process (single-server posture, like
-# consolidation / approvals). ``_inflight`` dedupes a burst of due turns onto one
-# pass per conversation; ``_failure_cooldown_until`` blocks re-schedule after a
-# failed pass; ``_tasks`` holds references so a pass is not GC'd mid-flight
-# and can be flushed on shutdown.
-_inflight: set[str] = set()
+# consolidation / approvals). ``_inflight_tasks`` dedupes a burst of due turns onto
+# one pass per conversation and lets the near-ceiling pre-turn path await the same
+# task; ``_failure_cooldown_until`` blocks re-schedule after a failed pass;
+# ``_tasks`` holds references so a pass is not GC'd mid-flight and can be flushed
+# on shutdown.
+_inflight_tasks: dict[str, asyncio.Task] = {}
 _failure_cooldown_until: dict[str, float] = {}
 _tasks: set[asyncio.Task] = set()
 
@@ -353,14 +368,40 @@ def _in_failure_cooldown(conversation_id: str) -> bool:
     return True
 
 
+def near_context_ceiling(input_tokens: int, context_length: int | None) -> bool:
+    """True when ``input_tokens`` is near the model window (定案⑦A threshold).
+
+    Uses ``compaction_near_context_ratio`` of ``context_length`` when known and
+    positive; otherwise the absolute ``compaction_near_context_tokens`` floor.
+    """
+    if input_tokens <= 0:
+        return False
+    if context_length is not None and context_length > 0:
+        threshold = int(context_length * settings.compaction_near_context_ratio)
+        return input_tokens >= threshold
+    return input_tokens >= settings.compaction_near_context_tokens
+
+
+def _spawn_compact(conversation_id: str, input_tokens: int) -> asyncio.Task | None:
+    """Arm one compact task; ``None`` if this conversation already has one in flight."""
+    if conversation_id in _inflight_tasks:
+        return None
+    task = asyncio.ensure_future(_run(conversation_id, input_tokens))
+    _inflight_tasks[conversation_id] = task
+    _tasks.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _tasks.discard(t)
+        if _inflight_tasks.get(conversation_id) is t:
+            _inflight_tasks.pop(conversation_id, None)
+
+    task.add_done_callback(_done)
+    return task
+
+
 def _arm_compaction(conversation_id: str, input_tokens: int) -> None:
     """Schedule one background fold; caller must have already decided due + not inflight."""
-    if conversation_id in _inflight:
-        return
-    _inflight.add(conversation_id)
-    task = asyncio.ensure_future(_run(conversation_id, input_tokens))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    _spawn_compact(conversation_id, input_tokens)
 
 
 async def schedule_compaction_if_due(conversation_id: str, input_tokens: int) -> None:
@@ -376,7 +417,7 @@ async def schedule_compaction_if_due(conversation_id: str, input_tokens: int) ->
     if _in_failure_cooldown(conversation_id):
         logger.debug("compaction.cooldown_skip", conversation_id=conversation_id)
         return
-    if conversation_id in _inflight:
+    if conversation_id in _inflight_tasks:
         return
     try:
         due = input_tokens >= settings.compaction_trigger_input_tokens
@@ -394,11 +435,110 @@ async def schedule_compaction_if_due(conversation_id: str, input_tokens: int) ->
         )
 
 
-async def _run(conversation_id: str, input_tokens: int) -> None:
+async def ensure_compaction_before_turn(
+    conversation_id: str,
+    *,
+    input_tokens: int,
+    context_length: int | None = None,
+) -> bool:
+    """Await fold pass(es) when last-turn tokens are near the model window.
+
+    Never raises. Bypasses failure cooldown (near-ceiling is urgent). Returns
+    whether any pass wrote a new summary. Caps at ``compaction_near_max_passes``
+    so a long backlog still advances incrementally without unbounded pre-turn wait.
+    """
+    if not settings.compaction_enabled:
+        return False
+    if not near_context_ceiling(input_tokens, context_length):
+        return False
+
+    wrote_any = False
     try:
-        await compact_conversation(conversation_id, trigger_input_tokens=input_tokens)
-    finally:
-        _inflight.discard(conversation_id)
+        for _ in range(max(1, settings.compaction_near_max_passes)):
+            existing = _inflight_tasks.get(conversation_id)
+            if existing is not None:
+                try:
+                    ok = bool(await existing)
+                except Exception:
+                    ok = False
+                wrote_any = wrote_any or ok
+                if not ok:
+                    break
+                continue
+            task = _spawn_compact(conversation_id, input_tokens)
+            if task is None:
+                existing = _inflight_tasks.get(conversation_id)
+                if existing is None:
+                    break
+                try:
+                    ok = bool(await existing)
+                except Exception:
+                    ok = False
+                wrote_any = wrote_any or ok
+                if not ok:
+                    break
+                continue
+            try:
+                ok = bool(await task)
+            except Exception:
+                ok = False
+            if not ok:
+                break
+            wrote_any = True
+        logger.info(
+            "compaction.near_ceiling",
+            conversation_id=conversation_id,
+            input_tokens=input_tokens,
+            context_length=context_length if context_length is not None else 0,
+            wrote=wrote_any,
+        )
+        return wrote_any
+    except Exception as e:
+        logger.warning(
+            "compaction.near_ceiling_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+        return False
+
+
+async def maybe_compact_near_ceiling(
+    conversation_id: str,
+    *,
+    model_id: str | None = None,
+) -> bool:
+    """Pre-turn facade: load last input tokens + model window, then maybe await fold.
+
+    Token source: latest ``turn_metrics.input_tokens``, else
+    ``conversations.compaction_input_tokens``. Best-effort; never raises.
+    """
+    if not settings.compaction_enabled:
+        return False
+    try:
+        async with async_session_factory() as session:
+            tokens = await TurnMetricsRepository(session).latest_input_tokens(conversation_id)
+            if tokens is None:
+                conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+                tokens = int(getattr(conv, "compaction_input_tokens", None) or 0) if conv else 0
+        context_length: int | None = None
+        if model_id:
+            context_length = model_metadata_for(model_id).context_length
+        return await ensure_compaction_before_turn(
+            conversation_id,
+            input_tokens=int(tokens or 0),
+            context_length=context_length,
+        )
+    except Exception as e:
+        logger.warning(
+            "compaction.near_ceiling_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+        return False
+
+
+async def _run(conversation_id: str, input_tokens: int) -> bool:
+    return await compact_conversation(conversation_id, trigger_input_tokens=input_tokens)
 
 
 async def shutdown_compaction() -> None:

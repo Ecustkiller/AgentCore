@@ -251,19 +251,14 @@ class ToolContext:
     # ops still leave the short-lived sidecar and land in the desktop main process.
     # ``None`` on cloud-only runs — ``terminal`` is not registered there.
     workspace_channel: WorkspaceChannel | None = None
-    # AI 协作白板 (AI协作白板.md §九.4): the optional vision port ``board_read`` uses to turn a
-    # rasterized hand-drawn / screenshot selection into text (DeepSeek V4 无多模态, so 读图 is a
-    # separate model). Wired by ``build_vision_reader`` when ``VISION_API_KEY`` is set; ``None``
-    # without a key (and on workers / tests) ⇒ ``board_read`` returns a clean「读图能力未配置」
-    # error instead of pretending. Set here (CEO, not workers) alongside ``board_channel``.
+    # AI 协作白板 / 对话读图: optional vision port (``board_read`` / visual critic /
+    # attachment eye→text). Wired by ``resolve_vision_reader_for_conversation`` from
+    # the profile ``vision`` slot or platform ``VISION_*`` fallback; ``None`` ⇒ clean
+    # 「读图能力未配置」. CEO context only (not workers).
     vision_reader: VisionReader | None = None
-    # AI 协作白板 (AI协作白板.md §九.4 Gap ②): a turn-level sink ``board_read`` appends a priced
-    # vision sub-call ledger row (:class:`~agentcore.runtime.costing.RunCost`) to. The vision
-    # model (qwen-vl) ≠ the run's DeepSeek, so the spend can't fold into the run usage; it
-    # becomes its own ``role=vision`` row the pipeline collects into the turn's ``cost_runs``
-    # (→ cost_events on the turn's message_id). Set once on the pipeline's base context and
-    # shared by every derived run via ``replace`` (a plain list, shared by reference); only
-    # ``board_read`` writes it, only in a 白板会话. ``None`` everywhere else (tests / no board).
+    # Turn-level sink for priced ``role=vision`` ledger rows (board_read + conversation
+    # image attachments). Shared by every derived run via ``replace`` (list by reference).
+    # ``None`` in tests / paths with no vision billing.
     cost_sink: list[RunCost] | None = None
     # 项目共享工作区 (folder 绑定): True ⇒ CEO overview / worker manifest 用稀疏清单
     # (附件 + 少量最近触达 + 「另有 N 个」)；False ⇒ 裸聊 scratch，非附件文件照常列入。

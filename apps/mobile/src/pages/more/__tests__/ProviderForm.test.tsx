@@ -2,6 +2,7 @@
 /**
  * Tests for the add / edit BYOK provider form. Covers the preset-prefilled create path and
  * the edit path where an omitted key keeps the stored ciphertext. The REST layer is mocked.
+ * Connection-test model lives under 高级选项 (still submitted as default_model).
  */
 import type { LlmProviderView } from "@/api/llmProviders";
 import { createLlmProvider, updateLlmProvider } from "@/api/llmProviders";
@@ -31,6 +32,22 @@ const SAVED: LlmProviderView = {
   status: "unchecked",
 };
 
+/** Open「高级选项」<details> so nested controls are queryable. */
+function openAdvancedOptions(): HTMLDetailsElement {
+  const details = screen.getByText("高级选项").closest("details");
+  if (!(details instanceof HTMLDetailsElement)) {
+    throw new Error("expected 高级选项 <details>");
+  }
+  details.open = true;
+  return details;
+}
+
+/** Query「连接测试用模型」after opening advanced options. */
+function connectionTestModel(): HTMLElement {
+  openAdvancedOptions();
+  return screen.getByLabelText("连接测试用模型");
+}
+
 afterEach(cleanup);
 beforeEach(() => {
   mockCreate.mockReset();
@@ -38,6 +55,19 @@ beforeEach(() => {
 });
 
 describe("ProviderForm", () => {
+  it("keeps connection-test model off the main path", () => {
+    render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.queryByText("默认模型名")).toBeNull();
+    expect(screen.getByText("厂商")).toBeTruthy();
+    expect(screen.getByText("显示名称")).toBeTruthy();
+    expect(screen.getByText(/^API Key/)).toBeTruthy();
+    expect(screen.getByText("高级选项")).toBeTruthy();
+    expect(
+      screen.getByText(/选择后将预填名称与端点；日常选用请到「模型组合」/),
+    ).toBeTruthy();
+    expect(connectionTestModel()).toBeTruthy();
+  });
+
   it("creates a provider from the default preset once a key is entered", async () => {
     mockCreate.mockResolvedValue(SAVED);
     const onSaved = vi.fn();
@@ -85,11 +115,9 @@ describe("ProviderForm", () => {
     expect(patch.default_model).toBe("deepseek-v4-flash");
   });
 
-  it("exposes a preset model dropdown with 其他… for non-custom presets", () => {
+  it("exposes a preset model dropdown with 其他… under advanced", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
-    const modelSelect = screen.getByLabelText(
-      "默认模型名",
-    ) as HTMLSelectElement;
+    const modelSelect = connectionTestModel() as HTMLSelectElement;
     expect(modelSelect.tagName).toBe("SELECT");
     expect(modelSelect.value).toBe("deepseek-v4-flash");
     expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
@@ -97,7 +125,7 @@ describe("ProviderForm", () => {
       "deepseek-v4-pro",
       "__other__",
     ]);
-    expect(screen.queryByLabelText("自定义默认模型名")).toBeNull();
+    expect(screen.queryByLabelText("自定义连接测试用模型")).toBeNull();
 
     fireEvent.change(modelSelect, { target: { value: "deepseek-v4-pro" } });
     expect(modelSelect.value).toBe("deepseek-v4-pro");
@@ -111,11 +139,12 @@ describe("ProviderForm", () => {
     const onSaved = vi.fn();
     render(<ProviderForm onSaved={onSaved} onCancel={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("默认模型名"), {
+    fireEvent.change(connectionTestModel(), {
       target: { value: "__other__" },
     });
+    openAdvancedOptions();
     const customInput = screen.getByLabelText(
-      "自定义默认模型名",
+      "自定义连接测试用模型",
     ) as HTMLInputElement;
     fireEvent.change(customInput, { target: { value: "deepseek-custom" } });
     fireEvent.change(screen.getByLabelText("API Key"), {
@@ -129,7 +158,7 @@ describe("ProviderForm", () => {
     );
   });
 
-  it("auto-selects 其他… when the stored model is not in the preset list", () => {
+  it("opens advanced when the stored model is not in the preset list", () => {
     render(
       <ProviderForm
         provider={{
@@ -141,15 +170,17 @@ describe("ProviderForm", () => {
       />,
     );
 
+    const details = screen.getByText("高级选项").closest("details");
+    expect(details?.open).toBe(true);
     expect(
-      (screen.getByLabelText("默认模型名") as HTMLSelectElement).value,
+      (screen.getByLabelText("连接测试用模型") as HTMLSelectElement).value,
     ).toBe("__other__");
     expect(
-      (screen.getByLabelText("自定义默认模型名") as HTMLInputElement).value,
+      (screen.getByLabelText("自定义连接测试用模型") as HTMLInputElement).value,
     ).toBe("already-saved-custom");
   });
 
-  it("prefills Moonshot and saves a listed default model from the dropdown", async () => {
+  it("prefills Moonshot and saves a listed model from the advanced dropdown", async () => {
     mockCreate.mockResolvedValue({
       id: "prov-moon",
       label: "Kimi (Moonshot)",
@@ -163,9 +194,7 @@ describe("ProviderForm", () => {
     fireEvent.change(screen.getByLabelText("厂商"), {
       target: { value: "moonshot" },
     });
-    const modelSelect = screen.getByLabelText(
-      "默认模型名",
-    ) as HTMLSelectElement;
+    const modelSelect = connectionTestModel() as HTMLSelectElement;
     expect(modelSelect.value).toBe("kimi-k2.6");
     expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
       "kimi-k2.6",
@@ -189,7 +218,7 @@ describe("ProviderForm", () => {
     });
   });
 
-  it("prefills JiuRelay endpoint, model dropdown, and key/model tip", () => {
+  it("prefills JiuRelay endpoint, advanced model dropdown, and key/model tip", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("厂商"), {
@@ -202,9 +231,7 @@ describe("ProviderForm", () => {
     expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
       "JiuRelay",
     );
-    const modelSelect = screen.getByLabelText(
-      "默认模型名",
-    ) as HTMLSelectElement;
+    const modelSelect = connectionTestModel() as HTMLSelectElement;
     expect(modelSelect.value).toBe("glm-5.2");
     expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
       "glm-5.2",
@@ -212,36 +239,37 @@ describe("ProviderForm", () => {
       "grok-4.5",
       "__other__",
     ]);
+    openAdvancedOptions();
     expect(screen.getByText("领取的 Key 须与所选模型对应")).toBeTruthy();
     expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
       "https://jiurelay.com/openai/v1",
     );
   });
 
-  it("resets the default model when switching presets", () => {
+  it("resets the connection-test model when switching presets", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("默认模型名"), {
+    fireEvent.change(connectionTestModel(), {
       target: { value: "deepseek-v4-pro" },
     });
     fireEvent.change(screen.getByLabelText("厂商"), {
       target: { value: "jiurelay" },
     });
 
-    expect(
-      (screen.getByLabelText("默认模型名") as HTMLSelectElement).value,
-    ).toBe("glm-5.2");
-    expect(screen.queryByLabelText("自定义默认模型名")).toBeNull();
+    expect((connectionTestModel() as HTMLSelectElement).value).toBe("glm-5.2");
+    expect(screen.queryByLabelText("自定义连接测试用模型")).toBeNull();
   });
 
-  it("uses a free-text default model for custom providers", () => {
+  it("keeps custom Base URL on main path; connection-test model in advanced", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("厂商"), {
       target: { value: "custom" },
     });
 
-    const modelInput = screen.getByLabelText("默认模型名") as HTMLInputElement;
+    expect(screen.getByLabelText("Base URL").tagName).toBe("INPUT");
+    expect(screen.getByText("高级选项")).toBeTruthy();
+    const modelInput = connectionTestModel() as HTMLInputElement;
     expect(modelInput.tagName).toBe("INPUT");
     fireEvent.change(modelInput, { target: { value: "my-custom-model" } });
     expect(modelInput.value).toBe("my-custom-model");

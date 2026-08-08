@@ -172,6 +172,21 @@ async def apply_loop_directive(
                 finish_override_sink.append(fr)
             # Mid-loop zero_write → DEGRADED + raised「Worker 因零写…」已退役。
             # Hard-ceiling thrashing still uses ceiling.record_thrashing_backstop.
+            # 08-08 定案①：validation thrash 早停也要向上交缺口（勿重做 e94 PARTIAL）。
+            if reason == "validation_thrash" and role == "worker":
+                from agentcore.runtime.engine.ceiling import record_thrashing_backstop
+
+                record_thrashing_backstop(
+                    run_id=run_id,
+                    agent_id=tool_context.agent_id,
+                    question=(
+                        "Worker 因同类参数/契约错误连撞已早停，"
+                        "交付可能不完整——请续派或换策略补缺口。"
+                    ),
+                    evidence=f"validation_thrash: rounds={round_idx + 1}",
+                    sink=sink,
+                    gate_escalation_sink=gate_escalation_sink,
+                )
             finalize_allowed = allowed_tool_names
             (
                 final_content,

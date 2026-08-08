@@ -513,9 +513,13 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
     # structure blueprint), and that研究级大型交付 should make「定结构」an evidence-driven,
     # user-gated outline step (调研 → 提纲 + checkpoint_after → 全文) rather than the
     # CEO fixing the skeleton up front. Pins the范式 so it can't silently drop out.
+    # 案 f9a6a1c3 / 08-08②：必备章节标题与验收同字面；禁藏裸报错。
     body = _body("team_orchestration_advanced")
     assert "方案" in body  # 约束 vs 方案
     assert "required_sections" in body  # 验收底线、非结构蓝图
+    assert "同字面" in body or "同一套原文" in body
+    assert "近义" in body
+    assert "裸报错" in body or "藏起契约" in body or "藏契约" in body
     assert "提纲" in body
     assert "checkpoint_after" in body
     # 定案 A：调研驱动大型交付 — 各角 MD 笔记 files，禁三人 prose 只靠主笔落盘
@@ -534,6 +538,7 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
 
     案 20260803-ppt-office A+B + docx-office-exec-capability-lie B/C。
     案 1eb5eb99 A：压体积与模板保真解耦。
+    案 5d25bfc3 / 08-08④：图形组织图直接拒+替代；仅文本/表格 Word；禁说满空派。
     """
     body = _body("team_orchestration_advanced")
     assert "python-pptx" in body
@@ -549,6 +554,12 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
     assert "压体积" in body and "模板保真" in body
     assert "*_slim.pptx" in body or "slim.pptx" in body
     assert "相对模板" in body
+    # 08-08④：图形组织图拒+替代；勿点名 SmartArt/DrawingML 当能力
+    assert "图形组织图" in body
+    assert "直接拒" in body
+    assert "文本" in body and "表格" in body
+    assert "说满" in body and "空派" in body
+    assert "SmartArt" not in body and "DrawingML" not in body
 
 
 def test_team_orchestration_skill_teaches_windows_bat_crlf_ascii():
@@ -842,6 +853,11 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "可读" in body or "可扫" in body or "可编辑" in body
     assert "不得" in body or "禁止" in body
     assert "SmartArt" not in body and "DrawingML" not in body
+    # 案 5d25 / 08-08④：图形组织图拒+替代；禁说满空派
+    assert "图形组织图" in body
+    assert "直接拒" in body
+    assert "文本" in body and "表格" in body
+    assert "说满" in body and "空派" in body
     assert "话术锚点" not in body
     assert "极宽" not in body
     assert "载体" in body

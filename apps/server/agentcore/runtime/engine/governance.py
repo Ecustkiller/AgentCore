@@ -107,13 +107,14 @@ def maybe_inject_team_gate_direct_reject(
 
 def _user_intent_chunks(messages: list[LLMMessage]) -> list[str]:
     """Real user turns only (skip system nudges / short affirmations)."""
+    from agentcore.llm.provider.protocol import llm_content_text
     from agentcore.runtime.kickoff import is_short_affirmation
 
     chunks: list[str] = []
     for msg in messages:
         if msg.role != "user" or not msg.content:
             continue
-        text = msg.content.strip()
+        text = llm_content_text(msg.content).strip()
         if not text or text.startswith("[系统提示]"):
             continue
         if is_short_affirmation(text):

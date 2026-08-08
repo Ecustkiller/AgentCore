@@ -205,6 +205,26 @@ _TEMPERATURE_DEPRECATED_MARKERS = re.compile(
     r"`?temperature`?\s+is\s+deprecated",
     re.IGNORECASE,
 )
+# Context / prompt overflow (⑦A · 2026-08-08): never echo upstream walls like
+# "This model's maximum context length is … you requested …".
+_CONTEXT_OVERFLOW_CODES = frozenset(
+    {
+        "context_length_exceeded",
+        "context_overflow",
+        "prompt_too_long",
+        "input_too_long",
+    }
+)
+_CONTEXT_OVERFLOW_MARKERS = re.compile(
+    r"(maximum\s+context\s+length|context_length_exceeded|context\s+overflow|"
+    r"prompt\s+is\s+too\s+long|prompt\s+too\s+long|"
+    r"exceeds?\s+(the\s+)?(maximum\s+)?context|"
+    r"context\s+window|"
+    r"输入过长|上下文.*(过长|超限|溢出|超过)|超过.*上下文)",
+    re.IGNORECASE,
+)
+# Product face — short Chinese; upstream body stays in preview / logs only.
+_CONTEXT_OVERFLOW_PRODUCT = "对话上下文过长，本轮无法继续。请压缩较早对话后重试"
 
 
 def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
@@ -237,6 +257,18 @@ def is_model_not_found_404(body: bytes | str | None) -> bool:
     return bool(preview and _MODEL_404_MARKERS.search(preview))
 
 
+def is_context_overflow(body: bytes | str | None) -> bool:
+    """True when upstream rejects the request for context / prompt length."""
+    preview = body_preview(body)
+    code = (_extract_upstream_code(preview) or "").lower()
+    if code in _CONTEXT_OVERFLOW_CODES:
+        return True
+    extracted = _extract_upstream_message(preview) or ""
+    if extracted and _CONTEXT_OVERFLOW_MARKERS.search(extracted):
+        return True
+    return bool(preview and _CONTEXT_OVERFLOW_MARKERS.search(preview))
+
+
 def client_error_message(
     provider_name: str, status_code: int, body: bytes | str | None
 ) -> str:
@@ -252,6 +284,9 @@ def client_error_message(
         if extracted:
             return f"{provider_name} {extracted}"
         return f"{provider_name} 接口地址不可达（404），请检查 base_url 配置"
+    # 413 / body-proven overflow: product Chinese only (⑦A) — no upstream wall.
+    if status_code == 413 or is_context_overflow(body):
+        return _CONTEXT_OVERFLOW_PRODUCT
     if (
         status_code == 400
         and extracted

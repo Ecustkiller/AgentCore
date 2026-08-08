@@ -274,6 +274,7 @@ def test_register_always_ceo_tools_declare_loop():
         "list_projects",
         "resolve_project",
         "create_project",
+        "read_image",
     } <= names
     assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})
 

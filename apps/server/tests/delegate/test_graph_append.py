@@ -1098,6 +1098,7 @@ async def test_assemble_injects_recent_graph_note_into_ceo_prompt(monkeypatch):
         base_tool_context=ctx(),
         vision_cost_sink=[],
         attachment_context="",
+        native_image_parts=[],
         memory_topics=[],
         bound_execution_id="e",
         execution_id_token=None,

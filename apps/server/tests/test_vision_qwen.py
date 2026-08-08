@@ -1,20 +1,28 @@
-"""QwenVLReader + build_vision_reader (AI协作白板.md §九.4).
+"""QwenVLReader + build_vision_reader / resolve_vision_reader (AI协作白板.md §九.4).
 
 Verifies the reader sends the board PNG as an OpenAI-compatible multimodal message
 (``image_url`` data URL), parses the text reading back, maps upstream HTTP errors to
-typed LLM errors, and that the factory only builds a reader when a key is configured.
+typed LLM errors, and that the factory builds a reader from (a) profile vision-slot
+credentials or (b) platform ``VISION_*`` when the slot is null.
 Network is mocked via ``httpx.MockTransport`` (injected through the reader's ``transport``
 seam) — no real DashScope calls.
 """
 
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
 from agentcore.core.errors import LLMAuthError, LLMError
-from agentcore.vision import QwenVLReader, build_vision_reader
+from agentcore.llm.resolve import ModelSelection
+from agentcore.vision import (
+    QwenVLReader,
+    build_vision_reader,
+    resolve_vision_reader,
+    resolve_vision_reader_for_conversation,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -138,7 +146,8 @@ def test_build_vision_reader_none_without_base_url():
     assert build_vision_reader(cfg) is None
 
 
-def test_build_vision_reader_none_when_byok_even_with_key():
+def test_build_vision_reader_none_when_byok_no_slot_even_with_vision_env():
+    """Null vision slot + billing_mode=byok → no platform VISION_* fallback."""
     cfg = SimpleNamespace(
         billing_mode="byok",
         vision_api_key="sk-x",
@@ -160,3 +169,143 @@ def test_build_vision_reader_returns_reader_on_platform():
     reader = build_vision_reader(cfg)
     assert isinstance(reader, QwenVLReader)
     assert reader._model == "kimi-k2.5"
+    assert reader.credential_source == "platform"
+
+
+def test_build_vision_reader_explicit_slot_creds_ignore_billing_mode():
+    """Filled vision slot → build even under billing_mode=byok."""
+    cfg = SimpleNamespace(
+        billing_mode="byok",
+        vision_api_key="",
+        vision_base_url="",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    reader = build_vision_reader(
+        cfg,
+        api_key="user-sk",
+        base_url="https://byok.example/v1",
+        model="qwen-vl-max",
+        credential_source="user",
+    )
+    assert isinstance(reader, QwenVLReader)
+    assert reader.credential_source == "user"
+    assert reader._model == "qwen-vl-max"
+    assert reader._api_key == "user-sk"
+
+
+async def test_resolve_vision_reader_byok_slot_builds(monkeypatch):
+    from agentcore.llm.credentials import LLMCredentials
+
+    cfg = SimpleNamespace(
+        billing_mode="byok",
+        vision_api_key="sk-platform",
+        vision_base_url="https://relay.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_provider_credentials",
+        AsyncMock(
+            return_value=LLMCredentials(
+                api_key="byok-key",
+                base_url="https://user.example/v1",
+                default_model="qwen-vl-max",
+                source="user",
+                provider_id="prov-1",
+            )
+        ),
+    )
+    vision = ModelSelection(model="qwen-vl-max", origin="byok", provider_id="prov-1")
+    reader = await resolve_vision_reader(MagicMock(), "u1", vision, settings=cfg)
+    assert isinstance(reader, QwenVLReader)
+    assert reader._model == "qwen-vl-max"
+    assert reader._api_key == "byok-key"
+    assert reader.credential_source == "user"
+
+
+async def test_resolve_vision_reader_byok_no_slot_none():
+    cfg = SimpleNamespace(
+        billing_mode="byok",
+        vision_api_key="sk-x",
+        vision_base_url="https://relay.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    assert await resolve_vision_reader(MagicMock(), "u1", None, settings=cfg) is None
+
+
+async def test_resolve_vision_reader_platform_no_slot_with_vision_env():
+    cfg = SimpleNamespace(
+        billing_mode="platform",
+        vision_api_key="sk-x",
+        vision_base_url="https://relay.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    reader = await resolve_vision_reader(MagicMock(), "u1", None, settings=cfg)
+    assert isinstance(reader, QwenVLReader)
+    assert reader._model == "kimi-k2.5"
+    assert reader.credential_source == "platform"
+
+
+async def test_resolve_vision_reader_for_conversation_lookup_failure_falls_back(
+    monkeypatch,
+):
+    """DB lookup errors must not raise — fall back to build_vision_reader(settings)."""
+    cfg = SimpleNamespace(
+        billing_mode="platform",
+        vision_api_key="sk-fallback",
+        vision_base_url="https://relay.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+
+    class _BoomSession:
+        async def __aenter__(self):
+            raise ValueError("invalid UUID for conversation_id")
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _BoomSession(),
+    )
+    reader = await resolve_vision_reader_for_conversation(
+        user_id="u1", conversation_id="c1", settings=cfg
+    )
+    assert isinstance(reader, QwenVLReader)
+    assert reader._api_key == "sk-fallback"
+    assert reader.credential_source == "platform"
+
+
+async def test_resolve_vision_reader_for_conversation_lookup_failure_byok_none(
+    monkeypatch,
+):
+    """BYOK + no VISION_* → lookup failure still returns None (no raise)."""
+    cfg = SimpleNamespace(
+        billing_mode="byok",
+        vision_api_key="",
+        vision_base_url="",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+
+    class _BoomSession:
+        async def __aenter__(self):
+            raise RuntimeError("db unavailable")
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _BoomSession(),
+    )
+    assert (
+        await resolve_vision_reader_for_conversation(
+            user_id="u1", conversation_id="c1", settings=cfg
+        )
+        is None
+    )

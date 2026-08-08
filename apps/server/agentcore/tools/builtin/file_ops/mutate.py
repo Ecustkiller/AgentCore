@@ -1008,7 +1008,9 @@ class WriteSectionTool:
         from agentcore.runtime.runs.website_section import (
             SectionMarkerError,
             inject_section_html,
+            list_section_ids,
             normalize_section_id,
+            teachable_section_reject,
         )
 
         start = time.monotonic()
@@ -1046,12 +1048,26 @@ class WriteSectionTool:
             return denied
         coordinator = context.write_coordinator
 
+        async def _peek_existing_sections() -> list[str] | None:
+            """Best-effort inventory for teachable rejects (read-only)."""
+            try:
+                text = await context.backend.read(rel_path)
+            except (OutsideWorkspace, PathNotFound, NotAFile, NotUTF8, WorkspaceError):
+                return None
+            return list_section_ids(text)
+
         try:
             slug = normalize_section_id(str(section_raw))
         except SectionMarkerError as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(str(e), start)
+            existing = await _peek_existing_sections()
+            example = (existing[0] if existing else "s0")
+            return _error(
+                teachable_section_reject(str(e), existing=existing, example=example),
+                start,
+                contract_failure=True,
+            )
 
         body: str
         if from_file:
@@ -1120,7 +1136,13 @@ class WriteSectionTool:
         except SectionMarkerError as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(str(e), start, contract_failure=True)
+            existing = list_section_ids(old)
+            example = existing[0] if existing else slug
+            return _error(
+                teachable_section_reject(str(e), existing=existing, example=example),
+                start,
+                contract_failure=True,
+            )
 
         if new_html == old:
             unchanged = f"SECTION:{slug} 在 {rel_path} 已是目标正文，无需改动"

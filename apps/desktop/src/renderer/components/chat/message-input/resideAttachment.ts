@@ -126,16 +126,14 @@ export async function stageDroppedFileAttachment(
 }
 
 /**
- * 浏览器：回形针 / 拖贴共用。校验图片与大小；有会话则立即云端 PUT，
- * 无会话则持 ``fileBlob`` 到发送。允许二进制（docx/pdf 等）。
+ * 浏览器：回形针 / 拖贴共用。校验大小；有会话则立即云端 PUT，
+ * 无会话则持 ``fileBlob`` 到发送。允许二进制（图片 / docx / pdf 等）；
+ * 识图是否可用由后端与模型配置决定，此处不硬拒。
  */
 export async function prepareBrowserFileAttachment(
   conversationId: string | null,
   file: File,
 ): Promise<ResideResult> {
-  if (file.type.startsWith("image/")) {
-    return { ok: false, reason: "暂不支持图片附件（模型尚无视觉能力）" };
-  }
   if (file.size > ATTACH_MAX_BYTES) {
     return {
       ok: false,
@@ -146,7 +144,8 @@ export async function prepareBrowserFileAttachment(
   const name = safeBrowserFileName(file.name);
   const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
   const bytes = new Uint8Array(head);
-  const binary = bytes.includes(0);
+  // 图片 MIME 常无 NUL，不能只靠 sniff；按 binary 驻留，避免当 UTF-8 正文内联。
+  const binary = file.type.startsWith("image/") || bytes.includes(0);
   const truncated = !binary && file.size > TEXT_PREVIEW_CAP;
   const text = binary
     ? ""

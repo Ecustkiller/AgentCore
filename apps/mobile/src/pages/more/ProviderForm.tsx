@@ -8,9 +8,10 @@ import {
 import { useState } from "react";
 
 // 添加 / 编辑一个 BYOK 服务商 (设置·模型配置). Mobile-local vendor presets (no shared package
-// with desktop) prefill the endpoint / label / default model; 「自定义」also requires Base URL.
-// Preset vendors: main path = vendor + name + Key + default model select (models +「其他…」).
-// Base URL override lives under 高级. Chat model pick lives in 模型组合, not this form.
+// with desktop) prefill endpoint / label / connection-test model; 「自定义」also requires Base URL.
+// Main path = vendor + name + Key（自定义另有 Base URL）.
+// Advanced = Base URL override（预设）+ 连接测试用模型（静默预填，仍提交 default_model）.
+// Chat model pick lives in 模型组合, not this form.
 
 /** Mobile-local BYOK presets. */
 type ProviderId =
@@ -34,7 +35,7 @@ type ProviderPreset = {
   models: readonly string[];
 };
 
-/** Sentinel `<select>` value for free-text default model. */
+/** Sentinel `<select>` value for free-text connection-test model. */
 const OTHER_MODEL_VALUE = "__other__";
 
 const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -188,7 +189,9 @@ export function ProviderForm({
     !(preset.baseUrlAliases ?? []).some(
       (alias) => normalizeBaseUrl(alias) === normalizeBaseUrl(baseUrl),
     );
-  const [advancedOpen, setAdvancedOpen] = useState(() => baseUrlOverride);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => baseUrlOverride || modelOther,
+  );
 
   const keyOk = editing || apiKey.trim().length > 0;
   const canSave =
@@ -279,7 +282,7 @@ export function ProviderForm({
         </select>
         {!isCustom && (
           <p className="section-note" style={{ marginTop: 4 }}>
-            选择后将预填名称、端点与默认模型；对话用哪个模型请在「模型组合」中选择。
+            选择后将预填名称与端点；日常选用请到「模型组合」。
           </p>
         )}
       </div>
@@ -342,57 +345,14 @@ export function ProviderForm({
         </div>
       )}
 
-      <div className="field">
-        <label className="field-label" htmlFor="llm-default-model">
-          默认模型名
-        </label>
-        {!isCustom && preset != null && (
-          <select
-            id="llm-default-model"
-            value={modelSelectValue}
-            onChange={(e) => selectListedModel(e.target.value)}
-            className="text-input"
-          >
-            {preset.models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-            <option value={OTHER_MODEL_VALUE}>其他…</option>
-          </select>
-        )}
-        {showModelOtherInput && (
-          <input
-            id={isCustom ? "llm-default-model" : "llm-default-model-other"}
-            type="text"
-            value={defaultModel}
-            onChange={(e) => setDefaultModel(e.target.value)}
-            placeholder={preset?.defaultModel ?? "model-name"}
-            autoComplete="off"
-            spellCheck={false}
-            className="text-input"
-            style={!isCustom ? { marginTop: 8 } : undefined}
-            aria-label={isCustom ? undefined : "自定义默认模型名"}
-          />
-        )}
-        {providerId === "jiurelay" && (
-          <p className="section-note" style={{ marginTop: 4 }}>
-            领取的 Key 须与所选模型对应
-          </p>
-        )}
-        <p className="section-note" style={{ marginTop: 4 }}>
-          连接测试与目录兜底用；日常选用请到「模型组合」。
-        </p>
-      </div>
-
-      {!isCustom && (
-        <details
-          open={advancedOpen}
-          onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
-        >
-          <summary className="field-label" style={{ cursor: "pointer" }}>
-            高级选项
-          </summary>
+      <details
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+      >
+        <summary className="field-label" style={{ cursor: "pointer" }}>
+          高级选项
+        </summary>
+        {!isCustom && (
           <div className="field" style={{ marginTop: 8 }}>
             <label className="field-label" htmlFor="llm-base-url">
               Base URL
@@ -408,8 +368,50 @@ export function ProviderForm({
               className="text-input"
             />
           </div>
-        </details>
-      )}
+        )}
+        <div className="field" style={{ marginTop: 8 }}>
+          <label className="field-label" htmlFor="llm-default-model">
+            连接测试用模型
+          </label>
+          {!isCustom && preset != null && (
+            <select
+              id="llm-default-model"
+              value={modelSelectValue}
+              onChange={(e) => selectListedModel(e.target.value)}
+              className="text-input"
+            >
+              {preset.models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+              <option value={OTHER_MODEL_VALUE}>其他…</option>
+            </select>
+          )}
+          {showModelOtherInput && (
+            <input
+              id={isCustom ? "llm-default-model" : "llm-default-model-other"}
+              type="text"
+              value={defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+              placeholder={preset?.defaultModel ?? "model-name"}
+              autoComplete="off"
+              spellCheck={false}
+              className="text-input"
+              style={!isCustom ? { marginTop: 8 } : undefined}
+              aria-label={isCustom ? undefined : "自定义连接测试用模型"}
+            />
+          )}
+          {providerId === "jiurelay" && (
+            <p className="section-note" style={{ marginTop: 4 }}>
+              领取的 Key 须与所选模型对应
+            </p>
+          )}
+          <p className="section-note" style={{ marginTop: 4 }}>
+            连接测试与目录兜底用；日常选用请到「模型组合」。
+          </p>
+        </div>
+      </details>
 
       <div className="field-actions">
         <button

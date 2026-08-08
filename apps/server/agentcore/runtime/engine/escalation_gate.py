@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.events import EventSink, escalation_raised, run_escalation_gate
 from agentcore.runtime.routing import evaluate_after_tools, signals_as_dicts
 
@@ -26,7 +26,7 @@ def apply_escalation_gate(
     from agentcore.runtime.loop_controller import ToolAttempt
 
     typed_attempts = [a for a in attempts if isinstance(a, ToolAttempt)]
-    outputs = [(m.content or "") for m in tool_results]
+    outputs = [llm_content_text(m.content) for m in tool_results]
     verdict = evaluate_after_tools(
         attempts=typed_attempts,
         tool_outputs=outputs,

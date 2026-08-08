@@ -10,7 +10,9 @@ from agentcore.runtime.runs.website_section import (
     collect_light_website_acceptance_gaps,
     inject_section_html,
     light_website_acceptance_gaps,
+    list_section_ids,
     normalize_section_id,
+    teachable_section_reject,
 )
 from agentcore.tools.builtin.file_ops import WriteSectionTool
 from agentcore.tools.protocol import ToolContext
@@ -26,6 +28,25 @@ def test_normalize_section_id():
         normalize_section_id("")
     with pytest.raises(SectionMarkerError):
         normalize_section_id("hero")
+
+
+def test_list_section_ids_ordered_unique():
+    html = (
+        "<!-- SECTION:s1 START --><!-- SECTION:s1 END -->\n"
+        "<!-- SECTION:s0 START --><!-- SECTION:s0 END -->\n"
+        "<!-- SECTION:s1 START --><!-- SECTION:s1 END -->\n"
+    )
+    assert list_section_ids(html) == ["s1", "s0"]
+
+
+def test_teachable_section_reject_includes_example_and_inventory():
+    msg = teachable_section_reject(
+        "section 格式无效：'ch5-s0'（须为 sN，如 s0 / s1）",
+        existing=["s0", "s1"],
+        example="s0",
+    )
+    assert '合法示例：section="s0"' in msg
+    assert "当前文件已有分区：s0、s1" in msg
 
 
 def test_inject_section_ignores_indent_drift():
@@ -177,6 +198,50 @@ async def test_write_section_rejects_md_path(tmp_path: Path):
         md.read_text(encoding="utf-8")
         == "<!-- SECTION:s0 START -->\n\n<!-- SECTION:s0 END -->\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_write_section_invalid_format_is_teachable_contract_failure(
+    tmp_path: Path,
+):
+    """08-08 定案①：格式无效拒文含合法例+已有分区，并标 contract_failure。"""
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!-- SECTION:s0 START -->\n"
+        "<!-- SECTION:s0 END -->\n"
+        "<!-- SECTION:s2 START -->\n"
+        "<!-- SECTION:s2 END -->\n",
+        encoding="utf-8",
+    )
+    result = await WriteSectionTool().execute(
+        {"path": "site/index.html", "section": "ch5-s0", "content": "<p>x</p>"},
+        _ctx(tmp_path),
+    )
+    assert result.success is False
+    assert result.contract_failure is True
+    err = result.error or ""
+    assert "格式无效" in err
+    assert '合法示例：section="' in err
+    assert "当前文件已有分区：s0、s2" in err
+
+
+@pytest.mark.asyncio
+async def test_write_section_missing_marker_lists_existing(tmp_path: Path):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!-- SECTION:s0 START --><!-- SECTION:s0 END -->\n",
+        encoding="utf-8",
+    )
+    result = await WriteSectionTool().execute(
+        {"path": "site/index.html", "section": "s9", "content": "<p>x</p>"},
+        _ctx(tmp_path),
+    )
+    assert result.success is False
+    assert result.contract_failure is True
+    err = result.error or ""
+    assert "找不到" in err
+    assert '合法示例：section="s0"' in err
+    assert "当前文件已有分区：s0" in err
 
 
 @pytest.mark.asyncio

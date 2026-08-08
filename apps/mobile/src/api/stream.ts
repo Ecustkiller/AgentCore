@@ -147,8 +147,9 @@ async function sseFetch(doFetch: () => Promise<Response>): Promise<Response> {
  * Since 执行与请求解耦 (slice 1a) a dropped connection no longer kills the turn — it runs
  * detached — so a mid-stream throw means "rejoin it" (attachStream), not "resend".
  *
- * `attachments` carry extracted file text alongside the prompt (composer 附件); omitted from
- * the body when empty so a plain turn keeps the exact prior shape.
+ * `attachments` carry extracted file text and/or resident binary metadata alongside the
+ * prompt (composer 附件); omitted from the body when empty so a plain turn keeps the exact
+ * prior shape.
  *
  * ``delivery`` 必填（同对话再发）：空闲开跑仍带 ``steer``；缺 → 422。
  */

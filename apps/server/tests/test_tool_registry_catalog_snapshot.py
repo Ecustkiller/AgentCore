@@ -137,6 +137,7 @@ _CATALOG_ORCHESTRATION_ORDER = [
     "remember",
     "update_project_profile",
     "ask_user",
+    "read_image",
     "board_ops",
     "board_read",
 ]
@@ -201,6 +202,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "remember": (AVAILABLE_TO_CEO,),
     "update_project_profile": (AVAILABLE_TO_CEO,),
     "ask_user": (AVAILABLE_TO_CEO,),
+    "read_image": (AVAILABLE_TO_CEO,),
     "board_ops": (AVAILABLE_TO_CEO,),
     "board_read": (AVAILABLE_TO_CEO,),
 }
@@ -405,6 +407,7 @@ def test_tool_registry_declarations_cover_roster():
         "remember": CeoWire.MEMORY,
         "update_project_profile": CeoWire.MEMORY,
         "ask_user": CeoWire.CHECKPOINT,
+        "read_image": CeoWire.ALWAYS,
         "board_ops": CeoWire.BOARD,
         "board_read": CeoWire.BOARD,
     }

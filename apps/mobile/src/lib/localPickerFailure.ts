@@ -7,7 +7,6 @@
 export type LocalPickerFailureKind =
   | "dialog_failed"
   | "unauthorized"
-  | "no_package_json"
   | "unavailable"
   | "error";
 
@@ -29,11 +28,6 @@ const LOCAL_PICKER_FAILURE_COPY: Record<
     title: "未能授权本机目录",
     detail:
       "所选路径无法访问或未能登记为授权根。请换一个可访问的文件夹后重试。",
-  },
-  no_package_json: {
-    title: "所选目录没有 package.json",
-    detail:
-      "请选择项目根目录（含 package.json 的文件夹），而不是空目录、压缩包解压不全的目录或上级目录。",
   },
   unavailable: {
     title: "本机目录仅桌面端可用",
@@ -68,7 +62,6 @@ export function isLocalPickerFailureKind(
   return (
     reason === "dialog_failed" ||
     reason === "unauthorized" ||
-    reason === "no_package_json" ||
     reason === "unavailable" ||
     reason === "error"
   );

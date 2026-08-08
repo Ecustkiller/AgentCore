@@ -6,12 +6,15 @@ from agentcore.llm.provider.protocol import (
     INITIAL_BACKOFF,
     MAX_RETRIES,
     LLMChunk,
+    LLMContent,
     LLMMessage,
     LLMProvider,
     LLMRequest,
     LLMResponse,
     TokenUsage,
     ToolCall,
+    build_multimodal_user_content,
+    llm_content_text,
 )
 from agentcore.llm.provider.router import ProviderRouter
 
@@ -22,6 +25,7 @@ __all__ = [
     "BACKOFF_MULTIPLIER",
     "INITIAL_BACKOFF",
     "LLMChunk",
+    "LLMContent",
     "LLMMessage",
     "LLMProvider",
     "LLMRequest",
@@ -31,4 +35,6 @@ __all__ = [
     "ProviderRouter",
     "TokenUsage",
     "ToolCall",
+    "build_multimodal_user_content",
+    "llm_content_text",
 ]

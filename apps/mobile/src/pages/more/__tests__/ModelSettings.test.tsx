@@ -94,7 +94,7 @@ const CATALOG: ModelCatalog = {
       provider_label: "OpenAI",
       display_name: "GPT-4o",
       vendor: "OpenAI",
-      capabilities: [],
+      capabilities: ["vision"],
       context_length: null,
       price: null,
       available: true,
@@ -119,10 +119,10 @@ const mockList = vi.mocked(listLlmProviders);
 const mockListProfiles = vi.mocked(listModelProfiles);
 const mockSetDefault = vi.mocked(setDefaultModelProfile);
 const mockCreateProfile = vi.mocked(createModelProfile);
+const mockUpdateProfile = vi.mocked(updateModelProfile);
 vi.mocked(testLlmProvider);
 vi.mocked(deleteLlmProvider);
 vi.mocked(deleteModelProfile);
-vi.mocked(updateModelProfile);
 
 const SYSTEM_52: LlmModelProfileView = {
   id: "00000000-0000-4000-8000-000000000011",
@@ -191,6 +191,7 @@ beforeEach(() => {
   mockListProfiles.mockReset();
   mockSetDefault.mockReset();
   mockCreateProfile.mockReset();
+  mockUpdateProfile.mockReset();
 });
 
 describe("ModelSettings (profiles + providers)", () => {
@@ -202,7 +203,7 @@ describe("ModelSettings (profiles + providers)", () => {
     await waitFor(() => expect(screen.getByText("DeepSeek")).toBeTruthy());
     expect(screen.getByText("OpenAI")).toBeTruthy();
     expect(screen.getByText("api.deepseek.com")).toBeTruthy();
-    expect(screen.getByText("模型 deepseek-v4-pro")).toBeTruthy();
+    expect(screen.queryByText("模型 deepseek-v4-pro")).toBeNull();
     expect(screen.getAllByTestId("provider-card")).toHaveLength(2);
     expect(screen.getByTestId("profiles-section")).toBeTruthy();
     expect(screen.getByText("GLM-5.2")).toBeTruthy();
@@ -277,8 +278,119 @@ describe("ModelSettings (profiles + providers)", () => {
         },
         worker: null,
         background: null,
+        vision: null,
         set_as_default: false,
       }),
+    );
+  });
+
+  it("creates with a vision slot and prefers vision-capable catalog rows", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52], SYSTEM_52.id);
+    mockCreateProfile.mockResolvedValue({
+      ...USER_PROFILE,
+      vision: {
+        origin: "byok",
+        provider_id: "prov-openai",
+        model: "gpt-4o",
+      },
+    });
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+
+    fireEvent.change(await screen.findByLabelText("名称"), {
+      target: { value: "识图组合" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-select"), {
+      target: { value: "prov-deepseek::deepseek-v4-pro" },
+    });
+
+    expect(screen.getByText(/主模型目录标有视觉时，贴图走主模型/)).toBeTruthy();
+    expect(
+      screen.getByText(/留空=平台 VISION_\* 兜底或无 reader/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/当前主模型目录标有视觉/)).toBeNull();
+
+    const visionSelect = screen.getByTestId(
+      "profile-vision-select",
+    ) as HTMLSelectElement;
+    const visionValues = [...visionSelect.options].map((o) => o.value);
+    expect(visionValues).toContain("prov-openai::gpt-4o");
+    expect(visionValues).not.toContain("prov-deepseek::deepseek-v4-pro");
+    expect(visionValues).toContain(""); // 「不配置」
+
+    fireEvent.change(screen.getByTestId("profile-main-select"), {
+      target: { value: "prov-openai::gpt-4o" },
+    });
+    expect(
+      screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
+    ).toBeTruthy();
+    // 切回无视觉主模型后再选识图槽，避免把主模型 vision 能力混进 create body
+    fireEvent.change(screen.getByTestId("profile-main-select"), {
+      target: { value: "prov-deepseek::deepseek-v4-pro" },
+    });
+
+    fireEvent.change(visionSelect, {
+      target: { value: "prov-openai::gpt-4o" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(mockCreateProfile).toHaveBeenCalledWith({
+        name: "识图组合",
+        main: {
+          origin: "byok",
+          provider_id: "prov-deepseek",
+          model: "deepseek-v4-pro",
+        },
+        worker: null,
+        background: null,
+        vision: {
+          origin: "byok",
+          provider_id: "prov-openai",
+          model: "gpt-4o",
+        },
+        set_as_default: false,
+      }),
+    );
+  });
+
+  it("clears vision on edit when set to 不配置", async () => {
+    const withVision: LlmModelProfileView = {
+      ...USER_PROFILE,
+      vision: {
+        origin: "byok",
+        provider_id: "prov-openai",
+        model: "gpt-4o",
+      },
+    };
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, withVision], SYSTEM_52.id);
+    mockUpdateProfile.mockResolvedValue({ ...withVision, vision: null });
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`profile-card-${withVision.id}`)).toBeTruthy(),
+    );
+    const card = screen.getByTestId(`profile-card-${withVision.id}`);
+    fireEvent.click(
+      card.querySelector("button.btn-outline") as HTMLButtonElement,
+    );
+
+    const visionSelect = (await screen.findByTestId(
+      "profile-vision-select",
+    )) as HTMLSelectElement;
+    expect(visionSelect.value).toBe("prov-openai::gpt-4o");
+    fireEvent.change(visionSelect, { target: { value: "" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(mockUpdateProfile).toHaveBeenCalledWith(
+        withVision.id,
+        expect.objectContaining({ vision: null }),
+      ),
     );
   });
 
@@ -327,6 +439,7 @@ describe("ModelSettings (profiles + providers)", () => {
         },
         worker: null,
         background: null,
+        vision: null,
         set_as_default: false,
       }),
     );

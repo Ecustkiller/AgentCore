@@ -296,9 +296,60 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getByText("主模型（必填）")).toBeTruthy();
     expect(screen.getByText("Worker 模型")).toBeTruthy();
     expect(screen.getByText("后台任务模型")).toBeTruthy();
+    expect(screen.getByText("识图模型（可选）")).toBeTruthy();
     expect(screen.getAllByText("跟随主模型").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("不配置")).toBeTruthy();
     expect(screen.getByText(/辩论用主模型/)).toBeTruthy();
     expect(screen.getByText(/标题、记忆等后台任务/)).toBeTruthy();
+    expect(screen.getByText(/主模型目录标有视觉时，贴图走主模型/)).toBeTruthy();
+    expect(
+      screen.getByText(/留空=平台 VISION_\* 兜底或无 reader/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/当前主模型目录标有视觉/)).toBeNull();
+  });
+
+  it("hints when draft main is curated vision-capable", () => {
+    useModelsMock.mockReturnValue({
+      data: {
+        byok_configured: true,
+        current: { id: "gpt-4o", origin: "byok", provider_id: "p2" },
+        models: [
+          {
+            id: "deepseek-v4-pro",
+            origin: "byok",
+            display_name: "DeepSeek V4 Pro",
+            vendor: "DeepSeek",
+            provider_id: "p1",
+            provider_label: "DeepSeek",
+            capabilities: [],
+            available: true,
+          },
+          {
+            id: "gpt-4o",
+            origin: "byok",
+            display_name: "GPT-4o",
+            vendor: "OpenAI",
+            provider_id: "p2",
+            provider_label: "OpenAI",
+            capabilities: ["vision"],
+            available: true,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useModels>);
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    const mainSelect = document.getElementById(
+      "profile-main",
+    ) as HTMLSelectElement;
+    fireEvent.change(mainSelect, { target: { value: "p2::gpt-4o" } });
+    expect(
+      screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
+    ).toBeTruthy();
   });
 
   it("saves an edited user profile, toasts success, and closes the editor", async () => {
@@ -524,6 +575,10 @@ describe("ModelSettings (profiles)", () => {
       "disabled",
       false,
     );
+    expect(document.getElementById("profile-vision")).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 
   it("when groups have no models with platform_available, editor shows retry/settings guide", () => {
@@ -732,5 +787,166 @@ describe("ModelSettings (profiles)", () => {
       screen.getByText("当前客户端版本过旧，请到设置 · 关于检查更新"),
     ).toBeTruthy();
     expect(screen.queryByText("加载失败，请重试")).toBeNull();
+  });
+
+  it("saves create with a vision slot and clears it on edit", async () => {
+    vi.mocked(createLlmModelProfile).mockResolvedValue({
+      id: "user-vision",
+      name: "识图组合",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p1", model: "deepseek-v4-pro" },
+      worker: null,
+      background: null,
+      vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+    });
+    vi.mocked(updateLlmModelProfile).mockResolvedValue({
+      id: "user-mine",
+      name: "办公",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+      worker: null,
+      background: null,
+      vision: null,
+    });
+    useModelsMock.mockReturnValue({
+      data: {
+        byok_configured: true,
+        current: { id: "deepseek-v4-pro", origin: "byok", provider_id: "p1" },
+        models: [
+          {
+            id: "deepseek-v4-pro",
+            origin: "byok",
+            display_name: "DeepSeek V4 Pro",
+            vendor: "DeepSeek",
+            provider_id: "p1",
+            provider_label: "DeepSeek",
+            capabilities: [],
+            available: true,
+          },
+          {
+            id: "gpt-4o",
+            origin: "byok",
+            display_name: "GPT-4o",
+            vendor: "OpenAI",
+            provider_id: "p2",
+            provider_label: "OpenAI",
+            capabilities: ["vision"],
+            available: true,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useModels>);
+    mockProviders(providersResponse());
+    mockProfiles(profilesResponse({ data: [] }));
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.change(screen.getByLabelText(/名称/), {
+      target: { value: "识图组合" },
+    });
+    const visionSelect = document.getElementById(
+      "profile-vision",
+    ) as HTMLSelectElement;
+    // 有 vision capability 时下拉优先只列识图模型（不含无 vision 的 deepseek）
+    const visionValues = [...visionSelect.options].map((o) => o.value);
+    expect(visionValues).toContain("p2::gpt-4o");
+    expect(visionValues).not.toContain("p1::deepseek-v4-pro");
+    fireEvent.change(visionSelect, { target: { value: "p2::gpt-4o" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(createLlmModelProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "识图组合",
+          vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+        }),
+      ),
+    );
+
+    cleanup();
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-mine",
+            name: "办公",
+            kind: "user",
+            is_default: false,
+            main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+            worker: null,
+            background: null,
+            vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const editVision = document.getElementById(
+      "profile-vision",
+    ) as HTMLSelectElement;
+    expect(editVision.value).toBe("p2::gpt-4o");
+    fireEvent.change(editVision, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(updateLlmModelProfile).toHaveBeenCalledWith(
+        "user-mine",
+        expect.objectContaining({ vision: null }),
+      ),
+    );
+  });
+
+  it("falls back to full catalog for vision when no model advertises vision", () => {
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    const visionSelect = document.getElementById(
+      "profile-vision",
+    ) as HTMLSelectElement;
+    const visionValues = [...visionSelect.options].map((o) => o.value);
+    expect(visionValues).toContain("p1::deepseek-v4-pro");
+    expect(visionValues).toContain("p2::gpt-4o");
+  });
+
+  it("copies vision slot when duplicating a profile", async () => {
+    vi.mocked(createLlmModelProfile).mockResolvedValue({
+      id: "user-copy",
+      name: "办公 副本",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+      vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+    });
+    mockProviders(providersResponse());
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-mine",
+            name: "办公",
+            kind: "user",
+            is_default: false,
+            main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+            worker: null,
+            background: null,
+            vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() =>
+      expect(createLlmModelProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "办公 副本",
+          vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+        }),
+      ),
+    );
   });
 });

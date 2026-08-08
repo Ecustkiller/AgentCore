@@ -14,11 +14,11 @@ from agentcore.runtime.suspension import SuspensionKind
 class MessageAttachment(BaseModel):
     """A piece of context the user referenced (@-mention or paperclip).
 
-    Text files carry client-extracted ``text`` (images stay out of scope until a
-    vision model). Binary files are **resident-first** (引用即驻留): the desktop
-    copies raw bytes into the conversation workspace ``attachments/`` and sends
-    ``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析
-    then extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv
+    Text files carry client-extracted ``text``. Raster image attachments are
+    **resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare
+    the server eye→texts them via ``VisionReader`` into the attachment prompt block
+    (main LLM stays text-only — not native multimodal). Binary office/PDF may gain
+    server-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv
     stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
     another of the user's conversations: recent messages are materialized into
     ``text`` client-side, and ``conversation_id`` records which one (for the chip +
@@ -85,7 +85,13 @@ class StoredAttachment(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=32000)
+    """POST a user turn: text, attachments, or both.
+
+    ``content`` may be empty / whitespace when ``attachments`` is non-empty
+    (image-only / file-only send); without attachments, non-blank text is required.
+    """
+
+    content: str = Field(..., max_length=32000)
     # 同对话再发分流（运行时三模型 · Steer/Queue）：必填；缺 → 422；开发期无缺省兼容层。
     delivery: Literal["steer", "queue"]
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
@@ -97,6 +103,12 @@ class SendMessageRequest(BaseModel):
     # Locality is conversation/project state (birth-time bind), not a per-turn field —
     # auto-promote is vetoed (双模式工作区).
     requires_tools: bool = False
+
+    @model_validator(mode="after")
+    def _require_content_or_attachments(self) -> "SendMessageRequest":
+        if not (self.content and self.content.strip()) and not self.attachments:
+            raise ValueError("消息内容与附件不能同时为空")
+        return self
 
 
 class RegenerateMessageRequest(BaseModel):

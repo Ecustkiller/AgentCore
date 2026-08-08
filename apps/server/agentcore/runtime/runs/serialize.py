@@ -17,7 +17,12 @@ import re
 from dataclasses import asdict, fields
 from typing import Any
 
-from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.llm.provider.protocol import (
+    LLMMessage,
+    ToolCall,
+    ToolCallFunction,
+    llm_content_text,
+)
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
@@ -142,7 +147,7 @@ def landing_write_failure_kind(
                 if tc.function.name in _FILE_PRODUCT_ARG and tc.id:
                     landing_call_ids.add(tc.id)
         elif msg.role == "tool" and msg.tool_call_id in landing_call_ids:
-            content = msg.content or ""
+            content = llm_content_text(msg.content)
             if not _tool_result_failed(content):
                 continue
             saw_failed = True
@@ -245,11 +250,11 @@ def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
                         )
         elif msg.role == "tool" and msg.tool_call_id:
             if msg.tool_call_id in code_execute_call_ids:
-                for path in _written_files_from_marker(msg.content or ""):
+                for path in _written_files_from_marker(llm_content_text(msg.content)):
                     _add(path)
             elif (
                 msg.tool_call_id in file_product_by_call_id
-                and not _tool_result_failed(msg.content or "")
+                and not _tool_result_failed(llm_content_text(msg.content))
             ):
                 _add(file_product_by_call_id[msg.tool_call_id])
     return seen

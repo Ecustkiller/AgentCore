@@ -50,18 +50,19 @@ vi.mock("@/stores/backgroundTasks", () => ({
 }));
 
 describe("localPickerFailureCopy", () => {
-  it("exposes fixed titles for dialog / auth / package.json", () => {
+  it("exposes fixed titles for dialog / auth / unavailable", () => {
     expect(localPickerFailureCopy("dialog_failed").title).toContain(
       "未弹出文件夹选择器",
     );
     expect(localPickerFailureCopy("unauthorized").title).toContain(
       "未能授权本机目录",
     );
-    expect(localPickerFailureCopy("no_package_json").title).toContain(
-      "package.json",
+    expect(localPickerFailureCopy("unavailable").title).toContain(
+      "本机目录仅桌面端可用",
     );
     expect(isLocalPickerFailureKind("cancelled")).toBe(false);
     expect(isLocalPickerFailureKind("dialog_failed")).toBe(true);
+    expect(isLocalPickerFailureKind("no_package_json")).toBe(false);
   });
 });
 
@@ -110,49 +111,23 @@ describe("pickLocalFolderRoot structured failures", () => {
   });
 });
 
-describe("pickAndOpenLocalProject no_package_json", () => {
+describe("pickAndOpenLocalProject without language marker", () => {
   beforeEach(() => {
     window.fsApi = {
       addRoot: vi.fn().mockResolvedValue({
         ok: true,
-        root: { id: "r1", name: "empty-app" },
+        root: { id: "r1", name: "docs-only" },
       }),
-      listDir: vi.fn().mockResolvedValue({
-        ok: true,
-        data: [{ name: "README.md", relPath: "README.md", kind: "file" }],
-      }),
+      listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
   });
 
-  it("fails with no_package_json when root has no package.json", async () => {
-    const result = await pickAndOpenLocalProject(vi.fn(), {
-      notifyOnFailure: false,
-    });
-    expect(result).toMatchObject({
-      ok: false,
-      reason: "no_package_json",
-    });
-    expect(window.fsApi.listDir).toHaveBeenCalledWith("r1", "");
-  });
-
-  it("proceeds when package.json is present", async () => {
-    vi.mocked(window.fsApi.listDir).mockResolvedValue({
-      ok: true,
-      data: [
-        {
-          name: "package.json",
-          relPath: "package.json",
-          kind: "file",
-          size: 12,
-          modifiedMs: null,
-        },
-      ],
-    });
+  it("opens a folder that has no package.json", async () => {
     const { createFolder } = await import("@/services/folders");
     vi.mocked(createFolder).mockResolvedValue({
       folder: {
         id: "f1",
-        name: "empty-app",
+        name: "docs-only",
         mode: "local",
         localRootId: "r1",
         localSubpath: null,
@@ -164,6 +139,7 @@ describe("pickAndOpenLocalProject no_package_json", () => {
       notifyOnFailure: false,
     });
     expect(result.ok).toBe(true);
+    expect(window.fsApi.listDir).not.toHaveBeenCalled();
   });
 });
 

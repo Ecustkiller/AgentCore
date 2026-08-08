@@ -965,6 +965,24 @@ class TurnMetricsRepository:
         )
         return result.scalars().all()
 
+    async def latest_input_tokens(self, conversation_id: str) -> int | None:
+        """Most recent turn's ``input_tokens`` for this conversation, or ``None``.
+
+        Used by near-ceiling pre-turn compaction (定案⑦A) to decide whether the
+        next send must await a fold before assembling history. Hits
+        ``ix_turn_metrics_conversation_created``.
+        """
+        result = await self._session.execute(
+            select(TurnMetricsRow.input_tokens)
+            .where(TurnMetricsRow.conversation_id == conversation_id)
+            .order_by(TurnMetricsRow.created_at.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return int(row)
+
     async def list_recent_for_user(
         self, user_id: str, *, limit: int = 20
     ) -> Sequence[TurnMetricsRow]:

@@ -4339,6 +4339,16 @@
             "title": "Set As Default",
             "type": "boolean"
           },
+          "vision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "worker": {
             "anyOf": [
               {
@@ -7150,6 +7160,16 @@
             ],
             "title": "Updated At"
           },
+          "vision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "worker": {
             "anyOf": [
               {
@@ -7996,7 +8016,7 @@
         "type": "object"
       },
       "MessageAttachment": {
-        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText files carry client-extracted ``text`` (images stay out of scope until a\nvision model). Binary files are **resident-first** (引用即驻留): the desktop\ncopies raw bytes into the conversation workspace ``attachments/`` and sends\n``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析\nthen extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv\nstay path-only so workers can ``code_execute``. ``kind=\"conversation\"`` references\nanother of the user's conversations: recent messages are materialized into\n``text`` client-side, and ``conversation_id`` records which one (for the chip +\nlater jump).",
+        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText files carry client-extracted ``text``. Raster image attachments are\n**resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare\nthe server eye→texts them via ``VisionReader`` into the attachment prompt block\n(main LLM stays text-only — not native multimodal). Binary office/PDF may gain\nserver-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv\nstay path-only so workers can ``code_execute``. ``kind=\"conversation\"`` references\nanother of the user's conversations: recent messages are materialized into\n``text`` client-side, and ``conversation_id`` records which one (for the chip +\nlater jump).",
         "properties": {
           "binary": {
             "default": false,
@@ -8641,7 +8661,7 @@
         "type": "object"
       },
       "ModelProfileSlot": {
-        "description": "One slot in a model combination (main / worker / background).",
+        "description": "One slot in a model combination (main / worker / background / vision).",
         "properties": {
           "model": {
             "maxLength": 200,
@@ -10837,6 +10857,7 @@
         "type": "object"
       },
       "SendMessageRequest": {
+        "description": "POST a user turn: text, attachments, or both.\n\n``content`` may be empty / whitespace when ``attachments`` is non-empty\n(image-only / file-only send); without attachments, non-blank text is required.",
         "properties": {
           "agent_mentions": {
             "items": {
@@ -10856,7 +10877,6 @@
           },
           "content": {
             "maxLength": 32000,
-            "minLength": 1,
             "title": "Content",
             "type": "string"
           },
@@ -13583,7 +13603,7 @@
         "type": "object"
       },
       "UpdateLlmModelProfileRequest": {
-        "description": "Partial update. Omitted fields unchanged; explicit null on worker/background clears\nthe slot (follow_main).",
+        "description": "Partial update. Omitted fields unchanged; explicit null on worker/background/vision\nclears the slot (worker/background → follow_main; vision → no slot / platform fallback).",
         "properties": {
           "background": {
             "anyOf": [
@@ -13616,6 +13636,16 @@
               }
             ],
             "title": "Name"
+          },
+          "vision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "worker": {
             "anyOf": [
@@ -15030,7 +15060,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.43"
+    "version": "0.3.45"
   },
   "openapi": "3.1.0",
   "paths": {

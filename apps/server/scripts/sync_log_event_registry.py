@@ -61,6 +61,13 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "revises": "int",
         "escalations": "int",
     },
+    "chat.regenerate_rejected": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "user_id": "str",
+        "reason": "str",
+        "found_role": "str",
+    },
     "delegate.started": {
         "nodes": "int",
         "call": "str",
@@ -258,6 +265,9 @@ KEY_DESC: dict[str, str] = {
     "chat.turn_start": "回合起点（preview/chars/history）",
     "chat.turn_complete": "回合收尾（含 Phase-0 延迟：prepare/assemble/ttft_*；model/credential_source）",
     "chat.resume_complete": "暂停恢复回合收尾（终态带协作计数；STOP 终结不带）",
+    "chat.regenerate_rejected": (
+        "regenerate 早退拒绝（会话不存在 / 目标非用户消息或已删除）；排前端传错 id"
+    ),
     "delegate.started": "编排委派开始（agents/plan/waves）",
     "delegate.completed": "委派批次完成（escalations/scope）",
     "delegate.yielded": "委派中途让出（replan 边界）",

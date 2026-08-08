@@ -33,15 +33,6 @@ export type PickAndOpenLocalProjectResult =
       message: string;
     };
 
-async function rootHasPackageJson(rootId: string): Promise<boolean> {
-  if (!window.fsApi) return false;
-  const listed = await window.fsApi.listDir(rootId, "");
-  if (!listed.ok) return false;
-  return listed.data.some(
-    (e) => e.kind === "file" && e.name === "package.json",
-  );
-}
-
 /**
  * OS folder picker → create/reuse local Folder (mode=local, empty subpath) →
  * start a **new** conversation under that project.
@@ -49,8 +40,9 @@ async function rootHasPackageJson(rootId: string): Promise<boolean> {
  * Does **not** rewrite the current session's ``folder_id`` (出生定终身).
  * Distinct from {@link pickAndBindLocalFolder} (bare-chat scratch execution bind).
  *
- * Failure kinds are fixed (dialog_failed / unauthorized / no_package_json / …);
+ * Failure kinds are fixed (dialog_failed / unauthorized / …);
  * callers should show the structured card — never loop 「已触发请选择」.
+ * No language-specific root marker (e.g. package.json) — any folder can be a local project.
  */
 export async function pickAndOpenLocalProject(
   navigate: NavigateFunction,
@@ -76,15 +68,6 @@ export async function pickAndOpenLocalProject(
         reason: picked.reason,
         message: picked.message,
       };
-    }
-
-    const hasPkg = await rootHasPackageJson(picked.root.id);
-    if (!hasPkg) {
-      const message = localPickerFailureCopy("no_package_json").detail;
-      if (notifyOnFailure) {
-        notifyLocalPickerFailure("no_package_json", message);
-      }
-      return { ok: false, reason: "no_package_json", message };
     }
 
     const existing = findLocalFolderByBinding(

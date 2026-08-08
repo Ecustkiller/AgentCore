@@ -7058,6 +7058,7 @@ export interface components {
              * @default false
              */
             set_as_default: boolean;
+            vision?: components["schemas"]["ModelProfileSlot"] | null;
             worker?: components["schemas"]["ModelProfileSlot"] | null;
         };
         /**
@@ -8270,6 +8271,7 @@ export interface components {
             name: string;
             /** Updated At */
             updated_at?: string | null;
+            vision?: components["schemas"]["ModelProfileSlot"] | null;
             worker?: components["schemas"]["ModelProfileSlot"] | null;
         };
         /**
@@ -8681,11 +8683,11 @@ export interface components {
          * MessageAttachment
          * @description A piece of context the user referenced (@-mention or paperclip).
          *
-         *     Text files carry client-extracted ``text`` (images stay out of scope until a
-         *     vision model). Binary files are **resident-first** (引用即驻留): the desktop
-         *     copies raw bytes into the conversation workspace ``attachments/`` and sends
-         *     ``workspace_path`` + ``binary=True`` with empty ``text``. Server-side分流预解析
-         *     then extracts text for docx/pdf/pptx/txt 等 (markitdown → ``*.md`` copy); xlsx/csv
+         *     Text files carry client-extracted ``text``. Raster image attachments are
+         *     **resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare
+         *     the server eye→texts them via ``VisionReader`` into the attachment prompt block
+         *     (main LLM stays text-only — not native multimodal). Binary office/PDF may gain
+         *     server-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv
          *     stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
          *     another of the user's conversations: recent messages are materialized into
          *     ``text`` client-side, and ``conversation_id`` records which one (for the chip +
@@ -8970,7 +8972,7 @@ export interface components {
         };
         /**
          * ModelProfileSlot
-         * @description One slot in a model combination (main / worker / background).
+         * @description One slot in a model combination (main / worker / background / vision).
          */
         ModelProfileSlot: {
             /** Model */
@@ -9993,7 +9995,13 @@ export interface components {
             /** Reply To Message Id */
             reply_to_message_id?: string | null;
         };
-        /** SendMessageRequest */
+        /**
+         * SendMessageRequest
+         * @description POST a user turn: text, attachments, or both.
+         *
+         *     ``content`` may be empty / whitespace when ``attachments`` is non-empty
+         *     (image-only / file-only send); without attachments, non-blank text is required.
+         */
         SendMessageRequest: {
             /** Agent Mentions */
             agent_mentions?: components["schemas"]["AgentMention"][];
@@ -11201,14 +11209,15 @@ export interface components {
         };
         /**
          * UpdateLlmModelProfileRequest
-         * @description Partial update. Omitted fields unchanged; explicit null on worker/background clears
-         *     the slot (follow_main).
+         * @description Partial update. Omitted fields unchanged; explicit null on worker/background/vision
+         *     clears the slot (worker/background → follow_main; vision → no slot / platform fallback).
          */
         UpdateLlmModelProfileRequest: {
             background?: components["schemas"]["ModelProfileSlot"] | null;
             main?: components["schemas"]["ModelProfileSlot"] | null;
             /** Name */
             name?: string | null;
+            vision?: components["schemas"]["ModelProfileSlot"] | null;
             worker?: components["schemas"]["ModelProfileSlot"] | null;
         };
         /**

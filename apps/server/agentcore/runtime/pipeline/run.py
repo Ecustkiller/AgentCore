@@ -312,6 +312,7 @@ async def run_chat_pipeline(
             approval_gate=assembled.approval_gate,
             supports_tools=llm_supports_tools,
             turn_evidence_ledger=evidence_ledger,
+            native_image_parts=prepared.native_image_parts,
         )
         captain_state = await run_captain(captain_spec)
 

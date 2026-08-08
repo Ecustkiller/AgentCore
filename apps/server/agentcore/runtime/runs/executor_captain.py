@@ -52,6 +52,7 @@ def build_captain_executor(
     approval_gate: ApprovalGate | None = None,
     supports_tools: bool | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
+    native_image_parts: list[dict] | None = None,
 ) -> Callable[[RunSpec], Awaitable[RunState]]:
     """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
 
@@ -71,7 +72,13 @@ def build_captain_executor(
     they are dropped client-side and never journaled into a graph. Priced once here
     (``state.cost``) so the captain payroll row shows real cost; the pipeline reads
     that into the captain ledger row (no re-price).
+
+    ``native_image_parts`` (optional): OpenAI ``image_url`` parts for the current
+    user turn when main catalog supports vision — never mixed with eye→text.
     """
+    from agentcore.llm.provider.protocol import build_multimodal_user_content
+
+    user_content = build_multimodal_user_content(user_message, native_image_parts or [])
 
     async def execute(spec: RunSpec) -> RunState:
         tool_ctx = replace(
@@ -80,7 +87,7 @@ def build_captain_executor(
         messages = [LLMMessage(role="system", content=chat_system_prompt)]
         for msg in history:
             messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
-        messages.append(LLMMessage(role="user", content=user_message))
+        messages.append(LLMMessage(role="user", content=user_content))
         return await _drive_captain_loop(
             spec=spec,
             messages=messages,

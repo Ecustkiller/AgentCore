@@ -434,11 +434,9 @@ export function useMentionMenu({
           }
           if (res.kind !== "text") {
             setMenuError(
-              res.kind === "image"
-                ? "暂不支持图片附件（模型尚无视觉能力）"
-                : res.kind === "too-large"
-                  ? "文件过大，无法作为附件"
-                  : "二进制文件请用回形针从本机选择（将驻留到工作区）",
+              res.kind === "too-large"
+                ? "文件过大，无法作为附件"
+                : "图片或二进制请用回形针 / 拖入附加（将驻留到工作区）",
             );
             return;
           }

@@ -44,6 +44,17 @@ def test_prepare_rewrites_dispatch_started_framing():
     assert "尚未真正开工" in args["message"]
 
 
+def test_prepare_strips_install_ready_framing():
+    """案 ac890 ⑥B：卡面禁保留「依赖已装完」再与尚未开工叠。"""
+    calls = prepare_blocking_ask_user_tool_calls(
+        [_ask_user_call()],
+        "依赖已经装完，派两个队员",
+    )
+    args = json.loads(calls[0].function.arguments)
+    assert "装完" not in args["message"]
+    assert "确认" in args["message"]
+
+
 def test_prepare_rewrites_explicit_dispatch_message():
     calls = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call(message="已派出团队开工")],

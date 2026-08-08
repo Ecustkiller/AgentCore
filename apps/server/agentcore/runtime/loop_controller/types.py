@@ -124,6 +124,9 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
     retries. Non-empty identical ``old_string``/``new_string`` collapses per path
     (longdoc revise thrash: different noop payloads still melt). Sentinel shape is
     stable and intentional (not a real tool schema).
+
+    ``write_section`` invalid ``section`` (e.g. ``ch5-s0``) collapses per path so
+    format thrash enters the same validation early-stop (08-08 定案①).
     """
     if name == "str_replace":
         old = parsed.get("old_string")
@@ -144,6 +147,16 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
         path = parsed.get("path")
         if path is None or (isinstance(path, str) and not path.strip()):
             return {"__malformed__": "path"}
+    if name == "write_section":
+        from agentcore.runtime.runs.website_section import is_valid_section_id
+
+        path = parsed.get("path")
+        path_key = path.strip().replace("\\", "/") if isinstance(path, str) else ""
+        section = parsed.get("section")
+        if section is None or (
+            isinstance(section, str) and not is_valid_section_id(section)
+        ):
+            return {"__malformed__": "section", "path": path_key}
     return parsed
 
 

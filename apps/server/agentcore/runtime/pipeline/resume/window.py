@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from agentcore.core.errors import ResumeJournalDegradedError
 from agentcore.core.logging import get_logger
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.journal import window_from_journal
 from agentcore.runtime.suspension import TurnSuspension
@@ -84,5 +84,5 @@ def pre_pause_content(transcript: list[LLMMessage]) -> str:
     acc = ""
     for msg in transcript[start:]:
         if msg.role == "assistant" and msg.content:
-            acc = join_segments(acc, msg.content)
+            acc = join_segments(acc, llm_content_text(msg.content))
     return acc

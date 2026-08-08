@@ -4,7 +4,8 @@ import type { components } from "@/types/api.generated";
 /**
  * 账号「模型组合」CRUD（设置·模型配置 / 输入框组合选择器）。
  *
- * 组合 = `{ main, worker?, background? }`；Worker / 后台空 = 跟随主模型。
+ * 组合 = `{ main, worker?, background?, vision? }`；
+ * Worker / 后台空 = 跟随主模型；vision 空 = 不配置（服务端 null → platform VISION_* 兜底或无 reader）。
  * 账号默认写在 `PUT …/default`；会话引用走 `conversations.model_profile_id`。
  */
 

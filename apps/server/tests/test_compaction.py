@@ -329,7 +329,7 @@ async def test_if_due_fires_on_token_threshold(monkeypatch):
     await asyncio.wait_for(fired.wait(), 1)
     assert calls == [("c1", 150)]
     await asyncio.sleep(0)
-    assert "c1" not in compaction._inflight
+    assert "c1" not in compaction._inflight_tasks
 
 
 async def test_if_due_fires_on_message_trigger(monkeypatch):
@@ -393,13 +393,13 @@ async def test_if_due_dedupes_while_inflight(monkeypatch):
         calls.append(conversation_id)
 
     monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
-    compaction._inflight.add("c1")
+    compaction._inflight_tasks["c1"] = object()  # type: ignore[assignment]
     try:
         await compaction.schedule_compaction_if_due("c1", 150)
         await asyncio.sleep(0.02)
         assert calls == []
     finally:
-        compaction._inflight.discard("c1")
+        compaction._inflight_tasks.pop("c1", None)
 
 
 async def test_if_due_skips_during_failure_cooldown(monkeypatch):
@@ -482,6 +482,113 @@ def test_default_compaction_settings_match_design():
     assert defaults.compaction_message_trigger_min_fold == 16
     assert defaults.compaction_min_fold_messages == 4
     assert defaults.compaction_failure_cooldown_seconds == 90
+    assert defaults.compaction_near_context_ratio == 0.8
+    assert defaults.compaction_near_context_tokens == 200_000
+    assert defaults.compaction_near_max_passes == 3
+
+
+def test_near_context_ceiling_ratio_and_absolute():
+    """Near-ceiling: ratio of known window, else absolute floor."""
+    assert compaction.near_context_ceiling(0, 100_000) is False
+    assert compaction.near_context_ceiling(79_999, 100_000) is False
+    assert compaction.near_context_ceiling(80_000, 100_000) is True
+    assert compaction.near_context_ceiling(199_999, None) is False
+    assert compaction.near_context_ceiling(200_000, None) is True
+    assert compaction.near_context_ceiling(200_000, 0) is True  # non-positive → absolute
+
+
+async def test_ensure_before_turn_noop_when_not_near(monkeypatch):
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_near_context_ratio", 0.8, raising=True)
+    calls: list[str] = []
+
+    async def _rec(conversation_id, *, trigger_input_tokens=None):
+        calls.append(conversation_id)
+        return True
+
+    monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
+    wrote = await compaction.ensure_compaction_before_turn(
+        "c1", input_tokens=10_000, context_length=100_000
+    )
+    assert wrote is False
+    assert calls == []
+
+
+async def test_ensure_before_turn_awaits_fold_when_near(monkeypatch):
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_near_context_ratio", 0.8, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_near_max_passes", 3, raising=True)
+    calls: list[int] = []
+
+    async def _rec(conversation_id, *, trigger_input_tokens=None):
+        calls.append(trigger_input_tokens or 0)
+        # First pass writes; second finds nothing — stops the loop.
+        return len(calls) == 1
+
+    monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
+    compaction._inflight_tasks.pop("c-near", None)
+    wrote = await compaction.ensure_compaction_before_turn(
+        "c-near", input_tokens=90_000, context_length=100_000
+    )
+    assert wrote is True
+    assert calls == [90_000, 90_000]
+    assert "c-near" not in compaction._inflight_tasks
+
+
+async def test_ensure_before_turn_bypasses_failure_cooldown(monkeypatch):
+    import time
+
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_near_context_tokens", 50_000, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_near_max_passes", 1, raising=True)
+    calls: list[str] = []
+
+    async def _rec(conversation_id, *, trigger_input_tokens=None):
+        calls.append(conversation_id)
+        return True
+
+    monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
+    compaction._failure_cooldown_until["c-cd"] = time.monotonic() + 60
+    try:
+        wrote = await compaction.ensure_compaction_before_turn(
+            "c-cd", input_tokens=60_000, context_length=None
+        )
+        assert wrote is True
+        assert calls == ["c-cd"]
+    finally:
+        compaction._failure_cooldown_until.pop("c-cd", None)
+        compaction._inflight_tasks.pop("c-cd", None)
+
+
+async def test_maybe_compact_near_ceiling_uses_metrics_and_model(monkeypatch):
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    seen: list[tuple[int, int | None]] = []
+
+    async def _ensure(cid, *, input_tokens, context_length=None):
+        seen.append((input_tokens, context_length))
+        return True
+
+    class _CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    class _Metrics:
+        def __init__(self, _s):
+            pass
+
+        async def latest_input_tokens(self, _cid):
+            return 900_000
+
+    monkeypatch.setattr(compaction, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(compaction, "TurnMetricsRepository", _Metrics)
+    monkeypatch.setattr(compaction, "ensure_compaction_before_turn", _ensure, raising=True)
+    # gpt-4.1 curated meta is 1_000_000 → 80% = 800_000; 900k is near.
+    ok = await compaction.maybe_compact_near_ceiling("c1", model_id="gpt-4.1")
+    assert ok is True
+    assert seen == [(900_000, 1_000_000)]
 
 
 async def test_finalize_cloud_and_local_call_if_due(monkeypatch):

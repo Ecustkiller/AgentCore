@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentcore.llm.provider.protocol import llm_content_text
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunPhase, RunState
 
@@ -52,8 +53,9 @@ def freeze_partial_transcript(messages: list[LLMMessage]) -> list[LLMMessage]:
 def content_from_transcript(messages: list[LLMMessage]) -> str:
     """Best-effort draft body for display / session.content (last assistant text)."""
     for msg in reversed(messages):
-        if msg.role == "assistant" and (msg.content or "").strip():
-            return msg.content or ""
+        text = llm_content_text(msg.content)
+        if msg.role == "assistant" and text.strip():
+            return text
     return ""
 
 

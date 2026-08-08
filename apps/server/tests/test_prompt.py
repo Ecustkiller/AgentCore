@@ -717,6 +717,7 @@ def test_core_teaches_delivery_path_by_workspace_type():
 def test_core_teaches_presentation_honesty():
     # 演讲/PPT/Office：诚实性钩子保留；场面 format_options 已退役。
     # 须真目标后缀；无执行禁再派跑脚本；当模板须 file_copy。
+    # 案 5d25 / 08-08④：图形组织图直接拒+替代；仅文本/表格 Word；禁说满空派。
     hint = _CEO_CORE_HINT
     assert "pptx" in hint.lower()
     assert "Office 已落盘可直接使用" in hint or "PPT 已落盘可直接使用" in hint
@@ -729,6 +730,11 @@ def test_core_teaches_presentation_honesty():
     assert "压体积" in hint and "模板保真" in hint
     assert "*_slim.pptx" in hint or "slim.pptx" in hint
     assert "相对模板" in hint
+    assert "图形组织图" in hint
+    assert "直接拒" in hint
+    assert "文本" in hint and "表格" in hint
+    assert "说满" in hint and "空派" in hint
+    assert "SmartArt" not in hint and "DrawingML" not in hint
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
     # 场面 format_options 已退役；仅允许以「禁复活」语境出现，不得当字段教
     assert "复活" in kickoff and "format_options" in kickoff
@@ -743,6 +749,20 @@ def test_core_teaches_presentation_honesty():
     assert ".py" in orch and "不算" in orch
     assert "压体积" in orch and "模板保真" in orch
     assert "*_slim.pptx" in orch or "slim.pptx" in orch
+    assert "图形组织图" in orch
+    assert "说满" in orch and "空派" in orch
+
+
+def test_core_teaches_required_sections_same_literal():
+    """案 f9a6 / 08-08②：派活钉必备章节同字面；禁对用户藏裸报错。"""
+    hint = _CEO_CORE_HINT
+    assert "required_sections" in hint
+    assert "同字面" in hint or "同一套原文" in hint
+    assert "近义" in hint
+    assert "裸报错" in hint or "藏契约" in hint
+    orch = _TEAM_ORCHESTRATION_ADVANCED
+    assert "同字面" in orch or "同一套原文" in orch
+    assert "裸报错" in orch or "藏起契约" in orch or "藏契约" in orch
 
 
 def test_core_teaches_short_edit_not_m2a_kickoff_template():

@@ -11,7 +11,7 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import default_turn_profiles as default_profile_set
-from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage, llm_content_text
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate.speech_pipeline import (
     research_continuation_message,
@@ -91,12 +91,12 @@ def _record_continuation_run_head(
     system_prompt = ""
     for msg in messages:
         if msg.role == "system":
-            system_prompt = msg.content or ""
+            system_prompt = llm_content_text(msg.content)
             break
     user_message = ""
     for msg in reversed(messages):
         if msg.role == "user":
-            user_message = msg.content or ""
+            user_message = llm_content_text(msg.content)
             break
     record_turn_fact(
         RunHeadFact(

@@ -39,10 +39,13 @@ class PlatformSettings(BaseModel):
     doubao_api_key: str = ""
     doubao_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
 
-    # --- AI 协作白板 读图（仅 billing_mode=platform；BYOK 不启用）---
+    # --- AI 协作白板 / 对话读图 ---
+    # Platform fallback when profile vision slot is null: requires billing_mode=platform
+    # + VISION_API_KEY + VISION_BASE_URL. A filled vision slot builds the reader from that
+    # slot's credentials even under billing_mode=byok.
     # OpenAI-compatible multimodal. Default model = kimi-k2.5 (operator relay vision).
-    # VISION_BASE_URL must be set (typically = PLATFORM_BASE_URL); empty → reader off.
-    # Keep VISION_MODEL off PLATFORM_MODELS — not user-selectable.
+    # VISION_BASE_URL must be set (typically = PLATFORM_BASE_URL); empty → fallback off.
+    # Keep VISION_MODEL off PLATFORM_MODELS — not a selectable chat catalog id.
     vision_api_key: str = ""
     vision_base_url: str = ""
     vision_model: str = "kimi-k2.5"

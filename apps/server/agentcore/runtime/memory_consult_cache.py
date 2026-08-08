@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from contextvars import ContextVar
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 
 # slug → full note body (same turn)
 consulted_memory_cache: ContextVar[dict[str, str] | None] = ContextVar(
@@ -73,7 +73,7 @@ def seed_consult_cache_from_window(messages: list[LLMMessage]) -> int:
         slug = call_id_to_slug.get(message.tool_call_id)
         if not slug:
             continue
-        body = message.content or ""
+        body = llm_content_text(message.content)
         if not body.strip() or body.startswith("没有名为"):
             continue
         if slug not in cache:

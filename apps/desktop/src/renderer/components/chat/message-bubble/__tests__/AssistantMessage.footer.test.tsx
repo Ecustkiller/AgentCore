@@ -5,7 +5,7 @@
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -123,15 +123,24 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
-  it("错误气泡 regenerate 入口文案为「重新生成」而非「重试」", () => {
+  it("错误卡不挂重新生成（定案 A；底栏 footer 另测）", () => {
     renderBubble(
       settledMessage({
         content: "",
         error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
       }),
     );
-    expect(screen.getByRole("button", { name: "重新生成" })).toBeTruthy();
+    const errText = screen.getByText("模型调用失败，请重试。");
+    const errCard = errText.closest("div");
+    expect(errCard).toBeTruthy();
+    expect(
+      within(errCard as HTMLElement).queryByRole("button", {
+        name: "重新生成",
+      }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    // 本测 mock 了 Footer；只断言错误卡已摘按钮，footer 仍挂载。
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
   it("空正文 + runs.error 时显示 footer", () => {

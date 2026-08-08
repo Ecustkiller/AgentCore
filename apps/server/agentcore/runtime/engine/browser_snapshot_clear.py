@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 
 _TREE_KEYS = ("elements", "accessibility_tree")
 
@@ -96,7 +96,7 @@ def project_omitted_browser_snapshots(
         name, _arguments = info
         if not name.startswith("browser_"):
             continue
-        if not has_browser_tree_fields(message.content):
+        if not has_browser_tree_fields(llm_content_text(message.content)):
             continue
         tree_indices.append(index)
 
@@ -110,7 +110,7 @@ def project_omitted_browser_snapshots(
             projected.append(
                 LLMMessage(
                     role="tool",
-                    content=omit_browser_tree_fields(message.content or ""),
+                    content=omit_browser_tree_fields(llm_content_text(message.content)),
                     tool_call_id=message.tool_call_id,
                 )
             )

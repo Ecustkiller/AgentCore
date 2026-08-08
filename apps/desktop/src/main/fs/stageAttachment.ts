@@ -307,17 +307,25 @@ async function materializeSource(
     };
   }
 
-  const ext = extname(absPath).toLowerCase();
-  if (IMAGE_MIME[ext]) {
-    return {
-      ok: false,
-      reason: "暂不支持图片附件（模型尚无视觉能力）",
-      code: "invalid",
-    };
-  }
-
   if (await isCloudPlaceholder(absPath)) {
     return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
+  }
+
+  const ext = extname(absPath).toLowerCase();
+  const name = safeName(basename(absPath));
+  // 图片按二进制驻留（不内联 UTF-8）；识图能力由后端/模型配置决定，前端不硬拒。
+  if (IMAGE_MIME[ext]) {
+    return {
+      ok: true,
+      data: {
+        absPath,
+        name,
+        binary: true,
+        text: "",
+        truncated: false,
+        sizeBytes: st.size,
+      },
+    };
   }
 
   // 读入内存做二进制嗅探 + 文本预览；整文件仍经流式复制落盘（见 copyFileTimed）。
@@ -348,7 +356,6 @@ async function materializeSource(
   }
 
   const binary = sniffBinary(head);
-  const name = safeName(basename(absPath));
   if (binary) {
     return {
       ok: true,

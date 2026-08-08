@@ -55,6 +55,9 @@ class LlmModelProfileRepository:
         background_origin: str | None = None,
         background_provider_id: str | None = None,
         background_model: str | None = None,
+        vision_origin: str | None = None,
+        vision_provider_id: str | None = None,
+        vision_model: str | None = None,
     ) -> LlmModelProfile:
         row = LlmModelProfile(
             user_id=user_id,
@@ -69,6 +72,9 @@ class LlmModelProfileRepository:
             background_origin=background_origin,
             background_provider_id=background_provider_id,
             background_model=background_model,
+            vision_origin=vision_origin,
+            vision_provider_id=vision_provider_id,
+            vision_model=vision_model,
         )
         self._session.add(row)
         await self._session.commit()
@@ -90,6 +96,9 @@ class LlmModelProfileRepository:
         background_origin: str | None | object = _UNSET,
         background_provider_id: str | None | object = _UNSET,
         background_model: str | None | object = _UNSET,
+        vision_origin: str | None | object = _UNSET,
+        vision_provider_id: str | None | object = _UNSET,
+        vision_model: str | None | object = _UNSET,
     ) -> LlmModelProfile | None:
         row = await self.get(profile_id, user_id=user_id)
         if row is None:
@@ -114,6 +123,12 @@ class LlmModelProfileRepository:
             row.background_provider_id = background_provider_id  # type: ignore[assignment]
         if background_model is not _UNSET:
             row.background_model = background_model  # type: ignore[assignment]
+        if vision_origin is not _UNSET:
+            row.vision_origin = vision_origin  # type: ignore[assignment]
+        if vision_provider_id is not _UNSET:
+            row.vision_provider_id = vision_provider_id  # type: ignore[assignment]
+        if vision_model is not _UNSET:
+            row.vision_model = vision_model  # type: ignore[assignment]
         await self._session.commit()
         await self._session.refresh(row)
         return row
@@ -136,7 +151,7 @@ class LlmModelProfileRepository:
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def clear_provider_refs(self, user_id: str, provider_id: str) -> None:
-        """Clear worker / background pins that reference a deleted BYOK provider."""
+        """Clear worker / background / vision pins that reference a deleted BYOK provider."""
         rows = await self.list_for_user(user_id, include_implicit=True)
         changed = False
         for row in rows:
@@ -149,6 +164,11 @@ class LlmModelProfileRepository:
                 row.background_origin = None
                 row.background_provider_id = None
                 row.background_model = None
+                changed = True
+            if row.vision_provider_id == provider_id:
+                row.vision_origin = None
+                row.vision_provider_id = None
+                row.vision_model = None
                 changed = True
         if changed:
             await self._session.commit()

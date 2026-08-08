@@ -14,6 +14,7 @@ import {
   isEmptyInterruptedAssistant,
 } from "@/lib/composerContinueHint";
 import { TOOLS_GATE_HINT, needsToolsGateHint } from "@/lib/llmToolsGate";
+import { cn } from "@/lib/utils";
 import { defaultChatSupportsTools } from "@/services/llmProviders";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
@@ -37,6 +38,7 @@ import { ComposerEngineViaChip } from "./ComposerEngineViaChip";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
+import { ComposerPlusMenu, useComposerPlusClose } from "./ComposerPlusMenu";
 import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionAxesBadge } from "./PermissionPresetBadge";
@@ -47,6 +49,7 @@ import type {
   PendingAgentMention,
   PendingAttachment,
 } from "./composerAttachments";
+import { composerHasSendableDraft } from "./composerAttachments";
 import { useComposerDrop } from "./useComposerDrop";
 import { useComposerSend } from "./useComposerSend";
 import type { AttachmentProjectHint } from "./useMentionMenu";
@@ -78,11 +81,10 @@ export type TurnComposerVariant = "card" | "bar";
  * the same act in both views, so it is the same component; hosts only pick chrome
  * (placeholder, canvas follow hook, whether 后台云端 applies).
  *
- * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock;
- * default `card` keeps textarea-above-toolbar layout (center draft + canvas command bar).
- * Both share the same 底栏左簇：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限(图标) ·
- * 附件 · 后台云；右簇仍为语音 · 字数 · 发送。离线态靠 {@link ComposerConnectionNotice}
- * 与发送硬禁，不再用安静连接绿点。
+ * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock:
+ * `[＋]` · textarea · 语音 · 发送；工作区/Git/引擎/模型/权限/附件/后台云收进＋菜单。
+ * default `card` keeps textarea-above-toolbar（居中草稿 + 画布指挥台），左簇摊开。
+ * 离线态靠 {@link ComposerConnectionNotice} 与发送硬禁，不再用安静连接绿点。
  *
  * Draft state (text + attachments) lives in {@link useComposerDraftStore} keyed by
  * conversation, NOT in component state — switching 聊天 ⇄ 画布 swaps the mounted skin
@@ -108,8 +110,7 @@ export function TurnComposer({
   onDispatch?: () => void;
   /**
    * `card` = textarea above toolbar (default; center draft + canvas).
-   * `bar` = compact single-row input (chat bottom dock only).
-   * Both keep the full left-cluster chrome in-card (workspace … model … background).
+   * `bar` = compact dock: ＋菜单收纳左簇，常显仅输入与发送。
    */
   variant?: TurnComposerVariant;
   /** Visually fuse with ApprovalPrompt stacked above (工具审批 A · Composer 一体). */
@@ -456,54 +457,51 @@ export function TurnComposer({
     ? charCount >= CHAR_COUNT_NEAR_LIMIT
     : charCount > 0;
 
+  const backgroundTip = toolsGateHint
+    ? `${TOOLS_GATE_HINT}。${
+        bg
+          ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+          : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+      }`
+    : bg
+      ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+      : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用";
+
   const backgroundToggle = showBackground ? (
-    <SimpleTooltip
-      label={
-        toolsGateHint
-          ? `${TOOLS_GATE_HINT}。${
-              bg
-                ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-                : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
-            }`
-          : bg
-            ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-            : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
-      }
-    >
-      <IconButton
-        size="md"
-        onClick={() => setBackgroundMode((v) => !v)}
-        disabled={isGenerating}
-        aria-label="切换后台云端任务"
-        aria-pressed={bg}
-        className={
-          bg
-            ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-            : undefined
-        }
-      >
-        <Cloud size={14} />
-      </IconButton>
-    </SimpleTooltip>
+    <ComposerBackgroundToggle
+      disabled={isGenerating}
+      pressed={bg}
+      tip={backgroundTip}
+      iconOnly={!isBar}
+      onToggle={() => setBackgroundMode((v) => !v)}
+    />
   ) : null;
 
-  // 底栏左簇顺序：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限 · 附件 · 后台
-  const leftCluster = (
+  // 左簇顺序：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限 · 附件 · 后台?
+  // bar：整簇收进 ComposerPlusMenu（权限/附件/后台带文案）；card：底栏摊开（iconOnly）。
+  const sessionChrome = (
     <>
       <ComposerWorkspaceChip conversationId={conversationId} />
       <ComposerGitStatusChip conversationId={conversationId} />
       <ComposerEngineViaChip conversationId={conversationId} />
       <ComposerNoLocalChip />
       <ModelPicker disabled={isGenerating} />
-      <PermissionAxesBadge disabled={isGenerating} iconOnly />
-      <IconButton
-        size="md"
-        onClick={onPaperclipClick}
-        disabled={isGenerating}
-        aria-label="附加文件"
-      >
-        <Paperclip size={16} />
-      </IconButton>
+      <PermissionAxesBadge disabled={isGenerating} iconOnly={!isBar} />
+    </>
+  );
+
+  const attachButton = (
+    <ComposerAttachButton
+      disabled={isGenerating}
+      onAttach={onPaperclipClick}
+      iconOnly={!isBar}
+    />
+  );
+
+  const leftCluster = (
+    <>
+      {sessionChrome}
+      {attachButton}
       {backgroundToggle}
     </>
   );
@@ -512,7 +510,7 @@ export function TurnComposer({
   // 插队为旁路轻量入口（显式 steer），不把主槽改成 Stop&send。
   // N4-A：只读离线硬禁用发送。
   const sendBlocked = serverUnhealthy;
-  const hasDraft = Boolean(value.trim());
+  const hasDraft = composerHasSendableDraft(value, attachments);
   const queueDisabled = !hasDraft || sendBlocked;
   const midFlightLabel = "排队发送";
   const midFlightHint = "排队发送（Enter）；Ctrl/Cmd+Enter 插队";
@@ -720,8 +718,12 @@ export function TurnComposer({
 
       {isBar ? (
         <div className="flex items-end gap-1 px-2 py-1">
-          <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
-            {leftCluster}
+          <div className="flex shrink-0 items-center pb-0.5">
+            <ComposerPlusMenu>
+              {sessionChrome}
+              {attachButton}
+              {backgroundToggle}
+            </ComposerPlusMenu>
           </div>
           {textareaBlock}
           <div className="flex shrink-0 items-center gap-1 pb-0.5">
@@ -758,5 +760,106 @@ export function TurnComposer({
         </>
       )}
     </div>
+  );
+}
+
+/** 附件按钮：bar「＋」菜单内带文案；card 底栏仅图标。点菜单内项时先关菜单再选文件。 */
+function ComposerAttachButton({
+  disabled,
+  onAttach,
+  iconOnly = true,
+}: {
+  disabled?: boolean;
+  onAttach: () => void;
+  iconOnly?: boolean;
+}) {
+  const closePlus = useComposerPlusClose();
+  const onClick = () => {
+    closePlus?.();
+    onAttach();
+  };
+  if (iconOnly) {
+    return (
+      <IconButton
+        size="md"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label="附加文件"
+      >
+        <Paperclip size={16} />
+      </IconButton>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label="附加文件"
+      className={cn(
+        "inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <Paperclip size={14} className="shrink-0" aria-hidden />
+      <span>附加文件</span>
+    </button>
+  );
+}
+
+/** 后台云端开关：bar「＋」菜单内带文案；card 底栏仅图标。 */
+function ComposerBackgroundToggle({
+  disabled,
+  pressed,
+  tip,
+  onToggle,
+  iconOnly = true,
+}: {
+  disabled?: boolean;
+  pressed: boolean;
+  tip: string;
+  onToggle: () => void;
+  iconOnly?: boolean;
+}) {
+  if (iconOnly) {
+    return (
+      <SimpleTooltip label={tip}>
+        <IconButton
+          size="md"
+          onClick={onToggle}
+          disabled={disabled}
+          aria-label="切换后台云端任务"
+          aria-pressed={pressed}
+          className={
+            pressed
+              ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+              : undefined
+          }
+        >
+          <Cloud size={14} />
+        </IconButton>
+      </SimpleTooltip>
+    );
+  }
+  return (
+    <SimpleTooltip label={tip}>
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={disabled}
+        aria-label="切换后台云端任务"
+        aria-pressed={pressed}
+        className={cn(
+          "inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs",
+          pressed
+            ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+          disabled && "cursor-not-allowed opacity-60",
+        )}
+      >
+        <Cloud size={14} className="shrink-0" aria-hidden />
+        <span>后台云端</span>
+      </button>
+    </SimpleTooltip>
   );
 }

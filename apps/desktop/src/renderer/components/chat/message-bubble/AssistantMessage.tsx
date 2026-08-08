@@ -21,7 +21,6 @@ import {
   degradedFinishChipLabel,
   errorActionForCode,
   formatAssistantErrorMessage,
-  isConnectivityErrorCode,
   syntheticErrorForEmptyFailure,
   visibleMessageText,
 } from "@/lib/errors";
@@ -43,7 +42,7 @@ import {
 import { useExecutionStore } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
-import { AlertTriangle, Check, Copy, KeyRound, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Copy, KeyRound } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
@@ -128,12 +127,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     : null;
   // Empty interrupted = layer-1 composer recoverability only (no bubble retry).
   // User-stop: no chat-timeline「已停止」face (P1); team StatusStrip still labels cancelled.
+  // 定案 A：红错误卡不挂「重新生成」（整轮推翻易乱；失败救火改再说/改发）。底栏 footer 仍保留。
   const isUserStopped = displayError?.code === "TURN_CANCELLED";
-  const showRetry =
-    !!displayError &&
-    !isUserStopped &&
-    displayError.code !== "TURN_INTERRUPTED" &&
-    (isConnectivityErrorCode(displayError.code) || !errorAction);
   const supportDiagnosticText = formatSupportDiagnosticText({
     conversationId,
     messageId: assistantProjectionId(message),
@@ -415,16 +410,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
               onClick={() => navigate(errorAction.href)}
             >
               {errorAction.label}
-            </Button>
-          )}
-          {showRetry && (
-            <Button
-              variant="danger"
-              className="shrink-0 border border-destructive/40"
-              icon={<RefreshCw size={13} />}
-              onClick={handleRegenerate}
-            >
-              重新生成
             </Button>
           )}
         </div>
