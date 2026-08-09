@@ -1017,9 +1017,30 @@ class MessagingService:
 
     async def list_friend_requests(self, *, user_id: str) -> FriendRequestBox:
         friends = self._require_friends()
-        incoming = await friends.list_pending_incoming(user_id)
-        outgoing = await friends.list_pending_outgoing(user_id)
-        return FriendRequestBox(incoming=incoming, outgoing=outgoing)
+        incoming = list(await friends.list_pending_incoming(user_id))
+        outgoing = list(await friends.list_pending_outgoing(user_id))
+        # Self-heal: drop pending rows that already have a friendship (should not
+        # happen after accept, but clears stuck「等待对方处理」if status lagged).
+        kept_in: list[FriendRequest] = []
+        for req in incoming:
+            if await friends.are_friends(user_id, req.from_user_id):
+                await friends.set_request_status(req.id, "accepted")
+            else:
+                kept_in.append(req)
+        kept_out: list[FriendRequest] = []
+        for req in outgoing:
+            if await friends.are_friends(user_id, req.to_user_id):
+                await friends.set_request_status(req.id, "accepted")
+            else:
+                kept_out.append(req)
+        return FriendRequestBox(incoming=kept_in, outgoing=kept_out)
+
+    async def get_user(self, user_id: str) -> User | None:
+        """Load a user by id without profile visibility gates (inbox peer chip)."""
+        user = await self._users.get_by_id(user_id)
+        if user is None or user.status != "active":
+            return None
+        return user
 
     async def send_friend_request(
         self,

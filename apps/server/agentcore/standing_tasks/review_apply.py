@@ -26,8 +26,7 @@ from agentcore.memory.user_memory import (
     MemoryOp,
 )
 from agentcore.tools.builtin.ask_user.schema import option_label
-from agentcore.workspace.locate import build_server_workspace, workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
+from agentcore.workspace.locate import build_server_workspace
 from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
 logger = get_logger(__name__)
@@ -166,32 +165,28 @@ async def apply_daily_review_selections(
                     )
 
     if docs:
-        key = workspace_storage_key(
-            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        backend = build_server_workspace(
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
         )
-        async with workspace_lock(key):
-            backend = build_server_workspace(
-                user_id=user_id,
-                folder_id=folder_id,
-                conversation_id=conversation_id,
-            )
-            for p in docs:
-                path = p.path or f"{REVIEWS_DIR}/{date.today().isoformat()}.md"
-                try:
-                    data = p.body.encode("utf-8")
-                    if not data.endswith(b"\n"):
-                        data += b"\n"
-                    await backend.write_bytes(path, data)
-                    applied += 1
-                except Exception as e:  # noqa: BLE001
-                    skipped += 1
-                    errors.append(f"文档「{p.label}」失败")
-                    logger.warning(
-                        "standing.daily_review.doc_failed",
-                        user_id=user_id,
-                        path=path,
-                        error=str(e),
-                    )
+        for p in docs:
+            path = p.path or f"{REVIEWS_DIR}/{date.today().isoformat()}.md"
+            try:
+                data = p.body.encode("utf-8")
+                if not data.endswith(b"\n"):
+                    data += b"\n"
+                await backend.write_bytes(path, data)
+                applied += 1
+            except Exception as e:  # noqa: BLE001
+                skipped += 1
+                errors.append(f"文档「{p.label}」失败")
+                logger.warning(
+                    "standing.daily_review.doc_failed",
+                    user_id=user_id,
+                    path=path,
+                    error=str(e),
+                )
 
     logger.info(
         "standing.daily_review.applied",

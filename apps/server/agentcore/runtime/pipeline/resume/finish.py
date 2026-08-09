@@ -74,14 +74,16 @@ def finish_terminal_resume(
     sink: EventSink,
     pre_pause_reasoning: str = "",
 ) -> dict:
-    """Close a resumed ask_user turn that the user STOPPED (结构化挂起 2b terminal).
+    """Close a resumed turn whose settle returned terminal ``INTERACT`` (no CEO round).
 
-    No CEO round ran — the closing note is the whole reply (the engine's
-    terminal-effect semantics, replayed on resume). The pre-pause CEO round that
-    raised the ask_user was never billed (the turn paused before persistence), and a
-    stop runs nothing new, so this turn bills nothing — consistent with the「paused
-    before persist = never billed」model. The seeded journal (checkpoint_required) +
-    the emitted ``checkpoint_resolved`` persist so a reload replays the settled card.
+    Historically used for ask_user stop; that path now CONTINUE-feeds the CEO
+    (拒答可见). Kept for any settle that still sets ``terminal_text``. No CEO round
+    runs — ``closing`` is the whole reply. The pre-pause CEO round that raised the
+    checkpoint was never billed (the turn paused before persistence), and a
+    terminal finish runs nothing new, so this turn bills nothing — consistent with
+    the「paused before persist = never billed」model. The seeded journal
+    (checkpoint_required) + the emitted ``checkpoint_resolved`` persist so a reload
+    replays the settled card.
 
     ``pre_pause_reasoning`` is preserved as the turn's reasoning (no live segment to
     join — G3 terminal path).

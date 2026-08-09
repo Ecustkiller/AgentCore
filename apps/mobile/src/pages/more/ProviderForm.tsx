@@ -342,6 +342,9 @@ export function ProviderForm({
             spellCheck={false}
             className="text-input"
           />
+          <p className="section-note" style={{ marginTop: 4 }}>
+            须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+          </p>
         </div>
       )}
 
@@ -367,6 +370,9 @@ export function ProviderForm({
               spellCheck={false}
               className="text-input"
             />
+            <p className="section-note" style={{ marginTop: 4 }}>
+              须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+            </p>
           </div>
         )}
         <div className="field" style={{ marginTop: 8 }}>

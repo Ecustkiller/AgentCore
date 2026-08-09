@@ -164,7 +164,7 @@ export function buildCollaborationTimelineMock(folderId: string) {
     limit: 20,
     offset: 0,
     dossier_refs_note:
-      "路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
+      "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
     items: [
       {
         conversation_id: "c-pin-1",

@@ -188,16 +188,6 @@ async def test_run_workflow_job_uses_mechanism_direct_envelope(monkeypatch):
     monkeypatch.setattr(wf_runner, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(wf_runner, "load_chat_context", AsyncMock(return_value=[]))
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(wf_runner, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(wf_runner, "workspace_storage_key", lambda **k: "k")
-
     async def fake_envelope(**kwargs):
         called["envelope"] = kwargs
         return {"finish_reason": FinishReason.END_TURN, "content": "done", "message_id": "m1"}

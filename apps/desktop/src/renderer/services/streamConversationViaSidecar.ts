@@ -1,6 +1,12 @@
-import { patchConversationCache } from "@/hooks/useConversations";
+import {
+  getConversations,
+  patchConversationCache,
+} from "@/hooks/useConversations";
+import { getFolders } from "@/hooks/useFolders";
 import { StreamError } from "@/lib/errors";
 import { notifyWarning } from "@/lib/toast";
+import { resolveSidecarAccountAuth } from "@/services/accountToken";
+import { resolveSidecarFoldersAuth } from "@/services/foldersToken";
 import {
   clearSidecarInference,
   looksLikeInferenceTokenFailure,
@@ -111,6 +117,30 @@ function newTraceId(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
+/**
+ * 从列表 / folders 缓存解析「项目归属 + 本地 FS 绑定」，供 startTurn / resume 下发。
+ * 绑定字段与寻址用 `rootId`/`subpath` 分离：仅当项目在 folders 缓存有 `localRootId` 时
+ * 填入；裸聊 / 云项目 / 无绑定 → 二者为 null（键仍由调用方写入 RPC）。
+ */
+function resolveProjectTurnBinding(conversationId: string): {
+  folderId: string | null;
+  localRootId: string | null;
+  localSubpath: string | null;
+} {
+  const folderId =
+    getConversations().find((c) => c.id === conversationId)?.folderId ?? null;
+  if (!folderId) {
+    return { folderId: null, localRootId: null, localSubpath: null };
+  }
+  const folder = getFolders().find((f) => f.id === folderId);
+  const localRootId = folder?.localRootId ?? null;
+  return {
+    folderId,
+    localRootId,
+    localSubpath: localRootId != null ? (folder?.localSubpath ?? "") : null,
+  };
+}
+
 /** 剥 Electron IPC / SidecarRpcError 包装，露出引擎真因原文；提不出则 `null`。 */
 function unwrapSidecarRejectMessage(err: unknown): string | null {
   if (!(err instanceof Error)) return null;
@@ -188,9 +218,18 @@ export async function streamConversationViaSidecar({
   // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。每回合强制续铸，避免挂过期票。
   // 取不到则带 undefined：dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败。
   let inference = (await resolveSidecarInference({ force: true })) ?? undefined;
+  // folders 窄票（定案甲）：与 inference 并列强制续铸；失败则 undefined（工具侧旧行为/诚实失败）。
+  const foldersAuth =
+    (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
+  // account 窄票（定案 R3a）：搜/读云对话日志；失败则 undefined（本机 DB / 诚实失败）。
+  const accountAuth =
+    (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
   // 本会话权限轴随回合送达本地引擎；取不到则 sidecar 沿用其当前值。
   const permissionAxes =
     await resolveConversationPermissionAxes(conversationId);
+  // 项目归属 + 本地绑定：列表 / folders 缓存已有，勿为此查本机库；裸聊 / 云 = null。
+  const { folderId, localRootId, localSubpath } =
+    resolveProjectTurnBinding(conversationId);
   throwIfCannotOpenStream(conversationId, signal);
   return runSidecarTurn({
     conversationId,
@@ -214,7 +253,12 @@ export async function streamConversationViaSidecar({
         userMessageId: optimisticUserId,
         history,
         inference,
+        foldersAuth,
+        accountAuth,
         permissionAxes,
+        folderId,
+        localRootId,
+        localSubpath,
       }),
     remintInference: async () => {
       clearSidecarInference();
@@ -253,9 +297,18 @@ export async function resumeConversationViaSidecar({
   );
   // 续跑同样要跑 LLM（重启后会新拉起引擎），故强制续铸当前云推理凭据（同 startTurn）。
   let inference = (await resolveSidecarInference({ force: true })) ?? undefined;
+  // folders 窄票（同 startTurn）：续跑对称下发。
+  const foldersAuth =
+    (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
+  // account 窄票（同 startTurn）：续跑对称下发。
+  const accountAuth =
+    (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
   // 本会话权限轴（同 startTurn）：续跑期间的能力授权按会话当前轴。
   const permissionAxes =
     await resolveConversationPermissionAxes(conversationId);
+  // 项目归属 + 本地绑定（同 startTurn）：续跑对称下发；folderId 覆盖帧内归属。
+  const { folderId, localRootId, localSubpath } =
+    resolveProjectTurnBinding(conversationId);
   // 本次续跑的 trace_id（同 startTurn）：贯穿续跑的推理调用 + 回写落库。
   const traceId = newTraceId();
   throwIfCannotOpenStream(conversationId, signal);
@@ -289,7 +342,12 @@ export async function resumeConversationViaSidecar({
             ? { write_capability_overrides }
             : {}),
           inference,
+          foldersAuth,
+          accountAuth,
           permissionAxes,
+          folderId,
+          localRootId,
+          localSubpath,
         }),
       remintInference: async () => {
         clearSidecarInference();

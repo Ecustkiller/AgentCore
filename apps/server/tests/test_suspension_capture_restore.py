@@ -252,7 +252,6 @@ async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
         patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),
         patch.object(turns_mod, "suspension_callbacks", return_value=(AsyncMock(), AsyncMock())),
-        patch.object(turns_mod, "workspace_lock") as lock,
         patch.object(
             turns_mod,
             "resume_chat_pipeline",
@@ -273,8 +272,6 @@ async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
         board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
-        lock.return_value.__aenter__ = AsyncMock(return_value=None)
-        lock.return_value.__aexit__ = AsyncMock(return_value=None)
 
         await turns_mod.resume_chat(
             suspension=suspension,
@@ -311,7 +308,6 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
         patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),
         patch.object(turns_mod, "suspension_callbacks", return_value=(AsyncMock(), AsyncMock())),
-        patch.object(turns_mod, "workspace_lock") as lock,
         patch.object(
             turns_mod,
             "resume_chat_pipeline",
@@ -331,8 +327,6 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
         board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
-        lock.return_value.__aenter__ = AsyncMock(return_value=None)
-        lock.return_value.__aexit__ = AsyncMock(return_value=None)
 
         await turns_mod.resume_chat(
             suspension=suspension,
@@ -393,7 +387,6 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
         patch.object(turns_mod, "session_callbacks", return_value=(AsyncMock(), AsyncMock())),
         patch.object(turns_mod, "suspension_callbacks", return_value=(AsyncMock(), AsyncMock())),
-        patch.object(turns_mod, "workspace_lock") as lock,
         patch.object(turns_mod, "resume_chat_pipeline", _cancel),
         patch.object(turns_mod, "close_user_stop_turn", AsyncMock(return_value=True)) as close_stop,
         patch.object(turns_mod, "persist_turn_result", AsyncMock()),
@@ -403,8 +396,6 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
         board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
-        lock.return_value.__aenter__ = AsyncMock(return_value=None)
-        lock.return_value.__aexit__ = AsyncMock(return_value=None)
 
         try:
             with pytest.raises(asyncio.CancelledError):

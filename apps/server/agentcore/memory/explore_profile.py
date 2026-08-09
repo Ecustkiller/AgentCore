@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -163,22 +164,106 @@ def build_workspace_key(*, folder_id: str, binding: Any | None) -> str:
     return format_workspace_id(folder_id=folder_id, conversation_id="")
 
 
-async def resolve_folder_workspace_key(folder_id: str) -> str:
-    """Load Folder binding and return :func:`build_workspace_key` (DB round-trip)."""
+def _looks_like_folder_uuid(folder_id: str) -> bool:
+    """True when ``folder_id`` parses as a formal UUID (folders PK shape).
+
+    Runtime ``folder_id`` may also be a memory scope string (tests / legacy);
+    only UUID-shaped ids are eligible for a ``folders`` table lookup.
+    """
+    raw = (folder_id or "").strip()
+    if not raw:
+        return False
+    try:
+        uuid.UUID(raw)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_db_data_error(exc: BaseException) -> bool:
+    """True when ``exc`` (or cause / ``orig``) is a driver/SQLAlchemy data error.
+
+    Covers asyncpg ``DataError`` (e.g. invalid UUID cast) wrapped as
+    ``DBAPIError`` — must degrade like connectivity, never HARD-kill.
+    """
+    from sqlalchemy.exc import DataError
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, DataError):
+            return True
+        mod = type(cur).__module__ or ""
+        if type(cur).__name__ == "DataError" and mod.startswith(("asyncpg", "sqlalchemy")):
+            return True
+        orig = getattr(cur, "orig", None)
+        if isinstance(orig, BaseException) and id(orig) not in seen:
+            cur = orig
+            continue
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+async def resolve_folder_workspace_key(
+    folder_id: str,
+    *,
+    binding: Any | None = None,
+    binding_injected: bool = False,
+) -> str | None:
+    """Resolve explore workspace identity for ``folder_id``.
+
+    Prefer an injected local bind (sidecar/desktop ``localRootId`` /
+    ``localSubpath``) — pure :func:`build_workspace_key`, no DB. When not
+    injected:
+
+    - Non-UUID ``folder_id`` (memory scope string) → **no** ``folders`` query;
+      same as row miss → ``folder:<id>``.
+    - Formal UUID → load the Folder row; miss → ``folder:<id>``.
+    - DB connectivity / ``DataError`` (illegal cast, …) → ``None`` + warning.
+
+    Never HARD-kills the turn over key resolution; never silently pretends
+    ``folder:<id>`` is a verified *local* key when the DB was unreachable.
+    Callers still run empty / named explore gates with an unknown key
+    (``None`` → ``\"\"`` sentinel; skip rebind until bind is known).
+    """
+    if binding_injected:
+        return build_workspace_key(folder_id=folder_id, binding=binding)
+
+    # Memory-scope strings (F1 / test_birth / …) are legal folder_id values for
+    # consult_memory but are not folders PKs — never send them through ::UUID.
+    if not _looks_like_folder_uuid(folder_id):
+        return build_workspace_key(folder_id=folder_id, binding=None)
+
     from agentcore.conversation.scratch import resolve_conversation_local_binding
     from agentcore.db.base import async_session_factory
+    from agentcore.db.errors import DatabaseUnavailableError, is_db_connectivity_error
     from agentcore.db.repositories import FolderRepository
 
-    async with async_session_factory() as session:
-        folder = await FolderRepository(session).get_by_id_unscoped(folder_id)
-        if not folder:
-            return build_workspace_key(folder_id=folder_id, binding=None)
-        binding = resolve_conversation_local_binding(
-            local_root_id=folder.local_root_id,
-            local_subpath=folder.local_subpath,
-            label=folder.name or "workspace",
-        )
-        return build_workspace_key(folder_id=folder_id, binding=binding)
+    try:
+        async with async_session_factory() as session:
+            folder = await FolderRepository(session).get_by_id_unscoped(folder_id)
+            if not folder:
+                return build_workspace_key(folder_id=folder_id, binding=None)
+            resolved = resolve_conversation_local_binding(
+                local_root_id=folder.local_root_id,
+                local_subpath=folder.local_subpath,
+                label=folder.name or "workspace",
+            )
+            return build_workspace_key(folder_id=folder_id, binding=resolved)
+    except Exception as e:
+        if (
+            isinstance(e, DatabaseUnavailableError)
+            or is_db_connectivity_error(e)
+            or _is_db_data_error(e)
+        ):
+            logger.warning(
+                "memory.explore_workspace_key_db_unavailable",
+                folder_id=folder_id,
+                error=str(e),
+            )
+            return None
+        raise
 
 
 async def load_explore_workspace_key(

@@ -280,7 +280,7 @@ def _promote_research_landed_refs(rel_path: str, content: str) -> None:
 def _maybe_inject_research_ledger_anchors(
     rel_path: str, content: str, context: ToolContext
 ) -> str:
-    """案卷 ``research/`` 落盘时若正文无 ``#rN``，用本 worker 台账条目补脚注（一层兜底）。"""
+    """约定文档 ``research/`` 落盘时若正文无 ``#rN``，用本 worker 台账条目补脚注（一层兜底）。"""
     from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
 
     norm = (rel_path or "").replace("\\", "/").lstrip("./")
@@ -354,7 +354,7 @@ class FileWriteTool:
                 "括号结构不完整或含省略标记 → 硬拒绝（防截断类缺 `}`）。"
                 "只改一部分优先 str_replace；骨架填空才用 file_append。"
                 "路径必须是相对于工作区的相对路径。"
-                "【案卷扁平】`AgentCore/文档/` 下 research/reviews/debate/项目 "
+                "【约定文档扁平】`AgentCore/文档/` 下 research/reviews/debate/项目 "
                 "写盘扁平：前缀后嵌套 `/` 压成 `_` 单文件名（非路径损坏）。"
             ),
             parameters={
@@ -363,7 +363,7 @@ class FileWriteTool:
                     "path": {
                         "type": "string",
                         "description": (
-                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "工作区内的相对文件路径；约定文档区写盘扁平"
                             "（前缀后嵌套 `/` → `_` 单文件名）"
                         ),
                     },
@@ -419,7 +419,7 @@ class FileWriteTool:
             return denied
         coordinator = context.write_coordinator
 
-        # 幕1 案卷落盘锚：AgentCore/文档/research/ 下若正文无 #rN，
+        # 幕1 约定文档落盘锚：AgentCore/文档/research/ 下若正文无 #rN，
         # 用本回合台账条目写脚注（一层兜底）。
         write_content = _maybe_inject_research_ledger_anchors(
             rel_path, content, context
@@ -616,7 +616,7 @@ class FileAppendTool:
                     "path": {
                         "type": "string",
                         "description": (
-                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "工作区内的相对文件路径；约定文档区写盘扁平"
                             "（前缀后嵌套 `/` → `_` 单文件名）"
                         ),
                     },
@@ -793,7 +793,7 @@ class StrReplaceTool:
                     "path": {
                         "type": "string",
                         "description": (
-                            "工作区内的相对文件路径；案卷区写盘扁平"
+                            "工作区内的相对文件路径；约定文档区写盘扁平"
                             "（前缀后嵌套 `/` → `_` 单文件名）"
                         ),
                     },

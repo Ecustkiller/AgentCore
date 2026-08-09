@@ -36,6 +36,18 @@ export interface HandoffJobStarted {
   jobConversationId: string;
 }
 
+/**
+ * 交接作业生命周期（§7.6）：跑批态 + 结果收口态。
+ * ``succeeded`` = 可合回；``applied`` = 已合回本机；``discarded`` = 已丢弃。
+ */
+export type HandoffJobStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "applied"
+  | "discarded";
+
 /** 一个本地→云交接作业（双模式工作区 P2e / e2，camelCase 域模型）。 */
 export interface HandoffJob {
   id: string;
@@ -44,7 +56,7 @@ export interface HandoffJob {
   baseSnapshotId: string;
   resultSnapshotId: string | null;
   task: string;
-  status: "pending" | "running" | "succeeded" | "failed";
+  status: HandoffJobStatus;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -82,13 +94,19 @@ export interface HandoffApplySummary {
 /** Server handoff-job payload (`/handoff/jobs`), generated from OpenAPI. */
 type BackendJob = Schemas["HandoffJobSummary"];
 
+/**
+ * Wire job with §7.6 status. Generated OpenAPI 尚缺 `applied`/`discarded` 与
+ * discard 路径——域模型已对齐服务端；需主 Agent `gen:types`。
+ */
+type HandoffJobWire = Omit<BackendJob, "status"> & { status: HandoffJobStatus };
+
 /** Server diff file-change row (`/handoff/jobs/{id}/diff`), generated from OpenAPI. */
 type BackendFileChange = Schemas["HandoffFileChange"];
 
 /** Server diff payload (`/handoff/jobs/{id}/diff`), generated from OpenAPI. */
 type BackendDiff = Schemas["HandoffDiffResponse"];
 
-function toJob(b: BackendJob): HandoffJob {
+function toJob(b: HandoffJobWire): HandoffJob {
   return {
     id: b.id,
     sourceConversationId: b.source_conversation_id,
@@ -274,7 +292,7 @@ export async function dispatchHandoffJob(
 export async function listHandoffJobs(
   conversationId: string,
 ): Promise<HandoffJob[]> {
-  const res = await api.get<Schemas["HandoffJobListResponse"]>(
+  const res = await api.get<{ data: HandoffJobWire[]; total: number }>(
     `/v1/conversations/${conversationId}/handoff/jobs`,
   );
   return res.data.map(toJob);
@@ -345,6 +363,45 @@ export async function applyHandoffJob(
       return undefined;
     },
   );
+}
+
+/**
+ * 放弃一份已结束交接的云端结果（§7.6）：不写回本机，标记 `discarded` 并回收云 host。
+ * 路径约定与其它 handoff REST 一致；OpenAPI 生成类型尚未收录（需主 Agent gen:types）。
+ */
+export async function discardHandoffJob(
+  conversationId: string,
+  jobId: string,
+): Promise<HandoffJob> {
+  const res = await api.post<HandoffJobWire>(
+    `/v1/conversations/${conversationId}/handoff/jobs/${jobId}/discard`,
+  );
+  return toJob(res);
+}
+
+/**
+ * 卡面收口相（§7.6）：后端 `applied`/`discarded` 优先；`mergedOptimistic` 仅在
+ * `succeeded` 上补「已合回」，不覆盖 discarded。
+ */
+export type HandoffCardPhase =
+  | "pending"
+  | "running"
+  | "failed"
+  | "awaiting"
+  | "applied"
+  | "discarded";
+
+export function resolveHandoffCardPhase(
+  job: Pick<HandoffJob, "status">,
+  mergedOptimistic: boolean,
+): HandoffCardPhase {
+  if (job.status === "pending") return "pending";
+  if (job.status === "running") return "running";
+  if (job.status === "failed") return "failed";
+  if (job.status === "discarded") return "discarded";
+  if (job.status === "applied") return "applied";
+  if (mergedOptimistic) return "applied";
+  return "awaiting";
 }
 
 /**

@@ -56,9 +56,14 @@ def test_resume_rpc_contract_documents_python_consumer_keys():
         "excluded_run_ids",
         "write_capability_overrides",
         "inference",
+        "foldersAuth",
+        "accountAuth",
         "browserBridge",
         "permissionAxes",
         "userId",
+        "folderId",
+        "localRootId",
+        "localSubpath",
     }
     assert set(resume_rpc_param_keys()) == expected
     assert set(resume_rpc_required_keys()) == {

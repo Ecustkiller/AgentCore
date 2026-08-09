@@ -281,16 +281,6 @@ async def test_run_job_succeeded(monkeypatch):
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
-
     async def fake_pipeline(**kwargs):
         return {"finish_reason": FinishReason.END_TURN, "content": "本周摘要 OK"}
 
@@ -420,16 +410,6 @@ async def test_run_job_awaiting_user(monkeypatch):
     monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
-
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
 
     async def fake_pipeline(**kwargs):
         return {"finish_reason": FinishReason.PAUSED, "content": ""}
@@ -568,16 +548,6 @@ async def test_run_job_ignores_residual_conversation_pause(monkeypatch):
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
-
     async def fake_pipeline(**kwargs):
         return {
             "finish_reason": FinishReason.END_TURN,
@@ -711,16 +681,6 @@ async def test_run_job_awaiting_user_via_this_turn_pause(monkeypatch):
     monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
-
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
 
     async def fake_pipeline(**kwargs):
         # Production CEO path may omit finish_reason; pause truth is paused_turns.
@@ -1191,16 +1151,6 @@ async def test_run_job_includes_event_text(monkeypatch):
     monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
-
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
 
     async def fake_pipeline(**kwargs):
         captured["pipeline_msg"] = kwargs.get("user_message")
@@ -2017,16 +1967,6 @@ async def test_run_job_without_workflow_uses_ceo_pipeline(monkeypatch):
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
-
     async def fake_ceo(**kwargs):
         called["ceo"] += 1
         return {"finish_reason": FinishReason.END_TURN, "content": "ceo"}
@@ -2194,16 +2134,6 @@ async def test_run_job_with_workflow_uses_direct_start(monkeypatch):
     monkeypatch.setattr(runner_mod, "resolve_permission_axes", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_mod, "build_turn_backend", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
-
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(runner_mod, "workspace_lock", lambda *a, **k: _Lock())
-    monkeypatch.setattr(runner_mod, "workspace_storage_key", lambda **k: "k")
 
     async def fake_ceo(**kwargs):
         called["ceo"] = int(called["ceo"]) + 1

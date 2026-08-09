@@ -1774,7 +1774,7 @@ def test_reviews_md_landing_latches():
 def test_declared_research_artifact_latches_landing():
     from agentcore.workspace.stage_dirs import RESEARCH_DIR
 
-    art = f"{RESEARCH_DIR}/调研报告.md"
+    art = f"{RESEARCH_DIR}/报告.md"
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,

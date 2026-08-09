@@ -351,14 +351,14 @@ def check_contract(
         if missing:
             listed = "、".join(f"`{p}`" for p in missing)
             path_mismatch_warnings.append(f"声明的交付物路径未落盘：{listed}")
-    # 案卷目录对账（与归属分键）：artifact_dir 不进 ownership；不对齐仅提醒。
+    # 约定文档目录对账（与归属分键）：artifact_dir 不进 ownership；不对齐仅提醒。
     if deliverable.artifact_dir and deliverable.requires_files:
         from agentcore.runtime.runs.artifact_dir import normalize_artifact_dir
 
         dir_pat = f"{normalize_artifact_dir(deliverable.artifact_dir)}/"
         if dir_pat != "/" and not artifact_present(dir_pat, workspace_paths or []):
             path_mismatch_warnings.append(
-                f"产物未写入案卷目录 `{dir_pat}`（建议落在此目录下，勿写到工作区根）"
+                f"产物未写入约定文档目录 `{dir_pat}`（建议落在此目录下，勿写到工作区根）"
             )
     # 网页接缝：同批 HTML+CSS/JS，或 ``web_seam_scope`` 终态整站复查。
     if deliverable.web_seam_scope:
@@ -1087,7 +1087,7 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
     if deliverable.form != "prose":
         if deliverable.artifact_dir:
             lines.append(
-                f"- 建议案卷落盘目录：`{deliverable.artifact_dir}/`（系统约定；你只定文件名，"
+                f"- 建议约定文档落盘目录：`{deliverable.artifact_dir}/`（系统约定；你只定文件名，"
                 "建议写入此目录，勿写到工作区根或其他路径）"
             )
         if deliverable.artifacts:

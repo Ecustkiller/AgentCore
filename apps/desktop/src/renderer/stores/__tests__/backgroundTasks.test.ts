@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { dispatchBackgroundTask } from "@/components/chat/message-input/dispatchBackgroundTask";
+import { notifyInfo } from "@/lib/toast";
 import type { HandoffJob } from "@/services/handoff";
 import { dispatchHandoffJob, listHandoffJobs } from "@/services/handoff";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
@@ -17,10 +18,14 @@ vi.mock("@/services/handoff", () => ({
 vi.mock("@/services/workspaceBinding", () => ({
   getWorkspaceBinding: vi.fn(),
 }));
+vi.mock("@/lib/toast", () => ({
+  notifyInfo: vi.fn(),
+}));
 
 const listJobs = vi.mocked(listHandoffJobs);
 const dispatchJob = vi.mocked(dispatchHandoffJob);
 const getBinding = vi.mocked(getWorkspaceBinding);
+const notifyInfoMock = vi.mocked(notifyInfo);
 
 const store = () => useBackgroundTasksStore.getState();
 
@@ -44,10 +49,13 @@ beforeEach(() => {
     byConversation: {},
     modeByConversation: {},
     rootIdByConversation: {},
+    mergedJobIds: {},
+    toastedSucceededIds: {},
   });
   listJobs.mockReset();
   dispatchJob.mockReset();
   getBinding.mockReset();
+  notifyInfoMock.mockReset();
   getBinding.mockResolvedValue({
     mode: "local",
     scope: "conversation",
@@ -195,5 +203,69 @@ describe("useBackgroundTasksSync 轮询", () => {
       expect(store().modeByConversation["c-cloud"]).toBe("cloud");
     });
     expect(listJobs).not.toHaveBeenCalled();
+  });
+});
+
+describe("succeeded discoverability (§7.6)", () => {
+  it("toasts once when an in-flight job becomes succeeded", async () => {
+    useBackgroundTasksStore.setState({
+      byConversation: { c1: [job({ status: "running" })] },
+      modeByConversation: { c1: "local" },
+      rootIdByConversation: { c1: "root-1" },
+      mergedJobIds: {},
+    });
+    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
+
+    await store().load("c1");
+
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    expect(String(notifyInfoMock.mock.calls[0][0])).toContain("云端拷贝已改完");
+
+    // Reload same succeeded job — no second toast.
+    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
+    await store().load("c1");
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not toast historical succeeded jobs on cold load", async () => {
+    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
+    await store().load("c1");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("markMerged flips card state without a second toast", async () => {
+    useBackgroundTasksStore.setState({
+      byConversation: { c1: [job({ status: "running" })] },
+      mergedJobIds: {},
+    });
+    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
+    await store().load("c1");
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+
+    store().markMerged("job-1");
+    expect(store().mergedJobIds["job-1"]).toBe(true);
+
+    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
+    await store().load("c1");
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("load keeps backend applied/discarded on the job (no false awaiting)", async () => {
+    listJobs.mockResolvedValueOnce([
+      job({ id: "a", status: "applied" }),
+      job({ id: "d", status: "discarded" }),
+    ]);
+    await store().load("c1");
+    expect(store().byConversation.c1.map((j) => j.status)).toEqual([
+      "applied",
+      "discarded",
+    ]);
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("upsert after discard replaces succeeded with discarded", () => {
+    store().upsert("c1", job({ status: "succeeded" }));
+    store().upsert("c1", job({ status: "discarded" }));
+    expect(store().byConversation.c1[0].status).toBe("discarded");
   });
 });

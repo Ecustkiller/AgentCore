@@ -353,6 +353,94 @@ describe("turn stop lifecycle", () => {
     );
   });
 
+  it("terminal completed 后迟到 error → 不改写气泡/图/phase（D1）", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useConversationStore.getState().appendToLastMessage("成功回复", CID);
+    useExecutionStore.getState().startExecution(plan, mid);
+    // 先把图收到成功终局（message_end  alone 不会把未结算 execution 打成 completed）。
+    useExecutionStore.getState().setStatus("completed", mid);
+
+    dispatchSSEEvent(
+      {
+        type: "message_end",
+        payload: { finish_reason: "stop", rounds: 1 },
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+    expect(getTurnPhase(CID)).toBe("completed");
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "completed",
+    );
+
+    dispatchSSEEvent(
+      {
+        type: "error",
+        payload: { code: "LATE", message: "迟到错误" },
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    const last = getRuntime(CID).messages.at(-1);
+    expect(getTurnPhase(CID)).toBe("completed");
+    expect(last?.content).toBe("成功回复");
+    expect(last?.error).toBeUndefined();
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "completed",
+    );
+  });
+
+  it("stopping 态收到 error → terminal stopped + 气泡挂错 + 图 failed", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useConversationStore.getState().appendToLastMessage("半截", CID);
+    useExecutionStore.getState().startExecution(plan, mid);
+    useConversationStore.getState().stopGeneration();
+    expect(getTurnPhase(CID)).toBe("stopping");
+
+    dispatchSSEEvent(
+      {
+        type: "error",
+        payload: { code: "ABORT", message: "停止收口" },
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    const last = getRuntime(CID).messages.at(-1);
+    expect(getTurnPhase(CID)).toBe("stopped");
+    expect(last?.error?.code).toBe("ABORT");
+    expect(last?.isStreaming).toBe(false);
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "failed",
+    );
+  });
+
+  it("streaming 态收到 error → terminal failed + 气泡挂错 + 图 failed", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useExecutionStore.getState().startExecution(plan, mid);
+
+    dispatchSSEEvent(
+      {
+        type: "error",
+        payload: { code: "LLM", message: "上游失败" },
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(getTurnPhase(CID)).toBe("failed");
+    expect(getRuntime(CID).messages.at(-1)?.error?.code).toBe("LLM");
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "failed",
+    );
+  });
+
   it("/stop 失败时回滚 streaming 并 setError 可再点停止", async () => {
     apiPost.mockRejectedValueOnce(new Error("network down"));
     beginTurnPreflight(CID);

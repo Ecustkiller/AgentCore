@@ -265,15 +265,33 @@ class UpdateProjectProfileTool:
         self._hot_refresh_prompts(resulting, topic_paths, nav_path)
         # Persist workspace identity + fingerprint; clear R2 dirty.
         try:
-            key = self.workspace_key or await resolve_folder_workspace_key(self.folder_id)
-            fingerprint = await compute_workspace_explore_fingerprint(context.backend)
-            await record_explore_closeout(
-                store,
-                context.user_id,
-                self.folder_id,
-                workspace_key=key,
-                fingerprint=fingerprint,
-            )
+            key: str | None
+            if self.workspace_key:
+                key = self.workspace_key
+            else:
+                from agentcore.conversation.scratch import resolve_conversation_local_binding
+
+                injected = bool(getattr(context, "folder_binding_injected", False))
+                binding = None
+                if injected:
+                    binding = resolve_conversation_local_binding(
+                        local_root_id=getattr(context, "folder_local_root_id", None),
+                        local_subpath=getattr(context, "folder_local_subpath", None),
+                    )
+                key = await resolve_folder_workspace_key(
+                    self.folder_id,
+                    binding=binding,
+                    binding_injected=injected,
+                )
+            if key:
+                fingerprint = await compute_workspace_explore_fingerprint(context.backend)
+                await record_explore_closeout(
+                    store,
+                    context.user_id,
+                    self.folder_id,
+                    workspace_key=key,
+                    fingerprint=fingerprint,
+                )
         except Exception as e:  # noqa: BLE001 - meta write must not fail the tool
             logger.warning(
                 "memory.explore_workspace_key_failed",

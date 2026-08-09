@@ -87,26 +87,26 @@ def _background_block(config: DebateConfig) -> str:
         "引用其中事实时，【沿用清单中的【已核实·#eN】台账 id】——不得把本底料本身包装成新的"
         "【已核实】来源；清单未写明为既定事实的未决 / 推断状态（如「表示将上诉」≠「已进入二审」）"
         "不得改写成既定事实。"
-        f"先读案卷（{RESEARCH_DIR}/）取证，独立检索仅补案卷没有的缺口；引用案卷内容须标注文件来源。\n"
+        f"先读约定文档（{RESEARCH_DIR}/）取证，独立检索仅补约定文档没有的缺口；引用约定文档内容须标注文件来源。\n"
         f"{clipped}\n"
     )
 
 
 def _research_dossier_block(config: DebateConfig) -> str:
-    """首轮可选案卷索引块：工作区有案卷文件时注入（文件列表 + 取证纪律，不注全文）。"""
+    """首轮可选约定文档索引块：工作区有约定文档文件时注入（文件列表 + 取证纪律，不注全文）。"""
     idx = (config.research_dossier_index or "").strip()
     if not idx:
         return ""
     return (
         f"\n\n{idx}\n"
-        "取证纪律：【案卷优先】按本轮议题焦点选读相关案卷文件（看索引中的字数/摘要），"
-        "【禁止】无差别全量通读所有案卷——控 token、保立论空间；"
+        "取证纪律：【约定文档优先】按本轮议题焦点选读相关约定文档文件（看索引中的字数/摘要），"
+        "【禁止】无差别全量通读所有约定文档——控 token、保立论空间；"
         "先用 file_read / file_list / grep 取证。"
-        "独立检索（web_search / read_url）【仅】补案卷没有的缺口："
-        "每次补搜前须在证据笔记中【先声明案卷缺口】（缺什么、哪份案卷未覆盖）；"
-        "【禁止】重复检索案卷已覆盖的基础事实（时间线 / 主体 / 已核实数字与案号）。"
-        "引用案卷事实写成【已核实·#eN】——id 须用上方「案卷预登记台账」列出的号"
-        "（已预登记进场级台账，徽章可溯源到案卷文件与幕1 #rN）；"
+        "独立检索（web_search / read_url）【仅】补约定文档没有的缺口："
+        "每次补搜前须在证据笔记中【先声明约定文档缺口】（缺什么、哪份约定文档未覆盖）；"
+        "【禁止】重复检索约定文档已覆盖的基础事实（时间线 / 主体 / 已核实数字与案号）。"
+        "引用约定文档事实写成【已核实·#eN】——id 须用上方「约定文档预登记台账」列出的号"
+        "（已预登记进场级台账，徽章可溯源到约定文档文件与幕1 #rN）；"
         "勿另造自由出处短语代替 #eN。\n"
     )
 
@@ -316,15 +316,15 @@ def debater_task(
         getattr(config, "pretrial_evidence_ready", False)
     )
     dossier_discipline = (
-        "【案卷优先·选读】按本轮议题焦点选读案卷（看索引字数/摘要），勿全量通读；"
-        "补搜前须声明案卷缺口；禁重复搜案卷已覆盖的基础事实。"
+        "【约定文档优先·选读】按本轮议题焦点选读约定文档（看索引字数/摘要），勿全量通读；"
+        "补搜前须声明约定文档缺口；禁重复搜约定文档已覆盖的基础事实。"
         if has_dossier
-        else f"优先用 file_read / file_list / grep 阅读工作区 {RESEARCH_DIR}/ 案卷（若有）；"
+        else f"优先用 file_read / file_list / grep 阅读工作区 {RESEARCH_DIR}/ 约定文档（若有）；"
     )
     research_task = (
         f"{_situation_header(config, side, focus=focus, ask_block=ask_block)}\n\n"
         f"请为开场立论做取证：{dossier_discipline}"
-        f"独立检索（web_search / read_url）仅补案卷没有的缺口；然后产出【证据笔记】。"
+        f"独立检索（web_search / read_url）仅补约定文档没有的缺口；然后产出【证据笔记】。"
         f"关键事实主张按【证据状态铁律】标注。"
         f"{EVIDENCE_NOTES_SPEC}{quick_suffix}{bg_block}{dossier_block}"
     )
@@ -347,8 +347,8 @@ def debater_task(
         ),
         "draft_system": draft_system(config, side, beat="opening"),
     }
-    # 有案卷或庭前取证已汇流时：优先用庭前按完整度写下的 per-side 预算（full→0 / 缺口→有界）；
-    # 未写入时保留案卷残搜旧路径（CEO 案卷、无庭前）。
+    # 有约定文档或庭前取证已汇流时：优先用庭前按完整度写下的 per-side 预算（full→0 / 缺口→有界）；
+    # 未写入时保留约定文档残搜旧路径（CEO 约定文档、无庭前）。
     side_budgets = getattr(config, "debater_retrieval_budgets", None) or {}
     if side.key in side_budgets:
         payload["retrieval_budget"] = int(side_budgets[side.key])

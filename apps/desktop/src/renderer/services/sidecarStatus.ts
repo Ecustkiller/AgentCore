@@ -23,6 +23,16 @@ interface SidecarFailure {
 const failures = new Map<string, SidecarFailure>();
 let installed = false;
 
+/** `spawned` 时通知健康缓存（由 sidecarHealth 注册，避免循环 import）。 */
+let spawnedHandler: ((rootId: string) => void) | null = null;
+
+/** 注册「进程已拉起」回调——清掉该根 bad 健康缓存，不必干等 TTL。 */
+export function setSidecarSpawnedHandler(
+  handler: ((rootId: string) => void) | null,
+): void {
+  spawnedHandler = handler;
+}
+
 /**
  * 订阅 `onStatus`（幂等）；在 renderer 启动时调一次。
  *
@@ -44,6 +54,7 @@ export function installSidecarStatusListener(): void {
 export function recordStatus(push: SidecarStatusPush): void {
   if (push.phase === "spawned") {
     failures.delete(push.rootId);
+    spawnedHandler?.(push.rootId);
     return;
   }
   failures.set(push.rootId, {

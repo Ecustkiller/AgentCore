@@ -110,6 +110,11 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
   const cachedTurn = useUsageStore((s) => s.messageCosts[message.id] ?? null);
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  const waitingForWorkspaceLock = useConversationStore((s) => {
+    const id = s.currentConversationId;
+    if (!id) return false;
+    return s.byId?.[id]?.waitingForWorkspaceLock ?? false;
+  });
   const navigate = useNavigate();
   const finishReason = !message.isStreaming
     ? (message.finishReason ?? message.runs?.finishReason)
@@ -343,7 +348,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         ) : displayContent.length === 0 && !hasReasoning ? (
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <ThinkingDots />
-            Thinking…
+            {/* 不得静默等锁：写锁短等用诚实等待态，禁空 Thinking… 冒充 */}
+            {waitingForWorkspaceLock ? "等待工作区…" : "Thinking…"}
           </span>
         ) : (
           <span

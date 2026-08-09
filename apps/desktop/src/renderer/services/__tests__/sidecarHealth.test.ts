@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // 的诊断」（真实实现是与主进程 onStatus 推送绑定的一次性消费，见 sidecarStatus.test）。
 vi.mock("@/services/sidecarStatus", () => ({
   takeRecentSidecarFailure: vi.fn(() => null),
+  setSidecarSpawnedHandler: vi.fn(),
 }));
 
 import type { SidecarTarget } from "@/services/sidecarRouting";
@@ -14,6 +15,7 @@ import {
   clearSidecarHealth,
   getSidecarHealth,
   markSidecarUnhealthy,
+  noteSidecarSpawned,
   probeSidecar,
   takeCloudBridgeToastSlot,
 } from "../sidecarHealth";
@@ -91,14 +93,17 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     });
   });
 
-  it("已 bad 的根：TTL 内命中缓存（false、无诊断），不再拉起", async () => {
+  it("已 bad 的根：TTL 内命中缓存（false），仍带回上次诊断，不再拉起", async () => {
+    takeRecentSidecarFailureMock.mockReturnValue(
+      "本地引擎启动失败：spawn uv ENOENT",
+    );
     probeMock.mockRejectedValue(new Error("boom"));
     const t = target("r-bad3");
     await probeSidecar(t); // → bad，probe 调用一次
     await expect(probeSidecar(t)).resolves.toEqual({
       healthy: false,
       probed: false,
-      detail: null,
+      detail: "本地引擎启动失败：spawn uv ENOENT",
     });
     expect(probeMock).toHaveBeenCalledTimes(1); // 未重探
   });
@@ -146,11 +151,26 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     expect(getSidecarHealth(t)).toBe("ok");
   });
 
-  it("非桌面 / 未注入 sidecarApi：视作不健康、不抛", async () => {
+  it("非桌面 / 未注入 sidecarApi：视作不健康、不抛（诚实 detail）", async () => {
     (globalThis as Record<string, unknown>).window = {};
     await expect(probeSidecar(target("r-web"))).resolves.toEqual({
       healthy: false,
       probed: false,
+      detail: "当前环境无本地引擎",
+    });
+  });
+
+  it("noteSidecarSpawned：清掉该根 bad，允许立刻再探", async () => {
+    probeMock.mockRejectedValue(new Error("boom"));
+    const t = target("r-spawn");
+    await probeSidecar(t);
+    expect(getSidecarHealth(t)).toBe("bad");
+    noteSidecarSpawned("r-spawn");
+    expect(getSidecarHealth(t)).toBe("unknown");
+    probeMock.mockResolvedValue(undefined);
+    await expect(probeSidecar(t)).resolves.toEqual({
+      healthy: true,
+      probed: true,
       detail: null,
     });
   });

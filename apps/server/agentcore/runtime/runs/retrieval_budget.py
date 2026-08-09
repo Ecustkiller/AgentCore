@@ -5,7 +5,7 @@ resolved limit is 0. Runtime counter lives on ``ToolContext.retrieval_budget``
 (:class:`~agentcore.tools.protocol.RetrievalBudgetState`); enforce in
 ``tool_exec`` (orthogonal to LoopController / team_gate). Cache hits and A3
 query-contract rejects do not consume budget. CEO / delegate schema 不可配置该
-字段；额度只来自统一常量（辩手有案卷窄例外由辩论内部 writer 补写）。
+字段；额度只来自统一常量（辩手有约定文档窄例外由辩论内部 writer 补写）。
 """
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ RETRIEVAL_TOOL_NAMES: frozenset[str] = frozenset({"web_search", "read_url"})
 # 统一阀（原 RESEARCH 档复用；已删 prose→0 / ROOT/DOWNSTREAM / 透镜 base/gap /
 # CEO 显式覆盖）。不做批级共享池 / 按 worker 数缩放——接受 N×线性税。
 DEFAULT_RETRIEVAL_BUDGET = 14
-# 辩手有幕1 案卷时：案卷已覆盖底料，只留残搜槽位补漏。原 4 → 2026-07-22 复测：
-# 案卷充分时残搜 3 次几乎全是噪声域名，正文引用几乎全来自案卷 → 校准为 2。
-# 窄硬例外（内部 writer 写入 RunSpec，非 CEO 可配置），不是结构猜档。无案卷路径不动。
+# 辩手有幕1 约定文档时：约定文档已覆盖底料，只留残搜槽位补漏。原 4 → 2026-07-22 复测：
+# 约定文档充分时残搜 3 次几乎全是噪声域名，正文引用几乎全来自约定文档 → 校准为 2。
+# 窄硬例外（内部 writer 写入 RunSpec，非 CEO 可配置），不是结构猜档。无约定文档路径不动。
 DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER = 2
 
 # 同轮超订缓解：剩余槽位 ≤ 此值时经 reflection 注入提前告知，避免当轮 fan-out 超订被挡回。
@@ -79,7 +79,7 @@ def default_retrieval_budget(spec: RunSpec, *, complexity_hint: str = "standard"
     """Structured default — unified single value for all ordinary workers.
 
     Always :data:`DEFAULT_RETRIEVAL_BUDGET`（14）. ``form`` / role 不参与分档。
-    辩手有案卷残搜 2 由辩论内部 writer 在 plan 建成后写入，不经本函数。
+    辩手有约定文档残搜 2 由辩论内部 writer 在 plan 建成后写入，不经本函数。
     ``complexity_hint`` 保留签名兼容，**不再**参与分档。
     """
     del complexity_hint  # API compat only; no tiering
@@ -131,7 +131,7 @@ def apply_retrieval_budgets_to_specs(
 def _apply_one(
     spec: RunSpec, *, valid_tools: set[str] | None, complexity_hint: str = "standard"
 ) -> None:
-    # 额度只来自结构化默认；CEO/task 字段不再写入。内部 writer（辩手有案卷）在
+    # 额度只来自结构化默认；CEO/task 字段不再写入。内部 writer（辩手有约定文档）在
     # apply 之后补写 RunSpec.retrieval_budget，故此处仅填 None。
     if spec.retrieval_budget is None:
         spec.retrieval_budget = default_retrieval_budget(spec, complexity_hint=complexity_hint)

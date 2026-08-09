@@ -102,7 +102,7 @@ def is_local_search_unreachable(exc: BaseException) -> bool:
     """True only for local-primary *unreachable / not-ready* failures.
 
     Connect / network / breaker-style ``EgressError`` qualify (the same class that
-    surfaces as「本机搜索服务未就绪」/ 熔断). HTTP 4xx (e.g. 403), empty SERP
+    surfaces as「本地搜索服务不可用」/ 熔断). HTTP 4xx (e.g. 403), empty SERP
     success, and read timeouts do **not** — those must not trigger cloud fallback.
     """
     if isinstance(exc, httpx.ConnectTimeout):

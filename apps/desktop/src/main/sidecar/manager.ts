@@ -78,6 +78,30 @@ interface ActiveTurn {
 }
 
 /**
+ * Electron：`isDestroyed()` 通过后到 `send` 仍可能竞态抛「已销毁」。
+ * 仅识别这类竞态；其它真实错误原样上抛，避免被吞成静默丢事件。
+ */
+export function isDestroyedWebContentsError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /has been destroyed/i.test(msg) ||
+    /render frame was disposed/i.test(msg) ||
+    /webframemain was disposed/i.test(msg)
+  );
+}
+
+/** 流式/状态热路径：先查 isDestroyed，再 try/send，只吞销毁竞态。 */
+function safeWcSend(wc: WebContents, channel: string, payload: unknown): void {
+  if (wc.isDestroyed()) return;
+  try {
+    wc.send(channel, payload);
+  } catch (err) {
+    if (isDestroyedWebContentsError(err)) return;
+    throw err;
+  }
+}
+
+/**
  * 管理每个授权根的 sidecar：懒拉起 + 初始化、回合事件路由、cancel/respond、退出清理。
  *
  * `spawnFn` 可注入（默认真实 `spawnTransport`），便于单测用假传输驱动整条链路。
@@ -209,10 +233,20 @@ export class SidecarManager {
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
         ...(req.inference ? { inference: req.inference } : {}),
+        // folders 窄票（定案甲）：与 inference 并列按回合重送，供云名册工具鉴权。
+        ...(req.foldersAuth ? { foldersAuth: req.foldersAuth } : {}),
+        // account 窄票（定案 R3a）：与 folders 并列按回合重送，供搜/读云对话日志。
+        ...(req.accountAuth ? { accountAuth: req.accountAuth } : {}),
         // Same for DesktopBrowserBridge (B-Arch): refresh every turn; null = 未装配.
         browserBridge: currentBrowserBridge(),
         // 会话权限轴按回合随送：中途切换后下一回合即生效。
         ...(req.permissionAxes ? { permissionAxes: req.permissionAxes } : {}),
+        // 项目归属：键始终下发（含 null=裸聊），使引擎优先用 params、旧桌面缺键才查库。
+        folderId: req.folderId ?? null,
+        // 项目本地绑定（FolderMeta 同形）：进 RPC 供拼 workspace key；与 rootId/subpath
+        // 寻址分离（后者只经 ensure，不进本 params）。
+        localRootId: req.localRootId ?? null,
+        localSubpath: req.localSubpath ?? null,
       });
       this.emitSyntheticTerminalIfNeeded(req.turnId, "message_end");
       return result as SidecarTurnResult;
@@ -343,7 +377,13 @@ export class SidecarManager {
           mode: r.mode === "organize" ? "organize" : "readonly",
         }));
       const result = await entry.client.request("resume", {
-        ...buildSidecarResumeRpcParams(req, inference, currentBrowserBridge()),
+        ...buildSidecarResumeRpcParams(
+          req,
+          inference,
+          currentBrowserBridge(),
+          req.foldersAuth,
+          req.accountAuth,
+        ),
         ...(externalMounts.length > 0 ? { externalMounts } : {}),
       });
       this.emitSyntheticTerminalIfNeeded(req.messageId, "message_end");
@@ -562,7 +602,7 @@ export class SidecarManager {
 
     // During attach's zero-await window: buffer only — snapshot owns those events.
     if (turn.attaching || turn.wc.isDestroyed()) return;
-    turn.wc.send(SIDECAR_CHANNELS.event, {
+    safeWcSend(turn.wc, SIDECAR_CHANNELS.event, {
       conversationId: turn.conversationId,
       turnId,
       event: buffered,
@@ -599,13 +639,11 @@ export class SidecarManager {
           : {},
     };
     turn.buffer.record(event);
-    if (!turn.wc.isDestroyed()) {
-      turn.wc.send(SIDECAR_CHANNELS.event, {
-        conversationId: turn.conversationId,
-        turnId,
-        event,
-      });
-    }
+    safeWcSend(turn.wc, SIDECAR_CHANNELS.event, {
+      conversationId: turn.conversationId,
+      turnId,
+      event,
+    });
   }
 
   private findLiveTurn(
@@ -621,9 +659,7 @@ export class SidecarManager {
 
   private pushStatus(push: SidecarStatusPush): void {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.webContents.isDestroyed()) {
-        win.webContents.send(SIDECAR_CHANNELS.status, push);
-      }
+      safeWcSend(win.webContents, SIDECAR_CHANNELS.status, push);
     }
   }
 }

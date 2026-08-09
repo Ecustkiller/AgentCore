@@ -42,6 +42,14 @@ class AuthSettings(BaseModel):
     inference_token_mint_max: int = 10
     inference_token_mint_window_seconds: int = 60
 
+    # Same TTL posture as inference: sidecar roster / desk-binding calls use a
+    # folders narrow JWT (type=folders), reminted per local turn.
+    folders_token_expire_minutes: int = 720
+
+    # Same TTL posture: sidecar conversation-log tools (search/read) use an
+    # account narrow JWT (type=account), reminted per local turn.
+    account_token_expire_minutes: int = 720
+
     cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cookie_path_prefix: str = ""

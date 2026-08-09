@@ -457,6 +457,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "tool_use_progress":
       case "coordination_wait":
+      case "workspace_lock_wait":
       case "turn_queued":
       case "turn_steer_accepted":
       case "turn_queue_cancelled":

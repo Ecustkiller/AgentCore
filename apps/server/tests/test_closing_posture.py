@@ -695,23 +695,26 @@ def test_b1_browser_claim_requires_tool_success():
     clear_b1_closing_latches()
 
 
-def test_b1_zero_write_forbids_disk_landing_claim_no_banner():
-    """ceo-claim：无 files 对账禁称已落盘；不恢复【落盘说明】横幅."""
+def test_b1_zero_write_landing_hard_rework_withdrawn():
+    """2026-08-09 定案 B：零写落盘声称扫词硬回炉已撤；检测器仍可用；不恢复横幅."""
     from agentcore.runtime.closing_posture import (
         claims_disk_landing,
         clear_b1_closing_latches,
         closing_honesty_rework,
         enforce_ceo_mutation_honesty,
     )
+    from agentcore.runtime.closing_posture.ceo_mutation import _zero_write_landing_rework
 
     clear_b1_closing_latches()
     claim = "评审报告已落盘 `AgentCore/文档/reviews/v3.md`，验证通过。"
     assert claims_disk_landing(claim)
-    rework = closing_honesty_rework(claim)
-    assert rework is not None
-    assert "落盘" in rework
+    assert _zero_write_landing_rework(claim) is None
+    # 无对账卡：不再因落盘词硬回炉（亦非 A∪C）。
+    assert closing_honesty_rework(claim) is None
     assert "【落盘说明】" not in enforce_ceo_mutation_honesty(claim)
-    assert "【落盘说明】" not in (rework or "")
+    # 解释规则时的禁语举例不得再清气泡。
+    meta = "时序诚实：没落盘成功之前，不宣称「已改好」。"
+    assert closing_honesty_rework(meta) is None
     clear_b1_closing_latches()
 
 

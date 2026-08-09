@@ -12,7 +12,7 @@ DEBATE_OUTPUT_LIMIT = 16000
 # 真纯丙·H4：已退役 DEBATER_TOOLS / WITNESS_TOOLS 系统只读窄名单。
 # 辩手/证人默认与全开工具面一致（仍受写盘授权 / write_scope）；只读纪律靠角色提示自觉。
 
-# 庭前无 pack / pack 非 full 时：发言期对称有界检索（复用案卷残搜槽位，不平行发明第二套）。
+# 庭前无 pack / pack 非 full 时：发言期对称有界检索（复用约定文档残搜槽位，不平行发明第二套）。
 # 庭前调查员舰队已删；此常量只驱动辩手 debater_retrieval_budgets。
 BOUNDED_GAP_FILL_RETRIEVAL_BUDGET = DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER
 

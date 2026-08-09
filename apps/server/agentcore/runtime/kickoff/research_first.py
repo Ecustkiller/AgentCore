@@ -32,7 +32,7 @@ def should_offer_research_first(
 ) -> bool:
     """开工卡是否提供「先多视角调研再辩」——定案退役后恒 False。
 
-    旧判据（命题卡 / MLR 成功 / 案卷产物并集消假阳性）保留为
+    旧判据（命题卡 / MLR 成功 / 约定文档产物并集消假阳性）保留为
     :func:`has_research_chain_evidence` 供宿主挂接探测。
     """
     del entries, has_research_artifacts  # 退役：不再点亮按键
@@ -44,7 +44,7 @@ def has_research_chain_evidence(
     *,
     has_research_artifacts: bool = False,
 ) -> bool:
-    """是否已有调研链证据（命题卡 / MLR / 案卷）——原 offer 判据的逆命题素材。"""
+    """是否已有调研链证据（命题卡 / MLR / 约定文档）——原 offer 判据的逆命题素材。"""
     if select_motion_card_from_journal(entries) is not None:
         return True
     if _has_successful_multi_lens_research(entries):

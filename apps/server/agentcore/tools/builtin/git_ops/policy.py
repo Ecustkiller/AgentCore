@@ -175,139 +175,105 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
                 "create_pr",
             ],
             "description": (
-                "要执行的 git 子命令。"
-                "只读 status/diff/log/fetch/show/blame：需工作区根 `.git`（不扫嵌套、不上溯）；"
-                "无仓 → success + metadata.code=no_repo；"
-                "有 `.git` 但 probe 超时/损坏 → 硬失败（timeout/error，禁止当无仓）。"
-                "stash/tag/remote 的 action=list 只读免批；push/pop、create、add 须审批。"
-                "写入 add/commit/branch/checkout/push/pull/merge/rebase/cherry-pick/create_pr："
-                "无仓仍硬错；需用户授权；CEO 路径拒写（须 delegate）。"
-                "例外 init_baseline：无仓时初始化并首提交（一键基线；CEO 可调、仍需授权）；"
-                "已有仓且工作区脏 → 不代 commit（metadata.code=dirty_skip）。"
-                "pull 固定 --ff-only；merge/rebase/cherry-pick 冲突诚实失败，不自动 resolve。"
-                "push / create_pr 需用户授权（恒确认）；create_pr 仅 GitHub（API，非自由 shell）；"
-                "force / 保护分支仍拒；reset/clean 硬禁；无凭据会失败。"
+                "子命令。写入与 stash push/pop、tag create、remote add 须审批；"
+                "list/只读免批。无仓只读→no_repo；写硬错（init_baseline 除外）。"
+                "CEO 拒写须 delegate（init_baseline 例外）。"
             ),
         },
         "paths": {
             "type": "array",
             "items": {"type": "string"},
             "description": (
-                "status/diff/add/show/blame 的路径过滤（工作区相对路径）。"
-                "add 时必填；blame 时必填且仅一个文件。"
-                "大仓 status/diff 请尽量收窄 paths，避免全树扫描超时。"
+                "status/diff/add/show/blame 路径过滤；add/blame 必填（blame 仅一文件）。"
+                "大仓宜收窄。"
             ),
         },
         "staged": {
             "type": "boolean",
-            "description": "diff 时只看暂存区（等同 git diff --cached）。默认 false。",
+            "description": "diff 只看暂存区（--cached）。默认 false。",
             "default": False,
         },
         "include_untracked": {
             "type": "boolean",
-            "description": (
-                "status 是否包含未跟踪文件。默认 false（--untracked-files=no），"
-                "大仓更快；需要看未跟踪时显式传 true。"
-            ),
+            "description": "status 含未跟踪；默认 false（大仓更快）。",
             "default": False,
         },
         "max_count": {
             "type": "integer",
-            "description": "log 最多返回条数（默认 20，上限 100）。",
+            "description": "log 条数（默认 20，上限 100）。",
             "default": 20,
         },
         "oneline": {
             "type": "boolean",
-            "description": "log 使用 --oneline 格式。默认 true。",
+            "description": "log 用 --oneline。默认 true。",
             "default": True,
         },
         "message": {
             "type": "string",
-            "description": (
-                "commit 的提交说明（subcommand=commit 时必填）；"
-                "stash push 可选说明。"
-            ),
+            "description": "commit 必填说明；stash push 可选。",
         },
         "branch": {
             "type": "string",
-            "description": "branch/checkout 的分支名（subcommand=branch 或 checkout 时必填）。",
+            "description": "branch/checkout 分支名（二者必填）。",
         },
         "create": {
             "type": "boolean",
-            "description": "checkout 时创建新分支（-b）。默认 false。",
+            "description": "checkout 时 -b 建分支。默认 false。",
             "default": False,
         },
         "remote": {
             "type": "string",
-            "description": (
-                "fetch/pull/push 的远程名（默认 origin）。仅远程名，禁止 refspec / 选项形态。"
-            ),
+            "description": "fetch/pull/push 远程名（默认 origin；禁 refspec/选项）。",
             "default": "origin",
         },
         "set_upstream": {
             "type": "boolean",
-            "description": "push 时设置上游跟踪（--set-upstream）。默认 false。",
+            "description": "push 设上游（--set-upstream）。默认 false。",
             "default": False,
         },
         "object": {
             "type": "string",
-            "description": (
-                "show 的对象（提交 / 树 / blob，默认 HEAD）。禁止以 '-' 开头的选项形态。"
-            ),
+            "description": "show 对象（默认 HEAD；禁 '-' 开头）。",
             "default": "HEAD",
         },
         "action": {
             "type": "string",
             "enum": ["list", "push", "pop", "create", "add"],
             "description": (
-                "stash：list（只读免批）/ push / pop（须审批）；禁止 drop/clear。"
-                "tag：list（只读）/ create（须审批）；禁止删 tag。"
-                "remote：list（只读，等同 -v）/ add（须审批）；禁止 remove。"
-                "默认 list。"
+                "stash：list|push|pop（禁 drop/clear）；"
+                "tag：list|create（禁删）；"
+                "remote：list|add（禁 remove）。默认 list。"
             ),
             "default": "list",
         },
         "ref": {
             "type": "string",
-            "description": (
-                "merge / rebase / cherry-pick 的目标引用（分支名或 commit SHA）。"
-                "禁止以 '-' 开头的选项形态。"
-            ),
+            "description": "merge/rebase/cherry-pick 目标引用（禁 '-' 开头）。",
         },
         "name": {
             "type": "string",
-            "description": (
-                "tag create 的标签名；remote add 的远程名。"
-                "禁止以 '-' 开头。"
-            ),
+            "description": "tag create 标签名；remote add 远程名（禁 '-'）。",
         },
         "url": {
             "type": "string",
-            "description": (
-                "remote add 的 URL 或本地路径（http(s)/ssh/git/file 或路径）。"
-                "禁止以 '-' 开头的选项形态。"
-            ),
+            "description": "remote add 的 URL/路径（禁 '-' 开头）。",
         },
         "title": {
             "type": "string",
-            "description": "create_pr 的 PR 标题（必填）。",
+            "description": "create_pr 标题（必填）。",
         },
         "body": {
             "type": "string",
-            "description": "create_pr 的 PR 正文（可选，默认空）。",
+            "description": "create_pr 正文（可选）。",
             "default": "",
         },
         "base": {
             "type": "string",
-            "description": (
-                "create_pr 的目标分支（可选；默认仓库 default_branch，如 main）。"
-            ),
+            "description": "create_pr 目标分支（可选；默认 default_branch）。",
         },
         "head": {
             "type": "string",
-            "description": (
-                "create_pr 的源分支（可选；默认当前分支）。须已推到 GitHub remote。"
-            ),
+            "description": "create_pr 源分支（可选；默认当前；须已推远程）。",
         },
     },
     "required": ["subcommand"],

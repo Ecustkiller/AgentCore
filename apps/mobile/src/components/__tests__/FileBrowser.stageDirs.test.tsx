@@ -9,7 +9,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 describe("FileBrowser stage dir badges", () => {
-  it("约定案卷目录显示徽章，普通目录零噪音", async () => {
+  it("约定约定文档目录显示徽章，普通目录零噪音", async () => {
     const source = {
       list: async () => [
         { path: "AgentCore", is_dir: true },
@@ -33,7 +33,7 @@ describe("FileBrowser stage dir badges", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByText("调研案卷 · 2 件")).toBeTruthy();
+      expect(screen.getByText("调研约定文档 · 2 件")).toBeTruthy();
       expect(screen.getByText("辩论产物 · 1 件")).toBeTruthy();
     });
     expect(screen.queryByText(/src.*件/)).toBeNull();

@@ -200,7 +200,7 @@ function FileRow({
             opensFullPreview
               ? `打开完整预览 ${artifact.path}`
               : stageLabel
-                ? `在文件页查看案卷 ${artifact.path}`
+                ? `在文件页查看约定文档 ${artifact.path}`
                 : `在工作区预览 ${artifact.path}`
           }
           className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"

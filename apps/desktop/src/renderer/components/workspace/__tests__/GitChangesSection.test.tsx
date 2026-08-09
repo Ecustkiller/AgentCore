@@ -5,6 +5,7 @@ import {
   primaryStatusChar,
   shortDirLabel,
   statusCharClass,
+  statusSummaryParts,
 } from "@/components/workspace/GitChangesSection";
 import { describe, expect, it } from "vitest";
 
@@ -57,5 +58,21 @@ describe("GitChangesSection status helpers", () => {
     expect(shortDirLabel("apps")).toBe("apps");
     expect(shortDirLabel("apps/desktop")).toBe("apps/desktop");
     expect(shortDirLabel("apps/desktop/src/renderer")).toBe("src/renderer");
+  });
+
+  it("statusSummaryParts aggregates by primary letter in SCM order", () => {
+    expect(
+      statusSummaryParts([
+        { path: "a.ts", code: " M" },
+        { path: "b.ts", code: "M " },
+        { path: "c.ts", code: "??" },
+        { path: "d.ts", code: " D" },
+        { path: "e.ts", code: "??" },
+      ]),
+    ).toEqual([
+      { ch: "M", n: 2 },
+      { ch: "D", n: 1 },
+      { ch: "?", n: 2 },
+    ]);
   });
 });

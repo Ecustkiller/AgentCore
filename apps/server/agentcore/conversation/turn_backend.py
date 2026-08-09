@@ -135,4 +135,18 @@ async def build_turn_backend(
     kick = getattr(backend, "start_code_index_maintenance", None)
     if callable(kick):
         kick()
+    # A′ write-lock short waits: emit workspace_lock_wait so desktop never fakes Thinking…
+    bind_wait = getattr(backend, "set_lock_waiting_hook", None)
+    if callable(bind_wait):
+
+        def _on_lock_waiting(waiting: bool) -> None:
+            if sink._closed:
+                return
+            from agentcore.runtime.events import workspace_lock_wait
+
+            sink.emit(
+                workspace_lock_wait(conversation_id=conversation_id, waiting=waiting)
+            )
+
+        bind_wait(_on_lock_waiting)
     return backend

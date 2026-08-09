@@ -33,7 +33,7 @@ export function formatActChain(
   return acts.map((a) => a.title?.trim() || a.act_id).join(" → ");
 }
 
-/** 案卷引用条来源的诚实短标签。 */
+/** 约定文档引用条来源的诚实短标签。 */
 export function dossierSourceLabel(
   sources: CollaborationDossierRef["sources"] | undefined,
 ): string {
@@ -43,5 +43,5 @@ export function dossierSourceLabel(
   if (hasInject && hasRead) return "开赛注入 · 已读";
   if (hasInject) return "开赛注入";
   if (hasRead) return "会话内读取";
-  return "案卷引用";
+  return "约定文档引用";
 }

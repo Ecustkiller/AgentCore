@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -59,7 +60,7 @@ export function HorizontalTabStrip({
   return (
     <nav
       className={cn(
-        "relative flex min-w-0 items-center gap-0.5 self-stretch",
+        "relative flex min-h-0 min-w-0 items-center gap-0.5 self-stretch overflow-hidden",
         className,
       )}
       aria-label={ariaLabel}
@@ -76,7 +77,12 @@ export function HorizontalTabStrip({
         </IconButton>
       ) : null}
 
-      <div className="relative flex min-w-0 flex-1 items-center self-stretch">
+      {/*
+        min-h-0 on the flex chain: overflow-x scrollbar/min-content height must
+        not inflate this box (flex default min-height:auto) or tabs sit high
+        with empty space below inside h-* headers.
+      */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 items-center self-stretch overflow-hidden">
         {canScrollLeft ? (
           <div
             aria-hidden
@@ -89,10 +95,9 @@ export function HorizontalTabStrip({
             className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-card to-transparent"
           />
         ) : null}
-        {/* Hide scrollbar gutter: overflow-x alone can grow this box and shift tabs up. */}
         <div
           ref={scrollRef}
-          className="min-w-0 w-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0"
+          className="min-h-0 w-full max-h-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0"
         >
           <div
             ref={contentRef}
@@ -129,6 +134,7 @@ type DragSession = {
   dragging: boolean;
   overId: string | null;
   place: ReorderPlace;
+  el: HTMLElement;
 };
 
 export interface UseSortableTabIdsOptions {
@@ -145,6 +151,10 @@ export interface SortableTabItemProps
 /**
  * Pointer-based tab reorder (capture after threshold; not HTML5 DnD).
  * Spread `getItemProps(id)` onto each tab root; mark close/etc with `data-no-tab-drag`.
+ *
+ * Lifecycle: idle → armed (document listeners, no capture) → dragging
+ * (capture + suppress trailing click) → idle. Early capture would retarget
+ * `click` to the sortable root and break child Button `onClick` activation.
  */
 export function useSortableTabIds(
   ids: readonly string[],
@@ -157,17 +167,27 @@ export function useSortableTabIds(
   const sessionRef = useRef<DragSession | null>(null);
   /** Survives past pointerup so the trailing click does not activate the tab. */
   const suppressClickRef = useRef(false);
+  const detachDocListenersRef = useRef<(() => void) | null>(null);
   const idsRef = useRef(ids);
   idsRef.current = ids;
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
+  const thresholdPxRef = useRef(thresholdPx);
+  thresholdPxRef.current = thresholdPx;
+
+  const detachDocListeners = useCallback(() => {
+    detachDocListenersRef.current?.();
+    detachDocListenersRef.current = null;
+  }, []);
 
   const endSession = useCallback(
-    (el: HTMLElement, pointerId: number, commit: boolean) => {
+    (pointerId: number, commit: boolean) => {
       const session = sessionRef.current;
       if (!session || session.pointerId !== pointerId) return;
+      const { el } = session;
       sessionRef.current = null;
       setDraggingId(null);
+      detachDocListeners();
       try {
         if (el.hasPointerCapture?.(pointerId)) {
           el.releasePointerCapture(pointerId);
@@ -193,7 +213,7 @@ export function useSortableTabIds(
         if (!same) onReorderRef.current(next);
       }
     },
-    [],
+    [detachDocListeners],
   );
 
   const resolveOver = useCallback(
@@ -215,33 +235,16 @@ export function useSortableTabIds(
     [],
   );
 
-  const getItemProps = useCallback(
-    (id: string): SortableTabItemProps => {
-      const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
-        if (disabled || e.button !== 0) return;
-        const target = e.target as Element | null;
-        if (target?.closest?.(`[${NO_TAB_DRAG_ATTR}]`)) return;
-        suppressClickRef.current = false;
-        sessionRef.current = {
-          pointerId: e.pointerId,
-          fromId: id,
-          startX: e.clientX,
-          startY: e.clientY,
-          dragging: false,
-          overId: null,
-          place: "after",
-        };
-        // Capture early so moves past the threshold are not lost if the
-        // pointer leaves the tab before dragging starts.
-        e.currentTarget.setPointerCapture?.(e.pointerId);
-      };
+  const attachDocListeners = useCallback(
+    (el: HTMLElement, fromId: string, pointerId: number) => {
+      detachDocListeners();
 
-      const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+      const onMove = (e: PointerEvent) => {
         const session = sessionRef.current;
         if (
           !session ||
           session.pointerId !== e.pointerId ||
-          session.fromId !== id
+          session.fromId !== fromId
         ) {
           return;
         }
@@ -250,25 +253,80 @@ export function useSortableTabIds(
             e.clientX - session.startX,
             e.clientY - session.startY,
           );
-          if (dist < thresholdPx) return;
+          if (dist < thresholdPxRef.current) return;
           session.dragging = true;
           suppressClickRef.current = true;
-          setDraggingId(id);
+          setDraggingId(fromId);
+          try {
+            el.setPointerCapture?.(e.pointerId);
+          } catch {
+            /* capture unsupported / pointer already up */
+          }
         }
-        const hit = resolveOver(e.clientX, e.clientY, id);
+        const hit = resolveOver(e.clientX, e.clientY, fromId);
         if (hit) {
           session.overId = hit.overId;
           session.place = hit.place;
         }
       };
 
-      const onPointerUp = (e: ReactPointerEvent<HTMLElement>) => {
-        endSession(e.currentTarget, e.pointerId, true);
+      const onUp = (e: PointerEvent) => {
+        if (e.pointerId !== pointerId) return;
+        endSession(pointerId, true);
       };
 
-      const onPointerCancel = (e: ReactPointerEvent<HTMLElement>) => {
+      const onCancel = (e: PointerEvent) => {
+        if (e.pointerId !== pointerId) return;
         suppressClickRef.current = false;
-        endSession(e.currentTarget, e.pointerId, false);
+        endSession(pointerId, false);
+      };
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+      detachDocListenersRef.current = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onCancel);
+      };
+    },
+    [detachDocListeners, endSession, resolveOver],
+  );
+
+  useEffect(() => {
+    return () => {
+      const session = sessionRef.current;
+      if (session) {
+        endSession(session.pointerId, false);
+      } else {
+        detachDocListeners();
+      }
+    };
+  }, [detachDocListeners, endSession]);
+
+  const getItemProps = useCallback(
+    (id: string): SortableTabItemProps => {
+      const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+        if (disabled || e.button !== 0) return;
+        const target = e.target as Element | null;
+        if (target?.closest?.(`[${NO_TAB_DRAG_ATTR}]`)) return;
+        if (sessionRef.current) {
+          endSession(sessionRef.current.pointerId, false);
+        }
+        suppressClickRef.current = false;
+        const el = e.currentTarget;
+        sessionRef.current = {
+          pointerId: e.pointerId,
+          fromId: id,
+          startX: e.clientX,
+          startY: e.clientY,
+          dragging: false,
+          overId: null,
+          place: "after",
+          el,
+        };
+        // Armed only — capture after threshold so child Button clicks still fire.
+        attachDocListeners(el, id, e.pointerId);
       };
 
       const onClickCapture = (e: ReactMouseEvent<HTMLElement>) => {
@@ -283,9 +341,6 @@ export function useSortableTabIds(
         "data-tab-id": id,
         ...(draggingId === id ? { "data-dragging": "true" } : {}),
         onPointerDown,
-        onPointerMove,
-        onPointerUp,
-        onPointerCancel,
         onClickCapture,
         className: cn(
           "touch-none select-none",
@@ -297,7 +352,7 @@ export function useSortableTabIds(
         ),
       };
     },
-    [disabled, draggingId, endSession, resolveOver, thresholdPx],
+    [attachDocListeners, disabled, draggingId, endSession],
   );
 
   return { getItemProps, draggingId };
@@ -321,9 +376,6 @@ export function SortableTab({
   const {
     className: itemClassName,
     onPointerDown,
-    onPointerMove,
-    onPointerUp,
-    onPointerCancel,
     onClickCapture,
     ...itemRest
   } = item;
@@ -334,18 +386,6 @@ export function SortableTab({
       onPointerDown={(e) => {
         onPointerDown?.(e);
         rest.onPointerDown?.(e);
-      }}
-      onPointerMove={(e) => {
-        onPointerMove?.(e);
-        rest.onPointerMove?.(e);
-      }}
-      onPointerUp={(e) => {
-        onPointerUp?.(e);
-        rest.onPointerUp?.(e);
-      }}
-      onPointerCancel={(e) => {
-        onPointerCancel?.(e);
-        rest.onPointerCancel?.(e);
       }}
       onClickCapture={(e) => {
         onClickCapture?.(e);

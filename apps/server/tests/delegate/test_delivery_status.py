@@ -585,7 +585,7 @@ def test_artifact_dir_path_hint_only_is_notes_not_partial():
             delivery_gaps=[
                 {
                     "description": (
-                        "产物未写入案卷目录 `docs/research/`"
+                        "产物未写入约定文档目录 `docs/research/`"
                         "（建议落在此目录下，勿写到工作区根）"
                     ),
                     "severity": "warning",
@@ -599,7 +599,7 @@ def test_artifact_dir_path_hint_only_is_notes_not_partial():
     assert payload["state"] == "notes"
     assert payload["gaps"][0]["severity"] == "warning"
     assert payload["gaps"][0]["reason"] == "path_hint"
-    assert "案卷目录" in payload["gaps"][0]["description"]
+    assert "约定文档目录" in payload["gaps"][0]["description"]
     assert "路径建议" in payload["summary"]
     assert payload["delivered_files"] == ["miro-research.md"]
     assert payload["actions"] == []
@@ -615,7 +615,7 @@ def test_artifact_dir_path_hint_from_warnings_alone_is_notes():
             files_touched=["notes.md"],
             file_acceptance=_accepted("notes.md"),
             warnings=[
-                "产物未写入案卷目录 `docs/research/`（建议落在此目录下，勿写到工作区根）"
+                "产物未写入约定文档目录 `docs/research/`（建议落在此目录下，勿写到工作区根）"
             ],
         )
     }

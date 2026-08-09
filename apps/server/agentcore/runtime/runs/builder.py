@@ -290,9 +290,9 @@ def build_run_plan(
     Returned plan still contains **only** the new batch nodes; pure new builds leave
     this ``None`` (behavior unchanged).
 
-    ``code_verified``：**非 kind**——kw 名历史遗留；修码等批跳过案卷
+    ``code_verified``：**非 kind**——kw 名历史遗留；修码等批跳过约定文档
     ``artifact_dir`` 默认（S3：由 playbook ``repair_code`` 等驱动，不再绑 criteria
-    kind）。显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍优先。未改名以免牵动
+    kind）。显式 ``artifact_dir`` / 约定文档路径 ``artifacts`` 仍优先。未改名以免牵动
     builder/artifact_dir 全链。
 
     ``default_target_folder_id``: nested sub-team inheritance (§4.2b·3) — when a
@@ -857,7 +857,7 @@ def _inline_spec(
         context_inject_files=_str_list(item.get("context_inject_files")),
         require_upstream=bool(item.get("require_upstream")),
         # 检索额度由 apply_retrieval_budgets 填统一默认；CEO/task 不可配置。
-        # 辩手有案卷等内部窄例外在 build 后补写 RunSpec.retrieval_budget。
+        # 辩手有约定文档等内部窄例外在 build 后补写 RunSpec.retrieval_budget。
         retrieval_budget=None,
         search_policy=_parse_search_policy(item.get("search_policy")),
         verify_policy=_parse_verify_policy(item.get("verify_policy")),

@@ -134,15 +134,9 @@ def _error_target_host(e: BaseException, url: str | None) -> str | None:
 
 
 # Connect failures to loopback / configured SearXNG — not「出网受限」(that copy is for
-# public egress). Compose hint matches .env.example SEARXNG_URL default port.
-_LOCAL_SEARCH_CONNECT = (
-    "本机搜索服务未就绪（无法连接 SearXNG）；"
-    "请检查 docker compose 是否已启动 searxng 及端口映射（默认 18888）"
-)
-_LOCAL_SEARCH_CONNECT_TIMEOUT = (
-    "本机搜索服务未就绪（连接 SearXNG 超时）；"
-    "请检查 docker compose 是否已启动 searxng 及端口映射（默认 18888）"
-)
+# public egress). User/model-facing: no docker compose teaching; boot logs keep ops hints.
+_LOCAL_SEARCH_CONNECT = "本地搜索服务不可用，请稍后重试"
+_LOCAL_SEARCH_CONNECT_TIMEOUT = "本地搜索服务暂时不可用，请稍后重试"
 
 
 def _is_ssl_error(e: BaseException) -> bool:
@@ -178,7 +172,7 @@ def describe_net_error(
 
     ``url`` / ``e.request`` / ``local_service``: connect-class failures aimed at
     loopback (or an explicitly local service such as configured SearXNG) get
-    「本机搜索服务未就绪」instead of the public「出网受限」copy. Does not change
+    「本地搜索服务不可用」instead of the public「出网受限」copy. Does not change
     SSRF policy — classification only.
     """
     if isinstance(e, EgressError):

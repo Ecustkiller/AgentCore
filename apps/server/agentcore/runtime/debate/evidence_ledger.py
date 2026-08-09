@@ -32,7 +32,7 @@ _ID_IN_NOTE_RE = re.compile(r"#e(\d+)\b")
 # 底料中 CEO 回合引用：不用 \b（中文邻接时 \b 失效，会漏掉「#r2与」这类）。
 _CEO_R_REF_RE = re.compile(r"#r(\d+)(?!\d)")
 
-# 辩论 wire / 对外快照字段（与 EvidenceLedgerEntry 对齐；案卷锚 additive）。
+# 辩论 wire / 对外快照字段（与 EvidenceLedgerEntry 对齐；约定文档锚 additive）。
 _DEBATE_WIRE_KEYS = (
     "id",
     "url",
@@ -172,7 +172,7 @@ class EvidenceLedger:
     ) -> str:
         """登记一条来源并立即提交上 wire；同键去重返回既有 id。返回 ``#eN``。
 
-        ``side_key`` → 共享核 ``registrant`` 别名。案卷锚字段 additive（空串=无）。
+        ``side_key`` → 共享核 ``registrant`` 别名。约定文档锚字段 additive（空串=无）。
         """
         eid = self._core.register_sync(
             url=url,
@@ -389,7 +389,7 @@ def preregister_turn_research_entries(
     ledger: EvidenceLedger,
     turn_entries: Sequence[Mapping[str, Any]] | None,
 ) -> list[str]:
-    """CEO 回合调研台账 ``#rN`` → 场级 ``#eN``（案卷桥无条件化 · §二之二）。
+    """CEO 回合调研台账 ``#rN`` → 场级 ``#eN``（约定文档桥无条件化 · §二之二）。
 
     无条目 → ``[]``。已映射的 ``origin_id`` 去重。不改写任何正文（正文改写仍走
     :func:`preregister_background`）。
@@ -473,7 +473,7 @@ def preregister_background(ledger: EvidenceLedger, background: str) -> str:
         result = result.replace(old, new)
 
     # CEO 回合台账引用（#rN）随底料注入时，映射登记为场级 #eN 并改写正文。
-    # 与案卷 preregister_research_dossier 同构：注入面不得留下未登记的 #rN。
+    # 与约定文档 preregister_research_dossier 同构：注入面不得留下未登记的 #rN。
     # 抽取不用 citations.extract_ledger_ref_ids（其 \b 在中文邻接会漏号）。
     r_to_e: dict[str, str] = {}
     for rid in _extract_ceo_r_ref_ids(result):

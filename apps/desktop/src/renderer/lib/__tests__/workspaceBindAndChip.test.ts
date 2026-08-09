@@ -10,6 +10,7 @@ import { formatOpenLocalProjectAnswer } from "../openLocalProject";
 import { formatRegisterLocalProjectAnswer } from "../registerLocalProject";
 import {
   formatWorkspaceChipLabel,
+  formatWorkspaceChipTitle,
   resolveEffectiveWorkspace,
 } from "../workspaceEffectiveMode";
 
@@ -156,6 +157,9 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     });
     expect(ws.viaProject).toBe(true);
     expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 本地");
+    expect(formatWorkspaceChipTitle(ws)).toBe(
+      "工作区·本地（文件夹绑定，≠执行路径）",
+    );
   });
 
   it("treats default container root as local when binding is cloud", () => {
@@ -167,6 +171,9 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(ws.isLocal).toBe(true);
     expect(ws.viaContainer).toBe(true);
     expect(formatWorkspaceChipLabel(ws)).toBe("本机草稿");
+    expect(formatWorkspaceChipTitle(ws)).toBe(
+      "本机草稿（文件落本机默认目录，不算项目）",
+    );
   });
 
   it("shows 云端对话 when neither bind nor container is set", () => {
@@ -177,6 +184,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     });
     expect(ws.isLocal).toBe(false);
     expect(formatWorkspaceChipLabel(ws)).toBe("云端对话");
+    expect(formatWorkspaceChipTitle(ws)).toBe("云端对话");
   });
 
   it("labels cloud project as 项目名 · 云端对话", () => {
@@ -195,5 +203,6 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(ws.isLocal).toBe(false);
     expect(ws.viaProject).toBe(true);
     expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 云端对话");
+    expect(formatWorkspaceChipTitle(ws)).toBe("云端对话");
   });
 });

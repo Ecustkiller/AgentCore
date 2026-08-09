@@ -473,12 +473,16 @@ export interface FsApi {
    *
    * 可选顶层 `timeoutMs`（勿塞进 `args`）：主进程墙钟 Promise.race，超时先回
    * `WorkspaceIOError` 活性信封；底层 op 可能继续跑（与渲染 abort 同构）。
+   *
+   * 可选 `correlation`：仅观测用（conversation_id / request_id），对齐服务端
+   * `workspace.op_timeout`；不改调度语义。
    */
   workspaceOp(
     rootId: string,
     op: WorkspaceOpName,
     args: Record<string, unknown>,
     timeoutMs?: number,
+    correlation?: { conversationId?: string; requestId?: string },
   ): Promise<WorkspaceOpResult>;
   /**
    * 聊天内 RunConfirm「本会话都允许」→ 主进程置 session run flag（进程重启清零）。

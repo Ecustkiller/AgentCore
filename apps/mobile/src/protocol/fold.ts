@@ -1117,6 +1117,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "tool_use_progress":
       case "coordination_wait":
+      case "workspace_lock_wait":
       case "turn_queued":
       case "turn_queue_cancelled":
       // 经典软插入 ack（EPHEMERAL）：toast 由 ChatPage 消费；不进 ProjectedTurn。

@@ -1,4 +1,4 @@
-"""辩论消费幕1 research/ 案卷：索引格式 / 工作区探测（零 LLM）。"""
+"""辩论消费幕1 research/ 约定文档：索引格式 / 工作区探测（零 LLM）。"""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ async def test_list_research_missing_dir_is_empty():
 def test_format_research_dossier_index_shape():
     assert format_research_dossier_index([]) == ""
     text = format_research_dossier_index(["AgentCore/文档/research/a.md", "AgentCore/文档/research/b.md"])
-    assert text.startswith("【工作区案卷索引·AgentCore/文档/research/】")
+    assert text.startswith("【工作区约定文档索引·AgentCore/文档/research/】")
     assert "非全文" in text
     assert "file_read" in text
     assert "选读" in text or "勿无差别" in text
@@ -87,5 +87,5 @@ async def test_server_workspace_research_listing(tmp_path):
     assert any(p.endswith("法律透镜报告.md") for p in paths)
     assert any("汇总与命题卡.md" in p for p in paths)
     idx = format_research_dossier_index(paths)
-    assert "【工作区案卷索引·AgentCore/文档/research/】" in idx
+    assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
     assert await workspace_has_research_artifacts(ws) is True

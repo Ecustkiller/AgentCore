@@ -53,7 +53,7 @@ class PretrialResult:
     @property
     def incomplete(self) -> bool:
         # intentional 秒过（fast / evidence_pack / no_pack）不得标 incomplete；
-        # 完整度仍写入 completeness，供发言期预算与案卷标注使用。
+        # 完整度仍写入 completeness，供发言期预算与约定文档标注使用。
         if self.skipped:
             return False
         return self.completeness != "full"

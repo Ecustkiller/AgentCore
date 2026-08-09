@@ -826,10 +826,46 @@ class OpenAICompatibleProvider:
                 body=body,
             )
 
+    @staticmethod
+    def _is_dns_failure(exc: BaseException) -> bool:
+        """True when the transport failure is hostname resolution (not TCP/TLS)."""
+        detail = str(exc).strip().lower()
+        return any(
+            needle in detail
+            for needle in (
+                "name or service not known",
+                "getaddrinfo failed",
+                "nodename nor servname",
+                "temporary failure in name resolution",
+                "errno -2",
+            )
+        )
+
+    def _probe_connect_error(self, exc: httpx.HTTPError) -> LLMError:
+        """User-facing connect error for settings「测试连接」/ model discovery."""
+        if isinstance(exc, httpx.TimeoutException):
+            return LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+        if self._is_dns_failure(exc):
+            return LLMError(
+                f"无法连接 {self._name}：域名无法解析。"
+                "请确认 Base URL 拼写正确，且为公网可达地址"
+                "（公司内网域名通常无法从云端访问）"
+            )
+        return LLMError(
+            f"无法连接 {self._name}：端点不可达，请确认 Base URL 可从公网访问"
+        )
+
     def _network_error_to_llm(self, exc: httpx.HTTPError) -> LLMError:
         """Map transient transport failures to retryable LLM errors."""
         if isinstance(exc, httpx.TimeoutException):
             return LLMTimeoutError("连接上游模型服务超时，请检查网络后重试")
+        if self._is_dns_failure(exc):
+            return upstream_error(
+                "上游域名无法解析；请确认 Base URL 为公网可达地址"
+                "（公司内网域名通常无法从云端访问）",
+                status=502,
+                body=str(exc).strip().encode() or b"dns",
+            )
         detail = str(exc).strip() or type(exc).__name__
         return upstream_error(
             "上游模型服务连接中断，请稍后再试",
@@ -1004,10 +1040,8 @@ class OpenAICompatibleProvider:
         }
         try:
             response = await self._client.post("/chat/completions", json=payload)
-        except httpx.TimeoutException as e:
-            raise LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试") from e
         except httpx.HTTPError as e:
-            raise LLMError(f"无法连接 {self._name}：{e}") from e
+            raise self._probe_connect_error(e) from e
         code = response.status_code
         if code < 300 or code == 429:
             return
@@ -1100,10 +1134,8 @@ class OpenAICompatibleProvider:
         """
         try:
             response = await self._client.get("/models")
-        except httpx.TimeoutException as e:
-            raise LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试") from e
         except httpx.HTTPError as e:
-            raise LLMError(f"无法连接 {self._name}：{e}") from e
+            raise self._probe_connect_error(e) from e
         code = response.status_code
         if code in (401, 403):
             if "/inference/" in self._base_url:

@@ -35,7 +35,7 @@ AgentCore/
 │   ├── 导航.md           always · 仅项目 · 短入口（一句话定位 + 任务路由）✅
 │   └── 主题/<slug>.md    on_demand · consult_memory（单次软顶 5；总数≤memory_max_topic_files）✅
 └── 文档/                 工作区盘 · 永不进 <rules> · 按需 file_read
-    └── 项目/…            厚案卷（探索 pending 不写；闸清后/普通回合）✅
+    └── 项目/…            厚约定文档（探索 pending 不写；闸清后/普通回合）✅
 ```
 
 - 叠加注入：绑定文件夹的对话 = 全局 + 该项目；预算紧张时**全局优先**；项目层无 `偏好.md`。
@@ -43,7 +43,7 @@ AgentCore/
 - 冲突：靠措辞 + 就近相关性；用户硬规则恒胜。
 - `文档/` 与同树旁路 `AgentCore/index/`（code_search；系统噪音）正交：索引管符号检索；导航/主题管叙事路由。勿与 `~/Documents/AgentCore/` 工作区容器混淆。
 - 主题继续 `name=主题/<slug>.md`（非真实嵌套 folder）——有意设计。
-- **约定常量**：`AgentCore/文档/项目/` → 代码 `workspace/stage_dirs.py`（`PROJECT_DOCS_DIR`）；案卷子目录 `research`/`debate`/`reviews` 同文件。
+- **约定常量**：`AgentCore/文档/项目/` → 代码 `workspace/stage_dirs.py`（`PROJECT_DOCS_DIR`）；约定文档子目录 `research`/`debate`/`reviews` 同文件。
 
 → 见代码：`memory/document_store.py`、`memory/migrate_agentcore.py`
 
@@ -92,7 +92,7 @@ AgentCore/
 | 指纹漂移 | 顶层树 + 关键清单指纹相对上次探索写入已变（README / package·锁文件 / pyproject / 顶层目录名等；**不做**纯天数、**不以** commit 为唯一闸） | **不挡**。一期（R2）✅：脏标记 + 软提示「项目结构已变，可点名刷新」。二期（R1）✅：`schedule_explore_refresh` 旁路静默合并更新（无 team_preview、不占当前对话） |
 | 用户点名 | 「先了解 / 重新了解 / 刷新项目记忆」 | **挡**（强制开幕、合并更新；点名硬闸与 pending 同级 ✅） |
 
-**产物谁写（D1）✅**：硬挡 pending 时 worker 可用 `form=files`，但 `write_scope≤explore_memory`（只写 `AgentCore/` 约定记忆/探索笔记；越权在写工具层拒）。画像 / 导航 / 主题收尾仍经 CEO `update_project_profile`（及同族工具）。`文档/项目/` 厚案卷只在探索闸清除后、或普通回合按需落盘——**不**在 pending 探索批内写。R1 旁路亦不经 worker 写用户工程树。**否决**再用禁 `form=files` 代理本约束。
+**产物谁写（D1）✅**：硬挡 pending 时 worker 可用 `form=files`，但 `write_scope≤explore_memory`（只写 `AgentCore/` 约定记忆/探索笔记；越权在写工具层拒）。画像 / 导航 / 主题收尾仍经 CEO `update_project_profile`（及同族工具）。`文档/项目/` 厚约定文档只在探索闸清除后、或普通回合按需落盘——**不**在 pending 探索批内写。R1 旁路亦不经 worker 写用户工程树。**否决**再用禁 `form=files` 代理本约束。
 
 **主题上限（T2）✅**：取消单次硬顶 3；单次探索/更新 **软顶 5**（超额截断+warning）；仓库主题总数仍受 `memory_max_topic_files`（现状 24）约束；多轮探索可累加主题。
 
@@ -136,7 +136,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 | 单层巩固 + 冷却/门槛 | 只抑症状，不解「单场判断持久性」 |
 | 首轮后再补铸标题 | 收益小、二次覆盖复杂 |
 | 照搬 Cursor rules（globs 为主入口） | 大众不手写规则文件；对话产品无 globs 附着物 |
-| 独立 `AgentCore/知识/` + 知识目录注入 | 无独立可注入知识库产品；案卷走 `文档/` + `file_read` |
+| 独立 `AgentCore/知识/` + 知识目录注入 | 无独立可注入知识库产品；约定文档走 `文档/` + `file_read` |
 | 偏好/画像改 on_demand；隐藏点目录替代可见 `AgentCore/` | 规则缺了模型不会主动查；产品心智要可见约定根 |
 | 向量 chunk 自动灌进 prompt | 与「文件随时变」不合；agentic 自取永远新鲜 |
 | 用户可关的记忆/历史查阅总闸（设置页） | 默认常开 + 文件页编辑/清空已够；总闸难懂且历史检索与记忆正交却同页堆开关；定案 A 恒开并删页 |

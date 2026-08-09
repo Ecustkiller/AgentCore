@@ -576,3 +576,41 @@ def test_client_error_message_400_unrelated_still_passthrough():
     body = b'{"error":{"message":"max_tokens too large"}}'
     msg = client_error_message("平台", 400, body)
     assert msg == "平台 max_tokens too large"
+
+
+async def test_probe_maps_dns_failure_to_public_endpoint_copy():
+    def _handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("[Errno -2] Name or service not known")
+
+    provider = await _mock_provider(_handler)
+    with pytest.raises(LLMError) as ei:
+        await provider.probe(model=DEEPSEEK_V4_FLASH)
+    msg = str(ei.value)
+    assert "域名无法解析" in msg
+    assert "公网可达" in msg
+    assert "Errno -2" not in msg
+
+
+async def test_list_models_maps_dns_failure_to_public_endpoint_copy():
+    def _handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("[Errno -2] Name or service not known")
+
+    provider = await _mock_provider(_handler)
+    with pytest.raises(LLMError) as ei:
+        await provider.list_models()
+    msg = str(ei.value)
+    assert "域名无法解析" in msg
+    assert "公网可达" in msg
+
+
+async def test_probe_maps_generic_connect_failure_without_raw_errno():
+    def _handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+    provider = await _mock_provider(_handler)
+    with pytest.raises(LLMError) as ei:
+        await provider.probe(model=DEEPSEEK_V4_FLASH)
+    msg = str(ei.value)
+    assert "端点不可达" in msg
+    assert "公网访问" in msg
+    assert "Connection refused" not in msg

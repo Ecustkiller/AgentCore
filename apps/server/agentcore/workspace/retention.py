@@ -4,6 +4,11 @@
 aged soft-deleted 裸聊 conversations purge ``conv:<id>`` scratch. Project-member
 conversations never own an independent disk root — deleting the row does not
 rmtree the shared project space.
+
+Handoff cloud hosts (§7.6): apply/discard soft-delete immediately; open finished
+jobs are soft-deleted only after ``workspace_retention_days`` from ``finished_at``
+(so Diff stays available in-window — never early-delete on succeed). Physical
+purge then follows the same soft-delete grace as any other conversation.
 """
 
 from __future__ import annotations
@@ -19,7 +24,12 @@ from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.errors import is_schema_error
 from agentcore.db.models import Conversation
-from agentcore.db.repositories import ConversationRepository, FolderRepository
+from agentcore.db.repositories import (
+    ConversationRepository,
+    FolderRepository,
+    HandoffJobRepository,
+)
+from agentcore.workspace.handoff_reclaim import soft_delete_job_host
 from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.snapshots import purge_snapshots
@@ -53,13 +63,45 @@ async def _purge_conversation_space(
         await purge_snapshots(user_id=user_id, folder_id=None, conversation_id=conversation_id)
 
 
+async def _age_open_handoff_hosts(*, before: datetime, limit: int) -> int:
+    """Soft-delete open (unapplied/undiscarded) handoff hosts past the Diff window."""
+    async with async_session_factory() as session:
+        jobs = await HandoffJobRepository(session).list_open_past_retention(
+            before=before, limit=limit
+        )
+    aged = 0
+    for job in jobs:
+        try:
+            if await soft_delete_job_host(
+                user_id=job.user_id, job_conversation_id=job.job_conversation_id
+            ):
+                aged += 1
+                logger.info(
+                    "retention.handoff_host_aged",
+                    job_id=job.id,
+                    job_conversation_id=job.job_conversation_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "retention.handoff_host_age_failed",
+                job_id=job.id,
+                error=str(e),
+            )
+    return aged
+
+
 async def run_retention_sweep() -> dict[str, int]:
     """Purge soft-deleted folders/conversations past the retention period once."""
     if not settings.workspace_retention_enabled:
-        return {"folders": 0, "conversations": 0}
+        return {"folders": 0, "conversations": 0, "handoff_hosts_aged": 0}
 
     before = datetime.now() - timedelta(days=settings.workspace_retention_days)
     limit = settings.workspace_retention_batch_limit
+
+    # Open handoff hosts first: soft-delete so the conversation sweep below (or
+    # a later pass) can hard-purge after the usual grace. Status stays
+    # succeeded/failed — aging ≠ user discard; Diff may still work until purge.
+    handoff_aged = await _age_open_handoff_hosts(before=before, limit=limit)
 
     async with async_session_factory() as session:
         folders = await FolderRepository(session).list_purgeable(before=before, limit=limit)
@@ -105,7 +147,11 @@ async def run_retention_sweep() -> dict[str, int]:
             await ConversationRepository(session).hard_delete(conv.id)
         purged_convs += 1
 
-    return {"folders": purged_folders, "conversations": purged_convs}
+    return {
+        "folders": purged_folders,
+        "conversations": purged_convs,
+        "handoff_hosts_aged": handoff_aged,
+    }
 
 
 async def retention_loop() -> None:
@@ -114,7 +160,7 @@ async def retention_loop() -> None:
     while True:
         try:
             result = await run_retention_sweep()
-            if result["folders"] or result["conversations"]:
+            if result["folders"] or result["conversations"] or result["handoff_hosts_aged"]:
                 logger.info("retention.sweep_purged", **result)
         except asyncio.CancelledError:
             raise

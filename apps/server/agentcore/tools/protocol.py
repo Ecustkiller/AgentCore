@@ -355,6 +355,13 @@ class ToolContext:
     # 经 ``dataclasses.replace`` 继承）——仅允许 ``AgentCore/`` 下约定记忆与探索笔记，
     # 禁止 ``AgentCore/文档/项目/``；``none``=拒一切写。闸在写工具入口。
     write_scope: Literal["none", "explore_memory", "project"] = "project"
+    # Sidecar/desktop-injected Folder local bind for explore workspace_key
+    # (RPC ``localRootId`` / ``localSubpath``, same camelCase shape as ``folderId``).
+    # ``folder_binding_injected`` True ⇒ assemble must not open PG for key resolve
+    # (``folder_local_root_id`` None = cloud / unbound). False ⇒ DB fallback / degrade.
+    folder_binding_injected: bool = False
+    folder_local_root_id: str | None = None
+    folder_local_subpath: str | None = None
 
 
 @dataclass
@@ -367,12 +374,11 @@ class ToolResult:
     model and loops; a terminal effect (``HANDOFF`` / ``INTERACT``) stops the loop
     because the tool already produced the turn's final user-facing answer, carried
     in ``final_text`` (so the model does not generate a second, duplicate reply).
-    The CEO ``ask_user`` checkpoint sets ``INTERACT`` on a "stop" decision — its
-    closing note is the ``final_text`` — so the turn ends gracefully in-band rather
-    than via an SSE abort; ``delegate`` stays ``CONTINUE`` (its workers' products
-    return to the CEO loop). ``final_text`` is persisted but NOT re-emitted and is
-    exempt from ``output`` truncation (which only guards the model-facing
-    ``output`` string).
+    ``ask_user`` stop / timeout and team_preview cancel feed ``CONTINUE`` so the
+    CEO sees the拒答 and may short-close; ``delegate`` likewise stays ``CONTINUE``
+    (workers' products return to the CEO loop). ``final_text`` (when a terminal
+    effect sets it) is persisted but NOT re-emitted and is exempt from ``output``
+    truncation (which only guards the model-facing ``output`` string).
 
     ``output_limit`` overrides the default model-facing truncation budget for the
     ``output`` string. Most tools leave it ``None`` (4000 chars); read-heavy tools

@@ -40,21 +40,14 @@ class GitTool:
         return ToolSchema(
             name="git",
             description=(
-                "在工作区内执行 Git 操作。根规则：仅工作区根 `.git`"
-                "（不扫嵌套、不上溯）。探路摸底优先 file_list/grep。"
-                "只读：status / diff / log / fetch / show / blame；"
-                "stash/tag/remote 的 action=list"
-                "（无仓 → success + metadata.code=no_repo，禁止当成干净仓；"
-                "status 默认不含未跟踪文件；show/blame 输出有界截断）。"
-                "写入（需用户授权）：add / commit / branch / checkout / push / pull /"
-                "merge / rebase / cherry-pick / create_pr；stash push/pop；tag create；"
-                "remote add（无仓仍硬错；CEO 拒写须 delegate）。"
-                "pull 固定 --ff-only；merge/rebase/cherry-pick 冲突诚实失败。"
-                "一键基线：init_baseline（无仓→init+首提交；CEO 可调仍需授权；"
-                "已有仓且脏树不代 commit）。"
-                "push / create_pr 需授权（恒确认）；create_pr 仅 GitHub API；"
-                "force / 保护分支仍拒；无凭据会失败（指向设置凭据 / 本地仓）。"
-                "reset / clean 硬禁；stash drop/clear、删 tag、remote remove 硬拒。"
+                "工作区根结构化 Git（仅根 `.git`；探路优先 file_list/grep）。"
+                "只读免批；写入与 stash push/pop、tag create、remote add 须审批；"
+                "CEO 拒写须 delegate（例外 init_baseline 仍须授权）。"
+                "无仓：只读→success+no_repo（勿当干净仓）；写硬错；"
+                "init_baseline=无仓则 init+首提交，脏仓→dirty_skip。"
+                "status 默认无未跟踪；pull=--ff-only；冲突诚实失败；"
+                "push/create_pr 恒确认（create_pr 仅 GitHub API）；"
+                "force/保护分支/reset|clean/stash drop|clear/删 tag/remote remove 硬拒。"
             ),
             parameters=GIT_TOOL_PARAMETERS,
             category=ToolCategory.FILESYSTEM,

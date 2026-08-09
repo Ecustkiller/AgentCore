@@ -57,6 +57,7 @@ def test_registry_registers_the_system_skills():
         "product_help",
         "product_help_map",
         "product_help_faq",
+        "product_bug_triage",
         "build_website",
         "build_app",
         "debate_and_review",
@@ -99,6 +100,7 @@ def test_available_hides_gated_skills_without_required_tools():
     assert "product_help" in available  # requires_tools=() — always listed
     assert "product_help_map" in available
     assert "product_help_faq" in available
+    assert "product_bug_triage" in available
     assert "build_website" in available
     assert "debate_and_review" in available
     assert "revising_a_product" in available
@@ -133,17 +135,27 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
 
 def test_directory_preamble_carves_out_product_help_consult():
     """产品用法从「纯对话无需 consult」划出，与 platform_knowledge 必查对齐。"""
-    from agentcore.runtime.skills import CONSULT_PRODUCT_HELP_BY_SCENE
+    from agentcore.runtime.skills import (
+        CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
+        CONSULT_PRODUCT_HELP_BY_SCENE,
+    )
 
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
     assert CONSULT_PRODUCT_HELP_BY_SCENE in out
+    assert CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE in out
     assert "必查 `product_help`" in out
     assert "product_help_map" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_faq" in CONSULT_PRODUCT_HELP_BY_SCENE
+    # 收紧触发：主动查/报产品本身；勿宽「出问题必查」、勿第二个无条件必查与 FAQ 对打
+    assert "用户主动查/报产品本身可证伪故障" in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
+    assert "查 `product_bug_triage`" in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
+    assert "必查 `product_bug_triage`" not in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
+    assert "出问题必查" not in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
     assert "纯对话式回答自己答即可，无需 consult" not in out
     assert "- product_help：" in out
     assert "- product_help_map：" in out
     assert "- product_help_faq：" in out
+    assert "- product_bug_triage：" in out
 
 
 def test_directory_preamble_recommends_build_app_not_hard_forbid_none():
@@ -216,8 +228,9 @@ async def test_consult_skill_product_help_hit():
     assert "- product_help：" in directory
     assert "- product_help_map：" in directory
     assert "- product_help_faq：" in directory
+    assert "- product_bug_triage：" in directory
     assert skill.summary in directory
-    for name in ("product_help_map", "product_help_faq"):
+    for name in ("product_help_map", "product_help_faq", "product_bug_triage"):
         sibling = reg.get(name)
         assert sibling is not None
         hit = await tool.execute({"name": name}, _ctx())
@@ -444,6 +457,39 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "完整预览" in faq_body and "不是一路" in faq_body
 
     assert "Markdown 语法" in help_body or ".md 怎么打开" in help_body
+    # 与 product_bug_triage 分轨：用法短答不承载诊断仪式
+    assert "product_bug_triage" in help_body
+    assert "product_bug_triage" in faq_body
+    assert "【L1" not in help_body and "【L1" not in faq_body
+    assert "【L2" not in help_body and "【L2" not in faq_body
+    assert "`product_bug`" not in help_body and "`model_limit`" not in help_body
+
+
+def test_product_bug_triage_skill_teaches_l1_l2_and_ceilings():
+    """P0：定性四类 + 复现要点 + FAQ 分轨 + 证据上限 + 禁区；无 L4/新工具教法。"""
+    body = _body("product_bug_triage")
+    assert "product_bug" in body and "usage" in body
+    assert "model_limit" in body and "unclear" in body
+    assert "复现" in body
+    assert "证据不足" in body
+    assert "本会话" in body or "本会话可见" in body
+    assert "ask_user" in body
+    assert "服务端日志" in body
+    assert "product_help" in body or "product_help_faq" in body
+    assert "设置" in body and "反馈" in body
+    assert "L4" in body or "开 PR" in body
+    assert "dogfood" in body
+    assert "跨用户" in body
+    assert "扫长文" in body or "意图" in body
+    # 目录 summary 与登记名一致可见
+    skill = build_system_skill_registry().get("product_bug_triage")
+    assert skill is not None
+    assert skill.requires_tools == ()
+    assert "主动" in skill.summary
+    assert "product_bug_triage" in render_skill_directory(
+        build_system_skill_registry(), _NO_LIVE_USER
+    )
+
 
 def test_team_orchestration_skill_teaches_cross_project_parallel():
     """跨项目并行指挥整条用法（第二教学面；与双模式 §五 / 编排器 delegate 定案一致）。"""
@@ -465,11 +511,18 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "多 local" in body and "并行" in body
     assert "暂不支持" not in body
     assert "协作图不改" in body or "并行支线" in body
+    # 空壳/双项目 kickoff：先问、同次两路、开发≠挂载
+    assert "空壳" in body or "近空" in body
+    assert "file_list" in body
+    assert "同一次" in body or "同次" in body
+    assert "external_mount_readonly" in body
+    assert "开发双仓" in body or "区外挂载" in body
     # 目录摘要须可触发 consult（多项目 / target_folder）
     skill = build_system_skill_registry().get("team_orchestration_advanced")
     assert skill is not None
     assert "跨项目" in skill.summary
     assert "target_folder_id" in skill.summary
+    assert "空壳" in skill.summary or "external_mount" in skill.summary
 
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
@@ -485,6 +538,10 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "生产者→消费者" in body
     assert "正例·串行" in body and "反例·勿串" in body
     assert "嵌套委派" in body and "大模块" in body
+    assert "编排自主" in body
+    assert "摸底波" in body
+    assert "假两段" in body
+    assert "为编排而编排" in body or "禁为编排而编排" in body
     assert "默认" in body and "二选一" in body
     assert "禁止再平铺" in body
     # 协调补派失败节点须标 replaces_run_id，引擎改写下游 depends_on
@@ -930,6 +987,8 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "register_local_project" in body
     assert "team_orchestration_advanced" in body
     assert "跨项目并行指挥" in body
+    assert "开发双仓" in body
+    assert "target_folder_id" in body
     # 已绑定本地工程：「打开项目」=跑当前项目，换目录才开卡。
     assert "已绑定本地工程" in body
     assert "跑" in body and "当前" in body
@@ -1063,7 +1122,7 @@ def test_deep_multi_lens_research_teaches_parallel_lenses_and_motion_card():
     assert "按确认默认" in body
     assert "default" in body
     assert "不得 continue 派工" in body or "无 default" in body
-    # 幕 1 案卷落盘：research/ + form=files / artifacts（叠加 handoff，不替代）
+    # 幕 1 约定文档落盘：research/ + form=files / artifacts（叠加 handoff，不替代）
     assert "AgentCore/文档/research/" in body
     assert "透镜报告" in body
     assert "汇总与命题卡" in body

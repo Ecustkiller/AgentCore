@@ -13,8 +13,8 @@ from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_des
 TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     "type": "object",
     "description": (
-        "可选交付物（form 等）。用户已拍板验收口径写入「已确认约束」"
-        "（与 task/team_brief 同块约定）；细节见 team_orchestration_advanced。"
+        "可选交付物（form 等）。用户已拍板验收口径写入「已确认约束」；"
+        "细节→team_orchestration_advanced。"
     ),
     "properties": {
         "name": {"type": "string"},
@@ -35,10 +35,7 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
         "artifacts": {"type": "array", "items": {"type": "string"}},
         "artifact_dir": {
             "type": "string",
-            "description": (
-                "案卷落盘目录（可选；可多人共享；省略时运行时按 stage_dirs 填默认）。"
-                "目录不占归属；并行互斥靠各人不同的 artifacts 文件路径。"
-            ),
+            "description": "约定落盘目录（可选；可共享；省略走 stage_dirs 默认）。",
         },
         "strict": {
             "type": "boolean",
@@ -50,19 +47,12 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
 # Trigger + short cues. Long HOW → CEO core / team_orchestration_advanced.
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
-    "该派就派；按活的缝拆人、能少则少；闲聊/单点/聊天短文自己答；要落盘短文派1人。"
-    "交付形态：给用户【看】→deliverable.form=prose；【用】→form=files。"
+    "【看】→deliverable.form=prose；【用】→files。"
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
-    "同回合再调 delegate 默认可 depends_on 本回合已有节点；"
-    "跨回合加人 append_to_execution_id=\"latest\"。"
-    "playbook 可选（建站推荐 build_website 且必填 playbook_args.topic；"
-    "控制台 dense 另加 style=toolshed；绿场软件/SPA 推荐 build_app 且必填 app；"
-    "其余可省略直接手写 tasks）；与 tasks 二选一。"
-    "交付靠 deliverable.form/artifacts；勿再填已删的 completion_criteria。"
-    "跨项目：tasks[].target_folder_id=已解析项目 id（列/解析后填；裸聊必填；"
-    "有出生省略=默认桌；子派默认继承）。"
-    "拿不准怎么拆再 consult_skill(team_orchestration_advanced)。"
+    "playbook 与 tasks 二选一；建站必填 playbook_args.topic；绿场必填 app。"
+    "勿再填已删的 completion_criteria。"
+    "HOW→consult_skill(team_orchestration_advanced)。"
 )
 
 DELEGATE_PARAMETERS = {
@@ -79,11 +69,9 @@ DELEGATE_PARAMETERS = {
                         "type": "string",
                         "description": (
                             "自包含=目标+边界+验收（宜短；worker 看不到完整历史）。"
-                            "用户已拍板项写入固定「已确认约束：…」块"
-                            "（有 ask 槽位答案则写入；无卡亦须枚举；约束块优先于附件旧角色表）；"
+                            "已拍板项写入「已确认约束：…」块；"
                             "细则进任务范围/required_sections/artifacts；"
-                            "must_contain 仅短主题词软提醒（勿塞细清单）；"
-                            "全队共识进顶层 team_brief（勿把长文塞进本字段）。"
+                            "must_contain 仅短主题词软提醒；全队共识进 team_brief。"
                         ),
                     },
                     "objective": {"type": "string"},
@@ -91,20 +79,17 @@ DELEGATE_PARAMETERS = {
                     "id": {
                         "type": "string",
                         "description": (
-                            "节点 id（可选）。声明后铸 run_id={prefix}_{id}；"
-                            "同批勿重复；跨批/同回合二次 depends_on 可填此字面值。"
+                            "节点 id（可选）。铸 run_id={prefix}_{id}；"
+                            "depends_on 可引用此字面值。"
                         ),
                     },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "依赖任务 id（DAG）。"
-                            "填本批 id、同回合已有节点 id/无歧义角色名，"
-                            "或跨回合 append 后宿主节点；勿手抄 del_* 作为主路径。"
-                            "同回合二次 delegate 默认可解析本回合已有节点；"
-                            "跨回合须 append_to_execution_id。"
-                            "何时填（生产者→消费者）见系统提示路由。"
+                            "依赖 id（DAG）：本批 id / 同回合节点 id 或角色名；"
+                            "勿手抄 del_*。跨回合须 append_to_execution_id。"
+                            "何时填（生产者→消费者）见系统提示。"
                         ),
                     },
                     "result_handling": {
@@ -114,10 +99,7 @@ DELEGATE_PARAMETERS = {
                     "replaces_run_id": {"type": "string"},
                     "continue_from_run_id": {
                         "type": "string",
-                        "description": (
-                            "同人带现场续派（调查后确认修 / 同人改稿）；"
-                            "填已完成 run_id。"
-                        ),
+                        "description": "同人续派（调查后确认修 / 改稿）；填已完成 run_id。",
                     },
                     "checkpoint_after": {"type": "boolean"},
                     "bind_after_deps": {"type": "boolean"},
@@ -129,11 +111,8 @@ DELEGATE_PARAMETERS = {
                     "target_folder_id": {
                         "type": "string",
                         "description": (
-                            "目标项目身份（已解析的 folder id；对用户不可见）。"
-                            "有则该 worker 换到该项目根写盘，记忆/规则跟该项目；"
-                            "嵌套子派默认继承父目标，再点名才换。"
-                            "裸聊（无出生）派写盘任务必须带此字段；"
-                            "有出生且省略 → 坐会话默认桌（同今）。"
+                            "已解析项目 folder id。裸聊写盘必填；"
+                            "有出生省略=默认桌；子派默认继承。"
                         ),
                     },
                 },
@@ -145,8 +124,7 @@ DELEGATE_PARAMETERS = {
             "type": "string",
             "description": (
                 '跨回合追加："latest" 或 execution_id；'
-                "latest 未命中可追加图时自动新建。"
-                "同回合再调一般不必传（活跃图 / 本回合上一张图自动合入）。"
+                "同回合再调一般不必传。"
             ),
         },
         "coordinate": {
@@ -159,27 +137,17 @@ DELEGATE_PARAMETERS = {
             "type": "string",
             "enum": sorted(PLAYBOOKS),
             "description": (
-                "可选固化形状名（与 tasks 二选一：传此字段时勿再传 tasks，"
-                "槽位进 playbook_args）。建站/落地页推荐 build_website"
-                "（必填 playbook_args.topic；产物目录固定 site/）；"
-                "控制台/工具台 dense 同用 build_website + playbook_args.style=toolshed；"
-                "绿场软件/SPA 完整交付推荐 build_app（必填 playbook_args.app）；"
-                "其余自由组队可省略，直接手写 tasks。亦可用 playbook_id。"
+                "可选固化形状（与 tasks 二选一；槽位进 playbook_args）。"
+                "建站→build_website；绿场→build_app；亦可用 playbook_id。"
             ),
         },
         "playbook_id": {
             "type": "string",
-            "description": (
-                "可选 playbook 声明：已知形状名，或字面值 \"none\"（手写 tasks）。"
-                "与 playbook 同义优先。建站/绿场推荐具名 playbook（不硬拒 none/手写）。"
-            ),
+            "description": '可选 playbook 名，或 "none"（手写 tasks）；与 playbook 同义优先。',
         },
         "playbook_none_reason": {
             "type": "string",
-            "description": (
-                "可选：手写 tasks 时一句说明（不强制）。"
-                "软件意图禁止仅因单文件缩成 1 名前端 + 单 HTML。"
-            ),
+            "description": "可选：手写 tasks 时一句说明（不强制）。",
         },
         "playbook_args": {
             "type": "object",
@@ -207,8 +175,7 @@ DELEGATE_PARAMETERS = {
         "team_brief": {
             "type": "string",
             "description": (
-                "全队共识（预算口径、日期、共享约束、「已确认约束」等）；"
-                "写入后各 worker 开局可见——勿在每个 task 里重复粘贴；"
+                "全队共识（含「已确认约束」）；各 worker 开局可见；"
                 "约束块优先于附件旧角色表。"
             ),
         },

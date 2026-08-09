@@ -3,11 +3,13 @@ import {
   getConversations,
   restoreConversationCache,
 } from "@/hooks/useConversations";
+import { hasLocalEngine } from "@/lib/capabilities";
 import {
   StreamError,
   describeStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import { logEvent } from "@/lib/log";
 import { notifyInfo } from "@/lib/toast";
 import {
   markSidecarUnhealthy,
@@ -16,6 +18,7 @@ import {
 } from "@/services/sidecarHealth";
 import {
   buildSidecarHistory,
+  isSidecarEnabled,
   resolveConversationLocalTarget,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
@@ -73,6 +76,46 @@ function notifyCloudBridge(
   if (takeCloudBridgeToastSlot(toastKey, { force })) {
     notifyInfo(message);
   }
+}
+
+/** 云端分支原因——写入 turnTrace + desktop.jsonl，对照服务端 via=cloud。 */
+type CloudPathReason =
+  | "attachments"
+  | "agent_mentions"
+  | "switch_off"
+  | "no_local_engine"
+  | "probe_unhealthy"
+  | "probe_cache_bad"
+  | "no_local_target"
+  | "sidecar_fallback";
+
+function resolveCloudPathReason(args: {
+  attachments: number;
+  agentMentions: number;
+  hadSidecarTarget: boolean;
+  probeHealthy: boolean | null;
+  probeProbed: boolean | null;
+}): CloudPathReason {
+  if (args.attachments > 0) return "attachments";
+  if (args.agentMentions > 0) return "agent_mentions";
+  if (!hasLocalEngine()) return "no_local_engine";
+  if (!isSidecarEnabled()) return "switch_off";
+  if (args.hadSidecarTarget && args.probeHealthy === false) {
+    return args.probeProbed ? "probe_unhealthy" : "probe_cache_bad";
+  }
+  return "no_local_target";
+}
+
+function logStreamPath(
+  conversationId: string,
+  via: "sidecar" | "cloud",
+  reason: string,
+  extra?: Record<string, unknown>,
+): void {
+  const fields = { conversation_id: conversationId, via, reason, ...extra };
+  traceTurnMilestone(conversationId, "stream_path", { via, reason, ...extra });
+  // 持久化到 desktop.jsonl（非仅 DEV 控制台 opt-in），便于对照服务端 via=cloud。
+  logEvent("info", "turn.stream_path", fields);
 }
 
 /**
@@ -138,11 +181,11 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
   // Open the assistant bubble now (即时反馈), before the POST even resolves —
   // mirrors runRegenerate. This flips `isGenerating` on immediately so the
-  // composer shows the stop button and the bubble shows a "正在思考…" indicator
-  // during the gap before the first SSE event, instead of looking like nothing
-  // happened. `message_start` reuses this same bubble (ensureStreamingAssistant).
-  // In-flight 排队时 ``turn_queued`` 先到、``message_start`` 稍后——占位气泡保持
-  // 「已排队 / 等待」心智，与 toast 一致。
+  // composer shows the stop button and the bubble shows a "Thinking…" indicator
+  // during prepare/TTFT before the first content frame. A′: kickoff no longer
+  // holds folder workspace_lock — 不得静默等锁. Residual write-lock short waits
+  // emit ``workspace_lock_wait`` so the bubble shows「等待工作区…」instead of
+  // faking Thinking…. In-flight 同对话排队时 ``turn_queued`` 先到——用户气泡轻态.
   store.createAssistantMessage(conversationId);
 
   const ac = new AbortController();
@@ -152,11 +195,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const primaryToken = claimPrimaryStream(conversationId);
   try {
     traceTurnMilestone(conversationId, "send_start");
-    // 路由（双模式工作区 §一.1）：开关开（默认开）+ 会话绑定本机本地根 + 无附件 → 走本地
-    // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
-    // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
-    // agent_mentions 同理：sidecar 未接，有点名时走云。
-    // resolveSidecarRoot 不读健康（续跑/列帧共用绑定判定）；健康由下方 probe 收敛。
+    // 路由（双模式工作区 §一.1）：开关开（默认关；高级显式 on）+ 会话绑定本机本地根 + 无附件 →
+    // 走本地 sidecar；否则云链路（含 unset→默认关的云端过桥）。附件 / agent_mentions 退云。
+    // resolveSidecarRoot 早退不 probe；健康由下方 probe 仅在有 target 时收敛。
     const sidecarTarget =
       attachments.length === 0 && agentMentions.length === 0
         ? await resolveSidecarRoot(conversationId)
@@ -180,7 +221,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     }
     if (sidecarTarget && probe?.healthy) {
       setExecutionVia(conversationId, "sidecar");
-      traceTurnMilestone(conversationId, "stream_path", { via: "sidecar" });
+      logStreamPath(conversationId, "sidecar", "probe_ok", {
+        root_id: sidecarTarget.rootId,
+        subpath: sidecarTarget.subpath,
+      });
       try {
         throwIfCannotOpenStream(conversationId, ac.signal);
         enterTurnStreaming(conversationId);
@@ -206,7 +250,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         ) {
           throw sidecarErr;
         }
-        markSidecarUnhealthy(sidecarTarget);
+        const fallbackDetail =
+          sidecarErr.serverMessage?.trim() || "本地引擎未能启动";
+        markSidecarUnhealthy(sidecarTarget, fallbackDetail);
         setExecutionVia(conversationId, "cloud_bridge");
         notifyCloudBridge(
           `${sidecarTarget.rootId}::${sidecarTarget.subpath}`,
@@ -217,9 +263,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         store.createAssistantMessage(conversationId);
         beginTurnPreflight(conversationId);
         throwIfCannotOpenStream(conversationId, ac.signal);
-        traceTurnMilestone(conversationId, "stream_path", {
-          via: "cloud",
-          reason: "sidecar_fallback",
+        logStreamPath(conversationId, "cloud", "sidecar_fallback", {
+          root_id: sidecarTarget.rootId,
+          detail: fallbackDetail,
         });
         enterTurnStreaming(conversationId);
         await streamConversation({
@@ -238,6 +284,15 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         sidecarTarget !== null ||
         (await resolveConversationLocalTarget(conversationId)) !== null;
       setExecutionVia(conversationId, bridging ? "cloud_bridge" : null);
+      const reason = resolveCloudPathReason({
+        attachments: attachments.length,
+        agentMentions: agentMentions.length,
+        hadSidecarTarget: sidecarTarget !== null,
+        probeHealthy: probe ? probe.healthy : null,
+        probeProbed: probe ? probe.probed : null,
+      });
+      // Toast：仅高级曾开后的探活/启动失败降级可感知；默认云 / 开关关路径静默
+      // （禁常态 switch_off「本地引擎已关闭…」推回大众面）。
       if (sidecarTarget && probe && !probe.healthy) {
         const toastKey = `${sidecarTarget.rootId}::${sidecarTarget.subpath}`;
         notifyCloudBridge(
@@ -250,7 +305,11 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           /* force */ probe.probed,
         );
       }
-      traceTurnMilestone(conversationId, "stream_path", { via: "cloud" });
+      logStreamPath(conversationId, "cloud", reason, {
+        bridging,
+        root_id: sidecarTarget?.rootId ?? null,
+        probe_detail: probe?.detail ?? null,
+      });
       // 本地意向已是会话状态（Conversation.local_container_root_id，建会话时定型，
       // 工作区对称化 D1a），服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——
       // 回合不再携带容器根。

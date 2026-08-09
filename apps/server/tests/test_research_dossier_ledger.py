@@ -1,4 +1,4 @@
-"""批 D2：案卷台账锚写入 / 开赛预登记 / 无幕1 零行为（零 LLM）。"""
+"""批 D2：约定文档台账锚写入 / 开赛预登记 / 无幕1 零行为（零 LLM）。"""
 
 from __future__ import annotations
 
@@ -89,8 +89,8 @@ async def test_preregister_research_dossier_maps_r_to_e(tmp_path: Path):
     led = EvidenceLedger()
     idx = await preregister_research_dossier(led, ws)
 
-    assert "【工作区案卷索引·AgentCore/文档/research/】" in idx
-    assert "【案卷预登记台账·引用须用下列 #eN】" in idx
+    assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
+    assert "【约定文档预登记台账·引用须用下列 #eN】" in idx
     assert "AgentCore/文档/research/法律透镜报告.md" in idx
     assert led.ids  # 至少一条
     legal = next(
@@ -132,5 +132,5 @@ def test_format_index_with_ledger_lines():
         ["AgentCore/文档/research/a.md"],
         ledger_lines=["- research/a.md → #e1（幕1 #r1）"],
     )
-    assert "案卷预登记台账" in text
+    assert "约定文档预登记台账" in text
     assert "#e1（幕1 #r1）" in text

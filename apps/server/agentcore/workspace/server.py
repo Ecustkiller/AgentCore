@@ -31,6 +31,7 @@ from agentcore.workspace._paths import (
     is_ignored_dir_entry,
     is_ignored_file_name,
     is_system_ignored_file_name,
+    path_has_non_internal_entries,
     resolve_safe_path,
 )
 from agentcore.workspace.channel import WorkspaceChannel
@@ -143,11 +144,17 @@ class ServerWorkspace:
         *,
         root_label: str = "workspace",
         location: Literal["server", "local"] = "server",
+        lock_key: str | None = None,
     ) -> None:
         self._root = root
         self._sandbox = sandbox
         self.root_label = root_label
         self.location: Literal["server", "local"] = location
+        # A′ sink: primary-tree mutations take this key (cloud builds). None =
+        # sidecar / hermetic tests — unlocked (sidecar never held folder lock).
+        self._lock_key = lock_key
+        # Optional UX hook when mutation lock must wait (不得静默等锁 → SSE).
+        self._on_lock_waiting: Callable[[bool], None] | None = None
         # Flips True on the first mutating op so the service snapshots only
         # workspaces a turn actually changed (see WorkspaceBackend.dirty).
         self._dirty = False
@@ -173,20 +180,34 @@ class ServerWorkspace:
         # (file_list pattern targets zip/rar/…). Default False.
         self.ai_list_reveal_archives: bool = False
 
+    def set_lock_waiting_hook(self, hook: Callable[[bool], None] | None) -> None:
+        """Register UX callback for contended mutation-lock waits (不得静默等锁)."""
+        self._on_lock_waiting = hook
+
     @property
     def dirty(self) -> bool:
         return self._dirty
 
     def _mark_mutated(self) -> None:
-        """Snapshot dirty + invalidate code index (schedule background refresh)."""
+        """Snapshot dirty + invalidate code index (schedule background refresh).
+
+        Always routes through :meth:`start_code_index_maintenance` so the first
+        write on a previously empty workspace still starts indexing (turn-start
+        kick is a no-op while the tree has only internal zones / is empty).
+        """
         self._dirty = True
         if self._index_manager is not None:
             self._index_manager.mark_content_dirty()
-        if self._index_maintainer is not None:
-            self._index_maintainer.schedule()
+        self.start_code_index_maintenance()
 
     def start_code_index_maintenance(self) -> None:
-        """Kick coalesced background ensure (turn / sidecar entry)."""
+        """Kick coalesced background ensure (turn / sidecar entry).
+
+        Lazy B1: only when the workspace has non-internal content — empty chats
+        must not ``mkdir AgentCore/index`` (which would leak into hub has_files).
+        """
+        if not path_has_non_internal_entries(self._root):
+            return
         manager = self._get_index_manager()
         if self._index_maintainer is None:
             self._index_maintainer = IndexMaintainer(manager, self)
@@ -263,14 +284,26 @@ class ServerWorkspace:
             raise OutsideWorkspace(readonly_write_error(path))
 
     @asynccontextmanager
-    async def _maybe_shared_lock(self, path: str):
-        """Space-level lock for Agent (and human) writes to a shared mount."""
+    async def _mutation_lock(self, path: str):
+        """Single-layer lock for one mutating op (A′).
+
+        Shared mounts serialize on the space key; primary tree uses ``lock_key``
+        when set. Never nest with an outer same-key ``workspace_lock``.
+        Contended waits notify ``_on_lock_waiting`` (honest SSE; 不得静默等锁).
+        """
         routed = route_shared(path, self._shared_mounts) if parse_shared_path(path) else None
-        if routed is None:
-            yield
+        if routed is not None:
+            async with workspace_lock(
+                shared_workspace_storage_key(routed.mount.space_id),
+                on_waiting=self._on_lock_waiting,
+            ):
+                yield
             return
-        async with workspace_lock(shared_workspace_storage_key(routed.mount.space_id)):
-            yield
+        if self._lock_key:
+            async with workspace_lock(self._lock_key, on_waiting=self._on_lock_waiting):
+                yield
+            return
+        yield
 
     async def _emit_shared_mutation(self, path: str, action: str) -> None:
         if self._on_shared_mutation is None or parse_shared_path(path) is None:
@@ -422,7 +455,7 @@ class ServerWorkspace:
             n = await self._require_external_bridge().write(path, content)
             self._mark_mutated()
             return n
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="write")
             try:
@@ -439,7 +472,7 @@ class ServerWorkspace:
             n = await self._require_external_bridge().append(path, content)
             self._mark_mutated()
             return n
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="append")
             try:
@@ -502,7 +535,7 @@ class ServerWorkspace:
             n = await self._require_external_bridge().write_bytes(path, data)
             self._mark_mutated()
             return n
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="write_bytes")
             try:
@@ -561,10 +594,11 @@ class ServerWorkspace:
         is restored to ``eol`` before an atomic (temp + rename) write. Raises
         ``OutsideWorkspace`` / ``NotAFile`` / ``WorkspaceIOError``.
 
-        Best-effort against external writers; callers serialize against same-workspace
-        turns via ``workspace_lock`` so an Agent write can't interleave mid-CAS.
+        Best-effort against external writers; this method holds ``workspace_lock``
+        (via ``lock_key`` / shared space key) for the CAS so an Agent write can't
+        interleave mid-check — callers must not nest another same-key hold.
         """
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="write")
             exists = target.exists()
@@ -601,14 +635,23 @@ class ServerWorkspace:
             raise NotADirectory(directory)
         try:
             entries = sorted(base.glob(pattern))[:_MAX_LIST_ENTRIES]
-            parent_rel = directory.replace("\\", "/").strip("/")
-            if parent_rel in ("", "."):
-                parent_rel = ""
             out: list[DirEntry] = []
             for entry in entries:
+                # Per-entry parent — recursive ``**/*`` yields nested paths; using the
+                # list-root as parent_rel would treat ``AgentCore/index`` as bare
+                # ``index`` and leak internal zones into the user file UI.
+                entry_rel = self._model_path(entry, logical=directory).replace(
+                    "\\", "/"
+                ).strip("/")
+                if not entry_rel or entry_rel == ".":
+                    continue
+                if "/" in entry_rel:
+                    parent_rel, entry_name = entry_rel.rsplit("/", 1)
+                else:
+                    parent_rel, entry_name = "", entry_rel
                 # Name-first ignore — avoid touching locked noise dirs (e.g. Windows
                 # ``.pytest_tmp``) before ``is_dir`` / ``is_file``.
-                if is_ignored_dir_entry(parent_rel=parent_rel, name=entry.name):
+                if is_ignored_dir_entry(parent_rel=parent_rel, name=entry_name):
                     continue
                 try:
                     is_dir = entry.is_dir()
@@ -617,7 +660,7 @@ class ServerWorkspace:
                     if is_access_denied_oserror(e):
                         continue
                     raise WorkspaceIOError(str(e)) from e
-                if is_file and is_system_ignored_file_name(entry.name):
+                if is_file and is_system_ignored_file_name(entry_name):
                     continue
                 # Soft meta for UI subtitles — never fail the whole listing on stat.
                 size_bytes: int | None = None
@@ -633,7 +676,7 @@ class ServerWorkspace:
                 # applies AI-noise filtering in the tool layer.
                 out.append(
                     DirEntry(
-                        path=self._model_path(entry, logical=directory),
+                        path=entry_rel,
                         is_dir=is_dir,
                         size_bytes=size_bytes,
                         mtime_ms=mtime_ms,
@@ -876,7 +919,7 @@ class ServerWorkspace:
             await self._require_external_bridge().mkdir(path)
             self._mark_mutated()
             return
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="mkdir")
             # Refuse mkdir of the primary workspace root itself; external mount roots
@@ -907,7 +950,7 @@ class ServerWorkspace:
             await self._require_external_bridge().delete(path, permanent=permanent)
             self._mark_mutated()
             return
-        async with self._maybe_shared_lock(path):
+        async with self._mutation_lock(path):
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="delete", permanent=permanent)
             if target == self._root.resolve():
@@ -977,66 +1020,74 @@ class ServerWorkspace:
             await self._require_external_bridge().copy(src, dst)
             self._mark_mutated()
             return
-        source = self._safe(src, write=False)
-        dest = self._safe(dst, write=True, op="copy")
-        src_ext = parse_external_path(src)
-        dst_ext = parse_external_path(dst)
-        if bool(src_ext) != bool(dst_ext):
-            raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
-        if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
-            raise OutsideWorkspace("不能跨会话授权目录复制文件")
-        if src_ext is None:
-            root = self._root.resolve()
-            if source == root or dest == root:
-                raise OutsideWorkspace(src if source == root else dst)
-        if not source.exists():
-            raise PathNotFound(src)
-        if dest.exists():
-            raise AlreadyExists(dst)
-        # Refuse copying a directory into itself or a descendant (self-recursion).
-        try:
-            dest.relative_to(source)
-            if source.is_dir():
-                raise WorkspaceIOError("不能复制到自身或其子目录")
-        except ValueError:
-            pass  # dest is not under source — expected
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if source.is_dir():
-                shutil.copytree(source, dest)
-            else:
-                shutil.copy2(source, dest)
-        except OSError as e:
-            raise WorkspaceIOError(str(e)) from e
-        self._mark_mutated()
+        async with self._mutation_lock(dst):
+            await self._gate_shared(src, write=False)
+            await self._gate_shared(dst, write=True)
+            source = self._safe(src, write=False)
+            dest = self._safe(dst, write=True, op="copy")
+            src_ext = parse_external_path(src)
+            dst_ext = parse_external_path(dst)
+            if bool(src_ext) != bool(dst_ext):
+                raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
+            if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
+                raise OutsideWorkspace("不能跨会话授权目录复制文件")
+            if src_ext is None:
+                root = self._root.resolve()
+                if source == root or dest == root:
+                    raise OutsideWorkspace(src if source == root else dst)
+            if not source.exists():
+                raise PathNotFound(src)
+            if dest.exists():
+                raise AlreadyExists(dst)
+            # Refuse copying a directory into itself or a descendant (self-recursion).
+            try:
+                dest.relative_to(source)
+                if source.is_dir():
+                    raise WorkspaceIOError("不能复制到自身或其子目录")
+            except ValueError:
+                pass  # dest is not under source — expected
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if source.is_dir():
+                    shutil.copytree(source, dest)
+                else:
+                    shutil.copy2(source, dest)
+            except OSError as e:
+                raise WorkspaceIOError(str(e)) from e
+            self._mark_mutated()
+            await self._emit_shared_mutation(dst, "file_written")
 
     async def move(self, src: str, dst: str) -> None:
         if self._external_needs_channel(src, dst):
             await self._require_external_bridge().move(src, dst)
             self._mark_mutated()
             return
-        source = self._safe(src, write=True, op="move")
-        dest = self._safe(dst, write=True, op="move")
-        src_ext = parse_external_path(src)
-        dst_ext = parse_external_path(dst)
-        if bool(src_ext) != bool(dst_ext):
-            raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
-        if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
-            raise OutsideWorkspace("不能跨会话授权目录移动文件")
-        if src_ext is None:
-            root = self._root.resolve()
-            if source == root or dest == root:
-                raise OutsideWorkspace(src if source == root else dst)
-        if not source.exists():
-            raise PathNotFound(src)
-        if dest.exists():
-            raise AlreadyExists(dst)
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(source, dest)
-        except OSError as e:
-            raise WorkspaceIOError(str(e)) from e
-        self._mark_mutated()
+        async with self._mutation_lock(dst):
+            await self._gate_shared(src, write=True)
+            await self._gate_shared(dst, write=True)
+            source = self._safe(src, write=True, op="move")
+            dest = self._safe(dst, write=True, op="move")
+            src_ext = parse_external_path(src)
+            dst_ext = parse_external_path(dst)
+            if bool(src_ext) != bool(dst_ext):
+                raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
+            if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
+                raise OutsideWorkspace("不能跨会话授权目录移动文件")
+            if src_ext is None:
+                root = self._root.resolve()
+                if source == root or dest == root:
+                    raise OutsideWorkspace(src if source == root else dst)
+            if not source.exists():
+                raise PathNotFound(src)
+            if dest.exists():
+                raise AlreadyExists(dst)
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, dest)
+            except OSError as e:
+                raise WorkspaceIOError(str(e)) from e
+            self._mark_mutated()
+            await self._emit_shared_mutation(dst, "file_moved")
 
     async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
         if self._external_needs_channel(path):
@@ -1045,35 +1096,38 @@ class ServerWorkspace:
             )
             self._mark_mutated()
             return outcome
-        target = self._safe(path, write=True, op="replace")
-        if not target.exists():
-            raise PathNotFound(path)
-        if not target.is_file():
-            raise NotAFile(path)
+        async with self._mutation_lock(path):
+            await self._gate_shared(path, write=True)
+            target = self._safe(path, write=True, op="replace")
+            if not target.exists():
+                raise PathNotFound(path)
+            if not target.is_file():
+                raise NotAFile(path)
 
-        try:
-            # Read bytes + decode (no newline translation). ``apply_text_replace``
-            # keeps exact hits byte-faithful; CRLF↔LF mismatch uses the LF-normalize
-            # fallback and restores the file's original eol on write-back.
-            content = target.read_bytes().decode("utf-8")
-        except UnicodeDecodeError as e:
-            raise NotUTF8(path) from e
-        except OSError as e:
-            raise WorkspaceIOError(str(e)) from e
+            try:
+                # Read bytes + decode (no newline translation). ``apply_text_replace``
+                # keeps exact hits byte-faithful; CRLF↔LF mismatch uses the LF-normalize
+                # fallback and restores the file's original eol on write-back.
+                content = target.read_bytes().decode("utf-8")
+            except UnicodeDecodeError as e:
+                raise NotUTF8(path) from e
+            except OSError as e:
+                raise WorkspaceIOError(str(e)) from e
 
-        result = apply_text_replace(content, old, new, all_=all_)
-        if isinstance(result, TextReplaceNoMatch):
-            raise NoMatch(path)
-        if isinstance(result, TextReplaceAmbiguous):
-            raise AmbiguousMatch(result.count)
+            result = apply_text_replace(content, old, new, all_=all_)
+            if isinstance(result, TextReplaceNoMatch):
+                raise NoMatch(path)
+            if isinstance(result, TextReplaceAmbiguous):
+                raise AmbiguousMatch(result.count)
 
-        try:
-            _atomic_write_bytes(target, result.content.encode("utf-8"))
-        except OSError as e:
-            raise WorkspaceIOError(str(e)) from e
+            try:
+                _atomic_write_bytes(target, result.content.encode("utf-8"))
+            except OSError as e:
+                raise WorkspaceIOError(str(e)) from e
 
-        self._mark_mutated()
-        return ReplaceOutcome(count=result.count, first_line=result.first_line)
+            self._mark_mutated()
+            await self._emit_shared_mutation(path, "file_written")
+            return ReplaceOutcome(count=result.count, first_line=result.first_line)
 
     async def grep(self, query: GrepQuery) -> GrepResult:
         # Path checks stay on the event loop so OutsideWorkspace / PathNotFound
@@ -1132,15 +1186,20 @@ class ServerWorkspace:
         # occasional snapshot of a pure-compute run (cheap, async, post-answer);
         # the alternative — silently missing code-generated files — is worse for
         # a backup feature. Read-only file ops still never set this.
-        self._mark_mutated()
-        env = dict(req.env or {})
-        env.update(build_external_env(self._mounts))
-        cwd = str(self._root.resolve())
-        # D11′：python 执行与 TestExitCode 同源注入 PYTHONPATH（. + 现存 src/lib）
-        if req.language == "python":
-            from agentcore.tools.sandbox.pythonpath import merge_pythonpath_into_env
+        #
+        # A′: hold the same single-layer mutation lock as file writes for the
+        # whole sandbox run (code_execute / test_run). Whole-turn lock used to
+        # cover this; without it, execute would race sibling turns' writes.
+        async with self._mutation_lock("."):
+            self._mark_mutated()
+            env = dict(req.env or {})
+            env.update(build_external_env(self._mounts))
+            cwd = str(self._root.resolve())
+            # D11′：python 执行与 TestExitCode 同源注入 PYTHONPATH（. + 现存 src/lib）
+            if req.language == "python":
+                from agentcore.tools.sandbox.pythonpath import merge_pythonpath_into_env
 
-            env = merge_pythonpath_into_env(Path(cwd), env)
-        return await self._sandbox.execute(
-            replace(req, cwd=cwd, env=env or None)
-        )
+                env = merge_pythonpath_into_env(Path(cwd), env)
+            return await self._sandbox.execute(
+                replace(req, cwd=cwd, env=env or None)
+            )

@@ -71,7 +71,7 @@ function renderDir(path: string, name: string, fileCount: number) {
 describe("FileTreeRow stage dir badges", () => {
   it("AgentCore/文档/research/debate 显示徽章副文案，普通目录零噪音", () => {
     const { unmount } = renderDir("AgentCore/文档/research", "research", 2);
-    expect(screen.getByText("调研案卷 · 2 件")).toBeTruthy();
+    expect(screen.getByText("调研约定文档 · 2 件")).toBeTruthy();
     unmount();
 
     renderDir("AgentCore/文档/debate", "debate", 1);
@@ -80,6 +80,6 @@ describe("FileTreeRow stage dir badges", () => {
     renderDir("src", "src", 3);
     expect(screen.queryByText(/src ·/)).toBeNull();
     expect(screen.getByText("src")).toBeTruthy();
-    expect(screen.queryByText("调研案卷 · 3 件")).toBeNull();
+    expect(screen.queryByText("调研约定文档 · 3 件")).toBeNull();
   });
 });

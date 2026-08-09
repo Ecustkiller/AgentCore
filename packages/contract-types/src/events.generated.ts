@@ -715,6 +715,15 @@ export interface CoordinationWaitPayload {
   total: number;
 }
 
+/** 同 folder 写锁短等（``workspace_lock_wait``）：跨会话串行时的前端 UX 信号。
+ * 
+ * ``waiting=true`` 即将阻塞在 ``workspace_lock``；``waiting=false`` 已拿到锁。
+ * 与同对话 FIFO ``turn_queued`` 正交。EPHEMERAL——不落 journal。 */
+export interface WorkspaceLockWaitPayload {
+  conversation_id: string;
+  waiting: boolean;
+}
+
 /** Overall verdict of a delegate batch's delivery reconciliation (交付诚实性):
  * delivered = 无缺口且有落盘产物; partial = 有产物也有缺口; blocked = 有缺口且
  * 无落盘产物. */
@@ -1125,7 +1134,7 @@ export interface DebateRoundScore {
 
 /** 场级证据台账条目（Citation ⊃ 台账字段 + 登记方 side_key）。
  * 
- * 案卷预登记（批 D2）可选来源锚：``dossier_path`` / ``origin_id`` / ``dossier_label``；
+ * 约定文档预登记（批 D2）可选来源锚：``dossier_path`` / ``origin_id`` / ``dossier_label``；
  * 旧 journal / 旧向量缺字段 → 前端忽略，零回归。 */
 export interface EvidenceLedgerEntry {
   id: string;
@@ -1859,6 +1868,7 @@ export type SSEPayloadMap = {
   team_note_posted: TeamNotePostedPayload;
   team_synthesis_preview: TeamSynthesisPreviewPayload;
   coordination_wait: CoordinationWaitPayload;
+  workspace_lock_wait: WorkspaceLockWaitPayload;
   delivery_status: DeliveryStatusPayload;
   user_interjection: UserInterjectionPayload;
   turn_queued: TurnQueuedPayload;

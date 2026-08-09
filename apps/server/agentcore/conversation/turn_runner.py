@@ -139,6 +139,11 @@ async def run_and_persist(
                 message_id=message_id,
                 backend=backend,
             )
+            # Baseline (and any prior channel hang) may sticky-dead the local
+            # desktop channel — fail the turn before prepare burns probe/MCP/LLM.
+            from agentcore.workspace.channel import raise_if_backend_channel_dead
+
+            raise_if_backend_channel_dead(backend)
             # Dev-only demo tape: divert before the real pipeline when this conversation
             # is bound under DEMO_TAPE_REPLAY_ENABLED. Optional — ImportError must not
             # block live turns (e.g. partial deploy missing tape_frame_meta).
@@ -432,6 +437,9 @@ async def run_mechanism_direct_and_persist(
                 message_id=message_id,
                 backend=backend,
             )
+            from agentcore.workspace.channel import raise_if_backend_channel_dead
+
+            raise_if_backend_channel_dead(backend)
 
             if settings.turn_lease_enabled:
                 owner_id = await acquire_turn_lease(

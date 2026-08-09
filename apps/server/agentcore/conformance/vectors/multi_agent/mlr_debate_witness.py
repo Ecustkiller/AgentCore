@@ -172,7 +172,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "id": "#e2",
                 "url": "https://court.example/contract",
                 "title": "法律 · #r1",
-                "snippet": "案卷 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
+                "snippet": "约定文档 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
                 "site": "法律",
                 "date": "",
                 "tier": "unknown",

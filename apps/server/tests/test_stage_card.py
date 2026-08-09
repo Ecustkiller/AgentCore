@@ -1151,13 +1151,6 @@ def _patch_start_debate_harness(monkeypatch, mod, *, pipeline):
         async def create(self, **_k):
             return None
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_a):
-            return None
-
     monkeypatch.setattr(mod, "run_stage_card_debate_pipeline", pipeline)
     monkeypatch.setattr(mod, "create_assistant_placeholder", _noop_placeholder)
     monkeypatch.setattr(mod, "persist_turn_result", _noop_persist)
@@ -1173,8 +1166,6 @@ def _patch_start_debate_harness(monkeypatch, mod, *, pipeline):
     monkeypatch.setattr(mod, "build_turn_backend", AsyncMock(return_value=object()))
     monkeypatch.setattr(mod, "session_callbacks", lambda *_a: (None, None))
     monkeypatch.setattr(mod, "suspension_callbacks", lambda: (None, None))
-    monkeypatch.setattr(mod, "workspace_lock", lambda *_a, **_k: _Lock())
-    monkeypatch.setattr(mod, "workspace_storage_key", lambda **_k: "k")
 
 
 @pytest.mark.asyncio

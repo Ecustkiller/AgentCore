@@ -13,7 +13,7 @@ from agentcore.runtime.events.payloads._base import WirePayload, absent
 class EvidenceLedgerEntry(WirePayload):
     """场级证据台账条目（Citation ⊃ 台账字段 + 登记方 side_key）。
 
-    案卷预登记（批 D2）可选来源锚：``dossier_path`` / ``origin_id`` / ``dossier_label``；
+    约定文档预登记（批 D2）可选来源锚：``dossier_path`` / ``origin_id`` / ``dossier_label``；
     旧 journal / 旧向量缺字段 → 前端忽略，零回归。
     """
 
@@ -24,8 +24,8 @@ class EvidenceLedgerEntry(WirePayload):
     site: str = ""
     date: str = ""
     tier: str = "unknown"  # official | media | unknown | weak | blocked
-    side_key: str = ""  # 登记方；主持人底料 = moderator；案卷预登记 = dossier
-    # 案卷来源锚（additive）：工作区相对路径 / 幕1 #rN / 透镜人话标签。
+    side_key: str = ""  # 登记方；主持人底料 = moderator；约定文档预登记 = dossier
+    # 约定文档来源锚（additive）：工作区相对路径 / 幕1 #rN / 透镜人话标签。
     dossier_path: str = ""
     origin_id: str = ""
     dossier_label: str = ""

@@ -107,6 +107,206 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/conversations/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read Account Conversation
+         * @description Owner-scoped deep transcript read (account ticket or access). Soft miss on 404.
+         */
+        post: operations["read_account_conversation_v1_account_conversations_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/conversations/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Account Conversations
+         * @description Owner-scoped conversation directory search (account ticket or access).
+         */
+        post: operations["search_account_conversations_v1_account_conversations_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Account Memory
+         * @description Soft-delete one memory note (no-op if missing).
+         */
+        post: operations["delete_account_memory_v1_account_memory_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Account Memory
+         * @description List memory note paths under one scope (global when ``scope`` is null).
+         */
+        post: operations["list_account_memory_v1_account_memory_list_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Load Account Memory
+         * @description Load one memory note body; missing path → empty string (soft).
+         */
+        post: operations["load_account_memory_v1_account_memory_load_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/project-scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Account Memory Project Scopes
+         * @description Folder ids that hold a semantic project memory layer.
+         */
+        post: operations["list_account_memory_project_scopes_v1_account_memory_project_scopes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Account Memory
+         * @description Upsert one memory note (画像/导航/主题/…). Write failures raise HTTP errors.
+         */
+        post: operations["save_account_memory_v1_account_memory_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/rules/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Account User Rules
+         * @description Injectable user rules (``ai_maintained=false``) for turn ``<rules>`` assembly.
+         */
+        post: operations["list_account_user_rules_v1_account_rules_list_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/rules/remember": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remember Account User Rule
+         * @description Append an explicit user directive to the scope's user-rule doc (``remember``).
+         */
+        post: operations["remember_account_user_rule_v1_account_rules_remember_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Account Token
+         * @description Exchange the caller's cookie/Bearer access session for an account narrow ticket.
+         */
+        post: operations["mint_account_token_v1_account_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/audit-logs": {
         parameters: {
             query?: never;
@@ -1570,10 +1770,13 @@ export interface paths {
          *     The conflict gate is server-authoritative — a file that diverged locally since the
          *     base is refused (status ``conflict``) unless its selection ``force``\s it.
          *
+         *     On a successful apply pass the job becomes ``applied`` and the cloud host enters
+         *     soft-delete reclaim (§7.6) — not an immediate destroy.
+         *
          *     Binding resolution matches turn routing (``resolve_local_binding``).
          *     404 if the conversation is not owned or the job is unknown / from another source;
-         *     409 while the job has not succeeded yet; 422 when the conversation is not in local
-         *     mode (nothing local to apply onto).
+         *     409 while the job has not succeeded yet, or after applied/discarded; 422 when the
+         *     conversation is not in local mode (nothing local to apply onto).
          */
         post: operations["apply_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__apply_post"];
         delete?: never;
@@ -1603,6 +1806,34 @@ export interface paths {
         get: operations["get_handoff_job_diff_v1_conversations__conversation_id__handoff_jobs__job_id__diff_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard Handoff Job
+         * @description Abandon a finished handoff's cloud replica without applying (§7.6 结束可收).
+         *
+         *     Marks the job ``discarded`` and soft-deletes the hidden job host so retention
+         *     can reclaim it. Succeeded (未合回) and failed jobs may be discarded; already
+         *     discarded is idempotent. 409 if the job is still running / pending, or already
+         *     applied. Diff may still work until retention hard-purges snapshots.
+         *
+         *     Uses the request-scoped repos (not a detached session) so the status write and
+         *     host soft-delete share the same DB binding as list/get.
+         */
+        post: operations["discard_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__discard_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2929,7 +3160,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/folders/{folder_id}": {
+    "/v1/folders/token": {
         parameters: {
             query?: never;
             header?: never;
@@ -2937,6 +3168,30 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        /**
+         * Mint Folders Token
+         * @description Exchange the caller's cookie/Bearer access session for a folders narrow ticket.
+         */
+        post: operations["mint_folders_token_v1_folders_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/folders/{folder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Folder
+         * @description Owner-scoped folder fetch (desk binding / sidecar get-by-id).
+         */
+        get: operations["get_folder_v1_folders__folder_id__get"];
         put?: never;
         post?: never;
         /** Delete Folder */
@@ -2956,9 +3211,9 @@ export interface paths {
         };
         /**
          * Get Collaboration Timeline
-         * @description 项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 案卷引用条.
+         * @description 项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.
          *
-         *     零写路径。案卷快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
+         *     零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
          *     文件 API，不在此返回。
          */
         get: operations["get_collaboration_timeline_v1_folders__folder_id__collaboration_timeline_get"];
@@ -5281,6 +5536,111 @@ export interface components {
              */
             recorded: boolean;
         };
+        /** AccountMemoryDeleteRequest */
+        AccountMemoryDeleteRequest: {
+            /** Path */
+            path: string;
+            /** Scope */
+            scope?: string | null;
+        };
+        /** AccountMemoryFileMeta */
+        AccountMemoryFileMeta: {
+            /** Path */
+            path: string;
+            /** Version */
+            version: string;
+        };
+        /** AccountMemoryListResponse */
+        AccountMemoryListResponse: {
+            /** Files */
+            files: components["schemas"]["AccountMemoryFileMeta"][];
+        };
+        /** AccountMemoryLoadRequest */
+        AccountMemoryLoadRequest: {
+            /** Path */
+            path: string;
+            /** Scope */
+            scope?: string | null;
+        };
+        /** AccountMemoryLoadResponse */
+        AccountMemoryLoadResponse: {
+            /** Content */
+            content: string;
+        };
+        /** AccountMemoryOkResponse */
+        AccountMemoryOkResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
+        /** AccountMemoryProjectScopesResponse */
+        AccountMemoryProjectScopesResponse: {
+            /** Scopes */
+            scopes: string[];
+        };
+        /** AccountMemorySaveRequest */
+        AccountMemorySaveRequest: {
+            /** Content */
+            content: string;
+            /** Path */
+            path: string;
+            /** Scope */
+            scope?: string | null;
+        };
+        /** AccountMemoryScopeRequest */
+        AccountMemoryScopeRequest: {
+            /** Scope */
+            scope?: string | null;
+        };
+        /** AccountRememberRequest */
+        AccountRememberRequest: {
+            /** Content */
+            content: string;
+            /** Folder Id */
+            folder_id?: string | null;
+        };
+        /** AccountRememberResponse */
+        AccountRememberResponse: {
+            /** Changed */
+            changed: boolean;
+        };
+        /** AccountRuleDoc */
+        AccountRuleDoc: {
+            /** Content */
+            content: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * AccountRulesListRequest
+         * @description Optional project layer; global rules always included.
+         */
+        AccountRulesListRequest: {
+            /** Folder Id */
+            folder_id?: string | null;
+        };
+        /** AccountRulesListResponse */
+        AccountRulesListResponse: {
+            /** Global Rules */
+            global_rules: components["schemas"]["AccountRuleDoc"][];
+            /** Project Rules */
+            project_rules: components["schemas"]["AccountRuleDoc"][];
+        };
+        /**
+         * AccountTokenResponse
+         * @description Freshly minted account narrow token + lifetime (sidecar log-tool auth).
+         *
+         *     Desktop: ``baseUrl`` for ``accountAuth`` is ``{apiOrigin}/v1/account``;
+         *     ``apiKey`` is ``token``. Mint path: ``POST /v1/account/token``.
+         */
+        AccountTokenResponse: {
+            /** Expires In Sec */
+            expires_in_sec: number;
+            /** Token */
+            token: string;
+        };
         /** ActiveNotice */
         ActiveNotice: {
             /** Body */
@@ -6749,7 +7109,7 @@ export interface components {
         };
         /**
          * CollaborationDossierRef
-         * @description Path-level 案卷消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。
+         * @description Path-level 约定文档消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。
          */
         CollaborationDossierRef: {
             /** Path */
@@ -6795,7 +7155,7 @@ export interface components {
         CollaborationTimelineResponse: {
             /**
              * Dossier Refs Note
-             * @default 路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边
+             * @default 路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边
              */
             dossier_refs_note: string;
             /** Folder Id */
@@ -6847,6 +7207,136 @@ export interface components {
             page_size: number;
             /** Total */
             total: number;
+        };
+        /** ConversationReadRequest */
+        ConversationReadRequest: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Cursor */
+            cursor?: string | null;
+            /** Max Chars */
+            max_chars?: number | null;
+        };
+        /** ConversationReadResponse */
+        ConversationReadResponse: {
+            /**
+             * Char Offset
+             * @default 0
+             */
+            char_offset: number;
+            /**
+             * Conversation Id
+             * @default
+             */
+            conversation_id: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "soft_miss";
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Total Chars
+             * @default 0
+             */
+            total_chars: number;
+            /**
+             * Transcript
+             * @default
+             */
+            transcript: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * ConversationSearchRequest
+         * @description Aligned with Worker ``search_conversations`` (resolved folder filters).
+         */
+        ConversationSearchRequest: {
+            /**
+             * Check Folder Owned
+             * @default false
+             */
+            check_folder_owned: boolean;
+            /** Exclude Conversation Id */
+            exclude_conversation_id?: string | null;
+            /** Folder Id */
+            folder_id?: string | null;
+            /**
+             * Global Chats Only
+             * @default false
+             */
+            global_chats_only: boolean;
+            /**
+             * Include Archived
+             * @default false
+             */
+            include_archived: boolean;
+            /**
+             * Limit
+             * @default 10
+             */
+            limit: number;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /** Updated Within Hours */
+            updated_within_hours?: number | null;
+        };
+        /** ConversationSearchResponse */
+        ConversationSearchResponse: {
+            /**
+             * Folder Miss
+             * @default false
+             */
+            folder_miss: boolean;
+            /** Rows */
+            rows: components["schemas"]["ConversationSearchRow"][];
+        };
+        /** ConversationSearchRow */
+        ConversationSearchRow: {
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Folder Name */
+            folder_name?: string | null;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /** Snippet */
+            snippet?: string | null;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** ConversationSummary */
         ConversationSummary: {
@@ -7895,6 +8385,16 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * FoldersTokenResponse
+         * @description Freshly minted folders narrow token + lifetime (sidecar roster auth).
+         */
+        FoldersTokenResponse: {
+            /** Expires In Sec */
+            expires_in_sec: number;
+            /** Token */
+            token: string;
+        };
         /** FriendListResponse */
         FriendListResponse: {
             /** Data */
@@ -8097,6 +8597,10 @@ export interface components {
          *     diff base, under the source conversation's storage key); ``result_snapshot_id``
          *     is the team's output (under the hidden job conversation's key), NULL until the
          *     run succeeds. ``job_conversation_id`` hosts the team's replayable graph.
+         *
+         *     ``status`` for the cloud-replica reclaim surface (§7.6): ``succeeded`` = 可合回
+         *     (Diff/apply open); ``applied`` = 已合回; ``discarded`` = 已丢弃. Pending /
+         *     running / failed are the run phase before that.
          */
         HandoffJobSummary: {
             /** Base Snapshot Id */
@@ -8122,7 +8626,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "pending" | "running" | "succeeded" | "failed";
+            status: "pending" | "running" | "succeeded" | "failed" | "applied" | "discarded";
             /** Task */
             task: string;
             /**
@@ -11666,6 +12170,11 @@ export interface components {
          *     ``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same
          *     message as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``
          *     (str_replace). An unknown ``kind`` degrades to a generic I/O error.
+         *
+         *     ``reason`` is an optional stable failure category for channels that already
+         *     classify on the desktop (e.g. external mount ``not_found`` / ``not_directory`` /
+         *     ``ambiguous``) so the model-facing tool error can keep the code, not only
+         *     a human message.
          */
         WorkspaceOpError: {
             /** Count */
@@ -11677,6 +12186,8 @@ export interface components {
             detail: string;
             /** Kind */
             kind: string;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * WorkspaceSummary
@@ -11921,6 +12432,368 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdatesPolicyResponse"];
+                };
+            };
+        };
+    };
+    read_account_conversation_v1_account_conversations_read_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationReadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_account_conversations_v1_account_conversations_search_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_memory_v1_account_memory_delete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemoryDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_account_memory_v1_account_memory_list_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    load_account_memory_v1_account_memory_load_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemoryLoadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryLoadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_account_memory_project_scopes_v1_account_memory_project_scopes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryProjectScopesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_account_memory_v1_account_memory_save_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemorySaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_account_user_rules_v1_account_rules_list_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountRulesListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountRulesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remember_account_user_rule_v1_account_rules_remember_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountRememberRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountRememberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mint_account_token_v1_account_token_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -14787,6 +15660,42 @@ export interface operations {
             };
         };
     };
+    discard_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__discard_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                job_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoffJobSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post: {
         parameters: {
             query?: never;
@@ -17471,6 +18380,74 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mint_folders_token_v1_folders_token_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FoldersTokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_folder_v1_folders__folder_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                folder_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

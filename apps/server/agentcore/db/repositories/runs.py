@@ -25,9 +25,10 @@ from ._base import commit_or_flush, strip_nul
 class HandoffJobRepository:
     """Local→云 handoff jobs (双模式工作区 P2e / e2): a dispatched cloud team run.
 
-    Tracks one job's lifecycle (pending → running → succeeded/failed) and the two
-    snapshot ids that bracket it (the base it ran on, the result it produced). All
-    reads are owner-scoped so a non-owner gets nothing (IDOR-safe), mirroring the
+    Tracks one job's lifecycle (pending → running → succeeded/failed, then
+    applied/discarded for cloud-replica reclaim) and the two snapshot ids that
+    bracket it (the base it ran on, the result it produced). All reads are
+    owner-scoped so a non-owner gets nothing (IDOR-safe), mirroring the
     conversation repo.
     """
 
@@ -78,6 +79,31 @@ class HandoffJobRepository:
         )
         return result.scalars().all()
 
+    async def list_open_past_retention(
+        self, *, before: datetime, limit: int
+    ) -> Sequence[HandoffJob]:
+        """Finished but still-open jobs (succeeded/failed) past ``before``.
+
+        Backs retention aging of unapplied/undiscarded cloud hosts: Diff must
+        stay available until this cutoff — never soft-delete earlier on succeed.
+
+        Only hosts that are not yet soft-deleted are returned, so a prior aging
+        pass (or apply/discard reclaim) cannot starve the batch with no-ops.
+        """
+        result = await self._session.execute(
+            select(HandoffJob)
+            .join(Conversation, Conversation.id == HandoffJob.job_conversation_id)
+            .where(
+                HandoffJob.status.in_(("succeeded", "failed")),
+                HandoffJob.finished_at.is_not(None),
+                HandoffJob.finished_at <= before,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(HandoffJob.finished_at.asc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def mark_running(self, job_id: str) -> None:
         await self._session.execute(
             update(HandoffJob).where(HandoffJob.id == job_id).values(status="running")
@@ -103,6 +129,29 @@ class HandoffJobRepository:
             .values(status="failed", error=error, finished_at=datetime.now(UTC))
         )
         await self._session.commit()
+
+    async def mark_applied(self, job_id: str) -> bool:
+        """Terminal: cloud result merged back. Only from ``succeeded``. Returns whether updated."""
+        result = await self._session.execute(
+            update(HandoffJob)
+            .where(HandoffJob.id == job_id, HandoffJob.status == "succeeded")
+            .values(status="applied")
+        )
+        await self._session.commit()
+        return bool(result.rowcount)
+
+    async def mark_discarded(self, job_id: str) -> bool:
+        """Terminal: user abandoned the cloud replica. From ``succeeded`` or ``failed``."""
+        result = await self._session.execute(
+            update(HandoffJob)
+            .where(
+                HandoffJob.id == job_id,
+                HandoffJob.status.in_(("succeeded", "failed")),
+            )
+            .values(status="discarded")
+        )
+        await self._session.commit()
+        return bool(result.rowcount)
 
 
 class RunSessionRepository:

@@ -168,6 +168,12 @@ class TurnSuspension:
     # global) instead of degrading to global-only — Agent记忆与知识系统 §二. ``None`` for a
     # 裸聊 / local turn with no cloud folder. Serialized into the frame (resume control state).
     folder_id: str | None = None
+    # Sidecar/desktop-injected Folder local bind for explore workspace_key (mirrors
+    # startTurn ``localRootId`` / ``localSubpath``). Captured at pause so resume can
+    # rebuild the key without opening local PG. Legacy frames lack these → False.
+    folder_binding_injected: bool = False
+    folder_local_root_id: str | None = None
+    folder_local_subpath: str | None = None
     # Caller-supplied memory gate at pause (product resolve always on / 定案 A):
     # captured so a resume re-wires the toolset the SAME way the original turn did —
     # False ⇒ consult_memory stays UNwired on resume too. Defaults True (legacy
@@ -244,6 +250,9 @@ class TurnSuspension:
             "base_system_prompt": self.base_system_prompt,
             "user_message": self.user_message,
             "folder_id": self.folder_id,
+            "folder_binding_injected": self.folder_binding_injected,
+            "folder_local_root_id": self.folder_local_root_id,
+            "folder_local_subpath": self.folder_local_subpath,
             "memory_enabled": self.memory_enabled,
             "conversation_history_access": self.conversation_history_access,
             # NOTE: ``transcript`` / ``history`` / ``journal_entries`` are deliberately NOT
@@ -281,6 +290,14 @@ class TurnSuspension:
             "base_system_prompt": data.get("base_system_prompt", "") or "",
             "user_message": data.get("user_message", "") or "",
             "folder_id": data.get("folder_id"),
+            # Legacy frames (pre-inject) lack bind keys → not injected (DB / degrade on resume).
+            "folder_binding_injected": bool(data.get("folder_binding_injected")),
+            "folder_local_root_id": data.get("folder_local_root_id"),
+            "folder_local_subpath": (
+                None
+                if data.get("folder_local_subpath") is None
+                else str(data.get("folder_local_subpath"))
+            ),
             # Legacy frames (pre-field) lack the key → default True so a resume never silently
             # strips memory that the original turn had on.
             "memory_enabled": data.get("memory_enabled", True),

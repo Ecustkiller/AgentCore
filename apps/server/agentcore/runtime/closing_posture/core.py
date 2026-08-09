@@ -138,7 +138,8 @@ def closing_honesty_rework(
     主路径：``delivery_verdict.state`` ∉ 正式完成 → 不得姿势 A；
     ``requires_draft_ack``（evidence_deficit / thin_review / verify_failed /
     node_failed / artifact_rejected）另须正文出现草稿/缺口承认（正向要求，不靠加完成词）。
-    B1：浏览器声称须 tool 成功；零写禁称落盘；超席/空交接/cancel·0 须 PARTIAL 缺口清单。
+    B1：浏览器声称须 tool 成功；超席/空交接/cancel·0 须 PARTIAL 缺口清单。
+    零写落盘声称扫词硬回炉已撤（2026-08-09 定案 B）。
     无对账卡：同条不得既 C 又 A（少靠双边大词表；C/A 均为闭集）。
     """
     # Late imports: B1 probe axes live in sibling latch modules (avoid import cycles).
@@ -147,12 +148,6 @@ def closing_honesty_rework(
         _ceiling_hollow_teach_rework,
         _partial_storm_rework,
         _verify_budget_hollow_rework,
-        _zero_write_landing_rework,
-    )
-    from .ceo_mutation import (
-        claims_ceo_mutation_done,
-        claims_disk_landing,
-        turn_has_product_write_evidence,
     )
 
     text = content or ""
@@ -160,13 +155,9 @@ def closing_honesty_rework(
         return None
 
     # B1 structural axes first（真源=装配/tool/对账 latch，不扫用户气泡）。
-    # 零写须吃显式 delivery_verdict.delivered_files（finish_guard 传入），不能只读 ContextVar。
     browser_hit = _browser_claim_rework(text)
     if browser_hit:
         return browser_hit
-    zero_write = _zero_write_landing_rework(text, delivery_verdict=delivery_verdict)
-    if zero_write:
-        return zero_write
     for probe in (
         _partial_storm_rework,
         _verify_budget_hollow_rework,
@@ -178,16 +169,6 @@ def closing_honesty_rework(
 
     if delivery_verdict is not None:
         state = delivery_verdict.state
-        # 有对账卡但零 files：再拦落盘声称（与 _zero_write 互补；verdict 有 files 时已放行）。
-        if (
-            not delivery_verdict.delivered_files
-            and (claims_ceo_mutation_done(text) or claims_disk_landing(text))
-            and not turn_has_product_write_evidence(delivery_verdict=delivery_verdict)
-        ):
-            return (
-                f"本回合交付对账档位为「{_TIER_LABEL.get(state, state)}」且无落盘文件——"
-                "正文不得声称已落盘 / 已修改完成。请改 PARTIAL：缺口清单 + 下一步。"
-            )
         if not tier_forbids_posture_a(state):
             return None
         label = _TIER_LABEL.get(state, state)

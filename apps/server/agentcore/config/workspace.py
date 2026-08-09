@@ -18,6 +18,10 @@ class WorkspaceSettings(BaseModel):
     workspace_auto_snapshot_max: int = 10
 
     workspace_retention_enabled: bool = True
+    # Soft-deleted workspace grace before hard purge. Also the open-handoff Diff
+    # window (§7.6): unapplied/undiscarded cloud hosts stay until finished_at +
+    # this many days, then soft-delete into the same sweep — never early-delete
+    # on succeed (that would break Diff). Apply/discard soft-delete immediately.
     workspace_retention_days: int = 30
     workspace_retention_sweep_interval_seconds: int = 6 * 3600
     workspace_retention_batch_limit: int = 100

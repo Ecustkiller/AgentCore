@@ -222,6 +222,11 @@ class WorkspaceChannel:
     _consecutive_settle_timeouts: int = field(default=0, init=False, repr=False)
     _sem: asyncio.Semaphore | None = field(default=None, init=False, repr=False)
 
+    @property
+    def is_dead(self) -> bool:
+        """True after sticky-dead (consecutive real-op liveness hangs)."""
+        return self._dead
+
     def _get_sem(self) -> asyncio.Semaphore:
         """Lazy semaphore so it binds to the running event loop on first acquire."""
         if self._sem is None:
@@ -394,3 +399,24 @@ class WorkspaceChannel:
             error = result.get("error") if isinstance(result, dict) else None
             raise_op_error(error or {"kind": "WorkspaceIOError", "detail": "malformed op result"})
         return result.get("value")
+
+
+def raise_if_backend_channel_dead(backend: object | None) -> None:
+    """Abort when a local backend's ``WorkspaceChannel`` is already sticky-dead.
+
+    Used by prepare / turn_runner so a dead desktop channel fails the turn before
+    assemble + LLM (tools would only reject afterward). No-op for cloud / no-channel
+    backends. Raises ``WorkspaceIOError`` with a user-honest prepare-abort message.
+    """
+    if backend is None:
+        return
+    channel = getattr(backend, "_channel", None)
+    if not isinstance(channel, WorkspaceChannel) or not channel.is_dead:
+        return
+    from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
+
+    logger.info(
+        "workspace.prepare_aborted_channel_dead",
+        conversation_id=getattr(channel, "conversation_id", None),
+    )
+    raise WorkspaceIOError(CHANNEL_DEAD_PREPARE_ABORT)

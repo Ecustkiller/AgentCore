@@ -120,6 +120,10 @@ def test_cloud_scratch_facts():
     assert "多 local" in out and "并行" in out
     assert "可能降级" not in out
     assert "协作图不改" in out
+    # 空壳先问 + 开发双仓 ≠ 挂载
+    assert "空" in out and "ask_user" in out
+    assert "file_list" in out
+    assert "开发双仓" in out or "external_mount_readonly" in out
     assert "external_mount_readonly" in out
     assert "grant_organize_folder" in out
     assert "与工作区绑定正交" in out
@@ -170,12 +174,13 @@ def test_cloud_scratch_facts():
     assert "API Key" in out or "密钥" in out or "明文" in out
     # 旧「云端临时空间」短标签已换成诚实草稿口径
     assert "工作区身份：云端临时空间" not in out
-    # 案卷布局（始终可见）：三行出口 + 边界
-    assert "案卷出口·调研/讨论：`AgentCore/文档/research/`" in out
-    assert "案卷出口·辩论副产物：`AgentCore/文档/debate/`" in out
-    assert "案卷出口·审查：`AgentCore/文档/reviews/`" in out
+    # 约定文档布局（始终可见）：三行出口 + 边界
+    assert "约定文档出口·调研/讨论：`AgentCore/文档/research/`" in out
+    assert "约定文档出口·辩论副产物：`AgentCore/文档/debate/`" in out
+    assert "约定文档出口·审查：`AgentCore/文档/reviews/`" in out
     assert "讨论/调研/审查类交付写此树" in out
     assert "用户工程源码仍写业务路径" in out
+    assert "完整前缀" in out and "裸 reviews" in out
     # FakeBackend has no root → probe unknown; still soft-tips init_baseline (P3).
     assert "init_baseline" in out
     assert "不挡派工" in out or "不挡" in out

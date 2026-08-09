@@ -508,6 +508,12 @@ export function registerFsIpc(): void {
       isRecord(p) && typeof p.timeoutMs === "number" && p.timeoutMs > 0
         ? p.timeoutMs
         : undefined;
+    const conversationId =
+      isRecord(p) && typeof p.conversationId === "string"
+        ? p.conversationId
+        : undefined;
+    const requestId =
+      isRecord(p) && typeof p.requestId === "string" ? p.requestId : undefined;
     // execute：聊天审批卡是唯一人门（`workspace_op_required` 仅在后端 ApprovalGate 放行后
     // 触发）。不再叠主侧 native「即将运行 python」框——对标 Cursor 单一确认面。
     // native 门仅保留 openPath + 未带 rendererConfirmed 的 bash 兜底（见 terminal-service）。
@@ -516,6 +522,8 @@ export function registerFsIpc(): void {
       op: args.op as WorkspaceOpName,
       args: opArgs,
       timeoutMs,
+      conversationId,
+      requestId,
     });
   });
 

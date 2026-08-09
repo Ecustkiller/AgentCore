@@ -105,6 +105,9 @@ async def _wire_continuation_toolset(
     suspension_deleter: SuspensionDeleter | None,
     x_client_platform: str | None,
     has_memory_topics: bool | None = None,
+    folder_binding_injected: bool = False,
+    folder_local_root_id: str | None = None,
+    folder_local_subpath: str | None = None,
 ) -> ResumedWiring:
     """Shared CEO/worker toolset rebuild for resume and crash redrive (no parallel path)."""
     from agentcore.runtime.pipeline.resume import pipeline as resume_pipeline_mod
@@ -131,6 +134,10 @@ async def _wire_continuation_toolset(
 
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
+    # Sticky channel-dead: abort before probe / MCP burn more wall clock.
+    from agentcore.workspace.channel import raise_if_backend_channel_dead
+
+    raise_if_backend_channel_dead(backend)
     exec_languages = await resolve_exec_languages(backend)
     # Host / MCP backfill needs a desktop client — orthogonal to workspace location.
     channel = resolve_channel_profile(x_client_platform)
@@ -234,6 +241,9 @@ async def _wire_continuation_toolset(
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=frozenset(),
+        folder_binding_injected=folder_binding_injected,
+        folder_local_root_id=folder_local_root_id,
+        folder_local_subpath=folder_local_subpath,
     )
     from agentcore.runtime.closing_posture import (
         clear_b1_closing_latches,
@@ -274,6 +284,8 @@ async def _wire_continuation_toolset(
     # Re-stamp environment facts onto the worker base: continuation rebuilds the
     # backend from the CURRENT binding, so workers must not inherit a stale cloud
     # ``<workspace_context>``.
+    git_fact = await detect_workspace_git(backend)
+    raise_if_backend_channel_dead(backend)
     refreshed_base = restamp_workspace_facts(
         base_system_prompt,
         build_workspace_context(
@@ -283,7 +295,7 @@ async def _wire_continuation_toolset(
             permission_axes=permission_axes,
             mcp_enabled=mcp_discover.tool_count > 0,
             mcp_label=mcp_label,
-            git_fact=await detect_workspace_git(backend),
+            git_fact=git_fact,
         ),
     )
     # Look up via ``resume.pipeline`` so any module-level monkeypatch on that
@@ -329,21 +341,43 @@ async def _wire_continuation_toolset(
     # update_project_profile clears the flag).
     # Soft-empty / named-refresh via resolve_hard_explore_reason（与 assemble 同源）.
     if memory_enabled and folder_id:
+        from agentcore.conversation.scratch import resolve_conversation_local_binding
         from agentcore.memory.explore_profile import (
             project_profile_explore_reason,
+            resolve_folder_workspace_key,
             resolve_hard_explore_reason,
         )
         from agentcore.memory.store import default_memory_store
 
+        injected_binding = None
+        if folder_binding_injected:
+            injected_binding = resolve_conversation_local_binding(
+                local_root_id=folder_local_root_id,
+                local_subpath=folder_local_subpath,
+            )
+        # Same resolve boundary as assemble: non-UUID scope → folder:<id>;
+        # connectivity/DataError → None (never HARD-kill resume over key resolve).
+        current_key = await resolve_folder_workspace_key(
+            folder_id,
+            binding=injected_binding,
+            binding_injected=folder_binding_injected,
+        )
+        key_for_gates = current_key if current_key is not None else ""
         explore_reason = await project_profile_explore_reason(
             default_memory_store(),
             user_id,
             folder_id,
+            current_workspace_key=key_for_gates,
         )
         explore_reason, _soft = resolve_hard_explore_reason(explore_reason, user_message)
         if explore_reason:
             base_tool_context.cold_start_explore_pending = True
             base_tool_context.write_scope = "explore_memory"
+        if current_key:
+            upd = chat_tools.get_optional("update_project_profile")
+            if upd is not None and getattr(upd, "workspace_key", None) is None:
+                cast_upd: Any = upd
+                cast_upd.workspace_key = current_key
 
     return ResumedWiring(
         base_tool_context=base_tool_context,
@@ -400,6 +434,9 @@ async def wire_resume_turn(
         suspension_saver=suspension_saver,
         suspension_deleter=suspension_deleter,
         x_client_platform=x_client_platform,
+        folder_binding_injected=bool(suspension.folder_binding_injected),
+        folder_local_root_id=suspension.folder_local_root_id,
+        folder_local_subpath=suspension.folder_local_subpath,
     )
 
 

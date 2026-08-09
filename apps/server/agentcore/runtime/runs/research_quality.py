@@ -61,7 +61,8 @@ MD_PDF_EXPORT_DISCIPLINE = (
     "（确定性 `md_to_pdf` 才是主路径）。"
 )
 
-# research_report 默认成篇路径（可被 playbook_args.output_path 覆盖）。
+# research_report 成篇主文件权威默认（可被 playbook_args.output_path 覆盖）。
+# 单角调研中间产物见 playbooks.research ``调研要点.md``，勿与本路径抢名。
 DEFAULT_RESEARCH_REPORT_ARTIFACT = f"{RESEARCH_DIR}/报告.md"
 
 # 本地改文件 / 广度摸底 / 成篇意图 / 字数承诺：用户·task 文 RE 猜意图腿已撤；
@@ -70,7 +71,7 @@ DEFAULT_RESEARCH_REPORT_ARTIFACT = f"{RESEARCH_DIR}/报告.md"
 # 独立复核短报告：案 20260803-longfix-thin-review-claim-pass B——须 files_written，禁薄 handoff。
 # 纪律文案由 playbook / 已声明 form=files·artifacts 的 task 自带；运行时不再扫角色名抬契约。
 INDEPENDENT_REVIEW_REPORT_DISCIPLINE = (
-    "【复核落盘】须将带行号的短复核报告 file_write 到案卷 reviews/；"
+    "【复核落盘】须将带行号的短复核报告 file_write 到约定文档 reviews/；"
     "逐条写清结论与证据指针（文件:行号）；"
     "禁止仅用十余字 handoff 冒充过闸；handoff 只作速览+路径。"
 )
@@ -322,7 +323,7 @@ def is_two_phase_citation_deliverable(
     - ``citation_mode=="two_phase"`` → 是（playbook / CEO 盖戳）
     - 否则：声明的 ``artifacts`` / ``artifact_dir`` 或已落盘路径落在
       ``AgentCore/文档/research/`` 或 ``AgentCore/文档/reviews/`` → 是
-      （自由 delegate 案卷与 playbook 同口径）
+      （自由 delegate 约定文档与 playbook 同口径）
     """
     mode: str | None
     artifacts: list[str] = []
@@ -474,7 +475,7 @@ def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
 
     判定（结构字段，不扫 task/角色自由文）：
     - ``deliverable.min_length≥3000`` 成篇信号；或
-    - 批内已声明 reviews/ files 审校座 **且** 存在 two_phase / research·reviews 案卷 deliverable
+    - 批内已声明 reviews/ files 审校座 **且** 存在 two_phase / research·reviews 约定文档 deliverable
       （``research_report`` 与手写同构；``parallel_brief`` 无审校落盘 → 不进）。
     """
     if plan_signals_long_form_audit(plan_nodes):

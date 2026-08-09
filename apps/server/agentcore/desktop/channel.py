@@ -41,7 +41,16 @@ class DesktopNotifyError(Exception):
 
 
 class ExternalMountError(Exception):
-    """An external mount request failed (not found, desktop error, drop, or timeout)."""
+    """An external mount request failed (not found, desktop error, drop, or timeout).
+
+    ``reason`` is an optional stable category from the desktop resolve path
+    (``not_found`` / ``not_directory`` / ``ambiguous`` / …) so tools can surface
+    both a human detail and a machine-stable code to the model.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class HostOpError(Exception):
@@ -186,13 +195,20 @@ class DesktopClientChannel:
 
         if not isinstance(result, dict) or not result.get("ok"):
             detail = ""
+            reason: str | None = None
             if isinstance(result, dict):
                 err = result.get("error")
                 if isinstance(err, dict):
                     detail = str(err.get("detail", "") or "")
+                    raw_reason = err.get("reason")
+                    if isinstance(raw_reason, str) and raw_reason.strip():
+                        reason = raw_reason.strip()
                 elif err:
                     detail = str(err)
-            raise ExternalMountError(detail or "找不到该目录，无法挂载")
+            raise ExternalMountError(
+                detail or "找不到该目录，无法挂载",
+                reason=reason,
+            )
         value = result.get("value")
         return value if isinstance(value, dict) else {}
 

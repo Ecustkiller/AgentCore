@@ -27,7 +27,7 @@ RingStatus = Literal["PASS", "FAIL", "N/A"]
 # 污染基线，仅存档观测：首验场旧口径（证人答问核实误记辩手）总量，不再推导门槛。
 BASELINE_DEBATER_SEARCHES = 56
 # 环4 检索硬判据 = 机制对齐（2026-07-20 产品确认）：任一辩手 run 检索数不得超其
-# 机制预算（有案卷路径恒为此常数；引擎侧 tool_exec 强制，这里抓预算被绕过/接线
+# 机制预算（有约定文档路径恒为此常数；引擎侧 tool_exec 强制，这里抓预算被绕过/接线
 # 断裂的回归）。场级总量/分侧数降级为观测指标，不判 FAIL——总量随轮次×子 run 数
 # 线性膨胀，任何场级常数都会与轮次策略隐性耦合。
 SEARCH_BUDGET_PER_RUN = DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER
@@ -568,7 +568,7 @@ def collect_metrics(bundle: GoldenBundle) -> dict[str, Any]:
     if not saw_debate_tool and background_len == 0:
         gaps.append(
             "background_len：journal 未见 debate 工具 arguments.background"
-            "（stage_card 机制直起路径常见为 0；案卷注入见 dossier_index_len）"
+            "（stage_card 机制直起路径常见为 0；约定文档注入见 dossier_index_len）"
         )
 
     # 分幕费用：按 turn 归属（含 multi_agent run_plan 的 turn = 幕1；含 debate act 的 = 幕2）
@@ -803,7 +803,7 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     )
     ring4 = RingResult(
         4,
-        "幕2 同图生长+案卷消费+检索预算合规",
+        "幕2 同图生长+约定文档消费+检索预算合规",
         "PASS" if ring4_pass else "FAIL",
         (
             f"same_exec={same_exec} act_id={act_id!r} anchor_synth={anchor_synth} "

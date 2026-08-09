@@ -38,8 +38,6 @@ from agentcore.runtime.kickoff.stage_card import (
 )
 from agentcore.runtime.pipeline.stage_card_debate import run_stage_card_debate_pipeline
 from agentcore.runtime.settlement import already_settled_in_writer, prewrite_settlement_direct
-from agentcore.workspace.locate import workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
 
 logger = get_logger(__name__)
 
@@ -240,33 +238,28 @@ async def run_stage_card_start_debate(
         )
         debate_ok = False
         try:
-            async with workspace_lock(
-                workspace_storage_key(
-                    user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
-                )
-            ):
-                result = await run_stage_card_debate_pipeline(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    sink=sink,
-                    backend=backend,
-                    card=card_for_run,
-                    note=note,
-                    history=history[:-1] if history else [],
-                    folder_id=folder_id,
-                    board_id=board_id,
-                    memory_enabled=memory_enabled,
-                    conversation_history_access=conversation_history_access,
-                    permission_axes=permission_axes,
-                    profile_set=profile_set,
-                    llm_credentials=llm_credentials,
-                    session_saver=session_saver,
-                    session_loader=session_loader,
-                    suspension_saver=suspension_saver,
-                    suspension_deleter=suspension_deleter,
-                    message_id=message_id,
-                    x_client_platform=x_client_platform,
-                )
+            result = await run_stage_card_debate_pipeline(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                sink=sink,
+                backend=backend,
+                card=card_for_run,
+                note=note,
+                history=history[:-1] if history else [],
+                folder_id=folder_id,
+                board_id=board_id,
+                memory_enabled=memory_enabled,
+                conversation_history_access=conversation_history_access,
+                permission_axes=permission_axes,
+                profile_set=profile_set,
+                llm_credentials=llm_credentials,
+                session_saver=session_saver,
+                session_loader=session_loader,
+                suspension_saver=suspension_saver,
+                suspension_deleter=suspension_deleter,
+                message_id=message_id,
+                x_client_platform=x_client_platform,
+            )
             finish = str(result.get("finish_reason") or "")
             debate_ok = finish not in ("error", "interrupted") and not result.get("error")
             # finalize 已在 debate.started 边界完成；此处只区分启动失败 vs 开跑后失败。
@@ -389,29 +382,24 @@ async def run_stage_card_research_first(
     # 紧挨 CEO 回合授予，避免前置失败泄漏到下一请求。
     grant_mlr_preauth()
     try:
-        async with workspace_lock(
-            workspace_storage_key(
-                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
-            )
-        ):
-            await run_and_persist(
-                conversation_id=conversation_id,
-                user_message=composed,
-                user_id=user_id,
-                folder_id=folder_id,
-                sink=sink,
-                history=history[:-1] if history else [],
-                attachments=None,
-                backend=backend,
-                llm_credentials=llm_credentials,
-                profile_set=profile_set,
-                memory_enabled=memory_enabled,
-                conversation_history_access=conversation_history_access,
-                permission_axes=permission_axes,
-                board_id=board_id,
-                llm_supports_tools=llm_supports_tools,
-                x_client_platform=x_client_platform,
-            )
+        await run_and_persist(
+            conversation_id=conversation_id,
+            user_message=composed,
+            user_id=user_id,
+            folder_id=folder_id,
+            sink=sink,
+            history=history[:-1] if history else [],
+            attachments=None,
+            backend=backend,
+            llm_credentials=llm_credentials,
+            profile_set=profile_set,
+            memory_enabled=memory_enabled,
+            conversation_history_access=conversation_history_access,
+            permission_axes=permission_axes,
+            board_id=board_id,
+            llm_supports_tools=llm_supports_tools,
+            x_client_platform=x_client_platform,
+        )
     finally:
         discard_mlr_preauth()
 

@@ -1,3 +1,4 @@
+import { notifyInfo } from "@/lib/toast";
 import { type HandoffJob, listHandoffJobs } from "@/services/handoff";
 import {
   type WorkspaceMode,
@@ -17,18 +18,31 @@ import { create } from "zustand";
  * `modeByConversation` 缓存每个对话的云/本地判定（`getWorkspaceBinding`），供输入框的
  * 「后台」开关与本 feed 共用一次请求（`ensureMode` 去重并发拉取）——交接只在本地模式
  * 存在，故云端对话零额外拉取。
+ *
+ * §7.6 心智：云端改的是拷贝；合回本机须用户点一下。徽章优先信后端
+ * `applied` / `discarded`；`mergedJobIds` 仅作本会话合回后的乐观/兼容（勿与后端打架）。
+ * 轮询到新 succeeded 时给一次 toast（按 job id 去重，不对历史已成功作业刷屏）。
  */
 interface BackgroundTasksState {
-  /** conversationId → 其后台云端任务（后端按创建倒序返回）。 */
+  /** conversationId → 其后台云端任务（后端按时间倒序返回）。 */
   byConversation: Record<string, HandoffJob[]>;
   /** conversationId → 工作区模式（cloud / local），解析后缓存。 */
   modeByConversation: Record<string, WorkspaceMode>;
   /** conversationId → 绑定的本地根 id（本地模式才有；云端 / 未解析为 null）。 */
   rootIdByConversation: Record<string, string | null>;
+  /**
+   * 本会话乐观「已合回」标记（apply 成功瞬间、或确认无需合回）。权威态以 job.status
+   * `applied`/`discarded` 为准；本表不覆盖后端 discarded。
+   */
+  mergedJobIds: Record<string, true>;
+  /** 本会话已 toast 过的 succeeded job id（禁止累计骚扰）。 */
+  toastedSucceededIds: Record<string, true>;
   /** 用服务端权威列表覆盖某对话的任务（`listHandoffJobs`）。 */
   load: (conversationId: string) => Promise<void>;
   /** 插入 / 替换单项（乐观派发的临时项，或轮询刷新）。 */
   upsert: (conversationId: string, job: HandoffJob) => void;
+  /** 乐观标记已合回本机 / 无需合回（卡面在后端尚未刷到 applied 前用）。 */
+  markMerged: (jobId: string) => void;
   /**
    * 解析并缓存某对话的工作区模式 + 绑定根 id；与输入框共用，去重并发请求。失败回落
    * cloud / null。返回 mode（rootId 经 `useWorkspaceRootId` 读取，供成功任务的内联评审
@@ -47,11 +61,46 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
     byConversation: {},
     modeByConversation: {},
     rootIdByConversation: {},
+    mergedJobIds: {},
+    toastedSucceededIds: {},
     load: async (conversationId) => {
+      const prev = get().byConversation[conversationId] ?? [];
       const jobs = await listHandoffJobs(conversationId);
-      set((s) => ({
-        byConversation: { ...s.byConversation, [conversationId]: jobs },
-      }));
+      const hadInFlight = prev.some(
+        (j) => j.status === "pending" || j.status === "running",
+      );
+      const toToast: string[] = [];
+      if (hadInFlight) {
+        const { mergedJobIds, toastedSucceededIds } = get();
+        for (const job of jobs) {
+          if (job.status !== "succeeded") continue;
+          if (mergedJobIds[job.id] || toastedSucceededIds[job.id]) continue;
+          toToast.push(job.id);
+        }
+      }
+      set((s) => {
+        const toastedSucceededIds =
+          toToast.length === 0
+            ? s.toastedSucceededIds
+            : {
+                ...s.toastedSucceededIds,
+                ...Object.fromEntries(toToast.map((id) => [id, true as const])),
+              };
+        return {
+          byConversation: { ...s.byConversation, [conversationId]: jobs },
+          toastedSucceededIds,
+        };
+      });
+      if (toToast.length === 1) {
+        notifyInfo("云端拷贝已改完", {
+          description: "点卡片可查看改动并合回本机（不会自动写入本机文件夹）",
+        });
+      } else if (toToast.length > 1) {
+        notifyInfo(`${toToast.length} 个云端拷贝已改完`, {
+          description:
+            "点对应卡片可查看改动并合回本机（不会自动写入本机文件夹）",
+        });
+      }
     },
     upsert: (conversationId, job) =>
       set((s) => {
@@ -63,6 +112,12 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           byConversation: { ...s.byConversation, [conversationId]: next },
         };
       }),
+    markMerged: (jobId) =>
+      set((s) =>
+        s.mergedJobIds[jobId]
+          ? s
+          : { mergedJobIds: { ...s.mergedJobIds, [jobId]: true } },
+      ),
     ensureMode: async (conversationId) => {
       const cached = get().modeByConversation[conversationId];
       if (cached) return cached;
@@ -103,7 +158,27 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           s.modeByConversation;
         const { [conversationId]: _root, ...rootIdByConversation } =
           s.rootIdByConversation;
-        return { byConversation, modeByConversation, rootIdByConversation };
+        // Drop merged / toasted flags for jobs that belonged to this conversation.
+        const dropped = new Set(
+          (s.byConversation[conversationId] ?? []).map((j) => j.id),
+        );
+        let mergedJobIds = s.mergedJobIds;
+        let toastedSucceededIds = s.toastedSucceededIds;
+        if (dropped.size > 0) {
+          mergedJobIds = { ...s.mergedJobIds };
+          toastedSucceededIds = { ...s.toastedSucceededIds };
+          for (const id of dropped) {
+            delete mergedJobIds[id];
+            delete toastedSucceededIds[id];
+          }
+        }
+        return {
+          byConversation,
+          modeByConversation,
+          rootIdByConversation,
+          mergedJobIds,
+          toastedSucceededIds,
+        };
       });
     },
   }),
@@ -131,6 +206,11 @@ export function useWorkspaceRootId(
   return useBackgroundTasksStore((s) =>
     conversationId ? (s.rootIdByConversation[conversationId] ?? null) : null,
   );
+}
+
+/** 选择器：作业是否本会话乐观标记已合回（权威态见 job.status applied/discarded）。 */
+export function useBackgroundTaskMerged(jobId: string): boolean {
+  return useBackgroundTasksStore((s) => Boolean(s.mergedJobIds[jobId]));
 }
 
 /**

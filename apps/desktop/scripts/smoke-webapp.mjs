@@ -250,7 +250,7 @@ async function main() {
 
         // Gating spot-check: visit surfaces that carry local-only affordances and
         // screenshot them, so the web build's degradation (no window controls, no
-        // 本地引擎 toggle / 软件更新, no 添加本地文件夹) is visually verifiable. The
+        // 「允许本机执行」toggle / 软件更新, no 添加本地文件夹) is visually verifiable. The
         // cookie set during login persists in this context, so a full reload re-auths
         // silently (no login form).
         try {

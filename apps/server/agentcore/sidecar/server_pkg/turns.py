@@ -21,24 +21,95 @@ from agentcore.sidecar.server_pkg.result import trim_result
 logger = get_logger(__name__)
 
 
+def normalize_folder_id_param(raw: Any) -> str | None:
+    """RPC ``folderId`` → ``str | None`` (blank / null = bare chat). Never invent a project."""
+    if raw is None:
+        return None
+    cleaned = str(raw).strip()
+    return cleaned or None
+
+
+def normalize_local_subpath_param(raw: Any) -> str:
+    """RPC ``localSubpath`` → stripped str (null/blank = root itself)."""
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
+def resolve_rpc_folder_binding(
+    params: dict[str, Any],
+) -> tuple[bool, str | None, str]:
+    """Prefer RPC ``localRootId`` (+ optional ``localSubpath``); absent key ⇒ not injected.
+
+    Same presence rule as ``folderId``: key present (including explicit null / \"\")
+    means the desktop stamped a bind — do not open local PG for Folder.local_*.
+    Returns ``(injected, local_root_id, local_subpath)``.
+    """
+    if "localRootId" not in params:
+        return False, None, ""
+    root = normalize_folder_id_param(params.get("localRootId"))
+    subpath = (
+        normalize_local_subpath_param(params.get("localSubpath"))
+        if "localSubpath" in params
+        else ""
+    )
+    return True, root, subpath
+
+
+def apply_rpc_folder_binding_to_suspension(
+    suspension: TurnSuspension, params: dict[str, Any]
+) -> None:
+    """Overlay resume RPC project scope / bind onto the claimed frame when re-sent.
+
+    ``folderId`` key present (including explicit null) → overwrite ``suspension.folder_id``;
+    key absent → keep frame value (old desktop). Same presence rule for ``localRootId``.
+    """
+    if "folderId" in params:
+        suspension.folder_id = normalize_folder_id_param(params.get("folderId"))
+    injected, root, subpath = resolve_rpc_folder_binding(params)
+    if not injected:
+        return
+    suspension.folder_binding_injected = True
+    suspension.folder_local_root_id = root
+    suspension.folder_local_subpath = subpath
+
+
 async def load_conversation_folder_id(conversation_id: str) -> str | None:
     """Same shape as cloud ``conversation/turns.py``: ``conv.folder_id`` via unscoped get.
 
     Missing conversation → ``None`` (bare/global). Resume inherits via
     ``suspension.folder_id`` written on the start-turn pause path.
+
+    DB unreachable → ``DatabaseUnavailableError`` (honest fail). Never invent a
+    cached ``folder_id`` or silently continue as bare chat (wrong project scope).
     """
     from agentcore.db.base import async_session_factory
+    from agentcore.db.errors import reraise_as_database_unavailable
     from agentcore.db.repositories import ConversationRepository
 
-    async with async_session_factory() as session:
-        conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
-        if not conv:
-            return None
-        raw = getattr(conv, "folder_id", None)
-        if raw is None:
-            return None
-        cleaned = str(raw).strip()
-        return cleaned or None
+    try:
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+            if not conv:
+                return None
+            raw = getattr(conv, "folder_id", None)
+            return normalize_folder_id_param(raw)
+    except Exception as e:
+        reraise_as_database_unavailable(e)
+        raise
+
+
+async def resolve_start_turn_folder_id(
+    params: dict[str, Any], conversation_id: str
+) -> str | None:
+    """Prefer RPC ``params.folderId``; only hit local PG when the key is absent (old desktop).
+
+    Key present (including explicit ``null`` / ``""``) → normalize, no DB.
+    Key missing → ``load_conversation_folder_id`` (compat); connect refuse stays honest fail.
+    """
+    if "folderId" in params:
+        return normalize_folder_id_param(params.get("folderId"))
+    return await load_conversation_folder_id(conversation_id)
 
 
 def _finish_str(result: dict[str, Any]) -> str | None:
@@ -148,23 +219,31 @@ class TurnExecutionMixin:
                 conversation_id=conversation_id,
                 message_id=message_id,
             )
-        # Same shape as cloud conversation/turns.py: conversation.folder_id from DB
-        # (project memory scope + suspension.folder_id). Bare/missing → None.
-        folder_id = await load_conversation_folder_id(conversation_id)
-
-        # A1+ local：message_id mint + begin_turn 之后、pipeline 之前打本机基线（resume 不重打）。
-        from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-        await maybe_capture_turn_baseline(
-            user_id=self._user_id,
-            folder_id=folder_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            backend=backend,
-            workspace_root=self._root,
-        )
-        pump = asyncio.create_task(self._pump(turn_id, sink))
+        # folder_id / baseline / pipeline sit inside try so begin_turn OPEN cannot
+        # stick forever when DB is down on the legacy fallback path (方案一 · 诚实失败).
+        pump: asyncio.Task[None] | None = None
         try:
+            # Prefer params.folderId (desktop inject); key absent → DB load (old desktop).
+            # Explicit null/"" = bare chat — do not open local PG just to learn that.
+            folder_id = await resolve_start_turn_folder_id(params, conversation_id)
+            # Same for Folder local bind (explore workspace_key): desktop stamps
+            # localRootId/localSubpath so assemble never HARD-fails on PG-down.
+            binding_injected, folder_local_root_id, folder_local_subpath = (
+                resolve_rpc_folder_binding(params)
+            )
+
+            # A1+ local：message_id mint + begin_turn 后、pipeline 前打本机基线（resume 不重打）。
+            from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
+
+            await maybe_capture_turn_baseline(
+                user_id=self._user_id,
+                folder_id=folder_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                backend=backend,
+                workspace_root=self._root,
+            )
+            pump = asyncio.create_task(self._pump(turn_id, sink))
             try:
                 # Bind the turn's trace_id here (the cloud binds it in stream_chat; the engine
                 # itself doesn't) so the engine's message_start carries it and the live bubble
@@ -186,6 +265,8 @@ class TurnExecutionMixin:
                         via="sidecar",
                         message_id=message_id,
                     )
+                    from agentcore.account.credentials import account_credentials_scope
+                    from agentcore.folders.credentials import folders_credentials_scope
                     from agentcore.sidecar import server as sidecar_server
                     from agentcore.tools.builtin.web.cloud_fallback import (
                         inference_search_credentials_scope,
@@ -198,7 +279,15 @@ class TurnExecutionMixin:
                     # desktop_online from location=local.
                     # Bind inference JWT for web_search cloud fallback when local
                     # SearXNG is unreachable (ContextVar; reset after turn).
-                    with inference_search_credentials_scope(_inference_search_creds(turn_creds)):
+                    # Bind folders narrow ticket for roster / desk-binding cloud HTTP.
+                    # Bind account narrow ticket for conversation-log search/read.
+                    with (
+                        inference_search_credentials_scope(
+                            _inference_search_creds(turn_creds)
+                        ),
+                        folders_credentials_scope(self._folders_creds),
+                        account_credentials_scope(self._account_creds),
+                    ):
                         result = await sidecar_server.run_chat_pipeline(
                             conversation_id=conversation_id,
                             user_message=user_message,
@@ -207,6 +296,9 @@ class TurnExecutionMixin:
                             user_id=self._user_id,
                             backend=backend,
                             folder_id=folder_id,
+                            folder_binding_injected=binding_injected,
+                            folder_local_root_id=folder_local_root_id,
+                            folder_local_subpath=folder_local_subpath,
                             approvals_enabled=self._approvals_enabled,
                             permission_axes=self._permission_axes,
                             llm_credentials=turn_creds,
@@ -273,8 +365,12 @@ class TurnExecutionMixin:
                 journal_entries=len(journal),
                 salvaged=outbox is not None,
             )
-            with contextlib.suppress(Exception):
-                await pump
+            if pump is not None:
+                with contextlib.suppress(Exception):
+                    await pump
+            else:
+                with contextlib.suppress(Exception):
+                    sink.close()
             # Reply on an independent task: this one is unwinding from cancellation.
             self._send_soon(
                 protocol.make_error(request_id, protocol.TURN_CANCELLED, "turn cancelled")
@@ -289,8 +385,12 @@ class TurnExecutionMixin:
                     trace_id=trace_id,
                     message_id=message_id,
                 )
-            with contextlib.suppress(Exception):
-                await pump
+            if pump is not None:
+                with contextlib.suppress(Exception):
+                    await pump
+            else:
+                with contextlib.suppress(Exception):
+                    sink.close()
             logger.error("sidecar.turn_failed", turn_id=turn_id, error=str(e), exc_info=True)
             await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
         finally:
@@ -458,13 +558,19 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     user_id=self._user_id,
                 ):
+                    from agentcore.account.credentials import account_credentials_scope
+                    from agentcore.folders.credentials import folders_credentials_scope
                     from agentcore.sidecar import server as sidecar_server
                     from agentcore.tools.builtin.web.cloud_fallback import (
                         inference_search_credentials_scope,
                     )
 
-                    with inference_search_credentials_scope(
-                        _inference_search_creds(resume_creds)
+                    with (
+                        inference_search_credentials_scope(
+                            _inference_search_creds(resume_creds)
+                        ),
+                        folders_credentials_scope(self._folders_creds),
+                        account_credentials_scope(self._account_creds),
                     ):
                         result = await sidecar_server.resume_chat_pipeline(
                             suspension=suspension,

@@ -48,7 +48,9 @@ class SettledSuspension(NamedTuple):
     ``effect`` mirrors the settled tool's :class:`ToolEffect` so the cold resume
     path can honor re-entrant SUSPEND (downstream checkpoint while ``resume_plan``
     runs) the same way the live engine does — PAUSED, no CEO continuation.
-    ``terminal_text`` remains the ask_user-stop in-band closing path (INTERACT).
+    ``terminal_text`` is set only when settle returns a terminal ``INTERACT``
+    effect (in-band closing without another CEO round); ask_user stop no longer
+    uses that path — it feeds CONTINUE like timeout / kickoff cancel.
     """
 
     output: str

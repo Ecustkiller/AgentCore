@@ -35,11 +35,14 @@ export function BackgroundTaskReview({
   jobId,
   rootId,
   onClose,
+  onMerged,
 }: {
   conversationId: string;
   jobId: string;
   rootId: string;
   onClose: () => void;
+  /** 合回完成或确认无需合回时回调（卡面徽章）。 */
+  onMerged?: () => void;
 }) {
   const [rows, setRows] = useState<ReviewRow[] | null>(null);
   const [error, setError] = useState(false);
@@ -66,11 +69,29 @@ export function BackgroundTaskReview({
         rootId,
         diff.changes.map((c) => c.path),
       );
-      if (mounted.current) setRows(buildReviewRows(diff.changes, shas));
+      if (!mounted.current) return;
+      const rowsNext = buildReviewRows(diff.changes, shas);
+      setRows(rowsNext);
+      // 与本机一致：空 apply 让服务端标 applied（§7.6），重开不再「待合回」。
+      if (rowsNext.length === 0) {
+        try {
+          await applyHandoffJob(conversationId, jobId, []);
+          if (mounted.current) onMerged?.();
+        } catch (err) {
+          // 已合回等 409：徽章仍应收口；其它错误不误标。
+          if (
+            err instanceof StreamError &&
+            err.status === 409 &&
+            mounted.current
+          ) {
+            onMerged?.();
+          }
+        }
+      }
     } catch {
       if (mounted.current) setError(true);
     }
-  }, [conversationId, jobId, rootId]);
+  }, [conversationId, jobId, rootId, onMerged]);
 
   useEffect(() => {
     void load();
@@ -115,21 +136,24 @@ export function BackgroundTaskReview({
         })),
       );
       const result = await applyHandoffJob(conversationId, jobId, selections);
-      if (mounted.current) setSummary(result);
+      if (mounted.current) {
+        setSummary(result);
+        onMerged?.();
+      }
     } catch (err) {
       if (mounted.current) {
         setApplyError(
           err instanceof StreamError
-            ? "应用失败：网络或服务异常"
+            ? "合回本机失败：网络或服务异常"
             : err instanceof Error
               ? err.message
-              : "应用失败",
+              : "合回本机失败",
         );
       }
     } finally {
       if (mounted.current) setApplying(false);
     }
-  }, [rows, applying, conversationId, jobId, rootId]);
+  }, [rows, applying, conversationId, jobId, rootId, onMerged]);
 
   if (error) {
     return (
@@ -153,7 +177,7 @@ export function BackgroundTaskReview({
       <Bar>
         <CheckCircle2 size={13} className="text-success" />
         <span className="text-muted-foreground">
-          云端结果与本地一致，无需改动。
+          云端拷贝与本机一致，无需合回。
         </span>
         <BarButton className="ml-auto" onClick={onClose}>
           收起
@@ -164,7 +188,7 @@ export function BackgroundTaskReview({
 
   if (summary) {
     const parts: string[] = [];
-    if (summary.applied) parts.push(`${summary.applied} 已应用`);
+    if (summary.applied) parts.push(`${summary.applied} 已合回本机`);
     if (summary.skipped) parts.push(`${summary.skipped} 跳过`);
     if (summary.conflicts) parts.push(`${summary.conflicts} 冲突`);
     if (summary.errors) parts.push(`${summary.errors} 失败`);
@@ -194,10 +218,12 @@ export function BackgroundTaskReview({
         {conflicts.length > 0 ? (
           <span className="flex items-center gap-1 text-destructive">
             <AlertTriangle size={12} />
-            {conflicts.length} 个与本地改动冲突，需你选择
+            {conflicts.length} 个与本机改动冲突，需你选择
           </span>
         ) : (
-          <span className="text-muted-foreground">无冲突，可直接全部接受</span>
+          <span className="text-muted-foreground">
+            无冲突，可直接全部合回本机
+          </span>
         )}
       </div>
 
@@ -237,12 +263,12 @@ export function BackgroundTaskReview({
                     active={row.decision === "cloud"}
                     danger
                     onClick={() => setDecision(row.change.path, "cloud")}
-                    label="云端（覆盖）"
+                    label="用云端拷贝（覆盖本机）"
                   />
                   <DecisionToggle
                     active={row.decision === "local"}
                     onClick={() => setDecision(row.change.path, "local")}
-                    label="保留本地"
+                    label="保留本机"
                   />
                 </div>
                 {open && canPreview && (
@@ -259,7 +285,7 @@ export function BackgroundTaskReview({
       {forced > 0 && (
         <p className="mt-2 flex items-center gap-1 text-xs text-destructive">
           <AlertTriangle size={12} />
-          将强制覆盖 {forced} 个有本地改动的文件
+          将强制覆盖 {forced} 个有本机改动的文件
         </p>
       )}
       {applyError && (
@@ -280,8 +306,8 @@ export function BackgroundTaskReview({
           onClick={() => void onApply()}
         >
           {conflicts.length === 0
-            ? `全部接受并应用（${rows.length} 个文件）`
-            : "应用所选改动"}
+            ? `全部合回本机（${rows.length} 个文件）`
+            : "合回所选改动到本机"}
         </Button>
         <Button
           variant="neutral"

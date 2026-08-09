@@ -105,7 +105,10 @@ interface MemoryUpdatedEvent {
 function catchUp(): void {
   const store = useMessagingStore.getState();
   void store.fetchChats();
-  void store.fetchFriendRequests();
+  void (async () => {
+    await store.fetchFriends();
+    await store.fetchFriendRequests();
+  })();
   if (store.activeChatId) void store.loadMessages(store.activeChatId);
 }
 
@@ -172,12 +175,19 @@ function handleFrame(frame: string): void {
         useMessagingStore.getState().applyPresence(e.user_id, !!e.online);
       }
     } else if (event.type === "friend_request") {
-      // Refresh request box + friends; open profile card re-fetches via store subscribe.
-      useMessagingStore.getState().applyFriendRequestEvent();
       const e = event as FriendRequestEvent;
+      const action = e.action ?? "cancelled";
+      const request = e.request ?? ({ id: "" } as FriendRequest);
+      useMessagingStore.getState().applyFriendRequestEvent({ action, request });
       const myId = useAuthStore.getState().user?.id;
-      if (e.action === "created" && myId && e.request?.to_user_id === myId) {
+      if (action === "created" && myId && e.request?.to_user_id === myId) {
         notifyInfo("你收到一条好友申请");
+      } else if (
+        action === "accepted" &&
+        myId &&
+        e.request?.from_user_id === myId
+      ) {
+        notifyInfo("对方已同意好友申请");
       }
     }
     // "ready" and any other event types: no-op here.

@@ -75,14 +75,11 @@ async def test_harvest_closing_passes_preflight_credentials_to_run():
         patch.object(eh, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(eh, "build_turn_backend", AsyncMock(return_value=MagicMock())),
         patch.object(eh, "run_and_persist", new=_capture_run),
-        patch.object(eh, "workspace_lock") as lock,
         patch.object(eh, "notify_user", AsyncMock()),
         patch("agentcore.db.repositories.MessageRepository") as msg_repo_cls,
         patch.object(eh.turn_runs, "get", return_value=None),
         patch.object(eh.turn_runs, "register"),
     ):
-        lock.return_value.__aenter__ = AsyncMock(return_value=None)
-        lock.return_value.__aexit__ = AsyncMock(return_value=None)
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
         user_repo_cls.return_value.get_by_id = AsyncMock(return_value=user)
         board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)

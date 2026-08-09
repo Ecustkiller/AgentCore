@@ -35,8 +35,13 @@
       "excluded_run_ids",
       "write_capability_overrides",
       "inference",
+      "foldersAuth",
+      "accountAuth",
       "browserBridge",
-      "permissionAxes"
+      "permissionAxes",
+      "folderId",
+      "localRootId",
+      "localSubpath"
     ],
     "required": [
       "rootId",
@@ -59,8 +64,13 @@
       "excluded_run_ids",
       "write_capability_overrides",
       "inference",
+      "foldersAuth",
+      "accountAuth",
       "browserBridge",
-      "permissionAxes"
+      "permissionAxes",
+      "folderId",
+      "localRootId",
+      "localSubpath"
     ],
     "required": [
       "messageId",
@@ -73,6 +83,14 @@
   "inference": {
     "keys": ["baseUrl", "apiKey", "model"],
     "required": ["baseUrl", "apiKey", "model"]
+  },
+  "foldersAuth": {
+    "keys": ["baseUrl", "apiKey"],
+    "required": ["baseUrl", "apiKey"]
+  },
+  "accountAuth": {
+    "keys": ["baseUrl", "apiKey"],
+    "required": ["baseUrl", "apiKey"]
   },
   "browserBridge": {
     "keys": ["baseUrl", "token"],

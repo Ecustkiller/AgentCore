@@ -25,7 +25,7 @@ import { Children, type ReactNode, isValidElement } from "react";
  * - **已核实 (verified)** → success tone. Note 含 `#eN` 且台账命中 → 徽章文案换成
  *   site/title，点击开溯源 Popover；未命中 / 旧自由文本 → 今日纯文案徽章（不可点）。
  * - **待核实 (unverified)** → muted tone（非琥珀）。
- * - 案卷预登记条目：面板展示透镜/文件名，可跳转工作区打开该文件（批 D2）。
+ * - 约定文档预登记条目：面板展示透镜/文件名，可跳转工作区打开该文件（批 D2）。
  *
  * 台账 map 由 {@link EvidenceLedgerProvider} 注入（辩论室树）；无 Provider 时一律降级纯文案。
  */
@@ -123,7 +123,7 @@ function EvidenceLedgerCard({ entry }: { entry: EvidenceLedgerEntry }) {
       {dossierPath ? (
         <div className="rounded-lg border border-border bg-muted/40 px-2 py-1.5 text-xs">
           <div className="font-medium text-foreground">
-            案卷来源
+            约定文档来源
             {dossierLabel ? ` · ${dossierLabel}` : ""}
           </div>
           <div
@@ -143,7 +143,7 @@ function EvidenceLedgerCard({ entry }: { entry: EvidenceLedgerEntry }) {
             onClick={() => showFile(dossierPath, dossierName)}
           >
             <FileText size={11} aria-hidden />
-            打开案卷文件
+            打开约定文档文件
           </button>
         </div>
       ) : null}

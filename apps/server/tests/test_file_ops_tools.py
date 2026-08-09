@@ -1558,7 +1558,7 @@ async def test_write_scope_explore_memory_rejects_project_docs(tmp_path: Path):
     result = await FileWriteTool().execute(
         {
             "path": "AgentCore/文档/项目/架构详解.md",
-            "content": "# 厚案卷\n",
+            "content": "# 厚约定文档\n",
         },
         ctx,
     )

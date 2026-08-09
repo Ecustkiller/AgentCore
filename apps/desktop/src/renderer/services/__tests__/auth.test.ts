@@ -121,7 +121,8 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("数据库");
+      expect(result.reason).toContain("AgentCore");
+      expect(result.reason).not.toContain("请确认数据库");
     }
   });
 
@@ -148,7 +149,7 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("无法连接后端");
+      expect(result.reason).toContain("连不上 AgentCore");
     }
   });
 
@@ -166,7 +167,7 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("无法连接后端");
+      expect(result.reason).toContain("连不上 AgentCore");
     }
   });
 });

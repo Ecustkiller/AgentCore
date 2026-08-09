@@ -73,7 +73,7 @@ def test_structured_default_unified_for_all_workers():
 
 
 def test_debate_dossier_narrow_exception_constant():
-    """有案卷辩手残搜 2：窄硬例外，不是结构猜档。"""
+    """有约定文档辩手残搜 2：窄硬例外，不是结构猜档。"""
     assert DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER == 2
     assert DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER < DEFAULT_RETRIEVAL_BUDGET
 

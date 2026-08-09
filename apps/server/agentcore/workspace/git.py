@@ -33,7 +33,8 @@ from agentcore.config import settings
 from agentcore.core.net import PRIVATE_IP_BLOCKS, URLBlock, classify_url
 from agentcore.workspace._paths import resolve_safe_path
 from agentcore.workspace.git_credentials import GitAuthMaterial, embed_http_basic_auth
-from agentcore.workspace.locate import resolve_workspace_root
+from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
+from agentcore.workspace.locks import workspace_lock
 
 _ALLOWED_SCHEMES = ("http", "https")
 
@@ -97,28 +98,35 @@ async def clone_repo(
     """
     _validate_url(repo_url)
     await _reject_ssrf(repo_url)
-    root = resolve_workspace_root(
+    key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    dest_rel = dest.strip() if dest and dest.strip() else _derive_dest_name(repo_url)
-    target = resolve_safe_path(root, dest_rel)
-    if target is None:
-        raise ValueError("目标路径无效")
-    if target.exists() and any(target.iterdir()):
-        raise ValueError("目标目录已存在且非空")
-
-    clone_url = repo_url
-    if auth is not None:
-        clone_url = embed_http_basic_auth(
-            repo_url, username=auth.username, token=auth.token
+    async with workspace_lock(key):
+        root = resolve_workspace_root(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
         )
+        dest_rel = dest.strip() if dest and dest.strip() else _derive_dest_name(repo_url)
+        target = resolve_safe_path(root, dest_rel)
+        if target is None:
+            raise ValueError("目标路径无效")
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("目标目录已存在且非空")
 
-    await _git_clone(
-        clone_url, target, depth=depth, timeout=settings.workspace_clone_timeout_seconds
-    )
-    # ``target`` is the resolved absolute path from the traversal guard; report it
-    # back relative to the (resolved) workspace root for the client.
-    return target.relative_to(root.resolve()).as_posix()
+        clone_url = repo_url
+        if auth is not None:
+            clone_url = embed_http_basic_auth(
+                repo_url, username=auth.username, token=auth.token
+            )
+
+        await _git_clone(
+            clone_url,
+            target,
+            depth=depth,
+            timeout=settings.workspace_clone_timeout_seconds,
+        )
+        # ``target`` is the resolved absolute path from the traversal guard; report it
+        # back relative to the (resolved) workspace root for the client.
+        return target.relative_to(root.resolve()).as_posix()
 
 
 async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> None:

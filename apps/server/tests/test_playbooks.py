@@ -40,7 +40,7 @@ def test_code_audit_single_module_one_auditor():
     assert "P0" in t["task"] and "P3" in t["task"]
     assert "观察·工程" in t["task"]
     assert len(d["artifacts"]) == 2
-    assert d["artifacts"][0] == f"{REVIEWS_DIR}/code-audit-audit_0-main.md"
+    assert d["artifacts"][0] == f"{REVIEWS_DIR}/code-audit-0-main.md"
     assert d["artifacts"][1].endswith(".audit.json")
     assert "〇、人审速览" in d["required_sections"]
     assert "验证方式" in d["must_contain"]
@@ -49,6 +49,11 @@ def test_code_audit_single_module_one_auditor():
     assert ".audit.json" in t["task"]
     assert "缺陷id|严重度|一句话" in t["task"]
     assert "不得以 handoff 替代落盘" in t["task"]
+    assert "一次交接" in t["task"]
+    assert "二次 handoff" in t["task"]
+    assert "收口口径" in t["task"]
+    assert "全程只读" in t["task"]
+    assert "未改业务源码" in t["task"]
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.nodes) == 1
@@ -67,17 +72,21 @@ def test_code_audit_multi_module_parallel_plus_synth():
     assert set(by_id) == {"audit_0", "audit_1", "audit_2", "audit_synth"}
     assert all(by_id[i]["role"] == "代码审计员" for i in ("audit_0", "audit_1", "audit_2"))
     assert by_id["audit_0"]["deliverable"]["artifacts"][0] == (
-        f"{REVIEWS_DIR}/code-audit-audit_0-server.md"
+        f"{REVIEWS_DIR}/code-audit-0-server.md"
     )
     assert by_id["audit_1"]["deliverable"]["artifacts"][0] == (
-        f"{REVIEWS_DIR}/code-audit-audit_1-desktop.md"
+        f"{REVIEWS_DIR}/code-audit-1-desktop.md"
     )
     synth = by_id["audit_synth"]
     assert synth["role"] == "审计主管"
     assert set(synth["depends_on"]) == {"audit_0", "audit_1", "audit_2"}
-    assert synth["deliverable"]["artifacts"] == [f"{REVIEWS_DIR}/code-audit-汇总速览.md"]
+    assert synth["deliverable"]["artifacts"] == [f"{REVIEWS_DIR}/code-audit-summary.md"]
     assert "缺陷id|严重度|一句话" in synth["task"]
     assert "不得以 handoff 代落盘" in synth["task"]
+    assert "一次交接" in synth["task"]
+    assert "显著短于" in synth["task"] or "细节只进落盘" in synth["task"]
+    assert "收口口径" in synth["task"]
+    assert "通过验收" in synth["task"]
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.waves()) >= 2
@@ -103,8 +112,8 @@ def test_code_audit_artifact_uses_task_id_slug_not_essay_filename():
     by_id = _by_id(tasks)
     md0 = by_id["audit_0"]["deliverable"]["artifacts"][0]
     md1 = by_id["audit_1"]["deliverable"]["artifacts"][0]
-    assert md0 == f"{REVIEWS_DIR}/code-audit-audit_0-desktop-renderer.md"
-    assert md1 == f"{REVIEWS_DIR}/code-audit-audit_1-desktop-sidecar.md"
+    assert md0 == f"{REVIEWS_DIR}/code-audit-0-desktop-renderer.md"
+    assert md1 == f"{REVIEWS_DIR}/code-audit-1-desktop-sidecar.md"
     assert essay in by_id["audit_0"]["task"]
     assert md0.endswith(".md")
     assert by_id["audit_0"]["deliverable"]["artifacts"][1] == md0[:-3] + ".audit.json"
@@ -234,7 +243,7 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     assert "HTML" in write_task
     assert "reportlab" in write_task
     assert "MD 为主" in write_task or "`.md`" in write_task or ".md" in write_task
-    # 中间环与终稿同走案卷：各路调研 + 提纲 form=files，路径钉 RESEARCH_DIR，角度名入文件名。
+    # 中间环与终稿同走约定文档：各路调研 + 提纲 form=files，路径钉 RESEARCH_DIR，角度名入文件名。
     expected_research_artifacts = {
         "AgentCore/文档/research/原理调研报告.md",
         "AgentCore/文档/research/选型调研报告.md",
@@ -315,10 +324,10 @@ def test_research_report_without_angles_uses_single_researcher():
     assert "待核实" in by_id["research_0"]["task"]
     assert by_id["research_0"]["search_policy"] == "academic_literature"
     assert "学术检索" in by_id["research_0"]["task"]
-    # 无 angles 时默认案卷路径（仍落 RESEARCH_DIR，不用角色名）。
+    # 无 angles 时默认约定文档路径（仍落 RESEARCH_DIR，不用角色名）。
     d = by_id["research_0"]["deliverable"]
     assert d["form"] == "files"
-    assert d["artifacts"] == ["AgentCore/文档/research/调研报告.md"]
+    assert d["artifacts"] == ["AgentCore/文档/research/调研要点.md"]
     assert by_id["outline"]["deliverable"]["artifacts"] == ["AgentCore/文档/research/提纲.md"]
 
 
@@ -1069,7 +1078,7 @@ def test_multi_lens_research_default_four_lenses_plus_synthesizer():
     # 默认四异质透镜角色名嵌入 role
     roles = {by_id[lid]["role"] for lid in lens_ids}
     assert roles == {"法律视角", "品牌商业视角", "舆情公关视角", "文化社会视角"}
-    # 幕 1 案卷：各透镜自写 research/{透镜}透镜报告.md（form=files + artifacts）
+    # 幕 1 约定文档：各透镜自写 research/{透镜}透镜报告.md（form=files + artifacts）
     expected_lens_artifacts = {
         "AgentCore/文档/research/法律透镜报告.md",
         "AgentCore/文档/research/品牌商业透镜报告.md",

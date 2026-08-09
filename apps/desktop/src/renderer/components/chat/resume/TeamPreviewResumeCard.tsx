@@ -144,18 +144,15 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                   motionClassName="whitespace-pre-wrap text-sm text-foreground"
                 />
               ) : (
-                <>
-                  <p className="mt-2 text-xs text-muted-foreground">分工预览</p>
-                  <WorkerPreviewRows
-                    mode="interactive"
-                    workers={turn.workers}
-                    excludedRunIds={excludedRunIds}
-                    onExcludedChange={onExcludedChange}
-                    textOnlyRunIds={textOnlyRunIds}
-                    onTextOnlyChange={onTextOnlyChange}
-                    disabled={busy}
-                  />
-                </>
+                <WorkerPreviewRows
+                  mode="interactive"
+                  workers={turn.workers}
+                  excludedRunIds={excludedRunIds}
+                  onExcludedChange={onExcludedChange}
+                  textOnlyRunIds={textOnlyRunIds}
+                  onTextOnlyChange={onTextOnlyChange}
+                  disabled={busy}
+                />
               )}
 
               {showCapabilities && (

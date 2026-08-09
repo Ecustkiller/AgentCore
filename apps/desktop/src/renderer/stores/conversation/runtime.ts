@@ -20,6 +20,7 @@ export const EMPTY_RUNTIME: ConversationRuntime = {
   pendingTurnWarning: null,
   toolStartedMs: {},
   executionVia: null,
+  waitingForWorkspaceLock: false,
 };
 
 export interface ConversationStateSlice {

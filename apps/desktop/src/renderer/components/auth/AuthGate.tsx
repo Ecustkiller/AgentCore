@@ -96,7 +96,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         console.error("[auth] bootstrap failed", err);
-        const reason = "无法连接后端：请确认后端服务已启动后重试。";
+        const reason = "连不上 AgentCore 服务，请稍后重试。";
         const entered = await enterOfflineReadonly(reason);
         if (!entered) useAuthStore.getState().setUnavailable(reason);
       }
@@ -124,8 +124,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       if (cur === "authenticated") {
         void (async () => {
           const reason =
-            (await diagnoseOutage()) ??
-            "无法连接后端：请确认后端服务已启动后重试。";
+            (await diagnoseOutage()) ?? "连不上 AgentCore 服务，请稍后重试。";
           useServerHealthStore.getState().markOffline(reason);
         })();
         return;
@@ -179,7 +178,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <PreAuthShell>
         <ServiceUnavailablePage
-          reason={reason ?? "无法连接后端：请确认后端服务已启动后重试。"}
+          reason={reason ?? "连不上 AgentCore 服务，请稍后重试。"}
           onRetry={() => void runBootstrap()}
         />
       </PreAuthShell>

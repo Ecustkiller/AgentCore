@@ -299,6 +299,8 @@ async def test_list_projects_empty(monkeypatch: pytest.MonkeyPatch):
     assert "create_project" in result.output
     # Empty roster must not default-nudge open_local_project as the create path.
     assert "勿默认催 open_local_project" in result.output or "create_project" in result.output
+    assert "target_folder_id" in result.output
+    assert "external_mount_readonly" in result.output
 
 
 async def test_resolve_unique(monkeypatch: pytest.MonkeyPatch):
@@ -314,7 +316,10 @@ async def test_resolve_unique(monkeypatch: pytest.MonkeyPatch):
     assert result.display["status"] == "resolved"
     assert result.display["folder_id"] == "only"
     assert "唯一命中" in result.output
-    assert "ask_user" not in result.output
+    # Tip encourages early ask on empty/near-empty; not a hard ask_user gate.
+    assert "file_list" in result.output
+    assert "target_folder_id" in result.output
+    assert "external_mount_readonly" in result.output
 
 
 async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
@@ -360,6 +365,73 @@ async def test_resolve_missing_name_arg():
     assert not result.success
     assert result.error == "missing name"
 
+
+def _patch_list_raises(monkeypatch: pytest.MonkeyPatch, exc: BaseException) -> None:
+    """Stub session so list/resolve hit a DB connectivity failure."""
+    import agentcore.tools.builtin.projects as projects_mod
+
+    class _CM:
+        async def __aenter__(self) -> object:
+            raise exc
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(projects_mod, "async_session_factory", lambda: _CM())
+
+
+async def test_list_projects_db_unreachable_honest_message(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """PG down → clear service-unavailable copy; no WinError 1225 as primary narrative."""
+    from sqlalchemy.exc import OperationalError
+
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_CODE, DATABASE_UNAVAILABLE_MESSAGE
+
+    cause = OSError(1225, "远程计算机拒绝网络连接")
+    cause.winerror = 1225  # type: ignore[attr-defined]
+    err = OperationalError("SELECT 1", {}, cause)
+    err.__cause__ = cause
+    _patch_list_raises(monkeypatch, err)
+
+    result = await ListProjectsTool().execute({}, _ctx())
+    assert not result.success
+    assert result.error == DATABASE_UNAVAILABLE_CODE
+    assert DATABASE_UNAVAILABLE_MESSAGE in result.output
+    assert "请确认数据库" not in result.output
+    assert "WinError" not in result.output
+    assert "1225" not in result.output
+    assert "WinError" not in (result.error or "")
+
+
+async def test_resolve_project_db_unreachable_honest_message(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from sqlalchemy.exc import OperationalError
+
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_CODE, DATABASE_UNAVAILABLE_MESSAGE
+
+    err = OperationalError("SELECT 1", {}, ConnectionRefusedError("refused"))
+    _patch_list_raises(monkeypatch, err)
+
+    result = await ResolveProjectTool().execute({"name": "Alpha"}, _ctx())
+    assert not result.success
+    assert result.error == DATABASE_UNAVAILABLE_CODE
+    assert DATABASE_UNAVAILABLE_MESSAGE in result.output
+    assert "WinError" not in result.output
+    # Business not_found must NOT be substituted when the roster never loaded.
+    assert '"status": "not_found"' not in result.output
+
+
+async def test_list_projects_non_db_failure_keeps_generic_path(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Non-connectivity faults keep prior soft-fail semantics (not database_unavailable)."""
+    _patch_list_raises(monkeypatch, RuntimeError("unexpected boom"))
+    result = await ListProjectsTool().execute({}, _ctx())
+    assert not result.success
+    assert result.error == "unexpected boom"
+    assert "数据库不可用" not in result.output
 
 # --- create_project (P1 桶 C) -------------------------------------------------
 

@@ -369,7 +369,7 @@ def test_cold_start_allows_artifacts():
     )
     assert errs == []
     assert plan.nodes[0].deliverable is not None
-    # 调研语义 → 裸文件名迁入案卷目录；冷启动不再因 artifacts 非空而拒。
+    # 调研语义 → 裸文件名迁入约定文档目录；冷启动不再因 artifacts 非空而拒。
     assert plan.nodes[0].deliverable.artifacts == ["AgentCore/文档/research/brief.md"]
     assert validate_cold_start_explore_deliverables(plan) is None
 

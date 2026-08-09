@@ -35,13 +35,19 @@ from ._helpers import _new_uuid
 # dedicated hidden ``mode="handoff"`` conversation (filtered from the sidebar), so
 # the run replays by opening it. e3 then diffs result vs base back to local files.
 # Not a standing/workflows job twin: thin credentials, no pause / paused_turns.
+#
+# Cloud-replica reclaim (§7.6 按任务临时、结束可收): ``succeeded`` = 可合回 (Diff
+# / apply still open); ``applied`` = 已合回; ``discarded`` = 已丢弃. Apply or
+# discard soft-deletes the job host so retention can purge it — we do **not**
+# pretend the replica is gone the instant the run finishes, and we never early-
+# delete an open job (Diff must stay usable for ``workspace_retention_days``).
 
 
 class HandoffJob(Base):
     __tablename__ = "handoff_jobs"
     __table_args__ = (
         CheckConstraint(
-            "status in ('pending', 'running', 'succeeded', 'failed')",
+            "status in ('pending', 'running', 'succeeded', 'failed', 'applied', 'discarded')",
             name="ck_handoff_jobs_status",
         ),
         # A source conversation's job list (newest first) is the only list query;

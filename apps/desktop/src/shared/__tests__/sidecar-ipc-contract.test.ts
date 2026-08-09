@@ -68,9 +68,11 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
         model: "deepseek-v4-flash",
       },
       { baseUrl: "http://127.0.0.1:9", token: "bridge-tok" },
+      { baseUrl: "https://api.example.com", apiKey: "folders-tok" },
+      { baseUrl: "https://api.example.com/v1/account", apiKey: "account-tok" },
     );
     // Optional team_preview veto keys are omitted when empty (same as absent
-    // inference / browserBridge) — exact-key sample excludes them.
+    // inference / browserBridge / foldersAuth / accountAuth) — exact-key sample excludes them.
     assertExactKeys(withInference, [
       ...sidecarIpc.resumeRpcParams.keys.filter(
         (k) =>
@@ -83,12 +85,22 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       baseUrl: "http://127.0.0.1:9",
       token: "bridge-tok",
     });
+    expect(withInference.foldersAuth).toEqual({
+      baseUrl: "https://api.example.com",
+      apiKey: "folders-tok",
+    });
+    expect(withInference.accountAuth).toEqual({
+      baseUrl: "https://api.example.com/v1/account",
+      apiKey: "account-tok",
+    });
 
     const withoutInference = buildSidecarResumeRpcParams(req);
     assertExactKeys(withoutInference, [
       ...sidecarIpc.resumeRpcParams.keys.filter(
         (k) =>
           k !== "inference" &&
+          k !== "foldersAuth" &&
+          k !== "accountAuth" &&
           k !== "browserBridge" &&
           k !== "excluded_run_ids" &&
           k !== "write_capability_overrides" &&
@@ -159,7 +171,39 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       note: "",
       selected: [],
     });
+    expect(withoutUser.userId).toBeUndefined();
     expect("userId" in withoutUser).toBe(false);
+  });
+
+  it("buildSidecarResumeRpcParams always includes folderId and localRootId/localSubpath (null default)", () => {
+    const omitted = buildSidecarResumeRpcParams({
+      messageId: "m-asst",
+      conversationId: "c1",
+      traceId: "abc123",
+      decision: "continue",
+      note: "",
+      selected: [],
+    });
+    expect(omitted.folderId).toBeNull();
+    expect(omitted.localRootId).toBeNull();
+    expect(omitted.localSubpath).toBeNull();
+    expect(omitted).not.toHaveProperty("rootId");
+    expect(omitted).not.toHaveProperty("subpath");
+
+    const bound = buildSidecarResumeRpcParams({
+      messageId: "m-asst",
+      conversationId: "c1",
+      traceId: "abc123",
+      decision: "continue",
+      note: "",
+      selected: [],
+      folderId: "fold-1",
+      localRootId: "root-1",
+      localSubpath: "src",
+    });
+    expect(bound.folderId).toBe("fold-1");
+    expect(bound.localRootId).toBe("root-1");
+    expect(bound.localSubpath).toBe("src");
   });
 
   it("resume IPC request required fields are a superset of renderer routing keys", () => {
@@ -201,5 +245,27 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
     };
     assertExactKeys(inference, sidecarIpc.inference.keys);
     expect(sidecarIpc.inference.required).toEqual(sidecarIpc.inference.keys);
+  });
+
+  it("foldersAuth block keys align with SidecarFoldersAuth", () => {
+    const foldersAuth = {
+      baseUrl: "https://x",
+      apiKey: "k",
+    };
+    assertExactKeys(foldersAuth, sidecarIpc.foldersAuth.keys);
+    expect(sidecarIpc.foldersAuth.required).toEqual(
+      sidecarIpc.foldersAuth.keys,
+    );
+  });
+
+  it("accountAuth block keys align with SidecarAccountAuth", () => {
+    const accountAuth = {
+      baseUrl: "https://x/v1/account",
+      apiKey: "k",
+    };
+    assertExactKeys(accountAuth, sidecarIpc.accountAuth.keys);
+    expect(sidecarIpc.accountAuth.required).toEqual(
+      sidecarIpc.accountAuth.keys,
+    );
   });
 });

@@ -243,7 +243,7 @@ export function WorkspaceModeMenu({
       ? "目录在本机不可用"
       : rootName
         ? viaProject
-          ? `本地 · ${rootName}`
+          ? `工作区本地 · ${rootName}`
           : `默认容器 · ${rootName}`
         : "本机草稿"
     : viaProject

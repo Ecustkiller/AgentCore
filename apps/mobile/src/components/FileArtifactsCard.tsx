@@ -195,7 +195,7 @@ export function FileArtifactsCard({
                   onClick={() => open(a)}
                   title={
                     stageFileLabel(a.path)
-                      ? `在文件页查看案卷 ${a.path}`
+                      ? `在文件页查看约定文档 ${a.path}`
                       : `在工作区查看 ${a.path}`
                   }
                 >

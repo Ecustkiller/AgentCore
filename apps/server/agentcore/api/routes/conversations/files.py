@@ -1,8 +1,6 @@
 """Workspace files (bring files in / take results out: 文件进出·先上传)."""
 
 import mimetypes
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
@@ -29,7 +27,6 @@ from agentcore.api.schemas import (
 )
 from agentcore.config import settings
 from agentcore.core.errors import NotFoundError, ValidationError
-from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
 from agentcore.docs_export.workspace_export import ExportMarkdownError, export_markdown_path
 from agentcore.workspace.files import (
@@ -44,8 +41,7 @@ from agentcore.workspace.files import (
     write_file_text,
 )
 from agentcore.workspace.git import CloneError, clone_repo
-from agentcore.workspace.locate import build_server_workspace, workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
+from agentcore.workspace.locate import build_server_workspace
 from agentcore.workspace.protocol import (
     AlreadyExists,
     NotAFile,
@@ -58,20 +54,6 @@ from agentcore.workspace.protocol import (
 from ._helpers import _get_owned_conversation
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
-
-
-@asynccontextmanager
-async def _conv_workspace_lock(
-    conv: Conversation,
-    *,
-    user_id: str,
-) -> AsyncIterator[None]:
-    """Lock a conversation's scratch workspace for a creating panel op."""
-    key = workspace_storage_key(
-        user_id=user_id, folder_id=conv.folder_id, conversation_id=conv.id
-    )
-    async with workspace_lock(key):
-        yield
 
 
 @router.get("/{conversation_id}/workspace/files", response_model=WorkspaceFileListResponse)
@@ -120,14 +102,13 @@ async def upload_workspace_file(
         raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
 
     try:
-        async with _conv_workspace_lock(conv, user_id=user.user_id):
-            written = await upload_file(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                path=path,
-                data=data,
-            )
+        written = await upload_file(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            path=path,
+            data=data,
+        )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     return UploadFileResponse(path=path, size_bytes=written)
@@ -146,13 +127,12 @@ async def export_conversation_workspace_docx(
     """Export a conversation-workspace Markdown file to a sibling ``.docx``."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
-        async with _conv_workspace_lock(conv, user_id=user.user_id):
-            backend = build_server_workspace(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-            )
-            result = await export_markdown_path(backend, body.path)
+        backend = build_server_workspace(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+        )
+        result = await export_markdown_path(backend, body.path)
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
     return ExportDocxResponse(
@@ -218,16 +198,15 @@ async def write_workspace_file(
         raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
 
     try:
-        async with _conv_workspace_lock(conv, user_id=user.user_id):
-            ok, mtime_ms = await write_file_text(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                path=path,
-                content=body.content,
-                baseline_mtime_ms=body.baseline_mtime_ms,
-                eol=body.eol,
-            )
+        ok, mtime_ms = await write_file_text(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            path=path,
+            content=body.content,
+            baseline_mtime_ms=body.baseline_mtime_ms,
+            eol=body.eol,
+        )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except NotAFile as e:
@@ -281,17 +260,13 @@ async def delete_workspace_file(
 ):
     """Delete a file or directory from the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id
-    )
     try:
-        async with workspace_lock(key):
-            await delete_file(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                path=path,
-            )
+        await delete_file(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            path=path,
+        )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
@@ -308,18 +283,14 @@ async def move_workspace_file(
 ):
     """Move/rename a file or directory within the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conv.id
-    )
     try:
-        async with workspace_lock(key):
-            await move_file(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                src=body.src,
-                dst=body.dst,
-            )
+        await move_file(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            src=body.src,
+            dst=body.dst,
+        )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
@@ -339,13 +310,12 @@ async def create_workspace_dir(
     """Create a directory in the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
-        async with _conv_workspace_lock(conv, user_id=user.user_id):
-            await create_dir(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                path=body.path,
-            )
+        await create_dir(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            path=body.path,
+        )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except AlreadyExists as e:
@@ -372,15 +342,14 @@ async def clone_repo_into_workspace(
     except Exception:  # noqa: BLE001 — public clone still works without PAT table
         auth = None
     try:
-        async with _conv_workspace_lock(conv, user_id=user.user_id):
-            dest = await clone_repo(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conv.id,
-                repo_url=body.repo_url,
-                dest=body.dest,
-                auth=auth,
-            )
+        dest = await clone_repo(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            repo_url=body.repo_url,
+            dest=body.dest,
+            auth=auth,
+        )
     except ValueError as e:
         raise ValidationError(str(e)) from e
     except CloneError as e:

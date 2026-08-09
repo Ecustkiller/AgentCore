@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BASE_URL } from "@/services/api";
 import { resetClientToolFulfillmentForTests } from "@/services/clientToolFulfill";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
-import { performWorkspaceOp } from "@/services/workspaceOps";
+import {
+  performWorkspaceOp,
+  resetWorkspaceOpIpcInflightForTests,
+} from "@/services/workspaceOps";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
 
@@ -61,6 +64,7 @@ const postedBody = (fetchMock: ReturnType<typeof vi.fn>, call = 0) =>
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   resetClientToolFulfillmentForTests();
+  resetWorkspaceOpIpcInflightForTests();
   useWorkspaceChannelStore.setState({ notReady: false });
   fetchMock = vi.fn().mockResolvedValue(okResponse());
   vi.stubGlobal("fetch", fetchMock);
@@ -69,6 +73,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   resetClientToolFulfillmentForTests();
+  resetWorkspaceOpIpcInflightForTests();
   useWorkspaceChannelStore.setState({ notReady: false });
   vi.unstubAllGlobals();
 });
@@ -80,9 +85,13 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
 
     await performWorkspaceOp(payload(), "c1");
 
-    expect(workspaceOp).toHaveBeenCalledWith("root-1", "read", {
-      path: "a.txt",
-    });
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "root-1",
+      "read",
+      { path: "a.txt" },
+      undefined,
+      { conversationId: "c1", requestId: "r1" },
+    );
     expect(fetchMock.mock.calls[0][0]).toBe(OPS_URL);
     expect(postedBody(fetchMock)).toEqual({
       kind: "client_tool",
@@ -100,9 +109,13 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
 
     await performWorkspaceOp(payload({ op: "process_list", args: {} }), "c1");
 
-    expect(workspaceOp).toHaveBeenCalledWith("root-1", "process_list", {
-      conversation_id: "c1",
-    });
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "root-1",
+      "process_list",
+      { conversation_id: "c1" },
+      undefined,
+      { conversationId: "c1", requestId: "r1" },
+    );
   });
 
   it("resolves the bound root for a sidecar process op (empty root_id) and prefixes the scratch subpath into start cwd", async () => {
@@ -125,11 +138,17 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       "c1",
     );
 
-    expect(workspaceOp).toHaveBeenCalledWith("container-1", "process_start", {
-      command: "pnpm dev",
-      cwd: "conv-c1/web",
-      conversation_id: "c1",
-    });
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "container-1",
+      "process_start",
+      {
+        command: "pnpm dev",
+        cwd: "conv-c1/web",
+        conversation_id: "c1",
+      },
+      undefined,
+      { conversationId: "c1", requestId: "r1" },
+    );
   });
 
   it("keeps worker 异根 process_start on the target root and does not hijack cwd with session scratch subpath", async () => {
@@ -160,6 +179,8 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
         cwd: "apps/web",
         conversation_id: "c1",
       },
+      undefined,
+      { conversationId: "c1", requestId: "r1" },
     );
   });
 
@@ -183,11 +204,17 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       "c1",
     );
 
-    expect(workspaceOp).toHaveBeenCalledWith("session-root", "process_start", {
-      command: "pnpm dev",
-      cwd: "conversations/c1/web",
-      conversation_id: "c1",
-    });
+    expect(workspaceOp).toHaveBeenCalledWith(
+      "session-root",
+      "process_start",
+      {
+        command: "pnpm dev",
+        cwd: "conversations/c1/web",
+        conversation_id: "c1",
+      },
+      undefined,
+      { conversationId: "c1", requestId: "r1" },
+    );
   });
 
   it("answers with an IO error when a sidecar process op has no local binding", async () => {
@@ -289,6 +316,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       "read",
       { path: "a.txt" },
       20,
+      { conversationId: "c1", requestId: "r-abort" },
     );
     const body = postedBody(fetchMock) as {
       ok: boolean;

@@ -15,8 +15,6 @@ from agentcore.core.errors import ConflictError, NotFoundError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
 from agentcore.storage import SnapshotNotFound
-from agentcore.workspace.locate import workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.snapshots import (
     create_snapshot,
     list_snapshots,
@@ -77,18 +75,13 @@ async def create_conversation_snapshot(
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await _refuse_local_snapshot_mutate(session, conv, action="创建")
-    key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+    # create_snapshot holds workspace_lock at the sink (A′).
+    ref = await create_snapshot(
+        user_id=user.user_id,
+        folder_id=conv.folder_id,
+        conversation_id=conversation_id,
+        label=body.label,
     )
-    # Folder lock (决策④): serialize the manifest write against a running turn's
-    # auto-snapshot and other same-workspace mutations.
-    async with workspace_lock(key):
-        ref = await create_snapshot(
-            user_id=user.user_id,
-            folder_id=conv.folder_id,
-            conversation_id=conversation_id,
-            label=body.label,
-        )
     return SnapshotSummary.model_validate(ref)
 
 
@@ -107,19 +100,14 @@ async def restore_conversation_snapshot(
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await _refuse_local_snapshot_mutate(session, conv, action="恢复")
-    key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
-    )
-    # Folder lock (决策④): a restore rewrites the whole workspace, so it must not
-    # interleave with a running turn or another mutation on the same space.
+    # restore_snapshot holds workspace_lock at the sink (A′).
     try:
-        async with workspace_lock(key):
-            await restore_snapshot(
-                user_id=user.user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conversation_id,
-                snapshot_id=snapshot_id,
-            )
+        await restore_snapshot(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conversation_id,
+            snapshot_id=snapshot_id,
+        )
     except SnapshotNotFound as e:
         raise NotFoundError("快照不存在") from e
     return StatusResponse()

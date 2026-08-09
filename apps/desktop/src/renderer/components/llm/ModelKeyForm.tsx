@@ -278,19 +278,24 @@ export function ModelKeyForm({
           </div>
         </label>
         {isCustom && (
-          <label className="block" htmlFor={baseUrlId}>
-            <span className="text-xs text-muted-foreground">Base URL</span>
-            <Input
-              id={baseUrlId}
-              type="text"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://your-endpoint.example/v1"
-              autoComplete="off"
-              spellCheck={false}
-              className="mt-1 w-full font-mono"
-            />
-          </label>
+          <div>
+            <label className="block" htmlFor={baseUrlId}>
+              <span className="text-xs text-muted-foreground">Base URL</span>
+              <Input
+                id={baseUrlId}
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://your-endpoint.example/v1"
+                autoComplete="off"
+                spellCheck={false}
+                className="mt-1 w-full font-mono"
+              />
+            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+            </p>
+          </div>
         )}
         <details
           className="rounded-lg border border-border/60 bg-muted/20 p-3"
@@ -302,19 +307,26 @@ export function ModelKeyForm({
           </summary>
           <div className="mt-3 space-y-3">
             {!isCustom && (
-              <label className="block" htmlFor={baseUrlId}>
-                <span className="text-xs text-muted-foreground">Base URL</span>
-                <Input
-                  id={baseUrlId}
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder={preset?.baseUrl}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="mt-1 w-full font-mono"
-                />
-              </label>
+              <div>
+                <label className="block" htmlFor={baseUrlId}>
+                  <span className="text-xs text-muted-foreground">
+                    Base URL
+                  </span>
+                  <Input
+                    id={baseUrlId}
+                    type="text"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder={preset?.baseUrl}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="mt-1 w-full font-mono"
+                  />
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+                </p>
+              </div>
             )}
             <div>
               {isCustom ? (

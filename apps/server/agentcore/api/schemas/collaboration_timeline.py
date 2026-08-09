@@ -14,7 +14,7 @@ class CollaborationTimelineAct(BaseModel):
 
 
 class CollaborationDossierRef(BaseModel):
-    """Path-level 案卷消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。"""
+    """Path-level 约定文档消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。"""
 
     path: str
     sources: list[Literal["dossier_inject", "file_read"]] = Field(default_factory=list)
@@ -37,5 +37,5 @@ class CollaborationTimelineResponse(BaseModel):
     limit: int = 20
     offset: int = 0
     dossier_refs_note: str = (
-        "路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边"
+        "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边"
     )

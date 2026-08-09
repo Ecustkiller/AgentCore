@@ -152,17 +152,18 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     ...(hasLocalFiles()
       ? [
           {
-            // 显式本机草稿（§八.7：桌面裸聊默认云后，绑本地的逃生口）。
+            // 显式本机草稿：文件落本机默认目录（逃生口）；≠本机引擎、≠打开项目。
             id: "new-local-conversation",
             title: "本机草稿",
             category: "操作" as const,
             icon: HardDrive,
+            hint: "文件落本机默认目录",
             keywords: [
               "local",
               "benji",
               "bendi",
-              "sidecar",
               "scratch",
+              "caogao",
               "new",
               "chat",
             ],

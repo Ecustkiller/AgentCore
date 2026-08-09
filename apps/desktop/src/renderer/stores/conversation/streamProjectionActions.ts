@@ -455,6 +455,8 @@ export function createStreamProjectionActions(
           },
         ],
         isGenerating: true,
+        // Fresh bubble: clear any prior lock-wait chrome（不得静默等锁）.
+        waitingForWorkspaceLock: false,
       }));
       return id;
     },
@@ -470,7 +472,11 @@ export function createStreamProjectionActions(
             composingTool: null,
           };
         }
-        return { messages, isGenerating: false };
+        return {
+          messages,
+          isGenerating: false,
+          waitingForWorkspaceLock: false,
+        };
       }),
 
     setLastAssistantExecutionId: (executionId, conversationId) =>

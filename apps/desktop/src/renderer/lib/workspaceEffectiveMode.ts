@@ -76,7 +76,7 @@ export function resolveEffectiveWorkspace(opts: {
 }
 
 /**
- * Chip / mode-bar label:
+ * Chip / mode-bar label（可见短标；「· 本地」= 工作区文件夹绑定，≠ 执行引擎）:
  * - project local: 「项目名 · 本地」
  * - project cloud: 「项目名 · 云端对话」
  * - bare local: 「本机草稿」
@@ -90,4 +90,15 @@ export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
   }
   if (ws.isLocal) return "本机草稿";
   return "云端对话";
+}
+
+/**
+ * Bound workspace chip `title` / `aria-label`：与可见「· 本地」配套，说清是工作区绑定
+ * （文件夹绑定，≠ 执行路径）。执行路径不在大众 Composer 产品面展示。
+ */
+export function formatWorkspaceChipTitle(ws: EffectiveWorkspace): string {
+  if (ws.viaProject) {
+    return ws.isLocal ? "工作区·本地（文件夹绑定，≠执行路径）" : "云端对话";
+  }
+  return ws.isLocal ? "本机草稿（文件落本机默认目录，不算项目）" : "云端对话";
 }

@@ -1,7 +1,7 @@
 """项目级协作时间线 — 读时聚合投影（批 D+ · 项目级团队图 v1+v1.5）。
 
 不新建项目级 execution / 边表。输入是会话级 ``turn_journal`` 事实 + 会话元数据；
-输出是「会话 + 幕序列摘要 + 案卷引用条」的只读投影。
+输出是「会话 + 幕序列摘要 + 约定文档引用条」的只读投影。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from agentcore.workspace.stage_dirs import RESEARCH_DIR, RESEARCH_PREFIX
 DossierSource = Literal["dossier_inject", "file_read"]
 
 _DOSSIER_REFS_NOTE = (
-    "路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边"
+    "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边"
 )
 
 _KIND_FALLBACK_TITLE: dict[str, str] = {
@@ -220,7 +220,7 @@ def extract_acts_from_journal(entries: list[dict[str, Any]]) -> tuple[str, str, 
 
 
 def extract_dossier_refs(entries: list[dict[str, Any]]) -> list[DossierRef]:
-    """Path-level 案卷消费事实 from journal (dossier inject + research/ file_read)."""
+    """Path-level 约定文档消费事实 from journal (dossier inject + research/ file_read)."""
     sources_by_path: dict[str, set[DossierSource]] = {}
 
     def _add(path: str, source: DossierSource) -> None:

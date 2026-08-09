@@ -98,4 +98,31 @@ describe("cloud FileSource listing (fc35aece root zip visibility)", () => {
       "site/index.html",
     ]);
   });
+
+  it("AgentCore expand hides path-aware internal zones; bare index/ stays", async () => {
+    wsListFiles.mockResolvedValue([
+      { path: "AgentCore", isDir: true },
+      { path: "AgentCore/index", isDir: true },
+      { path: "AgentCore/trash", isDir: true },
+      { path: "AgentCore/baselines", isDir: true },
+      { path: "AgentCore/规则", isDir: true },
+      { path: "AgentCore/规则/r.md", isDir: false },
+      { path: "index", isDir: true },
+      { path: "index/user.py", isDir: false },
+    ]);
+
+    const source = createCloudWorkspaceSource("conv:c1", "工作区");
+    const acKids = await source.listDir("AgentCore");
+    expect(acKids.map((n) => n.path).sort()).toEqual(["AgentCore/规则"]);
+
+    // Root path also drops leaked zone entries if a non-recursive payload includes them.
+    listWorkspaceFiles.mockResolvedValue([
+      { path: "AgentCore", isDir: true },
+      { path: "AgentCore/index", isDir: true },
+      { path: "index", isDir: true },
+    ]);
+    const convSource = createWorkspaceSource("c1");
+    const rootKids = await convSource.listDir("");
+    expect(rootKids.map((n) => n.path).sort()).toEqual(["AgentCore", "index"]);
+  });
 });

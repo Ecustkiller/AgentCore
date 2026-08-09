@@ -60,6 +60,13 @@ CONSULT_PRODUCT_HELP_BY_SCENE = (
     "非产品用法的知识问答 / 闲聊 → 直接答不必查"
 )
 
+# Shared with能力目录 preamble — product-self triage (主动触发；勿与 FAQ「必查」对打).
+CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
+    "按场面：用户主动查/报产品本身可证伪故障"
+    "（UI/运行时/工具/编排异常，像不像产品 Bug）→ 查 `product_bug_triage`；"
+    "用法 FAQ / Key / 一直转等自助短答仍走 product_help*，勿把诊断塞进 FAQ"
+)
+
 
 @dataclass(frozen=True)
 class SystemSkill:
@@ -158,17 +165,24 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 组合：多对象+成篇 → 分组×流水线；构建+并行模块 → 契约共享面+独立验证；\
 审查要改 → 接有界返工环；结论真冲突 → 局部辩论；跨域合成一篇 → 少派串起，勿按工种堆人。
 
-【跨项目并行指挥】用户要多个项目同时推进时（例：「三项目并行…」）——整条用法：
+【跨项目并行指挥】用户要多个项目同时推进时（例：「三项目并行…」「同时开发 A 和 B」）——整条用法：
 1. **指认**：`list_projects` / `resolve_project`；唯一命中→用返回 id；0 命中或多名→\
 `ask_user`（kind=choice；选项区分 name/mode 等）；**禁止**静默猜「最近」。
-2. **派工**：同一次 `delegate` 扇出多 task，各填 `target_folder_id=`已解析 id →\
-该 worker **换桌+记忆跟桌**；**不改**本会话 `folder_id`。协作图不改（并行支线即表达）。
-3. **默认桌**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名 → 会被拒**（禁默写 scratch）。
-4. **先建后派**：云→`create_project`（同指挥面）；本地→`ask_user` `action=register_local_project`\
+2. **空壳/近空先问**：认到项目后，若 `<workspace_file_index>` 空或一眼近空 → **立刻** `ask_user`\
+钉各自目标 / 本轮交付 / 是否两线同开；【禁止】为确认空而连续 `file_list` 烧探路轮\
+（索引已空不必再付调查轮）。关键缺口未齐也可先短问，再动手翻仓。
+3. **派工**：用户确认后 → **同一次** `delegate` 扇出多 task（双项目常两路），各填\
+`target_folder_id=`已解析 id → 该 worker **换桌+记忆跟桌**；**不改**本会话 `folder_id`。\
+协作图不改（并行支线即表达）。【禁止】CEO 串行翻两空目录代替两路派工。
+4. **默认桌**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名 → 会被拒**（禁默写 scratch）。
+5. **先建后派**：云→`create_project`（同指挥面）；本地→`ask_user` `action=register_local_project`\
 （登记留本对话）；**勿**用 `open_local_project` 冒充先建后干（那是打开当出生=**新会话**）。\
 与 midtask「打开/登记/bind」分流一致。
-5. **混部**：local+cloud 可同指挥面；多 local 同回合可并行（每目标一桌）；\
+6. **混部**：local+cloud 可同指挥面；多 local 同回合可并行（每目标一桌）；\
 单线无法接通异根时诚实失败该线，勿因一失败拒整锅、勿硬装全成。
+7. **开发双仓 ≠ 区外挂载**：同时**开发**两项目 = 名册指认 + `target_folder_id` 换桌写盘；\
+【禁止】用 `external_mount_readonly` 乱挂文档/桌面/下载冒充跨项目开发桌\
+（挂载仅区外只读看目录，与写盘桌正交；看一眼再挂，勿当开工默认步）。
 
 三档：默认中档。轻=保底（构建类轻档也要「实现+独立验证」双人）；\
 重=任务规模大或用户点名才上。控税靠选档与按缝拆人，不靠默认单干、也不按工种凑满。
@@ -186,8 +200,10 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 选项只说桌上结果，【禁止】写内部编制（几人几步、学术审校）。\
 用户原话已明示报告/落盘/交文档 → 可直接成文，不必多拦。\
 **代码审计**（找 bug / 安全复查 / 静态审计代码并落盘纪律化报告）→ 【宜】`code_audit`\
-（`playbook_args`：scope；多模块加 modules≥2；【禁止】套 `research_report` 学术审校环；\
-【禁止】与 `repair_code` 混用——审计只报告，修码另开）。\
+（`playbook_args`：scope 必填；探路后若 ≥2 可独立并行的目录/子系统缝 → 填 `modules`\
+（短名/路径，少扇出常 2–4）→ 并行审计+主管速览；单缝省略 modules；\
+【禁止】指望 playbook 从 scope 自动拆；【禁止】把多目录拼进 scope 字符串冒充多模块；\
+【禁止】套 `research_report` 学术审校环；【禁止】与 `repair_code` 混用——审计只报告，修码另开）。\
 **默认 A**：用户说调研/摸清/看 gap/看论文与开源，**未**明示「写成报告/成文/交一篇」→ \
 【宜】`parallel_brief`（topic+少扇出 angles，常 2；【禁止】一上来 `research_report` 三路成文；\
 「论文/开源」当资料源 ≠ 明示成文）。\
@@ -284,6 +300,16 @@ task 正文只给【被审材料的文件路径或引用】+【本官审查焦�
 判据是【区够不够大、够不够自成一摊】、不是流水线长度；最多再嵌套一层（单个 lead 最多带 \
 4 个 sub-worker）、其子成员不能继续委派。简单单一的活自己干、别为委派而委派——\
 几个扁平的并行小活直接一次 `delegate` 扇出即可，别为它再套一层 lead——那是纯开销。
+- 【编排自主·摸底波 / 专班 / 嵌套】（通用于审计、摸仓、大改、调研升档等；**非**某一 playbook 硬流程）——\
+由你（及拿到 `delegate` 的 lead）按证据自判，三选一或组合，**禁止**写死成「凡审计必两拨人 / 凡大活必嵌套」：\
+① **轻探即派**：范围缝已清（或探路 ≤5 轮已写出可并行子面）→ 一次扇出专班（如 `code_audit`+`modules`、\
+多角调研、多模块实现）；专班内部纪律（如审计员 A 宽扫→B 定案）≠ 根上再开一波摸底队。\
+② **真两波摸底→专班**：范围大 / 不知怎么拆 / 怕 modules 扇错 → 先派摸底 worker（宜 ≥2 角并行、\
+`form=files` 落短笔记到约定文档或 prose 要点），再用 `depends_on` 同批串专班，或摸底后再 \
+`delegate`/`replan` 追加专班；**【假两段·禁】**同一 task 写「先摸底再审计/再实现」。\
+摸底产出须能服务下游拆缝（路径/子系统/风险面），勿空转「了解一下」。\
+③ **交 lead 嵌套**：某一区够大、细拆尚不清 → 根只派该区 lead，由 lead 自判再扇出（深度上限内）；\
+与①②勿双开同职责。判据：**拆得清就扁平；拆不清先摸底或交 lead；正确干活可贵，禁为编排而编排。**
 - 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
 该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只留给机械单步；只要可能要据结果\
 继续委派、或一次派了多个 worker，就别设。
@@ -454,7 +480,7 @@ repair_code；禁 none 当修码默认）。`build_feature` / `build_website` \
 _DEBATE_AND_REVIEW = """\
 <debate_and_review>
 【入口分流·按意图】正文分流前置：① 用户明确点名开辩 / 模拟庭审 / 终局对抗（含模拟法庭 / 庭审对抗 / \
-对簿公堂等）→ 本 skill，直调 `debate`——取证作为质量前提由辩论机制保证（案卷桥 / 可选 Evidence Pack / \
+对簿公堂等）→ 本 skill，直调 `debate`——取证作为质量前提由辩论机制保证（约定文档桥 / 可选 Evidence Pack / \
 发言期对称有界检索入台账；**非**庭前调查员舰队、**非**开工前先拦调研），【勿】再先拦去 \
 `deep_multi_lens_research`；② 公共事件跨域研判 → `consult_skill(deep_multi_lens_research)` \
 （MLR → 命题卡 → 推进卡）；③ 一起弄懂/多路摸清（未明示成文）→ `parallel_brief`；明示成文 → \
@@ -710,15 +736,17 @@ _ASK_USER_MIDTASK = """\
   （新建会话挂 Folder；禁止改写本会话 folder_id；禁止用 bind 冒充）。
 - 同指挥面【登记】本机目录为项目（先建后派、留本对话）→ `action=register_local_project`
   （禁新会话；禁止改写本会话 folder_id；与 open 分流，勿用 open 冒充登记）。
-  多项目并行派工整条（列/解析→`target_folder_id`→先建云/本地）→
+  多项目并行派工整条（列/解析→空/近空先问→同次 `delegate`+`target_folder_id`→先建云/本地）→
   `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
+  【开发双仓】同时开发多项目 ≠ `external_mount_readonly` 乱挂；写盘走 `target_folder_id`。
 - 本会话仅需本机执行环境（裸聊 scratch）→ `action=bind_local_folder`（≠打开/登记项目）。
 - 已绑定本地工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
   勿再弹 `open_local_project`；仅用户要换目录/换工程根才 `open_local_project` / ask。
 - 「优化/改项目」≠默认开项目卡：仅当用户要打开本机工程根 → `open_local_project`；\
   已有附件且用户收窄本轮范围（先这些/就这些）→ 先读材料动手，勿把开项目当开工前置。
 - 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
-  well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡。\
+  well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡；\
+  【禁止】把挂载当「同时开发两项目」的默认步。\
   整理/写回 → `grant_organize_folder`（仍确认）。与绑定正交：云端草稿 + 桌面在线亦可\
   挂载（经桌面通道读 `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
 - 【授权后发现】用户已点名常见目录（桌面/下载/文档）+ 明确任务 → 只读首动 \
@@ -856,7 +884,7 @@ _DEEP_MULTI_LENS_RESEARCH = """\
 用户批准后再辩】。一起弄懂/学术多切口/未明示成文的多路摸清 → 【勿】用本 skill，改 \
 `playbook="parallel_brief"`；用户明示要报告/论文/落盘成文 → `research_report`。\
 用户明确点名开辩 / 模拟庭审 / 终局对抗（含【""" + _MULTI_LENS_COURTROOM_TRIGGERS_JOINED + """】等）→ \
-【勿】用本 skill 拦截，改 `consult_skill(debate_and_review)` 直调 `debate`（取证前提由辩论机制保证：案卷桥 / Evidence Pack / 发言期台账，非调查员舰队）。\
+【勿】用本 skill 拦截，改 `consult_skill(debate_and_review)` 直调 `debate`（取证前提由辩论机制保证：约定文档桥 / Evidence Pack / 发言期台账，非调查员舰队）。\
 意图模糊（既像公共研判又像开辩）→ 保守缺省走本 skill，并在回复里说明「也可直接开辩」。\
 这与律师作业（接案 / 文书 / 诉讼策略、先对抗后研判）不同：本域是公共事件多维取证，不是替律师打官司。
 
@@ -1107,6 +1135,8 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 深链：`#/toolbox/manual/intro?s=quickstart`
 
 【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。\
+用户主动查/报产品本身可证伪故障 → `consult_skill(product_bug_triage)`（定性+复现）；\
+勿在本 skill / faq 做四类结论或复现包。\
 完整入口表与 FAQ 清单不在本 body——分别见 `product_help_map` / `product_help_faq`。
 </product_help>"""
 
@@ -1138,7 +1168,8 @@ _PRODUCT_HELP_MAP = """\
 
 _PRODUCT_HELP_FAQ = """\
 <product_help_faq>
-常见产品面 FAQ 的自含短答。用户问到对应题时 consult 本 skill；勿整表粘贴给宽问「有什么功能」。
+常见产品面 FAQ 的自含短答。用户问到对应题时 consult 本 skill；勿整表粘贴给宽问「有什么功能」。\
+本 skill 只给自助短答；用户主动排查「是不是产品 Bug」→ `product_bug_triage`，勿在此做定性/复现包。
 
 【FAQ 精华】（自含短答；桌面可附对应节）
 - 怎么打开 .md / 文件面板？——桌面左边「文件」面板点开 `.md` 即阅读预览；\
@@ -1165,6 +1196,51 @@ force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 P
 </product_help_faq>"""
 
 
+_PRODUCT_BUG_TRIAGE = """\
+<product_bug_triage>
+用户**主动**查/报 **AgentCore 产品本身**可证伪故障时的 HOW（终端与维护者同一入口）。\
+先 consult 本 skill，再按场面定性 + 交复现要点。非用户项目代码排障。
+
+【触发】仅用户主动（「帮我查是不是产品 Bug / 排查刚才那次失败 / 像不像产品故障」等）。\
+禁：失败后自动切入、扫长文猜意图、宽「出问题就查」。
+
+【与 product_help* 分轨】
+- FAQ / 用法 / 入口 → `product_help` / `product_help_map` / `product_help_faq`（自助短答）。
+- 本 skill → L1 定性 + L2 复现要点；勿把诊断仪式塞进 FAQ，也勿用 FAQ 短答冒充定性。
+
+【证据上限】仅本会话可见事实 + 必要时 `ask_user` 补口述。\
+不足则结论标「证据不足」/ `unclear`，诚实说明看不到服务端日志。\
+禁假装读了服务端日志、对话日志流水线、dogfood 金标或其他用户数据。
+
+【L1 四类结论】（必出；对用户用产品面说法，可对内记标签）
+- `product_bug`：能钉到 UI / 运行时 / 工具 / 编排的可证伪异常（错状态、契约违背、管线失败等）。
+- `usage`：用法 / 配置 / 预期理解问题（含 FAQ 类自助能解的）。
+- `model_limit`：模型能力或答得差 / 跑偏，且钉不死产品契约或状态错误。
+- `unclear`：证据不足，无法在上述三类间裁定。
+「答得差」默认先落 `model_limit` 或 `usage`；只有可证伪的产品行为才升 `product_bug`。\
+附一句依据 + 置信（高/中/低）。
+
+【L2 复现要点】（必出；结构固定，可复制）
+- 结论：四选一 + 置信
+- 现象：用户可见表现（1–3 句）
+- 依据：可核对事实；无则写「证据不足」
+- 排除：为何不像 / 像用法或模型
+- 复现：步骤；期望 vs 实际
+- 定位锚：本会话可见的 conversation_id / 时间 / 端与版本 / 页面或路由（知多少写多少）
+- 建议：规避 / 再试条件；若需上报 → 见 L3
+
+【L3】用户要上报时：口头指路「设置 → 反馈」；可提示把上方 L2 要点粘进描述。\
+本档不加提交工具、不改反馈 API。
+
+【禁区】
+- L4：自动改产品仓 / 开 PR / 自愈修产品 = 禁
+- dogfood / 维护者对话日志流水线 = 禁（勿指路、勿冒充）
+- 跨用户数据 = 禁
+- 翻 AgentCore 源码仓「修产品」= 禁（工作区是用户/worker 产出，不是产品仓排障面）
+- 意图分类器扫用户长文 = 禁
+</product_bug_triage>"""
+
+
 # --- The system skills (single source of truth) -----------------------------
 # Catalog summaries (the always-on one-line triggers) per the design (§4.4): sharp
 # enough that the model knows WHEN to pull each, without spending the body on it.
@@ -1172,8 +1248,9 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="team_orchestration_advanced",
         summary=(
-            "形状词汇组队 / 跨项目并行派工（list·resolve→target_folder_id）/ "
-            "多 worker 流水线 / 契约 / 嵌套委派 / 协调墙的进阶用法"
+            "形状词汇组队 / 跨项目并行派工（list·resolve→空壳先问→同次 delegate+"
+            "target_folder_id；开发双仓≠external_mount）/ "
+            "多 worker 流水线 / 契约 / 嵌套委派 / 摸底波与专班自判 / 协调墙的进阶用法"
         ),
         body=_TEAM_ORCHESTRATION_ADVANCED,
     ),
@@ -1209,6 +1286,14 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "→ 自含短答；桌面可附对应手册节"
         ),
         body=_PRODUCT_HELP_FAQ,
+    ),
+    SystemSkill(
+        name="product_bug_triage",
+        summary=(
+            "用户主动查/报产品本身可证伪故障（UI/运行时/工具/编排，像不像产品 Bug）"
+            "→ 四类结论 + 复现要点；FAQ 自助仍走 product_help*；禁 L4/跨用户/假装读服务端日志"
+        ),
+        body=_PRODUCT_BUG_TRIAGE,
     ),
     SystemSkill(
         name="build_website",
@@ -1360,6 +1445,7 @@ def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str
         "<能力目录>",
         "下列进阶能力的完整指引未常驻；要用到时，先用 `consult_skill(name)` 把指引拉回来再执行"
         f"（{CONSULT_PRODUCT_HELP_BY_SCENE}；"
+        f"{CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE}；"
         "提问卡直接 ask_user、不必先查；"
         f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
         "糊建站 /「做个网站」先 ask_user（形态+桌上档），确认后再 consult `build_website`；"

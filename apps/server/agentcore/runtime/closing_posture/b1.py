@@ -18,7 +18,6 @@ from .cancel_zero import (
     clear_cancel_zero_output,
     turn_has_cancel_zero_output,
 )
-from .ceo_mutation import _zero_write_landing_rework
 from .core import (
     claims_draft_acknowledgment,
     claims_posture_a,
@@ -108,6 +107,5 @@ __all__ = [
     "_ceiling_hollow_teach_rework",
     "_partial_storm_rework",
     "_verify_budget_hollow_rework",
-    "_zero_write_landing_rework",
     "clear_b1_closing_latches",
 ]

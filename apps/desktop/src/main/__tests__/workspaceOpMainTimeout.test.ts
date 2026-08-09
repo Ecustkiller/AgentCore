@@ -1,5 +1,5 @@
 /**
- * D1 主进程墙钟 timeout + D3 main_begin/end/timeout 观测。
+ * 主进程墙钟 timeout + main_begin/end/timeout 观测（含多对话 inflight）。
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,15 +17,20 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
-import { runWorkspaceOpMain } from "../fs/workspace/dispatch";
+import {
+  resetWorkspaceOpMainInflightForTests,
+  runWorkspaceOpMain,
+} from "../fs/workspace/dispatch";
 import { logDesktop } from "../log-service";
 
 describe("runWorkspaceOpMain (主进程墙钟)", () => {
   beforeEach(() => {
     vi.mocked(logDesktop).mockClear();
+    resetWorkspaceOpMainInflightForTests();
   });
   afterEach(() => {
     vi.useRealTimers();
+    resetWorkspaceOpMainInflightForTests();
   });
 
   it("无 timeoutMs 时行为不变：直接返回 op 结果并打 begin/end", async () => {
@@ -41,6 +46,8 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
           op: "read",
           root_id: "r1",
           timeout_ms: null,
+          inflight_total: 1,
+          queue_depth: 0,
         }),
       }),
     );
@@ -62,12 +69,18 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
     ).toBe(false);
   });
 
-  it("超时先返回活性 WorkspaceIOError 信封，并打 main_timeout", async () => {
+  it("超时先返回活性 WorkspaceIOError 信封，并打 main_timeout（含 cid inflight）", async () => {
     const hang = new Promise<{ ok: true; value: string }>(() => {
       /* never settles */
     });
     const settled = runWorkspaceOpMain(
-      { rootId: "r1", op: "read", timeoutMs: 30 },
+      {
+        rootId: "r1",
+        op: "read",
+        timeoutMs: 30,
+        conversationId: "cid-b",
+        requestId: "req-b",
+      },
       () => hang,
     );
     const result = await settled;
@@ -83,16 +96,25 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
           op: "read",
           root_id: "r1",
           timeout_ms: 30,
+          conversation_id: "cid-b",
+          request_id: "req-b",
         }),
       }),
     );
     expect(logDesktop).toHaveBeenCalledWith(
       expect.objectContaining({
+        level: "warn",
         event: "workspace_op.main_timeout",
         fields: expect.objectContaining({
           op: "read",
           root_id: "r1",
           timeout_ms: 30,
+          conversation_id: "cid-b",
+          request_id: "req-b",
+          inflight_cid: 1,
+          inflight_total: 1,
+          queue_depth: 0,
+          duration_ms: expect.any(Number),
         }),
       }),
     );
@@ -102,6 +124,52 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
         fields: expect.objectContaining({
           ok: false,
           timeout_ms: 30,
+          conversation_id: "cid-b",
+        }),
+      }),
+    );
+  });
+
+  it("第二对话超时日志能看到邻对话争用（inflight_total / queue_depth）", async () => {
+    const hangA = new Promise<{ ok: true; value: string }>(() => {
+      /* never settles */
+    });
+    const hangB = new Promise<{ ok: true; value: string }>(() => {
+      /* never settles */
+    });
+    void runWorkspaceOpMain(
+      {
+        rootId: "r1",
+        op: "grep",
+        timeoutMs: 5_000,
+        conversationId: "cid-a",
+        requestId: "req-a",
+      },
+      () => hangA,
+    );
+    const resultB = await runWorkspaceOpMain(
+      {
+        rootId: "r1",
+        op: "exists",
+        timeoutMs: 30,
+        conversationId: "cid-b",
+        requestId: "req-b",
+      },
+      () => hangB,
+    );
+    expect(resultB.ok).toBe(false);
+    expect(logDesktop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        event: "workspace_op.main_timeout",
+        fields: expect.objectContaining({
+          conversation_id: "cid-b",
+          request_id: "req-b",
+          op: "exists",
+          inflight_cid: 1,
+          inflight_total: 2,
+          queue_depth: 1,
+          duration_ms: expect.any(Number),
         }),
       }),
     );

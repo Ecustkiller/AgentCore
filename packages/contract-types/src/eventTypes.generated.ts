@@ -94,4 +94,5 @@ export type SSEEventType =
   | "turn_steer_accepted"
   | "turn_warning"
   | "user_interjection"
+  | "workspace_lock_wait"
   | "workspace_op_required";

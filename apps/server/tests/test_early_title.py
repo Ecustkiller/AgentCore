@@ -330,13 +330,6 @@ async def test_stream_chat_schedules_title_before_turn(monkeypatch):
         async def get_by_conversation_id(self, *_a, **_k):
             return None
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_a):
-            return False
-
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
@@ -356,8 +349,6 @@ async def test_stream_chat_schedules_title_before_turn(monkeypatch):
         "build_turn_backend",
         AsyncMock(return_value=SimpleNamespace(location="server")),
     )
-    monkeypatch.setattr(turns_mod, "workspace_lock", lambda *_a, **_k: _Lock())
-    monkeypatch.setattr(turns_mod, "workspace_storage_key", lambda **_k: "k")
     monkeypatch.setattr(turns_mod, "persist_attachments", AsyncMock(return_value=[]))
     monkeypatch.setattr(turns_mod, "to_stored_metadata", lambda _a: None)
     monkeypatch.setattr(
@@ -415,13 +406,6 @@ async def test_stream_chat_skips_title_when_already_named(monkeypatch):
         async def get_by_conversation_id(self, *_a, **_k):
             return None
 
-    class _Lock:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_a):
-            return False
-
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
@@ -441,8 +425,6 @@ async def test_stream_chat_skips_title_when_already_named(monkeypatch):
         "build_turn_backend",
         AsyncMock(return_value=SimpleNamespace(location="server")),
     )
-    monkeypatch.setattr(turns_mod, "workspace_lock", lambda *_a, **_k: _Lock())
-    monkeypatch.setattr(turns_mod, "workspace_storage_key", lambda **_k: "k")
     monkeypatch.setattr(turns_mod, "persist_attachments", AsyncMock(return_value=[]))
     monkeypatch.setattr(turns_mod, "to_stored_metadata", lambda _a: None)
     monkeypatch.setattr(

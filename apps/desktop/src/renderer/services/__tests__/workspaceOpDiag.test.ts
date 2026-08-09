@@ -13,7 +13,10 @@ vi.mock("@/services/sidecarRouting", () => ({
 import { BASE_URL } from "@/services/api";
 import { resetClientToolFulfillmentForTests } from "@/services/clientToolFulfill";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
-import { performWorkspaceOp } from "@/services/workspaceOps";
+import {
+  performWorkspaceOp,
+  resetWorkspaceOpIpcInflightForTests,
+} from "@/services/workspaceOps";
 import { useConversationStore } from "@/stores/conversation/store";
 import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
@@ -55,6 +58,7 @@ describe("workspace_op L3 diagnostics", () => {
 
   beforeEach(() => {
     resetClientToolFulfillmentForTests();
+    resetWorkspaceOpIpcInflightForTests();
     useWorkspaceChannelStore.setState({ notReady: false });
     logEvent.mockReset();
     fetchMock = vi.fn().mockResolvedValue(okResponse());
@@ -65,6 +69,7 @@ describe("workspace_op L3 diagnostics", () => {
 
   afterEach(() => {
     resetClientToolFulfillmentForTests();
+    resetWorkspaceOpIpcInflightForTests();
     useWorkspaceChannelStore.setState({ notReady: false });
     useConversationStore.getState().setTurnPhase("idle", CID);
     vi.unstubAllGlobals();
@@ -129,7 +134,7 @@ describe("workspace_op L3 diagnostics", () => {
     ).toMatchObject({ outcome: "fail", http_status: 500 });
   });
 
-  it("logs aborted when timeout_ms elapses before IPC returns", async () => {
+  it("logs aborted when timeout_ms elapses before IPC returns（含 cid inflight）", async () => {
     const workspaceOp = vi.fn(
       () =>
         new Promise(() => {
@@ -143,10 +148,71 @@ describe("workspace_op L3 diagnostics", () => {
       CID,
     );
 
-    expect(logEvent.mock.calls.map((c) => c[1])).toContain(
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
       "workspace_op.aborted",
+      expect.objectContaining({
+        conversation_id: CID,
+        request_id: "r-abort",
+        op: "read",
+        duration_ms: expect.any(Number),
+        timeout_ms: 30,
+        inflight_cid: 1,
+        inflight_total: 1,
+        queue_depth: 0,
+      }),
     );
     expect(useWorkspaceChannelStore.getState().notReady).toBe(true);
+  });
+
+  it("第二对话 abort 日志能看到邻对话 IPC 争用", async () => {
+    let aStarted!: () => void;
+    const aReady = new Promise<void>((resolve) => {
+      aStarted = resolve;
+    });
+    const hang = () =>
+      new Promise<never>(() => {
+        /* never settle */
+      });
+    stubFsApi(
+      vi.fn(
+        (_root: string, _op: string, _args: unknown, timeoutMs?: number) => {
+          if (timeoutMs === 5_000) aStarted();
+          return hang();
+        },
+      ),
+    );
+
+    void performWorkspaceOp(
+      payload({
+        request_id: "r-a",
+        conversation_id: "cid-a",
+        timeout_ms: 5_000,
+      }),
+      "cid-a",
+    );
+    await aReady;
+    await performWorkspaceOp(
+      payload({
+        request_id: "r-b",
+        conversation_id: "cid-b",
+        timeout_ms: 30,
+      }),
+      "cid-b",
+    );
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
+      "workspace_op.aborted",
+      expect.objectContaining({
+        conversation_id: "cid-b",
+        request_id: "r-b",
+        inflight_cid: 1,
+        inflight_total: 2,
+        queue_depth: 1,
+        duration_ms: expect.any(Number),
+      }),
+    );
   });
 
   it("posts resolve to the interaction URL (sanity)", async () => {

@@ -4,11 +4,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // real renderer-global subscription), so each test uses a UNIQUE rootId to avoid
 // cross-test bleed — and the consume-on-take semantics keep them isolated anyway.
 import {
+  clearSidecarHealth,
+  getSidecarHealth,
+  markSidecarUnhealthy,
+  noteSidecarSpawned,
+} from "@/services/sidecarHealth";
+import {
   recordStatus,
+  setSidecarSpawnedHandler,
   takeRecentSidecarFailure,
 } from "@/services/sidecarStatus";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  // sidecarHealth 模块加载时注册了 noteSidecarSpawned；测完恢复，勿长期置空。
+  setSidecarSpawnedHandler(noteSidecarSpawned);
+  clearSidecarHealth();
+});
 
 describe("sidecar status diagnostics (onStatus consumer)", () => {
   it("surfaces an init-failure (error) as a startup diagnostic", () => {
@@ -44,6 +56,17 @@ describe("sidecar status diagnostics (onStatus consumer)", () => {
     recordStatus({ rootId: "r-heal", phase: "error", detail: "boom" });
     recordStatus({ rootId: "r-heal", phase: "spawned" });
     expect(takeRecentSidecarFailure("r-heal")).toBeNull();
+  });
+
+  it("spawned 经 handler 清掉 health bad，不必干等 TTL", () => {
+    markSidecarUnhealthy({ rootId: "r-bad-spawn", subpath: "" }, "旧失败");
+    expect(getSidecarHealth({ rootId: "r-bad-spawn", subpath: "" })).toBe(
+      "bad",
+    );
+    recordStatus({ rootId: "r-bad-spawn", phase: "spawned" });
+    expect(getSidecarHealth({ rootId: "r-bad-spawn", subpath: "" })).toBe(
+      "unknown",
+    );
   });
 
   it("consumes one-shot: the same diagnostic explains only one turn", () => {

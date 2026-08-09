@@ -8,10 +8,12 @@ from typing import Annotated, Any
 
 from pydantic import Field, TypeAdapter, ValidationError
 
+from agentcore.account.credentials import AccountCredentials
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
+from agentcore.folders.credentials import FoldersCredentials
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.runtime.interaction import default_interaction_registry
@@ -46,6 +48,8 @@ class HandlerMixin:
         self._user_id = resolve_sidecar_user_id(None if raw_user is None else str(raw_user))
         self._root = root.resolve()
         self._creds = self._parse_inference(params.get("inference"))
+        self._folders_creds = self._parse_folders_auth(params)
+        self._account_creds = self._parse_account_auth(params)
         self._apply_browser_bridge(params)
         self._approvals_enabled = bool(params.get("approvalsEnabled", True))
         self._permission_axes = self._parse_permission_axes(params) or DEFAULT_PERMISSION_AXES
@@ -180,6 +184,58 @@ class HandlerMixin:
             default_model=model or PLATFORM_MODEL_FLASH,
         )
 
+    @staticmethod
+    def _parse_folders_creds(raw: Any) -> FoldersCredentials | None:
+        """Build folders narrow-ticket creds from ``folders`` / ``foldersAuth``.
+
+        Shape matches inference: ``{baseUrl, apiKey}`` where ``baseUrl`` is the
+        folders collection URL (``…/v1/folders``) and ``apiKey`` is the
+        ``type=folders`` JWT. Never accepts an access token — desktop mints the
+        narrow ticket separately.
+        """
+        if not isinstance(raw, dict):
+            return None
+        base_url = str(raw.get("baseUrl") or "").strip()
+        api_key = str(raw.get("apiKey") or "").strip()
+        if not base_url or not api_key:
+            return None
+        return FoldersCredentials(api_key=api_key, base_url=base_url)
+
+    @classmethod
+    def _parse_folders_auth(cls, params: dict[str, Any]) -> FoldersCredentials | None:
+        """Prefer ``folders``; accept ``foldersAuth`` as an alias (desktop contract)."""
+        if "folders" in params:
+            return cls._parse_folders_creds(params.get("folders"))
+        if "foldersAuth" in params:
+            return cls._parse_folders_creds(params.get("foldersAuth"))
+        return None
+
+    @staticmethod
+    def _parse_account_creds(raw: Any) -> AccountCredentials | None:
+        """Build account narrow-ticket creds from ``account`` / ``accountAuth``.
+
+        Shape matches folders: ``{baseUrl, apiKey}`` where ``baseUrl`` is the
+        account API root (``…/v1/account``) and ``apiKey`` is the ``type=account``
+        JWT. Never accepts an access / inference / folders token — desktop mints
+        the account ticket via ``POST /v1/account/token``.
+        """
+        if not isinstance(raw, dict):
+            return None
+        base_url = str(raw.get("baseUrl") or "").strip()
+        api_key = str(raw.get("apiKey") or "").strip()
+        if not base_url or not api_key:
+            return None
+        return AccountCredentials(api_key=api_key, base_url=base_url)
+
+    @classmethod
+    def _parse_account_auth(cls, params: dict[str, Any]) -> AccountCredentials | None:
+        """Prefer ``account``; accept ``accountAuth`` as an alias (desktop contract)."""
+        if "account" in params:
+            return cls._parse_account_creds(params.get("account"))
+        if "accountAuth" in params:
+            return cls._parse_account_creds(params.get("accountAuth"))
+        return None
+
     def _refresh_creds(self, params: dict[str, Any]) -> None:
         """Refresh session creds from a per-turn ``inference`` block when present.
 
@@ -191,6 +247,10 @@ class HandlerMixin:
         """
         if "inference" in params:
             self._creds = self._parse_inference(params.get("inference"))
+        if "folders" in params or "foldersAuth" in params:
+            self._folders_creds = self._parse_folders_auth(params)
+        if "account" in params or "accountAuth" in params:
+            self._account_creds = self._parse_account_auth(params)
         # Bridge creds: always apply when key present (including explicit null → clear).
         if "browserBridge" in params:
             self._apply_browser_bridge(params)
@@ -228,7 +288,8 @@ class HandlerMixin:
 
         Permission axes stay client-pushed — the desktop re-sends them on every
         startTurn / resume so a mid-session switch applies to the next turn.
-        (folder_id is loaded from conversation DB at startTurn, not from params.)
+        (``folderId`` is resolved in ``_run_turn`` from params when present; DB
+        fallback only when the key is absent.)
         Absent / invalid ⇒ keep the current value.
         """
         parsed = self._parse_permission_axes(params)
@@ -424,6 +485,11 @@ class HandlerMixin:
         # initialized as local; login mid-session must not leave ToolContext on the
         # alias UUID).
         suspension.user_id = self._user_id
+        # Prefer resume RPC folderId / localRootId/localSubpath when the desktop
+        # re-sends them; else keep frame-stamped scope/bind from the pause card.
+        from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+
+        apply_rpc_folder_binding_to_suspension(suspension, params)
 
         # Cold peek 无 plan blob → workers 行校验（同云端）；非法修正 rollback claim。
         from agentcore.core.errors import ValidationError as CoreValidationError

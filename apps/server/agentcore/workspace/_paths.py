@@ -238,16 +238,56 @@ def is_internal_zone_relpath(relpath: str) -> bool:
     return False
 
 
+def path_has_non_internal_entries(root: Path) -> bool:
+    """True when ``root`` has content outside ``AgentCore/{index,trash,baselines}``.
+
+    Hub ``has_files`` / lazy index kicks use this so a tree that only holds
+    internal zones (or an empty ``AgentCore/``) counts as empty. Does not create
+    ``root``. Bare top-level ``index`` / ``trash`` / ``baselines`` still count —
+    only the path-aware internal zones are skipped (via
+    :func:`is_internal_zone_relpath`).
+    """
+    if not root.is_dir():
+        return False
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return False
+    for child in children:
+        name = child.name
+        if name == AGENTCORE_ROOT and child.is_dir():
+            try:
+                ac_children = list(child.iterdir())
+            except OSError:
+                continue
+            for ac in ac_children:
+                if is_internal_zone_relpath(f"{AGENTCORE_ROOT}/{ac.name}"):
+                    continue
+                return True
+            continue
+        return True
+    return False
+
+
 def is_ignored_dir_entry(*, parent_rel: str, name: str) -> bool:
     """Whether a directory child should be pruned during a workspace walk.
 
     Combines name-only :data:`IGNORED_DIRS` with path-aware internal zones.
     ``parent_rel`` is the workspace-relative POSIX path of the parent
     (``""`` / ``.`` = workspace root).
+
+    Also true when any *ancestor* segment in ``parent_rel`` is in
+    :data:`IGNORED_DIRS` — needed for recursive ``**/*`` globs that already
+    descended into a noise dir (walk-based callers prune earlier and never
+    hit this).
     """
     if name in IGNORED_DIRS:
         return True
     parent = parent_rel.replace("\\", "/").strip("/")
+    if parent and parent != ".":
+        for seg in parent.split("/"):
+            if seg and is_ignored_dir_name(seg):
+                return True
     child = name if parent in ("", ".") else f"{parent}/{name}"
     return is_internal_zone_relpath(child)
 

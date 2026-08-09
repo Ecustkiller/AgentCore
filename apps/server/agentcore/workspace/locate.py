@@ -28,11 +28,15 @@ from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.tools.sandbox import create_sandbox
 from agentcore.tools.sandbox.protocol import SandboxProvider
+from agentcore.workspace._paths import path_has_non_internal_entries
 from agentcore.workspace.channel import WorkspaceChannel
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.server import ServerWorkspace
-from agentcore.workspace.shared_paths import resolve_shared_workspace_root
+from agentcore.workspace.shared_paths import (
+    resolve_shared_workspace_root,
+    shared_workspace_storage_key,
+)
 
 _WORKSPACES_SEGMENT = "workspaces"
 
@@ -96,16 +100,18 @@ def parse_workspace_id(ws_id: str) -> WorkspaceId:
 
 
 def workspace_has_entries(*, user_id: str, folder_id: str | None, conversation_id: str) -> bool:
-    """Whether the workspace dir exists and is non-empty — *without* creating it.
+    """Whether the workspace dir has non-internal content — *without* creating it.
 
     Backs the hub enumeration's F1 filter (未分组空间只在真有文件时才列出, 文件中枢
-    统一 §四). Uses the no-create path helper on purpose: resolving via the backend
-    would ``mkdir`` an empty dir for every ungrouped conversation we probe.
+    统一 §四). Ignores ``AgentCore/{index,trash,baselines}`` so a naked chat that
+    only grew an index DB does not appear as "有文件". Uses the no-create path
+    helper on purpose: resolving via the backend would ``mkdir`` an empty dir for
+    every ungrouped conversation we probe.
     """
     root = workspace_root_path(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return root.is_dir() and any(root.iterdir())
+    return path_has_non_internal_entries(root)
 
 
 def workspace_root_path(*, user_id: str, folder_id: str | None, conversation_id: str) -> Path:
@@ -165,7 +171,13 @@ def build_server_workspace(
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return ServerWorkspace(root=root, sandbox=sandbox or _default_server_sandbox())
+    return ServerWorkspace(
+        root=root,
+        sandbox=sandbox or _default_server_sandbox(),
+        lock_key=workspace_storage_key(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        ),
+    )
 
 
 # IM chat attachments live in their own top-level space, separate from the
@@ -191,7 +203,11 @@ def build_chat_workspace(
     """
     root = chat_workspace_root_path(chat_id)
     root.mkdir(parents=True, exist_ok=True)
-    return ServerWorkspace(root=root, sandbox=sandbox or _default_server_sandbox())
+    return ServerWorkspace(
+        root=root,
+        sandbox=sandbox or _default_server_sandbox(),
+        lock_key=f"{_WORKSPACES_SEGMENT}/{_IM_SEGMENT}/{chat_id}",
+    )
 
 
 def build_shared_workspace(
@@ -202,7 +218,11 @@ def build_shared_workspace(
     Callers must authorize membership *before* building (mkdir on resolve).
     """
     root = resolve_shared_workspace_root(space_id)
-    return ServerWorkspace(root=root, sandbox=sandbox or _default_server_sandbox())
+    return ServerWorkspace(
+        root=root,
+        sandbox=sandbox or _default_server_sandbox(),
+        lock_key=shared_workspace_storage_key(space_id),
+    )
 
 
 @dataclass(frozen=True)

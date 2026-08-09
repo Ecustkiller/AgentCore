@@ -92,18 +92,32 @@ interface CloudFileClient {
   listFileIndex?(): Promise<string[]>;
 }
 
+/** Path-aware `AgentCore/{index,trash,baselines}` — mirrors main `isInternalZoneRelPath`. */
+function isInternalZonePath(path: string): boolean {
+  const p = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!p || p === ".") return false;
+  for (const zone of ["index", "trash", "baselines"] as const) {
+    const prefix = `AgentCore/${zone}`;
+    if (p === prefix || p.startsWith(`${prefix}/`)) return true;
+  }
+  return false;
+}
+
 function toFileNodes(files: WorkspaceFile[]): FileNode[] {
-  return files.map((f) => ({
-    path: f.path,
-    name: baseName(f.path),
-    isDir: f.isDir,
-  }));
+  return files
+    .filter((f) => !isInternalZonePath(f.path))
+    .map((f) => ({
+      path: f.path,
+      name: baseName(f.path),
+      isDir: f.isDir,
+    }));
 }
 
 /** Direct children of `dir` from a flat listing (root when `dir` is ""). */
 function oneLevelFrom(all: FileNode[], dir: string): FileNode[] {
   const prefix = dir ? `${dir}/` : "";
   return all.filter((n) => {
+    if (isInternalZonePath(n.path)) return false;
     if (!n.path.startsWith(prefix)) return false;
     const rest = n.path.slice(prefix.length);
     return rest.length > 0 && !rest.includes("/");

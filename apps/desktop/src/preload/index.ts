@@ -153,12 +153,16 @@ const fsApi: FsApi = {
     ipcRenderer.on(FS_CHANNELS.changed, listener);
     return () => ipcRenderer.removeListener(FS_CHANNELS.changed, listener);
   },
-  workspaceOp: (rootId, op, args, timeoutMs) =>
+  workspaceOp: (rootId, op, args, timeoutMs, correlation) =>
     ipcRenderer.invoke(FS_CHANNELS.workspaceOp, {
       rootId,
       op,
       args,
       ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+      ...(correlation?.conversationId
+        ? { conversationId: correlation.conversationId }
+        : {}),
+      ...(correlation?.requestId ? { requestId: correlation.requestId } : {}),
     }),
   grantSessionRun: () => ipcRenderer.invoke(FS_CHANNELS.grantSessionRun),
   reveal: (rootId, relPath) =>

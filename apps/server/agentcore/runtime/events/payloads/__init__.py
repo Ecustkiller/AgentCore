@@ -163,6 +163,7 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(run.TeamSynthesisWorkerPreview),
     TsInterface(run.TeamSynthesisPreviewPayload),
     TsInterface(run.CoordinationWaitPayload),
+    TsInterface(run.WorkspaceLockWaitPayload),
     TsAlias(
         "DeliveryState",
         run.DeliveryState,
@@ -407,6 +408,7 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.TEAM_NOTE_POSTED: run.TeamNotePostedPayload,
     EventType.TEAM_SYNTHESIS_PREVIEW: run.TeamSynthesisPreviewPayload,
     EventType.COORDINATION_WAIT: run.CoordinationWaitPayload,
+    EventType.WORKSPACE_LOCK_WAIT: run.WorkspaceLockWaitPayload,
     EventType.DELIVERY_STATUS: run.DeliveryStatusPayload,
     EventType.USER_INTERJECTION: run.UserInterjectionPayload,
     EventType.TURN_QUEUED: run.TurnQueuedPayload,

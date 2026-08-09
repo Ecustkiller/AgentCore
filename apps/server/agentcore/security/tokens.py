@@ -183,3 +183,85 @@ def decode_inference_token(token: str) -> str:
     if not sub:
         raise AuthenticationError("Token missing subject")
     return sub
+
+
+def create_folders_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:
+    """Mint a scoped token authorizing sidecar cloud folder roster calls.
+
+    Desktop exchanges its cookie session for THIS token and passes
+    ``{baseUrl, apiKey}`` into the on-machine engine (same shape as inference).
+    Distinct ``type`` ("folders") means it can ONLY authorize account folders
+    read/write on the narrow folders surface — never access-cookie APIs and never
+    the inference proxy. ``decode_folders_token`` / ``decode_access_token`` /
+    ``decode_inference_token`` refuse each other's types.
+    """
+    now = datetime.now(UTC)
+    expire = now + (expires_delta or timedelta(minutes=settings.folders_token_expire_minutes))
+    claims = {
+        "sub": user_id,
+        "type": "folders",
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+    }
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
+
+
+def decode_folders_token(token: str) -> str:
+    """Return the subject (user_id) of a valid folders narrow token.
+
+    Raises ``AuthenticationError`` for any invalid, tampered, expired, or
+    wrong-type token (including ``access`` and ``inference``).
+    """
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
+    except JWTError as exc:
+        raise AuthenticationError("Invalid or expired folders token") from exc
+
+    if claims.get("type") != "folders":
+        raise AuthenticationError("Wrong token type")
+    sub = claims.get("sub")
+    if not sub:
+        raise AuthenticationError("Token missing subject")
+    return sub
+
+
+def create_account_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:
+    """Mint a scoped token for sidecar cloud conversation-log access (R3a).
+
+    Desktop exchanges its cookie session for THIS token and passes
+    ``accountAuth: {baseUrl, apiKey}`` into the on-machine engine (same shape as
+    folders). ``baseUrl`` is the account API root (``…/v1/account``); ``apiKey``
+    is this JWT. Distinct ``type`` ("account") means it can ONLY authorize the
+    narrow conversation-log surface (``search`` / ``read``) — never folders
+    roster, never inference proxy, never cookie-auth UI CRUD.
+    ``decode_account_token`` / ``decode_access_token`` / ``decode_inference_token``
+    / ``decode_folders_token`` refuse each other's types.
+    """
+    now = datetime.now(UTC)
+    expire = now + (expires_delta or timedelta(minutes=settings.account_token_expire_minutes))
+    claims = {
+        "sub": user_id,
+        "type": "account",
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+    }
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
+
+
+def decode_account_token(token: str) -> str:
+    """Return the subject (user_id) of a valid account narrow token.
+
+    Raises ``AuthenticationError`` for any invalid, tampered, expired, or
+    wrong-type token (including ``access``, ``inference``, and ``folders``).
+    """
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
+    except JWTError as exc:
+        raise AuthenticationError("Invalid or expired account token") from exc
+
+    if claims.get("type") != "account":
+        raise AuthenticationError("Wrong token type")
+    sub = claims.get("sub")
+    if not sub:
+        raise AuthenticationError("Token missing subject")
+    return sub

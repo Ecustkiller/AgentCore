@@ -8,9 +8,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from agentcore.account.credentials import AccountCredentials
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
+from agentcore.folders.credentials import FoldersCredentials
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
@@ -38,10 +40,14 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._user_id = ""
         self._root: Path | None = None
         self._creds: LLMCredentials | None = None
+        # Folders narrow-ticket creds (``{baseUrl, apiKey}``); refreshed per turn.
+        self._folders_creds: FoldersCredentials | None = None
+        # Account narrow-ticket creds for conversation-log tools; refreshed per turn.
+        self._account_creds: AccountCredentials | None = None
         self._approvals_enabled = True
         # Conversation permission axes. Axes are still client-pushed (desktop sends
-        # ``permissionAxes`` on initialize and refreshes per turn); folder_id for the
-        # turn is loaded from conversation DB at startTurn (same as cloud).
+        # ``permissionAxes`` on initialize and refreshes per turn). Turn ``folderId``
+        # prefers RPC params; DB load is only the old-desktop fallback.
         self._permission_axes: PermissionAxes = DEFAULT_PERMISSION_AXES
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.

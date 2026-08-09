@@ -19,7 +19,10 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
-import { SidecarManager } from "../sidecar/manager";
+import {
+  SidecarManager,
+  isDestroyedWebContentsError,
+} from "../sidecar/manager";
 import type { Transport } from "../sidecar/transport";
 
 /** Fake stdio transport: complete initialize, hang startTurn/resume, inject notifications. */
@@ -420,5 +423,141 @@ describe("SidecarManager recovery / attach (D7)", () => {
     expect(recovery.unsynced[0].content).toBe("partial from seg");
     expect(recovery.unsynced[1].phase).toBe("ready");
     expect(recovery.paused).toEqual([]);
+  });
+
+  it("swallows wc.send destroy race on notify without dropping buffer (D2)", async () => {
+    const t = hangingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    const wc = mockWc();
+    (wc.send as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new TypeError("Object has been destroyed");
+    });
+    const turnP = manager.startTurn(
+      wc as never,
+      {
+        conversationId: "c-d2-race",
+        rootId: "r1",
+        turnId: "turn-d2",
+        traceId: "f".repeat(32),
+        userMessageId: "u-d2",
+        userMessage: "hello",
+      },
+      "/tmp/ws",
+    );
+    await waitLive(manager, "c-d2-race");
+
+    expect(() =>
+      t.notify("turn-d2", {
+        type: "content_delta",
+        timestamp: "t0",
+        payload: { delta: "race" },
+      }),
+    ).not.toThrow();
+
+    const attached = manager.attach(mockWc() as never, {
+      conversationId: "c-d2-race",
+    });
+    expect(attached.attached).toBe(true);
+    expect(attached.events?.map((e) => e.type)).toEqual(["content_delta"]);
+    expect((attached.events?.[0].payload as { delta: string }).delta).toBe(
+      "race",
+    );
+
+    t.settleTurn({ turnId: "turn-d2", ...TURN_RESULT, content: "race" });
+    await turnP;
+  });
+
+  it("swallows destroy race on synthetic terminal send (D2)", async () => {
+    const t = hangingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    const wc = mockWc();
+    const turnP = manager.startTurn(
+      mockWc(true) as never,
+      {
+        conversationId: "c-d2-synth",
+        rootId: "r1",
+        turnId: "turn-d2-synth",
+        traceId: "1".repeat(32),
+        userMessageId: "u-d2-synth",
+        userMessage: "q",
+      },
+      "/tmp/ws",
+    );
+    await waitLive(manager, "c-d2-synth");
+    t.notify("turn-d2-synth", {
+      type: "content_delta",
+      timestamp: "t0",
+      payload: { delta: "partial" },
+    });
+    expect(
+      manager.attach(wc as never, { conversationId: "c-d2-synth" }).attached,
+    ).toBe(true);
+
+    (wc.send as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new TypeError("Object has been destroyed");
+    });
+    t.settleTurn({
+      turnId: "turn-d2-synth",
+      ...TURN_RESULT,
+      content: "partial",
+    });
+    await expect(turnP).resolves.toBeTruthy();
+  });
+
+  it("rethrows non-destroy wc.send errors from onNotification (D2)", async () => {
+    const t = hangingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    const wc = mockWc();
+    (wc.send as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("EPIPE: broken pipe");
+    });
+    const turnP = manager.startTurn(
+      wc as never,
+      {
+        conversationId: "c-d2-real",
+        rootId: "r1",
+        turnId: "turn-d2-real",
+        traceId: "2".repeat(32),
+        userMessageId: "u-d2-real",
+        userMessage: "q",
+      },
+      "/tmp/ws",
+    );
+    await waitLive(manager, "c-d2-real");
+
+    expect(() =>
+      t.notify("turn-d2-real", {
+        type: "content_delta",
+        timestamp: "t0",
+        payload: { delta: "x" },
+      }),
+    ).toThrow(/EPIPE/);
+
+    t.settleTurn({ turnId: "turn-d2-real", ...TURN_RESULT });
+    await turnP;
+  });
+});
+
+describe("isDestroyedWebContentsError (D2)", () => {
+  it("matches Electron destroy / frame-disposed messages only", () => {
+    expect(
+      isDestroyedWebContentsError(new TypeError("Object has been destroyed")),
+    ).toBe(true);
+    expect(
+      isDestroyedWebContentsError(
+        new Error(
+          "Render frame was disposed before WebFrameMain could be accessed",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isDestroyedWebContentsError(new Error("WebFrameMain was disposed")),
+    ).toBe(true);
+    expect(isDestroyedWebContentsError(new Error("EPIPE: broken pipe"))).toBe(
+      false,
+    );
+    expect(isDestroyedWebContentsError(new Error("channel closed"))).toBe(
+      false,
+    );
   });
 });

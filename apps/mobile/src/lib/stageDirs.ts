@@ -1,5 +1,5 @@
 /**
- * 案卷约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
+ * 约定文档约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
  * 文件浏览器徽章与产物卡标签共用。与后端 ``workspace.stage_dirs`` 对齐；无匹配则零噪音。
  */
 
@@ -17,7 +17,7 @@ export interface StageDirMeta {
 const STAGE_DIRS: Record<string, StageDirMeta> = {
   [RESEARCH_DIR]: {
     key: "research",
-    label: "调研案卷",
+    label: "调研约定文档",
     tooltip: "团队协作阶段产物，后续阶段会读取",
   },
   [DEBATE_DIR]: {

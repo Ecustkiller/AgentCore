@@ -66,7 +66,7 @@ describe("FileArtifactsCard acceptance labels", () => {
 });
 
 describe("FileArtifactsCard stage labels", () => {
-  it("AgentCore/文档/research/debate 路径显示案卷标签，普通路径零噪音", () => {
+  it("AgentCore/文档/research/debate 路径显示约定文档标签，普通路径零噪音", () => {
     render(
       <MemoryRouter>
         <FileArtifactsCard
@@ -88,10 +88,12 @@ describe("FileArtifactsCard stage labels", () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByText("调研案卷")).toBeTruthy();
+    expect(screen.getByText("调研约定文档")).toBeTruthy();
     expect(screen.getByText("辩论产物")).toBeTruthy();
     expect(
-      screen.getByTitle("在文件页查看案卷 AgentCore/文档/research/brief.md"),
+      screen.getByTitle(
+        "在文件页查看约定文档 AgentCore/文档/research/brief.md",
+      ),
     ).toBeTruthy();
     expect(screen.getByTitle("在工作区查看 notes.txt")).toBeTruthy();
   });

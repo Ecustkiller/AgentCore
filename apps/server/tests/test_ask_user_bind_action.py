@@ -414,3 +414,13 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert "external_mount_readonly" in action_desc or "禁止" in action_desc
     assert "选择器兜底" not in props2["well_known"]["description"]
     assert "picker" not in props2["target_name"]["description"].lower()
+    # Desktop advertise must stay compact (dogfood ~3796 before slim); HOW → skill.
+    adv_blob = advertised.schema.description + json.dumps(
+        advertised.schema.parameters, ensure_ascii=False
+    )
+    plain_blob = plain.schema.description + json.dumps(
+        plain.schema.parameters, ensure_ascii=False
+    )
+    assert len(adv_blob) < 3300, f"desktop ask_user schema too fat: {len(adv_blob)}"
+    assert len(plain_blob) < len(adv_blob)
+    assert abs(len(plain_blob) - 2397) < 80  # non-desktop path must not inflate

@@ -100,9 +100,11 @@ describe("Markdown evidence badges (render seam)", () => {
       </EvidenceLedgerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /已核实 · 法律/ }));
-    expect(screen.getByText(/案卷来源/)).toBeTruthy();
+    expect(screen.getByText(/约定文档来源/)).toBeTruthy();
     expect(screen.getByText(/法律透镜报告\.md/)).toBeTruthy();
     expect(screen.getByText(/幕1 出处 #r1/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /打开案卷文件/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /打开约定文档文件/ }),
+    ).toBeTruthy();
   });
 });

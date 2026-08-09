@@ -610,7 +610,7 @@ def test_research_report_write_task_has_chapter_discipline():
     assert "按章" in write["task"]
     assert "file_delete" in write["task"]
     assert "章边界" in write["task"]
-    # 中间环案卷契约：调研 + 提纲 form=files，路径在 RESEARCH_DIR，角度名入文件名。
+    # 中间环约定文档契约：调研 + 提纲 form=files，路径在 RESEARCH_DIR，角度名入文件名。
     from agentcore.workspace.stage_dirs import RESEARCH_DIR
 
     research = [t for t in tasks if t["id"].startswith("research_")]
@@ -639,7 +639,7 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
     assert not b_errs
     assert plan_is_literature_report_delivery(brief) is False
 
-    # 同等成文：已声明 reviews/ files 审校座 + two_phase 案卷
+    # 同等成文：已声明 reviews/ files 审校座 + two_phase 约定文档
     assert plan_is_literature_report_delivery(
         [
             {

@@ -86,6 +86,15 @@ async def persist_kickoff(
             base_system_prompt=host._kickoff_system_prompt(),
             user_message=host._user_message,
             folder_id=host._folder_id,
+            folder_binding_injected=bool(
+                getattr(host._base_tool_context, "folder_binding_injected", False)
+            ),
+            folder_local_root_id=getattr(
+                host._base_tool_context, "folder_local_root_id", None
+            ),
+            folder_local_subpath=getattr(
+                host._base_tool_context, "folder_local_subpath", None
+            ),
             memory_enabled=host._memory_enabled,
             conversation_history_access=host._conversation_history_access,
             transcript=capture.transcript,

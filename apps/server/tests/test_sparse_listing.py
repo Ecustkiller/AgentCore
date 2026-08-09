@@ -10,6 +10,7 @@ from agentcore.workspace._paths import (
     SYSTEM_IGNORED_FILE_SUFFIXES,
     is_access_denied_oserror,
     is_ai_noise_file_name,
+    is_ignored_dir_entry,
     is_ignored_dir_name,
     is_ignored_file_name,
     is_ignored_relpath,
@@ -61,6 +62,17 @@ def test_internal_zone_relpath_is_path_aware():
     assert not is_internal_zone_relpath("index")
     assert not is_internal_zone_relpath("trash/foo")
     assert not is_internal_zone_relpath("foo/AgentCore/index")
+
+
+def test_ignored_dir_entry_path_aware_and_ancestor_noise():
+    assert is_ignored_dir_entry(parent_rel="AgentCore", name="index")
+    assert is_ignored_dir_entry(parent_rel="AgentCore", name="trash")
+    assert is_ignored_dir_entry(parent_rel="AgentCore", name="baselines")
+    assert not is_ignored_dir_entry(parent_rel="", name="index")
+    assert not is_ignored_dir_entry(parent_rel="AgentCore", name="规则")
+    # Recursive glob under .git: parent carries the noise segment.
+    assert is_ignored_dir_entry(parent_rel=".git", name="config")
+    assert is_ignored_dir_entry(parent_rel="node_modules/pkg", name="index.js")
 
 
 def test_system_suffixes_hide_from_ui_and_ai():
@@ -328,6 +340,40 @@ async def test_list_shows_media_hides_system_noise(tmp_path: Path):
     }
     assert "规则" in ac_names
     assert "index" not in ac_names
+
+
+async def test_recursive_list_hides_internal_zones_keeps_bare_index(tmp_path: Path):
+    """Cloud UI expands AgentCore via recursive list — zones must not leak."""
+    (tmp_path / "ok.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "AgentCore" / "index").mkdir(parents=True)
+    (tmp_path / "AgentCore" / "index" / "code_search.db").write_bytes(b"db")
+    (tmp_path / "AgentCore" / "trash").mkdir(parents=True)
+    (tmp_path / "AgentCore" / "baselines").mkdir(parents=True)
+    (tmp_path / "AgentCore" / "规则").mkdir(parents=True)
+    (tmp_path / "AgentCore" / "规则" / "r.md").write_text("r", encoding="utf-8")
+    (tmp_path / "index").mkdir()
+    (tmp_path / "index" / "user.py").write_text("u", encoding="utf-8")
+    git = tmp_path / ".git"
+    git.mkdir()
+    (git / "config").write_text("g", encoding="utf-8")
+
+    paths = {
+        e.path
+        for e in await ServerWorkspace(
+            root=tmp_path, sandbox=SubprocessSandbox()
+        ).list(".", "**/*")
+    }
+    assert "ok.txt" in paths
+    assert "AgentCore" in paths
+    assert "AgentCore/规则" in paths
+    assert "AgentCore/规则/r.md" in paths
+    assert "index" in paths
+    assert "index/user.py" in paths
+    assert "AgentCore/index" not in paths
+    assert "AgentCore/trash" not in paths
+    assert "AgentCore/baselines" not in paths
+    assert not any(p == "AgentCore/index" or p.startswith("AgentCore/index/") for p in paths)
+    assert not any(p == ".git" or p.startswith(".git/") for p in paths)
 
 
 async def test_list_and_tree_ignore_pytest_tmp(tmp_path: Path):

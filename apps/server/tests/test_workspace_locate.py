@@ -194,3 +194,55 @@ def test_workspace_has_entries_true_when_non_empty(tmp_path: Path, monkeypatch):
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     (root / "note.txt").write_text("hi", encoding="utf-8")
     assert workspace_has_entries(user_id="u1", folder_id="f1", conversation_id="c1")
+
+
+def test_workspace_has_entries_false_when_only_internal_index(
+    tmp_path: Path, monkeypatch
+):
+    """AgentCore/index alone must not count as hub has_files."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c1")
+    (root / "AgentCore" / "index").mkdir(parents=True)
+    (root / "AgentCore" / "index" / "code_search.db").write_bytes(b"")
+    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c1")
+
+
+def test_workspace_has_entries_false_when_only_internal_zones(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c2")
+    for zone in ("index", "trash", "baselines"):
+        (root / "AgentCore" / zone).mkdir(parents=True)
+    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c2")
+
+
+def test_workspace_has_entries_true_with_agentcore_docs(tmp_path: Path, monkeypatch):
+    """Visible AgentCore content (文档等) still counts; bare top-level index too."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c3")
+    (root / "AgentCore" / "index").mkdir(parents=True)
+    (root / "AgentCore" / "文档").mkdir(parents=True)
+    (root / "AgentCore" / "文档" / "note.md").write_text("x", encoding="utf-8")
+    assert workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c3")
+
+    root2 = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c4")
+    (root2 / "index").mkdir()  # bare name — not an internal zone
+    assert workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c4")
+
+
+@pytest.mark.asyncio
+async def test_empty_server_workspace_start_index_does_not_mkdir(tmp_path: Path):
+    """Lazy B1: empty tree must not create AgentCore/index on turn kick."""
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.stage_dirs import INDEX_REL
+
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    ws.start_code_index_maintenance()
+    assert ws._index_maintainer is None  # noqa: SLF001
+    assert not (tmp_path / Path(*INDEX_REL.split("/"))).exists()
+
+    await ws.write("hello.py", "print(1)\n")
+    assert ws._index_maintainer is not None  # noqa: SLF001
+    await ws._index_maintainer.drain()  # noqa: SLF001
+    assert (tmp_path / Path(*INDEX_REL.split("/"))).is_dir()

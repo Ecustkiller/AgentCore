@@ -107,6 +107,15 @@ def _stub_conversation_folder_id(monkeypatch: pytest.MonkeyPatch, request: pytes
     if request.node.name in {
         "test_sidecar_start_turn_passes_conversation_folder_id",
         "test_load_conversation_folder_id_normalizes_blank",
+        "test_load_conversation_folder_id_connection_refused",
+        "test_sidecar_start_turn_db_unavailable_seals_outbox",
+        "test_sidecar_start_turn_folder_id_param_skips_db",
+        "test_sidecar_start_turn_local_binding_reaches_pipeline",
+        "test_sidecar_start_turn_explicit_null_folder_id_skips_db",
+        "test_sidecar_start_turn_absent_folder_id_still_loads_db",
+        "test_resolve_start_turn_folder_id_key_present",
+        "test_resolve_rpc_folder_binding_key_presence",
+        "test_apply_rpc_folder_binding_overlays_folder_id",
     }:
         return
 
@@ -434,6 +443,7 @@ def test_sidecar_start_turn_passes_conversation_folder_id(tmp_path, monkeypatch)
 
     Hardcoding folder_id=None broke project memory scope + suspension.folder_id on
     local turns. Mock the unscoped repo lookup; assert run_chat_pipeline gets it.
+    Absent ``folderId`` key (old desktop) still uses this path.
     """
     captured: dict[str, Any] = {}
 
@@ -517,6 +527,353 @@ def test_sidecar_start_turn_passes_conversation_folder_id(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_resolve_start_turn_folder_id_key_present(monkeypatch):
+    """``folderId`` key present → normalize, never call DB loader (PG may be down)."""
+    from agentcore.sidecar.server_pkg.turns import resolve_start_turn_folder_id
+
+    called = {"db": False}
+
+    async def boom(_conversation_id: str) -> str | None:
+        called["db"] = True
+        raise AssertionError("DB loader must not run when folderId key is present")
+
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        boom,
+    )
+    assert await resolve_start_turn_folder_id({"folderId": "  proj-1  "}, "c1") == "proj-1"
+    assert await resolve_start_turn_folder_id({"folderId": None}, "c1") is None
+    assert await resolve_start_turn_folder_id({"folderId": ""}, "c1") is None
+    assert await resolve_start_turn_folder_id({"folderId": "  "}, "c1") is None
+    assert called["db"] is False
+
+
+def test_resolve_rpc_folder_binding_key_presence():
+    """``localRootId`` key present → injected; absent → not (DB fallback later)."""
+    from agentcore.sidecar.server_pkg.turns import resolve_rpc_folder_binding
+
+    assert resolve_rpc_folder_binding({}) == (False, None, "")
+    assert resolve_rpc_folder_binding({"localRootId": "  root-1  "}) == (
+        True,
+        "root-1",
+        "",
+    )
+    assert resolve_rpc_folder_binding(
+        {"localRootId": "root-1", "localSubpath": "  apps/api  "}
+    ) == (True, "root-1", "apps/api")
+    assert resolve_rpc_folder_binding({"localRootId": None}) == (True, None, "")
+    assert resolve_rpc_folder_binding({"localRootId": ""}) == (True, None, "")
+
+
+def test_apply_rpc_folder_binding_overlays_folder_id():
+    """Resume RPC ``folderId`` key present → overwrite frame; absent → keep."""
+    from agentcore.runtime.suspension import AskUserSuspension
+    from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+
+    def _frame(*, folder_id: str | None = "fold-old") -> AskUserSuspension:
+        return AskUserSuspension(
+            message_id="m1",
+            conversation_id="c1",
+            user_id="u1",
+            captain_run_id="r1",
+            checkpoint_id="cp-1",
+            tool_call_id="tc1",
+            base_system_prompt="sys",
+            user_message="q",
+            folder_id=folder_id,
+            question="?",
+        )
+
+    kept = _frame()
+    apply_rpc_folder_binding_to_suspension(kept, {})
+    assert kept.folder_id == "fold-old"
+
+    overwritten = _frame()
+    apply_rpc_folder_binding_to_suspension(overwritten, {"folderId": "  fold-new  "})
+    assert overwritten.folder_id == "fold-new"
+
+    cleared = _frame()
+    apply_rpc_folder_binding_to_suspension(cleared, {"folderId": None})
+    assert cleared.folder_id is None
+
+    blank = _frame()
+    apply_rpc_folder_binding_to_suspension(blank, {"folderId": "  "})
+    assert blank.folder_id is None
+
+    # Binding overlay still works alongside folderId.
+    bound = _frame(folder_id="fold-keep")
+    apply_rpc_folder_binding_to_suspension(
+        bound,
+        {"folderId": "fold-rpc", "localRootId": "root-1", "localSubpath": "apps"},
+    )
+    assert bound.folder_id == "fold-rpc"
+    assert bound.folder_binding_injected is True
+    assert bound.folder_local_root_id == "root-1"
+    assert bound.folder_local_subpath == "apps"
+
+
+def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch):
+    """Injected localRootId/localSubpath reach run_chat_pipeline (no Folder PG)."""
+    captured: dict[str, Any] = {}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["folder_id"] = kwargs.get("folder_id")
+        captured["folder_binding_injected"] = kwargs.get("folder_binding_injected")
+        captured["folder_local_root_id"] = kwargs.get("folder_local_root_id")
+        captured["folder_local_subpath"] = kwargs.get("folder_local_subpath")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def fake_baseline(**kwargs: Any) -> None:
+        return None
+
+    async def boom_db(_conversation_id: str) -> str | None:
+        raise AssertionError("load_conversation_folder_id must not run")
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
+        fake_baseline,
+    )
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        boom_db,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t-bind",
+                        "conversationId": "c-bind",
+                        "userMessage": "hello",
+                        "folderId": "fold-proj",
+                        "localRootId": "root-xyz",
+                        "localSubpath": "repos/app",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert captured["folder_id"] == "fold-proj"
+    assert captured["folder_binding_injected"] is True
+    assert captured["folder_local_root_id"] == "root-xyz"
+    assert captured["folder_local_subpath"] == "repos/app"
+    assert "error" not in _response(sent, 2)
+
+
+def test_sidecar_start_turn_folder_id_param_skips_db(tmp_path, monkeypatch):
+    """Injected folderId reaches pipeline without opening local PG."""
+    captured: dict[str, Any] = {}
+    db_calls = {"n": 0}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["folder_id"] = kwargs.get("folder_id")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def fake_baseline(**kwargs: Any) -> None:
+        captured["baseline_folder_id"] = kwargs.get("folder_id")
+
+    async def boom_db(_conversation_id: str) -> str | None:
+        db_calls["n"] += 1
+        raise AssertionError("load_conversation_folder_id must not run")
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
+        fake_baseline,
+    )
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        boom_db,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "项目里查记忆",
+                        "folderId": "folder-from-rpc",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert db_calls["n"] == 0
+    assert captured["folder_id"] == "folder-from-rpc"
+    assert captured["baseline_folder_id"] == "folder-from-rpc"
+    assert "error" not in _response(sent, 2)
+
+
+def test_sidecar_start_turn_explicit_null_folder_id_skips_db(tmp_path, monkeypatch):
+    """Explicit null folderId = bare chat; must not query PG (PG down still OK)."""
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE, DatabaseUnavailableError
+
+    captured: dict[str, Any] = {}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["folder_id"] = kwargs.get("folder_id")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def boom_db(_conversation_id: str) -> str | None:
+        raise DatabaseUnavailableError(DATABASE_UNAVAILABLE_MESSAGE)
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        boom_db,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "裸聊",
+                        "folderId": None,
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert captured["folder_id"] is None
+    assert "error" not in _response(sent, 2)
+
+
+def test_sidecar_start_turn_absent_folder_id_still_loads_db(tmp_path, monkeypatch):
+    """Old desktop (no folderId key) still falls back to DB loader."""
+    captured: dict[str, Any] = {}
+    db_calls = {"n": 0}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["folder_id"] = kwargs.get("folder_id")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def fake_db(_conversation_id: str) -> str | None:
+        db_calls["n"] += 1
+        return "from-legacy-db"
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        fake_db,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "旧桌面无 folderId",
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert db_calls["n"] == 1
+    assert captured["folder_id"] == "from-legacy-db"
+
+
+@pytest.mark.asyncio
 async def test_load_conversation_folder_id_normalizes_blank(monkeypatch):
     """DB blank / whitespace folder_id → None (bare), never empty str."""
     from agentcore.sidecar.server_pkg.turns import load_conversation_folder_id
@@ -547,6 +904,113 @@ async def test_load_conversation_folder_id_normalizes_blank(monkeypatch):
         _Repo,
     )
     assert await load_conversation_folder_id("c-blank") is None
+
+
+@pytest.mark.asyncio
+async def test_load_conversation_folder_id_connection_refused(monkeypatch):
+    """PG connection refuse → DatabaseUnavailableError, not raw WinError narrative."""
+    from sqlalchemy.exc import OperationalError
+
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE, DatabaseUnavailableError
+    from agentcore.sidecar.server_pkg.turns import load_conversation_folder_id
+
+    class _FailSession:
+        async def __aenter__(self) -> object:
+            raise OperationalError(
+                "SELECT 1",
+                {},
+                ConnectionRefusedError("connection refused"),
+            )
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _FailSession(),
+    )
+
+    with pytest.raises(DatabaseUnavailableError) as ei:
+        await load_conversation_folder_id("c1")
+    assert str(ei.value) == DATABASE_UNAVAILABLE_MESSAGE
+    assert "1225" not in str(ei.value)
+
+
+def test_sidecar_start_turn_db_unavailable_seals_outbox(tmp_path, monkeypatch):
+    """After begin_turn, folder_id connect refuse must not leave outbox permanently open.
+
+    方案一 · 诚实失败：回合干净失败，错误可识别为数据库问题；禁止静默当裸聊继续。
+    """
+    from agentcore.conversation.store.outbox import PHASE_OPEN, PHASE_READY, list_outbox_records
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE, DatabaseUnavailableError
+
+    pipeline_ran = {"value": False}
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        pipeline_ran["value"] = True
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def boom_folder(_conversation_id: str) -> str | None:
+        raise DatabaseUnavailableError(DATABASE_UNAVAILABLE_MESSAGE)
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.turns.load_conversation_folder_id",
+        boom_folder,
+    )
+
+    data_dir = tmp_path / "data"
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                        "dataDir": str(data_dir),
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t1",
+                        "conversationId": "c1",
+                        "userMessage": "查项目记忆",
+                        "userMessageId": "um-db-down",
+                        "traceId": "a" * 32,
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+
+    assert pipeline_ran["value"] is False
+    err = _response(sent, 2)["error"]
+    assert err["code"] == protocol.INTERNAL_ERROR
+    assert DATABASE_UNAVAILABLE_MESSAGE in err["message"]
+    assert "1225" not in err["message"]
+
+    records = list_outbox_records(data_dir / "outbox")
+    assert records, "begin_turn must have created an outbox record"
+    assert all(r.get("phase") != PHASE_OPEN for r in records)
+    assert all(r.get("phase") == PHASE_READY for r in records)
+    assert any("salvage" in (r.get("ops") or []) for r in records)
 
 
 def test_sidecar_start_turn_passes_desktop_client_platform(tmp_path, monkeypatch):

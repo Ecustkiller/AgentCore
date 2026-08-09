@@ -54,7 +54,7 @@ def research_chain_evidence(
     *,
     has_research_artifacts: bool = False,
 ) -> bool:
-    """True when 已有调研链（命题卡 / MLR 成功 / 案卷产物）。"""
+    """True when 已有调研链（命题卡 / MLR 成功 / 约定文档产物）。"""
     return has_research_chain_evidence(
         entries, has_research_artifacts=has_research_artifacts
     )
@@ -153,7 +153,7 @@ async def resolve_debate_host_attach(
         resolve_latest_mlr_execution,
     )
 
-    # Soft pre-gate: 当前回合明确「应先调研」且无案卷时，不抢挂旧图（冷开辩 → 独立图）。
+    # Soft pre-gate: 当前回合明确「应先调研」且无约定文档时，不抢挂旧图（冷开辩 → 独立图）。
     # 跨回合：snapshot 空但 DB 能定位 MLR 时仍可进图（定位本身即链证据）。
     local_chain = research_chain_evidence(
         journal_entries, has_research_artifacts=has_research_artifacts

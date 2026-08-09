@@ -79,6 +79,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "internal",
     reason: "协调等待实时信号；手机 fold no-op，等待态由 run/status 派生呈现",
   },
+  workspace_lock_wait: {
+    verdict: "internal",
+    reason:
+      "同 folder 写锁短等 EPHEMERAL；桌面空气泡「等待工作区…」（不得静默等锁）；手机 fold no-op",
+  },
   run_started: { verdict: "ported", surface: "TeamView" },
   run_phase: {
     verdict: "ported",
@@ -685,7 +690,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   EvidenceBadge: {
     verdict: "ported",
     surface:
-      "RunDetail · 输出（辩手发言全文）—— 手机独立 remarkEvidence 把【已核实·出处】/【待核实·推断】渲成 EvidenceBadge 徽章；`#eN` 台账解析 + 溯源底栏（含案卷路径/幕1 #rN，可跳转对话文件页）与桌面同构（批 D2）",
+      "RunDetail · 输出（辩手发言全文）—— 手机独立 remarkEvidence 把【已核实·出处】/【待核实·推断】渲成 EvidenceBadge 徽章；`#eN` 台账解析 + 溯源底栏（含约定文档路径/幕1 #rN，可跳转对话文件页）与桌面同构（批 D2）",
   },
   EvidenceLedgerContext: {
     verdict: "ported",

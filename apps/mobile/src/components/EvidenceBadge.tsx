@@ -22,7 +22,7 @@ import { useNavigate, useParams } from "react-router-dom";
  * `【已核实·<出处|#eN>】` / `【待核实·推断】` marker inside debate speech markdown.
  *
  * - **已核实**：note 含 `#eN` 且台账命中 → 徽章文案换成 site/title；可点开溯源面板
- *   （含案卷路径 / 幕1 #rN，可跳转对话文件页）。
+ *   （含约定文档路径 / 幕1 #rN，可跳转对话文件页）。
  * - 未命中 / 旧自由文本 → 今日纯文案徽章。
  * - **待核实** → muted 灰（非琥珀）。
  */
@@ -164,7 +164,7 @@ function EvidenceLedgerSheet({
         {dossierPath ? (
           <div className="evidence-sheet-dossier">
             <div className="evidence-sheet-dossier-label">
-              案卷来源{dossierLabel ? ` · ${dossierLabel}` : ""}
+              约定文档来源{dossierLabel ? ` · ${dossierLabel}` : ""}
             </div>
             <div className="evidence-sheet-dossier-path">{dossierName}</div>
             {originId ? (
@@ -177,7 +177,7 @@ function EvidenceLedgerSheet({
                 onClick={onOpenDossier}
               >
                 <FileText size={14} aria-hidden />
-                打开案卷文件
+                打开约定文档文件
               </button>
             ) : null}
           </div>

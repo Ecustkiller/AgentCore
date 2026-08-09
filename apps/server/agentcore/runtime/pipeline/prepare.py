@@ -78,6 +78,9 @@ async def prepare_fresh_turn(
     x_client_platform: str | None,
     profiles: TurnProfiles | None = None,
     agent_mentions: list[dict] | None = None,
+    folder_binding_injected: bool = False,
+    folder_local_root_id: str | None = None,
+    folder_local_subpath: str | None = None,
 ) -> PreparedTurn:
     """Build the stable base prompt, worker tools, channels, and tool context."""
     # Long-term memory injection is gated by the caller-supplied ``memory_enabled``
@@ -126,6 +129,11 @@ async def prepare_fresh_turn(
     # Host / MCP backfill needs a desktop client — orthogonal to workspace location.
     channel = resolve_channel_profile(x_client_platform)
     desktop_online = channel.desktop_online
+    # Sticky channel-dead (e.g. baseline already hung the desktop): abort before
+    # probe / MCP / exists burn more wall clock and before assemble + LLM.
+    from agentcore.workspace.channel import raise_if_backend_channel_dead
+
+    raise_if_backend_channel_dead(backend)
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
     exec_languages = await resolve_exec_languages(backend)
@@ -146,6 +154,8 @@ async def prepare_fresh_turn(
     mcp_discover = await discover_mcp_tools(desktop_channel)
     mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
     git_fact = await detect_workspace_git(backend)
+    # exists/.git (and similar) may sticky-dead after prior timeouts — stop here.
+    raise_if_backend_channel_dead(backend)
     workspace_facts = build_workspace_context(
         backend,
         desktop_online=desktop_online,
@@ -290,6 +300,9 @@ async def prepare_fresh_turn(
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=material_paths,
+        folder_binding_injected=folder_binding_injected,
+        folder_local_root_id=folder_local_root_id,
+        folder_local_subpath=folder_local_subpath or None,
     )
     from agentcore.runtime.closing_posture import (
         clear_b1_closing_latches,

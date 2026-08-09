@@ -1,8 +1,9 @@
 """SSE generator: idle heartbeat + event passthrough + optional id: seq.
 
-The generator races each event pull against a heartbeat timeout so a turn that is
-alive but thinking keeps the connection flowing bytes (the client's stall watchdog
-reads those bytes as liveness). No DB, no HTTP — plain async tests
+The live-tail races a persistent ``sink.get`` task against a heartbeat timeout
+(``asyncio.wait``, never ``wait_for``) so a turn that is alive but thinking keeps
+the connection flowing bytes without cancelling a get that may already hold a
+dequeued event behind the persist barrier. No DB, no HTTP — plain async tests
 (asyncio_mode=auto).
 """
 
@@ -34,7 +35,8 @@ async def test_emits_heartbeat_while_idle(monkeypatch):
     sink = EventSink()
     gen = sse._event_generator(sink, None)
     try:
-        # Nothing queued → the pull times out → an SSE comment heartbeat frame.
+        # Nothing queued → the wait times out → an SSE comment heartbeat frame;
+        # the underlying get task stays alive across the ping.
         first = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
         assert first.startswith(":")
 
@@ -48,6 +50,40 @@ async def test_emits_heartbeat_while_idle(monkeypatch):
         with pytest.raises(StopAsyncIteration):
             await asyncio.wait_for(gen.__anext__(), timeout=1.0)
     finally:
+        await gen.aclose()
+
+
+async def test_heartbeat_does_not_cancel_get_waiting_on_persist_barrier(monkeypatch):
+    """SS-1: heartbeat timeout must not cancel ``sink.get`` mid persist barrier.
+
+    If the get has already dequeued the event and is awaiting the barrier,
+    cancelling it (as ``wait_for`` would) drops the event and desyncs
+    queue/barrier pairing. Persistent get + ``asyncio.wait`` must ping while
+    still delivering the event once the barrier resolves.
+    """
+    monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.02)
+    sink = EventSink()
+    loop = asyncio.get_running_loop()
+    barrier: asyncio.Future[int | None] = loop.create_future()
+    sink._queue.put_nowait(content_delta("held"))
+    sink._persist_barriers.put_nowait(barrier)
+
+    gen = sse._event_generator(sink, None)
+    try:
+        ping = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+        assert ping.startswith(":")
+
+        barrier.set_result(99)
+        frame = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+        assert "content_delta" in frame
+        assert "\nid: 99\n" in frame
+
+        sink.close()
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+    finally:
+        if not barrier.done():
+            barrier.cancel()
         await gen.aclose()
 
 

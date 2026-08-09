@@ -1,16 +1,16 @@
-"""案卷 ``artifact_dir``：布局常量 → 委派交付默认目录 + 验收前缀。
+"""约定文档 ``artifact_dir``：布局常量 → 委派交付默认目录 + 验收前缀。
 
 工作区布局事实见 ``workspace_context``；本模块只在 ``form=files`` /
-``requires_files`` / 已声明 ``artifacts`` 且语义为案卷时，按 ``stage_dirs``
+``requires_files`` / 已声明 ``artifacts`` 且语义为约定文档时，按 ``stage_dirs``
 填默认落盘目录。Worker 只定文件名。
 
 **验收 vs 归属分键**：``artifact_dir`` / 目录前缀 / 通配 = 验收覆盖；具体文件
 路径 = C3 归属与 sibling 互斥。裸目录**永不**注入 ``artifacts`` 冒充归属键。
 
-**语义收紧**：brief 里引用案卷路径（必读材料）不算调研成文意图；业务向
+**语义收紧**：brief 里引用约定文档路径（必读材料）不算调研成文意图；业务向
 ``artifacts``（``src/`` · ``site/`` 等）或批次 ``skip_dossier_default``
-（kw 名历史遗留 ``code_verified``，**非** criteria kind）默认不套案卷目录。
-显式 ``artifact_dir`` / 案卷路径 ``artifacts`` 仍优先。
+（kw 名历史遗留 ``code_verified``，**非** criteria kind）默认不套约定文档目录。
+显式 ``artifact_dir`` / 约定文档路径 ``artifacts`` 仍优先。
 
 不做：``file_write`` 启发式改写、根目录搬迁、``playbook=none`` 特例。
 """
@@ -33,10 +33,10 @@ if TYPE_CHECKING:
 
 _STAGE_DIRS = (RESEARCH_DIR, DEBATE_DIR, REVIEWS_DIR)
 
-# 案卷语义（讨论 / 调研 / 审查）；与 WC 边界句同一产品口径，非写盘启发式。
+# 约定文档语义（讨论 / 调研 / 审查）；与 WC 边界句同一产品口径，非写盘启发式。
 # 英文词须词界，避免把路径段 research 当意图（路径引用另经 _strip_dossier_path_refs）。
 _DOSSIER_SEMANTIC = re.compile(
-    r"调研|研究|竞品|审查|质检|评审|讨论|笔记|案卷|透镜|"
+    r"调研|研究|竞品|审查|质检|评审|讨论|笔记|约定文档|透镜|"
     r"(?<![a-zA-Z])research(?![a-zA-Z])|"
     r"(?<![a-zA-Z])dossier(?![a-zA-Z])|"
     r"(?<![a-zA-Z])review(?![a-zA-Z])",
@@ -47,7 +47,7 @@ _REVIEW_SEMANTIC = re.compile(
     re.IGNORECASE,
 )
 
-# 工作区案卷路径引用（含可选反引号）；剥掉后再扫语义，避免「必读材料」误绑出口。
+# 工作区约定文档路径引用（含可选反引号）；剥掉后再扫语义，避免「必读材料」误绑出口。
 _DOSSIER_PATH_REF = re.compile(
     r"`?"
     r"(?:"
@@ -137,7 +137,7 @@ def resolve_artifact_dir(
     if any(_looks_like_business_artifact(a) for a in deliverable.artifacts):
         return ""
 
-    # 修码等批：默认不套案卷目录（显式 / 案卷 artifacts 已在上面放行）。
+    # 修码等批：默认不套约定文档目录（显式 / 约定文档 artifacts 已在上面放行）。
     if code_verified:
         return ""
 

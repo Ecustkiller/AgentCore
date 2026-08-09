@@ -5,6 +5,9 @@ configured provider). Both the post-turn auto-backup (``conversation/service``)
 and the snapshot API routes go through here, so "which conversation → which
 storage key / root" lives in exactly one place. Path policy never leaks into the
 storage layer; provider choice never leaks into the routes.
+
+A′: ``create_snapshot`` / ``restore_snapshot`` / ``restore_into_workspace`` hold
+``workspace_lock`` once at this sink — callers must not nest the same key.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 from agentcore.config import settings
 from agentcore.storage import SnapshotRef, StorageProvider, build_storage_provider
 from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
+from agentcore.workspace.locks import workspace_lock
 
 
 async def _enforce_auto_cap(provider: StorageProvider, key: str, keep: int) -> None:
@@ -40,6 +44,8 @@ async def create_snapshot(
     Auto snapshots (no ``label``) are capped to ``workspace_auto_snapshot_max``:
     the oldest auto backups beyond the cap are pruned so they don't grow without
     bound (决策⑥). Kept versions (labeled) are never pruned.
+
+    Holds ``workspace_lock`` for the manifest RMW (A′ sink).
     """
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
@@ -48,14 +54,19 @@ async def create_snapshot(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     provider = build_storage_provider()
-    ref = await provider.snapshot(root, key, label=label)
-    if label is None:
-        await _enforce_auto_cap(provider, key, settings.workspace_auto_snapshot_max)
-    return ref
+    async with workspace_lock(key):
+        ref = await provider.snapshot(root, key, label=label)
+        if label is None:
+            await _enforce_auto_cap(provider, key, settings.workspace_auto_snapshot_max)
+        return ref
 
 
 async def purge_snapshots(*, user_id: str, folder_id: str | None, conversation_id: str) -> None:
-    """Delete the entire snapshot history for a conversation's workspace (决策⑦)."""
+    """Delete the entire snapshot history for a conversation's workspace (决策⑦).
+
+    Caller must already hold ``workspace_lock`` for ``key`` when purging together
+    with an on-disk rmtree (retention) — this path does not re-acquire.
+    """
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
@@ -75,14 +86,18 @@ async def list_snapshots(
 async def restore_snapshot(
     *, user_id: str, folder_id: str | None, conversation_id: str, snapshot_id: str
 ) -> None:
-    """Extract a snapshot over the conversation's workspace (``SnapshotNotFound``)."""
+    """Extract a snapshot over the conversation's workspace (``SnapshotNotFound``).
+
+    Holds ``workspace_lock`` for the duration (A′ sink).
+    """
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    await build_storage_provider().restore(key, snapshot_id, root)
+    async with workspace_lock(key):
+        await build_storage_provider().restore(key, snapshot_id, root)
 
 
 async def read_snapshot(
@@ -113,15 +128,23 @@ async def restore_into_workspace(
     runs on the user's real files. Distinct from :func:`restore_snapshot`, which
     restores a conversation over its *own* root. Raises ``SnapshotNotFound`` if the
     snapshot id is missing under the source key.
+
+    Holds ``workspace_lock`` on the **destination** key (A′ sink).
     """
     source_key = workspace_storage_key(
         user_id=source_user_id,
         folder_id=source_folder_id,
         conversation_id=source_conversation_id,
     )
+    dest_key = workspace_storage_key(
+        user_id=dest_user_id,
+        folder_id=dest_folder_id,
+        conversation_id=dest_conversation_id,
+    )
     dest_root = resolve_workspace_root(
         user_id=dest_user_id,
         folder_id=dest_folder_id,
         conversation_id=dest_conversation_id,
     )
-    await build_storage_provider().restore(source_key, snapshot_id, dest_root)
+    async with workspace_lock(dest_key):
+        await build_storage_provider().restore(source_key, snapshot_id, dest_root)

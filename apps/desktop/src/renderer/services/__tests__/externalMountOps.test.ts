@@ -73,7 +73,7 @@ describe("performExternalMountReadonly", () => {
     expect(posted.value).not.toHaveProperty("path");
   });
 
-  it("maps not_found to tool failure (clear detail)", async () => {
+  it("maps not_found to tool failure (detail + reason)", async () => {
     pickAndGrantReadonlyFolder.mockResolvedValue({
       ok: false,
       reason: "not_found",
@@ -101,6 +101,30 @@ describe("performExternalMountReadonly", () => {
         error: {
           kind: "ExternalMountError",
           detail: "找不到该目录",
+          reason: "not_found",
+        },
+      }),
+    );
+  });
+
+  it("maps not_directory / ambiguous with structured reason", async () => {
+    pickAndGrantReadonlyFolder.mockResolvedValue({
+      ok: false,
+      reason: "ambiguous",
+      message: "匹配到多个目录，请说得更具体",
+    });
+
+    await performExternalMountReadonly(payload(), "conv-1");
+
+    expect(resolveInteraction).toHaveBeenCalledWith(
+      "conv-1",
+      "req-1",
+      expect.objectContaining({
+        ok: false,
+        error: {
+          kind: "ExternalMountError",
+          detail: "匹配到多个目录，请说得更具体",
+          reason: "ambiguous",
         },
       }),
     );
@@ -122,6 +146,7 @@ describe("performExternalMountReadonly", () => {
         error: {
           kind: "ExternalMountError",
           detail: "非桌面环境，无法挂载本机目录",
+          reason: "unavailable",
         },
       }),
     );

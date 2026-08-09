@@ -203,10 +203,9 @@ async def test_run_handoff_job_failure_marks_failed(monkeypatch):
     assert not any(e[0] == "succeeded" for e in events)
 
 
-async def test_run_handoff_job_holds_dest_workspace_lock(monkeypatch):
-    """Restore + pipeline + result snapshot must run under the job conversation lock."""
+async def test_run_handoff_job_uses_snapshot_sinks_without_outer_lock(monkeypatch):
+    """A′: handoff job must not hold whole-job workspace_lock; restore/snapshot still run."""
     events: list = []
-    lock_keys: list[str] = []
 
     async def _pipeline(**kw):
         return {
@@ -223,14 +222,12 @@ async def test_run_handoff_job_holds_dest_workspace_lock(monkeypatch):
 
     _patch_job_runner(monkeypatch, events, pipeline=_pipeline)
 
-    from contextlib import asynccontextmanager
+    import inspect
 
-    @asynccontextmanager
-    async def _capture_lock(key: str):
-        lock_keys.append(key)
-        yield
+    import agentcore.conversation.handoff_jobs as hj
 
-    monkeypatch.setattr(handoff_jobs_mod, "workspace_lock", _capture_lock)
+    src = inspect.getsource(hj.run_handoff_job)
+    assert "async with workspace_lock" not in src
 
     await run_handoff_job(
         job_id="j-lock",
@@ -242,7 +239,7 @@ async def test_run_handoff_job_holds_dest_workspace_lock(monkeypatch):
         task="work",
     )
 
-    assert lock_keys == [
-        workspace_storage_key(user_id="u1", folder_id=None, conversation_id="job-lock")
-    ]
+    assert ("restore", "src", "job-lock") in events
+    snap = next(e for e in events if e[0] == "snapshot")
+    assert snap[1] == "job-lock" and snap[2].startswith("result:")
     assert ("succeeded", "j-lock", "result-snap") in events

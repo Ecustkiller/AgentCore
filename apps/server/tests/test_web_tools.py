@@ -196,22 +196,24 @@ def test_describe_net_error_is_honest():
 
 
 def test_describe_net_error_loopback_searxng_vs_public():
-    # Loopback / configured SearXNG connect failure → 本机搜索未就绪 (not 出网受限).
+    # Loopback / configured SearXNG connect failure → 本地搜索不可用 (not 出网受限;
+    # no docker compose teaching toward the model).
     local = describe_net_error(
         httpx.ConnectError("connection refused"),
         url="http://127.0.0.1:18888/search",
     )
-    assert "本机搜索" in local and "未就绪" in local
-    assert "SearXNG" in local
+    assert "本地搜索" in local and "不可用" in local
     assert "出网受限" not in local
-    assert "18888" in local or "compose" in local
+    assert "docker" not in local.lower()
+    assert "compose" not in local.lower()
 
     localhost = describe_net_error(
         httpx.ConnectTimeout(""),
         url="http://localhost:18888",
     )
-    assert "本机搜索" in localhost and "未就绪" in localhost
+    assert "本地搜索" in localhost and "不可用" in localhost
     assert "出网受限" not in localhost
+    assert "docker" not in localhost.lower()
 
     # Public target keeps the egress-restricted copy (read_url / favicon path).
     public = describe_net_error(
@@ -219,18 +221,18 @@ def test_describe_net_error_loopback_searxng_vs_public():
         url="https://example.com/page",
     )
     assert "出网受限" in public
-    assert "本机搜索" not in public
+    assert "本地搜索" not in public
 
     # Bare ConnectError with no url/request stays public (callers must pass url /
     # local_service for SearXNG — see describe_searxng_error).
     bare = describe_net_error(httpx.ConnectError("connection refused"))
     assert "出网受限" in bare
-    assert "本机搜索" not in bare
+    assert "本地搜索" not in bare
 
     # Real httpx attaches request.url — loopback is detected without an explicit url=.
     req = httpx.Request("GET", "http://127.0.0.1:18888/search")
     from_req = describe_net_error(httpx.ConnectError("refused", request=req))
-    assert "本机搜索" in from_req and "出网受限" not in from_req
+    assert "本地搜索" in from_req and "出网受限" not in from_req
 
 
 def test_describe_searxng_error_marks_configured_host():
@@ -239,14 +241,15 @@ def test_describe_searxng_error_marks_configured_host():
         httpx.ConnectError("connection refused"),
         base_url="http://searxng:8080",
     )
-    assert "本机搜索" in msg and "未就绪" in msg
+    assert "本地搜索" in msg and "不可用" in msg
     assert "出网受限" not in msg
+    assert "docker" not in msg.lower()
 
     via_backend = search_backend_mod.describe_search_error(
         httpx.ConnectError("down"),
         SearXNGBackend("http://127.0.0.1:18888"),
     )
-    assert "本机搜索" in via_backend
+    assert "本地搜索" in via_backend
 
 
 # --- read_url: SSRF classification ---
@@ -1450,8 +1453,9 @@ async def test_web_search_no_cloud_fallback_without_credentials(monkeypatch):
 
     assert result.success is False
     assert "搜索失败" in (result.error or "")
-    assert "本机搜索" in (result.error or "") and "未就绪" in (result.error or "")
+    assert "本地搜索" in (result.error or "") and "不可用" in (result.error or "")
     assert "出网受限" not in (result.error or "")
+    assert "docker" not in (result.error or "").lower()
     assert cloud_calls["n"] == 0
 
 

@@ -46,8 +46,6 @@ from agentcore.standing_tasks.templates import (
     is_known_template,
 )
 from agentcore.standing_tasks.webhook import build_fire_message
-from agentcore.workspace.locate import workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
 
 logger = get_logger(__name__)
 
@@ -282,59 +280,54 @@ async def run_standing_task_job(
             local_binding=None,
         )
 
-        async with workspace_lock(
-            workspace_storage_key(
-                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        async with async_session_factory() as session:
+            user_msg = await MessageRepository(session).create(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message,
             )
-        ):
-            async with async_session_factory() as session:
-                user_msg = await MessageRepository(session).create(
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=user_message,
-                )
-                history = await load_chat_context(session, conversation_id, max_messages=40)
-                await StandingTaskRunRepository(session).set_conversation_and_message(
-                    run_id,
-                    conversation_id=conversation_id,
-                    user_message_id=user_msg.id,
-                )
+            history = await load_chat_context(session, conversation_id, max_messages=40)
+            await StandingTaskRunRepository(session).set_conversation_and_message(
+                run_id,
+                conversation_id=conversation_id,
+                user_message_id=user_msg.id,
+            )
 
-            # Monkeypatch seam for unit tests (see test_standing_tasks.py).
-            if workflow_id and workflow_definition is not None:
-                result = await _run_workflow_pipeline(
-                    conversation_id=conversation_id,
-                    user_message=user_message,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    sink=sink,
-                    history=history[:-1],
-                    backend=backend,
-                    llm_credentials=credentials,
-                    profile_set=profile_set,
-                    memory_enabled=memory_enabled,
-                    conversation_history_access=conversation_history_access,
-                    permission_axes=axes,
-                    workflow_id=workflow_id,
-                    workflow_version=workflow_version,
-                    workflow_name=workflow_name,
-                    definition=workflow_definition,
-                )
-            else:
-                result = await _run_pipeline(
-                    conversation_id=conversation_id,
-                    user_message=user_message,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    sink=sink,
-                    history=history[:-1],
-                    backend=backend,
-                    llm_credentials=credentials,
-                    profile_set=profile_set,
-                    memory_enabled=memory_enabled,
-                    conversation_history_access=conversation_history_access,
-                    permission_axes=axes,
-                )
+        # Monkeypatch seam for unit tests (see test_standing_tasks.py).
+        if workflow_id and workflow_definition is not None:
+            result = await _run_workflow_pipeline(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                user_id=user_id,
+                folder_id=folder_id,
+                sink=sink,
+                history=history[:-1],
+                backend=backend,
+                llm_credentials=credentials,
+                profile_set=profile_set,
+                memory_enabled=memory_enabled,
+                conversation_history_access=conversation_history_access,
+                permission_axes=axes,
+                workflow_id=workflow_id,
+                workflow_version=workflow_version,
+                workflow_name=workflow_name,
+                definition=workflow_definition,
+            )
+        else:
+            result = await _run_pipeline(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                user_id=user_id,
+                folder_id=folder_id,
+                sink=sink,
+                history=history[:-1],
+                backend=backend,
+                llm_credentials=credentials,
+                profile_set=profile_set,
+                memory_enabled=memory_enabled,
+                conversation_history_access=conversation_history_access,
+                permission_axes=axes,
+            )
 
         finish = (result or {}).get("finish_reason") if isinstance(result, dict) else None
         summary = _truncate_summary(

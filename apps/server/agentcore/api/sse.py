@@ -44,6 +44,40 @@ def _format_sse(event: SSEEvent, *, seq: int | None = None) -> str:
     return "\n".join(parts) + "\n\n"
 
 
+async def _live_tail(sink: EventSink) -> AsyncIterator[str]:
+    """Drain ``sink`` into SSE frames with idle ping comments.
+
+    Same pattern as realtime ``_firehose``: a persistent ``get`` task is reused
+    across heartbeat windows and is **never** cancelled on a mere timeout.
+
+    Cancel safety: ``EventSink.get`` may already have dequeued an event and be
+    awaiting the persist barrier. ``asyncio.wait_for(get, …)`` would cancel that
+    await on heartbeat, drop the event, and desync queue/barrier pairing (seq
+    mismatch). ``asyncio.wait`` leaves the get task running so idle still pings
+    without that race. The get task is cancelled only on teardown (disconnect /
+    generator close), when this consumer is going away anyway.
+    """
+    get_task: asyncio.Task[SSEEvent | None] | None = None
+    try:
+        while True:
+            if get_task is None:
+                get_task = asyncio.ensure_future(sink.get())
+            done, _ = await asyncio.wait({get_task}, timeout=_HEARTBEAT_INTERVAL_S)
+            if not done:
+                # Idle keep-alive — turn alive but no frame ready yet (or get is
+                # still behind a persist barrier). Do not cancel get_task here.
+                yield ": ping\n\n"
+                continue
+            event = get_task.result()
+            get_task = None
+            if event is None:
+                return
+            yield _format_sse(event)
+    finally:
+        if get_task is not None:
+            get_task.cancel()
+
+
 async def _event_generator(
     sink: EventSink,
     producer: asyncio.Task | None,
@@ -51,19 +85,8 @@ async def _event_generator(
     detach_on_disconnect: bool = False,
 ) -> AsyncIterator[str]:
     try:
-        while True:
-            try:
-                event = await asyncio.wait_for(sink.get(), _HEARTBEAT_INTERVAL_S)
-            except TimeoutError:
-                # No event for a while — the turn is alive but thinking. Emit an
-                # SSE comment line (begins with ':'): the client ignores it at the
-                # parse layer but counts the bytes as liveness, so its watchdog
-                # holds. Cancelling the queue.get() here is loss-safe on 3.12.
-                yield ": ping\n\n"
-                continue
-            if event is None:
-                break
-            yield _format_sse(event)
+        async for frame in _live_tail(sink):
+            yield frame
     except (asyncio.CancelledError, GeneratorExit):
         # The client disconnected before the stream finished. Two policies:
         #
@@ -175,15 +198,8 @@ async def _attach_generator(
                 yield _format_sse(event)
         # Boundary: everything above is catch-up; clients one-shot fold then live.
         yield _ATTACH_CAUGHT_UP
-        while True:
-            try:
-                event = await asyncio.wait_for(sink.get(), _HEARTBEAT_INTERVAL_S)
-            except TimeoutError:
-                yield ": ping\n\n"
-                continue
-            if event is None:
-                break
-            yield _format_sse(event)
+        async for frame in _live_tail(sink):
+            yield frame
     except (asyncio.CancelledError, GeneratorExit):
         sink.detach()
         raise

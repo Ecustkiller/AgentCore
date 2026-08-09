@@ -1333,6 +1333,29 @@ async def test_friend_request_lifecycle():
     assert await friends.are_friends(alice.user_id, bob.user_id)
     friend_list = await svc.list_friends(user_id=alice.user_id)
     assert [u.user_id for u in friend_list] == [bob.user_id]
+    # Initiator's outgoing inbox must clear — otherwise UI keeps「等待对方处理」.
+    alice_box = await svc.list_friend_requests(user_id=alice.user_id)
+    assert alice_box.outgoing == []
+    bob_box = await svc.list_friend_requests(user_id=bob.user_id)
+    assert bob_box.incoming == []
+    assert any(
+        e[1]["type"] == "friend_request" and e[1]["action"] == "accepted"
+        for e in events.published
+    )
+
+
+async def test_list_friend_requests_heals_stale_pending_when_already_friends():
+    """If friendship exists but request row is still pending, inbox must not show it."""
+    svc, users, _chats, _blocks, _directory, _events, friends = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    req = await svc.send_friend_request(from_user_id=alice.user_id, to_user_id=bob.user_id)
+    await friends.add_friendship(alice.user_id, bob.user_id)
+    # Leave status pending on purpose (simulates lagged / partial write).
+    assert req.status == "pending"
+    alice_box = await svc.list_friend_requests(user_id=alice.user_id)
+    assert alice_box.outgoing == []
+    assert (await friends.get_request(req.id)).status == "accepted"
 
 
 async def test_friend_request_group_members_gate():

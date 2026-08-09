@@ -30,7 +30,7 @@ def test_reviews_md_counts_as_product_without_artifacts():
 
 
 def test_research_artifact_still_product():
-    art = f"{RESEARCH_DIR}/调研报告.md"
+    art = f"{RESEARCH_DIR}/报告.md"
     assert is_product_landing_path(art, [art])
     assert is_product_landing_path(art, [f"{RESEARCH_DIR}/"])
     assert filter_product_landing_paths([art], [art]) == [art]

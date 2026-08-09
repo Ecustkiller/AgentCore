@@ -18,13 +18,14 @@ from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
 
 _DEFAULT_MULTI_LENSES = ("法律", "品牌商业", "舆情公关", "文化社会")
 
-# 幕 1 案卷目录：各透镜报告 + 汇总与命题卡（多幕共享；辩论阶段将读这些文件）。
+# 幕 1 约定文档目录：各透镜报告 + 汇总与命题卡（多幕共享；辩论阶段将读这些文件）。
 _MULTI_LENS_RESEARCH_DIR = RESEARCH_DIR
 _SYNTHESIZER_ARTIFACT = f"{_MULTI_LENS_RESEARCH_DIR}/汇总与命题卡.md"
 
 _RESEARCH_REPORT_OUTLINE_ARTIFACT = f"{RESEARCH_DIR}/提纲.md"
-_RESEARCH_REPORT_DEFAULT_ANGLE_ARTIFACT = f"{RESEARCH_DIR}/调研报告.md"
-# 审校落盘契约写死在 playbook（不靠运行时扫角色名抬 files）。
+# 单角调研中间产物（≠ 成篇主文件 ``报告.md``；见 research_quality.DEFAULT_*）。
+_RESEARCH_REPORT_DEFAULT_ANGLE_ARTIFACT = f"{RESEARCH_DIR}/调研要点.md"
+# 审校落盘契约写死在 playbook（不靠运行时扫角色名抬 files）；本轮保持中文名。
 _RESEARCH_REPORT_REVIEW_ARTIFACT = f"{REVIEWS_DIR}/审校报告.md"
 
 _SYNTHESIZER_MOTION_CARD_GUIDANCE = (
@@ -197,7 +198,7 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
     仅用户明示成文且需正式长文/可提交（或已确认要审校满编）时用；讨论/形态未定勿首派；
     普通构想勿默认学术审校。一起弄懂/多路摸清/仅提论文开源当资料默认 ``parallel_brief``。
 
-    中间环（各路调研 + 提纲）与终稿同走案卷契约：``form=files`` + 钉死
+    中间环（各路调研 + 提纲）与终稿同走约定文档契约：``form=files`` + 钉死
     ``AgentCore/文档/research/`` 下路径（角度名入文件名，对齐 MLR ``{透镜}透镜报告.md``；
     提纲钉 ``提纲.md``）。成篇验收钉死单一主文件（``output_path`` / 默认 ``报告.md``）；
     主交付 `.md`；用户要 PDF/可分享时 brief 钉 ``md → md_to_pdf → handoff``（禁 HTML 顶替、
@@ -467,7 +468,7 @@ def multi_lens_research(args: dict[str, Any]) -> tuple[list[dict[str, Any]], lis
                 f"可先 file_read `{_MULTI_LENS_RESEARCH_DIR}/` 下各透镜报告取完整正文。"
                 f"完整综述须用 file_write 落盘到 `{_SYNTHESIZER_ARTIFACT}`"
                 "（含交叉验证全文；若产命题卡则把命题 / 双方薄立场 / rationale 一并写入该文件；"
-                "内容是完整案卷，不是 handoff 摘要复制）。"
+                "内容是完整约定文档，不是 handoff 摘要复制）。"
                 "沿用上游透镜报告中的 #rN 台账锚（或工具结果给出的本回合 id）；"
                 "落盘综述须保留可解析的 #rN，勿抹成自由出处。"
                 "继承上游关键数字 / 关键结论时须带上 #rN 或保留待核实语，勿抹成既定事实。"

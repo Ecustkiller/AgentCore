@@ -207,9 +207,10 @@ def _searxng_host(base_url: str) -> str:
 def describe_searxng_error(e: BaseException, *, base_url: str) -> str:
     """Honest copy for failures talking to the configured SearXNG host.
 
-    Connect-class errors are always「本机搜索服务未就绪」(loopback *or* compose
-    service name) — never the public「出网受限」wording. Other failures fall
-    through to :func:`describe_net_error`. Classification only; no SSRF change.
+    Connect-class errors are always「本地搜索服务不可用」(loopback *or* compose
+    service name) — never the public「出网受限」wording, and never docker teaching
+    toward the model. Other failures fall through to :func:`describe_net_error`.
+    Classification only; no SSRF change.
     """
     return describe_net_error(e, url=base_url, local_service=True)
 

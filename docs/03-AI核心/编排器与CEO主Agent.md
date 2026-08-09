@@ -89,7 +89,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 协调模式（≥2 worker、根 CEO、非 finalize）：默认后台跑、CEO 继续 ReAct；`coordinate=false` / 单 worker / finalize / 含 `checkpoint_after` 仍阻塞。结构跟着证据走：调研成篇用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后。委派后用团队产出写综述（提示强化，非硬禁只读）；根 CEO 探路成功的 list/read/grep 可摘要注入 worker 开局。worker 协作通道 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)。协调 `wait` 在用户侧热审批/授权未决时禁止空等（勿假装推进）；用户显式停止 / regenerate 会 orphan 热交互并写入 journal（取活 turn 的 `message_id` 作 `turn_id`，非路径上的用户消息 id）。**协调期 CEO 可见面纪律**（提示/工具 schema）：图在转无新结论时可静默；禁止用用户可见 content 复述「谁还在跑」类进度（协作图是进度真相）；开口仅请示 / 报告阻塞与选项 / 宣布阶段结论；插话须先回用户句；`update_synthesis` 禁纯进度播报；协调态进度旁白经 `deliverable_only` 不进终稿 `messages.content`（过程仍进 process）。
 
-收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`playbook`：建站/工具台/绿场软件(`build_app`)推荐具名形状（不再硬拒 `none`/手写）；`build_website` 默认 `intensity=standard`（三串），`solo`=一人整页；`build_app` 默认 `intensity=lean`（三节点），`full`=五阶段+模块扇出——已确认 MVP /「先…以后再说」禁默升 `full`。多角摸清/讨论对齐默认 `parallel_brief`，正式长文成文专线 `research_report`（点选成文≠立刻满编；普通构想不默认学术审校），其余自由组队（可选快捷形状）。**Agent/自动化**不靠场面账三档硬闸；缺形态信息时 `ask_user` 短问（探讨类默认推摸清对齐；糊「做个网站」须消歧展示页/工具壳/业务应用 + 本轮桌上档），由模型自洽选择交付路径 → [检查点与开工卡 · §一](/docs/03-AI核心/检查点与开工卡.md)。对抗性多视角另走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
+收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`playbook`：建站/工具台/绿场软件(`build_app`)推荐具名形状（不再硬拒 `none`/手写）；`build_website` 默认 `intensity=standard`（三串），`solo`=一人整页；`build_app` 默认 `intensity=lean`（三节点），`full`=五阶段+模块扇出——已确认 MVP /「先…以后再说」禁默升 `full`。多角摸清/讨论对齐默认 `parallel_brief`，正式长文成文专线 `research_report`（点选成文≠立刻满编；普通构想不默认学术审校），代码审计 `code_audit`（单缝只 `scope`；探路见 ≥2 可并行子面则填 `modules`、少扇出常 2–4；playbook **不**从 scope 自动拆、禁把多目录拼进 scope），其余自由组队（可选快捷形状）。**Agent/自动化**不靠场面账三档硬闸；缺形态信息时 `ask_user` 短问（探讨类默认推摸清对齐；糊「做个网站」须消歧展示页/工具壳/业务应用 + 本轮桌上档），由模型自洽选择交付路径 → [检查点与开工卡 · §一](/docs/03-AI核心/检查点与开工卡.md)。对抗性多视角另走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
 
 提示词分层：常驻 = 路由脊柱 + 能力目录 + 短钩子；进阶 HOW 在系统 Skill，用时 `consult_skill`。同一条知识只在唯一所有者出现。全局工作纪律分层：共享基座 `<work_authority>`（权威序 / **当前课题：工作区＞全局「正在做 X」** / 冲突通道 escalate·ask_user / 决策权限，CEO+worker）；CEO core 仅权威线索、「继续项目跟工作区」与「未定案·窄」钩；进阶 HOW → `consult_skill(work_discipline)`（设计三问、补丁绊线等）。禁止为读规则再派 worker。
 
@@ -101,7 +101,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述 |
 | `complexity_hint` | `light`/`standard`：编排姿态（如 light 隐含 `coordination=none`），**不**映射 worker token/超时 |
 | `coordination` | 便签墙档；缺省 `none`；权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
-| `deliverable` | `requires_files` / `artifacts` = 落盘契约；否决悬空 `output_schema`。`form=prose` = 纯文字交付（写工具仍装配，靠角色提示自觉勿乱写）；`form=files` / 省略 = 可写盘。`form=prose` 不得同时声明 `requires_files` / 非空 `artifacts`（硬拒）。**`form` 只表交付形态，不再代理探索期「别乱写工程」、也不再硬卸写工具**。案卷中间笔记（`AgentCore/文档/{research,reviews,debate}/`）默认**不**计入 `form=files` 修码产品落盘（零写 soft），除非 `artifacts` 声明该路径。✅ S3：不再有按 criteria kind 的队形闸 |
+| `deliverable` | `requires_files` / `artifacts` = 落盘契约；否决悬空 `output_schema`。`form=prose` = 纯文字交付（写工具仍装配，靠角色提示自觉勿乱写）；`form=files` / 省略 = 可写盘。`form=prose` 不得同时声明 `requires_files` / 非空 `artifacts`（硬拒）。**`form` 只表交付形态，不再代理探索期「别乱写工程」、也不再硬卸写工具**。约定文档中间笔记（`AgentCore/文档/{research,reviews,debate}/`）默认**不**计入 `form=files` 修码产品落盘（零写 soft），除非 `artifacts` 声明该路径。✅ S3：不再有按 criteria kind 的队形闸 |
 | `write_scope` ✅ | worker 本批可写范围：`none` / `explore_memory`（仅 `AgentCore/` 约定记忆与探索笔记）/ `project`（用户工程树，默认满权限批次）。探索硬挡 pending 时上限 `explore_memory`；越权在**写工具层**拒，不在 `delegate` 入口因 `form=files` 拒整批。否决：explore 专用 playbook 分叉、pending 时静默把 files 改成 prose |
 | ~~`completion_criteria`~~ | ✅ **已删**（S3）——见下节；工具面 `test_run`↔`code_execute` 分流仍在（与 kind 正交） |
 | `continue_from_run_id` | 带现场续派；权威 → [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md) |
@@ -143,6 +143,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 - **命中**（可证明结构）：无具名 playbook ∧ 恰好 1 task ∧ 非 `finalize` ∧ 显式写工程（`form=files` 或 `requires_files=true`；form 省略不算）∧ 无切片钉。
 - **切片钉白名单**（任一豁免）：非空 `artifacts` / `artifact_dir` / `min_length>0` / 非空 `required_sections` / 本 task `checkpoint_after`。
 - **路径**：根多节点 / 具名 playbook / deliverable 钉边界（A）与 **单 lead 嵌套扇出**（B）等价合法；软文案须明示嵌套可用。路径 B 与整锅入口同构 → **接受软提示对 B 亦响**（nudge，非拒）。
+- **编排自主（✅ 提示/技能，非硬编码 playbook）**：范围大或拆缝不清时，CEO/lead 可自判 **摸底波→专班**（同批 `depends_on` 或再 `delegate`/`replan`）与路径 A/B 并列；通用于审计/摸仓/大改等，**禁止**写成「凡 X 必两拨人 / 必嵌套」。真两段结构 OK；同 task 假两段仍禁。→ `skills`「编排自主·摸底波 / 专班 / 嵌套」· CEO `【编排自主】`
 - **边界**：仍**不拒收、不改图**；不做硬拒；不扫用户/task 长文；不用 `write_scope`（非 grant 槽）。阶梯沿用 `design_impl` 先例（提示词后直接软提示）。
 - **验收**：单 task + `form=files` + 无钉 → CEO 可见告警；`finalize` / 具名 playbook / 有 artifacts 等 → 不告警。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/root_slice_honesty.py`
 
@@ -160,7 +161,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 **强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report` 与 deliverable 结构字段（如 `min_length≥3000`）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；硬门**不**扫 task/角色自由文。✅ 已删角色名扫与静默改写 deliverable（审校落盘靠 playbook/结构声明，见上节）。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
 
-**边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚案卷另见 `文档/项目/` 且不在探索 pending 批）。权威分层 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)。
+**边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚约定文档另见 `文档/项目/` 且不在探索 pending 批）。权威分层 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)。
 
 **否决（本定案）**：pending 时按 `form=files` 拒整批；为冷启动单开 prose 版调研 playbook；delegate 入口静默改写 playbook/tasks XOR。
 
@@ -175,6 +176,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 累计 N 次只读软提醒护栏 | A/B 净负已移除；靠提示词边界 + 失控硬兜底 |
 | 默认加硬闸/软闸「优化服从度」 | **否决**；阶梯见 `.cursor/rules/intercept-discipline.mdc`（提示词→观测→一次性软提示→结构化硬拒） |
 | 扩大收口姿势 A / 完成话术正则冒充近零误报 | **否决** → [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md) |
+| 零写落盘声称扫词硬回炉（答完清气泡） | ✅ **已撤**（2026-08-09 定案 B；解释禁语误伤）→ 同上 |
 | 领域 kind 扩表 / 边删 kind 边加启发式完成硬闸 | **否决**；S3 接盘见上节 |
 | `validate_criteria_kind_fit` 扫 task 拟合硬闸 | ✅ **已随 S3 退役** |
 | `host_shell` fuse 改可批可跑（B）/ 仅改文案当终案（D） | **否决** → [安全 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |

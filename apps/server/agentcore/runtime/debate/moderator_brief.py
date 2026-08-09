@@ -221,13 +221,13 @@ def _background_block_for_brief(config: DebateConfig) -> str:
 
 
 def _research_dossier_block_for_brief(config: DebateConfig) -> str:
-    """收场简报可选案卷索引（空串 → 省略）；提醒事实交接可对照幕1 落盘路径。"""
+    """收场简报可选约定文档索引（空串 → 省略）；提醒事实交接可对照幕1 落盘路径。"""
     idx = (config.research_dossier_index or "").strip()
     if not idx:
         return ""
     return (
         f"{idx}\n"
-        "（简报事实类 handoffs 可对照上述案卷路径标注来源；索引非全文。）\n\n"
+        "（简报事实类 handoffs 可对照上述约定文档路径标注来源；索引非全文。）\n\n"
     )
 
 

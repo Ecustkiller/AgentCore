@@ -72,4 +72,8 @@ async def test_purge_is_idempotent_on_missing(fs_storage):
 
 async def test_sweep_disabled_is_noop(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_retention_enabled", False)
-    assert await run_retention_sweep() == {"folders": 0, "conversations": 0}
+    assert await run_retention_sweep() == {
+        "folders": 0,
+        "conversations": 0,
+        "handoff_hosts_aged": 0,
+    }

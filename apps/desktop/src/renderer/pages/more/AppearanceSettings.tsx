@@ -37,7 +37,7 @@ const THEME_OPTIONS: ThemeOption[] = [
 ];
 
 /**
- * 外观设置（/more/appearance）— 主题选择；桌面有本地引擎时附带本地引擎开关。
+ * 外观设置（/more/appearance）— 主题选择；桌面有 sidecar 能力时附带「允许本机执行」高级开关。
  *
  * 写入共享的 `useUIStore.theme`（持久化到 localStorage），应用由 `lib/theme.ts`
  * 统一收口（AppShell 的 `useApplyTheme` 切 root `.dark` 类、`系统`档随 OS 跟随），
@@ -123,6 +123,7 @@ function ThemeRow({
   );
 }
 
+/** 高级：显式打开后偏好落盘为 `on`；默认关，不作为大众卖点。 */
 function LocalEngineToggle() {
   const enabled = useUIStore((s) => s.sidecarEnabled);
   const setEnabled = useUIStore((s) => s.setSidecarEnabled);
@@ -133,13 +134,17 @@ function LocalEngineToggle() {
   return (
     <Card className="mt-6 flex items-center justify-between gap-4 px-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm text-foreground">本地引擎</p>
+        <p className="text-sm text-foreground">允许本机执行</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          绑定本机文件夹的对话默认在本机执行（直连磁盘、更快），启动失败会自动切回云端。裸聊与云端项目仍走云。本地引擎不是离线模式：AI
+          高级选项。开启后，绑定本机文件夹的对话可在本机跑回合（直连磁盘）；启动失败会自动改走云端。裸聊与云端项目仍走云。这不是离线模式：AI
           推理仍在云端，断网时只能浏览缓存与本机文件（只读），不能发送。关闭后全部走云端。
         </p>
       </div>
-      <Switch checked={enabled} onCheckedChange={onToggle} label="本地引擎" />
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+        label="允许本机执行"
+      />
     </Card>
   );
 }

@@ -173,8 +173,8 @@ async def write_file_text(
     """Conditionally write editor text to ``path``; ``(ok, mtime_ms)`` (mtime CAS).
 
     ``ok`` False means a conflict (disk changed since ``baseline_mtime_ms``) and the
-    returned mtime is the current disk version. Callers must hold ``workspace_lock``
-    so the CAS is atomic against a same-workspace Agent turn.
+    returned mtime is the current disk version. CAS is atomic under
+    ``ServerWorkspace``'s ``lock_key`` (callers must not wrap the same key).
     """
     backend = build_server_workspace(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id

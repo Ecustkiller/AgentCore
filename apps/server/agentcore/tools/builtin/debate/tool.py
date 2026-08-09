@@ -643,7 +643,7 @@ class DebateTool:
             list_research_artifact_paths,
         )
 
-        # 案卷桥无条件化：CEO 回合 #rN → 场级 #eN（不论是否写入 background）。
+        # 约定文档桥无条件化：CEO 回合 #rN → 场级 #eN（不论是否写入 background）。
         try:
             from agentcore.runtime.suspension import turn_evidence_ledger as _turn_led
 
@@ -660,7 +660,7 @@ class DebateTool:
                 self._evidence_ledger, config.background
             )
 
-        # 幕1 案卷：预登记进场级台账（#rN 锚 → #eN）+ 注入索引（含 #eN 映射）。
+        # 幕1 约定文档：预登记进场级台账（#rN 锚 → #eN）+ 注入索引（含 #eN 映射）。
         try:
             from agentcore.runtime.debate.research_dossier import (
                 preregister_research_dossier,
@@ -956,7 +956,7 @@ class DebateTool:
                     payload=result_payload,
                 )
             )
-            # 双产物机制性落盘（案卷 ``AgentCore/文档/debate/``）；失败不阻断收口，路径附 CEO 输出尾部。
+            # 双产物机制性落盘（约定文档 ``AgentCore/文档/debate/``）；失败不阻断收口，路径附 CEO 输出尾部。
             from agentcore.runtime.debate.persist import (
                 artifact_stamp,
                 format_artifact_footer,

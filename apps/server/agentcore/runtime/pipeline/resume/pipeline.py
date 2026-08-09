@@ -85,7 +85,7 @@ async def resume_chat_pipeline(
     transcript is a projection of the journal, no longer read from ``frame.transcript``,
     执行级事件溯源 Phase 2 ④), apply the user's decision to the paused frame by kind
     (:func:`recover_turn`), feed the settled result back as the suspended
-    tool result, and — unless the answer ended the turn in-band (ask_user ``stop``)
+    tool result, and — unless settle returned a terminal ``INTERACT`` closing
     or settle itself re-suspended (``ToolEffect.SUSPEND`` at a downstream
     checkpoint) — run the CEO loop on the rebuilt window to its reply. ``history``
     is the reloaded prior
@@ -325,8 +325,8 @@ async def resume_chat_pipeline(
         if hydrated.from_turn_paused:
             controller_seed = mark_controller_after_settle(controller_seed, suspension)
 
-        # ask_user stop: the closing note IS the reply (terminal effect) — finish
-        # without another CEO round, mirroring the engine's terminal-effect branch.
+        # Terminal INTERACT settle (legacy / rare): closing text ends the turn
+        # without another CEO round. ask_user stop now CONTINUE-feeds the CEO.
         if settled.terminal_text is not None:
             if settled.terminal_text:
                 sink.emit(content_delta(settled.terminal_text))

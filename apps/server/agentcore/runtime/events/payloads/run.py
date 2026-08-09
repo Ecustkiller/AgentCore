@@ -281,6 +281,17 @@ class CoordinationWaitPayload(WirePayload):
     total: int
 
 
+class WorkspaceLockWaitPayload(WirePayload):
+    """同 folder 写锁短等（``workspace_lock_wait``）：跨会话串行时的前端 UX 信号。
+
+    ``waiting=true`` 即将阻塞在 ``workspace_lock``；``waiting=false`` 已拿到锁。
+    与同对话 FIFO ``turn_queued`` 正交。EPHEMERAL——不落 journal。
+    """
+
+    conversation_id: str
+    waiting: bool
+
+
 DeliveryState = Literal["delivered", "partial", "blocked", "notes"]
 
 

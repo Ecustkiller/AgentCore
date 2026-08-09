@@ -11,6 +11,7 @@ from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_regist
 from agentcore.tools.builtin.external_mount_readonly import (
     EXTERNAL_MOUNT_READONLY_TOOL_NAME,
     ExternalMountReadonlyTool,
+    format_external_mount_error,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.workspace import grant_store
@@ -65,7 +66,7 @@ async def test_maps_not_found_error():
     tool = ExternalMountReadonlyTool()
     channel = MagicMock()
     channel.request_external_mount_readonly = AsyncMock(
-        side_effect=ExternalMountError("找不到该目录")
+        side_effect=ExternalMountError("找不到该目录", reason="not_found")
     )
     result = await tool.execute(
         {"well_known": "desktop", "target_name": "nope"},
@@ -73,6 +74,90 @@ async def test_maps_not_found_error():
     )
     assert result.success is False
     assert "找不到" in (result.error or "")
+    assert "reason=not_found" in (result.error or "")
+    assert "盲重试" in (result.error or "")
+    assert result.metadata.get("code") == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_maps_ambiguous_error_with_stable_reason():
+    tool = ExternalMountReadonlyTool()
+    channel = MagicMock()
+    channel.request_external_mount_readonly = AsyncMock(
+        side_effect=ExternalMountError(
+            "匹配到多个目录，请说得更具体", reason="ambiguous"
+        )
+    )
+    result = await tool.execute(
+        {"well_known": "desktop", "target_name": "docs"},
+        _ctx(desktop_channel=channel),
+    )
+    assert result.success is False
+    assert "reason=ambiguous" in (result.error or "")
+    assert result.metadata.get("code") == "ambiguous"
+
+
+def test_format_external_mount_error_preserves_reason():
+    exc = ExternalMountError("路径指向的是文件，不是目录", reason="not_directory")
+    text = format_external_mount_error(exc)
+    assert "reason=not_directory" in text
+    assert "盲重试" in text
+
+
+def test_schema_mentions_reason_and_soft_recovery():
+    tool = ExternalMountReadonlyTool()
+    desc = tool.schema.description
+    assert "reason" in desc
+    assert "盲重试" in desc
+    assert "well_known" in desc
+
+
+@pytest.mark.asyncio
+async def test_channel_preserves_error_reason():
+    from agentcore.desktop.channel import DesktopClientChannel
+
+    registry = MagicMock()
+    registry.suspend = AsyncMock(
+        return_value={
+            "ok": False,
+            "error": {
+                "kind": "ExternalMountError",
+                "detail": "找不到该目录",
+                "reason": "not_found",
+            },
+        }
+    )
+    channel = DesktopClientChannel(
+        sink=MagicMock(),
+        conversation_id="c1",
+        registry=registry,
+        timeout_seconds=1.0,
+    )
+    with pytest.raises(ExternalMountError) as ei:
+        await channel.request_external_mount_readonly(well_known="desktop")
+    assert ei.value.reason == "not_found"
+    assert "找不到" in str(ei.value)
+
+
+def test_workspace_op_error_roundtrips_reason():
+    from agentcore.api.schemas.messages import (
+        ResolveClientToolInteraction,
+        WorkspaceOpError,
+        interaction_result_from_body,
+    )
+
+    body = ResolveClientToolInteraction(
+        ok=False,
+        error=WorkspaceOpError(
+            kind="ExternalMountError",
+            detail="匹配到多个目录，请说得更具体",
+            reason="ambiguous",
+        ),
+    )
+    envelope = interaction_result_from_body(body)
+    assert envelope["ok"] is False
+    assert envelope["error"]["reason"] == "ambiguous"
+    assert envelope["error"]["detail"].startswith("匹配")
 
 
 @pytest.mark.asyncio

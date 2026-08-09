@@ -23,6 +23,26 @@ export interface SidecarInference {
 }
 
 /**
+ * 一次回合的 folders 窄票凭据（定案甲）：sidecar 问云账号名册 / 换桌绑定。
+ * 与 inference 并列；形状 `{baseUrl, apiKey}`——`baseUrl` 为 folders 集合 URL
+ *（`…/v1/folders`），`apiKey` 为 type=folders JWT；勿塞 access/cookie。
+ */
+export interface SidecarFoldersAuth {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
+ * 一次回合的 account 窄票凭据（定案 R3a）：sidecar 搜/读云端对话日志。
+ * 与 folders/inference 并列；形状 `{baseUrl, apiKey}`——`baseUrl` 为 account 面根
+ *（`…/v1/account`），`apiKey` 为 type=account JWT；勿塞 access/cookie。
+ */
+export interface SidecarAccountAuth {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
  * DesktopBrowserBridge 本回合客户端句柄（与 inference 同构：长活 sidecar 随回合刷新）。
  * 主进程签发；勿经 renderer。缺省 / null → sidecar 本回合 browser=未装配（C4 明示，不静默 Sandbox）。
  */
@@ -49,11 +69,18 @@ export interface SidecarPermissionAxes {
 export interface SidecarStartTurnRequest {
   /** 目标会话 id —— 回流的 `turn/event` 用它定位 renderer 侧的会话切片。 */
   conversationId: string;
-  /** 绑定的本地授权根 id（主进程据此解析绝对路径并复用 / 拉起该根的 sidecar）。 */
+  /**
+   * **主进程寻址专用**（选/起 sidecar 进程）：本地授权根 id。
+   * 只出现在 Electron IPC，**不**写入 stdio JSON-RPC；与下方「项目本地绑定」
+   * （`localRootId` / `localSubpath`，供引擎拼 workspace key）语义分离——即便数值常相同，
+   * 也禁止把绑定字段当路由键、或把本字段冒充项目绑定下发给引擎。
+   */
   rootId: string;
-  /** 工作区子路径（工作区对称化 D1a）：非空时主进程把 sidecar 的 `workspaceRoot` 设为
-   *  `容器根 absPath + subpath`，故懒建的 per 对话本地工作区各跑在自己目录里。缺省 / 空 =
-   *  该根自身（显式添加的本地项目，现行为）。sidecar 按 `rootId + subpath` 分别起进程。 */
+  /**
+   * **主进程寻址专用**（同 `rootId`）：工作区子路径。非空时主进程把 sidecar 的
+   * `workspaceRoot` 设为 `容器根 absPath + subpath`（工作区对称化 D1a）；缺省 / 空 =
+   * 该根自身。只进 IPC、不进 stdio；勿与 `localSubpath`（项目绑定）混用。
+   */
   subpath?: string;
   /** 本回合 id（cancel 的寻址键；renderer 自行铸造，需在该 sidecar 内唯一）。 */
   turnId: string;
@@ -82,12 +109,40 @@ export interface SidecarStartTurnRequest {
   /** 云代理凭据；缺省则 sidecar 回退到其自身 server 配置（dev 便利，非生产姿态）。 */
   inference?: SidecarInference;
   /**
+   * folders 窄票凭据（与 inference 并列）。缺省 / 铸票失败 = 不传键或 undefined，
+   * 工具侧无凭据则旧行为 / 诚实失败——勿假装成功。
+   */
+  foldersAuth?: SidecarFoldersAuth;
+  /**
+   * account 窄票凭据（定案 R3a · 与 folders/inference 并列）。缺省 / 铸票失败 =
+   * 不传键或 undefined，工具侧无凭据则本机 DB / 诚实失败——勿假装成功。
+   */
+  accountAuth?: SidecarAccountAuth;
+  /**
    * DesktopBrowserBridge 本回合凭证（主进程注入）。与 inference 一样按回合重送，
    * 避免 spawn-env 过期 / 未注入导致 browser 永久未装配。
    */
   browserBridge?: SidecarBrowserBridge;
   /** 本会话当前权限轴。缺省 = sidecar 沿用当前值（初始默认少打断）。 */
   permissionAxes?: SidecarPermissionAxes;
+  /**
+   * 当前对话所属项目 folderId（与列表 / grouped 的 `conversation.folderId` 同形）。
+   * `null` / 缺省 = 裸聊（无项目）；主进程原样写入 startTurn RPC `params.folderId`
+   *（键在则引擎不查本机库；与 sidecar turns 约定对齐）。
+   */
+  folderId?: string | null;
+  /**
+   * 项目本地 FS 绑定（与 `FolderMeta.localRootId` 同形，camelCase）。
+   * 有项目且 folders 缓存带 `localRootId` 时传入；裸聊 / 云项目 / 缓存无绑定 → `null`
+   *（键仍下发，引擎拼记忆 workspace key 时勿再查本机 Folder 行）。
+   * **不是** `rootId`：本字段进 startTurn RPC；`rootId` 仅主进程寻址。
+   */
+  localRootId?: string | null;
+  /**
+   * 项目本地子路径（与 `FolderMeta.localSubpath` 同形）。有 `localRootId` 时传
+   * `folder.localSubpath ?? ""`；无绑定 → `null`。进 RPC；勿与寻址用 `subpath` 混淆。
+   */
+  localSubpath?: string | null;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
@@ -196,8 +251,15 @@ export interface SidecarPausedTurn {
 
 /** 续跑一个持久挂起的本地回合（结构化挂起 2b resume，经 sidecar 的 `resume` 方法）。 */
 export interface SidecarResumeRequest {
+  /**
+   * **主进程寻址专用**（同 {@link SidecarStartTurnRequest.rootId}）：只进 IPC、不进
+   * stdio；勿与 `localRootId` 项目绑定混淆。
+   */
   rootId: string;
-  /** 工作区子路径（同 `SidecarStartTurnRequest.subpath`）：寻址按 root+subpath 起的进程。 */
+  /**
+   * **主进程寻址专用**（同 {@link SidecarStartTurnRequest.subpath}）：只进 IPC；
+   * 勿与 `localSubpath` 混淆。
+   */
   subpath?: string;
   conversationId: string;
   /** 挂起回合的 assistant message_id（续跑键；续跑后的回复复用它）。 */
@@ -237,10 +299,27 @@ export interface SidecarResumeRequest {
   /** Structured website style pick (s0/s1/…). */
   /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
   inference?: SidecarInference;
+  /** folders 窄票凭据（同 `startTurn.foldersAuth`）。 */
+  foldersAuth?: SidecarFoldersAuth;
+  /** account 窄票凭据（同 `startTurn.accountAuth`）。 */
+  accountAuth?: SidecarAccountAuth;
   /** DesktopBrowserBridge 本回合凭证（同 `startTurn.browserBridge`）。 */
   browserBridge?: SidecarBrowserBridge;
   /** 本会话当前权限轴（同 `startTurn.permissionAxes`）。 */
   permissionAxes?: SidecarPermissionAxes;
+  /**
+   * 当前对话所属项目 folderId（同 {@link SidecarStartTurnRequest.folderId}）：
+   * 续跑对称下发；键在（含 `null`=裸聊）则覆盖帧内 `suspension.folder_id`；
+   * 缺键保留帧内值（旧客户端兼容）。
+   */
+  folderId?: string | null;
+  /**
+   * 项目本地 FS 绑定（同 {@link SidecarStartTurnRequest.localRootId}）：续跑对称下发，
+   * 供引擎拼 workspace key；`null` = 裸聊 / 云项目 / 无绑定。
+   */
+  localRootId?: string | null;
+  /** 同 {@link SidecarStartTurnRequest.localSubpath}。 */
+  localSubpath?: string | null;
 }
 
 /** A1+ 本机回合文件真 diff（相对 `AgentCore/baselines/{messageId}.zip`）。 */
@@ -307,6 +386,9 @@ export interface SidecarListBrowserSessionsResult {
  * Build the Python JSON-RPC ``resume`` params from a renderer IPC request.
  *
  * ``rootId`` / ``subpath`` are main-process routing only — they never cross stdio.
+ * ``folderId`` is project ownership (always sent, including null = bare chat).
+ * ``localRootId`` / ``localSubpath`` are project binding for the engine workspace key
+ * (always sent, including null) — not routing keys.
  * ``selected`` is always sent (empty array when absent) so Python never has to guess.
  */
 export function buildSidecarResumeRpcParams(
@@ -323,9 +405,14 @@ export function buildSidecarResumeRpcParams(
     | "permissionAxes"
     | "excluded_run_ids"
     | "write_capability_overrides"
+    | "folderId"
+    | "localRootId"
+    | "localSubpath"
   >,
   inference?: SidecarInference,
   browserBridge?: SidecarBrowserBridge | null,
+  foldersAuth?: SidecarFoldersAuth,
+  accountAuth?: SidecarAccountAuth,
 ): Record<string, unknown> {
   return {
     messageId: req.messageId,
@@ -334,9 +421,16 @@ export function buildSidecarResumeRpcParams(
     decision: req.decision,
     note: req.note,
     selected: req.selected ?? [],
+    // Project ownership (conversation.folderId 同形)；键始终下发，含 null=裸聊。
+    folderId: req.folderId ?? null,
+    // Project local binding (FolderMeta 同形)；键始终下发，含 null。
+    localRootId: req.localRootId ?? null,
+    localSubpath: req.localSubpath ?? null,
     ...(req.userId ? { userId: req.userId } : {}),
     ...(req.userMessageId ? { userMessageId: req.userMessageId } : {}),
     ...(inference ? { inference } : {}),
+    ...(foldersAuth ? { foldersAuth } : {}),
+    ...(accountAuth ? { accountAuth } : {}),
     // Explicit null clears sticky spawn-env leftovers on the Python side.
     ...(browserBridge !== undefined ? { browserBridge } : {}),
     ...(req.permissionAxes ? { permissionAxes: req.permissionAxes } : {}),

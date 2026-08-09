@@ -584,12 +584,13 @@ def build_workspace_context(
 
         interpreters_line = format_interpreters_line(tuple(langs))
 
-    # 案卷布局（始终可见）：三行出口 + 一句边界。只陈述路径事实，不注入文档正文进 <rules>。
-    dossier_research_line = f"案卷出口·调研/讨论：`{RESEARCH_DIR}/`"
-    dossier_debate_line = f"案卷出口·辩论副产物：`{DEBATE_DIR}/`"
-    dossier_reviews_line = f"案卷出口·审查：`{REVIEWS_DIR}/`"
+    # 约定文档布局（始终可见）：三行出口 + 一句边界。只陈述路径事实，不注入文档正文进 <rules>。
+    dossier_research_line = f"约定文档出口·调研/讨论：`{RESEARCH_DIR}/`"
+    dossier_debate_line = f"约定文档出口·辩论副产物：`{DEBATE_DIR}/`"
+    dossier_reviews_line = f"约定文档出口·审查：`{REVIEWS_DIR}/`"
     dossier_boundary_line = (
-        "案卷边界：讨论/调研/审查类交付写此树；用户工程源码仍写业务路径。"
+        "约定文档边界：讨论/调研/审查类交付写此树；用户工程源码仍写业务路径；"
+        "向用户报产物路径须用上列完整前缀，禁缩短成裸 reviews/research/debate。"
     )
     # Git fact: prefer caller probe (async Local); else sync root; never gates kickoff.
     resolved_git = git_fact if git_fact is not None else detect_workspace_git_sync(backend)
@@ -599,8 +600,10 @@ def build_workspace_context(
     # 与 desktop_line 的 open/register/bind 分流互补，不替代。
     cross_project_line = (
         "跨项目指挥：多项目并行→`list_projects` / `resolve_project` 得 id"
-        "（歧义 `ask_user` choice，禁猜最近），再 `delegate` 各 task 填"
+        "（歧义 `ask_user` choice，禁猜最近）；空/近空→先 `ask_user` 钉目标，"
+        "禁连续 file_list 确认空；确认后同一次 `delegate` 各 task 填"
         "`target_folder_id`（换桌+记忆跟桌；不改本会话 folder_id）；"
+        "开发双仓≠`external_mount_readonly` 乱挂（挂载=区外只读，正交）；"
         "有出生未点名=默认桌，无出生未点名禁默写 scratch；"
         "先建：云 `create_project`；本地 ask `register_local_project`（留本对话）；"
         "`open_local_project`=新会话当出生，勿冒充先建后干；"

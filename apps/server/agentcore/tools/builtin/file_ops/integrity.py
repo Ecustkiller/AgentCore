@@ -311,7 +311,7 @@ def _prepare_write_relpath(path: str) -> tuple[str, str]:
     return (
         actual,
         f"注意：请求路径已清理，实际写入 `{actual}`。"
-        "案卷区（`AgentCore/文档/` 下 research/reviews/debate/项目）前缀之后"
+        "约定文档区（`AgentCore/文档/` 下 research/reviews/debate/项目）前缀之后"
         "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
         "（规范化后常等同）。",
     )
@@ -348,9 +348,9 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
     project_docs = PROJECT_DOCS_PREFIX.rstrip("/")
     if norm == project_docs or norm.startswith(PROJECT_DOCS_PREFIX):
         return (
-            f"冷启动探索写范围禁止写入 `{PROJECT_DOCS_PREFIX}`（厚案卷）；"
+            f"冷启动探索写范围禁止写入 `{PROJECT_DOCS_PREFIX}`（厚约定文档）；"
             f"拒绝路径 `{path}`。请写到 `{AGENTCORE_ROOT}/文档/research/` 等探索笔记，"
-            "厚案卷留到探索收尾后。"
+            "厚约定文档留到探索收尾后。"
         )
     return None
 

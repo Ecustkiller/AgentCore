@@ -549,18 +549,16 @@ async def list_friend_requests(
 ):
     """Friend-request inbox: pending incoming + outgoing."""
     box = await svc.list_friend_requests(user_id=user.user_id)
+    # Resolve peers by id — do NOT use get_profile (directory gates can 404 and
+    # fail the whole inbox, leaving the client on a stale「等待对方处理」row).
     incoming: list[FriendRequestDetail] = []
     for req in box.incoming:
-        peer_view = await svc.get_profile(
-            viewer_id=user.user_id, target_id=req.from_user_id
-        )
-        incoming.append(_friend_request_detail(req, peer=peer_view.user))
+        peer = await svc.get_user(req.from_user_id)
+        incoming.append(_friend_request_detail(req, peer=peer))
     outgoing: list[FriendRequestDetail] = []
     for req in box.outgoing:
-        peer_view = await svc.get_profile(
-            viewer_id=user.user_id, target_id=req.to_user_id
-        )
-        outgoing.append(_friend_request_detail(req, peer=peer_view.user))
+        peer = await svc.get_user(req.to_user_id)
+        outgoing.append(_friend_request_detail(req, peer=peer))
     return FriendRequestListResponse(incoming=incoming, outgoing=outgoing)
 
 

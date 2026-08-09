@@ -23,7 +23,7 @@ function stageFiles(paths: string[], prefix: string): string[] {
 
 /**
  * 项目筛选态顶部：协作时间线（会话 + 幕摘要）+ 阶段产物并列。
- * 案卷引用条为路径级消费事实，非跨会话过程边。
+ * 约定文档引用条为路径级消费事实，非跨会话过程边。
  */
 export function CollaborationTimelinePanel({
   folderId,
@@ -54,7 +54,7 @@ export function CollaborationTimelinePanel({
   const items = timelineQ.data?.items ?? [];
   const note =
     timelineQ.data?.dossier_refs_note ??
-    "路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边";
+    "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边";
   const research = dossierQ.data?.research ?? [];
   const debate = dossierQ.data?.debate ?? [];
   const loading = timelineQ.isLoading;

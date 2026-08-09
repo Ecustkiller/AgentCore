@@ -21,6 +21,11 @@ from agentcore.api.schemas.conversations import FolderSummary
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.db.base import async_session_factory
+from agentcore.db.errors import (
+    DATABASE_UNAVAILABLE_CODE,
+    DATABASE_UNAVAILABLE_MESSAGE,
+    is_db_connectivity_error,
+)
 from agentcore.db.repositories import FolderRepository
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -52,6 +57,13 @@ _EMPTY_LIST_HINT = (
     "当前账号下没有项目。需要新建时：云项目用 create_project（同指挥面）；"
     "本地登记留指挥面：ask_user action=register_local_project——"
     "勿默认催 open_local_project（那会新会话）。"
+    "多项目同时开工须先有名册项再 resolve→同次 delegate(target_folder_id)；"
+    "开发双仓≠external_mount_readonly。"
+)
+_RESOLVED_TIP = (
+    "空/近空先 ask_user 钉目标，勿连续 file_list 确认空；"
+    "多项目同次 delegate 各填 target_folder_id；"
+    "开发双仓≠external_mount_readonly。"
 )
 
 
@@ -97,6 +109,21 @@ def resolve_projects_by_name(
 
 
 async def _load_user_project_summaries(user_id: str) -> list[dict[str, Any]]:
+    from agentcore.folders.credentials import (
+        FoldersCloudError,
+        cloud_list_folders,
+        get_folders_credentials,
+    )
+
+    creds = get_folders_credentials()
+    if creds is not None:
+        try:
+            return await cloud_list_folders(creds)
+        except FoldersCloudError:
+            raise
+        except Exception as e:  # noqa: BLE001 — normalize unexpected HTTP failures
+            raise FoldersCloudError(str(e)) from e
+
     async with async_session_factory() as session:
         folders = await FolderRepository(session).list_by_user(user_id)
     return [folder_summary_dict(f) for f in folders]
@@ -106,7 +133,24 @@ async def _create_cloud_folder(*, user_id: str, name: str) -> dict[str, Any]:
     """Account-level cloud Folder create — same semantics as ``POST /folders`` mode=cloud.
 
     Does **not** touch any Conversation row (no ``folder_id`` rebind, no new session).
+    With folders narrow-ticket creds (sidecar), calls the cloud HTTP API instead of
+    the local FolderRepository.
     """
+    from agentcore.folders.credentials import (
+        FoldersCloudError,
+        cloud_create_cloud_folder,
+        get_folders_credentials,
+    )
+
+    creds = get_folders_credentials()
+    if creds is not None:
+        try:
+            return await cloud_create_cloud_folder(creds, name=name)
+        except FoldersCloudError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise FoldersCloudError(str(e)) from e
+
     async with async_session_factory() as session:
         folder = await FolderRepository(session).create(
             user_id=user_id,
@@ -115,6 +159,12 @@ async def _create_cloud_folder(*, user_id: str, name: str) -> dict[str, Any]:
             local_subpath=None,
         )
     return folder_summary_dict(folder)
+
+
+def _is_folders_cloud_failure(exc: BaseException) -> bool:
+    from agentcore.folders.credentials import FoldersCloudError
+
+    return isinstance(exc, FoldersCloudError)
 
 
 def _json_output(payload: dict[str, Any]) -> str:
@@ -138,7 +188,9 @@ class ListProjectsTool:
                 "列出当前用户账号下的全部【已有项目】（与侧栏 / GET /folders 同名册："
                 "id、name、mode=local|cloud、local_root_id、local_subpath、时间戳；"
                 "无本机绝对路径）。跨项目指挥前先查名册；按名定位请用 resolve_project；"
-                "同指挥面新建云项目请用 create_project。"
+                "同指挥面新建云项目请用 create_project；"
+                "多项目并行派工：resolve 后空/近空先 ask_user，确认后同次 "
+                "delegate 各填 target_folder_id（开发双仓≠external_mount_readonly）。"
                 "【禁止】用 open_local_project 代替本工具——那会新建会话，不是列已有。"
             ),
             parameters={"type": "object", "properties": {}, "required": []},
@@ -151,11 +203,28 @@ class ListProjectsTool:
         try:
             projects = await _load_user_project_summaries(context.user_id)
         except Exception as e:  # noqa: BLE001 — tool failure must not crash the turn
+            cloud_fail = _is_folders_cloud_failure(e)
             logger.warning(
                 "projects.list_failed",
                 user_id=context.user_id,
                 error=str(e),
+                db_unreachable=is_db_connectivity_error(e),
+                folders_cloud_failed=cloud_fail,
             )
+            if is_db_connectivity_error(e):
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"列出项目失败。{DATABASE_UNAVAILABLE_MESSAGE}",
+                    error=DATABASE_UNAVAILABLE_CODE,
+                )
+            if cloud_fail:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"列出项目失败。{e}",
+                    error=getattr(e, "code", "folders_cloud_failed"),
+                )
             return ToolResult(
                 tool_call_id="",
                 success=False,
@@ -197,7 +266,9 @@ class ResolveProjectTool:
             name=RESOLVE_PROJECT_TOOL_NAME,
             description=(
                 "按项目名解析为已有 Folder（与 GET /folders 同形字段）。"
-                "唯一命中 → 返回该项目（可静默供后续派工使用）；"
+                "唯一命中 → 返回该项目（可静默供后续派工使用；空/近空先 ask_user，"
+                "勿连续 file_list 确认空；多项目同次 delegate 各填 target_folder_id；"
+                "开发双仓≠external_mount_readonly）；"
                 "零命中或多名 → 返回候选并提示用 ask_user kind=choice 让用户选"
                 "（选项须可区分 name/mode 等；禁止静默猜「最近」）。"
                 "零命中若需新建：云 → create_project；本地 → ask_user "
@@ -232,11 +303,28 @@ class ResolveProjectTool:
         try:
             projects = await _load_user_project_summaries(context.user_id)
         except Exception as e:  # noqa: BLE001
+            cloud_fail = _is_folders_cloud_failure(e)
             logger.warning(
                 "projects.resolve_failed",
                 user_id=context.user_id,
                 error=str(e),
+                db_unreachable=is_db_connectivity_error(e),
+                folders_cloud_failed=cloud_fail,
             )
+            if is_db_connectivity_error(e):
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"解析项目失败。{DATABASE_UNAVAILABLE_MESSAGE}",
+                    error=DATABASE_UNAVAILABLE_CODE,
+                )
+            if cloud_fail:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"解析项目失败。{e}",
+                    error=getattr(e, "code", "folders_cloud_failed"),
+                )
             return ToolResult(
                 tool_call_id="",
                 success=False,
@@ -263,7 +351,10 @@ class ResolveProjectTool:
             return ToolResult(
                 tool_call_id="",
                 success=True,
-                output="唯一命中，可直接用于后续派工：\n" + _json_output(payload),
+                output=(
+                    "唯一命中，可直接用于后续派工"
+                    f"（{_RESOLVED_TIP}）：\n" + _json_output(payload)
+                ),
                 display={
                     "status": "resolved",
                     "folder_id": project.get("id"),
@@ -361,12 +452,21 @@ class CreateProjectTool:
         try:
             project = await _create_cloud_folder(user_id=context.user_id, name=name)
         except Exception as e:  # noqa: BLE001
+            cloud_fail = _is_folders_cloud_failure(e)
             logger.warning(
                 "projects.create_failed",
                 user_id=context.user_id,
                 conversation_id=context.conversation_id or None,
                 error=str(e),
+                folders_cloud_failed=cloud_fail,
             )
+            if cloud_fail:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"创建云项目失败。{e}",
+                    error=getattr(e, "code", "folders_cloud_failed"),
+                )
             return ToolResult(
                 tool_call_id="",
                 success=False,

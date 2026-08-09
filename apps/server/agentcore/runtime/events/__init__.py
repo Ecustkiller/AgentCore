@@ -29,6 +29,14 @@ from agentcore.runtime.events.chat import (
     turn_saved,
     turn_warning,
 )
+from agentcore.runtime.events.debate import (
+    debate_pretrial_completed,
+    debate_pretrial_orders,
+    debate_pretrial_started,
+    debate_result,
+    debate_round,
+    debate_round_started,
+)
 from agentcore.runtime.events.desktop import (
     desktop_notify_required,
     external_mount_readonly_required,
@@ -60,12 +68,6 @@ from agentcore.runtime.events.journal_config import (
 from agentcore.runtime.events.run import (
     batch_metrics,
     coordination_wait,
-    debate_pretrial_completed,
-    debate_pretrial_orders,
-    debate_pretrial_started,
-    debate_result,
-    debate_round,
-    debate_round_started,
     delivery_status,
     escalation_raised,
     execution_completed,
@@ -92,6 +94,7 @@ from agentcore.runtime.events.run import (
     turn_queued,
     turn_steer_accepted,
     user_interjection,
+    workspace_lock_wait,
 )
 from agentcore.runtime.events.sink import EventSink
 from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
@@ -169,6 +172,7 @@ __all__ = [
     "team_note_posted",
     "team_synthesis_preview",
     "coordination_wait",
+    "workspace_lock_wait",
     "delivery_status",
     "user_interjection",
     "turn_queued",

@@ -161,11 +161,17 @@ class WorkspaceOpError(BaseModel):
     ``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same
     message as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``
     (str_replace). An unknown ``kind`` degrades to a generic I/O error.
+
+    ``reason`` is an optional stable failure category for channels that already
+    classify on the desktop (e.g. external mount ``not_found`` / ``not_directory`` /
+    ``ambiguous``) so the model-facing tool error can keep the code, not only
+    a human message.
     """
 
     kind: str = Field(..., max_length=64)
     detail: str = Field("", max_length=2000)
     count: int | None = None
+    reason: str | None = Field(None, max_length=64)
 
 
 class ResolveDelegationAuthorizationInteraction(BaseModel):

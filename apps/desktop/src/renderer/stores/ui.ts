@@ -47,25 +47,33 @@ function persistTheme(v: Theme): void {
   uiSet(THEME_KEY, v);
 }
 
-// 本地引擎（sidecar）开关——三态偏好（双模式工作区 §一.1 / 本地引擎毕业方案 · 阶段三）。
+// 本机执行（sidecar）开关——三态偏好（双模式工作区 §一.1）。高级 opt-in，非大众默认卖点。
 //
-// 为「毕业到默认开」铺路：必须区分「用户从未设过」与「用户显式关过」，否则把默认翻成开时会误
-// 开那些主动关掉的人。故持久化的是**偏好**而非有效值：
+// 设置 UI「允许本机执行」打开 → 偏好 `on`。持久化的是**偏好**而非有效值，
+// 故翻产品默认时不静默改写已落盘的 `on`/`off`：
 //   - "unset"（无 key）→ 跟随 `SIDECAR_DEFAULT_ENABLED`（用户没表态，由产品默认决定）；
 //   - "on" / "off" → 用户显式选择，恒被尊重，不受默认值变化影响。
 // 有效开关 = `resolveSidecarEnabled(偏好)`，消费方（sidecarRouting）只读那个 boolean。
 type SidecarPreference = "unset" | "on" | "off";
 
-/** 本地引擎默认是否开启（用户未表态时）。已毕业到**默认开**：绑定本机本地文件夹的对话默认走
- * 本地引擎（启动失败会自动降级回云端，故默认开是安全的，见 `turns.sendTurn`）；"unset" 用户
- * 跟随此默认，显式 "on"/"off" 用户不受影响。需回退为 opt-in 时改回 false 即可。 */
-const SIDECAR_DEFAULT_ENABLED = true;
+/** 本机执行默认是否开启（用户未表态时）。**默认关**：仅高级在外观设置里显式打开后，
+ * 绑定本机本地文件夹的对话才走 sidecar（启动失败仍可降级回云，见 `turns.sendTurn`）。
+ * "unset" 跟随此默认；显式 "on"/"off" 不受影响，勿静默改写已落盘偏好。 */
+const SIDECAR_DEFAULT_ENABLED = false;
+
+/**
+ * 解析持久化偏好。三态字符串为主；兼容毕业前 boolean 落盘：
+ * `false` = 用户显式关过 → `off`（勿当 unset，否则翻默认时误伤显式选择）；
+ * `true` = 显式开过 → `on`。无 key / 其它值 → `unset`（跟产品默认）。
+ */
+export function parseSidecarPreference(raw: unknown): SidecarPreference {
+  if (raw === "on" || raw === true) return "on";
+  if (raw === "off" || raw === false) return "off";
+  return "unset";
+}
 
 function loadSidecarPreference(): SidecarPreference {
-  const v = uiGet<string>(SIDECAR_KEY);
-  if (v === "on") return "on";
-  if (v === "off") return "off";
-  return "unset";
+  return parseSidecarPreference(uiGet<unknown>(SIDECAR_KEY));
 }
 
 function persistSidecarPreference(p: "on" | "off"): void {
@@ -98,15 +106,15 @@ interface UIState {
    * **持久化**到 `agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
    * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
-  /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
-   * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
-   * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端项目 /
-   * 带附件的回合仍走云。**默认开**、可关闭——启动失败自动降级回云端（故默认开安全）；但 sidecar
-   * 暂非真离线（LLM 仍经云推理代理），断网时不可用。 */
+  /** 本机执行（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
+   * 消费方（路由）只读这个 boolean。设置「允许本机执行」打开后，绑定本机本地文件夹的对话可由
+   * 用户机器上的 `python -m agentcore.sidecar` 跑（直连本地盘）；裸聊 / 云端项目 / 带附件的
+   * 回合仍走云。**默认关**（高级 opt-in）；启动失败可降级回云。sidecar 暂非真离线
+   * （LLM 仍经云推理代理），断网时不可用。 */
   sidecarEnabled: boolean;
-  /** 本地引擎开关的**持久化偏好**（三态）：`unset` 跟随 `SIDECAR_DEFAULT_ENABLED`、`on`/`off` 为
-   * 用户显式选择——为「毕业到默认开」铺路（翻默认时不误开显式关过的人）。持久化到
-   * `agentcore:sidecar-enabled`；设置开关只关心 {@link sidecarEnabled}。 */
+  /** 本机执行开关的**持久化偏好**（三态）：`unset` 跟随 `SIDECAR_DEFAULT_ENABLED`、`on`/`off` 为
+   * 用户显式选择——翻产品默认时不静默改写已落盘偏好。持久化到
+   * `agentcore:sidecar-enabled`；设置「允许本机执行」只关心 {@link sidecarEnabled}。 */
   sidecarPreference: SidecarPreference;
 
   openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;

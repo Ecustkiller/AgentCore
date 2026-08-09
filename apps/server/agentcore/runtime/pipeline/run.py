@@ -77,6 +77,9 @@ async def run_chat_pipeline(
     message_id: str | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
+    folder_binding_injected: bool = False,
+    folder_local_root_id: str | None = None,
+    folder_local_subpath: str | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -224,6 +227,9 @@ async def run_chat_pipeline(
             x_client_platform=x_client_platform,
             profiles=profiles,
             agent_mentions=agent_mentions,
+            folder_binding_injected=folder_binding_injected,
+            folder_local_root_id=folder_local_root_id,
+            folder_local_subpath=folder_local_subpath,
         )
         if latency_probe is not None:
             latency_probe.mark_prepare(int((time.monotonic() - prepare_t0) * 1000))

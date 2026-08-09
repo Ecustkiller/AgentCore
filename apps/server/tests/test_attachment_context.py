@@ -386,6 +386,170 @@ async def test_conversation_truncated_note(monkeypatch):
     assert huge not in out
 
 
+@pytest.mark.asyncio
+async def test_conversation_deep_read_uses_cloud_when_account_creds(monkeypatch):
+    """有 account 票 → 走云读，禁止查本机库（大众桌面无 PG）。"""
+    from agentcore.account.credentials import (
+        AccountCredentials,
+        account_credentials_scope,
+    )
+
+    db_hits = {"n": 0}
+
+    class _BoomCm:
+        async def __aenter__(self):
+            db_hits["n"] += 1
+            raise AssertionError("must not hit DB when account creds bound")
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _BoomCm(),
+    )
+
+    async def _fake_cloud(creds, *, payload):
+        assert creds.api_key == "acct-key"
+        assert payload["conversation_id"] == "cloud-1"
+        assert payload["max_chars"] == ATTACHMENT_INLINE_MAX_CHARS
+        return {
+            "status": "ok",
+            "title": "云端场",
+            "conversation_id": "cloud-1",
+            "transcript": "### User\n云正文\n",
+            "truncated": False,
+            "next_cursor": None,
+        }
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_read_conversation",
+        _fake_cloud,
+    )
+
+    creds = AccountCredentials(api_key="acct-key", base_url="https://api.example/v1/account")
+    with account_credentials_scope(creds):
+        out = await _build_attachment_context(
+            [
+                {
+                    "name": "云端场",
+                    "text": "CLIENT_SHALLOW_SHOULD_NOT_APPEAR",
+                    "kind": "conversation",
+                    "conversation_id": "cloud-1",
+                }
+            ],
+            user_id="u1",
+            conversation_history_access=True,
+        )
+    assert out is not None
+    assert "--- Conversation: 云端场 ---" in out
+    assert "云正文" in out
+    assert "CLIENT_SHALLOW_SHOULD_NOT_APPEAR" not in out
+    assert db_hits["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_conversation_cloud_soft_miss(monkeypatch):
+    from agentcore.account.credentials import (
+        AccountCredentials,
+        account_credentials_scope,
+    )
+
+    async def _fake_cloud(creds, *, payload):
+        del creds, payload
+        return {"status": "soft_miss", "conversation_id": "missing"}
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_read_conversation",
+        _fake_cloud,
+    )
+    creds = AccountCredentials(api_key="k", base_url="https://api.example/v1/account")
+    with account_credentials_scope(creds):
+        out = await _build_attachment_context(
+            [
+                {
+                    "name": "缺失场",
+                    "text": "CLIENT_SHALLOW",
+                    "kind": "conversation",
+                    "conversation_id": "missing",
+                }
+            ],
+            user_id="u1",
+            conversation_history_access=True,
+        )
+    assert out is not None
+    assert "无法打开该对话" in out
+    assert "CLIENT_SHALLOW" not in out
+
+
+@pytest.mark.asyncio
+async def test_conversation_cloud_failure_soft_degrades(monkeypatch):
+    from agentcore.account.credentials import (
+        AccountCloudError,
+        AccountCredentials,
+        account_credentials_scope,
+    )
+
+    async def _boom(creds, *, payload):
+        del creds, payload
+        raise AccountCloudError("down", code="account_cloud_unreachable")
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_read_conversation",
+        _boom,
+    )
+    creds = AccountCredentials(api_key="k", base_url="https://api.example/v1/account")
+    with account_credentials_scope(creds):
+        out = await _build_attachment_context(
+            [
+                {
+                    "name": "云挂",
+                    "text": "CLIENT_SHALLOW",
+                    "kind": "conversation",
+                    "conversation_id": "c1",
+                }
+            ],
+            user_id="u1",
+            conversation_history_access=True,
+        )
+    assert out is not None
+    assert "暂时无法深读该对话" in out
+    assert "CLIENT_SHALLOW" not in out
+
+
+@pytest.mark.asyncio
+async def test_conversation_db_connectivity_soft_degrades(monkeypatch):
+    """无票 + 本机库拒绝连接 → 软说明块，prepare 不因深读抛死。"""
+    from sqlalchemy.exc import OperationalError
+
+    class _RefuseCm:
+        async def __aenter__(self):
+            raise OperationalError("connection refused", None, None)
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _RefuseCm(),
+    )
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "库挂",
+                "text": "CLIENT_SHALLOW",
+                "kind": "conversation",
+                "conversation_id": "local-1",
+            }
+        ],
+        user_id="u1",
+        conversation_history_access=True,
+    )
+    assert out is not None
+    assert "暂时无法深读该对话" in out
+    assert "CLIENT_SHALLOW" not in out
+
+
 class _StubVisionReader:
     """Minimal VisionReader duck for attachment eye→text tests."""
 

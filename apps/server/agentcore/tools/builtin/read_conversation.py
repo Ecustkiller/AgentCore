@@ -3,6 +3,9 @@
 Worker-only; privacy-gated via ``manual_wire`` + ``_wire_worker_conversation_log_tools``.
 Supports cursor continuation so a multi-chunk transcript can be reassembled — never
 silently summarised via the default 4k ToolResult head+tail truncate.
+
+With account narrow-ticket creds (sidecar), calls the cloud HTTP API instead of
+the local repositories (大众桌面无本机 PG).
 """
 
 from __future__ import annotations
@@ -35,6 +38,103 @@ _SOFT_MISS = (
     "无法打开该对话（可能不存在、已删除、为 handoff 宿主，或不在可访问范围内）。"
 )
 _HOST_MISS = "那是本回合正在进行的宿主会话——请直接看本会话工作记忆，无需 read_conversation。"
+
+
+def _is_account_cloud_failure(exc: BaseException) -> bool:
+    from agentcore.account.credentials import AccountCloudError
+
+    return isinstance(exc, AccountCloudError)
+
+
+def _ok_result_from_chunk(
+    *,
+    title: str,
+    conversation_id: str,
+    transcript: str,
+    truncated: bool,
+    next_cursor: str | None,
+    started_at: str | None,
+    ended_at: str | None,
+    message_count: int,
+    char_offset: int,
+    total_chars: int,
+    run_id: str | None,
+) -> ToolResult:
+    header_lines = [
+        f"title: {title}",
+        f"conversation_id: {conversation_id}",
+        f"messages: {message_count}",
+        f"time_range: {started_at or '—'} → {ended_at or '—'}",
+        f"truncated: {truncated}",
+        f"offset: {char_offset}/{total_chars}",
+    ]
+    if next_cursor:
+        header_lines.append(f"next_cursor: {next_cursor}")
+    header_lines.append("")
+    header_lines.append("--- transcript ---")
+    header_lines.append("")
+    output = "\n".join(header_lines) + transcript
+    output_limit = max(len(output), MAX_CHUNK_CHARS)
+
+    logger.info(
+        "conversation_log.read",
+        result="ok",
+        conversation_id=conversation_id,
+        truncated=truncated,
+        chars=len(transcript),
+        run_id=run_id,
+    )
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output=output,
+        output_limit=output_limit,
+        display={
+            "title": title,
+            "conversation_id": conversation_id,
+            "truncated": truncated,
+            "depth": "full",
+        },
+        metadata={
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+            "stats": {
+                "message_count": message_count,
+                "char_offset": char_offset,
+                "total_chars": total_chars,
+            },
+        },
+    )
+
+
+async def _read_via_cloud(
+    *,
+    conversation_id: str,
+    cursor: str | None,
+    max_chars: int | None,
+) -> dict[str, Any]:
+    from agentcore.account.credentials import (
+        AccountCloudError,
+        cloud_read_conversation,
+        get_account_credentials,
+    )
+
+    creds = get_account_credentials()
+    assert creds is not None
+    payload: dict[str, Any] = {
+        "conversation_id": conversation_id,
+        "cursor": cursor,
+        "max_chars": max_chars,
+    }
+    try:
+        data = await cloud_read_conversation(creds, payload=payload)
+    except AccountCloudError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise AccountCloudError(str(e)) from e
+    if not isinstance(data, dict):
+        raise AccountCloudError("account read response is not an object")
+    return data
 
 
 class ReadConversationTool:
@@ -114,89 +214,129 @@ class ReadConversationTool:
             except (TypeError, ValueError):
                 max_chars = None
 
-        async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(
-                cid, user_id=context.user_id
-            )
-            # Soft miss: wrong owner / soft-deleted / missing / handoff host.
-            if conv is None or conv.mode == "handoff":
-                logger.info(
-                    "conversation_log.read",
-                    result="soft_miss",
+        from agentcore.account.credentials import get_account_credentials
+
+        try:
+            if get_account_credentials() is not None:
+                data = await _read_via_cloud(
                     conversation_id=cid,
+                    cursor=cursor_s,
+                    max_chars=max_chars,
+                )
+                status = str(data.get("status") or "")
+                if status == "soft_miss":
+                    logger.info(
+                        "conversation_log.read",
+                        result="soft_miss",
+                        conversation_id=cid,
+                        run_id=context.run_id,
+                    )
+                    return ToolResult(
+                        tool_call_id="",
+                        success=True,
+                        output=_SOFT_MISS,
+                        display={
+                            "title": "",
+                            "conversation_id": cid,
+                            "truncated": False,
+                            "depth": "full",
+                        },
+                    )
+                if status != "ok":
+                    raise RuntimeError(f"unexpected account read status: {status}")
+                return _ok_result_from_chunk(
+                    title=str(data.get("title") or ""),
+                    conversation_id=str(data.get("conversation_id") or cid),
+                    transcript=str(data.get("transcript") or ""),
+                    truncated=bool(data.get("truncated")),
+                    next_cursor=(
+                        str(data["next_cursor"])
+                        if data.get("next_cursor") is not None
+                        else None
+                    ),
+                    started_at=(
+                        str(data["started_at"])
+                        if data.get("started_at") is not None
+                        else None
+                    ),
+                    ended_at=(
+                        str(data["ended_at"]) if data.get("ended_at") is not None else None
+                    ),
+                    message_count=int(data.get("message_count") or 0),
+                    char_offset=int(data.get("char_offset") or 0),
+                    total_chars=int(data.get("total_chars") or 0),
                     run_id=context.run_id,
                 )
-                return ToolResult(
-                    tool_call_id="",
-                    success=True,
-                    output=_SOFT_MISS,
-                    display={
-                        "title": "",
-                        "conversation_id": cid,
-                        "truncated": False,
-                        "depth": "full",
-                    },
+
+            async with async_session_factory() as session:
+                conv = await ConversationRepository(session).get_by_id(
+                    cid, user_id=context.user_id
+                )
+                # Soft miss: wrong owner / soft-deleted / missing / handoff host.
+                if conv is None or conv.mode == "handoff":
+                    logger.info(
+                        "conversation_log.read",
+                        result="soft_miss",
+                        conversation_id=cid,
+                        run_id=context.run_id,
+                    )
+                    return ToolResult(
+                        tool_call_id="",
+                        success=True,
+                        output=_SOFT_MISS,
+                        display={
+                            "title": "",
+                            "conversation_id": cid,
+                            "truncated": False,
+                            "depth": "full",
+                        },
+                    )
+
+                messages = list(
+                    await MessageRepository(session).list_all_for_conversation(cid)
+                )
+                assistant_ids = [m.id for m in messages if m.role == "assistant"]
+                journal_map = await TurnJournalRepository(session).load_map(assistant_ids)
+                full = render_conversation_log(conv, messages, journal_map)
+                chunk = chunk_transcript(
+                    full,
+                    conversation=conv,
+                    messages=messages,
+                    cursor=cursor_s,
+                    max_chars=max_chars,
                 )
 
-            messages = list(
-                await MessageRepository(session).list_all_for_conversation(cid)
+            return _ok_result_from_chunk(
+                title=chunk.title,
+                conversation_id=chunk.conversation_id,
+                transcript=chunk.transcript,
+                truncated=chunk.truncated,
+                next_cursor=chunk.next_cursor,
+                started_at=chunk.started_at,
+                ended_at=chunk.ended_at,
+                message_count=chunk.message_count,
+                char_offset=chunk.char_offset,
+                total_chars=chunk.total_chars,
+                run_id=context.run_id,
             )
-            assistant_ids = [m.id for m in messages if m.role == "assistant"]
-            journal_map = await TurnJournalRepository(session).load_map(assistant_ids)
-            full = render_conversation_log(conv, messages, journal_map)
-            chunk = chunk_transcript(
-                full,
-                conversation=conv,
-                messages=messages,
-                cursor=cursor_s,
-                max_chars=max_chars,
+        except Exception as e:  # noqa: BLE001
+            cloud_fail = _is_account_cloud_failure(e)
+            logger.warning(
+                "conversation_log.read_failed",
+                conversation_id=cid,
+                error=str(e),
+                account_cloud_failed=cloud_fail,
             )
-
-        # Build model-facing output: metadata header + transcript body.
-        header_lines = [
-            f"title: {chunk.title}",
-            f"conversation_id: {chunk.conversation_id}",
-            f"messages: {chunk.message_count}",
-            f"time_range: {chunk.started_at or '—'} → {chunk.ended_at or '—'}",
-            f"truncated: {chunk.truncated}",
-            f"offset: {chunk.char_offset}/{chunk.total_chars}",
-        ]
-        if chunk.next_cursor:
-            header_lines.append(f"next_cursor: {chunk.next_cursor}")
-        header_lines.append("")
-        header_lines.append("--- transcript ---")
-        header_lines.append("")
-        output = "\n".join(header_lines) + chunk.transcript
-
-        # HARD: output_limit must cover this chunk — never default 4k head+tail.
-        output_limit = max(len(output), MAX_CHUNK_CHARS)
-
-        logger.info(
-            "conversation_log.read",
-            result="ok",
-            conversation_id=cid,
-            truncated=chunk.truncated,
-            chars=len(chunk.transcript),
-            run_id=context.run_id,
-        )
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output=output,
-            output_limit=output_limit,
-            display={
-                "title": chunk.title,
-                "conversation_id": chunk.conversation_id,
-                "truncated": chunk.truncated,
-                "depth": "full",
-            },
-            metadata={
-                "next_cursor": chunk.next_cursor,
-                "truncated": chunk.truncated,
-                "stats": {
-                    "message_count": chunk.message_count,
-                    "char_offset": chunk.char_offset,
-                    "total_chars": chunk.total_chars,
-                },
-            },
-        )
+            if cloud_fail:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=f"读取历史对话失败。{e}",
+                    error=getattr(e, "code", "account_cloud_failed"),
+                )
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="读取历史对话失败，请稍后再试。",
+                error=str(e),
+            )

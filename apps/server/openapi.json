@@ -75,6 +75,290 @@
         "title": "AcceptRunOutcomeResponse",
         "type": "object"
       },
+      "AccountMemoryDeleteRequest": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "AccountMemoryDeleteRequest",
+        "type": "object"
+      },
+      "AccountMemoryFileMeta": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "version"
+        ],
+        "title": "AccountMemoryFileMeta",
+        "type": "object"
+      },
+      "AccountMemoryListResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/AccountMemoryFileMeta"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "AccountMemoryListResponse",
+        "type": "object"
+      },
+      "AccountMemoryLoadRequest": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "AccountMemoryLoadRequest",
+        "type": "object"
+      },
+      "AccountMemoryLoadResponse": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "AccountMemoryLoadResponse",
+        "type": "object"
+      },
+      "AccountMemoryOkResponse": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "title": "AccountMemoryOkResponse",
+        "type": "object"
+      },
+      "AccountMemoryProjectScopesResponse": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "title": "AccountMemoryProjectScopesResponse",
+        "type": "object"
+      },
+      "AccountMemorySaveRequest": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "AccountMemorySaveRequest",
+        "type": "object"
+      },
+      "AccountMemoryScopeRequest": {
+        "properties": {
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "title": "AccountMemoryScopeRequest",
+        "type": "object"
+      },
+      "AccountRememberRequest": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "AccountRememberRequest",
+        "type": "object"
+      },
+      "AccountRememberResponse": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "changed"
+        ],
+        "title": "AccountRememberResponse",
+        "type": "object"
+      },
+      "AccountRuleDoc": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "title": "AccountRuleDoc",
+        "type": "object"
+      },
+      "AccountRulesListRequest": {
+        "description": "Optional project layer; global rules always included.",
+        "properties": {
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          }
+        },
+        "title": "AccountRulesListRequest",
+        "type": "object"
+      },
+      "AccountRulesListResponse": {
+        "properties": {
+          "global_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Global Rules",
+            "type": "array"
+          },
+          "project_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Project Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "global_rules",
+          "project_rules"
+        ],
+        "title": "AccountRulesListResponse",
+        "type": "object"
+      },
+      "AccountTokenResponse": {
+        "description": "Freshly minted account narrow token + lifetime (sidecar log-tool auth).\n\nDesktop: ``baseUrl`` for ``accountAuth`` is ``{apiOrigin}/v1/account``;\n``apiKey`` is ``token``. Mint path: ``POST /v1/account/token``.",
+        "properties": {
+          "expires_in_sec": {
+            "title": "Expires In Sec",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_in_sec"
+        ],
+        "title": "AccountTokenResponse",
+        "type": "object"
+      },
       "ActiveNotice": {
         "properties": {
           "body": {
@@ -3593,7 +3877,7 @@
         "type": "object"
       },
       "CollaborationDossierRef": {
-        "description": "Path-level 案卷消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。",
+        "description": "Path-level 约定文档消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。",
         "properties": {
           "path": {
             "title": "Path",
@@ -3719,7 +4003,7 @@
       "CollaborationTimelineResponse": {
         "properties": {
           "dossier_refs_note": {
-            "default": "路径级案卷消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
+            "default": "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
             "title": "Dossier Refs Note",
             "type": "string"
           },
@@ -3832,6 +4116,290 @@
           "page_size"
         ],
         "title": "ConversationListResponse",
+        "type": "object"
+      },
+      "ConversationReadRequest": {
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "max_chars": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Chars"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ],
+        "title": "ConversationReadRequest",
+        "type": "object"
+      },
+      "ConversationReadResponse": {
+        "properties": {
+          "char_offset": {
+            "default": 0,
+            "title": "Char Offset",
+            "type": "integer"
+          },
+          "conversation_id": {
+            "default": "",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "soft_miss"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "total_chars": {
+            "default": 0,
+            "title": "Total Chars",
+            "type": "integer"
+          },
+          "transcript": {
+            "default": "",
+            "title": "Transcript",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ConversationReadResponse",
+        "type": "object"
+      },
+      "ConversationSearchRequest": {
+        "description": "Aligned with Worker ``search_conversations`` (resolved folder filters).",
+        "properties": {
+          "check_folder_owned": {
+            "default": false,
+            "title": "Check Folder Owned",
+            "type": "boolean"
+          },
+          "exclude_conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Conversation Id"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "global_chats_only": {
+            "default": false,
+            "title": "Global Chats Only",
+            "type": "boolean"
+          },
+          "include_archived": {
+            "default": false,
+            "title": "Include Archived",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "updated_within_hours": {
+            "anyOf": [
+              {
+                "maximum": 168.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated Within Hours"
+          }
+        },
+        "title": "ConversationSearchRequest",
+        "type": "object"
+      },
+      "ConversationSearchResponse": {
+        "properties": {
+          "folder_miss": {
+            "default": false,
+            "title": "Folder Miss",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSearchRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "ConversationSearchResponse",
+        "type": "object"
+      },
+      "ConversationSearchRow": {
+        "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "folder_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Name"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "title"
+        ],
+        "title": "ConversationSearchRow",
         "type": "object"
       },
       "ConversationSummary": {
@@ -6246,6 +6814,25 @@
         "title": "FolderSummary",
         "type": "object"
       },
+      "FoldersTokenResponse": {
+        "description": "Freshly minted folders narrow token + lifetime (sidecar roster auth).",
+        "properties": {
+          "expires_in_sec": {
+            "title": "Expires In Sec",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_in_sec"
+        ],
+        "title": "FoldersTokenResponse",
+        "type": "object"
+      },
       "FriendListResponse": {
         "properties": {
           "data": {
@@ -6722,7 +7309,7 @@
         "type": "object"
       },
       "HandoffJobSummary": {
-        "description": "One local→云 handoff job: its lifecycle + the snapshots bracketing it.\n\n``base_snapshot_id`` is the user's local files the cloud team ran on (the e3\ndiff base, under the source conversation's storage key); ``result_snapshot_id``\nis the team's output (under the hidden job conversation's key), NULL until the\nrun succeeds. ``job_conversation_id`` hosts the team's replayable graph.",
+        "description": "One local→云 handoff job: its lifecycle + the snapshots bracketing it.\n\n``base_snapshot_id`` is the user's local files the cloud team ran on (the e3\ndiff base, under the source conversation's storage key); ``result_snapshot_id``\nis the team's output (under the hidden job conversation's key), NULL until the\nrun succeeds. ``job_conversation_id`` hosts the team's replayable graph.\n\n``status`` for the cloud-replica reclaim surface (§7.6): ``succeeded`` = 可合回\n(Diff/apply open); ``applied`` = 已合回; ``discarded`` = 已丢弃. Pending /\nrunning / failed are the run phase before that.",
         "properties": {
           "base_snapshot_id": {
             "title": "Base Snapshot Id",
@@ -6784,7 +7371,9 @@
               "pending",
               "running",
               "succeeded",
-              "failed"
+              "failed",
+              "applied",
+              "discarded"
             ],
             "title": "Status",
             "type": "string"
@@ -14813,7 +15402,7 @@
         "type": "object"
       },
       "WorkspaceOpError": {
-        "description": "A typed failure from a desktop-run local-workspace op (双模式工作区 P2).\n\n``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.\n``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same\nmessage as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``\n(str_replace). An unknown ``kind`` degrades to a generic I/O error.",
+        "description": "A typed failure from a desktop-run local-workspace op (双模式工作区 P2).\n\n``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.\n``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same\nmessage as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``\n(str_replace). An unknown ``kind`` degrades to a generic I/O error.\n\n``reason`` is an optional stable failure category for channels that already\nclassify on the desktop (e.g. external mount ``not_found`` / ``not_directory`` /\n``ambiguous``) so the model-facing tool error can keep the code, not only\na human message.",
         "properties": {
           "count": {
             "anyOf": [
@@ -14836,6 +15425,18 @@
             "maxLength": 64,
             "title": "Kind",
             "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "required": [
@@ -15176,6 +15777,746 @@
         "summary": "Updates Policy",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/account/conversations/read": {
+      "post": {
+        "description": "Owner-scoped deep transcript read (account ticket or access). Soft miss on 404.",
+        "operationId": "read_account_conversation_v1_account_conversations_read_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationReadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Account Conversation",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/conversations/search": {
+      "post": {
+        "description": "Owner-scoped conversation directory search (account ticket or access).",
+        "operationId": "search_account_conversations_v1_account_conversations_search_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Account Conversations",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/delete": {
+      "post": {
+        "description": "Soft-delete one memory note (no-op if missing).",
+        "operationId": "delete_account_memory_v1_account_memory_delete_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemoryDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryOkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Account Memory",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/list": {
+      "post": {
+        "description": "List memory note paths under one scope (global when ``scope`` is null).",
+        "operationId": "list_account_memory_v1_account_memory_list_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemoryScopeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Account Memory",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/load": {
+      "post": {
+        "description": "Load one memory note body; missing path → empty string (soft).",
+        "operationId": "load_account_memory_v1_account_memory_load_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemoryLoadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryLoadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Load Account Memory",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/project-scopes": {
+      "post": {
+        "description": "Folder ids that hold a semantic project memory layer.",
+        "operationId": "list_account_memory_project_scopes_v1_account_memory_project_scopes_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryProjectScopesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Account Memory Project Scopes",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/save": {
+      "post": {
+        "description": "Upsert one memory note (画像/导航/主题/…). Write failures raise HTTP errors.",
+        "operationId": "save_account_memory_v1_account_memory_save_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemorySaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryOkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Account Memory",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/rules/list": {
+      "post": {
+        "description": "Injectable user rules (``ai_maintained=false``) for turn ``<rules>`` assembly.",
+        "operationId": "list_account_user_rules_v1_account_rules_list_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountRulesListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRulesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Account User Rules",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/rules/remember": {
+      "post": {
+        "description": "Append an explicit user directive to the scope's user-rule doc (``remember``).",
+        "operationId": "remember_account_user_rule_v1_account_rules_remember_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountRememberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRememberResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remember Account User Rule",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/token": {
+      "post": {
+        "description": "Exchange the caller's cookie/Bearer access session for an account narrow ticket.",
+        "operationId": "mint_account_token_v1_account_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint Account Token",
+        "tags": [
+          "account"
         ]
       }
     },
@@ -21485,7 +22826,7 @@
     },
     "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}/apply": {
       "post": {
-        "description": "Apply a finished handoff's selected changes back to the local workspace (P2e / e3).\n\nThe last leg of the 本地→云 round trip: the user's per-file decisions (take cloud /\nkeep local, with the locally-observed hash) are replayed onto their machine over\nthe channel. Streams SSE: ``workspace_op_required`` (WRITE_BYTES / DELETE) the\nbound desktop fulfils, then a ``handoff_apply_done`` with the per-file outcomes.\nThe conflict gate is server-authoritative — a file that diverged locally since the\nbase is refused (status ``conflict``) unless its selection ``force``\\s it.\n\nBinding resolution matches turn routing (``resolve_local_binding``).\n404 if the conversation is not owned or the job is unknown / from another source;\n409 while the job has not succeeded yet; 422 when the conversation is not in local\nmode (nothing local to apply onto).",
+        "description": "Apply a finished handoff's selected changes back to the local workspace (P2e / e3).\n\nThe last leg of the 本地→云 round trip: the user's per-file decisions (take cloud /\nkeep local, with the locally-observed hash) are replayed onto their machine over\nthe channel. Streams SSE: ``workspace_op_required`` (WRITE_BYTES / DELETE) the\nbound desktop fulfils, then a ``handoff_apply_done`` with the per-file outcomes.\nThe conflict gate is server-authoritative — a file that diverged locally since the\nbase is refused (status ``conflict``) unless its selection ``force``\\s it.\n\nOn a successful apply pass the job becomes ``applied`` and the cloud host enters\nsoft-delete reclaim (§7.6) — not an immediate destroy.\n\nBinding resolution matches turn routing (``resolve_local_binding``).\n404 if the conversation is not owned or the job is unknown / from another source;\n409 while the job has not succeeded yet, or after applied/discarded; 422 when the\nconversation is not in local mode (nothing local to apply onto).",
         "operationId": "apply_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__apply_post",
         "parameters": [
           {
@@ -21654,6 +22995,90 @@
           }
         },
         "summary": "Get Handoff Job Diff",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}/discard": {
+      "post": {
+        "description": "Abandon a finished handoff's cloud replica without applying (§7.6 结束可收).\n\nMarks the job ``discarded`` and soft-deletes the hidden job host so retention\ncan reclaim it. Succeeded (未合回) and failed jobs may be discarded; already\ndiscarded is idempotent. 409 if the job is still running / pending, or already\napplied. Diff may still work until retention hard-purges snapshots.\n\nUses the request-scoped repos (not a detached session) so the status write and\nhost soft-delete share the same DB binding as list/get.",
+        "operationId": "discard_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__discard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffJobSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Handoff Job",
         "tags": [
           "conversations"
         ]
@@ -27716,6 +29141,72 @@
         ]
       }
     },
+    "/v1/folders/token": {
+      "post": {
+        "description": "Exchange the caller's cookie/Bearer access session for a folders narrow ticket.",
+        "operationId": "mint_folders_token_v1_folders_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FoldersTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint Folders Token",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
     "/v1/folders/{folder_id}": {
       "delete": {
         "operationId": "delete_folder_v1_folders__folder_id__delete",
@@ -27785,6 +29276,79 @@
           }
         },
         "summary": "Delete Folder",
+        "tags": [
+          "folders"
+        ]
+      },
+      "get": {
+        "description": "Owner-scoped folder fetch (desk binding / sidecar get-by-id).",
+        "operationId": "get_folder_v1_folders__folder_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Folder",
         "tags": [
           "folders"
         ]
@@ -27874,7 +29438,7 @@
     },
     "/v1/folders/{folder_id}/collaboration-timeline": {
       "get": {
-        "description": "项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 案卷引用条.\n\n零写路径。案卷快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区\n文件 API，不在此返回。",
+        "description": "项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.\n\n零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区\n文件 API，不在此返回。",
         "operationId": "get_collaboration_timeline_v1_folders__folder_id__collaboration_timeline_get",
         "parameters": [
           {

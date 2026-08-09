@@ -138,11 +138,73 @@ export function sessionRootAccessError(
   return null;
 }
 
+/** 主进程在飞 workspace op（底层未 settle 前仍计入，超时返回后亦然）。 */
+let mainInflightTotal = 0;
+const mainInflightByCid = new Map<string, number>();
+
+export type WorkspaceOpMainReq = {
+  rootId: string;
+  op: WorkspaceOpName | string;
+  timeoutMs?: number;
+  /** 观测用：对齐服务端 workspace.op_timeout / 活性挂起。 */
+  conversationId?: string;
+  requestId?: string;
+};
+
+function mainInflightSnapshot(conversationId?: string): {
+  inflight_total: number;
+  inflight_cid: number | null;
+  queue_depth: number;
+} {
+  const cid = conversationId?.trim() || "";
+  return {
+    inflight_total: mainInflightTotal,
+    inflight_cid: cid ? (mainInflightByCid.get(cid) ?? 0) : null,
+    // 桌面无真实排队闸：当前除自身外的在飞数 = 争用深度信号。
+    queue_depth: Math.max(0, mainInflightTotal - 1),
+  };
+}
+
+function enterMainInflight(conversationId?: string): {
+  inflight_total: number;
+  inflight_cid: number | null;
+  queue_depth: number;
+} {
+  const queueDepth = mainInflightTotal;
+  mainInflightTotal += 1;
+  const cid = conversationId?.trim() || "";
+  if (cid) {
+    mainInflightByCid.set(cid, (mainInflightByCid.get(cid) ?? 0) + 1);
+  }
+  return {
+    inflight_total: mainInflightTotal,
+    inflight_cid: cid ? (mainInflightByCid.get(cid) ?? 0) : null,
+    queue_depth: queueDepth,
+  };
+}
+
+function leaveMainInflight(conversationId?: string): void {
+  mainInflightTotal = Math.max(0, mainInflightTotal - 1);
+  const cid = conversationId?.trim() || "";
+  if (!cid) return;
+  const n = (mainInflightByCid.get(cid) ?? 1) - 1;
+  if (n <= 0) mainInflightByCid.delete(cid);
+  else mainInflightByCid.set(cid, n);
+}
+
+/** Test-only: reset main-process inflight counters. */
+export function resetWorkspaceOpMainInflightForTests(): void {
+  mainInflightTotal = 0;
+  mainInflightByCid.clear();
+}
+
 async function workspaceOp(req: {
   rootId: string;
   op: WorkspaceOpName;
   args: Record<string, unknown>;
   timeoutMs?: number;
+  conversationId?: string;
+  requestId?: string;
 }): Promise<WorkspaceOpResult> {
   return runWorkspaceOpMain(req, async () => {
     await ensureReady();
@@ -153,11 +215,12 @@ async function workspaceOp(req: {
 }
 
 /**
- * 主进程 workspaceOp 墙钟 + D3 观测（可单测：注入 `run` 模拟挂起 op）。
- * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封，底层 promise 可继续跑。
+ * 主进程 workspaceOp 墙钟 + 观测（可单测：注入 `run` 模拟挂起 op）。
+ * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封，底层 promise 可继续跑
+ *（底层未 settle 前仍计入 inflight，便于钉多对话争用）。
  */
 export async function runWorkspaceOpMain(
-  req: { rootId: string; op: WorkspaceOpName | string; timeoutMs?: number },
+  req: WorkspaceOpMainReq,
   run: () => Promise<WorkspaceOpResult>,
 ): Promise<WorkspaceOpResult> {
   const timeoutMs =
@@ -165,16 +228,26 @@ export async function runWorkspaceOpMain(
       ? req.timeoutMs
       : undefined;
   const t0 = Date.now();
+  const cid = req.conversationId?.trim() || undefined;
+  const rid = req.requestId?.trim() || undefined;
+  const enter = enterMainInflight(cid);
+  const corr = {
+    conversation_id: cid ?? null,
+    request_id: rid ?? null,
+  };
   logDesktop({
-    level: "info",
+    level: "debug",
     event: "workspace_op.main_begin",
     fields: {
       op: req.op,
       root_id: req.rootId,
       timeout_ms: timeoutMs ?? null,
+      ...corr,
+      ...enter,
     },
   });
-  const opPromise = run();
+  // 底层 settle 才 leave——超时先返回时 hung op 仍占 inflight。
+  const opPromise = run().finally(() => leaveMainInflight(cid));
   let result: WorkspaceOpResult;
   if (timeoutMs == null) {
     result = await opPromise;
@@ -193,6 +266,8 @@ export async function runWorkspaceOpMain(
                 root_id: req.rootId,
                 timeout_ms: timeoutMs,
                 duration_ms: Date.now() - t0,
+                ...corr,
+                ...mainInflightSnapshot(cid),
               },
             });
             resolve(
@@ -209,7 +284,7 @@ export async function runWorkspaceOpMain(
     }
   }
   logDesktop({
-    level: result.ok ? "info" : "warn",
+    level: result.ok ? "debug" : "warn",
     event: "workspace_op.main_end",
     fields: {
       op: req.op,
@@ -217,6 +292,8 @@ export async function runWorkspaceOpMain(
       timeout_ms: timeoutMs ?? null,
       duration_ms: Date.now() - t0,
       ok: result.ok,
+      ...corr,
+      ...mainInflightSnapshot(cid),
     },
   });
   return result;

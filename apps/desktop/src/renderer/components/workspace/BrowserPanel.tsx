@@ -601,9 +601,9 @@ export function BrowserPanel({
   return (
     <div className="flex h-full flex-col bg-card">
       {/* 页签条 */}
-      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border bg-muted/30 px-1.5 py-1">
+      <div className="flex h-10 min-h-0 shrink-0 items-center gap-0.5 overflow-hidden border-b border-border bg-muted/30 px-1.5 py-1">
         <HorizontalTabStrip
-          className="min-w-0 flex-1"
+          className="min-h-0 min-w-0 flex-1"
           aria-label="浏览器标签页"
         >
           {pages.map((page) => {

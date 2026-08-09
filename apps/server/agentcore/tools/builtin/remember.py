@@ -98,13 +98,24 @@ class RememberTool:
         folder_id = self.folder_id if scope_token == "project" and self.folder_id else None
 
         try:
-            async with async_session_factory() as session:
-                changed = await append_user_rule(
-                    DocumentRepository(session),
-                    context.user_id,
-                    folder_id=folder_id,
-                    content=content,
+            from agentcore.account.credentials import (
+                cloud_remember_rule,
+                get_account_credentials,
+            )
+
+            creds = get_account_credentials()
+            if creds is not None:
+                changed = await cloud_remember_rule(
+                    creds, content=content, folder_id=folder_id
                 )
+            else:
+                async with async_session_factory() as session:
+                    changed = await append_user_rule(
+                        DocumentRepository(session),
+                        context.user_id,
+                        folder_id=folder_id,
+                        content=content,
+                    )
         except Exception as e:  # noqa: BLE001 - a tool failure must not crash the turn
             logger.warning("memory.remember_failed", user_id=context.user_id, error=str(e))
             return ToolResult(

@@ -93,6 +93,37 @@ async def test_project_profile_needs_explore_gate(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_explore_reason_empty_keeps_gate_when_workspace_key_unknown(tmp_path):
+    """Degraded key (\"\") must not skip empty-profile explore gate."""
+    store = FileMemoryStore(tmp_path)
+    uid = str(uuid4())
+    folder = str(uuid4())
+    reason = await project_profile_explore_reason(
+        store, uid, folder, current_workspace_key=""
+    )
+    assert reason == "empty"
+
+
+@pytest.mark.asyncio
+async def test_explore_reason_no_false_rebind_when_workspace_key_unknown(tmp_path):
+    """Unknown live key must not forge rebind against a stored local key."""
+    store = FileMemoryStore(tmp_path)
+    uid = str(uuid4())
+    folder = str(uuid4())
+    await store.save(
+        uid,
+        CORE_MEMORY_FILE,
+        "## 技术栈与工具\n- Python\n",
+        scope=folder,
+    )
+    await record_explore_workspace_key(store, uid, folder, "local:root-a:")
+    reason = await project_profile_explore_reason(
+        store, uid, folder, current_workspace_key=""
+    )
+    assert reason is None
+
+
+@pytest.mark.asyncio
 async def test_explore_reason_rebind_when_workspace_key_mismatches(tmp_path):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
@@ -124,6 +155,106 @@ def test_build_workspace_key_local_and_cloud():
 
     assert build_workspace_key(folder_id="f1", binding=_B("rid", "sub")) == "local:rid:sub"
     assert build_workspace_key(folder_id="f1", binding=None) == "folder:f1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_workspace_key_injected_skips_db(monkeypatch):
+    """Injected bind → pure build_workspace_key; never opens session factory."""
+    from agentcore.memory.explore_profile import resolve_folder_workspace_key
+    from agentcore.workspace.locate import LocalBinding
+
+    def boom_factory():
+        raise AssertionError("async_session_factory must not run when binding_injected")
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        boom_factory,
+    )
+    key = await resolve_folder_workspace_key(
+        "fold-1",
+        binding=LocalBinding(root_id="root-a", subpath="app"),
+        binding_injected=True,
+    )
+    assert key == "local:root-a:app"
+    cloud = await resolve_folder_workspace_key(
+        "fold-1",
+        binding=None,
+        binding_injected=True,
+    )
+    assert cloud == "folder:fold-1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_workspace_key_non_uuid_skips_db(monkeypatch):
+    """Memory-scope folder_id (F1 / test_birth) → folder:<id>; never ::UUID query."""
+    from agentcore.memory.explore_profile import resolve_folder_workspace_key
+
+    def boom_factory():
+        raise AssertionError("async_session_factory must not run for non-UUID folder_id")
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        boom_factory,
+    )
+    assert await resolve_folder_workspace_key("F1") == "folder:F1"
+    assert await resolve_folder_workspace_key("test_birth") == "folder:test_birth"
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_workspace_key_data_error_degrades(monkeypatch):
+    """UUID-shaped id + driver DataError → None (no HARD raise; same as connectivity)."""
+    from sqlalchemy.exc import DBAPIError
+
+    from agentcore.memory.explore_profile import resolve_folder_workspace_key
+
+    class _FakeAsyncpgDataError(Exception):
+        """Stand-in for asyncpg.exceptions.DataError (name + module matter)."""
+
+        __module__ = "asyncpg.exceptions"
+
+    _FakeAsyncpgDataError.__name__ = "DataError"
+
+    class _BoomCM:
+        async def __aenter__(self):
+            raise DBAPIError(
+                "SELECT folders.id FROM folders WHERE folders.id = $1::UUID",
+                {"id": "00000000-0000-0000-0000-000000000001"},
+                _FakeAsyncpgDataError(
+                    "invalid input for query argument $1: invalid UUID"
+                ),
+            )
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _BoomCM(),
+    )
+    key = await resolve_folder_workspace_key("00000000-0000-0000-0000-000000000001")
+    assert key is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_workspace_key_db_unavailable_degrades(monkeypatch):
+    """PG down without injection → None (no HARD raise; no forged local key)."""
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE, DatabaseUnavailableError
+    from agentcore.memory.explore_profile import resolve_folder_workspace_key
+
+    class _BoomCM:
+        async def __aenter__(self):
+            raise DatabaseUnavailableError(DATABASE_UNAVAILABLE_MESSAGE)
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: _BoomCM(),
+    )
+    key = await resolve_folder_workspace_key("00000000-0000-0000-0000-000000000099")
+    assert key is None
+
 
 # --- 合并语义 -----------------------------------------------------------------
 
@@ -571,6 +702,9 @@ def test_compose_prompt_project_profile_empty_soft_hint():
     assert "不挡" in soft
     assert "</cold_start_explore>" not in soft
     assert "写盘不得出 AgentCore/" not in soft
+    # 软空：禁连续 file_list；硬幕非空不可跳过
+    assert "file_list" in soft
+    assert "不可当跳过" in soft or "≥2" in soft
     # Hard empty wins over soft empty.
     hard = compose_ceo_chat_prompt(
         "BASE",
@@ -582,6 +716,8 @@ def test_compose_prompt_project_profile_empty_soft_hint():
     assert "</cold_start_explore>" in hard
     assert "</project_profile_empty>" not in hard
     assert "写盘不得出 AgentCore/" in hard
+    assert "file_list" in hard
+    assert "不可跳过" in hard or "≥2" in hard
 
 
 @pytest.mark.asyncio

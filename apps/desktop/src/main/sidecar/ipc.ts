@@ -65,7 +65,7 @@ export function registerSidecarIpc(): void {
   ipcMain.handle(
     SIDECAR_CHANNELS.startTurn,
     async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
-      // permissionAxes 是对象载荷，勿列入 optionalStrings（否则合法请求被拒）。
+      // permissionAxes / folderId / localRootId / localSubpath（可为 null）是对象/可空载荷，勿列入 optionalStrings。
       assertSidecarShape(
         SIDECAR_CHANNELS.startTurn,
         req,
@@ -138,7 +138,7 @@ export function registerSidecarIpc(): void {
   ipcMain.handle(
     SIDECAR_CHANNELS.resume,
     async (e, req: SidecarResumeRequest): Promise<SidecarTurnResult> => {
-      // permissionAxes 是对象载荷，勿列入 optionalStrings（与 startTurn 同）。
+      // permissionAxes / folderId / localRootId / localSubpath 是对象/可空载荷，勿列入 optionalStrings（与 startTurn 同）。
       assertSidecarShape(
         SIDECAR_CHANNELS.resume,
         req,

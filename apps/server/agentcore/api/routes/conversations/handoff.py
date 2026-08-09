@@ -43,6 +43,7 @@ from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.handoff_apply import ApplySelection, apply_handoff
 from agentcore.workspace.handoff_diff import compute_handoff_diff
+from agentcore.workspace.handoff_reclaim import reclaim_after_apply
 from agentcore.workspace.locate import LocalBinding, build_workspace
 
 from ._helpers import _get_owned_conversation, _require_owned_conversation
@@ -50,6 +51,13 @@ from ._helpers import _get_owned_conversation, _require_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 logger = get_logger(__name__)
+
+# Terminal statuses where Diff may still be read while snapshots remain.
+_DIFFABLE = frozenset({"succeeded", "applied", "discarded"})
+# Open for apply / discard of a successful result.
+_APPLYABLE = frozenset({"succeeded"})
+# Open for discard (completed run, result wanted or not).
+_DISCARDABLE = frozenset({"succeeded", "failed"})
 
 
 async def _run_handoff(
@@ -239,7 +247,7 @@ async def get_handoff_job_diff(
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
         raise NotFoundError("交接任务不存在")
-    if job.status != "succeeded" or not job.result_snapshot_id:
+    if job.status not in _DIFFABLE or not job.result_snapshot_id:
         raise ConflictError("交接任务尚未产出结果")
     try:
         changes = await compute_handoff_diff(
@@ -283,6 +291,9 @@ async def _run_apply(
     fulfils). On success a ``handoff_apply_done`` carrying the per-file outcomes is
     emitted before the stream closes; a missing snapshot or any failure surfaces as
     an inline ``error`` event (never an unhandled crash on this detached task).
+
+    After a successful apply pass the job is marked ``applied`` and the cloud host
+    is soft-deleted (§7.6 结束可收) — soft-delete only; hard purge waits retention.
     """
     try:
         backend = build_workspace(
@@ -302,6 +313,20 @@ async def _run_apply(
             result_snapshot_id=result_snapshot_id,
             selections=selections,
         )
+        try:
+            await reclaim_after_apply(
+                job_id=job_id,
+                user_id=user_id,
+                job_conversation_id=job_conversation_id,
+            )
+        except Exception as e:
+            # Apply already landed locally — reclaim is best-effort; do not fail the
+            # SSE done event (client already has the merge). Retention will age later.
+            logger.warning(
+                "handoff.reclaim_after_apply_failed",
+                job_id=job_id,
+                error=str(e),
+            )
         sink.emit(
             handoff_apply_done(
                 job_id=job_id,
@@ -347,16 +372,23 @@ async def apply_handoff_job(
     The conflict gate is server-authoritative — a file that diverged locally since the
     base is refused (status ``conflict``) unless its selection ``force``\\s it.
 
+    On a successful apply pass the job becomes ``applied`` and the cloud host enters
+    soft-delete reclaim (§7.6) — not an immediate destroy.
+
     Binding resolution matches turn routing (``resolve_local_binding``).
     404 if the conversation is not owned or the job is unknown / from another source;
-    409 while the job has not succeeded yet; 422 when the conversation is not in local
-    mode (nothing local to apply onto).
+    409 while the job has not succeeded yet, or after applied/discarded; 422 when the
+    conversation is not in local mode (nothing local to apply onto).
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
         raise NotFoundError("交接任务不存在")
-    if job.status != "succeeded" or not job.result_snapshot_id:
+    if job.status == "applied":
+        raise ConflictError("交接任务已合回")
+    if job.status == "discarded":
+        raise ConflictError("交接任务已丢弃")
+    if job.status not in _APPLYABLE or not job.result_snapshot_id:
         raise ConflictError("交接任务尚未产出结果")
 
     binding = await resolve_local_binding(session, conv)
@@ -383,3 +415,57 @@ async def apply_handoff_job(
         )
     )
     return sse_response(sink, producer=task)
+
+
+@router.post(
+    "/{conversation_id}/handoff/jobs/{job_id}/discard",
+    response_model=HandoffJobSummary,
+)
+async def discard_handoff_job(
+    conversation_id: str,
+    job_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    job_repo: HandoffJobRepository = Depends(get_handoff_job_repo),
+):
+    """Abandon a finished handoff's cloud replica without applying (§7.6 结束可收).
+
+    Marks the job ``discarded`` and soft-deletes the hidden job host so retention
+    can reclaim it. Succeeded (未合回) and failed jobs may be discarded; already
+    discarded is idempotent. 409 if the job is still running / pending, or already
+    applied. Diff may still work until retention hard-purges snapshots.
+
+    Uses the request-scoped repos (not a detached session) so the status write and
+    host soft-delete share the same DB binding as list/get.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    job = await job_repo.get_by_id(job_id, user_id=user.user_id)
+    if job is None or job.source_conversation_id != conversation_id:
+        raise NotFoundError("交接任务不存在")
+    if job.status == "applied":
+        raise ConflictError("交接任务已合回，无法丢弃")
+    if job.status == "discarded":
+        return HandoffJobSummary.model_validate(job)
+    if job.status not in _DISCARDABLE:
+        raise ConflictError("交接任务尚未结束，无法丢弃")
+
+    host_id = job.job_conversation_id
+    ok = await job_repo.mark_discarded(job.id)
+    if not ok:
+        # Race: another request applied/discarded between the check and update.
+        job = await job_repo.get_by_id(job_id, user_id=user.user_id)
+        if job is None or job.source_conversation_id != conversation_id:
+            raise NotFoundError("交接任务不存在")
+        if job.status == "applied":
+            raise ConflictError("交接任务已合回，无法丢弃")
+        if job.status == "discarded":
+            return HandoffJobSummary.model_validate(job)
+        raise ConflictError("交接任务尚未结束，无法丢弃")
+
+    # Best-effort: host may already be gone / never persisted in thin seeds.
+    await conv_repo.soft_delete(host_id, user_id=user.user_id)
+
+    job = await job_repo.get_by_id(job_id, user_id=user.user_id)
+    if job is None:
+        raise NotFoundError("交接任务不存在")
+    return HandoffJobSummary.model_validate(job)

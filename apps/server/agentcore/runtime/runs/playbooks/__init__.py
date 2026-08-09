@@ -17,6 +17,7 @@ moment a "playbook" needs branching / conditionals / per-call structural choices
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from agentcore.runtime.runs.playbooks._common import (
@@ -49,16 +50,18 @@ PLAYBOOKS: dict[str, Playbook] = {
         name="code_audit",
         summary=(
             "【代码审计】A 宽扫→B 定案两阶段；强制字段/严重度/checklist/人审骨架；"
-            "报告落 AgentCore/文档/reviews/；多模块并行+主管速览；"
+            "报告落 AgentCore/文档/reviews/；扇出靠 CEO 填 modules（不从 scope 自动拆）；"
+            "多模块并行+主管速览；"
             "正交于 parallel_brief（摸底）/ research_report（成文审校）/ repair_code（按症状修）"
         ),
         slots=(
             "scope(必填,审计范围路径或子系统;亦接受 topic/target) / "
-            "modules(可选,≥2 短模块名/路径则并行审计+主管速览;单模块省略本槽;"
-            "禁把长作文当模块名,侧重进 focus) / "
+            "modules(可选;探路后≥2 可独立并行子面则填短模块名/路径→并行审计+主管速览,"
+            "少扇出常 2–4;单缝省略;playbook 不从 scope 自动拆;"
+            "禁把多目录拼进 scope 冒充多模块;禁把长作文当模块名,侧重进 focus) / "
             "focus(可选,侧重如 security|eng|流式刷新) / "
             "k(可选,每模块 Phase B 定案上限,默认 8) / "
-            "output_path(可选,单模块报告或汇总速览覆盖路径)"
+            "output_path(可选,单模块报告或汇总 code-audit-summary 覆盖路径)"
         ),
         build=code_audit,
     ),
@@ -216,18 +219,23 @@ def available_playbooks() -> str:
 
 
 def playbook_args_schema_description() -> str:
-    """``delegate.playbook_args`` schema description — required-slot cues from ``PLAYBOOKS``.
+    """``delegate.playbook_args`` schema description — required-slot names only.
 
-    Skill / Playbook docs point here for slots; always-on path skips consult for
-    build_website, so the tool schema must carry at least the required keys.
-    Full optional detail remains in each playbook's ``slots`` string (consult skill).
+    Always-on path skips consult for build_website, so schema must carry required
+    keys. Full optional slot prose lives in each playbook's ``slots`` (consult skill).
     """
-    required_cues = "；".join(f"{p.name}→{p.slots}" for p in PLAYBOOKS.values())
+    cues: list[str] = []
+    for p in PLAYBOOKS.values():
+        req = re.findall(r"(\w+)\(必填", p.slots)
+        if req:
+            cues.append(f"{p.name}→{'/'.join(req)}")
+    required_cues = "；".join(cues)
     return (
         "具名 playbook 槽位对象（与 playbook/playbook_id 联用；手写 tasks 时勿传）。"
         "建站必填 topic（简述；亦接受 purpose/brief/description；不接受旧键 site）、"
         "绿场必填 app——勿空对象。"
-        f"{required_cues}"
+        f"必填槽：{required_cues}。"
+        "可选槽与细节→consult_skill(team_orchestration_advanced)。"
     )
 
 

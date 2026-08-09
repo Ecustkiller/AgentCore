@@ -134,6 +134,10 @@ class EventType(StrEnum):
     # EPHEMERAL——传输态心跳（进入 waiting=true / 退出 waiting=false；长等 ≤15s 刷新计数）；
     # 不落 journal（reload 时等待已结束或由 live SSE 重挂）。
     COORDINATION_WAIT = "coordination_wait"
+    # 同 folder 写锁短等（决策④ / A′）：争用 workspace_lock 即将阻塞 → waiting=true；
+    # acquire 后 waiting=false。EPHEMERAL——桌面禁空「Thinking…」冒充；无争用不发射
+    # （不得静默等锁）。与同对话 FIFO turn_queued 正交。
+    WORKSPACE_LOCK_WAIT = "workspace_lock_wait"
     # 交付状态（能力闸门与交付诚实性）：delegate 批次收尾时把已有的完成度缺口 / artifacts
     # 对账 / degraded 信号汇成结构化交付对账（已交付文件 / 缺口 / 操作元数据），
     # 模板拼接、不调 LLM。DURABLE——落 journal；前端 fold 同 execution_id 保最新（反映

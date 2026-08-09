@@ -1,11 +1,14 @@
 import type { SidecarTarget } from "@/services/sidecarRouting";
-import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
+import {
+  setSidecarSpawnedHandler,
+  takeRecentSidecarFailure,
+} from "@/services/sidecarStatus";
 
 /**
  * 本地引擎（sidecar）会话级健康缓存 + 主动探活。
  *
- * 双模式工作区 §一.1 / 本地引擎毕业 · 探活增强。本地引擎毕业到**默认开**后，所有绑本机本地
- * 文件夹的对话都会走 sidecar——若用户机器环境起不来（杀软拦截 / 缺组件 / venv 损坏…），没有
+ * 双模式工作区 §一.1 · 探活增强。大众默认关（全云端过桥）；仅高级显式打开本地引擎后，绑本机
+ * 本地根的对话才会走 sidecar——若用户机器环境起不来（杀软拦截 / 缺组件 / venv 损坏…），没有
  * 探活则每个回合都要「试 startTurn → 启动失败 → 降级回云端（阶段二）→ 弹一次提示」，反复打扰。
  *
  * 本模块把「首轮失败」前移成一次**主动探活**，并按 `root + subpath` 记住结果（app 进程内、
@@ -27,7 +30,7 @@ import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 
 type Health = "ok" | "bad";
 
-type HealthEntry = { health: Health; at: number };
+type HealthEntry = { health: Health; at: number; detail: string | null };
 
 /** `bad` 缓存 TTL：过期后 `probeSidecar` 再探一次（修好环境 / 偶发失败可恢复）。 */
 export const BAD_HEALTH_TTL_MS = 5 * 60 * 1000;
@@ -63,9 +66,26 @@ export function getSidecarHealth(target: SidecarTarget): Health | "unknown" {
  * 标记某 sidecar 目标本会话「环境起不来」（探活失败、或阶段二降级的边缘失败）。
  *
  * 标记后 `probeSidecar` 对该根在 TTL 内命中 `bad` 缓存（`probed:false`）；过期后允许再探。
+ * `detail` 留在缓存里，命中续云时仍能打出可读诊断（不必等 TTL 再探）。
  */
-export function markSidecarUnhealthy(target: SidecarTarget): void {
-  health.set(keyOf(target), { health: "bad", at: nowMs() });
+export function markSidecarUnhealthy(
+  target: SidecarTarget,
+  detail: string | null = null,
+): void {
+  health.set(keyOf(target), { health: "bad", at: nowMs(), detail });
+}
+
+/**
+ * 主进程推送 `spawned` 时清掉该根下所有 `bad`（进程已起来，勿再等满 TTL 才放行）。
+ * 同 root 不同 subpath 一并清——拉起成功说明本机环境可用。
+ */
+export function noteSidecarSpawned(rootId: string): void {
+  const prefix = `${rootId}::`;
+  for (const [k, entry] of health) {
+    if (entry.health === "bad" && k.startsWith(prefix)) {
+      health.delete(k);
+    }
+  }
 }
 
 /** 清空全部健康结论与过桥 toast 节流（用户在设置里重新开启本地引擎时调）。 */
@@ -120,29 +140,43 @@ export async function probeSidecar(
   }
   if (cached?.health === "bad") {
     if (nowMs() - cached.at < BAD_HEALTH_TTL_MS) {
-      return { healthy: false, probed: false, detail: null };
+      // 命中缓存仍带回上次诊断，便于 toast / desktop.jsonl 对照 via=cloud。
+      return {
+        healthy: false,
+        probed: false,
+        detail: cached.detail,
+      };
     }
     health.delete(key);
   }
 
   if (typeof window === "undefined" || !window.sidecarApi) {
-    return { healthy: false, probed: false, detail: null };
+    // 非桌面：调用方应已因 isSidecarEnabled 拿不到 target。此处诚实不健康，勿假装可走。
+    return {
+      healthy: false,
+      probed: false,
+      detail: "当前环境无本地引擎",
+    };
   }
   try {
     await window.sidecarApi.probe({
       rootId: target.rootId,
       subpath: target.subpath,
     });
-    health.set(key, { health: "ok", at: nowMs() });
+    health.set(key, { health: "ok", at: nowMs(), detail: null });
     return { healthy: true, probed: true, detail: null };
   } catch {
-    health.set(key, { health: "bad", at: nowMs() });
     // 诊断由主进程 onStatus(error) 推入 sidecarStatus；取走它换出针对性提示（取不到则 null，
-    // 由调用方退回通用兜底文案）。
+    // 由调用方退回通用兜底文案）。写入 bad 缓存，TTL 内续云仍可带出同一 detail。
+    const detail = takeRecentSidecarFailure(target.rootId);
+    health.set(key, { health: "bad", at: nowMs(), detail });
     return {
       healthy: false,
       probed: true,
-      detail: takeRecentSidecarFailure(target.rootId),
+      detail,
     };
   }
 }
+
+// 进程真正拉起成功 → 提前作废该根 bad，避免 DEV 下偶发首探失败后整段静默走云。
+setSidecarSpawnedHandler(noteSidecarSpawned);

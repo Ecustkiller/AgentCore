@@ -214,7 +214,7 @@ async def first_round(
     # run_id 命名统一：首轮辩手改用语义后缀 `_r1_{side.key}`，与后续轮 continue_run 的
     # `_r{n}_{side.key}` 同构。形态专属拍（defense/rebuttal/thread/crux）追加 beat 后缀，
     # 避免同轮多拍撞 id。
-    # 检索预算：builder 只填全员统一默认；有案卷残搜 2 由 debater_task 写入 payload，
+    # 检索预算：builder 只填全员统一默认；有约定文档残搜 2 由 debater_task 写入 payload，
     # 此处在 apply 之后补写到 RunSpec（CEO/schema 不可配置该字段）。
     from agentcore.runtime.runs.retrieval_budget import parse_retrieval_budget
 

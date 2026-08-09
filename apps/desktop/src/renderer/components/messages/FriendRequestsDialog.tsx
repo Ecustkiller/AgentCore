@@ -19,6 +19,9 @@ interface Props {
 
 /**
  * 「新的朋友」申请箱：incoming 同意/拒绝；outgoing 只读展示。
+ *
+ * While open, re-pull on focus (and a light interval) so a peer accept is not
+ * stuck as「等待对方处理」when firehose delivery is missed (多 worker ⏳).
  */
 export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
   const incoming = useMessagingStore((s) => s.friendRequestsIncoming);
@@ -28,16 +31,29 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) void fetchFriendRequests();
-  }, [open, fetchFriendRequests]);
+    if (!open) return;
+    const refresh = () => {
+      void (async () => {
+        await fetchFriends();
+        await fetchFriendRequests();
+      })();
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    const interval = window.setInterval(refresh, 8_000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.clearInterval(interval);
+    };
+  }, [open, fetchFriendRequests, fetchFriends]);
 
   const handleAccept = async (id: string) => {
     setBusyId(id);
     try {
       await acceptFriendRequest(id);
       notifySuccess("已成为好友");
-      await fetchFriendRequests();
       await fetchFriends();
+      await fetchFriendRequests();
     } catch (err) {
       notifyError(err, messagingErrorMessage(err, "同意失败"));
     } finally {
@@ -58,6 +74,13 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
     }
   };
 
+  const pendingIncoming = incoming.filter(
+    (r) => r.status == null || r.status === "pending",
+  );
+  const pendingOutgoing = outgoing.filter(
+    (r) => r.status == null || r.status === "pending",
+  );
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-sm" aria-describedby={undefined}>
@@ -69,11 +92,11 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
           <p className="px-5 pb-1 pt-3 text-xs font-medium text-muted-foreground">
             收到的申请
           </p>
-          {incoming.length === 0 ? (
+          {pendingIncoming.length === 0 ? (
             <p className="px-5 py-4 text-sm text-muted-foreground">暂无申请</p>
           ) : (
             <ul className="pb-2">
-              {incoming.map((r) => {
+              {pendingIncoming.map((r) => {
                 const u = r.peer;
                 const label =
                   u?.display_name || u?.username || r.from_user_id.slice(0, 8);
@@ -123,13 +146,13 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
             </ul>
           )}
 
-          {outgoing.length > 0 && (
+          {pendingOutgoing.length > 0 && (
             <>
               <p className="border-t border-border px-5 pb-1 pt-3 text-xs font-medium text-muted-foreground">
                 发出的申请
               </p>
               <ul className="pb-2">
-                {outgoing.map((r) => {
+                {pendingOutgoing.map((r) => {
                   const u = r.peer;
                   const label =
                     u?.display_name || u?.username || r.to_user_id.slice(0, 8);

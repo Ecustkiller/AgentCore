@@ -59,10 +59,12 @@ P0/critical/high→高，P1/medium→中，P2/low→低，P3/info/observation→
 """.strip()
 
 
-# 产物路径权威：``code-audit-{task_id}-{slug}.md``。
+# 产物路径权威（约定文档命名公约）：``code-audit-{slot}-{slug}.md``；
+# slot = 0/1/2…（勿把 run id ``audit_0`` 叠进文件名）；汇总 ``code-audit-summary.md``。
 # 长模块作文只进 task【module】正文；禁止把整段描述当文件名再硬截断（易截断扩展名/括弧）。
 _SLUG_MAX = 40
 _SLUG_HEAD_SEPS = ("：", ":", "（", "(", "—", "–", " - ", " — ")
+_CODE_AUDIT_SUMMARY_ARTIFACT = f"{REVIEWS_DIR}/code-audit-summary.md"
 
 
 def _module_slug(hint: str) -> str:
@@ -77,9 +79,9 @@ def _module_slug(hint: str) -> str:
     return (s[:_SLUG_MAX] or "scope")
 
 
-def _report_artifact(task_id: str, hint: str) -> str:
-    """Stable short path: task id disambiguates; slug is human skim only."""
-    return f"{REVIEWS_DIR}/code-audit-{task_id}-{_module_slug(hint)}.md"
+def _report_artifact(slot: int, hint: str) -> str:
+    """Stable short path: numeric slot disambiguates; slug is human skim only."""
+    return f"{REVIEWS_DIR}/code-audit-{slot}-{_module_slug(hint)}.md"
 
 
 def _auditor_task_body(
@@ -95,18 +97,24 @@ def _auditor_task_body(
         artifact[:-3] + ".audit.json" if artifact.endswith(".md") else f"{artifact}.audit.json"
     )
     return (
-        f"对范围【{scope}】中的模块【{module}】做代码审计（只读调查，默认不改业务源码；"
-        f"报告落盘除外）。{focus_line}"
+        f"对范围【{scope}】中的模块【{module}】做代码审计（只读调查：默认不改业务源码；"
+        f"允许 file_write/str_replace 写入约定文档报告，除此以外勿改工程）。{focus_line}"
         f"{_AUDIT_DISCIPLINE.format(k=k)}"
         f"完整报告用 file_write 落到 `{artifact}`（Markdown）；"
         f"另交配套 `{json_artifact}`（findings：severity/verification/verdict/"
         f'evidence 等；evidence 例 `"a.ts:10"` 或 `["a.ts:10","b.ts:20"]`）。'
         "handoff 人审速览（可执行摘要，不代落盘）："
-        "summary 写共 N 条属实（只计「一、属实缺陷」）与报告路径；"
+        "【一次交接】先把 Markdown + .audit.json 终稿 file_write 定稿，再调用一次 handoff；"
+        "handoff 后勿再改同一报告并二次 handoff（除非主管续派）。"
+        "summary 写共 N 条属实（只计「一、属实缺陷」）与报告完整相对路径"
+        f"（须含约定文档前缀，如 `{artifact}`，禁裸 reviews/…）；禁空话「审计完成」。"
         "key_points 须覆盖属实缺陷——每条格式 `缺陷id|严重度|一句话`，"
-        "另含报告路径一条；空话或仅「审计完成」不够。"
+        "另含完整报告路径一条；空话不够。"
+        "本轮正文可短/空（详情在文件），但 summary + key_points 不得空泛。"
         "受 handoff 条数上限时中+优先，并写「另有 n 条见报告」。"
         "不得以 handoff 替代落盘（Markdown 与 .audit.json 仍须 file_write）。"
+        "【收口口径】向用户/主管交接时写「报告已落盘、未改业务源码」；"
+        "禁止「通过验收 / 全程只读 / 未使用写工具」。"
         "短命令优先：rg/grep、定点 read、git check-ignore、git ls-files；"
         "禁止把全量 typecheck/全量 pytest 超时当作中+缺陷证据。"
     )
@@ -157,7 +165,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     if not modules:
         label = clean_str(args.get("label")) or "main"
-        artifact = out_override or _report_artifact("audit_0", label)
+        artifact = out_override or _report_artifact(0, label)
         return [
             {
                 "id": "audit_0",
@@ -188,7 +196,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         tid = f"audit_{i}"
         # 路径用短 slug；完整 modules 文案只进 module_desc / deliverable 展示名。
         path_hint = parts[0] if not merged else f"merged-{i}"
-        artifact = _report_artifact(tid, path_hint)
+        artifact = _report_artifact(i, path_hint)
         module_desc = (
             f"合并模块：{'、'.join(f'【{p}】' for p in parts)}（须全部覆盖）"
             if merged
@@ -212,7 +220,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             body["playbook_note"] = fold_note
         tasks.append(body)
 
-    synth_path = out_override or f"{REVIEWS_DIR}/code-audit-汇总速览.md"
+    synth_path = out_override or _CODE_AUDIT_SUMMARY_ARTIFACT
     tasks.append(
         {
             "id": "audit_synth",
@@ -222,11 +230,15 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 f"汇总主题【{scope}】下各路代码审计报告，产出**跨模块人审速览**（一页内）："
                 "仍成立的中+（去重）/ 已撤销 / 待核实与未覆盖缺口；"
                 "N 只计各路「一、属实缺陷」合并去重后的条数。"
+                "速览须显著短于交接/合成上限，细节只进落盘文件、勿把分册全文塞进汇总或 handoff。"
                 "【合并硬规则】同模块多份报告必须去重；条目冲突标「冲突·未定案」且不得进 N；"
                 "某路称「模块/目录未检出」时，主管须对照 apps/* 核实后再写缺口。"
                 f"先 file_read 各审计员落盘报告，再 file_write 到 `{synth_path}`。"
+                "【一次交接】汇总定稿后再 handoff 一次；禁先交再改再交。"
                 "handoff 人审速览同审计员：key_points 覆盖属实（`缺陷id|严重度|一句话`）"
-                f"+ 汇总路径 `{synth_path}`；空话不够；不得以 handoff 代落盘。"
+                f"+ 汇总路径 `{synth_path}`；summary 须含结论+路径；"
+                "空话不够；不得以 handoff 代落盘。"
+                "【收口口径】写「汇总已落盘、未改业务源码」；禁「通过验收 / 全程只读」。"
                 "不要重做全量审计；不要套 research_report 审校环。"
                 "正向确认默认不写。"
             ),

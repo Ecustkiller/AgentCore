@@ -128,7 +128,7 @@ def _inject_witness_into_events(events: list) -> list:
 
 
 def _enrich_stage_card_positive() -> list:
-    """以 stage_card 向量为骨，补齐六环所需事件（四透镜 / ask / 案卷 file_read / 证人）。"""
+    """以 stage_card 向量为骨，补齐六环所需事件（四透镜 / ask / 约定文档 file_read / 证人）。"""
     base = list(_multi_agent_stage_card_start_debate())
     head = [
         message_start("m0", conversation_id="conv_golden"),
@@ -340,7 +340,7 @@ def test_ring6_na_when_roster_empty():
 
 
 def test_stage_card_vector_partial_pass_ring3_structure():
-    """stage_card 向量本身：环3 结构字段齐全；缺证人 → 环6 FAIL；缺案卷 → 环2/5 FAIL。"""
+    """stage_card 向量本身：环3 结构字段齐全；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
     bundle = sse_events_to_bundle(
         _multi_agent_stage_card_start_debate(),
         user_prompt=_TOPIC,
@@ -413,7 +413,7 @@ def test_cost_gap_without_message_costs():
 
 
 def test_search_budget_constant_aligned_with_mechanism():
-    """环4 硬判据常数须与引擎侧有案卷辩手预算同源（机制对齐，2026-07-20 定案）。"""
+    """环4 硬判据常数须与引擎侧有约定文档辩手预算同源（机制对齐，2026-07-20 定案）。"""
     from agentcore.runtime.runs.retrieval_budget import (
         DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER,
     )

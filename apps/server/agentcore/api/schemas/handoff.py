@@ -19,6 +19,10 @@ class HandoffJobSummary(BaseModel):
     diff base, under the source conversation's storage key); ``result_snapshot_id``
     is the team's output (under the hidden job conversation's key), NULL until the
     run succeeds. ``job_conversation_id`` hosts the team's replayable graph.
+
+    ``status`` for the cloud-replica reclaim surface (§7.6): ``succeeded`` = 可合回
+    (Diff/apply open); ``applied`` = 已合回; ``discarded`` = 已丢弃. Pending /
+    running / failed are the run phase before that.
     """
 
     id: str
@@ -27,7 +31,7 @@ class HandoffJobSummary(BaseModel):
     base_snapshot_id: str
     result_snapshot_id: str | None
     task: str
-    status: Literal["pending", "running", "succeeded", "failed"]
+    status: Literal["pending", "running", "succeeded", "failed", "applied", "discarded"]
     error: str | None
     created_at: datetime
     updated_at: datetime

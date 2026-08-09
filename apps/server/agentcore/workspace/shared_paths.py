@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcore.config import settings
+from agentcore.workspace._paths import path_has_non_internal_entries
 
 _WORKSPACES_SEGMENT = "workspaces"
 _SHARED_SEGMENT = "shared"
@@ -20,8 +21,8 @@ def shared_workspace_root_path(space_id: str) -> Path:
 
 
 def shared_workspace_has_entries(space_id: str) -> bool:
-    root = shared_workspace_root_path(space_id)
-    return root.is_dir() and any(root.iterdir())
+    """True when the shared space has content outside AgentCore internal zones."""
+    return path_has_non_internal_entries(shared_workspace_root_path(space_id))
 
 
 def shared_workspace_storage_key(space_id: str) -> str:

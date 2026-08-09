@@ -292,7 +292,7 @@ class RunSpec:
     # 检索预算（提案 A1）：本 run ``web_search``+``read_url`` 合计次数上限。
     # ``None`` = 未解析（手工构造的 spec / 测试）；经 ``build_run_plan`` /
     # ``apply_retrieval_budgets`` 后恒为 ``>=0`` 的 int（全员统一默认；CEO 不可配置）。
-    # 辩手有案卷等内部 writer 可在 apply 后覆写为窄例外常量。
+    # 辩手有约定文档等内部 writer 可在 apply 后覆写为窄例外常量。
     # Enforce 在 engine ``tool_exec``（有 run 身份处），与 LoopController 正交。
     retrieval_budget: int | None = None
     # Per-run web_search posture (结构化信号，禁止靠 prompt 触发)。

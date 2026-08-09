@@ -182,6 +182,7 @@ async def assemble_ceo_turn(
     project_nav_stale = False
     project_profile_empty_soft = False
     if memory_enabled and folder_id:
+        from agentcore.conversation.scratch import resolve_conversation_local_binding
         from agentcore.memory.explore_profile import (
             compute_workspace_explore_fingerprint,
             evaluate_explore_fingerprint_drift,
@@ -191,12 +192,27 @@ async def assemble_ceo_turn(
         )
 
         mem_store = run_mod.default_memory_store()
-        current_key = await resolve_folder_workspace_key(folder_id)
+        ctx = prepared.base_tool_context
+        injected_binding = None
+        if ctx.folder_binding_injected:
+            injected_binding = resolve_conversation_local_binding(
+                local_root_id=ctx.folder_local_root_id,
+                local_subpath=ctx.folder_local_subpath,
+            )
+        # Injected → pure key (no PG). Else DB only for UUID-shaped folder_id;
+        # non-UUID memory scope → folder:<id>; connectivity/DataError → None.
+        # Unknown key: still run empty / named gates; skip rebind ("" sentinel).
+        current_key = await resolve_folder_workspace_key(
+            folder_id,
+            binding=injected_binding,
+            binding_injected=ctx.folder_binding_injected,
+        )
+        key_for_gates = current_key if current_key is not None else ""
         explore_reason = await project_profile_explore_reason(
             mem_store,
             prepared.base_tool_context.user_id,
             folder_id,
-            current_workspace_key=current_key,
+            current_workspace_key=key_for_gates,
         )
         explore_reason, project_profile_empty_soft = resolve_hard_explore_reason(
             explore_reason,
@@ -212,7 +228,7 @@ async def assemble_ceo_turn(
                 live_fingerprint=live_fp,
                 current_workspace_key=current_key,
             )
-            if project_nav_stale:
+            if project_nav_stale and current_key:
                 from agentcore.memory.explore_refresh import (
                     build_workspace_explore_snapshot,
                     schedule_explore_refresh,
@@ -226,6 +242,11 @@ async def assemble_ceo_turn(
                     snapshot=snapshot,
                     live_fingerprint=live_fp,
                 )
+        # Precompute close-out key so update_project_profile does not re-hit PG.
+        if current_key:
+            upd = chat_tools.get_optional("update_project_profile")
+            if upd is not None and getattr(upd, "workspace_key", None) is None:
+                upd.workspace_key = current_key
     # Sink explore-pending into ToolContext so delegate can suppress structured
     # files_written inference / require ≥2 explore workers（prompt 块 delegate 读不到）。
     # Worker write_scope=explore_memory：写工具层拦出 AgentCore/ 与 文档/项目/。

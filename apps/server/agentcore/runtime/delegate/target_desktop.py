@@ -41,6 +41,14 @@ NO_TARGET_SCRATCH_GATE_MSG = (
 )
 
 
+class TargetDesktopError(Exception):
+    """Structured prepare-time failure (unknown folder / DB unreachable / …)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 @dataclass(frozen=True)
 class TargetFolderBinding:
     """Resolved Folder row bits needed to build a worker desk."""
@@ -116,25 +124,80 @@ async def load_target_folder_binding(
     folder_id: str,
     user_id: str,
 ) -> TargetFolderBinding | None:
-    """Owner-scoped Folder lookup → binding for ``build_workspace``."""
-    from agentcore.conversation.scratch import resolve_conversation_local_binding
-    from agentcore.db.base import async_session_factory
-    from agentcore.db.repositories import FolderRepository
+    """Owner-scoped Folder lookup → binding for ``build_workspace``.
 
-    async with async_session_factory() as session:
-        folder = await FolderRepository(session).get_by_id(folder_id, user_id=user_id)
-        if folder is None:
+    Returns ``None`` when the folder is missing or not owned (business miss).
+    Raises ``TargetDesktopError`` when PostgreSQL is unreachable **or** when
+    folders cloud credentials are bound but the cloud HTTP call fails — honest
+    failure, no local-cache fallback and no forged ``local_binding``.
+
+    With folders narrow-ticket credentials (sidecar), uses cloud ``GET /folders/{id}``
+    instead of the local FolderRepository.
+    """
+    from agentcore.conversation.scratch import resolve_conversation_local_binding
+    from agentcore.folders.credentials import (
+        FoldersCloudError,
+        cloud_get_folder,
+        get_folders_credentials,
+    )
+
+    creds = get_folders_credentials()
+    if creds is not None:
+        try:
+            summary = await cloud_get_folder(creds, folder_id=folder_id)
+        except FoldersCloudError as e:
+            logger.warning(
+                "delegate.target_folder_cloud_failed",
+                folder_id=folder_id,
+                user_id=user_id,
+                error=str(e),
+                code=e.code,
+            )
+            raise TargetDesktopError(f"无法绑定目标项目。{e.message}") from e
+        if summary is None:
             return None
         binding = resolve_conversation_local_binding(
-            local_root_id=folder.local_root_id,
-            local_subpath=folder.local_subpath,
-            label=folder.name or "workspace",
+            local_root_id=summary.get("local_root_id"),
+            local_subpath=summary.get("local_subpath"),
+            label=str(summary.get("name") or "workspace"),
         )
         return TargetFolderBinding(
-            folder_id=folder.id,
-            name=folder.name or "",
+            folder_id=str(summary.get("id") or folder_id),
+            name=str(summary.get("name") or ""),
             local_binding=binding,
         )
+
+    from agentcore.db.base import async_session_factory
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE, is_db_connectivity_error
+    from agentcore.db.repositories import FolderRepository
+
+    try:
+        async with async_session_factory() as session:
+            folder = await FolderRepository(session).get_by_id(folder_id, user_id=user_id)
+            if folder is None:
+                return None
+            binding = resolve_conversation_local_binding(
+                local_root_id=folder.local_root_id,
+                local_subpath=folder.local_subpath,
+                label=folder.name or "workspace",
+            )
+            return TargetFolderBinding(
+                folder_id=folder.id,
+                name=folder.name or "",
+                local_binding=binding,
+            )
+    except Exception as e:  # noqa: BLE001 — classify connectivity vs bubble
+        if is_db_connectivity_error(e):
+            logger.warning(
+                "delegate.target_folder_db_unreachable",
+                folder_id=folder_id,
+                user_id=user_id,
+                error=str(e),
+            )
+            raise TargetDesktopError(
+                f"无法绑定目标项目。{DATABASE_UNAVAILABLE_MESSAGE}"
+            ) from e
+        raise
 
 
 def build_target_backend(
@@ -242,14 +305,6 @@ class AppliedTargetDesktop:
     worker_tools: ToolRegistry
     system_prompt: str
     target_folder_id: str
-
-
-class TargetDesktopError(Exception):
-    """Structured prepare-time failure (unknown folder / …)."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
 
 
 async def apply_target_desktop(

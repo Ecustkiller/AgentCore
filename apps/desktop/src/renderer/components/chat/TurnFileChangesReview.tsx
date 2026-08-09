@@ -27,7 +27,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
  * 优先拉回合基线真 diff（A1+）；无基线 / 失败则降级工具参数预览（A1）。
  * 标签按路径相对回合初是否存在（新建/更新/删除），不按 file_write/str_replace 工具名。
  * 有 Local zip 基线即可恢复（不依赖 file_* 产物；P0c）。
- * 不做 apply / 三方冲突（与交接「查看并应用」刻意区分）。
+ * 不做 apply / 三方冲突（与交接「查看改动并合回本机」刻意区分）。
  *
  * 信息架构：折叠头 = 唯一身份条（路径 + 变更态 + 行统计）；展开体 = 纯 diff / 预览，不再套路径标题。
  */

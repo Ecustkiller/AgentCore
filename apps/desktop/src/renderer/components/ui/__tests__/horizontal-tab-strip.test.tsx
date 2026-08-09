@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   HorizontalTabStrip,
   SortableTab,
+  TAB_DRAG_THRESHOLD_PX,
   moveItem,
   useSortableTabIds,
 } from "../horizontal-tab-strip";
@@ -16,6 +17,15 @@ beforeAll(() => {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+
+  // jsdom 对 Pointer Capture / elementsFromPoint 支持不完整。
+  Element.prototype.setPointerCapture ??= function setPointerCapture() {};
+  Element.prototype.releasePointerCapture ??=
+    function releasePointerCapture() {};
+  Element.prototype.hasPointerCapture ??= function hasPointerCapture() {
+    return false;
+  };
+  document.elementsFromPoint ??= () => [];
 });
 
 describe("moveItem", () => {
@@ -60,9 +70,11 @@ describe("moveItem", () => {
 function SortableHarness({
   initial,
   onReorder,
+  onSelect,
 }: {
   initial: string[];
   onReorder?: (ids: string[]) => void;
+  onSelect?: (id: string) => void;
 }) {
   const [ids, setIds] = useState(initial);
   const { getItemProps, draggingId } = useSortableTabIds(ids, (next) => {
@@ -73,7 +85,9 @@ function SortableHarness({
     <HorizontalTabStrip aria-label="测试标签">
       {ids.map((id) => (
         <SortableTab key={id} id={id} getItemProps={getItemProps}>
-          <button type="button">{id}</button>
+          <button type="button" onClick={() => onSelect?.(id)}>
+            {id}
+          </button>
           <button type="button" data-no-tab-drag aria-label={`关闭 ${id}`}>
             x
           </button>
@@ -106,12 +120,60 @@ describe("HorizontalTabStrip / useSortableTabIds", () => {
       clientY: 10,
       pointerId: 1,
     });
-    fireEvent.pointerMove(close, {
+    fireEvent.pointerMove(document, {
       clientX: 40,
       clientY: 10,
       pointerId: 1,
     });
     expect(screen.getByTestId("drag-a").textContent).toBe("idle");
     expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it("activates via child button click without dragging", () => {
+    const onSelect = vi.fn();
+    render(<SortableHarness initial={["a", "b"]} onSelect={onSelect} />);
+    const tab = screen.getByRole("button", { name: "a" });
+    fireEvent.pointerDown(tab, {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+      pointerId: 1,
+    });
+    fireEvent.pointerUp(document, {
+      clientX: 10,
+      clientY: 10,
+      pointerId: 1,
+    });
+    fireEvent.click(tab);
+    expect(onSelect).toHaveBeenCalledWith("a");
+    expect(screen.getByTestId("drag-a").textContent).toBe("idle");
+  });
+
+  it("suppresses the trailing click after a drag past threshold", () => {
+    const onSelect = vi.fn();
+    const setCapture = vi.spyOn(Element.prototype, "setPointerCapture");
+    render(<SortableHarness initial={["a", "b"]} onSelect={onSelect} />);
+    const tab = screen.getByRole("button", { name: "a" });
+    fireEvent.pointerDown(tab, {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+      pointerId: 1,
+    });
+    fireEvent.pointerMove(document, {
+      clientX: 10 + TAB_DRAG_THRESHOLD_PX + 1,
+      clientY: 10,
+      pointerId: 1,
+    });
+    expect(screen.getByTestId("drag-a").textContent).toBe("dragging");
+    expect(setCapture).toHaveBeenCalled();
+    fireEvent.pointerUp(document, {
+      clientX: 10 + TAB_DRAG_THRESHOLD_PX + 1,
+      clientY: 10,
+      pointerId: 1,
+    });
+    fireEvent.click(tab);
+    expect(onSelect).not.toHaveBeenCalled();
+    setCapture.mockRestore();
   });
 });

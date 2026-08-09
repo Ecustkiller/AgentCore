@@ -4,7 +4,9 @@ A snapshot is a single zip of the workspace tree (regenerable junk pruned). Per
 ``storage_key`` a small ``manifest.json`` lists the snapshots, so listing is one
 object read and does not depend on per-object metadata (which differs across S3
 vendors). Manifest writes for one key are serialized by the app's folder-level
-lock (决策④), so the read-modify-write here needs no extra coordination for MVP.
+``workspace_lock`` at the snapshot sink (决策④ / A′: write serial; read/LLM/prepare
+may overlap) — callers of ``create_snapshot`` / restore must not nest another
+same-key hold. The read-modify-write here needs no extra coordination for MVP.
 """
 
 from __future__ import annotations

@@ -34,7 +34,6 @@ import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
-import { ComposerEngineViaChip } from "./ComposerEngineViaChip";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
@@ -82,7 +81,7 @@ export type TurnComposerVariant = "card" | "bar";
  * (placeholder, canvas follow hook, whether 后台云端 applies).
  *
  * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock:
- * `[＋]` · textarea · 语音 · 发送；工作区/Git/引擎/模型/权限/附件/后台云收进＋菜单。
+ * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/附件/后台云收进＋菜单。
  * default `card` keeps textarea-above-toolbar（居中草稿 + 画布指挥台），左簇摊开。
  * 离线态靠 {@link ComposerConnectionNotice} 与发送硬禁，不再用安静连接绿点。
  *
@@ -457,15 +456,12 @@ export function TurnComposer({
     ? charCount >= CHAR_COUNT_NEAR_LIMIT
     : charCount > 0;
 
+  const backgroundTipCore = bg
+    ? "已切到「后台云端」：发送后 AI 在云端拷贝上改，不会直接动本机文件夹；完成后需你点一下才合回本机"
+    : "切到「后台云端」：AI 在云端拷贝上改，不会直接动本机文件夹；完成后需你点一下才合回本机";
   const backgroundTip = toolsGateHint
-    ? `${TOOLS_GATE_HINT}。${
-        bg
-          ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-          : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
-      }`
-    : bg
-      ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
-      : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用";
+    ? `${TOOLS_GATE_HINT}。${backgroundTipCore}`
+    : backgroundTipCore;
 
   const backgroundToggle = showBackground ? (
     <ComposerBackgroundToggle
@@ -477,13 +473,13 @@ export function TurnComposer({
     />
   ) : null;
 
-  // 左簇顺序：工作区 · Git? · 过桥? · 网页无本机? · 模型 · 权限 · 附件 · 后台?
+  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · 附件 · 后台?
   // bar：整簇收进 ComposerPlusMenu（权限/附件/后台带文案）；card：底栏摊开（iconOnly）。
+  // 执行路径（sidecar / 云端）不在大众 Composer 产品面展示；高级开关在外观设置。
   const sessionChrome = (
     <>
       <ComposerWorkspaceChip conversationId={conversationId} />
       <ComposerGitStatusChip conversationId={conversationId} />
-      <ComposerEngineViaChip conversationId={conversationId} />
       <ComposerNoLocalChip />
       <ModelPicker disabled={isGenerating} />
       <PermissionAxesBadge disabled={isGenerating} iconOnly={!isBar} />

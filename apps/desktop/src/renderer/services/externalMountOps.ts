@@ -38,7 +38,10 @@ type ClientToolResult =
         namespace: string;
       };
     }
-  | { ok: false; error: { kind: string; detail: string } };
+  | {
+      ok: false;
+      error: { kind: string; detail: string; reason?: string };
+    };
 
 const WELL_KNOWN = new Set<GrantSessionWellKnown>([
   "desktop",
@@ -83,6 +86,7 @@ async function runExternalMount(
         error: {
           kind: "ExternalMountError",
           detail: "非桌面环境，无法挂载本机目录",
+          reason: "unavailable",
         },
       };
     }
@@ -91,6 +95,8 @@ async function runExternalMount(
       error: {
         kind: "ExternalMountError",
         detail: result.message,
+        // Keep structured grant/IPC reason (not_found / not_directory / …).
+        reason: result.reason,
       },
     };
   }

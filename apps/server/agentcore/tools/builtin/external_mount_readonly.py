@@ -30,6 +30,21 @@ EXTERNAL_MOUNT_READONLY_TOOL_NAME = "external_mount_readonly"
 
 _WELL_KNOWN = frozenset({"desktop", "downloads", "documents"})
 
+# Resolve-path categories from desktop grant (≠ timeout / channel dead).
+_RESOLVE_REASONS = frozenset({"not_found", "not_directory", "ambiguous", "invalid"})
+
+
+def format_external_mount_error(exc: ExternalMountError) -> str:
+    """Model-facing error: human detail + stable reason when present."""
+    detail = str(exc).strip() or "找不到该目录，无法挂载"
+    reason = (exc.reason or "").strip() or None
+    if not reason:
+        return detail
+    parts = [f"{detail}（reason={reason}）"]
+    if reason in _RESOLVE_REASONS:
+        parts.append("勿用相同参数盲重试。")
+    return " ".join(parts)
+
 
 class ExternalMountReadonlyTool:
     """Silently mount a user-local directory under ``external/<alias>/`` (readonly)."""
@@ -50,7 +65,9 @@ class ExternalMountReadonlyTool:
                 "`external/<别名>/…` 做 file_list / file_read。"
                 "参数：可选 path（本机绝对路径提示）与/或 well_known"
                 "（desktop|downloads|documents）+ target_name（子目录名）。"
-                "成功返回 namespace（无绝对路径）；找不到则明确失败——"
+                "成功返回 namespace（无绝对路径）；失败带稳定 reason"
+                "（not_found/not_directory/ambiguous 等）——"
+                "勿用相同参数盲重试；成功后勿乱猜其他 well_known。"
                 "【禁止】为此再发 grant_readonly_folder 决策卡；"
                 "【禁止】整理/写回用本工具（整理仍 ask_user + grant_organize_folder）；"
                 "只读挂载过 ≠ 已授写，同目录升整理须再确认。"
@@ -130,11 +147,13 @@ class ExternalMountReadonlyTool:
                 target_name=target_name,
             )
         except ExternalMountError as e:
+            reason = (e.reason or "").strip() or None
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
-                error=str(e) or "找不到该目录，无法挂载",
+                error=format_external_mount_error(e),
+                metadata={"code": reason} if reason else {},
             )
 
         root_id = str(value.get("root_id") or "").strip()

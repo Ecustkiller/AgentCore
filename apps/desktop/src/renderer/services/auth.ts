@@ -1,4 +1,5 @@
 import { logEvent } from "@/lib/log";
+import { clearSidecarAccountAuth } from "@/services/accountToken";
 import { clearAgentTownSession } from "@/services/agentTownSession";
 import {
   ApiError,
@@ -10,6 +11,7 @@ import {
   fetchWithTimeout,
   tryRefresh,
 } from "@/services/api";
+import { clearSidecarFoldersAuth } from "@/services/foldersToken";
 import { clearSidecarInference } from "@/services/inferenceToken";
 import { clearDefaultPermissionAxesCache } from "@/services/permissionAxes";
 import type { AuthUser } from "@/stores/auth";
@@ -69,6 +71,8 @@ export async function login(
   // Fresh session → drop any inference token cached for a previous user, so the
   // sidecar never mints under one user then bills another (token is user-scoped).
   clearSidecarInference();
+  clearSidecarFoldersAuth();
+  clearSidecarAccountAuth();
   clearDefaultPermissionAxesCache(); // 自主度同为按用户的设置，换人重取
   return user;
 }
@@ -88,6 +92,8 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
     }),
   );
   clearSidecarInference(); // fresh session → drop any prior-user token (see login)
+  clearSidecarFoldersAuth();
+  clearSidecarAccountAuth();
   clearDefaultPermissionAxesCache();
   return user;
 }
@@ -96,6 +102,8 @@ export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
   clearCsrfToken();
   clearSidecarInference(); // session ended → next login re-mints
+  clearSidecarFoldersAuth();
+  clearSidecarAccountAuth();
   clearDefaultPermissionAxesCache();
   void clearAgentTownSession();
 }
@@ -193,6 +201,8 @@ export async function deleteAvatar(): Promise<AuthUser> {
 export async function deleteAccount(password: string): Promise<void> {
   await api.delete("/v1/auth/me", { password });
   clearSidecarInference(); // account gone → drop any cached inference token
+  clearSidecarFoldersAuth();
+  clearSidecarAccountAuth();
   clearDefaultPermissionAxesCache();
 }
 
@@ -230,10 +240,10 @@ export async function diagnoseOutage(): Promise<string | null> {
     });
     const ready = (await res.json()) as ReadinessResponse;
     if (res.ok && ready.database) return null;
-    if (!ready.database) return "数据库不可用：请确认数据库已启动后重试。";
-    return "后端服务异常：请稍后重试。";
+    // Mass-user copy: no「请确认数据库已启动 / 请起后端」. Dev sees real cause in logs.
+    return "AgentCore 服务暂时不可用，请稍后重试。";
   } catch {
-    return "无法连接后端：请确认后端服务已启动后重试。";
+    return "连不上 AgentCore 服务，请稍后重试。";
   }
 }
 
@@ -270,6 +280,8 @@ async function devAutoLogin(): Promise<DevLoginResult> {
     }
     const user = toUser(body.user);
     clearSidecarInference();
+    clearSidecarFoldersAuth();
+    clearSidecarAccountAuth();
     clearDefaultPermissionAxesCache();
     return { kind: "ok", user };
   } catch (err) {
@@ -324,7 +336,8 @@ export async function bootstrapAuth(): Promise<BootstrapResult> {
     return { kind: "authenticated", user };
   } catch (err) {
     if (isOutage(err)) {
-      const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      const reason =
+        (await diagnoseOutage()) ?? "AgentCore 服务暂时不可用，请稍后重试。";
       logBootstrap("outage", { stage: "me", reason });
       return { kind: "unavailable", reason };
     }
@@ -349,13 +362,15 @@ export async function bootstrapAuth(): Promise<BootstrapResult> {
       return { kind: "authenticated", user };
     }
     if (outcome === "transient") {
-      const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      const reason =
+        (await diagnoseOutage()) ?? "AgentCore 服务暂时不可用，请稍后重试。";
       logBootstrap("outage", { stage: "refresh", reason });
       return { kind: "unavailable", reason };
     }
   } catch (err) {
     if (isOutage(err)) {
-      const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      const reason =
+        (await diagnoseOutage()) ?? "AgentCore 服务暂时不可用，请稍后重试。";
       logBootstrap("outage", { stage: "refresh", reason });
       return { kind: "unavailable", reason };
     }

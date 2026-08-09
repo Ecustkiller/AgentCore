@@ -21,11 +21,16 @@
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
  * `reject_not_richer` / `reject_generating` / `reject_active_has_more_after` 等）。
- * 本地工作区通道 L3（channel dead）：`workspace_op.received` / `workspace_op.dropped`
- *（turnPhase 门丢掉）/ `workspace_op.ipc_begin|end` / `workspace_op.aborted` /
- * `workspace_op.resolve`（`outcome`=ok|stale_404|fail）/ `sse.idle_stall`（泵空闲 60s）。
- * 主进程墙钟（对齐 desktop.jsonl）：`workspace_op.main_begin` / `workspace_op.main_end`
- *（`op` / `root_id` / `timeout_ms` / `duration_ms` / `ok`）/ `workspace_op.main_timeout`。
+ * 本地工作区通道 L3（channel dead / 多对话活性挂起）：`workspace_op.received` /
+ * `workspace_op.dropped`（turnPhase 门丢掉）/ `workspace_op.ipc_begin|end`（成功多为
+ * debug）/ `workspace_op.aborted`（超时 Abort · warn，含 `inflight_cid` /
+ * `inflight_total` / `queue_depth` / `duration_ms`）/ `workspace_op.fulfill_begin`
+ *（debug）/ `workspace_op.resolve`（`outcome`=ok|stale_404|fail）/
+ * `sse.idle_stall`（泵空闲 60s）。字段对齐服务端 `workspace.op_timeout`：
+ * `conversation_id` / `request_id` / `op`。
+ * 主进程墙钟（对齐 desktop.jsonl）：`workspace_op.main_begin`（debug）/
+ * `workspace_op.main_end`（成功 debug / 失败 warn）/ `workspace_op.main_timeout`
+ *（warn；含 inflight / queue_depth / duration；可选 conversation_id / request_id）。
  * 铁律：禁止把 token / 密码 / 消息正文放进 `fields`（只记可观测信号，不记机密与正文）。
  *
  * 与 ipc-contract（文件系统）/ sidecar-contract（本地引擎）/ updater-contract（自动更新）

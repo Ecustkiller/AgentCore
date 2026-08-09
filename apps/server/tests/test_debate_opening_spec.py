@@ -61,7 +61,7 @@ def test_frame_system_anchors_moderator_register():
 
 
 def test_frame_round_injects_research_dossier_agenda_hint():
-    """首轮定焦 brief：有案卷索引则注入，并提示可用汇总分歧作议程参考。"""
+    """首轮定焦 brief：有约定文档索引则注入，并提示可用汇总分歧作议程参考。"""
     sides = [
         DebateSide(key="pro", name="正方", stance="支持"),
         DebateSide(key="con", name="反方", stance="反对"),
@@ -80,7 +80,7 @@ def test_frame_round_injects_research_dossier_agenda_hint():
     focus, opening = asyncio.run(frame_round(cap, cfg, []))
     assert focus == "成本净影响"
     assert opening == "开场白占位"
-    assert "【工作区案卷索引·AgentCore/文档/research/】" in cap.user
+    assert "【工作区约定文档索引·AgentCore/文档/research/】" in cap.user
     assert SYNTHESIZER_FILE in cap.user
     assert "分歧作议程" in cap.user or "议程线索" in cap.user
 
@@ -98,4 +98,4 @@ def test_frame_round_omits_dossier_when_empty():
     )
     cap = _CaptureJson()
     asyncio.run(frame_round(cap, cfg, []))
-    assert "工作区案卷索引" not in cap.user
+    assert "工作区约定文档索引" not in cap.user

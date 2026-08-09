@@ -451,9 +451,9 @@ export function SidePanel() {
         className="absolute left-0 top-0 z-10 h-full w-1 min-w-0 cursor-col-resize rounded-none bg-transparent p-0 hover:bg-primary/40"
       />
 
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 pr-1">
+      <div className="flex h-11 min-h-0 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-2 py-1.5 pr-1">
         <HorizontalTabStrip
-          className="min-w-0 flex-1"
+          className="min-h-0 min-w-0 flex-1"
           contentClassName="gap-1"
           aria-label="侧面板标签"
         >

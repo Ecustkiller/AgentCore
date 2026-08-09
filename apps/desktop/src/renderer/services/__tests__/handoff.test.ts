@@ -4,9 +4,11 @@ import { performWorkspaceOp } from "@/services/workspaceOps";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyHandoffJob,
+  discardHandoffJob,
   dispatchHandoffJob,
   getHandoffDiff,
   readLocalShas,
+  resolveHandoffCardPhase,
 } from "../handoff";
 
 vi.mock("@/services/workspaceOps", () => ({
@@ -23,6 +25,7 @@ vi.mock("@/services/api", async (importOriginal) => {
 
 const performOp = vi.mocked(performWorkspaceOp);
 const apiGet = vi.mocked(api.get);
+const apiPost = vi.mocked(api.post);
 
 /** Build a one-shot SSE Response whose body yields the given events then closes. */
 function sseResponse(events: unknown[]): Response {
@@ -48,6 +51,7 @@ beforeEach(() => {
   performOp.mockReset();
   performOp.mockResolvedValue(undefined);
   apiGet.mockReset();
+  apiPost.mockReset();
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -323,5 +327,51 @@ describe("应用前重哈希冲突门 (review → fresh shas → apply body)", (
       local_sha: "drifted",
       force: true,
     });
+  });
+});
+
+describe("discardHandoffJob", () => {
+  it("POSTs discard path and maps discarded job", async () => {
+    apiPost.mockResolvedValueOnce({
+      id: "job-1",
+      source_conversation_id: "c1",
+      job_conversation_id: "job-conv-1",
+      base_snapshot_id: "snap-base",
+      result_snapshot_id: "snap-result",
+      task: "调研竞品",
+      status: "discarded",
+      error: null,
+      created_at: "2026-07-10T00:00:00Z",
+      updated_at: "2026-07-10T01:00:00Z",
+      finished_at: "2026-07-10T01:00:00Z",
+    });
+
+    const job = await discardHandoffJob("c1", "job-1");
+
+    expect(apiPost).toHaveBeenCalledWith(
+      "/v1/conversations/c1/handoff/jobs/job-1/discard",
+    );
+    expect(job.status).toBe("discarded");
+    expect(job.id).toBe("job-1");
+  });
+});
+
+describe("resolveHandoffCardPhase (§7.6)", () => {
+  it("prefers backend applied/discarded over mergedOptimistic", () => {
+    expect(resolveHandoffCardPhase({ status: "applied" }, false)).toBe(
+      "applied",
+    );
+    expect(resolveHandoffCardPhase({ status: "discarded" }, true)).toBe(
+      "discarded",
+    );
+  });
+
+  it("maps succeeded+optimistic → applied; bare succeeded → awaiting", () => {
+    expect(resolveHandoffCardPhase({ status: "succeeded" }, false)).toBe(
+      "awaiting",
+    );
+    expect(resolveHandoffCardPhase({ status: "succeeded" }, true)).toBe(
+      "applied",
+    );
   });
 });

@@ -153,8 +153,15 @@ interface MessagingState {
   closeProfile: () => void;
   fetchFriends: () => Promise<void>;
   fetchFriendRequests: () => Promise<void>;
-  /** Refresh request box (+ friends when an accept may have landed). */
-  applyFriendRequestEvent: () => void;
+  /**
+   * Firehose `friend_request`: optimistic inbox patch, then refetch.
+   * Optimistic remove matters when the dialog is already open and/or
+   * multi-worker firehose delivery is best-effort (消息IM.md §四 ⏳).
+   */
+  applyFriendRequestEvent: (event: {
+    action: "created" | "accepted" | "rejected" | "cancelled";
+    request: FriendRequest;
+  }) => void;
   loadMessages: (chatId: string) => Promise<void>;
   /** Fetch the next older page and prepend it (deduped, scroll position preserved by caller). */
   loadOlderMessages: (chatId: string) => Promise<void>;
@@ -243,9 +250,23 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   fetchFriendRequests: async () => {
     try {
       const box = await listFriendRequests();
+      // Pending-only inbox; also drop peers already in 通讯录 (stale outgoing
+      // after the other party accepted while this client missed firehose).
+      const friendIds = new Set(get().friends.map((f) => f.id));
+      const keepPending = (
+        rows: FriendRequest[],
+        peerOf: (r: FriendRequest) => string,
+      ) =>
+        rows.filter((r) => {
+          if (r.status != null && r.status !== "pending") return false;
+          return !friendIds.has(peerOf(r));
+        });
       set({
-        friendRequestsIncoming: box.incoming,
-        friendRequestsOutgoing: box.outgoing,
+        friendRequestsIncoming: keepPending(
+          box.incoming,
+          (r) => r.from_user_id,
+        ),
+        friendRequestsOutgoing: keepPending(box.outgoing, (r) => r.to_user_id),
         friendRequestsLoaded: true,
       });
     } catch {
@@ -253,9 +274,25 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
     }
   },
 
-  applyFriendRequestEvent: () => {
-    void get().fetchFriendRequests();
-    void get().fetchFriends();
+  applyFriendRequestEvent: (event) => {
+    const { action, request } = event;
+    const id = request?.id;
+    if (id && action !== "created") {
+      // accepted / rejected / cancelled → drop from pending inbox immediately.
+      set((s) => ({
+        friendRequestsIncoming: s.friendRequestsIncoming.filter(
+          (r) => r.id !== id,
+        ),
+        friendRequestsOutgoing: s.friendRequestsOutgoing.filter(
+          (r) => r.id !== id,
+        ),
+      }));
+    }
+    void (async () => {
+      // Friends first so fetchFriendRequests can drop stale outgoing vs 通讯录.
+      if (action === "accepted") await get().fetchFriends();
+      await get().fetchFriendRequests();
+    })();
   },
 
   fetchChats: async () => {

@@ -32,7 +32,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** 未暂存条目超过此数时，目录分组默认折叠。 */
 const COLLAPSE_DIRS_THRESHOLD = 30;
@@ -85,6 +85,51 @@ export function statusCharClass(ch: string): string {
     default:
       return "text-muted-foreground";
   }
+}
+
+/** 折叠行摘要顺序：常见改动类型优先。 */
+const STATUS_SUMMARY_ORDER = ["M", "A", "D", "R", "C", "U", "?"] as const;
+
+/** 按主状态字母聚合计数，供「未暂存 · N」旁摘要。 */
+export function statusSummaryParts(
+  entries: GitChangeEntry[],
+): { ch: string; n: number }[] {
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    const ch = primaryStatusChar(e.code);
+    counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  }
+  const parts: { ch: string; n: number }[] = [];
+  const seen = new Set<string>();
+  for (const ch of STATUS_SUMMARY_ORDER) {
+    const n = counts.get(ch);
+    if (n) {
+      parts.push({ ch, n });
+      seen.add(ch);
+    }
+  }
+  for (const [ch, n] of counts) {
+    if (!seen.has(ch)) parts.push({ ch, n });
+  }
+  return parts;
+}
+
+function StatusSummary({ entries }: { entries: GitChangeEntry[] }) {
+  const parts = statusSummaryParts(entries);
+  if (parts.length === 0) return null;
+  return (
+    <span className="ml-1.5 min-w-0 truncate tabular-nums text-xs">
+      {parts.map((p, i) => (
+        <span key={p.ch}>
+          {i > 0 ? <span className="text-muted-foreground/40"> · </span> : null}
+          <span className={statusCharClass(p.ch)}>
+            {p.ch}
+            {p.n}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /** 仅未暂存已跟踪文件可 discard（未跟踪需 clean，产品禁）。 */
@@ -519,8 +564,12 @@ export function GitChangesSection({
   const [busy, setBusy] = useState<"commit" | "push" | "pull" | "fetch" | null>(
     null,
   );
+  /** 默认收起；有暂存时展开（挂载已有暂存 / 0→>0）。 */
+  const [commitOpen, setCommitOpen] = useState(() => status.staged.length > 0);
   const [stagedOpen, setStagedOpen] = useState(true);
-  const [unstagedOpen, setUnstagedOpen] = useState(true);
+  const [unstagedOpen, setUnstagedOpen] = useState(false);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const prevHasStagedRef = useRef(status.staged.length > 0);
   const openFileTab = useSidePanelStore((s) => s.openFileTab);
 
   const openRepoFile = useCallback(
@@ -541,6 +590,18 @@ export function GitChangesSection({
   const discardableUnstaged = status.unstaged.filter((e) =>
     canDiscardChange(e, false),
   );
+  const stagedCount = status.staged.length;
+
+  useEffect(() => {
+    const prev = prevHasStagedRef.current;
+    if (!prev && hasStaged) setCommitOpen(true);
+    else if (prev && !hasStaged && !message.trim()) setCommitOpen(false);
+    prevHasStagedRef.current = hasStaged;
+  }, [hasStaged, message]);
+
+  useEffect(() => {
+    if (commitOpen) messageRef.current?.focus();
+  }, [commitOpen]);
 
   const onCommit = async () => {
     const msg = message.trim();
@@ -550,6 +611,7 @@ export function GitChangesSection({
     setBusy(null);
     if (ok) {
       setMessage("");
+      setCommitOpen(false);
       onRefresh();
     }
   };
@@ -676,36 +738,64 @@ export function GitChangesSection({
         </output>
       ) : null}
 
-      {/* Commit 置顶：对齐 VS Code / JetBrains SCM 工作流入口 */}
-      <div className="border-b border-border/40 p-1.5">
-        <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/20 focus-within:border-border">
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="提交说明"
-            rows={2}
-            className="min-h-0 resize-none rounded-none border-0 bg-transparent px-2 py-1.5 text-xs shadow-none focus-visible:ring-0"
-            disabled={busy !== null}
-            data-testid="git-commit-message"
-          />
-          <div className="flex items-center justify-end border-t border-border/30 px-1 py-0.5">
+      {/* Commit：仅有暂存时出现，避免空态全宽灰按钮占位 */}
+      {hasStaged ? (
+        <div className="border-b border-border/40 p-1.5">
+          {commitOpen ? (
+            <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/20 focus-within:border-border">
+              <Textarea
+                ref={messageRef}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="提交说明"
+                rows={2}
+                className="min-h-0 resize-none rounded-none border-0 bg-transparent px-2 py-1.5 text-xs shadow-none focus-visible:ring-0"
+                disabled={busy !== null}
+                data-testid="git-commit-message"
+              />
+              <div className="flex items-center justify-between border-t border-border/30 px-1 py-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground"
+                  disabled={busy !== null}
+                  onClick={() => setCommitOpen(false)}
+                  data-testid="git-commit-collapse"
+                >
+                  收起
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-6 px-2.5 text-xs"
+                  disabled={!message.trim() || busy !== null}
+                  onClick={() => void onCommit()}
+                  data-testid="git-commit-button"
+                >
+                  {busy === "commit" ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    "提交"
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
             <Button
               type="button"
+              variant="neutral"
               size="sm"
-              className="h-6 px-2.5 text-xs"
-              disabled={!hasStaged || !message.trim() || busy !== null}
-              onClick={() => void onCommit()}
-              data-testid="git-commit-button"
+              className="h-7 w-full border-border/50 text-xs"
+              disabled={busy !== null}
+              onClick={() => setCommitOpen(true)}
+              data-testid="git-commit-open"
             >
-              {busy === "commit" ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                "提交"
-              )}
+              {`提交 · ${stagedCount}`}
             </Button>
-          </div>
+          )}
         </div>
-      </div>
+      ) : null}
 
       {hasStaged ? (
         <div className="border-b border-border/40">
@@ -730,6 +820,7 @@ export function GitChangesSection({
               <span className="text-xs text-muted-foreground">
                 已暂存 · {status.staged.length}
               </span>
+              <StatusSummary entries={status.staged} />
             </button>
             <Button
               type="button"
@@ -780,6 +871,7 @@ export function GitChangesSection({
               <span className="text-xs text-muted-foreground">
                 未暂存 · {status.unstaged.length}
               </span>
+              <StatusSummary entries={status.unstaged} />
             </button>
             {discardableUnstaged.length > 0 ? (
               <Button

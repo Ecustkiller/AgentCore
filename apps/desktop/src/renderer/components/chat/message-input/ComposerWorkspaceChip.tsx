@@ -17,7 +17,9 @@ import {
   isLocalPickerFailureKind,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
+import { visibleDraftProjects } from "@/lib/draftWorkspaceProjects";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import {
   type FolderMeta,
@@ -26,7 +28,9 @@ import {
 import { type DraftWorkspaceIntent, useFoldersStore } from "@/stores/folders";
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
   Cloud,
   FolderOpen,
   HardDrive,
@@ -64,13 +68,7 @@ function BoundChip({ conversationId }: { conversationId: string }) {
     );
   }
 
-  const boundTitle = state.effective.viaProject
-    ? state.effective.isLocal
-      ? "本地工作区"
-      : "云端对话"
-    : state.effective.isLocal
-      ? "本机草稿"
-      : "云端对话";
+  const boundTitle = formatWorkspaceChipTitle(state.effective);
 
   return (
     <div className="relative shrink-0">
@@ -129,6 +127,7 @@ function DraftChip() {
   const navigate = useNavigate();
   const [pop, setPop] = useState(false);
   const [query, setQuery] = useState("");
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
   const [view, setView] = useState<"pick" | "create">("pick");
   const [pickerFailure, setPickerFailure] = useState<{
@@ -145,18 +144,42 @@ function DraftChip() {
     return isDesktop ? list : list.filter((f) => f.mode === "cloud");
   }, [grouped?.folders, isDesktop]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return folders;
-    return folders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [folders, query]);
+  const selectedFolderId = intent.kind === "project" ? intent.folderId : null;
+
+  const {
+    visible: projectRows,
+    matchCount,
+    canExpand,
+    hiddenCount,
+  } = useMemo(
+    () =>
+      visibleDraftProjects({
+        folders,
+        conversations: grouped?.conversations ?? [],
+        query,
+        expanded: projectsExpanded,
+        selectedFolderId,
+      }),
+    [
+      folders,
+      grouped?.conversations,
+      query,
+      projectsExpanded,
+      selectedFolderId,
+    ],
+  );
 
   const { icon, text } = draftLabel(intent, folders);
 
+  const resetPickChrome = () => {
+    setQuery("");
+    setProjectsExpanded(false);
+    setView("pick");
+  };
+
   const closePick = () => {
     setPop(false);
-    setQuery("");
-    setView("pick");
+    resetPickChrome();
   };
 
   const openLocalProject = () => {
@@ -205,10 +228,7 @@ function DraftChip() {
         open={pop}
         onOpenChange={(o) => {
           setPop(o);
-          if (!o) {
-            setQuery("");
-            setView("pick");
-          }
+          if (!o) resetPickChrome();
         }}
       >
         <PopoverTrigger asChild>
@@ -262,7 +282,7 @@ function DraftChip() {
                 </div>
                 {!isDesktop ? (
                   <div className="text-xs text-muted-foreground">
-                    Web 默认云端草稿；仅云项目可选
+                    仅支持云端
                   </div>
                 ) : null}
               </div>
@@ -270,7 +290,7 @@ function DraftChip() {
                 <DraftRow
                   icon={<Cloud size={14} />}
                   label="快速对话"
-                  hint="云端草稿（默认）"
+                  hint="云端临时空间（默认）"
                   selected={intent.kind === "quick_cloud"}
                   onClick={pickQuickCloud}
                 />
@@ -278,7 +298,7 @@ function DraftChip() {
                   <DraftRow
                     icon={<HardDrive size={14} />}
                     label="本机草稿"
-                    hint="落本机容器；本机执行更快，推理需联网"
+                    hint="文件落本机默认目录，不建项目"
                     selected={intent.kind === "quick_local"}
                     onClick={pickQuickLocal}
                   />
@@ -287,10 +307,16 @@ function DraftChip() {
                   <DraftRow
                     icon={<FolderOpen size={14} />}
                     label="打开本地项目…"
-                    hint="选本机文件夹 · 新会话（可发现入口）"
+                    hint="选本机文件夹，开新会话"
                     onClick={openLocalProject}
                   />
                 ) : null}
+                <DraftRow
+                  icon={<Plus size={14} />}
+                  label="新建项目…"
+                  hint={isDesktop ? "空白项目，或从文件夹建档" : "云端空白项目"}
+                  onClick={() => setView("create")}
+                />
 
                 <div className="my-1 border-t border-border" />
                 <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
@@ -306,7 +332,7 @@ function DraftChip() {
                     inputClassName="text-xs"
                   />
                 </div>
-                {filtered.map((f) => (
+                {projectRows.map((f) => (
                   <DraftRow
                     key={f.id}
                     icon={<FolderOpen size={14} />}
@@ -318,18 +344,25 @@ function DraftChip() {
                     onClick={() => pickProject(f.id)}
                   />
                 ))}
-                {filtered.length === 0 && (
+                {matchCount === 0 && (
                   <p className="px-2.5 py-2 text-xs text-muted-foreground">
                     {query.trim() ? "没有匹配的项目" : "还没有项目"}
                   </p>
                 )}
-
-                <div className="my-1 border-t border-border" />
-                <DraftRow
-                  icon={<Plus size={14} />}
-                  label="新建项目…"
-                  onClick={() => setView("create")}
-                />
+                {canExpand && !projectsExpanded && hiddenCount > 0 ? (
+                  <DraftRow
+                    icon={<ChevronDown size={14} />}
+                    label={`查看全部（${matchCount}）`}
+                    onClick={() => setProjectsExpanded(true)}
+                  />
+                ) : null}
+                {canExpand && projectsExpanded ? (
+                  <DraftRow
+                    icon={<ChevronUp size={14} />}
+                    label="收起"
+                    onClick={() => setProjectsExpanded(false)}
+                  />
+                ) : null}
               </div>
             </>
           )}

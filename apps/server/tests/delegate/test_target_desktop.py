@@ -14,6 +14,7 @@ from agentcore.runtime.delegate.target_desktop import (
     apply_target_desktop,
     effective_target_folder_id,
     gate_bare_chat_requires_target,
+    load_target_folder_binding,
 )
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.tools.protocol import ToolContext
@@ -216,6 +217,155 @@ async def test_apply_target_desktop_unknown_folder_errors():
             sink=MagicMock(),
             local_root_claims=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_load_target_folder_binding_db_unreachable_raises_structured(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """PG down → TargetDesktopError with stable service-unavailable copy; never forge local_binding."""
+    from sqlalchemy.exc import OperationalError
+
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE
+
+    cause = OSError(1225, "远程计算机拒绝网络连接")
+    cause.winerror = 1225  # type: ignore[attr-defined]
+    err = OperationalError("SELECT 1", {}, cause)
+    err.__cause__ = cause
+
+    class _CM:
+        async def __aenter__(self) -> object:
+            raise err
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    import agentcore.db.base as db_base
+
+    monkeypatch.setattr(db_base, "async_session_factory", lambda: _CM())
+
+    with pytest.raises(TargetDesktopError, match="服务暂时不可用") as caught:
+        await load_target_folder_binding(folder_id="any-folder", user_id="u1")
+
+    msg = caught.value.message
+    assert DATABASE_UNAVAILABLE_MESSAGE in msg
+    assert "请确认数据库" not in msg
+    assert "WinError" not in msg
+    assert "1225" not in msg
+
+
+@pytest.mark.asyncio
+async def test_apply_target_desktop_db_unreachable_surfaces_structured_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """delegate 换桌: connectivity failure is structured, not bare OS connection code."""
+    from sqlalchemy.exc import OperationalError
+
+    from agentcore.db.errors import DATABASE_UNAVAILABLE_MESSAGE
+
+    err = OperationalError("SELECT 1", {}, ConnectionRefusedError("refused"))
+
+    class _CM:
+        async def __aenter__(self) -> object:
+            raise err
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    import agentcore.db.base as db_base
+
+    monkeypatch.setattr(db_base, "async_session_factory", lambda: _CM())
+
+    ctx = ToolContext(
+        execution_id="e",
+        run_id="r",
+        agent_id="a",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c1",
+    )
+    with pytest.raises(TargetDesktopError) as caught:
+        await apply_target_desktop(
+            target_folder_id="cloud-or-local",
+            session_folder_id="birth",
+            env_system_prompt="P",
+            base_tool_context=ctx,
+            worker_tools=ToolRegistry(),
+            sink=MagicMock(),
+            local_root_claims=None,
+        )
+
+    assert DATABASE_UNAVAILABLE_MESSAGE in caught.value.message
+    assert "不存在或无权" not in caught.value.message
+
+@pytest.mark.asyncio
+async def test_load_target_folder_binding_cloud_folder_has_no_local_binding(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cloud row → local_binding is None (must not invent a local desk)."""
+    folder = SimpleNamespace(
+        id="cloud-1",
+        name="Cloud Desk",
+        local_root_id=None,
+        local_subpath=None,
+    )
+
+    class _Repo:
+        def __init__(self, session: object) -> None:
+            del session
+
+        async def get_by_id(self, folder_id: str, *, user_id: str) -> object:
+            assert folder_id == "cloud-1"
+            assert user_id == "u1"
+            return folder
+
+    class _CM:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    import agentcore.db.base as db_base
+    import agentcore.db.repositories as repos
+
+    monkeypatch.setattr(db_base, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(repos, "FolderRepository", _Repo)
+
+    binding = await load_target_folder_binding(folder_id="cloud-1", user_id="u1")
+    assert binding is not None
+    assert binding.folder_id == "cloud-1"
+    assert binding.local_binding is None
+
+
+@pytest.mark.asyncio
+async def test_load_target_folder_binding_missing_stays_none(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Business miss stays None (apply_target_desktop → 不存在或无权), not DB copy."""
+
+    class _Repo:
+        def __init__(self, session: object) -> None:
+            del session
+
+        async def get_by_id(self, folder_id: str, *, user_id: str) -> None:
+            del folder_id, user_id
+            return None
+
+    class _CM:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    import agentcore.db.base as db_base
+    import agentcore.db.repositories as repos
+
+    monkeypatch.setattr(db_base, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(repos, "FolderRepository", _Repo)
+
+    assert await load_target_folder_binding(folder_id="missing", user_id="u1") is None
 
 
 @pytest.mark.asyncio

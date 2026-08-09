@@ -36,6 +36,9 @@ async def test_handoff_requires_auth(client):
             json={"selections": []},
         )
     ).status_code == 401
+    assert (
+        await client.post(f"/v1/conversations/{cid}/handoff/jobs/{cid}/discard")
+    ).status_code == 401
 
 
 async def test_dispatch_rejects_cloud_conversation(client):
@@ -154,3 +157,74 @@ async def test_apply_cloud_conversation_is_422(client, session_factory):
         json={"selections": []},
     )
     assert r.status_code == 422, r.text
+
+
+async def test_discard_succeeded_job_exposes_discarded_on_list_get(client, session_factory):
+    """§7.6 discard: succeeded → discarded; list/get surface the new status."""
+    user_id = await register_and_login(client, "hjdiscard1")
+    conv = await _new_conversation(client, "mine")
+    job_id = await _seed_job(
+        session_factory, user_id=user_id, source_conversation_id=conv, succeeded=True
+    )
+
+    r = await client.get(f"/v1/conversations/{conv}/handoff/jobs/{job_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "succeeded"
+
+    r = await client.post(f"/v1/conversations/{conv}/handoff/jobs/{job_id}/discard")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "discarded"
+    assert r.json()["id"] == job_id
+
+    # Idempotent re-discard.
+    r = await client.post(f"/v1/conversations/{conv}/handoff/jobs/{job_id}/discard")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "discarded"
+
+    r = await client.get(f"/v1/conversations/{conv}/handoff/jobs")
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 1
+    assert r.json()["data"][0]["status"] == "discarded"
+
+    r = await client.get(f"/v1/conversations/{conv}/handoff/jobs/{job_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "discarded"
+
+
+async def test_discard_pending_is_409_and_applied_is_409(client, session_factory):
+    user_id = await register_and_login(client, "hjdiscard409")
+    conv = await _new_conversation(client, "mine")
+
+    pending_id = await _seed_job(session_factory, user_id=user_id, source_conversation_id=conv)
+    r = await client.post(f"/v1/conversations/{conv}/handoff/jobs/{pending_id}/discard")
+    assert r.status_code == 409, r.text
+
+    applied_id = await _seed_job(
+        session_factory, user_id=user_id, source_conversation_id=conv, succeeded=True
+    )
+    async with session_factory() as session:
+        assert await HandoffJobRepository(session).mark_applied(applied_id)
+
+    r = await client.get(f"/v1/conversations/{conv}/handoff/jobs/{applied_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "applied"
+
+    r = await client.post(f"/v1/conversations/{conv}/handoff/jobs/{applied_id}/discard")
+    assert r.status_code == 409, r.text
+
+
+async def test_discard_unknown_and_idor(client, new_client, session_factory):
+    user_id = await register_and_login(client, "hjdiscardowner")
+    conv = await _new_conversation(client, "mine")
+    job_id = await _seed_job(
+        session_factory, user_id=user_id, source_conversation_id=conv, succeeded=True
+    )
+
+    assert (
+        await client.post(f"/v1/conversations/{conv}/handoff/jobs/{new_id()}/discard")
+    ).status_code == 404
+
+    async with new_client() as other:
+        await register_and_login(other, "hjdiscardintruder")
+        r = await other.post(f"/v1/conversations/{conv}/handoff/jobs/{job_id}/discard")
+        assert r.status_code == 404, r.text

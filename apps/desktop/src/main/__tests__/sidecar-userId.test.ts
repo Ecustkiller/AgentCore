@@ -129,4 +129,230 @@ describe("SidecarManager userId passthrough", () => {
     expect(init?.params?.userId).toBe("local");
     expect(start?.params?.userId).toBeUndefined();
   });
+
+  it("startTurn RPC always includes folderId (project id or null bare chat)", async () => {
+    const withFolder = capturingTransport();
+    const managerA = new SidecarManager(() => withFolder.transport);
+    await managerA.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c3",
+        rootId: "r3",
+        turnId: "turn-3",
+        traceId: "c".repeat(32),
+        userMessageId: "u3",
+        userMessage: "hello",
+        folderId: "fold-abc",
+      },
+      "/tmp/ws",
+    );
+    const startA = withFolder.sent.find((m) => m.method === "startTurn");
+    expect(startA?.params?.folderId).toBe("fold-abc");
+
+    const bare = capturingTransport();
+    const managerB = new SidecarManager(() => bare.transport);
+    await managerB.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c4",
+        rootId: "r4",
+        turnId: "turn-4",
+        traceId: "d".repeat(32),
+        userMessageId: "u4",
+        userMessage: "hello",
+        folderId: null,
+      },
+      "/tmp/ws",
+    );
+    const startB = bare.sent.find((m) => m.method === "startTurn");
+    expect(startB?.params).toHaveProperty("folderId");
+    expect(startB?.params?.folderId).toBeNull();
+  });
+
+  it("startTurn RPC always includes localRootId/localSubpath (binding or null)", async () => {
+    const withBinding = capturingTransport();
+    const managerA = new SidecarManager(() => withBinding.transport);
+    await managerA.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c5",
+        rootId: "r5",
+        subpath: "apps/web",
+        turnId: "turn-5",
+        traceId: "e".repeat(32),
+        userMessageId: "u5",
+        userMessage: "hello",
+        folderId: "fold-local",
+        localRootId: "r5",
+        localSubpath: "apps/web",
+      },
+      "/tmp/ws",
+    );
+    const startA = withBinding.sent.find((m) => m.method === "startTurn");
+    expect(startA?.params?.localRootId).toBe("r5");
+    expect(startA?.params?.localSubpath).toBe("apps/web");
+    // Routing keys stay off the stdio params.
+    expect(startA?.params).not.toHaveProperty("rootId");
+    expect(startA?.params).not.toHaveProperty("subpath");
+
+    const bare = capturingTransport();
+    const managerB = new SidecarManager(() => bare.transport);
+    await managerB.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c6",
+        rootId: "r6",
+        turnId: "turn-6",
+        traceId: "f".repeat(32),
+        userMessageId: "u6",
+        userMessage: "hello",
+        folderId: null,
+      },
+      "/tmp/ws",
+    );
+    const startB = bare.sent.find((m) => m.method === "startTurn");
+    expect(startB?.params).toHaveProperty("localRootId");
+    expect(startB?.params?.localRootId).toBeNull();
+    expect(startB?.params).toHaveProperty("localSubpath");
+    expect(startB?.params?.localSubpath).toBeNull();
+  });
+
+  it("startTurn RPC includes foldersAuth when provided", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-folders",
+        rootId: "r-folders",
+        turnId: "turn-folders",
+        traceId: "1".repeat(32),
+        userMessageId: "u-folders",
+        userMessage: "hello",
+        foldersAuth: {
+          baseUrl: "https://api.test.example",
+          apiKey: "folders-jwt",
+        },
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params?.foldersAuth).toEqual({
+      baseUrl: "https://api.test.example",
+      apiKey: "folders-jwt",
+    });
+  });
+
+  it("startTurn RPC omits foldersAuth when mint absent", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-no-folders",
+        rootId: "r-no-folders",
+        turnId: "turn-no-folders",
+        traceId: "2".repeat(32),
+        userMessageId: "u-no-folders",
+        userMessage: "hello",
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params).not.toHaveProperty("foldersAuth");
+  });
+
+  it("startTurn RPC includes accountAuth when provided", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-account",
+        rootId: "r-account",
+        turnId: "turn-account",
+        traceId: "a".repeat(32),
+        userMessageId: "u-account",
+        userMessage: "hello",
+        accountAuth: {
+          baseUrl: "https://api.test.example/v1/account",
+          apiKey: "account-jwt",
+        },
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params?.accountAuth).toEqual({
+      baseUrl: "https://api.test.example/v1/account",
+      apiKey: "account-jwt",
+    });
+  });
+
+  it("startTurn RPC omits accountAuth when mint absent", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-no-account",
+        rootId: "r-no-account",
+        turnId: "turn-no-account",
+        traceId: "b".repeat(32),
+        userMessageId: "u-no-account",
+        userMessage: "hello",
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params).not.toHaveProperty("accountAuth");
+  });
+
+  it("resume RPC always includes folderId (project id or null bare chat)", async () => {
+    const withFolder = capturingTransport();
+    const managerA = new SidecarManager(() => withFolder.transport);
+    await managerA.resume(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-resume",
+        rootId: "r-resume",
+        messageId: "m-asst",
+        traceId: "3".repeat(32),
+        decision: "continue",
+        note: "",
+        folderId: "fold-resume",
+      },
+      "/tmp/ws",
+      undefined,
+    );
+    const resumeA = withFolder.sent.find((m) => m.method === "resume");
+    expect(resumeA?.params?.folderId).toBe("fold-resume");
+
+    const bare = capturingTransport();
+    const managerB = new SidecarManager(() => bare.transport);
+    await managerB.resume(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-resume-bare",
+        rootId: "r-resume-bare",
+        messageId: "m-asst-2",
+        traceId: "4".repeat(32),
+        decision: "continue",
+        note: "",
+        folderId: null,
+      },
+      "/tmp/ws",
+      undefined,
+    );
+    const resumeB = bare.sent.find((m) => m.method === "resume");
+    expect(resumeB?.params).toHaveProperty("folderId");
+    expect(resumeB?.params?.folderId).toBeNull();
+  });
 });

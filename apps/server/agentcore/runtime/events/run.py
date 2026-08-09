@@ -1,4 +1,4 @@
-"""Multi-agent run and debate SSE event factories."""
+"""Multi-agent run SSE event factories."""
 
 from __future__ import annotations
 
@@ -500,6 +500,20 @@ def coordination_wait(
     )
 
 
+def workspace_lock_wait(*, conversation_id: str, waiting: bool) -> SSEEvent:
+    """同 folder 写锁短等：争锁前 ``waiting=true``，acquire 后 ``waiting=false``。
+
+    Emitted via ``ServerWorkspace`` mutation-lock ``on_waiting`` (bound in
+    ``build_turn_backend``) when a write contends. A′: kickoff no longer holds the
+    folder lock. EPHEMERAL — no journal; clients must not render empty 「Thinking…」
+    while this is true（不得静默等锁）.
+    """
+    return SSEEvent(
+        type=EventType.WORKSPACE_LOCK_WAIT,
+        payload={"conversation_id": conversation_id, "waiting": waiting},
+    )
+
+
 def team_synthesis_preview(
     *,
     execution_id: str,
@@ -725,76 +739,3 @@ def batch_metrics(*, execution_id: str, metrics: dict[str, Any]) -> SSEEvent:
         type=EventType.BATCH_METRICS,
         payload={"execution_id": execution_id, **metrics},
     )
-
-
-def debate_result(
-    *,
-    execution_id: str,
-    moderator_run_id: str,
-    payload: dict[str, Any],
-) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.DEBATE_RESULT,
-        payload={
-            "execution_id": execution_id,
-            "moderator_run_id": moderator_run_id,
-            **payload,
-        },
-    )
-
-
-def debate_round_started(
-    *,
-    execution_id: str,
-    moderator_run_id: str,
-    round_no: int,
-    focus: str,
-    cross_exam_enabled: bool = False,
-    opening: str = "",
-    form: str = "",
-) -> SSEEvent:
-    payload: dict = {
-        "execution_id": execution_id,
-        "moderator_run_id": moderator_run_id,
-        "round_no": round_no,
-        "focus": focus,
-        "cross_exam_enabled": cross_exam_enabled,
-        "opening": opening,
-    }
-    if form:
-        payload["form"] = form
-    return SSEEvent(
-        type=EventType.DEBATE_ROUND_STARTED,
-        payload=payload,
-    )
-
-
-def debate_round(
-    *,
-    execution_id: str,
-    moderator_run_id: str,
-    payload: dict[str, Any],
-) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.DEBATE_ROUND,
-        payload={
-            "execution_id": execution_id,
-            "moderator_run_id": moderator_run_id,
-            **payload,
-        },
-    )
-
-
-def debate_pretrial_started(**payload: Any) -> SSEEvent:
-    """庭前取证开场（fast 档亦可带 skip_reason 秒过）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_STARTED, payload=dict(payload))
-
-
-def debate_pretrial_orders(**payload: Any) -> SSEEvent:
-    """庭前准备摘要（Evidence Pack / 空订单 + 外证计划）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_ORDERS, payload=dict(payload))
-
-
-def debate_pretrial_completed(**payload: Any) -> SSEEvent:
-    """庭前收口（done / skipped / degraded + ledger delta）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_COMPLETED, payload=dict(payload))

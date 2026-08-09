@@ -758,7 +758,7 @@ class DelegateTool:
         # 立刻定格，透传给 drive → format_for_ceo 用于完成侧日志。
         call_idx = self._calls
         prefix = f"del_{new_id()}"
-        # 案卷目录默认：repair_code 不套 RESEARCH_DIR（S3：不再绑 criteria kind）。
+        # 约定文档目录默认：repair_code 不套 RESEARCH_DIR（S3：不再绑 criteria kind）。
         playbook_early = arguments.get("playbook")
         skip_dossier_default = (
             isinstance(playbook_early, str) and playbook_early.strip() == "repair_code"

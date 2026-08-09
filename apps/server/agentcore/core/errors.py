@@ -430,4 +430,21 @@ def error_fields_for(
             (exc.message or fallback_message),
             error_context_from(exc),
         )
+    # Local workspace sticky-dead during prepare / turn gate: surface the honest
+    # WorkspaceIOError text (not the generic STREAM_ERROR fallback) so the UI can
+    # clear isStreaming with a clear channel-down reason.
+    from agentcore.workspace.limits import (
+        CHANNEL_DEAD_PREPARE_ABORT,
+        is_channel_dead_detail,
+    )
+    from agentcore.workspace.protocol import WorkspaceIOError
+
+    if isinstance(exc, WorkspaceIOError):
+        detail = str(exc).strip()
+        if detail == CHANNEL_DEAD_PREPARE_ABORT or is_channel_dead_detail(detail):
+            return (
+                ErrorCode.STREAM_ERROR,
+                detail or CHANNEL_DEAD_PREPARE_ABORT,
+                None,
+            )
     return fallback_code, fallback_message, None

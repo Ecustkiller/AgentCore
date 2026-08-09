@@ -23,6 +23,10 @@ vi.mock("@/services/sidecarStatus", () => ({
 }));
 vi.mock("@/hooks/useConversations", () => ({
   patchConversationCache: vi.fn(),
+  getConversations: vi.fn(() => []),
+}));
+vi.mock("@/hooks/useFolders", () => ({
+  getFolders: vi.fn(() => []),
 }));
 vi.mock("@/lib/toast", () => ({
   notifyWarning: vi.fn(),
@@ -39,7 +43,21 @@ vi.mock("@/services/inferenceToken", () => ({
   looksLikeInferenceTokenFailure: vi.fn(() => false),
 }));
 
+vi.mock("@/services/foldersToken", () => ({
+  resolveSidecarFoldersAuth: vi.fn(),
+  clearSidecarFoldersAuth: vi.fn(),
+}));
+
+vi.mock("@/services/accountToken", () => ({
+  resolveSidecarAccountAuth: vi.fn(),
+  clearSidecarAccountAuth: vi.fn(),
+}));
+
+import { getConversations } from "@/hooks/useConversations";
+import { getFolders } from "@/hooks/useFolders";
 import { notifyWarning } from "@/lib/toast";
+import { resolveSidecarAccountAuth } from "@/services/accountToken";
+import { resolveSidecarFoldersAuth } from "@/services/foldersToken";
 import { resolveSidecarInference } from "@/services/inferenceToken";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
@@ -55,7 +73,11 @@ import {
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
 const resolveSidecarInferenceMock = vi.mocked(resolveSidecarInference);
+const resolveSidecarFoldersAuthMock = vi.mocked(resolveSidecarFoldersAuth);
+const resolveSidecarAccountAuthMock = vi.mocked(resolveSidecarAccountAuth);
 const notifyWarningMock = vi.mocked(notifyWarning);
+const getConversationsMock = vi.mocked(getConversations);
+const getFoldersMock = vi.mocked(getFolders);
 
 type EventPush = { conversationId: string; turnId: string; event: unknown };
 
@@ -109,10 +131,16 @@ beforeEach(() => {
   });
   dispatchSSEEventMock.mockReset();
   notifyWarningMock.mockReset();
+  getConversationsMock.mockReset();
+  getConversationsMock.mockReturnValue([]);
+  getFoldersMock.mockReset();
+  getFoldersMock.mockReturnValue([]);
   takeRecentSidecarFailureMock.mockReturnValue(null);
   // Default: no token mintable → the fallback path (what most existing cases assert with
   // `inference: undefined`). Cases that need a normal turn override this per-test.
   resolveSidecarInferenceMock.mockResolvedValue(null);
+  resolveSidecarFoldersAuthMock.mockResolvedValue(null);
+  resolveSidecarAccountAuthMock.mockResolvedValue(null);
 
   onEventCb = null;
   resumeMock = vi.fn();
@@ -181,6 +209,158 @@ function seedOriginalUserBubble(
 }
 
 describe("streamConversationViaSidecar", () => {
+  it("forwards foldersAuth on startTurn when mint succeeds", async () => {
+    resolveSidecarFoldersAuthMock.mockResolvedValue({
+      baseUrl: "https://api.test.example",
+      apiKey: "folders-jwt",
+    });
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        foldersAuth: {
+          baseUrl: "https://api.test.example",
+          apiKey: "folders-jwt",
+        },
+      }),
+    );
+  });
+
+  it("omits foldersAuth on startTurn when mint fails (undefined, no fake success)", async () => {
+    resolveSidecarFoldersAuthMock.mockResolvedValue(null);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ foldersAuth: undefined }),
+    );
+  });
+
+  it("forwards accountAuth on startTurn when mint succeeds", async () => {
+    resolveSidecarAccountAuthMock.mockResolvedValue({
+      baseUrl: "https://api.test.example/v1/account",
+      apiKey: "account-jwt",
+    });
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountAuth: {
+          baseUrl: "https://api.test.example/v1/account",
+          apiKey: "account-jwt",
+        },
+      }),
+    );
+  });
+
+  it("omits accountAuth on startTurn when mint fails (undefined, no fake success)", async () => {
+    resolveSidecarAccountAuthMock.mockResolvedValue(null);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountAuth: undefined }),
+    );
+  });
+
+  it("forwards foldersAuth on resume when mint succeeds", async () => {
+    resolveSidecarFoldersAuthMock.mockResolvedValue({
+      baseUrl: "https://api.test.example",
+      apiKey: "folders-resume",
+    });
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    const result = turnResult();
+    resumeMock.mockImplementation(async () => result);
+
+    await resumeConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      messageId: "m-asst",
+      decision: "continue",
+      note: "",
+      selected: [],
+      userMessage: "原始问题",
+      userMessageId: "u-orig",
+    });
+
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        foldersAuth: {
+          baseUrl: "https://api.test.example",
+          apiKey: "folders-resume",
+        },
+      }),
+    );
+  });
+
+  it("forwards accountAuth on resume when mint succeeds", async () => {
+    resolveSidecarAccountAuthMock.mockResolvedValue({
+      baseUrl: "https://api.test.example/v1/account",
+      apiKey: "account-resume",
+    });
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    const result = turnResult();
+    resumeMock.mockImplementation(async () => result);
+
+    await resumeConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      messageId: "m-asst",
+      decision: "continue",
+      note: "",
+      selected: [],
+      userMessage: "原始问题",
+      userMessageId: "u-orig",
+    });
+
+    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountAuth: {
+          baseUrl: "https://api.test.example/v1/account",
+          apiKey: "account-resume",
+        },
+      }),
+    );
+  });
+
   it("forwards the logged-in account userId on startTurn (not hardcoded local)", async () => {
     useAuthStore.setState({
       status: "authenticated",
@@ -226,9 +406,174 @@ describe("streamConversationViaSidecar", () => {
       expect.objectContaining({ userId: "local" }),
     );
   });
+
+  it("forwards conversation.folderId on startTurn when the chat belongs to a project", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: "fold-proj-1" } as never,
+    ]);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ folderId: "fold-proj-1" }),
+    );
+  });
+
+  it("forwards folderId: null on startTurn for bare chat (no project)", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: null } as never,
+    ]);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: null,
+        localRootId: null,
+        localSubpath: null,
+      }),
+    );
+  });
+
+  it("forwards FolderMeta local binding on startTurn for a local project", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: "fold-local-1" } as never,
+    ]);
+    getFoldersMock.mockReturnValue([
+      {
+        id: "fold-local-1",
+        name: "本地项目",
+        mode: "local",
+        localRootId: "root-abc",
+        localSubpath: "apps/web",
+      },
+    ]);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "root-abc",
+      subpath: "apps/web",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: "fold-local-1",
+        localRootId: "root-abc",
+        localSubpath: "apps/web",
+      }),
+    );
+  });
+
+  it("forwards null local binding on startTurn for a cloud project", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: "fold-cloud-1" } as never,
+    ]);
+    getFoldersMock.mockReturnValue([
+      {
+        id: "fold-cloud-1",
+        name: "云项目",
+        mode: "cloud",
+        localRootId: null,
+        localSubpath: null,
+      },
+    ]);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: "fold-cloud-1",
+        localRootId: null,
+        localSubpath: null,
+      }),
+    );
+  });
 });
 
 describe("resumeConversationViaSidecar", () => {
+  it("forwards project folderId + local binding on resume (symmetric with startTurn)", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: "fold-local-1" } as never,
+    ]);
+    getFoldersMock.mockReturnValue([
+      {
+        id: "fold-local-1",
+        name: "本地项目",
+        mode: "local",
+        localRootId: "root-abc",
+        localSubpath: "",
+      },
+    ]);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue(turnResult());
+
+    await resumeConversationViaSidecar({
+      ...baseRequest,
+      rootId: "root-abc",
+      subpath: "",
+    });
+
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: "fold-local-1",
+        localRootId: "root-abc",
+        localSubpath: "",
+      }),
+    );
+  });
+
+  it("forwards folderId: null on resume for bare chat (covers frame ownership)", async () => {
+    getConversationsMock.mockReturnValue([
+      { id: "c1", folderId: null } as never,
+    ]);
+    getFoldersMock.mockReturnValue([]);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue(turnResult());
+
+    await resumeConversationViaSidecar({
+      ...baseRequest,
+      rootId: "root-bare",
+      subpath: "",
+    });
+
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: null,
+        localRootId: null,
+        localSubpath: null,
+      }),
+    );
+  });
+
   it("drives the resume RPC, forwards only this conversation's events, and reconciles the original user bubble on outbox sync", async () => {
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
 

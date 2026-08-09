@@ -42,13 +42,12 @@ def ask_user_tool_result(
     """Map the user's ask_user answer to the tool result the CEO loop consumes.
 
     The single source of truth for both the live tool (``AskUserTool.execute``) and
-    a durable resume (``runtime/pipeline.resume_chat_pipeline``): submit feeds back as
-    a ``CONTINUE`` result (the CEO resumes); stop returns an ``INTERACT`` (terminal)
-    result whose optional closing note rides as ``final_text`` (empty when the user
-    left no note — stop status lives on the interaction card, not a canned assistant
-    line); a timeout hands control back to the CEO to wrap up on its own. Pure (no SSE
-    side-effect): the caller streams a non-empty stop ``final_text`` via
-    ``content_delta`` (it is persist-only, the engine never re-emits it).
+    a durable resume (``runtime/pipeline.resume_chat_pipeline``): submit / stop /
+    timeout all feed ``CONTINUE`` results so the CEO resumes (stop is **拒答**, not
+    empty-continue「按默认」；wire stays ``decision=stop``). Soft guidance on stop
+    mirrors team_preview cancel (``kickoff/cancel_guidance``): model sees the refuse
+    and may close / rephrase / proceed with assumptions — no in-band ``INTERACT``
+    terminal that skips the CEO round.
 
     答复正文 (α 答复模型): the desktop composes the user's per-question picks + style +
     free-form note into ONE readable ``note`` string (the picks live in the UI, so the
@@ -84,13 +83,16 @@ def ask_user_tool_result(
                 output = "用户确认：按你提出的方向继续。"
         return ToolResult(tool_call_id="", success=True, output=output)
     if decision is CheckpointDecision.STOP:
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output="用户取消未回答。",
-            effect=ToolEffect.INTERACT,
-            final_text=note,
+        # 拒答可见：回灌 CEO（对齐开工卡取消 / OpenAI reject→resume）；非空 continue。
+        head = "用户取消了澄清，未作答。"
+        guidance = (
+            "宜据此自行收口、换假设继续，或改用正文确认；"
+            "勿用同一问句立刻再弹 ask_user。"
         )
+        output = (
+            f"{head}用户留言：{note}\n{guidance}" if note else f"{head}\n{guidance}"
+        )
+        return ToolResult(tool_call_id="", success=True, output=output)
     # TIMEOUT — never silently picked a branch; let the CEO decide how to close.
     return ToolResult(
         tool_call_id="",

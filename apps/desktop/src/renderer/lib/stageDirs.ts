@@ -1,5 +1,5 @@
 /**
- * 案卷约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
+ * 约定文档约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
  * 文件树徽章与产物卡标签共用。与后端 ``workspace.stage_dirs`` 对齐；无匹配则零噪音。
  */
 
@@ -11,7 +11,7 @@ export const REVIEWS_DIR = `${DOCS_PREFIX}/reviews`;
 export interface StageDirMeta {
   /** 目录短名（research / debate / reviews） */
   key: string;
-  /** 徽章主文案前缀，如「调研案卷」 */
+  /** 徽章主文案前缀，如「调研约定文档」 */
   label: string;
   /** tooltip */
   tooltip: string;
@@ -21,7 +21,7 @@ export interface StageDirMeta {
 const STAGE_DIRS: Record<string, StageDirMeta> = {
   [RESEARCH_DIR]: {
     key: "research",
-    label: "调研案卷",
+    label: "调研约定文档",
     tooltip: "团队协作阶段产物，后续阶段会读取",
   },
   [DEBATE_DIR]: {
@@ -76,7 +76,7 @@ export function countDescendantFiles(
   return n;
 }
 
-/** 「调研案卷 · 3 件」副文案。 */
+/** 「调研约定文档 · 3 件」副文案。 */
 export function stageDirCaption(meta: StageDirMeta, fileCount: number): string {
   return `${meta.label} · ${fileCount} 件`;
 }

@@ -26,6 +26,7 @@ skip_if:
 - **`turn_queue_cancelled`**（✅ EPHEMERAL）：按项取消成功（`queue_id` / `conversation_id`）；多端清 UI。语义 → [运行时三模型 · 同对话再发](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)。
 - **`turn_steer_accepted`**（✅ EPHEMERAL）：经典 in-flight 软插入确认（`steer_id` / `conversation_id` / 截断 `content` / `pending`）；toast「已插入，下一工具步生效」。**勿**复用 `user_interjection`。→ 见代码：`runtime/events/run.py:turn_steer_accepted` · `runtime/turn_steer.py`
 - **`user_interjection`**（✅ DURABLE）：协调中 Steer 插话；同 `interjection_id` 保最新 `status`（received / addressed / queued / failed）。→ 见代码：`runtime/events/run.py:user_interjection`
+- **`workspace_lock_wait`**（✅ EPHEMERAL）：同 folder 写锁短等（A′ 后仅写路径争用）；`waiting` 进出。桌面空气泡「等待工作区…」——**不得静默等锁** / 禁空 Thinking… 冒充。与同对话 `turn_queued` 正交。→ 见代码：`workspace/locks.py` · `runtime/events/run.py:workspace_lock_wait`
 - **`run_failed.failure_kind`**（✅ additive）：协作图失败脸优先按此类贴文案——`quality`→「未达标」、`format`→「格式未过」（结构/格式闸：code_audit·缺章节·JSON）、`model`→「模型中断」、`call`→「调用失败」；缺省→「失败」/空 error「调用失败」。禁前端扫正文猜脸。→ 见代码：`RunFailureKind` · `runtime/events/payloads/run.py`
 
 `finish_reason` → 见代码 `FinishReason`。

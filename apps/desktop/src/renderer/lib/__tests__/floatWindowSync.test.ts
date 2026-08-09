@@ -79,6 +79,7 @@ describe("floatWindowSync", () => {
           pendingTurnWarning: null,
           toolStartedMs: {},
           executionVia: null,
+          waitingForWorkspaceLock: false,
         },
       },
     });

@@ -110,10 +110,9 @@ export async function diagnoseOutage(): Promise<string | null> {
     const res = await fetch(apiUrl("/readyz"));
     const ready = (await res.json()) as ReadinessResponse;
     if (res.ok && ready.database) return null;
-    if (!ready.database) return "数据库不可用：请确认数据库已启动后重试。";
-    return "后端服务异常：请稍后重试。";
+    return "AgentCore 服务暂时不可用，请稍后重试。";
   } catch {
-    return "无法连接后端：请确认后端服务已启动后重试。";
+    return "连不上 AgentCore 服务，请稍后重试。";
   }
 }
 
@@ -149,7 +148,7 @@ async function runBootstrap(): Promise<BootstrapResult> {
 }
 
 async function outageReason(): Promise<string> {
-  return (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+  return (await diagnoseOutage()) ?? "AgentCore 服务暂时不可用，请稍后重试。";
 }
 
 async function devAutoLogin(): Promise<boolean> {

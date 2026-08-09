@@ -84,8 +84,6 @@ async def _persist_delivered_interjection_attachments(
     from agentcore.conversation.turn_backend import build_turn_backend
     from agentcore.db import async_session_factory
     from agentcore.workspace.attachments import persist_attachments
-    from agentcore.workspace.locate import workspace_storage_key
-    from agentcore.workspace.locks import workspace_lock
 
     async with async_session_factory() as session:
         conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -101,10 +99,7 @@ async def _persist_delivered_interjection_attachments(
         sink=sink,
         local_binding=local_binding,
     )
-    async with workspace_lock(
-        workspace_storage_key(user_id=user_id, folder_id=folder_id, conversation_id=conversation_id)
-    ):
-        return await persist_attachments(backend, attachments)
+    return await persist_attachments(backend, attachments)
 
 
 @router.get("/{conversation_id}/messages", response_model=MessageListResponse)

@@ -15,13 +15,21 @@ vi.mock("@/hooks/useConversations", () => ({
 vi.mock("@/services/sidecarRouting", () => ({
   resolveSidecarRoot: vi.fn(),
   resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
+  getActiveSidecarTarget: vi.fn(() => null),
   buildSidecarHistory: vi.fn(() => []),
+  isSidecarEnabled: vi.fn(() => true),
 }));
 vi.mock("@/services/sidecarHealth", () => ({
   probeSidecar: vi.fn(),
   markSidecarUnhealthy: vi.fn(),
   clearSidecarHealth: vi.fn(),
   takeCloudBridgeToastSlot: vi.fn(() => true),
+}));
+vi.mock("@/lib/capabilities", () => ({
+  hasLocalEngine: vi.fn(() => true),
+}));
+vi.mock("@/lib/log", () => ({
+  logEvent: vi.fn(),
 }));
 vi.mock("@/services/streamConversation", () => ({
   attachConversation: vi.fn(),
@@ -37,6 +45,8 @@ vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
 // notifyError 由 stream 错误路径间接引入；排队 toast 现由 turn_queued → queuedNotify。
 vi.mock("@/lib/toast", () => ({ notifyInfo: vi.fn(), notifyError: vi.fn() }));
 
+import { hasLocalEngine } from "@/lib/capabilities";
+import { logEvent } from "@/lib/log";
 import { notifyInfo } from "@/lib/toast";
 import {
   clearSidecarHealth,
@@ -45,6 +55,8 @@ import {
   takeCloudBridgeToastSlot,
 } from "@/services/sidecarHealth";
 import {
+  getActiveSidecarTarget,
+  isSidecarEnabled,
   resolveConversationLocalTarget,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
@@ -62,6 +74,10 @@ import { runResume, sendTurn } from "../turns";
 
 const resolveSidecarRootMock = vi.mocked(resolveSidecarRoot);
 const resolveLocalTargetMock = vi.mocked(resolveConversationLocalTarget);
+const getActiveSidecarTargetMock = vi.mocked(getActiveSidecarTarget);
+const isSidecarEnabledMock = vi.mocked(isSidecarEnabled);
+const hasLocalEngineMock = vi.mocked(hasLocalEngine);
+const logEventMock = vi.mocked(logEvent);
 const probeSidecarMock = vi.mocked(probeSidecar);
 const markSidecarUnhealthyMock = vi.mocked(markSidecarUnhealthy);
 const clearSidecarHealthMock = vi.mocked(clearSidecarHealth);
@@ -105,6 +121,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   streamConversationMock.mockResolvedValue(undefined);
   resolveLocalTargetMock.mockResolvedValue(null);
+  getActiveSidecarTargetMock.mockReturnValue(null);
+  isSidecarEnabledMock.mockReturnValue(true);
+  hasLocalEngineMock.mockReturnValue(true);
   takeCloudBridgeToastSlotMock.mockReturnValue(true);
   seedOptimisticUser();
 });
@@ -134,6 +153,11 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "sidecar",
     );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({ via: "sidecar", reason: "probe_ok" }),
+    );
   });
 
   it("探活失败 → 强制提示（带诊断）并走云，不走 sidecar", async () => {
@@ -159,6 +183,14 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
     );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "cloud",
+        reason: "probe_unhealthy",
+      }),
+    );
   });
 
   it("探活通过但回合启动期失败(recoverable) → 标坏 + 降级走云", async () => {
@@ -177,13 +209,21 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
 
     await sendTurn(spec());
 
-    expect(markSidecarUnhealthyMock).toHaveBeenCalledWith(TARGET);
+    expect(markSidecarUnhealthyMock).toHaveBeenCalledWith(TARGET, "拉不起");
     expect(streamConversationMock).toHaveBeenCalledTimes(1); // 降级走云
     expect(takeCloudBridgeToastSlotMock).toHaveBeenCalledWith("r1::", {
       force: true,
     });
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "cloud",
+        reason: "sidecar_fallback",
+      }),
     );
   });
 
@@ -213,7 +253,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     probeSidecarMock.mockResolvedValue({
       healthy: false,
       probed: false,
-      detail: null,
+      detail: "本地引擎启动失败：spawn uv ENOENT",
     });
 
     await sendTurn(spec());
@@ -227,6 +267,14 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(String(notifyInfoMock.mock.calls[0][0])).toContain("云端过桥");
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "cloud",
+        reason: "probe_cache_bad",
+      }),
     );
   });
 
@@ -245,6 +293,27 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
+    );
+  });
+
+  it("开关关 + 绑本机 → 云端过桥静默（无 switch_off toast），不假装 sidecar", async () => {
+    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
+    isSidecarEnabledMock.mockReturnValue(false);
+
+    await sendTurn(spec());
+
+    expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(streamViaSidecarMock).not.toHaveBeenCalled();
+    expect(streamConversationMock).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
+      "cloud_bridge",
+    );
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({ via: "cloud", reason: "switch_off" }),
     );
   });
 });
@@ -304,7 +373,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("探活通过 → 本地 sidecar 续跑、认领续跑卡", async () => {
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: true,
       probed: true,
@@ -318,6 +387,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
 
     await runResume("m1", "continue", "");
 
+    expect(resolveSidecarRootMock).not.toHaveBeenCalled();
     expect(resumeViaSidecarMock).toHaveBeenCalledWith(
       expect.objectContaining({
         messageId: "m1",
@@ -335,8 +405,54 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(assistants[0].isStreaming).toBe(true);
   });
 
+  it("偏好关 + origin=sidecar → 仍跟本地事实续跑（忽略大众默认关）", async () => {
+    isSidecarEnabledMock.mockReturnValue(false);
+    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
+    probeSidecarMock.mockResolvedValue({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    resumeViaSidecarMock.mockResolvedValue(undefined as never);
+
+    await runResume("m1", "continue", "");
+
+    expect(resolveSidecarRootMock).not.toHaveBeenCalled();
+    expect(resolveLocalTargetMock).toHaveBeenCalledWith("c1");
+    expect(resumeViaSidecarMock).toHaveBeenCalledWith(
+      expect.objectContaining({ rootId: "r1", messageId: "m1" }),
+    );
+    expect(resumeConversationMock).not.toHaveBeenCalled();
+  });
+
+  it("活回合 active target 优先于 resolveConversationLocalTarget", async () => {
+    getActiveSidecarTargetMock.mockReturnValue({
+      rootId: "r-active",
+      subpath: "scratch",
+      turnId: "t1",
+    });
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
+    probeSidecarMock.mockResolvedValue({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    resumeViaSidecarMock.mockResolvedValue(undefined as never);
+
+    await runResume("m1", "continue", "");
+
+    expect(resolveLocalTargetMock).not.toHaveBeenCalled();
+    expect(resumeViaSidecarMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rootId: "r-active",
+        subpath: "scratch",
+      }),
+    );
+  });
+
   it("探活失败 → 保留续跑卡 + 出横幅，绝不降级走云", async () => {
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: false,
       probed: true,
@@ -356,7 +472,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("sidecar 帧无 target → 留卡 + 横幅，绝不降级走云", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(null);
 
     await expect(runResume("m1", "continue", "")).rejects.toThrow(
       /sidecar unavailable/,
@@ -372,7 +488,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("云端帧未绑本地根 → 不探活、直接走云 resume", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -381,13 +497,14 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     await runResume("m1", "continue", "");
 
     expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(resolveLocalTargetMock).not.toHaveBeenCalled();
     expect(resumeConversationMock).toHaveBeenCalledTimes(1);
     expect(resumeViaSidecarMock).not.toHaveBeenCalled();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
   it("云端暂停帧（origin=server）即使绑了本地根也走云 resume", async () => {
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -396,13 +513,13 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     await runResume("m1", "continue", "");
 
     expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(resolveLocalTargetMock).not.toHaveBeenCalled();
     expect(resumeConversationMock).toHaveBeenCalledTimes(1);
     expect(resumeViaSidecarMock).not.toHaveBeenCalled();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
   it("请求被拒(404) → 丢续跑卡 + 横幅（无 retry）", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -425,7 +542,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("sidecar PAUSED_TURN_NOT_FOUND → 丢续跑卡 + 横幅（无 retry）", async () => {
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: true,
       probed: true,
@@ -450,7 +567,6 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("请求被拒(409 turn_in_progress) → 恢复续跑卡 + 明确文案（无 retry）", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -470,7 +586,6 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("流中断(network) → 不恢复续跑卡", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -487,7 +602,6 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("用户 abort → 不恢复续跑卡，并离开 stopping", async () => {
-    resolveSidecarRootMock.mockResolvedValue(null);
     usePausedTurnStore.setState({
       pending: [{ ...pendingFrame("m1"), origin: "server" }],
     });
@@ -506,7 +620,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   });
 
   it("探活失败横幅清缓存（下次续跑可重探，无 banner retry）", async () => {
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: false,
       probed: true,
@@ -524,7 +638,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
 
   it("有冷卡 + isGenerating → 先收口再续跑（不挡死）", async () => {
     useConversationStore.getState().setGenerating(true, "c1");
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: true,
       probed: true,
@@ -542,7 +656,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
   it("无冷卡 + isGenerating → 仍拦截（抛错 + 横幅）", async () => {
     usePausedTurnStore.setState({ pending: [] });
     useConversationStore.getState().setGenerating(true, "c1");
-    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
 
     await expect(runResume("m1", "continue", "")).rejects.toThrow(
       /still generating/,

@@ -1,7 +1,8 @@
 """开工卡（team_preview）取消后回灌 CEO 的软引导文案。
 
 仅引导、不硬闸：wire 仍 ``decision=stop``；不自动再弹 ask。
-ask_user 取消 / plan_review 取消下游不走本模块。
+ask_user 取消的拒答引导在 ``tools/builtin/ask_user/result.py``（同形 CONTINUE 回灌）；
+plan_review 取消下游不走本模块。
 """
 
 from __future__ import annotations

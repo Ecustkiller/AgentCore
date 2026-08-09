@@ -26,14 +26,6 @@ class _FakeSessionCM:
         return False
 
 
-class _Lock:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_a):
-        return False
-
-
 @pytest.fixture(autouse=True)
 def _clear_turn_runs():
     turn_runs._runs.clear()
@@ -131,8 +123,6 @@ def _patch_stream_chat_deps(monkeypatch, *, backend, run_and_persist):
         AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
     )
     monkeypatch.setattr(turns_mod, "build_turn_backend", AsyncMock(return_value=backend))
-    monkeypatch.setattr(turns_mod, "workspace_lock", lambda *_a, **_k: _Lock())
-    monkeypatch.setattr(turns_mod, "workspace_storage_key", lambda **_k: "k")
     monkeypatch.setattr(turns_mod, "persist_attachments", AsyncMock(return_value=[]))
     monkeypatch.setattr(turns_mod, "to_stored_metadata", lambda _a: None)
     monkeypatch.setattr(

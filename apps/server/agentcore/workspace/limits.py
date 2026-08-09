@@ -51,6 +51,13 @@ CHANNEL_DEAD_USER_VISIBLE = (
     "本地文件暂时连不上。请检查桌面连接后重试；我将基于已有材料收口。"
 )
 
+# Prepare / turn-start abort when the local channel is already sticky-dead —
+# no LLM, no "收口" framing (nothing ran yet). Keep ``channel dead`` so
+# ``is_channel_dead_detail`` / SSE mapping stay aligned with tool envelopes.
+CHANNEL_DEAD_PREPARE_ABORT = (
+    "本机工作区通道无响应（已挂起 / channel dead）。请检查桌面连接后重试。"
+)
+
 WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (
     "本地工作区文件通道已挂起（活性无响应）：本回合起停用全部本地文件读写工具。"
     "请向用户说明「本地文件暂时连不上」，基于已有信息收口或请用户检查桌面连接后重试；"

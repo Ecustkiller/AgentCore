@@ -21,6 +21,53 @@ const NON_FILE_CHANNEL_OPS = new Set<string>([
   "git_run",
 ]);
 
+/** 渲染层 IPC 在飞（底层 fsApi 未 settle 前仍计入，abort 返回后亦然）。 */
+let ipcInflightTotal = 0;
+const ipcInflightByCid = new Map<string, number>();
+
+function ipcInflightSnapshot(conversationId: string): {
+  inflight_total: number;
+  inflight_cid: number;
+  queue_depth: number;
+} {
+  return {
+    inflight_total: ipcInflightTotal,
+    inflight_cid: ipcInflightByCid.get(conversationId) ?? 0,
+    queue_depth: Math.max(0, ipcInflightTotal - 1),
+  };
+}
+
+function enterIpcInflight(conversationId: string): {
+  inflight_total: number;
+  inflight_cid: number;
+  queue_depth: number;
+} {
+  const queueDepth = ipcInflightTotal;
+  ipcInflightTotal += 1;
+  ipcInflightByCid.set(
+    conversationId,
+    (ipcInflightByCid.get(conversationId) ?? 0) + 1,
+  );
+  return {
+    inflight_total: ipcInflightTotal,
+    inflight_cid: ipcInflightByCid.get(conversationId) ?? 0,
+    queue_depth: queueDepth,
+  };
+}
+
+function leaveIpcInflight(conversationId: string): void {
+  ipcInflightTotal = Math.max(0, ipcInflightTotal - 1);
+  const n = (ipcInflightByCid.get(conversationId) ?? 1) - 1;
+  if (n <= 0) ipcInflightByCid.delete(conversationId);
+  else ipcInflightByCid.set(conversationId, n);
+}
+
+/** Test-only: reset renderer IPC inflight counters. */
+export function resetWorkspaceOpIpcInflightForTests(): void {
+  ipcInflightTotal = 0;
+  ipcInflightByCid.clear();
+}
+
 /**
  * Desktop half of the local-workspace op channel (双模式工作区 P2a).
  *
@@ -105,23 +152,41 @@ async function runLocalOp(
   const timer =
     ac && timeoutMs != null ? setTimeout(() => ac.abort(), timeoutMs) : null;
   const t0 = Date.now();
-  logEvent("info", "workspace_op.ipc_begin", {
+  const enter = enterIpcInflight(conversationId);
+  const corr = {
     conversation_id: conversationId,
     request_id: payload.request_id,
     op: payload.op,
+  };
+  logEvent("debug", "workspace_op.ipc_begin", {
+    ...corr,
     root_id: rootId,
     timeout_ms: timeoutMs ?? null,
+    ...enter,
   });
+  const correlation = {
+    conversationId,
+    requestId: payload.request_id,
+  };
+  // 底层 settle 才 leave——abort 先返回时 hung IPC 仍占 inflight。
+  const opPromise = (
+    timeoutMs != null
+      ? fsApi.workspaceOp(
+          rootId,
+          payload.op as WorkspaceOpName,
+          args,
+          timeoutMs,
+          correlation,
+        )
+      : fsApi.workspaceOp(
+          rootId,
+          payload.op as WorkspaceOpName,
+          args,
+          undefined,
+          correlation,
+        )
+  ).finally(() => leaveIpcInflight(conversationId));
   try {
-    const opPromise =
-      timeoutMs != null
-        ? fsApi.workspaceOp(
-            rootId,
-            payload.op as WorkspaceOpName,
-            args,
-            timeoutMs,
-          )
-        : fsApi.workspaceOp(rootId, payload.op as WorkspaceOpName, args);
     const result = !ac
       ? await opPromise
       : await Promise.race([
@@ -139,10 +204,9 @@ async function runLocalOp(
             );
           }),
         ]);
-    logEvent("info", "workspace_op.ipc_end", {
-      conversation_id: conversationId,
-      request_id: payload.request_id,
-      op: payload.op,
+    const endLevel = result.ok ? "debug" : "warn";
+    logEvent(endLevel, "workspace_op.ipc_end", {
+      ...corr,
       ok: result.ok,
       duration_ms: Date.now() - t0,
       error_kind: result.ok ? null : result.error?.kind,
@@ -152,6 +216,7 @@ async function runLocalOp(
         : typeof result.error?.detail === "string"
           ? result.error.detail.slice(0, 200)
           : null,
+      ...ipcInflightSnapshot(conversationId),
     });
     return result;
   } catch (e) {
@@ -160,11 +225,10 @@ async function runLocalOp(
       (e instanceof Error && e.name === "AbortError")
     ) {
       logEvent("warn", "workspace_op.aborted", {
-        conversation_id: conversationId,
-        request_id: payload.request_id,
-        op: payload.op,
+        ...corr,
         duration_ms: Date.now() - t0,
         timeout_ms: timeoutMs ?? null,
+        ...ipcInflightSnapshot(conversationId),
       });
       if (!NON_FILE_CHANNEL_OPS.has(payload.op)) {
         useWorkspaceChannelStore.getState().markNotReady();
@@ -172,12 +236,11 @@ async function runLocalOp(
       return ioError("本地工作区 op 活性挂起（已按服务端 deadline abort）");
     }
     logEvent("error", "workspace_op.ipc_end", {
-      conversation_id: conversationId,
-      request_id: payload.request_id,
-      op: payload.op,
+      ...corr,
       ok: false,
       duration_ms: Date.now() - t0,
       error_kind: "throw",
+      ...ipcInflightSnapshot(conversationId),
     });
     return ioError(e instanceof Error ? e.message : String(e));
   } finally {

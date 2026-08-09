@@ -28,6 +28,7 @@ type TurnLifecycleActions = Pick<
   | "setAbort"
   | "setTurnPhase"
   | "setExecutionVia"
+  | "setWaitingForWorkspaceLock"
   | "stopGeneration"
   | "setError"
   | "clearError"
@@ -72,6 +73,11 @@ export function createTurnLifecycleActions(
 
     setExecutionVia: (via, conversationId) =>
       patchConversation(conversationId, () => ({ executionVia: via })),
+
+    setWaitingForWorkspaceLock: (waiting, conversationId) =>
+      patchConversation(conversationId, () => ({
+        waitingForWorkspaceLock: waiting,
+      })),
 
     stopGeneration: () => {
       const conversationId = get().currentConversationId;

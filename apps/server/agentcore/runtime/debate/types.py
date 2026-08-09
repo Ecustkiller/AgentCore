@@ -136,16 +136,16 @@ class DebateConfig:
     # 用户插话：主持人定首轮焦点可见、首轮辩手 prompt 可见、verbatim 进 rounds[0].user_interjections。
     # 不覆写 motion / 不改 sides。
     kickoff_ask: str = ""
-    # 工作区 AgentCore/文档/research/ 案卷文件索引（开工时机制性探测后填入；空串 = 无案卷，不注入）。
+    # 工作区 AgentCore/文档/research/ 约定文档文件索引（开工时机制性探测后填入；空串 = 无约定文档，不注入）。
     # 仅文本通道：辩手底料 / 主持人议题 brief；非 wire 事件字段。
     research_dossier_index: str = ""
-    # 庭前取证已汇流（§二之二）：True → 首轮辩手检索预算按有案卷下调，引用台账为主。
+    # 庭前取证已汇流（§二之二）：True → 首轮辩手检索预算按有约定文档下调，引用台账为主。
     pretrial_evidence_ready: bool = False
     # 共享证据包（附件已在主持人上下文时由庭前组装；非 wire 必填；空 = 未走 pack 路径）。
     evidence_pack: Any | None = None
     # 庭前证据完整度（一等公民）：full / partial / empty；非 full 时主持人 frame / 辩手须显式感知缺口。
     evidence_completeness: Literal["full", "partial", "empty"] = "full"
-    # 庭前解析后的辩手 per-side 检索预算（None 键不写 = 沿用案卷残搜旧路径；0 = 禁外证）。
+    # 庭前解析后的辩手 per-side 检索预算（None 键不写 = 沿用约定文档残搜旧路径；0 = 禁外证）。
     debater_retrieval_budgets: dict[str, int] = field(default_factory=dict)
     # 外证计划观测：庭前舰队已删后恒为 skip + reason（非 wire 必填）。
     external_evidence_mode: str = ""

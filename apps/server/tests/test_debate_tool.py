@@ -866,7 +866,7 @@ def test_debater_task_injects_kickoff_interjection():
 
 
 def test_debater_task_injects_background_block():
-    """有底料：首轮 task 注入「主持人整理的案件底料·双方共享」+ 事实正文 + 案卷优先取证口径。"""
+    """有底料：首轮 task 注入「主持人整理的案件底料·双方共享」+ 事实正文 + 约定文档优先取证口径。"""
     sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
     facts = "- 主体：甲公司 vs 乙公司\n- 时间线：2023 起诉，2024 一审判赔 80 万"
     cfg = DebateConfig(
@@ -876,8 +876,8 @@ def test_debater_task_injects_background_block():
         task = debater_task(cfg, side, i, round_no=1, focus="风险")["task"]
         assert "【主持人整理的案件底料·双方共享】" in task
         assert facts in task
-        assert "先读案卷" in task
-        assert "独立检索仅补案卷没有的缺口" in task
+        assert "先读约定文档" in task
+        assert "独立检索仅补约定文档没有的缺口" in task
         assert "标注文件来源" in task
         assert "不得把本底料本身包装成新的【已核实】来源" in task
         # 旧教法不得回潮
@@ -926,7 +926,7 @@ def test_both_debate_start_paths_omit_debater_tools_allowlist():
 
 
 def test_debater_task_injects_research_dossier_index():
-    """有案卷索引：首轮 task / draft_brief 注入索引块 + 取证纪律；无索引则不注入。"""
+    """有约定文档索引：首轮 task / draft_brief 注入索引块 + 取证纪律；无索引则不注入。"""
     from agentcore.runtime.debate.prompt import opening_draft_brief
     from agentcore.runtime.debate.research_dossier import format_research_dossier_index
 
@@ -934,7 +934,7 @@ def test_debater_task_injects_research_dossier_index():
     idx = format_research_dossier_index(
         ["AgentCore/文档/research/法律透镜报告.md", "AgentCore/文档/research/汇总与命题卡.md"]
     )
-    assert "【工作区案卷索引·AgentCore/文档/research/】" in idx
+    assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
     assert "AgentCore/文档/research/法律透镜报告.md" in idx
 
     from agentcore.runtime.runs.retrieval_budget import (
@@ -943,8 +943,8 @@ def test_debater_task_injects_research_dossier_index():
 
     empty_cfg = DebateConfig(motion="X", form=DebateForm.DEBATE, sides=sides)
     empty_payload = debater_task(empty_cfg, sides[0], 0, round_no=1, focus="焦点")
-    assert "工作区案卷索引" not in empty_payload["task"]
-    # 无案卷路径：不写入残搜预算（走默认 root，不收紧为 WITH_DOSSIER）
+    assert "工作区约定文档索引" not in empty_payload["task"]
+    # 无约定文档路径：不写入残搜预算（走默认 root，不收紧为 WITH_DOSSIER）
     assert "retrieval_budget" not in empty_payload
 
     cfg = DebateConfig(
@@ -954,12 +954,12 @@ def test_debater_task_injects_research_dossier_index():
     task = payload["task"]
     brief = opening_draft_brief(cfg, sides[0], focus="焦点")
     for text in (task, brief):
-        assert "【工作区案卷索引·AgentCore/文档/research/】" in text
+        assert "【工作区约定文档索引·AgentCore/文档/research/】" in text
         assert "AgentCore/文档/research/法律透镜报告.md" in text
         assert "file_read" in text
         assert "【已核实·#eN】" in text
-        assert "案卷预登记" in text or "预登记进场级台账" in text
-    assert "案卷优先" in task
+        assert "约定文档预登记" in text or "预登记进场级台账" in text
+    assert "约定文档优先" in task
     assert "file_read" in task
     assert "选读" in task or "勿全量" in task
     assert payload.get("retrieval_budget") == DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER

@@ -100,14 +100,12 @@ describe("ResumePrompt · team_preview delegate", () => {
     ];
     render(<ResumePrompt />);
     expect(screen.getByText("MVP主流程 · 预计 1 人")).toBeTruthy();
-    expect(screen.getByText("分工预览")).toBeTruthy();
   });
 
   it("仅两按钮：左取消 + 右授权并开工；无逐次审批 / 调整 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();
     expect(screen.getByText("预计 1 人开工")).toBeTruthy();
-    expect(screen.getByText("分工预览")).toBeTruthy();
     const cancel = screen.getByRole("button", { name: "取消" });
     const primary = screen.getByRole("button", { name: "授权并开工" });
     expect(

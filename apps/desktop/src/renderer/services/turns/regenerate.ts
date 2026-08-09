@@ -12,7 +12,11 @@ import {
   resolveResumeOrigin,
 } from "@/services/resume";
 import { clearSidecarHealth, probeSidecar } from "@/services/sidecarHealth";
-import { resolveSidecarRoot } from "@/services/sidecarRouting";
+import {
+  type SidecarTarget,
+  getActiveSidecarTarget,
+  resolveConversationLocalTarget,
+} from "@/services/sidecarRouting";
 import {
   regenerateConversation,
   resumeConversation,
@@ -35,6 +39,20 @@ import { rejoinLiveTurn } from "./recovery";
 /** Durable resume routes to the local sidecar engine when the frame lives there. */
 function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
   return origin === "sidecar";
+}
+
+/**
+ * 续跑本机帧的寻址：跟本地事实，**忽略**大众默认关 / 开关偏好。
+ * 优先活回合登记，否则会话本地绑定（勿用 `resolveSidecarRoot`——其早退会挡续跑）。
+ */
+async function resolveResumeSidecarTarget(
+  conversationId: string,
+): Promise<SidecarTarget | null> {
+  const active = getActiveSidecarTarget(conversationId);
+  if (active) {
+    return { rootId: active.rootId, subpath: active.subpath };
+  }
+  return resolveConversationLocalTarget(conversationId);
 }
 
 /**
@@ -187,12 +205,15 @@ export async function runResume(
 
   // Capture the pending frame BEFORE removing it — sidecar path needs its
   // original user message text / pinned user bubble id; refuse path restores it.
-  const sidecarTarget = await resolveSidecarRoot(conversationId);
   const pending = usePausedTurnStore
     .getState()
     .pending.find((p) => p.messageId === resumeMessageId);
   const origin = resolveResumeOrigin(conversationId, resumeMessageId);
   const viaSidecar = shouldResumeViaSidecar(origin);
+  // origin=sidecar：跟本地事实，忽略偏好默认关（勿 resolveSidecarRoot）。
+  const sidecarTarget = viaSidecar
+    ? await resolveResumeSidecarTarget(conversationId)
+    : null;
 
   const raiseSidecarUnavailable = (detail: string | null) => {
     // Drop the bad-health cache so the next ResumePrompt submit re-probes

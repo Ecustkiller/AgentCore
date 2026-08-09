@@ -208,6 +208,11 @@ export interface ConversationState {
     via: ConversationRuntime["executionVia"],
     conversationId?: string | null,
   ) => void;
+  /** Live-only workspace_lock_wait UX（不得静默等锁）. */
+  setWaitingForWorkspaceLock: (
+    waiting: boolean,
+    conversationId?: string | null,
+  ) => void;
   /** Explicit hard cancel of the in-flight turn (disconnect alone does not cancel). */
   stopGeneration: () => void;
   setError: (

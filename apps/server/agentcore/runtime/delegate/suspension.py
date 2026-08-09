@@ -57,6 +57,15 @@ async def persist_suspension(
             base_system_prompt=tool._system_prompt,
             user_message=tool._user_message,
             folder_id=tool._folder_id,
+            folder_binding_injected=bool(
+                getattr(tool._base_tool_context, "folder_binding_injected", False)
+            ),
+            folder_local_root_id=getattr(
+                tool._base_tool_context, "folder_local_root_id", None
+            ),
+            folder_local_subpath=getattr(
+                tool._base_tool_context, "folder_local_subpath", None
+            ),
             memory_enabled=tool._memory_enabled,
             conversation_history_access=tool._conversation_history_access,
             transcript=capture.transcript,

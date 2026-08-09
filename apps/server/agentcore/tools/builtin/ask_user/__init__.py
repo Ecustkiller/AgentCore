@@ -31,9 +31,10 @@ with a ``default`` so a 想省事 user one-clicks through). A mid-task A/B is ju
 ``message`` + a one-item ``questions``.
 
 A submit answer is ``ToolEffect.CONTINUE`` (the CEO resumes with the user's picks); a
-stop is ``ToolEffect.INTERACT`` — a terminal effect that ends the turn gracefully in-band
-(optional user note rides as ``ToolResult.final_text``; empty when none). The question + answer are
-journaled (``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline.
+stop is also ``CONTINUE`` with a拒答 breadcrumb + soft guidance (wire ``decision=stop``,
+not empty-continue「按默认」) so the CEO sees the cancel and may short-close — same
+shape as team_preview cancel / timeout. The question + answer are journaled
+(``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline.
 
 结构化挂起 2b + 挂起即收口 (②) / D11 (turn 级落盘 + ``POST .../resume``): like the
 ``delegate`` checkpoint hook, the suspend is backed by a durable frame — an

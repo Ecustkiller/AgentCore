@@ -161,7 +161,7 @@ _SOFT_REMINDER_MARKERS = (
 # Contract path-reconciliation warnings (artifacts / artifact_dir) — warning-only
 # at contract.py; must stay soft on the delivery card (notes, never partial).
 _SOFT_PATH_HINT_MARKERS = (
-    "产物未写入案卷目录",
+    "产物未写入约定文档目录",
     "声明的交付物路径未落盘",
 )
 

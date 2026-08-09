@@ -4,12 +4,22 @@ Folders are user-scoped: every route resolves the authenticated user and a
 non-owner receives 404 (IDOR-safe). Soft-deleting a folder archives its
 conversations in place (keeps ``folder_id``); workspace binding is set at
 create and is immutable thereafter.
+
+List / create / get-by-id accept either an access session or a folders narrow
+ticket (sidecar cloud roster). Mutating archive / permanent-delete / timeline
+remain access-session only.
 """
 
 from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.api.dependencies import AuthUser, get_db, get_folder_repo
+from agentcore.api.dependencies import (
+    AuthUser,
+    FoldersApiUser,
+    get_db,
+    get_folder_repo,
+)
 from agentcore.api.schemas import (
     CollaborationDossierRef,
     CollaborationTimelineAct,
@@ -20,6 +30,7 @@ from agentcore.api.schemas import (
     StatusResponse,
     UpdateFolderRequest,
 )
+from agentcore.config import settings
 from agentcore.core.errors import NotFoundError
 from agentcore.db.repositories import FolderRepository
 from agentcore.folders.collaboration_timeline import (
@@ -27,14 +38,31 @@ from agentcore.folders.collaboration_timeline import (
     list_folder_collaboration_timeline,
 )
 from agentcore.folders.permanent_delete import permanent_delete_folder
+from agentcore.security.tokens import create_folders_token
 
 router = APIRouter(prefix="/folders", tags=["folders"])
+
+
+class FoldersTokenResponse(BaseModel):
+    """Freshly minted folders narrow token + lifetime (sidecar roster auth)."""
+
+    token: str
+    expires_in_sec: int
+
+
+@router.post("/token", response_model=FoldersTokenResponse)
+async def mint_folders_token(user: AuthUser) -> FoldersTokenResponse:
+    """Exchange the caller's cookie/Bearer access session for a folders narrow ticket."""
+    return FoldersTokenResponse(
+        token=create_folders_token(user.user_id),
+        expires_in_sec=settings.folders_token_expire_minutes * 60,
+    )
 
 
 @router.post("", response_model=FolderSummary, status_code=201)
 async def create_folder(
     body: CreateFolderRequest,
-    user: AuthUser,
+    user: FoldersApiUser,
     response: Response,
     repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -66,11 +94,24 @@ async def create_folder(
 
 @router.get("", response_model=list[FolderSummary])
 async def list_folders(
-    user: AuthUser,
+    user: FoldersApiUser,
     repo: FolderRepository = Depends(get_folder_repo),
 ):
     folders = await repo.list_by_user(user.user_id)
     return [FolderSummary.from_folder(f) for f in folders]
+
+
+@router.get("/{folder_id}", response_model=FolderSummary)
+async def get_folder(
+    folder_id: str,
+    user: FoldersApiUser,
+    repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Owner-scoped folder fetch (desk binding / sidecar get-by-id)."""
+    folder = await repo.get_by_id(folder_id, user_id=user.user_id)
+    if not folder:
+        raise NotFoundError("文件夹不存在")
+    return FolderSummary.from_folder(folder)
 
 
 @router.patch("/{folder_id}", response_model=FolderSummary)
@@ -130,9 +171,9 @@ async def get_collaboration_timeline(
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
 ):
-    """项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 案卷引用条.
+    """项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.
 
-    零写路径。案卷快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
+    零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
     文件 API，不在此返回。
     """
     folder = await repo.get_by_id(folder_id, user_id=user.user_id)

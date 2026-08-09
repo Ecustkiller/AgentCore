@@ -380,7 +380,7 @@ def format_evidence_completeness_notice(
     completeness: PackCompleteness,
     path: str = "",
 ) -> str:
-    """写入案卷索引 / 主持人 frame 可见的「证据不完整」显式标注。"""
+    """写入约定文档索引 / 主持人 frame 可见的「证据不完整」显式标注。"""
     if completeness == "full":
         return ""
     path_bit = f"路径={path}；" if path else ""
@@ -467,7 +467,7 @@ def register_evidence_pack_on_ledger(ledger: Any, pack: EvidencePack) -> Evidenc
 
 
 def merge_pack_into_dossier_index(existing: str, pack: EvidencePack) -> str:
-    """把证据包索引并入案卷索引通道（复用既有辩手注入点）。"""
+    """把证据包索引并入约定文档索引通道（复用既有辩手注入点）。"""
     pack_block = format_evidence_pack_index(pack)
     if not pack_block:
         return existing or ""

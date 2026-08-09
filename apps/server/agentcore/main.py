@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agentcore.api.routes import (
+    account,
     admin,
     auth,
     autonomy,
@@ -534,6 +535,7 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 
 app.include_router(system.router)
 app.include_router(admin.router, prefix="/v1")
+app.include_router(account.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(autonomy.router, prefix="/v1")
 app.include_router(boards.router, prefix="/v1")

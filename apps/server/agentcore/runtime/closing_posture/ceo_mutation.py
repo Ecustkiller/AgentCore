@@ -2,6 +2,7 @@
 
 案 20260803-ceo-claim-edit-without-write · 软Ⅱ′
 2026-08-04：【落盘说明】横幅已撤（与完成态叠放净负）；检测器保留；不做完成态降档。
+2026-08-09 定案 B：零写落盘声称扫词硬回炉亦撤（``_zero_write_landing_rework`` 恒 None）。
 """
 
 from __future__ import annotations
@@ -9,11 +10,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from .core import (
-    _positive_hits,
-    claims_posture_a,
-    claims_posture_c,
-)
+from .core import _positive_hits
 
 if TYPE_CHECKING:
     from agentcore.runtime.delegate.delivery_status import DeliveryVerdict
@@ -103,20 +100,11 @@ def _zero_write_landing_rework(
     *,
     delivery_verdict: DeliveryVerdict | None = None,
 ) -> str | None:
-    """无 files 对账 / 零写证据时禁称已落盘·已修改（finish_guard 回炉；不恢复落盘横幅）。"""
-    text = content or ""
-    if not text.strip():
-        return None
-    # 同条 A∪C 仍走既有互斥回炉（e8fb470c），不抢先成零写项。
-    if claims_posture_a(text) and claims_posture_c(text):
-        return None
-    if not (claims_ceo_mutation_done(text) or claims_disk_landing(text)):
-        return None
-    if turn_has_product_write_evidence(delivery_verdict=delivery_verdict):
-        return None
-    return (
-        "本回合交付对账未见落盘文件（无 accepted files / 无写盘成功证据）——"
-        "正文不得声称已落盘 / 已写入工作区 / 已修改或修正完成。"
-        "请改为承认未落盘，列出缺口与下一步（重派写手 / 说明阻塞）；"
-        "禁止整文件甩贴交差。真源=对账 files。"
-    )
+    """2026-08-09 定案 B：零写落盘声称扫词硬回炉已撤（恒 None）。
+
+    曾扫「已改好/已落盘」等闭集 → finish_guard 清气泡重写；解释诚实规则时误伤。
+    检测器 ``claims_*`` 仍保留（测试 / 观测）；不恢复【落盘说明】横幅；
+    不改为软提醒。真吹牛靠对账档位 / 产物结构闸。
+    """
+    _ = (content, delivery_verdict)
+    return None

@@ -304,4 +304,10 @@ export interface ConversationRuntime {
    * `null` = 纯云会话或尚未判定。不落盘，仅驱动轻量状态指示。
    */
   executionVia: "sidecar" | "cloud_bridge" | null;
+  /**
+   * Live-only：写路径争用 workspace_lock（`workspace_lock_wait` SSE）。
+   * true 时空 assistant 气泡显示「等待工作区…」而非 Thinking…（不得静默等锁）。
+   * EPHEMERAL——reload 丢失；message_start / waiting=false 清除。
+   */
+  waitingForWorkspaceLock: boolean;
 }

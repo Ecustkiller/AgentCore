@@ -69,11 +69,11 @@ _shutting_down: bool = False
 class TurnRunRegistry:
     """Tracks the active detached run per conversation (one active run each).
 
-    Turns for one conversation are serialized client-side and by the folder-level
-    ``workspace_lock``, so one active run per ``conversation_id`` is the model. A
-    rare overlap (e.g. a regenerate fired before the prior run cleared) cancels the
-    older task (marked user-stopped) before the newer run takes the slot — otherwise
-    the orphaned task can no longer be addressed by :meth:`stop`.
+    Turns for one conversation are serialized client-side (and by per-mutation
+    ``workspace_lock`` sinks), so one active run per ``conversation_id`` is the
+    model. A rare overlap (e.g. a regenerate fired before the prior run cleared)
+    cancels the older task (marked user-stopped) before the newer run takes the
+    slot — otherwise the orphaned task can no longer be addressed by :meth:`stop`.
     """
 
     def __init__(self) -> None:
@@ -231,10 +231,10 @@ class TurnRunRegistry:
     async def stop_and_drain(self, conversation_id: str, *, timeout: float = 10.0) -> bool:
         """Cancel the conversation's live run AND await its unwind (explicit ``/stop``).
 
-        Fire-and-forget :meth:`stop` signals cancel; this waits for unwind so the caller
-        can take the folder ``workspace_lock`` next. Resume uses :meth:`drain` instead —
-        it must not cancel a D9 in-flight new turn. Returns ``True`` if a live run was
-        found and signalled.
+        Fire-and-forget :meth:`stop` signals cancel; this waits for unwind so the
+        caller can proceed without racing an in-flight task. Resume uses
+        :meth:`drain` instead — it must not cancel a D9 in-flight new turn.
+        Returns ``True`` if a live run was found and signalled.
         """
         run = self._runs.get(conversation_id)
         if run is None or run.task.done():

@@ -340,6 +340,8 @@ def test_core_teaches_split_criterion_over_count():
     assert "规格已齐" in hint
     assert "playbook_args.topic" in hint
     assert "立刻派 ≠ 立刻全量" in hint or "立刻全量" in hint
+    assert "编排自主" in hint
+    assert "摸底波" in hint
     assert "根委派切片诚实" in hint or "路径 A" in hint or "路径 B" in hint
     assert "嵌套扇出" in hint or "单 lead" in hint
     assert "MVP" in hint or "契约" in hint
@@ -425,7 +427,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "完整可玩" in skill
     assert "规格已齐 ≠ 全量" in skill or "规格已齐≠全量" in skill
     assert "结构槽" in skill or "playbook_args" in skill
-    assert "设计波" in skill or "案卷说明" in skill
+    assert "设计波" in skill or "约定文档说明" in skill
     assert "真两段" in skill
     assert "假两段" in skill
     assert "同一 task" in skill
@@ -437,6 +439,7 @@ def test_core_teaches_split_criterion_over_count():
 def test_catalog_preamble_matches_core_consult_intensity():
     """核与能力目录 preamble 共用同一句按场面强度。"""
     from agentcore.runtime.skills import (
+        CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
         CONSULT_PRODUCT_HELP_BY_SCENE,
         CONSULT_TEAM_ORCH_BY_SCENE,
         render_skill_directory,
@@ -449,6 +452,7 @@ def test_catalog_preamble_matches_core_consult_intensity():
     assert CONSULT_TEAM_ORCH_BY_SCENE in _CEO_CORE_HINT
     assert CONSULT_TEAM_ORCH_BY_SCENE in directory
     assert CONSULT_PRODUCT_HELP_BY_SCENE in directory
+    assert CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE in directory
     assert "先 consult `team_orchestration_advanced` 再决定团队形态" not in directory
     assert "纯对话式回答自己答即可，无需 consult" not in directory
 
@@ -684,6 +688,9 @@ def test_core_teaches_delivery_honesty_when_no_execution():
 def test_core_teaches_delivery_path_by_workspace_type():
     # 收口信任级：产物出口按执行位置分道。
     hint = _CEO_CORE_HINT
+    assert "【产物路径】" in hint
+    assert "完整" in hint and "约定文档出口" in hint
+    assert "裸" in hint or "reviews/" in hint
     assert "【交付指引】" in hint
     assert "执行位置分道" in hint
     assert "收口硬约束" in hint
@@ -866,6 +873,10 @@ def test_shared_base_teaches_delivery_baseline():
     assert "#rN" in _DEFAULT_SYSTEM_PROMPT
     assert "真假引擎查" in _DEFAULT_SYSTEM_PROMPT
     assert "交付验收对照" in _DEFAULT_SYSTEM_PROMPT
+    assert "禁口头验收" in _DEFAULT_SYSTEM_PROMPT
+    assert "只读口径" in _DEFAULT_SYSTEM_PROMPT
+    assert "通过验收" in _DEFAULT_SYSTEM_PROMPT
+    assert "全程只读" in _DEFAULT_SYSTEM_PROMPT
     assert "可用性短问" in _DEFAULT_SYSTEM_PROMPT
     assert "已完整可用" in _DEFAULT_SYSTEM_PROMPT
 
@@ -915,6 +926,17 @@ def test_ceo_core_workspace_outranks_global_current_project_memory():
     assert "读全局规则" in hint
     assert "work_discipline" in hint
     assert "问还是派·中性" in hint
+
+
+def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
+    """空壳/双项目 kickoff：先问、同次两路 target_folder_id、开发≠挂载。"""
+    hint = _CEO_CORE_HINT
+    assert "【跨项目 / 空壳 kickoff】" in hint
+    assert "target_folder_id" in hint
+    assert "file_list" in hint
+    assert "external_mount_readonly" in hint
+    assert "开发双仓" in hint or "乱挂" in hint
+    assert "不可" in hint and ("跳过" in hint or "≥2" in hint)
 
 
 def test_core_guides_out_of_workspace_absolute_paths():
@@ -1054,6 +1076,11 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     assert "product_help_map" in block and "product_help_faq" in block
     assert "web_search" in block
     assert "工作区" in block and ("产品说明" in block or "平台手册" in block or "平台文档" in block)
+    # 产品本身 Bug 分流一句（非整份 HOW）
+    assert "consult_skill(product_bug_triage)" in block
+    assert "可证伪故障" in block
+    assert "四类结论" not in block
+    assert "复现要点" not in block
 
 
 def test_ceo_core_teaches_intent_routing_for_adversarial_entry():

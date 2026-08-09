@@ -23,7 +23,7 @@ has rules (or the budget trims), which is the new behavior this phase adds.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from agentcore.core.logging import get_logger
@@ -204,6 +204,37 @@ async def _user_rule_fragments(
     return frags
 
 
+def _user_rule_fragments_from_cloud(
+    payload: Mapping[str, object], *, folder_id: str | None
+) -> list[RuleFragment]:
+    """Map ``POST /v1/account/rules/list`` payload into injection fragments."""
+    frags: list[RuleFragment] = []
+    global_rules = payload.get("global_rules") or []
+    if isinstance(global_rules, list):
+        for doc in global_rules:
+            if not isinstance(doc, Mapping):
+                continue
+            body = str(doc.get("content") or "").strip()
+            if body:
+                frags.append(RuleFragment(scope="global", authority="user", body=body))
+    if folder_id:
+        project_rules = payload.get("project_rules") or []
+        if isinstance(project_rules, list):
+            for doc in project_rules:
+                if not isinstance(doc, Mapping):
+                    continue
+                body = str(doc.get("content") or "").strip()
+                if body:
+                    frags.append(
+                        RuleFragment(
+                            scope="project",
+                            authority="user",
+                            body=f"{_USER_RULE_PROJECT_LABEL}\n{body}",
+                        )
+                    )
+    return frags
+
+
 async def assemble_injected_rules(
     store: MemoryStore,
     repo: DocumentRepository,
@@ -242,19 +273,26 @@ async def assemble_turn_rules(
     """Turn-time convenience over :func:`assemble_injected_rules` (the pipeline entry point).
 
     AI memory is read through the given ``store`` (the patchable pipeline seam); user rules are
-    read through a fresh document session. User-rule loading degrades to「no rules」on ANY error
-    (missing DB in a unit test, transient failure) so memory injection can never break a turn —
+    read through account-cloud HTTP when the sidecar turn bound account creds, else a fresh
+    document session. User-rule loading degrades to「no rules」on ANY error (missing DB in a
+    unit test, transient / offline failure) so memory injection can never break a turn —
     matching the rest of the memory system's defensive posture. Byte-stability holds: with no
     user rules the memory body is identical to the legacy concatenation.
     """
+    from agentcore.account.credentials import cloud_list_user_rules, get_account_credentials
     from agentcore.db.base import async_session_factory
 
     user_fragments: list[RuleFragment] = []
     try:
-        async with async_session_factory() as session:
-            user_fragments = await _user_rule_fragments(
-                DocumentRepository(session), user_id, folder_id=folder_id
-            )
+        creds = get_account_credentials()
+        if creds is not None:
+            payload = await cloud_list_user_rules(creds, folder_id=folder_id)
+            user_fragments = _user_rule_fragments_from_cloud(payload, folder_id=folder_id)
+        else:
+            async with async_session_factory() as session:
+                user_fragments = await _user_rule_fragments(
+                    DocumentRepository(session), user_id, folder_id=folder_id
+                )
     except Exception as e:  # noqa: BLE001 - user rules must never break a turn's assembly
         logger.warning("memory.user_rules_load_failed", user_id=user_id, error=str(e))
 

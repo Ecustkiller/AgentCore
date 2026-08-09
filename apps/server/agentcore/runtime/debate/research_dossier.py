@@ -1,7 +1,7 @@
-"""工作区幕 1 调研案卷（``AgentCore/文档/research/``）——辩论开工探测、台账锚与索引文案。
+"""工作区幕 1 调研约定文档（``AgentCore/文档/research/``）——辩论开工探测、台账锚与索引文案。
 
-案卷由 ``multi_lens_research`` playbook 落盘；辩论侧只读索引（文件列表 + 一行说明），
-全文由辩手 ``file_read`` 自取。开赛时把案卷内 ``#rN`` 锚预登记进场级 ``#eN`` 台账
+约定文档由 ``multi_lens_research`` playbook 落盘；辩论侧只读索引（文件列表 + 一行说明），
+全文由辩手 ``file_read`` 自取。开赛时把约定文档内 ``#rN`` 锚预登记进场级 ``#eN`` 台账
 （对齐底料 ``preregister_background``）。不碰 persist / 轮次原语。
 """
 
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 # 汇总文件名（议程提示用；不强制文件必须存在）。
 SYNTHESIZER_FILE = f"{RESEARCH_DIR}/汇总与命题卡.md"
 
-# 案卷预登记的登记方键（非辩手 side_key；与 moderator 底料并列）。
+# 约定文档预登记的登记方键（非辩手 side_key；与 moderator 底料并列）。
 DOSSIER_SIDE_KEY = "dossier"
 
 _INDEX_CAP = 40
@@ -38,7 +38,7 @@ _URL_LIKE = re.compile(r"^https?://", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class ResearchLedgerAnchor:
-    """案卷正文中的一条可解析调研台账锚（幕 1 ``#rN``）。"""
+    """约定文档正文中的一条可解析调研台账锚（幕 1 ``#rN``）。"""
 
     origin_id: str  # #rN
     url: str = ""
@@ -46,7 +46,7 @@ class ResearchLedgerAnchor:
 
 
 def dossier_label_from_path(path: str) -> str:
-    """从案卷路径推导人话透镜/角色标签（徽章溯源用）。"""
+    """从约定文档路径推导人话透镜/角色标签（徽章溯源用）。"""
     name = (path or "").replace("\\", "/").rsplit("/", 1)[-1]
     stem = name.removesuffix(".md").removesuffix(".MD")
     if stem.endswith("透镜报告"):
@@ -57,7 +57,7 @@ def dossier_label_from_path(path: str) -> str:
 
 
 def extract_research_ledger_anchors(content: str) -> list[ResearchLedgerAnchor]:
-    """从案卷正文抽取 ``#rN`` 锚（正文行尾 + 脚注节）；保首次出现序。"""
+    """从约定文档正文抽取 ``#rN`` 锚（正文行尾 + 脚注节）；保首次出现序。"""
     text = content or ""
     by_id: dict[str, ResearchLedgerAnchor] = {}
     order: list[str] = []
@@ -188,7 +188,7 @@ def format_research_dossier_index(
     ledger_lines: Sequence[str] | None = None,
     file_hints: dict[str, str] | None = None,
 ) -> str:
-    """案卷文件索引块（非全文）。空路径 → 空串（调用方跳过注入）。
+    """约定文档文件索引块（非全文）。空路径 → 空串（调用方跳过注入）。
 
     ``ledger_lines`` 可选：预登记后的 ``#eN`` 映射行（每行已格式化）。
     ``file_hints`` 可选：path → 「约Nk字 · 标签：摘要」附注，助选读。
@@ -203,7 +203,7 @@ def format_research_dossier_index(
         bullet_lines.append(f"- {p}" + (f"（{hint}）" if hint else ""))
     lines = "\n".join(bullet_lines)
     block = (
-        f"【工作区案卷索引·{RESEARCH_DIR}/】\n"
+        f"【工作区约定文档索引·{RESEARCH_DIR}/】\n"
         "幕1 多视角调研产物已落盘（下列为文件列表+字数/摘要，非全文；"
         "按本轮议题选读相关文件，用 file_read 按路径自取——勿无差别全量通读）。\n"
         f"{lines}"
@@ -211,8 +211,8 @@ def format_research_dossier_index(
     if ledger_lines:
         mapped = "\n".join(ledger_lines)
         block += (
-            "\n\n【案卷预登记台账·引用须用下列 #eN】\n"
-            "引用案卷事实写成【已核实·#eN】（id 见下；徽章可溯源到案卷文件与幕1 #rN）。\n"
+            "\n\n【约定文档预登记台账·引用须用下列 #eN】\n"
+            "引用约定文档事实写成【已核实·#eN】（id 见下；徽章可溯源到约定文档文件与幕1 #rN）。\n"
             f"{mapped}"
         )
     return block
@@ -222,9 +222,9 @@ async def preregister_research_dossier(
     ledger: EvidenceLedger,
     backend: WorkspaceBackend,
 ) -> str:
-    """开赛案卷预登记：读案卷文件 → 抽 ``#rN`` 锚 → 登记进场级台账 → 返回索引。
+    """开赛约定文档预登记：读约定文档文件 → 抽 ``#rN`` 锚 → 登记进场级台账 → 返回索引。
 
-    无案卷 → 空串（零行为）。文件无锚时仍登记「整文件」一条（一层兜底，可溯源到路径）。
+    无约定文档 → 空串（零行为）。文件无锚时仍登记「整文件」一条（一层兜底，可溯源到路径）。
     """
     paths = await list_research_artifact_paths(backend)
     if not paths:
@@ -248,7 +248,7 @@ async def preregister_research_dossier(
                 eid = ledger.register(
                     url=a.url,
                     title=title,
-                    snippet=f"案卷 {path}"
+                    snippet=f"约定文档 {path}"
                     + (f" · 幕1 {a.origin_id}" if a.origin_id else ""),
                     site=label,
                     side_key=DOSSIER_SIDE_KEY,
@@ -261,8 +261,8 @@ async def preregister_research_dossier(
         else:
             eid = ledger.register(
                 url="",
-                title=f"案卷 · {label}",
-                snippet=f"案卷文件 {path}（正文无 #rN 锚）",
+                title=f"约定文档 · {label}",
+                snippet=f"约定文档文件 {path}（正文无 #rN 锚）",
                 site=label,
                 side_key=DOSSIER_SIDE_KEY,
                 tier="unknown",

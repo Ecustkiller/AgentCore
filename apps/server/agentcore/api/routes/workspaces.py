@@ -480,24 +480,23 @@ async def upload_workspace_file(
         shared_svc.check_capacity(target.space_id, incoming_bytes=len(data))
 
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                written = await _shared_upload(target.space_id, path, data)
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="file_written",
-                    path=path,
-                )
-            else:
-                written = await upload_file(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                    path=path,
-                    data=data,
-                )
+        if target.space_id:
+            written = await _shared_upload(target.space_id, path, data)
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_written",
+                path=path,
+            )
+        else:
+            written = await upload_file(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                path=path,
+                data=data,
+            )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     return UploadFileResponse(path=path, size_bytes=written)
@@ -553,24 +552,23 @@ async def export_workspace_docx(
     _require_shared_write(target)
 
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                backend = build_shared_workspace(target.space_id)
-            else:
-                backend = build_server_workspace(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                )
-            result = await export_markdown_path(backend, body.path)
-            if target.space_id:
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="file_written",
-                    path=result.output_path,
-                )
+        if target.space_id:
+            backend = build_shared_workspace(target.space_id)
+        else:
+            backend = build_server_workspace(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+            )
+        result = await export_markdown_path(backend, body.path)
+        if target.space_id:
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_written",
+                path=result.output_path,
+            )
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
 
@@ -621,24 +619,23 @@ async def export_workspace_pdf(
     _require_shared_write(target)
 
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                backend = build_shared_workspace(target.space_id)
-            else:
-                backend = build_server_workspace(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                )
-            result = await export_markdown_to_pdf_path(backend, body.path)
-            if target.space_id:
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="file_written",
-                    path=result.output_path,
-                )
+        if target.space_id:
+            backend = build_shared_workspace(target.space_id)
+        else:
+            backend = build_server_workspace(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+            )
+        result = await export_markdown_to_pdf_path(backend, body.path)
+        if target.space_id:
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_written",
+                path=result.output_path,
+            )
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
 
@@ -716,34 +713,32 @@ async def write_workspace_file_text(
         shared_svc.check_capacity(target.space_id, incoming_bytes=len(encoded))
 
     try:
-        # CAS + lock: atomic against a running same-space Agent turn.
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                ok, mtime_ms = await _shared_write_cas(
-                    target.space_id,
-                    path,
-                    body.content,
-                    baseline_mtime_ms=body.baseline_mtime_ms,
-                    eol=body.eol,
-                )
-                if ok:
-                    await shared_svc.record_file_change(
-                        space_id=target.space_id,
-                        actor_user_id=user.user_id,
-                        actor_via="user",
-                        action="file_written",
-                        path=path,
-                    )
-            else:
-                ok, mtime_ms = await write_file_text(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
+        if target.space_id:
+            ok, mtime_ms = await _shared_write_cas(
+                target.space_id,
+                path,
+                body.content,
+                baseline_mtime_ms=body.baseline_mtime_ms,
+                eol=body.eol,
+            )
+            if ok:
+                await shared_svc.record_file_change(
+                    space_id=target.space_id,
+                    actor_user_id=user.user_id,
+                    actor_via="user",
+                    action="file_written",
                     path=path,
-                    content=body.content,
-                    baseline_mtime_ms=body.baseline_mtime_ms,
-                    eol=body.eol,
                 )
+        else:
+            ok, mtime_ms = await write_file_text(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                path=path,
+                content=body.content,
+                baseline_mtime_ms=body.baseline_mtime_ms,
+                eol=body.eol,
+            )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except NotAFile as e:
@@ -815,23 +810,22 @@ async def delete_workspace_file(
     _require_cloud(target)
     _require_shared_write(target)
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                await _shared_delete(target.space_id, path)
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="file_deleted",
-                    path=path,
-                )
-            else:
-                await delete_file(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                    path=path,
-                )
+        if target.space_id:
+            await _shared_delete(target.space_id, path)
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_deleted",
+                path=path,
+            )
+        else:
+            await delete_file(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                path=path,
+            )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
@@ -857,25 +851,24 @@ async def move_workspace_file(
     _require_cloud(target)
     _require_shared_write(target)
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                await _shared_move(target.space_id, body.src, body.dst)
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="file_moved",
-                    path=body.dst,
-                    detail={"src": body.src},
-                )
-            else:
-                await move_file(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                    src=body.src,
-                    dst=body.dst,
-                )
+        if target.space_id:
+            await _shared_move(target.space_id, body.src, body.dst)
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_moved",
+                path=body.dst,
+                detail={"src": body.src},
+            )
+        else:
+            await move_file(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                src=body.src,
+                dst=body.dst,
+            )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
@@ -901,23 +894,22 @@ async def create_workspace_dir(
     _require_cloud(target)
     _require_shared_write(target)
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            if target.space_id:
-                await _shared_mkdir(target.space_id, body.path)
-                await shared_svc.record_file_change(
-                    space_id=target.space_id,
-                    actor_user_id=user.user_id,
-                    actor_via="user",
-                    action="dir_created",
-                    path=body.path,
-                )
-            else:
-                await create_dir(
-                    user_id=user.user_id,
-                    folder_id=target.folder_id,
-                    conversation_id=target.conversation_id,
-                    path=body.path,
-                )
+        if target.space_id:
+            await _shared_mkdir(target.space_id, body.path)
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="dir_created",
+                path=body.path,
+            )
+        else:
+            await create_dir(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                path=body.path,
+            )
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     except AlreadyExists as e:
@@ -950,15 +942,14 @@ async def clone_repo_into_workspace(
     except Exception:  # noqa: BLE001 — public clone still works without PAT table
         auth = None
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            dest = await clone_repo(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
-                repo_url=body.repo_url,
-                dest=body.dest,
-                auth=auth,
-            )
+        dest = await clone_repo(
+            user_id=user.user_id,
+            folder_id=target.folder_id,
+            conversation_id=target.conversation_id,
+            repo_url=body.repo_url,
+            dest=body.dest,
+            auth=auth,
+        )
     except ValueError as e:
         raise ValidationError(str(e)) from e
     except CloneError as e:
@@ -1011,13 +1002,13 @@ async def create_workspace_snapshot(
     )
     _require_cloud(target)
     _refuse_shared_extra(target)
-    async with workspace_lock(_storage_key(user.user_id, target)):
-        ref = await create_snapshot(
-            user_id=user.user_id,
-            folder_id=target.folder_id,
-            conversation_id=target.conversation_id,
-            label=body.label,
-        )
+    # create_snapshot holds workspace_lock at the sink (A′).
+    ref = await create_snapshot(
+        user_id=user.user_id,
+        folder_id=target.folder_id,
+        conversation_id=target.conversation_id,
+        label=body.label,
+    )
     return SnapshotSummary.model_validate(ref)
 
 
@@ -1039,14 +1030,14 @@ async def restore_workspace_snapshot(
     )
     _require_cloud(target)
     _refuse_shared_extra(target)
+    # restore_snapshot holds workspace_lock at the sink (A′).
     try:
-        async with workspace_lock(_storage_key(user.user_id, target)):
-            await restore_snapshot(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
-                snapshot_id=snapshot_id,
-            )
+        await restore_snapshot(
+            user_id=user.user_id,
+            folder_id=target.folder_id,
+            conversation_id=target.conversation_id,
+            snapshot_id=snapshot_id,
+        )
     except SnapshotNotFound as e:
         raise NotFoundError("快照不存在") from e
     return StatusResponse()

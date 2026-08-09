@@ -68,12 +68,11 @@ _STANCE_RETRY_TIP = (
 
 # Schema layer (工具面瘦身): short trigger + key param cues. HOW → debate_and_review skill.
 DEBATE_DESCRIPTION = (
-    "对需要【对抗性多视角思考】的问题发起主持人驱动的结构化辩论，交回【决策简报 + 交锋叙事线】"
-    "双产物（非终结，产物回到你的循环）。"
-    "form：debate=正反决策；red_team=红队压测方案（被审方标 is_subject）；roundtable=圆桌观点光谱。"
-    "传 motion + form + sides（≥2）；轮数与收敛由主持人自调。"
-    "各角度独立的并行调研用 delegate；无对立面 / 单点事实不要用本工具。"
-    "细节见 consult_skill(debate_and_review)。"
+    "对抗性多视角思考：主持人驱动结构化辩论，交回【决策简报+交锋叙事线】（非终结）。"
+    "form：debate=正反；red_team=红队压测（被审方 is_subject）；roundtable=圆桌。"
+    "必填 motion+form+sides（≥2）；轮数/收敛主持人自调。"
+    "独立并行调研用 delegate；无对立面/单点事实勿用。"
+    "HOW→consult_skill(debate_and_review)。"
 )
 
 DEBATE_PARAMETERS = {
@@ -81,78 +80,61 @@ DEBATE_PARAMETERS = {
     "properties": {
         "motion": {
             "type": "string",
-            "description": "辩论命题（用户原话或你提炼的争议命题）。",
+            "description": "辩论命题（用户原话或提炼的争议命题）。",
         },
         "form": {
             "type": "string",
             "enum": list(DEBATE_FORM_VALUES),
             "description": (
-                "debate=正反攻防（并行波+质询+结辩）；"
-                "red_team=红队挑刺（finding 台账+攻→应→复三拍+门决；被审方标 is_subject）；"
-                "roundtable=多方圆桌（分题点名串行线程+共识/分歧地图）。"
+                "debate=正反攻防；red_team=红队挑刺（被审方 is_subject）；"
+                "roundtable=多方圆桌。流程细节→debate_and_review。"
             ),
         },
         "sides": {
             "type": "array",
-            "description": "参与方（≥2）：正反=2，圆桌≥3，红队=被审方 + ≥1 红队。",
+            "description": "参与方（≥2）：正反=2，圆桌≥3，红队=被审方+≥1 红队。",
             "items": {
                 "type": "object",
                 "properties": {
                     "key": {
                         "type": "string",
-                        "description": "机器标识（唯一英文短词，如 pro/con/red1）。",
+                        "description": "唯一英文短词（如 pro/con/red1）。",
                     },
                     "name": {
                         "type": "string",
-                        "description": (
-                            "展示名：简短的立场 / 视角名，各方对称同风格；勿塞模型名"
-                            "（模型走 model 字段）。"
-                        ),
+                        "description": "展示立场/视角名；勿塞模型名（走 model）。",
                     },
                     "stance": {
                         "type": "string",
                         # 生成侧兜底：maxLength 拦极端超长；真意图靠 validate_stance 语义形状。
                         "maxLength": STANCE_MAX_CHARS,
                         "description": (
-                            f"一句话立场倾向（单句判断句；硬上限 {STANCE_MAX_CHARS} 字作兜底）："
-                            "只说该方主张什么结论"
-                            "（正例：「支持一审判决正确」/「认为判赔过重」）；"
-                            "禁换行、分号、顿号/括号号等枚举展开、「首先/其次」类论证展开、"
-                            "论点清单与论证角度指令、事实细节——"
-                            "客观事实归 background，论点与论证路径归辩手自己检索构建。"
-                            "反例（勿写，会被拒）：「核心论点包括(1)…(4)；请从…角度系统论证」。"
-                            "模型名/版本号（如 GLM 5.2）可出现在单句立场里，不是枚举。"
+                            f"一句话立场倾向（单句；硬上限 {STANCE_MAX_CHARS} 字）："
+                            "只写主张结论；禁论证/论点清单"
+                            "（如「核心论点…系统论证」）；事实归 background。"
+                            "细则→debate_and_review。"
                         ),
                     },
                     "is_subject": {
                         "type": "boolean",
-                        "description": "仅红队形态：标记被审的方案方。",
+                        "description": "仅红队：标记被审方案方。",
                     },
                     "model": {
                         "type": "string",
                         "description": (
-                            "（可选）该方辩手模型：只填目录裸 id 或人类可读提及"
-                            "（如「glm-5.2」「平台 glm-5.2」「DeepSeek」）。"
-                            "禁止写入 origin/model 路由键（含 /）。"
-                            "点名时只填提及即可，origin/provider_id 可省略——开赛前 runtime 消歧成三元组；"
-                            "用户已说「平台的」时提及可省略「平台」前缀。"
-                            "已有完整三元组亦可直通。空=跟本 turn 主模型（同模型场）。"
+                            "（可选）辩手模型：目录裸 id 或可读提及"
+                            "（如「glm-5.2」「DeepSeek」）；禁路由键（含 /）。"
+                            "origin/provider_id 可省略，runtime 消歧；空=跟 turn 主模型。"
                         ),
                     },
                     "origin": {
                         "type": "string",
                         "enum": ["platform", "byok"],
-                        "description": (
-                            "模型来源：platform=平台目录；byok=用户自备密钥服务商。"
-                            "可选；缺省时由 runtime 对 model 提及消歧补全。"
-                        ),
+                        "description": "platform|byok；可选，缺省由 model 提及消歧。",
                     },
                     "provider_id": {
                         "type": "string",
-                        "description": (
-                            "BYOK 服务商 id（origin=byok 时最终必填；platform 勿填）。"
-                            "提及消歧成功后由 runtime 写回。"
-                        ),
+                        "description": "BYOK 服务商 id（origin=byok 最终必填；platform 勿填）。",
                     },
                 },
                 "required": ["key", "name", "stance"],
@@ -161,47 +143,36 @@ DEBATE_PARAMETERS = {
         "cross_model": {
             "type": "boolean",
             "description": (
-                "用户只说「跨模型 / 不同模型辩论」未点名双方时置 true，且各方 model 留空："
-                "runtime 套默认对阵（平台 allowlist 前两名，或 1 平台 + BYOK DeepSeek）。"
-                "留空且无本旗标 = 同模型场（跟 turn 主模型），不是跨模型。"
+                "仅说「跨模型」未点名时置 true 且各方 model 留空→默认对阵；"
+                "无本旗标=同模型场。"
             ),
         },
         "thorough": {
             "type": "boolean",
-            "description": (
-                "默认 true=辩透（主持人自判收敛）；false=快速单轮对碰（用户只想轻量看看时）。"
-            ),
+            "description": "默认 true=辩透；false=快速单轮对碰。",
         },
         "background": {
             "type": "string",
             "description": (
-                "（可选）赛前底料：已核实客观事实清单，每条须附【来源】与【日期】；"
-                "未决 / 推断不得写成既定事实；只放事实不放观点。纯价值观命题不必传。"
-                "格式与硬化禁令见 debate_and_review。"
+                "（可选）赛前客观事实清单，每条附【来源】与【日期】；"
+                "未决/推断勿当既定事实。细则→debate_and_review。"
             ),
         },
         "moderator_model": {
             "type": "string",
             "description": (
-                "（可选）裁判 / 主持人模型：同 sides[].model，只填目录裸 id 或人类可读提及"
-                "（如「DeepSeek」「平台 glm-5.2」）；禁止写入路由键（含 /）。"
-                "用户点名裁判时填此字段；origin/provider_id 可省略——开赛前 runtime 消歧。"
+                "（可选）裁判模型：同 sides[].model 填法；禁路由键（含 /）；"
                 "空=系统默认（可与辩手同模）。"
             ),
         },
         "moderator_origin": {
             "type": "string",
             "enum": ["platform", "byok"],
-            "description": (
-                "裁判模型来源：platform|byok。可选；缺省时由 runtime 对 moderator_model 提及消歧补全。"
-            ),
+            "description": "裁判来源 platform|byok；可选。",
         },
         "moderator_provider_id": {
             "type": "string",
-            "description": (
-                "裁判 BYOK 服务商 id（origin=byok 时最终必填；platform 勿填）。"
-                "提及消歧成功后由 runtime 写回。"
-            ),
+            "description": "裁判 BYOK 服务商 id（origin=byok 最终必填）。",
         },
     },
     "required": ["motion", "form", "sides"],

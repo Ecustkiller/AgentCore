@@ -12,14 +12,14 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
 /**
  * 会话路由判定：一个回合该走本地 sidecar，还是云端 SSE。
  *
- * 双模式工作区 §十。sidecar 的持久化 / 计费现经回合结束**回写云端**已闭环（幂等
- * 可重试，见 `streamConversationViaSidecar`），且**启动失败会自动降级回云端**
- * （见 `turns.sendTurn`），故本地引擎已毕业到**默认开**。
+ * 双模式工作区 §十。大众默认**永不走 sidecar**（全云端过桥）；仅高级在设置里显式打开
+ * 「本地引擎」后，绑定本机本地根且本回合无附件 / 无点名时才走 sidecar。启动失败会自动
+ * 降级回云（见 `turns.sendTurn`）。无本地绑定 / 带附件 / 开关关（含 unset→默认关）→ 云链路。
  *
- * 路由判定：会话绑定本机存在的本地根、本回合无附件、且开关有效（默认开，用户可在
- * `设置 → 外观` 关闭）时走 sidecar；无本地绑定 / 带附件 / 显式关闭 → 维持云链路。
- * 注意 sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门——这些是其限制，
- * 不再是 opt-in 的理由。
+ * 续跑例外：`origin=sidecar` / 已有本机活回合须跟本地事实（{@link resolveConversationLocalTarget}
+ * / {@link getActiveSidecarTarget}），**忽略**大众默认关——本机帧云端没有。新开回合仍跟偏好。
+ *
+ * sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门。
  */
 
 /**
@@ -148,16 +148,14 @@ export async function resolveConversationLocalTarget(
 }
 
 /**
- * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + scratch 子路径）；不该走 sidecar 则 null。
+ * 解析**新开回合**应在其上跑 sidecar 的目标；不该走 sidecar 则 null（早退，不 probe / 不 spawn）。
  *
- * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}）**且**该会话能用本地引擎
+ * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}；unset→默认关）**且**该会话能用本地引擎
  * （{@link resolveConversationLocalTarget}）。开关关 / 无本地绑定 / 根不在本机 → null（交回云链路）。
  *
- * 纯「绑定判定」，**不掺运行时健康**：本判定被新回合（`sendTurn`）、续跑（`runResume`）、列暂停
- * 帧（`loadPausedTurns`）三处复用，而「环境能否拉起」（探活 / 降级标记，见 sidecarHealth）对三者
- * 语义不同——对新回合是「降级走云」的理由，对续跑 / 列帧反而是「本机帧只在本地、绝不能误走云」。
- * 故健康收敛留给各调用方按自身语义处理（`sendTurn` 探活失败走云、`runResume` 探活失败保留帧出
- * 横幅、`loadPausedTurns` 只读本机帧不关心进程健康），不在此处统一挡掉、以免污染后两者。
+ * 纯「新回合路由意图」，**不掺运行时健康**（探活由 `sendTurn` 收敛）。**续跑勿用本函数**：
+ * `origin=sidecar` 须跟本地事实（{@link resolveConversationLocalTarget} /
+ * {@link getActiveSidecarTarget}），忽略大众默认关——见 `runResume`。
  */
 export async function resolveSidecarRoot(
   conversationId: string,

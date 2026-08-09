@@ -34,6 +34,7 @@ import type {
   TurnQueueCancelledPayload,
   TurnQueuedPayload,
   TurnWarningPayload,
+  WorkspaceLockWaitPayload,
 } from "@/types/events";
 import { resetCaptainContext } from "../captainContext";
 import {
@@ -101,11 +102,20 @@ export function handleMessageStreamEvent(
         .recordTurnWarning(payload.message, conversationId);
       return true;
     }
+    case "workspace_lock_wait": {
+      // EPHEMERAL：写锁短等 — 空气泡显示「等待工作区…」而非 Thinking…（不得静默等锁）。
+      const p = event.payload as WorkspaceLockWaitPayload;
+      useConversationStore
+        .getState()
+        .setWaitingForWorkspaceLock(Boolean(p.waiting), conversationId);
+      return true;
+    }
     case "message_start": {
       const payload = event.payload as MessageStartPayload;
       // Resume = same-turn continuation: if an assistant already matches the
       // server message_id, reuse it (idempotent). Never delete+create.
       const store = useConversationStore.getState();
+      store.setWaitingForWorkspaceLock(false, conversationId);
       const wasGenerating = getRuntime(conversationId).isGenerating;
       // 跨回合回放 / 同连接下一回合：上一回合 message_end 已进 terminal，须先拨回
       // streaming，否则 ensureStreamingAssistant 与后续生长帧会被门禁丢掉。
@@ -282,6 +292,12 @@ export function handleMessageStreamEvent(
       return true;
     }
     case "error": {
+      // terminal 后迟到 error：turnPhase 本就因守卫不改；消息/协作图侧效也须
+      // no-op，否则会出现「phase=completed 但气泡挂 error、图被打 failed」的自相矛盾。
+      // stopping/streaming 仍正常收口。allowsSseEvent 放行的 run_*/execution_* 不经此分支。
+      if (isTerminalPhase(getTurnPhase(conversationId))) {
+        return true;
+      }
       flushPendingContent(conversationId);
       flushPendingFrames(conversationId);
       ensureStreamingAssistant(conversationId);
@@ -306,12 +322,10 @@ export function handleMessageStreamEvent(
       // Same as message_end: keep the complete window; idle prune is LRU-only.
       finalizeTurnTrace(conversationId);
       clearGraphAppendRedirect(conversationId);
-      if (!isTerminalPhase(getTurnPhase(conversationId))) {
-        completeTurnPhase(
-          conversationId,
-          getTurnPhase(conversationId) === "stopping" ? "stopped" : "failed",
-        );
-      }
+      completeTurnPhase(
+        conversationId,
+        getTurnPhase(conversationId) === "stopping" ? "stopped" : "failed",
+      );
       return true;
     }
     default:

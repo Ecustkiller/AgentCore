@@ -4,13 +4,13 @@ Pins the pure pieces the ask_user ``POST .../resume`` path adds on top of the
 plan_review machinery:
 
 - :func:`ask_user_tool_result` is the SINGLE source of truth shared by the live tool
-  and resume — continue feeds the CEO loop a ``CONTINUE`` result, stop returns
-  a terminal ``INTERACT`` whose closing note ends the turn in-band, timeout hands
-  control back to the CEO. ``ADJUST`` is rejected (plan_review only).
+  and resume — continue / stop / timeout all feed the CEO loop a ``CONTINUE``
+  result (stop is 拒答 with soft guidance, not empty-continue「按默认」; wire stays
+  ``decision=stop``). ``ADJUST`` is rejected (plan_review only).
 - :func:`_settle_resumed_suspension` applies the user's decision to a paused frame by
   kind: for ask_user it emits the journaled ``checkpoint_resolved``, drops off-menu
-  picks (same guard as the live tool), and reports a ``terminal_text`` ONLY for stop
-  (so resume finishes without another CEO round).
+  picks (same guard as the live tool), and never sets ``terminal_text`` (CEO always
+  resumes after settle).
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -105,24 +105,26 @@ def test_result_continue_folds_picks_and_note():
     assert "A" in res.output and "走稳一点" in res.output
 
 
-def test_result_stop_is_terminal_with_closing_text():
+def test_result_stop_feeds_ceo_with_cancel_guidance():
     res = ask_user_tool_result(
         CheckpointResponse(decision=CheckpointDecision.STOP, note="先到这", selected=[])
     )
-    # stop ends the turn in-band: the closing note rides as final_text (the reply),
-    # NOT as output (which is the CEO-facing breadcrumb).
-    assert res.effect is ToolEffect.INTERACT
-    assert res.final_text == "先到这"
-    assert "取消未回答" in res.output
+    # stop = 拒答可见：CONTINUE 回灌 CEO（非 INTERACT 静默终结）；留言进 output。
+    assert res.effect is ToolEffect.CONTINUE
+    assert res.final_text is None
+    assert "取消了澄清" in res.output
+    assert "先到这" in res.output
+    assert "勿用同一问句" in res.output
 
 
-def test_result_stop_empty_closing_when_no_note():
+def test_result_stop_empty_note_still_feeds_ceo():
     res = ask_user_tool_result(
         CheckpointResponse(decision=CheckpointDecision.STOP, note="", selected=[])
     )
-    assert res.effect is ToolEffect.INTERACT
-    # No canned assistant line — stop status is on the interaction card.
-    assert res.final_text == ""
+    assert res.effect is ToolEffect.CONTINUE
+    assert res.final_text is None
+    assert "取消了澄清" in res.output
+    assert "用户留言" not in res.output
 
 
 def test_result_adjust_rejected():
@@ -153,7 +155,7 @@ def _sink_with_seeded_checkpoint() -> EventSink:
     return sink
 
 
-async def test_settle_ask_user_stop_yields_terminal_text():
+async def test_settle_ask_user_stop_feeds_loop_without_terminal():
     sink = _sink_with_seeded_checkpoint()
     settled = await settle_resumed_suspension(
         _ask_frame(),
@@ -164,10 +166,11 @@ async def test_settle_ask_user_stop_yields_terminal_text():
         delegate_tool=None,  # unused on the ask_user branch
         execution_id="",
     )
-    # stop → finish WITHOUT another CEO round (the closing note is the whole reply).
-    assert settled.terminal_text == "收工"
-    assert settled.effect is ToolEffect.INTERACT
-    assert "取消未回答" in settled.output
+    # stop → CEO round (拒答可见)；留言在 output，无 terminal_text。
+    assert settled.terminal_text is None
+    assert settled.effect is ToolEffect.CONTINUE
+    assert "取消了澄清" in settled.output
+    assert "收工" in settled.output
     # the resolution is journaled so a reload replays the settled card.
     journal = sink.execution_journal() or []
     assert any(e["type"] == EventType.CHECKPOINT_RESOLVED.value for e in journal)
@@ -422,6 +425,74 @@ async def test_recover_window_skips_tool_result_on_suspend(monkeypatch):
     # Window still ends on the pending assistant tool_call (no tool result appended).
     assert recovered.messages[-1].role == "assistant"
     assert recovered.messages[-1].tool_calls
+
+
+async def test_recover_window_stop_skips_continuity_steer(monkeypatch):
+    """ask_user STOP feeds CEO but must not inject deliverable continuity steer."""
+    from agentcore.core.types import ToolEffect
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.pipeline.resume import recover_path as rp
+    from agentcore.runtime.recover import SettledSuspension
+
+    suspension = _ask_frame()
+    suspension.transcript = [
+        LLMMessage(role="user", content="A 还是 B?"),
+        LLMMessage(
+            role="assistant",
+            content="已交付前半段分析。",
+            tool_calls=[
+                ToolCall(
+                    id="call_ask",
+                    function=ToolCallFunction(name="ask_user", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    monkeypatch.setattr(
+        rp,
+        "resumed_captain_window",
+        lambda _s, _h: list(suspension.transcript),
+    )
+    monkeypatch.setattr(
+        rp,
+        "recover_turn",
+        AsyncMock(
+            return_value=SettledSuspension(
+                "用户取消了澄清，未作答。\n宜据此自行收口。",
+                None,
+                ToolEffect.CONTINUE,
+            ),
+        ),
+    )
+    monkeypatch.setattr(rp, "persist_resumed_tool_results", MagicMock())
+    monkeypatch.setattr(
+        rp,
+        "append_resumed_tool_results",
+        lambda msgs, _id, output: msgs.append(
+            LLMMessage(role="tool", content=output, tool_call_id="call_ask")
+        ),
+    )
+
+    recovered = await rp.recover_and_rebuild_window(
+        suspension=suspension,
+        decision=CheckpointDecision.STOP,
+        note="",
+        selected=[],
+        history=None,
+        sink=EventSink(),
+        delegate_tool=MagicMock(),
+        debate_tool=MagicMock(),
+        execution_id="e1",
+        captain_run_id="cap1",
+        pre_pause_override="已交付前半段分析。",
+    )
+    assert recovered.settled.terminal_text is None
+    assert recovered.messages[-1].role == "tool"
+    assert "取消了澄清" in (recovered.messages[-1].content or "")
+    # No continuity steer user message after the cancel tool result.
+    assert not any(
+        m.role == "user" and "[系统提示]" in (m.content or "") for m in recovered.messages
+    )
 
 
 async def test_resume_pipeline_suspend_skips_ceo(monkeypatch):

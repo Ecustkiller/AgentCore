@@ -40,8 +40,6 @@ from agentcore.workflows.definition import (
     WorkflowDefinitionError,
     expand_workflow_to_tasks,
 )
-from agentcore.workspace.locate import workspace_storage_key
-from agentcore.workspace.locks import workspace_lock
 
 logger = get_logger(__name__)
 
@@ -186,41 +184,36 @@ async def run_workflow_job(
             local_binding=None,
         )
 
-        async with workspace_lock(
-            workspace_storage_key(
-                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
-            )
-        ):
-            async with async_session_factory() as session:
-                await MessageRepository(session).create(
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=user_message,
-                )
-                history = await load_chat_context(session, conversation_id, max_messages=40)
-
-            from agentcore.conversation.turn_runner import (
-                run_mechanism_direct_and_persist,
-            )
-
-            # Shared envelope with standing bound-workflow (placeholder/lease/persist).
-            await run_mechanism_direct_and_persist(
+        async with async_session_factory() as session:
+            await MessageRepository(session).create(
                 conversation_id=conversation_id,
-                user_id=user_id,
-                user_message=user_message,
-                tasks=tasks,
-                workflow_id=workflow_id,
-                workflow_version=workflow_version,
-                sink=sink,
-                backend=backend,
-                history=history[:-1],
-                folder_id=folder_id,
-                memory_enabled=memory_enabled,
-                conversation_history_access=conversation_history_access,
-                permission_axes=axes,
-                profile_set=profile_set,
-                llm_credentials=llm_credentials,
+                role="user",
+                content=user_message,
             )
+            history = await load_chat_context(session, conversation_id, max_messages=40)
+
+        from agentcore.conversation.turn_runner import (
+            run_mechanism_direct_and_persist,
+        )
+
+        # Shared envelope with standing bound-workflow (placeholder/lease/persist).
+        await run_mechanism_direct_and_persist(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_message=user_message,
+            tasks=tasks,
+            workflow_id=workflow_id,
+            workflow_version=workflow_version,
+            sink=sink,
+            backend=backend,
+            history=history[:-1],
+            folder_id=folder_id,
+            memory_enabled=memory_enabled,
+            conversation_history_access=conversation_history_access,
+            permission_axes=axes,
+            profile_set=profile_set,
+            llm_credentials=llm_credentials,
+        )
         logger.info(
             "workflow.run_finished",
             conversation_id=conversation_id,
