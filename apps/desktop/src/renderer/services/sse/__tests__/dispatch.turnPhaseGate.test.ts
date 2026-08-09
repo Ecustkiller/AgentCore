@@ -106,11 +106,7 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
         settle: "fail_envelope",
       }),
     );
-    expect(rejectMock).toHaveBeenCalledWith(
-      payload,
-      CID,
-      "stopping",
-    );
+    expect(rejectMock).toHaveBeenCalledWith(payload, CID, "stopping");
   });
 
   it("does not drop-log when checkpoint_required is allowed in terminal", () => {

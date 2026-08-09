@@ -118,9 +118,7 @@ export async function rejectWorkspaceOpForTurnPhase(
     conversationId,
     logLabel: "workspaceOps",
     perform: async () =>
-      ioError(
-        `回合 phase=${turnPhase}，工作区 op 未执行（turn_phase_gate）`,
-      ),
+      ioError(`回合 phase=${turnPhase}，工作区 op 未执行（turn_phase_gate）`),
   });
 }
 

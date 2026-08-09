@@ -124,10 +124,7 @@ describe("workspace_op L3 diagnostics", () => {
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalled();
     });
-    const [, init] = fetchMock.mock.calls[0] as [
-      string,
-      { body?: string },
-    ];
+    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
     const body = JSON.parse(String(init.body)) as {
       kind: string;
       ok: boolean;
@@ -166,10 +163,7 @@ describe("workspace_op L3 diagnostics", () => {
         settle: "fail_envelope",
       }),
     );
-    const [, init] = fetchMock.mock.calls[0] as [
-      string,
-      { body?: string },
-    ];
+    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
     expect(JSON.parse(String(init.body))).toMatchObject({
       kind: "client_tool",
       ok: false,

@@ -1,9 +1,9 @@
 import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
 import { logDesktop } from "../../log-service";
 import {
+  WINDOWS_RESERVED_DEVICE_REASON,
   pathHasWindowsReservedDeviceName,
   toReason,
-  WINDOWS_RESERVED_DEVICE_REASON,
 } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { ensureReady, getRoot } from "../roots";
