@@ -284,6 +284,68 @@ async def test_close_user_stop_turn_empty_body_still_durable(monkeypatch):
     assert ok is True
     assert called and called[0]["load_stream_state"] is True
     assert called[0]["reason"] == TurnInterruptReason.USER_STOP
+    assert called[0]["content"] == ""
     assert sink._stream_finish_reason == FinishReason.CANCELLED.value
     payload = await _drain_until_message_end(sink)
     assert payload["finish_reason"] == FinishReason.CANCELLED
+
+
+async def test_close_user_stop_after_content_reset_salvages_stash(monkeypatch):
+    """finish_guard reset then stop: keep pre-reset prose (SSE + durable content)."""
+    from agentcore.conversation import turn_persistence
+    from agentcore.runtime.events import content_delta, content_reset
+
+    called: list[dict] = []
+
+    async def _fake_close(**kwargs):
+        called.append(kwargs)
+        return True
+
+    monkeypatch.setattr(turn_persistence.settings, "incomplete_turn_persist_enabled", True)
+    monkeypatch.setattr(turn_persistence, "close_turn_interrupted", _fake_close)
+
+    sink = EventSink()
+    sink.emit(content_delta("重置前已流式正文"))
+    sink.emit(content_reset("finish_guard"))
+    assert sink.streamed_content() == ""
+    assert sink.interrupt_salvage_content() == "重置前已流式正文"
+
+    # Drop setup frames so stop-path SSE is isolated.
+    while True:
+        try:
+            sink._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+
+    ok = await turn_persistence.close_user_stop_turn(
+        sink=sink,
+        conversation_id="c1",
+        trace_id="t1",
+        message_id="m-reset-stop",
+    )
+    assert ok is True
+    assert called and "重置前已流式正文" in (called[0].get("content") or "")
+
+    # Live SSE: salvage delta before message_end(cancelled).
+    first = await asyncio.wait_for(sink.get(), timeout=1.0)
+    assert first is not None
+    assert first.type == EventType.CONTENT_DELTA
+    assert first.payload["delta"] == "重置前已流式正文"
+    end = await asyncio.wait_for(sink.get(), timeout=1.0)
+    assert end is not None
+    assert end.type == EventType.MESSAGE_END
+    assert end.payload["finish_reason"] == FinishReason.CANCELLED
+
+
+async def test_interrupt_stash_cleared_when_live_delta_arrives():
+    """New CONTENT_DELTA after reset clears stash — live rewrite owns the body."""
+    from agentcore.runtime.events import content_delta, content_reset
+
+    sink = EventSink()
+    sink.emit(content_delta("旧稿"))
+    sink.emit(content_reset("finish_guard"))
+    assert sink.interrupt_salvage_content() == "旧稿"
+    sink.emit(content_delta("新稿"))
+    assert sink.streamed_content() == "新稿"
+    assert sink.interrupt_salvage_content() == "新稿"
+    assert sink._interrupt_content_stash is None

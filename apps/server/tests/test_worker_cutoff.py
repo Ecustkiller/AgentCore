@@ -336,6 +336,98 @@ def test_wind_down_keeps_file_read_for_files_deliverable():
     assert "web_search" not in prose_narrowed
 
 
+def test_wind_down_keeps_note_tools_for_collaboration():
+    """collaboration/wall：收窄后保留便签三件套；非协作不含；检索仍剥离。"""
+    from agentcore.runtime.runs.cutoff import (
+        WIND_DOWN_NOTE_TOOLS,
+        narrow_tools_for_wind_down_breach,
+        wind_down_allowed_tools,
+        wind_down_breach_nudge,
+        wind_down_instruction_timeout,
+        wind_down_instruction_token,
+        worker_keeps_notes_in_wind_down,
+    )
+
+    collab_available = {
+        "web_search",
+        "grep",
+        "file_write",
+        "file_append",
+        "handoff",
+        "post_note",
+        "read_notes",
+        "amend_note",
+        "code_execute",
+    }
+    collab_allowed = [
+        "web_search",
+        "grep",
+        "file_write",
+        "file_append",
+        "handoff",
+        "post_note",
+        "read_notes",
+        "amend_note",
+    ]
+    assert worker_keeps_notes_in_wind_down(
+        available=collab_available, allowed=collab_allowed
+    )
+    collab_narrowed = narrow_tools_for_wind_down(
+        collab_available, allowed=collab_allowed
+    )
+    for name in WIND_DOWN_NOTE_TOOLS:
+        assert name in collab_narrowed
+    assert "file_write" in collab_narrowed
+    assert "handoff" in collab_narrowed
+    assert "web_search" not in collab_narrowed
+    assert "grep" not in collab_narrowed
+    assert "code_execute" not in collab_narrowed
+
+    whitelist = wind_down_allowed_tools(keep_notes=True)
+    assert whitelist >= WIND_DOWN_NOTE_TOOLS
+    assert "web_search" not in whitelist
+
+    # 非协作：工具面无便签 → 收窄后不含。
+    solo_available = {"web_search", "file_write", "handoff", "grep"}
+    solo_allowed = ["web_search", "file_write", "handoff", "grep"]
+    assert not worker_keeps_notes_in_wind_down(
+        available=solo_available, allowed=solo_allowed
+    )
+    solo_narrowed = narrow_tools_for_wind_down(solo_available, allowed=solo_allowed)
+    for name in WIND_DOWN_NOTE_TOOLS:
+        assert name not in solo_narrowed
+    assert "file_write" in solo_narrowed
+    assert "handoff" in solo_narrowed
+    assert "web_search" not in solo_narrowed
+
+    # keep_landing 违约面：协作仍可便签；handoff-only 违约不含。
+    landing = narrow_tools_for_wind_down_breach(
+        collab_available,
+        keep_landing=True,
+        keep_notes=True,
+        allowed=collab_allowed,
+    )
+    for name in WIND_DOWN_NOTE_TOOLS:
+        assert name in landing
+    assert "web_search" not in landing
+    assert narrow_tools_for_wind_down_breach(
+        collab_available, keep_landing=False, keep_notes=True
+    ) == ["handoff"]
+
+    token_notes = wind_down_instruction_token(keep_notes=True)
+    token_plain = wind_down_instruction_token(keep_notes=False)
+    assert "可贴/读/改" in token_notes and "post_note" in token_notes
+    assert "禁止继续调查" in token_notes and "handoff" in token_notes
+    assert "post_note" not in token_plain
+    assert "可贴/读/改" in wind_down_instruction_timeout(keep_notes=True)
+    assert "post_note" not in wind_down_instruction_timeout(keep_notes=False)
+    landing_nudge = wind_down_breach_nudge(keep_landing=True, keep_notes=True)
+    assert "可贴/读/改" in landing_nudge
+    assert "禁止再检索" in landing_nudge
+    assert "post_note" not in wind_down_breach_nudge(keep_landing=True, keep_notes=False)
+    assert "仅 handoff" in wind_down_breach_nudge(keep_landing=False, keep_notes=True)
+
+
 def test_wind_down_breach_detection_and_local_force():
     """非白名单工具 = 违约；二次违约或已过硬顶 → 本地收口，禁止再烧 token。"""
     from agentcore.runtime.runs.cutoff import (

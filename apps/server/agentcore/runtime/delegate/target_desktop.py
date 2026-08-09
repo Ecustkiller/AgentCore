@@ -95,6 +95,30 @@ def effective_target_folder_id(
     return None
 
 
+def format_bare_chat_no_target_error(missing_tasks: list[dict[str, Any]]) -> str:
+    """Actionable bare-chat gate copy: constant prefix + missing-task skeleton.
+
+    Shared by root ``DelegateTool.execute`` and replan ``apply_replan`` / supervised
+    via ``gate_bare_chat_requires_target``. Lists every task lacking a valid
+    ``target_folder_id`` (role / optional id / missing-target mark only — no task body).
+    """
+    parts: list[str] = []
+    for item in missing_tasks:
+        bits: list[str] = []
+        role = item.get("role")
+        if isinstance(role, str) and role.strip():
+            bits.append(f"role={role.strip()}")
+        else:
+            bits.append("role=?")
+        rid = item.get("id")
+        if isinstance(rid, str) and rid.strip():
+            bits.append(f"id={rid.strip()}")
+        bits.append("缺 target_folder_id")
+        parts.append("{" + ", ".join(bits) + "}")
+    dynamic = "；".join(parts) if parts else "{role=?, 缺 target_folder_id}"
+    return f"{NO_TARGET_SCRATCH_GATE_MSG} 缺目标任务：{dynamic}"
+
+
 def gate_bare_chat_requires_target(
     *,
     session_folder_id: str | None,
@@ -103,10 +127,12 @@ def gate_bare_chat_requires_target(
 ) -> str | None:
     """§4.2b·2b / 改法④A: no birth + no target → reject before drive.
 
-    Returns an error message, or None when the batch may proceed.
+    Still rejects the whole batch. When any task lacks an effective target,
+    returns the constant prefix plus a skeleton listing *all* missing tasks.
     """
     if session_folder_id:
         return None
+    missing: list[dict[str, Any]] = []
     for item in tasks_raw:
         if not isinstance(item, dict):
             continue
@@ -115,8 +141,10 @@ def gate_bare_chat_requires_target(
             default=default_target_folder_id,
         ):
             continue
-        return NO_TARGET_SCRATCH_GATE_MSG
-    return None
+        missing.append(item)
+    if not missing:
+        return None
+    return format_bare_chat_no_target_error(missing)
 
 
 async def load_target_folder_binding(

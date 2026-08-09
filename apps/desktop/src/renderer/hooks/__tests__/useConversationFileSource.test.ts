@@ -105,6 +105,7 @@ describe("useConversationFileSource — 对话侧栏云端源的完整预览出�
       pageId: "browser-page:test",
       conversationId: "conv-123",
       path: "dir/app.html",
+      workspaceId: "ws-XYZ",
     });
   });
 

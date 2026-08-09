@@ -155,3 +155,131 @@ describe("turn_queue_cancelled · 清排队 UI", () => {
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });
 });
+
+describe("turn_queue_started · 契约出队清轻态", () => {
+  it("turn_queued 轻态 → turn_queue_started 后消失；用户泡保留", () => {
+    useConversationStore.getState().addMessage(
+      {
+        id: "user-drain",
+        role: "user",
+        content: "开跑这条",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-start",
+      conversationId: CID,
+      messageId: "user-drain",
+      content: "开跑这条",
+      position: 1,
+      queueDepth: 1,
+    });
+
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_started",
+        timestamp: "",
+        payload: {
+          queue_id: "q-start",
+          conversation_id: CID,
+          remaining_depth: 0,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(
+      useConversationStore
+        .getState()
+        .byId[CID]?.messages.find((m) => m.id === "user-drain"),
+    ).toMatchObject({ role: "user", content: "开跑这条" });
+  });
+
+  it("只清匹配 queue_id；message_start 不再猜出队", () => {
+    useConversationStore.getState().addMessage(
+      {
+        id: "user-a",
+        role: "user",
+        content: "A",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    useConversationStore.getState().addMessage(
+      {
+        id: "user-b",
+        role: "user",
+        content: "B",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-a",
+      conversationId: CID,
+      messageId: "user-a",
+      content: "A",
+      position: 1,
+      queueDepth: 2,
+    });
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-b",
+      conversationId: CID,
+      messageId: "user-b",
+      content: "B",
+      position: 2,
+      queueDepth: 2,
+    });
+
+    // 仅 message_start：不得清轻态（已退役猜出队启发式）
+    handleMessageStreamEvent(
+      {
+        type: "message_start",
+        timestamp: "",
+        payload: { message_id: "asst-new" },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(2);
+
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_started",
+        timestamp: "",
+        payload: {
+          queue_id: "q-a",
+          conversation_id: CID,
+          remaining_depth: 1,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    const left = useQueuedTurnsStore.getState().list(CID);
+    expect(left).toHaveLength(1);
+    expect(left[0]?.queueId).toBe("q-b");
+  });
+
+  it("缺项时幂等 no-op", () => {
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_started",
+        timestamp: "",
+        payload: {
+          queue_id: "ghost",
+          conversation_id: CID,
+          remaining_depth: 0,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+});

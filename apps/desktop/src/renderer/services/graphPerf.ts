@@ -13,7 +13,12 @@ const RING_MAX = 400;
 const SUMMARY_MS = 2000;
 const LONG_MS = 16;
 
-export type GraphPerfKind = "flush" | "project" | "elk" | "longtask";
+export type GraphPerfKind =
+  | "flush"
+  | "project"
+  | "elk"
+  | "liveFace"
+  | "longtask";
 
 export interface GraphPerfSample {
   t: number;

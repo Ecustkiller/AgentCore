@@ -165,10 +165,10 @@ export interface FileSource {
    */
   openInBrowser?(path: string): Promise<void>;
   /**
-   * 应用内「完整预览」：主进程经 `workspace://` 协议以 Bearer 代理会话工作区字节，在
+   * 应用内「完整预览」：主进程经 `workspace://` 协议以 Bearer 代理工作区字节，在
    * Local Browser **第二非持久 partition** + sandbox 的隔离 WebContents 里完整跑 JS + 多文件
-   * 相对路径引用。主入口 = 右坞 BrowserPanel（对话侧栏 `useConversationFileSource` 绑定
-   * conversationId 挂上；不再走已拆除的 `openPreview` / PREVIEW_TAB）。仅桌面**云端会话工作区**
+   * 相对路径引用。主入口 = 右坞 BrowserPanel（对话侧栏 / hub 云源按落地 desk
+   * `folder:`·`conv:` 挂上；不再走已拆除的 `openPreview` / PREVIEW_TAB）。仅桌面**云端**
    * 源；本地源 / web 均不实现（web 无 browserApi.openWorkspaceHtml）。
    */
   openInAppPreview?(path: string): Promise<void>;

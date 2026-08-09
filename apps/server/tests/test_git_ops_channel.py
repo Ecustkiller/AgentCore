@@ -20,8 +20,9 @@ class _FakeLocalBackend:
     location = "local"
     root_label = "LocalProj"
 
-    def __init__(self, *, has_git: bool) -> None:
+    def __init__(self, *, has_git: bool, base_subpath: str = "") -> None:
         self._has_git = has_git
+        self.base_subpath = base_subpath.strip("/")
 
     async def exists(self, path: str) -> bool:
         return self._has_git and path.replace("\\", "/").rstrip("/") == ".git"
@@ -47,13 +48,14 @@ def _channel_ctx(
     replies: list[dict[str, Any]],
     agent_id: str = "ceo",
     as_worker: bool = False,
+    base_subpath: str = "",
 ) -> tuple[ToolContext, _RecordingChannel]:
     channel = _RecordingChannel(replies)
     ctx = ToolContext(
         execution_id="e",
         run_id="s",
         agent_id=agent_id,
-        backend=_FakeLocalBackend(has_git=has_git),
+        backend=_FakeLocalBackend(has_git=has_git, base_subpath=base_subpath),
         user_id="u",
         workspace_channel=channel,
         write_coordinator=WriteCoordinator() if as_worker else None,
@@ -139,3 +141,65 @@ async def test_channel_log_via_git_run():
     assert "abc1234" in log.output
     assert channel.calls[1][0] == WorkspaceOp.GIT_RUN
     assert channel.calls[1][1]["argv"][0] == "log"
+
+
+async def test_channel_git_run_passes_subpath_cwd():
+    """G1: scoped Local backend → every git_run payload carries project cwd."""
+    ctx, channel = _channel_ctx(
+        has_git=True,
+        base_subpath="projA",
+        replies=[
+            {"stdout": "true\n", "stderr": "", "exit_code": 0},
+            {
+                "stdout": "## main\n",
+                "stderr": "",
+                "exit_code": 0,
+            },
+        ],
+    )
+    status = await GitTool().execute({"subcommand": "status"}, ctx)
+    assert status.success is True
+    assert len(channel.calls) == 2
+    for _op, args in channel.calls:
+        assert args.get("cwd") == "projA"
+        assert "argv" in args
+
+
+async def test_channel_git_run_omits_cwd_when_unscoped():
+    """Open-folder (empty subpath): no cwd key — desktop uses bound root."""
+    ctx, channel = _channel_ctx(
+        has_git=True,
+        base_subpath="",
+        replies=[
+            {"stdout": "true\n", "stderr": "", "exit_code": 0},
+            {
+                "stdout": "## main\n",
+                "stderr": "",
+                "exit_code": 0,
+            },
+        ],
+    )
+    await GitTool().execute({"subcommand": "status"}, ctx)
+    for _op, args in channel.calls:
+        assert "cwd" not in args
+
+
+async def test_channel_init_baseline_passes_subpath_cwd():
+    """G2: init_baseline issues git init via channel with the same project cwd."""
+    ctx, channel = _channel_ctx(
+        has_git=False,
+        base_subpath="projB",
+        replies=[
+            {"stdout": "", "stderr": "", "exit_code": 0},  # init
+            {"stdout": "", "stderr": "", "exit_code": 0},  # add -A
+            {"stdout": "", "stderr": "", "exit_code": 0},  # commit
+            {"stdout": "abc1234\n", "stderr": "", "exit_code": 0},  # rev-parse
+            {"stdout": "main\n", "stderr": "", "exit_code": 0},  # branch
+        ],
+    )
+    result = await GitTool().execute({"subcommand": "init_baseline"}, ctx)
+    assert result.success is True
+    assert channel.calls
+    assert channel.calls[0][1]["argv"] == ["init"]
+    for _op, args in channel.calls:
+        assert args.get("cwd") == "projB"

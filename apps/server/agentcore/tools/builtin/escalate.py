@@ -79,9 +79,13 @@ class EscalateTool:
                 "委派的 worker、够不到用户，这是你唯一的向上通道。仅在遇到【缺了就会让整件事"
                 "走偏的关键信息】【只有上级/用户能定的关键岔路】或【发现真正该做的与初始计划"
                 "不符】时才用——能自行合理假设的小事不要升级。\n"
-                "blocking 维度：默认 false【非阻塞】——上报后你立刻按假设继续、主管收尾时纠偏；"
-                "true【阻塞·求决策】——仅当岔路【猜错你的产物基本作废】时用：你原地挂起、拿到"
-                "答复再继续（须写明 assumption）。协调模式下由主管仲裁；经典路径直送用户。\n"
+                "blocking 怎么选（默认 false，按题自选）："
+                "true【阻塞·求决策】——猜错产物基本作废 / 用户明确要求不确定就问 / "
+                "只有上级能定的关键岔路：原地挂起等裁决再继续"
+                "（须写 assumption；协调模式主管仲裁，经典路径直送用户）；"
+                "false【非阻塞·默认】——已有合理默认、报一声即可、主管收尾纠偏："
+                "上报后立刻按假设继续。"
+                "能自行合理假设的小事别升级；blocking 省着用，但该停时别装非阻塞硬猜。\n"
                 "kind 维度（正交）：默认 normal=普通待决问题；scope=【职责偏离】——你发现真正"
                 "该做的与初始计划/子任务设定不符（如上游产出显示真问题是 X 不是 Y）；dep=【卡在"
                 "缺输入】——你缺一个【还不存在】的输入 / 依赖才能继续（没人产出过、计划也没安排；"
@@ -90,7 +94,7 @@ class EscalateTool:
                 "scope / dep 主管 / lead 都会在波"
                 "边界据此校准【尚未运行】的下游（scope→操舵已有步骤，dep→replan 追加一个产出它的"
                 "步骤 / 接一条依赖边）；两者都【不停工】——你照常按假设把当前能做的做完。"
-                "克制使用 normal 与 blocking——能自行合理假设的小事别升级、blocking 省着用；"
+                "克制使用 normal——能自行合理假设的小事别升级；"
                 "唯独 dep（卡在【不存在】的输入、再猜也是错）该喊就喊、别硬猜瞎编。"
                 "browser_login：仅 blocking 有意义；为 true 时强制阻塞语义，挂起后允许用户在"
                 "回合仍 running 时接管浏览器完成登录（AI 永不经手密码）。"
@@ -117,11 +121,13 @@ class EscalateTool:
                     "blocking": {
                         "type": "boolean",
                         "description": (
-                            "可选，默认 false。false=【非阻塞】：上报后你立刻按假设把活做完、"
-                            "主管收尾纠偏。true=【阻塞·求决策】：仅当这个岔路【猜错你的产物基本"
-                            "作废】时用——你会原地挂起等裁决再继续（须写明 assumption；默认无限"
-                            "期等待，用户 / 主管可点「按假设继续」；仅未武装 sink、并发满、或运维"
-                            "显式配置超时时才自动按假设继续）。"
+                            "可选，默认 false。按题自选：false=【非阻塞】——"
+                            "已有合理默认、报一声即可、主管收尾纠偏：上报后立刻按假设做完。"
+                            "true=【阻塞·求决策】——猜错产物基本作废 / 用户明确要不确定就问 / "
+                            "只有上级能定的关键岔路：原地挂起等裁决"
+                            "（须写 assumption；默认无限期等，用户 / 主管可点「按假设继续」；"
+                            "仅未武装 sink、并发满、或运维显式超时才自动按假设继续）。"
+                            "省着用，该停时别装非阻塞。"
                         ),
                     },
                     "browser_login": {
@@ -313,6 +319,7 @@ class EscalateTool:
                 execution_id=context.execution_id,
                 write_ancestors=context.write_ancestors,
                 write_coordinator=context.write_coordinator,
+                desk_id=getattr(context, "ownership_desk_id", None),
             )
             ownership_paths = ownership_hints.get("ownership_paths")
             # 用户写权卡仅锁主仍在跑；已完成/已结束占位靠同座续派/declare·claim 接手，
@@ -374,6 +381,7 @@ class EscalateTool:
                 execution_id=context.execution_id,
                 write_ancestors=context.write_ancestors,
                 write_coordinator=context.write_coordinator,
+                desk_id=getattr(context, "ownership_desk_id", None),
             )
             post_escalation_to_coordination(
                 run_id=context.run_id,

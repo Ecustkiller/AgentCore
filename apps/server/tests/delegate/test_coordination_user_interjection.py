@@ -29,6 +29,10 @@ from agentcore.workspace.attachments import (
 from agentcore.workspace.server import ServerWorkspace
 
 
+async def _never() -> None:
+    await asyncio.Future()
+
+
 @pytest.fixture(autouse=True)
 def _clean_coord():
     clear_active_coordination()
@@ -154,6 +158,10 @@ async def test_persist_then_repersist_keeps_text_and_skips_rewrite(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_queue_user_message_enqueues_and_emits_queued():
+    """协调升 FIFO：enqueue_and_ensure_drain + live sink ``turn_queued``（条可见可取消）。"""
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.turn_runs import turn_runs
+
     session = CoordinationSession(
         execution_id="exec-inj",
         total_workers=2,
@@ -178,6 +186,9 @@ async def test_queue_user_message_enqueues_and_emits_queued():
     )
 
     sink = EventSink()
+    live = EventSink()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id="conv-inj", task=blocker, sink=live)
     tool = QueueUserMessageTool(sink=sink)
     ctx = ToolContext(
         execution_id="exec-inj",
@@ -187,25 +198,42 @@ async def test_queue_user_message_enqueues_and_emits_queued():
         user_id="u1",
         conversation_id="conv-inj",
     )
-    result = await tool.execute(
-        {"interjection_id": "inj-1", "reason": "无关"},
-        ctx,
-    )
-    assert result.success is True
-    assert turn_queue.depth("conv-inj") == 1
-    assert session.get_interjection("inj-1") is None
+    try:
+        result = await tool.execute(
+            {"interjection_id": "inj-1", "reason": "无关"},
+            ctx,
+        )
+        assert result.success is True
+        assert turn_queue.depth("conv-inj") == 1
+        assert session.get_interjection("inj-1") is None
 
-    hist = list(sink._history)
-    types = [e.type.value for e in hist]
-    assert "user_interjection" in types
-    last = next(e for e in reversed(hist) if e.type.value == "user_interjection")
-    assert last.payload["status"] == "queued"
-    assert last.payload["interjection_id"] == "inj-1"
+        hist = list(sink._history)
+        types = [e.type.value for e in hist]
+        assert "user_interjection" in types
+        last = next(e for e in reversed(hist) if e.type.value == "user_interjection")
+        assert last.payload["status"] == "queued"
+        assert last.payload["interjection_id"] == "inj-1"
+
+        live_types = [e.type for e in live._history]  # noqa: SLF001
+        assert EventType.TURN_QUEUED in live_types
+        tq = next(e for e in live._history if e.type is EventType.TURN_QUEUED)  # noqa: SLF001
+        assert tq.payload["conversation_id"] == "conv-inj"
+        assert tq.payload["queue_id"]
+        assert tq.payload["position"] == 1
+        assert tq.payload["queue_depth"] == 1
+    finally:
+        turn_queue.clear("conv-inj")
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+
 
 
 @pytest.mark.asyncio
 async def test_queue_user_message_works_after_session_closed():
     """收口后 queue 不再死路——仍可升格 FIFO（或幂等确认已处置）。"""
+    from agentcore.runtime.turn_runs import turn_runs
+
     session = CoordinationSession(
         execution_id="exec-inj",
         total_workers=2,
@@ -222,28 +250,41 @@ async def test_queue_user_message_works_after_session_closed():
             "requires_tools": False,
         },
     )
-    session.close()
-    # close 已自动 promote → FIFO；再调 queue 应幂等成功，不报「不在协调模式」。
-    assert turn_queue.depth("conv-inj") == 1
-    assert "inj-late" in session.dispositioned_interjections
+    # 宿主仍在跑（生产收口升队常态）——挡住 ensure_drain 抢跑，断言项仍在队。
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id="conv-inj", task=blocker, sink=EventSink())
+    try:
+        session.close()
+        # close 已自动 promote → FIFO；再调 queue 应幂等成功，不报「不在协调模式」。
+        assert turn_queue.depth("conv-inj") == 1
+        assert "inj-late" in session.dispositioned_interjections
 
-    sink = EventSink()
-    tool = QueueUserMessageTool(sink=sink)
-    ctx = ToolContext(
-        execution_id="exec-inj",
-        run_id="ceo",
-        agent_id="ceo",
-        backend=MagicMock(),
-        user_id="u1",
-        conversation_id="conv-inj",
-    )
-    result = await tool.execute({"interjection_id": "inj-late", "reason": "无关"}, ctx)
-    assert result.success is True
-    assert "已转入" in (result.output or "") or "已消化" in (result.output or "")
+        sink = EventSink()
+        tool = QueueUserMessageTool(sink=sink)
+        ctx = ToolContext(
+            execution_id="exec-inj",
+            run_id="ceo",
+            agent_id="ceo",
+            backend=MagicMock(),
+            user_id="u1",
+            conversation_id="conv-inj",
+        )
+        result = await tool.execute({"interjection_id": "inj-late", "reason": "无关"}, ctx)
+        assert result.success is True
+        assert "已转入" in (result.output or "") or "已消化" in (result.output or "")
+    finally:
+        turn_queue.clear("conv-inj")
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
 
 
 @pytest.mark.asyncio
 async def test_close_promotes_unseen_pending_to_fifo():
+    """收口升队：ensure_drain + live sink ``turn_queued``。"""
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.turn_runs import turn_runs
+
     session = CoordinationSession(
         execution_id="exec-inj",
         total_workers=2,
@@ -252,6 +293,9 @@ async def test_close_promotes_unseen_pending_to_fifo():
     set_active_coordination(session)
     sink = EventSink()
     session.event_sink = sink
+    live = EventSink()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id="conv-inj", task=blocker, sink=live)
     session.stash_interjection(
         "inj-auto",
         {
@@ -262,11 +306,22 @@ async def test_close_promotes_unseen_pending_to_fifo():
             "requires_tools": False,
         },
     )
-    session.close()
-    assert turn_queue.depth("conv-inj") == 1
-    assert session.get_interjection("inj-auto") is None
-    last = next(e for e in reversed(list(sink._history)) if e.type.value == "user_interjection")
-    assert last.payload["status"] == "queued"
+    try:
+        session.close()
+        assert turn_queue.depth("conv-inj") == 1
+        assert session.get_interjection("inj-auto") is None
+        last = next(
+            e for e in reversed(list(sink._history)) if e.type.value == "user_interjection"
+        )
+        assert last.payload["status"] == "queued"
+        live_types = [e.type for e in live._history]  # noqa: SLF001
+        assert EventType.TURN_QUEUED in live_types
+    finally:
+        turn_queue.clear("conv-inj")
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+
 
 
 @pytest.mark.asyncio

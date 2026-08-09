@@ -24,7 +24,7 @@ from agentcore.conversation.store import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
-from agentcore.runtime.events import EventSink, FinishReason, message_end
+from agentcore.runtime.events import EventSink, FinishReason, content_delta, message_end
 from agentcore.runtime.facts import current_fact_log, pre_pause_from_journal
 from agentcore.runtime.turn_interrupt import TurnInterruptReason, close_turn_interrupted
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -160,17 +160,27 @@ async def close_user_stop_turn(
     leave ``stopping``. Empty journal / empty captain body must still durable-close
     (tool-only / pre-stream cancel); open durable pause keeps the pause frame and
     returns ``True`` (safe to release — pause owns continuation).
+
+    After ``content_reset`` with no new delta, reinjects stashed prose via
+    ``content_delta`` before ``message_end`` so the live bubble is not left empty.
     """
+    journal = sink.execution_journal()
+    salvage = sink.interrupt_salvage_content()
+    content = compose_salvage_content(salvage, journal_entries)
     # Live confirmation before durable close — FE confirms stop on this frame.
+    # If finish_guard cleared the bubble and no rewrite started, push salvage
+    # text so attached clients see what already streamed before cancelled.
     if not sink._closed:
+        live = sink.streamed_content()
+        if not (live or "").strip() and (salvage or "").strip():
+            with contextlib.suppress(Exception):
+                sink.emit(content_delta(salvage))
         with contextlib.suppress(Exception):
             sink.emit(message_end(FinishReason.CANCELLED))
     if not settings.incomplete_turn_persist_enabled:
         return False
     if not message_id:
         return False
-    journal = sink.execution_journal()
-    content = compose_salvage_content(sink.streamed_content(), journal_entries)
     suspend_frames = settings.structured_suspension_persist_enabled
     if journal and suspend_frames and has_open_durable_pause(journal):
         # Pause frame is the durable record — do not interrupt-close; lease may release.
@@ -282,7 +292,7 @@ def salvage_incomplete_turn(
     if not message_id:
         return
     journal = sink.execution_journal()
-    content = compose_salvage_content(sink.streamed_content(), journal_entries)
+    content = compose_salvage_content(sink.interrupt_salvage_content(), journal_entries)
     if not journal and not content.strip():
         return
     suspend_frames = settings.structured_suspension_persist_enabled

@@ -71,6 +71,24 @@ import {
   hasSendableDraft,
   prepareAttachment,
 } from "@/lib/attachments";
+import {
+  applyColdInteractionWireEvent,
+  bindEmptyColdMessageId,
+  clearColdInteractions,
+  isColdResumeKind,
+  kindFromColdRequiredEvent,
+  kindFromColdResolvedEvent,
+  listColdPending,
+  markColdResolved,
+  rekeyColdMessageId,
+  upsertColdRequired,
+  useColdInteractions,
+} from "@/lib/coldInteractions";
+import {
+  type ColdResumeHost,
+  pausedSummaryToRequiredPayload,
+  selectVisibleColdResumes,
+} from "@/lib/coldResume";
 import { composerTrailingSlots } from "@/lib/composerTrailing";
 import {
   type ErrorAction,
@@ -99,6 +117,7 @@ import {
   createHarvestRefreshScheduler,
   dropSettledLiveTurns,
 } from "@/lib/refreshAfterExecutionCompleted";
+import { prepareResumePausedTurn } from "@/lib/resumePausedTurn";
 import {
   STOP_FAILED_MESSAGE,
   type StopUiPhase,
@@ -137,6 +156,7 @@ import type {
   MessageStartPayload,
   SSEEvent,
   TurnQueueCancelledPayload,
+  TurnQueueStartedPayload,
   TurnSteerAcceptedPayload,
   TurnWarningPayload,
   UsageBreakdown,
@@ -1114,8 +1134,11 @@ export function ChatPage() {
   // The composer textarea — focused after ask / debate handoff fill so the user can edit/send.
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
-  // surfaced as ResumeCards on reopen (结构化挂起 2b).
+  // recovery shell on reopen (结构化挂起 2b). Live paint authority = cold Interaction store.
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
+  const coldById = useColdInteractions();
+  /** CEO host server message_id for the active live turn (message_start stamp). */
+  const hostServerMessageIdRef = useRef<string | null>(null);
   /** Sandbox browser live sheet (Step4 · C): login card / hot escalate open this. */
   const [browserLiveOpen, setBrowserLiveOpen] = useState(false);
   const [browserLiveSessionId, setBrowserLiveSessionId] = useState<
@@ -1196,6 +1219,9 @@ export function ChatPage() {
     null,
   );
   const setActiveTurn = (id: string | null) => {
+    if (id !== activeTurnIdRef.current) {
+      hostServerMessageIdRef.current = null;
+    }
     activeTurnIdRef.current = id;
     setActiveStreamTurnId(id);
   };
@@ -1298,6 +1324,15 @@ export function ChatPage() {
       }
       return;
     }
+    // EPHEMERAL：出队开跑（sink 首帧，先于 message_start）→ 只清排队轻态，保留用户气泡。
+    // 否决靠 message_start 猜出队。
+    if (event.type === "turn_queue_started" && conversationId) {
+      const p = event.payload as TurnQueueStartedPayload;
+      removeQueuedTurn(conversationId, p.queue_id);
+      // 已开跑：不再可按项取消；勿 abort（同连接续流 turn2）。
+      midFlightByQueueRef.current.delete(p.queue_id);
+      return;
+    }
     // turn_queued 由 onQueued 插泡；不写入主路 events（避免单槽 chip 语义）。
     if (event.type === "turn_queued") {
       return;
@@ -1324,6 +1359,38 @@ export function ChatPage() {
     if (stopPhaseRef.current === "stopping" && isStopConfirmEvent(event.type)) {
       clearStopping();
     }
+    // Live cold ResumeCard authority (检查点与开工卡 · Live 出卡):
+    // `*_required` → cold IX; message_start stamp → rekey/bind → paint. Do not wait for
+    // message_end → getRecovery as the only path (desktop parity; mobile-local store).
+    if (conversationId) {
+      if (event.type === "message_start") {
+        const serverId = (event.payload as MessageStartPayload).message_id;
+        const clientId = turnId ?? activeTurnIdRef.current ?? createdId ?? null;
+        if (serverId) {
+          hostServerMessageIdRef.current = serverId;
+          if (clientId) rekeyColdMessageId(clientId, serverId);
+          bindEmptyColdMessageId(conversationId, serverId);
+        }
+      }
+      const isColdWire =
+        kindFromColdRequiredEvent(event.type) != null ||
+        kindFromColdResolvedEvent(event.type) != null ||
+        event.type === "interaction_orphaned";
+      if (isColdWire) {
+        const hostId =
+          hostServerMessageIdRef.current ??
+          turnId ??
+          activeTurnIdRef.current ??
+          createdId ??
+          "";
+        applyColdInteractionWireEvent(
+          event.type,
+          (event.payload ?? {}) as Record<string, unknown>,
+          conversationId,
+          hostId,
+        );
+      }
+    }
     // 挂起即收口 (②): a live stream can END at a durable checkpoint — message_end carries
     // finish_reason=paused. The turn finalized (its in-process resolve Future was never
     // parked), so the live PauseCard no longer applies; re-read the recovery snapshot so
@@ -1346,13 +1413,6 @@ export function ChatPage() {
     if (event.type === "turn_steer_accepted") {
       const p = event.payload as TurnSteerAcceptedPayload;
       if (p.steer_id) showSteerAcceptedHint(p.steer_id);
-    }
-    // drain 开跑：清该 turn 的排队轻态（气泡保留）。
-    if (event.type === "message_start" && conversationId && turnId) {
-      const hit = listQueuedTurns(conversationId).find(
-        (e) => e.turnId === turnId,
-      );
-      if (hit) removeQueuedTurn(conversationId, hit.queueId);
     }
   };
 
@@ -1410,6 +1470,8 @@ export function ChatPage() {
       setSending(false);
       clearStopping();
       setPaused([]);
+      clearColdInteractions();
+      hostServerMessageIdRef.current = null;
       setHasMoreBefore(false);
       setMemoryUpdates([]);
       setPermissionDraftTouched(false);
@@ -1440,6 +1502,8 @@ export function ChatPage() {
     }
     setSending(false);
     setPaused([]);
+    clearColdInteractions();
+    hostServerMessageIdRef.current = null;
     setRecoveredInteractions([]);
     setBrowserLiveOpen(false);
     setBrowserLiveSessionId(null);
@@ -1476,6 +1540,17 @@ export function ChatPage() {
       if (!cancelled) {
         setPaused(r.paused);
         setRecoveredInteractions(r.pendingInteractions);
+        // Hydrate cold IX from recovery paused frames (reopen shell → live authority).
+        for (const p of r.paused) {
+          if (!isColdResumeKind(p.kind)) continue;
+          upsertColdRequired({
+            kind: p.kind,
+            conversationId,
+            messageId: p.message_id,
+            payload: pausedSummaryToRequiredPayload(p),
+            status: "pending",
+          });
+        }
       }
     });
     getMessages(conversationId)
@@ -1654,6 +1729,64 @@ export function ChatPage() {
       .map(recoveredEscalation)
       .filter((x): x is NonNullable<typeof x> => x != null);
   }, [recoveredInteractions, busy]);
+
+  // Live cold ResumeCard: Interaction pending (+ stamp) is authority; recovery paused = shell.
+  const coldHosts = useMemo((): ColdResumeHost[] => {
+    const hosts: ColdResumeHost[] = [];
+    for (const m of history ?? []) {
+      if (m.role === "assistant") {
+        hosts.push({
+          role: "assistant",
+          id: m.id,
+          serverMessageId: m.id,
+        });
+      }
+    }
+    for (const t of turns) {
+      hosts.push({
+        role: "assistant",
+        id: t.id,
+        serverMessageId: extractMessageId(t.events),
+      });
+    }
+    return hosts;
+  }, [history, turns]);
+
+  const visibleResumes = useMemo(() => {
+    if (!conversationId) return [];
+    let userMessage = "";
+    let userMessageId = "";
+    for (let i = (history?.length ?? 0) - 1; i >= 0; i--) {
+      const m = history?.[i];
+      if (m?.role === "user") {
+        userMessage = m.content ?? "";
+        userMessageId = m.id;
+        break;
+      }
+    }
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (t?.userText) {
+        userMessage = t.userText;
+        break;
+      }
+    }
+    return selectVisibleColdResumes({
+      conversationId,
+      byId: coldById,
+      paused,
+      hosts: coldHosts,
+      userMessage,
+      userMessageId,
+    });
+  }, [conversationId, coldById, paused, coldHosts, history, turns]);
+
+  // Cold pending with stamp ⇒ unlock composer lock (desktop finalizeGenerating parity).
+  useEffect(() => {
+    if (visibleResumes.length > 0 && sending) {
+      setSending(false);
+    }
+  }, [visibleResumes.length, sending]);
 
   // Stage picked files (composer 附件). Text is extracted; images/binary are resident-first
   // (upload when a conversation exists, else hold File until first send). The input is reset
@@ -1970,6 +2103,7 @@ export function ChatPage() {
           },
           beginTurn2: () => {
             // 用户气泡已由 onQueued 插入；此处只接管 abort 槽并切写入目标。
+            // 排队轻态由 turn_queue_started（sink 首帧）清，勿在此猜出队。
             if (!queuedTurnId) {
               const turnId = crypto.randomUUID();
               queuedTurnId = turnId;
@@ -1988,9 +2122,6 @@ export function ChatPage() {
             }
             setActiveTurn(queuedTurnId);
             abortRef.current = ac;
-            if (trackedQueueId) {
-              removeQueuedTurn(conversationId, trackedQueueId);
-            }
           },
           onTurn2Event: (event) => {
             appendEventToTurn(queuedTurnId, event);
@@ -2219,22 +2350,33 @@ export function ChatPage() {
 
   // 挂起即收口 (②): re-read the conversation's recovery snapshot — used when a live stream
   // ends at a checkpoint (appendEvent sees message_end finish_reason=paused) so the just-
-  // finalized turn's durable ResumeCard surfaces (it renders once `sending` flips false).
-  // Cheap + idempotent; best-effort — a recovery hiccup must never disrupt the settled turn.
+  // finalized turn's durable ResumeCard surfaces. Live paint prefers cold IX; this syncs
+  // the recovery shell. Cheap + idempotent; best-effort.
   async function refreshPaused(cid: string) {
     try {
       const r = await getRecovery(cid);
       setPaused(r.paused);
+      for (const p of r.paused) {
+        if (!isColdResumeKind(p.kind)) continue;
+        upsertColdRequired({
+          kind: p.kind,
+          conversationId: cid,
+          messageId: p.message_id,
+          payload: pausedSummaryToRequiredPayload(p),
+          status: "pending",
+        });
+      }
     } catch {
       /* best-effort: never break the just-finished turn on a recovery refresh */
     }
   }
 
-  // Continue a durably-paused turn (结构化挂起 2b). The user's decision is POSTed to the
-  // resume endpoint, which claims the persisted frame (atomic — a stale double-tap 404s)
-  // and drives the rest of the turn on a fresh SSE; we stream it into a userText-less turn
-  // (the paused turn's user bubble is already in history). The card is dropped
-  // optimistically; a mid-stream drop rejoins the now-live run rather than re-resuming.
+  // Continue a durably-paused turn (结构化挂起 2b). Option A: reuse the paused
+  // assistant by server message_id (same bubble → streaming) — never push a second
+  // assistant turn (dual TeamView). Desktop parity: resumePausedAssistant / runResume.
+  // The resume endpoint claims the frame (atomic — a stale double-tap 404s) and drives
+  // the rest on fresh SSE into that turn (`userText: null`; user bubble stays in
+  // history). Card dropped optimistically; mid-stream drop rejoins rather than re-resumes.
   async function resume(
     messageId: string,
     decision: CheckpointDecision,
@@ -2243,13 +2385,30 @@ export function ChatPage() {
     amendments?: TeamPreviewAmendments,
   ) {
     if (!conversationId || busy) return;
+    for (const e of listColdPending(conversationId)) {
+      if (e.messageId === messageId) {
+        markColdResolved({
+          kind: e.kind,
+          id: e.id,
+          resolution: { decision, note, selected },
+        });
+      }
+    }
     setPaused((p) => p.filter((x) => x.message_id !== messageId));
     setError(null);
     clearStopping();
     setSending(true);
-    const turnId = crypto.randomUUID();
+    hostServerMessageIdRef.current = messageId;
+    const prepared = prepareResumePausedTurn({
+      messageId,
+      turns,
+      history,
+      newTurnId: crypto.randomUUID(),
+    });
+    const turnId = prepared.turnId;
     setActiveTurn(turnId);
-    setTurns((t) => [...t, { id: turnId, userText: null, events: [] }]);
+    setTurns(prepared.turns);
+    if (prepared.history !== history) setHistory(prepared.history);
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -2557,19 +2716,19 @@ export function ChatPage() {
           />
         ))}
 
-      {/* Durable resume cards (a turn that paused then lost its stream). Hidden while a
-          stream is live — a live run owns the pause surface (PauseCard) instead. */}
-      {!busy &&
-        paused.map((p) => (
-          <ResumeCard
-            key={p.message_id}
-            paused={p}
-            onResume={(decision, note, selected, amendments) =>
-              void resume(p.message_id, decision, note, selected, amendments)
-            }
-            onOpenLive={conversationId ? openBrowserLive : undefined}
-          />
-        ))}
+      {/* Durable resume cards — live authority = cold Interaction pending + stamp;
+          recovery `paused` is reopen shell. Not gated on !busy (stamp may land while
+          stream still draining; sending unlocks via visibleResumes effect). */}
+      {visibleResumes.map((p) => (
+        <ResumeCard
+          key={`${p.message_id}:${p.checkpoint_id}`}
+          paused={p}
+          onResume={(decision, note, selected, amendments) =>
+            void resume(p.message_id, decision, note, selected, amendments)
+          }
+          onOpenLive={conversationId ? openBrowserLive : undefined}
+        />
+      ))}
 
       {!busy &&
         conversationId &&

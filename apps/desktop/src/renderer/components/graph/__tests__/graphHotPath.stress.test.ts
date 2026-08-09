@@ -2,8 +2,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 /**
- * 协作图流式热路径压测（真实 store fold + scene + RF 投影 + ELK）。
+ * 协作图流式热路径压测（真实 store fold + Document 门控投影 + Live face×N）。
  * 模拟多 worker 并行 token 洪水：每 tick ≈ 一次 rAF flush。
+ * 对齐生产：projectTurnGraph 仅在 document fingerprint 变时跑；每 tick 量 N×liveSig/derive。
  * 不进 CI 红线断言（环境噪声大）；跑完打印 / 写出 JSON，供掉帧归因。
  *
  * 跑：pnpm -C apps/desktop exec vitest run src/renderer/components/graph/__tests__/graphHotPath.stress.test.ts
@@ -20,6 +21,8 @@ import {
 import { projectRuntime } from "@/stores/execution/hooks";
 import { beforeEach, describe, expect, it } from "vitest";
 import { INPUT_ID } from "../constants";
+import { graphDocumentFingerprint } from "../graphDocument";
+import { agentNodeLiveSig, deriveAgentNodeLive } from "../graphLive";
 import { buildGraphStructure } from "../helpers";
 import { projectTurnGraph } from "../projectTurnGraph";
 import { buildGraphScene } from "../scene";
@@ -122,9 +125,12 @@ describe("graph hot path stress (dense stream)", () => {
     const chunk = "字".repeat(CHARS_PER_WORKER_PER_FLUSH);
     const flushMs: number[] = [];
     const foldMs: number[] = [];
-    const sceneMs: number[] = [];
-    const projectMs: number[] = [];
+    const liveSigMs: number[] = [];
+    const liveFaceMs: number[] = [];
+    const projectGatedMs: number[] = [];
     const tickMs: number[] = [];
+    let projectRuns = 0;
+    let lastDocFp = "";
 
     // First layout once (structure stable during flood).
     let positions: Record<string, { x: number; y: number }> = {};
@@ -177,16 +183,24 @@ describe("graph hot path stress (dense stream)", () => {
         litRunId: null,
         litEndpointMessageId: null,
         captainRun: { id: "captain" },
-        captainStatus: "pending",
+        captainStatus: null,
         finalAnswer: null,
         captainSynthesisPreview: "",
+        captainStatusCaption: null,
         taskMessage: null,
-        activateNode: () => {},
+        activateNode: () => undefined,
         expandedUnits: new Set(),
-        onToggleUnitExpand: () => {},
+        onToggleUnitExpand: undefined,
         injectOverlay: null,
         layoutKind: "leftright",
-        onFocusAct: () => {},
+        onFocusAct: () => undefined,
+        documentShell: true,
+      });
+      lastDocFp = graphDocumentFingerprint({
+        execution: exec0,
+        expandedUnits: new Set(),
+        focusedActId: null,
+        handleDirection: "horizontal",
       });
 
       // Attach elk to report via closure below.
@@ -209,75 +223,108 @@ describe("graph hot path stress (dense stream)", () => {
       foldMs.push(performance.now() - tFold);
       if (!exec) throw new Error("missing exec");
 
-      const tScene = performance.now();
-      const scene = buildGraphScene(exec, {
-        inputId: INPUT_ID,
-        expandedUnits: new Set(),
-      });
-      sceneMs.push(performance.now() - tScene);
-
-      const tProj = performance.now();
-      const projected = projectTurnGraph({
+      const docFp = graphDocumentFingerprint({
         execution: exec,
-        scene,
-        positions,
-        nodeHeights: {},
-        nodeSizes: {},
-        groups,
-        bbox,
-        actCards: [],
-        edges,
-        handleDirection: "horizontal",
-        litRunId: null,
-        litEndpointMessageId: null,
-        captainRun: { id: "captain" },
-        captainStatus: "pending",
-        finalAnswer: null,
-        captainSynthesisPreview: "",
-        taskMessage: null,
-        activateNode: () => {},
         expandedUnits: new Set(),
-        onToggleUnitExpand: () => {},
-        injectOverlay: null,
-        layoutKind: "leftright",
-        onFocusAct: () => {},
+        focusedActId: null,
+        handleDirection: "horizontal",
       });
-      projectMs.push(performance.now() - tProj);
-      tickMs.push(performance.now() - tick0);
+      const tProj = performance.now();
+      if (docFp !== lastDocFp) {
+        lastDocFp = docFp;
+        projectRuns += 1;
+        const scene = buildGraphScene(exec, {
+          inputId: INPUT_ID,
+          expandedUnits: new Set(),
+        });
+        const projected = projectTurnGraph({
+          execution: exec,
+          scene,
+          positions,
+          nodeHeights: {},
+          nodeSizes: {},
+          groups,
+          bbox,
+          actCards: [],
+          edges,
+          handleDirection: "horizontal",
+          litRunId: null,
+          litEndpointMessageId: null,
+          captainRun: { id: "captain" },
+          captainStatus: null,
+          finalAnswer: null,
+          captainSynthesisPreview: "",
+          captainStatusCaption: null,
+          taskMessage: null,
+          activateNode: () => undefined,
+          expandedUnits: new Set(),
+          onToggleUnitExpand: undefined,
+          injectOverlay: null,
+          layoutKind: "leftright",
+          onFocusAct: () => undefined,
+          documentShell: true,
+        });
+        expect(projected.nodes.length).toBeGreaterThan(WORKERS);
+      }
+      projectGatedMs.push(performance.now() - tProj);
 
-      // Keep RF work "real": touch node/edge counts so JIT can't DCE.
-      expect(projected.nodes.length).toBeGreaterThan(WORKERS);
+      // Production Live path: N× cheap sig + N× derive (only dirty nodes derive in React;
+      // here we force all running workers to measure worst-case face CPU).
+      const tSig = performance.now();
+      let sigTouch = 0;
+      for (let i = 0; i < WORKERS; i++) {
+        sigTouch += agentNodeLiveSig(exec, `r${i + 1}`).length;
+      }
+      liveSigMs.push(performance.now() - tSig);
+
+      const tFace = performance.now();
+      let faceTouch = 0;
+      for (let i = 0; i < WORKERS; i++) {
+        const run = exec.runs.find((r) => r.id === `r${i + 1}`);
+        if (!run) continue;
+        const live = deriveAgentNodeLive(exec, run, {
+          scene: null,
+          litRunId: null,
+          enterIndex: i,
+          unitExpanded: false,
+        });
+        faceTouch += live.outputPreview.length + live.tokenCount;
+      }
+      liveFaceMs.push(performance.now() - tFace);
+      expect(sigTouch + faceTouch).toBeGreaterThan(0);
+
+      tickMs.push(performance.now() - tick0);
     }
 
     const rtEnd = execRuntime(useExecutionStore.getState(), MID);
+    const liveFace = summarize(liveFaceMs);
+    const liveSig = summarize(liveSigMs);
+    const projectGated = summarize(projectGatedMs);
     const report = {
-      scenario: "20-worker dense stream",
+      scenario: "20-worker dense stream (document-gated + liveFace×N)",
       workers: WORKERS,
       flushes: FLUSHES,
       charsPerWorkerPerFlush: CHARS_PER_WORKER_PER_FLUSH,
       totalCharsApprox: FLUSHES * WORKERS * CHARS_PER_WORKER_PER_FLUSH,
       framesAtEnd: rtEnd.frames.length,
+      projectRuns,
       elkOnceMs:
         Math.round(
           ((globalThis as { __stressElkMs?: number }).__stressElkMs ?? 0) * 100,
         ) / 100,
       flush: summarize(flushMs),
       fold: summarize(foldMs),
-      scene: summarize(sceneMs),
-      project: summarize(projectMs),
+      liveSig,
+      liveFace,
+      projectGated,
       tick: summarize(tickMs),
       // Rough: if tick p95 > 16ms, main-thread alone can't hold 60fps even before paint.
       verdict: {
         tickP95Over16ms: summarize(tickMs).p95 > 16,
-        flushDominates:
-          summarize(flushMs).p95 >= summarize(projectMs).p95 &&
-          summarize(flushMs).p95 >= summarize(sceneMs).p95,
-        projectDominates:
-          summarize(projectMs).p95 >= summarize(flushMs).p95 &&
-          summarize(projectMs).p95 >= summarize(sceneMs).p95,
-        sceneDominates:
-          summarize(sceneMs).p95 >= summarize(flushMs).p95 &&
-          summarize(sceneMs).p95 >= summarize(projectMs).p95,
+        documentGateHolds: projectRuns <= 2,
+        liveFaceDominates:
+          liveFace.p95 >= summarize(flushMs).p95 &&
+          liveFace.p95 >= projectGated.p95,
       },
     };
 
@@ -297,5 +344,6 @@ describe("graph hot path stress (dense stream)", () => {
     // Sanity: work happened; not a CI budget gate.
     expect(report.framesAtEnd).toBeGreaterThan(FLUSHES);
     expect(report.tick.n).toBe(FLUSHES);
+    expect(report.verdict.documentGateHolds).toBe(true);
   }, 120_000);
 });

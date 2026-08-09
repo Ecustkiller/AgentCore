@@ -66,39 +66,34 @@ def execution_class_enabled_for(
     return code_execution_enabled_for(backend)
 
 
-def browser_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
-    """Whether the L3 team-browser tool class may appear in a worker toolset (D11 / C1).
+def _desktop_bridge_ready() -> bool:
+    """True when DesktopBrowserBridge credentials probe healthy for this turn."""
+    from agentcore.runtime.browser.desktop_bridge import (
+        desktop_bridge_configured,
+        desktop_bridge_health,
+        ensure_desktop_bridge_health,
+    )
 
-    Two paths (never mixed on one session — C4):
+    # Cached True → allow; False → not ready; None → probe once if env/turn present.
+    cached = desktop_bridge_health()
+    if cached is True:
+        return True
+    if cached is False:
+        return False
+    if not desktop_bridge_configured():
+        return False
+    return ensure_desktop_bridge_health()
 
-    - **server + gVisor**: real isolation; folds the boot-time sandbox health probe
-      and the browser netns capability probe (``network_mode=none`` does not cover
-      netns). (``code_execute_cloud_enabled`` subprocess path does NOT enable browsers.)
-    - **local + DesktopBrowserBridge**: desktop re-sends ``browserBridge`` on each
-      sidecar turn (``apply_desktop_bridge_from_turn``); we require a successful
-      ``GET /health`` for the **current** credential generation. Unconfigured /
-      unhealthy → withhold tools (no silent sandbox fallback).
+
+def _browser_sandbox_host_ready() -> bool:
+    """gVisor + cloud sandbox health + browser netns — shared server / local fallback.
+
+    ``code_execute_cloud_enabled`` subprocess path does NOT enable browsers.
+    Netns is orthogonal to ``GVisorSandbox.health_check`` (``network_mode=none``):
+    a failed boot / sticky probe withholds browser_* so the model never first-fails
+    then trips the circuit. ``None`` (tests / unbooted) keeps status quo — do not
+    withhold.
     """
-    if backend is None:
-        return False
-    if backend.location == "local":
-        from agentcore.runtime.browser.desktop_bridge import (
-            desktop_bridge_configured,
-            desktop_bridge_health,
-            ensure_desktop_bridge_health,
-        )
-
-        # Cached True → allow; False → withhold; None → probe once if env present.
-        cached = desktop_bridge_health()
-        if cached is True:
-            return True
-        if cached is False:
-            return False
-        if not desktop_bridge_configured():
-            return False
-        return ensure_desktop_bridge_health()
-    if backend.location != "server":
-        return False
     if not settings.gvisor_enabled:
         return False
     from agentcore.tools.sandbox.cloud_health import cloud_sandbox_health
@@ -106,12 +101,50 @@ def browser_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     # False → known unhealthy; True / None (never probed) → config + cloud gate alone.
     if cloud_sandbox_health() is False:
         return False
-    # Netns is orthogonal to GVisorSandbox.health_check (network_mode=none): a failed
-    # boot / sticky probe withholds browser_* so the model never first-fails then trips
-    # the circuit. None (tests / unbooted) keeps status quo — do not withhold.
     from agentcore.tools.sandbox.browser.netns import browser_netns_health
 
     return browser_netns_health() is not False
+
+
+def browser_host_kind_for(
+    backend: WorkspaceBackend | None,
+) -> Literal["local", "sandbox"] | None:
+    """Registry / navigate host_kind aligned with :func:`browser_execution_enabled_for`.
+
+    - Healthy DesktopBrowserBridge → ``local`` (real page).
+    - No usable Bridge but gVisor/sandbox/netns ready → ``sandbox`` (covers cloud
+      过桥: ``location=local`` while the API process cannot reach desktop loopback).
+    - True local engine (no Bridge, no gVisor) → ``None`` (withhold; no fake success).
+    - ``location=server`` → ``sandbox`` when sandbox host ready, else ``None``.
+
+    Never returns ``local`` unless Bridge is ready — so factory must not call
+    ``open_local_bridge_session`` on a sandbox-fallback assembly.
+    """
+    if backend is None:
+        return None
+    if backend.location == "local":
+        if _desktop_bridge_ready():
+            return "local"
+        return "sandbox" if _browser_sandbox_host_ready() else None
+    if backend.location != "server":
+        return None
+    return "sandbox" if _browser_sandbox_host_ready() else None
+
+
+def browser_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
+    """Whether the L3 team-browser tool class may appear in a worker toolset (D11 / C1).
+
+    Paths (never mixed on one session — C4; host_kind from :func:`browser_host_kind_for`):
+
+    - **local + DesktopBrowserBridge**: desktop re-sends ``browserBridge`` on each
+      sidecar turn (``apply_desktop_bridge_from_turn``); successful ``GET /health``
+      for the current credential generation → host_kind=local.
+    - **local without Bridge + gVisor/netns**: host_kind=sandbox (大众默认云端过桥；
+      cloud API cannot reach本机 loopback Bridge).
+    - **server + gVisor**: host_kind=sandbox; folds boot-time sandbox + netns probes.
+    - True local engine with neither Bridge nor gVisor → withhold (no fake success).
+    """
+    return browser_host_kind_for(backend) is not None
 
 
 def build_builtin_registry(

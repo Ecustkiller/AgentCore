@@ -135,6 +135,16 @@ async def test_scoped_execute_sends_cwd_subpath():
     assert event.payload["args"]["cwd"] == "proj"
 
 
+async def test_scoped_exists_git_prefixes_subpath():
+    """G2: ``exists(".git")`` probes project subdir, not the shared container root."""
+    local, registry, sink = _make(base="projA")
+    assert local.base_subpath == "projA"
+    _, event = await _round_trip(
+        local.exists(".git"), sink, registry, {"ok": True, "value": False}
+    )
+    assert event.payload["args"]["path"] == "projA/.git"
+
+
 async def test_unscoped_is_pure_passthrough():
     """base="" → no prefix / no strip (existing root-bound local projects unchanged)."""
     local, registry, sink = _make()

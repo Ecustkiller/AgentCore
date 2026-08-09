@@ -349,12 +349,15 @@ function teamStripMeta(args: {
 
 /** The read-only one-liner under an escalation's question, by lifecycle. */
 export function escalationDetail(esc: RunEscalation): string | null {
+  const earlyStop =
+    esc.source === "validation_thrash" || esc.source === "ceiling_backstop";
+  if (earlyStop) return "卡住早停 · 交付可能不完整";
   if (esc.status === "resolved" && esc.answer) return `已答复：${esc.answer}`;
   if (esc.status === "assumed")
     return esc.assumption ? `按假设继续：${esc.assumption}` : null;
   if (esc.status === "timed_out")
     return esc.assumption ? `超时回落假设：${esc.assumption}` : null;
-  return esc.assumption ? `暂用假设：${esc.assumption}` : null;
+  return esc.assumption ? `暂定假设：${esc.assumption}` : null;
 }
 
 export function TeamView({

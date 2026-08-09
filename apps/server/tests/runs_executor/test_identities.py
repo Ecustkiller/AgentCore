@@ -137,9 +137,18 @@ async def test_captain_identity_carries_when_to_split_guidance():
     sys = provider.system_messages[0]
     assert "再向下委派一层子团队" in sys
     assert "不要为委派而委派" in sys
-    assert "3+" in sys and "独立子系统" in sys
+    # Path-B priority nudge: 成果级 + 本轮无结构钉 → 优先先嵌套；无 3+ 子系统启发式。
+    assert "优先】先调用 delegate" in sys or "优先先嵌套" in sys
+    assert "3+" not in sys and "独立子系统" not in sys
+    assert "未嵌套禁写" in sys  # 明示禁止该误读
+    assert "凡大活" in sys and "嵌套" in sys
+    assert "≥2 角并行" in sys or "冷启动" in sys  # 勿与并行摸底打架
+    assert "嵌套扇出·写盘" in sys or "共写同一目标文件" in sys
+    assert "豁免" in sys and "单文件" in sys and "已钉死薄壳" in sys
+    assert "强耦合同 run 切片" in sys
+    assert "小修" in sys and "finalize" in sys
+    assert "整里程碑 M0" in sys and "不在】豁免" in sys
     assert "深入实现" in sys
-    assert "单文件" in sys and "强耦合" in sys and "勿扇出" in sys
     assert "4 个 sub-worker" in sys
 
 
@@ -217,6 +226,10 @@ async def test_handoff_prompt_splits_by_topology():
     assert "汇报不完整" in leaf
     assert "权威文档冲突" in leaf
     assert "静默改权威稿" in leaf
+    # 开局找路径轻 nudge：含糊「根」先 list/grep
+    assert "找路径" in leaf
+    assert "含糊" in leaf and "根" in leaf
+    assert "file_list" in leaf
 
     # Executor wires topology into the live system prompt (not just the helper).
     plan, _ = build_run_plan(
@@ -271,6 +284,17 @@ def test_worker_identity_states_no_execution_capability():
     assert "本回合执行环境未装配" not in with_exec
     # 默认参数与显式 True 字节一致（不惊扰既有路径）。
     assert with_exec == build_worker_identity(has_dependents=False)
+
+
+def test_worker_identity_teaches_escalate_blocking_choice():
+    """Worker 按题自选 blocking：identity 须写清该停 / 能报，且不再写「escalate 不会打断你」。"""
+    from agentcore.runtime.runs.executor_identities import build_worker_identity
+
+    body = build_worker_identity(has_dependents=False)
+    assert "blocking=false" in body
+    assert "blocking=true" in body
+    assert "该停时别装非阻塞" in body
+    assert "escalate 不会打断你" not in body
 
 
 async def test_executor_passes_registry_capability_into_identity():

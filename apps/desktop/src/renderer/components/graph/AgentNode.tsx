@@ -6,8 +6,9 @@ import {
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { AgentNodeCardFace } from "./agentNode/AgentNodeFace";
 import { AgentNodePeek } from "./agentNode/AgentNodePeek";
+import { SubTeamFoldChip } from "./agentNode/SubTeamFoldChip";
 import { buildAgentNodePresentation } from "./agentNode/presentation";
-import type { AgentNodeData } from "./agentNode/shared";
+import { type AgentNodeData, FACE_CARD_HEIGHT } from "./agentNode/shared";
 import { graphNodeDimClass, useGraphNodeDimmed } from "./graphHover";
 import {
   type AgentNodeShell,
@@ -28,6 +29,7 @@ export function AgentNode({ data }: NodeProps) {
   const flashColor =
     d.status === "failed" ? "var(--destructive)" : "var(--success)";
   const dimmed = useGraphNodeDimmed();
+  const foldCount = d.foldedChildCount ?? 0;
 
   return (
     <>
@@ -38,8 +40,12 @@ export function AgentNode({ data }: NodeProps) {
       />
       <div className={graphNodeDimClass(dimmed)}>
         <div
-          className="animate-graph-node-enter"
-          style={{ animationDelay: `${p.enterDelay}ms` }}
+          className="animate-graph-node-enter relative"
+          style={{
+            animationDelay: `${p.enterDelay}ms`,
+            width: p.cardWidth,
+            height: FACE_CARD_HEIGHT,
+          }}
         >
           <Tooltip>
             <TooltipTrigger asChild>
@@ -54,6 +60,14 @@ export function AgentNode({ data }: NodeProps) {
               <AgentNodePeek d={d} p={p} />
             </TooltipContent>
           </Tooltip>
+          {foldCount > 0 && (
+            <SubTeamFoldChip
+              count={foldCount}
+              expanded={Boolean(d.unitExpanded)}
+              horizontal={horizontal}
+              onToggle={d.onToggleUnitExpand}
+            />
+          )}
         </div>
       </div>
       <Handle

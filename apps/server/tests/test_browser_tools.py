@@ -14,7 +14,11 @@ from agentcore.runtime.browser.desktop_bridge import (
     set_desktop_bridge_health_for_tests,
 )
 from agentcore.runtime.browser.keyframes import KeyframeTracker
-from agentcore.tools.builtin import browser_execution_enabled_for, build_worker_registry
+from agentcore.tools.builtin import (
+    browser_execution_enabled_for,
+    browser_host_kind_for,
+    build_worker_registry,
+)
 from agentcore.tools.builtin.browser import (
     BROWSER_TOOL_NAMES,
     BrowserConsoleTool,
@@ -137,8 +141,9 @@ def test_gate_requires_server_plus_gvisor_plus_health(tmp_path, monkeypatch):
     backend = _server_backend(tmp_path)
     assert browser_execution_enabled_for(None) is False
     reset_desktop_bridge_health_for_tests()
-    assert browser_execution_enabled_for(LocalBackend()) is False  # local: no Bridge
+    # True local engine: no Bridge + no gVisor → withhold (no fake success).
     monkeypatch.setattr(settings, "gvisor_enabled", False)
+    assert browser_execution_enabled_for(LocalBackend()) is False
     assert browser_execution_enabled_for(backend) is False  # no gVisor isolation
     monkeypatch.setattr(settings, "gvisor_enabled", True)
     set_cloud_sandbox_health_for_tests(True)
@@ -165,13 +170,37 @@ def test_gate_netns_unprobed_keeps_cloud_health_semantics(tmp_path, monkeypatch)
     assert browser_execution_enabled_for(backend) is True
 
 
-def test_gate_local_requires_desktop_bridge_health(monkeypatch):
+def test_gate_local_requires_desktop_bridge_when_no_gvisor(monkeypatch):
+    """真·本地引擎：无 gVisor 时仅 Bridge 可装配。"""
     reset_desktop_bridge_health_for_tests()
+    monkeypatch.setattr(settings, "gvisor_enabled", False)
     assert browser_execution_enabled_for(LocalBackend()) is False
+    assert browser_host_kind_for(LocalBackend()) is None
     set_desktop_bridge_health_for_tests(True)
     assert browser_execution_enabled_for(LocalBackend()) is True
+    assert browser_host_kind_for(LocalBackend()) == "local"
     set_desktop_bridge_health_for_tests(False)
     assert browser_execution_enabled_for(LocalBackend()) is False
+    assert browser_host_kind_for(LocalBackend()) is None
+    reset_desktop_bridge_health_for_tests()
+
+
+def test_gate_local_bridge_session_falls_back_to_sandbox(monkeypatch):
+    """过桥：location=local、无 Bridge、gVisor 健康 → enabled 且 host_kind=sandbox."""
+    reset_desktop_bridge_health_for_tests()
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    set_cloud_sandbox_health_for_tests(True)
+    assert browser_execution_enabled_for(LocalBackend()) is True
+    assert browser_host_kind_for(LocalBackend()) == "sandbox"
+
+
+def test_gate_local_healthy_bridge_prefers_local_over_sandbox(monkeypatch):
+    """有健康 Bridge → host_kind=local（即便 gVisor 也健康）。"""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    set_cloud_sandbox_health_for_tests(True)
+    set_desktop_bridge_health_for_tests(True)
+    assert browser_execution_enabled_for(LocalBackend()) is True
+    assert browser_host_kind_for(LocalBackend()) == "local"
     reset_desktop_bridge_health_for_tests()
 
 
@@ -199,18 +228,28 @@ def test_worker_registry_excludes_browser_without_gvisor(tmp_path, monkeypatch):
     assert not (_BROWSER_NAMES & names)
 
 
-def test_worker_registry_excludes_browser_on_local_without_bridge(monkeypatch):
+def test_worker_registry_excludes_browser_on_local_without_bridge_or_gvisor(monkeypatch):
+    reset_desktop_bridge_health_for_tests()
+    monkeypatch.setattr(settings, "gvisor_enabled", False)
+    names = {s.name for s in build_worker_registry(backend=LocalBackend()).list_all()}
+    assert not (_BROWSER_NAMES & names)
+
+
+def test_worker_registry_includes_browser_on_local_bridge_session_sandbox(monkeypatch):
+    """过桥无 Bridge + gVisor → worker 装配 browser_*（host_kind 由工具侧解析为 sandbox）。"""
     reset_desktop_bridge_health_for_tests()
     monkeypatch.setattr(settings, "gvisor_enabled", True)
     set_cloud_sandbox_health_for_tests(True)
     names = {s.name for s in build_worker_registry(backend=LocalBackend()).list_all()}
-    assert not (_BROWSER_NAMES & names)
+    assert names >= _BROWSER_NAMES
+    assert browser_host_kind_for(LocalBackend()) == "sandbox"
 
 
 def test_worker_registry_includes_browser_on_local_with_bridge(monkeypatch):
     set_desktop_bridge_health_for_tests(True)
     names = {s.name for s in build_worker_registry(backend=LocalBackend()).list_all()}
     assert names >= _BROWSER_NAMES
+    assert browser_host_kind_for(LocalBackend()) == "local"
     reset_desktop_bridge_health_for_tests()
 
 
@@ -243,6 +282,7 @@ class _FakeRegistry:
         self._taken_over = taken_over
         self._acquire_error = acquire_error
         self.closed: list[str] = []
+        self.last_request = None
 
     def is_taken_over(self, cid, *, session_id=None, run_id=None):
         # M2 接管互斥: the tool consults this before acquiring; default False (no takeover).
@@ -254,9 +294,11 @@ class _FakeRegistry:
         from types import SimpleNamespace
 
         # Fake single-tab: session_id mirrors conversation for crash-drop assertions.
-        return SimpleNamespace(session_id=cid)
+        host = getattr(self.last_request, "host_kind", None) if self.last_request else None
+        return SimpleNamespace(session_id=cid, host_kind=host)
 
     async def acquire(self, request):
+        self.last_request = request
         if self._busy:
             raise BrowserSessionsBusyError("云端浏览器会话已满")
         if self._acquire_error is not None:
@@ -707,20 +749,22 @@ async def test_sandbox_file_url_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_local_relative_path_rewritten_to_workspace(tmp_path):
-    """甲：local backend 相对路径 → 改写为 workspace:// 再派发。"""
+async def test_local_relative_path_rewritten_to_workspace(tmp_path, monkeypatch):
+    """甲：Local Bridge 健康时相对路径 → 改写为 workspace:// 再派发。"""
+    set_desktop_bridge_health_for_tests(True)
     session = _FakeSession(
         BrowserCommandResult(
             ok=True,
             data={
-                "final_url": "workspace://conv-id/site/index.html",
+                "final_url": "workspace://conv.conv-id/site/index.html",
                 "title": "Index",
                 "http_status": None,
             },
             frame=b"\xff\xd8\xff",
         )
     )
-    tool = BrowserNavigateTool(registry=_FakeRegistry(session=session))
+    reg = _FakeRegistry(session=session)
+    tool = BrowserNavigateTool(registry=reg)
     ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
 
     class _LocalWs:
@@ -740,7 +784,50 @@ async def test_local_relative_path_rewritten_to_workspace(tmp_path):
     result = await tool.execute({"url": "site/index.html"}, ctx)
     assert result.success, result.output
     assert session.sent
-    assert session.sent[0].args["url"] == "workspace://conv-id/site/index.html"
+    assert session.sent[0].args["url"] == "workspace://conv.conv-id/site/index.html"
+    assert reg.last_request is not None
+    assert reg.last_request.host_kind == "local"
+    assert result.display["host_kind"] == "local"
+    reset_desktop_bridge_health_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_bridge_session_sandbox_relative_path_fails_honestly(tmp_path, monkeypatch):
+    """过桥无 Bridge + gVisor：相对路径诚实失败；acquire 须 host_kind=sandbox。"""
+    reset_desktop_bridge_health_for_tests()
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    set_cloud_sandbox_health_for_tests(True)
+    session = _FakeSession(
+        BrowserCommandResult(ok=True, data={"final_url": "https://x/", "title": "T"})
+    )
+    reg = _FakeRegistry(session=session)
+    tool = BrowserNavigateTool(registry=reg)
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+
+    class _LocalWs:
+        location = "local"
+
+        def __getattr__(self, name):
+            return getattr(ws, name)
+
+    ctx = ToolContext(
+        execution_id="e1",
+        run_id="r1",
+        agent_id="w1",
+        backend=_LocalWs(),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c1",
+    )
+    result = await tool.execute({"url": "site/index.html"}, ctx)
+    assert result.success is False
+    assert "完整预览" in _fail_text(result)
+    assert session.sent == []
+    # https still acquires sandbox (not open_local_bridge_session)
+    result_ok = await tool.execute({"url": "https://example.com/"}, ctx)
+    assert result_ok.success
+    assert reg.last_request is not None
+    assert reg.last_request.host_kind == "sandbox"
+    assert result_ok.display["host_kind"] == "sandbox"
 
 
 def test_classify_and_rewrite_navigate_targets():
@@ -756,7 +843,7 @@ def test_classify_and_rewrite_navigate_targets():
     assert classify_navigate_target("../secret") == "invalid"
     assert (
         rewrite_local_navigate_url("site/index.html", "Conv-ID")
-        == "workspace://conv-id/site/index.html"
+        == "workspace://conv.conv-id/site/index.html"
     )
     assert (
         rewrite_local_navigate_url("https://example.com/", "c1")

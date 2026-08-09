@@ -3,6 +3,7 @@ import {
   removeConversationScratch,
 } from "@/hooks/useWorkspaces";
 import { clearConversationUiState } from "@/lib/clearConversationUiState";
+import { previewFromOpenedWindow } from "@/lib/conversationListPreview";
 import { purgeConversationRuntimeState } from "@/lib/purgeConversationRuntimeState";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
@@ -18,6 +19,7 @@ import {
 import type { FolderMeta } from "@/services/folders";
 import { cacheShellMeta } from "@/services/offlineCache";
 import type { Conversation } from "@/stores/conversation";
+import { getRuntime } from "@/stores/conversation/selectors";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
@@ -92,7 +94,9 @@ export function patchConversationCache(
 }
 
 /** Move a conversation to the top and stamp `updatedAt = now` (a turn bumps it
- * into the「今天」group like the backend ordering will on the next reload). */
+ * into the「今天」group like the backend ordering will on the next reload).
+ * Does **not** refresh `lastMessagePreview` — call
+ * {@link syncConversationListPreview} at turn close for that. */
 export function bumpConversationCache(id: string): void {
   writeConversations((list) => {
     const target = list.find((c) => c.id === id);
@@ -102,6 +106,23 @@ export function bumpConversationCache(id: string): void {
       ...list.filter((c) => c.id !== id),
     ];
   });
+}
+
+/**
+ * After a turn closes, stamp the sidebar row's `lastMessagePreview` from the
+ * in-memory window. The grouped list uses `staleTime: ∞` and
+ * {@link bumpConversationCache} only moves / stamps `updatedAt`, so without
+ * this the row keeps the server preview from the last hydrate.
+ */
+export function syncConversationListPreview(conversationId: string): void {
+  const listed = getConversations().find((c) => c.id === conversationId);
+  if (!listed) return;
+  const lastMessagePreview = previewFromOpenedWindow(
+    getRuntime(conversationId).messages,
+    listed.lastMessagePreview,
+  );
+  if (lastMessagePreview === listed.lastMessagePreview) return;
+  patchConversationCache(conversationId, { lastMessagePreview });
 }
 
 /** Undo an optimistic {@link bumpConversationCache}: put the conversation back

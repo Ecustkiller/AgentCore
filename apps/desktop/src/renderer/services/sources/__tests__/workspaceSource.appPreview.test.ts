@@ -53,6 +53,7 @@ describe("createWorkspaceSource — 应用内「完整预览」入口门控（Br
       pageId: "page-1",
       conversationId: "c1",
       path: "dir/index.html",
+      workspaceId: "conv:c1",
     });
   });
 

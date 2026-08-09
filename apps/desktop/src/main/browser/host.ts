@@ -41,9 +41,8 @@ import {
   normalizeBrowserConversationId,
 } from "./paths";
 import {
-  buildWorkspaceUrl,
   isWorkspaceBrowserUrl,
-  normalizePreviewPath,
+  resolveWorkspaceHtmlUrl,
   workspacePartitionFor,
 } from "./workspace-paths";
 import { registerWorkspaceProtocolFor } from "./workspace-protocol";
@@ -593,13 +592,15 @@ export function navigateLocalBrowserPage(
 }
 
 /**
- * 在指定 pageId 加载会话工作区 HTML（L1b：workspace partition + workspace://）。
+ * 在指定 pageId 加载工作区 HTML（L1b：workspace partition + workspace:// desk host）。
  * 可先于 UI show；无主窗口 → 失败。
+ * `workspaceId` 缺省回退 `conv:{conversationId}`。
  */
 export function openLocalBrowserWorkspaceHtml(
   pageId: string,
   conversationId: string,
   path: string,
+  workspaceId?: string,
 ): BrowserResult {
   try {
     clearLegacyPagesOnce();
@@ -607,8 +608,8 @@ export function openLocalBrowserWorkspaceHtml(
     const conv = normalizeBrowserConversationId(conversationId);
     if (!id) return { ok: false, reason: "无效的页 id" };
     if (!conv) return { ok: false, reason: "无效的会话 id" };
-    const rel = normalizePreviewPath(path);
-    if (!rel) return { ok: false, reason: "无效的工作区路径" };
+    const target = resolveWorkspaceHtmlUrl(conv, path, workspaceId);
+    if (!target) return { ok: false, reason: "无效的工作区路径或 desk" };
 
     const win = resolveBridgeWindow();
     if (!win) {
@@ -617,7 +618,6 @@ export function openLocalBrowserWorkspaceHtml(
 
     registerWorkspaceProtocolFor(conv);
     const entry = ensurePageKind(win, id, "workspace", conv);
-    const target = buildWorkspaceUrl(conv, rel);
     void entry.view.webContents.loadURL(target);
     pushNavState(id);
     return { ok: true };

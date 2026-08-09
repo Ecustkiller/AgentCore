@@ -16,6 +16,7 @@ import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import type {
   SSEEvent,
+  TurnQueueStartedPayload,
   TurnQueuedPayload,
   TurnSteerAcceptedPayload,
 } from "@/types/events";
@@ -128,23 +129,19 @@ export async function sendMidFlightMessage(
     }
   };
 
-  const clearQueueLightState = (): void => {
-    if (!trackedQueueId) return;
-    useQueuedTurnsStore.getState().remove(conversationId, trackedQueueId);
-    trackedQueueId = null;
-  };
-
   const dispatchOne = (event: SSEEvent): void => {
-    if (event.type === "message_start" && result.kind === "queued") {
-      // drain 开跑：清排队轻态，保留用户气泡。
-      clearQueueLightState();
-      if (!userMessageId) {
-        // 防御：未在 turn_queued 插泡（不应发生）——补插再续。
+    if (event.type === "turn_queue_started" && result.kind === "queued") {
+      const p = event.payload as TurnQueueStartedPayload;
+      // 轻态主清在 messageStream；此处对齐 midFlight 跟踪 + 补插防御。
+      if (!userMessageId && p.queue_id === result.queueId) {
         insertQueuedUserBubble(
           result.queueId,
           result.position,
           result.queueDepth,
         );
+      }
+      if (trackedQueueId === p.queue_id) {
+        trackedQueueId = null;
       }
     }
     dispatchSSEEvent(event, { conversationId, source: "server" });

@@ -181,7 +181,7 @@ async def test_local_bridge_rewrites_relative_path_to_workspace(fake_bridge):
         BrowserCommand(action="navigate", args={"url": "site/index.html"})
     )
     assert result.ok
-    expected = "workspace://conv-id/site/index.html"
+    expected = "workspace://conv.conv-id/site/index.html"
     assert result.data["final_url"] == expected
     assert _FakeBridgeHandler.navigations[-1]["url"] == expected
     assert _FakeBridgeHandler.navigations[-1]["args"]["url"] == expected

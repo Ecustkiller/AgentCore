@@ -40,6 +40,27 @@ export interface PendingInteractionRef {
   id: string;
 }
 
+/**
+ * Cheap Live signature for graph action-bar pending decisions.
+ * Streaming output must NOT change this; node escalate / checkpoint must.
+ */
+export function graphPendingDecisionsLiveSig(
+  execution: Execution | null | undefined,
+): string {
+  if (!execution) return "";
+  const parts: string[] = [];
+  for (const r of execution.runs) {
+    let pendingEsc = 0;
+    for (const e of r.escalations) {
+      if (e.status === "pending") pendingEsc++;
+    }
+    const cp = r.checkpoint?.status === "pending" ? "1" : "0";
+    if (pendingEsc === 0 && cp === "0") continue;
+    parts.push(`${r.id}:${pendingEsc}:${cp}`);
+  }
+  return parts.join("|");
+}
+
 function escalationKindTag(esc: RunNode["escalations"][number]): string {
   const label = escalationRowKindLabel(esc);
   return label ? `（${label}）` : "";

@@ -205,7 +205,10 @@ function DiagnosticContextSkeleton({
             </p>
           ) : null}
 
-          {!diagnostic.loading && !diagnostic.available && blocks.length > 0 ? (
+          {!diagnostic.loading &&
+          !diagnostic.error &&
+          !diagnostic.available &&
+          blocks.length > 0 ? (
             <p className="text-xs text-muted-foreground">
               无法从 journal 重建后续轮次（可能缺少 execution facts）。
             </p>

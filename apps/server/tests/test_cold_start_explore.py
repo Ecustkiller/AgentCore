@@ -387,11 +387,19 @@ async def test_remember_does_not_touch_project_profile(tmp_path, monkeypatch):
     def _fake_factory():
         return _FakeSession()
 
-    async def _fake_append(repo, user_id, *, folder_id, content):  # noqa: ANN001
-        return True
+    async def _fake_mutate(repo, user_id, *, folder_id, action="add", content=None, replaces=None):  # noqa: ANN001
+        from agentcore.memory.rules_injection import UserRuleMutationResult
+
+        return UserRuleMutationResult(
+            action=action,
+            changed=True,
+            message=f"已追加规则：{content}",
+            markdown=f"- {content}\n",
+            content=content,
+        )
 
     monkeypatch.setattr(remember_mod, "async_session_factory", _fake_factory)
-    monkeypatch.setattr(remember_mod, "append_user_rule", _fake_append)
+    monkeypatch.setattr(remember_mod, "mutate_user_rule", _fake_mutate)
     monkeypatch.setattr(remember_mod, "DocumentRepository", lambda session: object())
 
     tool = RememberTool(folder_id=folder)

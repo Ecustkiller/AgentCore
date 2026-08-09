@@ -87,4 +87,42 @@ describe("WorkerContextSection", () => {
     // 拼接原文不应直接铺在开场区（由结构化分段替代）。
     expect(screen.queryByText("## 你的任务\n调研竞品定价")).toBeNull();
   });
+
+  it("REST error 只显示加载失败，不叠 journal 降级文案", () => {
+    render(
+      <WorkerContextSection
+        blocks={blocks}
+        diagnosticMode
+        diagnostic={{
+          messages: [],
+          available: false,
+          loading: false,
+          error: "加载失败",
+        }}
+        keyBase="err"
+      />,
+    );
+    fireEvent.click(screen.getByText("收到的上下文"));
+    expect(screen.getByText("加载失败")).toBeTruthy();
+    expect(screen.queryByText(/无法从 journal 重建后续轮次/)).toBeNull();
+  });
+
+  it("available=false 且无 error 时才显示 journal 降级", () => {
+    render(
+      <WorkerContextSection
+        blocks={blocks}
+        diagnosticMode
+        diagnostic={{
+          messages: [],
+          available: false,
+          loading: false,
+          error: null,
+        }}
+        keyBase="degrade"
+      />,
+    );
+    fireEvent.click(screen.getByText("收到的上下文"));
+    expect(screen.getByText(/无法从 journal 重建后续轮次/)).toBeTruthy();
+    expect(screen.queryByText("加载失败")).toBeNull();
+  });
 });

@@ -38,6 +38,18 @@ describe("formatMessageExport (mobile)", () => {
     expect(formatProcessExport(steps)).toContain("AgentCore");
   });
 
+  it("exports rework in completed tense (copy is not live)", () => {
+    expect(
+      formatProcessExport([
+        { kind: "rework" },
+        { kind: "content", text: "新稿" },
+      ]),
+    ).toContain("（引用/格式核验后已重写）");
+    expect(formatProcessExport([{ kind: "rework" }])).not.toContain(
+      "正在按规则修订",
+    );
+  });
+
   it("uses failure notice when content is empty (pure failure export)", () => {
     expect(
       formatMessageExport("", undefined, "deliverable", {

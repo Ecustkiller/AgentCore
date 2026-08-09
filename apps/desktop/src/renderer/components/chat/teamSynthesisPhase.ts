@@ -107,12 +107,16 @@ export function coordinationWaitCaptainCaption(
  * ``turnTerminal``: message_end already closed the chat turn (turnPhase
  * completed/stopped/failed) while execution.status may still be stuck
  * ``running`` — never show the synthesis spinner after the turn is over.
+ *
+ * ``paused``: cold ask / plan_review hang — workers may be 2/2, but CEO is
+ * waiting on the user (same invariant as deriveCaptainStatus).
  */
 export function isTeamSynthesizing(
   execution: Execution,
   opts?: { turnTerminal?: boolean },
 ): boolean {
   if (opts?.turnTerminal) return false;
+  if (execution.status === "paused") return false;
   if (execution.status !== "running") return false;
   const { completed, total } = workerProgress(execution);
   return total > 0 && completed >= total;

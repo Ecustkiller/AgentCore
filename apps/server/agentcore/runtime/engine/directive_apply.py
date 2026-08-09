@@ -186,6 +186,7 @@ async def apply_loop_directive(
                     evidence=f"validation_thrash: rounds={round_idx + 1}",
                     sink=sink,
                     gate_escalation_sink=gate_escalation_sink,
+                    source="validation_thrash",
                 )
             finalize_allowed = allowed_tool_names
             (
@@ -310,6 +311,8 @@ async def apply_loop_directive(
                     tool_defs = resolve_openai_tool_defs(
                         tools, finalize_allowed, disabled_tools
                     )
+                from agentcore.runtime.runs.cutoff import worker_keeps_notes_in_wind_down
+
                 _ = govern_after_tools(
                     outcome=RoundOutcome(
                         content=coordination.content,
@@ -327,6 +330,14 @@ async def apply_loop_directive(
                     role=role,
                     disabled_tools=disabled_tools,
                     investigation_tools=controller.investigation_tool_names,
+                    keep_notes=worker_keeps_notes_in_wind_down(
+                        available=set(tools.names),
+                        allowed=(
+                            list(finalize_allowed)
+                            if finalize_allowed is not None
+                            else None
+                        ),
+                    ),
                 )
                 return DirectiveApplyResult(
                     action="continue",

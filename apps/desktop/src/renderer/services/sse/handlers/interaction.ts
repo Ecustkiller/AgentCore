@@ -7,6 +7,8 @@ import {
   defFromResolvedEvent,
   defFromTimelineProcess,
   interactionChannelEventTypes,
+  isColdResumeKind,
+  kindFromRequiredEvent,
   useInteractionStore,
   wireFor,
 } from "@/stores/interactions";
@@ -18,7 +20,7 @@ import {
 } from "@/types/interactionExt";
 import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames } from "../execFrameBuffer";
-import { execMessageId } from "../helpers";
+import { ceoMessageId, execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
 
 const INTERACTION_SSE_TYPES = interactionChannelEventTypes();
@@ -28,7 +30,13 @@ function wireIntoInteractionStore(
   conversationId: string,
   origin: DispatchContext["source"],
 ): void {
-  const messageId = execMessageId(conversationId) ?? "";
+  // Cold pause cards are CEO-lane: never bind via growth-graph divert
+  // (execMessageId sticky host), or ResumePrompt keys the wrong turn.
+  const requiredKind = kindFromRequiredEvent(event.type);
+  const messageId =
+    (requiredKind && isColdResumeKind(requiredKind)
+      ? ceoMessageId(conversationId)
+      : execMessageId(conversationId)) ?? "";
   applyInteractionWireEvent(
     event.type,
     (event.payload ?? {}) as Record<string, unknown>,

@@ -194,17 +194,36 @@ async def cloud_list_user_rules(
 async def cloud_remember_rule(
     creds: AccountCredentials,
     *,
-    content: str,
+    content: str | None = None,
     folder_id: str | None,
-) -> bool:
-    """POST ``…/account/rules/remember`` → whether the rule doc changed."""
+    action: str = "add",
+    replaces: str | None = None,
+) -> dict[str, Any]:
+    """POST ``…/account/rules/remember`` → structured mutate result (changed/action/message/…)."""
+    payload: dict[str, Any] = {
+        "folder_id": folder_id,
+        "action": action or "add",
+    }
+    if content is not None:
+        payload["content"] = content
+    if replaces is not None:
+        payload["replaces"] = replaces
     data = await _post_json(
         creds,
         path="/rules/remember",
-        payload={"content": content, "folder_id": folder_id},
+        payload=payload,
         op="rules_remember",
     )
-    return bool(data.get("changed"))
+    if not isinstance(data, dict):
+        raise AccountCloudError("account remember response is not an object")
+    return {
+        "changed": bool(data.get("changed")),
+        "action": str(data.get("action") or action or "add"),
+        "message": str(data.get("message") or ""),
+        "rules_markdown": data.get("rules_markdown")
+        if isinstance(data.get("rules_markdown"), str) or data.get("rules_markdown") is None
+        else str(data.get("rules_markdown")),
+    }
 
 
 async def cloud_memory_list(

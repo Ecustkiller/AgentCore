@@ -89,6 +89,7 @@ export type SSEEventType =
   | "tool_use_progress"
   | "tool_use_start"
   | "turn_queue_cancelled"
+  | "turn_queue_started"
   | "turn_queued"
   | "turn_saved"
   | "turn_steer_accepted"

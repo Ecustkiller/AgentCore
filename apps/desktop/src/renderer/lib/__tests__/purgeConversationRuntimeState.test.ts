@@ -3,6 +3,7 @@ import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useInteractionStore } from "@/stores/interactions";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
+import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { useTurnModelStore } from "@/stores/turnModel";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +41,7 @@ beforeEach(() => {
   usePausedTurnStore.getState().clear();
   useInteractionStore.getState().clear();
   useTurnModelStore.setState({ byConversation: {} });
+  useQueuedTurnsStore.setState({ byConversation: {} });
   useBackgroundTasksStore.setState({
     byConversation: {},
     modeByConversation: {},
@@ -117,5 +119,29 @@ describe("purgeConversationRuntimeState", () => {
     expect(useBrowserSessionsStore.getState().pagesFor(CID)).toEqual([]);
     expect(useBrowserSessionsStore.getState().pagesFor(OTHER)).toHaveLength(1);
     expect(closeConversation).toHaveBeenCalledWith({ conversationId: CID });
+  });
+
+  it("清 queuedTurns FIFO 轻态", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-del",
+      conversationId: CID,
+      messageId: "u-del",
+      content: "bye",
+      position: 1,
+      queueDepth: 1,
+    });
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-keep",
+      conversationId: OTHER,
+      messageId: "u-keep",
+      content: "keep",
+      position: 1,
+      queueDepth: 1,
+    });
+
+    purgeConversationRuntimeState(CID);
+
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(useQueuedTurnsStore.getState().list(OTHER)).toHaveLength(1);
   });
 });

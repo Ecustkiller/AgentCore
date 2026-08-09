@@ -74,6 +74,20 @@ def test_turn_queue_cancelled_payload():
     TurnQueueCancelledPayload.model_validate(ev.payload)
 
 
+def test_turn_queue_started_payload():
+    from agentcore.runtime.events import turn_queue_started
+    from agentcore.runtime.events.payloads.run import TurnQueueStartedPayload
+
+    ev = turn_queue_started(
+        queue_id="q1",
+        conversation_id="c1",
+        remaining_depth=2,
+    )
+    assert ev.type is EventType.TURN_QUEUE_STARTED
+    assert ev.payload["remaining_depth"] == 2
+    TurnQueueStartedPayload.model_validate(ev.payload)
+
+
 def test_turn_steer_accepted_payload():
     from agentcore.runtime.events import turn_steer_accepted
     from agentcore.runtime.events.payloads.run import TurnSteerAcceptedPayload

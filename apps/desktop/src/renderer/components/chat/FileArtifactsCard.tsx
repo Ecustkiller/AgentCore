@@ -8,12 +8,14 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { useFileAudit } from "@/hooks/useFileAudit";
+import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import {
   type FileArtifact,
   type FileOp,
   hasChangePreviews,
 } from "@/lib/fileArtifacts";
 import { isHtmlPath } from "@/lib/fileSource";
+import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
 import { stageFileLabel } from "@/lib/stageDirs";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -37,7 +39,8 @@ import {
  * 「本回合产出文件」卡 —— 主清单只认路径验收态（delivery_status.artifacts），挂在
  * 答复正文下方（前端UX设计.md §九「回合内文件呈现」）。点任一可预览行 → 经 {@link useSidePanelStore}
  * 的 `showFile` 开右坞顶栏 File 内容 tab。例外：HTML 产物在会话具备应用内「完整预览」能力时
- * **直达**内置浏览器 tab（`workspace://` + BrowserPanel）。「查看改动」聚焦右坞「改动」tab（无则先挂；与
+ * **直达**内置浏览器 tab（`workspace://` + BrowserPanel；desk 优先 artifact.workspaceId，
+ * 否则会话工作区 wsId）。「查看改动」聚焦右坞「改动」tab（无则先挂；与
  * {@link TurnFileChangesReview} 同源，前端UX设计.md §十）。
  */
 
@@ -253,8 +256,10 @@ export function FileArtifactsCard({
   const showFile = useSidePanelStore((s) => s.showFile);
   const showChanges = useSidePanelStore((s) => s.showChanges);
   // 与对话侧栏同一套能力判定：hook 只对云端会话源且 hasInAppPreview 时挂 openInAppPreview。
-  const openInAppPreview =
-    useConversationFileSource(conversationId)?.openInAppPreview;
+  const canFullPreview =
+    !!useConversationFileSource(conversationId)?.openInAppPreview;
+  // 与侧栏同源落地 desk；产物可带独立 workspaceId 覆盖。
+  const sessionWsId = useConversationWorkspace(conversationId)?.wsId;
 
   if (artifacts.length === 0) return null;
 
@@ -262,9 +267,13 @@ export function FileArtifactsCard({
     hasChangePreviews(artifacts) || (!!conversationId && !!turnKey);
 
   const openArtifact = (a: FileArtifact) => {
-    // HTML 直达完整预览（内置浏览器 tab）；其余/无能力回落 File 内容 tab。
-    if (openInAppPreview && isHtmlPath(a.path)) {
-      void openInAppPreview(a.path);
+    // HTML 直达完整预览（内置浏览器 tab）；desk 优先 artifact，否则会话工作区。
+    if (canFullPreview && conversationId && isHtmlPath(a.path)) {
+      void openWorkspaceHtmlInBrowser(
+        conversationId,
+        a.path,
+        a.workspaceId ?? sessionWsId,
+      );
       return;
     }
     showFile(a.path, a.name);
@@ -323,7 +332,7 @@ export function FileArtifactsCard({
               conversationId={conversationId}
               turnKey={turnKey}
               onOpen={() => openArtifact(a)}
-              opensFullPreview={!!openInAppPreview && isHtmlPath(a.path)}
+              opensFullPreview={canFullPreview && isHtmlPath(a.path)}
             />
           ))}
         </ul>

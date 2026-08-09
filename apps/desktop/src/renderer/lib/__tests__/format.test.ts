@@ -1,5 +1,7 @@
 import {
   COST_ESTIMATE_LABEL,
+  chunksTailText,
+  estimateTokensFromCharCount,
   formatBytes,
   formatBytesPerSecond,
   formatCompact,
@@ -11,6 +13,8 @@ import {
   formatMessageTime,
   formatMessageTimeOfDay,
   pickCostMoney,
+  sumChunkChars,
+  tailText,
 } from "@/lib/format";
 import { describe, expect, it, vi } from "vitest";
 
@@ -142,5 +146,25 @@ describe("formatMessageTime", () => {
     expect(formatMessageTime("2026-07-04T08:30:00")).toBe("昨天 08:30");
 
     vi.useRealTimers();
+  });
+});
+
+describe("chunksTailText / char token estimate", () => {
+  it("matches tailText on a short joined stream", () => {
+    const chunks = ["hello ", "world"];
+    expect(chunksTailText(chunks)).toBe(tailText(chunks.join("")));
+  });
+
+  it("returns the trailing window for a long chunk list", () => {
+    const chunks = ["x".repeat(100), "y".repeat(100), "TAIL_MARKER"];
+    const preview = chunksTailText(chunks, 80);
+    expect(preview).toContain("TAIL_MARKER");
+    expect(preview.length).toBeLessThanOrEqual(81);
+  });
+
+  it("sums chunk chars and coarse-estimates tokens", () => {
+    expect(sumChunkChars(["ab", "cde"])).toBe(5);
+    expect(estimateTokensFromCharCount(0)).toBe(0);
+    expect(estimateTokensFromCharCount(5)).toBe(3);
   });
 });

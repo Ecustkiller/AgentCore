@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   History,
   Loader2,
@@ -42,6 +43,7 @@ import {
   Play,
   Square,
 } from "lucide-react";
+import { useState } from "react";
 
 /** Props every lifecycle strip shares: projection + strip controls. */
 export interface StatusStripProps {
@@ -519,6 +521,9 @@ function FailureStrip({
   const detached = useActiveExecField((rt) => rt.executionDetached);
   // Same session error RetryBanner / 底栏 already shows (e.g. stream interrupt).
   const sessionError = useActiveError();
+  // Long task briefs (e.g. code_audit instructions) must not explode the strip —
+  // default clamp; click to expand (teamPreview WorkerPreviewRows / AskCommenceKickoff).
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const failedRun = execution.runs.find((s) => s.status === "failed") ?? null;
   const failedAgent = failedRun
@@ -531,6 +536,12 @@ function FailureStrip({
     failedRun?.error?.trim() ||
     sessionError?.trim() ||
     "未获取到具体错误信息。";
+
+  const taskText = failedRun?.task?.trim() ?? "";
+  const canToggleDetail =
+    taskText.length > 72 ||
+    errorDetail.length > 96 ||
+    errorDetail.includes("\n");
 
   const money = resolveTurnDisplayMoney(
     null,
@@ -584,21 +595,71 @@ function FailureStrip({
       </div>
 
       <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
-        {failedAgent || failedRun ? (
-          <p className="text-foreground">
-            {failedAgent && (
-              <span className="font-medium">{failedAgent.role}</span>
-            )}
-            {failedRun && (
-              <span className="text-muted-foreground"> · {failedRun.task}</span>
-            )}
-          </p>
+        {canToggleDetail ? (
+          <button
+            type="button"
+            onClick={() => setDetailOpen((v) => !v)}
+            aria-expanded={detailOpen}
+            aria-label={detailOpen ? "收起失败详情" : "展开失败详情"}
+            data-testid="status-strip-failed-detail-toggle"
+            className="flex w-full items-start gap-1.5 text-left"
+          >
+            <div className="min-w-0 flex-1">
+              {failedAgent || failedRun ? (
+                <p
+                  className={
+                    detailOpen
+                      ? "whitespace-pre-wrap break-words text-foreground"
+                      : "line-clamp-2 text-foreground"
+                  }
+                >
+                  {failedAgent && (
+                    <span className="font-medium">{failedAgent.role}</span>
+                  )}
+                  {taskText ? (
+                    <span className="text-muted-foreground"> · {taskText}</span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="text-foreground">执行过程中出现错误</p>
+              )}
+              <p
+                className={
+                  detailOpen
+                    ? "mt-1 whitespace-pre-wrap break-words text-xs text-destructive"
+                    : "mt-1 line-clamp-2 break-words text-xs text-destructive"
+                }
+              >
+                {errorDetail}
+              </p>
+            </div>
+            <ChevronRight
+              size={14}
+              className={`mt-0.5 shrink-0 text-muted-foreground transition-transform ${
+                detailOpen ? "rotate-90" : ""
+              }`}
+              aria-hidden
+            />
+          </button>
         ) : (
-          <p className="text-foreground">执行过程中出现错误</p>
+          <>
+            {failedAgent || failedRun ? (
+              <p className="text-foreground">
+                {failedAgent && (
+                  <span className="font-medium">{failedAgent.role}</span>
+                )}
+                {taskText ? (
+                  <span className="text-muted-foreground"> · {taskText}</span>
+                ) : null}
+              </p>
+            ) : (
+              <p className="text-foreground">执行过程中出现错误</p>
+            )}
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
+              {errorDetail}
+            </p>
+          </>
         )}
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
-          {errorDetail}
-        </p>
       </div>
     </div>
   );

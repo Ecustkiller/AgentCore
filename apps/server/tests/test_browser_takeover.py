@@ -303,7 +303,8 @@ async def test_browser_tool_returns_user_in_control_during_takeover():
         execution_id="",
         run_id="r1",
         agent_id="",
-        backend=object(),  # untouched: the guard returns before any session use
+        # Navigate 先做接管互斥，再探 host_kind；接管路径不碰 session / backend.location
+        backend=object(),
         user_id="u1",
         conversation_id="c1",
     )

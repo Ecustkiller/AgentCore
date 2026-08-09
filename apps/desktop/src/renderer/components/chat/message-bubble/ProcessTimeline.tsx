@@ -10,6 +10,7 @@ import {
   type TimelineNode,
   groupToolRuns,
   omitCoordinationIdleSteps,
+  reworkChipLabel,
   timelineNodeKeys,
 } from "@/lib/processTimeline";
 import type {
@@ -108,6 +109,7 @@ function InlineReasoning({
 function ProcessRow({
   step,
   streaming,
+  reworkLabel,
   citations,
   citationToDisplay,
   knownLedgerIds,
@@ -118,6 +120,8 @@ function ProcessRow({
 }: {
   step: ProcessStep;
   streaming: boolean;
+  /** Presentational copy for `kind===rework` (in-progress vs done). */
+  reworkLabel?: string;
   citations: Citation[];
   citationToDisplay?: ReadonlyMap<number, number>;
   knownLedgerIds?: ReadonlySet<string> | null;
@@ -156,7 +160,7 @@ function ProcessRow({
   if (step.kind === "rework") {
     return (
       <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-        引用/格式核验后已重写
+        {reworkLabel ?? reworkChipLabel(false, true)}
       </span>
     );
   }
@@ -333,11 +337,19 @@ export function ProcessTimeline({
       );
     }
     const step: ProcessStep = node.kind === "tool" ? node.step : node;
+    const hasContentAfter =
+      step.kind === "rework" &&
+      nodes.slice(i + 1).some((n) => n.kind === "content");
     return (
       <ProcessRow
         key={nodeKey}
         step={step}
         streaming={live}
+        reworkLabel={
+          step.kind === "rework"
+            ? reworkChipLabel(isStreaming, hasContentAfter)
+            : undefined
+        }
         citations={citations}
         citationToDisplay={citationToDisplay}
         knownLedgerIds={knownLedgerIds}

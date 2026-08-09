@@ -337,8 +337,8 @@ describe("buildGraphScene · golden", () => {
   });
 
   it("nested sub-team → nested compounds + nodeGroup attribution", () => {
-    // Nested delegation is collapsed by default; expand mpm+lead to exercise the
-    // nested compound boxes (canvas host expands by default via expandedUnits).
+    // Nested units expand by default on canvas + chat embed; pass the same set
+    // here to exercise nested compound boxes in the golden.
     const scene = buildGraphScene(nestedSubteamExec(), {
       inputId: INPUT_ID,
       expandedUnits: new Set(["mpm", "lead"]),

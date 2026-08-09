@@ -5,7 +5,7 @@
  *   pnpm release:ship                 # 全端 full（默认）
  *   pnpm release:ship -- --track api  # 仅后端热修轨
  *   pnpm release:ship -- --sha abc1234
- *   pnpm release:ship -- --check      # 额外探测：git / 桌面 draft 资产（需 gh）
+ *   pnpm release:ship -- --check      # 额外探测：git / 桌面·Android draft 资产（需 gh）
  *
  * 公告两段式（定案 D · 工作流 A）：
  *   预告 = 人定「今天发 + 约时」后立刻 → pnpm release:notice -- --phase preview …
@@ -112,6 +112,42 @@ function checkDesktopDraft(desktopVer) {
   }
 }
 
+function checkAndroidDraft(mobileVer) {
+  const tag = `android-v${mobileVer}`;
+  const r = sh("gh", [
+    "release",
+    "view",
+    tag,
+    "--repo",
+    "Lawofall/AgentCore-releases",
+    "--json",
+    "isDraft,assets",
+  ]);
+  if (r.status !== 0) {
+    console.log(`   · draft ${tag}: 未找到或 gh 不可用`);
+    return;
+  }
+  try {
+    const j = JSON.parse(r.out);
+    const names = (j.assets ?? []).map((a) => a.name);
+    const need = [`AgentCore-${mobileVer}-android.apk`];
+    const missing = need.filter((n) => !names.includes(n));
+    console.log(
+      `   · ${tag} draft=${j.isDraft} assets=${names.length}` +
+        (missing.length ? ` 缺: ${missing.join(", ")}` : " （APK 齐）"),
+    );
+    if (!j.isDraft) {
+      console.log("   · 已非 draft → 官网 /download 可露 Android 链");
+    } else if (!missing.length) {
+      console.log(
+        `   · 可转正: gh release edit ${tag} --repo Lawofall/AgentCore-releases --draft=false`,
+      );
+    }
+  } catch {
+    console.log(`   · 无法解析 gh JSON`);
+  }
+}
+
 function main() {
   const track = (arg("track", "full").trim() || "full").toLowerCase();
   if (track !== "full" && track !== "api") {
@@ -172,11 +208,18 @@ function main() {
       `齐资产后转正: gh release edit v${v.desktop} --repo Lawofall/AgentCore-releases --draft=false --latest`,
     ]);
 
+    printStep(n++, "Android APK（与桌面 tag 分轨 android-v*）", [
+      "pnpm -C apps/mobile release:android   # 打签 APK → draft upload；CDN 由脚本末尾 sync",
+      "真机冒烟（安装启动 / 登录 / SSE）",
+      `冒烟绿后转正: gh release edit android-v${v.mobile} --repo Lawofall/AgentCore-releases --draft=false`,
+      "本清单不自动跑 release:android；漏 Publish 则官网/CDN 停在旧版",
+    ]);
+
     printStep(n++, "客户端静态面（后端已上后即可；官网等桌面 Publish）", [
       "pnpm -C apps/mobile deploy:pages",
       "pnpm -C apps/admin deploy:production",
       "pnpm -C apps/desktop deploy:web",
-      "pnpm -C apps/website deploy:pages   # 须在桌面 release 已 Publish 之后",
+      "pnpm -C apps/website deploy:pages   # 须在桌面 release 已 Publish 之后；Android 链亦须 android-v* 已转正",
     ]);
   } else {
     printStep(n++, "客户端", [
@@ -202,7 +245,10 @@ function main() {
     console.log("\n── --check 探针 ──");
     const st = sh("git", ["status", "-sb"]);
     console.log(`   · git: ${st.out.split(/\r?\n/)[0] ?? "?"}`);
-    if (track === "full") checkDesktopDraft(v.desktop);
+    if (track === "full") {
+      checkDesktopDraft(v.desktop);
+      checkAndroidDraft(v.mobile);
+    }
   }
 
   console.log("\n✓ 清单打印完毕。关键节点（Publish / 公告）须人确认后再执行。\n");

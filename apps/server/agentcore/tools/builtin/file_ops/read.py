@@ -191,6 +191,65 @@ def _no_match_hint(
     )
 
 
+def _parent_dir_of(rel_path: str) -> str:
+    """Workspace-relative parent of ``rel_path`` (``.`` when path is top-level)."""
+    raw = (rel_path or "").strip().replace("\\", "/").strip("/")
+    if not raw or "/" not in raw:
+        return "."
+    parent = raw.rsplit("/", 1)[0].strip("/")
+    return parent or "."
+
+
+def _missing_file_landmark_suffix(*, parent: str, bare_entries: list) -> str:
+    """Sibling samples + wider-search tip when parent exists (align ``_no_match_hint``)."""
+    root = "./" if parent in (".", "") else f"{parent.rstrip('/')}/"
+    tips = (
+        "可换 file_list(pattern)/grep/code_search 更宽查找后再读"
+        "（已知路径仍可直接读）"
+    )
+    if not bare_entries:
+        return f"（父目录 {root} 存在但当前层无可列样本。{tips}。）"
+    sample_parts: list[str] = []
+    for entry in bare_entries[:8]:
+        sample_parts.append(f"{'d ' if entry.is_dir else 'f '}{entry.path}")
+    sample = "；".join(sample_parts)
+    more = (
+        f" 等共 {len(bare_entries)} 项"
+        if len(bare_entries) > 8
+        else f"（共 {len(bare_entries)} 项）"
+    )
+    return (
+        f"（父目录 {root} 存在{more}。"
+        f"可见同层示例：{sample}。"
+        f"{tips}。）"
+    )
+
+
+async def _file_not_found_error(
+    rel_path: str,
+    *,
+    start: float,
+    context: ToolContext,
+) -> ToolResult:
+    """``PathNotFound`` for file_read — landmark when parent directory is listable."""
+    base = f"文件不存在：{rel_path}"
+    parent = _parent_dir_of(rel_path)
+    try:
+        bare = [
+            e
+            for e in await context.backend.list(parent, "*")
+            if e.is_dir
+            or not should_hide_ai_noise_from_list(
+                e.path,
+                materials=context.material_paths,
+                reveal_archives=False,
+            )
+        ]
+    except (PathNotFound, NotADirectory, OutsideWorkspace, WorkspaceError):
+        return _error(base, start)
+    return _error(base + _missing_file_landmark_suffix(parent=parent, bare_entries=bare), start)
+
+
 def _render_file_tree(
     entries: list[TreeEntry],
     directory: str,
@@ -337,6 +396,7 @@ class FileReadTool:
                 "code_execute。"
                 "宜在 grep / code_search 命中后再读；优先传 offset/limit 精读片段，"
                 "禁止无目标地整目录逐文件通读。"
+                "含糊「根」/ `.` / 仅根标签勿当文件整读——先 file_list/grep 钉真实路径。"
                 "回执为编号行 + 页脚「第 a–b 行，共 N 行」（区间视图；"
                 "超默认行数只展示窗口，非磁盘残缺，勿把页脚当正文去 str_replace）。"
                 "同一相对路径本 run 对【整读】有成功次数上限（带 offset/limit 的分段读"
@@ -445,7 +505,7 @@ class FileReadTool:
                 start,
             )
         except PathNotFound:
-            return _error(f"文件不存在：{rel_path}", start)
+            return await _file_not_found_error(rel_path, start=start, context=context)
         except NotAFile:
             return _error(f"不是文件：{rel_path}", start)
         except WorkspaceError as e:
@@ -504,7 +564,9 @@ class FileReadTool:
                     start,
                 )
             except PathNotFound:
-                return _error(f"文件不存在：{rel_path}", start)
+                return await _file_not_found_error(
+                    rel_path, start=start, context=context
+                )
             except NotAFile:
                 return _error(f"不是文件：{rel_path}", start)
             except WorkspaceError as e:

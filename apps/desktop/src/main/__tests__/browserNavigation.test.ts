@@ -215,34 +215,44 @@ describe("browser / workspace partition by conversationId", () => {
   });
 });
 
-describe("workspace protocol host === partition cid", () => {
-  it("同 cid 可解析；跨 cid → 403", () => {
+describe("workspace protocol desk host + partition cid", () => {
+  it("同 conv desk 可解析；跨 conv → 403；folder 放行", () => {
     expect(
       resolveWorkspaceProtocolRequest(
-        "workspace://conv-a/site/index.html",
+        "workspace://conv.conv-a/site/index.html",
         "conv-a",
       ),
     ).toEqual({
       ok: true,
-      conversationId: "conv-a",
+      workspaceId: "conv:conv-a",
       rel: "site/index.html",
     });
     expect(
       resolveWorkspaceProtocolRequest(
-        "workspace://conv-b/site/index.html",
+        "workspace://conv.conv-b/site/index.html",
         "conv-a",
       ),
     ).toEqual({ ok: false, status: 403 });
+    expect(
+      resolveWorkspaceProtocolRequest(
+        "workspace://folder.fid/site/index.html",
+        "conv-a",
+      ),
+    ).toEqual({
+      ok: true,
+      workspaceId: "folder:fid",
+      rel: "site/index.html",
+    });
   });
 });
 
 describe("buildWorkspaceUrl", () => {
-  it("uses workspace scheme and encodes path", () => {
-    expect(buildWorkspaceUrl("Conv-ID", "dir/a b.html")).toBe(
-      "workspace://conv-id/dir/a%20b.html",
+  it("uses desk host and encodes path", () => {
+    expect(buildWorkspaceUrl("conv:Conv-ID", "dir/a b.html")).toBe(
+      "workspace://conv.conv-id/dir/a%20b.html",
     );
     expect(WORKSPACE_SCHEME).toBe("workspace");
-    expect(isWorkspaceBrowserUrl("workspace://c1/x.html")).toBe(true);
+    expect(isWorkspaceBrowserUrl("workspace://conv.c1/x.html")).toBe(true);
   });
 });
 

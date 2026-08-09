@@ -337,4 +337,75 @@ describe("AssistantContent", () => {
     );
     expect(screen.getByTestId("team")).toBeTruthy();
   });
+
+  it("hides TeamView when all workers are still pending (开工挂起零开跑)", () => {
+    render(
+      <AssistantContent
+        content=""
+        process={[]}
+        team={{
+          agents: [],
+          runs: [
+            makeRun({ id: "r1", status: "pending" }),
+            makeRun({ id: "r2", status: "pending" }),
+          ],
+          progress: { completed: 0, total: 2 },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("team")).toBeNull();
+  });
+
+  it("hides TeamView when workers were skipped before start", () => {
+    render(
+      <AssistantContent
+        content=""
+        process={[]}
+        team={{
+          agents: [],
+          runs: [
+            makeRun({ id: "r1", status: "skipped" }),
+            makeRun({ id: "r2", status: "skipped" }),
+          ],
+          progress: { completed: 0, total: 2 },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("team")).toBeNull();
+  });
+
+  it("still shows TeamView mid-wave when a completed run exists (plan_review pause)", () => {
+    render(
+      <AssistantContent
+        content=""
+        process={[]}
+        team={{
+          agents: [],
+          runs: [
+            makeRun({ id: "r1", status: "completed" }),
+            makeRun({ id: "r2", status: "pending" }),
+          ],
+          progress: { completed: 1, total: 2 },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("team")).toBeTruthy();
+  });
+
+  it("gates TeamView on process team marker when runs never started", () => {
+    const process: ProcessStep[] = [{ kind: "team", execution_id: "exec-1" }];
+    render(
+      <AssistantContent
+        content=""
+        process={process}
+        isStreaming
+        team={{
+          agents: [],
+          runs: [makeRun({ id: "r1", status: "pending" })],
+          progress: { completed: 0, total: 1 },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("team")).toBeNull();
+  });
 });

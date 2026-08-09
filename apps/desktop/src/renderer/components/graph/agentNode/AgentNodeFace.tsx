@@ -12,8 +12,6 @@ import { STANCE_META, toolLabel } from "@/stores/execution";
 import {
   AlertTriangle,
   ArrowUp,
-  ChevronDown,
-  ChevronRight,
   FileText,
   Pause,
   PencilLine,
@@ -119,28 +117,6 @@ export function AgentNodeCardFace({
             </span>
           )}
         </div>
-      )}
-      {(d.foldedChildCount ?? 0) > 0 && (
-        <button
-          type="button"
-          className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-border/60 bg-muted/30 px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            d.onToggleUnitExpand?.();
-          }}
-        >
-          {d.unitExpanded ? (
-            <>
-              <ChevronDown size={12} />
-              收起子队
-            </>
-          ) : (
-            <>
-              <ChevronRight size={12} />
-              展开子队（{d.foldedChildCount}）
-            </>
-          )}
-        </button>
       )}
     </div>
   );

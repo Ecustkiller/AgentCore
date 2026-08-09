@@ -435,7 +435,13 @@ export function surfaceResumeFromAssistant(
 
 /**
  * Resolve the stamped server resume key for a cold Interaction entry.
- * Without a stamp, returns null — ResumePrompt must not paint a clickable card.
+ *
+ * Live paint contract: clickable ResumePrompt requires a durable server key
+ * (never the bare client bubble id). When the matching assistant exists but
+ * is not stamped yet, return null — ResumePrompt re-runs when
+ * `setServerMessageIdOnLastMessage` stamps + rekeys/binds, and paints then.
+ * Unbound entries (empty messageId) resolve to the latest stamped assistant
+ * so a late stamp still completes the live card without hard refresh.
  */
 export function resolveColdResumeKeyFromMessages(
   messages: Array<{
@@ -445,7 +451,13 @@ export function resolveColdResumeKeyFromMessages(
   }>,
   entryMessageId: string,
 ): string | null {
-  if (!entryMessageId) return null;
+  if (!entryMessageId) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.serverMessageId) return m.serverMessageId;
+    }
+    return null;
+  }
   const assistant = messages.find(
     (m) =>
       m.role === "assistant" &&

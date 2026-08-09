@@ -797,6 +797,78 @@ async def test_repeated_salvage_skips_body_upsert(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_close_turn_interrupted_load_stream_state_merges_body_content(monkeypatch):
+    """load_stream_state must pick_monotonic with passed salvage (reset-stash path)."""
+    upserts: list[dict] = []
+
+    class _MsgRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id(self, mid, conversation_id=None):
+            return SimpleNamespace(
+                content="",
+                reasoning_content=None,
+                trace_id="tr",
+                usage={"status": "running"},
+            )
+
+        async def upsert_assistant(self, **kwargs):
+            upserts.append(kwargs)
+
+    class _JournalRepo:
+        def __init__(self, _session):
+            pass
+
+        async def load_owned(self, turn_id, conversation_id):
+            return []
+
+        async def append(self, **kwargs):
+            return None
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class _Store:
+        async def list_stream_segments(self, *, turn_id):
+            # Segment empty after content_reset cleared the checkpointer generation.
+            return []
+
+        async def clear_stream_segments(self, *, turn_id):
+            pass
+
+    from agentcore.runtime import turn_interrupt as interrupt_mod
+
+    monkeypatch.setattr(interrupt_mod, "MessageRepository", _MsgRepo)
+    monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", _JournalRepo)
+    monkeypatch.setattr(interrupt_mod, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(
+        "agentcore.conversation.store.get_cloud_store",
+        lambda: _Store(),
+    )
+    monkeypatch.setattr(
+        interrupt_mod,
+        "_reconcile_interrupted_turn_cost",
+        AsyncMock(return_value=None),
+    )
+
+    ok = await close_turn_interrupted(
+        message_id="m-stash",
+        conversation_id="c1",
+        reason=TurnInterruptReason.USER_STOP,
+        content="重置前已流式正文",
+        load_stream_state=True,
+    )
+    assert ok is True
+    assert upserts
+    assert "重置前已流式正文" in (upserts[0].get("content") or "")
+
+
+@pytest.mark.asyncio
 async def test_close_turn_interrupted_ensures_turn_end_when_merge_persist_drops_it(
     monkeypatch,
 ):

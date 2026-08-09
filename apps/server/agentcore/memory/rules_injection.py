@@ -45,9 +45,65 @@ _USER_RULE_PROJECT_LABEL = "（以下为「当前项目」专属规则，仅在�
 _RULE_BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
 
 
+_REMEMBER_ACTIONS = frozenset({"add", "replace", "forget", "list"})
+
+
 def _normalize_rule(text: str) -> str:
     """Whitespace-collapsed, casefolded key for user-rule dedup."""
     return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def _collapse_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _rebuild_rule_markdown(lines: Sequence[str]) -> str:
+    body = "\n".join(lines).rstrip()
+    return f"{body}\n" if body else ""
+
+
+def _line_rule_text(line: str) -> str:
+    match = _RULE_BULLET_RE.match(line)
+    return match.group(1) if match else line
+
+
+def _remove_matching_bullets(current_markdown: str, key: str) -> tuple[str, list[str]]:
+    """Drop every line whose normalized rule text equals ``key``.
+
+    Returns ``(md, removed_texts)``.
+    """
+    if not key:
+        return current_markdown, []
+    kept: list[str] = []
+    removed: list[str] = []
+    for line in current_markdown.splitlines():
+        existing = _line_rule_text(line)
+        if _normalize_rule(existing) == key:
+            text = _collapse_ws(existing)
+            if text:
+                removed.append(text)
+            continue
+        kept.append(line)
+    if not removed:
+        return current_markdown, []
+    return _rebuild_rule_markdown(kept), removed
+
+
+@dataclass(frozen=True)
+class UserRuleMutationResult:
+    """Shared mutate outcome for ``remember`` tool + account ``/rules/remember``."""
+
+    action: str
+    changed: bool
+    message: str
+    markdown: str = ""
+    removed: tuple[str, ...] = ()
+    content: str | None = None
+
+    @property
+    def rules_markdown(self) -> str | None:
+        """List action exposes the current rules body; others leave this unset."""
+        return self.markdown if self.action == "list" else None
 
 
 def append_user_rule_bullet(current_markdown: str, content: str) -> tuple[str, bool]:
@@ -56,17 +112,139 @@ def append_user_rule_bullet(current_markdown: str, content: str) -> tuple[str, b
     User rules are a plain bullet list with NO AI-maintained chrome (they are user-owned, §5.2).
     A normalized duplicate is a no-op — re-remembering the same rule does not grow the doc.
     """
-    text = re.sub(r"\s+", " ", content).strip()
+    text = _collapse_ws(content)
     if not text:
         return current_markdown, False
     key = _normalize_rule(text)
     for line in current_markdown.splitlines():
-        match = _RULE_BULLET_RE.match(line)
-        existing = match.group(1) if match else line
-        if _normalize_rule(existing) == key:
+        if _normalize_rule(_line_rule_text(line)) == key:
             return current_markdown, False
     body = current_markdown.rstrip()
     return (f"{body}\n" if body else "") + f"- {text}\n", True
+
+
+def mutate_user_rule_markdown(
+    current_markdown: str,
+    *,
+    action: str = "add",
+    content: str | None = None,
+    replaces: str | None = None,
+) -> UserRuleMutationResult:
+    """Pure user-rule mutate: ``add`` / ``replace`` / ``forget`` / ``list``.
+
+    Matching uses :func:`_normalize_rule` (whitespace fold + casefold). ``forget`` / ``replace``
+    remove *all* bullets sharing the matched key. ``replace`` with a missing old bullet appends
+    only and reports that honestly (never claims「已替换」).
+    """
+    action_key = (action or "add").strip().lower() or "add"
+    if action_key not in _REMEMBER_ACTIONS:
+        return UserRuleMutationResult(
+            action=action_key,
+            changed=False,
+            message=f"不支持的 action：{action_key}。",
+            markdown=current_markdown,
+        )
+
+    if action_key == "list":
+        body = current_markdown if current_markdown.strip() else ""
+        message = (
+            f"当前用户规则：\n{body.rstrip()}"
+            if body.strip()
+            else "当前暂无用户规则。"
+        )
+        return UserRuleMutationResult(
+            action="list",
+            changed=False,
+            message=message,
+            markdown=body,
+        )
+
+    text = _collapse_ws(content or "")
+    if not text:
+        return UserRuleMutationResult(
+            action=action_key,
+            changed=False,
+            message="缺少 content。",
+            markdown=current_markdown,
+        )
+
+    if action_key == "add":
+        new_md, changed = append_user_rule_bullet(current_markdown, text)
+        if not changed:
+            return UserRuleMutationResult(
+                action="add",
+                changed=False,
+                message="这条规则已经记过了（未重复写入）。",
+                markdown=current_markdown,
+                content=text,
+            )
+        return UserRuleMutationResult(
+            action="add",
+            changed=True,
+            message=f"已追加规则：{text}",
+            markdown=new_md,
+            content=text,
+        )
+
+    if action_key == "forget":
+        new_md, removed = _remove_matching_bullets(current_markdown, _normalize_rule(text))
+        if not removed:
+            return UserRuleMutationResult(
+                action="forget",
+                changed=False,
+                message=f"未找到要忘掉的规则：{text}",
+                markdown=current_markdown,
+                content=text,
+            )
+        removed_label = "；".join(removed)
+        return UserRuleMutationResult(
+            action="forget",
+            changed=True,
+            message=f"已删除规则：{removed_label}",
+            markdown=new_md,
+            removed=tuple(removed),
+            content=text,
+        )
+
+    # replace
+    old_text = _collapse_ws(replaces or "")
+    if not old_text:
+        return UserRuleMutationResult(
+            action="replace",
+            changed=False,
+            message="replace 需要 replaces（要替换掉的旧规则）。",
+            markdown=current_markdown,
+            content=text,
+        )
+    after_remove, removed = _remove_matching_bullets(
+        current_markdown, _normalize_rule(old_text)
+    )
+    new_md, appended = append_user_rule_bullet(after_remove, text)
+    if removed:
+        removed_label = "；".join(removed)
+        return UserRuleMutationResult(
+            action="replace",
+            changed=True,
+            message=f"已替换规则：去掉「{removed_label}」，写入「{text}」",
+            markdown=new_md,
+            removed=tuple(removed),
+            content=text,
+        )
+    if appended:
+        return UserRuleMutationResult(
+            action="replace",
+            changed=True,
+            message=f"未找到旧条「{old_text}」，已追加新规则：{text}",
+            markdown=new_md,
+            content=text,
+        )
+    return UserRuleMutationResult(
+        action="replace",
+        changed=False,
+        message=f"未找到旧条「{old_text}」，且新规则已存在（未重复写入）。",
+        markdown=current_markdown,
+        content=text,
+    )
 
 
 async def append_user_rule(
@@ -78,13 +256,31 @@ async def append_user_rule(
     下指令 → 落用户规则」half of the ``remember`` split (§5.7 用户规则入口①) — a ``rule`` doc
     with ``ai_maintained=false``, so the offline consolidation never rewrites it.
     """
+    result = await mutate_user_rule(
+        repo, user_id, folder_id=folder_id, action="add", content=content
+    )
+    return result.changed
+
+
+async def mutate_user_rule(
+    repo: DocumentRepository,
+    user_id: str,
+    *,
+    folder_id: str | None,
+    action: str = "add",
+    content: str | None = None,
+    replaces: str | None = None,
+) -> UserRuleMutationResult:
+    """Persist a user-rule mutate for the scope's canonical rule doc (tool + account shared)."""
     doc = await repo.get_user_rules_doc(user_id, folder_id)
     current = doc.content if doc is not None else ""
-    new_md, changed = append_user_rule_bullet(current, content)
-    if not changed:
-        return False
-    await repo.upsert_user_rules_doc(user_id, folder_id, new_md)
-    return True
+    result = mutate_user_rule_markdown(
+        current, action=action, content=content, replaces=replaces
+    )
+    if result.action == "list" or not result.changed:
+        return result
+    await repo.upsert_user_rules_doc(user_id, folder_id, result.markdown)
+    return result
 
 
 @dataclass(frozen=True)

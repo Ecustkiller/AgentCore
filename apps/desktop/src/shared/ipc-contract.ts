@@ -136,7 +136,8 @@ export type FsWriteResult =
  * ``git_repo_status`` / ``git_scm`` 同样不是 backend 方法——桌面 U1–U3 用户 SCM
  *（只读摘要 + stage/commit/push/pull）；渲染层经 ``workspaceOp`` 直调，服务端/Agent 不发此 op。
  * ``git_run`` 同样不是 backend 方法——Agent 结构化 ``git`` 在 LocalWorkspace 上经通道
- * 在本机根执行 allowlisted argv；与 UI SCM 分立。
+ * 本机执行 allowlisted argv（``cwd`` = 项目 subpath 时落子目录，与 file_* 同基准；
+ * 无 subpath 则绑定根即项目）；与 UI SCM 分立。
  */
 export type WorkspaceOpName =
   | "read"

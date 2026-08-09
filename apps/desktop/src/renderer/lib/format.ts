@@ -56,6 +56,22 @@ export function estimateTokens(text: string): number {
   return Math.ceil(cjk + other / 4);
 }
 
+/** Sum chunk string lengths without joining (流式 face token 粗估输入). */
+export function sumChunkChars(chunks: readonly string[]): number {
+  let n = 0;
+  for (const c of chunks) n += c.length;
+  return n;
+}
+
+/**
+ * Coarse token estimate from total character count — avoids scanning full text
+ * on every stream delta (CJK/latin mix ≈ 0.5 token/char mid).
+ */
+export function estimateTokensFromCharCount(chars: number): number {
+  if (chars <= 0) return 0;
+  return Math.ceil(chars / 2);
+}
+
 /** 紧凑数字：1234 → "1.2k"、2_000_000 → "2.0M"（用于 token 等大数展示）。 */
 export function formatCompact(n: number): string {
   if (n < 1000) return String(n);
@@ -69,6 +85,26 @@ export function tailText(text: string, max = 80): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= max) return flat;
   return `…${flat.slice(flat.length - max)}`;
+}
+
+/**
+ * Tail preview from chunk list without `join("")` of the full stream.
+ * Accumulates from the end until enough raw chars for {@link tailText}.
+ */
+export function chunksTailText(chunks: readonly string[], max = 80): string {
+  if (chunks.length === 0) return "";
+  // Whitespace collapse can shrink; keep slack so the flattened tail is full.
+  const need = max + 48;
+  let len = 0;
+  let start = chunks.length;
+  while (start > 0 && len < need) {
+    start -= 1;
+    len += chunks[start]?.length ?? 0;
+  }
+  let raw =
+    start === 0 && len <= need ? chunks.join("") : chunks.slice(start).join("");
+  if (raw.length > need) raw = raw.slice(raw.length - need);
+  return tailText(raw, max);
 }
 
 /** 取文本开头若干字符并折行成单段预览（用于 CEO 汇总节点：成稿答案的开头通常即

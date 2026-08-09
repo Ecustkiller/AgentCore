@@ -1,4 +1,6 @@
+import type { Execution } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
+import { graphViewExecutionEpoch } from "../graphDocument";
 import { graphStructureKey } from "../useGraphLayout";
 
 describe("graphStructureKey", () => {
@@ -45,5 +47,41 @@ describe("graphStructureKey", () => {
       { id: "w2", dependsOn: ["w1b"] },
     ]);
     expect(before).not.toBe(after);
+  });
+});
+
+describe("graphViewExecutionEpoch", () => {
+  it("ignores streaming output length / process chrome", () => {
+    const base = {
+      runs: [{ id: "w1", dependsOn: [], output: "short" }],
+      status: "running",
+    } as unknown as Execution;
+    const long = {
+      runs: [{ id: "w1", dependsOn: [], output: "a".repeat(10_000) }],
+      status: "running",
+    } as unknown as Execution;
+    expect(graphViewExecutionEpoch(base)).toBe(graphViewExecutionEpoch(long));
+    expect(graphViewExecutionEpoch(base)).toContain("status=running");
+  });
+
+  it("changes when structure or lifecycle status changes", () => {
+    const before = {
+      runs: [{ id: "w1", dependsOn: [] }],
+      status: "running",
+    } as unknown as Execution;
+    const afterStruct = {
+      runs: [
+        { id: "w1", dependsOn: [] },
+        { id: "w2", dependsOn: [] },
+      ],
+      status: "running",
+    } as unknown as Execution;
+    const afterStatus = {
+      runs: [{ id: "w1", dependsOn: [] }],
+      status: "completed",
+    } as unknown as Execution;
+    const e0 = graphViewExecutionEpoch(before);
+    expect(e0).not.toBe(graphViewExecutionEpoch(afterStruct));
+    expect(e0).not.toBe(graphViewExecutionEpoch(afterStatus));
   });
 });

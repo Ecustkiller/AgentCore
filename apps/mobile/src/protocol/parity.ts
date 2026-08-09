@@ -199,6 +199,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface:
       "ChatPage · turn_queued 立即主时间线用户气泡 + queuedTurns 轻态（多项 FIFO）",
   },
+  turn_queue_started: {
+    verdict: "ported",
+    surface:
+      "ChatPage · 按 queue_id 清 queuedTurns / 气泡轻态（出队开跑；fold no-op）",
+  },
   turn_queue_cancelled: {
     verdict: "ported",
     surface:

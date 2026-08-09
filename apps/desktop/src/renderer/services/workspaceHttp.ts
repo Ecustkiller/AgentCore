@@ -103,33 +103,111 @@ export interface WorkspaceFile {
   isDir: boolean;
 }
 
-/** Decode cap for in-panel preview; larger files are shown truncated. */
-const PREVIEW_MAX_BYTES = 512 * 1024;
-/** Above this, skip preview entirely (download-only) to avoid a huge transfer. */
+/**
+ * In-panel text display truncate — aligned with desktop IPC `TEXT_PREVIEW_CAP`
+ * (256 KiB). Cloud still fetches up to {@link PREVIEW_HARD_BYTES} then slices.
+ */
+const PREVIEW_MAX_BYTES = 256 * 1024;
+/**
+ * Cloud-only network hard cap for non-image preview (no Range; whole-body fetch).
+ * Local IPC has no peer — intentional asymmetry.
+ */
 const PREVIEW_HARD_BYTES = 5 * 1024 * 1024;
+/** Inline image preview cap — aligned with desktop IPC `IMAGE_PREVIEW_CAP`. */
+const IMAGE_PREVIEW_CAP = 10 * 1024 * 1024;
+
+/** Ext → MIME for when the server falls back to `application/octet-stream`. */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".avif": "image/avif",
+};
 
 /**
- * The outcome of a preview read: decodable text (possibly truncated), or a
- * reason it can't be shown inline (binary / too big → download instead).
+ * The outcome of a preview read: decodable text (possibly truncated), an inline
+ * image, or a reason it can't be shown inline (binary / too big → download).
  */
 export type FilePreview =
   | { kind: "text"; text: string; truncated: boolean }
-  | { kind: "binary" }
+  | { kind: "image"; dataUrl: string; mime: string; size: number }
+  | { kind: "binary"; mime?: string; size?: number; reason?: string }
   | { kind: "too-large" };
+
+function extOfPath(path: string | undefined): string {
+  if (!path) return "";
+  const base = path.replace(/\\/g, "/").split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  return dot >= 0 ? base.slice(dot).toLowerCase() : "";
+}
+
+/** Prefer `Content-Type: image/*`; else guess from the workspace-relative path. */
+function resolveImageMime(
+  contentType: string | null,
+  path?: string,
+): string | null {
+  const ct = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (ct.startsWith("image/")) return ct;
+  return IMAGE_MIME_BY_EXT[extOfPath(path)] ?? null;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 /**
  * Decode a raw file response into an in-panel preview result.
  *
- * The file API has no range support, so the body is fetched whole; the
- * `content-length` header short-circuits oversized files before reading. Binary
- * content is detected by a null byte or a high UTF-8 replacement-char ratio and
- * surfaced as a download-only result rather than rendering garbage. Shared by both
- * the conversation-scoped and the ws-id-scoped preview reads.
+ * Images use `Content-Type` / path extension → `kind:"image"` (data URL), matching
+ * local IPC + mobile. Other bodies are UTF-8–probed; NUL / high replacement ratio
+ * → binary. Shared by conversation-scoped and ws-id-scoped preview reads.
  */
 export async function decodePreviewResponse(
   res: Response,
+  opts?: { path?: string },
 ): Promise<FilePreview> {
   const declared = Number(res.headers.get("content-length") ?? "0");
+  const imageMime = resolveImageMime(
+    res.headers.get("content-type"),
+    opts?.path,
+  );
+
+  if (imageMime) {
+    if (declared > IMAGE_PREVIEW_CAP) {
+      return {
+        kind: "binary",
+        mime: imageMime,
+        size: declared,
+        reason: "图片过大，暂不预览",
+      };
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > IMAGE_PREVIEW_CAP) {
+      return {
+        kind: "binary",
+        mime: imageMime,
+        size: bytes.length,
+        reason: "图片过大，暂不预览",
+      };
+    }
+    return {
+      kind: "image",
+      dataUrl: `data:${imageMime};base64,${bytesToBase64(bytes)}`,
+      mime: imageMime,
+      size: bytes.length,
+    };
+  }
+
   if (declared > PREVIEW_HARD_BYTES) return { kind: "too-large" };
 
   const bytes = new Uint8Array(await res.arrayBuffer());

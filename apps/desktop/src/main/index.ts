@@ -165,7 +165,7 @@ protocol.registerSchemesAsPrivileged([
     },
   },
   {
-    // Local Browser 工作区 HTML（workspace://<conversationId>/<path>；
+    // Local Browser 工作区 HTML（workspace://{folder|conv}.{id}/{path}；
     // partition 按 conversationId 切开，处理器 per-partition 注册）。
     // standard=true 才有层级 URL 语义 → 相对路径引用能按文档 URL 正确解析；
     // secure=true 给隔离页安全上下文；stream 支持大文件流式代理。

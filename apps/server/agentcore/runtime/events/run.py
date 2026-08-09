@@ -244,23 +244,30 @@ def escalation_raised(
     blocking: bool,
     kind: str = "normal",
     escalation_id: str | None = None,
+    source: str | None = None,
 ) -> SSEEvent:
     """非阻塞 raised 升级（DURABLE, 统一时间线二期 D6）。
 
     ``escalation_id`` 键给 raised 轻行的时间线标记（attach replay 幂等去重）；
     生产调用点缺省即自动生成，conformance 向量传固定值保 golden 稳定。
+
+    ``source`` 仅早停 / 打转收口路径写入（如 ``validation_thrash`` /
+    ``ceiling_backstop``）；真·边干边上报省略，保持 wire 形状不变。
     """
+    payload: dict[str, Any] = {
+        "escalation_id": escalation_id or new_id(),
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "question": question,
+        "assumption": assumption,
+        "blocking": blocking,
+        "kind": kind if kind in ("normal", "scope", "dep") else "normal",
+    }
+    if source:
+        payload["source"] = source
     return SSEEvent(
         type=EventType.RUN_ESCALATION,
-        payload={
-            "escalation_id": escalation_id or new_id(),
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "question": question,
-            "assumption": assumption,
-            "blocking": blocking,
-            "kind": kind if kind in ("normal", "scope", "dep") else "normal",
-        },
+        payload=payload,
     )
 
 
@@ -637,6 +644,23 @@ def turn_queued(
     if degraded_from is not None:
         payload["degraded_from"] = degraded_from
     return SSEEvent(type=EventType.TURN_QUEUED, payload=payload)
+
+
+def turn_queue_started(
+    *,
+    queue_id: str,
+    conversation_id: str,
+    remaining_depth: int,
+) -> SSEEvent:
+    """同对话 FIFO 出队开跑 ack——新回合 sink 首帧（先于 ``message_start``）。"""
+    return SSEEvent(
+        type=EventType.TURN_QUEUE_STARTED,
+        payload={
+            "queue_id": queue_id,
+            "conversation_id": conversation_id,
+            "remaining_depth": remaining_depth,
+        },
+    )
 
 
 def turn_queue_cancelled(*, queue_id: str, conversation_id: str) -> SSEEvent:

@@ -28,11 +28,13 @@ function renderCard(ui: ReactElement): RenderResult {
   );
 }
 
-const { showFile, showChanges, openInAppPreview } = vi.hoisted(() => ({
-  showFile: vi.fn(),
-  showChanges: vi.fn(),
-  openInAppPreview: vi.fn(),
-}));
+const { showFile, showChanges, openInAppPreview, openWorkspaceHtmlInBrowser } =
+  vi.hoisted(() => ({
+    showFile: vi.fn(),
+    showChanges: vi.fn(),
+    openInAppPreview: vi.fn(),
+    openWorkspaceHtmlInBrowser: vi.fn(),
+  }));
 
 vi.mock("@/stores/disclosure", () => ({
   usePersistentDisclosure: (_key: string | null, initial: boolean) =>
@@ -53,17 +55,35 @@ vi.mock("@/hooks/useFileAudit", () => ({
 vi.mock("@/hooks/useConversationFileSource", () => ({
   useConversationFileSource: vi.fn(() => null),
 }));
+vi.mock("@/hooks/useWorkspaces", () => ({
+  useConversationWorkspace: vi.fn(() => null),
+}));
+vi.mock("@/lib/openWorkspaceHtmlInBrowser", () => ({
+  openWorkspaceHtmlInBrowser,
+}));
 
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
+import { useConversationWorkspace } from "@/hooks/useWorkspaces";
+import type { WorkspaceInfo } from "@/services/workspaces";
 
 const sourceWithPreview = {
   openInAppPreview,
 } as unknown as FileSource;
 
+const sessionWs: WorkspaceInfo = {
+  wsId: "folder:proj",
+  name: "项目",
+  location: "cloud",
+  rootId: null,
+  subpath: "",
+  hasFiles: true,
+};
+
 describe("FileArtifactsCard acceptance labels", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useConversationFileSource).mockReturnValue(null);
+    vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
   it("shows 已验收/未通过 and never 写入/编辑 on acceptance rows", () => {
@@ -115,6 +135,7 @@ describe("FileArtifactsCard stage labels", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useConversationFileSource).mockReturnValue(null);
+    vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
   it("AgentCore/文档/research/debate 路径显示约定文档标签，普通路径零噪音", () => {
@@ -153,10 +174,12 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useConversationFileSource).mockReturnValue(null);
+    vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
   it("会话具备完整预览能力：点 HTML 行直达完整预览 tab，非 HTML 仍走 showFile", () => {
     vi.mocked(useConversationFileSource).mockReturnValue(sourceWithPreview);
+    vi.mocked(useConversationWorkspace).mockReturnValue(sessionWs);
     renderCard(
       <FileArtifactsCard
         conversationId="c1"
@@ -168,12 +191,41 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
     );
 
     fireEvent.click(screen.getByTitle("打开完整预览 site/index.html"));
-    expect(openInAppPreview).toHaveBeenCalledWith("site/index.html");
+    expect(openWorkspaceHtmlInBrowser).toHaveBeenCalledWith(
+      "c1",
+      "site/index.html",
+      "folder:proj",
+    );
     expect(showFile).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTitle("在工作区预览 data.csv"));
     expect(showFile).toHaveBeenCalledWith("data.csv", "data.csv");
-    expect(openInAppPreview).toHaveBeenCalledOnce();
+    expect(openWorkspaceHtmlInBrowser).toHaveBeenCalledOnce();
+  });
+
+  it("artifact.workspaceId 优先于会话工作区 desk", () => {
+    vi.mocked(useConversationFileSource).mockReturnValue(sourceWithPreview);
+    vi.mocked(useConversationWorkspace).mockReturnValue(sessionWs);
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[
+          {
+            path: "site/index.html",
+            name: "index.html",
+            acceptance: "accepted",
+            workspaceId: "folder:other",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("打开完整预览 site/index.html"));
+    expect(openWorkspaceHtmlInBrowser).toHaveBeenCalledWith(
+      "c1",
+      "site/index.html",
+      "folder:other",
+    );
   });
 
   it("无能力（本地会话 / web）：HTML 行回落 showFile 进文件视图", () => {
@@ -188,7 +240,7 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
 
     fireEvent.click(screen.getByTitle("在工作区预览 site/index.html"));
     expect(showFile).toHaveBeenCalledWith("site/index.html", "index.html");
-    expect(openInAppPreview).not.toHaveBeenCalled();
+    expect(openWorkspaceHtmlInBrowser).not.toHaveBeenCalled();
   });
 });
 
@@ -196,6 +248,7 @@ describe("FileArtifactsCard — A1 查看改动", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useConversationFileSource).mockReturnValue(null);
+    vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
   it("有 change 预览时显示「查看改动」，点击聚焦右坞改动 tab", () => {

@@ -261,6 +261,13 @@ export interface RunEscalation {
    */
   browserLogin?: boolean;
   /**
+   * 非阻塞 raised 的来源标记（wire `run_escalation.source`）。
+   * `validation_thrash` / `ceiling_backstop` → 卡住早停卡；缺省 / 其它 → 真·边干边上报。
+   * Desktop-local — 不进 conformance ProjectedTurn（与 browserLogin 同类；conformanceFold 勿带出）。
+   * 旧流缺字段时按普通边干边上报。
+   */
+  source?: string;
+  /**
    * 写权冲突结构化裁决（wire `ownership_paths`）。有值时呈现「移交写权 / 保持原主」。
    * Desktop-local — 不进 conformance ProjectedTurn。
    */

@@ -3,6 +3,8 @@
  * 协调 + steer → `user_interjection` 短确认；经典 + steer → `turn_steer_accepted` toast；
  * queue（或 steer 降级）→ 先 `turn_queued`（立即主时间线用户气泡 + 排队轻态），
  * 缓冲后续帧直至主路空闲，再续流 turn2——对齐桌面 midFlight / 发送即有流。
+ * 出队开跑首帧为 EPHEMERAL `turn_queue_started`（先于 `message_start`）；
+ * live UI 据此清 queuedTurns 轻态（保留用户气泡），否决靠 `message_start` 猜出队。
  * ``delivery`` 必填（缺 → 422）。
  */
 import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
@@ -126,9 +128,7 @@ export async function sendMidFlightMessage(
   };
 
   const dispatchTurn2 = (event: SSEEvent): void => {
-    if (event.type === "message_start" && result.kind === "queued") {
-      beginTurn2Once();
-    }
+    // turn_queue_started（或任意后续帧）均可开 turn2；轻态清理由 ChatPage 消费 started。
     if (!turn2Started && result.kind === "queued") {
       beginTurn2Once();
     }

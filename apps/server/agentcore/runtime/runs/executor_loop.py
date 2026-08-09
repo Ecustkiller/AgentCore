@@ -306,11 +306,9 @@ async def run_contract_loop(
             touched_now, product_landing_artifacts
         )
         product_files_written = len(product_touched_now)
-        landing_fail_kind = (
-            landing_write_failure_kind(messages)
-            if product_files_written <= 0
-            else None
-        )
+        # Always classify failed landing attempts so code_audit can demote
+        # absence hard-fails when the channel died mid-landing (not only zero-disk).
+        landing_fail_kind = landing_write_failure_kind(messages)
         # 自由 delegate 落盘 research/ 时与 playbook 盖戳同口径进入 A→B。
         two_phase = _two_phase_citation(
             deliverable, landed_paths=touched_now
@@ -774,9 +772,7 @@ async def run_contract_loop(
                 else None
             ),
             enforce_citations=True,
-            landing_failure_kind=(
-                landing_write_failure_kind(messages) if _product_safe <= 0 else None
-            ),
+            landing_failure_kind=landing_write_failure_kind(messages),
         )
         cite_fail, other_fail = partition_citation_failures(probe.failures)
         if other_fail:

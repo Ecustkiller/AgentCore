@@ -10,6 +10,7 @@ import {
   Reasoning,
   type TeamProjection,
   graphAppendAnchorLabel,
+  teamHasStartedRuns,
 } from "@/components/ProcessTimeline";
 import { SourceCards, buildCitationDisplayMap } from "@/components/SourceCards";
 import { TeamView } from "@/components/TeamView";
@@ -50,7 +51,7 @@ import type {
 } from "@agentcore/contract-types";
 import { useMemo, useRef, useState } from "react";
 
-export { graphAppendAnchorLabel, type TeamProjection };
+export { graphAppendAnchorLabel, teamHasStartedRuns, type TeamProjection };
 export {
   AssistantMessageFooter,
   DeliveryShortfallHint,
@@ -152,6 +153,9 @@ export function AssistantContent({
   clockIso?: string | null;
 }) {
   const hasTeam = !!team && team.runs.length > 0;
+  // 开工挂起零开跑不出图：全 pending/skipped 时仍保留 team 投影（交付/升级槽），但不挂 TeamView。
+  const showTeamGraph =
+    !!team && team.runs.length > 0 && teamHasStartedRuns(team.runs);
   const turnLedger = evidenceLedger;
 
   // Display renumbering: append-only across stream frames so assigned numbers never jump.
@@ -213,7 +217,7 @@ export function AssistantContent({
         />
       ) : (
         <>
-          {hasTeam ? <TeamView {...team} /> : null}
+          {showTeamGraph ? <TeamView {...team} /> : null}
           {reasoning ? (
             <Reasoning text={reasoning} isStreaming={isStreaming} />
           ) : null}

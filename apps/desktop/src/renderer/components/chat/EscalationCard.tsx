@@ -10,6 +10,7 @@ import {
 import { submitInteractionFeedback } from "@/services/interactionSubmit";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
   ChevronDown,
@@ -457,10 +458,16 @@ function DormantEscalation({
   );
 }
 
-/** 非阻塞上报「边干边提醒」(run_escalation, status=raised): the worker surfaced a
- * decision/blocker but did NOT suspend — it proceeded on its assumption. A passive,
- * non-interactive notice so 升级实时可见 holds even when the 协作图 is collapsed.
- * 默认收起为一行（对齐 TeamPreview / ResolvedDecisionRecord），点开再看全文 + 假设。 */
+/** 卡住早停 source（validation_thrash / ceiling_backstop）——非「边干边上报」。 */
+function isEarlyStopSource(source: string | undefined): boolean {
+  return source === "validation_thrash" || source === "ceiling_backstop";
+}
+
+/** 非阻塞 raised（run_escalation）:
+ * - 真·边干边上报：被动 notice，标题「边干边上报（无需你拍板）」；有 assumption 才渲染「暂定假设」。
+ * - 卡住早停（source=validation_thrash|ceiling_backstop）：标题「卡住早停（交付可能不完整）」；
+ *   正文 question；不写边干边上报 / 已按假设继续 / 无需你拍板。
+ * 默认收起为一行（对齐 TeamPreview / ResolvedDecisionRecord），点开再看全文。 */
 function RaisedEscalation({
   escalation,
   role,
@@ -469,20 +476,25 @@ function RaisedEscalation({
   role: string;
 }) {
   const kind = escalationKindTag(escalation);
-  const summary = `${role} · 边干边上报（无需你拍板）${kind ? ` · ${kind}` : ""}`;
+  const earlyStop = isEarlyStopSource(escalation.source);
+  const summary = earlyStop
+    ? `${role} · 卡住早停（交付可能不完整）${kind ? ` · ${kind}` : ""}`
+    : `${role} · 边干边上报（无需你拍板）${kind ? ` · ${kind}` : ""}`;
   return (
     <ResolvedDecisionRecord
       layout="neutralCollapsible"
       disclosureKey={escalationDisclosureKey(escalation, role, "raised")}
-      icon={Megaphone}
+      icon={earlyStop ? AlertTriangle : Megaphone}
       summary={summary}
     >
       <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
         {escalation.question}
       </p>
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        已按假设继续：{escalation.assumption}
-      </p>
+      {!earlyStop && escalation.assumption ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          暂定假设：{escalation.assumption}
+        </p>
+      ) : null}
     </ResolvedDecisionRecord>
   );
 }

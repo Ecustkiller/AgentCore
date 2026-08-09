@@ -167,7 +167,8 @@ class CoordinationSnapshot:
     turn_attached: bool = True
     user_stopped: bool = False
     saw_first_completion: bool = False
-    # C3: ownership ledger snapshot — v2 nested ``{_v, owners, written, …}`` only.
+    # C3: ownership ledger snapshot — v3 nested ``{_v, owners, written, …}``
+    # (desk×path keys); v≤2 lazy-migrated on restore.
     file_ownership: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -221,7 +222,7 @@ class CoordinationSnapshot:
         raw_own = data.get("file_ownership")
         file_ownership: dict[str, Any] = {}
         if isinstance(raw_own, dict) and (
-            raw_own.get("_v") == 2 or isinstance(raw_own.get("owners"), dict)
+            raw_own.get("_v") in (2, 3) or isinstance(raw_own.get("owners"), dict)
         ):
             file_ownership = dict(raw_own)
         return cls(
@@ -300,6 +301,9 @@ class CoordinationSession:
     decision_budget_remaining: int = DEFAULT_DECISION_BUDGET
     draft: str = ""
     conversation_id: str = ""
+    # C3: session birth desk (conversation folder_id). Ownership keys use
+    # ``target_folder_id or birth_desk_id``; process-local (re-armed from tool).
+    birth_desk_id: str | None = None
     completed_run_ids: set[str] = field(default_factory=set)
     # Terminal FAILED run_ids (subset of completed) — pipeline health / idle brief.
     failed_run_ids: set[str] = field(default_factory=set)
@@ -587,6 +591,7 @@ class CoordinationSession:
                 self.ensure_file_ownership(),
                 rid,
                 completed_run_ids=self.completed_run_ids,
+                birth_desk_id=self.birth_desk_id,
             )
         except Exception:  # noqa: BLE001 — never break completion
             return
@@ -1404,11 +1409,26 @@ class CoordinationSession:
             session._saw_first_completion = True
         raw_own = snap.file_ownership
         if raw_own and (
-            raw_own.get("_v") == 2 or isinstance(raw_own.get("owners"), dict)
+            raw_own.get("_v") in (2, 3) or isinstance(raw_own.get("owners"), dict)
         ):
             from agentcore.workspace.write_claims import WriteCoordinator
 
-            session.file_ownership = WriteCoordinator.from_dict(raw_own)
+            run_desks: dict[str, str | None] = {}
+            birth: str | None = None
+            live = session.live_plan
+            if live is not None:
+                for n in getattr(live, "nodes", ()) or ():
+                    rid = (getattr(n, "run_id", None) or "").strip()
+                    if rid:
+                        tf = getattr(n, "target_folder_id", None)
+                        run_desks[rid] = (
+                            str(tf).strip() if tf is not None and str(tf).strip() else None
+                        )
+            session.file_ownership = WriteCoordinator.from_dict(
+                raw_own,
+                birth_desk_id=birth,
+                run_target_folder_ids=run_desks or None,
+            )
         return session
 
     def close(self) -> None:

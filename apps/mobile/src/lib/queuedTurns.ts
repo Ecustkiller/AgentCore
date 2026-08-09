@@ -1,6 +1,7 @@
 /**
  * 同对话 FIFO 排队项（live · turn_queued；进程内，重启丢）。
  * 对齐桌面 queuedTurns store 行为；手机端自建，不 import 桌面。
+ * 出队开跑：SSE ``turn_queue_started`` 清对应项轻态（保留用户气泡）。
  */
 import { useSyncExternalStore } from "react";
 

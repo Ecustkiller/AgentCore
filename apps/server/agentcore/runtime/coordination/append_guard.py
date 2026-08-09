@@ -29,8 +29,9 @@ sibling-scan host∪new as one batch.
 ``replan.adds`` on an active coordination live plan reuses the same admit
 (``admit_added_nodes``) + ``declare_plan_artifacts`` path as append merge.
 
-Ownership keys are **concrete file** ``artifacts`` only — directory prefixes /
-``artifact_dir`` / globs are acceptance coverage, never exclusive claims.
+Ownership keys are **desk × concrete file** ``artifacts`` only — directory
+prefixes / ``artifact_dir`` / globs are acceptance coverage, never exclusive
+claims. Same ``rel_path`` on different desks does not collide.
 """
 
 from __future__ import annotations
@@ -43,7 +44,10 @@ from agentcore.runtime.coordination.isomorphic import _node_role, _node_task
 from agentcore.workspace.write_claims import (
     WriteCoordinator,
     file_ownership_v2_enabled,
+    make_ownership_key,
     normalize_ownership_path,
+    ownership_display_path,
+    resolve_ownership_desk,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +70,8 @@ class AppendOverlap:
     live_role: str
     live_run_id: str
     reason: str  # "role" | "deliverable" | "role+deliverable" | "sibling_artifact"
+    # Bare rel_path for user-facing reject text (sibling / deliverable); never desk key.
+    path: str = ""
 
 
 def has_incomplete_nodes(
@@ -169,9 +175,10 @@ def _paths_in_text(text: str) -> set[str]:
 
 
 def node_artifact_paths(node: Any) -> set[str]:
-    """Concrete ``deliverable.artifacts`` file paths (C3 declare / ownership keys).
+    """Concrete ``deliverable.artifacts`` bare file paths (display / acceptance).
 
     Directory prefixes, stage dirs, and globs are acceptance-only — excluded here.
+    Ledger keys use :func:`node_artifact_keys` (desk × path).
     """
     from agentcore.runtime.runs.artifact_dir import is_file_ownership_path
 
@@ -185,6 +192,28 @@ def node_artifact_paths(node: Any) -> set[str]:
             if key:
                 out.add(key)
     return out
+
+
+def node_ownership_desk(
+    node: Any,
+    *,
+    birth_desk_id: str | None = None,
+) -> str:
+    """Effective desk for a plan node: ``target_folder_id or birth desk``."""
+    return resolve_ownership_desk(
+        target_folder_id=getattr(node, "target_folder_id", None),
+        birth_desk_id=birth_desk_id,
+    )
+
+
+def node_artifact_keys(
+    node: Any,
+    *,
+    birth_desk_id: str | None = None,
+) -> set[str]:
+    """Composite ownership keys (desk × path) for declare / sibling / handoff."""
+    desk = node_ownership_desk(node, birth_desk_id=birth_desk_id)
+    return {make_ownership_key(desk, p) for p in node_artifact_paths(node) if p}
 
 
 def node_file_targets(node: Any) -> set[str]:
@@ -205,20 +234,25 @@ def _ancestors_for_plan(plan: RunPlan) -> dict[str, frozenset[str]]:
     return _ancestors_by_id(plan)
 
 
-def find_sibling_artifact_crosses(plan: RunPlan) -> list[AppendOverlap]:
-    """Same-batch nodes declaring the same artifact without ancestor handoff."""
+def find_sibling_artifact_crosses(
+    plan: RunPlan,
+    *,
+    birth_desk_id: str | None = None,
+) -> list[AppendOverlap]:
+    """Same-batch nodes declaring the same desk×artifact without ancestor handoff."""
     if not plan.nodes:
         return []
     ancestors = _ancestors_for_plan(plan)
-    by_path: dict[str, list[Any]] = {}
+    by_key: dict[str, list[Any]] = {}
     for n in plan.nodes:
-        for p in node_artifact_paths(n):
-            by_path.setdefault(p, []).append(n)
+        for key in node_artifact_keys(n, birth_desk_id=birth_desk_id):
+            by_key.setdefault(key, []).append(n)
     hits: list[AppendOverlap] = []
     seen_pairs: set[tuple[str, str]] = set()
-    for _path, holders in by_path.items():
+    for key, holders in by_key.items():
         if len(holders) < 2:
             continue
+        bare = ownership_display_path(key)
         for i, a in enumerate(holders):
             for b in holders[i + 1 :]:
                 a_anc = ancestors.get(a.run_id, frozenset())
@@ -236,6 +270,7 @@ def find_sibling_artifact_crosses(plan: RunPlan) -> list[AppendOverlap]:
                         live_role=_node_role(a) or a.run_id,
                         live_run_id=a.run_id,
                         reason="sibling_artifact",
+                        path=bare,
                     )
                 )
     return hits
@@ -247,6 +282,7 @@ def find_append_overlaps(
     *,
     completed_run_ids: set[str] | frozenset[str] | None = None,
     ownership: WriteCoordinator | None = None,
+    birth_desk_id: str | None = None,
 ) -> list[AppendOverlap]:
     """Return overlaps between ``new_plan`` nodes and live / ownership holders."""
     if not new_plan.nodes:
@@ -255,7 +291,7 @@ def find_append_overlaps(
     # Same-batch sibling artifact crosses (C3 declare-time).
     hits: list[AppendOverlap] = []
     if file_ownership_v2_enabled():
-        hits = find_sibling_artifact_crosses(new_plan)
+        hits = find_sibling_artifact_crosses(new_plan, birth_desk_id=birth_desk_id)
 
     if live_plan is None:
         return hits
@@ -285,7 +321,10 @@ def find_append_overlaps(
         if replaces:
             continue
         n_role = _node_role(nn)
-        n_files = node_artifact_paths(nn) if v2 else node_file_targets(nn)
+        n_desk = node_ownership_desk(nn, birth_desk_id=birth_desk_id)
+        n_files = (
+            node_artifact_paths(nn) if v2 else node_file_targets(nn)
+        )
         n_anc = set(combined_ancestors.get(nn.run_id, frozenset()))
         if continue_from:
             n_anc.add(continue_from)
@@ -302,9 +341,10 @@ def find_append_overlaps(
         # dispatch_handoff those paths. Still-running owners keep blocking.
         file_hit_id: str | None = None
         file_hit_role = ""
+        file_hit_path = ""
         if v2 and n_files and ownership is not None:
             for path in n_files:
-                owner = ownership.owner_of(path)
+                owner = ownership.owner_of(path, desk_id=n_desk)
                 if owner is None:
                     continue
                 if owner == nn.run_id or owner in n_anc:
@@ -317,6 +357,7 @@ def find_append_overlaps(
                 file_hit_id = owner
                 live_node = live_by_id.get(owner)
                 file_hit_role = (_node_role(live_node) if live_node else "") or owner
+                file_hit_path = path
                 break
         elif not v2 and incomplete:
             for live in incomplete:
@@ -324,6 +365,8 @@ def find_append_overlaps(
                 if n_files and live_files and (n_files & live_files):
                     file_hit_id = live.run_id
                     file_hit_role = _node_role(live) or live.run_id
+                    shared = sorted(n_files & live_files)
+                    file_hit_path = shared[0] if shared else ""
                     break
 
         if role_hit_live is None and file_hit_id is None:
@@ -338,6 +381,7 @@ def find_append_overlaps(
                         live_role=_node_role(role_hit_live) or role_hit_live.run_id,
                         live_run_id=role_id,
                         reason="role+deliverable",
+                        path=file_hit_path,
                     )
                 )
             else:
@@ -358,6 +402,7 @@ def find_append_overlaps(
                         live_role=file_hit_role,
                         live_run_id=file_hit_id or "",
                         reason="deliverable",
+                        path=file_hit_path,
                     )
                 )
         elif role_hit_live is not None:
@@ -378,6 +423,7 @@ def find_append_overlaps(
                     live_role=file_hit_role,
                     live_run_id=file_hit_id or "",
                     reason="deliverable",
+                    path=file_hit_path,
                 )
             )
     return hits
@@ -392,6 +438,7 @@ def admit_added_nodes(
     ownership: WriteCoordinator | None = None,
     force: bool = False,
     total_workers: int | None = None,
+    birth_desk_id: str | None = None,
 ) -> str | None:
     """Seat reclaim + overlap gate shared by append merge and ``replan.adds``.
 
@@ -412,6 +459,7 @@ def admit_added_nodes(
         live_plan,
         completed_run_ids=completed_run_ids,
         ownership=ownership,
+        birth_desk_id=birth_desk_id,
     )
     if not overlaps:
         return None
@@ -442,31 +490,48 @@ def append_overlap_reject_message(
             "显式调整现有计划后再派。"
             "已完成/已交接节点不能靠 cancel_worker 撤销，须 replaces_run_id 接手补派。"
         )
+    all_sibling = all(o.reason == "sibling_artifact" for o in overlaps)
     detail_parts: list[str] = []
     for o in overlaps:
-        why = {
-            "role": "座位（角色名）重叠",
-            "deliverable": "交付物/文件归属重叠",
-            "role+deliverable": "座位与文件归属均重叠",
-            "sibling_artifact": f"同批交付物交叉（`{o.live_run_id}` 与 `{o.new_run_id}`）",
-        }.get(o.reason, o.reason)
+        path_bit = f"`{o.path}`" if (o.path or "").strip() else ""
         if o.reason == "sibling_artifact":
-            detail_parts.append(
-                f"【{o.new_role}】与【{o.live_role}】{why}"
-            )
+            if path_bit:
+                why = (
+                    f"同批交付物交叉（路径 {path_bit}；"
+                    f"`{o.live_run_id}` 与 `{o.new_run_id}`）"
+                )
+            else:
+                why = f"同批交付物交叉（`{o.live_run_id}` 与 `{o.new_run_id}`）"
+            detail_parts.append(f"【{o.new_role}】与【{o.live_role}】{why}")
         elif o.reason == "role":
             detail_parts.append(
-                f"【{o.new_role}】与在图座位【{o.live_role}】（`{o.live_run_id}`）{why}"
+                f"【{o.new_role}】与在图座位【{o.live_role}】（`{o.live_run_id}`）"
+                "座位（角色名）重叠"
             )
         elif o.reason == "deliverable":
+            path_note = f"（路径 {path_bit}）" if path_bit else ""
             detail_parts.append(
-                f"【{o.new_role}】与文件主人【{o.live_role}】（`{o.live_run_id}`）{why}"
+                f"【{o.new_role}】与文件主人【{o.live_role}】（`{o.live_run_id}`）"
+                f"交付物/文件归属重叠{path_note}"
+            )
+        elif o.reason == "role+deliverable":
+            path_note = f"（路径 {path_bit}）" if path_bit else ""
+            detail_parts.append(
+                f"【{o.new_role}】与在图【{o.live_role}】（`{o.live_run_id}`）"
+                f"座位与文件归属均重叠{path_note}"
             )
         else:
             detail_parts.append(
-                f"【{o.new_role}】与在图【{o.live_role}】（`{o.live_run_id}`）{why}"
+                f"【{o.new_role}】与在图【{o.live_role}】（`{o.live_run_id}`）{o.reason}"
             )
     detail = "；".join(detail_parts)
+    if all_sibling:
+        return (
+            "【同批交付物交叉已拒绝】"
+            f"（本批 {total} 人）。冲突：{detail}。"
+            "请为并行队员分配不同文件路径，或用 depends_on 标明交接关系后再派；"
+            "跨项目同相对路径不互拦——确认是否误用同一 target_folder_id。"
+        )
     return (
         "【队员追加已拒绝·座位/交付物重叠】"
         f"（已完成 {completed}/{total}）。冲突：{detail}。"
@@ -486,6 +551,7 @@ def declare_plan_artifacts(
     ancestor_map: dict[str, frozenset[str]] | None = None,
     ancestor_handoff_at_declare: bool = False,
     completed_run_ids: set[str] | frozenset[str] | None = None,
+    birth_desk_id: str | None = None,
 ) -> list[tuple[str, str, str]]:
     """Reserve deliverable.artifacts for each node; apply replaces/continue transfers.
 
@@ -501,6 +567,7 @@ def declare_plan_artifacts(
 
     Returns list of ``(new_run_id, path, conflicting_owner)`` for hard conflicts
     when not force/transfer-eligible (caller should have rejected via overlaps first).
+    ``path`` in the tuple is the bare ``rel_path``.
     """
     ancestors = ancestor_map if ancestor_map is not None else _ancestors_for_plan(plan)
     # Topological-ish: nodes with fewer deps first so ancestors register before intent.
@@ -528,10 +595,11 @@ def declare_plan_artifacts(
         if replaces:
             anc.add(replaces)
         anc_f = frozenset(anc)
+        desk = node_ownership_desk(node, birth_desk_id=birth_desk_id)
 
         for path in node_artifact_paths(node):
             if force or replaces or continue_from:
-                ownership.transfer(path, rid)
+                ownership.transfer(path, rid, desk_id=desk)
                 continue
             owner = ownership.declare(
                 path,
@@ -539,6 +607,7 @@ def declare_plan_artifacts(
                 anc_f,
                 force=False,
                 allow_ancestor_handoff=ancestor_handoff_at_declare,
+                desk_id=desk,
             )
             if owner is not None:
                 ended = bool(
@@ -546,7 +615,7 @@ def declare_plan_artifacts(
                 )
                 if owner in done or ended:
                     # 原主已完成/已结束、本协作会话内仍占位 → 新波次声明同 artifact 即接手。
-                    ownership.transfer(path, rid)
+                    ownership.transfer(path, rid, desk_id=desk)
                     dispatch_handoffs.append((path, owner, rid))
                     continue
                 conflicts.append((rid, path, owner))
@@ -573,31 +642,34 @@ def handoff_owned_paths_on_complete(
     *,
     completed_run_ids: set[str] | frozenset[str] | None = None,
     ancestor_map: dict[str, frozenset[str]] | None = None,
+    birth_desk_id: str | None = None,
 ) -> list[tuple[str, str]]:
     """Move completed worker's paths to the unique unfinished dependent listing them.
 
-    Returns ``(path, new_owner_run_id)`` pairs actually transferred. Ambiguous
+    Returns ``(bare_path, new_owner_run_id)`` pairs actually transferred. Ambiguous
     (0 or 2+ candidates) paths stay with the completed owner for write-time claim
     or explicit ``transfer_ownership``.
     """
     rid = (completed_run_id or "").strip()
     if not rid or not plan.nodes:
         return []
-    owned = ownership.owned_paths(rid)
-    if not owned:
+    owned_keys = ownership.owned_keys(rid)
+    if not owned_keys:
         return []
     ancestors = ancestor_map if ancestor_map is not None else _ancestors_for_plan(plan)
     done = set(completed_run_ids or ())
     done.add(rid)
     moved: list[tuple[str, str]] = []
-    for path in owned:
+    for key in owned_keys:
+        bare = ownership_display_path(key)
         candidates: list[str] = []
         direct: list[str] = []
         for node in plan.nodes:
             nid = (getattr(node, "run_id", None) or "").strip()
             if not nid or nid == rid or nid in done:
                 continue
-            if path not in node_artifact_paths(node):
+            node_keys = node_artifact_keys(node, birth_desk_id=birth_desk_id)
+            if key not in node_keys:
                 continue
             anc = ancestors.get(nid, frozenset())
             if rid not in anc:
@@ -610,8 +682,8 @@ def handoff_owned_paths_on_complete(
         if len(pool) != 1:
             continue
         new_owner = pool[0]
-        ownership.transfer(path, new_owner)
-        moved.append((path, new_owner))
+        ownership.transfer(key, new_owner)
+        moved.append((bare, new_owner))
     return moved
 
 
@@ -651,6 +723,7 @@ def declare_nested_drive_artifacts(
             completed = sess.completed_run_ids
     except Exception:  # noqa: BLE001
         completed = None
+    birth = getattr(tool, "_folder_id", None)
     conflicts = declare_plan_artifacts(
         plan,
         ownership,
@@ -658,6 +731,7 @@ def declare_nested_drive_artifacts(
         ancestor_map=_ancestors_for_plan(plan),
         ancestor_handoff_at_declare=True,
         completed_run_ids=completed,
+        birth_desk_id=birth,
     )
     if conflicts:
         from agentcore.core.logging import get_logger

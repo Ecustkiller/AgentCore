@@ -9,11 +9,13 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 
 /**
  * 打开浏览器壳并在新页加载会话工作区 HTML（桌面 browserApi.openWorkspaceHtml）。
+ * `workspaceId` 为落地 desk（`folder:…` / `conv:…`）；缺省回退 `conv:{conversationId}`。
  * 失败抛错供 UI toast。
  */
 export async function openWorkspaceHtmlInBrowser(
   conversationId: string,
   path: string,
+  workspaceId?: string,
 ): Promise<void> {
   const open = window.browserApi?.openWorkspaceHtml;
   if (!open) throw new Error("此环境不支持应用内预览");
@@ -26,6 +28,11 @@ export async function openWorkspaceHtmlInBrowser(
   });
   useSidePanelStore.getState().showBrowser();
 
-  const result = await open({ pageId, conversationId, path });
+  const result = await open({
+    pageId,
+    conversationId,
+    path,
+    workspaceId: workspaceId ?? `conv:${conversationId}`,
+  });
   if (!result.ok) throw new Error(result.reason);
 }

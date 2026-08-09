@@ -11,7 +11,9 @@
 import { normalizePreviewPath } from "@shared/preview-path";
 import {
   WORKSPACE_SCHEME,
+  hostToWorkspaceId,
   resolveWorkspaceProtocolRequest,
+  workspaceIdToHost,
 } from "@shared/workspace-browser-url";
 import { normalizeBrowserConversationId } from "./paths";
 
@@ -19,6 +21,8 @@ export {
   resolveWorkspaceProtocolRequest,
   WORKSPACE_SCHEME,
   normalizePreviewPath,
+  workspaceIdToHost,
+  hostToWorkspaceId,
 };
 
 /** 工作区 partition 前缀（完整键 = {@link workspacePartitionFor}）。 */
@@ -64,16 +68,16 @@ function encodeRelPath(relPath: string): string {
 }
 
 /**
- * 后端「会话工作区文件」端点的**相对**路径（与渲染层 services/workspace 同形：
- * `/v1/conversations/{id}/workspace/files/{path}`）。由 auth-client.bearerFetch 拼上
- * 构建期烘焙的 API base 后发起 Bearer 代理请求。
+ * 后端 desk 工作区文件端点的**相对**路径：
+ * `/v1/workspaces/{wsId}/files/{path}`（wsId = `folder:…` / `conv:…`）。
+ * 由 auth-client.bearerFetch 拼上构建期烘焙的 API base 后发起 Bearer 代理。
  */
 export function workspaceFilePath(
-  conversationId: string,
+  workspaceId: string,
   relPath: string,
 ): string {
-  const id = encodeURIComponent(conversationId);
-  return `/v1/conversations/${id}/workspace/files/${encodeRelPath(relPath)}`;
+  const id = encodeURIComponent(workspaceId);
+  return `/v1/workspaces/${id}/files/${encodeRelPath(relPath)}`;
 }
 
 /** 常见 web 资源类型的扩展名 → MIME 映射（未知回退 application/octet-stream）。 */
@@ -124,16 +128,37 @@ export function mimeForPath(path: string): string {
 
 /**
  * 构造要在本机浏览器工作区页里加载的 `workspace://` URL。
- * 会话 id 作 host（小写 UUID）；路径经 {@link normalizePreviewPath} 守卫后逐段编码。
+ * host = desk 形（`folder.|conv.`，由 wsId 的 `:`→`.`）；路径经
+ * {@link normalizePreviewPath} 守卫后逐段编码。非法 wsId → 抛错。
  */
-export function buildWorkspaceUrl(
-  conversationId: string,
-  path: string,
-): string {
-  const host = normalizeBrowserConversationId(conversationId);
+export function buildWorkspaceUrl(workspaceId: string, path: string): string {
+  const host = workspaceIdToHost(workspaceId);
+  if (!host) {
+    throw new Error(`buildWorkspaceUrl: invalid workspaceId ${workspaceId}`);
+  }
   const rel = normalizePreviewPath(path);
   const encoded = rel ? rel.split("/").map(encodeURIComponent).join("/") : "";
   return `${WORKSPACE_SCHEME}://${host}/${encoded}`;
+}
+
+/**
+ * openWorkspaceHtml 目标 URL：缺省 `workspaceId` 回退 `conv:{conversationId}`。
+ * 路径/会话非法 → null。
+ */
+export function resolveWorkspaceHtmlUrl(
+  conversationId: string,
+  path: string,
+  workspaceId?: string | null,
+): string | null {
+  const conv = normalizeBrowserConversationId(conversationId);
+  if (!conv) return null;
+  const rel = normalizePreviewPath(path);
+  if (!rel) return null;
+  const raw =
+    typeof workspaceId === "string" ? workspaceId.trim().toLowerCase() : "";
+  const wsId = raw || `conv:${conv}`;
+  if (!workspaceIdToHost(wsId)) return null;
+  return buildWorkspaceUrl(wsId, rel);
 }
 
 /** 是否本机浏览器允许的工作区协议 URL。 */

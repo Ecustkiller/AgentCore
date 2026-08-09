@@ -638,6 +638,34 @@ async def test_nested_fanout_respects_tree_budget():
     assert peak["max"] <= 4
 
 
+async def test_child_budget_divides_by_ready_width_not_unready_sink():
+    # 4 independent auditors + 1 supervisor depending on all four. First-wave
+    # parallel width is 4 → each child's set_budget is budget//4 (≥3 with 12),
+    # not budget//5 from counting the still-blocked sink (旧 bug: 12//5=2).
+    from agentcore.runtime.runs.concurrency import current_budget
+
+    seen: dict[str, int] = {}
+
+    async def ex(spec: RunSpec, _completed) -> RunState:
+        seen[spec.run_id] = current_budget()
+        await asyncio.sleep(0.01)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    plan = RunPlan()
+    for x in ("a", "b", "c", "d"):
+        plan.add(_spec(x))
+    plan.add(_spec("lead", ("a", "b", "c", "d")))
+    token = set_budget(12)
+    try:
+        res = await WaveScheduler().run(plan, ex)
+    finally:
+        reset_budget(token)
+    assert set(res) == {"a", "b", "c", "d", "lead"}
+    for x in ("a", "b", "c", "d"):
+        assert seen[x] >= 3, f"{x} budget={seen[x]} (want ≥ 12//4=3, not 12//5=2)"
+    assert seen["lead"] >= 1
+
+
 # --- 受监督的波循环: on_boundary CHECKPOINT arm (结构化挂起 2a) ------------------
 
 

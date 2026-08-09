@@ -65,6 +65,20 @@ describe("queuedTurns store", () => {
     expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual(["q2"]);
   });
 
+  it("turn_queue_started 语义：remove 只清轻态（调用方保留气泡）", () => {
+    upsertQueuedTurn({
+      queueId: "q-go",
+      conversationId: "c1",
+      turnId: "t-user",
+      content: "queued then start",
+      position: 1,
+      queueDepth: 1,
+    });
+    const hit = removeQueuedTurn("c1", "q-go");
+    expect(hit?.turnId).toBe("t-user");
+    expect(listQueuedTurns("c1")).toEqual([]);
+    // store 不再持有该项 → 条/气泡排队轻态消失；turnId 仍由 ChatPage turns 保留。
+  });
   it("clearConversation 清空该对话", () => {
     upsertQueuedTurn({
       queueId: "q1",

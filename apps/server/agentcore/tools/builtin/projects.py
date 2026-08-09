@@ -63,6 +63,7 @@ _EMPTY_LIST_HINT = (
 _RESOLVED_TIP = (
     "空/近空先 ask_user 钉目标，勿连续 file_list 确认空；"
     "多项目同次 delegate 各填 target_folder_id；"
+    "裸聊同回合仅此唯一目标时可省略 target（运行时继承）；"
     "开发双仓≠external_mount_readonly。"
 )
 
@@ -343,6 +344,9 @@ class ResolveProjectTool:
 
         if outcome.status == "resolved":
             project = outcome.matches[0]
+            context.turn_target_desk.note_folder(
+                project.get("id") if isinstance(project.get("id"), str) else None
+            )
             payload: dict[str, Any] = {
                 "status": "resolved",
                 "query": name,
@@ -474,10 +478,12 @@ class CreateProjectTool:
                 error=str(e),
             )
 
+        folder_id = project.get("id") if isinstance(project.get("id"), str) else None
+        context.turn_target_desk.note_folder(folder_id)
         logger.info(
             "projects.created",
             user_id=context.user_id,
-            folder_id=project.get("id"),
+            folder_id=folder_id,
             conversation_id=context.conversation_id or None,
             conversation_untouched=True,
             run_id=context.run_id,
@@ -488,7 +494,9 @@ class CreateProjectTool:
             "conversation_untouched": True,
             "hint": (
                 "云项目已登记在账号名册；本会话归属/默认桌未改。"
-                "可直接用返回的 id 作为 delegate target_folder_id，或再 resolve_project。"
+                "可直接用返回的 id 作为 delegate target_folder_id；"
+                "裸聊同回合仅此一个目标时也可省略（运行时继承）。"
+                "多项目同回合仍须各 task 显式点名。"
             ),
         }
         return ToolResult(

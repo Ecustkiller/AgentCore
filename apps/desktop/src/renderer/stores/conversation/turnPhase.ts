@@ -9,6 +9,8 @@
  * 读写 phase 的命令式 API 见 `turnPhaseActions.ts`。
  */
 
+import { INTERACTION_KIND_WIRE } from "@agentcore/contract-types";
+
 export type TurnPhase =
   | "idle"
   | "preflight"
@@ -19,6 +21,20 @@ export type TurnPhase =
   | "failed";
 
 export type TurnTerminalOutcome = "stopped" | "completed" | "failed";
+
+/**
+ * User-facing interaction `*_required` events from {@link INTERACTION_KIND_WIRE}.
+ * Cold pause cards (ask_user / plan_review / team_preview) may arrive on the
+ * same connection after `message_end` has already moved turnPhase to terminal;
+ * dropping them leaves live UI without ResumePrompt until hard refresh.
+ * Hot `*_required` (approval / escalation / …) share the same wire shape and
+ * are allowlisted here too — still not a terminal free-for-all.
+ */
+const INTERACTION_REQUIRED_EVENTS: ReadonlySet<string> = new Set(
+  Object.values(INTERACTION_KIND_WIRE)
+    .map((w) => w.requiredEvent)
+    .filter((name) => name.endsWith("_required")),
+);
 
 export function isTerminalPhase(phase: TurnPhase): boolean {
   return phase === "stopped" || phase === "completed" || phase === "failed";
@@ -42,6 +58,9 @@ export function allowsStreamingMutations(phase: TurnPhase): boolean {
  * detached drive 续推 `run_completed` / `run_tool_progress`（conformance
  * `async_delivery`：detached → message_end → run_completed → execution_completed）。
  * 若挡掉，协作图会冻在收口前快照，直到（若有）execution_completed 刷新。
+ *
+ * stopping + terminal 另放行 INTERACTION_KIND_WIRE 的 `*_required`（见上常量）：
+ * 冷挂起 ask 常紧挨 `message_end(paused)`，门闩若挡掉则 live 看不到拍板卡。
  */
 export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
   if (phase === "idle" || phase === "preflight" || phase === "streaming") {
@@ -58,6 +77,13 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
   ) {
     return true;
   }
+  // stopping + terminal：冷/热交互 required 帧（至少 checkpoint_required）。
+  if (
+    (phase === "stopping" || isTerminalPhase(phase)) &&
+    INTERACTION_REQUIRED_EVENTS.has(eventType)
+  ) {
+    return true;
+  }
   return (
     eventType === "message_end" ||
     eventType === "error" ||
@@ -69,6 +95,8 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
     eventType === "evidence_ledger" ||
     // 排队按项取消：Stop 过程中仍可清 UI（Stop ≠ 取消排队，但 cancel 事件须入折）。
     eventType === "turn_queue_cancelled" ||
+    // FIFO 出队开跑：常紧挨上一回合 terminal 之后、message_start 之前到达。
+    eventType === "turn_queue_started" ||
     // 异步团队：detached 可落在 message_end 前后；completed 常在 terminal 后同连接到达。
     eventType === "execution_detached" ||
     eventType === "execution_completed"

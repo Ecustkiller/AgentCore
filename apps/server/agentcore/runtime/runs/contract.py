@@ -230,6 +230,8 @@ def check_contract(
     ``requires_files`` with zero successful landing becomes a soft ``warnings`` tip
     (甲⁺：不再契约 fail / 短写盘 pass). ``landing_failure_kind`` (optional)
     attributes the soft tip: ``channel_dead`` / ``write_failed`` vs paste framing.
+    When ``code_audit_gate`` is on, the same kind also demotes missing/unreadable
+    audit-JSON structure hard-fails (field semantics on loaded JSON still apply).
     Stays a pure function (the caller derives the count / kind) so it remains
     trivially unit-testable.
 
@@ -386,16 +388,42 @@ def check_contract(
             )
         )
     # code_audit 结构闸（L2b）：配套 *.audit.json 字段语义；与成篇硬门正交。
+    # 写盘不可用时：缺/读不到 JSON 不硬拒（归因靠零写 soft tip）；已读到的仍验语义。
     if deliverable.code_audit_gate:
-        from agentcore.runtime.runs.code_audit_gate import code_audit_json_failures
-
-        failures.extend(
-            code_audit_json_failures(
-                artifacts=deliverable.artifacts,
-                workspace_paths=workspace_paths or [],
-                artifact_contents=artifact_contents,
-            )
+        from agentcore.runtime.runs.code_audit_gate import (
+            code_audit_json_failures,
+            is_code_audit_landing_absence_failure,
         )
+
+        gate_fails = code_audit_json_failures(
+            artifacts=deliverable.artifacts,
+            workspace_paths=workspace_paths or [],
+            artifact_contents=artifact_contents,
+        )
+        write_unavailable = landing_failure_kind in ("channel_dead", "write_failed")
+        if write_unavailable:
+            demoted = False
+            for msg in gate_fails:
+                if is_code_audit_landing_absence_failure(msg):
+                    demoted = True
+                    continue
+                failures.append(msg)
+            if demoted and not zero_files_warnings:
+                # 已有部分落盘时零写 tip 不响；补写盘归因，避免静默跳过。
+                if landing_failure_kind == "channel_dead":
+                    zero_files_warnings.append(
+                        f"{_MEMBER_WAVE_UNDELIVERED}：写盘通道不可用"
+                        "（local workspace channel dead / 活性挂起），"
+                        "已跳过 audit JSON 缺产物结构硬闸——请恢复通道后补齐配套 *.audit.json"
+                    )
+                else:
+                    zero_files_warnings.append(
+                        f"{_MEMBER_WAVE_UNDELIVERED}：写盘未成功落盘，"
+                        "已跳过 audit JSON 缺产物结构硬闸——"
+                        "请修复写盘后补齐配套 *.audit.json"
+                    )
+        else:
+            failures.extend(gate_fails)
     soft_failures: list[str] = []
     # 前端质量门禁（独立于 placeholder / web_seam）：硬=语法损坏+编造联系方式；软=anti-slop。
     if deliverable.web_quality_scan:

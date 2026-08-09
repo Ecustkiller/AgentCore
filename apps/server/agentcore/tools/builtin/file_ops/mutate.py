@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
 from agentcore.tools.builtin.code_integrity import (
     code_omission_rejection,
     code_structure_rejection,
@@ -341,6 +342,10 @@ class FileWriteTool:
                 "`<!-- SECTION: -->`）再按节 file_append 或 str_replace 填空。"
                 "成功回执为 artifact manifest（优先以此验真；反复 file_read "
                 "受同 path 次数上限约束）。"
+                "【清参后改稿】上下文若只见已落盘短状态（无正文），"
+                "禁止当写盘参数重发；须先 file_read 取盘上真文，再 str_replace"
+                "（优先）或重填完整 content 写入"
+                "（≠ 落盘后验真空转回读——后者仍认 artifact manifest）。"
                 "【成篇省略硬拒】成篇体量正文若含省略标记（反例："
                 "「……（中间省略，已保留首尾）……」）→ 硬拒绝："
                 "须一次写完完整正文，或短骨架+SECTION 按节填，禁止省略标记交差。"
@@ -372,6 +377,7 @@ class FileWriteTool:
                         "description": (
                             "要写入的内容。主路径一次写完完整正文（不硬拒字数）；"
                             "可选短骨架 + 按节填空。成篇体量含省略标记则硬拒。"
+                            "禁止把已落盘短状态/清理占位原样当 content。"
                         ),
                     },
                     "allow_shrink": {
@@ -391,6 +397,10 @@ class FileWriteTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
+        stub_err = cleared_write_stub_rejection(arguments)
+        if stub_err is not None:
+            return _error(stub_err, start, contract_failure=True)
+
         requested_path = arguments.get("path", "")
         content = arguments.get("content", "")
         allow_shrink = bool(arguments.get("allow_shrink", False))
@@ -636,6 +646,10 @@ class FileAppendTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
+        stub_err = cleared_write_stub_rejection(arguments)
+        if stub_err is not None:
+            return _error(stub_err, start, contract_failure=True)
+
         requested_path = arguments.get("path", "")
         content = arguments.get("content", "")
 
@@ -785,6 +799,10 @@ class StrReplaceTool:
                 "若 old_string 不存在、或匹配多于一次（除非 replace_all=true），则失败；"
                 "失败回执会附带磁盘原文有界片段（模糊候选会标明非精确）——以盘文为真源"
                 "重锚再改；确需整盖可用 file_write（须完整正文，勿残缺骨架交差）。"
+                "【清参后改稿】上下文若只见已落盘短状态（无正文），"
+                "禁止当 old_string/new_string 重发；须先 file_read 取盘上真文，"
+                "再按真文重填完整片段后 str_replace"
+                "（≠ 落盘后验真空转回读——后者仍认 artifact manifest）。"
                 "要新建文件请改用 file_write。"
             ),
             parameters={
@@ -802,6 +820,7 @@ class StrReplaceTool:
                         "minLength": 1,
                         "description": (
                             "要替换的精确文本（不可为空），需带足够的上下文以在文件中唯一。"
+                            "禁止把已落盘短状态/清理占位原样当参数。"
                         ),
                     },
                     "new_string": {
@@ -809,6 +828,7 @@ class StrReplaceTool:
                         "description": (
                             "替换后的文本（必须与 old_string 不同；"
                             "单次替换建议一节为宜，不硬拒字数）。"
+                            "禁止把已落盘短状态/清理占位原样当 new_string。"
                         ),
                     },
                     "replace_all": {
@@ -825,6 +845,10 @@ class StrReplaceTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
+        stub_err = cleared_write_stub_rejection(arguments)
+        if stub_err is not None:
+            return _error(stub_err, start, contract_failure=True)
+
         rel_path = arguments.get("path", "")
         old_string = arguments.get("old_string", "")
         new_string = arguments.get("new_string", "")

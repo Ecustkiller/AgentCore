@@ -234,6 +234,19 @@ async def test_health_check_smoke_run(tmp_path: Path):
     runsc = _install_fake_runsc(tmp_path)
     sandbox = GVisorSandbox(runsc_path=runsc, runtime_root=str(tmp_path / "rt"))
     assert await sandbox.health_check() is True
+    assert sandbox.last_health_failure is None
+
+
+@pytest.mark.asyncio
+async def test_health_check_not_linux_sets_failure_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(gvisor_mod, "_IS_LINUX", False)
+    sandbox = GVisorSandbox(runtime_root=str(tmp_path / "rt"))
+    assert await sandbox.health_check() is False
+    assert sandbox.last_health_failure is not None
+    assert sandbox.last_health_failure[0] == "not_linux"
+    assert sandbox.last_health_failure[1] and "platform=" in sandbox.last_health_failure[1]
 
 
 def test_resolve_runtime_root_uses_settings_default(monkeypatch, tmp_path: Path):

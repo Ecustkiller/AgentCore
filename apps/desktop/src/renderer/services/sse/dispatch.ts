@@ -48,19 +48,24 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   // 停止生命周期事件门：stopping 仍消费 run_*，挡正文突变；terminal 只放行终态/meta。
   const turnPhase = getTurnPhase(ctx.conversationId);
   if (!allowsSseEvent(turnPhase, event.type)) {
-    // L3：stopping/terminal 会静默丢掉 workspace_op_required——否则服务端只见超时。
+    // 可观测丢点：勿扫用户长文；只记 event_type / phase（钉门闩 vs 传输丢包）。
+    const dropFields: Record<string, unknown> = {
+      conversation_id: ctx.conversationId,
+      event_type: event.type,
+      turn_phase: turnPhase,
+      reason: "turn_phase_gate",
+    };
+    // L3：workspace_op 另带 request_id/op，便于对上服务端超时。
     if (event.type === "workspace_op_required") {
       const payload = event.payload as {
         request_id?: string;
         op?: string;
       };
-      logEvent("warn", "workspace_op.dropped", {
-        conversation_id: ctx.conversationId,
-        request_id: payload?.request_id,
-        op: payload?.op,
-        turn_phase: turnPhase,
-        reason: "turn_phase_gate",
-      });
+      dropFields.request_id = payload?.request_id;
+      dropFields.op = payload?.op;
+      logEvent("warn", "workspace_op.dropped", dropFields);
+    } else {
+      logEvent("warn", "sse.event_dropped", dropFields);
     }
     return;
   }

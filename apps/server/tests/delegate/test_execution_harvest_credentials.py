@@ -202,3 +202,143 @@ def test_build_harvest_fallback_channel_dead_notice_from_flag():
     text = eh.build_harvest_fallback_content(session, kind="failure")
     assert text.startswith(CHANNEL_DEAD_USER_VISIBLE)
     assert "已有分析" in text
+
+
+@pytest.mark.asyncio
+async def test_harvest_skips_llm_when_session_channel_already_dead():
+    """已知通道死：不跑收口 LLM，直接 fallback。"""
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT, CHANNEL_DEAD_USER_VISIBLE
+
+    session = _session("exec-dead", "conv-dead")
+    session.workspace_channel_dead = True
+    session.update_draft("队员已交的综合草稿")
+    session.failed_run_ids.add("r1")
+    set_active_coordination(session)
+    conv = SimpleNamespace(user_id="user-1", folder_id=None, id="conv-dead")
+    user = SimpleNamespace(user_id="user-1")
+    selection = SimpleNamespace(origin="platform", provider_id=None, model="m")
+    creds = LLMCredentials(api_key="k", base_url="https://x", source="platform")
+
+    db_cm = MagicMock()
+    db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+    db_cm.__aexit__ = AsyncMock(return_value=None)
+
+    run_mock = AsyncMock()
+    msg_create = AsyncMock()
+    notify = AsyncMock()
+
+    with (
+        patch.object(eh, "async_session_factory", return_value=db_cm),
+        patch.object(eh, "ConversationRepository") as conv_repo_cls,
+        patch.object(eh, "UserRepository") as user_repo_cls,
+        patch.object(eh, "CostEventRepository"),
+        patch.object(eh, "resolve_conversation_model_selection", AsyncMock(return_value=selection)),
+        patch.object(eh, "preflight_llm_credentials", AsyncMock(return_value=creds)),
+        patch.object(eh, "platform_llm_credentials", return_value=creds),
+        patch.object(eh, "run_and_persist", new=run_mock),
+        patch.object(eh, "build_turn_backend", new=AsyncMock()),
+        patch.object(eh, "notify_user", new=notify),
+        patch("agentcore.db.repositories.MessageRepository") as msg_repo_cls,
+        patch.object(eh.turn_runs, "get", return_value=None),
+    ):
+        conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
+        user_repo_cls.return_value.get_by_id = AsyncMock(return_value=user)
+        msg_repo_cls.return_value.create = msg_create
+
+        await eh.run_harvest_closing_turn(
+            conversation_id="conv-dead",
+            execution_id="exec-dead",
+        )
+
+    run_mock.assert_not_called()
+    msg_create.assert_called_once()
+    kwargs = msg_create.await_args.kwargs
+    assert kwargs["role"] == "assistant"
+    assert CHANNEL_DEAD_USER_VISIBLE in kwargs["content"]
+    assert "队员已交的综合草稿" in kwargs["content"]
+    assert CHANNEL_DEAD_PREPARE_ABORT in kwargs["content"]
+    assert kwargs["metadata"]["origin"] == "execution_harvest_fallback"
+    assert kwargs["metadata"]["channel_dead"] is True
+    notify.assert_awaited()
+
+
+def test_result_is_channel_dead_abort_detects_prepare_abort():
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
+    from agentcore.workspace.protocol import WorkspaceIOError
+
+    assert eh._result_is_channel_dead_abort(
+        {"error": CHANNEL_DEAD_PREPARE_ABORT, "content": ""}
+    )
+    assert eh._result_is_channel_dead_abort(
+        {"error": {"message": CHANNEL_DEAD_PREPARE_ABORT}}
+    )
+    assert not eh._result_is_channel_dead_abort({"error": None, "content": "ok"})
+    assert not eh._result_is_channel_dead_abort({"error": "quota exceeded"})
+    assert eh._exc_is_channel_dead(WorkspaceIOError(CHANNEL_DEAD_PREPARE_ABORT))
+    assert not eh._exc_is_channel_dead(RuntimeError("other"))
+
+
+@pytest.mark.asyncio
+async def test_harvest_fallback_when_run_returns_channel_dead():
+    """收口回合返回通道死错误 → 调用 persist_harvest_fallback。"""
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
+
+    session = _session("exec-salv", "conv-salv")
+    session.update_draft("终端前已有草稿")
+    set_active_coordination(session)
+    conv = SimpleNamespace(user_id="user-1", folder_id=None, id="conv-salv")
+    user = SimpleNamespace(user_id="user-1")
+    selection = SimpleNamespace(origin="byok", provider_id="p", model="m")
+    creds = LLMCredentials(
+        api_key="k", base_url="https://x", source="user", provider_id="p"
+    )
+
+    db_cm = MagicMock()
+    db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+    db_cm.__aexit__ = AsyncMock(return_value=None)
+
+    async def _dead_result(**_kwargs):
+        return {
+            "message_id": "asst-empty",
+            "content": "",
+            "error": CHANNEL_DEAD_PREPARE_ABORT,
+        }
+
+    fallback = AsyncMock(return_value="fb")
+
+    with (
+        patch.object(eh, "async_session_factory", return_value=db_cm),
+        patch.object(eh, "ConversationRepository") as conv_repo_cls,
+        patch.object(eh, "UserRepository") as user_repo_cls,
+        patch.object(eh, "CostEventRepository"),
+        patch.object(eh, "BoardRepository") as board_repo_cls,
+        patch.object(eh, "resolve_conversation_model_selection", AsyncMock(return_value=selection)),
+        patch.object(eh, "preflight_llm_credentials", AsyncMock(return_value=creds)),
+        patch.object(eh, "resolve_local_binding", AsyncMock(return_value=None)),
+        patch.object(eh, "resolve_profile_set", AsyncMock(return_value=None)),
+        patch.object(eh, "resolve_memory_enabled", AsyncMock(return_value=True)),
+        patch.object(eh, "resolve_conversation_history_access", AsyncMock(return_value=True)),
+        patch.object(eh, "resolve_permission_axes", AsyncMock(return_value=None)),
+        patch.object(eh, "load_chat_context", AsyncMock(return_value=[])),
+        patch.object(eh, "build_turn_backend", AsyncMock(return_value=MagicMock())),
+        patch.object(eh, "run_and_persist", new=_dead_result),
+        patch.object(eh, "persist_harvest_fallback", new=fallback),
+        patch.object(eh, "notify_user", AsyncMock()),
+        patch("agentcore.db.repositories.MessageRepository") as msg_repo_cls,
+        patch.object(eh.turn_runs, "get", return_value=None),
+        patch.object(eh.turn_runs, "register"),
+    ):
+        conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
+        user_repo_cls.return_value.get_by_id = AsyncMock(return_value=user)
+        board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
+        msg_repo_cls.return_value.create = AsyncMock()
+        await eh.run_harvest_closing_turn(
+            conversation_id="conv-salv",
+            execution_id="exec-salv",
+        )
+
+    fallback.assert_awaited()
+    assert session.workspace_channel_dead is True

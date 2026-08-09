@@ -447,9 +447,7 @@ async def _continue_run_scoped(
             citable_ids=(
                 turn_ledger.draft_citable_ids() if turn_ledger is not None else None
             ),
-            landing_failure_kind=(
-                landing_write_failure_kind(messages) if product_written <= 0 else None
-            ),
+            landing_failure_kind=landing_write_failure_kind(messages),
         )
         record_turn_fact(
             MessageFinalFact(

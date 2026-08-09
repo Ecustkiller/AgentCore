@@ -284,7 +284,11 @@ def test_core_teaches_split_criterion_over_count():
     assert "派摸底" in hint or "摸底·验收" in hint or "了解到什么算够" in hint
     assert "够用即停" in hint
     assert "handoff" in hint
-    assert "入口" in hint
+    assert "file_list" in hint and ("grep" in hint or "code_search" in hint)
+    assert "每个 app" in hint and "package.json" in hint
+    assert "禁止" in hint and "名单" in hint
+    assert "已知路径" in hint
+    assert "含糊" in hint and "根" in hint
     assert "无限深挖" in hint or "更全" in hint
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in hint
@@ -344,6 +348,9 @@ def test_core_teaches_split_criterion_over_count():
     assert "摸底波" in hint
     assert "根委派切片诚实" in hint or "路径 A" in hint or "路径 B" in hint
     assert "嵌套扇出" in hint or "单 lead" in hint
+    assert "凡大活必嵌套" in hint
+    assert "并行写盘" in hint
+    assert "私有" in hint  # 私有 path / 笔记
     assert "MVP" in hint or "契约" in hint
     assert "多屏" in hint and ("大原型" in hint or "单文件" in hint)
     assert "完整可玩" in hint
@@ -929,14 +936,23 @@ def test_ceo_core_workspace_outranks_global_current_project_memory():
 
 
 def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
-    """空壳/双项目 kickoff：先问、同次两路 target_folder_id、开发≠挂载。"""
+    """空壳/双项目 kickoff：只读跨桌摸底、写仍派工换桌、≠挂载冒充。"""
     hint = _CEO_CORE_HINT
     assert "【跨项目 / 空壳 kickoff】" in hint
+    assert "list_project_dir" in hint and "read_project_file" in hint
+    assert "只读跨桌" in hint
+    assert "出生桌" in hint
+    assert "云端读不到本地" in hint and "禁止" in hint
     assert "target_folder_id" in hint
+    assert "写仍派工换桌" in hint
     assert "file_list" in hint
     assert "external_mount_readonly" in hint
-    assert "开发双仓" in hint or "乱挂" in hint
+    assert "开发双仓" in hint or "乱挂" in hint or "冒充" in hint
     assert "不可" in hint and ("跳过" in hint or "≥2" in hint)
+    # 一句短指针（HOW 在 skill；禁双写长段）
+    assert "先建齐再同次派" in hint or "先建齐" in hint
+    assert "拒后禁塌缩" in hint
+    assert "team_orchestration_advanced" in hint and "跨项目并行指挥" in hint
 
 
 def test_core_guides_out_of_workspace_absolute_paths():
@@ -1057,6 +1073,22 @@ def test_ceo_core_teaches_memory_history_user_facing_framing():
     assert "装不知道" in hint
     assert "禁止报工具名" in hint or "禁止报工具名与内部角色名" in hint
     assert "画像细节" in hint
+
+
+def test_ceo_core_teaches_user_rules_framing():
+    """用户规则：对外可记/改/删；内部改/删走 remember；禁只追加却声称已替换。"""
+    hint = _CEO_CORE_HINT
+    assert "用户规则·对外口径" in hint
+    assert "用户规则·内部" in hint
+    assert "可增" in hint and "可改" in hint and "可删" in hint
+    assert "remember" in hint
+    assert "只追加却声称" in hint
+    assert "文件页规则本" in hint
+    assert "硬约束清单" in hint
+    # 对外段不堆 ENUM；action 名只在内部段
+    external = hint.split("【用户规则·对外口径】", 1)[1].split("【", 1)[0]
+    assert "action=" not in external
+    assert "replace" not in external and "forget" not in external
 
 
 def test_ceo_core_platform_knowledge_two_way_routing():

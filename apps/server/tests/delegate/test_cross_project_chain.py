@@ -175,6 +175,112 @@ async def test_bare_chat_no_target_blocked_by_2b_gate() -> None:
     )
     assert result.success is False
     assert result.contract_failure is True
-    assert result.error == NO_TARGET_SCRATCH_GATE_MSG
-    assert "scratch" in (result.error or "")
-    assert "target_folder_id" in (result.error or "")
+    err = result.error or ""
+    assert err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert "scratch" in err
+    assert "target_folder_id" in err
+    assert "缺目标任务：" in err
+    assert "role=工" in err
+    assert "写 README" not in err
+
+
+@pytest.mark.asyncio
+async def test_bare_chat_turn_hint_passes_2b_gate() -> None:
+    """同回合唯一 create/resolve 写入 turn_target_desk 后，缺省 delegate 可过 2b 闸。"""
+
+    class _DummyLLM(LLMProvider):
+        async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+
+        async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+            yield  # pragma: no cover
+
+    ctx = _birth_ctx()
+    ctx.turn_target_desk.note_folder("proj_from_create")
+    tool = DelegateTool(
+        llm=_DummyLLM(),  # type: ignore[arg-type]
+        sink=EventSink(),
+        system_prompt="sys",
+        user_message="做个官网",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx,
+        folder_id=None,
+        captain_run_id="CEO",
+    )
+    assert tool.effective_default_target_folder_id() == "proj_from_create"
+    result = await tool.execute(
+        {"tasks": [{"role": "前端", "task": "写 index.html"}]},
+        ctx,
+    )
+    err = result.error or ""
+    assert not err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+
+
+@pytest.mark.asyncio
+async def test_bare_chat_multi_hint_still_blocked() -> None:
+    """同回合两个不同项目 → turn hint 清空 → 仍须显式 target_folder_id。"""
+
+    class _DummyLLM(LLMProvider):
+        async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+
+        async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+            yield  # pragma: no cover
+
+    ctx = _birth_ctx()
+    ctx.turn_target_desk.note_folder("proj_a")
+    ctx.turn_target_desk.note_folder("proj_b")
+    assert ctx.turn_target_desk.folder_id is None
+    tool = DelegateTool(
+        llm=_DummyLLM(),  # type: ignore[arg-type]
+        sink=EventSink(),
+        system_prompt="sys",
+        user_message="两个项目并行",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx,
+        folder_id=None,
+        captain_run_id="CEO",
+    )
+    result = await tool.execute(
+        {
+            "tasks": [
+                {"role": "甲", "task": "在 A 写"},
+                {"role": "乙", "task": "在 B 写"},
+            ]
+        },
+        ctx,
+    )
+    assert result.success is False
+    assert result.contract_failure is True
+    assert (result.error or "").startswith(NO_TARGET_SCRATCH_GATE_MSG)
+
+
+def test_birth_session_ignores_turn_hint() -> None:
+    """有出生项目时不消费 turn_target_desk（缺省仍坐出生桌）。"""
+
+    class _DummyLLM(LLMProvider):
+        async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+
+        async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+            yield  # pragma: no cover
+
+    ctx = _birth_ctx()
+    ctx.turn_target_desk.note_folder("other_proj")
+    tool = DelegateTool(
+        llm=_DummyLLM(),  # type: ignore[arg-type]
+        sink=EventSink(),
+        system_prompt="sys",
+        user_message="继续本项目",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx,
+        folder_id="birth_f",
+        captain_run_id="CEO",
+    )
+    assert tool.effective_default_target_folder_id() is None

@@ -125,6 +125,15 @@ class LocalWorkspace:
     def dirty(self) -> bool:
         return self._dirty
 
+    @property
+    def base_subpath(self) -> str:
+        """Project directory under the bound container root (empty = root is the project).
+
+        Same D1a base used by ``file_*`` / ``execute`` / structured ``git_run`` cwd —
+        never point git at the shared container root when this is non-empty.
+        """
+        return self._base
+
     def _channel_reveal_paths(self) -> list[str]:
         """Engine-relative materials → container-relative paths for the desktop."""
         materials = self.ai_list_materials

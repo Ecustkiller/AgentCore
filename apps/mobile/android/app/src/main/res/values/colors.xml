@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Native shell chrome: aligned with mobile-light --bg (pure white). -->
+    <!-- Native shell chrome: mobile-light bg (pure white). -->
     <color name="shellBackground">#FFFFFF</color>
     <color name="colorPrimary">#FFFFFF</color>
     <color name="colorPrimaryDark">#FFFFFF</color>

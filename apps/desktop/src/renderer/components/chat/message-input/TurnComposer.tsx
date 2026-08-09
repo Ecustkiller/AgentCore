@@ -529,37 +529,37 @@ export function TurnComposer({
           插队
         </button>
         <IconButton
-          size="md"
+          size="sm"
           tone="primary"
           onClick={() => void handleSend()}
           disabled={queueDisabled}
           aria-label={midFlightLabel}
           title={sendBlocked ? "离线时无法发送" : midFlightHint}
         >
-          <Send size={14} />
+          <Send size={16} />
         </IconButton>
       </div>
     ) : (
       <IconButton
-        size="md"
+        size="sm"
         tone="destructive"
         onClick={stopGeneration}
         aria-label="停止生成"
         title="停止生成"
       >
-        <Square size={14} />
+        <Square size={16} />
       </IconButton>
     )
   ) : (
     <IconButton
-      size="md"
+      size="sm"
       tone="primary"
       onClick={() => void handleSend()}
       disabled={!hasDraft || sendBlocked}
       aria-label={bg ? "派发到云端后台" : "发送"}
       title={sendBlocked ? "离线时无法发送" : undefined}
     >
-      {bg ? <CloudUpload size={14} /> : <Send size={14} />}
+      {bg ? <CloudUpload size={16} /> : <Send size={16} />}
     </IconButton>
   );
 

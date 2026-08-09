@@ -282,3 +282,113 @@ def test_build_run_plan_coding_brief_with_research_path_no_artifact_dir():
     assert d is not None
     assert d.artifact_dir == ""
     assert d.artifacts == ["src/ui/nav_system.ts"]
+
+
+_AI_DEV_DIR = "AgentCore/文档/AI开发"
+
+
+def test_resolve_derives_custom_docs_subtree_from_artifacts():
+    """写手声明 AI开发/ 产物时，核对目录跟 artifacts，不钉 research。"""
+    artifacts = [
+        f"{_AI_DEV_DIR}/00-导航与任务路由.md",
+        f"{_AI_DEV_DIR}/01-仓库地图.md",
+        f"{_AI_DEV_DIR}/04-开发约定与禁忌.md",
+    ]
+    d = Deliverable(form="files", artifacts=artifacts, name="AI 开发文档集")
+    assert (
+        resolve_artifact_dir(d, role="文档写手", task="根据调研笔记撰写 AI 开发文档")
+        == _AI_DEV_DIR
+    )
+
+
+def test_apply_overrides_mismatched_research_artifact_dir():
+    """显式/默认 artifact_dir=research 但 artifacts 在 AI开发/ → 纠正对齐。"""
+    artifacts = [
+        f"{_AI_DEV_DIR}/00-导航与任务路由.md",
+        f"{_AI_DEV_DIR}/03-架构与数据流.md",
+    ]
+    d = Deliverable(
+        form="files",
+        artifact_dir=RESEARCH_DIR,
+        artifacts=artifacts,
+        requires_files=True,
+        name="AI 开发文档集",
+    )
+    apply_artifact_dir_defaults(d, role="文档写手", task="写便于 AI 开发的文档")
+    assert d.artifact_dir == _AI_DEV_DIR
+    assert d.artifacts == artifacts
+
+
+def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
+    """回归：写手落 AI开发/ + 调研笔记落 research/ —— 不因写手误钉 research 冒假缺口。"""
+    from agentcore.runtime.runs.executor_shared import _delivery_gaps_from_warnings
+
+    writer_artifacts = [
+        f"{_AI_DEV_DIR}/00-导航与任务路由.md",
+        f"{_AI_DEV_DIR}/01-仓库地图.md",
+    ]
+    writer = Deliverable(
+        form="files",
+        artifact_dir=RESEARCH_DIR,  # 复现钉错
+        artifacts=writer_artifacts,
+        requires_files=True,
+        name="AI 开发文档集",
+    )
+    apply_artifact_dir_defaults(
+        writer, role="文档写手", task="根据笔记撰写 AI 开发文档集"
+    )
+    assert writer.artifact_dir == _AI_DEV_DIR
+
+    writer_verdict = check_contract(
+        "已写",
+        writer,
+        files_written=len(writer_artifacts),
+        workspace_paths=list(writer_artifacts),
+    )
+    assert writer_verdict.ok
+    assert not any("约定文档目录" in w for w in writer_verdict.warnings)
+    assert not any(
+        g.get("reason") == "path_hint"
+        for g in _delivery_gaps_from_warnings(list(writer_verdict.warnings), None)
+    )
+
+    note = Deliverable(
+        form="files",
+        artifacts=[f"{RESEARCH_DIR}/ai-dev-docs-文档侧笔记.md"],
+        name="文档侧调研笔记",
+    )
+    apply_artifact_dir_defaults(note, role="文档调研员", task="调研文档并落盘笔记")
+    assert note.artifact_dir == RESEARCH_DIR
+    note_verdict = check_contract(
+        "已写",
+        note,
+        files_written=1,
+        workspace_paths=[f"{RESEARCH_DIR}/ai-dev-docs-文档侧笔记.md"],
+    )
+    assert note_verdict.ok
+    assert not any("约定文档目录" in w for w in note_verdict.warnings)
+
+
+def test_build_run_plan_writer_custom_docs_dir_aligns_artifact_dir():
+    plan, errors = build_run_plan(
+        [
+            {
+                "role": "文档写手",
+                "task": "根据调研笔记撰写便于 AI 开发的文档",
+                "deliverable": {
+                    "form": "files",
+                    "name": "AI 开发文档集",
+                    "artifact_dir": RESEARCH_DIR,
+                    "artifacts": [
+                        f"{_AI_DEV_DIR}/00-导航与任务路由.md",
+                        f"{_AI_DEV_DIR}/01-仓库地图.md",
+                    ],
+                },
+            }
+        ]
+    )
+    assert errors == []
+    d = plan.nodes[0].deliverable
+    assert d is not None
+    assert d.artifact_dir == _AI_DEV_DIR
+    assert all(a.startswith(f"{_AI_DEV_DIR}/") for a in d.artifacts)

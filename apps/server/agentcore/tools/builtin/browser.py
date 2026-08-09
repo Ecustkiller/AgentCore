@@ -272,9 +272,25 @@ class _BrowserToolBase:
                 start,
                 code="user_in_control",
             )
-        # C1/C2: local backend → Local Bridge only; server → sandbox. Never mix (C4).
-        backend_loc = getattr(context.backend, "location", None) if context.backend else None
-        host_kind = "local" if backend_loc == "local" else "sandbox"
+        # C1/C2/C4: host_kind must match assembly gate (Bridge→local; else gVisor→sandbox).
+        from agentcore.tools.builtin import browser_host_kind_for
+
+        resolved = browser_host_kind_for(context.backend)
+        if resolved is not None:
+            host_kind = resolved
+        else:
+            backend_loc = (
+                getattr(context.backend, "location", None) if context.backend else None
+            )
+            if backend_loc == "local":
+                # 真·本地引擎：无 Bridge 且无 gVisor → 禁止假成功 / 禁 open_local。
+                return _error(
+                    "浏览器未装配（无本机 Bridge 且无云端隔离浏览器）；禁止假成功。",
+                    start,
+                    code="host_unavailable",
+                )
+            # server（或未知）：永不发明 local；工厂 / FakeRegistry 负责真实失败。
+            host_kind = "sandbox"
         request = BrowserSessionRequest(
             conversation_id=context.conversation_id,
             workspace_root=None,
@@ -540,9 +556,26 @@ class BrowserNavigateTool(_BrowserToolBase):
         if not url:
             return _error("缺少必填参数：url", start)
 
+        # M2 接管互斥：先于 host_kind / 相对路径改写（与基类一致；用户驾驶时不探 backend）。
+        if not context.conversation_id:
+            return _error("浏览器工具需要会话上下文（当前调用未绑定对话）。", start)
+        registry = self._registry_or_default()
+        want_sid = str(arguments.get("session_id") or "").strip() or None
+        if registry.is_taken_over(
+            context.conversation_id, session_id=want_sid, run_id=context.run_id or None
+        ):
+            return _error(
+                "用户正在接管浏览器，AI 浏览器工具暂不可用；请等待用户结束接管后再继续。",
+                start,
+                code="user_in_control",
+            )
+
         kind = classify_navigate_target(url)
-        backend_loc = getattr(context.backend, "location", None) if context.backend else None
-        is_local = backend_loc == "local"
+        from agentcore.tools.builtin import browser_host_kind_for
+
+        # Relative HTML only on real Local Bridge — not location=local sandbox fallback.
+        host_kind = browser_host_kind_for(context.backend)
+        allows_workspace_relative = host_kind == "local"
 
         if kind == "invalid":
             return _error(
@@ -551,10 +584,10 @@ class BrowserNavigateTool(_BrowserToolBase):
                 "不支持 file:// 等其它协议。",
                 start,
             )
-        if kind in ("relative", "workspace") and not is_local:
-            # 乙：Sandbox / 非 local —— 诚实失败，禁止假成功。
+        if kind in ("relative", "workspace") and not allows_workspace_relative:
+            # 乙：Sandbox（含过桥无 Bridge）—— 诚实失败，禁止假成功。
             return _error(RELATIVE_PATH_UNSUPPORTED_MSG, start)
-        if kind == "relative" and is_local:
+        if kind == "relative" and allows_workspace_relative:
             rewritten = rewrite_local_navigate_url(url, context.conversation_id or "")
             if not rewritten:
                 return _error(

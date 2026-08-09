@@ -3,6 +3,9 @@
 与成篇审计硬门（``research_report`` 独立审校）正交；与协议 ``ProjectedTurn`` 无关。
 由 :class:`~agentcore.runtime.runs.types.Deliverable` 的 ``code_audit_gate`` 盖戳触发，
 挂在 :func:`~agentcore.runtime.runs.contract.check_contract`。
+
+写盘通道不可用（``landing_failure_kind=channel_dead|write_failed``）时：缺/读不到
+配套 JSON 的**缺产物**失败不硬拒（归因走零写 soft tip）；已读到的 JSON 仍做字段语义校验。
 """
 
 from __future__ import annotations
@@ -96,6 +99,24 @@ def normalize_audit_verdict(value: str) -> str:
 def is_code_audit_structure_failure(message: str) -> bool:
     """True when ``message`` was stamped by this gate (structure-face classifier)."""
     return str(message or "").strip().startswith(STRUCTURE_FAILURE_PREFIX)
+
+
+# 缺产物 / 读不到（非字段语义）。写盘不可用时由 check_contract 降硬，勿冒充「格式未过」。
+_LANDING_ABSENCE_MARKERS = (
+    "缺少 audit JSON 产物",
+    "无法读取 audit JSON",
+    "需要读取 audit JSON 文件内容",
+    "未找到 *.audit.json 内容",
+)
+
+
+def is_code_audit_landing_absence_failure(message: str) -> bool:
+    """True when the structure-face message is about missing/unreadable audit JSON."""
+    text = str(message or "").strip()
+    if not text.startswith(STRUCTURE_FAILURE_PREFIX):
+        return False
+    body = text[len(STRUCTURE_FAILURE_PREFIX) :]
+    return any(m in body for m in _LANDING_ABSENCE_MARKERS)
 
 
 def _structure_fail(detail: str) -> str:
@@ -303,6 +324,7 @@ def _as_str(value: Any) -> str:
 __all__ = [
     "STRUCTURE_FAILURE_PREFIX",
     "code_audit_json_failures",
+    "is_code_audit_landing_absence_failure",
     "is_code_audit_structure_failure",
     "normalize_audit_evidence",
     "normalize_audit_severity",

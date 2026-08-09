@@ -14,6 +14,7 @@ from agentcore.runtime.runs.builder import build_added_nodes, build_run_plan
 from agentcore.runtime.runs.concurrency import (
     child_budget,
     current_budget,
+    reseed_nested_delegation_budget,
     reset_budget,
     resolve_max_parallel,
     set_budget,
@@ -78,4 +79,5 @@ __all__ = [
     "current_budget",
     "set_budget",
     "reset_budget",
+    "reseed_nested_delegation_budget",
 ]

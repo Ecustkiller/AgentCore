@@ -146,6 +146,8 @@ class GVisorSandbox:
         self._workspace_root = workspace_root
         self._runtime_root = _resolve_runtime_root(runtime_root)
         os.makedirs(self._runtime_root, exist_ok=True)
+        # Set by ``health_check`` on failure so boot probe can log a stable reason.
+        self._last_health_failure: tuple[str, str | None] | None = None
 
     def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
@@ -155,13 +157,20 @@ class GVisorSandbox:
             max_timeout_seconds=settings.gvisor_timeout_max_seconds,
         )
 
+    @property
+    def last_health_failure(self) -> tuple[str, str | None] | None:
+        """``(reason, detail)`` from the latest failed ``health_check``, else ``None``."""
+        return self._last_health_failure
+
     async def health_check(self) -> bool:
         """Smoke-run a minimal ``runsc run`` (not just ``--version``).
 
         Exercises global flags before ``run`` and the full bundle path so
         AppArmor / userns / flag-order faults fail the boot probe honestly.
         """
+        self._last_health_failure = None
         if not _IS_LINUX:
+            self._last_health_failure = ("not_linux", f"platform={sys.platform}")
             return False
 
         container_id = f"agentcore-health-{uuid.uuid4().hex[:12]}"
@@ -186,6 +195,7 @@ class GVisorSandbox:
             _, stderr = await proc.communicate()
             if proc.returncode != 0:
                 detail = stderr.decode("utf-8", errors="replace").strip()
+                self._last_health_failure = ("runsc_failed", detail[:200] or None)
                 logger.debug(
                     "sandbox.health_check_failed",
                     returncode=proc.returncode,
@@ -194,6 +204,7 @@ class GVisorSandbox:
                 return False
             return True
         except (FileNotFoundError, OSError) as exc:
+            self._last_health_failure = ("os_error", str(exc)[:200])
             logger.debug("sandbox.health_check_failed", error=str(exc)[:200])
             return False
         finally:

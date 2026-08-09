@@ -226,6 +226,12 @@ async def handle_tool_calls_round(
     if breaker.refresh_tool_defs or surface_changed:
         tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     gate_before = controller.team_gate_fired
+    from agentcore.runtime.runs.cutoff import worker_keeps_notes_in_wind_down
+
+    keep_notes = worker_keeps_notes_in_wind_down(
+        available=set(tools.names),
+        allowed=list(allowed_tool_names) if allowed_tool_names is not None else None,
+    )
     directive = govern_after_tools(
         outcome,
         controller,
@@ -236,6 +242,7 @@ async def handle_tool_calls_round(
         role=role,
         disabled_tools=disabled_tools,
         investigation_tools=controller.investigation_tool_names,
+        keep_notes=keep_notes,
     )
     # Hard team-gate may have stripped investigation tools — refresh defs.
     if controller.team_gate_fired and not gate_before:

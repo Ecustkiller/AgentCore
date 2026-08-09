@@ -18,6 +18,8 @@ from agentcore.tools.builtin.web.search import (
 # build_run_plan still enforces the global MAX_DELEGATION_TASKS on the expanded result as the real
 # net. Kept modest because a playbook is a STANDARD shape, not a place to launch a huge swarm.
 MAX_PLAYBOOK_FANOUT = 6
+# code_audit only: wider top-level module fan-out. Do not raise MAX_PLAYBOOK_FANOUT for this.
+CODE_AUDIT_FANOUT = 8
 
 PlaybookBuilder = Callable[[dict[str, Any]], "tuple[list[dict[str, Any]], list[str]]"]
 

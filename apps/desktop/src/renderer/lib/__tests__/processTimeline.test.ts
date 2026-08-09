@@ -1,4 +1,6 @@
 import {
+  REWORK_LABEL_DONE,
+  REWORK_LABEL_IN_PROGRESS,
   type TimelineNode,
   appendStageCardStep,
   appendTeamPreviewStep,
@@ -8,6 +10,7 @@ import {
   isWaitIdleReasoning,
   omitCoordinationIdleSteps,
   promoteScalarContentIntoProcess,
+  reworkChipLabel,
 } from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
@@ -336,5 +339,19 @@ describe("promoteScalarContentIntoProcess", () => {
       reasoning("想"),
       content("导语"),
     ]);
+  });
+});
+
+describe("reworkChipLabel", () => {
+  it("shows in-progress while streaming with no content after rework", () => {
+    expect(reworkChipLabel(true, false)).toBe(REWORK_LABEL_IN_PROGRESS);
+  });
+
+  it("shows done when content already follows the rework", () => {
+    expect(reworkChipLabel(true, true)).toBe(REWORK_LABEL_DONE);
+  });
+
+  it("shows done when settled even with empty body after rework", () => {
+    expect(reworkChipLabel(false, false)).toBe(REWORK_LABEL_DONE);
   });
 });

@@ -135,12 +135,26 @@ def build_escalation_channel(
             if session is not None and session.active:
                 from agentcore.workspace.write_claims import ownership_escalation_hints
 
+                desk_for_hints: str | None = None
+                if session.live_plan is not None:
+                    node = session.live_plan.by_id(run_id) if hasattr(session.live_plan, "by_id") else None
+                    if node is not None:
+                        tf = getattr(node, "target_folder_id", None)
+                        desk_for_hints = (
+                            str(tf or getattr(env, "session_folder_id", None) or "").strip()
+                            or None
+                        )
+                if desk_for_hints is None:
+                    desk_for_hints = (
+                        str(getattr(env, "session_folder_id", None) or "").strip() or None
+                    )
                 hints = ownership_escalation_hints(
                     escalator_run_id=run_id,
                     question=question,
                     execution_id=env.base_tool_context.execution_id,
                     write_ancestors=env.ancestors_by_id.get(run_id, frozenset()),
                     write_coordinator=env.write_coordinator,
+                    desk_id=desk_for_hints,
                 )
                 session.register_arbitration(
                     run_id,

@@ -925,7 +925,7 @@ describe("BrowserPanel", () => {
       pages: [
         {
           id: "p-ws",
-          url: "workspace://conv-1/site/index.html",
+          url: "workspace://conv.conv-1/site/index.html",
           title: "index.html",
           conversationId: "conv-1",
         },
@@ -960,7 +960,7 @@ describe("BrowserPanel", () => {
       pages: [
         {
           id: "p-other",
-          url: "workspace://other-cid/site/index.html",
+          url: "workspace://conv.other-cid/site/index.html",
           title: "other",
           conversationId: "conv-1",
         },

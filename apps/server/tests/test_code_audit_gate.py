@@ -280,3 +280,69 @@ def test_code_audit_json_failures_missing_file():
     )
     assert any("缺少" in f for f in fails)
     assert all(f.startswith("结构闸：") for f in fails)
+    from agentcore.runtime.runs.code_audit_gate import (
+        is_code_audit_landing_absence_failure,
+    )
+
+    assert all(is_code_audit_landing_absence_failure(f) for f in fails)
+
+
+def test_check_contract_code_audit_skips_absence_hard_fail_when_channel_dead():
+    """写盘通道 dead：缺 audit JSON 不结构硬拒，归因进 soft tip。"""
+    from agentcore.runtime.runs.contract import check_contract
+    from agentcore.runtime.runs.types import Deliverable
+
+    json_path = "AgentCore/文档/reviews/x.audit.json"
+    md_path = "AgentCore/文档/reviews/x.md"
+    d = Deliverable(
+        form="files",
+        artifacts=[md_path, json_path],
+        required_sections=[],
+        strict=True,
+        code_audit_gate=True,
+    )
+    verdict = check_contract(
+        "简报已写但通道挂了",
+        d,
+        files_written=0,
+        workspace_paths=[],
+        artifact_contents={},
+        landing_failure_kind="channel_dead",
+    )
+    assert verdict.ok
+    assert not any("缺少 audit JSON" in f for f in verdict.failures)
+    assert any("写盘通道不可用" in w for w in verdict.warnings)
+    assert not any("粘在回复正文" in w for w in verdict.warnings)
+
+
+def test_check_contract_code_audit_still_validates_loaded_json_when_channel_dead():
+    """通道 dead 但 JSON 已读到：字段语义仍硬拒。"""
+    from agentcore.runtime.runs.contract import check_contract, contract_run_failure_kind
+    from agentcore.runtime.runs.types import Deliverable
+
+    md = "## 〇、人审速览\n## 一、属实缺陷\n验证方式\n定案\n## 二、已撤销\n## 三、观察与工程债\n"
+    json_path = "AgentCore/文档/reviews/x.audit.json"
+    md_path = "AgentCore/文档/reviews/x.md"
+    bad_json = (
+        '{"findings":[{"severity":"中","verification":"静态推断·未读全",'
+        '"verdict":"属实","evidence":"a:1","summary":"x"}]}'
+    )
+    d = Deliverable(
+        form="files",
+        artifacts=[md_path, json_path],
+        required_sections=["〇、人审速览", "一、属实缺陷", "二、已撤销", "三、观察与工程债"],
+        must_contain=["验证方式", "定案"],
+        strict=True,
+        code_audit_gate=True,
+    )
+    verdict = check_contract(
+        "简报",
+        d,
+        files_written=2,
+        workspace_paths=[md_path, json_path],
+        artifact_contents={md_path: md, json_path: bad_json},
+        landing_failure_kind="channel_dead",
+    )
+    assert not verdict.ok
+    assert any("不得标中/高" in f for f in verdict.failures)
+    assert contract_run_failure_kind(verdict) == "format"

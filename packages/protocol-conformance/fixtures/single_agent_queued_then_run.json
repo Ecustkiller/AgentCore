@@ -1,6 +1,6 @@
 {
   "name": "single_agent_queued_then_run",
-  "description": "发送即有流：turn_queued → 开跑 → 同连接续流完整单聊（FIFO 排队态）",
+  "description": "发送即有流：turn_queued → turn_queue_started → message_start…（FIFO 闭环）",
   "events": [
     {
       "type": "turn_queued",
@@ -13,40 +13,49 @@
       "timestamp": "2026-01-01T00:00:00.001Z"
     },
     {
-      "type": "message_start",
+      "type": "turn_queue_started",
       "payload": {
-        "message_id": "m1",
-        "conversation_id": "conv_demo"
+        "queue_id": "q1",
+        "conversation_id": "conv_demo",
+        "remaining_depth": 0
       },
       "timestamp": "2026-01-01T00:00:00.002Z"
     },
     {
-      "type": "reasoning_delta",
+      "type": "message_start",
       "payload": {
-        "delta": "先想一下。"
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
       },
       "timestamp": "2026-01-01T00:00:00.003Z"
     },
     {
       "type": "reasoning_delta",
       "payload": {
-        "delta": "好的。"
+        "delta": "先想一下。"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
-      "type": "content_delta",
+      "type": "reasoning_delta",
       "payload": {
-        "delta": "你好"
+        "delta": "好的。"
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
       "type": "content_delta",
       "payload": {
-        "delta": "，世界！"
+        "delta": "你好"
       },
       "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "，世界！"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "message_end",
@@ -69,7 +78,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     }
   ],
   "projected": {

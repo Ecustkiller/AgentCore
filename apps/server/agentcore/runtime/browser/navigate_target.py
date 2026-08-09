@@ -1,7 +1,7 @@
 """Classify / rewrite ``browser_navigate`` URL targets.
 
-甲：桌面 Local Bridge —— 本会话工作区相对路径 → ``workspace://{conv}/…``
-（与用户「完整预览」同源）；公网 http(s) / 已构 workspace:// 原样通过。
+甲：桌面 Local Bridge —— 本会话工作区相对路径 → ``workspace://conv.{conv}/…``
+（desk host；与用户「完整预览」同源）；公网 http(s) / 已构 workspace:// 原样通过。
 乙：Sandbox / 非 local —— 相对路径与 workspace:// 诚实失败（见 browser 工具），禁止假成功。
 不放开任意 ``file://``。
 """
@@ -90,7 +90,7 @@ def classify_navigate_target(url: str) -> NavigateKind:
 
 
 def build_workspace_browser_url(conversation_id: str, path: str) -> str | None:
-    """Build ``workspace://{conv}/{encoded_path}`` after path normalize."""
+    """Build ``workspace://conv.{conv}/{encoded_path}`` after path normalize."""
     conv = (conversation_id or "").strip().lower()
     if not conv:
         return None
@@ -98,11 +98,11 @@ def build_workspace_browser_url(conversation_id: str, path: str) -> str | None:
     if not rel:
         return None
     encoded = "/".join(quote(seg, safe="") for seg in rel.split("/"))
-    return f"{WORKSPACE_SCHEME}://{conv}/{encoded}"
+    return f"{WORKSPACE_SCHEME}://conv.{conv}/{encoded}"
 
 
 def rewrite_local_navigate_url(url: str, conversation_id: str) -> str | None:
-    """Local Bridge：http(s)/workspace 透传；相对路径改写为 workspace://。"""
+    """Local Bridge：http(s)/workspace 透传；相对路径改写为 workspace:// desk host。"""
     kind = classify_navigate_target(url)
     if kind == "http" or kind == "workspace":
         return url.strip()

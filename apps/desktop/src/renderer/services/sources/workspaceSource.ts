@@ -29,6 +29,7 @@ import type {
 } from "@/services/workspaceHttp";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import {
+  openCloudWorkspaceInBrowser,
   wsCreateDir,
   wsDeleteFile,
   wsDownloadFile,
@@ -43,13 +44,76 @@ import {
 } from "@/services/workspaces";
 import { createLocalRootSource } from "./localRootSource";
 
-/** Map the server preview shape into the unified result (server has no image kind). */
+/** Map the cloud preview wire shape into the unified {@link FilePreviewResult}. */
 function adaptPreview(p: WorkspacePreview): FilePreviewResult {
   if (p.kind === "text") {
     return { kind: "text", text: p.text, truncated: p.truncated };
   }
+  if (p.kind === "image") {
+    return {
+      kind: "image",
+      dataUrl: p.dataUrl,
+      mime: p.mime,
+      size: p.size,
+    };
+  }
   if (p.kind === "too-large") return { kind: "too-large" };
-  return { kind: "binary" };
+  return {
+    kind: "binary",
+    mime: p.mime,
+    size: p.size,
+    reason: p.reason,
+  };
+}
+
+/**
+ * Hang HTML full-effect exits on a cloud {@link FileSource}.
+ *
+ * - `openInAppPreview` 跟落地 desk：传当前源的 `folder:` / `conv:` wsId（缺省
+ *   `conv:{conversationId}`）；hub `folder:` 在有能力位时同样挂上。
+ * - `openInBrowser` via conversation snapshot, or ws-id snapshot for hub
+ *   `folder:` / `conv:` (shared spaces refuse snapshots in v1).
+ */
+function withCloudHtmlEntries(
+  source: FileSource,
+  opts: { conversationId?: string; wsId?: string },
+): FileSource {
+  const withExtras: FileSource = { ...source };
+  const conversationId = opts.conversationId;
+  const wsId = opts.wsId;
+
+  if (conversationId) {
+    if (window.fsApi?.previewArchive) {
+      withExtras.openInBrowser = (path) =>
+        openWorkspaceInBrowser(conversationId, path);
+    }
+  } else if (
+    wsId &&
+    !wsId.startsWith("shared:") &&
+    window.fsApi?.previewArchive
+  ) {
+    withExtras.openInBrowser = (path) =>
+      openCloudWorkspaceInBrowser(wsId, path);
+  }
+
+  // 完整预览跟桌：落地 wsId = 显式 desk，否则会话 `conv:{cid}`；shared 无 desk 预览。
+  const landingWsId =
+    wsId ?? (conversationId ? `conv:${conversationId}` : undefined);
+  if (hasInAppPreview() && landingWsId && !landingWsId.startsWith("shared:")) {
+    // hub `folder:` 无会话时用 folder id 作页/分区作用域；desk 仍走 workspaceId。
+    const cid =
+      conversationId ??
+      (landingWsId.startsWith("conv:")
+        ? landingWsId.slice("conv:".length)
+        : landingWsId.startsWith("folder:")
+          ? landingWsId.slice("folder:".length)
+          : undefined);
+    if (cid) {
+      withExtras.openInAppPreview = (path) =>
+        openWorkspaceHtmlInBrowser(cid, path, landingWsId);
+    }
+  }
+  return withExtras;
 }
 
 /** The cloud workspace caps — shared by the conversation- and ws-id-keyed sources. */
@@ -214,20 +278,11 @@ export function createWorkspaceSource(
       downloadWorkspaceFile(conversationId, path, filename),
     exportMdToDocx: (path) => exportWorkspaceMdToDocx(conversationId, path),
   });
-  // 系统集成入口按「桌面专属能力是否存在」逐个门控（web stub 均不提供 → web 端不挂，
-  // HTML 面板内为源码视图，web 的完整效果出口退化为下载）。二者相互独立：
-  // - 「在浏览器打开」依赖 previewArchive（快照解压 + 系统浏览器）；
-  // - 应用内「完整预览」→ 右坞 BrowserPanel + workspace://（browserApi.openWorkspaceHtml）。
-  const withExtras: FileSource = { ...source };
-  if (window.fsApi?.previewArchive) {
-    withExtras.openInBrowser = (path) =>
-      openWorkspaceInBrowser(conversationId, path);
-  }
-  if (hasInAppPreview()) {
-    withExtras.openInAppPreview = (path) =>
-      openWorkspaceHtmlInBrowser(conversationId, path);
-  }
-  return withExtras;
+  // 桌面专属 HTML 完整效果出口（web stub 不提供 → 面板源码 + 下载兜底）。
+  return withCloudHtmlEntries(source, {
+    conversationId,
+    wsId: `conv:${conversationId}`,
+  });
 }
 
 /**
@@ -243,7 +298,7 @@ export function createCloudWorkspaceSource(
   opts?: { readonly?: boolean },
 ): FileSource {
   const readonly = !!opts?.readonly;
-  return makeCloudSource(
+  const source = makeCloudSource(
     wsId,
     label,
     {
@@ -261,6 +316,14 @@ export function createCloudWorkspaceSource(
     },
     readonly ? CLOUD_READONLY_CAPS : CLOUD_CAPS,
   );
+  // Hub cloud sources: `conv:` / `folder:` → 完整预览跟桌；`shared:` → 无快照/预览。
+  if (wsId.startsWith("conv:")) {
+    return withCloudHtmlEntries(source, {
+      conversationId: wsId.slice("conv:".length),
+      wsId,
+    });
+  }
+  return withCloudHtmlEntries(source, { wsId });
 }
 
 /**

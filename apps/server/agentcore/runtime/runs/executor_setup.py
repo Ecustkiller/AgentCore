@@ -129,6 +129,9 @@ async def prepare_agent_node(
         execution_id=env.execution_id,
         write_coordinator=env.write_coordinator,
         write_ancestors=env.ancestors_by_id.get(spec.run_id, frozenset()),
+        ownership_desk_id=(
+            str(spec.target_folder_id or env.session_folder_id or "").strip() or None
+        ),
         # 升级实时可见: give this worker's escalate tool a live channel back to the
         # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
         # hands it the (question, assumption, blocking) triple. run_id/agent_id are
@@ -217,6 +220,9 @@ async def prepare_agent_node(
         parent_desk = spec.target_folder_id or env.session_folder_id
         if parent_desk:
             child_delegate._default_target_folder_id = parent_desk  # type: ignore[attr-defined]
+        # 父审计员再嵌套：手写 tasks 继承 code_audit 收工纪律（不重跑整本 playbook）。
+        if deliverable is not None and getattr(deliverable, "code_audit_gate", False):
+            child_delegate._inherit_code_audit_discipline = True  # type: ignore[attr-defined]
         worker_tools = _registry_with(worker_tools, *lead_subteam.tools)
         # allowed_tools stays None — "offer all" already includes lead_subteam
         # tools now living in worker_tools.

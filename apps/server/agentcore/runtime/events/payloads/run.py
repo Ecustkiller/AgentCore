@@ -218,6 +218,9 @@ class RunEscalationPayload(WirePayload):
     JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
     timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
     reload — the event base is now level with ``escalation_required``.
+
+    ``source`` distinguishes early-stop / thrashing backstops (``validation_thrash`` /
+    ``ceiling_backstop``) from genuine mid-work escalate (omit / absent).
     """
 
     escalation_id: str
@@ -227,6 +230,7 @@ class RunEscalationPayload(WirePayload):
     assumption: str
     blocking: bool
     kind: EscalationKind | None = absent()
+    source: str | None = absent()
 
 
 class RunEscalationGatePayload(WirePayload):
@@ -352,12 +356,15 @@ class DeliveryArtifact(WirePayload):
     ``status=accepted`` → counts toward ``delivered_files`` / CEO「已交付」;
     ``rejected`` carries ``reason`` (e.g. ``citations_unverified``) and optional
     ``detail`` for the file checklist. Draft is out of scope for block 1.
+    ``workspace_id``: landing desk when the plan node set ``target_folder_id``
+    (``folder:{id}``); omit → client falls back to the session birth desk.
     """
 
     path: str
     status: Literal["accepted", "rejected"]
     reason: str | None = absent()
     detail: str | None = absent()
+    workspace_id: str | None = absent()
 
 
 class DeliveryStatusPayload(WirePayload):
@@ -416,6 +423,19 @@ class TurnQueuedPayload(WirePayload):
     queue_depth: int
     conversation_id: str
     degraded_from: Literal["steer"] | None = absent()
+
+
+class TurnQueueStartedPayload(WirePayload):
+    """FIFO dequeue → turn starting (D9 · 发送即有流). EPHEMERAL — clear queue-id light UI.
+
+    Emitted as the **first frame** of the drained turn's EventSink (after ``pop_next``,
+    before ``stream_chat`` / ``message_start``). ``remaining_depth`` is the queue length
+    after this item left the FIFO.
+    """
+
+    queue_id: str
+    conversation_id: str
+    remaining_depth: int
 
 
 class TurnQueueCancelledPayload(WirePayload):

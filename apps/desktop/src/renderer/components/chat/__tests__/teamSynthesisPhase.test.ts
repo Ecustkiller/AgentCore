@@ -129,6 +129,17 @@ describe("teamSynthesisPhase", () => {
     expect(isTeamSynthesizing(e, { turnTerminal: true })).toBe(false);
   });
 
+  it("not synthesizing when execution is paused (workers already done)", () => {
+    const e = exec({
+      status: "paused",
+      runs: [
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "completed" }),
+      ],
+    });
+    expect(isTeamSynthesizing(e)).toBe(false);
+  });
+
   it("captainSynthesisPreviewText prefers draft body over headline", () => {
     expect(
       captainSynthesisPreviewText({

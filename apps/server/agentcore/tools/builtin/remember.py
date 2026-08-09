@@ -4,9 +4,10 @@ The memory system splits how durable knowledge is written (Agent记忆与知识�
 入口① / §1.5 显式记住例外):
 
 - **explicit user directive → user rule** (this tool): when the user clearly says「记住…」「以后
-  都要…」「别再…」, the CEO records it as a ``role='rule', ai_maintained=false`` document — the
-  user OWNS it, so the offline consolidation never rewrites it, and it injects with authoritative
-  wording ahead of AI memory (§二 两档措辞). Effect is immediate: next turn's ``<rules>``.
+  都要…」「别再…」「改为…」「忘掉…」, the CEO records / mutates a ``role='rule',
+  ai_maintained=false`` document — the user OWNS it, so the offline consolidation never rewrites
+  it, and it injects with authoritative wording ahead of AI memory (§二 两档措辞). Effect is
+  immediate: next turn's ``<rules>``.
 - **inferred preference → offline consolidation** (NOT this tool): preferences merely observed in
   conversation stay with the two-layer consolidation pass, which writes ``ai_maintained=true``
   memory. The tool description steers the model to that split.
@@ -25,7 +26,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import DocumentRepository
-from agentcore.memory.rules_injection import append_user_rule
+from agentcore.memory.rules_injection import UserRuleMutationResult, mutate_user_rule
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_CEO_ONLY,
@@ -39,7 +40,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class RememberTool:
-    """CEO-only: record an explicit user directive as a user rule (immediate effect)."""
+    """CEO-only: record / mutate an explicit user directive as a user rule (immediate effect)."""
 
     registration = ToolRegistration(
         surface=ToolSurface.CEO_ORCHESTRATION,
@@ -57,18 +58,38 @@ class RememberTool:
             name="remember",
             description=(
                 "把用户明确下达的指令记为「用户规则」——长期生效、注入后续每一轮对话，"
-                "权威性高于 AI 记忆。仅当用户清楚地说「记住…」「以后都要…」「以后别…」等"
-                "明确指令时使用；普通对话里推测出来的偏好不要用本工具，交给会话结束后的离线巩固。"
-                "写入后立即生效，下一轮对话即注入。"
+                "权威性高于 AI 记忆。仅当用户清楚地说「记住…」「以后都要…」「以后别…」"
+                "「改为…」「忘掉…」「现在有哪些规则」等明确指令时使用；普通对话里推测出来的偏好"
+                "不要用本工具，交给会话结束后的离线巩固。"
+                "action：add 追加（默认）；replace 按 replaces 归一化匹配删旧再写新"
+                "（旧条不存在则只追加，且须诚实说明）；"
+                "forget 删除；list 列出当前作用域规则（不写盘）。"
+                "写入/删除后立即生效，下一轮对话即注入。"
                 "禁止把项目调研简报 / 技术栈盘点 / 探索幕产出写成规则——"
                 "那是项目画像，须用 update_project_profile。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["add", "replace", "forget", "list"],
+                        "description": (
+                            "add=追加（默认）；replace=替换旧条；forget=删除；list=列出当前规则。"
+                        ),
+                    },
                     "content": {
                         "type": "string",
-                        "description": "要记住的规则或事实（一句陈述句，用用户的语言）。",
+                        "description": (
+                            "规则正文（一句陈述句，用用户的语言）。"
+                            "add/replace 为新规则；forget 为要删的旧规则；list 不需要。"
+                        ),
+                    },
+                    "replaces": {
+                        "type": "string",
+                        "description": (
+                            "replace 时要去掉的旧规则原文（归一化匹配；可删掉所有同 key 条）。"
+                        ),
                     },
                     "scope": {
                         "type": "string",
@@ -78,24 +99,36 @@ class RememberTool:
                         ),
                     },
                 },
-                "required": ["content"],
+                "required": [],
             },
             category=ToolCategory.ORCHESTRATION,
             approval=ToolApproval.NEVER,
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        content = str(arguments.get("content") or "").strip()
+        action = str(arguments.get("action") or "add").strip().lower() or "add"
+        content_raw = arguments.get("content")
+        content = str(content_raw).strip() if content_raw is not None else ""
+        replaces_raw = arguments.get("replaces")
+        replaces = str(replaces_raw).strip() if replaces_raw is not None else None
         scope_token = str(arguments.get("scope") or "global").strip().lower()
-        if not content:
+        # project scope only when the conversation is actually in a project; else global.
+        folder_id = self.folder_id if scope_token == "project" and self.folder_id else None
+
+        if action != "list" and not content:
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="缺少 content。",
                 error="缺少 content。",
             )
-        # project scope only when the conversation is actually in a project; else global.
-        folder_id = self.folder_id if scope_token == "project" and self.folder_id else None
+        if action == "replace" and not (replaces or "").strip():
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="replace 需要 replaces（要替换掉的旧规则）。",
+                error="replace 需要 replaces。",
+            )
 
         try:
             from agentcore.account.credentials import (
@@ -105,16 +138,39 @@ class RememberTool:
 
             creds = get_account_credentials()
             if creds is not None:
-                changed = await cloud_remember_rule(
-                    creds, content=content, folder_id=folder_id
+                payload = await cloud_remember_rule(
+                    creds,
+                    content=content or None,
+                    folder_id=folder_id,
+                    action=action,
+                    replaces=replaces,
                 )
+                result = UserRuleMutationResult(
+                    action=str(payload.get("action") or action),
+                    changed=bool(payload.get("changed")),
+                    message=str(payload.get("message") or ""),
+                    markdown=str(payload.get("rules_markdown") or "")
+                    if action == "list"
+                    else "",
+                    content=content or None,
+                )
+                if not result.message:
+                    result = UserRuleMutationResult(
+                        action=result.action,
+                        changed=result.changed,
+                        message=_fallback_cloud_message(result),
+                        markdown=result.markdown,
+                        content=result.content,
+                    )
             else:
                 async with async_session_factory() as session:
-                    changed = await append_user_rule(
+                    result = await mutate_user_rule(
                         DocumentRepository(session),
                         context.user_id,
                         folder_id=folder_id,
-                        content=content,
+                        action=action,
+                        content=content or None,
+                        replaces=replaces,
                     )
         except Exception as e:  # noqa: BLE001 - a tool failure must not crash the turn
             logger.warning("memory.remember_failed", user_id=context.user_id, error=str(e))
@@ -125,25 +181,51 @@ class RememberTool:
                 error=str(e),
             )
 
-        if not changed:
+        if result.message.startswith("不支持的 action") or result.message.startswith(
+            "缺少 content"
+        ) or result.message.startswith("replace 需要"):
             return ToolResult(
                 tool_call_id="",
-                success=True,
-                output="这条规则已经记过了（未重复写入）。",
-                display={"remembered": False, "content": content, "kind": "user_rule"},
+                success=False,
+                output=result.message,
+                error=result.message,
             )
 
-        logger.info(
-            "memory.remember_written",
-            user_id=context.user_id,
-            scope="project" if folder_id else "global",
-        )
+        if result.changed:
+            logger.info(
+                "memory.remember_written",
+                user_id=context.user_id,
+                scope="project" if folder_id else "global",
+                action=result.action,
+            )
+
+        display: dict[str, Any] = {
+            "remembered": result.changed and result.action == "add",
+            "changed": result.changed,
+            "action": result.action,
+            "content": content or None,
+            "kind": "user_rule",
+        }
+        if result.removed:
+            display["removed"] = list(result.removed)
+        if result.action == "list":
+            display["rules_markdown"] = result.markdown
+
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已记为规则：{content}",
-            display={"remembered": True, "content": content, "kind": "user_rule"},
+            output=result.message,
+            display=display,
         )
+
+
+def _fallback_cloud_message(result: UserRuleMutationResult) -> str:
+    if result.action == "list":
+        body = (result.markdown or "").strip()
+        return f"当前用户规则：\n{body}" if body else "当前暂无用户规则。"
+    if result.changed:
+        return f"已更新用户规则（action={result.action}）。"
+    return "用户规则未变更。"
 
 
 def build_remember_tool(*, folder_id: str | None = None) -> RememberTool:

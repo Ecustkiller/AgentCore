@@ -45,6 +45,9 @@ class _Sink:
     def streamed_content(self) -> str:
         return self._content
 
+    def interrupt_salvage_content(self) -> str:
+        return self._content
+
 
 # --- _has_open_durable_pause ---
 

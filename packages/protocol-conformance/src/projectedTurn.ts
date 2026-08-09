@@ -151,6 +151,11 @@ export interface RunEscalation {
   arbitrated_by?: "user" | "ceo";
   /** 仅 arbitrated_by=ceo：是否经 ask_user 转交用户。 */
   via_user?: boolean;
+  /**
+   * 早停 / 打转收口标记（`validation_thrash` / `ceiling_backstop`）。
+   * 缺省 = 真·边干边上报。旧向量无此字段。
+   */
+  source?: string;
 }
 
 /** 幕类型 = 能力档取用键（首批 multi_agent / debate）。 */

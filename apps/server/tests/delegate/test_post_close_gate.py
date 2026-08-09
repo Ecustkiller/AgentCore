@@ -159,6 +159,9 @@ def test_same_graph_replan_gap_fill_unchanged():
         _topology_lock = False
         _folder_id = "test_birth"
 
+        def effective_default_target_folder_id(self) -> str | None:
+            return None
+
     plan = RunPlan(
         nodes=[
             RunSpec(run_id="ok", role="A", task="done"),

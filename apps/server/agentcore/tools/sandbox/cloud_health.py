@@ -62,7 +62,18 @@ async def probe_cloud_sandbox_at_startup() -> None:
         else:
             ok = bool(await health_check())
             if not ok:
-                reason = "unhealthy"
+                failure = getattr(sandbox, "last_health_failure", None)
+                if (
+                    isinstance(failure, tuple)
+                    and len(failure) >= 1
+                    and isinstance(failure[0], str)
+                    and failure[0]
+                ):
+                    reason = failure[0]
+                    if len(failure) > 1 and failure[1]:
+                        detail = str(failure[1])[:200]
+                else:
+                    reason = "unhealthy"
     except Exception as exc:  # noqa: BLE001 — probe must never break startup
         ok = False
         reason = type(exc).__name__
@@ -77,5 +88,5 @@ async def probe_cloud_sandbox_at_startup() -> None:
         "sandbox.cloud_health_failed",
         reason=reason,
         detail=detail or None,
-        hint="云端 code_execute/test_run 将不装配，直到沙箱可用",
+        hint="云端 code_execute/test_run/browser_* 将不装配，直到沙箱可用",
     )

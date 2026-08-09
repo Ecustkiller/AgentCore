@@ -31,7 +31,9 @@ Multi-Agent First：组合优于堆叠；单 Agent = 无成员的 Team（统一�
 
 ### `escalate`
 
-worker 唯一向上通道。`blocking=false`（默认）= 报后按假设续跑；`blocking=true` = 挂起求决（默认无限期等 +「按假设继续」按钮）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`。单 worker 永不走 resolve。
+worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、报后按假设续跑、主管收尾纠偏；`blocking=true` = 猜错作废 / 用户要不确定就问 / 只有上级能定 → 挂起求决（须写 assumption；默认无限期等 +「按假设继续」按钮）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`。单 worker 永不走 resolve。快跑还是停下由 **worker 按题自选** `blocking`（省着用、该停别装非阻塞），不设用户总开关。
+
+前端分卡：真·非阻塞 escalate →「边干边上报」+「暂定假设」；引擎早停 / 硬顶打转（wire `source=validation_thrash|ceiling_backstop`）→「卡住早停」，**不**冒充边干边上报或「已按假设继续」。真挂起 →「请你拍板」。
 
 | kind | 语义 |
 |---|---|
@@ -61,7 +63,7 @@ CEO 唯一裁决；置信度低才 `ask_user`。资源冲突靠 DAG。
 
 ### 交接式写权（C3）
 
-协调会话内一本路径账本（`WriteCoordinator`）：
+协调会话内一本路径账本（`WriteCoordinator`）；内部键 = **桌 × 相对路径**（`desk_id = target_folder_id or 会话出生 desk`，跨桌同 `rel_path` 不互拦；用户可见冲突仍点名裸路径）。跨项目换桌写盘见 [双模式工作区 · 跨项目](/docs/02-架构/双模式工作区.md)。
 
 | 阶段 | 行为 |
 |---|---|
@@ -72,6 +74,8 @@ CEO 唯一裁决；置信度低才 `ask_user`。资源冲突靠 DAG。
 | **显式移交** | `resolve_escalation(transfer_ownership=true)`；或用户写权卡「移交写权 / 保持原主」。**仅锁主仍在跑**时写权冲突直达用户；已完成占位不走用户移交卡（走同座续派 / declare）。 |
 
 写权冲突 escalate：**锁主进行中**才直达用户（与 `browser_login` 同属用户直达例外），卡上结构化动作真正转锁——自然语言「移交」 alone 不会改账本。锁主已完成却仍撞账本 → 协调活跃时改走主管裁决，提示同座续派，不弹「移交写权」。
+
+**编排纪律（✅ 提示词，非软闸）**：无 `depends_on` 的并行 sibling 勿共写同一目标文件——各写私有产出或串行 / 指定整合者。已声明同 `artifacts` 交叉由 `sibling_artifact` 硬拒；**不做**「同 artifacts 软提示」、**不**扫 task 长文猜同 path、**不**改为写成功即 release。→ CEO `【并行写盘】` · skill「并行写盘·同路径纪律」· captain 嵌套扇出写盘句
 
 ### 验收与座位（质量两档）
 

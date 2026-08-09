@@ -141,7 +141,7 @@ export async function readWorkspaceFile(
   const res = await authedFetch(
     `${filesBase(conversationId)}/${encodePath(path)}`,
   );
-  return decodePreviewResponse(res);
+  return decodePreviewResponse(res, { path });
 }
 
 // --- Edit (源无关编辑契约的云端实现: full text + mtime CAS) ---

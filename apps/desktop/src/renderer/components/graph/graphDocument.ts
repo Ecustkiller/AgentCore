@@ -28,6 +28,20 @@ export function graphStructureKey(
     .join("|");
 }
 
+/**
+ * GraphView parent-tree epoch: topology + act list + execution lifecycle.
+ * Streaming deltas (output length / process chrome) must NOT change this —
+ * Live faces subscribe via per-run signatures in graphLive.
+ */
+export function graphViewExecutionEpoch(
+  execution: Execution | null | undefined,
+): string {
+  if (!execution) return "";
+  const struct = graphStructureKey(execution.runs);
+  const actsKey = execution.acts?.map((a) => a.actId).join(",") ?? "";
+  return `${struct}::acts=${actsKey}::status=${execution.status}`;
+}
+
 /** Structure fingerprint for RF Document shells (setNodes/setEdges gate). */
 export function graphDocumentFingerprint(opts: {
   execution: Execution;

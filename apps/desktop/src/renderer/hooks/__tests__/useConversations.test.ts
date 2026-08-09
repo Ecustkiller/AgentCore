@@ -99,6 +99,12 @@ describe("conversation list cache helpers", () => {
       bumpConversationCache("missing");
       expect(getConversations().map((c) => c.id)).toEqual(["a"]);
     });
+
+    it("does not refresh lastMessagePreview (turn-end sync owns that)", () => {
+      seed([{ ...mk("a"), lastMessagePreview: "旧摘要" }]);
+      bumpConversationCache("a");
+      expect(getConversations()[0].lastMessagePreview).toBe("旧摘要");
+    });
   });
 
   describe("restoreConversationCache", () => {

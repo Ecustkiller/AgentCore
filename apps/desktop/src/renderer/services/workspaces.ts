@@ -166,7 +166,66 @@ export async function wsReadFile(
   path: string,
 ): Promise<FilePreview> {
   const res = await authedFetch(`${wsUrl(wsId)}/files/${encodePath(path)}`);
-  return decodePreviewResponse(res);
+  return decodePreviewResponse(res, { path });
+}
+
+/** Server snapshot payload (`/v1/workspaces/{ws_id}/snapshots`). */
+type BackendSnapshot = Schemas["SnapshotSummary"];
+
+export interface WorkspaceSnapshot {
+  snapshotId: string;
+  label: string | null;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+const toSnapshot = (s: BackendSnapshot): WorkspaceSnapshot => ({
+  snapshotId: s.snapshot_id,
+  label: s.label,
+  createdAt: s.created_at,
+  sizeBytes: s.size_bytes,
+});
+
+/** Take a manual snapshot of a cloud workspace addressed by ws id. */
+export async function wsCreateSnapshot(
+  wsId: string,
+  label?: string,
+): Promise<WorkspaceSnapshot> {
+  const res = await api.post<BackendSnapshot>(`${wsPath(wsId)}/snapshots`, {
+    label: label?.trim() || null,
+  } satisfies Schemas["CreateSnapshotRequest"]);
+  return toSnapshot(res);
+}
+
+/** blob → base64（分块，避免大文件撑爆调用栈）。 */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * 「在浏览器打开」文件中枢云端工作区 HTML：ws 快照 → zip → 主进程解压临时目录 →
+ * 系统默认浏览器。Shared spaces refuse snapshots (v1) → caller must not hang this
+ * for `shared:` ws ids. Desktop-only (`previewArchive`).
+ */
+export async function openCloudWorkspaceInBrowser(
+  wsId: string,
+  htmlPath: string,
+): Promise<void> {
+  const preview = window.fsApi?.previewArchive;
+  if (!preview) throw new Error("此环境不支持在浏览器打开");
+  const snap = await wsCreateSnapshot(wsId, "浏览器预览");
+  const res = await authedFetch(
+    `${wsUrl(wsId)}/snapshots/${encodeURIComponent(snap.snapshotId)}/download`,
+  );
+  const archiveBase64 = await blobToBase64(await res.blob());
+  const result = await preview(archiveBase64, htmlPath);
+  if (!result.ok) throw new Error(result.message);
 }
 
 /** Read a cloud-workspace file for **editing** (full text + mtime CAS baseline). */

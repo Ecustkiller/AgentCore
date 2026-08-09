@@ -485,6 +485,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
       // to its run so the node shows a ⚠️ badge and the card raises a live notice the
       // instant it fires. escalationId → RunEscalation.id（桌面本地；ProjectedTurn 不加 id）。
+      // source → RunEscalation.source（桌面本地；conformanceFold 勿带出）。
       const run = s.runIndex.get(f.runId);
       if (run)
         run.escalations.push({
@@ -497,6 +498,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           kind: f.escalationKind,
           // 非阻塞 banner 无应答卡，故无结构化选项。
           questions: [],
+          ...(f.source ? { source: f.source } : {}),
         });
       break;
     }
@@ -820,7 +822,10 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
     case "batch_metrics":
       return `调度快照 · ${frame.metrics.nodes} 节点 · 峰值并发 ${frame.metrics.peakRunning}`;
     case "run_escalation":
-      return `${role(frame.agentId)} 上报问题`;
+      return frame.source === "validation_thrash" ||
+        frame.source === "ceiling_backstop"
+        ? `${role(frame.agentId)} 卡住早停`
+        : `${role(frame.agentId)} 边干边上报`;
     case "escalation_required":
       return frame.browserLogin
         ? `${role(frame.agentId)} 需要你登录`

@@ -135,6 +135,22 @@ def test_escalation_required_emits_browser_login_only_when_true():
     assert "browser_login" not in omitted.payload
 
 
+def test_escalate_schema_teaches_blocking_choice():
+    """Worker 按题自选 blocking：schema 须写清该停 / 能报，默认仍 false。"""
+    schema = EscalateTool().schema
+    desc = schema.description
+    assert "默认 false" in desc
+    assert "猜错产物基本作废" in desc
+    assert "不确定就问" in desc
+    assert "该停时别装非阻塞" in desc
+    assert "能自行合理假设的小事" in desc
+    blocking = schema.parameters["properties"]["blocking"]["description"]
+    assert "默认 false" in blocking
+    assert "该停时别装非阻塞" in blocking
+    # default philosophy unchanged: missing blocking stays non-blocking
+    assert schema.parameters["properties"]["blocking"].get("default") in (None, False)
+
+
 @pytest.mark.asyncio
 async def test_blocking_channel_forwards_browser_login():
     seen: dict = {}

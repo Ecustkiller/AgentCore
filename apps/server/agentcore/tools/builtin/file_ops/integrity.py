@@ -405,7 +405,9 @@ def _mark_landed_files(
     # C3: successful I/O → path is no longer declare-only on the ownership ledger.
     coordinator = context.write_coordinator
     if coordinator is not None:
-        coordinator.mark_written(path_key)
+        coordinator.mark_written(
+            path_key, desk_id=getattr(context, "ownership_desk_id", None)
+        )
     # Successful disk land → sibling verify cache is stale (typecheck/build).
     # Must run before kind early-returns (prose lock) — the file already changed.
     eid = (getattr(context, "execution_id", None) or "").strip()
@@ -473,8 +475,14 @@ def _claim_write_path(
     coordinator = context.write_coordinator
     if coordinator is None:
         return None, False
-    prior = coordinator.owner_of(rel_path)
-    owner = coordinator.claim(rel_path, context.run_id, context.write_ancestors)
+    desk = getattr(context, "ownership_desk_id", None)
+    prior = coordinator.owner_of(rel_path, desk_id=desk)
+    owner = coordinator.claim(
+        rel_path,
+        context.run_id,
+        context.write_ancestors,
+        desk_id=desk,
+    )
     if owner is not None:
         _log_write_collision(
             event, path=rel_path, run_id=context.run_id, owner=owner
@@ -496,7 +504,9 @@ def _claim_write_path(
             note_unresolved_write_ownership(run_id=context.run_id)
         except Exception:  # noqa: BLE001 — honesty latch must never block the refusal
             pass
-        ownership_kind = "written" if coordinator.is_written(rel_path) else "declared"
+        ownership_kind = (
+            "written" if coordinator.is_written(rel_path, desk_id=desk) else "declared"
+        )
         owner_role, owner_status = lookup_owner_status(
             owner, execution_id=context.execution_id
         )

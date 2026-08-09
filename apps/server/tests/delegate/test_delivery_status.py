@@ -1199,6 +1199,53 @@ def test_clean_completed_artifacts_all_accepted():
     assert payload["artifacts"] == [{"path": "讲稿.md", "status": "accepted"}]
 
 
+def test_artifacts_workspace_id_from_target_folder_id():
+    """delegate + target_folder_id + file_acceptance → artifacts[].workspace_id."""
+    desk = "11111111-2222-3333-4444-555555555555"
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="写到目标桌",
+            role="撰写",
+            target_folder_id=desk,
+        )
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已落盘",
+            files_touched=["out.md"],
+            file_acceptance=_accepted("out.md"),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-desk")
+    assert payload is not None
+    assert payload["artifacts"] == [
+        {
+            "path": "out.md",
+            "status": "accepted",
+            "workspace_id": f"folder:{desk}",
+        }
+    ]
+
+
+def test_artifacts_omit_workspace_id_without_target_folder():
+    """无 target_folder_id → 不带 workspace_id（客户端回退会话出生桌）。"""
+    plan = _plan(RunSpec(run_id="w1", task="写讲稿", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已落盘",
+            files_touched=["讲稿.md"],
+            file_acceptance=_accepted("讲稿.md"),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-no-desk")
+    assert payload is not None
+    assert len(payload["artifacts"]) == 1
+    assert "workspace_id" not in payload["artifacts"][0]
+
+
 def test_phase_b_cite_fail_rejected_not_in_delivered_files():
     """阶段 B 引用不过闸 → rejected(citations_unverified)，不进 delivered_files；无 draft 行。"""
     from agentcore.runtime.runs.file_acceptance import (

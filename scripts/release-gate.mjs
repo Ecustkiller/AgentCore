@@ -6,6 +6,7 @@
  *   pnpm release:gate                    # full run（发布验证必须全量）
  *   pnpm release:gate:lite               # 日常迭代：跳过 desktop shoot + smoke
  *   pnpm release:gate --lite             # 同上（亦认 RELEASE_GATE_LITE=1）
+ *   RELEASE_GATE_SKIP_SHOOT=1            # 仅跳过 shoot，仍跑 smoke:webapp:ci
  *   pnpm release:gate --from desktop     # 断点续跑：从 desktop 段开始
  *   pnpm release:gate --only backend     # 只跑单段（修复迭代用）
  *
@@ -275,9 +276,16 @@ function runDesktopSection({ lite = false } = {}) {
     );
     return;
   }
-  run("desktop shoot", "pnpm", ["--filter", "agentcore-desktop", "shoot"], {
-    env: { SHOOT_FRAMES: "3" },
-  });
+  // Ops escape: skip screenshot matrix only; keep smoke:webapp:ci.
+  if (process.env.RELEASE_GATE_SKIP_SHOOT === "1") {
+    console.log(
+      "\n⏭ desktop shoot skipped (RELEASE_GATE_SKIP_SHOOT=1); smoke:webapp:ci still runs",
+    );
+  } else {
+    run("desktop shoot", "pnpm", ["--filter", "agentcore-desktop", "shoot"], {
+      env: { SHOOT_FRAMES: "3" },
+    });
+  }
   // Pre-free smoke port so a leftover vite does not flake strictPort (port-fragile).
   const smokePort = String(process.env.SMOKE_PORT ?? "5174");
   run("free smoke port", "node", ["scripts/free-listen-port.mjs", smokePort]);

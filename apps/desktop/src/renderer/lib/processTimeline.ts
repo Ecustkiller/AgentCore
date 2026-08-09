@@ -92,6 +92,24 @@ export function appendReworkStep(
   return steps;
 }
 
+/** Settled / rewritten chip copy (also used when streaming has already emitted content after rework). */
+export const REWORK_LABEL_DONE = "引用/格式核验后已重写";
+/** In-progress chip while finish_guard rework is still streaming with empty body. */
+export const REWORK_LABEL_IN_PROGRESS = "正在按规则修订…";
+
+/**
+ * Presentational label for a `rework` chip / export line.
+ * Streaming + no content step after this rework → in-progress; otherwise past-tense done.
+ */
+export function reworkChipLabel(
+  isStreaming: boolean,
+  hasContentAfter: boolean,
+): string {
+  return isStreaming && !hasContentAfter
+    ? REWORK_LABEL_IN_PROGRESS
+    : REWORK_LABEL_DONE;
+}
+
 /** Append a started tool call as a `running` step to the timeline.
  *
  * Skipped (returns the same reference so callers can no-op) for:

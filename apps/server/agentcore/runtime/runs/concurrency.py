@@ -1,19 +1,16 @@
-"""Tree-wide run concurrency budget.
+"""Run-tree concurrency budget (ContextVar).
 
-Bounds the *total* number of concurrently-running child runs across a whole Run
-tree, enforcing the configured parallel budget (``settings.engine_max_parallel_delegations``,
-fallback ``MAX_PARALLEL_DELEGATIONS``) — the cap a single scheduler's own width does *not*
-enforce across nesting.
+Root CEO fan-out still **分而不乘**: each :class:`WaveScheduler` divides
+``current_budget`` by its dispatch width (:func:`child_budget`) and installs the
+share on child tasks, so a wide root wave does not pretend every child still
+holds the full knobs.
 
-Why this matters: :class:`WaveScheduler` caps how many nodes *it* runs at once, but
-a node's executor can (阶段2) spawn a child engine that itself fans out into a
-*nested* scheduler. Without a tree-wide budget those caps multiply — depth 3 ×
-fan-out 6 explodes to ``6 + 36 + 216`` concurrent runs, each holding a DB session
-and firing its own LLM call. The budget rides an async-context :class:`ContextVar`:
-each scheduler divides its budget by the number of nodes it runs concurrently
-(:func:`child_budget`) and installs the reduced share on each child run's task
-context, so nested fan-outs *divide* rather than *multiply* — with no shared lock
-held across recursion, so the classic recursive-semaphore deadlock can't happen.
+Product nested ``delegate`` (depth≥1) **reseeds full** via
+:func:`reseed_nested_delegation_budget` before the nested scheduler runs — each
+sub-team schedules against ``engine_max_parallel_delegations`` so a 4-wide nest
+is not starved to ``12//N`` by sibling leads. Safe because nesting is hard-capped
+at ``MAX_DELEGATION_DEPTH`` (2) and per-lead spawn at ``MAX_WORKER_SUBDELEGATIONS``.
+Raw WaveScheduler-in-WaveScheduler without a reseed still divides (unit tests).
 """
 
 from __future__ import annotations
@@ -87,3 +84,15 @@ def child_budget(width: int) -> int:
     depth can't explode. Always ≥ 1 (a single slot still makes progress).
     """
     return max(1, current_budget() // max(1, width))
+
+
+def reseed_nested_delegation_budget(depth: int) -> contextvars.Token[int] | None:
+    """Re-install the full parallel knob for a nested ``delegate`` drive.
+
+    ``depth >= 1`` (worker-captain sub-team) returns a :func:`set_budget` token for
+    the caller to :func:`reset_budget` after the nested wave; ``depth == 0`` is a
+    no-op (CEO root keeps whatever share the outer context already holds).
+    """
+    if int(depth or 0) < 1:
+        return None
+    return set_budget(resolve_max_parallel())

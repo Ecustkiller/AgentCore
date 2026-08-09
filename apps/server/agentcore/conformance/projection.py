@@ -1016,7 +1016,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # message_start / turn_saved / title_generated / followups_generated /
             # board_op_required / board_read_required / desktop_notify_required /
             # host_op_required / tool_progress / workspace_op_required /
-            # handoff_* / turn_queued / turn_queue_cancelled /
+            # handoff_* / turn_queued / turn_queue_started / turn_queue_cancelled /
             # interaction_orphaned / escalation_* (run escalations folded above) —
             # not part of the normalized turn judge state beyond interactions[] fold
             # (no-op here). Mirrored by the frontend folds' assertNever switch

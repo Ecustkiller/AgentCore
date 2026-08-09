@@ -48,6 +48,53 @@ async def test_write_creates_file(tmp_path: Path):
     assert (tmp_path / "notes" / "report.md").read_text(encoding="utf-8") == "# Hi"
 
 
+async def test_write_rejects_cleared_stub_content(tmp_path: Path):
+    """过渡硬拒：content=[已清理] / 已落盘摘要不得写盘；正常长文仍成功。"""
+    target = tmp_path / "doc.md"
+    target.write_text("keep-me", encoding="utf-8")
+
+    stub = await FileWriteTool().execute(
+        {"path": "doc.md", "content": "[已清理]"}, _ctx(tmp_path)
+    )
+    assert stub.success is False
+    assert stub.contract_failure is True
+    assert "不能写入磁盘" in (stub.error or "")
+    assert target.read_text(encoding="utf-8") == "keep-me"
+
+    landed = await FileWriteTool().execute(
+        {
+            "path": "doc.md",
+            "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入",
+            "status": "landed",
+        },
+        _ctx(tmp_path),
+    )
+    assert landed.success is False
+    assert landed.contract_failure is True
+    assert target.read_text(encoding="utf-8") == "keep-me"
+
+    # Prose mentioning 已清理 must not be blocked.
+    prose = "本节已清理历史遗留问题。" + ("正文。" * 200)
+    ok = await FileWriteTool().execute({"path": "doc.md", "content": prose}, _ctx(tmp_path))
+    assert ok.success is True
+    assert target.read_text(encoding="utf-8") == prose
+
+
+async def test_str_replace_rejects_cleared_stub_new_string(tmp_path: Path):
+    (tmp_path / "notes.md").write_text("alpha\nbeta\n", encoding="utf-8")
+    result = await StrReplaceTool().execute(
+        {
+            "path": "notes.md",
+            "old_string": "alpha",
+            "new_string": "[已清理·须重填]",
+        },
+        _ctx(tmp_path),
+    )
+    assert result.success is False
+    assert result.contract_failure is True
+    assert (tmp_path / "notes.md").read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+
 async def test_write_allows_substantial_overwrite(tmp_path: Path):
     """成篇 md/html 整盖允许（不再硬拒）；磁盘被新内容覆盖。"""
     body = "成篇正文。" * 80  # well over substantial threshold
@@ -981,9 +1028,17 @@ def test_write_schema_teaches_artifact_first():
     assert "优先" in write_desc and "str_replace" in write_desc
     assert "整文件覆盖亦允许" in write_desc or "整盖" in write_desc
     assert "禁止整篇一次" not in write_desc and "仍建议分段" not in write_desc
+    assert "_landed_summary" not in write_desc
+    assert "已落盘短状态" in write_desc
+    assert "清参后改稿" in write_desc
+    assert "写盘参数" in write_desc or "重发" in write_desc
+    assert "真文" in write_desc
+    assert "file_read" in write_desc and "str_replace" in write_desc
     content_desc = FileWriteTool().schema.parameters["properties"]["content"]["description"]
     assert "一次写完" in content_desc or "完整正文" in content_desc
     assert "骨架" in content_desc
+    assert "_landed_summary" not in content_desc
+    assert "已落盘短状态" in content_desc or "清理占位" in content_desc
 
     append_desc = FileAppendTool().schema.description
     assert "骨架" in append_desc
@@ -997,8 +1052,15 @@ def test_write_schema_teaches_artifact_first():
     assert "整文件覆盖亦允许" in replace_desc or "整盖" in replace_desc
     assert "完整正文" in replace_desc
     assert "禁止改用骨架 file_write" not in replace_desc
+    assert "_landed_summary" not in replace_desc
+    assert "已落盘短状态" in replace_desc
+    assert "清参后改稿" in replace_desc
+    assert "真文" in replace_desc
+    assert "file_read" in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
     assert "不硬拒" in new_desc
+    assert "_landed_summary" not in new_desc
+    assert "已落盘短状态" in new_desc or "清理占位" in new_desc
 
 
 def test_classify_write_kind_helpers():
@@ -1354,6 +1416,52 @@ async def test_file_list_recursive_pattern_miss_hint(tmp_path: Path):
     assert "空目录" not in result.output
     assert "无匹配 pattern='*.rs'" in result.output
     assert "a.py" in result.output or "目录非空" in result.output
+
+
+async def test_file_read_missing_with_parent_gives_landmark(tmp_path: Path):
+    """父目录存在时：同层样本 + 更宽查找建议（对齐 file_list 空匹配 hint）。"""
+    app = tmp_path / "apps" / "desktop"
+    app.mkdir(parents=True)
+    (app / "README.md").write_text("# desk", encoding="utf-8")
+    (app / "src").mkdir()
+
+    result = await FileReadTool().execute(
+        {"path": "apps/desktop/package.json"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.startswith("文件不存在：apps/desktop/package.json")
+    assert "父目录" in result.error
+    assert "apps/desktop/" in result.error
+    assert "可见同层示例" in result.error
+    assert "README.md" in result.error or "src" in result.error
+    assert "file_list" in result.error
+    assert "更宽查找" in result.error
+    assert "已知路径" in result.error
+
+
+async def test_file_read_missing_parent_stays_concise(tmp_path: Path):
+    """路径与父目录都不在：保持简洁报错，不编造路标。"""
+    (tmp_path / "apps").mkdir()
+    result = await FileReadTool().execute(
+        {"path": "apps/ghost/package.json"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert result.error == "文件不存在：apps/ghost/package.json"
+
+
+async def test_file_read_missing_top_level_uses_root_landmark(tmp_path: Path):
+    """顶层缺失文件：父目录为根，仍给同层样本。"""
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    result = await FileReadTool().execute({"path": "package.json"}, _ctx(tmp_path))
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.startswith("文件不存在：package.json")
+    assert "父目录 ./" in result.error
+    assert "可见同层示例" in result.error
+    assert "README.md" in result.error or "src" in result.error
+    assert "file_list" in result.error
 
 
 async def test_file_list_shows_attachment_zip_hides_elsewhere(tmp_path: Path):

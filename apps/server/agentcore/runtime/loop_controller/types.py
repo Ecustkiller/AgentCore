@@ -46,6 +46,14 @@ _VALIDATION_PATH_STOP_STEER = (
     "同因参数/契约错误已连续出现：请停止原样重试该调用路径，"
     "修正参数或换策略后再试；工具保持可用。"
 )
+# Landing tools that echoed a landed-summary / cleared stub as write args.
+_LANDED_SUMMARY_ECHO_STOP_STEER = (
+    "同因把已落盘摘要/清理占位当写盘参数："
+    "下一拍必须先 file_read 该 path 取盘上真文，"
+    "再 str_replace（优先）或按真文重填 content/new_string；"
+    "禁止再次发送 `_landed_summary` 或清理条；工具保持可用。"
+    "若同 path 再原样回灌将早停。"
+)
 # Consecutive *unproductive* rounds that trip an early stop (B2 无产出早停). An
 # unproductive round = the model called ≥1 tool, every call FAILED, and it produced
 # no content — it is "working" but getting nowhere. Distinct from an empty round
@@ -125,9 +133,20 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
     (longdoc revise thrash: different noop payloads still melt). Sentinel shape is
     stable and intentional (not a real tool schema).
 
+    Landed-summary / cleared-stub echo (same surface as
+    ``is_cleared_write_stub_args``) collapses per path for write pens so different
+    summary texts still trip validation path-stop.
+
     ``write_section`` invalid ``section`` (e.g. ``ch5-s0``) collapses per path so
     format thrash enters the same validation early-stop (08-08 定案①).
     """
+    if name in {"file_write", "file_append", "str_replace"}:
+        from agentcore.runtime.engine.write_args_clear import is_cleared_write_stub_args
+
+        if is_cleared_write_stub_args(parsed):
+            path = parsed.get("path")
+            path_key = path.strip().replace("\\", "/") if isinstance(path, str) else ""
+            return {"__malformed__": "landed_summary_echo", "path": path_key}
     if name == "str_replace":
         old = parsed.get("old_string")
         if old is None or (isinstance(old, str) and not old.strip()):
@@ -190,15 +209,21 @@ def delivery_idle_nudge_prompt(
     )
 
 
-def delivery_idle_narrow_prompt(*, rounds: int) -> str:
+def delivery_idle_narrow_prompt(*, rounds: int, keep_notes: bool = False) -> str:
     """After soft nudge (repair files only): tools narrowed — still not FINALIZE.
 
     Report-delivery posts never arm this step (``narrow_rounds=0``); do not reuse
-    for report idle.
+    for report idle. Collaboration (wall) keeps note tools; mention briefly when
+    ``keep_notes``.
     """
+    notes = (
+        " / 便签（可贴/读/改）"
+        if keep_notes
+        else ""
+    )
     return (
         f"[系统提示] 交文件空转收窄（已连续 {rounds} 轮仅调查、零落盘）："
-        "大范围调查类工具已收回；仅保留写盘 / 内环诊断 / handoff / 必要 file_read。"
+        f"大范围调查类工具已收回；仅保留写盘 / 内环诊断{notes} / handoff / 必要 file_read。"
         "请立即改文件或交接，勿再展开新调研。"
     )
 

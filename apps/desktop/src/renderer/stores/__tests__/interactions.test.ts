@@ -62,6 +62,79 @@ describe("InteractionStore", () => {
     ).toBe("x");
   });
 
+  it("resolved stub (resolved-before-required) yields to a live required payload", () => {
+    store().markResolved({
+      kind: "ask_user",
+      id: "cp-stub",
+      resolution: { decision: "continue" },
+    });
+    expect(store().get("cp-stub")?.status).toBe("resolved");
+    expect(store().get("cp-stub")?.payload).toEqual({});
+
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m2",
+      payload: { checkpoint_id: "cp-stub", question: "还要拍板吗？" },
+    });
+    expect(store().get("cp-stub")?.status).toBe("pending");
+    expect(store().get("cp-stub")?.messageId).toBe("m2");
+    expect(
+      (store().get("cp-stub")?.payload as { question?: string }).question,
+    ).toBe("还要拍板吗？");
+  });
+
+  it("cold required on a new host messageId replaces a prior resolved entry", () => {
+    store().upsertRequired({
+      kind: "team_preview",
+      conversationId: "c1",
+      messageId: "m-turn1",
+      payload: {
+        checkpoint_id: "tp-reuse",
+        primitive: "delegate",
+        workers: [],
+      },
+    });
+    store().markResolved({
+      kind: "team_preview",
+      id: "tp-reuse",
+      resolution: { decision: "continue" },
+    });
+    store().upsertRequired({
+      kind: "team_preview",
+      conversationId: "c1",
+      messageId: "m-turn2",
+      payload: {
+        checkpoint_id: "tp-reuse",
+        primitive: "delegate",
+        workers: [{ run_id: "r2", role: "研", task: "t", depends_on: [] }],
+      },
+    });
+    expect(store().get("tp-reuse")?.status).toBe("pending");
+    expect(store().get("tp-reuse")?.messageId).toBe("m-turn2");
+  });
+
+  it("status:pending force replaces a resolved cold entry (recovery)", () => {
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: { checkpoint_id: "cp-force", question: "旧" },
+    });
+    store().markResolved({ kind: "ask_user", id: "cp-force" });
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      status: "pending",
+      payload: { checkpoint_id: "cp-force", question: "恢复" },
+    });
+    expect(store().get("cp-force")?.status).toBe("pending");
+    expect(
+      (store().get("cp-force")?.payload as { question?: string }).question,
+    ).toBe("恢复");
+  });
+
   it("orphaned-before-required builds terminal stub; required cannot resurrect pending", () => {
     applyInteractionWireEvent(
       "interaction_orphaned",

@@ -6,8 +6,9 @@ The active turn's done-callback drains the queue FIFO and starts the next turn.
 
 发送即有流 (D9): the enqueueing POST keeps an SSE open — it immediately emits
 ``turn_queued``, then when drain starts that entry the **same connection** becomes
-the primary observer of the new turn's sink (reuse attach / detach policy). If the
-waiting client disconnects mid-queue, the turn still starts detached (existing
+the primary observer of the new turn's sink (reuse attach / detach policy). Drain
+emits ``turn_queue_started`` as that sink's first frame (before ``message_start``).
+If the waiting client disconnects mid-queue, the turn still starts detached (existing
 attach/recovery path); no new mechanism.
 
 Process-local (same posture as :mod:`.runs`). Restart drops
@@ -56,6 +57,45 @@ class QueueStatus:
     queue_depth: int  # total pending after this enqueue
 
 
+def _try_emit_live_turn_queued(
+    *,
+    conversation_id: str,
+    queue_id: str,
+    position: int,
+    queue_depth: int,
+    degraded_from: str | None = None,
+) -> bool:
+    """Emit ``turn_queued`` on the live turn sink when present (multi-client UI).
+
+    No live sink → log only; never fabricate a broadcast (same posture as cancel).
+    """
+    from agentcore.runtime.events import turn_queued
+
+    from .runs import turn_runs
+
+    run = turn_runs.get(conversation_id)
+    if run is None or run.task.done():
+        logger.info(
+            "turn_queue.enqueued_no_live_sink",
+            conversation_id=conversation_id,
+            queue_id=queue_id,
+            position=position,
+            queue_depth=queue_depth,
+            degraded_from=degraded_from,
+        )
+        return False
+    run.sink.emit(
+        turn_queued(
+            queue_id=queue_id,
+            position=position,
+            queue_depth=queue_depth,
+            conversation_id=conversation_id,
+            degraded_from=degraded_from,
+        )
+    )
+    return True
+
+
 class TurnQueue:
     """FIFO pending turns keyed by ``conversation_id``."""
 
@@ -76,7 +116,14 @@ class TurnQueue:
         )
         return QueueStatus(queue_id=item.queue_id, position=depth, queue_depth=depth)
 
-    def enqueue_and_ensure_drain(self, conversation_id: str, item: QueuedTurn) -> QueueStatus:
+    def enqueue_and_ensure_drain(
+        self,
+        conversation_id: str,
+        item: QueuedTurn,
+        *,
+        emit_live_queued: bool = False,
+        degraded_from: str | None = None,
+    ) -> QueueStatus:
         """Enqueue, then close the「宿主已结束、drain 已 no-op」race window.
 
         The send route may await between its in-flight check and this enqueue (e.g.
@@ -87,8 +134,21 @@ class TurnQueue:
         done-callback will drain), or the slot is free/finished and we arm the drain
         ourselves. ``schedule_drain`` is idempotent and ``_drain`` re-checks the slot,
         so double-arming is harmless.
+
+        ``emit_live_queued=True`` (协调升队等): also emit ``turn_queued`` on the live
+        turn sink so the bar is visible/cancellable for multi-client. Classic POST
+        waiting SSE and leftover ``degraded_from=steer`` honesty keep their own emit
+        paths (pass False; leftover still calls its dedicated helper).
         """
         status = self.enqueue(conversation_id, item)
+        if emit_live_queued:
+            _try_emit_live_turn_queued(
+                conversation_id=conversation_id,
+                queue_id=status.queue_id,
+                position=status.position,
+                queue_depth=status.queue_depth,
+                degraded_from=degraded_from,
+            )
         from .runs import turn_runs
 
         existing = turn_runs.get(conversation_id)
@@ -201,15 +261,26 @@ def _waiter_still_alive(item: QueuedTurn) -> bool:
 
 
 async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
-    """Spawn the turn; hand the sink to a waiting SSE if still connected."""
+    """Spawn the turn; hand the sink to a waiting SSE if still connected.
+
+    Emits ``turn_queue_started`` as the new sink's first frame (before ``stream_chat``).
+    """
     import asyncio
 
     from agentcore.conversation.service import stream_chat
-    from agentcore.runtime.events import EventSink
+    from agentcore.runtime.events import EventSink, turn_queue_started
 
     from .runs import turn_runs
 
     sink = EventSink()
+    remaining_depth = turn_queue.depth(conversation_id)
+    sink.emit(
+        turn_queue_started(
+            queue_id=item.queue_id,
+            conversation_id=conversation_id,
+            remaining_depth=remaining_depth,
+        )
+    )
     if _waiter_still_alive(item):
         # Waiting POST is still open — it becomes the primary SSE consumer (no detach).
         assert item.started is not None

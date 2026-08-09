@@ -438,9 +438,10 @@ async def test_list_projects_non_db_failure_keeps_generic_path(
 
 async def test_create_project_cloud_success(monkeypatch: pytest.MonkeyPatch):
     calls = _patch_create(monkeypatch)
+    ctx = _ctx(user_id="owner-1", conversation_id="conv-stay")
     result = await CreateProjectTool().execute(
         {"name": "  New Cloud App  "},
-        _ctx(user_id="owner-1", conversation_id="conv-stay"),
+        ctx,
     )
     assert result.success
     assert result.display["status"] == "created"
@@ -466,7 +467,8 @@ async def test_create_project_cloud_success(monkeypatch: pytest.MonkeyPatch):
     assert project["local_root_id"] is None
     assert "path" not in project
     assert "未改会话" in result.output or "conversation_untouched" in result.output
-
+    assert "运行时继承" in result.output or "省略" in result.output
+    assert ctx.turn_target_desk.folder_id == "new-cloud-1"
 
 async def test_create_project_does_not_touch_conversation(monkeypatch: pytest.MonkeyPatch):
     """Invariant: create is account Folder only — never rebinds conversation.folder_id."""

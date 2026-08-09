@@ -44,15 +44,17 @@ async def commit_or_flush(session: AsyncSession, *, commit: bool) -> None:
 def strip_nul(value: Any) -> Any:
     """Remove ``\\x00`` from strings before Postgres writes (text / JSONB).
 
-    Postgres rejects NUL in text and in JSON string values
+    Postgres rejects NUL in text **and** in JSON object keys / string values
     (``UntranslatableCharacterError``). Tool stdout / LLM content can carry it;
-    journal, run_sessions, and messages all hit the same wall — one recursive
-    cleaner at the repository write boundary covers those paths.
+    ownership composite keys historically used ``\\x00`` as a separator and landed
+    in ``coordination_snapshot`` dict keys. One recursive cleaner at the
+    repository write boundary covers journal, run_sessions, and messages.
     """
     if isinstance(value, str):
         return value.replace("\x00", "") if "\x00" in value else value
     if isinstance(value, dict):
-        return {k: strip_nul(v) for k, v in value.items()}
+        # Keys must be cleaned too — JSONB object keys are text.
+        return {strip_nul(k): strip_nul(v) for k, v in value.items()}
     if isinstance(value, list):
         return [strip_nul(v) for v in value]
     if isinstance(value, tuple):

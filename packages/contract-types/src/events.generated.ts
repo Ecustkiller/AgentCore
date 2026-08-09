@@ -600,7 +600,10 @@ export type RunFailureKind =
  * 
  * JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
  * timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
- * reload — the event base is now level with ``escalation_required``. */
+ * reload — the event base is now level with ``escalation_required``.
+ * 
+ * ``source`` distinguishes early-stop / thrashing backstops (``validation_thrash`` /
+ * ``ceiling_backstop``) from genuine mid-work escalate (omit / absent). */
 export interface RunEscalationPayload {
   escalation_id: string;
   run_id: string;
@@ -609,6 +612,7 @@ export interface RunEscalationPayload {
   assumption: string;
   blocking: boolean;
   kind?: EscalationKind;
+  source?: string;
 }
 
 export interface RunEscalationGatePayload {
@@ -786,12 +790,15 @@ export interface DeliveryAction {
  * 
  * ``status=accepted`` → counts toward ``delivered_files`` / CEO「已交付」;
  * ``rejected`` carries ``reason`` (e.g. ``citations_unverified``) and optional
- * ``detail`` for the file checklist. Draft is out of scope for block 1. */
+ * ``detail`` for the file checklist. Draft is out of scope for block 1.
+ * ``workspace_id``: landing desk when the plan node set ``target_folder_id``
+ * (``folder:{id}``); omit → client falls back to the session birth desk. */
 export interface DeliveryArtifact {
   path: string;
   status: "accepted" | "rejected";
   reason?: string;
   detail?: string;
+  workspace_id?: string;
 }
 
 /** 交付状态（能力闸门与交付诚实性）: the structured delivery reconciliation a
@@ -844,6 +851,17 @@ export interface TurnQueuedPayload {
   queue_depth: number;
   conversation_id: string;
   degraded_from?: "steer";
+}
+
+/** FIFO dequeue → turn starting (D9 · 发送即有流). EPHEMERAL — clear queue-id light UI.
+ * 
+ * Emitted as the **first frame** of the drained turn's EventSink (after ``pop_next``,
+ * before ``stream_chat`` / ``message_start``). ``remaining_depth`` is the queue length
+ * after this item left the FIFO. */
+export interface TurnQueueStartedPayload {
+  queue_id: string;
+  conversation_id: string;
+  remaining_depth: number;
 }
 
 /** Per-item queue cancel ack (同对话再发 · drain 前取消). EPHEMERAL — multi-client UI clear. */
@@ -1872,6 +1890,7 @@ export type SSEPayloadMap = {
   delivery_status: DeliveryStatusPayload;
   user_interjection: UserInterjectionPayload;
   turn_queued: TurnQueuedPayload;
+  turn_queue_started: TurnQueueStartedPayload;
   turn_queue_cancelled: TurnQueueCancelledPayload;
   turn_steer_accepted: TurnSteerAcceptedPayload;
   execution_detached: ExecutionDetachedPayload;

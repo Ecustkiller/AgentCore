@@ -1,11 +1,11 @@
 /**
  * `workspace://` 自定义协议 —— Local Browser 工作区 HTML 字节来源（L1b）。
  *
- * 请求 `workspace://<conversationId>/<path>` → 主进程 Bearer 代理会话工作区文件端点
- * （与 workspace 同形安全不变量：路径穿越防护 / CSP / nosniff / 权限全拒）。
+ * 请求 `workspace://{folder|conv}.{uuid}/{path}` → 主进程 Bearer 代理
+ * `/v1/workspaces/{wsId}/files/{rel}`（按落地 desk 取字节；禁止只走会话 workspace/files）。
  *
  * 处理器按 **conversation 分区** 注册（`workspacePartitionFor(cid)`）；
- * URL host **必须等于**该 partition 绑定的 cid，否则 403（防跨对话灌 HTML）。
+ * `conv.*` host 须等于该 partition 绑定的 cid，否则 403；`folder.*` 本 partition 放行。
  */
 
 import { type Session, session } from "electron";
@@ -59,7 +59,7 @@ export function registerWorkspaceProtocolFor(conversationId: string): void {
     let upstream: Response;
     try {
       upstream = await bearerFetch(
-        workspaceFilePath(resolved.conversationId, resolved.rel),
+        workspaceFilePath(resolved.workspaceId, resolved.rel),
       );
     } catch {
       return new Response("Bad Gateway", { status: 502 });

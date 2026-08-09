@@ -258,7 +258,13 @@ def test_assembled_idle_surface_split():
 def test_assembled_offers_create_project():
     """跨项目 P1：create_project 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
     names = set(_assemble().names)
-    assert {"list_projects", "resolve_project", "create_project"} <= names
+    assert {
+        "list_projects",
+        "resolve_project",
+        "create_project",
+        "list_project_dir",
+        "read_project_file",
+    } <= names
 
 
 def test_register_always_ceo_tools_declare_loop():
@@ -274,6 +280,8 @@ def test_register_always_ceo_tools_declare_loop():
         "list_projects",
         "resolve_project",
         "create_project",
+        "list_project_dir",
+        "read_project_file",
         "read_image",
     } <= names
     assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})

@@ -38,7 +38,7 @@ from agentcore.db.repositories import (
     TurnJournalRepository,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
-from agentcore.memory.rules_injection import append_user_rule
+from agentcore.memory.rules_injection import mutate_user_rule
 from agentcore.security.tokens import create_account_token
 
 router = APIRouter(prefix="/account", tags=["account"])
@@ -259,12 +259,17 @@ async def list_account_user_rules(
 
 
 class AccountRememberRequest(BaseModel):
-    content: str
+    content: str | None = None
     folder_id: str | None = None
+    action: Literal["add", "replace", "forget", "list"] = "add"
+    replaces: str | None = None
 
 
 class AccountRememberResponse(BaseModel):
     changed: bool
+    action: str
+    message: str
+    rules_markdown: str | None = None
 
 
 @router.post("/rules/remember", response_model=AccountRememberResponse)
@@ -273,17 +278,21 @@ async def remember_account_user_rule(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRememberResponse:
-    """Append an explicit user directive to the scope's user-rule doc (``remember``)."""
-    content = (body.content or "").strip()
-    if not content:
-        return AccountRememberResponse(changed=False)
-    changed = await append_user_rule(
+    """Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``)."""
+    result = await mutate_user_rule(
         DocumentRepository(session),
         user.user_id,
         folder_id=body.folder_id,
-        content=content,
+        action=body.action,
+        content=body.content,
+        replaces=body.replaces,
     )
-    return AccountRememberResponse(changed=changed)
+    return AccountRememberResponse(
+        changed=result.changed,
+        action=result.action,
+        message=result.message,
+        rules_markdown=result.rules_markdown,
+    )
 
 
 class AccountMemoryScopeRequest(BaseModel):

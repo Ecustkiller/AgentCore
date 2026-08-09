@@ -13,14 +13,15 @@ import {
 } from "@/stores/conversation";
 import { useDisclosureStore } from "@/stores/disclosure";
 import {
+  projectRuntime,
   useActiveExecField,
   useExecutionScope,
-  useProjectedExecution,
+  useExecutionStore,
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
 import type { EndpointKind } from "@/stores/sidePanel";
 import { Background, type Edge, type Node, ReactFlow } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { DebateStageBands } from "./DebateStageBands";
@@ -35,6 +36,7 @@ import { GraphActionsContext } from "./graphActions";
 import {
   graphDocumentFingerprint,
   graphShellSnapshotKey,
+  graphViewExecutionEpoch,
 } from "./graphDocument";
 import { GraphFlowHost } from "./graphHost";
 import { GraphHoverContext, useGraphHoverState } from "./graphHover";
@@ -46,6 +48,10 @@ import {
   GraphSceneContext,
   injectPaintFromOverlay,
 } from "./graphLive";
+import {
+  GRAPH_UNIT_EXPAND_TOUCHED,
+  resolveGraphExpandedUnits,
+} from "./graphUnitExpand";
 import type { GraphPendingDecision } from "./pendingDecisions";
 import { executionGraphCapabilities } from "./planCapabilities";
 import { projectInjectGapEdges } from "./projectFlowGraph";
@@ -54,7 +60,7 @@ import { buildGraphScene } from "./scene";
 import { useActFocus } from "./useActFocus";
 import { useGraphDrillIn } from "./useGraphDrillIn";
 import { useGraphInjectFlow } from "./useGraphInjectFlow";
-import { useGraphLayout } from "./useGraphLayout";
+import { expandedUnitsFromFold, useGraphLayout } from "./useGraphLayout";
 import { useGraphPendingDecisions } from "./useGraphPendingDecisions";
 import { type GraphFitMode, useGraphViewport } from "./useGraphViewport";
 import { positionsMorphSig, useLayoutMorph } from "./useLayoutMorph";
@@ -76,7 +82,7 @@ interface GraphViewProps {
   autoplay?: boolean;
 }
 
-export function GraphView({
+export const GraphView = memo(function GraphView({
   interactive = true,
   fitMode = "view",
   onNodeSelect,
@@ -89,7 +95,17 @@ export function GraphView({
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const turnPhase = useActiveTurnPhase();
   const turnTerminal = isTerminalPhase(turnPhase);
-  const execution = useProjectedExecution();
+  // Parent Document tree: subscribe to structure+lifecycle epoch only.
+  // Streaming rt identity changes must not commit GraphView / RF shells;
+  // Live faces use per-run signature hooks in graphLive.
+  const structureStatusEpoch = useActiveExecField((rt) =>
+    graphViewExecutionEpoch(projectRuntime(rt)),
+  );
+  const execution = useMemo(() => {
+    if (!structureStatusEpoch || !messageId) return null;
+    const rt = useExecutionStore.getState().byId[messageId];
+    return rt ? projectRuntime(rt) : null;
+  }, [structureStatusEpoch, messageId]);
   const caps = executionGraphCapabilities(execution);
   const { data: turnAudit } = useTurnAudit(
     caps.auditInject ? conversationId : null,
@@ -103,52 +119,96 @@ export function GraphView({
   const parallelAvailable = !!execution && hasParallelTimeline(execution);
   const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind);
   // 内嵌模式：expandedUnits 按对话持久化（与画布 graph-fold 独立）。
+  // 默认展开有子队的 unit（对齐画布 / 协作图 UX「默认展开」）；用户点过收起后才记覆盖。
   // 交互/全屏 GraphView 仍用会话内存态；画布多回合折叠走 graph store。
   const persistEmbedUnits = !interactive && !!messageId && !!conversationId;
   const embedUnitPrefix = persistEmbedUnits
     ? `${conversationId}::${messageId}:embed-unit:`
     : null;
   const setDisclosureKey = useDisclosureStore((s) => s.setKey);
+  const embedTouchedKey = embedUnitPrefix
+    ? `${embedUnitPrefix}${GRAPH_UNIT_EXPAND_TOUCHED}`
+    : null;
+  const embedTouched = useDisclosureStore((s) =>
+    embedTouchedKey ? !!s.map[embedTouchedKey] : false,
+  );
   const embedUnitsFingerprint = useDisclosureStore((s) => {
     if (!embedUnitPrefix) return "";
     const ids: string[] = [];
     for (const [k, v] of Object.entries(s.map)) {
-      if (v && k.startsWith(embedUnitPrefix)) {
-        ids.push(k.slice(embedUnitPrefix.length));
-      }
+      if (!v || !k.startsWith(embedUnitPrefix)) continue;
+      const id = k.slice(embedUnitPrefix.length);
+      if (id === GRAPH_UNIT_EXPAND_TOUCHED) continue;
+      ids.push(id);
     }
     return ids.sort().join(",");
   });
-  const [sessionExpandedUnits, setSessionExpandedUnits] = useState<Set<string>>(
-    () => new Set(),
+  // biome-ignore lint/correctness/useExhaustiveDependencies: epoch gates execution identity
+  const defaultExpandedUnits = useMemo(() => {
+    if (!execution) return new Set<string>();
+    return expandedUnitsFromFold(execution.runs, new Set());
+  }, [structureStatusEpoch]);
+  const [sessionExpandedUnits, setSessionExpandedUnits] =
+    useState<Set<string> | null>(null);
+  const expandedUnits = useMemo(
+    () =>
+      resolveGraphExpandedUnits({
+        defaults: defaultExpandedUnits,
+        touched: embedTouched,
+        storedFingerprint: embedUnitsFingerprint,
+        sessionOverride: sessionExpandedUnits,
+        persist: !!embedUnitPrefix,
+      }),
+    [
+      defaultExpandedUnits,
+      embedTouched,
+      embedUnitsFingerprint,
+      sessionExpandedUnits,
+      embedUnitPrefix,
+    ],
   );
-  const expandedUnits = useMemo(() => {
-    if (!embedUnitPrefix) return sessionExpandedUnits;
-    if (!embedUnitsFingerprint) return new Set<string>();
-    return new Set(embedUnitsFingerprint.split(","));
-  }, [embedUnitPrefix, embedUnitsFingerprint, sessionExpandedUnits]);
   const onToggleUnitExpand = useCallback(
     (unitId: string) => {
       if (!embedUnitPrefix) {
         setSessionExpandedUnits((prev) => {
-          const next = new Set(prev);
+          const next = new Set(prev ?? defaultExpandedUnits);
           if (next.has(unitId)) next.delete(unitId);
           else next.add(unitId);
           return next;
         });
         return;
       }
-      const fullKey = `${embedUnitPrefix}${unitId}`;
-      const cur = useDisclosureStore.getState().map[fullKey] ?? false;
-      setDisclosureKey(fullKey, !cur, false);
+      const current = resolveGraphExpandedUnits({
+        defaults: defaultExpandedUnits,
+        touched: embedTouched,
+        storedFingerprint: embedUnitsFingerprint,
+        sessionOverride: null,
+        persist: true,
+      });
+      if (current.has(unitId)) current.delete(unitId);
+      else current.add(unitId);
+      if (embedTouchedKey) setDisclosureKey(embedTouchedKey, true, false);
+      const known = new Set([...defaultExpandedUnits, ...current, unitId]);
+      for (const id of known) {
+        setDisclosureKey(`${embedUnitPrefix}${id}`, current.has(id), false);
+      }
     },
-    [embedUnitPrefix, setDisclosureKey],
+    [
+      embedUnitPrefix,
+      embedTouchedKey,
+      embedTouched,
+      embedUnitsFingerprint,
+      defaultExpandedUnits,
+      setDisclosureKey,
+    ],
   );
   // 幕级 LOD（批 R2）：多幕回合聚焦态（进行中自动聚焦活跃幕，完成态整链折叠为卡）。
   // 单幕回合 focusScene.acts.length < 2，focusedActId 恒被 useGraphLayout 忽略。
+  // 跟 structure/lifecycle epoch 门控，勿绑每帧变的 execution 引用。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: epoch + expand gate scene
   const focusScene = useMemo(
     () => (execution ? buildGraphScene(execution, { expandedUnits }) : null),
-    [execution, expandedUnits],
+    [structureStatusEpoch, expandedUnits],
   );
   const { focusedActId, focusAct, collapseActs } = useActFocus(
     focusScene,
@@ -247,11 +307,7 @@ export function GraphView({
   }, [isMultiAct, focusedActId, collapseActs]);
 
   // 图头行动条（R3）：聚合本回合待拍板；点击定位到对应节点。
-  const pendingDecisions = useGraphPendingDecisions(
-    execution,
-    conversationId,
-    messageId,
-  );
+  const pendingDecisions = useGraphPendingDecisions(conversationId, messageId);
   const [locateTarget, setLocateTarget] = useState<{
     runId: string;
     actId: string | null;
@@ -617,4 +673,4 @@ export function GraphView({
       </div>
     </GraphFlowHost>
   );
-}
+});

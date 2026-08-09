@@ -885,6 +885,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             status: "raised",
             answer: null,
             kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+            ...(typeof p.source === "string" && p.source.trim()
+              ? { source: p.source.trim() }
+              : {}),
           });
         pushEscalationMarker(process, p.escalation_id);
         break;
@@ -1119,6 +1122,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "coordination_wait":
       case "workspace_lock_wait":
       case "turn_queued":
+      case "turn_queue_started":
       case "turn_queue_cancelled":
       // 经典软插入 ack（EPHEMERAL）：toast 由 ChatPage 消费；不进 ProjectedTurn。
       case "turn_steer_accepted":
@@ -1308,8 +1312,9 @@ export type TurnQueuedState = {
 
 /**
  * FIFO 排队态列表（``turn_queued``）：多 queue_id 并存，勿单槽覆盖。
- * ``turn_queue_cancelled`` 按 ``queue_id`` 清一项；``message_start`` 清空
- * （该事件流上的排队项已开跑 / 已迁走）。Live UI 以 ``queuedTurns`` store 为准。
+ * ``turn_queue_cancelled`` / ``turn_queue_started`` 按 ``queue_id`` 清一项
+ * （取消撤回 / 出队开跑）；否决靠 ``message_start`` 猜出队。
+ * Live UI 以 ``queuedTurns`` store 为准。
  */
 export function extractTurnQueued(events: SSEEvent[]): TurnQueuedState[] {
   const byId = new Map<string, TurnQueuedState>();
@@ -1334,14 +1339,14 @@ export function extractTurnQueued(events: SSEEvent[]): TurnQueuedState[] {
         });
       }
     }
-    if (ev.type === "turn_queue_cancelled") {
+    if (
+      ev.type === "turn_queue_cancelled" ||
+      ev.type === "turn_queue_started"
+    ) {
       const p = ev.payload as { queue_id?: string };
       if (typeof p.queue_id === "string" && p.queue_id) {
         byId.delete(p.queue_id);
       }
-    }
-    if (ev.type === "message_start") {
-      byId.clear();
     }
   }
   return [...byId.values()].sort((a, b) => a.position - b.position);
@@ -1659,6 +1664,9 @@ export function extractEscalationSlots(
           status: "raised",
           answer: null,
           kind: p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+          ...(typeof p.source === "string" && p.source.trim()
+            ? { source: p.source.trim() }
+            : {}),
         },
       });
     } else if (ev.type === "escalation_required") {

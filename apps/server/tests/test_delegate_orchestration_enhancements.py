@@ -14,8 +14,9 @@ from agentcore.runtime.delegate.parallelism import (
     widen_post_checkpoint_deps,
 )
 from agentcore.runtime.engine.write_args_clear import (
+    cleared_write_stub_rejection,
     project_cleared_write_args,
-    write_args_stub,
+    write_args_landed_summary,
 )
 from agentcore.runtime.events import plan_review_required
 from agentcore.runtime.events.payloads.interaction import PlanReviewRequiredPayload
@@ -171,21 +172,34 @@ def test_widen_aggressive_fans_from_checkpoint():
     assert set(plan.by_id("verifier").depends_on) == {"core", "table", "power"}
 
 
-# ── 3. handoff 写参清理 ──────────────────────────────────────────────────────
+# ── 3. handoff 写参清理（非写工具短状态，禁 _landed_summary 回灌形）────────
 
 
-def test_write_args_stub_keeps_path():
+def test_write_args_landed_summary_is_readonly_not_writing_args():
+    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+
     args = json.dumps({"path": "docs/spec.md", "content": "X" * 2000}, ensure_ascii=False)
-    stub = write_args_stub("file_write", args, 2000)
-    data = json.loads(stub)
+    projected = write_args_landed_summary("file_write", args, 2000)
+    data = json.loads(projected)
     assert data["path"] == "docs/spec.md"
-    assert data["content"] == "[已清理]"
-    assert "_cleared" in data
-    assert "禁止把本 stub" in data["_cleared"]
+    assert data["status"] == "landed"
+    assert data["via"] == "file_write"
+    assert data["chars"] == 2000
+    assert "file_read" in data["note"]
+    assert "str_replace" in data["note"]
+    # Must NOT look like submittable writing args / old echo template.
+    assert "_landed_summary" not in data
+    assert "content" not in data
+    assert "new_string" not in data
+    assert "old_string" not in data
+    assert "_cleared" not in data
+    assert "[已清理]" not in projected
+    assert LANDED_STATUS_TOOL == "_write_landed"
+    assert LANDED_STATUS_TOOL not in {"file_write", "file_append", "str_replace"}
 
 
-def test_write_args_stub_str_replace_keeps_old_string_schema_keys():
-    """str_replace 清参：保留完整 old_string、只 stub new_string，且键名对齐 schema。"""
+def test_write_args_landed_summary_str_replace_drops_body_keys():
+    """str_replace 清参：短状态 + via，不再挂 old/new 假写作字段。"""
     anchor = (
         "- 本轮检索未获得阿里 AI 板块单独营收数据（阿里整体财报口径以集团为主），"
         "标注为待核实。\n\n---\n"
@@ -199,19 +213,19 @@ def test_write_args_stub_str_replace_keeps_old_string_schema_keys():
         },
         ensure_ascii=False,
     )
-    stub = write_args_stub("str_replace", args, len(anchor + body))
-    data = json.loads(stub)
+    projected = write_args_landed_summary("str_replace", args, len(anchor + body))
+    data = json.loads(projected)
     assert data["path"] == "research/ai_cn_notes.md"
-    assert data["old_string"] == anchor
-    assert data["new_string"] == "[已清理·须重填]"
-    assert "old_str" not in data
-    assert "new_str" not in data
-    assert body not in stub
-    assert "禁止把本 stub" in data["_cleared"]
-    assert "old_string" in data["_cleared"] and "new_string" in data["_cleared"]
+    assert data["status"] == "landed"
+    assert data["via"] == "str_replace"
+    assert "_landed_summary" not in data
+    assert "old_string" not in data
+    assert "new_string" not in data
+    assert body not in projected
+    assert "[已清理" not in projected
 
 
-def test_write_args_stub_keeps_html_structure_summary():
+def test_write_args_landed_summary_keeps_html_structure():
     """清参后保留 HTML class/id 结构摘要，供后续文件对照契约（非凭记忆盲写）。"""
     from agentcore.runtime.engine.write_args_clear import structural_write_summary
 
@@ -222,7 +236,7 @@ def test_write_args_stub_keeps_html_structure_summary():
         '<span class="muted">hint</span>'
         "</div></body></html>"
     )
-    # Pad past min_chars so project path also exercises the stub.
+    # Pad past min_chars so project path also exercises the summary.
     html = html + ("<!-- pad -->" * 80)
     summary = structural_write_summary("index.html", html)
     assert summary is not None
@@ -230,21 +244,24 @@ def test_write_args_stub_keeps_html_structure_summary():
     assert "hero" in summary and "btn" in summary and "primary" in summary
 
     args = json.dumps({"path": "index.html", "content": html}, ensure_ascii=False)
-    stub = write_args_stub("file_write", args, len(html))
-    data = json.loads(stub)
-    assert data["content"] == "[已清理]"
+    projected = write_args_landed_summary("file_write", args, len(html))
+    data = json.loads(projected)
+    assert "content" not in data
+    assert "_landed_summary" not in data
     assert "_structure" in data
     assert "classes=[" in data["_structure"]
     assert "hero" in data["_structure"]
     assert "primary" in data["_structure"]
     assert "ids=[" in data["_structure"]
     assert "app" in data["_structure"]
-    # Full body must not leak back into the stub.
-    assert html[:40] not in stub
+    # Full body must not leak back into the projection.
+    assert html[:40] not in projected
     assert len(data["_structure"]) < 1200
 
 
 def test_project_cleared_write_args_collapses_completed_writes():
+    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+
     big = "正文" * 400
     call_id = "w1"
     msgs = [
@@ -268,18 +285,28 @@ def test_project_cleared_write_args_collapses_completed_writes():
     ]
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
-    args = json.loads(out[1].tool_calls[0].function.arguments)
+    call = out[1].tool_calls[0]
+    assert call.function.name == LANDED_STATUS_TOOL
+    assert call.function.name not in {"file_write", "file_append", "str_replace"}
+    args = json.loads(call.function.arguments)
     assert args["path"] == "docs/a.md"
-    assert big not in args["content"]
-    # canonical-shape: stub is stable on re-project
+    assert args["status"] == "landed"
+    assert args["via"] == "file_write"
+    assert "_landed_summary" not in args
+    assert "content" not in args
+    assert big not in call.function.arguments
+    # canonical-shape: status is stable on re-project (name left WRITE_ARG_TOOLS)
     out2 = project_cleared_write_args(out, min_chars=100)
     assert out2 is out or out2[1].tool_calls[0].function.arguments == (
         out[1].tool_calls[0].function.arguments
     )
+    assert out2[1].tool_calls[0].function.name == LANDED_STATUS_TOOL
 
 
-def test_project_cleared_write_args_str_replace_keeps_anchor():
-    """完成后清 new_string，但 old_string 锚点完整保留在模型可见窗口。"""
+def test_project_cleared_write_args_str_replace_readonly_summary():
+    """完成后投影为非写工具短状态，不再保留可提交的 old/new 形状。"""
+    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+
     anchor = "END_MARK\n---\n"
     big = "章节正文" * 200
     call_id = "s1"
@@ -307,11 +334,15 @@ def test_project_cleared_write_args_str_replace_keeps_anchor():
     ]
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
-    args = json.loads(out[0].tool_calls[0].function.arguments)
-    assert args["old_string"] == anchor
-    assert args["new_string"] == "[已清理·须重填]"
-    assert big not in args["new_string"]
-    assert big not in out[0].tool_calls[0].function.arguments
+    call = out[0].tool_calls[0]
+    assert call.function.name == LANDED_STATUS_TOOL
+    args = json.loads(call.function.arguments)
+    assert args["path"] == "notes.md"
+    assert args["via"] == "str_replace"
+    assert "_landed_summary" not in args
+    assert "old_string" not in args
+    assert "new_string" not in args
+    assert big not in call.function.arguments
 
 
 def test_project_cleared_write_args_skips_pending_write():
@@ -333,6 +364,169 @@ def test_project_cleared_write_args_skips_pending_write():
     ]
     assert project_cleared_write_args(msgs, min_chars=100) is msgs
 
+
+def test_cleared_write_stub_rejection_exact_markers_only():
+    """硬拒仅命中 stub 形；正常短文 / 含「已清理」散文不拦。"""
+    assert cleared_write_stub_rejection({"path": "a.md", "content": "[已清理]"}) is not None
+    assert (
+        cleared_write_stub_rejection(
+            {"path": "a.md", "old_string": "x", "new_string": "[已清理·须重填]"}
+        )
+        is not None
+    )
+    assert (
+        cleared_write_stub_rejection(
+            {"path": "a.md", "_landed_summary": "只读", "status": "landed"}
+        )
+        is not None
+    )
+    assert (
+        cleared_write_stub_rejection(
+            {"path": "a.md", "content": "hi", "_cleared": "legacy"}
+        )
+        is not None
+    )
+    # Normal short / prose must pass.
+    assert cleared_write_stub_rejection({"path": "a.md", "content": "短文"}) is None
+    assert (
+        cleared_write_stub_rejection(
+            {"path": "a.md", "content": "本节已清理历史遗留问题。"}
+        )
+        is None
+    )
+    assert (
+        cleared_write_stub_rejection(
+            {"path": "a.md", "old_string": "a", "new_string": "b"}
+        )
+        is None
+    )
+
+
+def test_landed_summary_echo_fingerprint_collapses_per_path():
+    """不同摘要文本同 path → 同 fingerprint；正常正文不塌缩。"""
+    from agentcore.runtime.loop_controller import fingerprint_tool_call
+
+    fp_a = fingerprint_tool_call(
+        "file_write",
+        json.dumps(
+            {
+                "path": "docs/a.md",
+                "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入 A",
+                "status": "landed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    fp_b = fingerprint_tool_call(
+        "file_write",
+        json.dumps(
+            {
+                "path": "docs\\a.md",
+                "_landed_summary": "完全不同的摘要正文 B · 约 9000 字符",
+                "status": "landed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    fp_stub = fingerprint_tool_call(
+        "file_write",
+        json.dumps({"path": "docs/a.md", "content": "[已清理]"}, ensure_ascii=False),
+    )
+    fp_other = fingerprint_tool_call(
+        "file_write",
+        json.dumps(
+            {
+                "path": "docs/other.md",
+                "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入 A",
+                "status": "landed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    fp_ok = fingerprint_tool_call(
+        "file_write",
+        json.dumps(
+            {"path": "docs/a.md", "content": "正常完整正文，不是摘要。"},
+            ensure_ascii=False,
+        ),
+    )
+    assert fp_a == fp_b
+    assert fp_a == fp_stub
+    assert fp_a != fp_other
+    assert fp_a != fp_ok
+
+    fp_sr_a = fingerprint_tool_call(
+        "str_replace",
+        json.dumps(
+            {
+                "path": "docs/a.md",
+                "_landed_summary": "摘要一",
+                "status": "landed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    fp_sr_b = fingerprint_tool_call(
+        "str_replace",
+        json.dumps(
+            {
+                "path": "docs/a.md",
+                "old_string": "[已清理]",
+                "new_string": "x",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    assert fp_sr_a == fp_sr_b
+
+
+def test_landed_summary_echo_validation_stop_names_file_read():
+    """摘要回灌：首次拒写即 path-stop（点名 file_read→str_replace/真文）；写工具保持可用。"""
+    from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
+    from agentcore.runtime.loop_controller import (
+        LoopController,
+        ToolAttempt,
+        fingerprint_tool_call,
+    )
+
+    args = {
+        "path": "docs/a.md",
+        "_landed_summary": "【已落盘摘要·只读】不可当写盘参数",
+        "status": "landed",
+    }
+    err = cleared_write_stub_rejection(args)
+    assert err is not None
+    assert "已落盘摘要" in err
+    assert "docs/a.md" in err
+    assert "file_read" in err
+    assert "真文" in err
+    assert "str_replace" in err
+    fp = fingerprint_tool_call("file_write", json.dumps(args, ensure_ascii=False))
+
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    rej = ToolAttempt(
+        fp,
+        "file_write",
+        success=False,
+        contract_failure=True,
+        error_summary=err,
+        meta={"error_class": "validation", "path": "docs/a.md"},
+    )
+    # 首次即舵（不再等第二次同指纹）。
+    c.record([rej])
+    cb = c.tool_circuit_breaker()
+    assert cb.validation_stop is not None
+    stop = cb.validation_stop or ""
+    assert "file_read" in stop
+    assert "真文" in stop
+    assert "str_replace" in stop
+    assert "file_write" in stop
+    assert "docs/a.md" in stop
+    assert cb.disabled == ()
+    assert c.tool_failure_count("file_write") == 0
+    # 同指纹再撞 → thrash 早停。
+    c.record([rej])
+    assert c.is_thrashing() or c.take_validation_hard_stop()
 
 # ── 4. 记忆复用 ──────────────────────────────────────────────────────────────
 

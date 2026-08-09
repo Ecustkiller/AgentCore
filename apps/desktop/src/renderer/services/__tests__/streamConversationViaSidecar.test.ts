@@ -24,6 +24,7 @@ vi.mock("@/services/sidecarStatus", () => ({
 vi.mock("@/hooks/useConversations", () => ({
   patchConversationCache: vi.fn(),
   getConversations: vi.fn(() => []),
+  syncConversationListPreview: vi.fn(),
 }));
 vi.mock("@/hooks/useFolders", () => ({
   getFolders: vi.fn(() => []),

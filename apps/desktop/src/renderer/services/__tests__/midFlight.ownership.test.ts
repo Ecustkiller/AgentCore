@@ -8,6 +8,7 @@ import {
   resetStreamOwnershipForTests,
 } from "@/services/turns/streamOwnership";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import type { SSEEvent } from "@/types/events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetStreamOwnershipForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
+  useQueuedTurnsStore.setState({ byConversation: {} });
   useConversationStore.getState().switchConversation(CID);
   useConversationStore.getState().setTurnPhase("streaming", CID);
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
@@ -75,6 +77,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetStreamOwnershipForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
+  useQueuedTurnsStore.setState({ byConversation: {} });
 });
 
 describe("midFlight · 主路门 + store 断言", () => {
@@ -130,10 +133,21 @@ describe("midFlight · 主路门 + store 断言", () => {
         (m) => m.role === "user" && m.content === "第二问",
       ),
     ).toBe(true);
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
 
-    // drain 边界交错：conn2 已到 message_start，但 turn1 主路未释放 → 缓冲
+    // drain 边界交错：conn2 已到 turn_queue_started + message_start，但 turn1 主路未释放 → 缓冲
+    sse.push(
+      ev("turn_queue_started", {
+        queue_id: "q1",
+        conversation_id: CID,
+        remaining_depth: 0,
+      }),
+    );
     sse.push(ev("message_start", { message_id: "srv-turn2" }));
     await new Promise((r) => setTimeout(r, 10));
+
+    // 缓冲中：轻态仍在（尚未 flush）
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
 
     // 不变式 c：turn1 正文未被 resetAssistant 清掉
     const midRace = getRuntime(CID).messages;
@@ -171,7 +185,8 @@ describe("midFlight · 主路门 + store 断言", () => {
       ).toBe(true);
     });
 
-    // 放行后：turn2 开流；用户气泡仍在
+    // 放行后：turn_queue_started 清轻态；用户气泡仍在
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
     const after = getRuntime(CID).messages;
     const turn2 = after.find(
       (m) => m.role === "assistant" && m.serverMessageId === "srv-turn2",
@@ -179,6 +194,9 @@ describe("midFlight · 主路门 + store 断言", () => {
     expect(turn2).toBeTruthy();
     expect(after.find((m) => m.serverMessageId === "srv-turn1")?.content).toBe(
       "turn1-正文",
+    );
+    expect(after.some((m) => m.role === "user" && m.content === "第二问")).toBe(
+      true,
     );
 
     sse.push(ev("content_delta", { delta: "turn2-答" }));
@@ -236,6 +254,8 @@ describe("midFlight · 主路门 + store 断言", () => {
         (m) => m.role === "user" && m.content === "排队后停止",
       ),
     ).toBe(true);
+    // Abort 丢缓冲：轻态保留（Stop ≠ 取消排队；亦未收到 turn_queue_started）
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
     expect(
       getRuntime(CID).messages.some(
         (m) => m.serverMessageId === "srv-should-not-land",
@@ -383,7 +403,7 @@ describe("midFlight · 主路门 + store 断言", () => {
   });
 });
 
-describe("同连接 turn_queued → message_start → 收口（dispatch 全链）", () => {
+describe("同连接 turn_queued → turn_queue_started → message_start → 收口（dispatch 全链）", () => {
   it("主路空闲时 turn_queued 后自然续流，正文落在新回合助手气泡", () => {
     // 无 primary = 空闲（idle send 同连接路径）
     const conv = useConversationStore.getState();
@@ -398,6 +418,14 @@ describe("同连接 turn_queued → message_start → 收口（dispatch 全链�
       },
       CID,
     );
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q1",
+      conversationId: CID,
+      messageId: "u-q",
+      content: "排队问",
+      position: 1,
+      queueDepth: 1,
+    });
     conv.createAssistantMessage(CID);
 
     dispatchSSEEvent(
@@ -410,6 +438,17 @@ describe("同连接 turn_queued → message_start → 收口（dispatch 全链�
       { conversationId: CID, source: "server" },
     );
     expect(notifyInfoMock).toHaveBeenCalledWith("已排队，当前回合结束后处理");
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+
+    dispatchSSEEvent(
+      ev("turn_queue_started", {
+        queue_id: "q1",
+        conversation_id: CID,
+        remaining_depth: 0,
+      }),
+      { conversationId: CID, source: "server" },
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
 
     dispatchSSEEvent(ev("message_start", { message_id: "m-q" }), {
       conversationId: CID,
@@ -442,5 +481,8 @@ describe("同连接 turn_queued → message_start → 收口（dispatch 全链�
     expect(last?.isStreaming).toBe(false);
     expect(last?.cost?.total).toBe(15);
     expect(getRuntime(CID).isGenerating).toBe(false);
+    expect(
+      getRuntime(CID).messages.some((m) => m.id === "u-q" && m.role === "user"),
+    ).toBe(true);
   });
 });

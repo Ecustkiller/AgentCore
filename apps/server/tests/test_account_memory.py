@@ -108,15 +108,60 @@ async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds)
         payload = json.loads(request.content.decode())
         assert payload["content"] == "以后都用中文"
         assert payload["folder_id"] is None
-        return httpx.Response(200, json={"changed": True})
+        assert payload["action"] == "add"
+        return httpx.Response(
+            200,
+            json={
+                "changed": True,
+                "action": "add",
+                "message": "已追加规则：以后都用中文",
+                "rules_markdown": None,
+            },
+        )
 
     monkeypatch.setattr(
         "agentcore.account.credentials.outbound_async_client",
         lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
     )
-    assert await cloud_remember_rule(
+    result = await cloud_remember_rule(
         account_creds, content="以后都用中文", folder_id=None
     )
+    assert result["changed"] is True
+    assert result["action"] == "add"
+    assert "已追加" in result["message"]
+
+
+async def test_cloud_remember_replace_payload(monkeypatch: pytest.MonkeyPatch, account_creds):
+    async def _handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        payload = json.loads(request.content.decode())
+        assert payload["action"] == "replace"
+        assert payload["content"] == "用中文"
+        assert payload["replaces"] == "用英文"
+        return httpx.Response(
+            200,
+            json={
+                "changed": True,
+                "action": "replace",
+                "message": "已替换规则：去掉「用英文」，写入「用中文」",
+            },
+        )
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.outbound_async_client",
+        lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
+    )
+    result = await cloud_remember_rule(
+        account_creds,
+        content="用中文",
+        folder_id=None,
+        action="replace",
+        replaces="用英文",
+    )
+    assert result["changed"] is True
+    assert result["action"] == "replace"
+
 
 
 async def test_cloud_memory_save_raises_on_5xx(
@@ -213,11 +258,18 @@ async def test_assemble_turn_rules_cloud_failure_soft_empty(
 async def test_remember_tool_cloud_success(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    async def _fake_remember(creds, *, content, folder_id):
+    async def _fake_remember(creds, *, content, folder_id, action="add", replaces=None):
         assert content == "以后都用中文"
         assert folder_id is None
+        assert action == "add"
+        assert replaces is None
         assert creds is account_creds
-        return True
+        return {
+            "changed": True,
+            "action": "add",
+            "message": "已追加规则：以后都用中文",
+            "rules_markdown": None,
+        }
 
     monkeypatch.setattr(
         "agentcore.account.credentials.cloud_remember_rule", _fake_remember
@@ -231,7 +283,33 @@ async def test_remember_tool_cloud_success(
     with account_credentials_scope(account_creds):
         result = await tool.execute({"content": "以后都用中文"}, _ctx())
     assert result.success is True
-    assert "已记为规则" in (result.output or "")
+    assert "已追加" in (result.output or "")
+
+
+async def test_remember_tool_cloud_forget(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    async def _fake_remember(creds, *, content, folder_id, action="add", replaces=None):
+        assert action == "forget"
+        assert content == "用英文"
+        return {
+            "changed": True,
+            "action": "forget",
+            "message": "已删除规则：用英文",
+            "rules_markdown": None,
+        }
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_remember_rule", _fake_remember
+    )
+    tool = RememberTool(folder_id=None)
+    with account_credentials_scope(account_creds):
+        result = await tool.execute(
+            {"action": "forget", "content": "用英文"}, _ctx()
+        )
+    assert result.success is True
+    assert "已删除" in (result.output or "")
+    assert result.display["action"] == "forget"
 
 
 async def test_remember_tool_cloud_failure_explicit(

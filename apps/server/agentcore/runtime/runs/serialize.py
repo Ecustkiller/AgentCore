@@ -128,13 +128,14 @@ def format_file_landing_tools_slash() -> str:
 def landing_write_failure_kind(
     transcript: list[LLMMessage] | None,
 ) -> str | None:
-    """Classify failed file-landing attempts for zero-disk attribution.
+    """Classify failed file-landing attempts for zero-disk / audit-JSON attribution.
 
     Returns ``channel_dead`` when any failed landing-tool result mentions a dead
     workspace channel / 活性挂起; ``write_failed`` when landing tools failed for
     other reasons; ``None`` when no failed landing-tool result is observed (true
     zero-attempt / paste-into-prose case). Successful landings are ignored here —
-    callers already gate on ``files_written == 0``.
+    callers may still pass the kind when some files landed (e.g. channel died
+    before companion ``*.audit.json``).
     """
     if not transcript:
         return None

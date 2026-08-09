@@ -175,6 +175,8 @@ export type RunFrame =
       /** 统一时间线二期 D6: raised 轻行幂等键（桌面填入 RunEscalation.id；golden 不加）。 */
       escalationId: string;
       escalationKind: import("./types").EscalationKind;
+      /** Wire `source`（桌面本地；ProjectedTurn 不加）。旧流缺字段 → undefined。 */
+      source?: string;
     }
   | {
       // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user.
@@ -460,6 +462,10 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
     }
     case "run_escalation": {
       const p = event.payload as RunEscalationPayload;
+      const source =
+        typeof p.source === "string" && p.source.trim()
+          ? p.source.trim()
+          : undefined;
       return {
         t,
         kind: "run_escalation",
@@ -471,6 +477,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         escalationId: p.escalation_id ?? "",
         escalationKind:
           p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+        ...(source ? { source } : {}),
       };
     }
     case "escalation_required": {

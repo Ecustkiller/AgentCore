@@ -819,11 +819,10 @@ async def test_validation_thrash_finalize_escalates_gap_upward(monkeypatch):
     from unittest.mock import MagicMock
 
     from agentcore.llm.provider.protocol import TokenUsage
-    from agentcore.runtime.engine.ceiling import CEILING_BACKSTOP_SOURCE
     from agentcore.runtime.engine.directive import Finalize
     from agentcore.runtime.engine.directive_apply import apply_loop_directive
     from agentcore.runtime.engine.outcome import RoundOutcome
-    from agentcore.runtime.events import EventSink, FinishReason
+    from agentcore.runtime.events import EventSink, EventType, FinishReason
 
     async def _fake_finalize(**_kwargs):
         return "", "", TokenUsage(), 3, None
@@ -874,9 +873,12 @@ async def test_validation_thrash_finalize_escalates_gap_upward(monkeypatch):
     assert result.action == "return"
     assert finish == [FinishReason.UNPRODUCTIVE]
     assert len(gate) == 1
-    assert gate[0]["source"] == CEILING_BACKSTOP_SOURCE
+    assert gate[0]["source"] == "validation_thrash"
     assert "早停" in gate[0]["question"] or "缺口" in gate[0]["question"]
     assert "validation_thrash" in gate[0]["evidence"]
+    raised = [e for e in sink._history if e.type is EventType.RUN_ESCALATION]
+    assert len(raised) == 1
+    assert raised[0].payload.get("source") == "validation_thrash"
 
 
 def test_transient_still_warns_at_two_disables_at_three():
@@ -1533,6 +1535,34 @@ def test_delivery_idle_nudge_then_narrow_without_finalize():
     assert any("交文件空转收窄" in str(m.content) for m in messages2)
     assert delivery_idle_narrow_prompt(rounds=3) in {m.content for m in messages2}
     assert "内环诊断" in delivery_idle_narrow_prompt(rounds=3)
+    # Collaboration: prompt mentions notes stay; non-collab wording omits them.
+    notes_prompt = delivery_idle_narrow_prompt(rounds=3, keep_notes=True)
+    assert "便签" in notes_prompt and "可贴/读/改" in notes_prompt
+    assert "handoff" in notes_prompt
+    assert "便签" not in delivery_idle_narrow_prompt(rounds=3, keep_notes=False)
+
+    messages_notes: list = []
+    # Re-arm narrow on a fresh controller to assert keep_notes injection path.
+    c_notes = LoopController(
+        convergence_finalize_rounds=30,
+        convergence_spin_rounds=0,
+        delivery_idle_nudge_rounds=2,
+        delivery_idle_narrow_rounds=3,
+        investigation_tools=frozenset({"web_search", "grep"}),
+    )
+    for _ in range(3):
+        c_notes.record(
+            [ToolAttempt(fingerprint="n", tool_name="web_search", success=True)]
+        )
+    assert maybe_inject_delivery_idle(
+        c_notes,
+        messages=messages_notes,
+        run_id="r-notes",
+        round_idx=3,
+        role="worker",
+        keep_notes=True,
+    ) == "narrow"
+    assert notes_prompt in {m.content for m in messages_notes}
 
     # Still Continue — no mid-loop FINALIZE / DEGRADED from idle.
     assert c.convergence_action() is Intervention.CONTINUE

@@ -143,7 +143,7 @@ def apply_replan(
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=getattr(tool, "_folder_id", None),
             tasks_raw=adds_list,
-            default_target_folder_id=getattr(tool, "_default_target_folder_id", None),
+            default_target_folder_id=tool.effective_default_target_folder_id(),
         )
         if bare_gate:
             return [bare_gate]
@@ -156,7 +156,7 @@ def apply_replan(
         valid_tools=valid_tools,
         parent_run_id=tool._captain_run_id,
         depth=tool._depth + 1,
-        default_target_folder_id=getattr(tool, "_default_target_folder_id", None),
+        default_target_folder_id=tool.effective_default_target_folder_id(),
     )
     errors.extend(add_errors)
     bind_ops: list[tuple[RunSpec, dict[str, Any]]] = []
@@ -294,6 +294,7 @@ def _admit_replan_adds_against_coordination(
         ownership=ownership,
         force=force,
         total_workers=session.total_workers,
+        birth_desk_id=getattr(tool, "_folder_id", None),
     )
     if reject is not None:
         get_logger(__name__).info(
@@ -333,6 +334,7 @@ def _declare_replan_adds_on_coordination(
         only_run_ids={n.run_id for n in new_specs},
         ancestor_map=_ancestors_by_id(plan),
         completed_run_ids=session.completed_run_ids,
+        birth_desk_id=getattr(tool, "_folder_id", None),
     )
 
 async def finalize_stopped(

@@ -172,8 +172,71 @@ async def test_queued_waiter_receives_sink_on_drain(monkeypatch):
     async for frame in gen:
         frames.append(frame)
     joined = "".join(frames)
+    assert "turn_queue_started" in joined
+    assert item.queue_id in joined
     assert "from-drain" in joined
     assert "content_delta" in joined
+
+
+async def test_start_queued_turn_emits_started_before_stream(monkeypatch):
+    """契约：pop 后新 sink 首帧为 turn_queue_started（先于 stream_chat / message_start）。"""
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.turn_queue import _start_queued_turn
+
+    done = asyncio.Event()
+
+    async def fake_stream_chat(**kwargs):
+        sink: EventSink = kwargs["sink"]
+        # stream_chat 入口时首帧已在 history。
+        types = [e.type for e in sink._history]  # noqa: SLF001
+        assert types[0] is EventType.TURN_QUEUE_STARTED
+        assert sink._history[0].payload["queue_id"] == "q-started"  # noqa: SLF001
+        assert sink._history[0].payload["remaining_depth"] == 1  # noqa: SLF001
+        sink.close()
+        done.set()
+
+    monkeypatch.setattr("agentcore.conversation.service.stream_chat", fake_stream_chat)
+    monkeypatch.setattr(
+        "agentcore.runtime.turn_runs.turn_runs.register",
+        lambda **kwargs: "run-id",
+    )
+
+    turn_queue.clear("c-started")
+    # Leave one sibling in queue so remaining_depth == 1 after this item is already popped.
+    turn_queue.enqueue("c-started", new_queued_turn(content="sibling", user_id="u"))
+    item = new_queued_turn(content="next", user_id="u")
+    item.queue_id = "q-started"
+    await _start_queued_turn("c-started", item)
+    await asyncio.wait_for(done.wait(), timeout=2.0)
+    turn_queue.clear("c-started")
+
+
+async def test_enqueue_and_ensure_drain_emits_live_turn_queued():
+    """emit_live_queued=True → live sink 收到 turn_queued（协调升队多端可见）。"""
+    from agentcore.runtime.events import EventType
+
+    cid = "c-live-queued"
+    turn_queue.clear(cid)
+    sink = EventSink()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id=cid, task=blocker, sink=sink)
+    try:
+        status = turn_queue.enqueue_and_ensure_drain(
+            cid,
+            new_queued_turn(content="from-coord", user_id="u"),
+            emit_live_queued=True,
+        )
+        types = [e.type for e in sink._history]  # noqa: SLF001
+        assert EventType.TURN_QUEUED in types
+        ev = next(e for e in sink._history if e.type is EventType.TURN_QUEUED)  # noqa: SLF001
+        assert ev.payload["queue_id"] == status.queue_id
+        assert ev.payload["position"] == 1
+        assert turn_queue.depth(cid) == 1
+    finally:
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+        turn_queue.clear(cid)
 
 
 async def test_queued_disconnect_before_drain_starts_detached(monkeypatch):

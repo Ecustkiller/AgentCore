@@ -174,11 +174,13 @@ def admit_before_run_plan_emit(
         ownership = (
             existing.ensure_file_ownership() if file_ownership_v2_enabled() else None
         )
+        birth_desk = getattr(tool, "_folder_id", None)
         overlaps = find_append_overlaps(
             plan,
             existing.live_plan,
             completed_run_ids=existing.completed_run_ids,
             ownership=ownership,
+            birth_desk_id=birth_desk,
         )
         if overlaps:
             completed_k = len(existing.completed_run_ids)
@@ -192,6 +194,7 @@ def admit_before_run_plan_emit(
                 execution_id=execution_id,
                 overlaps=len(overlaps),
                 reasons=[o.reason for o in overlaps],
+                paths=[o.path for o in overlaps if o.path],
                 completed=completed_k,
                 total=existing.total_workers,
                 call=call_idx,
@@ -265,6 +268,7 @@ def admit_before_run_plan_emit(
             ownership=None,
             force=False,
             total_workers=len(host_plan.nodes),
+            birth_desk_id=getattr(tool, "_folder_id", None),
         )
         if reject is not None:
             logger.info(
@@ -291,7 +295,8 @@ def admit_before_run_plan_emit(
         return None
 
     if file_ownership_v2_enabled():
-        sibling_hits = find_sibling_artifact_crosses(plan)
+        birth_desk = getattr(tool, "_folder_id", None)
+        sibling_hits = find_sibling_artifact_crosses(plan, birth_desk_id=birth_desk)
         if sibling_hits:
             msg = append_overlap_reject_message(
                 sibling_hits,
@@ -302,6 +307,7 @@ def admit_before_run_plan_emit(
                 "coordination.sibling_artifact_rejected",
                 execution_id=execution_id,
                 overlaps=len(sibling_hits),
+                paths=[o.path for o in sibling_hits if o.path],
                 call=call_idx,
                 via="pre_emit",
             )
@@ -529,6 +535,12 @@ def _merge_into_active_coordination(
     # auto-replaces, then reject incomplete seat / still-running file holders).
     force = getattr(tool, "_delegate_force", False) is True
     ownership = session.ensure_file_ownership() if file_ownership_v2_enabled() else None
+    _folder = getattr(tool, "_folder_id", None)
+    birth_desk = session.birth_desk_id or (
+        _folder.strip() if isinstance(_folder, str) and _folder.strip() else None
+    )
+    if birth_desk and not session.birth_desk_id:
+        session.birth_desk_id = birth_desk
     reject = admit_added_nodes(
         plan,
         live,
@@ -537,6 +549,7 @@ def _merge_into_active_coordination(
         ownership=ownership,
         force=force,
         total_workers=session.total_workers,
+        birth_desk_id=birth_desk,
     )
     if reject is not None:
         completed_k = len(session.completed_run_ids)
@@ -649,6 +662,12 @@ def _merge_into_active_coordination(
             only_run_ids={n.run_id for n in added_nodes},
             ancestor_map=_ancestors_by_id(live),
             completed_run_ids=session.completed_run_ids,
+            birth_desk_id=session.birth_desk_id
+            or (
+                getattr(tool, "_folder_id", None)
+                if isinstance(getattr(tool, "_folder_id", None), str)
+                else None
+            ),
         )
     # Budget merge（两池遥测）：派新批按 batch 规模补充两池计数额度，各自封顶。
     topup_progress, topup_decision = split_coordination_budget(
@@ -823,7 +842,9 @@ def try_start_coordination(
         )
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
-        sibling_hits = find_sibling_artifact_crosses(plan)
+        sibling_hits = find_sibling_artifact_crosses(
+            plan, birth_desk_id=getattr(tool, "_folder_id", None)
+        )
         if sibling_hits:
             msg = append_overlap_reject_message(
                 sibling_hits,
@@ -834,6 +855,7 @@ def try_start_coordination(
                 "coordination.sibling_artifact_rejected",
                 execution_id=execution_id,
                 overlaps=len(sibling_hits),
+                paths=[o.path for o in sibling_hits if o.path],
                 call=call_idx,
                 via="try_start",
             )
@@ -863,6 +885,10 @@ def try_start_coordination(
             conversation_id=str(getattr(tool, "_conversation_id", None) or ""),
             coordination=coordination if coordination in ("wall", "none") else "none",
         )
+        _folder = getattr(tool, "_folder_id", None)
+        session.birth_desk_id = (
+            _folder.strip() if isinstance(_folder, str) and _folder.strip() else None
+        )
         session.live_plan = plan
         session.event_sink = getattr(tool, "_sink", None)
         _seed_session_completed(session, seed_completed)
@@ -876,6 +902,11 @@ def try_start_coordination(
         if not session.conversation_id:
             session.conversation_id = str(
                 getattr(tool, "_conversation_id", None) or ""
+            )
+        if not session.birth_desk_id:
+            _folder = getattr(tool, "_folder_id", None)
+            session.birth_desk_id = (
+                _folder.strip() if isinstance(_folder, str) and _folder.strip() else None
             )
         # Resume / re-arm: re-attach live sink (not snapshotted).
         session.event_sink = getattr(tool, "_sink", None) or session.event_sink
@@ -895,6 +926,7 @@ def try_start_coordination(
             session.ensure_file_ownership(),
             force=force,
             completed_run_ids=session.completed_run_ids,
+            birth_desk_id=getattr(tool, "_folder_id", None),
         )
         record_coordination_snapshot(session)
 

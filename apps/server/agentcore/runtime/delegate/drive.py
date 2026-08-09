@@ -571,6 +571,16 @@ async def _drive_body(
         tool._sink.emit(run_skipped(rid, aid, reason=reason))
 
     should_stop, priority_reserve_hit = resolve_wave_budget_hooks()
+    # 嵌套满额：depth≥1 子团不继承父层 12//N 切开份额，按满额并行派发（单 lead 仍受
+    # MAX_WORKER_SUBDELEGATIONS=4；depth≤2）。根 depth0 保持分而不乘。
+    from agentcore.runtime.runs.concurrency import (
+        reseed_nested_delegation_budget,
+        reset_budget,
+    )
+
+    nested_budget_token = reseed_nested_delegation_budget(
+        int(getattr(tool, "_depth", 0) or 0)
+    )
     try:
         results = await WaveScheduler(tool._max_parallel or resolve_max_parallel()).run(
             plan,
@@ -600,6 +610,8 @@ async def _drive_body(
         )
         redirects.audit_ignored_redirects()
     finally:
+        if nested_budget_token is not None:
+            reset_budget(nested_budget_token)
         # Revoke AFTER waves + post-wave drain so late workers still see the grant
         # (工具审批 A+B · B). Keep grant while coordination session is live (merge-rearm).
         if delegation_started and worker_gate is not None:

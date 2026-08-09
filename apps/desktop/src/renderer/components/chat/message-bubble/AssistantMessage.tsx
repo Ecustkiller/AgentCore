@@ -252,6 +252,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         message.process,
         "with_process",
         exportError,
+        message.isStreaming,
       ),
     );
 

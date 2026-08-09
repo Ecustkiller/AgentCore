@@ -1,9 +1,21 @@
 import { isWebPreview } from "@/lib/preview";
+import { ApiError, NetworkError } from "@/services/api";
 import {
   type RunLlmWindowResponse,
   fetchRunLlmWindow,
 } from "@/services/llmWindow";
 import { useEffect, useSyncExternalStore } from "react";
+
+/** REST failure copy — typed lightly so UI does not confuse with available=false. */
+function llmWindowLoadError(err: unknown): string {
+  if (err instanceof ApiError && err.status === 404) {
+    return "加载失败（未找到）";
+  }
+  if (err instanceof NetworkError) {
+    return "加载失败（网络异常）";
+  }
+  return "加载失败";
+}
 
 type RunLlmWindowEntry = {
   data: RunLlmWindowResponse | null;
@@ -60,8 +72,12 @@ function ensureLoad(
       entries.set(key, { data, loading: false, error: null });
       notify(key);
     })
-    .catch(() => {
-      entries.set(key, { data: null, loading: false, error: "加载失败" });
+    .catch((err) => {
+      entries.set(key, {
+        data: null,
+        loading: false,
+        error: llmWindowLoadError(err),
+      });
       notify(key);
     })
     .finally(() => {

@@ -20,8 +20,8 @@ export const BROWSER_CHANNELS = {
   /** 导航某页到 http(s) 或 workspace:// URL（renderer→main，invoke）。 */
   navigate: "browser:navigate",
   /**
-   * 在指定 pageId 加载会话工作区 HTML（conversationId + path → workspace://；
-   * L1b 第二 partition；renderer→main，invoke）。
+   * 在指定 pageId 加载工作区 HTML（conversationId + path + 可选 workspaceId →
+   * `workspace://{folder|conv}.{id}/…`；L1b 第二 partition；renderer→main，invoke）。
    */
   openWorkspaceHtml: "browser:open-workspace-html",
   /** 刷新某页（renderer→main，send）。 */
@@ -72,6 +72,10 @@ export interface BrowserOpenWorkspaceHtmlInput {
   pageId: string;
   conversationId: string;
   path: string;
+  /**
+   * 落地 desk：`folder:…` / `conv:…`。缺省回退 `conv:{conversationId}`。
+   */
+  workspaceId?: string;
 }
 
 export interface BrowserCloseConversationInput {

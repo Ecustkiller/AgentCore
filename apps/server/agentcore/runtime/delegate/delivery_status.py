@@ -136,9 +136,12 @@ def _gaps_require_draft_ack(gaps: list[Any] | tuple[Any, ...] | None) -> bool:
     )
 
 
-def acceptance_counts(results: dict[str, RunState]) -> tuple[int, int]:
+def acceptance_counts(
+    results: dict[str, RunState],
+    plan: RunPlan | None = None,
+) -> tuple[int, int]:
     """Path-deduped ``(accepted, rejected)`` from ``file_acceptance`` — synthesis 同源."""
-    arts = _collect_artifacts(results)
+    arts = _collect_artifacts(results, plan)
     accepted = sum(1 for a in arts if a.get("status") == "accepted")
     rejected = sum(1 for a in arts if a.get("status") == "rejected")
     return accepted, rejected
@@ -222,29 +225,57 @@ def _website_verify_action(site: str) -> dict[str, str]:
     }
 
 
-def _delivered_files(results: dict[str, RunState]) -> list[str]:
+def _delivered_files(
+    results: dict[str, RunState],
+    plan: RunPlan | None = None,
+) -> list[str]:
     """Ordered, deduped accepted paths from ``file_acceptance`` only."""
-    return [a["path"] for a in _collect_artifacts(results) if a["status"] == "accepted"][
-        :_MAX_FILES
-    ]
+    return [
+        a["path"]
+        for a in _collect_artifacts(results, plan)
+        if a["status"] == "accepted"
+    ][:_MAX_FILES]
 
 
-def _collect_artifacts(results: dict[str, RunState]) -> list[dict[str, Any]]:
+def _collect_artifacts(
+    results: dict[str, RunState],
+    plan: RunPlan | None = None,
+) -> list[dict[str, Any]]:
     """Aggregate ``file_acceptance`` rows across workers (dedupe by path, last wins).
 
     Empty ``file_acceptance`` → no artifact rows (no ``files_touched`` synthesis).
+    When ``plan`` is given, stamp ``workspace_id=folder:{target_folder_id}`` from
+    the matching node (omit when the node has no target — client falls back to
+    session birth desk). Does not rewrite session ``folder_id``.
     """
     from agentcore.runtime.runs.file_acceptance import normalize_acceptance_row
+    from agentcore.workspace.locate import format_workspace_id
+
+    desk_by_run: dict[str, str] = {}
+    if plan is not None:
+        for node in plan.nodes:
+            rid = str(getattr(node, "run_id", "") or "").strip()
+            if not rid:
+                continue
+            tf = getattr(node, "target_folder_id", None)
+            tf_s = str(tf).strip() if tf else ""
+            if tf_s:
+                desk_by_run[rid] = format_workspace_id(
+                    folder_id=tf_s, conversation_id=""
+                )
 
     by_path: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    for state in results.values():
+    for run_id, state in results.items():
         if state is None:
             continue
+        workspace_id = desk_by_run.get(str(run_id))
         for raw in state.file_acceptance or []:
             row = normalize_acceptance_row(raw)
             if row is None:
                 continue
+            if workspace_id:
+                row = {**row, "workspace_id": workspace_id}
             path = row["path"]
             if path not in by_path:
                 order.append(path)
@@ -813,8 +844,8 @@ def build_delivery_status(
         plan_suggests_code_verification,
     )
 
-    delivered = _delivered_files(results)
-    artifacts = _collect_artifacts(results)
+    delivered = _delivered_files(results, plan)
+    artifacts = _collect_artifacts(results, plan)
 
     # B1：worker 转录里 browser_* 成功 → 闩锁（CEO 综收可对账；非气泡启发式）。
     from agentcore.runtime.closing_posture import note_browser_tool_success_from_messages

@@ -21,6 +21,10 @@ export function deriveCaptainStatus(
   if (execution.status === "failed") return "failed";
   if (execution.status === "cancelled") return "cancelled";
   if (execution.status === "completed") return "completed";
+  // Cold pause (ask_user / plan_review / …): workers may all be done, but CEO
+  // is waiting on the user — never paint the sink as「正在生成汇总」.
+  // RunStatus has no `paused`; `pending` clears the synthesis spinner.
+  if (execution.status === "paused") return "pending";
   // message_end already closed the chat turn; don't keep the CEO sink spinning
   // on a stuck execution.status=running (captain frame drop / hold race).
   if (opts?.turnTerminal) return "completed";

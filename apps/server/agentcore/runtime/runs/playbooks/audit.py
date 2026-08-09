@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.runtime.runs.playbooks._common import (
+    CODE_AUDIT_FANOUT,
     clean_str,
     clean_str_list,
     fold_fanout_slots,
@@ -20,6 +21,64 @@ _REQUIRED_SECTIONS = [
     "二、已撤销",
     "三、观察与工程债",
 ]
+
+# 嵌套子任务继承父审计语境时注入（不重跑整本 playbook；防「再确认」空转）。
+_NESTED_AUDIT_HANDOFF_SUPPLEMENT = """\
+【嵌套审计·收工】父任务属代码审计。证据够定案条数后立即 file_write 报告终稿并一次 handoff；\
+禁止以「再多读一点 / 再确认」无限扩读。先落盘再 handoff；handoff 后勿改同一报告再交。\
+summary/key_points 须可执行，禁空话「审计完成」。"""
+
+
+def companion_audit_json_path(artifact: str) -> str:
+    """Markdown 报告路径 → 配套 ``*.audit.json`` 路径。"""
+    if artifact.endswith(".md"):
+        return artifact[:-3] + ".audit.json"
+    return f"{artifact}.audit.json"
+
+
+def apply_inherited_code_audit_discipline(tasks: list[Any]) -> list[dict[str, Any]]:
+    """父 worker 带 ``code_audit_gate`` 时，给手写嵌套 tasks 盖同等收工戳。
+
+    - 未显式设置时盖 ``code_audit_gate=True``
+    - Markdown 产物补配套 ``*.audit.json``（若尚无）
+    - 追加一次交接短纪律到 ``system_prompt_supplement``（不覆盖已有补充）
+    不重跑 ``code_audit`` playbook，避免把单点子审扩成整团多模块图。
+    """
+    out: list[dict[str, Any]] = []
+    for raw in tasks:
+        if not isinstance(raw, dict):
+            continue
+        task = dict(raw)
+        d_raw = task.get("deliverable")
+        deliverable: dict[str, Any] = dict(d_raw) if isinstance(d_raw, dict) else {}
+        if "code_audit_gate" not in deliverable:
+            deliverable["code_audit_gate"] = True
+        arts = deliverable.get("artifacts")
+        if isinstance(arts, list):
+            paths = [str(p).strip() for p in arts if str(p).strip()]
+            existing = {p.replace("\\", "/") for p in paths}
+            extra: list[str] = []
+            for p in paths:
+                if not p.endswith(".md"):
+                    continue
+                twin = companion_audit_json_path(p)
+                if twin.replace("\\", "/") not in existing:
+                    extra.append(twin)
+                    existing.add(twin.replace("\\", "/"))
+            if extra:
+                deliverable["artifacts"] = [*paths, *extra]
+        if deliverable:
+            task["deliverable"] = deliverable
+        prior = clean_str(task.get("system_prompt_supplement"))
+        if _NESTED_AUDIT_HANDOFF_SUPPLEMENT not in (prior or ""):
+            task["system_prompt_supplement"] = (
+                f"{prior}\n\n{_NESTED_AUDIT_HANDOFF_SUPPLEMENT}".strip()
+                if prior
+                else _NESTED_AUDIT_HANDOFF_SUPPLEMENT
+            )
+        out.append(task)
+    return out
+
 
 _AUDIT_DISCIPLINE = """
 【两阶段·强制】先 A 宽扫只出候选（严重度上限低/观察），
@@ -93,9 +152,7 @@ def _auditor_task_body(
     artifact: str,
 ) -> str:
     focus_line = f"侧重：{focus}。" if focus else "全类问题均可报，按 rubric 定严重度。"
-    json_artifact = (
-        artifact[:-3] + ".audit.json" if artifact.endswith(".md") else f"{artifact}.audit.json"
-    )
+    json_artifact = companion_audit_json_path(artifact)
     return (
         f"对范围【{scope}】中的模块【{module}】做代码审计（只读调查：默认不改业务源码；"
         f"允许 file_write/str_replace 写入约定文档报告，除此以外勿改工程）。{focus_line}"
@@ -121,9 +178,7 @@ def _auditor_task_body(
 
 
 def _auditor_deliverable(artifact: str, name: str) -> dict[str, Any]:
-    json_artifact = (
-        artifact[:-3] + ".audit.json" if artifact.endswith(".md") else f"{artifact}.audit.json"
-    )
+    json_artifact = companion_audit_json_path(artifact)
     return {
         "form": "files",
         "name": name,
@@ -185,7 +240,9 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             "只用 scope）"
         ]
 
-    slots, fold_note = fold_fanout_slots(modules, label="审计模块")
+    slots, fold_note = fold_fanout_slots(
+        modules, label="审计模块", limit=CODE_AUDIT_FANOUT
+    )
     fold_hint = f" {fold_note}" if fold_note else ""
     tasks: list[dict[str, Any]] = []
     audit_ids: list[str] = []

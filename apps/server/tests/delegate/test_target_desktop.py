@@ -13,6 +13,7 @@ from agentcore.runtime.delegate.target_desktop import (
     TargetDesktopError,
     apply_target_desktop,
     effective_target_folder_id,
+    format_bare_chat_no_target_error,
     gate_bare_chat_requires_target,
     load_target_folder_binding,
 )
@@ -34,7 +35,39 @@ def test_gate_bare_chat_blocks_without_target():
         session_folder_id=None,
         tasks_raw=[{"role": "工", "task": "写文件"}],
     )
-    assert msg == NO_TARGET_SCRATCH_GATE_MSG
+    assert msg is not None
+    assert msg.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert "缺目标任务：" in msg
+    assert "role=工" in msg
+    assert "缺 target_folder_id" in msg
+    assert "写文件" not in msg  # 勿倾倒 task 正文
+
+
+def test_gate_bare_chat_lists_all_missing_targets():
+    """部分缺 target → 整批拒，回执点名全部缺项。"""
+    msg = gate_bare_chat_requires_target(
+        session_folder_id=None,
+        tasks_raw=[
+            {"role": "甲", "task": "有目标正文勿泄露", "target_folder_id": "proj_a"},
+            {"id": "n2", "role": "乙", "task": "缺目标的长任务说明不应出现"},
+            {"role": "丙", "task": "也缺"},
+        ],
+    )
+    assert msg is not None
+    assert msg.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert "role=乙" in msg and "id=n2" in msg
+    assert "role=丙" in msg
+    assert "role=甲" not in msg  # 有 target 的不进骨架
+    assert "有目标正文勿泄露" not in msg
+    assert "缺目标的长任务说明不应出现" not in msg
+    assert "也缺" not in msg
+    # 同源组装函数契约
+    assert msg == format_bare_chat_no_target_error(
+        [
+            {"id": "n2", "role": "乙", "task": "缺目标的长任务说明不应出现"},
+            {"role": "丙", "task": "也缺"},
+        ]
+    )
 
 
 def test_gate_bare_chat_allows_with_target():
@@ -42,6 +75,19 @@ def test_gate_bare_chat_allows_with_target():
         gate_bare_chat_requires_target(
             session_folder_id=None,
             tasks_raw=[{"role": "工", "task": "写", "target_folder_id": "proj_a"}],
+        )
+        is None
+    )
+
+
+def test_gate_bare_chat_allows_when_all_have_target():
+    assert (
+        gate_bare_chat_requires_target(
+            session_folder_id=None,
+            tasks_raw=[
+                {"role": "甲", "task": "a", "target_folder_id": "p1"},
+                {"role": "乙", "task": "b", "target_folder_id": "p2"},
+            ],
         )
         is None
     )
@@ -66,6 +112,18 @@ def test_gate_bare_inherits_default_target():
         )
         is None
     )
+
+
+def test_turn_target_desk_hint_single_then_clear():
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    hint = TurnTargetDeskHint()
+    hint.note_folder("  a  ")
+    assert hint.folder_id == "a"
+    hint.note_folder("a")
+    assert hint.folder_id == "a"
+    hint.note_folder("b")
+    assert hint.folder_id is None
 
 
 def test_build_run_plan_stamps_target_folder_id():

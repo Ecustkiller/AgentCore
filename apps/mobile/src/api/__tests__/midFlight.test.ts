@@ -47,6 +47,11 @@ describe("sendMidFlightMessage", () => {
             queue_depth: 2,
             conversation_id: "c1",
           }),
+          ev("turn_queue_started", {
+            queue_id: "q1",
+            conversation_id: "c1",
+            remaining_depth: 1,
+          }),
           ev("message_start", { message_id: "m2" }),
           ev("message_end", { finish_reason: "end_turn" }),
         ]),
@@ -98,9 +103,53 @@ describe("sendMidFlightMessage", () => {
       degradedFrom: undefined,
     });
     expect(began).toBe(1);
-    expect(turn2).toEqual(["message_start", "message_end"]);
+    expect(turn2).toEqual([
+      "turn_queue_started",
+      "message_start",
+      "message_end",
+    ]);
   });
 
+  it("turn_queue_started 即可开 turn2（不必等 message_start）", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        sseBody([
+          ev("turn_queued", {
+            queue_id: "q-start",
+            position: 1,
+            queue_depth: 1,
+            conversation_id: "c1",
+          }),
+          ev("turn_queue_started", {
+            queue_id: "q-start",
+            conversation_id: "c1",
+            remaining_depth: 0,
+          }),
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const turn2: string[] = [];
+    let began = 0;
+    const result = await sendMidFlightMessage("c1", "第二问", {
+      onLiveEvent: () => {},
+      onQueued: () => {},
+      beginTurn2: () => {
+        began += 1;
+      },
+      onTurn2Event: (e) => turn2.push(e.type),
+      isPrimaryIdle: () => true,
+      waitPrimaryIdle: async () => {},
+    });
+
+    expect(result.kind).toBe("queued");
+    expect(began).toBe(1);
+    expect(turn2).toEqual(["turn_queue_started"]);
+  });
   it("POST body 带 delivery", async () => {
     fetchMock.mockResolvedValue(
       new Response(

@@ -10,9 +10,12 @@ Legacy fallback: if no turn override has been applied yet, read
 environment (dev probes / older spawners). Production desktop no longer relies on
 spawn-time env alone.
 
-``browser_execution_enabled_for`` (local backend) is True only when a probe of
-``GET {url}/health`` with the Bearer token succeeds. Missing URL/token → not
-enabled (tools withheld). A failed probe never silently falls back to gVisor (C4).
+Healthy Bridge → ``browser_host_kind_for`` returns ``local``. Missing / unhealthy
+Bridge does **not** keep tools withheld when gVisor/sandbox/netns is ready: that
+path assembles ``host_kind=sandbox`` (云端过桥；API 够不到本机 loopback). C4 still
+forbids mixing local+sandbox on one session — fallback is whole-session sandbox,
+not a silent mid-session switch. True local engine with neither Bridge nor gVisor
+still withholds (no fake success).
 
 Tests inject via ``set_desktop_bridge_health_for_tests`` / ``apply_desktop_bridge_from_turn``.
 """

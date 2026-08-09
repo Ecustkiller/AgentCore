@@ -63,7 +63,8 @@ class ToolRegistration:
     # ``code_execute`` stamps description from backend location.
     needs_location: bool = False
     # L3 team browser (D11 / C1): gated by ``browser_execution_enabled_for`` ON TOP OF
-    # ``execution_class`` — server+gVisor **or** local+DesktopBrowserBridge healthy.
+    # ``execution_class`` — server+gVisor, local+Bridge, **or** local 过桥无 Bridge
+    # but gVisor/netns healthy (host_kind=sandbox; never open_local_bridge_session).
     browser_class: bool = False
     # Host 第三能力面: gated by ``host≠off`` + desktop backfill channel (desktop_online).
     # Must NOT set ``execution_class`` — L2/L3 never enter kickoff silent grant.
@@ -185,6 +186,10 @@ def _load_declared_tools() -> tuple[type, ...]:
     from agentcore.tools.builtin.md_to_docx import MdToDocxTool
     from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
     from agentcore.tools.builtin.post_note import PostNoteTool
+    from agentcore.tools.builtin.project_fs import (
+        ListProjectDirTool,
+        ReadProjectFileTool,
+    )
     from agentcore.tools.builtin.projects import (
         CreateProjectTool,
         ListProjectsTool,
@@ -275,6 +280,8 @@ def _load_declared_tools() -> tuple[type, ...]:
         ListProjectsTool,
         ResolveProjectTool,
         CreateProjectTool,
+        ListProjectDirTool,
+        ReadProjectFileTool,
         ConsultMemoryTool,
         RememberTool,
         UpdateProjectProfileTool,

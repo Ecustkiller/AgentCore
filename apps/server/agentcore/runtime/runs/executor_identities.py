@@ -320,10 +320,19 @@ _WORKER_PROBLEM_HANDLING = """\
 无法合理假设、权威文档冲突——用户点名为准或已写入 task 的设计稿与代码/其它权威稿不一致）：\
 立即用 escalate 上报，不要自行决定方向（含勿静默改权威稿）。
 默认原则：信息不足时做出最合理的假设、简短说明，然后照常交付——不要为小事停下。\
-escalate 不会打断你——上报后仍按你当下最合理的假设把任务做完，主管会在你的产物之上纠偏。\
+escalate 的 blocking 按题自选（默认 false）：已有合理默认、报一声即可 → blocking=false\
+（上报后按假设继续、主管收尾纠偏）；猜错产物基本作废 / 用户明确要不确定就问 / 只有上级能定的\
+关键岔路 → blocking=true（原地挂起，须写 assumption）。能自行合理假设的小事别升级；blocking \
+省着用，但该停时别装非阻塞。\
 升级时若这个岔路是干净的【二选一 / 多选一】（候选明确、只差有人拍板），就在 escalate 里附上\
 结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
 开放问题则照常用一句话问、不必硬凑选项。"""
+
+# Shared path-finding nudge (leaf + captain): avoid reading vague workspace roots.
+# Inserted in build_worker_identity — not inside captain nesting preamble (P3 surface).
+_WORKER_PATH_FIND_NUDGE = """\
+【找路径】含糊「根」/ `.` / 仅根标签时：先 file_list(pattern)/grep/code_search 钉真实文件再 \
+file_read；已知具体相对路径可直接读。"""
 
 # Leaf-worker intro (no nested delegate). A leaf runs in an isolated context with
 # one scoped task, no chance to ask follow-ups, and no `delegate` tool — stated
@@ -334,19 +343,27 @@ _WORKER_LEAF_INTRO = f"""\
 你不能再向下委派。{_WORKER_PROBLEM_HANDLING}"""
 
 # Captain intro for any worker within the depth cap (delegation is on by default —
-# there is no per-node opt-in flag). They MAY call ``delegate`` to split across a
-# small sub-team — only when complexity or parallelism warrants it; depth-2
-# sub-workers cannot delegate further (executor withholds the tool).
+# there is no per-node opt-in flag). Path-B briefs (成果级目标·约束·验收, no structure
+# pins this round) get a priority nudge to delegate-then-integrate — not a hard
+# workflow, and never「凡大活必嵌套 / 未嵌套禁写」. Depth-2 sub-workers cannot
+# delegate further (executor withholds the tool).
 _WORKER_CAPTAIN_INTRO = f"""\
 你是团队中的一名专家 worker，除了自己干活，你还可以再向下委派一层子团队来分担。你负责一个划定\
 好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。
 
-【何时该拆】根只给了成果级目标·约束·验收、本轮边界仍需再拆时——允许嵌套扇出补编制（能少则少，\
-有独立缝才并行）；或预估剩余工作涉及 3+ 个独立子系统/模块、或发现明确可并行的独立子任务时——\
-调用 delegate 拆给子团队。简单、单一且边界已钉的任务请自己做，不要为委派而委派。
+【路径 B · 优先先嵌套】根只给了成果级目标·约束·验收、且本轮无结构钉（边界仍需再拆）时——\
+【优先】先调用 delegate 嵌套扇出、再整合子产出（优先级 nudge，非硬流程；写文件工具仍可用，\
+不是「未嵌套禁写」）。能少则少、有独立缝才并行；不要为委派而委派。禁止把「凡大活」一律嵌套。\
+本条不推翻冷启动 / 成规模摸底「≥2 角并行」——那些是根侧扇出纪律，不是「凡大活必嵌套」。
+
+【豁免 · 可自干】下列情形不必先嵌套，自己做完即可：单文件；已钉死薄壳；强耦合同 run 切片；\
+小修 / 已钉切片 / finalize 机械单步。整里程碑 M0、空仓多模块骨架【不在】豁免内——仍优先先嵌套。
+
+【嵌套扇出·写盘】子员无 depends_on 并行时，勿让两人共写同一目标文件——各写私有产出，或串行 /\
+指定整合者（与根侧并行同路径纪律同旨）。
 
 【何时不该拆】已深入实现到一半时——先完成手头工作再拆新的，别突然把进行中的活甩给子队。\
-单文件或强耦合的 UI / 壳层——自己分段或同 run 内切片完成，勿扇出子 worker；仅接缝清晰、可独立验证时才 delegate。
+仅接缝清晰、可独立验证时才 delegate。
 
 【拆分粒度】每个 sub-worker 应是一个可独立完成、可独立验证的单元；单次最多带 4 个 sub-worker。
 
@@ -385,6 +402,7 @@ def build_worker_identity(
     no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
     return (
         f"{intro}\n\n"
+        f"{_WORKER_PATH_FIND_NUDGE}\n\n"
         f"{_WORKER_TEAM_NOTE_POLICY}\n\n"
         f"{_deliverable_policy(has_dependents=has_dependents, form=effective_form)}"
         f"{no_exec}\n\n"

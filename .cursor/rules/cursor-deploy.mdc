@@ -26,7 +26,7 @@ alwaysApply: false
 
 ## 全端发布顺序（速查）
 
-半自动清单（只打印步骤/探针，不替你 Publish）：`pnpm release:ship`（`--track api` = 仅热修轨；`--check` = 探 draft 资产）。
+半自动清单（只打印步骤/探针，不替你 Publish）：`pnpm release:ship`（`--track api` = 仅热修轨；`--check` = 探桌面·Android draft 资产）。full 清单含 Android APK 步（`release:android` → 冒烟 → Publish `android-v*`）。
 
 **公告两段式（定案 D · 工作流 A）**：人定「今天发 + 约时」后**立刻预告**（与 gate / 修拦阻并行）；门禁不过则改约时或归档预告。收口在验收完成后发。勿绑进 `deploy:backend` 自动发。**部署前**仍须 `release:gate` 全绿。
 
@@ -36,11 +36,12 @@ pnpm release:gate                          # Win 默认串行；红灯不得部�
 # bump → commit → push
 pnpm deploy:backend <sha>
 # full：Win release:win ∥ Mac GHA → 齐资产后 Publish
-# full：mobile / admin / web →（Publish 后）website deploy:pages
+# full：Android release:android → 真机冒烟 → Publish android-v*（CDN 由脚本末尾 sync；与桌面 v* 分轨）
+# full：mobile / admin / web →（桌面 Publish 后）website deploy:pages
 pnpm release:notice -- --phase done …      # 收口
 # tag prod-* / desktop-v*
 ```
 
-手搓顺序仍等价：git push → 后端 `pnpm deploy:backend <sha>` →（若桌面已 bump：先 Publish 桌面 release）→ 官网 → 手机 → admin → web 客户端 → 验收 → tag。
+手搓顺序仍等价：git push → 后端 `pnpm deploy:backend <sha>` →（若桌面已 bump：先 Publish 桌面 release）→ Android APK（见上）→ 官网 → 手机 → admin → web 客户端 → 验收 → tag。
 
 公告 CLI 细节 → [`产品公告文案模板`](/docs/05-平台与运维/产品公告文案模板.md) · `pnpm release:notice --help`。

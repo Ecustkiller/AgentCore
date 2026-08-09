@@ -9,9 +9,10 @@ Credential routing matches ordinary turns / standing-task fires (conversation
 model selection + billing preflight) — never hardcode ``llm_credentials=None``
 (that silently falls through to the platform key).
 
-When preflight refuses (quota / BYOK missing), :func:`persist_harvest_fallback`
+When preflight refuses (quota / BYOK missing), or the local workspace channel is
+already sticky-dead / dies during the closing turn, :func:`persist_harvest_fallback`
 pushes any existing synthesis draft / ALL_COMPLETED terminal body to the user
-as an assistant message — no second LLM call (A1).
+as an assistant message — no second LLM call (A1 / channel-dead harvest).
 """
 
 from __future__ import annotations
@@ -46,7 +47,12 @@ from agentcore.llm.resolve import (
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.turn_runs import turn_runs
-from agentcore.workspace.limits import CHANNEL_DEAD_USER_VISIBLE
+from agentcore.workspace.limits import (
+    CHANNEL_DEAD_PREPARE_ABORT,
+    CHANNEL_DEAD_USER_VISIBLE,
+    is_channel_dead_detail,
+)
+from agentcore.workspace.protocol import WorkspaceIOError
 
 if TYPE_CHECKING:
     from agentcore.llm.credentials import LLMCredentials
@@ -157,6 +163,33 @@ def _session_saw_channel_dead(session: CoordinationSession, body: str) -> bool:
         return True
     text = (body or "").lower()
     return any(m.lower() in text for m in _CHANNEL_DEAD_BODY_MARKERS)
+
+
+def _is_channel_dead_failure_text(text: str | None) -> bool:
+    detail = str(text or "").strip()
+    if not detail:
+        return False
+    if detail == CHANNEL_DEAD_PREPARE_ABORT:
+        return True
+    return is_channel_dead_detail(detail)
+
+
+def _exc_is_channel_dead(exc: BaseException) -> bool:
+    if isinstance(exc, WorkspaceIOError) and _is_channel_dead_failure_text(str(exc)):
+        return True
+    return _is_channel_dead_failure_text(str(exc))
+
+
+def _result_is_channel_dead_abort(result: dict[str, Any] | None) -> bool:
+    """True when a salvaged harvest turn failed because the workspace channel is dead."""
+    if not isinstance(result, dict):
+        return False
+    err = result.get("error")
+    if isinstance(err, dict):
+        return _is_channel_dead_failure_text(
+            str(err.get("message") or err.get("detail") or "")
+        )
+    return _is_channel_dead_failure_text(err if isinstance(err, str) else None)
 
 
 def build_harvest_fallback_content(
@@ -332,6 +365,25 @@ async def run_harvest_closing_turn(
                     error_message=e.message or str(e),
                 )
             return
+        # Channel already sticky-dead from the team wave: skip prepare/LLM and
+        # deliver the same no-LLM fallback (avoid STREAM_ERROR empty shell).
+        if getattr(session, "workspace_channel_dead", False):
+            logger.warning(
+                "coordination.harvest_channel_dead_skip_llm",
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+            )
+            with contextlib.suppress(Exception):
+                await persist_harvest_fallback(
+                    db=db,
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    session=session,
+                    kind=kind,
+                    error_message=CHANNEL_DEAD_PREPARE_ABORT,
+                )
+            return
         local_binding = await resolve_local_binding(db, conv)
         profile_set = await resolve_profile_set(db, conv, user_id)
         memory_enabled = await resolve_memory_enabled(db, user_id)
@@ -376,24 +428,75 @@ async def run_harvest_closing_turn(
         adopt_active_execution(conversation_id, event_sink=sink)
         origin_token = bind_user_message_origin(EXECUTION_HARVEST_ORIGIN)
         try:
-            await run_and_persist(
-                conversation_id=conversation_id,
-                user_message=user_text,
-                user_id=user_id,
-                folder_id=folder_id,
-                sink=sink,
-                history=history[:-1] if history else [],
-                attachments=None,
-                backend=backend,
-                llm_credentials=llm_credentials,
-                profile_set=profile_set,
-                memory_enabled=memory_enabled,
-                conversation_history_access=conversation_history_access,
-                permission_axes=permission_axes,
-                board_id=board_id,
-                llm_supports_tools=None,
-                x_client_platform=None,
-            )
+            try:
+                result = await run_and_persist(
+                    conversation_id=conversation_id,
+                    user_message=user_text,
+                    user_id=user_id,
+                    folder_id=folder_id,
+                    sink=sink,
+                    history=history[:-1] if history else [],
+                    attachments=None,
+                    backend=backend,
+                    llm_credentials=llm_credentials,
+                    profile_set=profile_set,
+                    memory_enabled=memory_enabled,
+                    conversation_history_access=conversation_history_access,
+                    permission_axes=permission_axes,
+                    board_id=board_id,
+                    llm_supports_tools=None,
+                    x_client_platform=None,
+                )
+            except Exception as e:
+                if not _exc_is_channel_dead(e):
+                    raise
+                session.workspace_channel_dead = True
+                logger.warning(
+                    "coordination.harvest_channel_dead_after_turn",
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    error=str(e),
+                    via="exception",
+                )
+                async with async_session_factory() as fb_db:
+                    with contextlib.suppress(Exception):
+                        await persist_harvest_fallback(
+                            db=fb_db,
+                            conversation_id=conversation_id,
+                            execution_id=execution_id,
+                            user_id=user_id,
+                            session=session,
+                            kind=kind,
+                            error_message=str(e) or CHANNEL_DEAD_PREPARE_ABORT,
+                        )
+                return
+            if _result_is_channel_dead_abort(result):
+                session.workspace_channel_dead = True
+                err_text = ""
+                raw_err = result.get("error") if isinstance(result, dict) else None
+                if isinstance(raw_err, dict):
+                    err_text = str(raw_err.get("message") or raw_err.get("detail") or "")
+                elif raw_err is not None:
+                    err_text = str(raw_err)
+                logger.warning(
+                    "coordination.harvest_channel_dead_after_turn",
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    error=err_text or CHANNEL_DEAD_PREPARE_ABORT,
+                    via="salvaged_result",
+                )
+                async with async_session_factory() as fb_db:
+                    with contextlib.suppress(Exception):
+                        await persist_harvest_fallback(
+                            db=fb_db,
+                            conversation_id=conversation_id,
+                            execution_id=execution_id,
+                            user_id=user_id,
+                            session=session,
+                            kind=kind,
+                            error_message=err_text or CHANNEL_DEAD_PREPARE_ABORT,
+                        )
+                return
         finally:
             reset_user_message_origin(origin_token)
         await _notify_harvest_complete(

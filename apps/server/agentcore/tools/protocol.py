@@ -90,6 +90,29 @@ class ToolSchema:
 
 
 @dataclass
+class TurnTargetDeskHint:
+    """Turn-scoped soft default desk for bare-chat ``delegate`` (not session birth).
+
+    ``create_project`` / unique ``resolve_project`` stamp a folder id onto the CEO
+    :class:`ToolContext`. A second distinct id in the same turn clears the default
+    so multi-project fan-out still requires explicit ``target_folder_id``. Never
+    rewrites conversation ``folder_id``.
+    """
+
+    folder_id: str | None = None
+    _seen: set[str] = field(default_factory=set, repr=False)
+
+    def note_folder(self, folder_id: str | None) -> None:
+        if not isinstance(folder_id, str):
+            return
+        cleaned = folder_id.strip()
+        if not cleaned:
+            return
+        self._seen.add(cleaned)
+        self.folder_id = cleaned if len(self._seen) == 1 else None
+
+
+@dataclass
 class RetrievalBudgetState:
     """Per-run ``web_search`` / ``read_url`` counter (提案 A1).
 
@@ -199,6 +222,10 @@ class ToolContext:
     # concurrent sibling did.
     write_coordinator: WriteCoordinator | None = None
     write_ancestors: frozenset[str] = frozenset()
+    # C3 desk×path ownership key: ``RunSpec.target_folder_id or session birth desk``.
+    # ``None`` → ledger uses legacy sentinel (unit tests / bare stubs). Must match
+    # declare-time desk so claim and dispatch reserve the same composite key.
+    ownership_desk_id: str | None = None
     # 团队便签墙 (§2.2 通): the per-batch sticky-note wall the worker-only ``post_note`` tool
     # broadcasts onto and that the engine pushes fresh sibling notes from before each step.
     # Set per delegated-worker node by ``build_agent_executor`` (one wall shared by the batch);
@@ -362,6 +389,9 @@ class ToolContext:
     folder_binding_injected: bool = False
     folder_local_root_id: str | None = None
     folder_local_subpath: str | None = None
+    # 裸聊同回合先建/解析后的软默认目标桌（共享可变；``replace`` 浅拷贝同引用）。
+    # 仅缺省 ``delegate`` 目标时消费；多 id 同回合清空。≠ 会话出生 ``folder_id``。
+    turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
 
 
 @dataclass

@@ -125,7 +125,7 @@ def enqueue_interjection_to_fifo(
     from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
 
     try:
-        status = turn_queue.enqueue(
+        status = turn_queue.enqueue_and_ensure_drain(
             conversation_id,
             new_queued_turn(
                 content=content,
@@ -137,6 +137,7 @@ def enqueue_interjection_to_fifo(
                 llm_credentials=stashed.get("llm_credentials"),
                 llm_supports_tools=stashed.get("llm_supports_tools"),
             ),
+            emit_live_queued=True,
         )
     except Exception as exc:  # noqa: BLE001 — surface as failed, never raise into CEO
         logger.exception(

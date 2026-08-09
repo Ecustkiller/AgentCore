@@ -3,6 +3,7 @@ import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { useToolOutputLiveStore } from "@/stores/toolOutputLive";
 import { useTurnModelStore } from "@/stores/turnModel";
 import { useUserTerminalStore } from "@/stores/userTerminals";
@@ -10,9 +11,9 @@ import { useUserTerminalStore } from "@/stores/userTerminals";
 /**
  * Delete-conversation cleanup for in-memory per-conversation runtime buckets
  * (paused resumes, interactions, model badge, handoff tasks, processes /
- * terminals / live tool output / browser sessions). Pair with
- * {@link clearConversationUiState} for persisted UI prefs — both run from
- * {@link useDeleteConversation} onSuccess.
+ * terminals / live tool output / browser sessions / FIFO queue light state).
+ * Pair with {@link clearConversationUiState} for persisted UI prefs — both run
+ * from {@link useDeleteConversation} onSuccess.
  */
 export function purgeConversationRuntimeState(conversationId: string): void {
   usePausedTurnStore.getState().clear(conversationId);
@@ -23,6 +24,7 @@ export function purgeConversationRuntimeState(conversationId: string): void {
   useUserTerminalStore.getState().clearConversation(conversationId);
   useToolOutputLiveStore.getState().clearConversation(conversationId);
   useBrowserSessionsStore.getState().clearConversation(conversationId);
+  useQueuedTurnsStore.getState().clearConversation(conversationId);
   const browserApi =
     typeof window !== "undefined" ? window.browserApi : undefined;
   void browserApi?.closeConversation?.({ conversationId }).catch((err) => {

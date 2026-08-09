@@ -132,8 +132,10 @@ class _Entry:
 async def _default_factory(request: BrowserSessionRequest) -> BrowserSession:
     """Open a browser session: Local Bridge (host_kind=local) or gVisor sandbox.
 
-    Local never falls back to sandbox (C4) — Bridge failure raises
-    ``BrowserSessionError`` with ``host_unavailable``.
+    When ``host_kind=local``, Bridge failure raises ``BrowserSessionError``
+    with ``host_unavailable`` (no mid-session switch to sandbox). Assembly may
+    choose ``host_kind=sandbox`` up-front for 过桥 without Bridge (C4 = no
+    mixed host on one session).
     """
     host_kind = getattr(request, "host_kind", None) or "sandbox"
     if host_kind == "local":

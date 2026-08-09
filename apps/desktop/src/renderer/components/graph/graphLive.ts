@@ -10,26 +10,36 @@ import {
   challengePreviewFromContext,
   debateFacePrimaryFromContext,
 } from "@/components/chat/debate/debateFaceCopy";
-import { captainSynthesisPreviewText } from "@/components/chat/teamSynthesisPhase";
-import { useCoordinationWaitChrome } from "@/components/chat/useCoordinationWaitChrome";
+import {
+  captainSynthesisPreviewText,
+  coordinationWaitCaptainCaption,
+  waitingWorkerRoles,
+} from "@/components/chat/teamSynthesisPhase";
+import { useElapsedSince } from "@/components/chat/useCoordinationWaitChrome";
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import {
-  estimateTokens,
+  chunksTailText,
+  estimateTokensFromCharCount,
   formatCostCaption,
   headText,
   pickCostMoney,
-  tailText,
+  sumChunkChars,
 } from "@/lib/format";
-import { detectReviewConcern } from "@/lib/reviewConcern";
+import { detectReviewConcern, isReviewLikeWorker } from "@/lib/reviewConcern";
+import { isGraphPerfEnabled, markGraphPerf } from "@/services/graphPerf";
 import {
+  type AgentState,
   type Execution,
   type RunNode,
   type RunStatus,
   debateBeatFromContext,
+  execRuntime,
+  projectRuntime,
   useActiveExecField,
-  useProjectedExecution,
+  useExecutionScope,
+  useExecutionStore,
 } from "@/stores/execution";
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import type { ActSummaryData } from "./ActSummaryNode";
 import {
   type AgentNodeData,
@@ -51,6 +61,9 @@ import {
 import { stripNamespace } from "./ids";
 import { type GraphScene, buildGraphScene } from "./scene";
 
+const EMPTY_FOLDED: readonly string[] = [];
+/** Stream: scan review concern every N output chars; terminal statuses always scan. */
+const REVIEW_CONCERN_MILESTONE = 256;
 /** When true, node/edge faces self-read Live; Document shells omit live fields. */
 export const GraphDocumentModeContext = createContext(false);
 
@@ -97,6 +110,183 @@ function sumDurationMs(
   return any ? sum : null;
 }
 
+/** Cheap chunk meta for live signatures — never joins text. */
+function chunkMetaSig(chunks: readonly string[]): string {
+  const n = chunks.length;
+  if (n === 0) return "0:0";
+  const last = chunks[n - 1];
+  return `${n}:${last?.length ?? 0}`;
+}
+
+function toolProgressSig(
+  tp: AgentState["toolProgress"] | null | undefined,
+): string {
+  return tp ? `${tp.toolName}:${tp.chars}` : "";
+}
+
+function toolExecLiveSig(
+  te: AgentState["toolExecutionLive"] | null | undefined,
+): string {
+  return te ? `${te.toolName}:${te.phase}` : "";
+}
+
+function escalationCountSig(run: RunNode): string {
+  let pending = 0;
+  let raised = 0;
+  for (const e of run.escalations) {
+    if (e.status === "pending") pending++;
+    else if (e.status === "raised") raised++;
+  }
+  return `${pending}:${raised}:${run.escalations.length}`;
+}
+
+/** tool_use_end mutates status in place — length alone misses completion. */
+function toolCallsSig(toolCalls: AgentState["toolCalls"] | undefined): string {
+  if (!toolCalls || toolCalls.length === 0) return "0";
+  let running = 0;
+  let success = 0;
+  let error = 0;
+  for (const t of toolCalls) {
+    if (t.status === "running") running++;
+    else if (t.status === "success") success++;
+    else error++;
+  }
+  return `${toolCalls.length}:${running}:${success}:${error}`;
+}
+
+function agentFaceSig(agent: AgentState | undefined): string {
+  if (!agent) return "";
+  return [
+    chunkMetaSig(agent.outputChunks),
+    chunkMetaSig(agent.reasoningChunks),
+    toolProgressSig(agent.toolProgress),
+    toolExecLiveSig(agent.toolExecutionLive),
+    toolCallsSig(agent.toolCalls),
+    agent.didRework ? "1" : "0",
+  ].join("|");
+}
+
+function runFaceSig(run: RunNode): string {
+  const usage = run.usage;
+  const cost = pickCostMoney(run.cost);
+  return [
+    run.status,
+    run.phase ?? "",
+    run.phaseTool ?? "",
+    run.durationMs ?? "",
+    run.startedAt ?? "",
+    run.model ?? "",
+    run.error ? "1" : "0",
+    run.failureKind ?? "",
+    usage ? `${usage.input}+${usage.output}` : "",
+    cost ? `${cost.nano}:${cost.estimated ? 1 : 0}` : "",
+    run.checkpoint?.status ?? "",
+    escalationCountSig(run),
+  ].join("|");
+}
+
+/**
+ * Per-agent Live signature — stable under other agents' delta floods.
+ * Includes host + folded debate beats' status/chunk meta (no full-text join).
+ */
+export function agentNodeLiveSig(
+  execution: Execution | null,
+  runId: string,
+  foldedRunIds: readonly string[] = EMPTY_FOLDED,
+): string {
+  if (!execution) return "";
+  const run = execution.runs.find((r) => r.id === runId);
+  if (!run) return `missing:${runId}`;
+  const round: RunNode[] = [run];
+  for (const id of foldedRunIds) {
+    const fr = execution.runs.find((r) => r.id === id);
+    if (fr) round.push(fr);
+  }
+  const parts: string[] = [];
+  for (const r of round) {
+    const agent = execution.agents.find((a) => a.id === r.agentId);
+    parts.push(`${r.id}:${runFaceSig(r)}:${agentFaceSig(agent)}`);
+  }
+  return parts.join(";");
+}
+
+/** Captain sink Live signature — worker status transitions, not chunk deltas. */
+export function captainEndpointLiveSig(
+  execution: Execution | null,
+  captainRunId: string,
+  turnTerminal: boolean,
+): string {
+  if (!execution) return "";
+  const cap = deriveCaptainStatus(execution, captainRunId, { turnTerminal });
+  const workers = execution.runs
+    .filter((r) => r.id !== captainRunId)
+    .map((r) => `${r.id}:${r.status}`)
+    .join(",");
+  return `${execution.status}|${cap}|${turnTerminal ? 1 : 0}|${workers}`;
+}
+
+/** Act card Live signature — status / decisions / duration, not stream text. */
+export function actSummaryLiveSig(execution: Execution | null): string {
+  if (!execution) return "";
+  const bits = execution.runs.map((r) => {
+    return `${r.status}:${escalationCountSig(r)}:${r.checkpoint?.status ?? ""}:${r.durationMs ?? ""}`;
+  });
+  return `${execution.status}|${bits.join(",")}`;
+}
+
+/** Step-edge animated Live signature. */
+export function stepEdgeAnimatedSig(
+  execution: Execution | null,
+  bareTarget: string,
+  captainRunId: string | null,
+  turnTerminal: boolean,
+): string {
+  if (!execution) return "0";
+  if (captainRunId && bareTarget === captainRunId) {
+    return deriveCaptainStatus(execution, captainRunId, { turnTerminal }) ===
+      "running"
+      ? "1"
+      : "0";
+  }
+  return execution.runs.find((s) => s.id === bareTarget)?.status === "running"
+    ? "1"
+    : "0";
+}
+
+function reviewConcernForFace(
+  agent: AgentState | undefined,
+  faceRun: RunNode,
+  status: RunStatus,
+): ReturnType<typeof detectReviewConcern> {
+  const role = agent?.role ?? faceRun.role ?? "";
+  if (!isReviewLikeWorker(role, faceRun.id)) return null;
+  const chunks = agent?.outputChunks ?? [];
+  const charLen = sumChunkChars(chunks);
+  if (charLen < 12) return null;
+  if (status === "running") {
+    const last = chunks.length > 0 ? chunks[chunks.length - 1] : undefined;
+    const prevLen = charLen - (last?.length ?? 0);
+    const crossed =
+      Math.floor(prevLen / REVIEW_CONCERN_MILESTONE) !==
+      Math.floor(charLen / REVIEW_CONCERN_MILESTONE);
+    const firstHit = prevLen < 12;
+    if (!crossed && !firstHit) return null;
+  }
+  // Terminal (or milestone): one join — not per-delta on the hot path.
+  return detectReviewConcern(chunks.join(""), {
+    role,
+    runId: faceRun.id,
+  });
+}
+
+function useLiveExecutionGetter(): () => Execution | null {
+  const messageId = useExecutionScope();
+  return useCallback(() => {
+    const rt = execRuntime(useExecutionStore.getState(), messageId);
+    return projectRuntime(rt);
+  }, [messageId]);
+}
+
 /**
  * Live face fields for one agent (or debate-round host) run.
  * Pure over Execution + scene beat folds — safe for hooks / tests.
@@ -115,6 +305,7 @@ export function deriveAgentNodeLive(
     toggleUnitExpand?: (unitId: string) => void;
   },
 ): AgentNodeData {
+  const t0 = isGraphPerfEnabled() ? performance.now() : 0;
   const captainId = execution.runs.find((r) => r.kind === "captain")?.id;
   const workerIdSet = new Set(
     execution.runs.filter((r) => r.id !== captainId).map((r) => r.id),
@@ -149,15 +340,10 @@ export function deriveAgentNodeLive(
       : run;
   const agent = execution.agents.find((a) => a.id === faceRun.agentId);
   const hostAgent = execution.agents.find((a) => a.id === run.agentId);
-  const output = agent ? agent.outputChunks.join("") : "";
-  const reasoning = agent ? agent.reasoningChunks.join("") : "";
-  const reviewConcern =
-    output.length >= 12
-      ? detectReviewConcern(output, {
-          role: agent?.role ?? faceRun.role,
-          runId: faceRun.id,
-        })
-      : null;
+  const outputChunks = agent?.outputChunks ?? [];
+  const reasoningChunks = agent?.reasoningChunks ?? [];
+  const outputChars = sumChunkChars(outputChunks);
+  const reviewConcern = reviewConcernForFace(agent, faceRun, aggregatedStatus);
   const focused =
     opts.litRunId === run.id || foldedCx.some((r) => r.id === opts.litRunId);
   const isContinuation = run.continuesRunId != null;
@@ -199,7 +385,7 @@ export function deriveAgentNodeLive(
   const activate = opts.activateNode;
   const toggle = opts.toggleUnitExpand;
 
-  return {
+  const live: AgentNodeData = {
     agentId: run.agentId,
     role: (hostAgent ?? agent)?.role ?? run.agentId,
     runId: run.id,
@@ -220,7 +406,7 @@ export function deriveAgentNodeLive(
         ? (roundRuns.find((r) => r.status === "failed")?.productLanded ??
           run.productLanded)
         : run.productLanded,
-    outputPreview: tailText(output),
+    outputPreview: chunksTailText(outputChunks),
     debateFacePrimary: isDebateAgentNode({
       stance: run.stance,
       group: run.group,
@@ -233,12 +419,12 @@ export function deriveAgentNodeLive(
     })
       ? challengePreviewFromContext(run.receivedContext)
       : null,
-    reasoningPreview: tailText(reasoning),
+    reasoningPreview: chunksTailText(reasoningChunks),
     toolProgress: agent?.toolProgress ?? null,
     toolExecutionLive: agent?.toolExecutionLive ?? null,
     phase: faceRun.phase ?? run.phase ?? null,
     phaseTool: faceRun.phaseTool ?? run.phaseTool ?? null,
-    tokenCount: estimateTokens(output),
+    tokenCount: estimateTokensFromCharCount(outputChars),
     toolCount: agent?.toolCalls.length ?? 0,
     artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
     focused,
@@ -292,6 +478,10 @@ export function deriveAgentNodeLive(
     enterIndex: opts.enterIndex,
     onActivate: activate ? () => activate(activateId) : undefined,
   };
+  if (isGraphPerfEnabled()) {
+    markGraphPerf("liveFace", performance.now() - t0, { runId: run.id });
+  }
+  return live;
 }
 
 /** Document shell whitelist for agent nodes (identity / direction only). */
@@ -358,10 +548,16 @@ function pendingShell(shell: AgentNodeShell): AgentNodeData {
  * Returns full AgentNodeData merged from shell identity + execution@playhead.
  */
 export function useAgentNodeLive(shell: AgentNodeShell): AgentNodeData {
-  const execution = useProjectedExecution();
   const actions = useGraphActions();
   const scene = useGraphScene();
+  const foldedRunIds = scene?.beatFoldsByHost.get(shell.runId) ?? EMPTY_FOLDED;
+  const liveSig = useActiveExecField((rt) =>
+    agentNodeLiveSig(projectRuntime(rt), shell.runId, foldedRunIds),
+  );
+  const getExecution = useLiveExecutionGetter();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig is intentional invalidation key (getExecution reads fresh)
   return useMemo(() => {
+    const execution = getExecution();
     if (!execution) return pendingShell(shell);
     const run = execution.runs.find((r) => r.id === shell.runId);
     if (!run) return pendingShell(shell);
@@ -375,7 +571,7 @@ export function useAgentNodeLive(shell: AgentNodeShell): AgentNodeData {
       activateNode: actions.activateNode,
       toggleUnitExpand: actions.toggleUnitExpand,
     });
-  }, [execution, shell, scene, actions]);
+  }, [liveSig, shell, scene, actions, getExecution]);
 }
 
 export type EndpointLive = {
@@ -388,10 +584,10 @@ export type EndpointLive = {
 };
 
 export function useInputEndpointLive(labelFromShell: string): EndpointLive {
-  const execution = useProjectedExecution();
   const actions = useGraphActions();
+  const taskSummary = useActiveExecField((rt) => rt.plan?.taskSummary ?? "");
   return useMemo(() => {
-    const label = labelFromShell || execution?.taskSummary || "";
+    const label = labelFromShell || taskSummary || "";
     return {
       status: "completed" as RunStatus,
       label,
@@ -402,26 +598,48 @@ export function useInputEndpointLive(labelFromShell: string): EndpointLive {
         ? () => actions.activateNode(INPUT_ID)
         : undefined,
     };
-  }, [labelFromShell, execution, actions]);
+  }, [labelFromShell, taskSummary, actions]);
 }
 
 export function useCaptainEndpointLive(runId: string): EndpointLive {
-  const execution = useProjectedExecution();
   const actions = useGraphActions();
   const answer = useContext(GraphCaptainAnswerContext);
+  const liveSig = useActiveExecField((rt) => {
+    const exec = projectRuntime(rt);
+    const base = captainEndpointLiveSig(exec, runId, actions.turnTerminal);
+    const preview = rt.teamSynthesisPreview;
+    const previewSig = preview
+      ? `${preview.headline.length}:${preview.text.length}:${preview.workers.length}`
+      : "";
+    const w = rt.coordinationWait;
+    const waitSig = w ? `${w.completed}/${w.total}` : "";
+    return `${base}|${previewSig}|${waitSig}`;
+  });
+  const wait = useActiveExecField((rt) => rt.coordinationWait);
+  const waitStartedAt = useActiveExecField(
+    (rt) => rt.coordinationWaitStartedAt,
+  );
   const teamSynthesisPreview = useActiveExecField(
     (rt) => rt.teamSynthesisPreview,
   );
-  const { captainCaption: captainWaitCaption } =
-    useCoordinationWaitChrome(execution);
+  const elapsedSec = useElapsedSince(wait ? waitStartedAt : null);
+  const getExecution = useLiveExecutionGetter();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig is intentional invalidation key (getExecution reads fresh)
   return useMemo(() => {
+    const execution = getExecution();
     const captainStatus = execution
       ? deriveCaptainStatus(execution, runId, {
           turnTerminal: actions.turnTerminal,
         })
       : ("pending" as RunStatus);
-    const waitCaption = (captainWaitCaption ?? "").trim();
+    const waitingRoles = execution ? waitingWorkerRoles(execution) : [];
+    const waitCaption = (
+      coordinationWaitCaptainCaption(wait, {
+        elapsedSec,
+        waitingRoles,
+      }) ?? ""
+    ).trim();
     const sinkStatus: RunStatus = waitCaption ? "running" : captainStatus;
     const answerPreview = answer?.content ? headText(answer.content) : "";
     const synthPreview =
@@ -441,12 +659,14 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
         : undefined,
     };
   }, [
-    execution,
+    liveSig,
     runId,
     actions,
     answer,
+    wait,
+    elapsedSec,
     teamSynthesisPreview,
-    captainWaitCaption,
+    getExecution,
   ]);
 }
 
@@ -464,8 +684,13 @@ export type ActSummaryLive = Pick<
 
 /** Live act-card progress — derived from current Execution via scene IR. */
 export function useActSummaryLive(actId: string): ActSummaryLive | null {
-  const execution = useProjectedExecution();
+  const liveSig = useActiveExecField((rt) =>
+    actSummaryLiveSig(projectRuntime(rt)),
+  );
+  const getExecution = useLiveExecutionGetter();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig is intentional invalidation key (getExecution reads fresh)
   return useMemo(() => {
+    const execution = getExecution();
     if (!execution) return null;
     const scene = buildGraphScene(execution, { inputId: INPUT_ID });
     const sa = scene.acts.find((a) => a.actId === actId);
@@ -480,7 +705,7 @@ export function useActSummaryLive(actId: string): ActSummaryLive | null {
       pendingDecisions: sa.pendingDecisions,
       recoverable: sa.recoverable,
     };
-  }, [execution, actId]);
+  }, [liveSig, actId, getExecution]);
 }
 
 /** Edge animated? — Live read of target run / captain status. */
@@ -489,22 +714,19 @@ export function useStepEdgeAnimated(
   captainRunId: string | null,
 ): boolean {
   const documentMode = useGraphDocumentMode();
-  const execution = useProjectedExecution();
   const { turnTerminal } = useGraphActions();
   // Canvas namespaces RF edge endpoints as `turnId::bare`; Live looks up bare run ids.
   const bareTarget = stripNamespace(targetId);
-  return useMemo(() => {
-    if (!documentMode || !execution) return false;
-    if (captainRunId && bareTarget === captainRunId) {
-      return (
-        deriveCaptainStatus(execution, captainRunId, { turnTerminal }) ===
-        "running"
-      );
-    }
-    return (
-      execution.runs.find((s) => s.id === bareTarget)?.status === "running"
+  const liveSig = useActiveExecField((rt) => {
+    if (!documentMode) return "0";
+    return stepEdgeAnimatedSig(
+      projectRuntime(rt),
+      bareTarget,
+      captainRunId,
+      turnTerminal,
     );
-  }, [documentMode, execution, bareTarget, captainRunId, turnTerminal]);
+  });
+  return liveSig === "1";
 }
 
 export function injectPaintFromOverlay(

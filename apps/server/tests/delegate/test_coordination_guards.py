@@ -361,8 +361,10 @@ async def test_thrash_rebrand_cold_delegate_rejected_continue_and_force():
 def _fake_merge_tool(*, force: bool = False) -> MagicMock:
     tool = MagicMock()
     tool._sink = MagicMock()
-    # MagicMock would otherwise make getattr(_delegate_force) truthy and bypass guards.
+    # MagicMock would otherwise make getattr(_delegate_force) / _folder_id truthy
+    # and bypass guards or invent a fake birth desk for ownership keys.
     tool._delegate_force = force
+    tool._folder_id = None
     return tool
 
 
@@ -1188,6 +1190,64 @@ def test_sibling_artifact_cross_detected():
     hits = find_sibling_artifact_crosses(plan)
     assert hits
     assert hits[0].reason == "sibling_artifact"
+    assert hits[0].path == "src/App.tsx"
+
+
+def test_cross_desk_same_rel_path_not_sibling_cross():
+    """两桌同 App.tsx → 同批 sibling 不撞。"""
+    from agentcore.runtime.coordination.append_guard import find_sibling_artifact_crosses
+    from agentcore.runtime.runs.types import Deliverable
+
+    plan = _plan(
+        RunSpec(
+            run_id="a",
+            role="前端 A",
+            task="写 App",
+            deliverable=Deliverable(artifacts=["App.tsx"]),
+            target_folder_id="desk-alpha",
+        ),
+        RunSpec(
+            run_id="b",
+            role="前端 B",
+            task="也写 App",
+            deliverable=Deliverable(artifacts=["App.tsx"]),
+            target_folder_id="desk-beta",
+        ),
+    )
+    assert find_sibling_artifact_crosses(plan) == []
+
+
+def test_same_desk_same_rel_path_still_sibling_cross():
+    """同桌同路径仍硬拒。"""
+    from agentcore.runtime.coordination.append_guard import (
+        append_overlap_reject_message,
+        find_sibling_artifact_crosses,
+    )
+    from agentcore.runtime.runs.types import Deliverable
+
+    plan = _plan(
+        RunSpec(
+            run_id="a",
+            role="前端 A",
+            task="写 App",
+            deliverable=Deliverable(artifacts=["App.tsx"]),
+            target_folder_id="desk-same",
+        ),
+        RunSpec(
+            run_id="b",
+            role="前端 B",
+            task="也写 App",
+            deliverable=Deliverable(artifacts=["App.tsx"]),
+            target_folder_id="desk-same",
+        ),
+    )
+    hits = find_sibling_artifact_crosses(plan)
+    assert hits
+    assert hits[0].path == "App.tsx"
+    msg = append_overlap_reject_message(hits, completed=0, total=2)
+    assert "同批交付物交叉已拒绝" in msg
+    assert "队员追加已拒绝" not in msg
+    assert "`App.tsx`" in msg
 
 
 def test_ancestor_artifact_overlap_not_sibling_cross():
@@ -1429,8 +1489,10 @@ def test_session_ownership_snapshot_roundtrip():
     assert isinstance(ledger, WriteCoordinator)
     ledger.declare("f.md", "w1", frozenset())
     snap = session.snapshot()
-    assert snap.file_ownership.get("_v") == 2
-    assert snap.file_ownership.get("owners", {}).get("f.md") == "w1"
+    assert snap.file_ownership.get("_v") == 3
+    owners = snap.file_ownership.get("owners", {})
+    assert any(k.endswith("f.md") or k.endswith("\0f.md") for k in owners)
+    assert "w1" in owners.values()
     restored = CoordinationSession.from_snapshot(snap)
     assert restored.ensure_file_ownership().owner_of("f.md") == "w1"
 

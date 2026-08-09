@@ -502,7 +502,14 @@ def build_workspace_context(
             "③ 引导桌面回填已连接的会话重试。"
         )
     if browser_on:
-        if is_local:
+        # Path capability follows real host_kind (Bridge→local；过桥无桥→sandbox).
+        # Test override ``browser_enabled=True`` without probing: local→Bridge guide.
+        use_local_bridge_guide = is_local
+        if browser_enabled is None:
+            from agentcore.tools.builtin import browser_host_kind_for
+
+            use_local_bridge_guide = browser_host_kind_for(backend) == "local"
+        if use_local_bridge_guide:
             path_capability = (
                 "桌面 Local Bridge 可打开本会话工作区相对 HTML 路径"
                 "（如 `site/index.html`，与用户「完整预览」同源 workspace://）；"
@@ -536,24 +543,34 @@ def build_workspace_context(
             "勿声称已替用户打开系统浏览器。"
         )
     else:
-        browser_base = (
-            "浏览器指引：本回合 browser=未装配（无云端隔离浏览器 / 无本机 Bridge）——"
-            "勿调用 browser_*、勿假装已打开或直播页面。"
-        )
         if is_local:
+            browser_base = (
+                "浏览器指引：本回合 browser=未装配"
+                "（无本机 Bridge 且本进程无可用云端隔离浏览器）——"
+                "勿调用 browser_*、勿假装已打开或直播页面。"
+            )
             how_enable = (
-                "装配启用：本机会话需桌面 Local Chromium Bridge 健康，"
-                "或启用云端沙箱浏览器。"
+                "装配启用：真·本地引擎需桌面 Local Chromium Bridge 健康；"
+                "无 Bridge 且无 gVisor 时不可装配，禁止假成功。"
             )
         elif desktop_online:
+            browser_base = (
+                "浏览器指引：本回合 browser=未装配（无云端隔离浏览器）——"
+                "勿调用 browser_*、勿假装已打开或直播页面。"
+            )
             how_enable = (
-                "装配启用：桌面端优先 `bind_local_folder`（本机 Local+Bridge）"
-                "或 `open_local_project`，或启用云端沙箱浏览器。"
+                "装配启用：云端路径需 gVisor/沙箱/netns 健康；"
+                "桌面端也可 `bind_local_folder` / `open_local_project` 后走本机 Bridge"
+                "（或过桥会话在云侧沙箱健康时装配 sandbox）。"
             )
         else:
+            browser_base = (
+                "浏览器指引：本回合 browser=未装配（无云端隔离浏览器）——"
+                "勿调用 browser_*、勿假装已打开或直播页面。"
+            )
             how_enable = (
-                "装配启用：当前非桌面会话无法绑定本机 Local；"
-                "可换桌面端或启用云端沙箱浏览器。"
+                "装配启用：当前非桌面会话无法绑定本机 Local Bridge；"
+                "云端路径需 gVisor/沙箱/netns 健康，或换桌面端。"
             )
         # 缺能力 → 同轮可开工排序；人手为一等路径（禁「仅补救/非主路径」反信号）。
         same_round = (
@@ -598,14 +615,21 @@ def build_workspace_context(
 
     # 跨项目并行指挥（事实面短教；整条 HOW 见 consult team_orchestration_advanced）。
     # 与 desktop_line 的 open/register/bind 分流互补，不替代。
+    # 读=只读跨桌工具；写=delegate+target_folder_id（与双模式 §五 / 编排器一致）。
     cross_project_line = (
-        "跨项目指挥：多项目并行→`list_projects` / `resolve_project` 得 id"
-        "（歧义 `ask_user` choice，禁猜最近）；空/近空→先 `ask_user` 钉目标，"
-        "禁连续 file_list 确认空；确认后同一次 `delegate` 各 task 填"
+        "跨项目指挥：默认工作区=出生桌（通用 file_* 只绑出生桌）；"
+        "摸已登记项目→只读跨桌 `list_project_dir` / `read_project_file`"
+        "（`folder_id`+相对路径；不改挂载、不写目标桌记忆）；"
+        "【禁止】以「云端读不到本地」为由改绑/open/mount 冒充跨仓读；"
+        "写/改盘→`list_projects` / `resolve_project` 得 id"
+        "（歧义 `ask_user` choice，禁猜最近）后同一次 `delegate` 各 task 填"
         "`target_folder_id`（换桌+记忆跟桌；不改本会话 folder_id）；"
-        "开发双仓≠`external_mount_readonly` 乱挂（挂载=区外只读，正交）；"
+        "空/近空→先 `ask_user` 钉目标，禁连续 file_list 确认空；"
+        "开发双仓≠open/register/bind/`external_mount_readonly` 冒充"
+        "（挂载=区外只读，正交；写仍派工换桌）；"
         "有出生未点名=默认桌，无出生未点名禁默写 scratch；"
         "先建：云 `create_project`；本地 ask `register_local_project`（留本对话）；"
+        "ask齐点名新建→先建齐再同次派；拒后禁塌缩→consult skill；"
         "`open_local_project`=新会话当出生，勿冒充先建后干；"
         "多 local 同回合可并行；协作图不改。"
     )

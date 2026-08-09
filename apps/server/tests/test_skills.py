@@ -398,6 +398,11 @@ def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
     # 派摸底验收：手写也要目标·手段·收工；够用即停 + handoff
     assert "派摸底" in body or "摸底·验收" in body or "了解到什么算够" in body
     assert "够用即停" in body
+    assert "file_list" in body and ("grep" in body or "code_search" in body)
+    assert "每个 app" in body and "package.json" in body
+    assert "禁止" in body and "名单" in body
+    assert "已知路径" in body
+    assert "含糊" in body and "根" in body
     assert "无限深挖" in body or "更全" in body
     assert "handoff" in body
 
@@ -410,8 +415,10 @@ def test_work_discipline_skill_teaches_design_and_patch_tripwires():
     assert "讨论与查证分相" in body
     assert "work_authority" in body
     assert "escalate" in body
-    # worker 自主度不进本 skill（已在 identity）
+    # worker 自主度不进本 skill（已在 identity）；本 skill 只短提醒 blocking 由工人自选
     assert "小问题（路径拼写" not in body
+    assert "按题自选" in body or "blocking" in body
+    assert "边干边报" in body or "默认 false" in body
     # 定稿漂移 A′：写 task 须含「已确认约束」
     assert "已确认约束" in body
     # 小步增量：用户偏好小步时首派更切片，勿一口吞绿场
@@ -511,18 +518,37 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "多 local" in body and "并行" in body
     assert "暂不支持" not in body
     assert "协作图不改" in body or "并行支线" in body
-    # 空壳/双项目 kickoff：先问、同次两路、开发≠挂载
+    # 先建齐再派（禁先扇出再补建）vs 拒后禁塌缩窄例外 vs 一般少派
+    assert "先建后派" in body
+    assert "先扇出再补建" in body and "禁止" in body
+    assert "ask 齐" in body or "点名新建" in body
+    assert "拒后禁塌缩" in body
+    assert "bare_chat_no_target" in body
+    assert "窄例外" in body
+    assert "裸聊单目标" in body or "运行时继承" in body
+    assert "能少则少" in body and "拿不准先少派" in body
+    assert "不" in body and "覆盖" in body
+    # 只读跨桌工具摸底 + 写仍派工换桌（禁「云端读不到本地」当唯一路径）
+    assert "list_project_dir" in body and "read_project_file" in body
+    assert "只读跨桌" in body
+    assert "出生桌" in body
+    assert "写仍派工换桌" in body
+    assert "云端读不到本地" in body and "禁止" in body
+    # 空壳/双项目 kickoff：先问、同次两路、≠open/bind/挂载冒充
     assert "空壳" in body or "近空" in body
     assert "file_list" in body
     assert "同一次" in body or "同次" in body
     assert "external_mount_readonly" in body
-    assert "开发双仓" in body or "区外挂载" in body
-    # 目录摘要须可触发 consult（多项目 / target_folder）
+    assert "开发双仓" in body or "区外挂载" in body or "冒充" in body
+    # 目录摘要须可触发 consult（多项目 / 只读跨桌 / target_folder / 先建齐再派）
     skill = build_system_skill_registry().get("team_orchestration_advanced")
     assert skill is not None
     assert "跨项目" in skill.summary
+    assert "list_project_dir" in skill.summary or "只读跨桌" in skill.summary
     assert "target_folder_id" in skill.summary
-    assert "空壳" in skill.summary or "external_mount" in skill.summary
+    assert "空壳" in skill.summary or "mount" in skill.summary or "冒充" in skill.summary
+    assert "先建齐再派" in skill.summary
+    assert "拒后禁塌缩" in skill.summary
 
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
@@ -537,11 +563,15 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     # 而非只讲 DAG 机械怎么填——修复 CEO 默认全平铺把有先后的流水线拍平的根因。
     assert "生产者→消费者" in body
     assert "正例·串行" in body and "反例·勿串" in body
+    assert "并行写盘" in body and "同路径" in body
+    assert "私有产出" in body or "私有 path" in body
+    assert "sibling_artifact" in body or "硬拒" in body
     assert "嵌套委派" in body and "大模块" in body
     assert "编排自主" in body
     assert "摸底波" in body
     assert "假两段" in body
     assert "为编排而编排" in body or "禁为编排而编排" in body
+    assert "凡大活必嵌套" in body
     assert "默认" in body and "二选一" in body
     assert "禁止再平铺" in body
     # 协调补派失败节点须标 replaces_run_id，引擎改写下游 depends_on
@@ -853,6 +883,13 @@ def test_revise_skill_teaches_recall_and_delegate_fallback():
     assert "全文重写" not in body
     assert "**禁止**对已有成篇成品再 `file_write`" not in body
     assert "禁止骨架/最小实现" not in body
+    # 写参收成已落盘短状态后：先 file_read 取真文，再 str_replace/按真文写，禁止把短状态当正文重发。
+    assert "已落盘短状态" in body
+    assert "_landed_summary" not in body
+    assert "file_read" in body
+    assert "真文" in body
+    assert "str_replace" in body
+    assert "禁止" in body and "重发" in body
 
 
 def test_team_orchestration_skill_teaches_revision_local_edit():
@@ -989,6 +1026,8 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "跨项目并行指挥" in body
     assert "开发双仓" in body
     assert "target_folder_id" in body
+    assert "只读跨桌" in body or "写仍派工换桌" in body
+    assert "写仍派工换桌" in body
     # 已绑定本地工程：「打开项目」=跑当前项目，换目录才开卡。
     assert "已绑定本地工程" in body
     assert "跑" in body and "当前" in body
@@ -1060,6 +1099,14 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "code_execute" in body
     assert "handoff" in body
     assert "禁止" in body and "file_read" in body
+    # 成篇修订例外：≠ 验真空转回读；清参后改稿才可先 file_read，禁短状态重发。
+    assert "验真" in body and "例外" in body
+    assert "已落盘短状态" in body
+    assert "_landed_summary" not in body
+    assert "清参" in body or "改稿" in body
+    assert "真文" in body
+    assert "str_replace" in body
+    assert "重发" in body
     # 定案 A：主路径一次完整 write；可选骨架；禁「禁止整篇一次 file_write」硬教条
     assert "主路径" in body and "完整正文" in body
     assert "禁止】整篇一次" not in body and "禁止】无骨架整篇一次" not in body

@@ -1,3 +1,4 @@
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useConversationStore } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
@@ -6,7 +7,8 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
  * Live cold card authority = InteractionStore: team_preview_required with a
  * server stamp paints ResumePrompt without message_end → surfaceResume.
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
 
@@ -21,6 +23,35 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 const CID = "conv-live-ix";
+
+const tpPayload = (
+  checkpointId: string,
+  over: Record<string, unknown> = {},
+) => ({
+  checkpoint_id: checkpointId,
+  conversation_id: CID,
+  primitive: "delegate" as const,
+  workers: [
+    { run_id: "r1", role: "研究员", task: "调研", depends_on: [] as string[] },
+  ],
+  tools: ["file_write"],
+  motion: "",
+  form: "",
+  sides: [] as string[],
+  max_rounds: 0,
+  thorough: true,
+  ...over,
+});
+
+function renderResume() {
+  return render(
+    <MemoryRouter>
+      <TooltipProvider>
+        <ResumePrompt />
+      </TooltipProvider>
+    </MemoryRouter>,
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -64,23 +95,10 @@ describe("ResumePrompt · live InteractionStore authority", () => {
       conversationId: CID,
       messageId: "m-server-tp",
       origin: "server",
-      payload: {
-        checkpoint_id: "tp-live",
-        conversation_id: CID,
-        primitive: "delegate",
-        workers: [
-          { run_id: "r1", role: "研究员", task: "调研", depends_on: [] },
-        ],
-        tools: ["file_write"],
-        motion: "",
-        form: "",
-        sides: [],
-        max_rounds: 0,
-        thorough: true,
-      },
+      payload: tpPayload("tp-live"),
     });
 
-    render(<ResumePrompt />);
+    renderResume();
 
     expect(screen.getByText("预计 1 人开工")).toBeTruthy();
     expect(screen.getByText("授权并开工")).toBeTruthy();
@@ -113,23 +131,217 @@ describe("ResumePrompt · live InteractionStore authority", () => {
       conversationId: CID,
       messageId: "client-only",
       origin: "sidecar",
+      payload: tpPayload("tp-nostamp"),
+    });
+
+    const { container } = renderResume();
+    expect(container.querySelector(".mx-4")).toBeNull();
+    expect(screen.queryByText("授权并开工")).toBeNull();
+  });
+
+  it("paints after stamp arrives (client-bound pending → rekey)", () => {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().addMessage({
+      id: "u1",
+      role: "user",
+      content: "组团",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-late",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "client-late",
+      origin: "server",
+      payload: tpPayload("tp-late-stamp"),
+    });
+
+    renderResume();
+    expect(screen.queryByText("授权并开工")).toBeNull();
+
+    act(() => {
+      useConversationStore
+        .getState()
+        .setServerMessageIdOnLastMessage("m-server-late", CID);
+    });
+
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(
+      useInteractionStore.getState().byId.get("tp-late-stamp")?.messageId,
+    ).toBe("m-server-late");
+  });
+
+  it("paints after stamp when pending arrived unbound (empty messageId)", () => {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().addMessage({
+      id: "u1",
+      role: "user",
+      content: "组团",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-unbound",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "",
+      origin: "server",
       payload: {
-        checkpoint_id: "tp-nostamp",
+        checkpoint_id: "cp-unbound",
         conversation_id: CID,
-        primitive: "delegate",
-        workers: [{ run_id: "r1", role: "研", task: "t", depends_on: [] }],
-        tools: [],
-        motion: "",
-        form: "",
-        sides: [],
-        max_rounds: 0,
-        thorough: true,
+        question: "第二轮拍板？",
+        context: "",
+        assumptions: [],
+        questions: [],
       },
     });
 
-    const { container } = render(<ResumePrompt />);
-    expect(container.querySelector(".mx-4")).toBeNull();
-    expect(screen.queryByText("授权并开工")).toBeNull();
+    renderResume();
+    expect(screen.queryByText("第二轮拍板？")).toBeNull();
+
+    act(() => {
+      useConversationStore
+        .getState()
+        .setServerMessageIdOnLastMessage("m-server-unbound", CID);
+    });
+
+    expect(screen.getByText("第二轮拍板？")).toBeTruthy();
+    expect(
+      useInteractionStore.getState().byId.get("cp-unbound")?.messageId,
+    ).toBe("m-server-unbound");
+  });
+
+  it("second-round team_preview paints after first round resolved", () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: tpPayload("tp-round1"),
+    });
+    useInteractionStore.getState().markResolved({
+      kind: "team_preview",
+      id: "tp-round1",
+      resolution: { decision: "continue" },
+    });
+
+    useConversationStore.getState().addMessage({
+      id: "u2",
+      role: "user",
+      content: "再组一轮",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-r2",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+    useConversationStore
+      .getState()
+      .setServerMessageIdOnLastMessage("m-server-tp-r2", CID);
+
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m-server-tp-r2",
+      origin: "server",
+      payload: tpPayload("tp-round2", {
+        workers: [{ run_id: "r2", role: "写", task: "写", depends_on: [] }],
+      }),
+    });
+
+    renderResume();
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(
+      useInteractionStore.getState().listPending(CID, ["team_preview"]),
+    ).toHaveLength(1);
+  });
+
+  it("second-round ask_user paints after first ask resolved", () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: {
+        checkpoint_id: "cp-r1",
+        conversation_id: CID,
+        question: "第一轮？",
+        context: "",
+        assumptions: [],
+        questions: [],
+      },
+    });
+    useInteractionStore.getState().markResolved({
+      kind: "ask_user",
+      id: "cp-r1",
+      resolution: { decision: "continue" },
+    });
+
+    useConversationStore.getState().addMessage({
+      id: "u2",
+      role: "user",
+      content: "继续问",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-ask-r2",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+    useConversationStore
+      .getState()
+      .setServerMessageIdOnLastMessage("m-server-ask-r2", CID);
+
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-ask-r2",
+      origin: "server",
+      payload: {
+        checkpoint_id: "cp-r2",
+        conversation_id: CID,
+        question: "第二轮拍板？",
+        context: "",
+        assumptions: [],
+        questions: [],
+      },
+    });
+
+    renderResume();
+    expect(screen.getByText("第二轮拍板？")).toBeTruthy();
+    expect(screen.queryByText("第一轮？")).toBeNull();
   });
 
   it("keeps origin=sidecar on Interaction entry for submit routing", () => {
@@ -138,21 +350,10 @@ describe("ResumePrompt · live InteractionStore authority", () => {
       conversationId: CID,
       messageId: "m-server-tp",
       origin: "sidecar",
-      payload: {
-        checkpoint_id: "tp-side",
-        conversation_id: CID,
-        primitive: "delegate",
-        workers: [{ run_id: "r1", role: "研", task: "t", depends_on: [] }],
-        tools: [],
-        motion: "",
-        form: "",
-        sides: [],
-        max_rounds: 0,
-        thorough: true,
-      },
+      payload: tpPayload("tp-side"),
     });
 
-    render(<ResumePrompt />);
+    renderResume();
     expect(useInteractionStore.getState().byId.get("tp-side")?.origin).toBe(
       "sidecar",
     );

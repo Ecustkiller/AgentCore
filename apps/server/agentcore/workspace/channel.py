@@ -139,7 +139,8 @@ class WorkspaceOp(StrEnum):
     GIT_REPO_STATUS = "git_repo_status"
     GIT_SCM = "git_scm"
     # Agent structured ``git`` on LocalWorkspace (no Path.root): run allowlisted
-    # argv on the desktop root. Args ``argv`` (+ optional ``timeout_seconds``);
+    # argv on the desktop. Args ``argv`` (+ optional ``timeout_seconds``, ``cwd`` =
+    # D1a project subpath under the bound root; omit/empty = root is the project);
     # value ``{stdout, stderr, exit_code}``. UI SCM stays on git_repo_status/git_scm.
     GIT_RUN = "git_run"
 

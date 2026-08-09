@@ -623,7 +623,38 @@ describe("extractTurnQueued", () => {
     ).toEqual([]);
   });
 
-  it("message_start 后收起", () => {
+  it("turn_queue_started 按 queue_id 清一项（出队开跑；保留其它）", () => {
+    expect(
+      extractTurnQueued([
+        ev("turn_queued", {
+          queue_id: "q1",
+          position: 1,
+          queue_depth: 2,
+          conversation_id: "c1",
+        }),
+        ev("turn_queued", {
+          queue_id: "q2",
+          position: 2,
+          queue_depth: 2,
+          conversation_id: "c1",
+        }),
+        ev("turn_queue_started", {
+          queue_id: "q1",
+          conversation_id: "c1",
+          remaining_depth: 1,
+        }),
+      ]),
+    ).toEqual([
+      {
+        position: 2,
+        queueDepth: 2,
+        queueId: "q2",
+        degradedFrom: undefined,
+      },
+    ]);
+  });
+
+  it("message_start 不猜出队（否决启发式）", () => {
     expect(
       extractTurnQueued([
         ev("turn_queued", {
@@ -634,7 +665,29 @@ describe("extractTurnQueued", () => {
         }),
         ev("message_start", { message_id: "m1", conversation_id: "c1" }),
       ]),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        position: 1,
+        queueDepth: 1,
+        queueId: "q1",
+        degradedFrom: undefined,
+      },
+    ]);
+  });
+
+  it("fold 对 turn_queue_started no-op（不炸 assertNever）", () => {
+    const turn = fold([
+      ev("turn_queue_started", {
+        queue_id: "q1",
+        conversation_id: "c1",
+        remaining_depth: 0,
+      }),
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("content_delta", { delta: "ok" }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    expect(turn.content).toBe("ok");
+    expect(turn.status).toBe("completed");
   });
 
   it("fold 对 turn_queue_cancelled no-op（不炸 assertNever）", () => {

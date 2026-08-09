@@ -7,10 +7,14 @@
 **验收 vs 归属分键**：``artifact_dir`` / 目录前缀 / 通配 = 验收覆盖；具体文件
 路径 = C3 归属与 sibling 互斥。裸目录**永不**注入 ``artifacts`` 冒充归属键。
 
+**与声明产物对齐**：非空 ``artifacts`` 若已落在 ``AgentCore/文档/…``（含自定义
+子目录如 ``AI开发/``，不限于 research/debate/reviews），案卷核对目录由这些路径
+推导；不得再钉默认 ``research`` 造成假 path_hint。调研笔记无声明路径时仍可用
+``research``。显式 ``artifact_dir`` 仅在无法从 artifacts 推导时生效。
+
 **语义收紧**：brief 里引用约定文档路径（必读材料）不算调研成文意图；业务向
 ``artifacts``（``src/`` · ``site/`` 等）或批次 ``skip_dossier_default``
 （kw 名历史遗留 ``code_verified``，**非** criteria kind）默认不套约定文档目录。
-显式 ``artifact_dir`` / 约定文档路径 ``artifacts`` 仍优先。
 
 不做：``file_write`` 启发式改写、根目录搬迁、``playbook=none`` 特例。
 """
@@ -102,6 +106,75 @@ def _default_stage_dir(role: str, task: str, name: str = "") -> str:
     return RESEARCH_DIR
 
 
+def _acceptance_dir_for_docs_path(path: str) -> str:
+    """Map one artifact pattern under ``AgentCore/文档/`` to an acceptance dir.
+
+    Stage dirs collapse to the stage root; custom subtrees (e.g. ``AI开发/``) keep
+    the concrete parent directory so contract checks match declared products.
+    """
+    raw = path.replace("\\", "/").strip()
+    if not raw:
+        return ""
+    covered = stage_dir_covering(raw)
+    if covered:
+        return covered
+
+    # Glob: take the directory prefix before the first wildcard.
+    if any(ch in raw for ch in "*?["):
+        cut = len(raw)
+        for ch in "*?[":
+            idx = raw.find(ch)
+            if idx != -1:
+                cut = min(cut, idx)
+        raw = raw[:cut].rstrip("/")
+        if not raw:
+            return ""
+        covered = stage_dir_covering(raw)
+        if covered:
+            return covered
+
+    ended_as_dir = raw.endswith("/")
+    p = normalize_artifact_dir(raw)
+    if not p or not (p == DOCS_PREFIX or p.startswith(f"{DOCS_PREFIX}/")):
+        return ""
+    if p == DOCS_PREFIX:
+        return DOCS_PREFIX
+
+    rel = p[len(DOCS_PREFIX) + 1 :]
+    if "/" not in rel:
+        # Single segment under 文档/：无扩展名或原带尾斜杠 → 子目录；否则视为文件。
+        if ended_as_dir or "." not in rel:
+            return p
+        return DOCS_PREFIX
+    return p.rsplit("/", 1)[0]
+
+
+def _dir_from_artifacts(artifacts: list[str]) -> str:
+    """Common acceptance dir derived from declared docs artifacts, or ``\"\"``."""
+    dirs: list[str] = []
+    for raw in artifacts:
+        if not isinstance(raw, str):
+            continue
+        d = _acceptance_dir_for_docs_path(raw)
+        if d:
+            dirs.append(d)
+    if not dirs:
+        return ""
+    common = dirs[0].split("/")
+    for d in dirs[1:]:
+        parts = d.split("/")
+        n = 0
+        while n < len(common) and n < len(parts) and common[n] == parts[n]:
+            n += 1
+        common = common[:n]
+        if len(common) < 2:
+            return ""
+    result = "/".join(common)
+    if result != DOCS_PREFIX and not result.startswith(f"{DOCS_PREFIX}/"):
+        return ""
+    return stage_dir_covering(result) or result
+
+
 def resolve_artifact_dir(
     deliverable: Deliverable,
     *,
@@ -125,14 +198,15 @@ def resolve_artifact_dir(
     if not fileish:
         return ""
 
+    # Declared product paths win over a mismatched/default ``artifact_dir``
+    # (e.g. writer artifacts under ``文档/AI开发`` must not keep ``research``).
+    derived = _dir_from_artifacts(list(deliverable.artifacts or []))
+    if derived:
+        return derived
+
     explicit = normalize_artifact_dir(deliverable.artifact_dir)
     if explicit:
         return explicit
-
-    for pattern in deliverable.artifacts:
-        covered = stage_dir_covering(pattern)
-        if covered:
-            return covered
 
     if any(_looks_like_business_artifact(a) for a in deliverable.artifacts):
         return ""

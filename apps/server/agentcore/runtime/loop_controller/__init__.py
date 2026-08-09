@@ -37,6 +37,7 @@ from typing import Any
 from .circuit import ToolCircuitBreakerMixin
 from .stuck import StuckInterventionMixin
 from .types import (
+    _LANDED_SUMMARY_ECHO_STOP_STEER,
     _PERMANENT_RETIRE_STEER,
     _VALIDATION_PATH_STOP_STEER,
     DEFAULT_EMPTY_THRESHOLD,
@@ -599,11 +600,33 @@ class LoopController(
                 if fp in self._validation_stopped_fps:
                     self._validation_thrash_latched = True
                     self._pending_validation_hard_stop = True
-                elif streak >= self._validation_path_streak:
-                    self._validation_stopped_fps.add(fp)
-                    self._pending_validation_stop = (
-                        f"工具 `{tool}` {_VALIDATION_PATH_STOP_STEER}"
+                else:
+                    summary = attempt.error_summary or ""
+                    landed_echo = tool in LANDING_TOOLS and (
+                        "已落盘摘要" in summary or "清理占位" in summary
                     )
+                    # 摘要回灌：首次拒写即 path-stop（点名 file_read），少烧一轮空转；
+                    # 其它 validation 仍按 validation_path_streak（默认 2）。
+                    need = 1 if landed_echo else self._validation_path_streak
+                    if streak >= need:
+                        self._validation_stopped_fps.add(fp)
+                        steer = (
+                            _LANDED_SUMMARY_ECHO_STOP_STEER
+                            if landed_echo
+                            else _VALIDATION_PATH_STOP_STEER
+                        )
+                        path_meta = attempt.meta.get("path") if attempt.meta else None
+                        path_s = (
+                            path_meta.strip().replace("\\", "/")
+                            if isinstance(path_meta, str) and path_meta.strip()
+                            else ""
+                        )
+                        if landed_echo and path_s:
+                            self._pending_validation_stop = (
+                                f"工具 `{tool}` path=`{path_s}` {steer}"
+                            )
+                        else:
+                            self._pending_validation_stop = f"工具 `{tool}` {steer}"
             elif attempt.success or error_class != ERROR_CLASS_VALIDATION:
                 # Break validation streak on success or a different error class.
                 if self._validation_fp_streak is not None and (

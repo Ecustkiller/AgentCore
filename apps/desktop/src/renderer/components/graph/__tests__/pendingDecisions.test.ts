@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type PendingInteractionRef,
   collectGraphPendingDecisions,
+  graphPendingDecisionsLiveSig,
 } from "../pendingDecisions";
 
 function run(partial: Partial<RunNode> & { id: string }): RunNode {
@@ -220,5 +221,54 @@ describe("collectGraphPendingDecisions", () => {
       "escalation",
       "delegation_authorization",
     ]);
+  });
+});
+
+describe("graphPendingDecisionsLiveSig", () => {
+  it("ignores streaming-stable runs and flips when escalation becomes pending", () => {
+    const base = execution(
+      [
+        run({ id: "captain", kind: "captain", agentId: "ceo" }),
+        run({ id: "r1", agentId: "a1", escalations: [] }),
+      ],
+      [{ id: "a1", role: "调研" }],
+    );
+    const streamed = execution(
+      [
+        run({ id: "captain", kind: "captain", agentId: "ceo" }),
+        run({ id: "r1", agentId: "a1", escalations: [] }),
+      ],
+      [{ id: "a1", role: "调研" }],
+    );
+    expect(graphPendingDecisionsLiveSig(base)).toBe(
+      graphPendingDecisionsLiveSig(streamed),
+    );
+
+    const withEsc = execution(
+      [
+        run({ id: "captain", kind: "captain", agentId: "ceo" }),
+        run({
+          id: "r1",
+          agentId: "a1",
+          escalations: [
+            {
+              id: "e1",
+              question: "q",
+              assumption: "a",
+              blocking: true,
+              status: "pending",
+              answer: null,
+              kind: "normal",
+              questions: [],
+            },
+          ],
+        }),
+      ],
+      [{ id: "a1", role: "调研" }],
+    );
+    expect(graphPendingDecisionsLiveSig(withEsc)).not.toBe(
+      graphPendingDecisionsLiveSig(base),
+    );
+    expect(graphPendingDecisionsLiveSig(withEsc)).toContain("r1:1:0");
   });
 });

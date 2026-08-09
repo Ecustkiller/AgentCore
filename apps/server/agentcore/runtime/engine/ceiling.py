@@ -30,14 +30,19 @@ def thrashing_backstop_payload(
     *,
     question: str,
     evidence: str,
+    source: str,
 ) -> dict[str, Any]:
-    """Structured escalation row for thrashing DEGRADED (signal only — no auto replan)."""
+    """Structured escalation row for thrashing DEGRADED (signal only — no auto replan).
+
+    ``source`` must match the SSE ``run_escalation`` payload (e.g.
+    ``ceiling_backstop`` / ``validation_thrash``).
+    """
     return {
         "question": question,
         "assumption": "",
         "blocking": False,
         "kind": "normal",
-        "source": CEILING_BACKSTOP_SOURCE,
+        "source": source,
         "gate_kind": "normal",
         "evidence": evidence,
         "tool_name": "",
@@ -53,11 +58,14 @@ def record_thrashing_backstop(
     evidence: str,
     sink: EventSink,
     gate_escalation_sink: list[dict[str, Any]] | None,
+    source: str,
 ) -> None:
     """Append gate escalation + emit ``escalation_raised`` for a thrashing worker."""
     if gate_escalation_sink is not None:
         gate_escalation_sink.append(
-            thrashing_backstop_payload(question=question, evidence=evidence)
+            thrashing_backstop_payload(
+                question=question, evidence=evidence, source=source
+            )
         )
     sink.emit(
         escalation_raised(
@@ -67,6 +75,7 @@ def record_thrashing_backstop(
             assumption="",
             blocking=False,
             kind="normal",
+            source=source,
         )
     )
 
@@ -153,6 +162,7 @@ async def ceiling_finalize(
             ),
             sink=sink,
             gate_escalation_sink=gate_escalation_sink,
+            source=CEILING_BACKSTOP_SOURCE,
         )
     final_content, final_reasoning, total_usage, rounds, coordination = await force_finalize(
         messages=messages,

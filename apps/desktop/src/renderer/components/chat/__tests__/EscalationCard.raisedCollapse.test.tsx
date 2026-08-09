@@ -39,7 +39,7 @@ function resolvedEsc(overrides: Partial<RunEscalation> = {}): RunEscalation {
 }
 
 describe("EscalationCard · raised collapse", () => {
-  it("默认收起为一行结论，点击可展开全文与假设", () => {
+  it("默认收起为一行结论，点击可展开全文与暂定假设", () => {
     // Spread `role` — prop is teammate display name, not ARIA role (biome a11y).
     render(
       <EscalationCard
@@ -55,7 +55,7 @@ describe("EscalationCard · raised collapse", () => {
     });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText(/无法将第5轮审查报告落盘/)).toBeNull();
-    expect(screen.queryByText(/已按假设继续/)).toBeNull();
+    expect(screen.queryByText(/暂定假设/)).toBeNull();
 
     fireEvent.click(toggle);
     expect(
@@ -68,9 +68,54 @@ describe("EscalationCard · raised collapse", () => {
     expect(screen.getByText(/请授予写盘或由主管代为持久化/)).toBeTruthy();
     expect(
       screen.getByText(
-        "已按假设继续：主管将据正文内容持久化报告或于下波授予写盘工具",
+        "暂定假设：主管将据正文内容持久化报告或于下波授予写盘工具",
       ),
     ).toBeTruthy();
+    expect(screen.queryByText(/已按假设继续/)).toBeNull();
+  });
+
+  it("卡住早停 source：标题含卡住早停，无边干边上报/已按假设继续", () => {
+    render(
+      <EscalationCard
+        escalation={raisedEsc({
+          source: "validation_thrash",
+          assumption: "",
+          question: "校验反复失败，已早停以免空转。",
+        })}
+        conversationId="conv-1"
+        interactive
+        {...{ role: "落盘员" }}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", {
+      name: /落盘员 · 卡住早停（交付可能不完整）/,
+    });
+    expect(screen.queryByRole("button", { name: /边干边上报/ })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(/校验反复失败，已早停以免空转/)).toBeTruthy();
+    expect(screen.queryByText(/边干边上报/)).toBeNull();
+    expect(screen.queryByText(/已按假设继续/)).toBeNull();
+    expect(screen.queryByText(/暂定假设/)).toBeNull();
+    expect(screen.queryByText(/无需你拍板/)).toBeNull();
+  });
+
+  it("ceiling_backstop 同样走卡住早停卡", () => {
+    render(
+      <EscalationCard
+        escalation={raisedEsc({ source: "ceiling_backstop" })}
+        conversationId="conv-1"
+        interactive
+        {...{ role: "审查员" }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /审查员 · 卡住早停（交付可能不完整）/,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /边干边上报/ })).toBeNull();
   });
 });
 

@@ -6,6 +6,7 @@ vi.mock("@/hooks/useConversations", () => ({
   getConversations: vi.fn(() => []),
   bumpConversationCache: vi.fn(),
   restoreConversationCache: vi.fn(),
+  syncConversationListPreview: vi.fn(),
 }));
 vi.mock("@/services/sidecarRouting", () => ({
   resolveSidecarRoot: vi.fn(() => Promise.resolve(null)),

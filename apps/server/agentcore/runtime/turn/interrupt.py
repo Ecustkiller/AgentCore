@@ -301,6 +301,11 @@ async def close_turn_interrupted(
                 )
                 if load_stream_state:
                     raw = pick_monotonic_content(existing_content, seg_content)
+                    # Passed salvage (e.g. content_reset stash) must join the
+                    # monotonic pick — load_stream_state alone used to ignore
+                    # ``content`` and could persist an empty body after reset.
+                    if body_content is not None:
+                        raw = pick_monotonic_content(raw, body_content)
                     body_reasoning = (
                         pick_monotonic_content(existing_reasoning, seg_reasoning) or None
                     )

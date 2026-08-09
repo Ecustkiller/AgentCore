@@ -43,12 +43,12 @@ def _single_agent_text() -> list[SSEEvent]:
 
 
 def _single_agent_queued_then_run() -> list[SSEEvent]:
-    """发送即有流 · FIFO 排队→开跑→续流：同连接先 ``turn_queued``，再完整单聊回合。
+    """发送即有流 · FIFO 排队→开跑→续流：``turn_queued`` → ``turn_queue_started`` → 单聊。
 
     此前此态从未被向量覆盖（HTTP 202 JSON 退役前客户端拿不到续流事件），是协议 bug
-    逃过 CI 的根因。``turn_queued`` 为 EPHEMERAL / fold no-op，golden 与纯单聊同形。
+    逃过 CI 的根因。排队 EPHEMERAL / fold no-op，golden 与纯单聊同形。
     """
-    from agentcore.runtime.events import turn_queued
+    from agentcore.runtime.events import turn_queue_started, turn_queued
 
     return [
         turn_queued(
@@ -56,6 +56,11 @@ def _single_agent_queued_then_run() -> list[SSEEvent]:
             position=1,
             queue_depth=1,
             conversation_id=_CONV,
+        ),
+        turn_queue_started(
+            queue_id="q1",
+            conversation_id=_CONV,
+            remaining_depth=0,
         ),
         *_single_agent_text(),
     ]
@@ -65,8 +70,9 @@ def _single_agent_queued_degraded_from_steer() -> list[SSEEvent]:
     """经典 in-flight + ``delivery=steer`` 回落：无 accepting 窗口时 ``turn_queued.degraded_from=steer``。
 
     EPHEMERAL / fold no-op；golden 与纯单聊同形。客户端据此 toast「已改为排队」。
+    开跑仍带 ``turn_queue_started``（与强制 queue 同形闭环）。
     """
-    from agentcore.runtime.events import turn_queued
+    from agentcore.runtime.events import turn_queue_started, turn_queued
 
     return [
         turn_queued(
@@ -75,6 +81,11 @@ def _single_agent_queued_degraded_from_steer() -> list[SSEEvent]:
             queue_depth=1,
             conversation_id=_CONV,
             degraded_from="steer",
+        ),
+        turn_queue_started(
+            queue_id="q-degraded",
+            conversation_id=_CONV,
+            remaining_depth=0,
         ),
         *_single_agent_text(),
     ]
@@ -565,11 +576,11 @@ def _mid_run_refresh_ceo_narration() -> list[SSEEvent]:
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
     "single_agent_queued_then_run": (
-        "发送即有流：turn_queued → 开跑 → 同连接续流完整单聊（FIFO 排队态）",
+        "发送即有流：turn_queued → turn_queue_started → message_start…（FIFO 闭环）",
         _single_agent_queued_then_run,
     ),
     "single_agent_queued_degraded_from_steer": (
-        "经典+steer 回落排队：无 accepting 时 turn_queued.degraded_from=steer → 同连接续流",
+        "经典+steer 回落：turn_queued.degraded_from=steer → turn_queue_started → 续流",
         _single_agent_queued_degraded_from_steer,
     ),
     "single_agent_turn_steer_accepted": (

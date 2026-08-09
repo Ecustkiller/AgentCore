@@ -266,12 +266,32 @@ class DelegateTool:
         self._active_playbook: str | None = None
         # 当前 playbook_args（kickoff headline 只读 intensity；手写 tasks 为 None）。
         self._active_playbook_args: dict[str, Any] | None = None
+        # 父 worker 带 code_audit_gate 时：嵌套手写 tasks 继承收工纪律（见 audit.apply_*）。
+        self._inherit_code_audit_discipline: bool = False
         # Per-call force flag for isomorphic re-delegation (set in execute).
         self._delegate_force: bool = False
         # Turn user-message provenance (harvest closing stamps execution_harvest).
         from agentcore.runtime.delegate.post_close_gate import current_user_message_origin
 
         self._user_message_origin: str = current_user_message_origin()
+
+    def effective_default_target_folder_id(self) -> str | None:
+        """Nested lead inheritance, else bare-chat turn hint from create/resolve.
+
+        Birth-bound sessions ignore the turn hint (omit → workers sit birth desk).
+        Does not rewrite ``_default_target_folder_id`` so a later multi-project
+        clear on ``turn_target_desk`` still forces explicit targets.
+        """
+        nested = getattr(self, "_default_target_folder_id", None)
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+        if self._folder_id:
+            return None
+        hint = getattr(self._base_tool_context, "turn_target_desk", None)
+        hinted = getattr(hint, "folder_id", None) if hint is not None else None
+        if isinstance(hinted, str) and hinted.strip():
+            return hinted.strip()
+        return None
 
     def spawn_lead_subteam(self, captain_run_id: str, captain_depth: int):
         """Mint a nested lead handle (阶段2); construction stays in the tools package."""
@@ -560,14 +580,16 @@ class DelegateTool:
             )
 
         # §4.2b·2b / 改法④A：无出生且任务未带目标 → 派工前拒（禁默坐 scratch）。
+        # 裸聊同回合唯一 create/resolve 可经 turn_target_desk 继承缺省目标。
         from agentcore.runtime.delegate.target_desktop import (
             gate_bare_chat_requires_target,
         )
 
+        default_target = self.effective_default_target_folder_id()
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=self._folder_id,
             tasks_raw=tasks_raw if isinstance(tasks_raw, list) else [],
-            default_target_folder_id=getattr(self, "_default_target_folder_id", None),
+            default_target_folder_id=default_target,
         )
         if bare_gate:
             logger.info(
@@ -580,6 +602,16 @@ class DelegateTool:
                 output="",
                 error=bare_gate,
                 contract_failure=True,
+            )
+        if (
+            not self._folder_id
+            and default_target
+            and not getattr(self, "_default_target_folder_id", None)
+        ):
+            # 观测：本批靠回合 hint 过闸（模型未显式 target_folder_id）
+            logger.info(
+                "delegate.turn_target_desk_inherited",
+                folder_id=default_target,
             )
 
         # 跨回合同图追加：须在 build_run_plan 之前加载宿主计划，以便 depends_on 解析
@@ -763,6 +795,19 @@ class DelegateTool:
         skip_dossier_default = (
             isinstance(playbook_early, str) and playbook_early.strip() == "repair_code"
         )
+        if getattr(self, "_inherit_code_audit_discipline", False) and isinstance(
+            tasks_raw, list
+        ):
+            from agentcore.runtime.runs.playbooks.audit import (
+                apply_inherited_code_audit_discipline,
+            )
+
+            tasks_raw = apply_inherited_code_audit_discipline(tasks_raw)
+            logger.info(
+                "delegate.nested_code_audit_discipline",
+                tasks=len(tasks_raw),
+                depth=self._depth,
+            )
         plan, errors = build_run_plan(
             tasks_raw,
             valid_tools=valid_tools,
@@ -772,7 +817,7 @@ class DelegateTool:
             complexity_hint=complexity_hint,
             existing_plan=host_plan_for_append,
             code_verified=skip_dossier_default,
-            default_target_folder_id=getattr(self, "_default_target_folder_id", None),
+            default_target_folder_id=self.effective_default_target_folder_id(),
         )
         if errors:
             msg = "委派任务无效：" + "；".join(errors)

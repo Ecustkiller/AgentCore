@@ -130,10 +130,56 @@ def test_code_audit_requires_scope_and_rejects_single_module_list():
     assert any("≥2" in e or "modules" in e for e in errors2)
 
 
+def test_code_audit_fans_out_up_to_eight_modules_without_fold():
+    """code_audit 扇出上限 8：恰好 8 个模块不折叠（全局 MAX_PLAYBOOK_FANOUT 仍为 6）。"""
+    from agentcore.runtime.runs.playbooks import (
+        CODE_AUDIT_FANOUT,
+        MAX_PLAYBOOK_FANOUT,
+        collect_playbook_notes,
+    )
+
+    assert CODE_AUDIT_FANOUT == 8
+    assert MAX_PLAYBOOK_FANOUT == 6
+    modules = [f"m{i}" for i in range(CODE_AUDIT_FANOUT)]
+    tasks, errors = expand_playbook(
+        "code_audit", {"scope": "monorepo", "modules": modules}
+    )
+    assert errors == []
+    auditors = [t for t in tasks if t["role"] == "代码审计员"]
+    assert len(auditors) == CODE_AUDIT_FANOUT
+    for i, mod in enumerate(modules):
+        assert f"audit_{i}" in {t["id"] for t in auditors}
+        assert mod in _by_id(tasks)[f"audit_{i}"]["task"]
+    assert collect_playbook_notes(tasks) == []
+
+
+def test_code_audit_folds_modules_beyond_eight_into_last_slot():
+    """>8 模块：折叠进末审计槽（合并不丢弃），带 playbook_note。"""
+    from agentcore.runtime.runs.playbooks import CODE_AUDIT_FANOUT, collect_playbook_notes
+
+    n = CODE_AUDIT_FANOUT + 3
+    modules = [f"m{i}" for i in range(n)]
+    tasks, errors = expand_playbook(
+        "code_audit", {"scope": "monorepo", "modules": modules}
+    )
+    assert errors == []
+    auditors = [t for t in tasks if t["role"] == "代码审计员"]
+    assert len(auditors) == CODE_AUDIT_FANOUT
+    last = auditors[-1]
+    for i in range(CODE_AUDIT_FANOUT - 1, n):
+        assert f"m{i}" in last["task"] or f"m{i}" in last["deliverable"]["name"]
+    notes = collect_playbook_notes(tasks)
+    assert notes and "扇出折叠" in notes[0]
+    assert f"m{CODE_AUDIT_FANOUT}" in notes[0]
+    assert str(CODE_AUDIT_FANOUT) in notes[0]
+
+
 def test_available_playbooks_lists_code_audit():
     listing = available_playbooks()
     assert "code_audit" in listing
     assert "代码审计" in listing
+    assert "4–8" in listing or "4-8" in listing
+    assert "自然缝" in listing or "能少则少" in listing
 
 
 # ── parallel_brief ────────────────────────────────────────────────────────────
@@ -166,7 +212,11 @@ def test_parallel_brief_fans_out_notes_without_write_pipeline():
         # 摸底验收：够用即停 + handoff 必交（提示词纪律，非完成硬闸）
         assert "摸底验收" in t["task"] or "够用即停" in t["task"]
         assert "定位" in t["task"] and "技术栈" in t["task"]
-        assert "入口" in t["task"]
+        assert "file_list" in t["task"] and ("grep" in t["task"] or "code_search" in t["task"])
+        assert "每个 app" in t["task"] and "package.json" in t["task"]
+        assert "禁止" in t["task"] and "名单" in t["task"]
+        assert "已知路径" in t["task"]
+        assert "含糊" in t["task"] and "根" in t["task"]
         assert "handoff" in t["task"].lower()
         assert "禁" in t["task"] and "业务代码" in t["task"]
         assert "够用即停" in d["name"] or "handoff" in d["name"].lower()

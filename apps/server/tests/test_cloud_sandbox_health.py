@@ -20,9 +20,16 @@ from tests.delegate.conftest import LocalBackend
 
 
 class _FakeSandbox:
-    def __init__(self, *, ok: bool = True, raise_exc: BaseException | None = None):
+    def __init__(
+        self,
+        *,
+        ok: bool = True,
+        raise_exc: BaseException | None = None,
+        last_health_failure: tuple[str, str | None] | None = None,
+    ):
         self._ok = ok
         self._raise = raise_exc
+        self.last_health_failure = last_health_failure
 
     async def health_check(self) -> bool:
         if self._raise is not None:
@@ -72,6 +79,40 @@ async def test_probe_failure_caches_unhealthy(monkeypatch: pytest.MonkeyPatch):
     )
     await probe_cloud_sandbox_at_startup()
     assert cloud_sandbox_health() is False
+
+
+@pytest.mark.asyncio
+async def test_probe_surfaces_sandbox_last_health_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """GVisor ``last_health_failure`` (e.g. not_linux) must reach the warning reason."""
+    set_cloud_sandbox_health_for_tests(None)
+    logged: list[dict[str, Any]] = []
+
+    class _Logger:
+        def debug(self, *_a: Any, **_k: Any) -> None:
+            return None
+
+        def warning(self, event: str, **kwargs: Any) -> None:
+            logged.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: _FakeSandbox(
+            ok=False,
+            last_health_failure=("not_linux", "platform=win32"),
+        ),
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.sandbox.cloud_health.logger",
+        _Logger(),
+    )
+    await probe_cloud_sandbox_at_startup()
+    assert cloud_sandbox_health() is False
+    assert logged and logged[0]["event"] == "sandbox.cloud_health_failed"
+    assert logged[0]["reason"] == "not_linux"
+    assert logged[0]["detail"] == "platform=win32"
 
 
 @pytest.mark.asyncio

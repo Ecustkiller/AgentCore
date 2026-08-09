@@ -381,7 +381,7 @@ async def react_loop(
 
             begin_accepting(steer_cid)
 
-    def _enter_wind_down(reason: str, instruction: str) -> None:
+    def _enter_wind_down(reason: str, instruction: str | None = None) -> None:
         nonlocal wind_down_active, wind_down_reason, wind_down_effective_allowed
         nonlocal wind_down_whitelist, tool_defs
         if wind_down_active or role != "worker":
@@ -389,7 +389,10 @@ async def react_loop(
         from agentcore.runtime.runs.cutoff import (
             narrow_tools_for_wind_down,
             wind_down_allowed_tools,
+            wind_down_instruction_timeout,
+            wind_down_instruction_token,
             worker_keeps_file_read_in_wind_down,
+            worker_keeps_notes_in_wind_down,
         )
 
         wind_down_active = True
@@ -398,14 +401,32 @@ async def react_loop(
         keep_file_read = worker_keeps_file_read_in_wind_down(
             available=available, allowed=live_allowed
         )
-        wind_down_whitelist = wind_down_allowed_tools(keep_file_read=keep_file_read)
+        keep_notes = worker_keeps_notes_in_wind_down(
+            available=available, allowed=live_allowed
+        )
+        wind_down_whitelist = wind_down_allowed_tools(
+            keep_file_read=keep_file_read, keep_notes=keep_notes
+        )
         narrowed = narrow_tools_for_wind_down(
             available,
             allowed=live_allowed,
             keep_file_read=keep_file_read,
+            keep_notes=keep_notes,
         )
         wind_down_effective_allowed = narrowed
         tool_defs = _resolve_tool_defs()
+        if instruction is None:
+            if reason == "token_budget":
+                instruction = wind_down_instruction_token(keep_notes=keep_notes)
+            elif reason == "worker_timeout":
+                instruction = wind_down_instruction_timeout(keep_notes=keep_notes)
+            else:
+                # retrieval_budget / other: keep caller-supplied or build a short default.
+                notes = "、便签（可贴/读/改）" if keep_notes else ""
+                instruction = (
+                    "[系统提示] 检索预算已用尽。本轮起进入收尾窗口：仅允许落盘"
+                    f"{notes}与 handoff，请基于已有证据交卷；禁止继续 web_search / read_url。"
+                )
         messages.append(LLMMessage(role="user", content=instruction))
         from agentcore.runtime.tool_failures import sync_tool_failure_constraint_in_system
 
@@ -428,6 +449,7 @@ async def react_loop(
             ),
             allowed_tools=narrowed,
             keep_file_read=keep_file_read,
+            keep_notes=keep_notes,
         )
         from agentcore.runtime.runs.run_phase_emit import emit_run_phase
 
@@ -441,6 +463,7 @@ async def react_loop(
         call this for report idle. Does **not** emit ``engine.wind_down_enter`` /
         winding_down phase (budget wind_down stays independent). If budget
         wind_down already active, surface is already narrowed — no-op on allowlist.
+        Collaboration keeps note tools on the narrowed surface.
         """
         nonlocal delivery_idle_narrow_active, live_allowed, tool_defs
         if delivery_idle_narrow_active or role != "worker":
@@ -454,16 +477,21 @@ async def react_loop(
         from agentcore.runtime.runs.cutoff import (
             narrow_tools_for_wind_down,
             worker_keeps_file_read_in_wind_down,
+            worker_keeps_notes_in_wind_down,
         )
 
         available = set(tools.names)
         keep_file_read = worker_keeps_file_read_in_wind_down(
             available=available, allowed=live_allowed
         )
+        keep_notes = worker_keeps_notes_in_wind_down(
+            available=available, allowed=live_allowed
+        )
         narrowed = narrow_tools_for_wind_down(
             available,
             allowed=live_allowed,
             keep_file_read=keep_file_read,
+            keep_notes=keep_notes,
         )
         live_allowed = narrowed
         tool_defs = _resolve_tool_defs()
@@ -473,6 +501,7 @@ async def react_loop(
             role=role,
             allowed_tools=narrowed,
             keep_file_read=keep_file_read,
+            keep_notes=keep_notes,
         )
 
     def _consume_timeout_wind_down_pending() -> bool:
@@ -509,20 +538,16 @@ async def react_loop(
         if role != "worker":
             return
         from agentcore.config import settings
-        from agentcore.runtime.runs.cutoff import (
-            WIND_DOWN_INSTRUCTION_TIMEOUT,
-            WIND_DOWN_INSTRUCTION_TOKEN,
-            should_enter_token_wind_down,
-        )
+        from agentcore.runtime.runs.cutoff import should_enter_token_wind_down
 
         reserve = int(settings.engine_worker_token_wind_down_reserve or 0)
         if not wind_down_active and should_enter_token_wind_down(
             total_usage.total_tokens, token_budget, reserve
         ):
-            _enter_wind_down("token_budget", WIND_DOWN_INSTRUCTION_TOKEN)
+            _enter_wind_down("token_budget")
         timeout_pending = _consume_timeout_wind_down_pending()
         if timeout_pending and not wind_down_active:
-            _enter_wind_down("worker_timeout", WIND_DOWN_INSTRUCTION_TIMEOUT)
+            _enter_wind_down("worker_timeout")
 
     def _enforce_hard_timeout_entry() -> str | None:
         """Round-boundary hard-timeout gate. Returns break reason or None.
@@ -542,10 +567,8 @@ async def react_loop(
             return None
         if guard.allows_grace_round():
             guard.begin_grace_round()
-            from agentcore.runtime.runs.cutoff import WIND_DOWN_INSTRUCTION_TIMEOUT
-
             if not wind_down_active:
-                _enter_wind_down("worker_timeout", WIND_DOWN_INSTRUCTION_TIMEOUT)
+                _enter_wind_down("worker_timeout")
             return None
         if guard.blocks_new_work():
             guard.request_force_cancel(reason="post_grace")
@@ -555,12 +578,9 @@ async def react_loop(
                 phase=guard.phase.value,
             )
             return "worker_timeout"
-        if guard.phase is HardTimeoutPhase.GRACE:
+        if guard.phase is HardTimeoutPhase.GRACE and not wind_down_active:
             # About to run the granted grace round — ensure tools are narrowed.
-            from agentcore.runtime.runs.cutoff import WIND_DOWN_INSTRUCTION_TIMEOUT
-
-            if not wind_down_active:
-                _enter_wind_down("worker_timeout", WIND_DOWN_INSTRUCTION_TIMEOUT)
+            _enter_wind_down("worker_timeout")
         return None
 
     try:
@@ -854,12 +874,12 @@ async def react_loop(
                         from agentcore.runtime.engine.directive import Continue, Return
                         from agentcore.runtime.runs.cutoff import (
                             WIND_DOWN_ALLOWED_TOOLS,
-                            WIND_DOWN_BREACH_NUDGE,
-                            WIND_DOWN_BREACH_NUDGE_KEEP_LANDING,
                             narrow_tools_for_wind_down_breach,
                             should_force_local_after_wind_down_breach,
+                            wind_down_breach_nudge,
                             wind_down_breach_tool_names,
                             worker_keeps_file_read_in_wind_down,
+                            worker_keeps_notes_in_wind_down,
                         )
 
                         effective_whitelist = wind_down_whitelist or WIND_DOWN_ALLOWED_TOOLS
@@ -887,6 +907,10 @@ async def react_loop(
                                 available=set(tools.names),
                                 allowed=list(effective_whitelist),
                             )
+                            keep_notes = keep_landing and worker_keeps_notes_in_wind_down(
+                                available=set(tools.names),
+                                allowed=list(effective_whitelist),
+                            )
                             logger.warning(
                                 "engine.wind_down_breach",
                                 run_id=run_id,
@@ -894,6 +918,7 @@ async def react_loop(
                                 prior_breaches=wind_down_breach_count,
                                 force_local=force_local,
                                 keep_landing=keep_landing,
+                                keep_notes=keep_notes,
                                 tokens=total_usage.total_tokens,
                                 token_budget=token_budget,
                             )
@@ -974,13 +999,13 @@ async def react_loop(
                                         set(tools.names),
                                         keep_landing=keep_landing,
                                         keep_file_read=keep_file_read,
+                                        keep_notes=keep_notes,
                                         allowed=list(effective_whitelist),
                                     )
                                 )
-                                breach_nudge = (
-                                    WIND_DOWN_BREACH_NUDGE_KEEP_LANDING
-                                    if keep_landing
-                                    else WIND_DOWN_BREACH_NUDGE
+                                breach_nudge = wind_down_breach_nudge(
+                                    keep_landing=keep_landing,
+                                    keep_notes=keep_notes,
                                 )
                                 tool_defs = _resolve_tool_defs()
                                 if not kept:
@@ -1189,11 +1214,7 @@ async def react_loop(
                 and rb.limit > 0
                 and rb.remaining <= 0
             ):
-                _enter_wind_down(
-                    "retrieval_budget",
-                    "[系统提示] 检索预算已用尽。本轮起进入收尾窗口：仅允许落盘与 "
-                    "handoff，请基于已有证据交卷；禁止继续 web_search / read_url。",
-                )
+                _enter_wind_down("retrieval_budget")
                 logger.info(
                     "engine.retrieval_budget_wind_down",
                     run_id=run_id,

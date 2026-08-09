@@ -278,7 +278,7 @@ export interface paths {
         put?: never;
         /**
          * Remember Account User Rule
-         * @description Append an explicit user directive to the scope's user-rule doc (``remember``).
+         * @description Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``).
          */
         post: operations["remember_account_user_rule_v1_account_rules_remember_post"];
         delete?: never;
@@ -5596,15 +5596,29 @@ export interface components {
         };
         /** AccountRememberRequest */
         AccountRememberRequest: {
+            /**
+             * Action
+             * @default add
+             * @enum {string}
+             */
+            action: "add" | "replace" | "forget" | "list";
             /** Content */
-            content: string;
+            content?: string | null;
             /** Folder Id */
             folder_id?: string | null;
+            /** Replaces */
+            replaces?: string | null;
         };
         /** AccountRememberResponse */
         AccountRememberResponse: {
+            /** Action */
+            action: string;
             /** Changed */
             changed: boolean;
+            /** Message */
+            message: string;
+            /** Rules Markdown */
+            rules_markdown?: string | null;
         };
         /** AccountRuleDoc */
         AccountRuleDoc: {

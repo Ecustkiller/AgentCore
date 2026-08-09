@@ -12,7 +12,7 @@ import {
   projectExecution,
 } from "@/stores/execution";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StatusStrip } from "../StatusStrip";
 
@@ -169,5 +169,55 @@ describe("StatusStrip · FailureStrip error detail", () => {
     renderStrip(exec);
 
     expect(screen.getByText("未获取到具体错误信息。")).toBeTruthy();
+  });
+
+  it("long failed task brief defaults to clamped toggle (does not dump full brief)", async () => {
+    const longTask = `${"对范围【AgentCore AI 功能全链审计】做只读代码审计。".repeat(8)}报告写到 AgentCore/文档/reviews/code-audit-1-server_conversation.md`;
+    const longPlan: ExecutionPlan = {
+      ...plan,
+      runs: [
+        {
+          id: "r-audit",
+          agentId: "w1",
+          task: longTask,
+          dependsOn: [],
+        },
+      ],
+      agents: [{ id: "w1", role: "代码审计员" }],
+    };
+    const frames: RunFrame[] = [
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r-audit",
+        agentId: "w1",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      {
+        t: 2,
+        kind: "run_failed",
+        runId: "r-audit",
+        agentId: "w1",
+        error:
+          "结构闸：缺少 audit JSON 产物：`AgentCore/文档/reviews/code-audit-1-server_conversation.audit.json`",
+      },
+    ];
+    const exec = projectExecution(longPlan, frames, "failed");
+    renderStrip(exec);
+
+    const toggle = screen.getByTestId("status-strip-failed-detail-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    // Collapsed: clamp classes present; full brief not forced open.
+    const taskLine = toggle.querySelector("p");
+    expect(taskLine?.className).toContain("line-clamp-2");
+    expect(taskLine?.className).not.toContain("whitespace-pre-wrap");
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.querySelector("p")?.className).toContain(
+      "whitespace-pre-wrap",
+    );
   });
 });

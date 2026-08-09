@@ -284,7 +284,9 @@ def test_ownership_snapshot_roundtrip():
     c = WriteCoordinator()
     c.declare("a/b.md", "w1", frozenset())
     c.mark_written("a/b.md")
-    restored = WriteCoordinator.from_dict(c.to_dict())
+    payload = c.to_dict()
+    assert payload.get("_v") == 3
+    restored = WriteCoordinator.from_dict(payload)
     assert restored.owner_of("a/b.md") == "w1"
     assert restored.is_written("a/b.md")
     assert restored.claim("a/b.md", "w2", frozenset()) == "w1"
@@ -294,6 +296,47 @@ def test_legacy_flat_snapshot_still_loads():
     restored = WriteCoordinator.from_dict({"a/b.md": "w1"})
     assert restored.owner_of("a/b.md") == "w1"
     assert not restored.is_written("a/b.md")
+
+
+def test_v2_snapshot_migrates_with_run_desks():
+    """v2 bare path → desk×path；优先节点 target，否则 birth，不明用哨兵。"""
+    from agentcore.workspace.write_claims import (
+        LEGACY_DESK_SENTINEL,
+        OWNERSHIP_KEY_SEP,
+        WriteCoordinator,
+        make_ownership_key,
+    )
+
+    v2 = {
+        "_v": 2,
+        "owners": {"App.tsx": "fe_a", "other.md": "fe_b"},
+        "written": ["App.tsx"],
+    }
+    migrated = WriteCoordinator.from_dict(
+        v2,
+        birth_desk_id="birth-desk",
+        run_target_folder_ids={"fe_a": "desk-a", "fe_b": None},
+    )
+    assert migrated.owner_of("App.tsx", desk_id="desk-a") == "fe_a"
+    assert migrated.owner_of("other.md", desk_id="birth-desk") == "fe_b"
+    # Cross-desk same path does not collide after migrate.
+    assert migrated.claim("App.tsx", "fe_x", frozenset(), desk_id="desk-b") is None
+    assert migrated.owner_of("App.tsx", desk_id="desk-a") == "fe_a"
+
+    unknown = WriteCoordinator.from_dict({"_v": 2, "owners": {"x.md": "w1"}})
+    key = make_ownership_key(LEGACY_DESK_SENTINEL, "x.md")
+    assert OWNERSHIP_KEY_SEP in key
+    assert unknown.owner_of("x.md") == "w1"
+    assert unknown.claim("x.md", "w2", frozenset(), desk_id="other-desk") is None
+
+
+def test_cross_desk_claim_and_declare_independent():
+    c = WriteCoordinator()
+    assert c.declare("App.tsx", "a", frozenset(), desk_id="desk-1") is None
+    assert c.declare("App.tsx", "b", frozenset(), desk_id="desk-2") is None
+    assert c.claim("App.tsx", "a", frozenset(), desk_id="desk-1") is None
+    assert c.claim("App.tsx", "b", frozenset(), desk_id="desk-2") is None
+    assert c.claim("App.tsx", "c", frozenset(), desk_id="desk-1") == "a"
 
 
 def test_conflict_message_distinguishes_declared_vs_written():

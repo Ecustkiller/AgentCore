@@ -8,6 +8,7 @@ import {
   type InteractionEntry,
   idFromRequiredPayload,
   idFromResolvedPayload,
+  isColdResumeKind,
   kindFromRequiredEvent,
   kindFromResolvedEvent,
 } from "./types";
@@ -81,6 +82,11 @@ interface InteractionState {
    * (cold entries may have been upserted against the client bubble id).
    */
   rekeyMessageId: (fromMessageId: string, toMessageId: string) => void;
+  /**
+   * Bind unbound cold pending (empty messageId) to a newly stamped server
+   * message id so live ResumePrompt paints without waiting for hard refresh.
+   */
+  bindEmptyMessageId: (conversationId: string, toMessageId: string) => void;
   get: (id: string) => InteractionEntry | undefined;
   listForConversation: (conversationId: string) => InteractionEntry[];
   listPending: (
@@ -110,9 +116,25 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
     if (!id) return;
     set((state) => {
       const prev = state.byId.get(id);
-      // Do not resurrect a terminal card from a re-delivered required.
       if (prev && (prev.status === "resolved" || prev.status === "orphaned")) {
-        return {};
+        // Explicit force (recovery hydrate → pending) may replace terminal.
+        const forcedPending = status === "pending";
+        // Resolved stub (resolved SSE before required): empty prior payload —
+        // a live required is authoritative and must paint.
+        const resolvedStub =
+          prev.status === "resolved" &&
+          (!prev.payload || Object.keys(prev.payload).length === 0);
+        // Cold: same checkpoint id on a new host message ⇒ new occurrence
+        // (re-delivery of a settled card keeps the same messageId).
+        const coldNewHost =
+          prev.status === "resolved" &&
+          isColdResumeKind(kind) &&
+          Boolean(messageId) &&
+          Boolean(prev.messageId) &&
+          messageId !== prev.messageId;
+        if (!forcedPending && !resolvedStub && !coldNewHost) {
+          return {};
+        }
       }
       // Idempotent re-delivery: keep the first pending/submitting payload.
       if (prev && (prev.status === "pending" || prev.status === "submitting")) {
@@ -307,6 +329,29 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
       const next = mapCopy(state.byId);
       for (const [id, entry] of state.byId) {
         if (entry.messageId !== fromMessageId) continue;
+        next.set(id, { ...entry, messageId: toMessageId });
+        changed = true;
+      }
+      return changed ? { byId: next } : {};
+    });
+  },
+
+  /**
+   * Bind cold pending entries that arrived before message_start stamped a
+   * durable resume key (empty messageId) to the new server message id so
+   * ResumePrompt can paint as soon as the stamp lands.
+   */
+  bindEmptyMessageId: (conversationId, toMessageId) => {
+    if (!conversationId || !toMessageId) return;
+    set((state) => {
+      let changed = false;
+      const next = mapCopy(state.byId);
+      for (const [id, entry] of state.byId) {
+        if (entry.conversationId !== conversationId) continue;
+        if (entry.messageId) continue;
+        if (entry.status !== "pending" && entry.status !== "submitting")
+          continue;
+        if (!isColdResumeKind(entry.kind)) continue;
         next.set(id, { ...entry, messageId: toMessageId });
         changed = true;
       }

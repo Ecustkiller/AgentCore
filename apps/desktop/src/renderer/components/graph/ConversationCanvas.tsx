@@ -248,7 +248,6 @@ function ConversationCanvasInner() {
 
   // 图头行动条（R3）：聚合聚焦回合待拍板；点击定位（折叠幕内先聚焦幕，命名空间节点居中）。
   const pendingDecisions = useGraphPendingDecisions(
-    flow.focusedExec,
     conversationId,
     effectiveFocus,
   );

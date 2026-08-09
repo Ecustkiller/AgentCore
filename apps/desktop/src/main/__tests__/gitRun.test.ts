@@ -124,4 +124,42 @@ describe("executeWorkspaceOp git_run", () => {
     const value = r.value as { exit_code: number; stderr: string };
     expect(value.exit_code).not.toBe(0);
   });
+
+  it("runs git under cwd subpath, not the shared container root", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { mkdir, access } = await import("node:fs/promises");
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync("git", ["--version"], { windowsHide: true });
+    } catch {
+      return;
+    }
+    const proj = join(dir, "projA");
+    await mkdir(proj, { recursive: true });
+
+    const { executeWorkspaceOp } = await import("../fs-service");
+    const root = { id: "r", name: "r", absPath: dir };
+    const init = await executeWorkspaceOp(root, "git_run", {
+      argv: ["init", "-b", "main"],
+      cwd: "projA",
+    });
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    expect((init.value as { exit_code: number }).exit_code).toBe(0);
+
+    await access(join(proj, ".git"));
+    await expect(access(join(dir, ".git"))).rejects.toBeTruthy();
+  });
+
+  it("resolveGitRunCwd rejects traversal and keeps empty at root", async () => {
+    const { resolveGitRunCwd } = await import("../fs/workspace/gitRun");
+    const root = { id: "r", name: "r", absPath: dir };
+    const atRoot = await resolveGitRunCwd(root, "");
+    expect(atRoot.ok).toBe(true);
+    if (atRoot.ok) expect(atRoot.cwd).toBe(dir);
+
+    const bad = await resolveGitRunCwd(root, "../outside");
+    expect(bad.ok).toBe(false);
+  });
 });

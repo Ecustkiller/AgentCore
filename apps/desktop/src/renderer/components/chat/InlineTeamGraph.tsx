@@ -20,11 +20,11 @@ import {
 import { useConversationStore } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import {
-  type Execution,
   type ExecutionJournal,
   ExecutionScopeContext,
   type UserInterjection,
   isDebate,
+  projectRuntime,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
@@ -192,7 +192,6 @@ export function InlineTeamGraph({
             aria-hidden={!expanded}
           >
             <GraphArea
-              execution={execution}
               messageId={messageId}
               height={graphHeight}
               onMeasure={onMeasure}
@@ -222,23 +221,26 @@ export function InlineTeamGraph({
 }
 
 function GraphArea({
-  execution,
   messageId,
   height,
   onMeasure,
 }: {
-  execution: Execution;
   messageId: string;
   height: number;
   onMeasure: (m: { height: number; overflowing: boolean }) => void;
 }) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
-
-  const onNodeSelect = (runId: string) => {
-    const run = execution.runs.find((r) => r.id === runId);
-    const role = execution.agents.find((a) => a.id === run?.agentId)?.role;
-    showRunDetail(messageId, runId, role);
-  };
+  // Stable callback so memo(GraphView) skips while StatusStrip eats live execution.
+  const onNodeSelect = useCallback(
+    (runId: string) => {
+      const rt = useExecutionStore.getState().byId[messageId];
+      const execution = rt ? projectRuntime(rt) : null;
+      const run = execution?.runs.find((r) => r.id === runId);
+      const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
+      showRunDetail(messageId, runId, role);
+    },
+    [messageId, showRunDetail],
+  );
 
   return (
     <div

@@ -11,6 +11,8 @@ vi.mock("@/lib/detachLocalBrowserHost", () => ({
     detachLocalBrowserHost(...args),
 }));
 
+import { queryClient } from "@/lib/queryClient";
+import { conversationKeys } from "@/lib/queryKeys";
 import {
   CONVERSATION_SLICE_LRU_LIMIT,
   getActiveRuntime,
@@ -44,6 +46,7 @@ beforeEach(() => {
   });
   useInteractionStore.getState().clear();
   detachLocalBrowserHost.mockClear();
+  queryClient.clear();
 });
 
 describe("conversation store", () => {
@@ -422,6 +425,35 @@ describe("conversation store", () => {
 
       expect(rt().messages[0].isStreaming).toBe(false);
       expect(rt().isGenerating).toBe(false);
+    });
+
+    it("syncs sidebar lastMessagePreview from the closed reply", () => {
+      queryClient.setQueryData(conversationKeys.grouped, {
+        folders: [],
+        conversations: [
+          {
+            id: "c1",
+            title: "对话",
+            updatedAt: "2020-01-01T00:00:00.000Z",
+            messageCount: 1,
+            lastMessagePreview: "旧摘要",
+            folderId: null,
+            localContainerRootId: null,
+            localRootId: null,
+            pinned: false,
+            archived: false,
+          },
+        ],
+      });
+      store().switchConversation("c1");
+      store().createAssistantMessage();
+      store().appendToLastMessage("本回合新回复");
+      store().finalizeLastMessage("c1");
+
+      const row = queryClient.getQueryData<{
+        conversations: { lastMessagePreview: string | null }[];
+      }>(conversationKeys.grouped)?.conversations[0];
+      expect(row?.lastMessagePreview).toBe("本回合新回复");
     });
   });
 

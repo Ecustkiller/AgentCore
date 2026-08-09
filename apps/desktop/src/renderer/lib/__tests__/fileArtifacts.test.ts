@@ -139,6 +139,7 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
           status: "rejected",
           reason: "citations_unverified",
           detail: "缺 #rN",
+          workspace_id: "folder:proj-1",
         },
       ],
     } as DeliveryStatusPayload;
@@ -153,6 +154,7 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
         acceptance: "rejected",
         acceptanceReason: "citations_unverified",
         acceptanceDetail: "缺 #rN",
+        workspaceId: "folder:proj-1",
       },
     ]);
     expect(resolveFileArtifactsForCard(status).map((a) => a.path)).toEqual([

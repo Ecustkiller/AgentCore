@@ -212,6 +212,10 @@ class EventSink:
         # G6: after content_reset, display-only reinject this text into history + SSE
         # (skip process / checkpointer). None = hook unset (status-quo behaviour).
         self._content_reset_reinjection: str | None = None
+        # Stop-after-reset salvage: content_reset pops live content steps; stash the
+        # discarded prose so /stop can restore what the user already saw (industry
+        # habit). Cleared when a new CONTENT_DELTA arrives (live takes over).
+        self._interrupt_content_stash: str | None = None
         # Soft-fail error (ERROR is history-skipped / not journaled): keep the latest
         # payload so settle can stamp turn_end + result.error for reload.
         self._last_error: dict[str, Any] | None = None
@@ -771,6 +775,8 @@ class EventSink:
             delta = event.payload.get("delta") or ""
             if not delta:
                 return futures
+            # Live rewrite superseded the pre-reset draft — drop interrupt stash.
+            self._interrupt_content_stash = None
             if self._process and self._process[-1].get("kind") == "content":
                 self._process[-1]["text"] += delta
             else:
@@ -779,6 +785,15 @@ class EventSink:
                 self._process.append({"kind": "content", "text": delta})
         elif t == EventType.CONTENT_RESET:
             # Discard open (unpersisted) trailing content — do not journal discarded prose.
+            # Stash discarded text for /stop salvage (empty discard keeps prior stash).
+            trailing: list[str] = []
+            i = len(self._process) - 1
+            while i >= 0 and self._process[i].get("kind") == "content":
+                trailing.append(self._process[i].get("text", "") or "")
+                i -= 1
+            discarded = "".join(reversed(trailing))
+            if discarded:
+                self._interrupt_content_stash = discarded
             while self._process and self._process[-1].get("kind") == "content":
                 self._process.pop()
         elif t == EventType.TOOL_USE_START:
@@ -948,10 +963,24 @@ class EventSink:
         detached, so a disconnect that later cancels still recovers what streamed.
 
         Live zone only — seeded pre-pause content must not re-enter salvage joins (G8).
+        After ``content_reset`` this is empty until the next delta; use
+        :meth:`interrupt_salvage_content` for stop-after-reset salvage.
         """
         return "".join(
             step.get("text", "") for step in self._process if step.get("kind") == "content"
         )
+
+    def interrupt_salvage_content(self) -> str:
+        """Body to keep on user stop: live streamed text, else pre-reset stash.
+
+        ``content_reset`` / finish_guard clears the live content lane so the bubble
+        can rewrite; if the user stops before a new delta, industry habit is to keep
+        whatever already streamed — not an empty shell.
+        """
+        live = self.streamed_content()
+        if live:
+            return live
+        return self._interrupt_content_stash or ""
 
     def streamed_reasoning(self) -> str:
         """CEO thinking text accumulated so far (live ``reasoning`` steps only)."""

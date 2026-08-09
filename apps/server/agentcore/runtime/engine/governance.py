@@ -207,6 +207,7 @@ def maybe_inject_delivery_idle(
     run_id: str,
     round_idx: int,
     role: str,
+    keep_notes: bool = False,
 ) -> Literal["none", "nudge", "narrow"]:
     """Files read-idle: soft nudge; repair posts may arm tool-narrow (not FINALIZE).
 
@@ -214,6 +215,7 @@ def maybe_inject_delivery_idle(
     Orthogonal to token/timeout wind_down and to the retired zero-write DEGRADED
     escalate. Narrow allowlist apply is consumed by the react loop via
     :meth:`LoopController.take_delivery_idle_narrow_apply`.
+    ``keep_notes``: collaboration/wall — narrow prompt mentions note tools stay.
     """
     if role != "worker" or controller.landing_succeeded:
         return "none"
@@ -221,13 +223,14 @@ def maybe_inject_delivery_idle(
     rounds = controller.delivery_idle_rounds
     if controller.delivery_idle_narrow_due():
         controller.mark_delivery_idle_narrowed()
-        prompt = delivery_idle_narrow_prompt(rounds=rounds)
+        prompt = delivery_idle_narrow_prompt(rounds=rounds, keep_notes=keep_notes)
         logger.info(
             "engine.delivery_idle_narrow",
             round=round_idx,
             idle_rounds=rounds,
             nudge_bar=controller.delivery_idle_nudge_rounds,
             narrow_bar=controller.delivery_idle_narrow_rounds,
+            keep_notes=keep_notes,
         )
         messages.append(LLMMessage(role="user", content=prompt))
         record_turn_fact(
@@ -804,6 +807,7 @@ def govern_after_tools(
     role: str = "",
     disabled_tools: set[str] | None = None,
     investigation_tools: frozenset[str] | None = None,
+    keep_notes: bool = False,
 ) -> LoopDirective:
     """Run post-tool convergence governance and return the next directive.
 
@@ -887,6 +891,7 @@ def govern_after_tools(
             run_id=run_id,
             round_idx=round_idx,
             role=role,
+            keep_notes=keep_notes,
         )
         return Continue()
 
@@ -940,5 +945,6 @@ def govern_after_tools(
         run_id=run_id,
         round_idx=round_idx,
         role=role,
+        keep_notes=keep_notes,
     )
     return Continue()

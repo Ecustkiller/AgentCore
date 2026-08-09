@@ -178,10 +178,22 @@ async def _run_git_via_channel(
     channel: Any,
     timeout: float,
 ) -> tuple[str, str, int]:
-    """Desktop ``git_run`` — returns stdout/stderr/exit_code (never raises WorkspaceError)."""
+    """Desktop ``git_run`` — returns stdout/stderr/exit_code (never raises WorkspaceError).
+
+    When the bound backend has a non-empty ``base_subpath`` (Local D1a), pass it as
+    ``cwd`` so desktop git runs in the project subdirectory — same baseline as
+    ``backend.exists(".git")`` / file ops (G1+G2). Empty / missing → container root
+    (open-folder: root is the project).
+    """
     payload: dict[str, Any] = {"argv": list(args)}
     if timeout != _GIT_TIMEOUT:
         payload["timeout_seconds"] = float(timeout)
+    backend = _git_backend.get()
+    base = getattr(backend, "base_subpath", None) if backend is not None else None
+    if isinstance(base, str):
+        sub = base.strip().strip("/").replace("\\", "/")
+        if sub and sub != ".":
+            payload["cwd"] = sub
     try:
         value = await channel.request(
             WorkspaceOp.GIT_RUN,

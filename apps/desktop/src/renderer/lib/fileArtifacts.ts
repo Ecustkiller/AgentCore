@@ -45,6 +45,11 @@ export interface FileArtifact {
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;
+  /**
+   * 落地 desk（`folder:…` / `conv:…`）。来自 delivery `workspace_id`；
+   * 缺省时打开完整预览回退会话工作区 wsId。
+   */
+  workspaceId?: string;
 }
 
 /**
@@ -162,12 +167,17 @@ export function fileArtifactsFromDeliveryStatus(
     if (!path) continue;
     const status = row.status;
     if (status !== "accepted" && status !== "rejected") continue;
+    const workspaceId =
+      typeof row.workspace_id === "string" && row.workspace_id.trim()
+        ? row.workspace_id.trim()
+        : undefined;
     out.push({
       path,
       name: basename(path),
       acceptance: status,
       acceptanceReason: row.reason,
       acceptanceDetail: row.detail,
+      ...(workspaceId ? { workspaceId } : {}),
     });
   }
   return dedupe(out);

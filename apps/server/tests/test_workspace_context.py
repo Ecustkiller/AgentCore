@@ -120,7 +120,16 @@ def test_cloud_scratch_facts():
     assert "多 local" in out and "并行" in out
     assert "可能降级" not in out
     assert "协作图不改" in out
-    # 空壳先问 + 开发双仓 ≠ 挂载
+    # 一句短指针（HOW 在 skill）
+    assert "先建齐再同次派" in out
+    assert "拒后禁塌缩" in out
+    # 只读跨桌工具摸底 + 写仍派工换桌（禁「云端读不到本地」当唯一路径）
+    assert "list_project_dir" in out and "read_project_file" in out
+    assert "只读跨桌" in out
+    assert "出生桌" in out
+    assert "写仍派工换桌" in out or ("delegate" in out and "target_folder_id" in out)
+    assert "云端读不到本地" in out and "禁止" in out
+    # 空壳先问 + 开发双仓 ≠ open/bind/挂载冒充
     assert "空" in out and "ask_user" in out
     assert "file_list" in out
     assert "开发双仓" in out or "external_mount_readonly" in out
@@ -282,7 +291,30 @@ def test_local_browser_guide_mentions_workspace_relative_path():
     assert "browser_console" in out
 
 
-def test_browser_unassembled_guide_mentions_bind_or_sandbox():
+def test_bridge_session_sandbox_browser_guide_no_relative_html(monkeypatch):
+    """过桥：local + 无 Bridge + gVisor → 已装配但沙箱指引（相对路径不可测）。"""
+    from agentcore.config import settings
+    from agentcore.runtime.browser.desktop_bridge import reset_desktop_bridge_health_for_tests
+    from agentcore.tools.sandbox.cloud_health import set_cloud_sandbox_health_for_tests
+
+    reset_desktop_bridge_health_for_tests()
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    set_cloud_sandbox_health_for_tests(True)
+    out = build_workspace_context(
+        _FakeBackend("local"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=True,
+        # 不 override browser_enabled — 走真实闸与 host_kind
+    )
+    assert "browser=已装配" in out
+    assert "云端沙箱浏览器" in out
+    assert "相对路径不可测" in out or "完整预览" in out
+    assert "Local Bridge 可打开" not in out
+    assert "或启用云端沙箱浏览器" not in out
+
+
+def test_browser_unassembled_guide_mentions_bind_or_gvisor():
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
@@ -291,11 +323,10 @@ def test_browser_unassembled_guide_mentions_bind_or_sandbox():
         browser_enabled=False,
     )
     assert "浏览器指引" in out
-    assert (
-        "bind_local_folder" in out
-        or "open_local_project" in out
-        or "云端沙箱浏览器" in out
-    )
+    assert "bind_local_folder" in out or "open_local_project" in out
+    assert "gVisor" in out or "沙箱" in out or "netns" in out
+    # 禁误导：未装配时勿暗示「本机未装就可随手启用云端沙箱」旧句
+    assert "或启用云端沙箱浏览器" not in out
     assert "ask_user(browser_login=true)" in out
     assert "escalate(browser_login=true)" not in out
     assert "已登录，继续" in out
@@ -310,6 +341,23 @@ def test_browser_unassembled_guide_mentions_bind_or_sandbox():
     assert "禁多轮复读" in out or "多轮复读" in out
     assert "补救，但不是" not in out
     assert "不是接管流程" not in out
+
+
+def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
+    """真·本地未装配：拆因；禁「或启用云端沙箱浏览器」误导。"""
+    out = build_workspace_context(
+        _FakeBackend("local"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=True,
+        browser_enabled=False,
+    )
+    assert "browser=未装配" in out
+    assert "无本机 Bridge" in out
+    assert "或启用云端沙箱浏览器" not in out
+    assert "禁止假成功" in out or "不可装配" in out
+    assert "同轮可开工" in out
+    assert "手脑" in out
 
 
 def test_host_mcp_unassembled_same_round_workable():

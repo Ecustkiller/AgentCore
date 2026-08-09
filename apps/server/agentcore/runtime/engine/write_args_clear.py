@@ -5,16 +5,15 @@ message still carries the FULL body inside ``tool_calls[].function.arguments``. 
 rounds re-pay that body as cache_miss (case: handoff round ~28k in / ~27k miss).
 
 This projection — applied at request-assembly time only, like ``tool_clear`` — replaces
-the write body's argument field with a stable stub once a tool result acknowledges the
-call. Canonical ``messages`` / journal keep the full args; resume rebuilds then re-applies.
+completed bulky write calls with a **non-write short status** (synthetic tool name
+``_write_landed`` + compact status JSON). Canonical ``messages`` / journal keep the
+full args; resume rebuilds then re-applies.
 
-For ``str_replace``, only ``new_string`` is stubbed; ``old_string`` is kept so the model
-still sees a valid schema-shaped prior call (empty/wrong-key stubs taught models to
-re-emit blank ``old_string``).
-
-The stub keeps a compact **structural digest** (HTML class/id lists, CSS selectors, …)
-so a multi-file worker can still contract against what it already wrote without re-paying
-the full body — and without blind-writing the next file from memory alone.
+定案：投影**不是**可提交的 writing-args（禁 ``content:"[已清理]"`` 假稿纸，也禁
+``file_write``/``str_replace`` + ``_landed_summary`` 可回灌模板）。短状态只报告
+路径 / 规模 / 已成功；要改须先 ``file_read`` 取盘上真文，再 ``str_replace``（优先）
+或按真文重填。过渡期 mutate 路径对遗留 stub / ``_landed_summary`` 回灌做结构化硬拒
+（见 ``cleared_write_stub_rejection``）。
 """
 
 from __future__ import annotations
@@ -22,10 +21,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 
 WRITE_ARG_TOOLS = frozenset({"file_write", "file_append", "str_replace"})
+
+# Synthetic name for the projected short status — not a callable write tool.
+LANDED_STATUS_TOOL = "_write_landed"
 
 # Argument keys that hold the bulky body for each write tool.
 _BODY_KEYS = ("content", "new_str", "new_string", "replacement")
@@ -33,6 +36,11 @@ _BODY_KEYS = ("content", "new_str", "new_string", "replacement")
 # Cap digest size (~几百 token): keep contract signal, not a second full body.
 _STRUCTURE_MAX_CHARS = 1200
 _STRUCTURE_MAX_ITEMS = 80
+
+# Legacy projection / stub markers (rejection兜底 only; new projection does not emit these).
+_LANDED_SUMMARY_KEY = "_landed_summary"
+_LEGACY_CLEARED_KEY = "_cleared"
+_STUB_BODY_MARKERS = frozenset({"[已清理]", "[已清理·须重填]"})
 
 _HTML_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 _HTML_CLASS_RE = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
@@ -171,15 +179,26 @@ def _body_text(data: dict) -> str:
     return ""
 
 
-def write_args_stub(tool_name: str, arguments: str, original_len: int) -> str:
-    """Stable stub arguments: keep path/anchor identity + structural digest, drop body.
+def _is_projected_write_args(arguments: str) -> bool:
+    """True when args are a legacy cleared / ``_landed_summary`` projection under a write name.
 
-    ``str_replace`` keeps the full ``old_string`` (anchor is usually short) and only
-    stubs ``new_string``. Stub keys MUST match the live tool schema — wrong keys
-    (e.g. ``old_str``) teach models to re-emit empty/malformed calls.
+    New projection renames the call to ``LANDED_STATUS_TOOL`` (not in ``WRITE_ARG_TOOLS``),
+    so re-entry skips by name; this only guards leftover write-name + legacy keys.
+    """
+    return (
+        f'"{_LANDED_SUMMARY_KEY}"' in arguments
+        or f'"{_LEGACY_CLEARED_KEY}"' in arguments
+    )
+
+
+def write_args_landed_summary(tool_name: str, arguments: str, original_len: int) -> str:
+    """Non-write short status JSON for the model window — not schema-shaped writing args.
+
+    Keeps path identity + optional structural digest; drops ``content`` / ``old_string`` /
+    ``new_string``. Does **not** emit ``_landed_summary`` (that template induced echo).
+    Prefix-cache safe: pure function of (tool, path, body structure, len).
     """
     path = ""
-    old_string = ""
     try:
         data = json.loads(arguments) if arguments else {}
     except (json.JSONDecodeError, TypeError, ValueError):
@@ -187,36 +206,90 @@ def write_args_stub(tool_name: str, arguments: str, original_len: int) -> str:
     body = ""
     if isinstance(data, dict):
         path = str(data.get("path") or data.get("file_path") or "")
-        # Prefer schema keys; accept legacy aliases only when reading historical args.
-        old_string = str(
-            data.get("old_string") or data.get("old_str") or data.get("pattern") or ""
-        )
         body = _body_text(data)
-    if tool_name == "str_replace":
-        cleared_msg = (
-            f"str_replace 的 new_string 已从上下文窗口移除（原 {original_len} 字符）；"
-            "内容已落盘。下次调用必须重新填写完整 old_string 与 new_string，"
-            "禁止把本 stub（含 _cleared）原样当参数重发；如需细节请 file_read。"
-        )
-    else:
-        cleared_msg = (
-            f"{tool_name} 正文已从上下文窗口移除（原 {original_len} 字符）；"
-            "内容已落盘。下次调用必须重新填写完整参数，"
-            "禁止把本 stub（含 _cleared）原样当参数重发；如需细节请 file_read。"
-        )
-    stub: dict[str, str] = {"_cleared": cleared_msg}
+
+    status: dict[str, Any] = {
+        "status": "landed",
+        "via": tool_name,
+        "chars": original_len,
+        "note": "已写入；改稿先 file_read 再 str_replace（勿把本条当写参）",
+    }
     if path:
-        stub["path"] = path
-    summary = structural_write_summary(path, body)
-    if summary:
-        stub["_structure"] = summary
-    if tool_name == "str_replace":
-        # 乙：保留完整锚点；甲：schema 真名 + 明示须重填正文。
-        stub["old_string"] = old_string if old_string else "[已清理·须重填]"
-        stub["new_string"] = "[已清理·须重填]"
-    elif tool_name in {"file_write", "file_append"}:
-        stub["content"] = "[已清理]"
-    return json.dumps(stub, ensure_ascii=False)
+        status["path"] = path
+    structure = structural_write_summary(path, body)
+    if structure:
+        status["_structure"] = structure
+    return json.dumps(status, ensure_ascii=False)
+
+
+# Back-compat alias (tests / call sites may still import the old name).
+write_args_stub = write_args_landed_summary
+
+
+def is_cleared_write_stub_args(arguments: dict[str, Any]) -> bool:
+    """Same surface as ``cleared_write_stub_rejection`` — True for stub / landed summary.
+
+    Narrow surface: projection keys (``_landed_summary`` / ``_cleared``) or body fields
+    whose **entire** value equals a known placeholder (``[已清理]`` /
+    ``[已清理·须重填]``). Does **not** scan free prose for the substring「已清理」.
+    """
+    if not isinstance(arguments, dict):
+        return False
+    if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
+        return True
+    for key in (
+        "content",
+        "new_string",
+        "new_str",
+        "replacement",
+        "old_string",
+        "old_str",
+    ):
+        val = arguments.get(key)
+        if isinstance(val, str) and val.strip() in _STUB_BODY_MARKERS:
+            return True
+    return False
+
+
+def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
+    """Structured hard-reject when mutate args are a cleared stub / landed summary.
+
+    Narrow surface: see ``is_cleared_write_stub_args``. Does **not** scan free prose
+    for the substring「已清理」— normal short text must still write.
+    """
+    if not is_cleared_write_stub_args(arguments):
+        return None
+    path = arguments.get("path") or arguments.get("file_path")
+    path_s = path.strip().replace("\\", "/") if isinstance(path, str) else ""
+    path_bit = f"`{path_s}`" if path_s else "该文件"
+    read_hint = (
+        f'file_read(path="{path_s}")' if path_s else "file_read(该 path)"
+    )
+    if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
+        return (
+            "拒绝：参数是上下文窗口里的只读「已落盘摘要」/清理占位，不能写入磁盘。"
+            f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
+            "② 再 str_replace（优先）或 file_write，按真文填完整 "
+            "content / old_string / new_string。"
+            "禁止把 `_landed_summary`、清理条或摘要原样当写盘参数重发。"
+        )
+    for key in (
+        "content",
+        "new_string",
+        "new_str",
+        "replacement",
+        "old_string",
+        "old_str",
+    ):
+        val = arguments.get(key)
+        if isinstance(val, str) and val.strip() in _STUB_BODY_MARKERS:
+            return (
+                "拒绝：正文参数仍是清理占位"
+                f"（{val.strip()}），不能写入磁盘。"
+                f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
+                "② 再 str_replace（优先）或按真文重填后再写。禁止原样重发 stub。"
+            )
+    return None
 
 
 def _body_len(arguments: str) -> int:
@@ -239,10 +312,12 @@ def project_cleared_write_args(
     *,
     min_chars: int = 500,
 ) -> list[LLMMessage]:
-    """Collapse bulky write-tool args once their tool result is present.
+    """Collapse bulky write-tool calls once their tool result is present.
 
-    Returns the same list when nothing qualifies. Prefix-cache safe for a given
-    completed write: stub is a pure function of (tool, path, body structure, original_len).
+    Rewrites completed write ``tool_calls`` to ``LANDED_STATUS_TOOL`` + short status
+    args (non-write form). Returns the same list when nothing qualifies.
+    Prefix-cache safe for a given completed write: status is a pure function of
+    (tool, path, body structure, original_len).
     """
     if min_chars < 0:
         return messages
@@ -259,8 +334,8 @@ def project_cleared_write_args(
             args = call.function.arguments or ""
             if _body_len(args) < min_chars:
                 continue
-            # Already cleared stubs are small / marked.
-            if '"_cleared"' in args:
+            # Already projected (legacy summary keys under a write name).
+            if _is_projected_write_args(args):
                 continue
             call_meta[call.id] = (name, args, mi, ci)
 
@@ -288,11 +363,14 @@ def project_cleared_write_args(
         for call in message.tool_calls:
             if call.id in completed_ids:
                 name, args, _, _ = call_meta[call.id]
-                stub = write_args_stub(name, args, _body_len(args))
+                summary = write_args_landed_summary(name, args, _body_len(args))
                 new_calls.append(
                     ToolCall(
                         id=call.id,
-                        function=ToolCallFunction(name=name, arguments=stub),
+                        function=ToolCallFunction(
+                            name=LANDED_STATUS_TOOL,
+                            arguments=summary,
+                        ),
                     )
                 )
                 changed = True

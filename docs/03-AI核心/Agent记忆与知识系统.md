@@ -72,8 +72,8 @@ AgentCore/
 - 异常回合（cancelled / interrupted / error）跳过沉淀仍推进 watermark。
 - 偏好只能来自用户**明示或纠正**，禁止从任务题材推断。
 - 空重写 / 保留率 <50% → 拒落盘；巩固失败不标记已消化。
-- 用户明示「记住」→ `remember` 直写**用户规则**（`ai_maintained=false`），立即生效。
-- 记忆能力**产品层恒开**（无用户总闸）；用户靠文件页编辑/清空控制内容。异常回合仍跳过沉淀并推进 watermark。
+- 用户明示指令 → `remember` 直写**用户规则**（`ai_maintained=false`）✅：支持**追加 / 替换 / 删除 / 列出**；改删在对话内真生效。文件页仍可人手改删（与对话内操作双轨，非互斥）。冲突：同 key 归一化去重；「改为」走替换去掉旧条，不以矛盾并存 + 措辞碰运气为主路径。
+- 记忆能力**产品层恒开**（无用户总闸）；内容由对话内 `remember` 与文件页编辑/清空双轨控制。异常回合仍跳过沉淀并推进 watermark。
 
 ### 两种「冷启动」（正交、禁混名）
 
@@ -139,6 +139,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 | 独立 `AgentCore/知识/` + 知识目录注入 | 无独立可注入知识库产品；约定文档走 `文档/` + `file_read` |
 | 偏好/画像改 on_demand；隐藏点目录替代可见 `AgentCore/` | 规则缺了模型不会主动查；产品心智要可见约定根 |
 | 向量 chunk 自动灌进 prompt | 与「文件随时变」不合；agentic 自取永远新鲜 |
-| 用户可关的记忆/历史查阅总闸（设置页） | 默认常开 + 文件页编辑/清空已够；总闸难懂且历史检索与记忆正交却同页堆开关；定案 A 恒开并删页 |
+| 用户可关的记忆/历史查阅总闸（设置页） | 默认常开 + 对话内 `remember` / 文件页编辑清空已够；总闸难懂且历史检索与记忆正交却同页堆开关；定案 A 恒开并删页 |
+| 意图分类器扫长文猜是否改规则 | 只认用户明示指令；禁扫自由文猜「改/删规则」再分叉 |
 
-查看/编辑：文件页 `AgentCore/{规则,记忆}/` + CAS；semantic diff 可搬层纠错。→ 见代码：`fileWorkbench/AgentCoreSection.tsx`
+查看/编辑：对话内 `remember`（增改删列）与文件页 `AgentCore/{规则,记忆}/` + CAS 双轨；semantic diff 可搬层纠错。→ 见代码：`fileWorkbench/AgentCoreSection.tsx`

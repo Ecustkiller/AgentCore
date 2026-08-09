@@ -39,13 +39,14 @@ class EngineSettings(BaseModel):
     # Workers use the single agent profile; 0 = inherit chat profile unchanged.
     engine_captain_max_rounds: int = 24
 
-    # 委派并发预算：ONE knob for both (a) the tree-wide ContextVar budget across a whole
-    # Run tree (分而不乘 — see runs/concurrency.py) and (b) a single WaveScheduler's own
-    # dispatch width (runs/wave.py). Kept as one field so neither alone re-bottlenecks a
-    # wide fan-out. Overflow queues (this bounds latency, not team size). 12 非上游硬限——
-    # F9 中转限速已实测通过（2026-07-20 运营方确认无虞），余量收紧或想再放宽时直接改此值
-    # （内测计费翻转后上游走合作中转，旧「本机是唯一约束、远低于 DeepSeek 单账号并发」的标定
-    # 已过时）。runs 包读它走延迟解析（settings 不可用时回落到
+    # 委派并发预算：ONE knob for (a) root CEO fan-out ContextVar shares（分而不乘 —
+    # see runs/concurrency.py）and (b) a single WaveScheduler's dispatch width
+    # (runs/wave.py). Nested delegate (depth≥1) reseeds this full value per sub-team
+    # (各嵌套满额；spawn 仍受 MAX_WORKER_SUBDELEGATIONS). Overflow queues (bounds
+    # latency, not team size). 12 非上游硬限——F9 中转限速已实测通过（2026-07-20
+    # 运营方确认无虞），余量收紧或想再放宽时直接改此值（内测计费翻转后上游走合作
+    # 中转，旧「本机是唯一约束、远低于 DeepSeek 单账号并发」的标定已过时）。runs
+    # 包读它走延迟解析（settings 不可用时回落到
     # runs/constants.py::MAX_PARALLEL_DELEGATIONS，值同步为 12）。
     engine_max_parallel_delegations: int = 12
 

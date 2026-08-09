@@ -245,9 +245,27 @@
       },
       "AccountRememberRequest": {
         "properties": {
-          "content": {
-            "title": "Content",
+          "action": {
+            "default": "add",
+            "enum": [
+              "add",
+              "replace",
+              "forget",
+              "list"
+            ],
+            "title": "Action",
             "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
           },
           "folder_id": {
             "anyOf": [
@@ -259,23 +277,52 @@
               }
             ],
             "title": "Folder Id"
+          },
+          "replaces": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces"
           }
         },
-        "required": [
-          "content"
-        ],
         "title": "AccountRememberRequest",
         "type": "object"
       },
       "AccountRememberResponse": {
         "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
           "changed": {
             "title": "Changed",
             "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "rules_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rules Markdown"
           }
         },
         "required": [
-          "changed"
+          "changed",
+          "action",
+          "message"
         ],
         "title": "AccountRememberResponse",
         "type": "object"
@@ -15661,7 +15708,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.45"
+    "version": "0.3.46"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -16380,7 +16427,7 @@
     },
     "/v1/account/rules/remember": {
       "post": {
-        "description": "Append an explicit user directive to the scope's user-rule doc (``remember``).",
+        "description": "Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``).",
         "operationId": "remember_account_user_rule_v1_account_rules_remember_post",
         "parameters": [
           {

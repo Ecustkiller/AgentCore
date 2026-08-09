@@ -32,6 +32,7 @@ import type {
   SSEEvent,
   ToolProgressPayload,
   TurnQueueCancelledPayload,
+  TurnQueueStartedPayload,
   TurnQueuedPayload,
   TurnWarningPayload,
   WorkspaceLockWaitPayload,
@@ -55,18 +56,6 @@ function finalizeTurnTrace(conversationId: string): void {
   traceTurnEnd(conversationId, lastA?.process);
 }
 
-/** drain 开跑：若时间线末条是队头用户气泡，清其排队轻态（气泡保留）。 */
-function clearQueueLightIfDraining(conversationId: string): void {
-  const list = useQueuedTurnsStore.getState().list(conversationId);
-  if (list.length === 0) return;
-  const msgs = getRuntime(conversationId).messages;
-  const last = msgs[msgs.length - 1];
-  const head = list[0];
-  if (last?.role === "user" && last.id === head.messageId) {
-    useQueuedTurnsStore.getState().remove(conversationId, head.queueId);
-  }
-}
-
 export function handleMessageStreamEvent(
   event: SSEEvent,
   ctx: DispatchContext,
@@ -87,6 +76,13 @@ export function handleMessageStreamEvent(
     case "turn_steer_accepted": {
       // EPHEMERAL：经典+steer 软插入 ack → toast；fold 穷尽 no-op。
       notifySteerAccepted();
+      return true;
+    }
+    case "turn_queue_started": {
+      // EPHEMERAL：FIFO 出队开跑（新回合 sink 首帧，先于 message_start）。
+      // 按 queue_id 清 QueuedTurnsBar + 气泡「排队中」；保留用户泡。
+      const p = event.payload as TurnQueueStartedPayload;
+      useQueuedTurnsStore.getState().remove(conversationId, p.queue_id);
       return true;
     }
     case "turn_queue_cancelled": {
@@ -116,7 +112,6 @@ export function handleMessageStreamEvent(
       // server message_id, reuse it (idempotent). Never delete+create.
       const store = useConversationStore.getState();
       store.setWaitingForWorkspaceLock(false, conversationId);
-      const wasGenerating = getRuntime(conversationId).isGenerating;
       // 跨回合回放 / 同连接下一回合：上一回合 message_end 已进 terminal，须先拨回
       // streaming，否则 ensureStreamingAssistant 与后续生长帧会被门禁丢掉。
       if (isTerminalPhase(getTurnPhase(conversationId))) {
@@ -146,10 +141,7 @@ export function handleMessageStreamEvent(
         store.resetAssistantForNewTurn(payload.message_id, conversationId);
         store.setGenerating(true, conversationId);
       }
-      // 新回合开跑（非同回合 resume）：清队头排队轻态。
-      if (!wasGenerating || !existing) {
-        clearQueueLightIfDraining(conversationId);
-      }
+      // 排队轻态出队真相源 = turn_queue_started（勿再靠 message_start 猜末条用户泡）。
       store.stampPendingTurnWarning(conversationId);
       if (payload.trace_id)
         store.setTraceIdOnLastMessage(payload.trace_id, conversationId);

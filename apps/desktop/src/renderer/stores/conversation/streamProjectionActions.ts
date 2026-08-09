@@ -1,3 +1,4 @@
+import { syncConversationListPreview } from "@/hooks/useConversations";
 import {
   foldAskMarker,
   foldCheckpointMarker,
@@ -68,7 +69,7 @@ function lastAssistantIndex(messages: Message[]): number {
 /** Streaming / projection mutations — fold entry points onto the live assistant lane. */
 export function createStreamProjectionActions(
   set: ConversationSet,
-  _get: ConversationGet,
+  get: ConversationGet,
 ): StreamProjectionActions {
   const patchConversation = createPatchConversation(set);
 
@@ -152,6 +153,13 @@ export function createStreamProjectionActions(
         useExecutionStore.getState().alignTurnKey(clientId, messageId);
         usePausedTurnStore.getState().rekeyMessageId(clientId, messageId);
         useInteractionStore.getState().rekeyMessageId(clientId, messageId);
+      }
+      // Cold *_required may arrive before message_start with an empty host key
+      // (no assistant projection yet). Bind those so selectVisibleColdResumes
+      // paints immediately on stamp — no hard-refresh hydrate required.
+      const cid = conversationId ?? get().currentConversationId;
+      if (cid && messageId) {
+        useInteractionStore.getState().bindEmptyMessageId(cid, messageId);
       }
     },
 
@@ -461,7 +469,7 @@ export function createStreamProjectionActions(
       return id;
     },
 
-    finalizeLastMessage: (conversationId) =>
+    finalizeLastMessage: (conversationId) => {
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
@@ -477,7 +485,12 @@ export function createStreamProjectionActions(
           isGenerating: false,
           waitingForWorkspaceLock: false,
         };
-      }),
+      });
+      // List cache is hydrate-once (`staleTime: ∞`); bump only moves/updatedAt.
+      // Stamp preview here so the sidebar reflects the closed reply.
+      const id = conversationId ?? get().currentConversationId;
+      if (id) syncConversationListPreview(id);
+    },
 
     setLastAssistantExecutionId: (executionId, conversationId) =>
       patchConversation(conversationId, (rt) => {

@@ -1,22 +1,31 @@
 /**
  * 图头行动条数据 hook（批 R3）：把一个回合的待拍板（node 级升级/检查点 + execution
  * 级审批/授权）聚合成 {@link GraphPendingDecision}[]。三宿主（内联/画布/全屏）共用。
+ *
+ * 自订 execution@playhead 的 pending Live sig——勿吃父树 Document epoch 快照，
+ * 否则 escalate/checkpoint 变了行动条会冻住（节点 face 已 per-run 更新）。
  */
 
-import type { Execution } from "@/stores/execution";
+import { projectRuntime, useExecutionStore } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
 import { useMemo } from "react";
 import {
   type GraphPendingDecision,
   type PendingInteractionRef,
   collectGraphPendingDecisions,
+  graphPendingDecisionsLiveSig,
 } from "./pendingDecisions";
 
 export function useGraphPendingDecisions(
-  execution: Execution | null | undefined,
   conversationId: string | null,
   messageId: string | null,
 ): GraphPendingDecision[] {
+  const pendingLiveSig = useExecutionStore((s) => {
+    if (!messageId) return "";
+    const rt = s.byId[messageId];
+    if (!rt) return "";
+    return graphPendingDecisionsLiveSig(projectRuntime(rt));
+  });
   const byId = useInteractionStore((s) => s.byId);
   const interactions = useMemo<PendingInteractionRef[]>(() => {
     const out: PendingInteractionRef[] = [];
@@ -33,10 +42,13 @@ export function useGraphPendingDecisions(
     return out;
   }, [byId, conversationId, messageId]);
 
-  return useMemo(
-    () => collectGraphPendingDecisions(execution, interactions),
-    [execution, interactions],
-  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingLiveSig is intentional invalidation key
+  return useMemo(() => {
+    if (!messageId) return [];
+    const rt = useExecutionStore.getState().byId[messageId];
+    const execution = rt ? projectRuntime(rt) : null;
+    return collectGraphPendingDecisions(execution, interactions);
+  }, [pendingLiveSig, interactions, messageId]);
 }
 
 export type { GraphPendingDecision };

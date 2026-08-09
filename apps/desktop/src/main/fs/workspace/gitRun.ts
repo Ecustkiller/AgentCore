@@ -1,9 +1,11 @@
 /**
  * Agent structured ``git`` — desktop half of ``WorkspaceOp.git_run``.
  *
- * Runs allowlisted argv (without the ``git`` binary name) under the bound root.
- * Aligns with server spawn policy: root-only ``.git`` (no climb),
- * ``GIT_CEILING_DIRECTORIES``, refuse reset/clean / force-like push tokens /
+ * Runs allowlisted argv (without the ``git`` binary name) under the project cwd.
+ * With ``args.cwd`` (Local D1a subpath) the cwd is that subdirectory under the
+ * bound root — same baseline as file_* / exists(".git"); empty cwd = root is the
+ * project (open-folder). Aligns with server spawn policy: root-only ``.git`` (no
+ * climb), ``GIT_CEILING_DIRECTORIES``, refuse reset/clean / force-like push tokens /
  * git-dir boundary overrides. Returns ``{stdout, stderr, exit_code}`` (success
  * envelope even when exit_code ≠ 0 — tool layer interprets). Policy hard-errors
  * become ``ok:false`` envelopes.
@@ -13,6 +15,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
+import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { opErr, opOk } from "./result";
 
@@ -22,11 +25,6 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const MAX_TIMEOUT_MS = 120_000;
 const FORCE_TOKENS = new Set(["-f", "--force", "--force-with-lease"]);
 const FORBIDDEN_SUBS = new Set(["reset", "clean"]);
-
-function toReason(e: unknown): string {
-  if (e instanceof Error) return e.message || String(e);
-  return String(e);
-}
 
 /** Pure: reject dangerous argv before spawn (server policy mirror). */
 export function evaluateGitRunArgv(argv: unknown): string | null {
@@ -75,6 +73,52 @@ function resolveTimeoutMs(args: Record<string, unknown>): number {
     return Math.min(MAX_TIMEOUT_MS, Math.max(1_000, Math.floor(raw * 1000)));
   }
   return DEFAULT_TIMEOUT_MS;
+}
+
+/**
+ * Resolve git process cwd under the bound root.
+ *
+ * Empty / ``"."`` → root itself (open-folder). Non-empty → project subpath;
+ * create if missing so ``init_baseline`` lands here. Never fall back to the
+ * container root when a subpath is set (G1+G2).
+ */
+export async function resolveGitRunCwd(
+  root: StoredRoot,
+  cwdArg: unknown,
+): Promise<{ ok: true; cwd: string } | { ok: false; detail: string }> {
+  const raw = cwdArg == null ? "" : String(cwdArg);
+  const sub =
+    raw === "." ? "" : raw.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!sub) {
+    return { ok: true, cwd: root.absPath };
+  }
+  if (
+    sub === ".." ||
+    sub.startsWith("../") ||
+    sub.includes("/../") ||
+    sub.endsWith("/..")
+  ) {
+    return { ok: false, detail: `git_run cwd 越界：${sub}` };
+  }
+  const lexical = resolveLexical(root, sub);
+  if (!lexical) {
+    return { ok: false, detail: `git_run cwd 越界：${sub}` };
+  }
+  const existing = await realInside(root, lexical);
+  if (existing.ok) {
+    return { ok: true, cwd: existing.path };
+  }
+  if (existing.code !== "not_found") {
+    return { ok: false, detail: existing.reason };
+  }
+  try {
+    await fs.mkdir(lexical, { recursive: true });
+  } catch (e) {
+    return { ok: false, detail: toReason(e) };
+  }
+  const after = await realInside(root, lexical);
+  if (after.ok) return { ok: true, cwd: after.path };
+  return { ok: false, detail: after.reason };
 }
 
 async function runGit(
@@ -142,15 +186,19 @@ export async function opGitRun(
   }
   const argv = (args.argv as string[]).map((s) => String(s));
   const timeoutMs = resolveTimeoutMs(args);
-  const cwd = root.absPath;
+  const resolved = await resolveGitRunCwd(root, args.cwd);
+  if (!resolved.ok) {
+    return opErr("OutsideWorkspace", resolved.detail);
+  }
+  const cwd = resolved.cwd;
 
-  // Defense: only root ``.git`` (no parent climb). Caller/server may soft-succeed
+  // Defense: only cwd ``.git`` (no parent climb). Caller/server may soft-succeed
   // no_repo before issuing; still refuse boundary escapes here.
   try {
     await fs.access(join(cwd, ".git"));
   } catch {
     // Still run rev-parse-like probes so server ensure_repo can distinguish
-    // missing vs corrupt — but ceiling keeps discovery inside root.
+    // missing vs corrupt — but ceiling keeps discovery inside cwd.
   }
 
   try {

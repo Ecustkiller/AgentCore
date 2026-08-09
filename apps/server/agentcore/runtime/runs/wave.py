@@ -15,13 +15,16 @@ batch drains. (The legacy barrier scheduler held both back to the slowest node i
 each wave — the latency this class exists to remove.)
 
 Tree-wide concurrency stays bounded the same way (分而不乘): this scheduler runs at
-most ``width`` nodes at once and hands each child a budget of ``budget // width``
-(:func:`concurrency.child_budget`), so a node whose executor fans out into a nested
-scheduler (阶段2) can't multiply past the configured parallel budget
-(``settings.engine_max_parallel_delegations``, fallback ``MAX_PARALLEL_DELEGATIONS``). Because waves
-now *overlap*, the divisor is the fixed ``width`` (not a per-wave chunk size) — that
-keeps the sum of concurrent child budgets ≤ the parent budget without a tree-shared
-lock (the recursive-semaphore deadlock the ContextVar budget exists to avoid).
+most ``width`` nodes at once and hands each child a budget of
+``budget // ready_width`` (:func:`concurrency.child_budget`), so a node whose executor
+fans out into a nested scheduler (阶段2) can't multiply past the configured parallel
+budget (``settings.engine_max_parallel_delegations``, fallback
+``MAX_PARALLEL_DELEGATIONS``). ``ready_width`` is the count of nodes that can occupy a
+slot *now* (in-flight + deps-satisfied ready) — sinks still blocked on unmet
+``depends_on`` are excluded so a 「4 并行 + 1 汇聚」graph divides by 4, not 5.
+Dispatch slot ``width`` still respects ``max_parallel`` / tree budget (overflow
+queues). Recomputed each dispatch cycle so overlapping continuous waves keep the
+sum of concurrent child budgets ≤ the parent budget without a tree-shared lock.
 
 Failure strategy per node is :attr:`RunPolicy.on_failure` (retry → re-run then
 cascade-skip dependents; skip → cascade-skip dependents; abort → drain in-flight
@@ -259,21 +262,41 @@ class WaveScheduler:
             logger.warning("wave.bad_topology", error=str(exc), nodes=len(plan.nodes))
             raise
 
-        # Concurrency width + per-child budget. Recalculated when the live plan grows
-        # (coordinate merge / secondary delegate) so newly appended nodes raise the
-        # cap up to global max_parallel and the tree budget — not frozen at entry.
-        def _recompute_width() -> tuple[int, int]:
-            n_pending = sum(1 for n in plan.nodes if n.run_id not in completed)
-            w = min(self._max_parallel, current_budget(), max(1, n_pending))
-            return w, child_budget(w)
-
-        width, per_child_budget = _recompute_width()
-        last_plan_size = len(plan.nodes)
-
         # 晚绑定 (受监督的波循环): defer ``bind_after_deps`` nodes to the bind boundary
         # ONLY when a host hook can resolve them; with no hook the marker is inert and
         # such a node dispatches normally (parity with ``checkpoint_after``-without-hook).
         defer_bind = on_boundary is not None
+
+        # Concurrency width + per-child budget. Recalculated each dispatch cycle so
+        # live-plan growth (coordinate merge) and ready-set changes (continuous
+        # dispatch / fan-out after a serial root) both refresh the slot cap and the
+        # tree-budget divisor — not frozen at entry.
+        def _recompute_width() -> tuple[int, int]:
+            n_pending = sum(1 for n in plan.nodes if n.run_id not in completed)
+            w = min(self._max_parallel, current_budget(), max(1, n_pending))
+            # Budget divisor = nodes that can occupy a slot now (in-flight or
+            # deps-satisfied ready). Unmet depends_on sinks must not inflate width
+            # (4 parallel + 1 join → divide by 4, not 5).
+            inflight = set(running.values())
+            n_ready = 0
+            for n in plan.nodes:
+                if n.run_id in completed or n.run_id in skipped:
+                    continue
+                if any(d not in completed and d not in skipped for d in n.depends_on):
+                    continue
+                if n.run_id in inflight:
+                    n_ready += 1
+                    continue
+                if n.run_id in dispatched:
+                    continue
+                if defer_bind and n.bind_after_deps:
+                    continue
+                n_ready += 1
+            budget_w = min(self._max_parallel, current_budget(), max(1, n_ready))
+            return w, child_budget(budget_w)
+
+        width, per_child_budget = _recompute_width()
+        last_plan_size = len(plan.nodes)
 
         # 调度埋点量化 (orthogonal to scheduling — see BatchMetrics): wall start, per-node
         # dispatch times (→ busy_ms occupancy), the concurrency high-water mark, how many
@@ -344,9 +367,10 @@ class WaveScheduler:
                                     skipped.add(n.run_id)
                                     dispatched.add(n.run_id)
                 if not holding:
-                    # Live-plan growth (coordinate merge): recalc width / child budget.
+                    # Refresh slot width + child budget every cycle (ready-set /
+                    # plan growth). Log only when the live plan grew.
+                    width, per_child_budget = _recompute_width()
                     if len(plan.nodes) != last_plan_size:
-                        width, per_child_budget = _recompute_width()
                         last_plan_size = len(plan.nodes)
                         logger.info(
                             "wave.width_recomputed",

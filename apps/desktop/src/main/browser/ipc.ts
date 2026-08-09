@@ -104,10 +104,15 @@ export function registerBrowserIpc(): void {
       ) {
         return { ok: false, reason: "无效的请求参数" };
       }
+      const workspaceId =
+        isRecord(p) && typeof p.workspaceId === "string"
+          ? p.workspaceId
+          : undefined;
       return openLocalBrowserWorkspaceHtml(
         args.pageId,
         args.conversationId,
         args.path,
+        workspaceId,
       );
     },
   );

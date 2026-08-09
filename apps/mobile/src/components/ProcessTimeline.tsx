@@ -53,6 +53,31 @@ export function graphAppendAnchorLabel(
   return auth ? `${base} · ${auth}` : base;
 }
 
+/**
+ * finish_guard 回炉 chip 文案：流式中且该 rework 后尚无 content 时用人话提示进行中，
+ * 否则保持完成时态（复制出口仍用完成时态，见 messageExport）。
+ */
+export function reworkChipLabel(
+  isStreaming: boolean,
+  hasContentAfter: boolean,
+): string {
+  if (isStreaming && !hasContentAfter) return "正在按规则修订…";
+  return "引用/格式核验后已重写";
+}
+
+/**
+ * True once the team has actually started work: any run left the never-started
+ * states (`pending`, or terminal `skipped` from finalize before a start).
+ * Gates TeamView so team_preview hang / stop-before-start stay graph-less;
+ * plan_review mid-wave pause (completed nodes exist) still shows the graph.
+ * Aligns desktop `debatePreviewPlacement.teamHasStartedRuns`.
+ */
+export function teamHasStartedRuns(
+  runs: readonly { status: string }[],
+): boolean {
+  return runs.some((r) => r.status !== "pending" && r.status !== "skipped");
+}
+
 export interface TeamProjection {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -527,7 +552,9 @@ export function ProcessTimeline({
       return <Reasoning key={nodeKey} text={node.text} isStreaming={live} />;
     }
     if (node.kind === "team") {
-      return team ? <TeamView key={nodeKey} {...team} /> : null;
+      return team && teamHasStartedRuns(team.runs) ? (
+        <TeamView key={nodeKey} {...team} />
+      ) : null;
     }
     if (node.kind === "graph_append") {
       const actKind = graphAppendActKinds?.get(node.execution_id);
@@ -628,9 +655,12 @@ export function ProcessTimeline({
       );
     }
     if (node.kind === "rework") {
+      const hasContentAfter = nodes
+        .slice(i + 1)
+        .some((n) => n.kind === "content");
       return (
         <span key={nodeKey} className="rework-chip">
-          引用/格式核验后已重写
+          {reworkChipLabel(isStreaming, hasContentAfter)}
         </span>
       );
     }
@@ -646,7 +676,9 @@ export function ProcessTimeline({
 
   return (
     <div className="timeline">
-      {team && !hasTeamMarker ? <TeamView {...team} /> : null}
+      {team && !hasTeamMarker && teamHasStartedRuns(team.runs) ? (
+        <TeamView {...team} />
+      ) : null}
       {nodes.map((node, i) => {
         const prefix =
           i === fallbackBeforeTeamIdx

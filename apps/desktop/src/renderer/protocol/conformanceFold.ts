@@ -460,6 +460,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "workspace_lock_wait":
       case "turn_queued":
       case "turn_steer_accepted":
+      case "turn_queue_started":
       case "turn_queue_cancelled":
       case "browser_live_frame":
       case "browser_live_status":
@@ -661,6 +662,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
             ...(e.via_user != null ? { via_user: e.via_user } : {}),
           }
         : {}),
+      // 早停 source 可选；旧 golden 无此字段。桌面本地 id / browserLogin 等仍剥离。
+      ...(e.source ? { source: e.source } : {}),
     })),
     process: r.process,
     // Worker mid-flight phase: only emit when set (mirrors oracle — absent on

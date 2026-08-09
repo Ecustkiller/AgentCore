@@ -338,6 +338,64 @@ describe("listVisibleColdResumes (InteractionStore authority)", () => {
     expect(paused().pending).toHaveLength(0);
   });
 
+  it("second-round ask paints after prior ask resolved (new checkpoint id)", () => {
+    seedTurn("m-server-1");
+    upsertAsk("m-server-1");
+    ix().markResolved({
+      kind: "ask_user",
+      id: "cp1",
+      resolution: { decision: "continue" },
+    });
+    expect(listVisibleColdResumes(CID)).toHaveLength(0);
+
+    conv().addMessage({
+      id: "u2",
+      role: "user",
+      content: "再问",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    conv().addMessage({
+      id: "client-r2",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+    conv().setServerMessageIdOnLastMessage("m-server-2", CID);
+    ix().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-2",
+      payload: cpPayload({
+        checkpoint_id: "cp2",
+        question: "第二轮？",
+      }) as unknown as Record<string, unknown>,
+    });
+
+    const visible = listVisibleColdResumes(CID);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toMatchObject({
+      messageId: "m-server-2",
+      checkpointId: "cp2",
+      kind: "ask_user",
+      question: "第二轮？",
+    });
+  });
+
+  it("stamp from none → paints once serverMessageId lands", () => {
+    seedTurn(); // client-uuid, no stamp
+    upsertTeamPreview("client-uuid");
+    expect(listVisibleColdResumes(CID)).toHaveLength(0);
+
+    conv().setServerMessageIdOnLastMessage("m-server-stamp", CID);
+    const visible = listVisibleColdResumes(CID);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.messageId).toBe("m-server-stamp");
+  });
+
   it("prefers Interaction origin over pausedTurns shell", () => {
     seedTurn("m-server-1");
     ix().upsertRequired({

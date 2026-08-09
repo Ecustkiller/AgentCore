@@ -138,8 +138,8 @@ export function FilePreviewView({
       setOpeningInBrowser(false);
     }
   };
-  // 应用内「完整预览」：右坞 BrowserPanel + workspace:// 代理会话工作区字节。
-  // 云端源专属（openInAppPreview 仅对话侧栏云端源挂）。
+  // 应用内「完整预览」：右坞 BrowserPanel + workspace:// 代理工作区字节。
+  // 云端源（对话侧栏 / hub `conv:` / hub `folder:`）在有能力位时挂 openInAppPreview。
   const onOpenInAppPreview = async () => {
     if (openingPreview || !source.openInAppPreview) return;
     setOpeningPreview(true);

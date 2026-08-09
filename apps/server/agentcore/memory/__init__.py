@@ -27,11 +27,14 @@ from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_m
 from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.rules_injection import (
     RuleFragment,
+    UserRuleMutationResult,
     append_user_rule,
     append_user_rule_bullet,
     assemble_injected_rules,
     assemble_turn_rules,
     compose_injected_rules,
+    mutate_user_rule,
+    mutate_user_rule_markdown,
 )
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
@@ -125,4 +128,7 @@ __all__ = [
     "compose_injected_rules",
     "append_user_rule",
     "append_user_rule_bullet",
+    "UserRuleMutationResult",
+    "mutate_user_rule",
+    "mutate_user_rule_markdown",
 ]

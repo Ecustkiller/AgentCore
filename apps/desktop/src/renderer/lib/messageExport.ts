@@ -7,6 +7,7 @@
  */
 
 import { visibleMessageText } from "@/lib/errors";
+import { reworkChipLabel } from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 
 export type MessageCopyMode = "deliverable" | "with_process";
@@ -111,10 +112,12 @@ function formatToolLine(step: Extract<ProcessStep, { kind: "tool" }>): string {
 /** Format the turn's process timeline into plain readable text (旁白 + 关键工具). */
 export function formatProcessExport(
   process: ProcessStep[] | undefined,
+  isStreaming = false,
 ): string {
   if (!process?.length) return "";
   const lines: string[] = [];
-  for (const step of process) {
+  for (let i = 0; i < process.length; i++) {
+    const step = process[i];
     switch (step.kind) {
       case "reasoning": {
         const t = step.text.trim();
@@ -129,9 +132,13 @@ export function formatProcessExport(
       case "tool":
         lines.push(formatToolLine(step));
         break;
-      case "rework":
-        lines.push("· （引用/格式核验后已重写）");
+      case "rework": {
+        const hasContentAfter = process
+          .slice(i + 1)
+          .some((s) => s.kind === "content");
+        lines.push(`· （${reworkChipLabel(isStreaming, hasContentAfter)}）`);
         break;
+      }
       case "team":
         lines.push("· （团队协作）");
         break;
@@ -164,6 +171,7 @@ export function formatMessageExport(
   process: ProcessStep[] | undefined,
   mode: MessageCopyMode,
   errorSource?: MessageExportErrorSource,
+  isStreaming = false,
 ): string {
   const deliverable = visibleMessageText({
     content,
@@ -172,7 +180,7 @@ export function formatMessageExport(
   });
   if (mode === "deliverable") return deliverable;
 
-  const processText = formatProcessExport(process);
+  const processText = formatProcessExport(process, isStreaming);
   if (!processText) return deliverable;
   if (!deliverable) return `【过程】\n\n${processText}`;
 

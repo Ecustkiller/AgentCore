@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWorkspaceUrl,
   mimeForPath,
   normalizePreviewPath,
+  resolveWorkspaceHtmlUrl,
   workspaceFilePath,
 } from "../browser/workspace-paths";
 
@@ -47,11 +49,37 @@ describe("normalizePreviewPath（协议路径守卫）", () => {
   });
 });
 
-describe("workspaceFilePath（后端会话工作区文件寻址）", () => {
-  it("拼出会话工作区 files 端点相对路径、逐段编码", () => {
-    expect(workspaceFilePath("c1", "dir/a b.html")).toBe(
-      "/v1/conversations/c1/workspace/files/dir/a%20b.html",
+describe("workspaceFilePath（desk /v1/workspaces 寻址）", () => {
+  it("拼出 workspaces files 端点、wsId 整体 encode、path 逐段编码", () => {
+    expect(workspaceFilePath("conv:c1", "dir/a b.html")).toBe(
+      "/v1/workspaces/conv%3Ac1/files/dir/a%20b.html",
     );
+    expect(workspaceFilePath("folder:fid-1", "site/index.html")).toBe(
+      "/v1/workspaces/folder%3Afid-1/files/site/index.html",
+    );
+  });
+});
+
+describe("resolveWorkspaceHtmlUrl / buildWorkspaceUrl（openWorkspaceHtml）", () => {
+  it("带 workspaceId 构造 desk host URL", () => {
+    expect(
+      resolveWorkspaceHtmlUrl("cid-1", "site/index.html", "folder:fid-9"),
+    ).toBe("workspace://folder.fid-9/site/index.html");
+    expect(buildWorkspaceUrl("folder:fid-9", "site/index.html")).toBe(
+      "workspace://folder.fid-9/site/index.html",
+    );
+  });
+
+  it("缺省 workspaceId 回退 conv:{conversationId}", () => {
+    expect(resolveWorkspaceHtmlUrl("Conv-ID", "dir/a b.html")).toBe(
+      "workspace://conv.conv-id/dir/a%20b.html",
+    );
+  });
+
+  it("非法 path / desk → null", () => {
+    expect(resolveWorkspaceHtmlUrl("c1", "../x")).toBeNull();
+    expect(resolveWorkspaceHtmlUrl("c1", "a.html", "project:x")).toBeNull();
+    expect(resolveWorkspaceHtmlUrl("", "a.html")).toBeNull();
   });
 });
 
