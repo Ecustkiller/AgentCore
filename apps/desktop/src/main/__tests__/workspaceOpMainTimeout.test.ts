@@ -125,11 +125,49 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
           ok: false,
           timeout_ms: 30,
           conversation_id: "cid-b",
+          // leave-once：超时后已卸，main_end 不再被僵尸占着
+          inflight_total: 0,
+          inflight_cid: 0,
         }),
       }),
     );
   });
 
+  it("超时 leave-once 后后续 op 不再被僵尸 inflight 占坑", async () => {
+    const hang = new Promise<{ ok: true; value: string }>(() => {
+      /* never settles */
+    });
+    await runWorkspaceOpMain(
+      {
+        rootId: "r1",
+        op: "read",
+        timeoutMs: 20,
+        conversationId: "cid-z",
+      },
+      () => hang,
+    );
+    const follow = await runWorkspaceOpMain(
+      {
+        rootId: "r1",
+        op: "exists",
+        timeoutMs: 200,
+        conversationId: "cid-z",
+      },
+      async () => ({ ok: true, value: true }),
+    );
+    expect(follow).toEqual({ ok: true, value: true });
+    expect(logDesktop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "workspace_op.main_begin",
+        fields: expect.objectContaining({
+          op: "exists",
+          conversation_id: "cid-z",
+          inflight_total: 1,
+          queue_depth: 0,
+        }),
+      }),
+    );
+  });
   it("第二对话超时日志能看到邻对话争用（inflight_total / queue_depth）", async () => {
     const hangA = new Promise<{ ok: true; value: string }>(() => {
       /* never settles */

@@ -101,7 +101,7 @@ describe("workspace_op L3 diagnostics", () => {
     ).toMatchObject({ outcome: "ok" });
   });
 
-  it("logs dropped when turnPhase gate blocks workspace_op_required", () => {
+  it("logs dropped + fail-settles when turnPhase gate blocks workspace_op_required", async () => {
     useConversationStore.getState().setTurnPhase("stopping", CID);
     dispatchSSEEvent(
       {
@@ -118,8 +118,62 @@ describe("workspace_op L3 diagnostics", () => {
         request_id: "r-l3",
         turn_phase: "stopping",
         reason: "turn_phase_gate",
+        settle: "fail_envelope",
       }),
     );
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const [, init] = fetchMock.mock.calls[0] as [
+      string,
+      { body?: string },
+    ];
+    const body = JSON.parse(String(init.body)) as {
+      kind: string;
+      ok: boolean;
+      error: { kind: string; detail: string };
+    };
+    expect(body).toMatchObject({
+      kind: "client_tool",
+      ok: false,
+      error: { kind: "WorkspaceIOError" },
+    });
+    expect(body.error.detail).toContain("turn_phase_gate");
+    expect(
+      logEvent.mock.calls.find((c) => c[1] === "workspace_op.resolve")?.[2],
+    ).toMatchObject({ outcome: "ok", result_ok: false });
+  });
+
+  it("terminal phase also fail-settles dropped workspace_op_required", async () => {
+    useConversationStore.getState().setTurnPhase("completed", CID);
+    dispatchSSEEvent(
+      {
+        type: "workspace_op_required",
+        payload: payload({ request_id: "r-term" }),
+        timestamp: "t0",
+      },
+      { conversationId: CID, source: "server" },
+    );
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
+      "workspace_op.dropped",
+      expect.objectContaining({
+        request_id: "r-term",
+        turn_phase: "completed",
+        settle: "fail_envelope",
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0] as [
+      string,
+      { body?: string },
+    ];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      kind: "client_tool",
+      ok: false,
+    });
   });
 
   it("logs resolve fail when POST is non-404 error", async () => {

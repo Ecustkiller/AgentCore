@@ -39,6 +39,13 @@ from agentcore.workspace.stage_dirs import (
 _UNSAFE_IN_SEGMENT = re.compile(r'[\0-\x1f:*?"<>|]')
 _UNSAFE_IN_FILENAME = re.compile(r'[\0-\x1f\\/:*?"<>|]+')
 _MULTI_UNDERSCORE = re.compile(r"_+")
+# Windows reserved device names (case-insensitive): bare ``nul`` / ``CON`` and
+# extension forms ``nul.txt``. Neutralized on write sanitize so LocalWorkspace on
+# Windows never opens a hanging device path. ``console`` / ``null.txt`` untouched.
+_WIN_RESERVED_DEVICE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$",
+    re.IGNORECASE,
+)
 
 # Linux NAME_MAX is 255 bytes; keep headroom for encoding edge cases / suffixes.
 _MAX_FILENAME_BYTES = 240
@@ -367,6 +374,17 @@ def strip_root_label_prefix(relative_path: str, root_label: str) -> str:
     return rest if rest else "."
 
 
+def _neutralize_win_reserved_segment(segment: str) -> str:
+    """Prefix Windows reserved device names so they become ordinary file names.
+
+    ``nul`` → ``_nul``, ``NUL.txt`` → ``_NUL.txt``. Idempotent when already
+    prefixed (``_nul`` does not match the device regex).
+    """
+    if _WIN_RESERVED_DEVICE.match(segment):
+        return f"_{segment}"
+    return segment
+
+
 def _finalize_cleaned_name(cleaned: str, *, empty_fallback: str) -> str:
     """Keep meaningful leading ``_`` / ``.``; strip only junk / Windows-dangerous tails.
 
@@ -382,14 +400,16 @@ def _clean_path_segment(segment: str) -> str:
     """Strip reserved chars from one path segment (directory or file name)."""
     cleaned = _UNSAFE_IN_SEGMENT.sub("_", segment)
     cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
-    return _finalize_cleaned_name(cleaned, empty_fallback="_")
+    cleaned = _finalize_cleaned_name(cleaned, empty_fallback="_")
+    return _neutralize_win_reserved_segment(cleaned)
 
 
 def _clean_dossier_filename(rest: str) -> str:
     """Flatten everything after a dossier prefix into one safe file name."""
     cleaned = _UNSAFE_IN_FILENAME.sub("_", rest.replace("\\", "/"))
     cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
-    return _finalize_cleaned_name(cleaned, empty_fallback="untitled")
+    cleaned = _finalize_cleaned_name(cleaned, empty_fallback="untitled")
+    return _neutralize_win_reserved_segment(cleaned)
 
 
 def sanitize_write_relpath(
@@ -398,6 +418,8 @@ def sanitize_write_relpath(
     """Sanitize a model-supplied write path before landing on disk.
 
     * Dangerous characters (controls, ``:*?"<>|``) → ``_``.
+    * Windows reserved device names (``nul`` / ``CON`` / ``nul.txt`` / …) get a
+      leading ``_`` so they never land as hanging Win32 device paths.
     * Under dossier prefixes (``research`` / ``reviews`` / ``debate`` / ``项目``),
       everything after the prefix is treated as a **single file name**: nested
       ``/`` ``\\`` become ``_`` so ``…/research/a/b.md`` → ``…/research/a_b.md``.

@@ -22,13 +22,27 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
+vi.mock("@/services/workspaceOps", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/services/workspaceOps")>();
+  return {
+    ...actual,
+    rejectWorkspaceOpForTurnPhase: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
+
 const CID = "conv-turn-phase-gate";
 const logEventMock = vi.mocked(logEvent);
+const rejectMock = vi.mocked(rejectWorkspaceOpForTurnPhase);
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: CID, byId: {} });
   useConversationStore.getState().switchConversation(CID);
   logEventMock.mockReset();
+  rejectMock.mockReset();
+  rejectMock.mockResolvedValue(undefined);
 });
 
 describe("dispatchSSEEvent turn-phase gate logging", () => {
@@ -55,6 +69,47 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
         turn_phase: "stopping",
         reason: "turn_phase_gate",
       }),
+    );
+    expect(rejectMock).not.toHaveBeenCalled();
+  });
+
+  it("fail-settles workspace_op_required when gated in stopping", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    useConversationStore.getState().createAssistantMessage(CID);
+    useConversationStore.getState().stopGeneration();
+
+    const payload = {
+      request_id: "r-gate",
+      conversation_id: CID,
+      root_id: "root-1",
+      op: "read",
+      args: { path: "a.txt" },
+      timeout_ms: 5_000,
+    };
+    dispatchSSEEvent(
+      {
+        type: "workspace_op_required",
+        payload,
+        timestamp: "t0",
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(logEventMock).toHaveBeenCalledWith(
+      "warn",
+      "workspace_op.dropped",
+      expect.objectContaining({
+        request_id: "r-gate",
+        turn_phase: "stopping",
+        reason: "turn_phase_gate",
+        settle: "fail_envelope",
+      }),
+    );
+    expect(rejectMock).toHaveBeenCalledWith(
+      payload,
+      CID,
+      "stopping",
     );
   });
 

@@ -46,4 +46,10 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
     // question_posted is in INTERACTION_KIND_WIRE but is not `*_required`.
     expect(allowsSseEvent("completed", "question_posted")).toBe(false);
   });
+
+  it("keeps workspace_op_required gated (fail-settle lives in dispatch, not allowlist)", () => {
+    for (const phase of TERMINAL_OR_STOPPING) {
+      expect(allowsSseEvent(phase, "workspace_op_required")).toBe(false);
+    }
+  });
 });

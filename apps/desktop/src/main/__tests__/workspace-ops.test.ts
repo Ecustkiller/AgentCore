@@ -57,6 +57,30 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
   const run = (op: string, args: Record<string, unknown>) =>
     executeWorkspaceOp(root, op as never, args);
 
+  it("rejects Windows reserved device names with settleable OutsideWorkspace (no fake success)", async () => {
+    for (const path of ["nul", "NUL", "con", "COM1", "nul.txt", "subdir/prn"]) {
+      const read = await run("read", { path });
+      expect(read.ok).toBe(false);
+      if (read.ok) return;
+      expect(read.error.kind).toBe("OutsideWorkspace");
+      expect(read.error.detail).toContain("保留设备名");
+
+      const exists = await run("exists", { path });
+      expect(exists.ok).toBe(false);
+      if (exists.ok) return;
+      expect(exists.error.kind).toBe("OutsideWorkspace");
+
+      const write = await run("write", { path, content: "x" });
+      expect(write.ok).toBe(false);
+      if (write.ok) return;
+      expect(write.error.kind).toBe("OutsideWorkspace");
+    }
+    // lookalikes still allowed (may PathNotFound)
+    const lookalike = await run("exists", { path: "null.txt" });
+    expect(lookalike.ok).toBe(true);
+    expect(valOf(lookalike)).toBe(false);
+  });
+
   it("write creates the file with parents and reports the code-point count", async () => {
     // "hi😀" = 3 code points (the emoji is one), matching Python len() — not the
     // 4 UTF-16 units JS .length would give.

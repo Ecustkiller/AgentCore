@@ -1,6 +1,10 @@
 import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
 import { logDesktop } from "../../log-service";
-import { toReason } from "../pathGuard";
+import {
+  pathHasWindowsReservedDeviceName,
+  toReason,
+  WINDOWS_RESERVED_DEVICE_REASON,
+} from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { ensureReady, getRoot } from "../roots";
 import { opArchive } from "./archive";
@@ -96,6 +100,75 @@ const ORGANIZE_DENY_MSG =
 const PERMANENT_EXTERNAL_MSG =
   "区外目录禁止永久删除；请使用可逆删除（进回收站）";
 
+/** Collect path-like args for a reserved-device preflight (before any op touches disk). */
+function pathArgsForReservedCheck(
+  op: WorkspaceOpName,
+  args: Record<string, unknown>,
+): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v.trim()) out.push(v);
+  };
+  switch (op) {
+    case "read":
+    case "read_bytes":
+    case "read_lines":
+    case "write":
+    case "append":
+    case "write_bytes":
+    case "exists":
+    case "mkdir":
+    case "delete":
+    case "replace":
+      push(args.path);
+      break;
+    case "list":
+    case "list_tree":
+      push(args.directory);
+      break;
+    case "index_files":
+      push(args.base);
+      break;
+    case "copy":
+    case "move":
+      push(args.src);
+      push(args.dst);
+      break;
+    case "grep":
+      push(args.path);
+      push(args.directory);
+      break;
+    case "execute":
+    case "process_start":
+      push(args.cwd);
+      break;
+    case "archive":
+      push(args.directory);
+      push(args.path);
+      break;
+    case "diagnostics":
+      push(args.path);
+      break;
+    case "ensure_turn_baseline":
+      push(args.directory);
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+/** First path arg that contains a Windows reserved device segment, or null. */
+function firstReservedDevicePath(
+  op: WorkspaceOpName,
+  args: Record<string, unknown>,
+): string | null {
+  for (const p of pathArgsForReservedCheck(op, args)) {
+    if (pathHasWindowsReservedDeviceName(p)) return p;
+  }
+  return null;
+}
+
 /** Resolve session-root mode (missing mode on sessionOnly → readonly). */
 export function resolveSessionMode(root: StoredRoot): SessionRootMode | null {
   if (root.mode === "organize" || root.mode === "readonly") return root.mode;
@@ -138,7 +211,7 @@ export function sessionRootAccessError(
   return null;
 }
 
-/** 主进程在飞 workspace op（底层未 settle 前仍计入，超时返回后亦然）。 */
+/** 主进程在飞 workspace op（leave-once：超时返回后即卸，底层 hung 不再永久占计数）。 */
 let mainInflightTotal = 0;
 const mainInflightByCid = new Map<string, number>();
 
@@ -216,8 +289,10 @@ async function workspaceOp(req: {
 
 /**
  * 主进程 workspaceOp 墙钟 + 观测（可单测：注入 `run` 模拟挂起 op）。
- * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封，底层 promise 可继续跑
- *（底层未 settle 前仍计入 inflight，便于钉多对话争用）。
+ * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封。
+ *
+ * 僵尸缓解：超时返回后立刻 leave inflight（leave-once），避免永不 settle 的底层
+ * promise 永久占无界计数；底层仍可能继续跑（Win32 不可小改取消），但不再挡住观测面。
  */
 export async function runWorkspaceOpMain(
   req: WorkspaceOpMainReq,
@@ -246,8 +321,13 @@ export async function runWorkspaceOpMain(
       ...enter,
     },
   });
-  // 底层 settle 才 leave——超时先返回时 hung op 仍占 inflight。
-  const opPromise = run().finally(() => leaveMainInflight(cid));
+  let left = false;
+  const leaveOnce = (): void => {
+    if (left) return;
+    left = true;
+    leaveMainInflight(cid);
+  };
+  const opPromise = run().finally(leaveOnce);
   let result: WorkspaceOpResult;
   if (timeoutMs == null) {
     result = await opPromise;
@@ -270,6 +350,8 @@ export async function runWorkspaceOpMain(
                 ...mainInflightSnapshot(cid),
               },
             });
+            // 超时先 leave，避免僵尸永久占 inflight（底层仍可能继续跑）。
+            leaveOnce();
             resolve(
               opErr(
                 "WorkspaceIOError",
@@ -314,6 +396,13 @@ export async function executeWorkspaceOp(
   try {
     const denied = sessionRootAccessError(root, op, args);
     if (denied) return denied;
+    const reserved = firstReservedDevicePath(op, args);
+    if (reserved != null) {
+      return opErr(
+        "OutsideWorkspace",
+        `${WINDOWS_RESERVED_DEVICE_REASON}：${reserved}`,
+      );
+    }
     switch (op) {
       case "read":
         return await opRead(root, String(args.path ?? ""));

@@ -161,6 +161,75 @@ async def test_safe_index_files_swallows_backend_failure():
     assert ok.order == "recent"  # manifest asks for newest-first relevance ordering
 
 
+async def test_safe_index_files_timeout_does_not_sticky_dead_channel():
+    """Ambient best-effort index hangs must not sticky-dead the shared file channel.
+
+    Bare tool-side INDEX_FILES still counts toward sticky (control); ``_safe_index_files``
+    wraps ``index_io_mode`` so N=2 ambient hangs leave the channel alive for real tools.
+    """
+    import asyncio
+
+    import pytest
+
+    from agentcore.runtime.events import EventSink
+    from agentcore.runtime.interaction import InteractionRegistry
+    from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
+    from agentcore.workspace.local import LocalWorkspace
+    from agentcore.workspace.protocol import WorkspaceIOError
+
+    conv = "conv-ambient-index"
+    root_id = "root-ambient"
+
+    async def _await_request(sink: EventSink):
+        for _ in range(2000):
+            if not sink._queue.empty():  # noqa: SLF001
+                return sink._queue.get_nowait()
+            await asyncio.sleep(0)
+        raise AssertionError("no workspace_op_required event emitted")
+
+    # Control: bare INDEX_FILES timeouts still sticky at N=2 (not permanently exempt).
+    sink_bare = EventSink()
+    registry_bare = InteractionRegistry()
+    channel_bare = WorkspaceChannel(
+        sink=sink_bare,
+        conversation_id=conv,
+        registry=registry_bare,
+        timeout_seconds=0.05,
+        root_id=root_id,
+    )
+    for _ in range(2):
+        with pytest.raises(WorkspaceIOError, match="活性挂起"):
+            await channel_bare.request(WorkspaceOp.INDEX_FILES, {"cap": 10, "order": "path"})
+    assert channel_bare._dead is True  # noqa: SLF001
+
+    # Ambient path: two unanswered index hangs via ``_safe_index_files`` must not sticky.
+    sink = EventSink()
+    registry = InteractionRegistry()
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=conv,
+        registry=registry,
+        timeout_seconds=0.05,
+        root_id=root_id,
+    )
+    backend = LocalWorkspace(channel)
+    assert await _safe_index_files(backend) == []
+    assert await _safe_index_files(backend) == []
+    assert channel._dead is False  # noqa: SLF001
+    while not sink._queue.empty():  # noqa: SLF001
+        sink._queue.get_nowait()
+
+    task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
+    event = await _await_request(sink)
+    assert event.payload["op"] == "read"
+    assert registry.resolve(
+        event.payload["request_id"],
+        {"ok": True, "value": "alive"},
+        conversation_id=conv,
+    )
+    assert await task == "alive"
+
+
 async def test_preexisting_index_snapshotted_once_per_turn():
     # Three workers in one batch share a SINGLE workspace index walk (the per-turn
     # snapshot cache), not one walk per worker — so the mtime stat cost doesn't multiply.

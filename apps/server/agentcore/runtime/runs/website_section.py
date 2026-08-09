@@ -210,9 +210,13 @@ async def collect_light_website_acceptance_gaps(backend: Any) -> list[dict[str, 
             html_texts[path] = text
 
     # Extra HTML under site/ (section fragments, etc.) — empty shell often lives here
-    # when assemble was skipped.
+    # when assemble was skipped. Best-effort index: same ``index_io_mode`` as ambient
+    # manifest / IndexMaintainer so a hang does not sticky-dead the file channel.
+    from agentcore.workspace.channel import index_io_mode
+
     try:
-        entries, _truncated = await backend.index_files(cap=200, order="path")
+        with index_io_mode():
+            entries, _truncated = await backend.index_files(cap=200, order="path")
     except Exception:  # noqa: BLE001 — light check must not break skip materialise
         entries = []
     for path in entries:

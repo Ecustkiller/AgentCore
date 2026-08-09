@@ -10,7 +10,13 @@ vi.mock("electron", () => ({
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
 }));
 
-import { locate, realInside, resolveLexical } from "../fs/pathGuard";
+import {
+  isWindowsReservedDeviceSegment,
+  locate,
+  pathHasWindowsReservedDeviceName,
+  realInside,
+  resolveLexical,
+} from "../fs/pathGuard";
 import { type StoredRoot, setRoot } from "../fs/roots";
 import { create, listDir } from "../fs/tree";
 
@@ -78,6 +84,36 @@ describe("pathGuard realInside / locate error codes", () => {
     setRoot(root);
     expect(resolveLexical(root, "/workspace/a.txt")).toBe(join(dir, "a.txt"));
     expect(resolveLexical(root, "/etc/passwd")).toBeNull();
+  });
+
+  it("rejects Windows reserved device names before touching disk", () => {
+    expect(pathHasWindowsReservedDeviceName("nul")).toBe(true);
+    expect(pathHasWindowsReservedDeviceName("subdir/CON")).toBe(true);
+    expect(isWindowsReservedDeviceSegment("nul.txt")).toBe(true);
+    expect(isWindowsReservedDeviceSegment("null.txt")).toBe(false);
+
+    expect(resolveLexical(root, "nul")).toBeNull();
+    expect(resolveLexical(root, "NUL")).toBeNull();
+    expect(resolveLexical(root, "con")).toBeNull();
+    expect(resolveLexical(root, "PRN")).toBeNull();
+    expect(resolveLexical(root, "aux")).toBeNull();
+    expect(resolveLexical(root, "COM1")).toBeNull();
+    expect(resolveLexical(root, "lpt9")).toBeNull();
+    // bare device + extension form (Win32 treats both as devices)
+    expect(resolveLexical(root, "nul.txt")).toBeNull();
+    expect(resolveLexical(root, "subdir/Con.log")).toBeNull();
+    // ordinary lookalikes must pass
+    expect(resolveLexical(root, "null.txt")).toBe(join(dir, "null.txt"));
+    expect(resolveLexical(root, "console")).toBe(join(dir, "console"));
+    expect(resolveLexical(root, "com10")).toBe(join(dir, "com10"));
+  });
+
+  it("locate marks reserved device names as invalid (not out_of_root)", () => {
+    const r = locate(root.id, "nul");
+    expect("error" in r).toBe(true);
+    if (!("error" in r) || r.error.ok) return;
+    expect(r.error.code).toBe("invalid");
+    expect(r.error.reason).toContain("保留设备名");
   });
 });
 

@@ -100,3 +100,25 @@ def test_empty_and_dot_passthrough():
 def test_traversal_segments_preserved_for_containment():
     assert sanitize_write_relpath("../etc/passwd") == "../etc/passwd"
     assert sanitize_write_relpath("a/../b") == "a/../b"
+
+
+def test_windows_reserved_device_names_neutralized():
+    """Bare + extension forms get a leading ``_``; lookalikes untouched."""
+    assert sanitize_write_relpath("nul") == "_nul"
+    assert sanitize_write_relpath("NUL") == "_NUL"
+    assert sanitize_write_relpath("con") == "_con"
+    assert sanitize_write_relpath("PRN") == "_PRN"
+    assert sanitize_write_relpath("aux") == "_aux"
+    assert sanitize_write_relpath("COM1") == "_COM1"
+    assert sanitize_write_relpath("lpt9") == "_lpt9"
+    assert sanitize_write_relpath("nul.txt") == "_nul.txt"
+    assert sanitize_write_relpath("docs/Con.log") == "docs/_Con.log"
+    # ordinary names
+    assert sanitize_write_relpath("null.txt") == "null.txt"
+    assert sanitize_write_relpath("console") == "console"
+    assert sanitize_write_relpath("com10") == "com10"
+    # dossier flatten also neutralizes
+    assert (
+        sanitize_write_relpath(f"{RESEARCH_PREFIX}nul.md")
+        == f"{RESEARCH_PREFIX}_nul.md"
+    )

@@ -61,6 +61,10 @@ export function allowsStreamingMutations(phase: TurnPhase): boolean {
  *
  * stopping + terminal 另放行 INTERACTION_KIND_WIRE 的 `*_required`（见上常量）：
  * 冷挂起 ask 常紧挨 `message_end(paused)`，门闩若挡掉则 live 看不到拍板卡。
+ *
+ * `workspace_op_required` **故意不**放行：stopping/terminal 由 dispatch 失败 settle
+ *（诚实 fail 信封），避免静默 drop → 服务端 TimeoutError 冲 sticky channel-dead；
+ * 也不无差别放开其它流式事件。
  */
 export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
   if (phase === "idle" || phase === "preflight" || phase === "streaming") {

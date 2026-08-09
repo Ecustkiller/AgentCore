@@ -8,6 +8,38 @@ import {
 import type { StoredRoot } from "./roots";
 import { getRoot } from "./roots";
 
+/**
+ * Windows 保留设备名（大小写不敏感）。
+ * 含纯段（``nul`` / ``CON``）与带扩展名形态（``nul.txt``）——打开任一段都会挂死 Win32 文件 API。
+ * 不含 ``console`` / ``null.txt`` 等仅前缀相似的普通名。
+ */
+const WIN_RESERVED_DEVICE_RE =
+  /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+/** 触盘前拒识保留设备名时的统一中文原因（Fs / workspace op 共用）。 */
+export const WINDOWS_RESERVED_DEVICE_REASON =
+  "路径含 Windows 保留设备名，已拒绝";
+
+/** 单段是否为 Windows 保留设备名（忽略尾部空格/点）。 */
+export function isWindowsReservedDeviceSegment(segment: string): boolean {
+  const name = segment.replace(/[ .]+$/g, "");
+  if (!name) return false;
+  return WIN_RESERVED_DEVICE_RE.test(name);
+}
+
+/**
+ * 相对路径任一段是否含 Windows 保留设备名。
+ * 在 normalize / 词法解析之后、触盘之前调用。
+ */
+export function pathHasWindowsReservedDeviceName(relPath: string): boolean {
+  const unified = relPath.replace(/\\/g, "/");
+  for (const seg of unified.split("/")) {
+    if (!seg || seg === "." || seg === "..") continue;
+    if (isWindowsReservedDeviceSegment(seg)) return true;
+  }
+  return false;
+}
+
 /** 把异常映射为对用户友好的中文原因。 */
 export function toReason(e: unknown): string {
   const code = (e as NodeJS.ErrnoException)?.code;
@@ -77,6 +109,8 @@ export function resolveLexical(
 ): string | null {
   const label = root.name?.trim() || DEFAULT_WORKSPACE_ROOT_LABEL;
   const normalized = normalizeWorkspacePath(relPath, label);
+  // 触盘前拒 Windows 保留设备名（nul/con/…）——否则 Win32 open 可永久挂起。
+  if (pathHasWindowsReservedDeviceName(normalized)) return null;
   const abs = resolve(root.absPath, normalized);
   const rel = relative(root.absPath, abs);
   if (rel === "") return abs; // 根目录自身
@@ -115,6 +149,11 @@ export function locate(
 ): { root: StoredRoot; abs: string } | { error: FsResult<never> } {
   const root = getRoot(rootId);
   if (!root) return { error: fsErr("unauthorized", "目录未授权或已移除") };
+  const label = root.name?.trim() || DEFAULT_WORKSPACE_ROOT_LABEL;
+  const normalized = normalizeWorkspacePath(relPath, label);
+  if (pathHasWindowsReservedDeviceName(normalized)) {
+    return { error: fsErr("invalid", WINDOWS_RESERVED_DEVICE_REASON) };
+  }
   const abs = resolveLexical(root, relPath);
   if (!abs) return { error: fsErr("out_of_root", "路径越界，已拒绝") };
   return { root, abs };
@@ -134,6 +173,9 @@ export async function resolveCwdInside(
     cwdArg == null || cwdArg === ""
       ? "."
       : normalizeWorkspacePath(cwdArg, label);
+  if (pathHasWindowsReservedDeviceName(normalized)) {
+    return { ok: false, detail: WINDOWS_RESERVED_DEVICE_REASON };
+  }
   let abs: string | null;
   if (normalized === "." || normalized === "") {
     abs = root.absPath;

@@ -27,6 +27,7 @@ from agentcore.runtime.runs.types import (
     RunSpec,
     RunState,
 )
+from agentcore.workspace.channel import index_io_mode
 from agentcore.workspace.sparse_listing import (
     format_remaining_summary,
     partition_sparse_paths,
@@ -653,7 +654,12 @@ async def _safe_index_files(backend: object) -> list[str]:
     Wraps ``backend.index_files`` so a listing failure (a dropped desktop in local
     mode, an I/O hiccup) degrades the manifest to teammate products instead of failing
     the run — workspace awareness is an enhancement, never a hard dependency. Returns
-    the paths (dropping the truncation flag — the manifest caps independently)."""
+    the paths (dropping the truncation flag — the manifest caps independently).
+
+    Runs under ``index_io_mode`` (same as IndexMaintainer) so ambient listing hangs
+    do not sticky-dead the shared Local file channel; real user-tool ``index_files``
+    outside this wrapper still counts toward sticky.
+    """
     index = getattr(backend, "index_files", None)
     if index is None:
         return []
@@ -661,7 +667,8 @@ async def _safe_index_files(backend: object) -> list[str]:
         # newest-first: in a big workspace the manifest's budget should spend on the
         # most-recently-touched files (uploads / latest outputs), not whatever sorts
         # alphabetically first.
-        paths, _truncated = await index(order="recent")
+        with index_io_mode():
+            paths, _truncated = await index(order="recent")
         return list(paths)
     except Exception as e:  # noqa: BLE001 — manifest is best-effort, never fail a run
         logger.debug("workspace.index_failed", error=str(e))

@@ -21,7 +21,7 @@ const NON_FILE_CHANNEL_OPS = new Set<string>([
   "git_run",
 ]);
 
-/** 渲染层 IPC 在飞（底层 fsApi 未 settle 前仍计入，abort 返回后亦然）。 */
+/** 渲染层 IPC 在飞（leave-once：abort 返回后即卸，底层 hung 不再永久占计数）。 */
 let ipcInflightTotal = 0;
 const ipcInflightByCid = new Map<string, number>();
 
@@ -86,6 +86,7 @@ export function resetWorkspaceOpIpcInflightForTests(): void {
  * ``timeout_ms`` (optional, from server channel): AbortSignal budget matching the
  * outer tool liveness deadline. On abort we skip settle when possible; a late
  * POST after the server discarded the Future is already a stale 404 no-op.
+ * Abort 返回后 leave-once 卸 IPC inflight（底层 hung promise 不再永久占计数）。
  *
  * Same ``request_id`` is de-duplicated in-process so attach rehang does not
  * re-run write / execute side effects.
@@ -99,6 +100,27 @@ export async function performWorkspaceOp(
     conversationId,
     logLabel: "workspaceOps",
     perform: () => runLocalOp(payload, conversationId),
+  });
+}
+
+/**
+ * turnPhase gate 挡掉 `workspace_op_required` 时立刻走现有 fulfill 失败信封 settle，
+ * 避免静默 drop 导致服务端 TimeoutError 冲 sticky channel-dead。
+ * 不跑 IPC / 不假装 ok。
+ */
+export async function rejectWorkspaceOpForTurnPhase(
+  payload: WorkspaceOpRequiredPayload,
+  conversationId: string,
+  turnPhase: string,
+): Promise<void> {
+  await fulfillClientToolOnce({
+    requestId: payload.request_id,
+    conversationId,
+    logLabel: "workspaceOps",
+    perform: async () =>
+      ioError(
+        `回合 phase=${turnPhase}，工作区 op 未执行（turn_phase_gate）`,
+      ),
   });
 }
 
@@ -168,7 +190,13 @@ async function runLocalOp(
     conversationId,
     requestId: payload.request_id,
   };
-  // 底层 settle 才 leave——abort 先返回时 hung IPC 仍占 inflight。
+  // leave-once：abort/超时先返回时立刻卸 inflight，避免永不 settle 的 IPC 永久占计数。
+  let left = false;
+  const leaveOnce = (): void => {
+    if (left) return;
+    left = true;
+    leaveIpcInflight(conversationId);
+  };
   const opPromise = (
     timeoutMs != null
       ? fsApi.workspaceOp(
@@ -185,7 +213,7 @@ async function runLocalOp(
           undefined,
           correlation,
         )
-  ).finally(() => leaveIpcInflight(conversationId));
+  ).finally(leaveOnce);
   try {
     const result = !ac
       ? await opPromise
@@ -230,6 +258,8 @@ async function runLocalOp(
         timeout_ms: timeoutMs ?? null,
         ...ipcInflightSnapshot(conversationId),
       });
+      // abort 日志快照仍含本 op；随后 leave，避免僵尸占无界计数。
+      leaveOnce();
       if (!NON_FILE_CHANNEL_OPS.has(payload.op)) {
         useWorkspaceChannelStore.getState().markNotReady();
       }
