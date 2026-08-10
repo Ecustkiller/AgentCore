@@ -6,7 +6,7 @@
 
 - **Next.js（App Router）** + TypeScript，`output: "export"` 静态导出
 - **Tailwind CSS v4**（CSS-first）
-- 色系：**Graphite + Steel**（石墨灰阶 + 冷钢蓝）
+- 色系：**靛青**（深蓝近黑画布 + hue 200–275 单色相点缀）
 - 构建产物为纯静态文件，部署 Cloudflare Pages
 
 ## 本地开发
