@@ -318,13 +318,20 @@ class EventSink:
         task.add_done_callback(self._barrier_tasks.discard)
         return combined
 
-    def emit(self, event: SSEEvent) -> None:
+    def emit(self, event: SSEEvent) -> bool:
+        """Emit ``event``. Returns True iff it was put on the live SSE queue.
+
+        Closed / detached sinks skip the live queue (Pillar A may still journal
+        DURABLE facts when closed). Callers that need a desktop round-trip
+        (workspace / board op channels) must fail-fast when this returns False
+        instead of awaiting a full settle timeout for an op the client never saw.
+        """
         if self._closed:
             # Pillar A: DURABLE display facts persist at execution/host journal scope
             # even after the turn sink closes; SSE / history are best-effort only.
             self._persist_durable_closed(event)
             _run_emit_tap(self, event)
-            return
+            return False
         if event.type is EventType.MESSAGE_END:
             finish = (event.payload or {}).get("finish_reason")
             if finish is not None:
@@ -340,11 +347,13 @@ class EventSink:
         self._record_history(event)
         if self._checkpointer is not None:
             self._checkpointer.observe(event)
+        live = False
         if not self._detached:
             self._queue.put_nowait(event)
             self._persist_barriers.put_nowait(
                 self._combine_persist_barriers([*process_futures, persist_future])
             )
+            live = True
         _run_emit_tap(self, event)
         # G6: reinject after content_reset is fully processed (history + SSE +
         # checkpointer already saw the reset). Display-only path skips process /
@@ -354,6 +363,7 @@ class EventSink:
             and self._content_reset_reinjection is not None
         ):
             self._emit_display_only(content_delta(self._content_reset_reinjection))
+        return live
 
     def _persist_durable_closed(self, event: SSEEvent) -> None:
         """Journal-only path after sink.close — no history / SSE / process lane."""

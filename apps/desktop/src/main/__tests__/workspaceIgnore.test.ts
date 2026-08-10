@@ -56,8 +56,17 @@ describe("workspaceIgnore", () => {
   it("AI noise covers media/archives; not system .db", () => {
     expect(shouldSkipAiNoiseFileName("hero.png")).toBe(true);
     expect(shouldSkipAiNoiseFileName("out.zip")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("data.parquet")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("arr.feather")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("x.arrow")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("w.npy")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("t.h5")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("t.hdf5")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("m.pkl")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("m.pickle")).toBe(true);
     expect(shouldSkipAiNoiseFileName("code_search.db")).toBe(false);
     expect(shouldSkipFileName("hero.png")).toBe(true);
+    expect(shouldSkipFileName("data.parquet")).toBe(true);
     expect(shouldSkipFileName("code_search.db")).toBe(true);
   });
 

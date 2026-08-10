@@ -89,8 +89,18 @@ def test_ai_noise_suffixes_are_media_archives_binaries():
     assert ".png" in AI_NOISE_FILE_SUFFIXES
     assert ".zip" in AI_NOISE_FILE_SUFFIXES
     assert ".pack" in AI_NOISE_FILE_SUFFIXES
+    assert ".parquet" in AI_NOISE_FILE_SUFFIXES
+    assert ".feather" in AI_NOISE_FILE_SUFFIXES
+    assert ".arrow" in AI_NOISE_FILE_SUFFIXES
+    assert ".npy" in AI_NOISE_FILE_SUFFIXES
+    assert ".h5" in AI_NOISE_FILE_SUFFIXES
+    assert ".hdf5" in AI_NOISE_FILE_SUFFIXES
+    assert ".pkl" in AI_NOISE_FILE_SUFFIXES
+    assert ".pickle" in AI_NOISE_FILE_SUFFIXES
     assert is_ai_noise_file_name("photo.PNG")
     assert is_ai_noise_file_name("out.zip")
+    assert is_ai_noise_file_name("data.PARQUET")
+    assert is_ai_noise_file_name("model.pkl")
     assert not is_ai_noise_file_name("code_search.db")  # system tier
     assert not is_ai_noise_file_name("report.pdf")  # office docs stay listable
 

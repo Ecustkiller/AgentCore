@@ -52,4 +52,10 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
       expect(allowsSseEvent(phase, "workspace_op_required")).toBe(false);
     }
   });
+
+  it("keeps host_op_required gated (fail-settle lives in dispatch, not allowlist)", () => {
+    for (const phase of TERMINAL_OR_STOPPING) {
+      expect(allowsSseEvent(phase, "host_op_required")).toBe(false);
+    }
+  });
 });

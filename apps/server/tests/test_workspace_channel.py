@@ -384,6 +384,10 @@ async def test_op_timeout_log_includes_path(monkeypatch):
     fields = spy.get("workspace.op_timeout")
     assert fields["op"] == "read"
     assert fields["path"] == path
+    assert fields["conversation_id"] == CONV
+    assert fields["root_id"] == ROOT_ID
+    # derive_channel_timeout floors at 1.0s even when channel_default is tiny.
+    assert fields["timeout_ms"] == 1000
     assert "directory" not in fields
 
     spy.events.clear()
@@ -401,6 +405,32 @@ async def test_op_timeout_log_includes_path(monkeypatch):
     grep_fields = spy.get("workspace.op_timeout")
     assert grep_fields["op"] == "grep"
     assert grep_fields["directory"] == "src"
+    assert grep_fields["conversation_id"] == CONV
+    assert grep_fields["root_id"] == ROOT_ID
+    assert grep_fields["timeout_ms"] == 1000
+
+
+async def test_sink_closed_fail_fast_without_wall_clock_wait():
+    """Closed sink: emit does not enqueue — settle immediately, no full timeout wait."""
+    sink = EventSink()
+    sink.close()
+    registry = InteractionRegistry()
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=CONV,
+        registry=registry,
+        timeout_seconds=5.0,
+        root_id=ROOT_ID,
+    )
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(WorkspaceIOError, match="sink closed（未入队）"):
+        await channel.request(WorkspaceOp.READ, {"path": "after-close.txt"})
+    elapsed = asyncio.get_running_loop().time() - t0
+    # Must not burn the 5s channel deadline awaiting a desktop that never saw the op.
+    assert elapsed < 0.5
+    # Not a liveness hang — sticky streak stays clear.
+    assert channel._dead is False  # noqa: SLF001
+    assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
 
 
 async def test_index_io_timeout_does_not_sticky_dead_channel():

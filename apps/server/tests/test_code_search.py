@@ -257,6 +257,78 @@ async def test_ensure_index_skips_read_when_fingerprint_unchanged(
 
 
 @pytest.mark.asyncio
+async def test_ensure_index_skips_ai_noise_suffixes(tmp_path: Path):
+    """Noise suffixes (e.g. .parquet) must not trigger backend.read."""
+    from agentcore.workspace.indexing.manager import IndexManager, _should_skip_path
+    from agentcore.workspace.protocol import IndexFileEntry, IndexFilesResult
+
+    assert _should_skip_path("data/huge.parquet")
+    assert _should_skip_path("weights.npy")
+    assert _should_skip_path("model.pkl")
+    assert not _should_skip_path("src/app.py")
+
+    reads: list[str] = []
+
+    class _Backend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["src/app.py", "data/huge.parquet", "weights.npy"],
+                truncated=False,
+                entries=(
+                    IndexFileEntry(path="src/app.py", mtime_ms=1, size_bytes=10),
+                    IndexFileEntry(path="data/huge.parquet", mtime_ms=1, size_bytes=99),
+                    IndexFileEntry(path="weights.npy", mtime_ms=1, size_bytes=99),
+                ),
+            )
+
+        async def read(self, path: str) -> str:
+            reads.append(path)
+            return "def ok():\n    return 1\n"
+
+    manager = IndexManager(str(tmp_path / "idx"))
+    assert await manager.ensure_index(_Backend()) is True
+    assert reads == ["src/app.py"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_aborts_after_consecutive_liveness_timeouts(tmp_path: Path):
+    """Two consecutive channel/liveness timeouts abort the round (no per-file 60s burn)."""
+    from agentcore.workspace.indexing.manager import IndexManager
+    from agentcore.workspace.protocol import (
+        CodeIndexStatus,
+        IndexFileEntry,
+        IndexFilesResult,
+        WorkspaceIOError,
+    )
+
+    reads: list[str] = []
+
+    class _Backend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["a.py", "b.py", "c.py"],
+                truncated=False,
+                entries=(
+                    IndexFileEntry(path="a.py", mtime_ms=1, size_bytes=1),
+                    IndexFileEntry(path="b.py", mtime_ms=1, size_bytes=1),
+                    IndexFileEntry(path="c.py", mtime_ms=1, size_bytes=1),
+                ),
+            )
+
+        async def read(self, path: str) -> str:
+            reads.append(path)
+            raise WorkspaceIOError(f"local workspace op 'read' timed out（活性挂起）")
+
+    manager = IndexManager(str(tmp_path / "idx"))
+    updated = await manager.ensure_index(_Backend())
+    assert updated is False
+    assert reads == ["a.py", "b.py"], "must abort before reading remaining paths"
+    assert manager.index_status() == CodeIndexStatus.STALE
+
+
+@pytest.mark.asyncio
 async def test_local_workspace_code_search_via_channel(sample_py: Path, tmp_path: Path, monkeypatch):
     """Cloud→desktop LocalWorkspace indexes via channel reads (not a disk stub)."""
     from agentcore.config import settings

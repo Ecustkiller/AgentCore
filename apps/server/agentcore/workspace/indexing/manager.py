@@ -6,9 +6,10 @@ import logging
 import os
 from pathlib import Path
 
-from agentcore.workspace._paths import IGNORED_DIRS, is_internal_zone_relpath
+from agentcore.workspace._paths import is_ignored_relpath
 from agentcore.workspace.indexing.bm25 import BM25Index
 from agentcore.workspace.indexing.chunker import chunk_file, detect_language, snippet_preview
+from agentcore.workspace.limits import is_liveness_timeout_detail
 from agentcore.workspace.protocol import (
     CodeChunk,
     CodeIndexStatus,
@@ -25,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 _INDEX_DB_NAME = "code_search.db"
 _MAX_INDEX_FILES = 5000
-_SKIP_DIRS = IGNORED_DIRS  # name-only noise; internal zones via path check
+# Abort one ensure round after this many consecutive channel/liveness timeouts
+# so a hung Local read cannot burn ~60s per remaining path.
+_ENSURE_ABORT_AFTER_CONSECUTIVE_TIMEOUTS = 2
 
 
 class IndexManager:
@@ -101,6 +104,7 @@ class IndexManager:
         indexed_paths = await bm25.list_indexed_paths()
         current_set = set(paths)
         updated = False
+        consecutive_timeouts = 0
 
         for stale_path in indexed_paths - current_set:
             await bm25.remove_file(stale_path)
@@ -117,14 +121,34 @@ class IndexManager:
             try:
                 text = await backend.read(path)
             except PathNotFound:
+                consecutive_timeouts = 0
                 if path in indexed_paths:
                     await bm25.remove_file(path)
                     updated = True
                 continue
             except WorkspaceError as exc:
+                detail = str(exc)
+                if is_liveness_timeout_detail(detail):
+                    consecutive_timeouts += 1
+                    logger.info(
+                        "workspace.index_read_timeout path=%s streak=%s",
+                        path,
+                        consecutive_timeouts,
+                    )
+                    if consecutive_timeouts >= _ENSURE_ABORT_AFTER_CONSECUTIVE_TIMEOUTS:
+                        logger.info(
+                            "workspace.index_abort_consecutive_timeouts streak=%s",
+                            consecutive_timeouts,
+                        )
+                        # Incomplete round — leave dirty so a later schedule can retry.
+                        self._last_ensure_complete = False
+                        return updated
+                    continue
+                consecutive_timeouts = 0
                 logger.debug("skip indexing %s: %s", path, exc)
                 continue
 
+            consecutive_timeouts = 0
             digest = bm25.content_hash(text)
             if not force:
                 existing = await bm25.get_file_hash(path)
@@ -225,7 +249,5 @@ def _coerce_index_files_result(raw: object) -> IndexFilesResult:
 
 
 def _should_skip_path(path: str) -> bool:
-    if is_internal_zone_relpath(path):
-        return True
-    parts = path.replace("\\", "/").split("/")
-    return any(part in _SKIP_DIRS for part in parts)
+    """Skip internal zones, noise dirs, and AI/system noise suffixes (e.g. ``.parquet``)."""
+    return is_ignored_relpath(path)

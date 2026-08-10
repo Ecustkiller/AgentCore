@@ -330,6 +330,37 @@ class WorkspaceChannel:
             )
             timeout_ms = max(1, int(deadline * 1000))
             rid = self.root_id if root_id is None else root_id
+
+            def _emit_op_required() -> None:
+                """Emit SSE; if not live-queued, settle immediately (no wall-clock wait)."""
+                live = self.sink.emit(
+                    workspace_op_required(
+                        request_id=request_id,
+                        conversation_id=self.conversation_id,
+                        root_id=rid,
+                        op=op_name,
+                        args=args,
+                        timeout_ms=timeout_ms,
+                    )
+                )
+                if live:
+                    return
+                # Sink closed / detached: desktop never saw the op — fail settle now.
+                self.registry.resolve(
+                    request_id,
+                    {
+                        "ok": False,
+                        "error": {
+                            "kind": "WorkspaceIOError",
+                            "detail": (
+                                f"local workspace op '{op_name}' failed: "
+                                "sink closed（未入队）"
+                            ),
+                        },
+                    },
+                    conversation_id=self.conversation_id,
+                )
+
             self._inflight.add(request_id)
             try:
                 try:
@@ -348,22 +379,19 @@ class WorkspaceChannel:
                             },
                         ),
                         timeout=deadline,
-                        on_suspended=lambda: self.sink.emit(
-                            workspace_op_required(
-                                request_id=request_id,
-                                conversation_id=self.conversation_id,
-                                root_id=rid,
-                                op=op_name,
-                                args=args,
-                                timeout_ms=timeout_ms,
-                            )
-                        ),
+                        on_suspended=_emit_op_required,
                     )
                 except TimeoutError as e:
+                    # Attribute from channel fields (not contextvars) so background
+                    # index / detached tasks stay replayable in logs/dev.jsonl.
                     timeout_fields: dict[str, Any] = {
                         "op": op_name,
                         "request_id": request_id,
+                        "conversation_id": self.conversation_id,
+                        "timeout_ms": timeout_ms,
                     }
+                    if rid:
+                        timeout_fields["root_id"] = rid
                     path = args.get("path")
                     if path is not None:
                         timeout_fields["path"] = path

@@ -22,6 +22,30 @@ export async function performHostOp(
   });
 }
 
+/**
+ * turnPhase gate 挡掉 `host_op_required` 时立刻走现有 fulfill 失败信封 settle，
+ * 避免静默 drop 导致服务端 TimeoutError 冲 sticky channel-dead。
+ * 不跑 IPC / 不假装 ok。对齐 `rejectWorkspaceOpForTurnPhase`。
+ */
+export async function rejectHostOpForTurnPhase(
+  payload: HostOpRequiredPayload,
+  conversationId: string,
+  turnPhase: string,
+): Promise<void> {
+  await fulfillClientToolOnce({
+    requestId: payload.request_id,
+    conversationId,
+    logLabel: "hostOps",
+    perform: async (): Promise<HostOpResult> => ({
+      ok: false,
+      error: {
+        kind: "HostOpError",
+        detail: `回合 phase=${turnPhase}，本机 Host op 未执行（turn_phase_gate）`,
+      },
+    }),
+  });
+}
+
 async function runHostOp(
   payload: HostOpRequiredPayload,
 ): Promise<HostOpResult> {

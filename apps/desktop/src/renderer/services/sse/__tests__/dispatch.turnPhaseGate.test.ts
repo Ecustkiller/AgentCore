@@ -31,18 +31,30 @@ vi.mock("@/services/workspaceOps", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/hostOps", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/hostOps")>();
+  return {
+    ...actual,
+    rejectHostOpForTurnPhase: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+import { rejectHostOpForTurnPhase } from "@/services/hostOps";
 import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
 
 const CID = "conv-turn-phase-gate";
 const logEventMock = vi.mocked(logEvent);
-const rejectMock = vi.mocked(rejectWorkspaceOpForTurnPhase);
+const rejectWorkspaceMock = vi.mocked(rejectWorkspaceOpForTurnPhase);
+const rejectHostMock = vi.mocked(rejectHostOpForTurnPhase);
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: CID, byId: {} });
   useConversationStore.getState().switchConversation(CID);
   logEventMock.mockReset();
-  rejectMock.mockReset();
-  rejectMock.mockResolvedValue(undefined);
+  rejectWorkspaceMock.mockReset();
+  rejectWorkspaceMock.mockResolvedValue(undefined);
+  rejectHostMock.mockReset();
+  rejectHostMock.mockResolvedValue(undefined);
 });
 
 describe("dispatchSSEEvent turn-phase gate logging", () => {
@@ -70,7 +82,8 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
         reason: "turn_phase_gate",
       }),
     );
-    expect(rejectMock).not.toHaveBeenCalled();
+    expect(rejectWorkspaceMock).not.toHaveBeenCalled();
+    expect(rejectHostMock).not.toHaveBeenCalled();
   });
 
   it("fail-settles workspace_op_required when gated in stopping", () => {
@@ -106,7 +119,76 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
         settle: "fail_envelope",
       }),
     );
-    expect(rejectMock).toHaveBeenCalledWith(payload, CID, "stopping");
+    expect(rejectWorkspaceMock).toHaveBeenCalledWith(payload, CID, "stopping");
+    expect(rejectHostMock).not.toHaveBeenCalled();
+  });
+
+  it("fail-settles host_op_required when gated in stopping", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    useConversationStore.getState().createAssistantMessage(CID);
+    useConversationStore.getState().stopGeneration();
+
+    const payload = {
+      request_id: "h-gate",
+      conversation_id: CID,
+      op: "host_shell",
+      args: { command: "echo hi" },
+    };
+    dispatchSSEEvent(
+      {
+        type: "host_op_required",
+        payload,
+        timestamp: "t0",
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(logEventMock).toHaveBeenCalledWith(
+      "warn",
+      "host_op.dropped",
+      expect.objectContaining({
+        request_id: "h-gate",
+        turn_phase: "stopping",
+        reason: "turn_phase_gate",
+        settle: "fail_envelope",
+      }),
+    );
+    expect(rejectHostMock).toHaveBeenCalledWith(payload, CID, "stopping");
+    expect(rejectWorkspaceMock).not.toHaveBeenCalled();
+  });
+
+  it("fail-settles host_op_required when gated in terminal", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    useConversationStore.getState().createAssistantMessage(CID);
+    useConversationStore.getState().setTurnPhase("completed", CID);
+
+    const payload = {
+      request_id: "h-term",
+      conversation_id: CID,
+      op: "host_ping",
+      args: {},
+    };
+    dispatchSSEEvent(
+      {
+        type: "host_op_required",
+        payload,
+        timestamp: "t0",
+      } as never,
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(logEventMock).toHaveBeenCalledWith(
+      "warn",
+      "host_op.dropped",
+      expect.objectContaining({
+        request_id: "h-term",
+        turn_phase: "completed",
+        settle: "fail_envelope",
+      }),
+    );
+    expect(rejectHostMock).toHaveBeenCalledWith(payload, CID, "completed");
   });
 
   it("does not drop-log when checkpoint_required is allowed in terminal", () => {
@@ -134,6 +216,11 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
     expect(logEventMock).not.toHaveBeenCalledWith(
       "warn",
       "workspace_op.dropped",
+      expect.anything(),
+    );
+    expect(logEventMock).not.toHaveBeenCalledWith(
+      "warn",
+      "host_op.dropped",
       expect.anything(),
     );
   });

@@ -2,10 +2,15 @@ import { assertNever } from "@/lib/assertNever";
 import { logEvent } from "@/lib/log";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
+import { rejectHostOpForTurnPhase } from "@/services/hostOps";
 import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
 import { allowsSseEvent } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
-import type { SSEEvent, WorkspaceOpRequiredPayload } from "@/types/events";
+import type {
+  HostOpRequiredPayload,
+  SSEEvent,
+  WorkspaceOpRequiredPayload,
+} from "@/types/events";
 import { handleBoardEvent } from "./handlers/board";
 import { handleDesktopEvent } from "./handlers/desktop";
 import { handleExecutionEvent } from "./handlers/execution";
@@ -56,7 +61,7 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       turn_phase: turnPhase,
       reason: "turn_phase_gate",
     };
-    // L3：workspace_op 另带 request_id/op，便于对上服务端超时。
+    // L3：workspace/host_op 另带 request_id/op，便于对上服务端超时。
     // 静默 drop 会让服务端等超时 → sticky channel-dead；改为立刻失败 settle。
     if (event.type === "workspace_op_required") {
       const payload = event.payload as WorkspaceOpRequiredPayload;
@@ -69,6 +74,13 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         ctx.conversationId,
         turnPhase,
       );
+    } else if (event.type === "host_op_required") {
+      const payload = event.payload as HostOpRequiredPayload;
+      dropFields.request_id = payload?.request_id;
+      dropFields.op = payload?.op;
+      dropFields.settle = "fail_envelope";
+      logEvent("warn", "host_op.dropped", dropFields);
+      void rejectHostOpForTurnPhase(payload, ctx.conversationId, turnPhase);
     } else {
       logEvent("warn", "sse.event_dropped", dropFields);
     }
