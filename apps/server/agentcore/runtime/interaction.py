@@ -192,7 +192,7 @@ class InteractionRegistry:
         kind: InteractionKind,
         payload: dict[str, Any] | None = None,
         timeout: float | None,
-        on_suspended: Callable[[], None] | None = None,
+        on_suspended: Callable[[], object] | None = None,
     ) -> Any:
         """Register a pending interaction, signal it, and await its resolution.
 

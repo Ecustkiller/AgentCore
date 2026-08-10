@@ -79,7 +79,7 @@ class ClientRequestBridge(Protocol):
         kind: InteractionKind,
         payload: dict[str, Any] | None = None,
         timeout: float | None,
-        on_suspended: Callable[[], None] | None = None,
+        on_suspended: Callable[[], object] | None = None,
     ) -> Any: ...
 
     def get(self, request_id: str) -> InteractionRequest | None: ...

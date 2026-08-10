@@ -35,7 +35,7 @@ class RecordingSink(EventSink):
         self.plan_type: str | None = None
         self.collab_interactions: dict[str, int] = {}
 
-    def emit(self, event: SSEEvent) -> None:
+    def emit(self, event: SSEEvent) -> bool:
         if event.type == EventType.TOOL_USE_START:
             self._record_tool_call(event.payload)
         elif event.type == EventType.RUN_PLAN:
@@ -45,7 +45,7 @@ class RecordingSink(EventSink):
             self._record_continue(event.payload)
         elif event.type in _COLLAB_EVENT_KEYS:
             self._bump(_COLLAB_EVENT_KEYS[event.type])
-        super().emit(event)
+        return super().emit(event)
 
     def _bump(self, key: str) -> None:
         self.collab_interactions[key] = self.collab_interactions.get(key, 0) + 1
