@@ -274,7 +274,7 @@ export function RuleSection({
 
   const header = (
     <div
-      className="group flex items-center rounded-lg text-sm"
+      className="flex items-center rounded-lg text-sm"
       style={{ paddingLeft: headerPad }}
     >
       <button
@@ -298,7 +298,7 @@ export function RuleSection({
         )}
         <span className="min-w-0 flex-1 truncate">规则</span>
       </button>
-      <div className="hidden shrink-0 items-center group-hover:flex">
+      <div className="shrink-0">
         <IconButton title="新建规则" onClick={() => void createRule()}>
           <FilePlus size={14} />
         </IconButton>
@@ -360,14 +360,6 @@ export function RuleSection({
             >
               短硬约束用常驻，长条文或偶发用按需
             </p>
-            <button
-              type="button"
-              onClick={() => void createRule()}
-              className="flex h-7 w-fit items-center gap-1.5 rounded-lg pr-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-            >
-              <FilePlus size={14} className="shrink-0" />
-              新建规则
-            </button>
           </div>
         ) : (
           scopedRules.map((doc) => renderRuleRow(doc))

@@ -127,11 +127,13 @@ describe("RuleSection (global)", () => {
     expect(screen.getByText("规则")).toBeTruthy();
   });
 
-  it("shows an empty hint with CTA when there are no global rules yet", async () => {
+  it("shows an empty hint without list CTA when there are no global rules yet", async () => {
     renderGlobal();
     expect(await screen.findByText("还没有全局规则")).toBeTruthy();
     expect(screen.getByText("短硬约束用常驻，长条文或偶发用按需")).toBeTruthy();
-    expect(screen.getByText("新建规则")).toBeTruthy();
+    // Create hangs on the section header only — no empty-state text CTA.
+    expect(screen.getByLabelText("新建规则")).toBeTruthy();
+    expect(screen.queryByText("新建规则")).toBeNull();
   });
 
   it("shows 常驻/按需 badges and toggles apply_mode via the chip", async () => {
@@ -185,7 +187,7 @@ describe("RuleSection (global)", () => {
     );
   });
 
-  it("creates a GLOBAL rule from the empty-state CTA", async () => {
+  it("creates a GLOBAL rule from the header + when empty", async () => {
     vi.mocked(createRuleDocument).mockResolvedValue(
       ruleDetail({ id: "new", name: "新规则.md" }),
     );
@@ -193,7 +195,7 @@ describe("RuleSection (global)", () => {
 
     await screen.findByText("还没有全局规则");
     await act(async () => {
-      fireEvent.click(screen.getByText("新建规则"));
+      fireEvent.click(screen.getByLabelText("新建规则"));
     });
 
     expect(createRuleDocument).toHaveBeenCalledWith("新规则.md", null);
@@ -235,10 +237,11 @@ describe("RuleSection (project)", () => {
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith("p3", "新规则.md"));
   });
 
-  it("shows project empty state with CTA", async () => {
+  it("shows project empty hint without list CTA", async () => {
     renderProject();
     fireEvent.click(screen.getByText("规则"));
     expect(await screen.findByText("本项目还没有规则")).toBeTruthy();
-    expect(screen.getByText("新建规则")).toBeTruthy();
+    expect(screen.getByLabelText("新建规则")).toBeTruthy();
+    expect(screen.queryByText("新建规则")).toBeNull();
   });
 });
