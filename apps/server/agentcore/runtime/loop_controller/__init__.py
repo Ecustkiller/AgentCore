@@ -54,6 +54,7 @@ from .types import (
     ERROR_CLASS_VALIDATION,
     FORCE_SEGMENTED_NARROW_TOOLS,
     LANDING_TOOLS,
+    MEMORY_TOOLS,
     ORCHESTRATION_TOOLS,
     PATH_SEGMENT_FORCE_TOOLS,
     PROGRESS_TOOLS,
@@ -85,6 +86,7 @@ __all__ = [
     "ERROR_CLASS_VALIDATION",
     "FORCE_SEGMENTED_NARROW_TOOLS",
     "LANDING_TOOLS",
+    "MEMORY_TOOLS",
     "ORCHESTRATION_TOOLS",
     "PATH_SEGMENT_FORCE_TOOLS",
     "PROGRESS_TOOLS",
@@ -207,7 +209,7 @@ class LoopController(
         self._path_write_rejects: dict[str, tuple[str, int]] = {}
         # One-shot: record() saw streak ≥ threshold; consumed by tool_circuit_breaker.
         self._pending_path_force_segmented: bool = False
-        # Orchestration tools kept alive despite parse-only disable-threshold hits.
+        # Orchestration / memory tools kept alive despite parse-only disable-threshold hits.
         self._tool_parse_kept: set[str] = set()
         # One-shot hard-stop steer from a tool that retires a family (e.g. browser
         # egress_unavailable). Consumed by :meth:`tool_circuit_breaker`.

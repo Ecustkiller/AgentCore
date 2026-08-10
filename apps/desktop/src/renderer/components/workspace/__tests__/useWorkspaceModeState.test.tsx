@@ -24,9 +24,6 @@ vi.mock("@/services/workspaceBinding", async (importOriginal) => {
     getWorkspaceBinding: vi.fn(),
   };
 });
-vi.mock("@/services/handoff", () => ({
-  runHandoff: vi.fn(),
-}));
 
 const getBinding = vi.mocked(getWorkspaceBinding);
 const getConvs = vi.mocked(getConversations);

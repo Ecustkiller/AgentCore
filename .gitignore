@@ -57,8 +57,9 @@ apps/town/shoot-out-before/
 apps/town/Builds/
 # AgentTown 3D 资产（Kenney/Quaternius 等 CC0，vendored）：源 mesh/纹理 + Import 生成的
 # prefab/catalog 连 .meta 入库。勿入库 Mixamo 等禁止再分发的 raw 角色。见 TownAssets/README.md。
-# website 预览自检截图
+# website 预览自检截图（.shots + shoot 矩阵产物，不入仓）
 apps/website/.shots/
+apps/website/shoot-out*/
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）
 apps/desktop/resources/sidecar/
 # 内嵌 ripgrep（产品 AI grep；fetch_ripgrep.py / pnpm fetch:rg）

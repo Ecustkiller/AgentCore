@@ -1,11 +1,8 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
-import { useLlmProviders } from "@/hooks/useLlmProviders";
-import { useModels } from "@/hooks/useModels";
 import { hasLocalFiles } from "@/lib/capabilities";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
@@ -13,10 +10,11 @@ import {
   isContinuableAssistant,
   isEmptyInterruptedAssistant,
 } from "@/lib/composerContinueHint";
-import { TOOLS_GATE_HINT, needsToolsGateHint } from "@/lib/llmToolsGate";
 import { cn } from "@/lib/utils";
-import { defaultChatSupportsTools } from "@/services/llmProviders";
-import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
+import {
+  useBackgroundTasksStore,
+  useHandoffArmed,
+} from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import {
   useActiveGenerating,
@@ -29,10 +27,11 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import { Cloud, CloudUpload, Paperclip, Send, Square, X } from "lucide-react";
+import { CloudUpload, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
+import { ComposerCloudBridgeHint } from "./ComposerCloudBridgeHint";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
@@ -73,15 +72,16 @@ export type TurnComposerVariant = "card" | "bar";
 
 /**
  * The ONE turn composer (统一 AI 输入框): the full-featured card — auto-growing
- * textarea, @ 文件引用 + 回形针浏览, drag-drop attachments, 后台云端 toggle, 停止生成,
+ * textarea, @ 文件引用 + 回形针浏览, drag-drop attachments, 停止生成,
  * char count, 回填 channel — shared by BOTH surfaces that give the team an order:
  * the chat view's {@link import("../MessageInput").MessageInput} and the canvas
  * 命令栏 {@link import("../../graph/CanvasCommandBar").CanvasCommandBar}. 下达指令 is
  * the same act in both views, so it is the same component; hosts only pick chrome
- * (placeholder, canvas follow hook, whether 后台云端 applies).
+ * (placeholder, canvas follow hook, whether legacy handoff arm applies).
  *
  * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock:
- * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/附件/后台云收进＋菜单。
+ * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/附件收进＋菜单（遗留 handoff
+ * 武装在 ModeControl，不在「＋」）。
  * default `card` keeps textarea-above-toolbar（居中草稿 + 画布指挥台），左簇摊开。
  * 离线态靠 {@link ComposerConnectionNotice} 与发送硬禁，不再用安静连接绿点。
  *
@@ -103,7 +103,10 @@ export function TurnComposer({
   attachedBelowApproval = false,
 }: {
   placeholder?: string;
-  /** Offer the 后台云端 toggle (still requires a local-mode conversation). */
+  /**
+   * Honor ModeControl legacy handoff arm (still requires a local-mode conversation).
+   * No Composer「＋」toggle — arming lives in WorkspaceModeMenu.
+   */
   allowBackground?: boolean;
   /** Called when a foreground turn is dispatched (canvas uses it to auto-follow). */
   onDispatch?: () => void;
@@ -120,11 +123,6 @@ export function TurnComposer({
     ? MIN_COMPOSER_HEIGHT_BAR
     : MIN_COMPOSER_HEIGHT_CARD;
   const isGenerating = useActiveGenerating();
-  const { data: llmProviders } = useLlmProviders();
-  const { data: modelCatalog } = useModels();
-  const toolsGateHint = needsToolsGateHint(
-    defaultChatSupportsTools(llmProviders, modelCatalog?.current?.provider_id),
-  );
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const conversations = useConversations();
   const contextCompacted = Boolean(
@@ -188,7 +186,7 @@ export function TurnComposer({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isLocal, setIsLocal] = useState(false);
-  const [backgroundMode, setBackgroundMode] = useState(false);
+  const handoffArmed = useHandoffArmed(conversationId);
   const folders = useFolders();
   const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const pendingFolderId =
@@ -273,7 +271,7 @@ export function TurnComposer({
     agentMentions,
     setAgentMentions,
     isGenerating,
-    backgroundMode,
+    backgroundMode: allowBackground && isLocal && handoffArmed,
     isLocal,
     closeMenu: mention.closeMenu,
     onDispatch,
@@ -337,12 +335,11 @@ export function TurnComposer({
     setAssignHint(null);
   }, [assignHint]);
 
-  // 后台云端 gate: only local-mode conversations can hand off to a cloud team, so
-  // resolve the bound mode (shared store, deduped) and show the toggle only then.
+  // Legacy handoff gate: only local-mode conversations can dispatch a cloud copy
+  // job. Arming is ModeControl-only; resolve mode so send honors the arm.
   useEffect(() => {
     if (!allowBackground || !conversationId) {
       setIsLocal(false);
-      setBackgroundMode(false);
       return;
     }
     let cancelled = false;
@@ -351,9 +348,7 @@ export function TurnComposer({
       .ensureMode(conversationId)
       .then((mode) => {
         if (cancelled) return;
-        const local = mode === "local";
-        setIsLocal(local);
-        if (!local) setBackgroundMode(false);
+        setIsLocal(mode === "local");
       });
     return () => {
       cancelled = true;
@@ -450,32 +445,15 @@ export function TurnComposer({
 
   const charCount = value.length;
   const menuOpen = mention.menuMode !== null;
-  const showBackground = allowBackground && isLocal;
-  const bg = showBackground && backgroundMode;
+  const bg = allowBackground && isLocal && handoffArmed;
   const showCharCount = isBar
     ? charCount >= CHAR_COUNT_NEAR_LIMIT
     : charCount > 0;
 
-  const backgroundTipCore = bg
-    ? "已切到「后台云端」：发送后 AI 在云端拷贝上改，不会直接动本机文件夹；完成后需你点一下才合回本机"
-    : "切到「后台云端」：AI 在云端拷贝上改，不会直接动本机文件夹；完成后需你点一下才合回本机";
-  const backgroundTip = toolsGateHint
-    ? `${TOOLS_GATE_HINT}。${backgroundTipCore}`
-    : backgroundTipCore;
-
-  const backgroundToggle = showBackground ? (
-    <ComposerBackgroundToggle
-      disabled={isGenerating}
-      pressed={bg}
-      tip={backgroundTip}
-      iconOnly={!isBar}
-      onToggle={() => setBackgroundMode((v) => !v)}
-    />
-  ) : null;
-
-  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · 附件 · 后台?
-  // bar：整簇收进 ComposerPlusMenu（权限/附件/后台带文案）；card：底栏摊开（iconOnly）。
-  // 执行路径（sidecar / 云端）不在大众 Composer 产品面展示；高级开关在外观设置。
+  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · 附件
+  // bar：整簇收进 ComposerPlusMenu（权限/附件带文案）；card：底栏摊开（iconOnly）。
+  // 否决 Composer 并排「本地引擎/云端过桥」切换器；过桥事后弱提示见 ComposerCloudBridgeHint。
+  // 遗留 handoff 武装在 ModeControl，不进「＋」。
   const sessionChrome = (
     <>
       <ComposerWorkspaceChip conversationId={conversationId} />
@@ -498,7 +476,6 @@ export function TurnComposer({
     <>
       {sessionChrome}
       {attachButton}
-      {backgroundToggle}
     </>
   );
 
@@ -691,6 +668,9 @@ export function TurnComposer({
       {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
       <ComposerConnectionNotice />
 
+      {/* 本机绑定却本轮过桥：弱状态（非引擎切换器；强制关路径不展示）。 */}
+      <ComposerCloudBridgeHint />
+
       {/* 会话字段徽章：较早对话已压缩（旗标 only，无摘要正文）。 */}
       <ComposerContextCompactedHint show={contextCompacted} />
 
@@ -718,7 +698,6 @@ export function TurnComposer({
             <ComposerPlusMenu>
               {sessionChrome}
               {attachButton}
-              {backgroundToggle}
             </ComposerPlusMenu>
           </div>
           {textareaBlock}
@@ -800,62 +779,5 @@ function ComposerAttachButton({
       <Paperclip size={14} className="shrink-0" aria-hidden />
       <span>附加文件</span>
     </button>
-  );
-}
-
-/** 后台云端开关：bar「＋」菜单内带文案；card 底栏仅图标。 */
-function ComposerBackgroundToggle({
-  disabled,
-  pressed,
-  tip,
-  onToggle,
-  iconOnly = true,
-}: {
-  disabled?: boolean;
-  pressed: boolean;
-  tip: string;
-  onToggle: () => void;
-  iconOnly?: boolean;
-}) {
-  if (iconOnly) {
-    return (
-      <SimpleTooltip label={tip}>
-        <IconButton
-          size="md"
-          onClick={onToggle}
-          disabled={disabled}
-          aria-label="切换后台云端任务"
-          aria-pressed={pressed}
-          className={
-            pressed
-              ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-              : undefined
-          }
-        >
-          <Cloud size={14} />
-        </IconButton>
-      </SimpleTooltip>
-    );
-  }
-  return (
-    <SimpleTooltip label={tip}>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={disabled}
-        aria-label="切换后台云端任务"
-        aria-pressed={pressed}
-        className={cn(
-          "inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs",
-          pressed
-            ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-          disabled && "cursor-not-allowed opacity-60",
-        )}
-      >
-        <Cloud size={14} className="shrink-0" aria-hidden />
-        <span>后台云端</span>
-      </button>
-    </SimpleTooltip>
   );
 }

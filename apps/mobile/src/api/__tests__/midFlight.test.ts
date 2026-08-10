@@ -37,7 +37,7 @@ describe("sendMidFlightMessage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("turn_queued：live 立即呈现，主路空闲后再开 turn2 并续流", async () => {
+  it("turn_queued：仅条 ack，主路空闲后再开 turn2 并续流", async () => {
     fetchMock.mockResolvedValue(
       new Response(
         sseBody([

@@ -105,7 +105,28 @@ describe("turn_steer_accepted · live toast", () => {
 });
 
 describe("turn_queue_cancelled · 清排队 UI", () => {
-  it("移除 store 项与乐观用户气泡", () => {
+  it("无泡：只清条", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-cancel",
+      conversationId: CID,
+      content: "queued",
+      position: 1,
+      queueDepth: 1,
+    });
+
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_cancelled",
+        timestamp: "",
+        payload: { queue_id: "q-cancel", conversation_id: CID },
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("有 messageId：清条并删对应泡", () => {
     useConversationStore.getState().addMessage(
       {
         id: "user-q",
@@ -157,7 +178,7 @@ describe("turn_queue_cancelled · 清排队 UI", () => {
 });
 
 describe("turn_queue_started · 契约出队清轻态", () => {
-  it("turn_queued 轻态 → turn_queue_started 后消失；用户泡保留", () => {
+  it("turn_queued 条 → turn_queue_started 后消失；已有用户泡则保留", () => {
     useConversationStore.getState().addMessage(
       {
         id: "user-drain",
@@ -199,33 +220,38 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     ).toMatchObject({ role: "user", content: "开跑这条" });
   });
 
+  it("无泡条：started 只清条", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-bar",
+      conversationId: CID,
+      content: "仅条",
+      position: 1,
+      queueDepth: 1,
+    });
+
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_started",
+        timestamp: "",
+        payload: {
+          queue_id: "q-bar",
+          conversation_id: CID,
+          remaining_depth: 0,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(
+      useConversationStore.getState().byId[CID]?.messages ?? [],
+    ).toHaveLength(0);
+  });
+
   it("只清匹配 queue_id；message_start 不再猜出队", () => {
-    useConversationStore.getState().addMessage(
-      {
-        id: "user-a",
-        role: "user",
-        content: "A",
-        createdAt: new Date().toISOString(),
-        executionId: null,
-        isStreaming: false,
-      },
-      CID,
-    );
-    useConversationStore.getState().addMessage(
-      {
-        id: "user-b",
-        role: "user",
-        content: "B",
-        createdAt: new Date().toISOString(),
-        executionId: null,
-        isStreaming: false,
-      },
-      CID,
-    );
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-a",
       conversationId: CID,
-      messageId: "user-a",
       content: "A",
       position: 1,
       queueDepth: 2,
@@ -233,7 +259,6 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-b",
       conversationId: CID,
-      messageId: "user-b",
       content: "B",
       position: 2,
       queueDepth: 2,

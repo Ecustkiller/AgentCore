@@ -15,6 +15,7 @@ from agentcore.llm.profiles import TurnProfiles
 from agentcore.memory import (
     assemble_turn_rules,
     load_memory_topics,
+    load_on_demand_user_rules,
 )
 from agentcore.runtime.context import (
     build_workspace_context,
@@ -58,6 +59,7 @@ class PreparedTurn:
     attachment_context: str
     native_image_parts: list[dict]
     memory_topics: list[str]
+    on_demand_rules: list
     bound_execution_id: str
     execution_id_token: object
 
@@ -119,6 +121,10 @@ async def prepare_fresh_turn(
         memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
     )
     has_memory_topics = bool(memory_topics)
+    # On-demand user rules (定案 B): catalog + consult_rule; never merge with memory topics.
+    # Independent of memory_enabled — user rules are the user's own instructions.
+    on_demand_rules = await load_on_demand_user_rules(user_id, folder_id=folder_id)
+    has_on_demand_rules = bool(on_demand_rules)
     # Clean, stable base (base + date + workspace facts + memory): NO attachments,
     # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
     # verbatim by workers. Environment facts ride the shared base so workers also
@@ -208,6 +214,7 @@ async def prepare_fresh_turn(
         system_prompt,
         memory_topics=memory_topics,
         memory_enabled=memory_enabled,
+        on_demand_rules=on_demand_rules,
         attachment_context=attachment_context,
     )
     worker_tools = build_worker_registry(
@@ -222,6 +229,7 @@ async def prepare_fresh_turn(
         memory_enabled=memory_enabled,
         folder_id=folder_id,
         has_memory_topics=has_memory_topics,
+        has_on_demand_rules=has_on_demand_rules,
     )
     _wire_worker_conversation_log_tools(
         worker_tools,
@@ -350,6 +358,7 @@ async def prepare_fresh_turn(
         attachment_context=attachment_context,
         native_image_parts=native_image_parts,
         memory_topics=memory_topics,
+        on_demand_rules=on_demand_rules,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,
     )

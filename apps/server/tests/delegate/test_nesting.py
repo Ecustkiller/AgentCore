@@ -92,7 +92,9 @@ async def test_finalize_stopped_absorbs_nested_children_usage():
     assert parent._children == []
 
 
-async def test_depth_two_subworker_cannot_delegate_further():
+async def test_depth_three_subworker_cannot_delegate_further():
+    """MAX=3: depth-1 and depth-2 may nest; depth-3 leaf has no CAPTAIN_MARK."""
+
     class DeepProvider(NestingProvider):
         async def stream(self, request):
             system = next((m.content or "" for m in request.messages if m.role == "system"), "")
@@ -124,7 +126,8 @@ async def test_depth_two_subworker_cannot_delegate_further():
         {"tasks": [{"role": "队长", "task": "主任务"}]}, ctx()
     )
     assert result.success is True
-    assert provider.delegate_calls == 1
+    # depth-1 nests once, depth-2 nests once; depth-3 leaf never adds a call.
+    assert provider.delegate_calls == 2
 
 
 def test_make_lead_subteam_wires_delegate_plus_replan_bound_to_child():
@@ -188,7 +191,9 @@ class _LeadBindReplanProvider:
 
     async def stream(self, request):
         system = next((m.content or "" for m in request.messages if m.role == "system"), "")
-        is_lead = self.CAPTAIN_MARK in system
+        # Under MAX=3, depth-1 and depth-2 both carry CAPTAIN_MARK; only depth-1
+        # honesty says children may still nest — treat that as the lead under test.
+        is_lead = "你的子成员仍可再向下委派一层" in system
         tool_msgs = [m for m in request.messages if m.role == "tool"]
         last_tool = (tool_msgs[-1].content or "") if tool_msgs else ""
         if is_lead and not tool_msgs:
@@ -281,7 +286,8 @@ class _LeadScopeSteerProvider:
     async def stream(self, request):
         system = next((m.content or "" for m in request.messages if m.role == "system"), "")
         user = next((m.content or "" for m in request.messages if m.role == "user"), "")
-        is_lead = self.CAPTAIN_MARK in system
+        # See _LeadBindReplanProvider: depth-1 only (MAX=3).
+        is_lead = "你的子成员仍可再向下委派一层" in system
         tool_msgs = [m for m in request.messages if m.role == "tool"]
         last_tool = (tool_msgs[-1].content or "") if tool_msgs else ""
         if is_lead and not tool_msgs:

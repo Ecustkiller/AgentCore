@@ -771,3 +771,180 @@ def test_salvage_without_umid_does_not_create_assistant_id_ready(tmp_path):
     _drive(run())
     assert list(base.glob("*.json")) == []
 
+
+def test_mutate_does_not_wipe_on_corrupt_read(tmp_path, monkeypatch):
+    """BUG-3: existing file that fails read/parse must not be replaced by an empty shell."""
+    import agentcore.conversation.store.outbox as outbox_mod
+
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="keep me",
+        message_id="m1",
+        trace_id="c" * 32,
+    )
+    path = tmp_path / "outbox" / "u1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    good = {
+        "schema_version": 1,
+        "user_message_id": "u1",
+        "conversation_id": "c1",
+        "message_id": "m1",
+        "user_message": "keep me",
+        "content": "precious checkpoint",
+        "phase": PHASE_OPEN,
+        "ops": ["begin_turn", "checkpoint"],
+        "journal": {},
+        "stream_segments": {},
+    }
+    path.write_text(json.dumps(good), encoding="utf-8")
+
+    errors: list[tuple] = []
+    warnings: list[tuple] = []
+
+    class _Spy:
+        def error(self, event, **kwargs):  # noqa: ANN001
+            errors.append((event, kwargs))
+
+        def warning(self, event, **kwargs):  # noqa: ANN001
+            warnings.append((event, kwargs))
+
+    monkeypatch.setattr(outbox_mod, "logger", _Spy())
+    monkeypatch.setattr(outbox_mod, "_READ_RETRY_DELAYS_S", (0.0, 0.0, 0.0))
+    # Corrupt the file after bind so mutate's read fails.
+    path.write_text("{not-json", encoding="utf-8")
+
+    async def run() -> None:
+        await store.checkpoint(
+            conversation_id="c1",
+            message_id="m1",
+            content="should not land",
+        )
+
+    _drive(run())  # must not raise into the turn
+    assert any(e[0] == "sidecar.outbox_read_failed" for e in errors)
+    assert any(e[0] == "sidecar.outbox_write_failed" for e in errors)
+    assert any(w[0] == "sidecar.outbox_read_retry" for w in warnings)
+    # On-disk bytes unchanged — no silent wipe / empty-shell overwrite.
+    assert path.read_text(encoding="utf-8") == "{not-json"
+
+
+def test_mutate_recovers_after_transient_read_failure(tmp_path, monkeypatch):
+    """BUG-3: short read retry can recover without aborting the write."""
+    import agentcore.conversation.store.outbox as outbox_mod
+
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="t" * 32,
+    )
+    path = tmp_path / "outbox" / "u1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "user_message_id": "u1",
+                "conversation_id": "c1",
+                "message_id": "m1",
+                "user_message": "hi",
+                "content": "old",
+                "phase": PHASE_OPEN,
+                "ops": ["begin_turn"],
+                "journal": {},
+                "stream_segments": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    calls = {"n": 0}
+    real_read = OutboxStore._read_sync
+
+    def flaky(self, user_message_id: str):  # noqa: ANN001
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise outbox_mod.OutboxReadError("transient")
+        return real_read(self, user_message_id)
+
+    monkeypatch.setattr(OutboxStore, "_read_sync", flaky)
+    monkeypatch.setattr(outbox_mod, "_READ_RETRY_DELAYS_S", (0.0, 0.0, 0.0))
+
+    async def run() -> None:
+        await store.checkpoint(
+            conversation_id="c1",
+            message_id="m1",
+            content="recovered",
+        )
+
+    _drive(run())
+    assert calls["n"] == 2
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["content"] == "recovered"
+    assert record["user_message"] == "hi"
+
+
+def test_finalize_explicit_empty_user_message_clears(tmp_path):
+    """BUG-2: explicit ``user_message=""`` must clear, not be swallowed by ``or``."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="prior text",
+        message_id="m1",
+        trace_id="e" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="e" * 32)
+        await store.finalize(
+            mode="local",
+            conversation_id="c1",
+            user_message="",
+            user_message_id="u1",
+            assistant_content="ok",
+            message_id="m1",
+            trace_id="e" * 32,
+            finish_reason="stop",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["user_message"] == ""
+    assert record["phase"] == PHASE_READY
+    body = to_record_turn_body(record)
+    assert body["user_message"] == ""
+
+
+def test_finalize_omitted_user_message_keeps_prior(tmp_path):
+    """BUG-2: key absent from kwargs keeps the on-disk user_message."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="keep prior",
+        message_id="m1",
+        trace_id="k" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="k" * 32)
+        await store.finalize(
+            mode="local",
+            conversation_id="c1",
+            # user_message intentionally omitted
+            user_message_id="u1",
+            assistant_content="ok",
+            message_id="m1",
+            trace_id="k" * 32,
+            finish_reason="stop",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["user_message"] == "keep prior"
+

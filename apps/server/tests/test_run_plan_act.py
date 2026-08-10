@@ -58,6 +58,42 @@ def test_delegate_plan_event_emits_act_1_multi_agent():
     assert ev.payload["act"] == {"act_id": "act-1", "kind": "multi_agent"}
 
 
+def test_delegate_plan_event_injects_captain_on_first_dispatch():
+    plan = RunPlan(nodes=[RunSpec(run_id="r1", task="调研", role="研究员")])
+    ev = plan_event(_StubDelegate(), "e1", plan)
+    runs = ev.payload["runs"]
+    assert runs[0]["kind"] == "captain"
+    assert runs[0]["id"] == "cap-1"
+    assert ev.payload["agents"][0]["role"] == "CEO"
+
+
+def test_delegate_plan_event_skips_turn_captain_when_host_message_id_without_host_cap():
+    plan = RunPlan(nodes=[RunSpec(run_id="r1", task="调研", role="研究员")])
+    ev = plan_event(_StubDelegate(), "e1", plan, host_message_id="m-host")
+    runs = ev.payload["runs"]
+    assert not any(r.get("kind") == "captain" for r in runs)
+    assert not any(a.get("role") == "CEO" for a in ev.payload["agents"])
+    assert runs[0]["id"] == "r1"
+
+
+def test_delegate_plan_event_reemits_host_captain_on_append_merge():
+    plan = RunPlan(nodes=[RunSpec(run_id="r1", task="调研", role="研究员")])
+    ev = plan_event(
+        _StubDelegate(),
+        "e1",
+        plan,
+        host_message_id="m-host",
+        host_captain_run_id="host-cap",
+    )
+    runs = ev.payload["runs"]
+    caps = [r for r in runs if r.get("kind") == "captain"]
+    assert len(caps) == 1
+    assert caps[0]["id"] == "host-cap"
+    assert caps[0]["id"] != "cap-1"
+    assert ev.payload["agents"][0]["role"] == "CEO"
+    assert ev.payload["agents"][0]["id"] == "host-cap"
+
+
 def test_debate_moderator_plan_event_emits_act_1_debate():
     cfg = SimpleNamespace(form="oxford", motion="是否应采用方案 A")
     ev = moderator_plan_event(_StubDebate(), "e1", "mod-1", cfg)  # type: ignore[arg-type]

@@ -80,8 +80,8 @@ async def assemble_ceo_turn(
     # voice (D3 / 决策①: per-worker detail is shown separately in the UI).
     # Workers get the full production ``worker_tools`` plus, for any worker with
     # ``depth < MAX_DELEGATION_DEPTH``, ``delegate``+``replan`` (delegation is on by
-    # default within the depth cap — worker captains may nest one sub-team; depth-2
-    # sub-workers are leaves; per-captain fan-out capped at ``MAX_WORKER_SUBDELEGATIONS``).
+    # default within the depth cap — worker captains may nest; workers at the cap
+    # are leaves; per-captain fan-out capped at ``MAX_WORKER_SUBDELEGATIONS``).
     # Approval gate (one per turn so an "allow for the rest of this turn" grant
     # is scoped to this message and does not leak across turns). It is wired into
     # the CEO's loop, but with the coordinator boundary the CEO holds no
@@ -156,6 +156,7 @@ async def assemble_ceo_turn(
         conversation_history_access=conversation_history_access,
         folder_id=folder_id,
         has_memory_topics=bool(prepared.memory_topics),
+        has_on_demand_rules=bool(prepared.on_demand_rules),
         permission_axes=permission_axes,
         # Same live-user gate as ask_user itself, plus desktop-only: web/mobile omit.
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
@@ -259,6 +260,7 @@ async def assemble_ceo_turn(
         skill_registry=prepared.skill_registry,
         ceo_tool_names=ceo_tool_names,
         memory_topics=prepared.memory_topics,
+        on_demand_rules=prepared.on_demand_rules,
         cold_start_explore=explore_reason or False,
         project_nav_stale=project_nav_stale,
         project_profile_empty_soft=project_profile_empty_soft,
@@ -278,6 +280,15 @@ async def assemble_ceo_turn(
     from agentcore.runtime.delegate.graph_append import build_recent_graph_context
 
     recent_graph_context = await build_recent_graph_context(
+        conversation_id=conversation_id,
+        exclude_message_id=message_id,
+    )
+    # 跨轮空委派/无产出：上轮 journal 结构化指纹 → 一次性再派软提示（不扫用户「继续」原文）。
+    from agentcore.runtime.delegate.redispatch_hint import (
+        build_prior_failure_redispatch_hint,
+    )
+
+    prior_delegate_retry = await build_prior_failure_redispatch_hint(
         conversation_id=conversation_id,
         exclude_message_id=message_id,
     )
@@ -304,6 +315,11 @@ async def assemble_ceo_turn(
             "recent_team_graph",
             recent_graph_context,
             SectionOrder.RECENT_TEAM_GRAPH,
+        )
+        .add(
+            "prior_delegate_retry",
+            prior_delegate_retry,
+            SectionOrder.PRIOR_DELEGATE_RETRY,
         )
         .add(
             "attachment_context",

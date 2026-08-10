@@ -1,4 +1,7 @@
+import { isColdPendingDrawable } from "@/services/resume";
 import type { PlanReviewDisplay } from "@/stores/conversation";
+import { useConversationStore } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 import { PendingDecisionMarker } from "./PendingDecisionMarker";
 
 /**
@@ -14,7 +17,19 @@ import { PendingDecisionMarker } from "./PendingDecisionMarker";
  * (ResumePrompt). resolved 不再占时间线一行；放行/调整结论收进协作图对应 worker 节点 face 徽标。
  */
 export function PlanReviewCard({ review }: { review: PlanReviewDisplay }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const entryMessageId = useInteractionStore(
+    (s) => s.byId.get(review.id)?.messageId,
+  );
   if (review.status === "resolved") {
+    return null;
+  }
+  // Honesty: same drawable gate as ResumePrompt / selectVisibleColdResumes.
+  if (
+    conversationId &&
+    entryMessageId !== undefined &&
+    !isColdPendingDrawable(conversationId, entryMessageId)
+  ) {
     return null;
   }
   return <PendingDecisionMarker label="等你确认 · 计划复核 · 确认后才会继续" />;

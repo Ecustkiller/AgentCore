@@ -35,7 +35,7 @@ from agentcore.memory.store import (
     NAVIGATION_MEMORY_FILE,
     MemoryStore,
 )
-from agentcore.memory.user_memory import strip_memory_chrome
+from agentcore.memory.user_memory import strip_memory_chrome, topic_summary_line
 
 logger = get_logger(__name__)
 
@@ -496,3 +496,130 @@ async def assemble_turn_rules(
     if enabled:
         fragments.extend(await _memory_fragments(store, user_id, folder_id=folder_id))
     return compose_injected_rules(fragments, max_docs=max_docs, max_chars=max_chars)
+
+
+# --- on-demand user rules (规则目录 + consult_rule; NOT memory topics) ----------------------
+
+
+@dataclass(frozen=True)
+class OnDemandUserRule:
+    """One entry in the「规则目录」: consult name + optional one-line summary.
+
+    Separate from :class:`~agentcore.memory.injection.MemoryTopic` — on_demand rules are
+    constraint appendices (应遵守); topics are thick facts (供查阅). Do not merge the two.
+    """
+
+    name: str
+    summary: str = ""
+
+
+def rule_consult_name(doc_name: str) -> str:
+    """Normalize a rule document filename to the name models pass to ``consult_rule``."""
+    return doc_name.removesuffix(".md").strip()
+
+
+async def _scope_on_demand_user_rules(
+    repo: DocumentRepository, user_id: str, folder_id: str | None
+) -> list[tuple[str, str]]:
+    """``(consult_name, summary)`` pairs for one scope's on_demand user rules."""
+    out: list[tuple[str, str]] = []
+    for doc in await repo.list_on_demand_user_rules(user_id, folder_id):
+        name = rule_consult_name(doc.name)
+        if not name:
+            continue
+        out.append((name, topic_summary_line(doc.content or "")))
+    return out
+
+
+def _iter_cloud_rule_docs(
+    payload: Mapping[str, object], key: str
+) -> list[Mapping[str, object]]:
+    """Normalize ``payload[key]`` to a list of mapping docs (skip junk)."""
+    raw = payload.get(key) or []
+    if not isinstance(raw, list):
+        return []
+    return [doc for doc in raw if isinstance(doc, Mapping)]
+
+
+def on_demand_user_rules_from_cloud(
+    payload: Mapping[str, object], *, folder_id: str | None
+) -> list[OnDemandUserRule]:
+    """Map account ``/rules/list`` on_demand fields into the「规则目录」entries.
+
+    Merge matches the local-DB path: global first, then project via ``setdefault``
+    (global summary wins on name collision). Older clouds omitting the keys → [].
+    """
+    summaries: dict[str, str] = {}
+    for doc in _iter_cloud_rule_docs(payload, "global_on_demand_rules"):
+        name = rule_consult_name(str(doc.get("name") or ""))
+        if not name:
+            continue
+        summaries.setdefault(name, topic_summary_line(str(doc.get("content") or "")))
+    if folder_id:
+        for doc in _iter_cloud_rule_docs(payload, "project_on_demand_rules"):
+            name = rule_consult_name(str(doc.get("name") or ""))
+            if not name:
+                continue
+            summaries.setdefault(name, topic_summary_line(str(doc.get("content") or "")))
+    return [
+        OnDemandUserRule(name=name, summary=summaries[name]) for name in sorted(summaries)
+    ]
+
+
+def lookup_on_demand_rule_body_from_cloud(
+    payload: Mapping[str, object], *, folder_id: str | None, name: str
+) -> str | None:
+    """Project-then-global body lookup on a ``/rules/list`` payload (consult_rule)."""
+    key = rule_consult_name(name)
+    if not key:
+        return None
+
+    def _body_in(scope_key: str) -> str | None:
+        for doc in _iter_cloud_rule_docs(payload, scope_key):
+            if rule_consult_name(str(doc.get("name") or "")) != key:
+                continue
+            body = str(doc.get("content") or "")
+            return body if body.strip() else None
+        return None
+
+    if folder_id:
+        hit = _body_in("project_on_demand_rules")
+        if hit is not None:
+            return hit
+    return _body_in("global_on_demand_rules")
+
+
+async def load_on_demand_user_rules(
+    user_id: str, *, folder_id: str | None
+) -> list[OnDemandUserRule]:
+    """Merge global + project on_demand user rules for the「规则目录」(or []).
+
+    Degrades to [] on any error (same defensive posture as always-rule loading).
+    Account-cloud turns use ``POST …/account/rules/list`` on_demand fields (same
+    ticket as always rules); local / server turns read the document session.
+    """
+    from agentcore.account.credentials import cloud_list_user_rules, get_account_credentials
+    from agentcore.db.base import async_session_factory
+
+    try:
+        creds = get_account_credentials()
+        if creds is not None:
+            payload = await cloud_list_user_rules(creds, folder_id=folder_id)
+            return on_demand_user_rules_from_cloud(payload, folder_id=folder_id)
+        async with async_session_factory() as session:
+            repo = DocumentRepository(session)
+            summaries: dict[str, str] = {}
+            for name, summary in await _scope_on_demand_user_rules(repo, user_id, None):
+                summaries.setdefault(name, summary)
+            if folder_id:
+                for name, summary in await _scope_on_demand_user_rules(
+                    repo, user_id, folder_id
+                ):
+                    summaries.setdefault(name, summary)
+            return [
+                OnDemandUserRule(name=name, summary=summaries[name])
+                for name in sorted(summaries)
+            ]
+    except Exception as e:  # noqa: BLE001 - must never break turn assembly
+        logger.warning("memory.on_demand_rules_load_failed", user_id=user_id, error=str(e))
+        return []

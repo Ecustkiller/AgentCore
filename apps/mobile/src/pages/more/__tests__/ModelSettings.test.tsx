@@ -102,12 +102,17 @@ const CATALOG: ModelCatalog = {
   ],
 };
 
+/** Per-test catalog override (null → default CATALOG). Hoisted for vi.mock. */
+const catalogState = vi.hoisted(() => ({
+  override: null as ModelCatalog | null,
+}));
+
 vi.mock("@/api/models", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/models")>();
   return {
     ...actual,
     useModels: () => ({
-      data: CATALOG,
+      data: catalogState.override ?? CATALOG,
       loading: false,
       error: null,
       refetch: vi.fn(),
@@ -187,12 +192,19 @@ function stubProfiles(data: LlmModelProfileView[], defaultId?: string | null) {
 
 afterEach(cleanup);
 beforeEach(() => {
+  catalogState.override = null;
   mockList.mockReset();
   mockListProfiles.mockReset();
   mockSetDefault.mockReset();
   mockCreateProfile.mockReset();
   mockUpdateProfile.mockReset();
 });
+
+/** Open「高级 · 分槽覆盖」so Worker / 后台 / 识图 controls are mounted. */
+function openAdvancedSlots() {
+  fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
+  expect(screen.getByText("Worker 模型")).toBeTruthy();
+}
 
 describe("ModelSettings (profiles + providers)", () => {
   it("renders provider cards and the model-profiles section", async () => {
@@ -206,6 +218,7 @@ describe("ModelSettings (profiles + providers)", () => {
     expect(screen.queryByText("模型 deepseek-v4-pro")).toBeNull();
     expect(screen.getAllByTestId("provider-card")).toHaveLength(2);
     expect(screen.getByTestId("profiles-section")).toBeTruthy();
+    expect(screen.getByText(/多人协作（委派）对工具调用要求较高/)).toBeTruthy();
     expect(screen.getByText("GLM-5.2")).toBeTruthy();
     expect(screen.getByText("写作强档")).toBeTruthy();
     expect(screen.getByText("账号默认")).toBeTruthy();
@@ -250,6 +263,36 @@ describe("ModelSettings (profiles + providers)", () => {
     await waitFor(() =>
       expect(mockSetDefault).toHaveBeenCalledWith(USER_PROFILE.id),
     );
+  });
+
+  it("opens the new-profile form with optional slots collapsed under 高级", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+
+    await screen.findByTestId("profile-form");
+    expect(screen.getByText("主模型（必填）")).toBeTruthy();
+    expect(screen.getByText("高级 · 分槽覆盖")).toBeTruthy();
+    expect(
+      screen.getByText("Worker/后台：跟随主模型 · 识图：不配置"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Worker 模型")).toBeNull();
+    expect(screen.queryByText("后台任务模型")).toBeNull();
+    expect(screen.queryByText("识图模型（可选）")).toBeNull();
+
+    openAdvancedSlots();
+    expect(screen.getByText("Worker 模型")).toBeTruthy();
+    expect(screen.getByText("后台任务模型")).toBeTruthy();
+    expect(screen.getByText("识图模型（可选）")).toBeTruthy();
+    expect(screen.getAllByText("跟随主模型").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("不配置")).toBeTruthy();
+    expect(screen.getByText(/辩论用主模型/)).toBeTruthy();
+    expect(screen.getByText(/标题、记忆等后台任务/)).toBeTruthy();
+    expect(screen.getByText(/主模型不能看图时再配/)).toBeTruthy();
+    expect(screen.queryByText(/VISION_/)).toBeNull();
   });
 
   it("opens the new-profile form and creates a combination", async () => {
@@ -313,11 +356,9 @@ describe("ModelSettings (profiles + providers)", () => {
       target: { value: "deepseek-v4-pro" },
     });
 
-    expect(screen.getByText(/主模型目录标有视觉时，贴图走主模型/)).toBeTruthy();
-    expect(
-      screen.getByText(/留空=平台 VISION_\* 兜底或无 reader/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/当前主模型目录标有视觉/)).toBeNull();
+    openAdvancedSlots();
+    expect(screen.getByText(/主模型不能看图时再配/)).toBeTruthy();
+    expect(screen.queryByText(/当前主模型标有视觉/)).toBeNull();
 
     // 识图槽始终可见 combobox；切到 OpenAI 后 datalist 仅含 vision 目录项
     fireEvent.change(screen.getByTestId("profile-vision-provider"), {
@@ -338,7 +379,7 @@ describe("ModelSettings (profiles + providers)", () => {
       target: { value: "gpt-4o" },
     });
     expect(
-      screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
+      screen.getByText(/当前主模型标有视觉，贴图优先走主模型/),
     ).toBeTruthy();
     // 切回无视觉主模型后再选识图槽，避免把主模型 vision 能力混进 create body
     fireEvent.change(screen.getByTestId("profile-main-provider"), {
@@ -376,6 +417,33 @@ describe("ModelSettings (profiles + providers)", () => {
     );
   });
 
+  it("auto-expands 高级 when editing a profile with slot overrides", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, USER_PROFILE], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`profile-card-${USER_PROFILE.id}`),
+      ).toBeTruthy(),
+    );
+    const card = screen.getByTestId(`profile-card-${USER_PROFILE.id}`);
+    fireEvent.click(
+      card.querySelector("button.btn-outline") as HTMLButtonElement,
+    );
+
+    await screen.findByTestId("profile-form");
+    const advanced = screen.getByTestId("profile-advanced");
+    expect(advanced.querySelector('[aria-expanded="true"]')).toBeTruthy();
+    expect(screen.getByText("Worker 模型")).toBeTruthy();
+    expect(
+      (screen.getByTestId("profile-worker-model") as HTMLInputElement).value,
+    ).toBe("gpt-4o");
+    expect(
+      screen.queryByText("Worker：gpt-4o · 后台：跟随主模型 · 识图：不配置"),
+    ).toBeNull();
+  });
+
   it("clears vision on edit when set to 不配置", async () => {
     const withVision: LlmModelProfileView = {
       ...USER_PROFILE,
@@ -398,6 +466,7 @@ describe("ModelSettings (profiles + providers)", () => {
       card.querySelector("button.btn-outline") as HTMLButtonElement,
     );
 
+    // 有 vision 覆盖 → 高级默认展开
     await screen.findByTestId("profile-vision-combobox");
     expect(
       (screen.getByTestId("profile-vision-provider") as HTMLSelectElement)
@@ -415,6 +484,54 @@ describe("ModelSettings (profiles + providers)", () => {
         expect.objectContaining({ vision: null }),
       ),
     );
+  });
+
+  it("when BYOK exists but catalog empty, freeform stays available and advanced slots stay enabled", async () => {
+    catalogState.override = {
+      byok_configured: true,
+      current: {
+        id: "orphan-model",
+        origin: "byok",
+        provider_id: "gone-provider",
+      },
+      models: [],
+    };
+    mockList.mockResolvedValue(
+      makeProviders({
+        providers: [
+          {
+            id: "prov-deepseek",
+            label: "DeepSeek",
+            base_url: "https://api.deepseek.com",
+            default_model: "",
+            status: "active",
+            masked_key: "sk-…abcd",
+            supports_tools: true,
+          },
+        ],
+        platform_available: false,
+        platform_model: null,
+      }),
+    );
+    stubProfiles([]);
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+    await screen.findByTestId("profile-form");
+    expect(screen.getByTestId("profile-main-combobox")).toBeTruthy();
+    expect(screen.queryByText(/暂无可用模型/)).toBeNull();
+    openAdvancedSlots();
+    expect(
+      (screen.getByTestId("profile-worker-model") as HTMLInputElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByTestId("profile-background-model") as HTMLInputElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByTestId("profile-vision-model") as HTMLInputElement).disabled,
+    ).toBe(false);
   });
 
   it("saves a hand-filled custom BYOK model id without 自定义… hop", async () => {

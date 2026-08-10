@@ -11,6 +11,7 @@ from typing import Any
 
 from .types import (
     LANDING_TOOLS,
+    MEMORY_TOOLS,
     ORCHESTRATION_TOOLS,
     PATH_SEGMENT_FORCE_TOOLS,
     CircuitBreak,
@@ -28,6 +29,11 @@ class ToolCircuitBreakerMixin:
     _tool_liveness_last: dict[str, bool]
     _workspace_channel_dead: bool
     _tool_warned: set[str]
+
+    @property
+    def workspace_channel_dead(self) -> bool:
+        """Sticky latch: local workspace channel died this run (landing retired)."""
+        return self._workspace_channel_dead
     _tool_disabled: set[str]
     _tool_segmented_forced: set[str]
     _tool_parse_kept: set[str]
@@ -53,9 +59,9 @@ class ToolCircuitBreakerMixin:
         then pens are disabled with the rest of the workspace IO family. Otherwise
         hitting the disable threshold yields ``force_segmented`` instead (keep the
         pen, force skeleton + section writes). Orchestration tools (``ORCHESTRATION_TOOLS``)
-        are never disabled on **parse-only** failures either (keep the dispatcher;
-        typed JSON-format steer). Non-landing tools (e.g. ``read_url`` via
-        ``retire_tools``) still disable normally.
+        and memory tools (``MEMORY_TOOLS``) are never disabled on **parse-only**
+        failures either (keep the dispatcher / remember; typed JSON-format steer).
+        Non-landing tools (e.g. ``read_url`` via ``retire_tools``) still disable normally.
 
         Same-path consecutive classified write rejects (prose-append / code integrity
         / severe_shrink) also enter ``force_segmented`` via the same latch — early
@@ -89,6 +95,13 @@ class ToolCircuitBreakerMixin:
                     continue
                 if name in ORCHESTRATION_TOOLS and parse_only_tool:
                     # Keep delegate/ask_user available; one-shot format steer via warn path.
+                    self._tool_parse_kept.add(name)
+                    if name not in self._tool_warned:
+                        self._tool_warned.add(name)
+                        newly_warned.append(name)
+                    continue
+                if name in MEMORY_TOOLS and parse_only_tool:
+                    # Keep remember available; memory-facing format steer via warn path.
                     self._tool_parse_kept.add(name)
                     if name not in self._tool_warned:
                         self._tool_warned.add(name)

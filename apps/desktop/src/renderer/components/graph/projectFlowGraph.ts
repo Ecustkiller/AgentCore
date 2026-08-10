@@ -38,6 +38,7 @@ import {
   isDebateFoldedBeatRun,
   pickDebateCrossExamActivateId,
   resolveHandoff,
+  workerRunsOf,
 } from "./helpers";
 import type { GraphScene } from "./scene";
 
@@ -201,7 +202,7 @@ export function projectFlowNodes({
 }: FlowGraphProjectionInput): Node[] {
   const placed = (id: string) => positions[id];
 
-  const workerRuns = execution.runs.filter((r) => r.id !== captainRun?.id);
+  const workerRuns = workerRunsOf(execution.runs);
   const workerIdSet = new Set(workerRuns.map((r) => r.id));
   // Structural conclusions come from the scene — never re-derived here.
   const foldInfo = scene.fold;

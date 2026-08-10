@@ -350,6 +350,7 @@ def test_checkpoint_after_yields_plan_preview_half():
 
 def test_debate_kickoff_summary_shape():
     from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
+    from agentcore.runtime.debate.models import allocate_debate_run_ids
 
     config = DebateConfig(
         motion="该不该上四天工作制？",
@@ -369,6 +370,7 @@ def test_debate_kickoff_summary_shape():
         ],
         "thorough": True,
     }
+    allocate_debate_run_ids(config, args)
     summary = debate_kickoff_summary(config, arguments=args)
     assert summary.primitive == "debate"
     assert summary.motion == config.motion
@@ -380,6 +382,11 @@ def test_debate_kickoff_summary_shape():
     assert card["thorough"] is True
     assert summary.headline == "预计 2 方开赛"
     assert card["headline"] == "预计 2 方开赛"
+    assert card["moderator_run_id"] == config.moderator_run_id
+    assert all(s.get("run_id") for s in card["sides"])
+    assert card["sides"][0]["run_id"] == f"{config.moderator_run_id}_pro"
+    assert summary.debate_arguments["moderator_run_id"] == config.moderator_run_id
+    assert summary.debate_arguments["sides"][0]["run_id"] == card["sides"][0]["run_id"]
 
 
 def test_delegate_kickoff_headline_intensity_and_fallback():

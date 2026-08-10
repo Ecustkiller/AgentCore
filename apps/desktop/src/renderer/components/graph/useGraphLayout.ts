@@ -31,6 +31,7 @@ import {
   type SubTeam,
   buildGraphStructure,
   computeGraphFold,
+  resolveCaptainSinkId,
 } from "./helpers";
 import { logLayoutFailure } from "./layoutFailure";
 import { type GraphScene, buildGraphScene } from "./scene";
@@ -93,7 +94,7 @@ function expandedUnitsFromFold(
   runs: Execution["runs"],
   collapsedSubtrees: ReadonlySet<string>,
 ): Set<string> {
-  const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
+  const captainId = resolveCaptainSinkId(runs);
   const foldInfo = computeGraphFold(runs, captainId);
   const expanded = new Set<string>();
   for (const unit of foldInfo.descendants.keys()) {
@@ -313,7 +314,7 @@ export function useGraphLayout(
 
     // 单幕：结构-only ELK（固定 NODE_HEIGHT footprint）。
     const runs = projectedRunsRef.current ?? [];
-    const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
+    const captainId = resolveCaptainSinkId(runs);
     const {
       nodeIds,
       rawEdges,
@@ -454,8 +455,6 @@ export function useMultiTurnLayouts(
           t.execution.runs,
           collapsedSubtrees,
         );
-        const captainId =
-          t.execution.runs.find((r) => r.kind === "captain")?.id ?? null;
         const scene = buildGraphScene(t.execution, {
           inputId: INPUT_ID,
           expandedUnits,
@@ -527,7 +526,7 @@ export function useMultiTurnLayouts(
             nodeIds,
             rawEdges,
             layoutKind as ElkGraphLayout,
-            { source: INPUT_ID, sink: captainId ?? undefined },
+            { source: INPUT_ID, sink: scene.captainId ?? undefined },
             subTeams,
             nodeSpacingForFitMode(fitMode),
             sizeMap,

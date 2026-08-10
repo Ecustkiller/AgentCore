@@ -26,6 +26,17 @@ export const AGENTCORE_ROOT_NAME = "AgentCore";
 /** User-rules directory under the convention root. */
 export const RULES_DIR_NAME = "规则";
 
+/**
+ * User-facing injection mode for rules (§5.4). API also stores `conditional` for
+ * scene rules, but the desktop surface only offers these two (no globs / conditions UI).
+ */
+export type DocumentApplyMode = "always" | "on_demand";
+
+/** Map wire `apply_mode` onto the two-state UI (unknown / conditional → always). */
+export function toApplyMode(raw: string): DocumentApplyMode {
+  return raw === "on_demand" ? "on_demand" : "always";
+}
+
 /** A tree node's metadata (list rows — body omitted so a listing stays light). */
 export interface DocumentNode {
   id: string;
@@ -36,7 +47,7 @@ export interface DocumentNode {
   role: "rule" | "general";
   /** true = AI-maintained memory (not user-settable here); false = a user-owned doc. */
   aiMaintained: boolean;
-  applyMode: string;
+  applyMode: DocumentApplyMode;
   name: string;
 }
 
@@ -76,7 +87,7 @@ const toNode = (w: DocumentNodeWire): DocumentNode => ({
   kind: w.kind === "folder" ? "folder" : "document",
   role: w.role === "rule" ? "rule" : "general",
   aiMaintained: w.ai_maintained,
-  applyMode: w.apply_mode,
+  applyMode: toApplyMode(w.apply_mode),
   name: w.name,
 });
 
@@ -159,8 +170,21 @@ export function createRuleDocument(
       content,
       parent_id: null,
       folder_id: folderId,
+      apply_mode: "always",
     })
     .then(toDetail);
+}
+
+/** Switch a rule's injection mode (`always` ↔ `on_demand`; never `conditional`). */
+export function updateDocumentApplyMode(
+  id: string,
+  applyMode: DocumentApplyMode,
+): Promise<DocumentNode> {
+  return api
+    .patch<DocumentNodeWire>(`/v1/documents/${encodeURIComponent(id)}`, {
+      apply_mode: applyMode,
+    })
+    .then(toNode);
 }
 
 /**

@@ -46,6 +46,7 @@ from .tool_exec_args import (
     with_tool_failed_marker,
 )
 from .tool_exec_citations import apply_round_citation_side_effects
+from .tool_exec_coalesce import _clone_tool_result, _file_read_round_coalesce_key
 from .tool_exec_gates import _check_safety_and_approval_gates
 from .tool_protocol_sanitize import (
     salvage_handoff_raw_arguments,
@@ -54,31 +55,9 @@ from .tool_protocol_sanitize import (
     sanitize_tool_name,
     unwrap_nested_delegate_arguments,
 )
+from .write_args_clear import landed_status_name_rejection
 
 logger = get_logger(__name__)
-
-
-def _file_read_round_coalesce_key(args: dict[str, Any]) -> str | None:
-    """Same-round parallel ``file_read`` coalesce key: normalized path only.
-
-    Offset/limit variants still share one underlying read (fan-out); only full
-    reads bump ``file_read_counts``. Empty path → no coalesce.
-    """
-    if not isinstance(args, dict):
-        return None
-    path = str(args.get("path") or "").strip().replace("\\", "/")
-    return path or None
-
-
-def _clone_tool_result(result: ToolResult, tool_call_id: str) -> ToolResult:
-    """Fan-out copy of a shared ``file_read`` result for a sibling tool_call."""
-    return replace(
-        result,
-        tool_call_id=tool_call_id,
-        citations=list(result.citations) if result.citations else None,
-        metadata=dict(result.metadata) if result.metadata else {},
-        display=dict(result.display) if result.display else None,
-    )
 
 
 async def execute_tools(
@@ -178,7 +157,7 @@ async def execute_tools(
                 raw_args = salvaged
                 fingerprint = fingerprint_tool_call(name, raw_args)
         if parse_exc is not None:
-            model_msg, user_msg = _format_args_parse_error(
+            model_msg, user_msg, parse_class = _format_args_parse_error(
                 name or raw_name, raw_args, parse_exc
             )
             # Honest wire pair: marker args (not ``{}``) + error end — never run the tool.
@@ -204,6 +183,7 @@ async def execute_tools(
                 pos=parse_exc.pos,
                 msg=parse_exc.msg,
                 args_preview=raw_args[:200],
+                parse_class=parse_class,
             )
             logger.info(
                 "tool.execute_end",
@@ -264,6 +244,42 @@ async def execute_tools(
                     "tool",
                     tool_name=name or raw_name or None,
                 )
+            )
+
+        # Legacy write-args projection bait: reject before allowlist/not_found.
+        landed_name_err = landed_status_name_rejection(name or raw_name)
+        if landed_name_err:
+            sink.emit(
+                tool_use_end(
+                    tc.id,
+                    name or raw_name,
+                    success=False,
+                    output=landed_name_err,
+                    run_id=event_run_id,
+                )
+            )
+            logger.info(
+                "tool.execute_end",
+                tool=name or raw_name,
+                status="landed_status_name",
+                duration_ms=0,
+                reason=landed_name_err,
+            )
+            return (
+                _failed_tool_message(tc.id, landed_name_err),
+                None,
+                ToolAttempt(
+                    fingerprint,
+                    name or raw_name,
+                    success=False,
+                    policy_failure=True,
+                    error_summary=landed_name_err,
+                    meta={
+                        "error_class": ERROR_CLASS_VALIDATION,
+                        "permission_kind": "landed_status_name",
+                    },
+                ),
+                [],
             )
 
         if allowed_set is not None and name not in allowed_set:

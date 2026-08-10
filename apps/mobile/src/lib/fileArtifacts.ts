@@ -13,6 +13,7 @@
 // 纯函数、只读运行时态/事件，不碰协议 fold（故不触发 conformance、零持久化）。卡片只把
 // 「文件去哪了」可视化，真相仍以工作区文件树为准。
 
+import { toWorkspaceRelPath } from "@/lib/workspacePath";
 import type {
   DeliveryStatusPayload,
   ProcessStep,
@@ -49,6 +50,11 @@ export interface FileArtifact {
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;
+  /**
+   * 落地 desk（`folder:…` / `conv:…`）。来自 delivery `workspace_id`；
+   * 缺省时打开预览回退会话工作区。
+   */
+  workspaceId?: string;
 }
 
 /**
@@ -108,9 +114,10 @@ function artifactFromTool(
   const op = OP_BY_TOOL[toolName];
   if (!op) return null;
   if (op === "move") {
-    const to = asStr(args.destination);
+    const to = toWorkspaceRelPath(asStr(args.destination));
     if (!to) return null;
-    const from = asStr(args.source);
+    const fromRaw = asStr(args.source);
+    const from = fromRaw ? toWorkspaceRelPath(fromRaw) : "";
     return {
       path: to,
       name: basename(to),
@@ -119,7 +126,7 @@ function artifactFromTool(
       change: changeFromTool(toolName, args, op, from || undefined),
     };
   }
-  const path = asStr(args.path);
+  const path = toWorkspaceRelPath(asStr(args.path));
   if (!path) return null;
   return {
     path,
@@ -158,16 +165,21 @@ export function fileArtifactsFromDeliveryStatus(
   if (!deliveryStatus || !Array.isArray(deliveryStatus.artifacts)) return null;
   const out: FileArtifact[] = [];
   for (const row of deliveryStatus.artifacts) {
-    const path = asStr(row.path).trim();
+    const path = toWorkspaceRelPath(asStr(row.path));
     if (!path) continue;
     const status = row.status;
     if (status !== "accepted" && status !== "rejected") continue;
+    const workspaceId =
+      typeof row.workspace_id === "string" && row.workspace_id.trim()
+        ? row.workspace_id.trim()
+        : undefined;
     out.push({
       path,
       name: basename(path),
       acceptance: status,
       acceptanceReason: row.reason,
       acceptanceDetail: row.detail,
+      ...(workspaceId ? { workspaceId } : {}),
     });
   }
   return dedupe(out);

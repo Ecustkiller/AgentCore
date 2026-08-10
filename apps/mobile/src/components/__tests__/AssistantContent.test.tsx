@@ -6,7 +6,7 @@
  * pin its composition logic — which sub-view it picks per props — with the heavy leaf children
  * (Markdown / DebateView / TeamView) stubbed, so the test targets AssistantContent's own
  * branching (process-timeline vs team/reasoning/content, debate overlay, the inline tool step,
- * citations, and the 收到的上下文 panel that hides the verbatim system prompt per 决策②), not
+ * citations, and captainContext routed into the footer「更多」sheet — including system), not
  * those leaves. The block comment keeps the @vitest-environment directive file-leading.
  */
 
@@ -21,8 +21,44 @@ import type {
   ProcessStep,
 } from "@agentcore/contract-types";
 import type { ProjectedRun } from "@agentcore/protocol-conformance";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/InteractionSheet", () => ({
+  InteractionSheet: ({
+    title,
+    children,
+    onCollapse,
+    footer,
+  }: {
+    title: string;
+    children: React.ReactNode;
+    onCollapse: () => void;
+    footer: React.ReactNode;
+  }) => (
+    <div data-testid="interaction-sheet" data-title={title}>
+      {children}
+      <div>{footer}</div>
+      <button type="button" onClick={onCollapse}>
+        close-mock
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("@/components/Modal", () => ({
+  Modal: ({
+    children,
+    label,
+  }: {
+    children: React.ReactNode;
+    label?: string;
+  }) => (
+    <div data-testid="copy-mode-sheet" data-label={label}>
+      {children}
+    </div>
+  ),
+}));
 
 vi.mock("@/components/Markdown", () => ({
   Markdown: ({
@@ -218,10 +254,10 @@ describe("AssistantContent", () => {
     expect(screen.getByText("待评")).toBeTruthy();
   });
 
-  it("shows 收到的上下文 but hides the verbatim system prompt (决策②)", () => {
+  it("routes 收到的上下文 into footer 更多 (includes system; full length)", () => {
     render(
       <AssistantContent
-        content=""
+        content="答案"
         captainContext={[
           ctxBlock({ channel: "system", body: "SECRET SYSTEM PROMPT" }),
           ctxBlock({
@@ -232,11 +268,36 @@ describe("AssistantContent", () => {
         ]}
       />,
     );
-    // The system block is filtered out, so only 1 段 is counted and shown.
-    expect(screen.getByText("收到的上下文 · 1 段")).toBeTruthy();
+    // No inline collapsible in the bubble body.
+    expect(screen.queryByText("收到的上下文 · 2 段")).toBeNull();
+    fireEvent.click(screen.getByTestId("assistant-footer-more"));
+    expect(screen.getByTestId("received-context-menu-item").textContent).toBe(
+      "收到的上下文 · 2 段",
+    );
+    fireEvent.click(screen.getByTestId("received-context-menu-item"));
+    expect(screen.getByText("系统提示")).toBeTruthy();
+    expect(screen.getByText("SECRET SYSTEM PROMPT")).toBeTruthy();
     expect(screen.getByText("原始请求")).toBeTruthy();
     expect(screen.getByText("做个登录页")).toBeTruthy();
-    expect(screen.queryByText("SECRET SYSTEM PROMPT")).toBeNull();
+  });
+
+  it("hides 收到的上下文 menu entry when captainContext is empty", () => {
+    render(
+      <AssistantContent
+        content="答案"
+        captainContext={[]}
+        usage={{
+          input: 10,
+          output: 5,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 10,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("assistant-footer-more"));
+    expect(screen.queryByTestId("received-context-menu-item")).toBeNull();
+    expect(screen.getByText("用量详情")).toBeTruthy();
   });
 
   it("overlays the debate product when present", () => {
@@ -262,6 +323,27 @@ describe("AssistantContent", () => {
     expect(screen.getByText("Search web")).toBeTruthy();
     expect(screen.getByText("openai 新闻")).toBeTruthy();
     expect(screen.getByText("Done")).toBeTruthy();
+  });
+
+  it("shows wait tool rows and wait-idle reasoning (no view-layer omit)", () => {
+    const process: ProcessStep[] = [
+      { kind: "reasoning", text: "空等队员" },
+      {
+        kind: "tool",
+        id: "w1",
+        tool_name: "wait",
+        arguments: {},
+        result: null,
+        status: "success",
+      },
+      { kind: "content", text: "旁白" },
+    ];
+    render(<AssistantContent content="" process={process} isStreaming />);
+    expect(screen.getByText("wait")).toBeTruthy();
+    expect(screen.getByText("Thought")).toBeTruthy();
+    fireEvent.click(screen.getByText("Thought"));
+    expect(screen.getByText("空等队员")).toBeTruthy();
+    expect(screen.queryByText("Thinking…")).toBeNull();
   });
 
   // Tool execution phase (network search UX)

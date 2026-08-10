@@ -185,7 +185,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   // during prepare/TTFT before the first content frame. A′: kickoff no longer
   // holds folder workspace_lock — 不得静默等锁. Residual write-lock short waits
   // emit ``workspace_lock_wait`` so the bubble shows「等待工作区…」instead of
-  // faking Thinking…. In-flight 同对话排队时 ``turn_queued`` 先到——用户气泡轻态.
+  // faking Thinking…. In-flight 同对话排队时 ``turn_queued`` 先到——仅 QueuedTurnsBar.
   store.createAssistantMessage(conversationId);
 
   const ac = new AbortController();
@@ -195,9 +195,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const primaryToken = claimPrimaryStream(conversationId);
   try {
     traceTurnMilestone(conversationId, "send_start");
-    // 路由（双模式工作区 §一.1）：开关开（默认关；高级显式 on）+ 会话绑定本机本地根 + 无附件 →
-    // 走本地 sidecar；否则云链路（含 unset→默认关的云端过桥）。附件 / agent_mentions 退云。
-    // resolveSidecarRoot 早退不 probe；健康由下方 probe 仅在有 target 时收敛。
+    // 路由（双模式工作区 §7.2）：本机传统默认同侧 sidecar =
+    //   有本地引擎 + 未显式强制关（sidecarPreference!=="off"；unset 不挡）+ 会话绑本机根 + 无附件/点名。
+    // 云链路：纯云会话 / 显式强制关 / 探活失败 / 附件·agent_mentions 退云。勿把 unset→SIDECAR_DEFAULT_ENABLED
+    // 误读成「整段过桥」。resolveSidecarRoot 早退不 probe；健康由下方 probe 仅在有 target 时收敛。
     const sidecarTarget =
       attachments.length === 0 && agentMentions.length === 0
         ? await resolveSidecarRoot(conversationId)
@@ -278,8 +279,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         });
       }
     } else {
-      // 云链路：探活失败 / bad 缓存 / 关开关 / 附件·点名退云 / 纯云会话。
-      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia +（降云时）节流提示。
+      // 云链路：探活失败 / bad 缓存 / 显式强制关 / 附件·点名退云 / 纯云会话。
+      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia（Composer 弱状态）+ 探活/启动失败节流 toast。
       const bridging =
         sidecarTarget !== null ||
         (await resolveConversationLocalTarget(conversationId)) !== null;
@@ -291,8 +292,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         probeHealthy: probe ? probe.healthy : null,
         probeProbed: probe ? probe.probed : null,
       });
-      // Toast：仅高级曾开后的探活/启动失败降级可感知；默认云 / 开关关路径静默
-      // （禁常态 switch_off「本地引擎已关闭…」推回大众面）。
+      // Toast：探活/启动失败降级可感知（节流）；纯云 / 显式强制关（switch_off）静默——
+      // 禁常态「本地引擎已关闭…」恐吓文案。弱状态见 ComposerCloudBridgeHint（非引擎切换器）。
       if (sidecarTarget && probe && !probe.healthy) {
         const toastKey = `${sidecarTarget.rootId}::${sidecarTarget.subpath}`;
         notifyCloudBridge(

@@ -249,6 +249,15 @@ _DEBATE_ARGS = {
 }
 
 
+def _debate_args() -> dict:
+    """Per-call copy: allocate_debate_run_ids mutates arguments (run_id / model sync)."""
+    return {
+        "motion": _DEBATE_ARGS["motion"],
+        "form": _DEBATE_ARGS["form"],
+        "sides": [dict(s) for s in _DEBATE_ARGS["sides"]],
+    }
+
+
 async def test_debate_flag_skips_kickoff_under_cap():
     tool, saved, sink = _debate_tool(deep_research_auto=True, debate_count=0)
 
@@ -262,7 +271,7 @@ async def test_debate_flag_skips_kickoff_under_cap():
         )
 
     tool._run_moderator = _fake_run  # type: ignore[method-assign]
-    result = await tool.execute(_DEBATE_ARGS, tool._base_tool_context)
+    result = await tool.execute(_debate_args(), tool._base_tool_context)
     assert result.effect is not ToolEffect.SUSPEND
     assert saved == []
     assert not any(e.type is EventType.TEAM_PREVIEW_REQUIRED for e in sink._history)
@@ -289,7 +298,7 @@ async def test_debate_flag_restores_kickoff_over_cap():
     fl_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(transcript)
     try:
-        result = await tool.execute(_DEBATE_ARGS, tool._base_tool_context)
+        result = await tool.execute(_debate_args(), tool._base_tool_context)
     finally:
         captain_transcript.reset(ct_token)
         current_fact_log.reset(fl_token)
@@ -314,7 +323,7 @@ async def test_debate_full_trust_still_skips_over_cap():
         )
 
     tool._run_moderator = _fake_run  # type: ignore[method-assign]
-    result = await tool.execute(_DEBATE_ARGS, tool._base_tool_context)
+    result = await tool.execute(_debate_args(), tool._base_tool_context)
     assert result.effect is not ToolEffect.SUSPEND
     assert saved == []
 

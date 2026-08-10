@@ -97,9 +97,13 @@ class TurnTargetDeskHint:
     :class:`ToolContext`. A second distinct id in the same turn clears the default
     so multi-project fan-out still requires explicit ``target_folder_id``. Never
     rewrites conversation ``folder_id``.
+
+    ``auto_cloud_provisioned``: runtime silently created a cloud desk this turn for
+    bare-chat write tasks — at most once; never rewrites conversation ``folder_id``.
     """
 
     folder_id: str | None = None
+    auto_cloud_provisioned: bool = False
     _seen: set[str] = field(default_factory=set, repr=False)
 
     def note_folder(self, folder_id: str | None) -> None:

@@ -11,8 +11,11 @@ import {
   debateRoundActiveBeat,
   debateRoundPhaseLabel,
   debateRoundSettledMark,
+  isCaptainKind,
   isDebateParticipantRun,
   pickDebateCrossExamActivateId,
+  resolveCaptainSinkId,
+  workerRunsOf,
 } from "../helpers";
 import {
   buildGraphScene,
@@ -29,6 +32,23 @@ function run(
 ): GraphRunLike {
   return { id, dependsOn: deps, ...extra };
 }
+
+describe("captain sink helpers", () => {
+  it("resolveCaptainSinkId picks the first plan-order captain", () => {
+    const runs = [
+      { id: "cap", kind: "captain" as const },
+      { id: "w1", kind: "agent" as const },
+      { id: "cap2", kind: "captain" as const },
+    ];
+    expect(resolveCaptainSinkId(runs)).toBe("cap");
+    expect(workerRunsOf(runs).map((r) => r.id)).toEqual(["w1"]);
+    const [cap, worker] = runs;
+    expect(cap).toBeDefined();
+    expect(worker).toBeDefined();
+    expect(isCaptainKind(cap)).toBe(true);
+    expect(isCaptainKind(worker)).toBe(false);
+  });
+});
 
 function minimalExecution(
   runs: GraphRunLike[],
@@ -1040,5 +1060,68 @@ describe("buildGraphStructure · bookend sink edges", () => {
     expect(
       rawEdges.filter((e) => e.source === "__input__").map((e) => e.target),
     ).toEqual(["a"]);
+  });
+
+  it("drops append-turn captains — no fake CEO 子队 / delegate edge", () => {
+    // Cross-turn graph_append leaves an extra kind=captain in runs; parent_run_id
+    // of the new worker points at that captain. Must not render as worker/sub-team.
+    const { nodeIds, rawEdges, subTeams } = buildGraphStructure(
+      [
+        captain(),
+        run("greeter", [], {
+          parentRunId: "captain",
+          delegateBatch: 1,
+        }),
+        {
+          id: "cap_append",
+          dependsOn: [],
+          kind: "captain",
+        },
+        run("newbie", [], {
+          parentRunId: "cap_append",
+          delegateBatch: 2,
+        }),
+      ],
+      "__input__",
+    );
+    expect(nodeIds).not.toContain("cap_append");
+    expect(nodeIds).toEqual(
+      expect.arrayContaining(["greeter", "newbie", "__input__", "captain"]),
+    );
+    // Extra captain must never become a sub-team parent (would paint「CEO 子队」).
+    expect(subTeams).toEqual([]);
+    expect(subTeams.every((st) => st.parentId !== "cap_append")).toBe(true);
+    expect(
+      rawEdges.some(
+        (e) =>
+          e.kind === "delegate" &&
+          (e.source === "cap_append" || e.target === "cap_append"),
+      ),
+    ).toBe(false);
+    expect(sinkTargets(rawEdges).sort()).toEqual(["greeter", "newbie"]);
+    const scene = buildGraphScene({
+      runs: [
+        { id: "captain", kind: "captain", dependsOn: [] },
+        {
+          id: "greeter",
+          dependsOn: [],
+          parentRunId: "captain",
+          delegateBatch: 1,
+        },
+        { id: "cap_append", kind: "captain", dependsOn: [] },
+        {
+          id: "newbie",
+          dependsOn: [],
+          parentRunId: "cap_append",
+          delegateBatch: 2,
+        },
+      ],
+    } as unknown as Execution);
+    expect(scene.captainId).toBe("captain");
+    expect(scene.nodeIds).not.toContain("cap_append");
+    expect(scene.subTeams).toEqual([]);
+    expect(scene.bands.lanes.flatMap((b) => b.memberRunIds)).not.toContain(
+      "cap_append",
+    );
   });
 });

@@ -9,6 +9,7 @@ Covered:
 * an empty reply with no process state persists only the user row (noop);
 * an empty reply with journal/runs still settles the assistant (+ journal);
 * an empty ERROR still settles the assistant row (failed + error_code; content empty);
+* paused/running assistant + empty final settles (no ghost noop);
 * **no cost ledger is ever written**;
 * the user row is pinned to the client-minted id;
 * a retried write-back is an idempotent D7 merge upsert (no early-return abandon);
@@ -282,6 +283,69 @@ async def test_record_local_turn_empty_reply_skips_assistant_and_journal(monkeyp
     assert result["assistant_message_id"] is None
     assert result["noop"] is True
     assert result["title"] == "已有标题"  # echo existing title (D7 merge response)
+
+
+async def test_record_local_turn_paused_then_empty_final_settles(monkeypatch):
+    """BUG-4: paused/running row + empty final must settle, not noop (no ghost)."""
+    events: list = []
+    consolidation = _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        existing_ids={_USER_MSG_ID, "m-pause-empty"},
+        existing_usage={"m-pause-empty": {"status": "running", "paused": True}},
+        existing_content={"m-pause-empty": "partial"},
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-pause-empty",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    assert not any(e[0] == "msg" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    usage = next(e for e in events if e[0] == "usage")
+    assert usage[2]["status"] == "complete"
+    assert "paused" not in usage[2]
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["noop"] is False
+    assert consolidation == ["c1"]
+
+
+async def test_record_local_turn_running_then_empty_final_settles(monkeypatch):
+    """BUG-4: non-paused running row + empty final must settle too."""
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        existing_ids={_USER_MSG_ID, "m-run-empty"},
+        existing_usage={"m-run-empty": {"status": "running"}},
+        existing_content={"m-run-empty": ""},
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-run-empty",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    assert ("upsert", "assistant", "c1") in events
+    usage = next(e for e in events if e[0] == "usage")
+    assert usage[2]["status"] == "complete"
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["noop"] is False
 
 
 async def test_record_local_turn_empty_with_journal_settles(monkeypatch):

@@ -1,6 +1,6 @@
 /**
- * 排队可见条：drain 前展示 FIFO 项，可按项取消（Stop ≠ 取消排队）。
- * 挂在 composer 上方，滚动离开气泡时仍可见。
+ * 排队可见条：drain 前唯一排队 UI（不插主时间线用户泡），可按项取消（Stop ≠ 取消排队）。
+ * 挂在 composer 上方。
  */
 import { cancelQueuedTurn } from "@/api/turn";
 import {
@@ -17,7 +17,7 @@ export function QueuedTurnsBar({
   onCancelFailed,
 }: {
   conversationId: string | null;
-  /** 取消成功 / 404 后：清气泡 + abort 该 mid-flight（由页面收口）。 */
+  /** 取消成功 / 404 后：清条 + abort 该 mid-flight（由页面收口）。 */
   onCancelled: (entry: QueuedTurnEntry, outcome: "cancelled" | "gone") => void;
   onCancelFailed?: (message: string) => void;
 }) {

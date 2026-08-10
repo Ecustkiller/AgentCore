@@ -258,61 +258,6 @@ function timelineNodeKeys(nodes: TimelineNode[]): string[] {
   });
 }
 
-/** CEO 协调空转工具（与桌面 `COORDINATION_IDLE_TOOLS` 对称）。 */
-function isCoordinationIdleTool(toolName: string): boolean {
-  return toolName === "wait";
-}
-
-function isWaitIdleReasoning(steps: ProcessStep[], index: number): boolean {
-  if (steps[index]?.kind !== "reasoning") return false;
-  let i = index + 1;
-  let sawWait = false;
-  while (i < steps.length) {
-    const s = steps[i];
-    if (s.kind === "tool") {
-      if (!isCoordinationIdleTool(s.tool_name)) return false;
-      sawWait = true;
-      i++;
-      continue;
-    }
-    break;
-  }
-  if (sawWait) return true;
-  let j = index - 1;
-  sawWait = false;
-  while (j >= 0) {
-    const s = steps[j];
-    if (s.kind === "tool") {
-      if (!isCoordinationIdleTool(s.tool_name)) return false;
-      sawWait = true;
-      j--;
-      continue;
-    }
-    break;
-  }
-  return sawWait;
-}
-
-/** View-layer omit：隐藏 wait 空转段（S4 Thought 降噪，对称桌面）。 */
-function omitCoordinationIdleSteps(steps: ProcessStep[]): ProcessStep[] {
-  if (steps.length === 0) return steps;
-  let changed = false;
-  const out: ProcessStep[] = [];
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    if (s.kind === "tool" && isCoordinationIdleTool(s.tool_name)) {
-      changed = true;
-      continue;
-    }
-    if (s.kind === "reasoning" && isWaitIdleReasoning(steps, i)) {
-      changed = true;
-      continue;
-    }
-    out.push(s);
-  }
-  return changed ? out : steps;
-}
-
 /** Header summary for a folded tool group: per-category counts in first-seen order
  *  (「Read file 6 · Edit file 2」), or each call's name/query when a single-category run is ≤3. */
 function toolGroupSummary(tools: ToolStepData[]): string {
@@ -488,8 +433,7 @@ export function ProcessTimeline({
   onFill?: (text: string) => void;
   onOpenBrowserLive?: (opts?: { runId?: string }) => void;
 }) {
-  const displayProcess = omitCoordinationIdleSteps(steps);
-  const nodes = groupToolRuns(displayProcess);
+  const nodes = groupToolRuns(steps);
   const nodeKeys = timelineNodeKeys(nodes);
   const { reasoningCount, toolCount } = countProcessStats(nodes);
   const shouldCollapseProcess =
@@ -512,7 +456,8 @@ export function ProcessTimeline({
   const showFallbackAfter =
     !hasContentStep && Boolean(fallbackText) && fallbackBeforeTeamIdx < 0;
 
-  const last = displayProcess[displayProcess.length - 1];
+  // wait 空转后不刷 Thinking 尾迹；下一轮有真实动作再出现。
+  const last = steps[steps.length - 1];
   const showThinkingTail =
     isStreaming &&
     last?.kind === "tool" &&

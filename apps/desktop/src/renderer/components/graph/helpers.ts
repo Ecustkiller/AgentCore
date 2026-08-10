@@ -13,6 +13,29 @@ import { subTeamGroupId } from "./ids";
 
 const PRODUCING_TOOLS = new Set(["file_write", "file_append", "str_replace"]);
 
+/** CEO bookend run (`run_started.kind=captain`) — never a graph worker. */
+export function isCaptainKind(r: { kind?: string | null }): boolean {
+  return r.kind === "captain";
+}
+
+/**
+ * Sink id for「CEO 汇总」bookend. Plan order first captain (stable with historical
+ * `find`). Cross-turn append may leave *extra* captains in `runs` — those must
+ * not become workers /「CEO 子队」parents; only this sink is drawn.
+ */
+export function resolveCaptainSinkId(
+  runs: ReadonlyArray<{ id: string; kind?: string | null }>,
+): string | null {
+  return runs.find((r) => r.kind === "captain")?.id ?? null;
+}
+
+/** Non-captain runs for layout / lanes / sub-teams / status aggregation. */
+export function workerRunsOf<T extends { kind?: string | null }>(
+  runs: ReadonlyArray<T>,
+): T[] {
+  return runs.filter((r) => r.kind !== "captain");
+}
+
 export function deriveCaptainStatus(
   execution: Execution,
   captainId: string,
@@ -28,7 +51,10 @@ export function deriveCaptainStatus(
   // message_end already closed the chat turn; don't keep the CEO sink spinning
   // on a stuck execution.status=running (captain frame drop / hold race).
   if (opts?.turnTerminal) return "completed";
-  const workers = execution.runs.filter((r) => r.id !== captainId);
+  // Exclude *all* captains (not only `captainId`): append-turn captains must not
+  // count as incomplete "workers" and stall the sink on pending.
+  void captainId;
+  const workers = workerRunsOf(execution.runs);
   const allDone =
     workers.length > 0 && workers.every((r) => r.status === "completed");
   return allDone ? "running" : "pending";
@@ -298,7 +324,8 @@ export function debateModeratorId(
   runs: GraphRunLike[],
   captainId: string | null,
 ): string | null {
-  const workers = runs.filter((r) => r.id !== captainId);
+  void captainId;
+  const workers = workerRunsOf(runs);
   const workerIds = new Set(workers.map((r) => r.id));
   const runById = new Map(workers.map((r) => [r.id, r]));
   for (const r of workers) {
@@ -342,7 +369,8 @@ export function computeGraphFold(
   runs: GraphRunLike[],
   captainId: string | null,
 ): GraphFoldInfo {
-  const workers = runs.filter((r) => r.id !== captainId);
+  void captainId;
+  const workers = workerRunsOf(runs);
   const workerIds = new Set(workers.map((r) => r.id));
   const runById = new Map(workers.map((r) => [r.id, r]));
   // 多主持人（多辩论幕）时按辩手 parent 链收集全部 moderator unit。
@@ -461,8 +489,10 @@ export function buildGraphStructure(
   subTeams: SubTeam[];
   foldInfo: GraphFoldInfo;
 } {
-  const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
-  const workerRuns = runs.filter((r) => r.id !== captainId);
+  const captainId = resolveCaptainSinkId(runs);
+  // Drop *every* captain from workers — append turns add fresh captain runs that
+  // must not render as AgentNode「CEO / 排队中」or spawn「CEO 子队」boxes.
+  const workerRuns = workerRunsOf(runs);
   const workerIds = new Set(workerRuns.map((r) => r.id));
   const foldInfo = computeGraphFold(runs, captainId);
   const { folded, unitOf, descendants, debateUnits } = foldInfo;

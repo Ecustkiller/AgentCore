@@ -9,6 +9,7 @@ import time
 from collections.abc import Sequence
 
 from agentcore.memory.injection import MemoryTopic
+from agentcore.memory.rules_injection import OnDemandUserRule
 from agentcore.memory.user_memory import strip_memory_chrome
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.resolve.profile import (
@@ -224,8 +225,9 @@ _CEO_CORE_HINT_TEMPLATE = """
 例：「三种风格可选」若产品是啥未说清 → 可短问；风格名单已给则不必再问。\
 「调研市面三款」未点名品牌 → 短问带默认主流三款，或派时在 task/正文写明自选了谁；禁静默定死。\
 【跨产品规则范式】跨 Cursor↔AgentCore 规则 / 「改成 AgentCore 规则」且**未钉死目标载体** → \
-先 `consult_skill(product_help)`；仍歧义 → `ask_user` 短问（选项含迁入 `AgentCore/规则/` / \
-只解释不动文件 等）且 `questions` 预填 `default`；【禁止】把工作区 `skills/*.json` 当\
+先 `consult_skill(product_help)`；仍歧义 → 至多一次窄 list `.cursor/rules`，仍不清则 \
+`ask_user` 短问（选项含迁入 `AgentCore/规则/` / 只解释不动文件 等）且 `questions` 预填 \
+`default`；【禁止】多轮 list / 通读 `.mdc` 再问；【禁止】把工作区 `skills/*.json` 当\
 「AgentCore 平台规则」默认迁移目标；【禁止】未查/未问就 `delegate` 做 `.mdc`→skill JSON。\
 细则在 skill；【禁止】扫自由文猜意图 / 硬闸。\
 【决策/澄清短问·default】决策或澄清类 `ask_user`（含日程/范围/关键缺口短问，不限三路简报）→ \
@@ -596,6 +598,9 @@ assumptions；其余仍按上方「问还是派·中性」与「规格已齐→�
 `package_install=未装配`（无包装源 allowlist egress/netns）时不能代跑 install→build/test；\
 允许结构自检 + `export_to_local` / 本机命令。【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」。\
 与 Office / 生图 / 零写盘假改分轴——本条只管装包与外环验绿诚实。\
+**【外环验绿对账】**点名「N/N OK / passed / PASS / 全绿」须本回合有**成功**的 `test_run` 或 \
+`terminal` 验证证据；本轮工具卡仅 error → 【禁止】写全绿/PASS，应标「工具卡未通过」或 \
+「曾失败→改命令后通过（附依据）」——与姿势 A 完成话术分轴，只对账工具结果。\
 【演讲/PPT/Office】有 `code_execute` 且用户要真幻灯片/文档 → 交 `.pptx`/`.docx`/`.xlsx`\
 （勿静默只交 `.md`/脚本）。\
 **【Word 图形组织图】**用户要 Word 里可拖拽/真图形对象组织架构图 → **直接拒** + 给替代\
@@ -617,7 +622,9 @@ assumptions；其余仍按上方「问还是派·中性」与「规格已齐→�
 【生图/第三方 Key】无原生生图工具。云端对照「出站网络」行：无任意 HTTPS 出口时【禁止】\
 开场承诺「给我 Key、团队 code_execute 代调外网 API 出图进工作区」；只允许拒接 / 指桌面有出口 / \
 明确「只帮写本机脚本、平台不出图」。任意位置【禁止】把用户粘贴的 API Key 写入工作区明文\
-（含 env）或依赖 tool 回显带出完整 Key——脚本用环境变量占位，用户本机自备。
+（含 env）或依赖 tool 回显带出完整 Key——脚本用环境变量占位，用户本机自备。\
+**【跨会话凭据脱敏】**进度摘要 / handoff / 跨窗续作复述历史时【禁止】回写密码、token、私钥、\
+hostkey、完整 API Key 原文；只写「已识别凭据，请到原会话或密钥处查看」（可保留非敏感：IP/用户名/路径）。
 
 进阶机制（辩论、定向修订、向用户发问、工作纪律等）不常驻——见「能力目录」，按需 `consult_skill(name)`。\
 提问卡 / 常见对比 / 单人落盘 / **规格已齐的建站与跨域合成**：直接做；\
@@ -901,26 +908,44 @@ def render_worker_memory_topic_directory(topics: Sequence[MemoryTopic]) -> str:
     return "\n".join(lines)
 
 
+def render_worker_rule_directory(rules: Sequence[OnDemandUserRule]) -> str:
+    """Worker simplified ``<规则目录>`` (names only; mirrors memory topic worker catalog)."""
+    if not rules:
+        return ""
+    lines = [
+        "<规则目录>",
+        "下列按需用户规则可查阅（`consult_rule(name)` 拉取全文；always 规则已常驻 ``<rules>``）：",
+    ]
+    lines.extend(f"- {r.name}" for r in rules)
+    lines.append("</规则目录>")
+    return "\n".join(lines)
+
+
 def compose_worker_base_prompt(
     shared_base: str,
     *,
     memory_topics: Sequence[MemoryTopic] = (),
     memory_enabled: bool = True,
+    on_demand_rules: Sequence[OnDemandUserRule] = (),
     attachment_context: str | None = None,
 ) -> str:
     """Build the delegated worker's system prompt from the shared base.
 
-    Layers the worker-only simplified 记忆主题目录 when memory is on, then the per-turn
-    attachment block last (缓存友好).     ``shared_base`` is the output of
+    Layers the worker-only simplified 记忆主题目录 / 规则目录 when catalogs are non-empty,
+    then the per-turn attachment block last (缓存友好). ``shared_base`` is the output of
     ``assemble_system_prompt`` — identity, runtime context, core memory.
     """
     memory_block = (
         render_worker_memory_topic_directory(memory_topics) if memory_enabled else ""
     )
+    # Directory↔tool: worker prompt only lists rules when the turn will wire consult_rule
+    # (caller passes the same non-empty catalog used for the wire gate).
+    rules_block = render_worker_rule_directory(on_demand_rules)
     return (
         ContextAssembler()
         .add("shared_base", shared_base, SectionOrder.BASE)
         .add("memory_topics", memory_block, SectionOrder.MEMORY_TOPICS)
+        .add("rule_directory", rules_block, SectionOrder.RULE_DIRECTORY)
         .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
         .render()
     )
@@ -951,12 +976,32 @@ def render_memory_topic_directory(topics: Sequence[MemoryTopic]) -> str:
     return "\n".join(lines)
 
 
+def render_rule_directory(rules: Sequence[OnDemandUserRule]) -> str:
+    """Render the CEO ``<规则目录>`` for on_demand user rules (consult_rule).
+
+    Constraint appendices — not memory topics. Returns "" when empty so the caller
+    appends nothing (directory↔tool: only when ``consult_rule`` is wired this turn).
+    """
+    if not rules:
+        return ""
+    lines = [
+        "<规则目录>",
+        "下列是该用户的「按需用户规则」（仅列规则名＋一行摘要、全文未常驻）；当某条与当前任务"
+        "相关时，先用 `consult_rule(name)` 把该规则全文拉回来再据此遵守（always 用户规则已在"
+        "``<rules>`` 常驻、无需查阅；记忆主题请用 `consult_memory`，勿与本目录混淆）：",
+    ]
+    lines.extend(f"- {r.name}：{r.summary}" if r.summary else f"- {r.name}" for r in rules)
+    lines.append("</规则目录>")
+    return "\n".join(lines)
+
+
 def compose_ceo_chat_prompt(
     base_prompt: str,
     *,
     skill_registry: SkillRegistry,
     ceo_tool_names: set[str],
     memory_topics: Sequence[MemoryTopic] = (),
+    on_demand_rules: Sequence[OnDemandUserRule] = (),
     cold_start_explore: bool | str | None = False,
     project_nav_stale: bool = False,
     project_profile_empty_soft: bool = False,
@@ -1031,6 +1076,13 @@ def compose_ceo_chat_prompt(
             if "consult_memory" in ceo_tool_names
             else "",
             SectionOrder.MEMORY_TOPICS,
+        )
+        .add(
+            "rule_directory",
+            render_rule_directory(on_demand_rules)
+            if "consult_rule" in ceo_tool_names
+            else "",
+            SectionOrder.RULE_DIRECTORY,
         )
         .add("citation", resolve(FRAGMENT_CITATION, CHAT_CITATION_HINT), SectionOrder.CITATION)
         .add(

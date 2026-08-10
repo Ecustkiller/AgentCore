@@ -78,6 +78,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
         (k) =>
           k !== "excluded_run_ids" &&
           k !== "write_capability_overrides" &&
+          k !== "model_overrides" &&
           k !== "userId",
       ),
     ]);
@@ -104,6 +105,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
           k !== "browserBridge" &&
           k !== "excluded_run_ids" &&
           k !== "write_capability_overrides" &&
+          k !== "model_overrides" &&
           k !== "userId",
       ),
     ]);

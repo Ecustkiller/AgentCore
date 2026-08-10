@@ -182,7 +182,11 @@ async def cloud_list_user_rules(
     *,
     folder_id: str | None,
 ) -> dict[str, Any]:
-    """POST ``…/account/rules/list`` → ``{global_rules, project_rules}``."""
+    """POST ``…/account/rules/list`` → always + on_demand rule docs.
+
+    Shape: ``{global_rules, project_rules, global_on_demand_rules, project_on_demand_rules}``
+    (on_demand keys may be absent on older clouds — treat as empty).
+    """
     return await _post_json(
         creds,
         path="/rules/list",

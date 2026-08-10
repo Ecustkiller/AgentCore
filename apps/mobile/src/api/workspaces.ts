@@ -5,6 +5,7 @@
 // is the mobile camelCase view (mirrors desktop `WorkspaceInfo`).
 import { apiFetch } from "@/api/client";
 import type { DownloadedFile, WorkspaceFileEntry } from "@/api/workspace";
+import { workspaceFileDownloadError } from "@/lib/fileDownloadError";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -59,7 +60,11 @@ export async function downloadWorkspaceFileByWs(
   path: string,
 ): Promise<DownloadedFile> {
   const res = await apiFetch(`${wsBase(wsId)}/files/${encodePath(path)}`);
-  if (!res.ok) throw new Error(`下载文件失败 (${res.status})`);
+  if (!res.ok) {
+    throw new Error(
+      workspaceFileDownloadError(res.status, { scope: "workspace" }),
+    );
+  }
   const blob = await res.blob();
   return {
     blob,

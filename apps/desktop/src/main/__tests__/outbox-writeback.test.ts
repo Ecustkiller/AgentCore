@@ -554,16 +554,30 @@ describe("drainOutbox", () => {
     expect(body.tool_failures).toBeUndefined();
   });
 
-  it("normalizeToolFailureCode maps searxng / egress / other", () => {
+  it("normalizeToolFailureCode maps searxng / egress / declaration / other", () => {
     expect(normalizeToolFailureCode("searxng unreachable")).toBe(
       "searxng_unreachable",
     );
     expect(normalizeToolFailureCode("无法建立连接（出网受限）")).toBe(
       "egress_connect",
     );
+    expect(
+      normalizeToolFailureCode(
+        "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
+      ),
+    ).toBe("declaration_empty");
+    expect(
+      normalizeToolFailureCode("playbook 与 tasks 二选一，不可同时传。…"),
+    ).toBe("declaration_xor");
+    expect(normalizeToolFailureCode("未知 playbook『x』；可用：a。")).toBe(
+      "declaration_unknown",
+    );
     expect(normalizeToolFailureCode("缺少参数")).toBe("other");
     expect(normalizeToolFailureCode("x", "egress_connect")).toBe(
       "egress_connect",
+    );
+    expect(normalizeToolFailureCode("x", "declaration_empty")).toBe(
+      "declaration_empty",
     );
   });
 

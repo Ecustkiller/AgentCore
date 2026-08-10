@@ -66,6 +66,47 @@ export function resolveColdResumeKeyFromHosts(
   return entryMessageId;
 }
 
+/**
+ * Durable host key for cold `*_required` upsert (投影键不断档).
+ *
+ * Never pin pending onto an unsealed client bubble when a stamp exists:
+ * prefer `resumeStamp` → preferred host's stamp → latest stamped host.
+ * Unsealed preferred with no stamp available → `""` (bindEmpty on later
+ * message_start) — keep the no-stamp / no-clickable-card latch.
+ */
+export function resolveColdBindHostId(
+  hosts: ColdResumeHost[],
+  preferredHostId: string,
+  opts?: { resumeStamp?: string | null },
+): string {
+  const resumeStamp = opts?.resumeStamp?.trim();
+  if (resumeStamp) return resumeStamp;
+
+  const preferred = preferredHostId.trim();
+  if (preferred) {
+    const hit = hosts.find(
+      (m) =>
+        m.id === preferred ||
+        (m.serverMessageId != null && m.serverMessageId === preferred),
+    );
+    if (hit) {
+      const sid = hit.serverMessageId?.trim();
+      if (sid) return sid;
+      // Matched an unsealed bubble — do not nail; fall through.
+    } else {
+      // Not in the live host list: treat as durable resume / journal key
+      // (same-turn continue before the host row catches up).
+      return preferred;
+    }
+  }
+
+  for (let i = hosts.length - 1; i >= 0; i--) {
+    const sid = hosts[i]?.serverMessageId?.trim();
+    if (sid) return sid;
+  }
+  return "";
+}
+
 /** Build ResumeCard DTO from a cold Interaction `*_required` payload. */
 export function entryToPausedSummary(
   entry: ColdInteractionEntry,

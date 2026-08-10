@@ -17,6 +17,7 @@ import {
   getDocument,
   listUserRules,
   renameDocument,
+  updateDocumentApplyMode,
   writeDocument,
 } from "@/services/documents";
 
@@ -141,6 +142,7 @@ describe("documents client", () => {
       content: "",
       parent_id: null,
       folder_id: "F1",
+      apply_mode: "always",
     });
   });
 
@@ -173,6 +175,25 @@ describe("documents client", () => {
       name: "改名.md",
     });
     expect(r.name).toBe("改名.md");
+  });
+
+  it("updateDocumentApplyMode patches apply_mode (always|on_demand)", async () => {
+    vi.mocked(api.patch).mockResolvedValue(
+      node({ id: "d1", apply_mode: "on_demand" }),
+    );
+    const r = await updateDocumentApplyMode("d1", "on_demand");
+    expect(api.patch).toHaveBeenCalledWith("/v1/documents/d1", {
+      apply_mode: "on_demand",
+    });
+    expect(r.applyMode).toBe("on_demand");
+  });
+
+  it("maps wire conditional/unknown apply_mode onto always for the UI", async () => {
+    vi.mocked(api.get).mockResolvedValue(
+      node({ id: "d1", apply_mode: "conditional", content: "", version: "v" }),
+    );
+    const doc = await getDocument("d1");
+    expect(doc.applyMode).toBe("always");
   });
 
   it("deleteDocument hits the delete endpoint", async () => {

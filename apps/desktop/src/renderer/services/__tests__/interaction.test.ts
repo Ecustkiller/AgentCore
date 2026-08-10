@@ -1,7 +1,10 @@
 import { api } from "@/services/api";
 import { getActiveSidecarTarget } from "@/services/sidecarRouting";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveInteraction } from "../interaction";
+import {
+  INTERACTION_RESOLVE_TIMEOUT_MS,
+  resolveInteraction,
+} from "../interaction";
 
 vi.mock("@/services/api", () => ({ api: { post: vi.fn() } }));
 vi.mock("@/services/sidecarRouting", () => ({
@@ -36,6 +39,7 @@ describe("resolveInteraction (统一 choke point)", () => {
     expect(post).toHaveBeenCalledWith(
       "/v1/conversations/conv-1/interactions/ix-1",
       { kind: "approval", decision: "approve" },
+      INTERACTION_RESOLVE_TIMEOUT_MS,
     );
   });
 
@@ -54,6 +58,7 @@ describe("resolveInteraction (统一 choke point)", () => {
         use_assumption: false,
         transfer_ownership: false,
       },
+      INTERACTION_RESOLVE_TIMEOUT_MS,
     );
   });
 

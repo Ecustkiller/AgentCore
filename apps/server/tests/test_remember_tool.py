@@ -5,11 +5,34 @@ DB-free here: the schema contract + the pure mutate helpers. The end-to-end writ
 schema in ``tests/integration/test_documents.py``.
 """
 
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
 from agentcore.memory.rules_injection import (
+    UserRuleMutationResult,
     append_user_rule_bullet,
     mutate_user_rule_markdown,
 )
-from agentcore.tools.builtin.remember import RememberTool, build_remember_tool
+from agentcore.tools.builtin.remember import (
+    RememberTool,
+    _is_incomplete_rule_content,
+    build_remember_tool,
+)
+from agentcore.tools.protocol import ToolContext
+
+
+def _ctx() -> ToolContext:
+    return ToolContext(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="local"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c1",
+    )
 
 
 def test_remember_schema_is_static():
@@ -138,3 +161,155 @@ def test_mutate_list_returns_body_without_claiming_write():
     assert listed.changed is False
     assert "用中文" in listed.message
     assert listed.rules_markdown == "- 用中文\n"
+
+
+# --- content integrity gate (add/replace) -------------------------------------
+
+
+def test_incomplete_rule_content_trailing_ellipsis():
+    assert _is_incomplete_rule_content("以后都用中文...")
+    assert _is_incomplete_rule_content("以后都用中文…")
+    assert _is_incomplete_rule_content("以后都用中文……")
+    assert not _is_incomplete_rule_content("以后都用中文回复")
+    assert not _is_incomplete_rule_content("")
+
+
+def test_incomplete_rule_content_mid_omission_marker():
+    # Reuses file_ops.has_omission_marker — same mid-body literals as write path.
+    assert _is_incomplete_rule_content("以后都用中文（略）回复")
+    assert _is_incomplete_rule_content("see ... omitted details")
+    assert _is_incomplete_rule_content("中间省略，已保留首尾")
+
+
+@pytest.mark.anyio
+async def test_remember_rejects_trailing_ellipsis():
+    tool = RememberTool(folder_id=None)
+    for suffix in ("...", "…", "……"):
+        result = await tool.execute({"content": f"用中文{suffix}"}, _ctx())
+        assert result.success is False
+        assert "完整一句" in (result.output or "")
+        assert "省略号" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_rejects_mid_omission_marker():
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute({"content": "用中文（略）别用表格"}, _ctx())
+    assert result.success is False
+    assert "完整一句" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_rejects_replace_incomplete_content():
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute(
+        {"action": "replace", "content": "用中文...", "replaces": "用英文"},
+        _ctx(),
+    )
+    assert result.success is False
+    assert "完整一句" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_empty_content_unchanged():
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute({"content": "   "}, _ctx())
+    assert result.success is False
+    assert result.error == "缺少 content。"
+
+
+@pytest.mark.anyio
+async def test_remember_complete_content_still_writes(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, object] = {}
+
+    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
+        captured["content"] = content
+        captured["action"] = action
+        return UserRuleMutationResult(
+            action=action,
+            changed=True,
+            message="已追加规则：以后都用中文回复",
+            content=content,
+        )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.mutate_user_rule", _fake_mutate
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.async_session_factory",
+        lambda: _FakeSession(),
+    )
+
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute({"content": "以后都用中文回复"}, _ctx())
+    assert result.success is True
+    assert captured["content"] == "以后都用中文回复"
+    assert "已追加" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_forget_trailing_ellipsis_not_gated(monkeypatch: pytest.MonkeyPatch):
+    """forget has no new-body semantics — trailing ellipsis must not block delete."""
+    called = {"ok": False}
+
+    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
+        called["ok"] = True
+        assert action == "forget"
+        assert content == "用中文..."
+        return UserRuleMutationResult(
+            action="forget",
+            changed=True,
+            message="已删除规则：用中文...",
+            content=content,
+            removed=("用中文...",),
+        )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.mutate_user_rule", _fake_mutate
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.async_session_factory",
+        lambda: _FakeSession(),
+    )
+
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute(
+        {"action": "forget", "content": "用中文..."}, _ctx()
+    )
+    assert result.success is True
+    assert called["ok"] is True
+
+
+@pytest.mark.anyio
+async def test_remember_list_unaffected_by_ellipsis_gate(monkeypatch: pytest.MonkeyPatch):
+    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
+        assert action == "list"
+        return UserRuleMutationResult(
+            action="list",
+            changed=False,
+            message="当前用户规则：\n- 用中文\n",
+            markdown="- 用中文\n",
+        )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.mutate_user_rule", _fake_mutate
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.async_session_factory",
+        lambda: _FakeSession(),
+    )
+
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute({"action": "list"}, _ctx())
+    assert result.success is True
+    assert "用中文" in (result.output or "")
+
+
+class _FakeSession:
+    """Minimal async context manager standing in for async_session_factory()."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None

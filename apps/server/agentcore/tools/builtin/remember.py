@@ -27,6 +27,7 @@ from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import DocumentRepository
 from agentcore.memory.rules_injection import UserRuleMutationResult, mutate_user_rule
+from agentcore.tools.builtin.file_ops import has_omission_marker
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_CEO_ONLY,
@@ -36,6 +37,22 @@ from agentcore.tools.registration import (
 )
 
 logger = get_logger(__name__)
+
+# Trailing ellipsis suffixes (check longer first). Distinct from mid-body
+# ``has_omission_marker`` — bare ``...`` / ``…`` / ``……`` at end only.
+_TRAILING_ELLIPSIS_SUFFIXES = ("……", "...", "…")
+_INCOMPLETE_CONTENT_MSG = (
+    "拒绝写入：规则正文不完整。请写完整一句陈述句，勿用省略号收口或中间省略标记。"
+)
+
+
+def _is_incomplete_rule_content(content: str) -> bool:
+    """True when add/replace content looks truncated (mid markers or trailing ellipsis)."""
+    if not content:
+        return False
+    if has_omission_marker(content):
+        return True
+    return any(content.endswith(s) for s in _TRAILING_ELLIPSIS_SUFFIXES)
 
 
 @dataclass
@@ -121,6 +138,15 @@ class RememberTool:
                 success=False,
                 output="缺少 content。",
                 error="缺少 content。",
+            )
+        # Content integrity (add/replace only): reject half-finished rules.
+        # list/forget are unaffected (forget has no "new rule body" semantics).
+        if action in ("add", "replace") and _is_incomplete_rule_content(content):
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output=_INCOMPLETE_CONTENT_MSG,
+                error=_INCOMPLETE_CONTENT_MSG,
             )
         if action == "replace" and not (replaces or "").strip():
             return ToolResult(

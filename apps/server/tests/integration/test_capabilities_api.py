@@ -25,9 +25,11 @@ async def test_capabilities_returns_full_catalog(client):
         assert name in tools
         assert tools[name]["available_to"] == ["ceo"]
     assert "revise" not in tools
-    # consult_memory is wired for CEO and workers when memory is enabled (catalog.py).
+    # consult_memory / consult_rule are wired for CEO and workers when catalogs exist.
     assert "consult_memory" in tools
     assert set(tools["consult_memory"]["available_to"]) == {"ceo", "worker"}
+    assert "consult_rule" in tools
+    assert set(tools["consult_rule"]["available_to"]) == {"ceo", "worker"}
     # …worker-only mutation + execution + escalate (test_run runs project code through
     # the same sandbox chain as code_execute, so it is worker-only, not a CEO read tool)…
     for name in ("file_write", "code_execute", "test_run", "escalate"):

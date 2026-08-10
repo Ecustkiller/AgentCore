@@ -184,10 +184,13 @@ def zero_files_gap_message(*, landing_failure_kind: str | None = None) -> str:
     """
     head = f"{_MEMBER_WAVE_UNDELIVERED}："
     if landing_failure_kind == "channel_dead":
+        # Align with WORKSPACE_CHANNEL_DEAD_RETIRE_STEER: prose/handoff close-out,
+        # not "don't paste to fake landing" (that framing fights dead-channel steer).
         return (
             f"{head}未把产物写入工作区：写盘通道不可用（local workspace channel dead / "
-            "活性挂起），落盘工具已失败——请恢复工作区通道后重试，"
-            "勿改用正文粘贴冒充落盘"
+            "活性挂起），落盘工具已失败——"
+            "请在 handoff 或正文交结论，禁止再尝试落盘；"
+            "可请用户恢复工作区通道后重试"
         )
     if landing_failure_kind == "write_failed":
         from agentcore.runtime.runs.serialize import format_file_landing_tools_slash

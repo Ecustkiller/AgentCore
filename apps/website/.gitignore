@@ -7,3 +7,4 @@ src/lib/download.generated.ts
 
 # 自检截图（scripts/shot-*.mjs 产物）
 .shots/
+shoot-out/

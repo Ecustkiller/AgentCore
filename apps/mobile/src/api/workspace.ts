@@ -4,6 +4,7 @@
 // The mobile browser fetches the whole tree once (recursive) and navigates in memory.
 // Download needs the Bearer header via apiFetch. REST DTOs track OpenAPI.
 import { apiFetch } from "@/api/client";
+import { workspaceFileDownloadError } from "@/lib/fileDownloadError";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -80,7 +81,11 @@ export async function downloadWorkspaceFile(
   const res = await apiFetch(
     `/v1/conversations/${conversationId}/workspace/files/${encoded}`,
   );
-  if (!res.ok) throw new Error(`下载文件失败 (${res.status})`);
+  if (!res.ok) {
+    throw new Error(
+      workspaceFileDownloadError(res.status, { scope: "conversation" }),
+    );
+  }
   const blob = await res.blob();
   return {
     blob,
@@ -90,6 +95,20 @@ export async function downloadWorkspaceFile(
       blob.type ||
       "application/octet-stream",
   };
+}
+
+/** Resolved workspace mode for a conversation (local vs cloud). */
+export type WorkspaceBinding = Schemas["WorkspaceBindingResponse"];
+
+/** Report whether this conversation's files live on a desktop local disk. */
+export async function getWorkspaceBinding(
+  conversationId: string,
+): Promise<WorkspaceBinding> {
+  const res = await apiFetch(
+    `/v1/conversations/${conversationId}/workspace/binding`,
+  );
+  if (!res.ok) throw new Error(`加载工作区绑定失败 (${res.status})`);
+  return (await res.json()) as WorkspaceBinding;
 }
 
 /** Restore the conversation workspace to a snapshot (overwrites current files).

@@ -4,6 +4,7 @@ import {
   blocksStreamOpen,
 } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
+import { sameTurnStampedServerId } from "./helpers";
 
 /**
  * Ensure the streamed conversation's last message is a streaming assistant
@@ -14,14 +15,37 @@ import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
  * the turn's conversation by id so a background turn opens its bubble on its own
  * slice, not whatever conversation is on screen.
  * Only allowed while turnPhase === streaming (停止后迟到事件不得重建气泡).
+ *
+ * Same-turn resume continuity: prefer flipping a paused stamped assistant over
+ * minting a client-only bubble (otherwise cold `*_required` would bind a key
+ * ResumePrompt refuses to paint).
  */
 export function ensureStreamingAssistant(conversationId: string): void {
   if (!allowsStreamingMutations(getTurnPhase(conversationId))) return;
+  const store = useConversationStore.getState();
   const messages = getRuntime(conversationId).messages;
   const last = messages[messages.length - 1];
-  if (!last || last.role !== "assistant" || !last.isStreaming) {
-    useConversationStore.getState().createAssistantMessage(conversationId);
+  if (last?.role === "assistant" && last.isStreaming) return;
+
+  if (last?.role === "assistant" && last.serverMessageId) {
+    if (store.resumePausedAssistant(last.serverMessageId, conversationId)) {
+      return;
+    }
   }
+
+  // Orphan unstamped tail after a same-turn stamped host: resume the host and
+  // inherit its stamp onto the streaming slot rather than minting another UUID.
+  const stamp = sameTurnStampedServerId(conversationId);
+  if (stamp) {
+    if (store.resumePausedAssistant(stamp, conversationId)) {
+      return;
+    }
+    store.createAssistantMessage(conversationId);
+    store.setServerMessageIdOnLastMessage(stamp, conversationId);
+    return;
+  }
+
+  store.createAssistantMessage(conversationId);
 }
 
 type PendingChunk =

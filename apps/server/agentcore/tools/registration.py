@@ -45,6 +45,8 @@ class CeoWire(StrEnum):
 
     ALWAYS = "always"
     MEMORY = "memory"
+    # On-demand user rules catalog non-empty → ``consult_rule`` (independent of memory gate).
+    RULES = "rules"
     CHECKPOINT = "checkpoint"
     BOARD = "board"
     # Advertised in catalog; runtime inject via ``ceo_surface`` (idle/coord gate).
@@ -146,6 +148,7 @@ def _load_declared_tools() -> tuple[type, ...]:
     from agentcore.tools.builtin.code_execute import CodeExecuteTool
     from agentcore.tools.builtin.code_search import CodeSearchTool
     from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+    from agentcore.tools.builtin.consult_rule import ConsultRuleTool
     from agentcore.tools.builtin.consult_skill import ConsultSkillTool
     from agentcore.tools.builtin.debate import DebateTool
     from agentcore.tools.builtin.delegate import DelegateTool
@@ -283,6 +286,7 @@ def _load_declared_tools() -> tuple[type, ...]:
         ListProjectDirTool,
         ReadProjectFileTool,
         ConsultMemoryTool,
+        ConsultRuleTool,
         RememberTool,
         UpdateProjectProfileTool,
         AskUserTool,

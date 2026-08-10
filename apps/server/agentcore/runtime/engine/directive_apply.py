@@ -215,6 +215,7 @@ async def apply_loop_directive(
                 outstanding_tool_failures=controller.outstanding_tool_failures(),
                 files_expected=files_expected,
                 form_prose=form_prose,
+                workspace_channel_dead=controller.workspace_channel_dead,
             )
             if coordination is not None and coordination.kind == "coordination_tools":
                 if coordination.content:

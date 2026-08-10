@@ -1,15 +1,13 @@
 /**
  * 同对话 FIFO 排队项（live · turn_queued；进程内，重启丢）。
  * 对齐桌面 queuedTurns store 行为；手机端自建，不 import 桌面。
- * 出队开跑：SSE ``turn_queue_started`` 清对应项轻态（保留用户气泡）。
+ * 产品语义：排队期仅 QueuedTurnsBar；出队开跑（``turn_queue_started``）再进主时间线用户泡并清条；取消只清条。
  */
 import { useSyncExternalStore } from "react";
 
 export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
-  /** 主时间线乐观用户气泡所在 turn id（取消时移除）。 */
-  turnId: string;
   content: string;
   position: number;
   queueDepth: number;

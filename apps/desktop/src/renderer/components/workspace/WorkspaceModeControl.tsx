@@ -22,18 +22,21 @@ import {
   peekMergeLanding,
   registerMergeLanding,
 } from "@/services/cloudDeskExit";
-import { runHandoff } from "@/services/handoff";
 import {
   type WorkspaceBinding,
   getWorkspaceBinding,
 } from "@/services/workspaceBinding";
+import {
+  useBackgroundTasksStore,
+  useHandoffArmed,
+} from "@/stores/backgroundTasks";
 import { useFoldersStore } from "@/stores/folders";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   Cloud,
+  CloudUpload,
   Download,
   FolderDown,
   FolderInput,
@@ -43,7 +46,6 @@ import {
   MapPin,
   Package,
   Upload,
-  UploadCloud,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -64,11 +66,6 @@ export interface WorkspaceModeState {
   binding: WorkspaceBinding;
   roots: FsRoot[];
   effective: EffectiveWorkspace;
-  busy: boolean;
-  error: string | null;
-  backingUp: boolean;
-  backupDone: boolean;
-  backup: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -79,10 +76,6 @@ export function useWorkspaceModeState(
   const [roots, setRoots] = useState<FsRoot[]>([]);
   const [containerRootId, setContainerRootId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [backingUp, setBackingUp] = useState(false);
-  const [backupDone, setBackupDone] = useState(false);
   // Track which conversation the in-memory binding belongs to. When the id
   // changes, clear synchronously during render so consumers never see the prior
   // session's effective.rootId (composer Git chip flash) before refresh resolves.
@@ -94,7 +87,6 @@ export function useWorkspaceModeState(
     setContainerRootId(null);
     setProjectName(null);
     setRoots([]);
-    setError(null);
   }
 
   // Guard in-flight refresh: a slow getWorkspaceBinding for conv A must not
@@ -147,24 +139,6 @@ export function useWorkspaceModeState(
       window.removeEventListener(WORKSPACE_BINDING_CHANGED, onChanged);
   }, [conversationId, refresh]);
 
-  const backup = async () => {
-    if (!conversationId) return;
-    setBackingUp(true);
-    setError(null);
-    setBackupDone(false);
-    setBusy(true);
-    try {
-      await runHandoff(conversationId);
-      setBackupDone(true);
-      setTimeout(() => setBackupDone(false), 4000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "备份失败，请重试");
-    } finally {
-      setBackingUp(false);
-      setBusy(false);
-    }
-  };
-
   const effective = useMemo(
     () =>
       resolveEffectiveWorkspace({
@@ -182,11 +156,6 @@ export function useWorkspaceModeState(
     binding,
     roots,
     effective,
-    busy,
-    error,
-    backingUp,
-    backupDone,
-    backup,
     refresh,
   };
 }
@@ -222,7 +191,7 @@ export function WorkspaceModeTrigger({
   );
 }
 
-/** Status + local backup; cloud sessions: ZIP/合回出口 + import/Git（无 mode=local create）。 */
+/** Status + local legacy handoff arm; cloud sessions: ZIP/合回出口 + import/Git（无 mode=local create）。 */
 export function WorkspaceModeMenu({
   state,
   conversationId,
@@ -232,19 +201,12 @@ export function WorkspaceModeMenu({
   conversationId?: string;
   onActionDone?: () => void;
 }) {
-  const {
-    effective,
-    busy,
-    error,
-    backingUp,
-    backupDone,
-    backup,
-    roots,
-    refresh,
-  } = state;
+  const { effective, roots, refresh } = state;
   const { isLocal, rootMissing, rootName, viaProject, projectName } = effective;
   const desktop = hasLocalFiles();
   const [exitBusy, setExitBusy] = useState(false);
+  const handoffArmed = useHandoffArmed(conversationId ?? null);
+  const setHandoffArmed = useBackgroundTasksStore((s) => s.setHandoffArmed);
 
   const title = viaProject
     ? projectName
@@ -359,7 +321,7 @@ export function WorkspaceModeMenu({
     useFoldersStore.getState().openConnectGit(wsId);
   };
 
-  const anyBusy = busy || exitBusy;
+  const anyBusy = exitBusy;
 
   return (
     <>
@@ -393,25 +355,27 @@ export function WorkspaceModeMenu({
               onClick={importToCloud}
               disabled={anyBusy}
             />
-            {backingUp ? (
-              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" />
-                备份中…
-              </div>
-            ) : backupDone ? (
-              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-success">
-                <Check size={14} />
-                已备份
-              </div>
-            ) : (
+            {conversationId ? (
               <ModeAction
-                icon={<UploadCloud size={14} />}
-                label="备份到云"
-                hint="快照交接（次要）"
-                onClick={() => void backup()}
+                icon={<CloudUpload size={14} />}
+                label="遗留：先改云拷贝再合回"
+                hint={
+                  handoffArmed
+                    ? "已开：下一条发送走云拷贝，完成后需点一下合回本机"
+                    : "高级：发送后在云拷贝上改，不会直写本机；再点关闭"
+                }
+                onClick={() => {
+                  setHandoffArmed(conversationId, !handoffArmed);
+                }}
                 disabled={anyBusy}
+                pressed={handoffArmed}
+                ariaLabel={
+                  handoffArmed
+                    ? "关闭遗留：先改云拷贝再合回"
+                    : "开启遗留：先改云拷贝再合回"
+                }
               />
-            )}
+            ) : null}
           </>
         ) : isLocal && rootMissing ? (
           <>
@@ -504,15 +468,12 @@ export function WorkspaceModeMenu({
           </p>
         )}
 
-        {(busy && !backingUp) || exitBusy ? (
+        {exitBusy ? (
           <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
             处理中…
           </div>
         ) : null}
-        {error && (
-          <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
-        )}
       </div>
     </>
   );
@@ -524,25 +485,45 @@ function ModeAction({
   hint,
   onClick,
   disabled,
+  pressed,
+  ariaLabel,
 }: {
   icon: ReactNode;
   label: string;
   hint?: string;
   onClick: () => void;
   disabled?: boolean;
+  pressed?: boolean;
+  ariaLabel?: string;
 }) {
   return (
     <Button
       variant="ghost"
       onClick={onClick}
       disabled={disabled}
-      className="h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium"
-      icon={<span className="shrink-0 text-muted-foreground">{icon}</span>}
+      aria-label={ariaLabel}
+      aria-pressed={pressed}
+      className={`h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium ${
+        pressed
+          ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+          : ""
+      }`}
+      icon={
+        <span
+          className={`shrink-0 ${pressed ? "text-primary" : "text-muted-foreground"}`}
+        >
+          {icon}
+        </span>
+      }
     >
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {hint ? (
-          <span className="block truncate text-xs font-normal text-muted-foreground">
+          <span
+            className={`block truncate text-xs font-normal ${
+              pressed ? "text-primary/80" : "text-muted-foreground"
+            }`}
+          >
             {hint}
           </span>
         ) : null}

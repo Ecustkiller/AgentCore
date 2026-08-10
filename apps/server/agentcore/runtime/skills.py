@@ -181,18 +181,26 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 `target_folder_id=`已解析 id → 该 worker **换桌+记忆跟桌**；**不改**本会话 `folder_id`。\
 协作图不改（并行支线即表达）。【禁止】CEO 串行翻两空目录代替两路派工；\
 【禁止】指望只读跨桌工具写盘。
-6. **默认桌（派工未点名）**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名 → 会被拒**（禁默写 scratch）。
-7. **先建后派**：云→`create_project`（同指挥面；只建云）；新产品要本机目录进桌 → **推荐**\
+6. **默认桌（派工未点名）**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名**：\
+纯对话/只读（无写盘 deliverable）→ **可派**（worker 坐会话 scratch、`write_scope=none` 禁写）；\
+写盘任务（`form=files` / `requires_files` / 非空 `artifacts`）→ 裸聊写盘缺桌由**运行时自动建云桌**，\
+【禁止】为过闸先 `create_project` / `ask_user` 建项；\
+多项目 / 已有名册目标 → 须点名 `target_folder_id` 或先 `list`/`resolve`/`ask_user` 再派\
+（歧义才问，禁猜最近）。\
+【禁止】把「必须先建项目」当成唯一过闸路——已有项目列名点名即可；裸聊单目标写盘勿催建。
+7. **先建后派**（仅用户明确要求新建云项目 / 显式多线先建）：云→`create_project`\
+（同指挥面；只建云）；新产品要本机目录进桌 → **推荐**\
 Composer「导入到云 / 连接 Git」后再 `resolve`；\
 本机传统（合法非默认，≠离线）→ 可教 `open_local_project` / `register_local_project` / \
 `bind_local_folder`，勿当默认推荐、勿与云平级主推。\
 与 midtask 分流一致——open/register/bind/mount **不是**跨仓开发捷径。\
+【禁止】为过写盘闸或裸聊缺桌而 create——裸聊写盘缺桌由运行时自动建云桌。\
 **ask 齐且点名新建**（用户已点名多新项目/多线要建）→ **先**把各目标 `create_project` **齐**，\
 **再**同一次 `delegate` 全员带已解析 `target_folder_id`；【禁止】先扇出再补建。\
 **裸聊单目标捷径**：同回合仅一次唯一 `create_project` / `resolve_project` 后，\
 缺省 `delegate` 可省略 `target_folder_id`（运行时继承该桌）；多项目同回合仍须显式点名。
 8. **拒后禁塌缩（窄例外）**：仅裸聊 + 用户已点名多新项目/多线 + 本回合刚被\
-`bare_chat_no_target`（无出生未点名）拒且已补齐目标后的重试 → 恢复先前已声明的同线量级同次扇出；\
+`bare_chat_no_target`（无出生 + 写盘任务未点名）拒且已补齐目标后的重试 → 恢复先前已声明的同线量级同次扇出；\
 **不**覆盖一般「能少则少 / 拿不准先少派」。勿因拒闸把已声明多线塌成单线。
 9. **混部**：云+遗留 local 可同指挥面；多遗留 local 同回合可并行（每目标一桌）；\
 单线无法接通异根时诚实失败该线，勿因一失败拒整锅、勿硬装全成。
@@ -216,11 +224,15 @@ Composer「导入到云 / 连接 Git」后再 `resolve`；\
 默认推荐「先多角度摸清、对话对齐」；次选「写成文档并保存」；可选「先聊暂不派队」。\
 选项只说桌上结果，【禁止】写内部编制（几人几步、学术审校）。\
 用户原话已明示报告/落盘/交文档 → 可直接成文，不必多拦。\
-**代码审计**（找 bug / 安全复查 / 静态审计代码并落盘纪律化报告）→ 【宜】`code_audit`\
-（`playbook_args`：scope 必填；探路后若 ≥2 可独立并行的目录/子系统缝 → 填 `modules`\
-（短名/路径，按自然缝扇出，整仓/多子系统常 4–8，能少则少）→ 并行审计+主管速览；单缝省略 modules；\
-【禁止】指望 playbook 从 scope 自动拆；【禁止】把多目录拼进 scope 字符串冒充多模块；\
-【禁止】套 `research_report` 学术审校环；【禁止】与 `repair_code` 混用——审计只报告，修码另开）。\
+**代码审计**（找 bug / 安全复查 / 静态审计代码并落盘纪律化报告）→ 模板路 / 手写路【二选一】，\
+【禁止】`code_audit`（或其它具名 playbook）与 `tasks` 同时传：\
+①【模板路】只填 `playbook=code_audit` + `playbook_args`（scope 必填；≥2 可独立并行目录/子系统缝 →\
+填 `modules` 短名/路径，按自然缝扇出，整仓/多子系统常 4–8，能少则少 → 并行审计+主管速览；\
+单缝省略 modules）；【禁止】再传 `tasks`。\
+②【手写路】天然两缝且角色自制（如云端引擎员+本地引擎员）→ 只手写 `tasks`\
+（`playbook_id=none` 或省略 playbook）；【禁止】再带 `code_audit`。\
+两路共通：【禁止】指望 playbook 从 scope 自动拆；【禁止】把多目录拼进 scope 字符串冒充多模块；\
+【禁止】套 `research_report` 学术审校环；【禁止】与 `repair_code` 混用——审计只报告，修码另开。\
 **默认 A**：用户说调研/摸清/看 gap/看论文与开源，**未**明示「写成报告/成文/交一篇」→ \
 【宜】`parallel_brief`（topic+少扇出 angles，常 2；【禁止】一上来 `research_report` 三路成文；\
 「论文/开源」当资料源 ≠ 明示成文）。\
@@ -313,6 +325,7 @@ task 正文只给【被审材料的文件路径或引用】+【本官审查焦�
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
 决定，见下「广度调查」。）
 - 嵌套委派（lead 下放）——每个 worker **默认**就能再带一层子队（深度上限内自动开、无需声明）；\
+硬顶 `depth≤3`（合法链 CEO→depth1→depth2→depth3 叶子；depth&lt;3 获 `delegate`+`replan`）。\
 与根侧多节点 DAG **等价合法**（根委派切片诚实路径 B）：根可只派单 lead 交成果级目标·约束·验收；\
 lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `delegate` 补编制再整合（nudge，非硬流程）。\
 豁免可自干：单文件 / 已钉薄壳 / 小修·finalize；整里程碑 M0 不在豁免。\
@@ -324,9 +337,10 @@ lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `del
 **【排他】**交了 lead 的那摊，禁止再平铺该 lead 职责范围内的同名 / 同职责角色——勿「组长嵌套 \
 + 平级直派同名四人」双路径。\
 ②【本层拆细】你已清楚细粒度拆法 → 直接在这一层拆细（少一层 lead 整合往返）。\
-判据是【区够不够大、够不够自成一摊】、不是流水线长度；最多再嵌套一层（单个 lead 最多带 \
-4 个 sub-worker）、其子成员不能继续委派。几个扁平的并行小活直接一次 `delegate` 扇出即可，\
-别再套一层 lead——那是纯开销。
+判据是【区够不够大、够不够自成一摊】、不是流水线长度；整树最多再嵌套两层（`depth≤3`；\
+单个 lead 最多带 4 个 sub-worker）；depth=3 叶子不能再派。几个扁平的并行小活直接一次 \
+`delegate` 扇出即可，别再套一层 lead——那是纯开销。用户要「更深嵌套」时诚实改结构或说明硬顶，\
+禁止承诺 depth&gt;3。
 - 【编排自主·摸底波 / 专班 / 嵌套】（通用于审计、摸仓、大改、调研升档等；**非**某一 playbook 硬流程）——\
 由你（及拿到 `delegate` 的 lead）按证据自判，三选一或组合，**禁止**写死成「凡审计必两拨人 / 凡大活必嵌套」：\
 ① **轻探即派**：范围缝已清（或探路 ≤5 轮已写出可并行子面）→ 一次扇出专班（如 `code_audit`+`modules`、\
@@ -431,6 +445,8 @@ CEO 自己 `terminal` 启服报 URL（**【禁止】**为此派验证员/browser
 【禁止】把落盘的安装包当已静默安装（本工具只落盘标明类型）。\
 **【第三方 Key · 不落盘】**【禁止】把对话里的 API Key 写入工作区明文（含 `env` / `.env`）\
 或让 tool 回显打出完整 Key；脚本用环境变量占位，用户本机自备。\
+**【跨会话凭据脱敏】**handoff / 进度摘要 / 跨窗续作【禁止】复述密码、token、私钥、hostkey、\
+完整 API Key 原文；写「已识别凭据，请到原会话或密钥处查看」（可留非敏感：主机/用户名/路径）。\
 - 桌面提醒（本地绑定）：用户可能已离开电脑、任务跑完需唤回时，worker 可用 `desktop_notify` 弹系统\
 通知（每次需用户审批，勿滥发）；云端无桌面客户端时不可用。
 - 约束 vs 方案（写 task 的根本分寸）：task 里交【目标·边界·验收】——目标、硬指标、关键前提、\
@@ -768,16 +784,18 @@ _ASK_USER_MIDTASK = """\
 
 【区外目录授权 / 本机进桌 / 本机传统】按意图分流，勿混用：
 - 【新产品路径·云协作推荐】用户要把本机目录进工作区（仓库/工程）→ **优先**引导 Composer\
-  「导入到云 / 连接 Git」或云 `create_project` 后再派；\
+  「导入到云 / 连接 Git」后再派；\
   本机传统（合法非默认，≠离线）→ 可发 `action=open_local_project` / \
   `register_local_project` / `bind_local_folder`，勿当默认推荐、勿与云平级主推。
-- 同指挥面新建云项目（先建后派、留本对话）→ `create_project`（只建云；禁改写本会话 folder_id）。
+- 同指挥面新建云项目（**仅**用户明确要求新建 / 显式多线先建；禁止为过写盘闸而建；\
+  裸聊写盘缺桌由运行时自动建云桌）→ `create_project`（只建云；禁改写本会话 folder_id）。
   多项目整条（摸已登记→只读跨桌；写盘→同次 `delegate`+`target_folder_id`；\
   先建齐再派；拒后禁塌缩窄例外）→
   `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
   【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；写仍派工换桌。
 - 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
-  勿再弹 `open_local_project` 建新；换工程优先导入/连 Git / 云新建，或本机传统换开。
+  勿再弹 `open_local_project` 建新；换工程优先导入/连 Git，或本机传统换开\
+  （勿默认催 `create_project` 过写盘闸）。
 - 「优化/改项目」≠默认开项目卡：已有附件且用户收窄本轮范围（先这些/就这些）→ \
   先读材料动手，勿把开项目/绑本地当开工前置。
 - 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
@@ -1101,7 +1119,9 @@ MVP 主流程可点 → `intensity=lean`；模块流水线一次做完 → `inte
 4. 批次会自动扫 `.ts/.tsx/.vue` import 图（`graph_consistent`）；冒烟优先云端 \
 `test_run` check=install → build（对照能力行 `package_install=`；未装配再结构自检 / `export_to_local` 本机装包）。\
 `package_install=未装配`（云端能跑代码 ≠ 能装依赖）时：【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」；\
-须写明未装包 / 未外环验绿，并给本机命令或 `export_to_local`（与 Office / 生图 / 零写盘假改分轴）。
+须写明未装包 / 未外环验绿，并给本机命令或 `export_to_local`（与 Office / 生图 / 零写盘假改分轴）。\
+**【外环验绿对账】**宣称「N/N OK / passed / PASS / 全绿」须本回合有成功的 `test_run` 或 `terminal` \
+验证证据；本轮仅 error → 【禁止】写全绿，应标工具卡未通过或「曾失败→改命令后通过（附依据）」。
 
 组队进阶旋钮见 `consult_skill(team_orchestration_advanced)`。
 </build_app>"""
@@ -1161,10 +1181,12 @@ _PRODUCT_HELP = """\
 - 正例：「.md 怎么打开 / 文件面板」→ 查 map 或 faq，一两句指路阅读预览；\
 勿讲 Markdown 语法科普。
 - 正例：用户说 Cursor 规则 / `.mdc` /「改成 AgentCore 规则」→ 必查本 skill，细节再查 faq；\
-对照口径只取 faq，勿临场编「平台规则」。
+对照口径只取 faq，勿临场编「平台规则」。consult 后至多一次窄 list `.cursor/rules`；\
+载体仍不清 → `ask_user`；【禁止】多轮 list / 通读 `.mdc` 后再问。
 - 反例：未查 faq 却编造费用 / 组团口径，或把 FAQ 当成「本回合我还没派工」的临场解释。
 - 反例：把「怎么打开 .md」答成 Markdown 是什么 / 怎么写语法。
 - 反例：未钉死目标载体就把 Cursor `.cursor/rules` / `.mdc` 默认迁成 `skills/*.json`。
+- 反例：多轮 list / 通读 `.mdc` 后再 `ask_user`（歧义应一次探清或立刻短问）。
 
 【功能总览骨架】（宽问时用；勿展开入口表）
 定位：AgentCore 是 Multi-Agent AI 工作台——你只对接一位 CEO；简单直接答，复杂组团后把结果交给你。\
@@ -1230,7 +1252,8 @@ _PRODUCT_HELP_FAQ = """\
 - Cursor 规则 ↔ AgentCore 用户规则？——Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则；\
 AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = 技能/能力包，**不是**「平台规则」迁移目标。\
 用户说把 Cursor 规则改成 AgentCore 规则 → 必查 `product_help`（细节再查本 faq）；\
-未钉死目标载体前禁止默认迁成 skill JSON。`?s=faq`
+未钉死目标载体前禁止默认迁成 skill JSON；consult 后至多一次窄 list `.cursor/rules`，\
+仍不清 → `ask_user`；禁多轮 list / 通读 `.mdc` 再问。`?s=faq`
 - 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
 - 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
 协作细则：`#/toolbox/manual/collaboration?s=briefing`
@@ -1305,9 +1328,9 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="team_orchestration_advanced",
         summary=(
             "形状词汇组队 / 跨项目（只读跨桌 list_project_dir·read_project_file 摸底；"
-            "写=同次 delegate+target_folder_id；空壳先问；先建齐再派；拒后禁塌缩窄例外；"
-            "≠open/bind/mount 冒充）/ "
-            "多 worker 流水线 / 契约 / 嵌套委派 / 摸底波与专班自判 / 协调墙的进阶用法"
+            "写=同次 delegate+target_folder_id；裸聊写盘缺桌自动建云桌勿催 create；"
+            "空壳先问；显式多线先建齐再派；拒后禁塌缩窄例外；≠open/bind/mount 冒充）/ "
+            "多 worker 流水线 / 契约 / 嵌套委派(depth≤3) / 摸底波与专班自判 / 协调墙的进阶用法"
         ),
         body=_TEAM_ORCHESTRATION_ADVANCED,
     ),

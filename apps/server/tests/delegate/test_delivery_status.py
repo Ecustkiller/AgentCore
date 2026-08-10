@@ -371,8 +371,9 @@ def test_zero_landing_gap_attributes_channel_dead_from_transcript():
             content="",
             error=(
                 "本队员本波未交卷：未把产物写入工作区：写盘通道不可用（local workspace "
-                "channel dead / 活性挂起），落盘工具已失败——请恢复工作区通道后重试，"
-                "勿改用正文粘贴冒充落盘"
+                "channel dead / 活性挂起），落盘工具已失败——"
+                "请在 handoff 或正文交结论，禁止再尝试落盘；"
+                "可请用户恢复工作区通道后重试"
             ),
             transcript=transcript,
         )
@@ -387,6 +388,54 @@ def test_zero_landing_gap_attributes_channel_dead_from_transcript():
     assert payload["state"] == "notes"
     assert "本队员本波未交卷" in gap["description"]
     assert "写盘通道不可用" in gap["description"]
+    assert "handoff 或正文交结论" in gap["description"]
+    assert "禁止再尝试落盘" in gap["description"]
+    assert "粘在回复正文" not in gap["description"]
+    assert "勿改用正文粘贴冒充落盘" not in gap["description"]
+
+
+def test_batch_zero_landing_gap_channel_dead_asks_prose_handoff():
+    """Batch-only channel_dead tip mirrors retire steer (prose/handoff, no paste ban)."""
+    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.delegate import delivery_status as ds
+    from agentcore.runtime.engine.tool_exec import with_tool_failed_marker
+
+    transcript = [
+        LLMMessage(
+            role="assistant",
+            tool_calls=[
+                ToolCall(
+                    id="w1",
+                    function=ToolCallFunction(
+                        name="file_write",
+                        arguments='{"path": "a.md", "content": "x"}',
+                    ),
+                )
+            ],
+        ),
+        LLMMessage(
+            role="tool",
+            tool_call_id="w1",
+            content=with_tool_failed_marker(
+                "local workspace op 'write' rejected: channel dead（活性挂起）"
+            ),
+        ),
+    ]
+    results = {
+        "w1": RunState(
+            phase=RunPhase.FAILED,
+            content="",
+            transcript=transcript,
+        )
+    }
+    gap = ds._files_not_landed_gap(results)
+    assert gap["reason"] == "files_not_landed"
+    assert gap["severity"] == "warning"
+    assert "写盘通道不可用" in gap["description"]
+    assert "handoff 或正文交结论" in gap["description"]
+    assert "禁止再尝试落盘" in gap["description"]
+    assert "恢复通道后重试" in gap["description"]
+    assert "勿改用正文粘贴冒充落盘" not in gap["description"]
     assert "粘在回复正文" not in gap["description"]
 
 

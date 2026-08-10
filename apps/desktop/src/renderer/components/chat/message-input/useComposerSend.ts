@@ -33,7 +33,7 @@ import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useComposerDraftStore } from "@/stores/composer";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { type Dispatch, type SetStateAction, useCallback } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   PendingAgentMention,
@@ -86,12 +86,14 @@ export function useComposerSend({
   backgroundMode: boolean;
   isLocal: boolean;
   closeMenu: () => void;
-  /** Fires when a FOREGROUND turn is dispatched (not for 后台云端 handoffs) — the
+  /** Fires when a FOREGROUND turn is dispatched (not for legacy handoff jobs) — the
    * canvas host uses it to start auto-following the new round. */
   onDispatch?: () => void;
 }) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const navigate = useNavigate();
+  /** 短时门闩：ack 前防连点重复 mid-flight 入队。 */
+  const midFlightSendingRef = useRef(false);
 
   const toOutgoingMentions = useCallback(
     (pending: PendingAgentMention[]): OutgoingAgentMention[] =>
@@ -136,63 +138,70 @@ export function useComposerSend({
       const outgoingMentions = toOutgoingMentions(agentMentions);
 
       // Mid-flight：生成中发送走独立 POST SSE（steer 插话 / queue 排队）。
-      // 排队立即插用户气泡；协调插话不经 addMessage——主时间线由 InterjectionTimeline
-      // 投影 execution.userInterjections（user_interjection SSE）。
+      // queue：ack 后清 composer；条进 QueuedTurnsBar，出队开跑再插用户泡。
+      // 协调插话不经 addMessage——主时间线由 InterjectionTimeline 投影
+      // execution.userInterjections（user_interjection SSE）。
       if (isGenerating && activeConvId) {
-        const pending = attachments;
-        const outgoing: OutgoingAttachment[] = [];
-        for (const a of pending) {
-          if (
-            a.kind === "file" &&
-            (a.stagingId || a.workspacePath || a.binary || a.fileBlob)
-          ) {
-            const resided = await ensureAttachmentResident(activeConvId, a);
-            if (!resided.ok) {
-              notifyError(new Error(resided.reason), "附件驻留失败");
-              if (resided.reason.includes("暂存已失效") && a.stagingId) {
-                setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+        if (midFlightSendingRef.current) return;
+        midFlightSendingRef.current = true;
+        try {
+          const pending = attachments;
+          const outgoing: OutgoingAttachment[] = [];
+          for (const a of pending) {
+            if (
+              a.kind === "file" &&
+              (a.stagingId || a.workspacePath || a.binary || a.fileBlob)
+            ) {
+              const resided = await ensureAttachmentResident(activeConvId, a);
+              if (!resided.ok) {
+                notifyError(new Error(resided.reason), "附件驻留失败");
+                if (resided.reason.includes("暂存已失效") && a.stagingId) {
+                  setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+                }
+                return;
               }
-              return;
+              outgoing.push({
+                name: resided.name,
+                path: resided.workspacePath || a.path,
+                text: resided.binary ? "" : resided.text,
+                truncated: resided.truncated,
+                kind: "file",
+                binary: resided.binary,
+                workspace_path: resided.workspacePath || undefined,
+              });
+            } else {
+              outgoing.push({
+                name: a.name,
+                path: a.path,
+                text: a.text,
+                truncated: a.truncated,
+                kind: a.kind,
+                conversation_id: a.conversationId,
+                binary: a.binary,
+                workspace_path: a.workspacePath,
+              });
             }
-            outgoing.push({
-              name: resided.name,
-              path: resided.workspacePath || a.path,
-              text: resided.binary ? "" : resided.text,
-              truncated: resided.truncated,
-              kind: "file",
-              binary: resided.binary,
-              workspace_path: resided.workspacePath || undefined,
-            });
-          } else {
-            outgoing.push({
-              name: a.name,
-              path: a.path,
-              text: a.text,
-              truncated: a.truncated,
-              kind: a.kind,
-              conversation_id: a.conversationId,
-              binary: a.binary,
-              workspace_path: a.workspacePath,
-            });
           }
-        }
 
-        const result = await sendMidFlightMessage(
-          activeConvId,
-          trimmed,
-          outgoing.length > 0 ? outgoing : undefined,
-          delivery,
-          outgoingMentions.length > 0 ? outgoingMentions : undefined,
-        );
-        if (
-          result.kind === "received" ||
-          result.kind === "steered" ||
-          result.kind === "queued"
-        ) {
-          clearComposer();
-          // queued toast / 气泡由 turn_queued → dispatch + midFlight；
-          // steered toast 由 turn_steer_accepted → messageStream；
-          // received 主时间线走 SSE 投影。
+          const result = await sendMidFlightMessage(
+            activeConvId,
+            trimmed,
+            outgoing.length > 0 ? outgoing : undefined,
+            delivery,
+            outgoingMentions.length > 0 ? outgoingMentions : undefined,
+          );
+          if (
+            result.kind === "received" ||
+            result.kind === "steered" ||
+            result.kind === "queued"
+          ) {
+            clearComposer();
+            // queued：条由 turn_queued → midFlight upsert；出队再插泡。
+            // steered toast 由 turn_steer_accepted → messageStream；
+            // received 主时间线走 SSE 投影。
+          }
+        } finally {
+          midFlightSendingRef.current = false;
         }
         return;
       }

@@ -114,8 +114,47 @@ def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
     assert "handoff" in narrow_names
 
 
+def test_channel_dead_finalize_disables_persist():
+    """Sticky channel_dead: finalize drops persist tools + FILES instruction path."""
+    reg = _registry(with_persist=True)
+    assert (
+        finalize_allows_persist(
+            reg, None, files_expected=True, workspace_channel_dead=True
+        )
+        is False
+    )
+    defs = resolve_finalize_coordination_tools(
+        reg, None, set(), files_expected=True, workspace_channel_dead=True
+    )
+    names = {d["function"]["name"] for d in (defs or [])}
+    assert "file_write" not in names
+    assert names == FINALIZE_COORDINATION_TOOLS
+
+
 @pytest.mark.asyncio
-async def test_files_form_finalize_round_offers_persist_tools_and_instruction():
+async def test_channel_dead_finalize_round_uses_coordination_instruction_not_files():
+    from agentcore.runtime.engine.constants import FINALIZE_INSTRUCTION
+
+    provider = _ScriptedProvider([[_content_chunk("通道已死，改交接")]])
+    messages = [LLMMessage(role="user", content="go")]
+    reg = _registry(with_persist=True)
+    result = await run_finalize_round(
+        messages=messages,
+        llm=provider,
+        profile=make_profile_params(),
+        active_model="m",
+        tools=reg,
+        allowed_tool_names=["file_write", "handoff", "delegate", "ask_user"],
+        disabled_tools=set(),
+        emit_content=lambda _d: None,
+        emit_reasoning=lambda _d: None,
+        files_expected=True,
+        workspace_channel_dead=True,
+    )
+    assert result.kind == "answer"
+    assert "file_write" not in (provider.last_tool_names or [])
+    assert any(FINALIZE_INSTRUCTION in (m.content or "") for m in messages)
+    assert not any(FINALIZE_INSTRUCTION_FILES in (m.content or "") for m in messages)
     provider = _ScriptedProvider([[_content_chunk("已落盘")]])
     messages = [LLMMessage(role="user", content="go")]
     reg = _registry(with_persist=True)

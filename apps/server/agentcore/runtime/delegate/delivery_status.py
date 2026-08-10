@@ -644,9 +644,11 @@ def _files_not_landed_gap(results: dict[str, RunState]) -> dict[str, Any]:
     """
     failure_kind = _landing_failure_kind_from_results(results)
     if failure_kind == "channel_dead":
+        # Mirror zero_files_gap_message(channel_dead): prose/handoff close-out.
         text = (
             "本批未见落盘：写盘通道不可用（工作区通道已挂起 / 活性挂起），"
-            "落盘工具调用失败——请恢复通道后重试"
+            "落盘工具调用失败——请在 handoff 或正文交结论，禁止再尝试落盘；"
+            "可请用户恢复通道后重试"
         )
     elif failure_kind == "write_failed":
         text = (

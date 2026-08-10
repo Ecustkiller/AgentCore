@@ -60,6 +60,10 @@ export interface PendingResume {
     form?: string;
     write_capability?: "text_only" | "can_write_files";
     write_capability_label?: string;
+    /** CEO 提案模型身份（人确认面可盖）。 */
+    model?: string;
+    origin?: "platform" | "byok";
+    provider_id?: string;
   }>;
   /** team_preview (开工卡): grantable tools listed for capability auth. */
   tools: string[];
@@ -75,12 +79,16 @@ export interface PendingResume {
     name: string;
     stance: string;
     is_subject?: boolean;
+    /** 开赛前预分配；缺省 = 旧帧，不展示改模。 */
+    run_id?: string;
     model?: string;
     origin?: "platform" | "byok";
     provider_id?: string;
   }>;
   maxRounds: number;
   thorough: boolean;
+  /** 裁判预分配 run_id；缺省 = 旧帧，不展示改模。 */
+  moderatorRunId?: string;
   /** Phase 3：裁判模型；缺省不展示跨模型署名。 */
   moderatorModel?: string;
   moderatorOrigin?: "platform" | "byok";
@@ -151,6 +159,15 @@ const toWorkers = (
       row.write_capability_label
         ? { write_capability_label: row.write_capability_label }
         : {}),
+      ...(typeof row.model === "string" && row.model.trim()
+        ? { model: row.model.trim() }
+        : {}),
+      ...(row.origin === "platform" || row.origin === "byok"
+        ? { origin: row.origin as "platform" | "byok" }
+        : {}),
+      ...(typeof row.provider_id === "string" && row.provider_id
+        ? { provider_id: row.provider_id }
+        : {}),
     };
   });
 
@@ -163,6 +180,9 @@ const toSides = (raw: unknown): PendingResume["sides"] =>
           name: String(row.name ?? ""),
           stance: String(row.stance ?? ""),
           ...(row.is_subject ? { is_subject: true as const } : {}),
+          ...(typeof row.run_id === "string" && row.run_id.trim()
+            ? { run_id: row.run_id.trim() }
+            : {}),
           ...(typeof row.model === "string" && row.model.trim()
             ? { model: row.model }
             : {}),
@@ -286,6 +306,7 @@ function entryFromSummary(
   origin: ResumeOrigin,
 ): PendingResume {
   // REST 快照尚未列 moderator_* 进 schema；可选字段宽松读（absent → 不透传）。
+  const moderatorRunId = (s as { moderator_run_id?: unknown }).moderator_run_id;
   const moderatorModel = (s as { moderator_model?: unknown }).moderator_model;
   const moderatorOrigin = (s as { moderator_origin?: unknown })
     .moderator_origin;
@@ -318,6 +339,9 @@ function entryFromSummary(
     sides: toSides((s as { sides?: unknown }).sides),
     maxRounds: Number((s as { max_rounds?: unknown }).max_rounds ?? 0),
     thorough: (s as { thorough?: unknown }).thorough !== false,
+    ...(typeof moderatorRunId === "string" && moderatorRunId.trim()
+      ? { moderatorRunId: moderatorRunId.trim() }
+      : {}),
     ...(typeof moderatorModel === "string" && moderatorModel.trim()
       ? { moderatorModel }
       : {}),

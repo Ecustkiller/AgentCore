@@ -44,7 +44,7 @@ import {
 import type { GraphActionsValue } from "./graphActions";
 import { useGraphHoverState } from "./graphHover";
 import { type GraphInjectPaint, injectPaintFromOverlay } from "./graphLive";
-import { computeGraphFold } from "./helpers";
+import { computeGraphFold, resolveCaptainSinkId } from "./helpers";
 import { namespaceId, parseActCardId, parseNamespacedId } from "./ids";
 import { executionGraphCapabilities } from "./planCapabilities";
 import { projectInjectGapEdges } from "./projectFlowGraph";
@@ -156,8 +156,7 @@ export function useCanvasFlow({ turns, effectiveFocus }: UseCanvasFlowOptions) {
   useEffect(() => {
     if (!conversationId) return;
     for (const { execution } of expandedTurnInputs) {
-      const captainId =
-        execution.runs.find((r) => r.kind === "captain")?.id ?? null;
+      const captainId = resolveCaptainSinkId(execution.runs);
       const info = computeGraphFold(execution.runs, captainId);
       const parents = [...info.descendants.keys()].filter(
         (id) => !info.debateUnits.has(id),

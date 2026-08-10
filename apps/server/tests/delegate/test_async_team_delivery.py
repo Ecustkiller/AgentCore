@@ -416,6 +416,47 @@ async def test_release_follows_conversation_host_when_mint_differs():
 
 
 @pytest.mark.asyncio
+async def test_release_follows_host_when_mint_never_registered():
+    """跨回合 append：mint 从未入表时，须靠 conversation_id 跟到宿主并 detach。
+
+    复现 gather ContextVar miss：父 teardown 仍拿 prepare 的 mint eid，
+    `_sessions.get(mint)` 为 None；旧逻辑静默 return，host.turn_attached 粘滞。
+    """
+    from structlog.testing import capture_logs
+
+    async def _slow():
+        await asyncio.sleep(0.3)
+
+    host = CoordinationSession(
+        execution_id="exec-host-orphan-mint",
+        total_workers=2,
+        conversation_id="conv-orphan-mint",
+    )
+    host.drive_task = asyncio.create_task(_slow())
+    host.turn_attached = True
+    set_active_coordination(host)
+    assert active_coordination_for_conversation("conv-orphan-mint") is host
+    assert active_coordination("exec-mint-never") is None
+
+    with capture_logs() as logs:
+        # Without conversation_id: still stuck (documents the miss).
+        release_turn_coordination("exec-mint-never")
+        assert host.turn_attached is True
+
+        release_turn_coordination(
+            "exec-mint-never", conversation_id="conv-orphan-mint"
+        )
+        assert host.turn_attached is False
+        assert any(
+            e.get("event") == "coordination.turn_detached" for e in logs
+        )
+
+    host.drive_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await host.drive_task
+
+
+@pytest.mark.asyncio
 async def test_pillar_c_harvest_skips_when_reattached():
     from agentcore.runtime.coordination.harvest import harvest_detached_execution
 

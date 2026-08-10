@@ -99,6 +99,35 @@ export function ceoMessageId(conversationId: string): string | null {
   return lastAssistantProjectionId(getRuntime(conversationId).messages);
 }
 
+/**
+ * Stamped server message id for assistants after the latest user message
+ * (same turn). Walks newest-first so a stray unstamped tail does not hide the
+ * durable host from an earlier pause in the same turn.
+ */
+export function sameTurnStampedServerId(conversationId: string): string | null {
+  const messages = getRuntime(conversationId).messages;
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i > lastUserIdx; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && m.serverMessageId) return m.serverMessageId;
+  }
+  return null;
+}
+
+/**
+ * Bind key for cold `*_required` upsert: same-turn stamped server id, else "".
+ * Never pin pending to a client-only bubble id (ResumePrompt gate requires stamp).
+ */
+export function coldBindMessageId(conversationId: string): string {
+  return sameTurnStampedServerId(conversationId) ?? "";
+}
+
 /** Pull routing fields from an opaque SSE payload. */
 export function routeHintFromPayload(payload: unknown): ExecRouteHint | null {
   if (!payload || typeof payload !== "object") return null;

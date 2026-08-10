@@ -9,8 +9,8 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * 「在哪工作」说明弹窗——对照云协作 vs 本机传统；不复述实现词（sidecar / 过桥）。
- * 布局：云推荐卡 + 本机次级卡 + 决策条；记忆提示落 footer。
+ * 「在哪工作」说明弹窗——只有两通道：云协作（推荐）/ 本机传统。
+ * 不把合回、遗留 handoff 写成第三平级模式；禁 sidecar / 过桥实现词。
  */
 export function WorkspaceChannelGuideDialog({
   open,
@@ -28,7 +28,7 @@ export function WorkspaceChannelGuideDialog({
         <DialogHeader>
           <DialogTitle>在哪工作：怎么选</DialogTitle>
           <DialogDescription>
-            先分清两条通道；云协作下的几个入口只是起步方式不同。
+            只有两条通道：云协作（推荐）与本机传统。云协作下的几个入口只是起步方式不同，不是第三种模式。
           </DialogDescription>
         </DialogHeader>
 
@@ -40,8 +40,9 @@ export function WorkspaceChannelGuideDialog({
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               文件在云桌，多端同一份；Agent
-              改的是云上的副本。要进你电脑上的文件夹，用合回或下载
-              ZIP——不会自动双向同步。
+              改的是云上的副本。要进你电脑上的文件夹，用 ModeControl
+              的合回或下载 ZIP——不会自动双向同步。合回落本机 ≠
+              本机传统工作区（那是另一条通道）。
             </p>
             <dl className="space-y-2">
               <div className="space-y-0.5">
@@ -49,7 +50,7 @@ export function WorkspaceChannelGuideDialog({
                   快速对话
                 </dt>
                 <dd className="text-xs leading-relaxed text-muted-foreground">
-                  临时云桌，适合先聊再定项目
+                  临时云桌，适合先聊再定项目。要写文件时系统会自动建云项目，也可先点「新建云项目」自建
                 </dd>
               </div>
               <div className="space-y-0.5">
@@ -84,7 +85,7 @@ export function WorkspaceChannelGuideDialog({
               <h3 className="text-sm font-medium text-foreground">本机传统</h3>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 菜单里的「打开本机项目」：打开的就是本机文件夹；Agent
-                直接改该目录。适合已有大仓、或必须碰本机环境。这不是离线模式：模型调用仍走网络，对话也会回写云端。
+                正常直接改这里。适合已有大仓、或必须碰本机环境。这不是离线模式：模型调用仍走网络，对话也会回写云端。仅本机引擎暂时不可用时，才会临时经云协助——不是第三条通道。
               </p>
             </section>
           ) : null}
@@ -102,6 +103,10 @@ export function WorkspaceChannelGuideDialog({
                   用「导入本机项目到云」（可选，不是必须迁）
                 </li>
               ) : null}
+              <li>
+                遗留「后台云端」不是平级第三通道；入口不在 Composer「＋」，而在
+                ModeControl 高级 / 遗留
+              </li>
             </ul>
           </section>
         </div>

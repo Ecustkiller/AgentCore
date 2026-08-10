@@ -407,13 +407,19 @@ async def run_chat_pipeline(
             # execution_id by跨回合同图追加); also release the mint-at-prepare id
             # when it differs. Live background drives are preserved (async team
             # model) — only idle sessions are cleared.
+            # Pass conversation_id so mint-never-registered still follows the
+            # conversation host (gather ContextVar miss on cross-turn append).
             live_eid = current_execution_id.get() or bound_execution_id
             if live_eid:
                 with contextlib.suppress(Exception):
-                    release_turn_coordination(live_eid)
+                    release_turn_coordination(
+                        live_eid, conversation_id=conversation_id
+                    )
             if bound_execution_id and bound_execution_id != live_eid:
                 with contextlib.suppress(Exception):
-                    release_turn_coordination(bound_execution_id)
+                    release_turn_coordination(
+                        bound_execution_id, conversation_id=conversation_id
+                    )
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here. The pipeline is a *producer* on a sink it did not
         # create; closing it would silently drop the post-turn tail (title_generated /

@@ -387,6 +387,33 @@ class DocumentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_on_demand_user_rules(
+        self, user_id: str, folder_id: str | None
+    ) -> list[Document]:
+        """On-demand user-rule docs of one scope (``ai_maintained=false``, not memory topics).
+
+        These ride the「规则目录」+ ``consult_rule`` — never the always ``<rules>`` budget.
+        Same convention-parent filter as :meth:`list_injectable_rules` for user rules.
+        """
+        conditions: list[ColumnElement[bool]] = [
+            Document.user_id == user_id,
+            _scope_clause(folder_id),
+            Document.role == "rule",
+            Document.apply_mode == "on_demand",
+            Document.ai_maintained.is_(False),
+            Document.kind == "document",
+            Document.deleted_at.is_(None),
+        ]
+        parent_filter = await self._injectable_parent_filter(
+            user_id, folder_id, ai_maintained=False
+        )
+        if parent_filter is not None:
+            conditions.append(parent_filter)
+        result = await self._session.execute(
+            select(Document).where(*conditions).order_by(Document.name.asc())
+        )
+        return list(result.scalars().all())
+
     # --- user rules (ai_maintained=false, role=rule) ---
 
     async def get_user_rules_doc(
@@ -448,6 +475,8 @@ class DocumentRepository:
             if doc.parent_id != rules_dir.id:
                 doc.parent_id = rules_dir.id
             doc.content = content
+            # remember path always keeps the canonical doc on always (never flips apply_mode).
+            doc.apply_mode = "always"
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
@@ -546,6 +575,18 @@ class DocumentRepository:
         if doc is None:
             return None
         doc.name = name
+        await self._session.commit()
+        await self._session.refresh(doc)
+        return doc
+
+    async def update_apply_mode(
+        self, document_id: str, *, user_id: str, apply_mode: str
+    ) -> Document | None:
+        """Set ``apply_mode`` (caller validates enum / role eligibility)."""
+        doc = await self.get(document_id, user_id=user_id)
+        if doc is None:
+            return None
+        doc.apply_mode = apply_mode
         await self._session.commit()
         await self._session.refresh(doc)
         return doc

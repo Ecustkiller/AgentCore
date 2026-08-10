@@ -9,7 +9,6 @@ import {
 import {
   type TimelineNode,
   groupToolRuns,
-  omitCoordinationIdleSteps,
   reworkChipLabel,
   timelineNodeKeys,
 } from "@/lib/processTimeline";
@@ -212,7 +211,8 @@ export function ProcessTimeline({
 }) {
   const last = process[process.length - 1];
   const hasContentStep = process.some((s) => s.kind === "content");
-  // wait 空转后不刷 Thinking 尾迹（S4）；下一轮有真实动作再出现。
+  // wait 结束后不刷 Thinking 尾迹（S4）；下一轮有真实动作再出现。wait / wait-idle
+  // reasoning 行本身仍展示（CEO 气泡与 run 详情同源 process）。
   const showThinkingTail =
     isStreaming &&
     !composingTool &&
@@ -220,12 +220,9 @@ export function ProcessTimeline({
     last.status !== "running" &&
     last.tool_name !== "wait";
 
-  // CEO 气泡：渲染前去掉 wait 空转段（S4）；run 详情（collapseProcessSteps=false）保留全量。
   // 摘要步数与可见行同源，避免「Thought 10」展开只剩 3 行。
-  const displayProcess = collapseProcessSteps
-    ? omitCoordinationIdleSteps(process)
-    : process;
-  const nodes = groupToolRuns(displayProcess);
+  // collapseProcessSteps 只控制折叠 chrome，不再 omit wait。
+  const nodes = groupToolRuns(process);
   // 稳定 key（时间线一期）：insertBeforeTeam 中段插入不再位移后续行的 React key。
   const nodeKeys = timelineNodeKeys(nodes);
 

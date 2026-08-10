@@ -3,6 +3,7 @@
 from agentcore.runtime.delegate.playbook_declaration import (
     declaration_reject_gate,
     resolve_playbook_declaration,
+    try_declaration_reject_gate,
 )
 from tests.delegate.conftest import Provider, ctx, tool
 
@@ -19,6 +20,11 @@ def test_declaration_reject_gate_helpers():
     assert declaration_reject_gate(PLAYBOOK_TASKS_XOR_MSG) == "xor"
     assert declaration_reject_gate(PLAYBOOK_ID_CONFLICT_MSG) == "xor"
     assert declaration_reject_gate(HANDWRITTEN_PLAYBOOK_ARGS_MSG) == "xor"
+    # try_* is None for non-declaration errors (normalize must not bucket as unknown).
+    assert try_declaration_reject_gate("缺少必填参数：query") is None
+    assert try_declaration_reject_gate(None) is None
+    assert try_declaration_reject_gate("未知 playbook『x』") == "unknown"
+    assert try_declaration_reject_gate("delegate 缺 tasks/playbook：…") == "empty"
 
 
 def test_resolve_playbook_xor_tasks_rejected():
@@ -110,16 +116,23 @@ def test_resolve_named_playbook_ok():
 
 
 def test_resolve_empty_delegate_rejected():
-    """无 tasks 且无具名 playbook → 拒（短文案，不倾倒 playbook 全家桶）。"""
-    from agentcore.runtime.delegate.playbook_declaration import _EMPTY_DELEGATE_MSG
+    """无 tasks 且无具名 playbook → 拒（短文案含可抄 tasks 骨架，不倾倒 playbook 全家桶）。"""
+    from agentcore.runtime.delegate.playbook_declaration import (
+        _EMPTY_DELEGATE_MSG,
+        HANDWRITTEN_TASKS_SKELETON,
+    )
     from agentcore.runtime.runs.playbooks import available_playbooks
 
     name, reason, err = resolve_playbook_declaration({})
     assert name is None and reason is None
     assert err == _EMPTY_DELEGATE_MSG
     assert "tasks" in err
-    assert "arguments" in err
-    assert "禁止" in err
+    assert HANDWRITTEN_TASKS_SKELETON in err
+    assert '"role"' in err and '"task"' in err
+    assert "deliverable" in err
+    # 空失败弱化嵌套 arguments / 长纠错叙事；具名 playbook 仍一等提示。
+    assert "arguments" not in err
+    assert "playbook" in err
     # Must not dump the full playbook catalog into every empty reject.
     assert available_playbooks() not in err
     assert "build_toolshed" not in err

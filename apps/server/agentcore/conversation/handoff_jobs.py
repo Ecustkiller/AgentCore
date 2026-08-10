@@ -158,7 +158,7 @@ async def run_handoff_job(
             await HandoffJobRepository(session).mark_failed(job_id, error=str(e))
     finally:
         if not sink._closed:
-            sink.close()
+            sink.close(reason="handoff_job_finally")
 
 
 async def dispatch_handoff(
@@ -221,4 +221,4 @@ async def dispatch_handoff(
         sink.emit(error_event(ErrorCode.HANDOFF_DISPATCH_FAILED, str(e)))
     finally:
         if not sink._closed:
-            sink.close()
+            sink.close(reason="handoff_dispatch_finally")

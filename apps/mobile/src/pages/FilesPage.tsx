@@ -2,17 +2,20 @@ import {
   type DownloadedFile,
   type WorkspaceFileEntry,
   downloadWorkspaceFile,
+  getWorkspaceBinding,
   listWorkspaceFiles,
   uploadWorkspaceFile,
 } from "@/api/workspace";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 import { TrashSection } from "@/components/TrashSection";
+import { LOCAL_WORKSPACE_MOBILE_HINT } from "@/lib/fileDownloadError";
+import { toWorkspaceRelPath } from "@/lib/workspacePath";
 // The cloud workspace file browser for ONE conversation (前端技术与架构 §七 · 云端文件浏览).
 //
 // Reachable from the chat header (/c/:id/files) — a full-screen, conversation-scoped shortcut
 // (no bottom tab bar). Soft-delete zone (AgentCore/trash list+restore) toggles in-place —
 // same page as the file tree (对齐桌面 TrashSection 语义；非 OS 回收站).
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 export function FilesPage() {
@@ -20,14 +23,33 @@ export function FilesPage() {
   const location = useLocation();
   const { id: conversationId } = useParams<{ id: string }>();
   // 一键直达：从聊天「本回合产出文件」卡跳来时带着要打开的文件路径（router state）。
-  const openPath =
+  const rawOpenPath =
     (location.state as { openPath?: string } | null)?.openPath ?? null;
+  const openPath = rawOpenPath
+    ? toWorkspaceRelPath(rawOpenPath) || rawOpenPath
+    : null;
   const [cwd, setCwd] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [trashOpen, setTrashOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [localMode, setLocalMode] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    getWorkspaceBinding(conversationId)
+      .then((b) => {
+        if (!cancelled) setLocalMode(b.mode === "local");
+      })
+      .catch(() => {
+        if (!cancelled) setLocalMode(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   // The conversation's workspace as a FileBrowser source — stable per conversation so the
   // browser resets to root only when the conversation changes (not on an upload reload).
@@ -100,6 +122,7 @@ export function FilesPage() {
             className="link"
             onClick={() => setTrashOpen(true)}
             aria-label="软删区"
+            disabled={localMode}
           >
             软删区
           </button>
@@ -107,7 +130,7 @@ export function FilesPage() {
             type="button"
             className="link"
             onClick={() => uploadInputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || localMode}
           >
             {uploading ? "上传中…" : "上传"}
           </button>
@@ -121,14 +144,22 @@ export function FilesPage() {
         />
       </header>
 
+      {localMode && (
+        <p className="muted hint" style={{ padding: "8px 16px", margin: 0 }}>
+          {LOCAL_WORKSPACE_MOBILE_HINT}
+        </p>
+      )}
+
       <FileBrowser
         source={source}
         cwd={cwd}
         onCwdChange={setCwd}
         reloadKey={reloadKey}
-        openPath={openPath}
-        emptyHint="此对话还没有工作区文件。"
-        onUpload={() => uploadInputRef.current?.click()}
+        openPath={localMode ? null : openPath}
+        emptyHint={
+          localMode ? LOCAL_WORKSPACE_MOBILE_HINT : "此对话还没有工作区文件。"
+        }
+        onUpload={localMode ? undefined : () => uploadInputRef.current?.click()}
       />
 
       {uploadError && <div className="error bar">{uploadError}</div>}

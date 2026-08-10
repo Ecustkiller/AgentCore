@@ -88,4 +88,17 @@ describe("deriveCaptainStatus", () => {
     // Clears「正在生成汇总」sink; RunStatus has no paused.
     expect(deriveCaptainStatus(e, "cap")).toBe("pending");
   });
+
+  it("ignores extra append-turn captains when judging worker completion", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "cap", status: "pending", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+        // Leaked append captain still pending — must not block sink「汇总中」.
+        run({ id: "cap2", status: "pending", kind: "captain" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap")).toBe("running");
+  });
 });

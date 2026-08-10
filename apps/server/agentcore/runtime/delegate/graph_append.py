@@ -337,6 +337,43 @@ async def open_host_journal_writer(
     )
 
 
+def parse_host_captain_run_id(entries: list[dict[str, Any]] | None) -> str | None:
+    """Parse the scene-level captain run id from host journal ``run_plan`` frames.
+
+    Prefers frames without ``host_message_id`` (original host plan). Growth / append
+    frames may still carry a captain on legacy journals; those are a fallback only.
+    Returns ``None`` when no ``kind=captain`` run is present.
+    """
+    if not entries:
+        return None
+    run_plan_label = EventType.RUN_PLAN.value
+    fallback: str | None = None
+    for entry in entries:
+        label = entry.get("kind") or entry.get("type") or ""
+        if label != run_plan_label:
+            continue
+        payload = entry.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        captain_id: str | None = None
+        for run in payload.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            if run.get("kind") != "captain":
+                continue
+            rid = run.get("id")
+            if isinstance(rid, str) and rid.strip():
+                captain_id = rid.strip()
+                break
+        if not captain_id:
+            continue
+        if not (payload.get("host_message_id") or "").strip():
+            return captain_id
+        if fallback is None:
+            fallback = captain_id
+    return fallback
+
+
 async def load_host_plan_and_completed(
     host_message_id: str,
 ) -> tuple[Any | None, dict[str, Any]]:

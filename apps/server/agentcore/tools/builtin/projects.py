@@ -49,14 +49,21 @@ _AMBIGUOUS_HINT = (
 )
 _NOT_FOUND_HINT = (
     "零命中：请向用户确认项目名，或用 list_projects 核对名册后再 ask_user；"
-    "若需新建：云项目用 create_project（同指挥面登记，不改本会话归属、不新开会话）；"
+    "【勿】为过写盘闸而 create_project / ask_user 建项——"
+    "裸聊写盘缺桌由运行时自动建云桌。"
+    "仅当用户明确要求新建云项目（可带名）或显式多线先建时，才用 create_project"
+    "（同指挥面登记，不改本会话归属、不新开会话）；"
     "本机目录进桌：**推荐** Composer「导入到云 / 连接 Git」；"
     "本机传统 open_local_project / register_local_project / bind_local_folder "
     "合法非默认（≠离线），勿与云平级主推；"
     "禁止静默猜「最近」。"
 )
 _EMPTY_LIST_HINT = (
-    "当前账号下没有项目。需要新建时：云项目用 create_project（同指挥面）；"
+    "当前账号下没有项目。"
+    "【勿】为过写盘闸而 create_project / ask_user 建项——"
+    "裸聊写盘缺桌由运行时自动建云桌。"
+    "仅当用户明确要求新建云项目（可带名）或显式多线先建时，才用 create_project"
+    "（同指挥面）；"
     "本机目录进桌：**推荐** Composer「导入到云 / 连接 Git」——"
     "勿默认催 open_local_project / register_local_project"
     "（本机传统合法非默认，≠离线）。"
@@ -133,12 +140,12 @@ async def _load_user_project_summaries(user_id: str) -> list[dict[str, Any]]:
     return [folder_summary_dict(f) for f in folders]
 
 
-async def _create_cloud_folder(*, user_id: str, name: str) -> dict[str, Any]:
+async def create_cloud_folder(*, user_id: str, name: str) -> dict[str, Any]:
     """Account-level cloud Folder create — same semantics as ``POST /folders`` mode=cloud.
 
     Does **not** touch any Conversation row (no ``folder_id`` rebind, no new session).
     With folders narrow-ticket creds (sidecar), calls the cloud HTTP API instead of
-    the local FolderRepository.
+    the local FolderRepository. Shared by ``create_project`` and bare-chat auto desk.
     """
     from agentcore.folders.credentials import (
         FoldersCloudError,
@@ -163,6 +170,10 @@ async def _create_cloud_folder(*, user_id: str, name: str) -> dict[str, Any]:
             local_subpath=None,
         )
     return folder_summary_dict(folder)
+
+
+# Back-compat alias for internal / test patches that still target the private name.
+_create_cloud_folder = create_cloud_folder
 
 
 def _is_folders_cloud_failure(exc: BaseException) -> bool:
@@ -192,7 +203,8 @@ class ListProjectsTool:
                 "列出当前用户账号下的全部【已有项目】（与侧栏 / GET /folders 同名册："
                 "id、name、mode=local|cloud、local_root_id、local_subpath、时间戳；"
                 "无本机绝对路径）。跨项目指挥前先查名册；按名定位请用 resolve_project；"
-                "同指挥面新建云项目请用 create_project；"
+                "create_project 仅用户明确要求新建云项目（可带名）或显式多线先建时使用，"
+                "禁止为过写盘闸而建（裸聊写盘缺桌由运行时自动建云桌）；"
                 "多项目并行派工：resolve 后空/近空先 ask_user，确认后同次 "
                 "delegate 各填 target_folder_id（开发双仓≠external_mount_readonly）。"
                 "【禁止】用 open_local_project 代替本工具——那会新建会话，不是列已有。"
@@ -275,8 +287,11 @@ class ResolveProjectTool:
                 "开发双仓≠external_mount_readonly）；"
                 "零命中或多名 → 返回候选并提示用 ask_user kind=choice 让用户选"
                 "（选项须可区分 name/mode 等；禁止静默猜「最近」）。"
-                "零命中若需新建：云 → create_project；本机目录进桌 → **推荐** Composer"
-                "「导入到云 / 连接 Git」；本机传统 register/open/bind 合法非默认（≠离线）。"
+                "【勿】零命中就为过写盘闸而 create_project——"
+                "裸聊写盘缺桌由运行时自动建云桌；"
+                "仅用户明确要求新建云项目（可带名）或显式多线先建时才 create_project；"
+                "本机目录进桌 → **推荐** Composer「导入到云 / 连接 Git」；"
+                "本机传统 register/open/bind 合法非默认（≠离线）。"
                 "【禁止】用 open_local_project 代替本工具选已有项目（那会新会话）。"
             ),
             parameters={
@@ -420,8 +435,10 @@ class CreateProjectTool:
         return ToolSchema(
             name=CREATE_PROJECT_TOOL_NAME,
             description=(
+                "仅当用户明确要求新建云项目（可带名）或显式多线先建时使用；"
+                "禁止为过写盘闸而建——裸聊写盘缺桌由运行时自动建云桌，勿先 ask_user/create。"
                 "在当前用户账号下新建一个【云项目】（空工作区 Folder；等同 "
-                "POST /folders mode=cloud）。同指挥面先建后干：建完返回 FolderSummary "
+                "POST /folders mode=cloud）。建完返回 FolderSummary "
                 "同形字段（id/name/mode=cloud/…），可供随后 resolve_project 或 "
                 "delegate(target_folder_id=…) 使用。"
                 "【不变式】不改本会话 conversation.folder_id / 出生 / 默认桌；不新开会话；"
@@ -457,7 +474,7 @@ class CreateProjectTool:
         # Account API only — never rebind conversation.folder_id (context.conversation_id
         # is intentionally unused beyond logging).
         try:
-            project = await _create_cloud_folder(user_id=context.user_id, name=name)
+            project = await create_cloud_folder(user_id=context.user_id, name=name)
         except Exception as e:  # noqa: BLE001
             cloud_fail = _is_folders_cloud_failure(e)
             logger.warning(

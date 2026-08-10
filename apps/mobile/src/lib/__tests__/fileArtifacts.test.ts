@@ -75,6 +75,32 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
     expect(fileArtifactsFromDeliveryStatus(status)).toEqual([]);
     expect(resolveFileArtifactsForCard(status)).toEqual([]);
   });
+
+  it("keeps workspace_id and strips /workspace path prefix", () => {
+    const status = {
+      execution_id: "e1",
+      state: "delivered",
+      summary: "x",
+      delivered_files: ["version-a-clean.html"],
+      gaps: [],
+      actions: [],
+      artifacts: [
+        {
+          path: "/workspace/version-a-clean.html",
+          status: "accepted",
+          workspace_id: "folder:proj-1",
+        },
+      ],
+    } as DeliveryStatusPayload;
+    expect(fileArtifactsFromDeliveryStatus(status)).toEqual([
+      {
+        path: "version-a-clean.html",
+        name: "version-a-clean.html",
+        acceptance: "accepted",
+        workspaceId: "folder:proj-1",
+      },
+    ]);
+  });
 });
 
 describe("fileArtifacts A1 change preview + history process bypass", () => {

@@ -176,6 +176,46 @@ function defaultModelGroups(
   return groups;
 }
 
+/** groups 内所有 items 合计为空（有 provider 但 models 空也算）。 */
+function hasSelectableModels(groups: ProviderModelGroup[]): boolean {
+  return groups.some((g) => g.items.length > 0);
+}
+
+/** 存在 BYOK 服务商分组时，即使目录为空也可手填 model id。 */
+function hasByokProviderGroups(groups: ProviderModelGroup[]): boolean {
+  return groups.some((g) => g.key !== PLATFORM_POINTER_ID);
+}
+
+/** 目录项或 BYOK 自定义均可选。 */
+function canChooseModel(groups: ProviderModelGroup[]): boolean {
+  return hasSelectableModels(groups) || hasByokProviderGroups(groups);
+}
+
+type AdvancedSlotDraft = {
+  worker: ModelProfileSlot | null;
+  background: ModelProfileSlot | null;
+  vision: ModelProfileSlot | null;
+};
+
+function hasAdvancedSlotOverrides(draft: AdvancedSlotDraft): boolean {
+  return Boolean(draft.worker || draft.background || draft.vision);
+}
+
+/** 高级区收起时的一行摘要。 */
+function advancedSlotsSummary(
+  worker: ModelProfileSlot | null,
+  background: ModelProfileSlot | null,
+  vision: ModelProfileSlot | null,
+): string {
+  if (!worker && !background && !vision) {
+    return "Worker/后台：跟随主模型 · 识图：不配置";
+  }
+  const workerLabel = worker?.model ?? "跟随主模型";
+  const backgroundLabel = background?.model ?? "跟随主模型";
+  const visionLabel = vision?.model ?? "不配置";
+  return `Worker：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
+}
+
 /** 识图槽：优先只列 catalog 带 `vision` capability 的项；过滤为空则回退全目录。 */
 function catalogForVisionSlot(
   catalog: ModelCatalog | null,
@@ -488,8 +528,12 @@ function ProfilesSection({
     <div className="section" data-testid="profiles-section">
       <h2 className="section-title">模型组合</h2>
       <p className="section-note">
-        聊天页选择的是组合（主模型 · Worker · 识图），不是单个模型。Worker /
-        后台为空时跟随主模型；识图为空表示不配置（不跟随主模型）。可设一个账号默认组合。
+        主模型必填；Worker / 后台可留空跟随；识图可留空不配置（高级 ·
+        分槽覆盖）。改定义后下一回合生效。
+      </p>
+      <p className="section-note">
+        多人协作（委派）对工具调用要求较高；若失败可换更稳的主模型，或改用手写{" "}
+        <code>tasks</code>。
       </p>
 
       {visible.length === 0 ? (
@@ -593,12 +637,12 @@ type SlotModelSelectProps = {
 
 /**
  * Slot picker.
- * - 有 BYOK：始终「服务商下拉 + 模型 id 输入」；目录项进 datalist 建议，可直接粘贴任意 id。
+ * - 有 BYOK 分组：始终「服务商下拉 + 模型 id 输入」；目录项进 datalist 建议，可直接粘贴任意 id。
  * - 仅 platform：纯 select，无手填。
  * `value` 为编码 pointer，或 ""（可选槽 = follow / 不配置）。
  */
 function SlotModelSelect(props: SlotModelSelectProps) {
-  if (props.providers.length > 0) {
+  if (hasByokProviderGroups(props.groups)) {
     return <SlotModelCombobox {...props} />;
   }
   return <SlotModelPlatformSelect {...props} />;
@@ -775,25 +819,31 @@ function SlotModelCombobox({
           <option key={s.id} value={s.id} label={s.display_name} />
         ))}
       </datalist>
-      {followLabel !== undefined && value ? (
-        <button
-          type="button"
-          className="btn-outline"
-          style={{ marginTop: 8 }}
-          disabled={disabled}
-          data-testid={`${id}-clear`}
-          onClick={() => {
-            setModel("");
-            onChange("");
-          }}
-        >
-          {followLabel}
-        </button>
-      ) : null}
-      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        可从建议选择或直接粘贴（火山 ep-、中转私有 id 等）。
-        {followLabel !== undefined && !value ? ` 空则${followLabel}。` : null}
-      </p>
+      {followLabel !== undefined ? (
+        value ? (
+          <button
+            type="button"
+            className="btn-outline"
+            style={{ marginTop: 8 }}
+            disabled={disabled}
+            data-testid={`${id}-clear`}
+            onClick={() => {
+              setModel("");
+              onChange("");
+            }}
+          >
+            {followLabel}
+          </button>
+        ) : (
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {followLabel}
+          </p>
+        )
+      ) : (
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          可从建议选择或直接粘贴（火山 ep-、中转私有 id 等）。
+        </p>
+      )}
     </div>
   );
 }
@@ -833,8 +883,9 @@ function ProfileForm({
   const firstMain =
     groups.find((g) => g.items.length > 0)?.items[0]?.value ??
     (platformModel ? `${PLATFORM_POINTER_ID}::${platformModel}` : "");
-  const noSelectableModels =
-    groups.every((g) => g.items.length === 0) && providers.length === 0;
+  const canChoose = canChooseModel(groups);
+  const canChooseVision = canChooseModel(visionGroups);
+  const showEmptyGuide = !canChoose;
 
   const [name, setName] = useState(profile?.name ?? "");
   const [mainValue, setMainValue] = useState(
@@ -849,10 +900,22 @@ function ProfileForm({
   const [visionValue, setVisionValue] = useState(
     profile?.vision ? encodeSlot(profile.vision) : "",
   );
+  const [advancedOpen, setAdvancedOpen] = useState(() =>
+    hasAdvancedSlotOverrides({
+      worker: profile?.worker ?? null,
+      background: profile?.background ?? null,
+      vision: profile?.vision ?? null,
+    }),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mainDecoded = mainValue ? decodeSlot(mainValue) : null;
   const mainVisionCapable = mainHasCuratedVision(mainDecoded, catalog);
+  const workerDecoded = workerValue ? decodeSlot(workerValue) : null;
+  const backgroundDecoded = backgroundValue
+    ? decodeSlot(backgroundValue)
+    : null;
+  const visionDecoded = visionValue ? decodeSlot(visionValue) : null;
 
   async function save() {
     const trimmed = name.trim();
@@ -912,7 +975,8 @@ function ProfileForm({
     }
   }
 
-  const slotDisabled = saving || noSelectableModels;
+  const slotDisabled = saving || !canChoose;
+  const visionDisabled = saving || !canChooseVision;
 
   return (
     <div className="section" data-testid="profile-form">
@@ -932,14 +996,14 @@ function ProfileForm({
         </div>
         <SlotModelSelect
           id="profile-main"
-          label="主模型"
+          label="主模型（必填）"
           groups={groups}
           providers={providers}
           value={mainValue}
           disabled={slotDisabled}
           onChange={setMainValue}
         />
-        {noSelectableModels && (
+        {showEmptyGuide && (
           <p
             className="muted"
             data-testid="profile-no-models"
@@ -962,48 +1026,76 @@ function ProfileForm({
             )}
           </p>
         )}
-        <SlotModelSelect
-          id="profile-worker"
-          label="Worker 模型"
-          groups={groups}
-          providers={providers}
-          value={workerValue}
-          followLabel="跟随主模型"
-          disabled={slotDisabled}
-          onChange={setWorkerValue}
-        />
-        <SlotModelSelect
-          id="profile-background"
-          label="后台模型"
-          groups={groups}
-          providers={providers}
-          value={backgroundValue}
-          followLabel="跟随主模型"
-          disabled={slotDisabled}
-          onChange={setBackgroundValue}
-        />
-        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          标题、记忆等便宜任务；空则跟随主模型。
-        </p>
-        <SlotModelSelect
-          id="profile-vision"
-          label="识图模型（可选）"
-          groups={visionGroups}
-          providers={providers}
-          value={visionValue}
-          followLabel="不配置"
-          disabled={slotDisabled}
-          onChange={setVisionValue}
-        />
-        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          主模型目录标有视觉时，贴图走主模型；本槽供无视觉时的眼→文与白板读图。留空=平台
-          VISION_* 兜底或无 reader。
-        </p>
-        {mainVisionCapable && (
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            当前主模型目录标有视觉；已知多模态模型贴图直送主模型，否则仍走本槽眼→文。本槽仍可供白板/按需深读。
-          </p>
-        )}
+
+        <div className="profile-advanced" data-testid="profile-advanced">
+          <button
+            type="button"
+            className="profile-advanced-summary"
+            aria-expanded={advancedOpen}
+            disabled={saving}
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            <span className="profile-advanced-title">高级 · 分槽覆盖</span>
+            {!advancedOpen && (
+              <span className="muted profile-advanced-hint">
+                {advancedSlotsSummary(
+                  workerDecoded,
+                  backgroundDecoded,
+                  visionDecoded,
+                )}
+              </span>
+            )}
+          </button>
+          {advancedOpen && (
+            <div className="profile-advanced-body">
+              <SlotModelSelect
+                id="profile-worker"
+                label="Worker 模型"
+                groups={groups}
+                providers={providers}
+                value={workerValue}
+                followLabel="跟随主模型"
+                disabled={slotDisabled}
+                onChange={setWorkerValue}
+              />
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                组队队员用；辩论用主模型。留空则跟随主模型。
+              </p>
+              <SlotModelSelect
+                id="profile-background"
+                label="后台任务模型"
+                groups={groups}
+                providers={providers}
+                value={backgroundValue}
+                followLabel="跟随主模型"
+                disabled={slotDisabled}
+                onChange={setBackgroundValue}
+              />
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                标题、记忆等后台任务；留空则跟随主模型。
+              </p>
+              <SlotModelSelect
+                id="profile-vision"
+                label="识图模型（可选）"
+                groups={visionGroups}
+                providers={providers}
+                value={visionValue}
+                followLabel="不配置"
+                disabled={visionDisabled}
+                onChange={setVisionValue}
+              />
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                主模型不能看图时再配；留空用平台识图或不可用。
+              </p>
+              {mainVisionCapable && (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  当前主模型标有视觉，贴图优先走主模型；本槽仍可供白板/按需深读。
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {error && <p className="error">{error}</p>}
         <div className="field-actions">
           <button

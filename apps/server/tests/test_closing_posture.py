@@ -438,6 +438,22 @@ def test_cloud_web_verify_honesty_banner_soft_only():
         [{"description": "无法装包：无出网·无 chokepoint"}]
     )
     assert turn_has_cloud_web_verify_gap()
+
+    # 案 88625：记分板「13/13 OK」在 verify_failed 闩锁下走软横幅（不进姿势 A）
+    clear_cloud_web_verify_gap()
+    scoreboard = (
+        "测试｜`python -m unittest …` → **13/13 OK，exit code 0**；"
+        "`pytest -q` → **13 passed**"
+    )
+    assert claims_cloud_web_verify_green(scoreboard)
+    assert enforce_cloud_web_verify_honesty(scoreboard) == scoreboard  # 无闩
+    note_cloud_web_verify_gap_from_delivery(
+        [{"reason": "verify_failed", "description": "测试未通过（test_run 未全部通过）"}]
+    )
+    scored = enforce_cloud_web_verify_honesty(scoreboard)
+    assert scored.startswith("【验证说明】")
+    assert "13/13 OK" in scored
+    clear_cloud_web_verify_gap()
     clear_cloud_web_verify_gap()
 
 

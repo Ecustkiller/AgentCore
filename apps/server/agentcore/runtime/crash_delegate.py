@@ -27,7 +27,12 @@ from agentcore.db.repositories import BoardRepository, ConversationRepository
 from agentcore.llm.credentials import bind_credential_pricing_context
 from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.llm.resolve import resolve_credentials
-from agentcore.memory import assemble_turn_rules, default_memory_store, load_memory_topics
+from agentcore.memory import (
+    assemble_turn_rules,
+    default_memory_store,
+    load_memory_topics,
+    load_on_demand_user_rules,
+)
 from agentcore.runtime.context import build_workspace_context, detect_workspace_git
 from agentcore.runtime.facts import FactKind
 from agentcore.runtime.pipeline.resume.wire import wire_crash_turn
@@ -140,6 +145,7 @@ async def production_crash_delegate_factory(
         memory_topics = await load_memory_topics(
             memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
         )
+        on_demand_rules = await load_on_demand_user_rules(user_id, folder_id=folder_id)
         exec_languages = await resolve_exec_languages(backend)
         # Crash rebuild has no live client header → fail-closed (no Host pretence).
         workspace_facts = build_workspace_context(
@@ -158,6 +164,7 @@ async def production_crash_delegate_factory(
             system_prompt,
             memory_topics=memory_topics,
             memory_enabled=memory_enabled,
+            on_demand_rules=on_demand_rules,
             attachment_context="",
         )
 
@@ -184,6 +191,7 @@ async def production_crash_delegate_factory(
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
             has_memory_topics=bool(memory_topics),
+            has_on_demand_rules=bool(on_demand_rules),
         )
         logger.info(
             "recover.crash_delegate_ready",

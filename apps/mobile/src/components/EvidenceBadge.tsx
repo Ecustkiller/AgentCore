@@ -5,6 +5,7 @@ import {
   ledgerTierLabel,
   ledgerTierShortLabel,
 } from "@/lib/evidenceLedger";
+import { toWorkspaceRelPath } from "@/lib/workspacePath";
 import type { EvidenceLedgerEntry } from "@agentcore/contract-types";
 import { BadgeCheck, CircleHelp, FileText, X } from "lucide-react";
 import {
@@ -46,8 +47,9 @@ export function EvidenceBadge({
   const { id: conversationId } = useParams<{ id: string }>();
 
   const openDossier = useCallback(() => {
-    const path = (entry?.dossier_path ?? "").trim();
-    if (!path || !conversationId) return;
+    const raw = (entry?.dossier_path ?? "").trim();
+    if (!raw || !conversationId) return;
+    const path = toWorkspaceRelPath(raw) || raw;
     setOpen(false);
     navigate(`/c/${conversationId}/files`, { state: { openPath: path } });
   }, [conversationId, entry?.dossier_path, navigate]);

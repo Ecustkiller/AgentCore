@@ -93,22 +93,32 @@ _DOSSIER_WRITE_PREFIXES: tuple[str, ...] = (
 # --- System noise (AI + user UI) ---
 # Directory set ↔ desktop ``LIST_FILES_SKIP_DIRS`` (parity gate).
 # Do NOT put bare ``index``/``trash``/``baselines`` here — see ``is_internal_zone_relpath``.
+# Runtime / scratch / lockfile-store names (``logs``, ``tmp``, ``vendor``, …) match
+# common VCS ignore + code-search practice so BM25/grep are not flooded by ops text.
 IGNORED_DIRS: frozenset[str] = frozenset(
     {
         ".git",
         ".hg",
         ".svn",
         "node_modules",
+        "bower_components",
+        "vendor",
         "__pycache__",
         ".venv",
         "venv",
+        ".tox",
+        ".nox",
+        ".eggs",
         ".mypy_cache",
         ".pytest_cache",
         ".pytest_tmp",
         ".ruff_cache",
         ".turbo",
         ".cache",
+        ".parcel-cache",
+        ".pnpm-store",
         "coverage",
+        "htmlcov",
         ".idea",
         ".vscode",
         "dist",
@@ -116,8 +126,14 @@ IGNORED_DIRS: frozenset[str] = frozenset(
         ".next",
         ".nuxt",
         ".vite",
+        ".svelte-kit",
+        ".wrangler",
         "out",
         "target",
+        "logs",
+        "tmp",
+        "temp",
+        ".tmp",
     }
 )
 
@@ -149,6 +165,8 @@ AI_NOISE_FILE_SUFFIXES: frozenset[str] = frozenset(
         ".dat",
         ".pack",
         ".idx",
+        # Runtime log files (dirs named ``logs`` are system-noise; loose ``*.log`` is AI-only).
+        ".log",
         # Columnar / numeric / serialized data blobs (not source text).
         ".parquet",
         ".feather",

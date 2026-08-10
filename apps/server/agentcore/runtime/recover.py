@@ -71,6 +71,7 @@ async def recover_turn(
     debate_tool: DebateTool | None = None,
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
+    model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> SettledSuspension:
     """Settle a resume decision or CONTINUE-redrive unfinished DAG from ``state``.
 
@@ -81,7 +82,9 @@ async def recover_turn(
     - ``debate_tool`` is required when settling a ``team_preview`` with
       ``primitive=debate``.
     - ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
-      ``team_preview`` continue (开工组队有限否决); ignored otherwise.
+      ``team_preview`` continue (开工组队有限否决).
+    - ``model_overrides`` apply to delegate continue (人盖队员) **and** debate
+      continue (人盖辩手 / 主持人 → debate_arguments)；其它 kind / stop ignore.
     """
     if suspension is not None:
         if decision is None:
@@ -98,6 +101,7 @@ async def recover_turn(
             execution_id=execution_id,
             excluded_run_ids=excluded_run_ids or [],
             write_capability_overrides=write_capability_overrides or [],
+            model_overrides=model_overrides or {},
         )
 
     decision = decision or CheckpointDecision.CONTINUE
@@ -144,6 +148,7 @@ async def _settle_resume(
     execution_id: str,
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
+    model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> SettledSuspension:
     """Kind-specific resume settle, projecting exclusively via ``state``."""
     # research_first 仅辩论开工卡合法；其它挂起点降级为 STOP，不得静默 continue。
@@ -318,37 +323,81 @@ async def _settle_resume(
 
     if isinstance(suspension, TeamPreviewSuspension):
         from agentcore.runtime.kickoff.team_veto import (
+            apply_debate_model_overrides,
             apply_team_preview_veto,
+            should_apply_debate_model_overrides,
             should_apply_team_veto,
+            validate_debate_model_overrides,
             validate_team_preview_veto,
             veto_summary_for_resolved,
         )
 
         excl_for_event: list[str] | None = None
         overrides_for_event: list[dict[str, str]] | None = None
+        model_for_event: dict[str, dict[str, str]] | None = None
         apply_veto = should_apply_team_veto(suspension, decision)
+        apply_debate_models = should_apply_debate_model_overrides(suspension, decision)
         seed_completed = dict(state.completed) or suspension.completed
         plan = state.plan or suspension.plan
-        # 开工组队有限否决：validate+apply 必须在 emit resolved 之前——非法修正不得先落事件。
-        # 冷启动 explore≥2 闸只在 delegate.execute，不挡本卡剪枝后的 resume。
+        # 开工组队有限否决 + 人盖模型：validate+apply 必须在 emit resolved 之前——
+        # 非法修正不得先落事件。冷启动 explore≥2 闸只在 delegate.execute，不挡本卡剪枝后的 resume。
         if apply_veto:
             validate_team_preview_veto(
                 plan,
                 excluded_run_ids=excluded_run_ids,
                 write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
             )
             apply_team_preview_veto(
                 plan,
                 excluded_run_ids=excluded_run_ids,
                 write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
                 seed_completed=seed_completed,
             )
-            excl_for_event, overrides_for_event = veto_summary_for_resolved(
+            excl_for_event, overrides_for_event, model_for_event = veto_summary_for_resolved(
                 excluded_run_ids=excluded_run_ids,
                 write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
             )
             excl_for_event = excl_for_event or None
             overrides_for_event = overrides_for_event or None
+            model_for_event = model_for_event or None
+            # 冷 resume 重建 router 只挂 Worker 槽：plan 上 CEO 已写 / 人盖后的
+            # 路由键都须补 extras，否则云端 in-process 跨 origin 软丢进 default。
+            # Sidecar proxy 按请求自解析，不依赖此。
+            from agentcore.runtime.debate.models import identity_from_route_key
+            from agentcore.runtime.delegate.task_models import (
+                ensure_delegate_route_extras,
+            )
+
+            idents = []
+            for node in plan.nodes:
+                raw = str(getattr(node, "model", "") or "").strip()
+                if not raw:
+                    continue
+                ident = identity_from_route_key(raw)
+                if not ident.is_empty() and ident.origin:
+                    idents.append(ident)
+            if idents:
+                ctx = getattr(delegate_tool, "_base_tool_context", None)
+                uid = str(getattr(ctx, "user_id", "") or "") or None
+                await ensure_delegate_route_extras(
+                    delegate_tool._llm,
+                    idents,
+                    user_id=uid,
+                )
+        elif apply_debate_models:
+            validate_debate_model_overrides(
+                suspension.sides,
+                debate_arguments=suspension.debate_arguments,
+                model_overrides=model_overrides,
+            )
+            model_for_event = apply_debate_model_overrides(
+                suspension.debate_arguments,
+                model_overrides,
+                sides=suspension.sides,
+            ) or None
 
         sink.emit(
             team_preview_resolved(
@@ -357,6 +406,7 @@ async def _settle_resume(
                 note=note,
                 excluded_run_ids=excl_for_event,
                 write_capability_overrides=overrides_for_event,
+                model_overrides=model_for_event,
             )
         )
         logger.info(
@@ -366,6 +416,7 @@ async def _settle_resume(
             primitive=suspension.primitive,
             excluded=len(excl_for_event or []),
             write_overrides=len(overrides_for_event or []),
+            model_overrides=len(model_for_event or {}),
         )
         if suspension.primitive == "debate":
             if debate_tool is None:

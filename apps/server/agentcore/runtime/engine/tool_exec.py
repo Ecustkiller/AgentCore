@@ -4,7 +4,8 @@ Thin facade: implementation is split by axis —
 
 * ``tool_exec_gates`` — approval / destructive baseline
 * ``tool_exec_args`` — args sanitize / miss feedback / failure markers
-* ``tool_exec_parallel`` — parallel execute + file_read coalesce
+* ``tool_exec_parallel`` — parallel execute orchestration
+* ``tool_exec_coalesce`` — same-round file_read path coalesce helpers
 * ``tool_exec_citations`` — citation sink / ledger side-effects
 
 Public import paths (``execute_tools``, ``TOOL_FAILED_MARKER``,

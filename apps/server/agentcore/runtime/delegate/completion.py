@@ -35,7 +35,7 @@ _VERIFY_COMMAND_RE = re.compile(
 )
 
 _EXECUTION_TASK_HINTS = re.compile(
-    r"(运行|启动|打开|安装|跑通|联调|验收|测试通过|"
+    r"(运行|启动|安装|跑通|联调|验收|测试通过|"
     r"npm\s+(run|start)|pnpm\s+(run|start)|yarn\s+(run|start|dev)|"
     r"python\s+-m|uv\s+run|pip\s+run|cargo\s+run|go\s+run|进程)",
     re.IGNORECASE,

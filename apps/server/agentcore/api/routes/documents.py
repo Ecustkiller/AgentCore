@@ -1,15 +1,15 @@
-"""Document tree CRUD API (「一切皆文档」子系统第一期, Agent记忆与知识系统 §5.7 载体).
+"""Documents API — tree CRUD; user rules expose ``always`` | ``on_demand`` apply_mode.
 
 Self-only CRUD over the single ``documents`` content tree. This is the generic tree surface a
 future「文件」page drives; in this phase its load-bearing use is **user rules** — a user rule is
 just a ``role='rule'`` document with ``ai_maintained=false`` (§5.2), created / edited / deleted
-here, then injected ahead of AI memory with authoritative wording (§二 两档措辞).
+here, then injected (always → ``<rules>``; on_demand → 规则目录 + ``consult_rule``).
 
 Ownership is the structural default (every op is owner-scoped → a non-owner id 404s, SEC-002).
 Nodes created here are always ``ai_maintained=false``: AI-maintained memory is written by the
 consolidation pass / memory routes, never authored as「AI 记忆」through this user-facing API.
 CAS mirrors the memory editor — a content write carries a content-hash ``baseline`` and reports a
-conflict instead of clobbering. ``conditional`` apply_mode is not offered (§5.7 第一期不做).
+conflict instead of clobbering. ``conditional`` apply_mode stays reserved (API rejects writes).
 """
 
 from __future__ import annotations
@@ -27,12 +27,10 @@ from agentcore.memory import memory_version
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-# What a user may author via this API (§5.2). AI memory (ai_maintained=true) is not user-settable
-# here, and every user rule is ``apply_mode='always'``: rule ``on_demand`` + ``consult_rule`` and
-# scene ``conditional`` are explicitly out of the first phase (§5.7 第一期不做), so the field is
-# not exposed. (``on_demand`` still exists internally for AI memory topics, set by the store.)
+# User-facing apply modes (§5.4 / 定案 B). ``conditional`` is DB-reserved but not writable here.
 DocKind = Literal["folder", "document"]
 DocRole = Literal["rule", "general"]
+DocApplyMode = Literal["always", "on_demand"]
 
 
 class DocumentNodeView(BaseModel):
@@ -64,6 +62,8 @@ class DocumentCreateRequest(BaseModel):
     kind: DocKind = "document"
     role: DocRole = "general"
     content: str = ""
+    # Default always; only ``role='rule'`` documents may be ``on_demand``.
+    apply_mode: DocApplyMode = "always"
     # ``parent_id`` None = a top-level node of its scope — except ``role='rule'`` documents,
     # which are auto-parented under ``AgentCore/规则/`` (§5.0 新写入落点). When ``parent_id``
     # is set, the child inherits the parent's ``folder_id`` scope; ``folder_id`` is only
@@ -85,12 +85,13 @@ class DocumentWriteResult(BaseModel):
 
 
 class DocumentPatchRequest(BaseModel):
-    """Rename and/or reparent a node (content untouched — that goes through PUT)."""
+    """Rename, reparent, and/or change apply_mode (content untouched — that goes through PUT)."""
 
     name: str | None = Field(default=None, min_length=1, max_length=500)
     # Use the string "" wrapped by the caller? No — reparent semantics: omitted = leave alone.
     parent_id: str | None = None
     reparent: bool = False  # set True to apply parent_id (even to None = move to root)
+    apply_mode: DocApplyMode | None = None
 
 
 def _detail(doc: Document) -> DocumentDetailView:
@@ -108,6 +109,13 @@ def _detail(doc: Document) -> DocumentDetailView:
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
+
+
+def _resolve_create_apply_mode(*, role: str, kind: str, apply_mode: DocApplyMode) -> str:
+    """Only user-rule documents may be on_demand; everything else stays always."""
+    if role == "rule" and kind == "document":
+        return apply_mode
+    return "always"
 
 
 @router.get("", response_model=list[DocumentNodeView])
@@ -154,7 +162,9 @@ async def create_document(
         kind=body.kind,
         role=body.role,
         ai_maintained=False,
-        apply_mode="always",
+        apply_mode=_resolve_create_apply_mode(
+            role=body.role, kind=body.kind, apply_mode=body.apply_mode
+        ),
         content=body.content if body.kind == "document" else "",
     )
     return _detail(doc)
@@ -197,7 +207,7 @@ async def patch_document(
     user: AuthUser,
     repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentDetailView:
-    """Rename and/or reparent a node (set ``reparent`` to apply ``parent_id``)."""
+    """Rename, reparent, and/or set apply_mode (set ``reparent`` to apply ``parent_id``)."""
     doc = await repo.get(document_id, user_id=user.user_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
@@ -214,6 +224,21 @@ async def patch_document(
             new_folder = parent.folder_id
         await repo.move(
             document_id, user_id=user.user_id, parent_id=body.parent_id, folder_id=new_folder
+        )
+    if body.apply_mode is not None:
+        # Refresh after rename/move so role/kind checks use current row.
+        current = await repo.get(document_id, user_id=user.user_id)
+        assert current is not None
+        if current.ai_maintained:
+            raise HTTPException(
+                status_code=400, detail="cannot change apply_mode of AI-maintained documents"
+            )
+        if current.role != "rule" or current.kind != "document":
+            raise HTTPException(
+                status_code=400, detail="apply_mode only applies to rule documents"
+            )
+        await repo.update_apply_mode(
+            document_id, user_id=user.user_id, apply_mode=body.apply_mode
         )
     refreshed = await repo.get(document_id, user_id=user.user_id)
     assert refreshed is not None  # just fetched under the same session

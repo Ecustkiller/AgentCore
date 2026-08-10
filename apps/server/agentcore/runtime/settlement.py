@@ -151,6 +151,7 @@ def cold_resume_settlement_event(
     selected: list[str] | None = None,
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
+    model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> SSEEvent:
     """Build the same ``*_resolved`` SSE recover will emit (D8 同形)."""
     from agentcore.runtime.events import (
@@ -187,19 +188,23 @@ def cold_resume_settlement_event(
     if isinstance(suspension, TeamPreviewSuspension):
         excl: list[str] | None = None
         overrides: list[dict[str, str]] | None = None
+        models: dict[str, dict[str, str]] | None = None
         if should_apply_team_veto(suspension, decision):
-            excl, overrides = veto_summary_for_resolved(
+            excl, overrides, models = veto_summary_for_resolved(
                 excluded_run_ids=excluded_run_ids,
                 write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
             )
             excl = excl or None
             overrides = overrides or None
+            models = models or None
         return team_preview_resolved(
             checkpoint_id=suspension.checkpoint_id,
             decision=decision,
             note=note,
             excluded_run_ids=excl,
             write_capability_overrides=overrides,
+            model_overrides=models,
         )
     raise ValueError(f"unknown suspension kind for cold settlement: {type(suspension)!r}")
 
@@ -212,6 +217,7 @@ async def prewrite_cold_resume_settlement(
     selected: list[str] | None = None,
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
+    model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Cold-path D8: durable-write ``*_resolved`` before ``claim_paused_turn``.
 
@@ -225,6 +231,7 @@ async def prewrite_cold_resume_settlement(
         selected=selected,
         excluded_run_ids=excluded_run_ids,
         write_capability_overrides=write_capability_overrides,
+        model_overrides=model_overrides,
     )
     written = await prewrite_settlement(event)
     if written:

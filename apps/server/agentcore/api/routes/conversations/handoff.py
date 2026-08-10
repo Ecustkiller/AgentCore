@@ -96,7 +96,7 @@ async def _run_handoff(
         sink.emit(error_event(ErrorCode.HANDOFF_FAILED, str(e)))
     finally:
         if not sink._closed:
-            sink.close()
+            sink.close(reason="handoff_archive_finally")
 
 
 @router.post("/{conversation_id}/workspace/handoff")
@@ -350,7 +350,7 @@ async def _run_apply(
         sink.emit(error_event(ErrorCode.HANDOFF_APPLY_FAILED, str(e)))
     finally:
         if not sink._closed:
-            sink.close()
+            sink.close(reason="handoff_apply_finally")
 
 
 @router.post("/{conversation_id}/handoff/jobs/{job_id}/apply")

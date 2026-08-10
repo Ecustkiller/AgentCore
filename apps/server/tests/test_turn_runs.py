@@ -154,7 +154,7 @@ async def test_drain_waits_without_cancelling():
     reg.register(conversation_id="c1", task=task, sink=EventSink())
     await asyncio.sleep(0)
 
-    # Still running within a short timeout → False (caller should 409).
+    # Still running within a short timeout → False.
     assert await reg.drain("c1", timeout=0.05) is False
     assert not task.done()
     assert not task.cancelled()

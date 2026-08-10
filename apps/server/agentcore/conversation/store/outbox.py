@@ -70,6 +70,18 @@ def _is_transient_replace_error(exc: BaseException) -> bool:
 # Backoff between replace attempts when the destination is briefly locked.
 _REPLACE_RETRY_DELAYS_S = (0.0, 0.05, 0.15, 0.35, 0.75)
 
+# Short retry when an existing outbox file cannot be read/parsed (AV / torn write).
+_READ_RETRY_DELAYS_S = (0.0, 0.05, 0.15)
+
+
+class OutboxReadError(OSError):
+    """Outbox file exists but could not be read or parsed.
+
+    Must not be collapsed into ``None`` (missing): treating corrupt/locked reads as
+    missing caused ``_mutate_sync`` to invent an empty shell and silently wipe the
+    on-disk record.
+    """
+
 
 def _replace_with_retry(tmp: Path, target: Path) -> None:
     """``os.replace`` with limited retry for transient Windows locks; re-raises if exhausted."""
@@ -240,14 +252,26 @@ class OutboxStore:
         }
 
     def _read_sync(self, user_message_id: str) -> dict[str, Any] | None:
+        """Return the on-disk record, or ``None`` only when the file is missing.
+
+        Raises :class:`OutboxReadError` when the file exists but read/parse fails
+        (including non-object JSON) so callers never invent an empty shell over it.
+        """
         path = self._path(user_message_id)
         if not path.is_file():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        return data if isinstance(data, dict) else None
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, ValueError) as e:
+            raise OutboxReadError(
+                f"outbox read failed for {user_message_id}: {e}"
+            ) from e
+        if not isinstance(data, dict):
+            raise OutboxReadError(
+                f"outbox record is not a JSON object for {user_message_id}"
+            )
+        return data
 
     def _write_sync(self, user_message_id: str, record: dict[str, Any]) -> None:
         self._base.mkdir(parents=True, exist_ok=True)
@@ -277,11 +301,45 @@ class OutboxStore:
                 )
 
     def _mutate_sync(self, user_message_id: str, mutator: Any) -> None:
-        record = self._read_sync(user_message_id)
-        if record is None:
-            record = self._empty_record(user_message_id=user_message_id)
-        mutator(record)
-        self._write_sync(user_message_id, record)
+        """Read-modify-write. Empty shell only when the file is missing.
+
+        On read/parse failure: short retry, then abort without writing (never wipe).
+        """
+        last_err: OutboxReadError | None = None
+        for attempt, delay in enumerate(_READ_RETRY_DELAYS_S):
+            if delay:
+                time.sleep(delay)
+            try:
+                record = self._read_sync(user_message_id)
+            except OutboxReadError as e:
+                last_err = e
+                logger.warning(
+                    "sidecar.outbox_read_retry",
+                    user_message_id=user_message_id,
+                    attempt=attempt + 1,
+                    max_attempts=len(_READ_RETRY_DELAYS_S),
+                    error=str(e),
+                )
+                continue
+            if record is None:
+                record = self._empty_record(user_message_id=user_message_id)
+            mutator(record)
+            self._write_sync(user_message_id, record)
+            if attempt > 0:
+                logger.warning(
+                    "sidecar.outbox_read_recovered",
+                    user_message_id=user_message_id,
+                    attempts=attempt + 1,
+                )
+            return
+        assert last_err is not None
+        logger.error(
+            "sidecar.outbox_read_failed",
+            user_message_id=user_message_id,
+            attempts=len(_READ_RETRY_DELAYS_S),
+            error=str(last_err),
+        )
+        raise last_err
 
     async def begin_turn(
         self,
@@ -528,7 +586,10 @@ class OutboxStore:
             record["conversation_id"] = kwargs.get("conversation_id") or record.get(
                 "conversation_id"
             )
-            record["user_message"] = kwargs.get("user_message") or record.get("user_message")
+            # Three-state user_message: absent → keep; explicit None → keep;
+            # explicit "" → clear (do not use ``or``, which swallows empty strings).
+            if "user_message" in kwargs and kwargs["user_message"] is not None:
+                record["user_message"] = kwargs["user_message"]
             record["user_message_id"] = user_message_id
             record["message_id"] = kwargs.get("message_id") or record.get("message_id")
             record["trace_id"] = kwargs.get("trace_id") or record.get("trace_id")
@@ -617,7 +678,16 @@ class OutboxStore:
 
         ctx = self._ctx_for(message_id)
         bound_user_message = str(ctx.get("user_message") or "")
-        existing = self._read_sync(user_message_id)
+        try:
+            existing = self._read_sync(user_message_id)
+        except OutboxReadError as e:
+            logger.error(
+                "sidecar.outbox_read_failed",
+                user_message_id=user_message_id,
+                message_id=message_id,
+                error=str(e),
+            )
+            return
         prior_um = (
             str(existing.get("user_message") or "").strip() if existing else ""
         )

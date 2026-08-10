@@ -230,4 +230,4 @@ async def run_workflow_job(
         )
     finally:
         if not sink._closed:
-            sink.close()
+            sink.close(reason="workflow_finally")

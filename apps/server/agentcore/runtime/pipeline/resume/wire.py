@@ -105,6 +105,7 @@ async def _wire_continuation_toolset(
     suspension_deleter: SuspensionDeleter | None,
     x_client_platform: str | None,
     has_memory_topics: bool | None = None,
+    has_on_demand_rules: bool | None = None,
     folder_binding_injected: bool = False,
     folder_local_root_id: str | None = None,
     folder_local_subpath: str | None = None,
@@ -131,6 +132,12 @@ async def _wire_continuation_toolset(
         )
     elif topics_present is None:
         topics_present = False
+
+    rules_present = has_on_demand_rules
+    if rules_present is None:
+        from agentcore.memory import load_on_demand_user_rules
+
+        rules_present = bool(await load_on_demand_user_rules(user_id, folder_id=folder_id))
 
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
@@ -168,6 +175,7 @@ async def _wire_continuation_toolset(
         memory_enabled=memory_enabled,
         folder_id=folder_id,
         has_memory_topics=topics_present,
+        has_on_demand_rules=rules_present,
     )
     _wire_worker_conversation_log_tools(
         worker_tools,
@@ -326,6 +334,7 @@ async def _wire_continuation_toolset(
         memory_enabled=memory_enabled,
         conversation_history_access=conversation_history_access,
         has_memory_topics=topics_present,
+        has_on_demand_rules=rules_present,
         permission_axes=permission_axes,
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
         desktop_online=desktop_online,
@@ -463,6 +472,7 @@ async def wire_crash_turn(
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
     has_memory_topics: bool | None = None,
+    has_on_demand_rules: bool | None = None,
 ) -> ResumedWiring:
     """Crash-lease sibling of :func:`wire_resume_turn` — same assembly, no suspension.
 
@@ -494,4 +504,5 @@ async def wire_crash_turn(
         suspension_deleter=suspension_deleter,
         x_client_platform=None,
         has_memory_topics=has_memory_topics,
+        has_on_demand_rules=has_on_demand_rules,
     )

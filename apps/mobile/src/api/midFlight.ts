@@ -1,10 +1,10 @@
 /**
  * Mid-flight send（生成中再发）：POST 恒 SSE。
  * 协调 + steer → `user_interjection` 短确认；经典 + steer → `turn_steer_accepted` toast；
- * queue（或 steer 降级）→ 先 `turn_queued`（立即主时间线用户气泡 + 排队轻态），
+ * queue（或 steer 降级）→ 先 `turn_queued`（仅 QueuedTurnsBar 轻态，不插主时间线用户泡），
  * 缓冲后续帧直至主路空闲，再续流 turn2——对齐桌面 midFlight / 发送即有流。
  * 出队开跑首帧为 EPHEMERAL `turn_queue_started`（先于 `message_start`）；
- * live UI 据此清 queuedTurns 轻态（保留用户气泡），否决靠 `message_start` 猜出队。
+ * live UI：插主时间线用户泡并清 queuedTurns 轻态；否决靠 `message_start` 猜出队。
  * ``delivery`` 必填（缺 → 422）。
  */
 import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
@@ -37,10 +37,10 @@ export type MidFlightSendResult =
 type DeliverMode = "open" | "buffering" | "live" | "aborted";
 
 export type MidFlightHooks = {
-  /** 立即 fold 到当前 live turn（user_interjection / turn_steer_accepted；turn_queued 亦可）。 */
+  /** 立即 fold 到当前 live turn（user_interjection / turn_steer_accepted）。 */
   onLiveEvent: (event: SSEEvent) => void;
   /**
-   * ``turn_queued``：立即主时间线用户气泡 + 排队轻态（drain 前可取消）。
+   * ``turn_queued``：仅 QueuedTurnsBar 轻态（drain 前可取消；不插主时间线用户泡）。
    * 先于缓冲 / beginTurn2；多项各调一次（各 queue_id）。
    */
   onQueued: (info: {
@@ -51,7 +51,7 @@ export type MidFlightHooks = {
   }) => void;
   /**
    * 主路空闲后开跑 turn2（只调一次）。
-   * 用户气泡应已由 {@link onQueued} 插入——此处勿再插泡。
+   * 此处插入主时间线用户泡（或由紧随其后的 ``turn_queue_started`` 路径补插）。
    */
   beginTurn2: () => void;
   /** turn2 开跑后的事件（含缓冲回放）。 */
@@ -217,7 +217,7 @@ export async function sendMidFlightMessage(
           queueId,
           degradedFrom: p.degraded_from,
         };
-        // 立即主时间线用户气泡 + 排队轻态（产品：Queue 可见可取消）。
+        // 仅 QueuedTurnsBar 轻态（产品：排队期不插主时间线用户泡）。
         hooks.onQueued({
           queueId,
           position,

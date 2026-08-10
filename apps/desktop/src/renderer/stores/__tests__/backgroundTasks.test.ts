@@ -49,6 +49,7 @@ beforeEach(() => {
     byConversation: {},
     modeByConversation: {},
     rootIdByConversation: {},
+    armedHandoffByConversation: {},
     mergedJobIds: {},
     toastedSucceededIds: {},
   });

@@ -26,6 +26,7 @@ from agentcore.memory.followups import select_motion_card_from_journal
 from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_memory_topics
 from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.rules_injection import (
+    OnDemandUserRule,
     RuleFragment,
     UserRuleMutationResult,
     append_user_rule,
@@ -33,8 +34,10 @@ from agentcore.memory.rules_injection import (
     assemble_injected_rules,
     assemble_turn_rules,
     compose_injected_rules,
+    load_on_demand_user_rules,
     mutate_user_rule,
     mutate_user_rule_markdown,
+    rule_consult_name,
 )
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
@@ -123,9 +126,12 @@ __all__ = [
     "load_memory_topics",
     "MemoryTopic",
     "RuleFragment",
+    "OnDemandUserRule",
     "assemble_injected_rules",
     "assemble_turn_rules",
     "compose_injected_rules",
+    "load_on_demand_user_rules",
+    "rule_consult_name",
     "append_user_rule",
     "append_user_rule_bullet",
     "UserRuleMutationResult",

@@ -40,3 +40,21 @@ def test_soft_warning_office_without_execution():
 
 def test_soft_warning_silent_when_no_run_smell():
     assert execution_capability_warning(_plan("写一段说明文字"), _CloudBackend()) is None
+
+
+def test_soft_warning_silent_on_bare_open_file():
+    """裸「打开文件 / 打开 .mdc」无运行味，不再触发 execution soft warning。"""
+    assert execution_capability_warning(_plan("打开文件"), _CloudBackend()) is None
+    assert (
+        execution_capability_warning(
+            _plan("打开 `.cursor/rules/x.mdc`"), _CloudBackend()
+        )
+        is None
+    )
+
+
+def test_soft_warning_on_open_acceptance_via_yanshou():
+    """「打开验收」仍经「验收」命中运行类 soft warning。"""
+    warn = execution_capability_warning(_plan("打开验收"), _CloudBackend())
+    assert warn is not None
+    assert "未装配" in warn or "能力提示" in warn

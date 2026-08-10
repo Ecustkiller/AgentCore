@@ -119,12 +119,13 @@ def test_cloud_scratch_facts():
     assert "list_projects" in out and "resolve_project" in out
     assert "target_folder_id" in out
     assert "create_project" in out
+    assert "自动建云桌" in out
     assert "禁猜最近" in out or "猜最近" in out
-    assert "禁默写 scratch" in out or "scratch" in out
+    assert "禁默写 scratch" in out or ("scratch" in out and "写盘" in out)
     assert "多" in out and "并行" in out
     assert "可能降级" not in out
     assert "协作图不改" in out
-    # 一句短指针（HOW 在 skill）
+    # 一句短指针（HOW 在 skill）；先建仅显式新建/多线
     assert "先建齐再同次派" in out
     assert "拒后禁塌缩" in out
     # 只读跨桌工具摸底 + 写仍派工换桌（禁「云端读不到本地」当唯一路径）

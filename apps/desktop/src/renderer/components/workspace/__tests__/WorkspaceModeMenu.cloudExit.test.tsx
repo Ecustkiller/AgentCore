@@ -90,11 +90,6 @@ function cloudState(
     },
     roots: [{ id: "root-1", name: "desk" }],
     effective,
-    busy: false,
-    error: null,
-    backingUp: false,
-    backupDone: false,
-    backup: vi.fn(),
     refresh: vi.fn(),
     ...overrides,
   };
@@ -123,6 +118,8 @@ describe("WorkspaceModeMenu · cloud desk §7.6 exits", () => {
     expect(screen.getByText("合回到本机")).toBeTruthy();
     expect(screen.getByText("只合回产物")).toBeTruthy();
     expect(screen.queryByText("本地工作区")).toBeNull();
+    expect(screen.queryByText("遗留：先改云拷贝再合回")).toBeNull();
+    expect(screen.queryByText("后台云端")).toBeNull();
   });
 
   it("shows 更换合回落点 when landing is registered", () => {

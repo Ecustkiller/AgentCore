@@ -172,6 +172,17 @@ def test_schema_exposes_form_enum():
     assert "一张图" in DELEGATE_DESCRIPTION
     # 建站常驻路径勿先 consult：schema 必须带 playbook_args.topic，否则缺 slot 全失败。
     assert "playbook_args.topic" in DELEGATE_DESCRIPTION
+    assert "禁止二者同时有内容" in DELEGATE_DESCRIPTION
+    assert "既填 code_audit 又传 tasks" in DELEGATE_DESCRIPTION
+    # 弱模型空失败可抄：顶层非空 tasks 三件套骨架（与 empty 拒收同源）。
+    from agentcore.runtime.delegate.playbook_declaration import HANDWRITTEN_TASKS_SKELETON
+
+    assert HANDWRITTEN_TASKS_SKELETON in DELEGATE_DESCRIPTION
+    tasks_desc = DELEGATE_PARAMETERS["properties"]["tasks"]["description"]
+    assert HANDWRITTEN_TASKS_SKELETON in tasks_desc
+    assert "手写" in tasks_desc and "互斥" in tasks_desc
+    playbook_desc = DELEGATE_PARAMETERS["properties"]["playbook"]["description"]
+    assert "不要传 tasks" in playbook_desc
     pa = DELEGATE_PARAMETERS["properties"]["playbook_args"]["description"]
     assert "build_website" in pa and "topic" in pa
     assert "建站必填 topic" in pa

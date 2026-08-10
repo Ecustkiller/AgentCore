@@ -33,13 +33,16 @@ swap behind the same repository seam.
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.runtime.events import EventSink
 
 logger = get_logger(__name__)
+
+ResumeBusyReason = Literal["wrap_up", "live_turn"]
 
 
 @dataclass
@@ -54,6 +57,27 @@ class TurnRun:
     # ``task.cancel()`` so the CancelledError handler can tell clean cancel
     # (terminal + release) from true hard kill (orphan lease for sweeper).
     user_stopped: bool = False
+
+
+@dataclass
+class ResumeDeferredWaiter:
+    """Cold resume waiting for the conversation slot (冷 resume × live deferred).
+
+    Settlement is prewritten before registration. On wake we claim + start
+    ``resume_chat``; a still-open SSE receives the sink via ``started`` (else
+    detached, same posture as FIFO queue drain).
+    """
+
+    conversation_id: str
+    message_id: str
+    busy_reason: ResumeBusyReason
+    checkpoint_response: Any
+    llm_credentials: Any = None
+    llm_supports_tools: bool | None = None
+    x_client_platform: str | None = None
+    # Soft-gate warnings to emit on the resume sink when the slot frees.
+    preflight_warnings: list[str] = field(default_factory=list)
+    started: asyncio.Future[Any] | None = field(default=None, repr=False)
 
 
 # Set on an ``asyncio.Task`` when that specific run was cancelled by user stop /
@@ -78,6 +102,8 @@ class TurnRunRegistry:
 
     def __init__(self) -> None:
         self._runs: dict[str, TurnRun] = {}
+        # At most one cold-resume deferred waiter per conversation (slot owner next).
+        self._resume_deferred: dict[str, ResumeDeferredWaiter] = {}
 
     @staticmethod
     def _mark_user_stopped(run: TurnRun) -> None:
@@ -139,7 +165,11 @@ class TurnRunRegistry:
         current = self._runs.get(conversation_id)
         if current is not None and current.run_id == run_id:
             del self._runs[conversation_id]
-            # Explicit serialisation: start the next queued user message, if any.
+            # Cold resume deferred owns the next slot ahead of FIFO.
+            waiter = self._resume_deferred.pop(conversation_id, None)
+            if waiter is not None:
+                self._arm_resume_deferred_start(waiter)
+                return
             try:
                 from .queue import turn_queue
 
@@ -149,6 +179,116 @@ class TurnRunRegistry:
                     "turn_run.queue_drain_failed",
                     conversation_id=conversation_id,
                 )
+
+    def busy_reason_for_resume(
+        self, conversation_id: str, message_id: str
+    ) -> ResumeBusyReason | None:
+        """``wrap_up`` / ``live_turn`` when a live task holds the slot; else ``None``."""
+        run = self._runs.get(conversation_id)
+        if run is None or run.task.done():
+            return None
+        if run.sink.message_id == message_id:
+            return "wrap_up"
+        return "live_turn"
+
+    def has_resume_deferred(self, conversation_id: str) -> bool:
+        return conversation_id in self._resume_deferred
+
+    def register_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+        """Park a cold resume until the slot frees (or start immediately if already idle).
+
+        Replaces any prior deferred waiter for the conversation (last click wins;
+        prior ``started`` Future is cancelled so its SSE unwinds).
+        """
+        prior = self._resume_deferred.pop(waiter.conversation_id, None)
+        if prior is not None and prior.started is not None and not prior.started.done():
+            prior.started.cancel()
+        self._resume_deferred[waiter.conversation_id] = waiter
+        logger.info(
+            "resume.deferred",
+            conversation_id=waiter.conversation_id,
+            message_id=waiter.message_id,
+            busy_reason=waiter.busy_reason,
+        )
+        existing = self._runs.get(waiter.conversation_id)
+        if existing is None or existing.task.done():
+            taken = self._resume_deferred.pop(waiter.conversation_id, None)
+            if taken is waiter:
+                self._arm_resume_deferred_start(taken)
+
+    def _arm_resume_deferred_start(self, waiter: ResumeDeferredWaiter) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning(
+                "resume.deferred_started",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                armed=False,
+                reason="no_running_loop",
+            )
+            return
+        loop.call_soon(lambda: asyncio.create_task(self._start_resume_deferred(waiter)))
+
+    async def _start_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+        """Claim the paused frame and start resume_chat (waiter SSE or detached)."""
+        from agentcore.conversation.service import resume_chat
+        from agentcore.runtime.events import turn_warning
+        from agentcore.runtime.suspension_persistence import claim_paused_turn
+
+        from .queue import turn_queue
+
+        logger.info(
+            "resume.deferred_started",
+            conversation_id=waiter.conversation_id,
+            message_id=waiter.message_id,
+            busy_reason=waiter.busy_reason,
+        )
+        # Another turn may have claimed the slot between arm and run.
+        existing = self._runs.get(waiter.conversation_id)
+        if existing is not None and not existing.task.done():
+            self._resume_deferred[waiter.conversation_id] = waiter
+            return
+
+        suspension = await claim_paused_turn(
+            waiter.message_id, conversation_id=waiter.conversation_id
+        )
+        if suspension is None:
+            logger.warning(
+                "resume.deferred_started",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                claimed=False,
+            )
+            fut = waiter.started
+            if fut is not None and not fut.done():
+                fut.cancel()
+            turn_queue.schedule_drain(waiter.conversation_id)
+            return
+
+        sink = EventSink()
+        for warning in waiter.preflight_warnings:
+            sink.emit(turn_warning(warning))
+
+        fut = waiter.started
+        if fut is not None and not fut.done():
+            fut.set_result(sink)
+        else:
+            sink.detach(reason="resume_deferred_no_waiter")
+
+        task = asyncio.create_task(
+            resume_chat(
+                suspension=suspension,
+                response=waiter.checkpoint_response,
+                sink=sink,
+                llm_credentials=waiter.llm_credentials,
+                llm_supports_tools=waiter.llm_supports_tools,
+                x_client_platform=waiter.x_client_platform,
+            )
+        )
+        self.register(
+            conversation_id=waiter.conversation_id, task=task, sink=sink
+        )
 
     def get(self, conversation_id: str) -> TurnRun | None:
         """The conversation's active run, or ``None`` if nothing is running."""
@@ -207,13 +347,12 @@ class TurnRunRegistry:
         return [run for run in self._runs.values() if not run.task.done()]
 
     async def drain(self, conversation_id: str, *, timeout: float = 10.0) -> bool:
-        """Wait for any live run to finish WITHOUT cancelling it (resume preflight).
+        """Wait for any live run to finish WITHOUT cancelling it.
 
-        D9: a cold paused session may already be running a *new* turn. Resume must not
-        ``cancel`` that work — only wait briefly for residual unwind of an already-finalized
-        turn (挂起即收口). Returns ``True`` when the slot is clear (idle, or unwind finished
-        within ``timeout``); ``False`` when a live task remains — the resume route should
-        409 ``turn_in_progress`` and leave the frame unclaimed.
+        Kept for callers that still need a short residual-unwind wait (e.g. stage_card
+        interactions). Cold ``POST .../resume`` no longer 409s on busy — it registers a
+        deferred waiter instead (see :meth:`register_resume_deferred`).
+        Returns ``True`` when the slot is clear; ``False`` when a live task remains.
         """
         run = self._runs.get(conversation_id)
         if run is None or run.task.done():

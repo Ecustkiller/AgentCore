@@ -10,6 +10,7 @@ import {
   upsertColdRequired,
 } from "../coldInteractions";
 import {
+  resolveColdBindHostId,
   resolveColdResumeKeyFromHosts,
   selectVisibleColdResumes,
 } from "../coldResume";
@@ -237,5 +238,202 @@ describe("coldResume · live Interaction authority", () => {
     expect(visible[0]?.interactionStatus).toBe("submitting");
     expect(visible[0]?.deferredBusyReason).toBe("live_turn");
     expect(visible[0]?.message_id).toBe("m-deferred");
+  });
+});
+
+describe("coldResume · resolveColdBindHostId (投影键不断档)", () => {
+  it("prefers resumeStamp over an unsealed preferred client bubble", () => {
+    expect(
+      resolveColdBindHostId(
+        [{ role: "assistant", id: "client-new", serverMessageId: null }],
+        "client-new",
+        { resumeStamp: "m-same-turn" },
+      ),
+    ).toBe("m-same-turn");
+  });
+
+  it("backfills stamp from preferred host when sealed", () => {
+    expect(
+      resolveColdBindHostId(
+        [
+          {
+            role: "assistant",
+            id: "client-uuid",
+            serverMessageId: "m-server",
+          },
+        ],
+        "client-uuid",
+      ),
+    ).toBe("m-server");
+  });
+
+  it("does not nail unsealed preferred — returns empty when no stamp exists", () => {
+    expect(
+      resolveColdBindHostId(
+        [{ role: "assistant", id: "client-only", serverMessageId: null }],
+        "client-only",
+      ),
+    ).toBe("");
+  });
+
+  it("falls back to latest stamped host when preferred is unsealed", () => {
+    expect(
+      resolveColdBindHostId(
+        [
+          { role: "assistant", id: "old", serverMessageId: "m-old" },
+          { role: "assistant", id: "new-unsealed", serverMessageId: null },
+        ],
+        "new-unsealed",
+      ),
+    ).toBe("m-old");
+  });
+});
+
+describe("coldResume · same-turn ask_user continue → team_preview", () => {
+  it("paints team_preview on the same stamped host after ask resolved", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-same",
+      payload: { checkpoint_id: "cp-ask", question: "怎么推进？" },
+    });
+    markColdResolved({
+      kind: "ask_user",
+      id: "cp-ask",
+      resolution: { decision: "continue" },
+    });
+
+    const hosts = [
+      {
+        role: "assistant" as const,
+        id: "client-same",
+        serverMessageId: "m-same",
+      },
+    ];
+
+    // Resume path may briefly prefer the client bubble; bind must keep the stamp.
+    const bindId = resolveColdBindHostId(hosts, "client-same", {
+      resumeStamp: "m-same",
+    });
+    expect(bindId).toBe("m-same");
+
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: bindId,
+      payload: tpPayload("tp-after-ask"),
+    });
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts,
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.kind).toBe("team_preview");
+    expect(visible[0]?.message_id).toBe("m-same");
+    expect(visible[0]?.checkpoint_id).toBe("tp-after-ask");
+  });
+
+  it("unsealed window: no clickable card until stamp; then paints", () => {
+    const bindEmpty = resolveColdBindHostId(
+      [{ role: "assistant", id: "client-gap", serverMessageId: null }],
+      "client-gap",
+    );
+    expect(bindEmpty).toBe("");
+
+    upsertColdRequired({
+      kind: "plan_review",
+      conversationId: "conv-live",
+      messageId: bindEmpty,
+      payload: {
+        checkpoint_id: "pr-gap",
+        steps: [{ run_id: "r1", role: "研" }],
+        pending: [],
+      },
+    });
+
+    expect(
+      selectVisibleColdResumes({
+        conversationId: "conv-live",
+        byId: getColdInteractionSnapshot(),
+        paused: [],
+        hosts: [{ role: "assistant", id: "client-gap", serverMessageId: null }],
+      }),
+    ).toHaveLength(0);
+
+    // Late stamp: empty messageId binds via resolve → latest stamped host.
+    const hostsSealed = [
+      {
+        role: "assistant" as const,
+        id: "client-gap",
+        serverMessageId: "m-gap-late",
+      },
+    ];
+    expect(resolveColdResumeKeyFromHosts(hostsSealed, "")).toBe("m-gap-late");
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts: hostsSealed,
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.kind).toBe("plan_review");
+    expect(visible[0]?.message_id).toBe("m-gap-late");
+  });
+
+  it("same-turn plan_review paints when bind uses resume stamp without second message_start", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-resume-key",
+      payload: { checkpoint_id: "cp1", question: "先确认？" },
+    });
+    markColdResolved({
+      kind: "ask_user",
+      id: "cp1",
+      resolution: { decision: "continue" },
+    });
+
+    // New unsealed bubble appeared; resume stamp still authoritative.
+    const hosts = [
+      {
+        role: "assistant" as const,
+        id: "client-prior",
+        serverMessageId: "m-resume-key",
+      },
+      {
+        role: "assistant" as const,
+        id: "client-unsealed",
+        serverMessageId: null,
+      },
+    ];
+    const bindId = resolveColdBindHostId(hosts, "client-unsealed", {
+      resumeStamp: "m-resume-key",
+    });
+    expect(bindId).toBe("m-resume-key");
+
+    upsertColdRequired({
+      kind: "plan_review",
+      conversationId: "conv-live",
+      messageId: bindId,
+      payload: {
+        checkpoint_id: "pr-same",
+        steps: [{ run_id: "r1", role: "研" }],
+        pending: [],
+      },
+    });
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts,
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.kind).toBe("plan_review");
+    expect(visible[0]?.message_id).toBe("m-resume-key");
   });
 });

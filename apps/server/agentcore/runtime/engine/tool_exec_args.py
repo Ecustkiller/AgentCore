@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.loop_controller import (
@@ -16,11 +16,17 @@ from agentcore.tools.registry import ToolRegistry
 # successfully parsed empty object ``{}`` (journal / UI 假象).
 _ARGS_PARSE_FAILED_MARKER: dict[str, Any] = {"__args_parse_failed__": True}
 
+# v1 taxonomy after ``sanitize_raw_tool_arguments`` (no ``residue`` — sanitize owns that).
+ArgsParseClass = Literal["truncated", "escape", "other"]
+
 # Write/landing tools: parse failures are usually「整篇正文塞进 tool JSON」— steer to
 # segmented writing, never disable the pen, never teach the user to escape quotes.
 _WRITE_PARSE_TOOLS = frozenset(
     {"file_write", "file_append", "str_replace", "write_section", "file_move"}
 )
+
+# Orchestration tools: anti-wrap / anti-XML tip (keep regardless of class).
+_ORCH_PARSE_TOOLS = frozenset({"delegate", "ask_user"})
 
 # User-visible process-line copy for write-tool args parse failures (人话).
 _USER_WRITE_PARSE_MSG = "长文保存失败，改成分段写入继续。"
@@ -73,9 +79,7 @@ def _attempt_meta_with_landing_path(
         meta["error_class"] = ERROR_CLASS_PERMANENT
         meta["retire_tools"] = [name]
         if not meta.get("retire_message"):
-            meta["retire_message"] = (
-                f"工具 `{name}` 因活性挂起已停用——请换路径推进，禁止原样重试。"
-            )
+            meta["retire_message"] = f"工具 `{name}` 因活性挂起已停用——请换路径推进，禁止原样重试。"
     return meta
 
 
@@ -189,22 +193,85 @@ def _missing_tool_feedback(
         )
     else:
         error_msg = (
-            f"Tool '{missing}' not found。"
-            f"{did_you_mean}"
-            "请使用合法工具名原样重试，勿夹带协议标签。"
+            f"Tool '{missing}' not found。{did_you_mean}请使用合法工具名原样重试，勿夹带协议标签。"
         )
     return error_msg, "not_found", False
 
 
+def _classify_args_parse_failure(raw: str, exc: json.JSONDecodeError) -> ArgsParseClass:
+    """Classify JSON args parse failure after sanitize (v1: truncated | escape | other)."""
+    detail = (exc.msg or "").strip()
+    pos = exc.pos if isinstance(exc.pos, int) else 0
+    # Dominant truncated signals (write-tool heuristic kept as a general length/pos cue).
+    if "Unterminated string" in detail or (len(raw) >= 4000 and pos < 200):
+        return "truncated"
+    # Typical mid-string structural / quote-escape failures (e.g. Expecting ',' delimiter).
+    if "Expecting" in detail:
+        return "escape"
+    return "other"
+
+
+def _strategy_for_args_parse(tool_name: str, parse_class: ArgsParseClass) -> str:
+    """Family + class first-fail tip (model-facing). Landing never teaches user escaping."""
+    if tool_name in _WRITE_PARSE_TOOLS:
+        trunc_hint = (
+            "【信号】输出长度截断导致参数 JSON 未闭合（finish_reason=length 同类）——"
+            if parse_class == "truncated"
+            else "【策略】这通常是整篇正文塞进一次工具调用导致的转义失败——"
+        )
+        return (
+            trunc_hint + "不要原样重发整段导致再次截断；可一次完整 file_write（须完整正文）"
+            "或改为短骨架 + 按节 file_append / str_replace 分段落盘"
+            "（每节远小于一次输出上限）；成篇后修订用 str_replace。"
+            "勿向用户讲解 JSON 引号转义。"
+        )
+    if tool_name in _ORCH_PARSE_TOOLS:
+        if tool_name == "delegate":
+            return (
+                "【策略】payload 顶层直接放字段（delegate：`tasks` 或 `playbook`/`playbook_id`），"
+                "禁止再包一层 `arguments` 字符串；参数须为单一合法 JSON 对象，"
+                "禁止混入 XML/<parameter>/<object> 等协议标签；"
+                "按工具 schema 重发精简参数，勿把整篇正文塞进 task 字段"
+                "（细则进 deliverable / team_brief）。"
+            )
+        return (
+            "【策略】参数必须是单一合法 JSON 对象，禁止混入 XML/"
+            "<parameter>/<object> 等协议标签；按工具 schema 重发精简参数，"
+            "勿把整篇正文塞进参数字段。"
+        )
+    if tool_name == "remember":
+        if parse_class == "truncated":
+            return (
+                "【信号】输出长度截断导致参数 JSON 未闭合——"
+                "请用完整一句规则重发（勿省略号收口）；多条规则请分多次 remember；"
+                "禁止原样重发全部半截参数。"
+            )
+        if parse_class == "escape":
+            return "【策略】请修复转义（尤其是 content 字符串内的引号）后重发合法 JSON 参数。"
+        return (
+            "【策略】请按工具 schema 重发精简合法 JSON；完整一句、勿省略号收口；"
+            "多条分次；禁止原样重发全部参数。"
+        )
+    if parse_class == "truncated":
+        return (
+            "【信号】输出长度截断导致参数 JSON 未闭合——"
+            "不要原样重发全部参数；请缩短单次参数或拆成多次调用后重发合法 JSON。"
+        )
+    if parse_class == "escape":
+        return "请修复转义（尤其是字符串内的引号）后，原样重发全部参数；禁止改写、缩短或删减内容。"
+    return "请按工具 schema 修复并重发合法 JSON 参数对象。"
+
+
 def _format_args_parse_error(
     tool_name: str, raw: str, exc: json.JSONDecodeError
-) -> tuple[str, str]:
-    """Return ``(model_facing, user_facing)`` for illegal tool-call arguments JSON.
+) -> tuple[str, str, ArgsParseClass]:
+    """Return ``(model_facing, user_facing, parse_class)`` for illegal tool-call JSON.
 
     Write/landing tools get a segmented-write steer for the model and a short human
     line for the process timeline — never「请修复转义后原样重发」exposed to users.
-    Other tools keep the technical tip for both surfaces.
+    Other tools keep the technical tip for both surfaces; strategy text is class-aware.
     """
+    parse_class = _classify_args_parse_failure(raw, exc)
     pos = exc.pos if isinstance(exc.pos, int) else 0
     # Window around the failure so the model can spot unescaped quotes without a full dump.
     left = max(0, pos - 24)
@@ -216,46 +283,9 @@ def _format_args_parse_error(
         snippet = snippet + "…"
     detail = (exc.msg or "JSON decode error").strip()
     technical = (
-        f"工具 '{tool_name}' 的参数不是合法 JSON（{detail}；失败位置 {pos}，附近片段："
-        f"{snippet}）。"
+        f"工具 '{tool_name}' 的参数不是合法 JSON（{detail}；失败位置 {pos}，附近片段：{snippet}）。"
     )
+    model_msg = technical + _strategy_for_args_parse(tool_name, parse_class)
     if tool_name in _WRITE_PARSE_TOOLS:
-        truncated = "Unterminated string" in detail or (
-            isinstance(exc.pos, int) and len(raw) >= 4000 and exc.pos < 200
-        )
-        trunc_hint = (
-            "【信号】输出长度截断导致参数 JSON 未闭合（finish_reason=length 同类）——"
-            if truncated
-            else "【策略】这通常是整篇正文塞进一次工具调用导致的转义失败——"
-        )
-        model_msg = (
-            technical
-            + trunc_hint
-            + "不要原样重发整段导致再次截断；可一次完整 file_write（须完整正文）"
-            "或改为短骨架 + 按节 file_append / str_replace 分段落盘"
-            "（每节远小于一次输出上限）；成篇后修订用 str_replace。"
-            "勿向用户讲解 JSON 引号转义。"
-        )
-        return model_msg, _USER_WRITE_PARSE_MSG
-    if tool_name in {"delegate", "ask_user"}:
-        dual_wrap = (
-            "【策略】payload 顶层直接放字段（delegate：`tasks` 或 `playbook`/`playbook_id`），"
-            "禁止再包一层 `arguments` 字符串；参数须为单一合法 JSON 对象，"
-            "禁止混入 XML/<parameter>/<object> 等协议标签；"
-            "按工具 schema 重发精简参数，勿把整篇正文塞进 task 字段"
-            "（细则进 deliverable / team_brief）。"
-            if tool_name == "delegate"
-            else (
-                "【策略】参数必须是单一合法 JSON 对象，禁止混入 XML/"
-                "<parameter>/<object> 等协议标签；按工具 schema 重发精简参数，"
-                "勿把整篇正文塞进参数字段。"
-            )
-        )
-        model_msg = technical + dual_wrap
-        return model_msg, model_msg
-    model_msg = (
-        technical
-        + "请修复转义（尤其是字符串内的引号）后，原样重发全部参数；"
-        "禁止改写、缩短或删减内容。"
-    )
-    return model_msg, model_msg
+        return model_msg, _USER_WRITE_PARSE_MSG, parse_class
+    return model_msg, model_msg, parse_class

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.runtime.delegate.task_models import TASK_MODEL_SCHEMA_PROPS
 from agentcore.tools.builtin.delegate.schema import TASK_DELIVERABLE_SCHEMA
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -86,6 +87,7 @@ _REPLAN_PARAMETERS = {
                         "description": "可选：职责 / 目标。",
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
+                    **TASK_MODEL_SCHEMA_PROPS,
                 },
                 "required": ["run_id"],
             },
@@ -138,6 +140,7 @@ _REPLAN_PARAMETERS = {
                         "description": "可选：职责 / 目标。",
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
+                    **TASK_MODEL_SCHEMA_PROPS,
                 },
                 "required": ["role", "task"],
             },

@@ -32,7 +32,7 @@ import {
 import type { LlmProviderView } from "@/services/llmProviders";
 import { type ModelCatalogItem, findCatalogItem } from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { SettingsHeader } from "./SettingsHeader";
@@ -294,8 +294,8 @@ function PlatformStatusLine({
 }
 
 /**
- * 模型组合列表 + 编辑：主必填；Worker / 后台 / 识图常显。
- * Worker / 后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
+ * 模型组合列表 + 编辑：主必填；Worker / 后台 / 识图收进「高级 · 分槽覆盖」
+ * （有覆盖时默认展开）。Worker / 后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
  * 系统预置不可删，可设默认 / 复制为用户组合；用户组合可新建 / 改名 / 删。
  */
 function ModelProfilesSection({
@@ -465,6 +465,10 @@ function ModelProfilesSection({
             主模型必填；Worker /
             后台可留空跟随；识图可留空不配置。改定义后下一回合生效。
           </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            多人协作（委派）对工具调用要求较高；若失败可换更稳的主模型，或改用手写{" "}
+            <code className="text-xs">tasks</code>。
+          </p>
         </div>
         <Button
           variant="neutral"
@@ -570,6 +574,27 @@ type ProfileDraft = {
   background: ModelProfileSlot | null;
   vision: ModelProfileSlot | null;
 };
+
+function hasAdvancedSlotOverrides(
+  draft: Pick<ProfileDraft, "worker" | "background" | "vision">,
+): boolean {
+  return Boolean(draft.worker || draft.background || draft.vision);
+}
+
+/** 高级区收起时的一行摘要。 */
+function advancedSlotsSummary(
+  worker: ModelProfileSlot | null,
+  background: ModelProfileSlot | null,
+  vision: ModelProfileSlot | null,
+): string {
+  if (!worker && !background && !vision) {
+    return "Worker/后台：跟随主模型 · 识图：不配置";
+  }
+  const workerLabel = worker?.model ?? "跟随主模型";
+  const backgroundLabel = background?.model ?? "跟随主模型";
+  const visionLabel = vision?.model ?? "不配置";
+  return `Worker：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
+}
 
 function ProfileListRow({
   profile,
@@ -692,6 +717,9 @@ function ProfileEditor({
   const [worker, setWorker] = useState(initial.worker);
   const [background, setBackground] = useState(initial.background);
   const [vision, setVision] = useState(initial.vision);
+  const [advancedOpen, setAdvancedOpen] = useState(() =>
+    hasAdvancedSlotOverrides(initial),
+  );
   const canChoose = canChooseModel(groups);
   const canChooseVision = canChooseModel(visionGroups);
   const showEmptyGuide = !canChoose;
@@ -726,54 +754,89 @@ function ProfileEditor({
           />
         )}
       </label>
-      <label className="block" htmlFor="profile-worker">
-        <span className="text-xs text-muted-foreground">Worker 模型</span>
-        <ProviderModelSelect
-          id="profile-worker"
-          groups={groups}
-          value={pointerValue(worker)}
-          disabled={pending || !canChoose}
-          followLabel="跟随主模型"
-          onChange={(value) => setWorker(decodePointer(value))}
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          组队队员用；辩论用主模型。留空则跟随主模型。
-        </p>
-      </label>
-      <label className="block" htmlFor="profile-background">
-        <span className="text-xs text-muted-foreground">后台任务模型</span>
-        <ProviderModelSelect
-          id="profile-background"
-          groups={groups}
-          value={pointerValue(background)}
-          disabled={pending || !canChoose}
-          followLabel="跟随主模型"
-          onChange={(value) => setBackground(decodePointer(value))}
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          标题、记忆等后台任务；留空则跟随主模型。
-        </p>
-      </label>
-      <label className="block" htmlFor="profile-vision">
-        <span className="text-xs text-muted-foreground">识图模型（可选）</span>
-        <ProviderModelSelect
-          id="profile-vision"
-          groups={visionGroups}
-          value={pointerValue(vision)}
-          disabled={pending || !canChooseVision}
-          followLabel="不配置"
-          onChange={(value) => setVision(decodePointer(value))}
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          主模型目录标有视觉时，贴图走主模型；本槽供无视觉时的眼→文与白板读图。留空=平台
-          VISION_* 兜底或无 reader。
-        </p>
-        {mainVisionCapable && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            当前主模型目录标有视觉；已知多模态模型贴图直送主模型，否则仍走本槽眼→文。本槽仍可供白板/按需深读。
-          </p>
+
+      <div className="rounded-lg border border-border/60 bg-background/40">
+        <button
+          type="button"
+          aria-expanded={advancedOpen}
+          disabled={pending}
+          onClick={() => setAdvancedOpen((open) => !open)}
+          className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left disabled:opacity-60"
+        >
+          <ChevronDown
+            size={14}
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform",
+              !advancedOpen && "-rotate-90",
+            )}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs text-foreground">
+              高级 · 分槽覆盖
+            </span>
+            {!advancedOpen && (
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {advancedSlotsSummary(worker, background, vision)}
+              </span>
+            )}
+          </span>
+        </button>
+        {advancedOpen && (
+          <div className="space-y-3 border-t border-border/60 px-2.5 py-2.5">
+            <label className="block" htmlFor="profile-worker">
+              <span className="text-xs text-muted-foreground">Worker 模型</span>
+              <ProviderModelSelect
+                id="profile-worker"
+                groups={groups}
+                value={pointerValue(worker)}
+                disabled={pending || !canChoose}
+                followLabel="跟随主模型"
+                onChange={(value) => setWorker(decodePointer(value))}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                组队队员用；辩论用主模型。留空则跟随主模型。
+              </p>
+            </label>
+            <label className="block" htmlFor="profile-background">
+              <span className="text-xs text-muted-foreground">
+                后台任务模型
+              </span>
+              <ProviderModelSelect
+                id="profile-background"
+                groups={groups}
+                value={pointerValue(background)}
+                disabled={pending || !canChoose}
+                followLabel="跟随主模型"
+                onChange={(value) => setBackground(decodePointer(value))}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                标题、记忆等后台任务；留空则跟随主模型。
+              </p>
+            </label>
+            <label className="block" htmlFor="profile-vision">
+              <span className="text-xs text-muted-foreground">
+                识图模型（可选）
+              </span>
+              <ProviderModelSelect
+                id="profile-vision"
+                groups={visionGroups}
+                value={pointerValue(vision)}
+                disabled={pending || !canChooseVision}
+                followLabel="不配置"
+                onChange={(value) => setVision(decodePointer(value))}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                主模型不能看图时再配；留空用平台识图或不可用。
+              </p>
+              {mainVisionCapable && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  当前主模型标有视觉，贴图优先走主模型；本槽仍可供白板/按需深读。
+                </p>
+              )}
+            </label>
+          </div>
         )}
-      </label>
+      </div>
 
       <div className="flex justify-end gap-2 pt-1">
         <Button
@@ -993,10 +1056,12 @@ function ByokProviderModelCombobox({
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">{followLabel}</p>
         )
-      ) : null}
-      <p className="mt-1 text-xs text-muted-foreground">
-        可从建议中选择，或直接粘贴 / 手填 model id（火山 ep-、中转私有 id 等）。
-      </p>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">
+          可从建议中选择，或直接粘贴 / 手填 model id（火山 ep-、中转私有 id
+          等）。
+        </p>
+      )}
     </div>
   );
 }

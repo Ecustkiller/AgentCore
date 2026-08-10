@@ -47,12 +47,18 @@ class SectionOrder(IntEnum):
     # both are "here is a catalog, pull the full text by name" blocks (记忆文件夹化 §六).
     # CEO gets name+summary; workers get a simplified names-only variant.
     MEMORY_TOPICS = 550
+    # On-demand user rules (consult_rule) — constraint appendices, NOT memory topics.
+    # Same live-tool gate: render only when ``consult_rule`` is wired this turn.
+    RULE_DIRECTORY = 560
     CITATION = 600
     CEO_VISUALIZATION = 700
     WORKSPACE_OVERVIEW = 800
     # CEO-only conversation state: the newest appendable team graph (跨回合同图追加's
     # cross-turn id echo — history replays no tool I/O, so it rides the volatile tail).
     RECENT_TEAM_GRAPH = 850
+    # Cross-turn soft nudge when the prior turn journal fingerprints empty-delegate /
+    # unproductive (history drops tool I/O — same volatile-tail reason as recent graph).
+    PRIOR_DELEGATE_RETRY = 860
     ATTACHMENT = 900
 
 

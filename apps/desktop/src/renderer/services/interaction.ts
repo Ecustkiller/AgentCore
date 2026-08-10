@@ -6,6 +6,13 @@ import type { components } from "@/types/api.generated";
 type Schemas = components["schemas"];
 
 /**
+ * Cloud settle POST wall clock. Must stay well under the server Local channel
+ * op budget (~59s) so transient NetworkError can still be retried in-process
+ * before the awaiter times out (dogfood: settle NetworkError → sticky dead).
+ */
+export const INTERACTION_RESOLVE_TIMEOUT_MS = 15_000;
+
+/**
  * Unified suspend-resume bridge (§18.2): a single endpoint settles any client-resolvable
  * paused interaction — a tool approval, a local-workspace op, a worker's blocking
  * escalation, or an interactive debate round. The body is discriminated on `kind`, so
@@ -64,5 +71,6 @@ export async function resolveInteraction(
   await api.post(
     `/v1/conversations/${conversationId}/interactions/${interactionId}`,
     body,
+    INTERACTION_RESOLVE_TIMEOUT_MS,
   );
 }

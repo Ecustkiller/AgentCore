@@ -43,6 +43,8 @@ import {
   isDebateClosingRun,
   isDebateFoldedBeatRun,
   isDebateParticipantRun,
+  resolveCaptainSinkId,
+  workerRunsOf,
 } from "./helpers";
 import { INPUT_ID } from "./ids";
 
@@ -176,7 +178,8 @@ export function computeTopologicalRunWaves(
   runs: GraphRunLike[],
   captainId: string | null,
 ): Map<string, number> {
-  const workerRuns = runs.filter((r) => r.id !== captainId);
+  void captainId;
+  const workerRuns = workerRunsOf(runs);
   if (workerRuns.length === 0) return new Map();
 
   const workerIds = new Set(workerRuns.map((r) => r.id));
@@ -261,9 +264,9 @@ function laneEligibleRunIds(
   captainId: string | null,
   fold: GraphFoldInfo,
 ): string[] {
+  void captainId;
   const out: string[] = [];
-  for (const r of runs) {
-    if (r.id === captainId) continue;
+  for (const r of workerRunsOf(runs)) {
     if (r.continuesRunId != null) continue;
     if (fold.folded.has(r.id)) continue;
     if (fold.unitOf.get(r.id) !== r.id) continue;
@@ -405,16 +408,14 @@ function buildActBands(
   execution: Execution,
   captainId: string | null,
 ): SceneBand[] {
+  void captainId;
   const acts = execution.acts;
   if (!acts || acts.length < 2) return [];
   const bands: SceneBand[] = [];
   for (const act of acts) {
-    const ids = execution.runs
+    const ids = workerRunsOf(execution.runs)
       .filter(
-        (r) =>
-          r.id !== captainId &&
-          (r.actId ?? "act-1") === act.actId &&
-          !isDebateFoldedBeatRun(r),
+        (r) => (r.actId ?? "act-1") === act.actId && !isDebateFoldedBeatRun(r),
       )
       .map((r) => r.id);
     if (ids.length === 0) continue;
@@ -540,7 +541,7 @@ export function buildGraphScene(
   const inputId = opts.inputId ?? INPUT_ID;
   const expandedUnits = opts.expandedUnits ?? new Set<string>();
   const runs = execution.runs;
-  const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
+  const captainId = resolveCaptainSinkId(runs);
 
   const {
     nodeIds,
@@ -551,7 +552,7 @@ export function buildGraphScene(
   const layoutHints = computeLayoutHints(subTeams, edges);
 
   // 辩论 beat 折进宿主（唯一结论；下游投影据此取被折 run 数据）。
-  const workerRuns = runs.filter((r) => r.id !== captainId) as GraphRunLike[];
+  const workerRuns = workerRunsOf(runs) as GraphRunLike[];
   const workerIds = new Set(workerRuns.map((r) => r.id));
   const beatFoldsByHost = new Map<string, string[]>();
   for (const r of workerRuns) {
@@ -611,9 +612,9 @@ function actMemberRuns(
   actId: string,
   captainId: string | null,
 ): RunNode[] {
-  return execution.runs.filter(
+  void captainId;
+  return workerRunsOf(execution.runs).filter(
     (r) =>
-      r.id !== captainId &&
       (r.actId ?? "act-1") === actId &&
       !isDebateFoldedBeatRun(r as GraphRunLike),
   );

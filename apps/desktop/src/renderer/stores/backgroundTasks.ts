@@ -15,9 +15,10 @@ import { create } from "zustand";
  * 持久化），故卡片随对话重开自然重放——无需在消息表另落占位行（方案 i 的「原位重放」
  * 目标用「按时间戳并入时间线」达成，零 schema 改动）。
  *
- * `modeByConversation` 缓存每个对话的云/本地判定（`getWorkspaceBinding`），供输入框的
- * 「后台」开关与本 feed 共用一次请求（`ensureMode` 去重并发拉取）——交接只在本地模式
- * 存在，故云端对话零额外拉取。
+ * `modeByConversation` 缓存每个对话的云/本地判定（`getWorkspaceBinding`），供 ModeControl
+ * 遗留 handoff 武装与本 feed 共用一次请求（`ensureMode` 去重并发拉取）——交接只在本地模式
+ * 存在，故云端对话零额外拉取。Composer「＋」不再常驻开关；武装态见
+ * `armedHandoffByConversation`。
  *
  * §7.6 心智：云端改的是拷贝；合回本机须用户点一下。徽章优先信后端
  * `applied` / `discarded`；`mergedJobIds` 仅作本会话合回后的乐观/兼容（勿与后端打架）。
@@ -31,6 +32,11 @@ interface BackgroundTasksState {
   /** conversationId → 绑定的本地根 id（本地模式才有；云端 / 未解析为 null）。 */
   rootIdByConversation: Record<string, string | null>;
   /**
+   * 本机会话遗留 handoff 武装（ModeControl 高级入口）。默认关；开启后 Composer 发送走
+   * `dispatchBackgroundTask`，不经大众「＋」开关。
+   */
+  armedHandoffByConversation: Record<string, boolean>;
+  /**
    * 本会话乐观「已合回」标记（apply 成功瞬间、或确认无需合回）。权威态以 job.status
    * `applied`/`discarded` 为准；本表不覆盖后端 discarded。
    */
@@ -43,10 +49,12 @@ interface BackgroundTasksState {
   upsert: (conversationId: string, job: HandoffJob) => void;
   /** 乐观标记已合回本机 / 无需合回（卡面在后端尚未刷到 applied 前用）。 */
   markMerged: (jobId: string) => void;
+  /** 武装 / 解除本机会话遗留 handoff（仅 local 会话有意义）。 */
+  setHandoffArmed: (conversationId: string, armed: boolean) => void;
   /**
-   * 解析并缓存某对话的工作区模式 + 绑定根 id；与输入框共用，去重并发请求。失败回落
-   * cloud / null。返回 mode（rootId 经 `useWorkspaceRootId` 读取，供成功任务的内联评审
-   * 写回本地用）。
+   * 解析并缓存某对话的工作区模式 + 绑定根 id；与 ModeControl / Composer 共用，去重并发
+   * 请求。失败回落 cloud / null。返回 mode（rootId 经 `useWorkspaceRootId` 读取，供成功
+   * 任务的内联评审写回本地用）。非 local 时顺带清武装。
    */
   ensureMode: (conversationId: string) => Promise<WorkspaceMode>;
   /** 删除对话时丢掉该会话的任务列表 / 模式缓存，避免分桶泄漏。 */
@@ -61,6 +69,7 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
     byConversation: {},
     modeByConversation: {},
     rootIdByConversation: {},
+    armedHandoffByConversation: {},
     mergedJobIds: {},
     toastedSucceededIds: {},
     load: async (conversationId) => {
@@ -118,9 +127,32 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           ? s
           : { mergedJobIds: { ...s.mergedJobIds, [jobId]: true } },
       ),
+    setHandoffArmed: (conversationId, armed) =>
+      set((s) => {
+        const prev = Boolean(s.armedHandoffByConversation[conversationId]);
+        if (prev === armed) return s;
+        if (!armed) {
+          const { [conversationId]: _, ...rest } = s.armedHandoffByConversation;
+          return { armedHandoffByConversation: rest };
+        }
+        return {
+          armedHandoffByConversation: {
+            ...s.armedHandoffByConversation,
+            [conversationId]: true,
+          },
+        };
+      }),
     ensureMode: async (conversationId) => {
       const cached = get().modeByConversation[conversationId];
-      if (cached) return cached;
+      if (cached) {
+        if (
+          cached !== "local" &&
+          get().armedHandoffByConversation[conversationId]
+        ) {
+          get().setHandoffArmed(conversationId, false);
+        }
+        return cached;
+      }
       const pending = modeInFlight.get(conversationId);
       if (pending) return pending;
       const p = (async () => {
@@ -132,18 +164,23 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           rootId = binding.rootId;
         } catch {
           // Binding unknown (e.g. a never-sent draft) — treat as cloud so the
-          // background entry stays hidden and the feed never lists.
+          // legacy handoff arm stays hidden and the feed never lists.
         }
-        set((s) => ({
-          modeByConversation: {
-            ...s.modeByConversation,
-            [conversationId]: mode,
-          },
-          rootIdByConversation: {
-            ...s.rootIdByConversation,
-            [conversationId]: rootId,
-          },
-        }));
+        set((s) => {
+          const nextArmed = { ...s.armedHandoffByConversation };
+          if (mode !== "local") delete nextArmed[conversationId];
+          return {
+            modeByConversation: {
+              ...s.modeByConversation,
+              [conversationId]: mode,
+            },
+            rootIdByConversation: {
+              ...s.rootIdByConversation,
+              [conversationId]: rootId,
+            },
+            armedHandoffByConversation: nextArmed,
+          };
+        });
         modeInFlight.delete(conversationId);
         return mode;
       })();
@@ -158,6 +195,8 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           s.modeByConversation;
         const { [conversationId]: _root, ...rootIdByConversation } =
           s.rootIdByConversation;
+        const { [conversationId]: _armed, ...armedHandoffByConversation } =
+          s.armedHandoffByConversation;
         // Drop merged / toasted flags for jobs that belonged to this conversation.
         const dropped = new Set(
           (s.byConversation[conversationId] ?? []).map((j) => j.id),
@@ -176,6 +215,7 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           byConversation,
           modeByConversation,
           rootIdByConversation,
+          armedHandoffByConversation,
           mergedJobIds,
           toastedSucceededIds,
         };
@@ -183,6 +223,15 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
     },
   }),
 );
+
+/** 选择器：本机会话遗留 handoff 是否已武装（ModeControl；默认 false）。 */
+export function useHandoffArmed(conversationId: string | null): boolean {
+  return useBackgroundTasksStore((s) =>
+    conversationId
+      ? Boolean(s.armedHandoffByConversation[conversationId])
+      : false,
+  );
+}
 
 const EMPTY: HandoffJob[] = [];
 

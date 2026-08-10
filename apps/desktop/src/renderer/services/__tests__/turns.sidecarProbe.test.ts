@@ -317,6 +317,53 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
       expect.objectContaining({ via: "cloud", reason: "switch_off" }),
     );
   });
+
+  it("附件退云 + 绑本机 → cloud_bridge（无恐吓 toast；弱状态由 executionVia 驱动）", async () => {
+    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
+
+    await sendTurn({
+      ...spec(),
+      attachments: [
+        {
+          name: "f.txt",
+          path: "/tmp/f.txt",
+          text: "x",
+          truncated: false,
+          kind: "file",
+        },
+      ],
+    });
+
+    expect(resolveSidecarRootMock).not.toHaveBeenCalled();
+    expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(streamViaSidecarMock).not.toHaveBeenCalled();
+    expect(streamConversationMock).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
+      "cloud_bridge",
+    );
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "cloud",
+        reason: "attachments",
+        bridging: true,
+      }),
+    );
+  });
+
+  it("纯云会话（无本机绑定）→ executionVia 仍 null，不冒充过桥", async () => {
+    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(null);
+
+    await sendTurn(spec());
+
+    expect(streamConversationMock).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().byId.c1?.executionVia).toBeNull();
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
 });
 
 /** 构造一个 sidecar 暂停帧（plan_review），续跑测试用：字段齐全、内容最小。 */
@@ -406,7 +453,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(assistants[0].isStreaming).toBe(true);
   });
 
-  it("偏好关 + origin=sidecar → 仍跟本地事实续跑（忽略大众默认关）", async () => {
+  it("偏好强制关 + origin=sidecar → 仍跟本地事实续跑（忽略 off）", async () => {
     isSidecarEnabledMock.mockReturnValue(false);
     resolveSidecarRootMock.mockResolvedValue(null);
     resolveLocalTargetMock.mockResolvedValue(TARGET);

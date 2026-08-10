@@ -218,14 +218,11 @@ class RunSpec:
     # 真纯丙：历史上曾作 allow-list；builder 现忽略入参 tools，executor 亦不再用本字段
     # 收窄（``allowed_tools=None``）。字段保留兼容旧 session / 序列化；新派发恒为 ``None``。
     tools: list[str] | None = None
-    # Explicit per-node model override (真·多模型辩手). Empty = resolve the model from
-    # the turn's ProfileSet (the default for ALL ordinary workers). When set, the
-    # executor replaces only the resolved profile's ``model`` with this value and
-    # dispatches through the turn's ProviderRouter, so a ``provider/model`` prefix
-    # (e.g. ``doubao/doubao-seed-2-1-turbo-260628``) routes that node to a specific
-    # vendor while keeping the profile's other params (temperature / budget). Pricing
-    # falls back to flash for an unknown model name (a known, logged fallback) until a
-    # per-model price is registered.
+    # Explicit per-node model override (辩论辩手 / per-worker 三元组编成的路由键).
+    # Empty = resolve from the turn's ProfileSet Worker 槽 (ordinary default). When set,
+    # the executor replaces only the resolved profile's ``model`` and dispatches through
+    # the turn's ProviderRouter (``platform/{id}`` or ``{provider_id}/{id}``). Pricing
+    # strips router prefixes. → runtime/delegate/task_models.py
     model: str = ""
     thinking: bool | None = None
     deliverable: Deliverable | None = None
@@ -263,7 +260,7 @@ class RunSpec:
     # Tree position — also the SOLE determinant of whether this worker may nest a
     # sub-team (阶段2 嵌套子任务). Any worker with ``depth < MAX_DELEGATION_DEPTH``
     # gets lead identity + ``delegate``+``replan`` (delegation is on by default;
-    # the executor enforces the cap); depth-2 sub-workers are always leaves. There
+    # the executor enforces the cap); workers at the cap are always leaves. There
     # is no per-node opt-in/opt-out flag.
     depth: int = 0
     # 回落换人 / 协调补派 (多轮编排 P-3): the failed (or cancelled) run this node

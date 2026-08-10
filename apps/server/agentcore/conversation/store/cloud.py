@@ -853,11 +853,26 @@ class CloudStore:
         # Settle whenever the turn has a terminal/pause surface — including empty
         # ERROR (soft-fail / first-turn crash) and empty bubble with process state
         # (runs/journal — aligns with cloud live: process projection must land).
+        # Also settle when message_id already has a running/paused assistant row
+        # (empty final must not noop — that leaves a ghost in-flight bubble).
         # True no-op (no orphan row): empty body AND no process state AND not
-        # paused/incomplete/failed. Desktop deletes outbox only on assistant id or noop.
+        # paused/incomplete/failed AND no open assistant row. Desktop deletes
+        # outbox only on assistant id or noop.
         has_process_state = bool(
             (isinstance(runs, dict) and bool(runs))
             or (isinstance(journal, list) and len(journal) > 0)
+        )
+        existing_usage = (
+            (getattr(existing_assistant, "usage", None) or {})
+            if existing_assistant is not None
+            else {}
+        )
+        has_open_assistant = bool(
+            existing_assistant is not None
+            and (
+                existing_usage.get("status") == MESSAGE_STATUS_RUNNING
+                or bool(existing_usage.get("paused"))
+            )
         )
         should_settle = bool(
             message_id
@@ -867,6 +882,7 @@ class CloudStore:
                 or is_incomplete
                 or terminal_status == MESSAGE_STATUS_FAILED
                 or has_process_state
+                or has_open_assistant
             )
         )
         # Intentional skip — client may delete outbox; never a silent "200 + null id".

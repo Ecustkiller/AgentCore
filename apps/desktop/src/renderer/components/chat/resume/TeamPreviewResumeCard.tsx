@@ -64,16 +64,15 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const capPreview = turn.tools.slice(0, 2).map(toolLabelZh);
   const capRest = turn.tools.length - capPreview.length;
 
-  /** 人改模型 UI 已撤：不再收集/发送 model_overrides（契约透传路径仍在 useColdSubmit）。 */
+  /**
+   * 人改模型 / 排除岗 UI 已撤：不再收集 model_overrides / excluded_run_ids
+   *（契约透传路径仍在 useColdSubmit；resolved 回放对账仍可读后端字段）。
+   */
   const buildCorrections = (): TeamPreviewResumeCorrections | undefined => {
     if (isDebate) return undefined;
-    const excluded_run_ids = turn.workers
-      .map((w) => w.run_id)
-      .filter((id) => excludedRunIds.has(id));
     const write_capability_overrides = turn.workers
       .filter(
         (w) =>
-          !excludedRunIds.has(w.run_id) &&
           textOnlyRunIds.has(w.run_id) &&
           w.write_capability === "can_write_files",
       )
@@ -81,27 +80,8 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
         run_id: w.run_id,
         capability: "text_only" as const,
       }));
-    if (
-      excluded_run_ids.length === 0 &&
-      write_capability_overrides.length === 0
-    ) {
-      return undefined;
-    }
-    return {
-      ...(excluded_run_ids.length > 0 ? { excluded_run_ids } : {}),
-      ...(write_capability_overrides.length > 0
-        ? { write_capability_overrides }
-        : {}),
-    };
-  };
-
-  const onExcludedChange = (runId: string, included: boolean) => {
-    setExcludedRunIds((prev) => {
-      const next = new Set(prev);
-      if (included) next.delete(runId);
-      else next.add(runId);
-      return next;
-    });
+    if (write_capability_overrides.length === 0) return undefined;
+    return { write_capability_overrides };
   };
 
   const onTextOnlyChange = (runId: string, textOnly: boolean) => {

@@ -125,7 +125,6 @@ describe("purgeConversationRuntimeState", () => {
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-del",
       conversationId: CID,
-      messageId: "u-del",
       content: "bye",
       position: 1,
       queueDepth: 1,
@@ -133,7 +132,6 @@ describe("purgeConversationRuntimeState", () => {
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-keep",
       conversationId: OTHER,
-      messageId: "u-keep",
       content: "keep",
       position: 1,
       queueDepth: 1,

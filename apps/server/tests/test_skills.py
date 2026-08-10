@@ -375,6 +375,11 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "白屏" in body or "挂载" in body
     assert "verify=" in body and "browser" in body
     assert "tsc" in body or "pytest" in body
+    # 代码审计：模板路 / 手写路互斥，禁 code_audit+tasks 叠用
+    assert "代码审计" in body
+    assert "模板路" in body and "手写路" in body
+    assert "禁止】`code_audit`" in body or "同时传" in body
+    assert "云端引擎员" in body or "本地引擎员" in body
 
 
 def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
@@ -473,9 +478,14 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "不是" in faq_body and "平台规则" in faq_body
     assert "必查 `product_help`" in faq_body
     assert "未钉死目标载体前禁止默认迁成 skill JSON" in faq_body
+    # 歧义路径压缩：consult 后至多一次窄 list；禁多轮 list/通读 .mdc 再问
+    assert "至多一次窄 list `.cursor/rules`" in faq_body
+    assert "禁多轮 list / 通读 `.mdc` 再问" in faq_body
     # help 正反例短钩；整本对照勿膨胀进 help
     assert "Cursor" in help_body and "改成 AgentCore 规则" in help_body
     assert "skills/*.json" in help_body
+    assert "至多一次窄 list `.cursor/rules`" in help_body
+    assert "多轮 list / 通读 `.mdc`" in help_body
     assert "Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则" not in help_body
     # summary / CONSULT 短钩可见
     help_skill = build_system_skill_registry().get("product_help")
@@ -533,6 +543,7 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "默认桌" in body
     assert "scratch" in body
     assert "create_project" in body
+    assert "自动建云桌" in body
     assert "register_local_project" in body  # 本机传统可教
     assert "open_local_project" in body
     assert "导入到云" in body or "连接 Git" in body
@@ -543,7 +554,7 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "多" in body and "并行" in body
     assert "暂不支持" not in body
     assert "协作图不改" in body or "并行支线" in body
-    # 先建齐再派（禁先扇出再补建）vs 拒后禁塌缩窄例外 vs 一般少派
+    # 先建齐再派（仅显式新建/多线；禁先扇出再补建）vs 拒后禁塌缩窄例外 vs 一般少派
     assert "先建后派" in body
     assert "先扇出再补建" in body and "禁止" in body
     assert "ask 齐" in body or "点名新建" in body
@@ -572,7 +583,8 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "list_project_dir" in skill.summary or "只读跨桌" in skill.summary
     assert "target_folder_id" in skill.summary
     assert "空壳" in skill.summary or "mount" in skill.summary or "冒充" in skill.summary
-    assert "先建齐再派" in skill.summary
+    assert "先建齐再派" in skill.summary  # 显式多线先建齐再派
+    assert "自动建云桌" in skill.summary or "勿催 create" in skill.summary
     assert "拒后禁塌缩" in skill.summary
 
 
@@ -692,6 +704,9 @@ def test_team_orchestration_skill_teaches_image_gen_key_boundary():
     assert "代调" in body or "出图" in body
     assert "明文" in body or "环境变量" in body
     assert "env" in body.lower()
+    # 案 47ae：跨窗摘要禁回显密码
+    assert "跨会话凭据脱敏" in body
+    assert "密码" in body
 
 
 def test_build_app_skill_teaches_cloud_install_verify_honesty():
@@ -701,6 +716,9 @@ def test_build_app_skill_teaches_cloud_install_verify_honesty():
     assert "结构自检" in body or "export_to_local" in body
     assert "自检全过" in body or "跑绿" in body
     assert "单测已绿" in body or "跑绿" in body
+    # 案 88625：记分板对账
+    assert "外环验绿对账" in body
+    assert "test_run" in body
 
 
 def test_build_app_skill_teaches_admission_and_agent_diversion():

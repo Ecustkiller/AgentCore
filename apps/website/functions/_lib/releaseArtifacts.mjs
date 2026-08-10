@@ -3,20 +3,16 @@
  * User-facing installer URLs = GitHub Releases；版本发现可读品牌域 latest.json。
  *
  * Discovery order:
- *   1. CDN desktop/{stable|beta}/latest.json + android/latest.json（version / filenames）
- *   2. FALLBACK_VERSION → 构造 GitHub asset URLs（SSG / offline；仅稳定轨）
- *   3. 测试轨无 CDN 且无 FALLBACK_BETA_VERSION → 空（官网隐藏入口）
+ *   1. CDN desktop/latest.json + android/latest.json（version / filenames）
+ *   2. FALLBACK_VERSION → 构造 GitHub asset URLs（SSG / offline）
  *
- * → apps/website/functions/_lib/downloadsCdn.mjs · 发布与门禁.md §7.6b / §7.6c
+ * → apps/website/functions/_lib/downloadsCdn.mjs · 发布与门禁.md §7.6b
  */
 import {
   androidArtifactUrls,
   androidLatestJsonUrl,
   artifactUrlsForVersion,
-  cdnUrl,
   desktopLatestJsonUrl,
-  DOWNLOADS_DESKTOP_PREFIX,
-  normalizeDesktopChannel,
 } from "./downloadsCdn.mjs";
 
 /** @typedef {{
@@ -26,13 +22,9 @@ import {
  *   winFilename: string,
  *   macUrl: string,
  *   macFilename: string,
- * }} DesktopArtifacts */
-
-/** @typedef {DesktopArtifacts & {
  *   androidUrl: string,
  *   androidFilename: string,
  *   androidVersion: string,
- *   beta: DesktopArtifacts | null,
  * }} ReleaseArtifacts */
 
 const EMPTY_ANDROID = {
@@ -64,106 +56,56 @@ async function fetchLatestAndroidArtifacts() {
 }
 
 /**
- * Fetch one desktop channel from CDN (no Android merge).
- * @param {string} [fallbackVersion] empty → no offline fallback (beta)
- * @param {"stable"|"beta"} [channel]
- * @returns {Promise<DesktopArtifacts | null>}
- */
-export async function fetchDesktopChannelArtifacts(
-  fallbackVersion = "",
-  channel = "stable",
-) {
-  const ch = normalizeDesktopChannel(channel);
-  const fb = String(fallbackVersion ?? "").trim();
-  /** @type {DesktopArtifacts | null} */
-  const fallback = fb ? { ...artifactUrlsForVersion(fb) } : null;
-
-  const manifestUrls = [desktopLatestJsonUrl(ch)];
-  // 迁移窗：stable 目录尚未镜像时，仍可读扁平 desktop/latest.json（旧 feed）。
-  if (ch === "stable") {
-    manifestUrls.push(cdnUrl(`${DOWNLOADS_DESKTOP_PREFIX}/latest.json`));
-  }
-
-  for (const url of manifestUrls) {
-    try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": "agentcore-website" },
-      });
-      if (!res.ok) {
-        throw new Error(`${url} HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const version = String(data.version ?? "").trim();
-      if (!version) throw new Error(`${url} missing version`);
-
-      if (fb && compareSemver(fb, version) > 0) {
-        return fallback;
-      }
-
-      const winFilename = String(data.winFilename ?? "").trim();
-      const macFilename = String(data.macFilename ?? "").trim();
-      if (!winFilename) {
-        throw new Error(`${url} missing winFilename`);
-      }
-
-      // Always reconstruct GitHub URL from manifest filenames（对齐 Android；勿忽略 CDN 里的真实文件名）.
-      const base = artifactUrlsForVersion(version, { winFilename, macFilename });
-      return {
-        version,
-        releaseNotesUrl:
-          String(data.releaseNotesUrl ?? "").trim() || base.releaseNotesUrl,
-        winUrl: base.winUrl,
-        winFilename: base.winFilename,
-        macUrl: base.macUrl,
-        macFilename: base.macFilename,
-      };
-    } catch {
-      // try next URL
-    }
-  }
-
-  return fallback;
-}
-
-/**
- * Latest published desktop artifacts from CDN manifest, merged with Android + beta.
+ * Latest published desktop artifacts from CDN manifest, merged with Android.
  *
- * When CDN stable manifest is older than ``fallbackVersion`` (bump already in source
+ * When CDN manifest is older than ``fallbackVersion`` (bump already in source
  * but CDN not synced yet), keep the fallback so a premature website deploy
  * cannot bake a regressive version into SSG.
  *
- * @param {string} fallbackVersion stable FALLBACK
- * @param {string} [fallbackBetaVersion] beta FALLBACK；空则无 CDN 时隐藏测试入口
+ * @param {string} fallbackVersion
  * @returns {Promise<ReleaseArtifacts>}
  */
-export async function fetchLatestReleaseArtifacts(
-  fallbackVersion,
-  fallbackBetaVersion = "",
-) {
+export async function fetchLatestReleaseArtifacts(fallbackVersion) {
   const fallback = {
     ...artifactUrlsForVersion(fallbackVersion),
     ...EMPTY_ANDROID,
-    beta: null,
   };
   const android = await fetchLatestAndroidArtifacts();
-  const beta = await fetchDesktopChannelArtifacts(
-    fallbackBetaVersion,
-    "beta",
-  );
 
-  const stable = await fetchDesktopChannelArtifacts(
-    fallbackVersion,
-    "stable",
-  );
-  if (!stable) {
-    return { ...fallback, ...android, beta };
+  try {
+    const res = await fetch(desktopLatestJsonUrl(), {
+      headers: { "User-Agent": "agentcore-website" },
+    });
+    if (!res.ok) {
+      throw new Error(`CDN desktop latest.json HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const version = String(data.version ?? "").trim();
+    if (!version) throw new Error("CDN desktop latest.json missing version");
+
+    if (compareSemver(fallbackVersion, version) > 0) {
+      return { ...fallback, ...android };
+    }
+
+    const winFilename = String(data.winFilename ?? "").trim();
+    const macFilename = String(data.macFilename ?? "").trim();
+    if (!winFilename) throw new Error("CDN desktop latest.json missing winFilename");
+
+    const base = artifactUrlsForVersion(version, { macFilename });
+    return {
+      version,
+      releaseNotesUrl:
+        String(data.releaseNotesUrl ?? "").trim() || base.releaseNotesUrl,
+      // Always GitHub — ignore stale brand-host winUrl/macUrl in manifest.
+      winUrl: base.winUrl,
+      winFilename,
+      macUrl: macFilename ? base.macUrl : "",
+      macFilename,
+      ...android,
+    };
+  } catch {
+    return { ...fallback, ...android };
   }
-
-  return {
-    ...stable,
-    ...android,
-    beta,
-  };
 }
 
 /** @param {string} a @param {string} b @returns {number} */

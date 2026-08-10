@@ -1,19 +1,23 @@
 import { IconButton } from "@/components/files/parts";
+import { Badge } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { isFeatureUnavailable } from "@/lib/errors";
 import { notifyActionError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
+  type DocumentApplyMode,
   type DocumentNode,
   createRuleDocument,
   deleteDocument,
   listUserRules,
   renameDocument,
+  updateDocumentApplyMode,
 } from "@/services/documents";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -27,7 +31,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { forwardRef, useState } from "react";
+import { type ReactNode, forwardRef, useState } from "react";
 import {
   loadRulesCollapsed,
   loadRulesExpanded,
@@ -44,6 +48,17 @@ export type RuleScope =
 const ROOT_KEY = "root";
 
 const RULES_QUERY_KEY = ["user-rules"] as const;
+
+const APPLY_LABEL: Record<DocumentApplyMode, string> = {
+  always: "常驻",
+  on_demand: "按需",
+};
+
+/** Short hint for the two modes (badge title / menu). */
+const APPLY_HINT: Record<DocumentApplyMode, string> = {
+  always: "短硬约束",
+  on_demand: "长条文或偶发",
+};
 
 /** Ensure a rule doc name is markdown so it opens in the shared 编辑器 (not the 只读预览). */
 function ensureMdName(name: string): string {
@@ -67,8 +82,8 @@ function nextRuleName(existing: Iterable<string>): string {
  * `AgentCore/规则/` (GLOBAL + per-project).
  *
  * Deliberately NOT the generic {@link FileTree} (照 {@link MemorySection} 先例): rules are a
- * flat per-scope list needing only 打开 / 新建 / 重命名 / 删除. Opening a rule reuses the shared
- * editor host via {@link createDocumentSource} (path = the doc id).
+ * flat per-scope list needing only 打开 / 新建 / 重命名 / 删除 / 常驻·按需. Opening a rule
+ * reuses the shared editor host via {@link createDocumentSource} (path = the doc id).
  *
  * Create entry mirrors {@link WorkspaceSection}: header hover `+` + context menu + empty-state CTA
  * (no list-tail fake row).
@@ -193,34 +208,69 @@ export function RuleSection({
     }
   };
 
+  const setApplyMode = async (doc: DocumentNode, mode: DocumentApplyMode) => {
+    if (doc.applyMode === mode) return;
+    try {
+      await updateDocumentApplyMode(doc.id, mode);
+      await refresh();
+      notifySuccess(`已设为${APPLY_LABEL[mode]}`);
+    } catch (e) {
+      notifyActionError("切换失败", e);
+    }
+  };
+
   const headerPad = indent + 8;
   const leafPad = indent + 26;
 
-  const renderRuleRow = (doc: DocumentNode) => (
-    <ContextMenu key={doc.id}>
-      <ContextMenuTrigger asChild>
-        <RuleLeafRow
-          paddingLeft={leafPad}
-          icon={
-            <FileText size={14} className="shrink-0 text-muted-foreground" />
-          }
-          label={doc.name}
-          active={activePath === doc.id}
-          onClick={() => onOpen(doc.id, doc.name)}
-        />
-      </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-36">
-        <ContextMenuItem onSelect={() => void renameRule(doc)}>
-          <Pencil size={14} className="shrink-0" />
-          <span className="flex-1 truncate">重命名</span>
-        </ContextMenuItem>
-        <ContextMenuItem variant="danger" onSelect={() => void removeRule(doc)}>
-          <Trash2 size={14} className="shrink-0" />
-          <span className="flex-1 truncate">删除规则</span>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  const renderRuleRow = (doc: DocumentNode) => {
+    const mode = doc.applyMode;
+    const other: DocumentApplyMode = mode === "always" ? "on_demand" : "always";
+    return (
+      <ContextMenu key={doc.id}>
+        <ContextMenuTrigger asChild>
+          <RuleLeafRow
+            paddingLeft={leafPad}
+            icon={
+              <FileText size={14} className="shrink-0 text-muted-foreground" />
+            }
+            label={doc.name}
+            active={activePath === doc.id}
+            onOpen={() => onOpen(doc.id, doc.name)}
+            applyMode={mode}
+            onToggleApplyMode={() => void setApplyMode(doc, other)}
+          />
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-36">
+          <ContextMenuItem
+            disabled={mode === "always"}
+            title={APPLY_HINT.always}
+            onSelect={() => void setApplyMode(doc, "always")}
+          >
+            <span className="flex-1 truncate">设为常驻</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={mode === "on_demand"}
+            title={APPLY_HINT.on_demand}
+            onSelect={() => void setApplyMode(doc, "on_demand")}
+          >
+            <span className="flex-1 truncate">设为按需</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void renameRule(doc)}>
+            <Pencil size={14} className="shrink-0" />
+            <span className="flex-1 truncate">重命名</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="danger"
+            onSelect={() => void removeRule(doc)}
+          >
+            <Trash2 size={14} className="shrink-0" />
+            <span className="flex-1 truncate">删除规则</span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
 
   const header = (
     <div
@@ -304,6 +354,12 @@ export function RuleSection({
             <p className="text-xs text-muted-foreground/60">
               {scope.kind === "global" ? "还没有全局规则" : "本项目还没有规则"}
             </p>
+            <p
+              className="text-xs text-muted-foreground/50"
+              title="新建默认常驻"
+            >
+              短硬约束用常驻，长条文或偶发用按需
+            </p>
             <button
               type="button"
               onClick={() => void createRule()}
@@ -320,37 +376,66 @@ export function RuleSection({
   );
 }
 
-/** A single rule-doc row — a slim button styled like the rail (照 MemoryLeafRow). */
+/**
+ * A single rule-doc row — open + apply-mode chip as siblings (no nested buttons).
+ * Outer div is the context-menu trigger surface (照 MemoryLeafRow 视觉密度).
+ */
 const RuleLeafRow = forwardRef<
-  HTMLButtonElement,
+  HTMLDivElement,
   {
     paddingLeft: number;
-    icon: React.ReactNode;
+    icon: ReactNode;
     label: string;
     active: boolean;
-    onClick: () => void;
+    onOpen: () => void;
+    applyMode: DocumentApplyMode;
+    onToggleApplyMode: () => void;
   }
 >(function RuleLeafRow(
-  { paddingLeft, icon, label, active, onClick, ...rest },
+  {
+    paddingLeft,
+    icon,
+    label,
+    active,
+    onOpen,
+    applyMode,
+    onToggleApplyMode,
+    ...rest
+  },
   ref,
 ) {
   return (
-    <button
-      type="button"
+    <div
       ref={ref}
-      onClick={onClick}
       {...rest}
       style={{ paddingLeft }}
       className={cn(
-        "flex h-7 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-sm transition-colors",
+        "flex h-7 w-full items-center gap-1.5 rounded-lg pr-1 text-sm transition-colors",
         active
           ? "bg-accent text-foreground"
           : "text-foreground hover:bg-accent/60",
       )}
     >
-      {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left"
+      >
+        {icon}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+      </button>
+      <button
+        type="button"
+        title={`${APPLY_LABEL[applyMode]} · ${APPLY_HINT[applyMode]}（点击切换）`}
+        aria-label={`应用方式：${APPLY_LABEL[applyMode]}，点击切换`}
+        onClick={onToggleApplyMode}
+        className="shrink-0 rounded-full"
+      >
+        <Badge tone="muted" pill className="pointer-events-none font-normal">
+          {APPLY_LABEL[applyMode]}
+        </Badge>
+      </button>
+    </div>
   );
 });
 RuleLeafRow.displayName = "RuleLeafRow";

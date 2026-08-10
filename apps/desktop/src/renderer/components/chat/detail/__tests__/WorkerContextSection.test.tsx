@@ -46,7 +46,7 @@ describe("WorkerContextSection", () => {
     expect(screen.queryByText(/系统提示词/)).toBeNull();
   });
 
-  it("诊断模式展开后显示系统提示与结构化开场，隐藏 origin 拼接原文", () => {
+  it("诊断模式展开后显示系统提示与结构化开场，不展示后续工作链轮次", () => {
     render(
       <WorkerContextSection
         blocks={blocks}
@@ -70,6 +70,11 @@ describe("WorkerContextSection", () => {
                 },
               ],
             },
+            {
+              role: "tool",
+              content: "search results",
+              tool_call_id: "c1",
+            },
           ],
           available: true,
           loading: false,
@@ -83,7 +88,10 @@ describe("WorkerContextSection", () => {
     expect(screen.getByText(/系统提示词/)).toBeTruthy();
     expect(screen.getByText("开场上下文（结构化分段）")).toBeTruthy();
     expect(screen.getByText("查看原始拼接")).toBeTruthy();
-    expect(screen.getByText("助手")).toBeTruthy();
+    // 后续轮与 ProcessTimeline 重复，诊断态也不再挂在此节。
+    expect(screen.queryByText("助手")).toBeNull();
+    expect(screen.queryByText("工具")).toBeNull();
+    expect(screen.queryByText("web_search")).toBeNull();
     // 拼接原文不应直接铺在开场区（由结构化分段替代）。
     expect(screen.queryByText("## 你的任务\n调研竞品定价")).toBeNull();
   });
@@ -104,7 +112,7 @@ describe("WorkerContextSection", () => {
     );
     fireEvent.click(screen.getByText("收到的上下文"));
     expect(screen.getByText("加载失败")).toBeTruthy();
-    expect(screen.queryByText(/无法从 journal 重建后续轮次/)).toBeNull();
+    expect(screen.queryByText(/无法加载系统提示/)).toBeNull();
   });
 
   it("available=false 且无 error 时才显示 journal 降级", () => {
@@ -122,7 +130,7 @@ describe("WorkerContextSection", () => {
       />,
     );
     fireEvent.click(screen.getByText("收到的上下文"));
-    expect(screen.getByText(/无法从 journal 重建后续轮次/)).toBeTruthy();
+    expect(screen.getByText(/无法加载系统提示 \/ 原始拼接/)).toBeTruthy();
     expect(screen.queryByText("加载失败")).toBeNull();
   });
 });

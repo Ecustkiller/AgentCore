@@ -1,3 +1,4 @@
+import { isColdPendingDrawable } from "@/services/resume";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 
@@ -25,14 +26,16 @@ export function conversationHasPendingDecision(
   for (const e of byId.values()) {
     if (e.conversationId !== conversationId) continue;
     if (e.status !== "pending" && e.status !== "submitting") continue;
+    if (e.kind === "approval" || e.kind === "delegation_authorization") {
+      return true;
+    }
     if (
-      e.kind === "approval" ||
-      e.kind === "delegation_authorization" ||
       e.kind === "ask_user" ||
       e.kind === "plan_review" ||
       e.kind === "team_preview"
     ) {
-      return true;
+      // Align with ResumePrompt: no stamp → no clickable card → no composer claim.
+      if (isColdPendingDrawable(conversationId, e.messageId)) return true;
     }
   }
   return false;

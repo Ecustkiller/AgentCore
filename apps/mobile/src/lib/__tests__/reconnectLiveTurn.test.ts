@@ -7,7 +7,7 @@ describe("reconnectLiveTurn", () => {
   const live: T = { id: "live", events: ["a", "b"], userText: null };
   const queued: T = { id: "queued", events: [], userText: "later" };
 
-  it("clearLiveTurnEvents：只清空 active id，保留队尾排队泡", () => {
+  it("clearLiveTurnEvents：只清空 active id，保留队尾其它 turn", () => {
     const next = clearLiveTurnEvents([live, queued], "live");
     expect(next).toEqual([{ id: "live", events: [], userText: null }, queued]);
   });
@@ -20,7 +20,7 @@ describe("reconnectLiveTurn", () => {
     ]);
   });
 
-  it("removeLiveTurn：只删 live，不误删排队泡（禁 slice(0,-1)）", () => {
+  it("removeLiveTurn：只删 live，不误删其它 turn（禁 slice(0,-1)）", () => {
     expect(removeLiveTurn([live, queued], "live")).toEqual([queued]);
   });
 

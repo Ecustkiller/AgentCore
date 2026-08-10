@@ -5,6 +5,7 @@ import {
   uploadWorkspaceFileByWs,
 } from "@/api/workspaces";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
+import { toWorkspaceRelPath } from "@/lib/workspacePath";
 // Browse ONE cloud workspace's files (手机端布局重构 · 跨工作区文件总览).
 //
 // The drill-down from the 文件 tab (/files → /files/:wsId). Keeps the bottom tab bar (a
@@ -13,14 +14,27 @@ import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // sibling of the per-conversation /c/:id/files. The workspace name rides in router state from
 // the list so the header shows it without a refetch.
 // 协作摘要已从本页拿掉：文件页只做浏览/预览/上传；项目协作时间线留桌面（手机暂无入口）。
+// 聊天产物卡带 workspace_id 时也会深链到此页（openPath + fromConversationId）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+
+type WorkspaceFilesState = {
+  name?: string;
+  openPath?: string;
+  fromConversationId?: string;
+} | null;
 
 export function WorkspaceFilesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { wsId = "" } = useParams<{ wsId: string }>();
-  const name = (location.state as { name?: string } | null)?.name ?? "工作区";
+  const state = location.state as WorkspaceFilesState;
+  const name = state?.name ?? "工作区";
+  const rawOpenPath = state?.openPath ?? null;
+  const openPath = rawOpenPath
+    ? toWorkspaceRelPath(rawOpenPath) || rawOpenPath
+    : null;
+  const fromConversationId = state?.fromConversationId ?? null;
 
   const [cwd, setCwd] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -65,15 +79,19 @@ export function WorkspaceFilesPage() {
     [wsId, cwd],
   );
 
+  const onBack = () => {
+    if (fromConversationId) {
+      navigate(`/c/${fromConversationId}`);
+      return;
+    }
+    navigate("/files");
+  };
+
   return (
     <div className="screen">
       <header className="bar">
-        <button
-          type="button"
-          className="link"
-          onClick={() => navigate("/files")}
-        >
-          ← 文件
+        <button type="button" className="link" onClick={onBack}>
+          {fromConversationId ? "← 返回" : "← 文件"}
         </button>
         <span className="viewer-name">{name}</span>
         <button
@@ -98,6 +116,7 @@ export function WorkspaceFilesPage() {
         cwd={cwd}
         onCwdChange={setCwd}
         reloadKey={reloadKey}
+        openPath={openPath}
         emptyHint="此工作区还没有文件。"
         onUpload={() => uploadInputRef.current?.click()}
       />

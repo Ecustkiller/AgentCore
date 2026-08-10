@@ -73,6 +73,23 @@ def test_plan_suggests_code_verification():
     assert plan_suggests_code_verification(plan)
 
 
+def test_plan_suggests_code_verification_skips_bare_open():
+    """裸「打开文件 / 打开 .mdc」不得命中 plan_suggests_code_verification。"""
+    for task in ("打开文件", "打开 `.cursor/rules/x.mdc`"):
+        plan = RunPlan(
+            nodes=[RunSpec(run_id="a", role="dev", task=task, objective="")]
+        )
+        assert not plan_suggests_code_verification(plan)
+
+
+def test_plan_suggests_code_verification_open_acceptance():
+    """「打开验收」仍经「验收」命中。"""
+    plan = RunPlan(
+        nodes=[RunSpec(run_id="a", role="dev", task="打开验收", objective="")]
+    )
+    assert plan_suggests_code_verification(plan)
+
+
 def test_cold_start_explore_requires_two_workers():
     thin = RunPlan(
         nodes=[RunSpec(run_id="a", role="explorer", task="摸仓", objective="")]

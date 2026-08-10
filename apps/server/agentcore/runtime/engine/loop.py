@@ -30,6 +30,7 @@ from .ceiling import ceiling_finalize
 from .directive import LoopDirective
 from .directive_apply import apply_loop_directive
 from .governance import (
+    apply_workspace_channel_dead_retire,
     classify_investigation_tools,
     coordination_injection_has_all_completed,
     create_loop_controller,
@@ -260,11 +261,13 @@ async def react_loop(
     disabled_tools: set[str] = set()
     # Re-apply run-scoped read_url retirement from a prior pass (stream-stall →
     # Wave retry, or contract write_pass/retry) so the tool is not re-offered.
+    # web_search stays closed with it — otherwise restart re-opens search thrash.
     if run_id:
         from agentcore.tools.builtin.web._net import is_read_url_retired
 
         if is_read_url_retired(run_id):
             disabled_tools.add("read_url")
+            disabled_tools.add("web_search")
     # B·收尾窗口：预算软顶 / 超时预警后收窄到落盘+诊断+handoff（不改硬顶语义）。
     wind_down_active = False
     wind_down_reason = ""
@@ -325,6 +328,19 @@ async def react_loop(
         form_prose=form_prose,
         product_landing_artifacts=product_landing_artifacts,
     )
+
+    def _maybe_retire_workspace_channel_dead() -> None:
+        """Session/backend sticky-dead → strip file family from offered tools."""
+        nonlocal tool_defs
+        if apply_workspace_channel_dead_retire(
+            disabled_tools=disabled_tools,
+            controller=controller,
+            tool_context=tool_context,
+        ):
+            tool_defs = _resolve_tool_defs()
+
+    # Entry: teammates that never hit a dead envelope still inherit session/channel sticky.
+    _maybe_retire_workspace_channel_dead()
     # 跑/修·打开验证·贴码写回：引擎不再扫用户文硬分叉；选型/验收靠提示词 + 结构字段。
     if role == "captain":
         maybe_inject_availability_status_nudge(
@@ -730,6 +746,9 @@ async def react_loop(
 
                 if ensure_coordination_surface_before_llm(tools):
                     tool_defs = _resolve_tool_defs()
+            # Sticky channel-dead poll immediately before LLM (session-read posture like
+            # timeout wind_down): sibling may have stamped after prior round / on_round_begin.
+            _maybe_retire_workspace_channel_dead()
             try:
                 round_result = await run_llm_round(
                     llm=llm,

@@ -32,12 +32,24 @@ def run_payload(node) -> dict[str, Any]:
     return payload
 
 
-def captain_card(tool: DelegateTool) -> dict[str, Any]:
+def captain_card(captain_run_id: str) -> dict[str, Any]:
     """Roster card for the CEO captain root node."""
     return {
-        "id": tool._captain_run_id,
+        "id": captain_run_id,
         "role": "CEO",
         "thinking": True,
+    }
+
+
+def captain_run(captain_run_id: str) -> dict[str, Any]:
+    """Plan-time captain root descriptor (kind=captain)."""
+    return {
+        "id": captain_run_id,
+        "agent_id": captain_run_id,
+        "task": "",
+        "depends_on": [],
+        "parent_run_id": None,
+        "kind": "captain",
     }
 
 
@@ -56,28 +68,32 @@ def plan_event(
     plan: RunPlan,
     *,
     host_message_id: str | None = None,
+    host_captain_run_id: str | None = None,
     act_id: str = "act-1",
 ):
     """Pre-declare this delegate batch's roster + runs so the graph lights up.
 
     幕声明：本批 A1 一律归宿主既有幕（默认 ``act-1`` / ``multi_agent``）；开新幕是后续批次。
+
+    Captain 注入：
+    - 首派（无 ``host_message_id``）：注入本回合 ``tool._captain_run_id``。
+    - 跨回合 append divert：merge 全量重发**同一宿主** captain（``host_captain_run_id``），
+      禁止注入本回合 captain（否则图上第二 CEO →「CEO 子队·排队中」）。
+      宿主 id 解析不到则不注入（FE 仍保留首派已有 captain）。
     """
     roles = list(dict.fromkeys(n.role for n in plan.nodes if n.role))
     agents = [card(tool, n) for n in plan.nodes]
     runs = [run_payload(n) for n in plan.nodes]
-    if tool._depth == 0 and tool._captain_run_id:
-        agents.insert(0, captain_card(tool))
-        runs.insert(
-            0,
-            {
-                "id": tool._captain_run_id,
-                "agent_id": tool._captain_run_id,
-                "task": "",
-                "depends_on": [],
-                "parent_run_id": None,
-                "kind": "captain",
-            },
-        )
+    host_mid = (host_message_id or "").strip()
+    if tool._depth == 0:
+        if host_mid:
+            host_cap = (host_captain_run_id or "").strip()
+            if host_cap:
+                agents.insert(0, captain_card(host_cap))
+                runs.insert(0, captain_run(host_cap))
+        elif tool._captain_run_id:
+            agents.insert(0, captain_card(tool._captain_run_id))
+            runs.insert(0, captain_run(tool._captain_run_id))
     return run_plan(
         execution_id=execution_id,
         plan_type="multi_agent",

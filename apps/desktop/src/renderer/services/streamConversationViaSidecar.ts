@@ -94,6 +94,10 @@ export interface ResumeViaSidecarOptions {
     run_id: string;
     capability: "text_only";
   }>;
+  model_overrides?: Record<
+    string,
+    { model: string; origin?: "platform" | "byok"; provider_id?: string }
+  >;
   /** Structured website style pick (s0/s1/…). */
   /** 挂起回合的原始用户消息（来自帧）——续跑完成后随回写落库。 */
   userMessage: string;
@@ -289,6 +293,7 @@ export async function resumeConversationViaSidecar({
   selected,
   excluded_run_ids,
   write_capability_overrides,
+  model_overrides,
   userMessageId,
   signal,
 }: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
@@ -340,6 +345,9 @@ export async function resumeConversationViaSidecar({
           ...(write_capability_overrides &&
           write_capability_overrides.length > 0
             ? { write_capability_overrides }
+            : {}),
+          ...(model_overrides && Object.keys(model_overrides).length > 0
+            ? { model_overrides }
             : {}),
           inference,
           foldersAuth,

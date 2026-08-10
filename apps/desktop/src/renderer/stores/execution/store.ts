@@ -33,7 +33,11 @@ import type {
   UserInterjection,
 } from "./types";
 
-/** True when every projected run has left pending/running (图收口 by run 终态). */
+/**
+ * True when every projected **worker** has left pending/running (图收口 by run 终态).
+ * Captains are excluded — same rule as {@link hasUnsettledRuns}: ghost / append-turn
+ * `kind=captain` rows must not pin the execution at `running`.
+ */
 function runsAllSettled(
   plan: ExecutionPlan,
   frames: RunFrame[],
@@ -52,10 +56,9 @@ function runsAllSettled(
     crossExamEnabled,
     debateOpening,
   );
-  if (exec.runs.length === 0) return false;
-  return exec.runs.every(
-    (r) => r.status !== "pending" && r.status !== "running",
-  );
+  const workers = exec.runs.filter((r) => r.kind !== "captain");
+  if (workers.length === 0) return false;
+  return workers.every((r) => r.status !== "pending" && r.status !== "running");
 }
 
 /**
@@ -338,10 +341,11 @@ export function execRuntime(
  *
  * Captain is excluded: its early `run_started` is often dropped (no plan yet), so
  * a still-pending captain after `end_turn` must not pin「正在生成汇总」forever when
- * every worker is already terminal. No plan or no worker runs → false (nothing in
- * flight to wait on, so message_end 照常收口). Sibling of the private
- * `runsAllSettled` reconcile check — NOT its exact negation (both are false on a
- * 0-run graph); also differs in that reconcile still counts the captain.
+ * every worker is already terminal. Extra append-turn captains are also ignored.
+ * No plan or no worker runs → false (nothing in flight to wait on, so message_end
+ * 照常收口). Sibling of the private `runsAllSettled` reconcile check — NOT its
+ * exact negation (both are false on a 0-run / captain-only graph); both exclude
+ * `kind=captain`.
  */
 export function hasUnsettledRuns(runtime: ExecutionRuntime): boolean {
   if (!runtime.plan) return false;

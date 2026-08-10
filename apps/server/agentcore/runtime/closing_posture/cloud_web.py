@@ -23,14 +23,19 @@ _CLOUD_WEB_VERIFY_GREEN_CLAIMS = re.compile(
     r"(?:后端)?单测已(?:跑)?绿|测试已跑绿|已跑绿|跑绿|"
     r"测试全部通过|全部测试通过|"
     r"沙箱内.{0,32}全部通过|"
-    r"全部通过"
+    r"全部通过|"
+    # 案 88625：记分板假绿（不进姿势 A；仅 verify_gap 闩锁时软横幅）
+    r"\d+\s*/\s*\d+\s*OK|"
+    r"\d+\s+passed|"
+    r"(?:unittest|pytest).{0,48}(?:passed|OK)"
     r")"
 )
 
 _CLOUD_WEB_VERIFY_HONESTY_BANNER = (
-    "【验证说明】本回合有装包被拒或外环验证缺口——下文若写「自检全过 / 跑绿 / 全部通过」，"
-    "可能把结构自检说成了外环验绿。云端不能代跑 install→build/test 时，请标明未装包/"
-    "未外环验绿，并给出本机命令或 export_to_local。\n\n"
+    "【验证说明】本回合有装包被拒或外环验证缺口——下文若写「自检全过 / 跑绿 / 全部通过 / "
+    "N/N OK / passed」，可能把结构自检或失败工具卡说成了外环验绿。云端不能代跑 "
+    "install→build/test 或本轮 test_run 未成功时，请标明未装包/未外环验绿或工具卡未通过，"
+    "并给出本机命令或 export_to_local。\n\n"
 )
 
 

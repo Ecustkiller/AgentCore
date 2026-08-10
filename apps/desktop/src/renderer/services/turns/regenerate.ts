@@ -42,8 +42,8 @@ function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
 }
 
 /**
- * 续跑本机帧的寻址：跟本地事实，**忽略**大众默认关 / 开关偏好。
- * 优先活回合登记，否则会话本地绑定（勿用 `resolveSidecarRoot`——其早退会挡续跑）。
+ * 续跑本机帧的寻址：跟本地事实，**忽略**显式强制关（`sidecarPreference==="off"`）。
+ * 优先活回合登记，否则会话本地绑定（勿用 `resolveSidecarRoot`——强制关早退会挡续跑）。
  */
 async function resolveResumeSidecarTarget(
   conversationId: string,
@@ -210,7 +210,7 @@ export async function runResume(
     .pending.find((p) => p.messageId === resumeMessageId);
   const origin = resolveResumeOrigin(conversationId, resumeMessageId);
   const viaSidecar = shouldResumeViaSidecar(origin);
-  // origin=sidecar：跟本地事实，忽略偏好默认关（勿 resolveSidecarRoot）。
+  // origin=sidecar：跟本地事实，忽略显式强制关（勿 resolveSidecarRoot）。
   const sidecarTarget = viaSidecar
     ? await resolveResumeSidecarTarget(conversationId)
     : null;
@@ -295,6 +295,7 @@ export async function runResume(
         selected,
         excluded_run_ids: corrections?.excluded_run_ids,
         write_capability_overrides: corrections?.write_capability_overrides,
+        model_overrides: corrections?.model_overrides,
         userMessage,
         userMessageId,
         signal: ac.signal,
@@ -308,6 +309,7 @@ export async function runResume(
         selected,
         excluded_run_ids: corrections?.excluded_run_ids,
         write_capability_overrides: corrections?.write_capability_overrides,
+        model_overrides: corrections?.model_overrides,
         signal: ac.signal,
       });
     }

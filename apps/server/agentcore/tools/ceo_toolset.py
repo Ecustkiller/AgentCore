@@ -29,6 +29,7 @@ from agentcore.tools.builtin import (
 )
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+from agentcore.tools.builtin.consult_rule import ConsultRuleTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.remember import RememberTool
 from agentcore.tools.builtin.update_project_profile import UpdateProjectProfileTool
@@ -63,6 +64,7 @@ def _assemble_ceo_toolset(
     conversation_history_access: bool = True,
     folder_id: str | None = None,
     has_memory_topics: bool = False,
+    has_on_demand_rules: bool = False,
     permission_axes=None,
     advertise_bind_local_folder: bool = False,
     desktop_online: bool = False,
@@ -179,6 +181,8 @@ def _assemble_ceo_toolset(
     # consult_memory is further gated by ``has_memory_topics`` — empty catalog ⇒ no tool
     # (aligns with「目录为空不渲染」; compose_ceo_chat_prompt keys the directory on this
     # tool being present). ``remember`` / explore profile stay on whenever memory is on.
+    # ``consult_rule`` is independent of the memory gate — on_demand user rules are the
+    # user's own instructions; empty on_demand catalog ⇒ not wired (same empty-catalog rule).
     if memory_enabled:
         # Look up via ``resolve.prepare`` so resume/board e2e monkeypatches of
         # ``prepare.default_memory_store`` keep working (historical seam).
@@ -201,6 +205,8 @@ def _assemble_ceo_toolset(
                     prompt_holders=[delegate_tool, debate_tool],
                 )
             )
+    if has_on_demand_rules:
+        chat_tools.register(ConsultRuleTool(folder_id=folder_id))
     if checkpoint_enabled:
         # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the
         # delegate plan_review — message_id keys the frame, the turn-level constants

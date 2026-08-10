@@ -4,8 +4,11 @@ import { create } from "zustand";
 export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
-  /** 主时间线乐观用户气泡 id（取消时移除）。 */
-  messageId: string;
+  /**
+   * 主时间线用户气泡 id（可选：排队期无泡；``turn_queue_started`` 出队插泡后可填）。
+   * 取消只清条；有 messageId 时顺带删泡（防御竞态）。
+   */
+  messageId?: string;
   content: string;
   position: number;
   queueDepth: number;

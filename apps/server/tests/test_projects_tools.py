@@ -158,6 +158,9 @@ def test_create_project_schema_and_registration():
     assert "mode=cloud" in tool.schema.description
     assert "folder_id" in tool.schema.description
     assert "open_local_project" in tool.schema.description
+    assert "用户明确" in tool.schema.description or "明确要求" in tool.schema.description
+    assert "禁止为过写盘闸" in tool.schema.description
+    assert "自动建云桌" in tool.schema.description
     reg = tool_registration(CreateProjectTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
     assert reg.audience == (AUDIENCE_CEO,)
@@ -297,6 +300,9 @@ async def test_list_projects_empty(monkeypatch: pytest.MonkeyPatch):
     assert result.display == {"count": 0}
     assert "没有项目" in result.output
     assert "create_project" in result.output
+    # Empty roster: create only for explicit new / multi-line; not write-gate default.
+    assert "自动建云桌" in result.output
+    assert "过写盘闸" in result.output or "勿" in result.output
     # Empty roster must not default-nudge open_local_project as the create path.
     assert "勿默认催 open_local_project" in result.output or "导入到云" in result.output
     assert "target_folder_id" in result.output
@@ -328,7 +334,8 @@ async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     assert result.success
     assert result.display["status"] == "not_found"
     assert "ask_user" in result.output or "list_projects" in result.output
-    assert "create_project" in result.output  # zero-hit → 云新建
+    assert "create_project" in result.output  # mention only as explicit-new path
+    assert "自动建云桌" in result.output
     assert "禁止静默猜" in result.output
     # Must not default-urge open_local_project as the create path (§4.9 ③A).
     assert "新建本机项目才用 open_local_project" not in result.output

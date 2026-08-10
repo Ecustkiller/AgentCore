@@ -447,13 +447,13 @@ describe("ResumeCard · team_preview", () => {
       ...over,
     });
 
-  it("非 debate 仅授权并开工 + 取消，无调整 / 逐次审批", () => {
+  it("非 debate 仅授权并开工 + 取消，无调整 / 逐次审批 / 排除岗", () => {
     render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
     expect(screen.getByText("授权并开工")).toBeTruthy();
     expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
-    expect(screen.getByText("纳入本轮")).toBeTruthy();
+    expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.getByText("本批工具：file_write")).toBeTruthy();
   });
 
@@ -469,7 +469,8 @@ describe("ResumeCard · team_preview", () => {
     expect(screen.getByText("1 人待确认 · 点开授权开工")).toBeTruthy();
     fireEvent.click(latch);
     expect(screen.getByText("授权并开工")).toBeTruthy();
-    expect(screen.getByText("纳入本轮")).toBeTruthy();
+    expect(screen.queryByText("纳入本轮")).toBeNull();
+    expect(screen.getByText("改为仅文字")).toBeTruthy();
   });
 
   it("主按钮带嘱咐发 continue（未改正时无修正载荷）", () => {
@@ -479,13 +480,11 @@ describe("ResumeCard · team_preview", () => {
       target: { value: "更简洁" },
     });
     fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "更简洁", [], {
-      excluded_run_ids: [],
-      write_capability_overrides: [],
-    });
+    expect(onResume).toHaveBeenCalledWith("continue", "更简洁", []);
+    expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
 
-  it("可排除多余岗；continue 带 excluded_run_ids", () => {
+  it("确认面无排除岗入口；continue 不附 excluded_run_ids", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -512,64 +511,14 @@ describe("ResumeCard · team_preview", () => {
         onResume={onResume}
       />,
     );
-    fireEvent.click(screen.getByLabelText("纳入本轮 写作"));
+    expect(screen.queryByText("纳入本轮")).toBeNull();
+    expect(screen.queryByLabelText(/纳入本轮/)).toBeNull();
     fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
-      excluded_run_ids: ["r2"],
-      write_capability_overrides: [],
-    });
-  });
-
-  it("至少保留 1 人：关到 0 被拒并提示", () => {
-    const onResume = vi.fn();
-    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
-    fireEvent.click(screen.getByLabelText("纳入本轮 调研"));
-    expect(screen.getByTestId("team-include-hint").textContent).toBe(
-      "至少保留 1 名队员",
-    );
-    fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
-      excluded_run_ids: [],
-      write_capability_overrides: [],
-    });
-  });
-
-  it("仍被他人 depends_on 引用的岗禁止排除", () => {
-    const onResume = vi.fn();
-    render(
-      <ResumeCard
-        paused={teamPreview({
-          workers: [
-            {
-              run_id: "r1",
-              role: "调研",
-              task: "做A",
-              depends_on: [],
-              write_capability: "text_only",
-              write_capability_label: "仅文字报告",
-            },
-            {
-              run_id: "r2",
-              role: "写作",
-              task: "做B",
-              depends_on: ["r1"],
-              write_capability: "can_write_files",
-              write_capability_label: "可改文件",
-            },
-          ],
-        })}
-        onResume={onResume}
-      />,
-    );
-    fireEvent.click(screen.getByLabelText("纳入本轮 调研"));
-    expect(screen.getByTestId("team-include-hint").textContent).toBe(
-      "仍有队员依赖此岗",
-    );
-    fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
-      excluded_run_ids: [],
-      write_capability_overrides: [],
-    });
+    expect(onResume).toHaveBeenCalledWith("continue", "", []);
+    const amendments = onResume.mock.calls[0]?.[3] as
+      | Record<string, unknown>
+      | undefined;
+    expect(amendments).toBeUndefined();
   });
 
   it("可改文件 → 仅文字：continue 带 write_capability_overrides", () => {
@@ -579,9 +528,12 @@ describe("ResumeCard · team_preview", () => {
     fireEvent.click(screen.getByText("改为仅文字"));
     fireEvent.click(screen.getByText("授权并开工"));
     expect(onResume).toHaveBeenCalledWith("continue", "", [], {
-      excluded_run_ids: [],
       write_capability_overrides: [{ run_id: "r1", capability: "text_only" }],
     });
+    const amendments = onResume.mock.calls[0]?.[3] as
+      | Record<string, unknown>
+      | undefined;
+    expect(amendments).not.toHaveProperty("excluded_run_ids");
   });
 
   it("delegate 开工卡无模型下拉；continue 不附 model_overrides", () => {
@@ -617,14 +569,11 @@ describe("ResumeCard · team_preview", () => {
     );
     expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
     fireEvent.click(screen.getByText("授权并开工"));
-    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
-      excluded_run_ids: [],
-      write_capability_overrides: [],
-    });
+    expect(onResume).toHaveBeenCalledWith("continue", "", []);
     const amendments = onResume.mock.calls[0]?.[3] as
       | Record<string, unknown>
       | undefined;
-    expect(amendments).not.toHaveProperty("model_overrides");
+    expect(amendments).toBeUndefined();
   });
 
   it("已是仅文字无升权入口；stop 不带修正", () => {
@@ -655,9 +604,8 @@ describe("ResumeCard · team_preview", () => {
       />,
     );
     expect(screen.queryByText("改为仅文字")).toBeTruthy(); // r2 only
-    // tighten + exclude then stop → amendments ignored (undefined)
+    // tighten then stop → amendments ignored (not passed)
     fireEvent.click(screen.getByText("改为仅文字"));
-    fireEvent.click(screen.getByLabelText("纳入本轮 写作"));
     fireEvent.click(screen.getByText("取消"));
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
   });

@@ -396,11 +396,16 @@ async function requestWithStatus<T>(
 export const api = {
   get: <T>(path: string) => request<T>(path),
 
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, {
-      method: "POST",
-      body: body ? JSON.stringify(body) : undefined,
-    }),
+  post: <T>(path: string, body?: unknown, timeoutMs?: number) =>
+    request<T>(
+      path,
+      {
+        method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
+      },
+      false,
+      timeoutMs,
+    ),
 
   /** POST that surfaces status (200 reuse vs 201 create). */
   postWithStatus: <T>(path: string, body?: unknown) =>

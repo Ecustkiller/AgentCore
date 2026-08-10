@@ -31,7 +31,7 @@ class SimulationStreamRegistry:
         async with self._lock:
             sink = self._sinks.pop(run_id, None)
             if sink is not None:
-                sink.close()
+                sink.close(reason="simulation_stream_remove")
 
     def get_sync(self, run_id: str) -> EventSink | None:
         return self._sinks.get(run_id)

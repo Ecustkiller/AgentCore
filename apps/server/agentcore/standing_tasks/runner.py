@@ -404,7 +404,7 @@ async def run_standing_task_job(
                     task_id, owner=lease_owner
                 )
         if not sink._closed:
-            sink.close()
+            sink.close(reason="standing_task_finally")
 
 
 async def _run_pipeline(**kwargs):

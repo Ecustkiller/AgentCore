@@ -71,6 +71,25 @@
   white-space: nowrap;
 }
 
+/* 「更多」内二级入口（收到的上下文）：整行可点，切到明细 Sheet。 */
+.amf-sheet-nav {
+  display: block;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.amf-sheet-nav:active {
+  color: var(--muted);
+}
+
 .amf-sheet-label {
   margin: 12px 0 6px;
   font-size: 12px;

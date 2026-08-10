@@ -167,6 +167,7 @@ async def await_kickoff(
         moderator_model=str(card.get("moderator_model") or ""),
         moderator_origin=str(card.get("moderator_origin") or ""),
         moderator_provider_id=str(card.get("moderator_provider_id") or ""),
+        moderator_run_id=str(card.get("moderator_run_id") or ""),
         same_model_debate=bool(card.get("same_model_debate")),
         model_candidates=list(card.get("model_candidates") or []) or None,
         headline=str(card.get("headline") or ""),

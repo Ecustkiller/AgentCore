@@ -28,14 +28,14 @@ MAX_DELEGATION_TASKS = 20
 MAX_GAP_FILL_ADDS = 3
 
 # Hard ceiling on delegation nesting across one turn's Run tree. The CEO's direct
-# workers are depth 1; a worker may itself delegate (开一层子团队) ONLY while its own
-# depth < this cap, so the tree can never nest past CEO → worker → sub-worker.
-# depth-2 sub-workers never receive a delegate tool. Bounds recursion (cost /
+# workers are depth 1; a worker may itself delegate ONLY while its own
+# depth < this cap. Legal chain: CEO → depth1 → depth2 → depth3 leaf.
+# depth-3 sub-workers never receive a delegate tool. Bounds recursion (cost /
 # latency / fan-out) on top of the tree-wide width budget (MAX_PARALLEL_DELEGATIONS).
-MAX_DELEGATION_DEPTH = 2
+MAX_DELEGATION_DEPTH = 3
 
 # Per worker-captain cap on sub-workers spawned across all nested delegate calls
-# in one turn (depth-1 leads only; CEO uses MAX_DELEGATION_TASKS instead).
+# in one turn (depth-1/2 leads; CEO uses MAX_DELEGATION_TASKS instead).
 MAX_WORKER_SUBDELEGATIONS = 4
 
 # Hard ceiling on per-node retries regardless of what a task declares.

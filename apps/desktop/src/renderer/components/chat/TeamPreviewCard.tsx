@@ -16,8 +16,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { isColdPendingDrawable } from "@/services/resume";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
+import { useConversationStore } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
+import { useInteractionStore } from "@/stores/interactions";
 import { PendingDecisionMarker } from "./PendingDecisionMarker";
 
 /**
@@ -45,11 +48,23 @@ export function TeamPreviewCard({
   messageId?: string;
 }) {
   const execution = useMessageExecution(messageId ?? null);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const entryMessageId = useInteractionStore(
+    (s) => s.byId.get(preview.id)?.messageId,
+  );
   if (shouldHostPreviewInGraph(preview, execution?.runs)) {
     return null;
   }
   if (preview.status === "resolved") {
     return <ResolvedTeamPreview preview={preview} />;
+  }
+  // Honesty: do not claim「入口在下方拍板卡」when ResumePrompt cannot paint yet.
+  if (
+    conversationId &&
+    entryMessageId !== undefined &&
+    !isColdPendingDrawable(conversationId, entryMessageId)
+  ) {
+    return null;
   }
   return (
     <PendingDecisionMarker

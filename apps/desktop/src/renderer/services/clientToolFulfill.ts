@@ -1,5 +1,5 @@
 import { logEvent } from "@/lib/log";
-import { ApiError } from "@/services/api";
+import { ApiError, NetworkError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 
 /** Result envelope posted as `ResolveClientToolInteraction` (sans `kind`). */
@@ -25,6 +25,9 @@ const fulfilled = new Map<string, FulfilledEntry>();
 /** Fulfill 在飞按 conversation（仅观测；不改调度）。 */
 let fulfillInflightTotal = 0;
 const fulfillInflightByCid = new Map<string, number>();
+
+/** In-process settle retries before giving up (dogfood: single NetworkError → sticky). */
+const RESOLVE_MAX_ATTEMPTS = 3;
 
 function fulfillSnapshot(conversationId: string): {
   inflight_total: number;
@@ -91,6 +94,54 @@ function logWorkspaceResolve(
   });
 }
 
+function isTransientResolveError(err: unknown): boolean {
+  if (err instanceof NetworkError) return true;
+  if (err instanceof ApiError && (err.status >= 500 || err.status === 429)) {
+    return true;
+  }
+  return false;
+}
+
+function resolveBackoffMs(attempt: number): number {
+  return 250 * 2 ** (attempt - 1);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * After settle retries are exhausted on the cloud bridge, kick the live SSE
+ * pump into the same transport-drop path as ``sse.idle_stall`` so the turn
+ * rejoins and later ``workspace_op_required`` frames are not stranded.
+ */
+async function nudgeStreamAfterSettleExhausted(
+  conversationId: string,
+  requestId: string,
+): Promise<void> {
+  try {
+    const { forceSseTransportDrop } = await import(
+      "@/services/streamConversation"
+    );
+    const nudged = forceSseTransportDrop(conversationId);
+    logEvent("warn", "workspace_op.settle_exhausted", {
+      conversation_id: conversationId,
+      request_id: requestId,
+      stream_nudged: nudged,
+      ...fulfillSnapshot(conversationId),
+    });
+  } catch {
+    logEvent("warn", "workspace_op.settle_exhausted", {
+      conversation_id: conversationId,
+      request_id: requestId,
+      stream_nudged: false,
+      ...fulfillSnapshot(conversationId),
+    });
+  }
+}
+
 async function tryResolve(
   conversationId: string,
   requestId: string,
@@ -98,36 +149,69 @@ async function tryResolve(
   logLabel: string,
   extra?: Record<string, unknown>,
 ): Promise<boolean> {
-  try {
-    await resolveInteraction(conversationId, requestId, {
-      kind: "client_tool",
-      ...result,
-    });
-    logWorkspaceResolve(conversationId, requestId, logLabel, "ok", {
-      result_ok: result.ok,
-      ...extra,
-    });
-    return true;
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      logWorkspaceResolve(
-        conversationId,
-        requestId,
-        logLabel,
-        "stale_404",
-        extra,
-      );
-      return true; // stale — no-op
+  const isWorkspace = logLabel === "workspaceOps";
+  const resolveStarted = Date.now();
+  let attempt = 0;
+  let lastErr: unknown;
+
+  while (attempt < RESOLVE_MAX_ATTEMPTS) {
+    attempt += 1;
+    try {
+      await resolveInteraction(conversationId, requestId, {
+        kind: "client_tool",
+        ...result,
+      });
+      logWorkspaceResolve(conversationId, requestId, logLabel, "ok", {
+        result_ok: result.ok,
+        resolve_attempts: attempt,
+        resolve_ms: Date.now() - resolveStarted,
+        ...extra,
+      });
+      return true;
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof ApiError && err.status === 404) {
+        logWorkspaceResolve(conversationId, requestId, logLabel, "stale_404", {
+          resolve_attempts: attempt,
+          resolve_ms: Date.now() - resolveStarted,
+          ...extra,
+        });
+        return true; // stale — no-op
+      }
+      const retryable =
+        isTransientResolveError(err) && attempt < RESOLVE_MAX_ATTEMPTS;
+      if (retryable) {
+        if (isWorkspace) {
+          logEvent("warn", "workspace_op.resolve_retry", {
+            conversation_id: conversationId,
+            request_id: requestId,
+            attempt,
+            max_attempts: RESOLVE_MAX_ATTEMPTS,
+            error_name: err instanceof Error ? err.name : "unknown",
+            http_status: err instanceof ApiError ? err.status : null,
+            ...fulfillSnapshot(conversationId),
+          });
+        }
+        await sleep(resolveBackoffMs(attempt));
+        continue;
+      }
+      break;
     }
-    const httpStatus = err instanceof ApiError ? err.status : null;
-    logWorkspaceResolve(conversationId, requestId, logLabel, "fail", {
-      http_status: httpStatus,
-      error_name: err instanceof Error ? err.name : "unknown",
-      ...extra,
-    });
-    console.error(`[${logLabel}] 回填失败`, err);
-    return false;
   }
+
+  const httpStatus = lastErr instanceof ApiError ? lastErr.status : null;
+  logWorkspaceResolve(conversationId, requestId, logLabel, "fail", {
+    http_status: httpStatus,
+    error_name: lastErr instanceof Error ? lastErr.name : "unknown",
+    resolve_attempts: attempt,
+    resolve_ms: Date.now() - resolveStarted,
+    ...extra,
+  });
+  console.error(`[${logLabel}] 回填失败`, lastErr);
+  if (isWorkspace) {
+    void nudgeStreamAfterSettleExhausted(conversationId, requestId);
+  }
+  return false;
 }
 
 /**

@@ -97,6 +97,9 @@ FORCE_SEGMENTED_NARROW_TOOLS = frozenset({"file_append"})
 # CEO orchestration primitives: parse-only thrashing must not retire them
 # (same posture as LANDING_TOOLS keeping the pen — keep the dispatcher).
 ORCHESTRATION_TOOLS = frozenset({"delegate", "ask_user"})
+# Memory tools: parse-only thrashing must not retire them (same keep posture as
+# ORCHESTRATION_TOOLS — independent set; do NOT fold into ORCHESTRATION_TOOLS).
+MEMORY_TOOLS = frozenset({"remember"})
 
 
 def classify_segmented_write_reject(
@@ -186,14 +189,28 @@ def _norm_write_reject_path(path: object) -> str:
 
 
 def delivery_idle_nudge_prompt(
-    *, rounds: int, recon: bool = False, report: bool = False
+    *,
+    rounds: int,
+    recon: bool = False,
+    report: bool = False,
+    channel_dead: bool = False,
 ) -> str:
-    """Soft steer for read-idle (repair files, report files, or investigation recon)."""
+    """Soft steer for read-idle (repair files, report files, or investigation recon).
+
+    ``channel_dead``: workspace write path is sticky-unavailable — never urge
+    ``file_write`` / ``str_replace`` (complements Phase 1 tool retire).
+    """
     if recon:
         return (
             f"[系统提示] 调查空转提醒（已连续 {rounds} 轮仅搜读、无结论交接）："
             "请立即基于已读内容给出结论，或 escalate / handoff 说明阻塞；"
             "禁止继续换文件通读摊大饼。不要为「再确认」再开一轮全仓 typecheck。"
+        )
+    if channel_dead:
+        return (
+            f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
+            "工作区写盘通道已不可用。请立即 handoff / escalate 说明阻塞与已读结论；"
+            "禁止继续只搜不交，勿再尝试落盘。"
         )
     if report:
         return (
@@ -209,13 +226,20 @@ def delivery_idle_nudge_prompt(
     )
 
 
-def delivery_idle_narrow_prompt(*, rounds: int, keep_notes: bool = False) -> str:
+def delivery_idle_narrow_prompt(
+    *, rounds: int, keep_notes: bool = False, channel_dead: bool = False
+) -> str | None:
     """After soft nudge (repair files only): tools narrowed — still not FINALIZE.
 
     Report-delivery posts never arm this step (``narrow_rounds=0``); do not reuse
     for report idle. Collaboration (wall) keeps note tools; mention briefly when
     ``keep_notes``.
+
+    ``channel_dead`` → ``None`` (caller must skip): narrow copy keeps write tools
+    and would push落盘 after the channel is already sticky-dead.
     """
+    if channel_dead:
+        return None
     notes = (
         " / 便签（可贴/读/改）"
         if keep_notes
@@ -428,7 +452,8 @@ class CircuitBreak:
             if read_w:
                 parts.append(
                     "工具 `read_url` 已多次失败，请不要再换 URL / 同策略空转重读——"
-                    "改用已有 web_search 摘要与已读材料推进写作，或换一个非外网读页工具。"
+                    "基于已有材料推进写作，或换一个非外网读页工具；"
+                    "不要把继续 web_search 当默认出路。"
                 )
             if other_w:
                 live_w = tuple(n for n in other_w if n in self.liveness_warned)
@@ -448,8 +473,13 @@ class CircuitBreak:
             if parse_w:
                 write_pw = tuple(n for n in parse_w if n in LANDING_TOOLS)
                 orch_pw = tuple(n for n in parse_w if n in ORCHESTRATION_TOOLS)
+                memory_pw = tuple(n for n in parse_w if n in MEMORY_TOOLS)
                 other_pw = tuple(
-                    n for n in parse_w if n not in LANDING_TOOLS and n not in ORCHESTRATION_TOOLS
+                    n
+                    for n in parse_w
+                    if n not in LANDING_TOOLS
+                    and n not in ORCHESTRATION_TOOLS
+                    and n not in MEMORY_TOOLS
                 )
                 if write_pw:
                     names = "、".join(f"`{n}`" for n in write_pw)
@@ -467,12 +497,21 @@ class CircuitBreak:
                         "【强制】只发单一合法 JSON（禁止 XML/<parameter> 混入），"
                         "按 schema 精简重试；工具保持可用，勿改用空回复交差。"
                     )
+                if memory_pw:
+                    names = "、".join(f"`{n}`" for n in memory_pw)
+                    parts.append(
+                        f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败："
+                        "【强制】记规则时若因截断则完整一句重发或分次写入；"
+                        "若因引号/转义错误则只修好转义后重试；"
+                        "禁止截断时原样重发全部。工具保持可用。"
+                    )
                 if other_pw:
                     names = "、".join(f"`{n}`" for n in other_pw)
                     parts.append(
                         f"工具 {names} 的调用参数不是合法 JSON，已多次解析失败："
-                        "请修复 JSON 格式（尤其是字符串内引号转义）后原样重发全部参数，"
-                        "不要改写、缩短或删减内容；也可换一个工具或基于已有信息直接推进。"
+                        "若因截断则缩短或分次后重发完整合法 JSON；"
+                        "若因引号/转义错误则修好转义后重发；"
+                        "截断场景禁止原样重发全部。也可换一个工具或基于已有信息直接推进。"
                     )
         if self.validation_stop:
             parts.append(self.validation_stop.strip())

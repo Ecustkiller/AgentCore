@@ -579,16 +579,30 @@ class DelegateTool:
                 hint=root_slice_warn[:200],
             )
 
-        # §4.2b·2b / 改法④A：无出生且任务未带目标 → 派工前拒（禁默坐 scratch）。
-        # 裸聊同回合唯一 create/resolve 可经 turn_target_desk 继承缺省目标。
+        # §4.2b·2b / 改法④A：无出生且写盘缺目标 → 先静默建云桌，再闸。
+        # 裸聊同回合唯一 create/resolve / auto 可经 turn_target_desk 继承缺省目标。
         from agentcore.runtime.delegate.target_desktop import (
+            ensure_bare_chat_auto_cloud_desk,
             gate_bare_chat_requires_target,
         )
 
+        tasks_for_gate = tasks_raw if isinstance(tasks_raw, list) else []
+        await ensure_bare_chat_auto_cloud_desk(
+            session_folder_id=self._folder_id,
+            tasks_raw=tasks_for_gate,
+            default_target_folder_id=self.effective_default_target_folder_id(),
+            turn_target_desk=getattr(
+                self._base_tool_context, "turn_target_desk", None
+            ),
+            user_id=getattr(self._base_tool_context, "user_id", "") or "",
+            conversation_id=self._conversation_id
+            or getattr(self._base_tool_context, "conversation_id", None),
+            user_message=self._user_message,
+        )
         default_target = self.effective_default_target_folder_id()
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=self._folder_id,
-            tasks_raw=tasks_raw if isinstance(tasks_raw, list) else [],
+            tasks_raw=tasks_for_gate,
             default_target_folder_id=default_target,
         )
         if bare_gate:
@@ -737,9 +751,14 @@ class DelegateTool:
                         if last_seed is not None and append_seed is None:
                             append_seed = last_seed
 
+        # 跨回合 append：新建节点 parent + merge run_plan 均绑宿主幕级 captain；
+        # 解析不到 parent 回落本回合 _captain_run_id，merge 则不注入本回合 captain 卡。
+        host_captain_run_id: str | None = None
         if append_to:
             from agentcore.runtime.delegate.graph_append import (
+                load_host_journal_entries,
                 load_host_plan_and_completed,
+                parse_host_captain_run_id,
                 resolve_host_message_id,
             )
 
@@ -780,6 +799,9 @@ class DelegateTool:
                         error=msg,
                         contract_failure=True,
                     )
+                host_captain_run_id = parse_host_captain_run_id(
+                    await load_host_journal_entries(host_message_id)
+                )
             if host_plan_for_append is not None and getattr(
                 host_plan_for_append, "topology_lock", False
             ):
@@ -831,11 +853,39 @@ class DelegateTool:
                 tasks=len(tasks_raw),
                 depth=self._depth,
             )
+        if isinstance(tasks_raw, list) and tasks_raw:
+            from agentcore.runtime.delegate.task_models import (
+                ensure_delegate_route_extras,
+                inherit_model_from_tool,
+                prepare_task_model_fields,
+            )
+
+            model_errors, model_idents = await prepare_task_model_fields(
+                tasks_raw,
+                user_id=getattr(self._base_tool_context, "user_id", "") or "",
+                where_prefix="tasks",
+                inherit_model=lambda rid: inherit_model_from_tool(self, rid),
+            )
+            if model_errors:
+                msg = "委派任务无效：" + "；".join(model_errors)
+                logger.info("delegate.rejected", errors=model_errors, reason="task_model")
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=msg,
+                    contract_failure=True,
+                )
+            await ensure_delegate_route_extras(
+                self._llm,
+                model_idents,
+                user_id=getattr(self._base_tool_context, "user_id", "") or "",
+            )
         plan, errors = build_run_plan(
             tasks_raw,
             valid_tools=valid_tools,
             id_prefix=prefix,
-            parent_run_id=self._captain_run_id,
+            parent_run_id=host_captain_run_id or self._captain_run_id,
             depth=self._depth + 1,
             complexity_hint=complexity_hint,
             existing_plan=host_plan_for_append,
@@ -1149,6 +1199,7 @@ class DelegateTool:
                     execution_id,
                     plan,
                     host_message_id=host_message_id,
+                    host_captain_run_id=host_captain_run_id,
                 )
             )
         # 决策可观测: who + what got delegated (the「派了谁、干什么」input basis), not just a
@@ -1479,7 +1530,7 @@ class DelegateTool:
         # Snapshot the pre-add node ids so we can tell which nodes apply_replan appended
         # (it mutates the plan in place) — those drive the re-emitted run_plan below.
         ids_before = {n.run_id for n in sup.plan.nodes}
-        errors = apply_replan(self, sup.plan, sup.completed, binds, steers, adds)
+        errors = await apply_replan(self, sup.plan, sup.completed, binds, steers, adds)
         if errors:
             # Seat/artifact rejects share append's message family — surface verbatim.
             if len(errors) == 1 and str(errors[0]).startswith("【队员追加已拒绝"):

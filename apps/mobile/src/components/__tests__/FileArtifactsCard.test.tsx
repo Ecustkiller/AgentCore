@@ -1,8 +1,20 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileArtifactsCard } from "../FileArtifactsCard";
+
+const navigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
 
 vi.mock("@/api/turnFilesDiff", () => ({
   getTurnFilesDiff: vi.fn().mockResolvedValue({
@@ -16,6 +28,10 @@ vi.mock("@/api/turnFilesDiff", () => ({
     deleted: 0,
   }),
 }));
+
+beforeEach(() => {
+  navigate.mockClear();
+});
 
 describe("FileArtifactsCard acceptance labels", () => {
   it("shows 已验收/未通过 and never 写入/编辑 on acceptance rows", () => {
@@ -149,5 +165,53 @@ describe("FileArtifactsCard 查看改动", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByLabelText("查看改动")).toBeNull();
+  });
+});
+
+describe("FileArtifactsCard open routing", () => {
+  it("opens conversation files when no workspaceId", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[
+            { path: "notes.md", name: "notes.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTitle("在工作区查看 notes.md"));
+    expect(navigate).toHaveBeenCalledWith("/c/c1/files", {
+      state: { openPath: "notes.md" },
+    });
+  });
+
+  it("opens workspace files desk when workspaceId is set", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[
+            {
+              path: "version-a-clean.html",
+              name: "version-a-clean.html",
+              acceptance: "accepted",
+              workspaceId: "folder:proj-1",
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTitle("在工作区查看 version-a-clean.html"));
+    expect(navigate).toHaveBeenCalledWith(
+      `/files/${encodeURIComponent("folder:proj-1")}`,
+      {
+        state: {
+          openPath: "version-a-clean.html",
+          name: "version-a-clean.html",
+          fromConversationId: "c1",
+        },
+      },
+    );
   });
 });

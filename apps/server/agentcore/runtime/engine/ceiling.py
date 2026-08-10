@@ -184,6 +184,7 @@ async def ceiling_finalize(
         outstanding_tool_failures=controller.outstanding_tool_failures(),
         files_expected=files_expected,
         form_prose=form_prose,
+        workspace_channel_dead=controller.workspace_channel_dead,
     )
     # CEO / captain：硬顶强制收口不得无条件姿势 A（finish_guard 被绕过）。
     # max_rounds / token_budget 对称；worker salvage 靠 finalize 注入的 ceiling_honesty_steer。

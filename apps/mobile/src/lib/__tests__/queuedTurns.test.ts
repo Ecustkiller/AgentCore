@@ -16,7 +16,6 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q1",
       conversationId: "c1",
-      turnId: "t1",
       content: "a",
       position: 1,
       queueDepth: 2,
@@ -24,7 +23,6 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q2",
       conversationId: "c1",
-      turnId: "t2",
       content: "b",
       position: 2,
       queueDepth: 2,
@@ -32,7 +30,6 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q1",
       conversationId: "c1",
-      turnId: "t1",
       content: "a",
       position: 1,
       queueDepth: 3,
@@ -47,7 +44,6 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q1",
       conversationId: "c1",
-      turnId: "t1",
       content: "a",
       position: 1,
       queueDepth: 2,
@@ -55,35 +51,44 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q2",
       conversationId: "c1",
-      turnId: "t2",
       content: "b",
       position: 2,
       queueDepth: 2,
     });
     const hit = removeQueuedTurn("c1", "q1");
-    expect(hit?.turnId).toBe("t1");
+    expect(hit?.queueId).toBe("q1");
     expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual(["q2"]);
   });
 
-  it("turn_queue_started 语义：remove 只清轻态（调用方保留气泡）", () => {
+  it("turn_queue_started 语义：remove 只清条（出队后再进主时间线用户泡）", () => {
     upsertQueuedTurn({
       queueId: "q-go",
       conversationId: "c1",
-      turnId: "t-user",
       content: "queued then start",
       position: 1,
       queueDepth: 1,
     });
     const hit = removeQueuedTurn("c1", "q-go");
-    expect(hit?.turnId).toBe("t-user");
+    expect(hit?.content).toBe("queued then start");
     expect(listQueuedTurns("c1")).toEqual([]);
-    // store 不再持有该项 → 条/气泡排队轻态消失；turnId 仍由 ChatPage turns 保留。
   });
+
+  it("cancel 语义：remove 只清条（排队期无主时间线用户泡可删）", () => {
+    upsertQueuedTurn({
+      queueId: "q-x",
+      conversationId: "c1",
+      content: "cancel me",
+      position: 1,
+      queueDepth: 1,
+    });
+    removeQueuedTurn("c1", "q-x");
+    expect(listQueuedTurns("c1")).toEqual([]);
+  });
+
   it("clearConversation 清空该对话", () => {
     upsertQueuedTurn({
       queueId: "q1",
       conversationId: "c1",
-      turnId: "t1",
       content: "a",
       position: 1,
       queueDepth: 1,
@@ -91,7 +96,6 @@ describe("queuedTurns store", () => {
     upsertQueuedTurn({
       queueId: "q9",
       conversationId: "c2",
-      turnId: "t9",
       content: "x",
       position: 1,
       queueDepth: 1,

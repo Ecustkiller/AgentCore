@@ -67,10 +67,14 @@ class CheckpointResponse:
     answer (no longer folded into ``note``), so ``CONTINUE`` carries the pick
     too. Empty when the ask offered no options or the user chose none.
 
-    ``excluded_run_ids`` / ``write_capability_overrides`` are delegate
-    ``team_preview`` continue corrections (开工组队有限否决). Ignored for debate /
-    ask_user / plan_review / stop. Override shape: ``{run_id, capability:
-    "text_only"}`` only (tighten write → ``form=prose``; never hard-strip tools).
+    ``excluded_run_ids`` / ``write_capability_overrides`` are
+    delegate ``team_preview`` continue corrections (开工组队有限否决).
+    ``model_overrides`` apply to delegate continue (人盖队员) and debate continue
+    (人盖辩手 / 主持人 → debate_arguments). Ignored for ask_user / plan_review / stop
+    and for debate excluded/write fields. Write override shape:
+    ``{run_id, capability: "text_only"}`` only (tighten write → ``form=prose``;
+    never hard-strip tools). ``model_overrides``: ``run_id → {model, origin?,
+    provider_id?}`` (空/缺=不改；非法三元组硬失败).
     """
 
     decision: CheckpointDecision
@@ -78,3 +82,4 @@ class CheckpointResponse:
     selected: list[str] = field(default_factory=list)
     excluded_run_ids: list[str] = field(default_factory=list)
     write_capability_overrides: list[dict[str, str]] = field(default_factory=list)
+    model_overrides: dict[str, dict[str, str]] = field(default_factory=dict)

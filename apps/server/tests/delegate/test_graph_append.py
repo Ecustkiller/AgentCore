@@ -12,6 +12,7 @@ from agentcore.runtime.delegate.graph_append import (
     bind_redirect,
     clear_graph_host_registry,
     is_graph_growth_event,
+    parse_host_captain_run_id,
     peek_graph_host,
     register_graph_host,
     reset_redirect,
@@ -36,6 +37,52 @@ def test_register_graph_host_first_wins():
     register_graph_host("exec-a", "m1")
     register_graph_host("exec-a", "m2")
     assert peek_graph_host("exec-a") == "m1"
+
+
+def test_parse_host_captain_run_id_prefers_original_host_frame():
+    entries = [
+        {
+            "kind": "run_plan",
+            "payload": {
+                "execution_id": "e1",
+                "runs": [
+                    {"id": "host-cap", "kind": "captain", "agent_id": "host-cap"},
+                    {"id": "r1", "agent_id": "w1", "task": "x", "depends_on": []},
+                ],
+            },
+        },
+        {
+            "kind": "run_plan",
+            "payload": {
+                "execution_id": "e1",
+                "host_message_id": "m-host",
+                "runs": [
+                    {"id": "turn-cap", "kind": "captain", "agent_id": "turn-cap"},
+                    {"id": "r2", "agent_id": "w2", "task": "y", "depends_on": []},
+                ],
+            },
+        },
+    ]
+    assert parse_host_captain_run_id(entries) == "host-cap"
+
+
+def test_parse_host_captain_run_id_fallback_append_frame_only():
+    entries = [
+        {
+            "type": "run_plan",
+            "payload": {
+                "host_message_id": "m-host",
+                "runs": [{"id": "legacy-cap", "kind": "captain"}],
+            },
+        }
+    ]
+    assert parse_host_captain_run_id(entries) == "legacy-cap"
+
+
+def test_parse_host_captain_run_id_empty():
+    assert parse_host_captain_run_id(None) is None
+    assert parse_host_captain_run_id([]) is None
+    assert parse_host_captain_run_id([{"kind": "run_plan", "payload": {"runs": []}}]) is None
 
 
 def test_is_graph_growth_event_matrix():
@@ -244,7 +291,98 @@ async def test_delegate_append_reuses_execution_id(monkeypatch):
     assert ga.payload["added_count"] == 1
     rp = next(e for e in t._sink._history if e.type is EventType.RUN_PLAN)
     assert rp.payload.get("host_message_id") == "m-host"
+    # 跨回合 divert：merge 重发同一宿主 captain，禁止本回合 captain（cap-1 / turn 新 id）
+    caps = [r for r in rp.payload.get("runs") or [] if r.get("kind") == "captain"]
+    assert len(caps) == 0  # 本用例未 stub journal captain → 不注入
+    assert not any(a.get("role") == "CEO" for a in rp.payload.get("agents") or [])
     assert "跨回合同图追加" in (result.output or "")
+
+
+@pytest.mark.asyncio
+async def test_delegate_append_parent_uses_host_captain_id(monkeypatch):
+    """append 新建节点 parent_run_id 挂宿主 journal captain；仍不注入第二 captain 卡。"""
+    register_graph_host("exec-host", "m-host")
+
+    host_plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="r_old", agent_id="w_old", role="研究员", task="旧任务"),
+        ]
+    )
+    seed = {"r_old": RunState(phase=RunPhase.COMPLETED, content="done")}
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
+        return "m-host"
+
+    async def fake_load(host_message_id: str):
+        return host_plan, seed
+
+    async def fake_journal(host_message_id: str):
+        assert host_message_id == "m-host"
+        return [
+            {
+                "kind": "run_plan",
+                "payload": {
+                    "execution_id": "exec-host",
+                    "runs": [
+                        {"id": "host-cap-42", "kind": "captain", "agent_id": "host-cap-42"},
+                        {"id": "r_old", "agent_id": "w_old", "task": "旧任务", "depends_on": []},
+                    ],
+                },
+            }
+        ]
+
+    async def fake_open_writer(**kwargs):  # noqa: ANN003
+        return TurnJournalWriter(
+            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
+        )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
+        added = [n for n in plan.nodes if n.run_id != "r_old"]
+        captured["parents"] = {n.run_id: n.parent_run_id for n in added}
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_journal_entries",
+        fake_journal,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
+        fake_open_writer,
+    )
+    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
+
+    t = tool(Provider(["X"]))
+    t._message_id = "m-new"
+    t._conversation_id = "c"
+    t._captain_run_id = "turn-cap-new"
+    t._base_tool_context.execution_id = "exec-fresh"
+
+    result = await t.execute(
+        {
+            "tasks": [{"role": "撰写员", "task": "写稿"}],
+            "append_to_execution_id": "exec-host",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert captured["parents"]
+    assert all(p == "host-cap-42" for p in captured["parents"].values())
+    rp = next(e for e in t._sink._history if e.type is EventType.RUN_PLAN)
+    caps = [r for r in rp.payload.get("runs") or [] if r.get("kind") == "captain"]
+    assert len(caps) == 1
+    assert caps[0]["id"] == "host-cap-42"
+    assert not any(r.get("id") == "turn-cap-new" for r in rp.payload.get("runs") or [])
 
 
 @pytest.mark.asyncio
@@ -1273,6 +1411,7 @@ async def test_assemble_injects_recent_graph_note_into_ceo_prompt(monkeypatch):
         attachment_context="",
         native_image_parts=[],
         memory_topics=[],
+        on_demand_rules=[],
         bound_execution_id="e",
         execution_id_token=None,
     )
@@ -1328,6 +1467,7 @@ async def test_delegate_append_unknown_execution_rejected(monkeypatch):
 def test_projection_cross_turn_keeps_runs_across_message_start():
     from agentcore.conformance.projection import project_turn
     from agentcore.conformance.vectors.multi_agent.cross_turn_append import (
+        _HOST_CAPTAIN,
         _multi_agent_cross_turn_append,
     )
 
@@ -1338,10 +1478,32 @@ def test_projection_cross_turn_keeps_runs_across_message_start():
     projected = project_turn(events)
     assert projected["status"] == "completed"
     run_ids = {r["id"] for r in projected["runs"]}
-    assert {"r1", "r2", "r3"} <= run_ids
+    assert {_HOST_CAPTAIN, "r1", "r2", "r3"} <= run_ids
+    captains = [r for r in projected["runs"] if r.get("kind") == "captain"]
+    assert len(captains) == 1
+    assert captains[0]["id"] == _HOST_CAPTAIN
+    for rid in ("r1", "r2", "r3"):
+        worker = next(r for r in projected["runs"] if r["id"] == rid)
+        assert worker["parentRunId"] == _HOST_CAPTAIN
+        assert worker.get("kind") != "captain"
     r3 = next(r for r in projected["runs"] if r["id"] == "r3")
     assert r3["status"] == "completed"
     process = projected["process"]
     assert any(s.get("kind") == "graph_append" for s in process)
     assert not any(s.get("kind") == "team" for s in process)
     assert "追加" in projected["content"] or "撰写" in projected["content"]
+
+    # Wire: both run_plans carry the same host captain only (no second captain id).
+    plans = [e for e in events if e["type"] == "run_plan"]
+    assert len(plans) == 2
+    for plan in plans:
+        cap_ids = [
+            r["id"]
+            for r in plan["payload"]["runs"]
+            if r.get("kind") == "captain"
+        ]
+        assert cap_ids == [_HOST_CAPTAIN]
+        for r in plan["payload"]["runs"]:
+            if r.get("kind") == "captain":
+                continue
+            assert r.get("parent_run_id") == _HOST_CAPTAIN

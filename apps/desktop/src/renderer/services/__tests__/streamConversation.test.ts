@@ -11,6 +11,7 @@ import * as dispatchMod from "../sse/dispatch";
 import {
   ATTACH_CAUGHT_UP_COMMENT,
   attachConversation,
+  forceSseTransportDrop,
   pumpSseBody,
   streamConversation,
 } from "../streamConversation";
@@ -327,5 +328,39 @@ describe("pumpSseBody comments", () => {
     );
     expect(events).toEqual(["content_delta", "content_delta"]);
     expect(comments).toEqual(["ping", ATTACH_CAUGHT_UP_COMMENT]);
+  });
+
+  it("forceSseTransportDrop rejects the active pump as StreamError network", async () => {
+    let pull!: (chunk: Uint8Array | null) => void;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        pull = (chunk) => {
+          if (chunk == null) controller.close();
+          else controller.enqueue(chunk);
+        };
+      },
+    });
+    const pumped = pumpSseBody(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+      "force-drop-cid",
+      () => {},
+    );
+    // Let the first readChunk park on reader.read().
+    await Promise.resolve();
+    expect(forceSseTransportDrop("force-drop-cid")).toBe(true);
+    await expect(pumped).rejects.toMatchObject({
+      name: "StreamError",
+      kind: "network",
+    });
+    expect(forceSseTransportDrop("force-drop-cid")).toBe(false);
+    // Avoid hanging the ReadableStream if anything still holds it.
+    try {
+      pull(null);
+    } catch {
+      /* already cancelled */
+    }
   });
 });

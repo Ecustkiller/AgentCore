@@ -831,31 +831,7 @@ button.link {
 
 /* timeline / reasoning / process-narration / tool-group → ProcessTimeline.css */
 
-/* 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): collapsible like 思考 (.reasoning); each
-   block shows its channel origin + the body the CEO read. */
-.recv {
-  font-size: 13px;
-}
-
-.recv > summary {
-  padding: 4px 0;
-  color: var(--muted);
-  cursor: pointer;
-  list-style: none;
-}
-
-.recv > summary::-webkit-details-marker {
-  display: none;
-}
-
-.recv > summary::before {
-  content: "▸ ";
-}
-
-.recv[open] > summary::before {
-  content: "▾ ";
-}
-
+/* 收到的上下文块列表：CEO「更多」明细 Sheet + Worker RunDetail 共用 .recv-* 视觉。 */
 .recv-list {
   display: flex;
   flex-direction: column;

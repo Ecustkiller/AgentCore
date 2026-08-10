@@ -236,7 +236,7 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.getByPlaceholderText(/对全体队员的嘱咐/)).toBeTruthy();
   });
 
-  it("纳入开关：排除无依赖队员后 continue 带 excluded_run_ids", () => {
+  it("确认面无纳入/排除开关；continue 不带 excluded_run_ids", () => {
     pendingRef.current = [
       makeTeamPreview({
         workers: [
@@ -260,20 +260,16 @@ describe("ResumePrompt · team_preview delegate", () => {
       }),
     ];
     render(<ResumePrompt />);
-    fireEvent.click(screen.getByRole("switch", { name: "纳入本轮 · 撰写员" }));
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByLabelText(/纳入本轮/)).toBeNull();
+    expect(screen.queryByTestId("team-preview-dep-block-hint")).toBeNull();
     fireEvent.click(screen.getByText("授权并开工"));
-    expect(submitInteraction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cold: expect.objectContaining({
-          decision: "continue",
-          excluded_run_ids: ["r2"],
-        }),
-      }),
-    );
     const cold = submitInteraction.mock.calls[0][0].cold as Record<
       string,
       unknown
     >;
+    expect(cold.decision).toBe("continue");
+    expect(cold.excluded_run_ids).toBeUndefined();
     expect(cold.write_capability_overrides).toBeUndefined();
   });
 
@@ -315,46 +311,11 @@ describe("ResumePrompt · team_preview delegate", () => {
         }),
       }),
     );
-  });
-
-  it("仍被依赖的岗禁止排除并短提示；至少保留 1 人", () => {
-    pendingRef.current = [
-      makeTeamPreview({
-        workers: [
-          {
-            run_id: "r1",
-            role: "研究员",
-            task: "调研",
-            depends_on: [],
-          },
-          {
-            run_id: "r2",
-            role: "撰写员",
-            task: "写报告",
-            depends_on: ["r1"],
-          },
-        ],
-      }),
-    ];
-    render(<ResumePrompt />);
-    const r1Switch = screen.getByRole("switch", { name: "纳入本轮 · 研究员" });
-    const r2Switch = screen.getByRole("switch", { name: "纳入本轮 · 撰写员" });
-    expect(r1Switch).toHaveProperty("disabled", true);
-    expect(screen.getByTestId("team-preview-dep-block-hint").textContent).toBe(
-      "仍有队员依赖此岗",
-    );
-    // 排除下游后：上游不再被依赖，但成唯一纳入者 → 仍禁止关到 0
-    fireEvent.click(r2Switch);
-    expect(r1Switch).toHaveProperty("disabled", true);
-    fireEvent.click(screen.getByText("授权并开工"));
-    expect(submitInteraction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cold: expect.objectContaining({
-          decision: "continue",
-          excluded_run_ids: ["r2"],
-        }),
-      }),
-    );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.excluded_run_ids).toBeUndefined();
   });
 
   it("stop 不带修正字段", () => {
@@ -379,7 +340,6 @@ describe("ResumePrompt · team_preview delegate", () => {
       }),
     ];
     render(<ResumePrompt />);
-    fireEvent.click(screen.getByRole("switch", { name: "纳入本轮 · 撰写员" }));
     fireEvent.click(
       screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
     );

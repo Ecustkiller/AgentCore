@@ -27,8 +27,8 @@ _CEO_ORCHESTRATION = {
     "create_project",
     "ask_user",
 }
-# consult_memory is wired for BOTH CEO and workers when memory is on.
-_SHARED_ORCHESTRATION = {"consult_memory"}
+# consult_memory / consult_rule are wired for BOTH CEO and workers when catalogs exist.
+_SHARED_ORCHESTRATION = {"consult_memory", "consult_rule"}
 # Mutation / execution built-ins the coordinator must NOT hold (they belong to workers),
 # plus the worker-only collaboration channels (escalate upward + post_note/read_notes
 # 便签墙). test_run is here too: it runs project code through the same sandbox chain as
@@ -87,6 +87,15 @@ def test_consult_memory_is_shared_between_ceo_and_worker():
     entries = _by_name()
     assert "consult_memory" in entries
     assert set(entries["consult_memory"].available_to) == {
+        AVAILABLE_TO_CEO,
+        AVAILABLE_TO_WORKER,
+    }
+
+
+def test_consult_rule_is_shared_between_ceo_and_worker():
+    entries = _by_name()
+    assert "consult_rule" in entries
+    assert set(entries["consult_rule"].available_to) == {
         AVAILABLE_TO_CEO,
         AVAILABLE_TO_WORKER,
     }

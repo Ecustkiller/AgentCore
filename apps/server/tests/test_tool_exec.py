@@ -368,7 +368,78 @@ async def test_illegal_json_args_return_explicit_error_not_empty_dict():
     assert ends[0].payload["status"] == "error"
     assert "不是合法 JSON" in (ends[0].payload.get("result") or "")
 
-    assert any(entry.get("event") == "tool.args_parse_failed" for entry in logs)
+    parse_failed = [e for e in logs if e.get("event") == "tool.args_parse_failed"]
+    assert parse_failed
+    assert parse_failed[0].get("parse_class") == "escape"
+
+
+async def test_remember_parse_failure_truncated_vs_escape_copy():
+    """remember：truncated → 完整一句/分次；escape → 修转义；截断禁原样重发全部。"""
+    tracked = _OkTool("remember", output="ok")
+    reg = ToolRegistry()
+    reg.register(tracked)
+
+    trunc = '{"content":"请始终用中文回复用户的问题'
+    sink = EventSink()
+    with capture_logs() as logs:
+        messages, terminal, attempts = await execute_tools(
+            [_call("c1", "remember", trunc)],
+            reg,
+            _ctx(),
+            sink,
+            run_id="r1",
+        )
+    assert terminal is None
+    assert tracked.executed is False
+    assert attempts[0].parse_failure is True
+    content = messages[0].content or ""
+    assert "不是合法 JSON" in content
+    assert "完整一句" in content
+    assert "省略号" in content or "分多" in content
+    assert "禁止原样重发" in content or "不要原样重发" in content
+    # Escape-default imperative (教原样重发) must not appear on truncated.
+    assert "后，原样重发全部参数" not in content
+    trunc_logs = [e for e in logs if e.get("event") == "tool.args_parse_failed"]
+    assert trunc_logs and trunc_logs[0].get("parse_class") == "truncated"
+
+    escape = '{"content":"查 "foo" 规则"}'
+    with capture_logs() as logs2:
+        messages2, _, attempts2 = await execute_tools(
+            [_call("c2", "remember", escape)],
+            reg,
+            _ctx(),
+            EventSink(),
+            run_id="r2",
+        )
+    assert attempts2[0].parse_failure is True
+    esc = messages2[0].content or ""
+    assert "不是合法 JSON" in esc
+    assert "转义" in esc
+    assert "完整一句" not in esc
+    esc_logs = [e for e in logs2 if e.get("event") == "tool.args_parse_failed"]
+    assert esc_logs and esc_logs[0].get("parse_class") == "escape"
+
+
+async def test_default_parse_failure_truncated_forbids_full_replay():
+    """default 工具 truncated 禁「原样重发全部」；escape 仍可教修转义后原样重发。"""
+    tracked = _OkTool("ok_a", output="alpha")
+    reg = ToolRegistry()
+    reg.register(tracked)
+
+    trunc = '{"query":"半截搜索词'
+    messages, _, attempts = await execute_tools(
+        [_call("c1", "ok_a", trunc)],
+        reg,
+        _ctx(),
+        EventSink(),
+        run_id="r1",
+    )
+    assert attempts[0].parse_failure is True
+    body = messages[0].content or ""
+    assert "不是合法 JSON" in body
+    assert "不要原样重发" in body or "禁止原样重发" in body
+    assert "后，原样重发全部参数" not in body
+    assert "截断" in body or "缩短" in body or "拆成" in body
 
 
 async def test_delegate_parse_failure_steers_away_from_nested_arguments():
@@ -607,6 +678,56 @@ async def test_execute_tools_denies_tool_outside_allowlist():
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
     assert ends[0].payload.get("status") == "error"
+
+
+async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
+    """仿调 `_write_landed` 早拒：落盘状态不是工具；勿落入 allowlist_deny / not_found。"""
+    reg = ToolRegistry()
+    reg.register(_OkTool("file_write", output="written"))
+    sink = EventSink()
+    # Allowlist active (would otherwise be allowlist_deny for unknown names).
+    messages, terminal, attempts = await execute_tools(
+        [
+            _call(
+                "c1",
+                "_write_landed",
+                json.dumps(
+                    {"status": "landed", "via": "file_write", "path": "docs/a.md", "chars": 10},
+                    ensure_ascii=False,
+                ),
+            )
+        ],
+        reg,
+        _ctx(),
+        sink,
+        run_id="r_landed",
+        allowed_tool_names=["file_write", "file_read"],
+    )
+    assert terminal is None
+    assert len(messages) == 1
+    assert attempts[0].success is False
+    assert attempts[0].policy_failure is True
+    body = messages[0].content or ""
+    assert "_write_landed" in body
+    assert "落盘" in body
+    assert "不是可调用工具" in body
+    assert "允许列表" not in body
+    assert "not found" not in body.lower()
+    from agentcore.runtime.engine.tool_exec import TOOL_FAILED_MARKER
+
+    assert TOOL_FAILED_MARKER in body
+    # No allowlist active → still explicit reject, not generic not_found.
+    messages2, _, attempts2 = await execute_tools(
+        [_call("c2", "_write_landed", "{}")],
+        reg,
+        _ctx(),
+        EventSink(),
+        allowed_tool_names=None,
+    )
+    assert attempts2[0].success is False
+    body2 = messages2[0].content or ""
+    assert "不是可调用工具" in body2
+    assert "not found" not in body2.lower()
 
 
 async def test_execute_tools_allowlist_none_permits_registry_tool():

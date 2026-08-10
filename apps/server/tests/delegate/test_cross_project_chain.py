@@ -104,7 +104,7 @@ async def test_resolve_delegate_target_desk_and_memory(
 
     async def _fake_rebuild(**_kwargs):
         # has_memory_topics=True → consult_memory rewired to target folder.
-        return "PROMPT_FOR_ALPHA", True
+        return "PROMPT_FOR_ALPHA", True, False
 
     with (
         patch(
@@ -146,8 +146,10 @@ async def test_resolve_delegate_target_desk_and_memory(
 
 
 @pytest.mark.asyncio
-async def test_bare_chat_no_target_blocked_by_2b_gate() -> None:
-    """§4.2b·2b：无出生 + 未点名 → DelegateTool 在 drive 前硬拒（禁默写 scratch）。"""
+async def test_bare_chat_write_no_target_auto_provisions_cloud_desk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """裸聊写盘缺 target → 系统静默建云桌并过 2b 闸（不再拒成催 create）。"""
 
     class _DummyLLM(LLMProvider):
         async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -157,12 +159,27 @@ async def test_bare_chat_no_target_blocked_by_2b_gate() -> None:
             raise NotImplementedError
             yield  # pragma: no cover
 
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "auto_cloud_1", "name": name, "mode": "cloud"}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_conversation_title",
+        AsyncMock(return_value=None),
+    )
+
     ctx = _birth_ctx()
     tool = DelegateTool(
         llm=_DummyLLM(),  # type: ignore[arg-type]
         sink=EventSink(),
         system_prompt="sys",
-        user_message="三个项目并行开发",
+        user_message="做一个落地页",
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx,
@@ -170,23 +187,30 @@ async def test_bare_chat_no_target_blocked_by_2b_gate() -> None:
         captain_run_id="CEO",
     )
     result = await tool.execute(
-        {"tasks": [{"role": "工", "task": "写 README"}]},
+        {
+            "tasks": [
+                {
+                    "role": "工",
+                    "task": "写 README",
+                    "deliverable": {"form": "files"},
+                }
+            ]
+        },
         ctx,
     )
-    assert result.success is False
-    assert result.contract_failure is True
     err = result.error or ""
-    assert err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
-    assert "scratch" in err
-    assert "target_folder_id" in err
-    assert "缺目标任务：" in err
-    assert "role=工" in err
-    assert "写 README" not in err
+    assert not err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert creates == ["做一个落地页"]
+    assert ctx.turn_target_desk.folder_id == "auto_cloud_1"
+    assert ctx.turn_target_desk.auto_cloud_provisioned is True
+    assert tool.effective_default_target_folder_id() == "auto_cloud_1"
 
 
 @pytest.mark.asyncio
-async def test_bare_chat_turn_hint_passes_2b_gate() -> None:
-    """同回合唯一 create/resolve 写入 turn_target_desk 后，缺省 delegate 可过 2b 闸。"""
+async def test_bare_chat_prose_no_target_passes_2b_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """方案 C：无出生 + 无写盘 deliverable → 过闸且不静默建云桌。"""
 
     class _DummyLLM(LLMProvider):
         async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -195,6 +219,65 @@ async def test_bare_chat_turn_hint_passes_2b_gate() -> None:
         async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
             raise NotImplementedError
             yield  # pragma: no cover
+
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "should_not", "name": name, "mode": "cloud"}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+
+    ctx = _birth_ctx()
+    tool = DelegateTool(
+        llm=_DummyLLM(),  # type: ignore[arg-type]
+        sink=EventSink(),
+        system_prompt="sys",
+        user_message="打个招呼",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=ctx,
+        folder_id=None,
+        captain_run_id="CEO",
+    )
+    result = await tool.execute(
+        {"tasks": [{"role": "客服", "task": "打招呼"}]},
+        ctx,
+    )
+    err = result.error or ""
+    assert not err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert creates == []
+    assert ctx.turn_target_desk.folder_id is None
+    assert ctx.turn_target_desk.auto_cloud_provisioned is False
+
+
+@pytest.mark.asyncio
+async def test_bare_chat_turn_hint_passes_2b_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同回合唯一 create/resolve 写入 turn_target_desk 后，缺省 delegate 可过 2b 闸且不重复建。"""
+
+    class _DummyLLM(LLMProvider):
+        async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+
+        async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise NotImplementedError
+            yield  # pragma: no cover
+
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "should_not", "name": name, "mode": "cloud"}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
 
     ctx = _birth_ctx()
     ctx.turn_target_desk.note_folder("proj_from_create")
@@ -211,16 +294,27 @@ async def test_bare_chat_turn_hint_passes_2b_gate() -> None:
     )
     assert tool.effective_default_target_folder_id() == "proj_from_create"
     result = await tool.execute(
-        {"tasks": [{"role": "前端", "task": "写 index.html"}]},
+        {
+            "tasks": [
+                {
+                    "role": "前端",
+                    "task": "写 index.html",
+                    "deliverable": {"form": "files"},
+                }
+            ]
+        },
         ctx,
     )
     err = result.error or ""
     assert not err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert creates == []
+    assert ctx.turn_target_desk.folder_id == "proj_from_create"
+    assert ctx.turn_target_desk.auto_cloud_provisioned is False
 
 
 @pytest.mark.asyncio
 async def test_bare_chat_multi_hint_still_blocked() -> None:
-    """同回合两个不同项目 → turn hint 清空 → 仍须显式 target_folder_id。"""
+    """同回合两个不同项目 → turn hint 清空 → 写盘 task 仍须显式 target_folder_id。"""
 
     class _DummyLLM(LLMProvider):
         async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -248,8 +342,16 @@ async def test_bare_chat_multi_hint_still_blocked() -> None:
     result = await tool.execute(
         {
             "tasks": [
-                {"role": "甲", "task": "在 A 写"},
-                {"role": "乙", "task": "在 B 写"},
+                {
+                    "role": "甲",
+                    "task": "在 A 写",
+                    "deliverable": {"form": "files"},
+                },
+                {
+                    "role": "乙",
+                    "task": "在 B 写",
+                    "deliverable": {"form": "files"},
+                },
             ]
         },
         ctx,

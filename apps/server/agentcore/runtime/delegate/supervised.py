@@ -98,7 +98,7 @@ def _gap_fill_add_errors(
     return errors
 
 
-def apply_replan(
+async def apply_replan(
     tool: DelegateTool,
     plan: RunPlan,
     completed: dict[str, RunState],
@@ -137,9 +137,21 @@ def apply_replan(
 
     if adds_list:
         from agentcore.runtime.delegate.target_desktop import (
+            ensure_bare_chat_auto_cloud_desk,
             gate_bare_chat_requires_target,
         )
 
+        ctx = getattr(tool, "_base_tool_context", None)
+        await ensure_bare_chat_auto_cloud_desk(
+            session_folder_id=getattr(tool, "_folder_id", None),
+            tasks_raw=adds_list,
+            default_target_folder_id=tool.effective_default_target_folder_id(),
+            turn_target_desk=getattr(ctx, "turn_target_desk", None) if ctx else None,
+            user_id=(getattr(ctx, "user_id", "") or "") if ctx else "",
+            conversation_id=getattr(tool, "_conversation_id", None)
+            or (getattr(ctx, "conversation_id", None) if ctx else None),
+            user_message=getattr(tool, "_user_message", None),
+        )
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=getattr(tool, "_folder_id", None),
             tasks_raw=adds_list,
@@ -147,6 +159,56 @@ def apply_replan(
         )
         if bare_gate:
             return [bare_gate]
+
+        # Bypass drive cold-open: replan adds resume via seed_completed and would
+        # skip post_close-style gates; reject write-desk adds when channel is dead.
+        from agentcore.runtime.delegate.channel_dead_gate import (
+            channel_dead_write_tasks_error,
+        )
+
+        channel_dead_err = channel_dead_write_tasks_error(tool, adds_list)
+        if channel_dead_err:
+            return [channel_dead_err]
+
+    from agentcore.runtime.delegate.task_models import (
+        ensure_delegate_route_extras,
+        inherit_model_from_tool,
+        prepare_task_model_fields,
+    )
+
+    user_id = ""
+    ctx = getattr(tool, "_base_tool_context", None)
+    if ctx is not None:
+        user_id = getattr(ctx, "user_id", "") or ""
+
+    model_idents: list = []
+    if adds_list:
+        add_model_errors, add_idents = await prepare_task_model_fields(
+            adds_list,
+            user_id=user_id,
+            where_prefix="add",
+            inherit_model=lambda rid: inherit_model_from_tool(tool, rid),
+        )
+        if add_model_errors:
+            return add_model_errors
+        model_idents.extend(add_idents)
+
+    if binds:
+        bind_model_errors, bind_idents = await prepare_task_model_fields(
+            binds,
+            user_id=user_id,
+            where_prefix="binds",
+        )
+        if bind_model_errors:
+            return bind_model_errors
+        model_idents.extend(bind_idents)
+
+    if model_idents:
+        await ensure_delegate_route_extras(
+            tool._llm,
+            model_idents,
+            user_id=user_id or None,
+        )
 
     valid_tools = {s.name for s in tool._tools.list_all()}
     errors: list[str] = []
@@ -194,6 +256,10 @@ def apply_replan(
             parsed = _parse_deliverable({"deliverable": raw_deliverable})
             if parsed is not None:
                 fields["deliverable"] = parsed
+        # Per-worker 模型：prepare 已把合法三元组编成路由键写入 b["model"]。
+        model_raw = b.get("model")
+        if isinstance(model_raw, str) and model_raw.strip():
+            fields["model"] = model_raw.strip()
         bind_ops.append((node, fields))
 
     steer_ops: list[tuple[RunSpec, str]] = []

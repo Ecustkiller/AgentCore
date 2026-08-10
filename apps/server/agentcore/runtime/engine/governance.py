@@ -216,14 +216,19 @@ def maybe_inject_delivery_idle(
     escalate. Narrow allowlist apply is consumed by the react loop via
     :meth:`LoopController.take_delivery_idle_narrow_apply`.
     ``keep_notes``: collaboration/wall — narrow prompt mentions note tools stay.
+
+    When ``controller.workspace_channel_dead``: never narrow (write-surface copy),
+    and files/report nudge drops file_write pressure (handoff/escalate only).
     """
     if role != "worker" or controller.landing_succeeded:
         return "none"
 
+    channel_dead = bool(controller.workspace_channel_dead)
     rounds = controller.delivery_idle_rounds
-    if controller.delivery_idle_narrow_due():
+    if controller.delivery_idle_narrow_due() and not channel_dead:
         controller.mark_delivery_idle_narrowed()
         prompt = delivery_idle_narrow_prompt(rounds=rounds, keep_notes=keep_notes)
+        assert prompt is not None
         logger.info(
             "engine.delivery_idle_narrow",
             round=round_idx,
@@ -246,6 +251,7 @@ def maybe_inject_delivery_idle(
             rounds=rounds,
             recon=controller.delivery_idle_recon,
             report=controller.delivery_idle_report,
+            channel_dead=channel_dead and not controller.delivery_idle_recon,
         )
         logger.info(
             "engine.delivery_idle_nudge",
@@ -255,6 +261,7 @@ def maybe_inject_delivery_idle(
             narrow_bar=controller.delivery_idle_narrow_rounds,
             recon=controller.delivery_idle_recon,
             report=controller.delivery_idle_report,
+            channel_dead=channel_dead,
         )
         messages.append(LLMMessage(role="user", content=prompt))
         record_turn_fact(
@@ -653,13 +660,19 @@ def finalize_allows_persist(
     *,
     files_expected: bool = False,
     form_prose: bool = False,
+    workspace_channel_dead: bool = False,
 ) -> bool:
     """True when finalize should keep file_write+handoff (files-form / wind_down).
 
     ``form_prose`` or writes absent from registry → coordination only (finalize
    不催 prose 队员落盘). ``files_expected`` → offer persist when ``file_write``
     is registered. 真纯丙后执行层默认 unrestricted，不再依赖「名单缺写盘补写」。
+
+    ``workspace_channel_dead`` / sticky session·channel dead → never retain persist
+    (Phase 1 may already strip tools; still avoid FINALIZE_INSTRUCTION_FILES 催写).
     """
+    if workspace_channel_dead or is_workspace_channel_sticky_dead():
+        return False
     if form_prose or "file_write" not in tools.names:
         return False
     if files_expected:
@@ -683,6 +696,7 @@ def resolve_finalize_coordination_tools(
     *,
     files_expected: bool = False,
     form_prose: bool = False,
+    workspace_channel_dead: bool = False,
 ) -> list[dict[str, Any]] | None:
     """OpenAI tool defs for a forced-finalize round.
 
@@ -699,6 +713,7 @@ def resolve_finalize_coordination_tools(
         allowed_tool_names,
         files_expected=files_expected,
         form_prose=form_prose,
+        workspace_channel_dead=workspace_channel_dead,
     )
     allow = finalize_tool_allowlist(persist=persist)
     # ``allow`` is the sole gate: when persist is on it re-includes file_write.
@@ -718,6 +733,54 @@ def resolve_finalize_coordination_tools(
     if not selected:
         return None
     return tools.get_openai_definitions(selected) or None
+
+
+def is_workspace_channel_sticky_dead(tool_context: Any | None = None) -> bool:
+    """True when coordination session or this worker's ``WorkspaceChannel`` is sticky-dead.
+
+    Session flag covers teammates that never hit a dead envelope; backend channel
+    covers the same desk when sticky-dead before/without a session stamp.
+    """
+    from agentcore.runtime.coordination.session import active_coordination
+    from agentcore.workspace.channel import WorkspaceChannel
+
+    session = active_coordination()
+    if session is not None and bool(getattr(session, "workspace_channel_dead", False)):
+        return True
+    if tool_context is None:
+        return False
+    backend = getattr(tool_context, "backend", None)
+    channel = getattr(backend, "_channel", None) if backend is not None else None
+    if isinstance(channel, WorkspaceChannel) and channel.is_dead:
+        return True
+    wc = getattr(tool_context, "workspace_channel", None)
+    return isinstance(wc, WorkspaceChannel) and wc.is_dead
+
+
+def apply_workspace_channel_dead_retire(
+    *,
+    disabled_tools: set[str],
+    controller: LoopController | None = None,
+    tool_context: Any | None = None,
+) -> bool:
+    """Seed ``WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS`` into ``disabled_tools`` when sticky-dead.
+
+    Called at ``react_loop`` entry and before each LLM round so sibling workers stop
+    seeing the local file family without having hit a retire envelope themselves.
+    Returns whether tool defs should be refreshed. Idempotent; does not revive mid-turn.
+    """
+    if not is_workspace_channel_sticky_dead(tool_context):
+        return False
+
+    from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
+
+    before = len(disabled_tools)
+    disabled_tools.update(WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS)
+    latch_flipped = False
+    if controller is not None and not controller._workspace_channel_dead:
+        controller._workspace_channel_dead = True
+        latch_flipped = True
+    return latch_flipped or len(disabled_tools) > before
 
 
 @dataclass(frozen=True)
@@ -753,6 +816,8 @@ def apply_circuit_breaker(
             )
             # Persist read_url disable across react_loop restart (stream-stall →
             # Wave retry / contract write_pass). Same process + run_id.
+            # Also strip web_search so deep-read death cannot become search thrash
+            # (failures do not charge retrieval_budget).
             if tool_name == "read_url":
                 from agentcore.tools.builtin.web._net import (
                     READ_URL_RETIRE_STEER,
@@ -760,6 +825,9 @@ def apply_circuit_breaker(
                 )
 
                 mark_read_url_retired(run_id, message=READ_URL_RETIRE_STEER)
+                if "web_search" not in disabled_tools:
+                    disabled_tools.add("web_search")
+                    refresh = True
     # force_segmented keeps the pen but narrows dangerous append thrashing
     # (file_append out; file_write / str_replace stay — not a full write lockout).
     if breaker.force_segmented:

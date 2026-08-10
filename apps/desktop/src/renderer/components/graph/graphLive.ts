@@ -57,6 +57,7 @@ import {
   deriveArtifacts,
   deriveCaptainStatus,
   pickDebateCrossExamActivateId,
+  workerRunsOf,
 } from "./helpers";
 import { stripNamespace } from "./ids";
 import { type GraphScene, buildGraphScene } from "./scene";
@@ -306,10 +307,7 @@ export function deriveAgentNodeLive(
   },
 ): AgentNodeData {
   const t0 = isGraphPerfEnabled() ? performance.now() : 0;
-  const captainId = execution.runs.find((r) => r.kind === "captain")?.id;
-  const workerIdSet = new Set(
-    execution.runs.filter((r) => r.id !== captainId).map((r) => r.id),
-  );
+  const workerIdSet = new Set(workerRunsOf(execution.runs).map((r) => r.id));
   const runById = new Map(execution.runs.map((r) => [r.id, r]));
   const foldInfo = opts.scene?.fold;
   const foldedCx = (opts.scene?.beatFoldsByHost.get(run.id) ?? [])

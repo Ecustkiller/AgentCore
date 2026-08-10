@@ -211,9 +211,33 @@ export function sessionRootAccessError(
   return null;
 }
 
-/** 主进程在飞 workspace op（leave-once：超时返回后即卸，底层 hung 不再永久占计数）。 */
+/**
+ * 主进程物理并发上限（含 leave-once 后仍未 settle 的僵尸），对齐服务端
+ * ``workspace_channel_max_inflight``。Admission 只看 physical_running，不看逻辑 leave-once。
+ */
+export const WORKSPACE_OP_MAIN_PHYSICAL_CAP = 16;
+
+/** capacity ≠ liveness：禁止含「活性挂起」/「timed out」，避免误冲 sticky / 熔断 tally。 */
+export function workspaceOpMainCapacityDetail(cap: number): string {
+  return `本地工作区并发已满（物理上限 ${cap}），排队等待未获执行位`;
+}
+
+/** 逻辑在飞（leave-once：超时返回后即卸；观测用，不驱动 admission）。 */
 let mainInflightTotal = 0;
 const mainInflightByCid = new Map<string, number>();
+
+/** 物理在飞：admit 时 +1，底层 promise finally 才 −1（超时不减 → 僵尸仍占槽）。 */
+let physicalRunning = 0;
+/** 已超时 leave-once、底层尚未 finally 的物理占槽数。 */
+let zombieCount = 0;
+let physicalCapOverride: number | null = null;
+
+type PhysicalWaiter = {
+  resolve: (admitted: boolean) => void;
+  timer: ReturnType<typeof setTimeout> | undefined;
+};
+
+const physicalWaiters: PhysicalWaiter[] = [];
 
 export type WorkspaceOpMainReq = {
   rootId: string;
@@ -224,36 +248,35 @@ export type WorkspaceOpMainReq = {
   requestId?: string;
 };
 
+function currentPhysicalCap(): number {
+  return physicalCapOverride ?? WORKSPACE_OP_MAIN_PHYSICAL_CAP;
+}
+
 function mainInflightSnapshot(conversationId?: string): {
   inflight_total: number;
   inflight_cid: number | null;
   queue_depth: number;
+  physical_running: number;
+  zombie_count: number;
+  cap: number;
 } {
   const cid = conversationId?.trim() || "";
   return {
     inflight_total: mainInflightTotal,
     inflight_cid: cid ? (mainInflightByCid.get(cid) ?? 0) : null,
-    // 桌面无真实排队闸：当前除自身外的在飞数 = 争用深度信号。
-    queue_depth: Math.max(0, mainInflightTotal - 1),
+    queue_depth: physicalWaiters.length,
+    physical_running: physicalRunning,
+    zombie_count: zombieCount,
+    cap: currentPhysicalCap(),
   };
 }
 
-function enterMainInflight(conversationId?: string): {
-  inflight_total: number;
-  inflight_cid: number | null;
-  queue_depth: number;
-} {
-  const queueDepth = mainInflightTotal;
+function enterMainInflight(conversationId?: string): void {
   mainInflightTotal += 1;
   const cid = conversationId?.trim() || "";
   if (cid) {
     mainInflightByCid.set(cid, (mainInflightByCid.get(cid) ?? 0) + 1);
   }
-  return {
-    inflight_total: mainInflightTotal,
-    inflight_cid: cid ? (mainInflightByCid.get(cid) ?? 0) : null,
-    queue_depth: queueDepth,
-  };
 }
 
 function leaveMainInflight(conversationId?: string): void {
@@ -265,10 +288,76 @@ function leaveMainInflight(conversationId?: string): void {
   else mainInflightByCid.set(cid, n);
 }
 
-/** Test-only: reset main-process inflight counters. */
+function releasePhysicalSlot(): void {
+  const next = physicalWaiters.shift();
+  if (next) {
+    if (next.timer != null) clearTimeout(next.timer);
+    // 槽位转交：physicalRunning 不变。
+    next.resolve(true);
+    return;
+  }
+  physicalRunning = Math.max(0, physicalRunning - 1);
+}
+
+/**
+ * 获取物理槽。满则排队；`deadlineMs` 耗尽 → 不占槽、返回 false（capacity fail）。
+ * 无 deadline 时一直等到有槽。
+ */
+function acquirePhysicalSlot(
+  deadlineMs: number | undefined,
+  onQueued?: () => void,
+): Promise<{
+  admitted: boolean;
+  queueWaitMs: number;
+}> {
+  const waitStarted = Date.now();
+  if (physicalRunning < currentPhysicalCap()) {
+    physicalRunning += 1;
+    return Promise.resolve({ admitted: true, queueWaitMs: 0 });
+  }
+  return new Promise((resolve) => {
+    const waiter: PhysicalWaiter = {
+      resolve: (admitted) => {
+        resolve({
+          admitted,
+          queueWaitMs: Date.now() - waitStarted,
+        });
+      },
+      timer: undefined,
+    };
+    physicalWaiters.push(waiter);
+    onQueued?.();
+    if (deadlineMs != null) {
+      const remaining = Math.max(0, deadlineMs);
+      waiter.timer = setTimeout(() => {
+        const idx = physicalWaiters.indexOf(waiter);
+        if (idx >= 0) physicalWaiters.splice(idx, 1);
+        waiter.resolve(false);
+      }, remaining);
+    }
+  });
+}
+
+/** Test-only: reset main-process logical + physical admission state. */
 export function resetWorkspaceOpMainInflightForTests(): void {
   mainInflightTotal = 0;
   mainInflightByCid.clear();
+  physicalRunning = 0;
+  zombieCount = 0;
+  physicalCapOverride = null;
+  while (physicalWaiters.length > 0) {
+    const w = physicalWaiters.shift();
+    if (!w) break;
+    if (w.timer != null) clearTimeout(w.timer);
+    w.resolve(false);
+  }
+}
+
+/** Test-only: override physical CAP（null = 恢复默认 16）。 */
+export function setWorkspaceOpMainPhysicalCapForTests(
+  cap: number | null,
+): void {
+  physicalCapOverride = cap == null ? null : Math.max(1, Math.floor(cap));
 }
 
 async function workspaceOp(req: {
@@ -288,11 +377,11 @@ async function workspaceOp(req: {
 }
 
 /**
- * 主进程 workspaceOp 墙钟 + 观测（可单测：注入 `run` 模拟挂起 op）。
- * 有 `timeoutMs` 时 Promise.race；超时先回活性 IO 信封。
+ * 主进程 workspaceOp：物理 CAP 闸 + 墙钟 + 观测（可单测：注入 `run` 模拟挂起）。
  *
- * 僵尸缓解：超时返回后立刻 leave inflight（leave-once），避免永不 settle 的底层
- * promise 永久占无界计数；底层仍可能继续跑（Win32 不可小改取消），但不再挡住观测面。
+ * Admission 看 physical_running（含僵尸）；超限排队，排队耗尽 deadline → capacity
+ * fail-settle（文案 ≠ 活性）。有 `timeoutMs` 时 Promise.race；超时 leave-once 卸逻辑
+ * 计数并 zombie_enter，底层 finally 才放物理槽（zombie_end）。
  */
 export async function runWorkspaceOpMain(
   req: WorkspaceOpMainReq,
@@ -305,31 +394,135 @@ export async function runWorkspaceOpMain(
   const t0 = Date.now();
   const cid = req.conversationId?.trim() || undefined;
   const rid = req.requestId?.trim() || undefined;
-  const enter = enterMainInflight(cid);
   const corr = {
     conversation_id: cid ?? null,
     request_id: rid ?? null,
   };
+  const baseFields = {
+    op: req.op,
+    root_id: req.rootId,
+    timeout_ms: timeoutMs ?? null,
+    ...corr,
+  };
+
+  const queueDeadlineMs =
+    timeoutMs == null ? undefined : Math.max(0, timeoutMs - (Date.now() - t0));
+  const slot = await acquirePhysicalSlot(queueDeadlineMs, () => {
+    logDesktop({
+      level: "debug",
+      event: "workspace_op.queued",
+      fields: {
+        ...baseFields,
+        ...mainInflightSnapshot(cid),
+      },
+    });
+  });
+  if (!slot.admitted) {
+    const detail = workspaceOpMainCapacityDetail(currentPhysicalCap());
+    logDesktop({
+      level: "warn",
+      event: "workspace_op.rejected_capacity",
+      fields: {
+        ...baseFields,
+        duration_ms: Date.now() - t0,
+        queue_wait_ms: slot.queueWaitMs,
+        ...mainInflightSnapshot(cid),
+      },
+    });
+    logDesktop({
+      level: "warn",
+      event: "workspace_op.main_end",
+      fields: {
+        ...baseFields,
+        duration_ms: Date.now() - t0,
+        ok: false,
+        capacity: true,
+        queue_wait_ms: slot.queueWaitMs,
+        ...mainInflightSnapshot(cid),
+      },
+    });
+    return opErr("WorkspaceIOError", detail);
+  }
+
+  const remainingAfterAdmit =
+    timeoutMs == null ? undefined : Math.max(0, timeoutMs - (Date.now() - t0));
+  // 排队已吃光墙钟：不启动 op，立刻放槽 + capacity fail（≠ 活性）。
+  if (remainingAfterAdmit === 0) {
+    releasePhysicalSlot();
+    const detail = workspaceOpMainCapacityDetail(currentPhysicalCap());
+    logDesktop({
+      level: "warn",
+      event: "workspace_op.rejected_capacity",
+      fields: {
+        ...baseFields,
+        duration_ms: Date.now() - t0,
+        queue_wait_ms: slot.queueWaitMs,
+        reason: "deadline_exhausted_at_admit",
+        ...mainInflightSnapshot(cid),
+      },
+    });
+    logDesktop({
+      level: "warn",
+      event: "workspace_op.main_end",
+      fields: {
+        ...baseFields,
+        duration_ms: Date.now() - t0,
+        ok: false,
+        capacity: true,
+        queue_wait_ms: slot.queueWaitMs,
+        ...mainInflightSnapshot(cid),
+      },
+    });
+    return opErr("WorkspaceIOError", detail);
+  }
+
+  logDesktop({
+    level: "debug",
+    event: "workspace_op.admitted",
+    fields: {
+      ...baseFields,
+      queue_wait_ms: slot.queueWaitMs,
+      ...mainInflightSnapshot(cid),
+    },
+  });
+
+  enterMainInflight(cid);
   logDesktop({
     level: "debug",
     event: "workspace_op.main_begin",
     fields: {
-      op: req.op,
-      root_id: req.rootId,
-      timeout_ms: timeoutMs ?? null,
-      ...corr,
-      ...enter,
+      ...baseFields,
+      queue_wait_ms: slot.queueWaitMs,
+      ...mainInflightSnapshot(cid),
     },
   });
+
   let left = false;
+  let becameZombie = false;
   const leaveOnce = (): void => {
     if (left) return;
     left = true;
     leaveMainInflight(cid);
   };
-  const opPromise = run().finally(leaveOnce);
+  const opPromise = run().finally(() => {
+    leaveOnce();
+    if (becameZombie) {
+      zombieCount = Math.max(0, zombieCount - 1);
+      logDesktop({
+        level: "debug",
+        event: "workspace_op.zombie_end",
+        fields: {
+          ...baseFields,
+          duration_ms: Date.now() - t0,
+          ...mainInflightSnapshot(cid),
+        },
+      });
+    }
+    releasePhysicalSlot();
+  });
+
   let result: WorkspaceOpResult;
-  if (timeoutMs == null) {
+  if (remainingAfterAdmit == null) {
     result = await opPromise;
   } else {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -342,23 +535,32 @@ export async function runWorkspaceOpMain(
               level: "warn",
               event: "workspace_op.main_timeout",
               fields: {
-                op: req.op,
-                root_id: req.rootId,
+                ...baseFields,
                 timeout_ms: timeoutMs,
                 duration_ms: Date.now() - t0,
-                ...corr,
                 ...mainInflightSnapshot(cid),
               },
             });
-            // 超时先 leave，避免僵尸永久占 inflight（底层仍可能继续跑）。
+            // 超时先 leave 逻辑计数；物理槽仍由底层 finally 释放（僵尸占槽）。
             leaveOnce();
+            becameZombie = true;
+            zombieCount += 1;
+            logDesktop({
+              level: "warn",
+              event: "workspace_op.zombie_enter",
+              fields: {
+                ...baseFields,
+                duration_ms: Date.now() - t0,
+                ...mainInflightSnapshot(cid),
+              },
+            });
             resolve(
               opErr(
                 "WorkspaceIOError",
                 "本地工作区 op 活性挂起（主进程 timeout）",
               ),
             );
-          }, timeoutMs);
+          }, remainingAfterAdmit);
         }),
       ]);
     } finally {
@@ -369,12 +571,10 @@ export async function runWorkspaceOpMain(
     level: result.ok ? "debug" : "warn",
     event: "workspace_op.main_end",
     fields: {
-      op: req.op,
-      root_id: req.rootId,
-      timeout_ms: timeoutMs ?? null,
+      ...baseFields,
       duration_ms: Date.now() - t0,
       ok: result.ok,
-      ...corr,
+      queue_wait_ms: slot.queueWaitMs,
       ...mainInflightSnapshot(cid),
     },
   });

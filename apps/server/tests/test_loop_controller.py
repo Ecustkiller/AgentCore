@@ -257,7 +257,10 @@ def test_circuit_breaker_leaps_straight_to_disable_without_redundant_warn():
 
 
 def test_circuit_breaker_read_url_warn_and_disable_use_stop_read_steer():
-    """read_url steers must not say「换不同的输入」(that fuels URL thrashing)."""
+    """read_url steers must not say「换不同的输入」(that fuels URL thrashing).
+
+    Warn/disable must also close the «继续 web_search» default exit.
+    """
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     c.record([_fail("a", "read_url"), _fail("b", "read_url")])
     warn = c.tool_circuit_breaker()
@@ -265,7 +268,7 @@ def test_circuit_breaker_read_url_warn_and_disable_use_stop_read_steer():
     msg = warn.message() or ""
     assert "换不同的输入" not in msg
     assert "read_url" in msg
-    assert "web_search" in msg or "收口" in msg or "重读" in msg
+    assert "不要把继续 web_search 当默认出路" in msg
 
     c.record([_fail("c", "read_url")])
     disable = c.tool_circuit_breaker()
@@ -273,7 +276,8 @@ def test_circuit_breaker_read_url_warn_and_disable_use_stop_read_steer():
     dmsg = disable.message() or ""
     assert "换不同的输入" not in dmsg
     assert "停用" in dmsg
-    assert "web_search" in dmsg or "收口" in dmsg
+    assert "收束继续 web_search" in dmsg or "不要把继续检索当默认出路" in dmsg
+    assert "基于已有材料" in dmsg
 
 
 def test_circuit_breaker_counts_failures_per_tool_and_ignores_success():
@@ -999,6 +1003,55 @@ def test_circuit_breaker_mixed_failures_keep_generic_warn():
     assert "换不同的输入" in (cb.message() or "")
 
 
+def test_circuit_breaker_remember_parse_only_keeps_and_memory_steer():
+    """remember parse-only thrashing keeps the tool + memory-facing format steer."""
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    parse = ToolAttempt("a", "remember", success=False, parse_failure=True)
+    c.record([parse])
+    assert not c.tool_circuit_breaker()
+    c.record([ToolAttempt("b", "remember", success=False, parse_failure=True)])
+    cb = c.tool_circuit_breaker()
+    assert cb.warned == ("remember",)
+    assert "remember" in cb.parse_only
+    msg = cb.message() or ""
+    assert "不是合法 JSON" in msg
+    assert "记规则" in msg
+    assert "禁止截断时原样重发全部" in msg
+    assert "勿改用空回复交差" not in msg
+    assert "后原样重发全部参数" not in msg
+    # Parse-only: keep remember (do not circuit-disable).
+    c.record([ToolAttempt("c", "remember", success=False, parse_failure=True)])
+    cb2 = c.tool_circuit_breaker()
+    assert cb2.disabled == ()
+    assert "停用" not in (cb2.message() or "")
+    assert c.tool_failure_count("remember") == 3
+
+
+def test_circuit_breaker_remember_still_disables_on_real_failures():
+    """Non-parse remember failures still retire at disable threshold."""
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    real = ToolAttempt("a", "remember", success=False, parse_failure=False)
+    c.record([real, real, real])
+    cb = c.tool_circuit_breaker()
+    assert cb.disabled == ("remember",)
+
+
+def test_circuit_breaker_other_parse_warn_is_class_aware():
+    """Default-tool parse warn must cover truncate vs escape — not only「原样重发全部」."""
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    parse = ToolAttempt("a", "web_search", success=False, parse_failure=True)
+    c.record([parse, ToolAttempt("b", "web_search", success=False, parse_failure=True)])
+    cb = c.tool_circuit_breaker()
+    assert cb.warned == ("web_search",)
+    assert "web_search" in cb.parse_only
+    msg = cb.message() or ""
+    assert "截断" in msg
+    assert "转义" in msg
+    # Must not teach truncated retries as verbatim resend-only.
+    assert "后原样重发全部参数" not in msg
+    assert "截断场景禁止原样重发全部" in msg
+
+
 def _prose_append_reject(fp: str, path: str) -> ToolAttempt:
     return ToolAttempt(
         fp,
@@ -1640,7 +1693,10 @@ def test_delivery_idle_skips_non_files_and_resets_on_write():
 
 
 def test_recon_idle_nudge_prompt_does_not_demand_writes():
-    from agentcore.runtime.loop_controller import delivery_idle_nudge_prompt
+    from agentcore.runtime.loop_controller import (
+        delivery_idle_narrow_prompt,
+        delivery_idle_nudge_prompt,
+    )
 
     text = delivery_idle_nudge_prompt(rounds=8, recon=True)
     assert "调查空转提醒" in text
@@ -1655,6 +1711,86 @@ def test_recon_idle_nudge_prompt_does_not_demand_writes():
     assert "检索工具仍可用" in report
     assert "已收回" not in report
     assert "收窄调查" not in report
+    dead = delivery_idle_nudge_prompt(rounds=4, report=True, channel_dead=True)
+    assert "写盘通道已不可用" in dead
+    assert "file_write" not in dead
+    assert "str_replace" not in dead
+    assert "handoff" in dead.lower() or "escalate" in dead.lower()
+    assert delivery_idle_narrow_prompt(rounds=3, channel_dead=True) is None
+
+
+def test_channel_dead_skips_write_pressure_on_delivery_idle():
+    """channel_dead: report/repair idle never urge file_write; narrow skipped."""
+    from agentcore.runtime.engine.governance import (
+        create_loop_controller,
+        maybe_inject_delivery_idle,
+    )
+    from agentcore.runtime.loop_controller import delivery_idle_nudge_prompt
+
+    report = create_loop_controller(
+        frozenset({"grep", "file_read", "code_search"}),
+        files_expected=True,
+        report_delivery=True,
+    )
+    report._workspace_channel_dead = True  # noqa: SLF001
+    bar = report.delivery_idle_nudge_rounds
+    for i in range(bar):
+        report.record(
+            [ToolAttempt(fingerprint=f"cd{i}", tool_name="grep", success=True)]
+        )
+    messages: list = []
+    assert (
+        maybe_inject_delivery_idle(
+            report, messages=messages, run_id="dead", round_idx=bar, role="worker"
+        )
+        == "nudge"
+    )
+    joined = "\n".join(str(m.content) for m in messages)
+    assert "file_write" not in joined
+    assert "str_replace" not in joined
+    assert "写盘通道已不可用" in joined
+    assert delivery_idle_nudge_prompt(rounds=bar, report=True, channel_dead=True) in {
+        m.content for m in messages
+    }
+
+    repair = create_loop_controller(
+        frozenset({"grep", "file_read"}),
+        files_expected=True,
+        report_delivery=False,
+    )
+    repair._workspace_channel_dead = True  # noqa: SLF001
+    narrow_bar = repair.delivery_idle_narrow_rounds
+    for i in range(narrow_bar):
+        repair.record(
+            [ToolAttempt(fingerprint=f"nr{i}", tool_name="file_read", success=True)]
+        )
+    assert repair.delivery_idle_narrow_due()
+    repair_msgs: list = []
+    # Past narrow bar: skip write-narrow; still handoff-only nudge (no file_write).
+    assert (
+        maybe_inject_delivery_idle(
+            repair,
+            messages=repair_msgs,
+            run_id="dead-narrow",
+            round_idx=narrow_bar,
+            role="worker",
+        )
+        == "nudge"
+    )
+    repair_joined = "\n".join(str(m.content) for m in repair_msgs)
+    assert "file_write" not in repair_joined
+    assert "str_replace" not in repair_joined
+    assert "写盘通道已不可用" in repair_joined
+    assert not repair.take_delivery_idle_narrow_apply()
+    assert not repair.delivery_idle_narrowed
+    # Second call: already nudged, still never narrow.
+    assert (
+        maybe_inject_delivery_idle(
+            repair, messages=[], run_id="dead-narrow", round_idx=narrow_bar + 1, role="worker"
+        )
+        == "none"
+    )
+    assert not repair.take_delivery_idle_narrow_apply()
 
 
 def test_report_delivery_idle_nudge_without_search_narrow():

@@ -1,13 +1,14 @@
 """Context subsystem: unified system-prompt assembly + on-demand context sources.
 
-上下文注入统一. Houses the injection-side spine (:class:`ContextAssembler`) and — as
-the later steps land — the shared "目录 + 按需取" protocol (``Consultable``) and its
-sources (skills, rules, workspace). The OUTPUT side (tool execution, memory writes)
+上下文注入统一. Houses the injection-side spine (:class:`ContextAssembler`) and the
+shared "目录 + 按需取" protocol (:class:`Consultable`) for on-demand sources (rules
+now; skills / memory adopt over time). The OUTPUT side (tool execution, memory writes)
 is intentionally NOT here: unification is injection-side only (文档「守恒律」: 复杂度
 搬家不消失).
 """
 
 from agentcore.runtime.context.assembler import ContextAssembler, assembly_hash
+from agentcore.runtime.context.consultable import Consultable, ConsultDirectoryEntry
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
 from agentcore.runtime.context.workspace_context import (
     ChannelProfile,
@@ -23,6 +24,8 @@ from agentcore.runtime.context.workspace_overview import build_workspace_overvie
 
 __all__ = [
     "ChannelProfile",
+    "Consultable",
+    "ConsultDirectoryEntry",
     "ContextAssembler",
     "PromptContributor",
     "SectionOrder",

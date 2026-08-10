@@ -1134,7 +1134,11 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
 
 async def test_read_url_disable_survives_react_loop_restart():
     """After CB disables read_url, a fresh react_loop with the same run_id must not
-    re-offer it (stream-stall → Wave retry / contract write_pass)."""
+    re-offer it (stream-stall → Wave retry / contract write_pass).
+
+    C2: web_search is stripped with read_url so deep-read death cannot reopen
+    search thrash on Wave/contract retry.
+    """
     from agentcore.tools.builtin.web._net import (
         clear_read_url_retired,
         is_read_url_retired,
@@ -1151,6 +1155,7 @@ async def test_read_url_disable_survives_react_loop_restart():
     )
     reg = ToolRegistry()
     reg.register(_StubTool(success=False, name="read_url"))
+    reg.register(_StubTool(success=True, name="web_search"))
     reg.register(_StubTool(success=True, name="other"))
     provider = _ToolsRecordingProvider(
         [
@@ -1174,9 +1179,11 @@ async def test_read_url_disable_survives_react_loop_restart():
     assert is_read_url_retired(run_id)
     steers = [m.content or "" for m in messages if m.role == "user"]
     assert any("停用" in s and "read_url" in s for s in steers)
+    assert any("收束继续 web_search" in s or "不要把继续检索当默认出路" in s for s in steers)
     assert "read_url" not in provider.offered[-1]
+    assert "web_search" not in provider.offered[-1]
 
-    # Fresh loop = Wave / contract retry: retirement latch keeps read_url off the surface.
+    # Fresh loop = Wave / contract retry: retirement latch keeps read_url + search off.
     provider2 = _ToolsRecordingProvider([[_content_chunk("done2")]])
     await react_loop(
         messages=[LLMMessage(role="user", content="retry")],

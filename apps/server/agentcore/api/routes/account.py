@@ -7,7 +7,8 @@ Desktop convention (parallel desktop inject):
   ``baseUrl`` = ``{apiOrigin}/v1/account`` and ``apiKey`` = minted token.
 - Cloud calls (account ticket **or** access):
   ``POST {baseUrl}/conversations/search|read``,
-  ``POST {baseUrl}/rules/list|remember``,
+  ``POST {baseUrl}/rules/list|remember`` (list = always + on_demand bodies for
+  规则目录 / ``consult_rule``),
   ``POST {baseUrl}/memory/{list,load,save,delete,project-scopes}``.
 - Does **not** open UI conversation / documents / memory-editor CRUD to the
   narrow ticket — engine-minimal surface only.
@@ -228,8 +229,12 @@ class AccountRuleDoc(BaseModel):
 
 
 class AccountRulesListResponse(BaseModel):
+    """Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult_rule``."""
+
     global_rules: list[AccountRuleDoc]
     project_rules: list[AccountRuleDoc]
+    global_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    project_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
 
 
 @router.post("/rules/list", response_model=AccountRulesListResponse)
@@ -238,7 +243,7 @@ async def list_account_user_rules(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRulesListResponse:
-    """Injectable user rules (``ai_maintained=false``) for turn ``<rules>`` assembly."""
+    """User rules for turn assembly: always → ``<rules>``; on_demand → catalog + consult."""
     repo = DocumentRepository(session)
     global_docs = await repo.list_injectable_rules(
         user.user_id, None, ai_maintained=False
@@ -248,12 +253,25 @@ async def list_account_user_rules(
         project_docs = await repo.list_injectable_rules(
             user.user_id, body.folder_id, ai_maintained=False
         )
+    global_on_demand = await repo.list_on_demand_user_rules(user.user_id, None)
+    project_on_demand = []
+    if body.folder_id:
+        project_on_demand = await repo.list_on_demand_user_rules(
+            user.user_id, body.folder_id
+        )
     return AccountRulesListResponse(
         global_rules=[
             AccountRuleDoc(name=d.name, content=d.content or "") for d in global_docs
         ],
         project_rules=[
             AccountRuleDoc(name=d.name, content=d.content or "") for d in project_docs
+        ],
+        global_on_demand_rules=[
+            AccountRuleDoc(name=d.name, content=d.content or "") for d in global_on_demand
+        ],
+        project_on_demand_rules=[
+            AccountRuleDoc(name=d.name, content=d.content or "")
+            for d in project_on_demand
         ],
     )
 

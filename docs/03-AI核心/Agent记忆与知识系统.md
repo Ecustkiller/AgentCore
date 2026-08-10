@@ -28,7 +28,9 @@ skip_if:
 
 ```
 AgentCore/
-├── 规则/                 用户硬规则（ai_maintained=false，默认 always）
+├── 规则/                 用户硬规则（ai_maintained=false）
+│   ├── *.md              always（默认）→ 共享 <rules>；或 on_demand → 目录 + consult_rule ✅
+│   └── （conditional）    DB 枚举 reserved · **不对外** · 无触发底（否决 Cursor globs / 意图预筛）
 ├── 记忆/                 AI 维护（ai_maintained=true）
 │   ├── 偏好.md           always · 仅全局 · 沟通/习惯
 │   ├── 画像.md           always · 技术栈/事实（可全局可项目）
@@ -39,6 +41,8 @@ AgentCore/
 ```
 
 - 叠加注入：绑定文件夹的对话 = 全局 + 该项目；预算紧张时**全局优先**；项目层无 `偏好.md`。
+- **用户规则加载（定案 B）**：对外仅 `always` | `on_demand`；新建/存量默认 always。短硬约束常驻；长条文/偶发场景标按需，相关回合由模型 `consult_rule` 自取（谁来拉 = 模型自选）。`remember` 仍只写规范 `用户规则.md`（always）；按需仅文件页 / documents API 配置，防对话误标。
+- **规则按需 ≠ 记忆主题**：on_demand 规则 = 约束/合规附录（应遵守）；主题 = 事实/厚知识（供查阅）。勿把百科塞进规则凑按需。
 - **双层项目知识**：短入口 = `导航.md`（always，只指路、不塞长文）；厚内容 = `主题/` + `文档/项目/`（按需查）。不写用户仓库根 `AGENTS.md` / `docs/`。
 - 冲突：靠措辞 + 就近相关性；用户硬规则恒胜。
 - `文档/` 与同树旁路 `AgentCore/index/`（code_search；系统噪音）正交：索引管符号检索；导航/主题管叙事路由。勿与 `~/Documents/AgentCore/` 工作区容器混淆。
@@ -53,7 +57,7 @@ AgentCore/
 
 1. 工作记忆经 `load_recent_history` 进窗口（CEO / worker 共用）。
 2. 长期记忆折叠进共享 `<rules>` 基座：用户规则在前（权威）、AI 记忆在后（软措辞）；无用户规则时与旧 memory-only 块逐字节一致（护前缀缓存）。
-3. always 序：**全局偏好 → 全局画像 → 项目画像 → 项目导航**（缺文件跳过）；on_demand 主题只列目录，按需 `consult_memory`（项目优先、全局兜底）。
+3. always 序：**全局偏好 → 全局画像 → 项目画像 → 项目导航**（缺文件跳过）；用户 always 规则进共享 `<rules>` 前半。on_demand **主题**只列目录 → `consult_memory`；on_demand **用户规则**只列目录 → `consult_rule`（均项目优先、全局兜底；仅当本回合已 wire 对应工具才露目录）。
 4. **当前课题认定**（✅）：「继续做项目 / 汇报现状」且用户未点名时，**工作区（及已绑工程）近况 ＞ 全局画像「正在做 X」**——全局仅软参考，不得压过工作区，也不得把旧项目名写进默认提问套用户。偏好/文风等仍可用全局记忆。
 5. 注入前剥人面 chrome（H1 + 说明引用块），文件本身不动。
 6. 装配顺序权威 → [执行引擎 §七](/docs/03-AI核心/执行引擎架构设计.md) / `runtime/context/`（`SectionOrder`）。
@@ -72,7 +76,7 @@ AgentCore/
 - 异常回合（cancelled / interrupted / error）跳过沉淀仍推进 watermark。
 - 偏好只能来自用户**明示或纠正**，禁止从任务题材推断。
 - 空重写 / 保留率 <50% → 拒落盘；巩固失败不标记已消化。
-- 用户明示指令 → `remember` 直写**用户规则**（`ai_maintained=false`）✅：支持**追加 / 替换 / 删除 / 列出**；改删在对话内真生效。文件页仍可人手改删（与对话内操作双轨，非互斥）。冲突：同 key 归一化去重；「改为」走替换去掉旧条，不以矛盾并存 + 措辞碰运气为主路径。
+- 用户明示指令 → `remember` 直写**用户规则**（`ai_maintained=false`）✅：支持**追加 / 替换 / 删除 / 列出**；改删在对话内真生效。文件页仍可人手改删（与对话内操作双轨，非互斥）。冲突：同 key 归一化去重；「改为」走替换去掉旧条，不以矛盾并存 + 措辞碰运气为主路径。**内容完整性**：半截/`…` 收尾或中段残缺标记 → 拒写入（与 [工具参数契约](/docs/03-AI核心/工具与能力系统.md) 同纪律）。
 - 记忆能力**产品层恒开**（无用户总闸）；内容由对话内 `remember` 与文件页编辑/清空双轨控制。异常回合仍跳过沉淀并推进 watermark。
 
 ### 两种「冷启动」（正交、禁混名）
@@ -136,6 +140,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 | 单层巩固 + 冷却/门槛 | 只抑症状，不解「单场判断持久性」 |
 | 首轮后再补铸标题 | 收益小、二次覆盖复杂 |
 | 照搬 Cursor rules（globs 为主入口） | 大众不手写规则文件；对话产品无 globs 附着物 |
+| 用户规则三态对外（含 conditional） | 无诚实触发底；完整能力 = always + on_demand + `consult_rule`（定案 B）；conditional 继续 reserved |
 | 独立 `AgentCore/知识/` + 知识目录注入 | 无独立可注入知识库产品；约定文档走 `文档/` + `file_read` |
 | 偏好/画像改 on_demand；隐藏点目录替代可见 `AgentCore/` | 规则缺了模型不会主动查；产品心智要可见约定根 |
 | 向量 chunk 自动灌进 prompt | 与「文件随时变」不合；agentic 自取永远新鲜 |

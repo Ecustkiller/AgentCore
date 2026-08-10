@@ -425,7 +425,8 @@ class _FakeDelegate:
         return None
 
 
-def test_topology_lock_blocks_replan_add_allows_steer():
+@pytest.mark.asyncio
+async def test_topology_lock_blocks_replan_add_allows_steer():
     plan = RunPlan(
         nodes=[
             RunSpec(run_id="r1", role="A", task="done"),
@@ -434,7 +435,7 @@ def test_topology_lock_blocks_replan_add_allows_steer():
         topology_lock=True,
     )
     tool = _FakeDelegate()
-    errors = apply_replan(
+    errors = await apply_replan(
         tool,
         plan,
         completed={},
@@ -445,7 +446,7 @@ def test_topology_lock_blocks_replan_add_allows_steer():
     assert errors
     assert any("拓扑锁" in e for e in errors)
 
-    errors2 = apply_replan(
+    errors2 = await apply_replan(
         tool,
         plan,
         completed={},
@@ -457,7 +458,8 @@ def test_topology_lock_blocks_replan_add_allows_steer():
     assert "请按质检清单写" in (plan.by_id("r2").steer or "")
 
 
-def test_gap_fill_replan_caps_replaces_adds():
+@pytest.mark.asyncio
+async def test_gap_fill_replan_caps_replaces_adds():
     """补跑 replaces 超缺口硬闸被拒；无 replaces 的普通 add 不误伤。"""
     from agentcore.runtime.runs.constants import MAX_GAP_FILL_ADDS
     from agentcore.runtime.runs.types import RunPhase, RunState
@@ -484,7 +486,7 @@ def test_gap_fill_replan_caps_replaces_adds():
         {"role": f"R{i}", "task": f"retry {i}", "replaces_run_id": f"f{i}"}
         for i in range(1, 5)
     ]
-    err = apply_replan(tool, plan, completed, binds=[], steers=[], adds=too_many)
+    err = await apply_replan(tool, plan, completed, binds=[], steers=[], adds=too_many)
     assert err
     assert any("补跑一次最多" in e for e in err)
     assert any(str(MAX_GAP_FILL_ADDS) in e for e in err)
@@ -495,18 +497,19 @@ def test_gap_fill_replan_caps_replaces_adds():
         {"role": f"R{i}", "task": f"retry {i}", "replaces_run_id": f"f{i}"}
         for i in range(1, MAX_GAP_FILL_ADDS + 1)
     ]
-    err_ok = apply_replan(tool, plan, completed, binds=[], steers=[], adds=ok_adds)
+    err_ok = await apply_replan(tool, plan, completed, binds=[], steers=[], adds=ok_adds)
     assert err_ok == []
 
 
-def test_gap_fill_replan_rejects_no_gap_team_reopen():
+@pytest.mark.asyncio
+async def test_gap_fill_replan_rejects_no_gap_team_reopen():
     """无失败/跳过缺口时带 replaces → 拒整团重开。"""
     from agentcore.runtime.runs.types import RunPhase, RunState
 
     plan = RunPlan(nodes=[RunSpec(run_id="ok", role="A", task="done")])
     completed = {"ok": RunState(phase=RunPhase.COMPLETED, content="ok")}
     tool = _FakeDelegate()
-    err = apply_replan(
+    err = await apply_replan(
         tool,
         plan,
         completed,
@@ -518,7 +521,8 @@ def test_gap_fill_replan_rejects_no_gap_team_reopen():
     assert any("无失败/跳过缺口" in e or "无缺口" in e for e in err)
 
 
-def test_gap_fill_replan_plain_add_without_replaces_ok():
+@pytest.mark.asyncio
+async def test_gap_fill_replan_plain_add_without_replaces_ok():
     """无 replaces/continue 的普通 add（首派补生产者）不走补跑闸。"""
     from agentcore.runtime.runs.types import RunPhase, RunState
 
@@ -532,6 +536,6 @@ def test_gap_fill_replan_plain_add_without_replaces_ok():
     tool = _FakeDelegate()
     # 一次加多个普通节点也应通过（只要不超过 MAX_DELEGATION_TASKS）
     adds = [{"role": f"P{i}", "task": f"produce {i}"} for i in range(4)]
-    err = apply_replan(tool, plan, completed, binds=[], steers=[], adds=adds)
+    err = await apply_replan(tool, plan, completed, binds=[], steers=[], adds=adds)
     assert err == []
     assert sum(1 for n in plan.nodes if n.role.startswith("P")) == 4

@@ -1,5 +1,6 @@
 import { InteractionSheet } from "@/components/InteractionSheet";
 import { Modal } from "@/components/Modal";
+import { CONTEXT_CHANNEL_LABEL } from "@/components/assistantLabels";
 import { FINISH_REASON_META } from "@/lib/errors";
 import {
   type MessageCopyMode,
@@ -11,7 +12,11 @@ import {
   formatSupportDiagnosticText,
 } from "@/lib/supportDiagnostics";
 import { formatDuration, formatMessageTime } from "@/lib/time";
-import type { ProcessStep, UsageBreakdown } from "@agentcore/contract-types";
+import type {
+  ContextBlockWire,
+  ProcessStep,
+  UsageBreakdown,
+} from "@agentcore/contract-types";
 import { Check, Copy, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import "./AssistantMessageFooter.css";
@@ -129,15 +134,47 @@ function CopyModeSheet({
   );
 }
 
+/** CEO「收到的上下文」明细列表（含 system；对齐桌面 ReceivedContextDialog）。 */
+function ReceivedContextBlocks({ blocks }: { blocks: ContextBlockWire[] }) {
+  return (
+    <div className="recv-list" data-testid="received-context-blocks">
+      {blocks.map((b, i) => (
+        <div key={`${b.channel}-${i}`} className="recv-item">
+          <div className="recv-head">
+            <span className="recv-channel">
+              {CONTEXT_CHANNEL_LABEL[b.channel] ?? b.channel}
+            </span>
+            {b.heading && <span className="recv-heading">{b.heading}</span>}
+          </div>
+          {b.body && <pre className="recv-body">{b.body}</pre>}
+          {b.files.length > 0 && (
+            <div className="recv-files">
+              {b.files.map((f) => (
+                <span key={f} className="recv-file">
+                  {f}
+                </span>
+              ))}
+            </div>
+          )}
+          {b.truncated && (
+            <div className="recv-trunc">已截断（完整内容已传给 AI）</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Assistant bubble footer — copy strategy + usage/cost/duration hierarchy.
  * 主行：无边框图标 Copy / MoreHorizontal（对齐桌面）；有过程时 Copy → Action Sheet 分档。
- * ⋯ Sheet：用量 / 收尾 / 排查包。赞踩 / 收藏：手机尚无 client API，不做假 UI。
+ * ⋯ Sheet：收到的上下文 / 用量 / 收尾 / 排查包。赞踩 / 收藏：手机尚无 client API，不做假 UI。
  */
 export function AssistantMessageFooter({
   content,
   process,
   supportIds,
+  captainContext,
   usage,
   rounds,
   costText,
@@ -150,6 +187,8 @@ export function AssistantMessageFooter({
   content: string;
   process?: ProcessStep[];
   supportIds?: SupportDiagnosticIds;
+  /** CEO 侧 run_context；非空时「更多」露出入口，段数用全量 length（含 system）。 */
+  captainContext?: ContextBlockWire[];
   usage?: UsageBreakdown | null;
   rounds?: number | null;
   costText?: string | null;
@@ -164,6 +203,7 @@ export function AssistantMessageFooter({
     null,
   );
   const [moreOpen, setMoreOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [copySheetOpen, setCopySheetOpen] = useState(false);
 
   const supportText = supportIds ? formatSupportDiagnosticText(supportIds) : "";
@@ -175,8 +215,14 @@ export function AssistantMessageFooter({
   const finishLabel = finishReason
     ? FINISH_REASON_META[finishReason]?.label
     : null;
+  const contextBlocks = captainContext ?? [];
+  const hasContext = contextBlocks.length > 0;
   const hasMore =
-    !!usage || !!finishLabel || !!supportText || (rounds != null && rounds > 1);
+    hasContext ||
+    !!usage ||
+    !!finishLabel ||
+    !!supportText ||
+    (rounds != null && rounds > 1);
 
   const onCopy = async (mode: MessageCopyMode) => {
     setCopySheetOpen(false);
@@ -222,6 +268,25 @@ export function AssistantMessageFooter({
     />
   ) : null;
 
+  const contextSheet = contextOpen ? (
+    <InteractionSheet
+      title="收到的上下文"
+      label="收到的上下文"
+      onCollapse={() => setContextOpen(false)}
+      footer={
+        <button
+          type="button"
+          className="amf-sheet-done"
+          onClick={() => setContextOpen(false)}
+        >
+          完成
+        </button>
+      }
+    >
+      <ReceivedContextBlocks blocks={contextBlocks} />
+    </InteractionSheet>
+  ) : null;
+
   // Streaming: only lightweight copy when there is body text (usage meaningless mid-stream).
   if (isStreaming) {
     if (!hasContent || !content.trim()) return null;
@@ -235,7 +300,14 @@ export function AssistantMessageFooter({
     );
   }
 
-  if (!hasContent && !supportText && !usage && !costText && !durationMs) {
+  if (
+    !hasContent &&
+    !supportText &&
+    !usage &&
+    !costText &&
+    !durationMs &&
+    !hasContext
+  ) {
     return null;
   }
 
@@ -245,6 +317,11 @@ export function AssistantMessageFooter({
       setCopied("support");
       window.setTimeout(() => setCopied(null), 1500);
     }
+  };
+
+  const openContext = () => {
+    setMoreOpen(false);
+    setContextOpen(true);
   };
 
   return (
@@ -287,6 +364,16 @@ export function AssistantMessageFooter({
             </button>
           }
         >
+          {hasContext && (
+            <button
+              type="button"
+              className="amf-sheet-nav"
+              data-testid="received-context-menu-item"
+              onClick={openContext}
+            >
+              收到的上下文 · {contextBlocks.length} 段
+            </button>
+          )}
           {usage && (
             <>
               <div className="amf-sheet-label">用量详情</div>
@@ -316,6 +403,7 @@ export function AssistantMessageFooter({
           )}
         </InteractionSheet>
       )}
+      {contextSheet}
     </div>
   );
 }

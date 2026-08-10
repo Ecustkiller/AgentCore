@@ -12,6 +12,7 @@
  */
 
 import { escalationRowKindLabel } from "@/components/graph/agentNode/shared";
+import { resolveCaptainSinkId, workerRunsOf } from "@/components/graph/helpers";
 import type { Execution, RunNode } from "@/stores/execution";
 
 export type GraphPendingKind =
@@ -75,16 +76,14 @@ export function collectGraphPendingDecisions(
   interactions: readonly PendingInteractionRef[] = [],
 ): GraphPendingDecision[] {
   if (!execution) return [];
-  const captainId =
-    execution.runs.find((r) => r.kind === "captain")?.id ?? null;
+  const captainId = resolveCaptainSinkId(execution.runs);
   const roleOf = (r: RunNode): string =>
     execution.agents.find((a) => a.id === r.agentId)?.role ??
     r.role ??
     r.agentId;
 
   const out: GraphPendingDecision[] = [];
-  for (const r of execution.runs) {
-    if (r.id === captainId) continue;
+  for (const r of workerRunsOf(execution.runs)) {
     // 与节点「待你拍板」角标同口径：全部 pending 升级都计（含 CEO 仲裁中，节点角标亦显）。
     for (const [i, e] of r.escalations.entries()) {
       if (e.status !== "pending") continue;
@@ -111,7 +110,7 @@ export function collectGraphPendingDecisions(
 
   // execution 级（工具审批 / 委派授权）：锚到团队代表节点，使「点击定位」有真实目标；
   // 委派授权先于团队开工 → 锚首个 worker（团队入口）；工具审批多为 CEO 级 → 锚汇聚点。
-  const firstWorker = execution.runs.find((r) => r.id !== captainId) ?? null;
+  const firstWorker = workerRunsOf(execution.runs)[0] ?? null;
   for (const it of interactions) {
     if (it.kind === "delegation_authorization") {
       out.push({

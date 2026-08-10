@@ -17,10 +17,19 @@ describe("WorkspaceChannelGuideDialog", () => {
       />,
     );
     expect(screen.getByText("在哪工作：怎么选")).toBeTruthy();
+    expect(screen.getByText(/只有两条通道/)).toBeTruthy();
     expect(screen.getByText("云协作")).toBeTruthy();
     expect(screen.getByText("推荐")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /要写文件时系统会自动建云项目，也可先点「新建云项目」自建/,
+      ),
+    ).toBeTruthy();
     expect(screen.getByText("本机传统")).toBeTruthy();
     expect(screen.getByText(/不是离线模式/)).toBeTruthy();
+    expect(screen.getByText(/临时经云协助/)).toBeTruthy();
+    expect(screen.getByText(/合回落本机 ≠/)).toBeTruthy();
+    expect(screen.getByText(/遗留「后台云端」不是平级第三通道/)).toBeTruthy();
     expect(screen.getByText(/选过的通道会记住/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "知道了" })).toBeTruthy();
   });
@@ -35,6 +44,13 @@ describe("WorkspaceChannelGuideDialog", () => {
     );
     expect(screen.getByText("云协作")).toBeTruthy();
     expect(screen.getByText("推荐")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /要写文件时系统会自动建云项目，也可先点「新建云项目」自建/,
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText("本机传统")).toBeNull();
+    expect(screen.getByText(/只有两条通道/)).toBeTruthy();
+    expect(screen.getByText(/不是平级第三通道/)).toBeTruthy();
   });
 });

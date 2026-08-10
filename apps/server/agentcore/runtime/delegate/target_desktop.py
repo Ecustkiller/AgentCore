@@ -26,6 +26,7 @@ from agentcore.runtime.resolve.prompt import (
     compose_worker_base_prompt,
 )
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+from agentcore.tools.builtin.consult_rule import ConsultRuleTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.locate import LocalBinding, build_workspace
@@ -33,11 +34,21 @@ from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
 
-# Honest reject when bare chat (no birth) would park a worker on conv scratch.
+# Honest reject when bare chat (no birth) would park a *write* worker on scratch.
+# Auto cloud-desk provision covers the empty-hint case; this copy is for residual
+# rejects (multi-project same turn, create failure, …) — do not urge create/ask.
 NO_TARGET_SCRATCH_GATE_MSG = (
-    "当前对话未绑定出生项目，且任务未携带目标项目（target_folder_id）。"
-    "禁止默坐会话 scratch 写盘：请先列/解析项目并点名目标，或 ask_user 问清后再派；"
-    "也可先建项目再派。"
+    "写盘任务必须点名目标项目（target_folder_id）；"
+    "纯对话/只读可不点名（worker 坐会话 scratch、禁写）。"
+    "同回合已涉及多个项目时请各写盘 task 显式点名。"
+)
+
+_AUTO_CLOUD_DESK_NAME_MAX = 200
+_DEFAULT_AUTO_CLOUD_DESK_NAME = "云项目"
+
+# Identity tip when a bare-chat worker sits on conv scratch with write_scope=none.
+SCRATCH_NO_WRITE_IDENTITY_HINT = (
+    "本回合坐会话 scratch、禁写盘；写盘须上级带 target_folder_id 重派。"
 )
 
 
@@ -95,12 +106,46 @@ def effective_target_folder_id(
     return None
 
 
+def task_structurally_requires_write_desk(task: dict[str, Any]) -> bool:
+    """True when deliverable structurally needs a write desk (no task-body scan).
+
+    Conditions (any): ``form=="files"`` / ``requires_files is True`` /
+    non-empty string ``artifacts``. No deliverable / ``form=prose`` / omit → False.
+    """
+    raw = task.get("deliverable")
+    if not isinstance(raw, dict):
+        return False
+    if raw.get("form") == "files":
+        return True
+    if raw.get("requires_files") is True:
+        return True
+    arts = raw.get("artifacts")
+    return isinstance(arts, list) and any(
+        isinstance(a, str) and a.strip() for a in arts
+    )
+
+
+def resolve_bare_chat_write_scope(
+    *,
+    target_folder_id: str | None,
+    session_folder_id: str | None,
+    base_write_scope: str,
+) -> str:
+    """Scratch seat (no birth, no target): ``write_scope=none``; keep ``explore_memory``."""
+    if target_folder_id or session_folder_id:
+        return base_write_scope
+    if base_write_scope == "explore_memory":
+        return "explore_memory"
+    return "none"
+
+
 def format_bare_chat_no_target_error(missing_tasks: list[dict[str, Any]]) -> str:
     """Actionable bare-chat gate copy: constant prefix + missing-task skeleton.
 
     Shared by root ``DelegateTool.execute`` and replan ``apply_replan`` / supervised
-    via ``gate_bare_chat_requires_target``. Lists every task lacking a valid
-    ``target_folder_id`` (role / optional id / missing-target mark only — no task body).
+    via ``gate_bare_chat_requires_target``. Lists every *write-desk* task lacking a
+    valid ``target_folder_id`` (role / optional id / missing-target mark only —
+    no task body).
     """
     parts: list[str] = []
     for item in missing_tasks:
@@ -125,10 +170,14 @@ def gate_bare_chat_requires_target(
     tasks_raw: list[dict[str, Any]],
     default_target_folder_id: str | None = None,
 ) -> str | None:
-    """§4.2b·2b / 改法④A: no birth + no target → reject before drive.
+    """方案 C: no birth + write-desk task without target → reject before drive.
 
-    Still rejects the whole batch. When any task lacks an effective target,
-    returns the constant prefix plus a skeleton listing *all* missing tasks.
+    Birth desk always passes. Pure chat / readonly (no write deliverable) may omit
+    ``target_folder_id`` (worker sits scratch, ``write_scope=none``). Still rejects
+    the whole batch when any write-desk task lacks an effective target.
+
+    Callers should run :func:`ensure_bare_chat_auto_cloud_desk` first so bare chat
+    with no unique turn hint can silently mint a cloud desk.
     """
     if session_folder_id:
         return None
@@ -141,10 +190,152 @@ def gate_bare_chat_requires_target(
             default=default_target_folder_id,
         ):
             continue
+        if not task_structurally_requires_write_desk(item):
+            continue
         missing.append(item)
     if not missing:
         return None
     return format_bare_chat_no_target_error(missing)
+
+
+def _auto_cloud_desk_name(
+    *,
+    conversation_title: str | None,
+    user_message: str | None,
+) -> str:
+    title = (conversation_title or "").strip()
+    if title:
+        return title[:_AUTO_CLOUD_DESK_NAME_MAX]
+    preview = " ".join((user_message or "").split()).strip()
+    if preview:
+        return preview[:_AUTO_CLOUD_DESK_NAME_MAX]
+    return _DEFAULT_AUTO_CLOUD_DESK_NAME
+
+
+async def _load_conversation_title(
+    *,
+    user_id: str,
+    conversation_id: str | None,
+) -> str | None:
+    if not conversation_id or not user_id:
+        return None
+    try:
+        from agentcore.db.base import async_session_factory
+        from agentcore.db.repositories import ConversationRepository
+
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id(
+                conversation_id, user_id=user_id
+            )
+        if conv is None:
+            return None
+        title = getattr(conv, "title", None)
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+    except Exception:  # noqa: BLE001 — title is best-effort for naming only
+        logger.debug(
+            "delegate.auto_cloud_desk_title_lookup_failed",
+            conversation_id=conversation_id,
+            exc_info=True,
+        )
+    return None
+
+
+def _bare_chat_write_tasks_need_target(
+    *,
+    session_folder_id: str | None,
+    tasks_raw: list[dict[str, Any]],
+    default_target_folder_id: str | None,
+) -> bool:
+    """True when gate would reject (no birth + write desk lacking effective target)."""
+    return (
+        gate_bare_chat_requires_target(
+            session_folder_id=session_folder_id,
+            tasks_raw=tasks_raw,
+            default_target_folder_id=default_target_folder_id,
+        )
+        is not None
+    )
+
+
+async def ensure_bare_chat_auto_cloud_desk(
+    *,
+    session_folder_id: str | None,
+    tasks_raw: list[dict[str, Any]],
+    default_target_folder_id: str | None,
+    turn_target_desk: Any,
+    user_id: str,
+    conversation_id: str | None = None,
+    user_message: str | None = None,
+    conversation_title: str | None = None,
+) -> str | None:
+    """Silently create a cloud desk for bare-chat write tasks lacking a target.
+
+    Trigger: no session ``folder_id`` + structural write-desk task + no effective
+    target + no unique ``turn_target_desk``. Only cloud; never rewrites conversation
+    ``folder_id``. At most once per turn (``auto_cloud_provisioned``). Does not ask
+    the user. Returns provisioned folder id, or ``None`` when skipped / failed.
+    """
+    if session_folder_id:
+        return None
+    if not user_id:
+        return None
+    if not _bare_chat_write_tasks_need_target(
+        session_folder_id=session_folder_id,
+        tasks_raw=tasks_raw if isinstance(tasks_raw, list) else [],
+        default_target_folder_id=default_target_folder_id,
+    ):
+        return None
+    if turn_target_desk is None:
+        return None
+    if getattr(turn_target_desk, "auto_cloud_provisioned", False):
+        return None
+    # Multi-project same turn already cleared the unique hint — do not mint a third.
+    seen = getattr(turn_target_desk, "_seen", None)
+    if isinstance(seen, set) and seen and not getattr(turn_target_desk, "folder_id", None):
+        return None
+
+    turn_target_desk.auto_cloud_provisioned = True
+    title = conversation_title
+    if not (isinstance(title, str) and title.strip()):
+        title = await _load_conversation_title(
+            user_id=user_id, conversation_id=conversation_id
+        )
+    name = _auto_cloud_desk_name(
+        conversation_title=title, user_message=user_message
+    )
+    try:
+        from agentcore.tools.builtin.projects import create_cloud_folder
+
+        project = await create_cloud_folder(user_id=user_id, name=name)
+    except Exception as e:  # noqa: BLE001 — fall through to gate reject
+        logger.warning(
+            "delegate.auto_cloud_desk_provision_failed",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+        return None
+
+    folder_id = project.get("id") if isinstance(project, dict) else None
+    if not isinstance(folder_id, str) or not folder_id.strip():
+        logger.warning(
+            "delegate.auto_cloud_desk_provision_failed",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            error="missing folder id",
+        )
+        return None
+    folder_id = folder_id.strip()
+    turn_target_desk.note_folder(folder_id)
+    logger.info(
+        "delegate.auto_cloud_desk_provisioned",
+        folder_id=folder_id,
+        name=name,
+        conversation_id=conversation_id,
+        conversation_untouched=True,
+    )
+    return folder_id
 
 
 async def load_target_folder_binding(
@@ -256,21 +447,25 @@ def _backend_local_root_id(backend: WorkspaceBackend) -> str | None:
     return None
 
 
-def _registry_rewire_consult_memory(
+def _registry_rewire_consult_tools(
     base: ToolRegistry,
     *,
     folder_id: str,
     memory_enabled: bool,
     has_memory_topics: bool,
+    has_on_demand_rules: bool,
 ) -> ToolRegistry:
-    """Fresh registry: drop old ``consult_memory``, optionally wire target scope."""
+    """Fresh registry: drop old consult_* tools, optionally wire target scope."""
     from agentcore.runtime.runs.executor_shared import _registry_without
 
     registry = _registry_without(base, "consult_memory")
+    registry = _registry_without(registry, "consult_rule")
     if memory_enabled and has_memory_topics:
         registry.register(
             ConsultMemoryTool(store=default_memory_store(), folder_id=folder_id)
         )
+    if has_on_demand_rules:
+        registry.register(ConsultRuleTool(folder_id=folder_id))
     return registry
 
 
@@ -283,10 +478,10 @@ async def rebuild_worker_prompt_for_target(
     attachment_context: str | None = None,
     desktop_online: bool = False,
     permission_axes: Any = None,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, bool]:
     """Reassemble worker system prompt with target-folder rules + workspace facts.
 
-    Returns ``(worker_base_prompt, has_memory_topics)``.
+    Returns ``(worker_base_prompt, has_memory_topics, has_on_demand_rules)``.
     """
     memory_store = default_memory_store()
     user_rules_markdown, memory_markdown = await assemble_turn_rules(
@@ -300,6 +495,9 @@ async def rebuild_worker_prompt_for_target(
     memory_topics = await load_memory_topics(
         memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
     )
+    from agentcore.memory import load_on_demand_user_rules
+
+    on_demand_rules = await load_on_demand_user_rules(user_id, folder_id=folder_id)
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
     exec_languages = await resolve_exec_languages(backend)
@@ -320,9 +518,10 @@ async def rebuild_worker_prompt_for_target(
         shared_base,
         memory_topics=memory_topics,
         memory_enabled=memory_enabled,
+        on_demand_rules=on_demand_rules,
         attachment_context=attachment_context,
     )
-    return worker_prompt, bool(memory_topics)
+    return worker_prompt, bool(memory_topics), bool(on_demand_rules)
 
 
 @dataclass(frozen=True)
@@ -385,7 +584,7 @@ async def apply_target_desktop(
         await local_root_claims.try_claim(target_root)
 
     desktop_online = base_tool_context.desktop_channel is not None
-    worker_prompt, has_topics = await rebuild_worker_prompt_for_target(
+    worker_prompt, has_topics, has_rules = await rebuild_worker_prompt_for_target(
         user_id=base_tool_context.user_id,
         folder_id=binding.folder_id,
         backend=backend,
@@ -393,11 +592,12 @@ async def apply_target_desktop(
         desktop_online=desktop_online,
         permission_axes=permission_axes,
     )
-    tools = _registry_rewire_consult_memory(
+    tools = _registry_rewire_consult_tools(
         worker_tools,
         folder_id=binding.folder_id,
         memory_enabled=memory_enabled,
         has_memory_topics=has_topics,
+        has_on_demand_rules=has_rules,
     )
     from agentcore.workspace.locate import workspace_channel_for_tools
 

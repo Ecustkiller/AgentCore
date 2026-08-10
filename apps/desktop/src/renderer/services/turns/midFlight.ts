@@ -30,7 +30,7 @@ import {
 
 export type MidFlightSendResult =
   | { kind: "received"; interjectionId: string }
-  /** 经典+steer 真软插入 ack（``turn_steer_accepted``）。 */
+  /** 经典+Steer 真软插入 ack（``turn_steer_accepted``）。 */
   | { kind: "steered"; steerId: string }
   | { kind: "queued"; position: number; queueDepth: number; queueId: string }
   | { kind: "blocked"; code?: string }
@@ -45,9 +45,11 @@ type DeliverMode = "open" | "buffering" | "live" | "aborted";
  * - 协调 → ``user_interjection`` 短确认（主时间线由 InterjectionTimeline 投影）
  * - 经典 → ``turn_steer_accepted``（软插入 pending；下一工具步生效）
  * - 不可注入 → ``turn_queued`` + ``degraded_from=steer``
- * ``delivery=queue``（强制）→ ``turn_queued`` 后立即插用户气泡 + 排队轻态，
- * 后续帧缓冲至 turn1 主路释放再续流。
+ * ``delivery=queue``（强制）→ ``turn_queued`` 只 upsert QueuedTurnsBar；
+ * ``turn_queue_started`` 出队开跑再插主时间线用户泡；后续帧缓冲至 turn1 主路释放再续流。
  *
+ * ack（queued / steered / received）后 Promise 即 resolve，调用方可清 composer；
+ * SSE 泵与 buffering/drain 在后台续跑。
  * POST 在调用时刻发出（D9 FIFO 位次已占）；缓冲只推迟客户端 fold。
  * Stop/abort **不** cancel 服务端队列（可见条仍可按项取消）。
  */
@@ -81,16 +83,17 @@ export async function sendMidFlightMessage(
   const onParentAbort = (): void => ac.abort();
   parentAbort?.signal.addEventListener("abort", onParentAbort);
 
-  const insertQueuedUserBubble = (
-    queueId: string,
-    position: number,
-    queueDepth: number,
-    degradedFrom?: "steer",
-  ): void => {
+  const registerAbort = (): void => {
+    if (abortRegistered) return;
+    useConversationStore.getState().setAbort(ac, conversationId);
+    abortRegistered = true;
+  };
+
+  /** 出队开跑时再进主时间线（排队期不插用户泡）。 */
+  const insertUserBubbleOnStart = (): void => {
     if (userMessageId) return;
     const id = crypto.randomUUID();
     userMessageId = id;
-    trackedQueueId = queueId;
     useConversationStore.getState().addMessage(
       {
         id,
@@ -114,31 +117,23 @@ export async function sendMidFlightMessage(
       },
       conversationId,
     );
-    useQueuedTurnsStore.getState().upsert({
-      queueId,
-      conversationId,
-      messageId: id,
-      content,
-      position,
-      queueDepth,
-      degradedFrom,
-    });
-    if (!abortRegistered) {
-      useConversationStore.getState().setAbort(ac, conversationId);
-      abortRegistered = true;
+    if (trackedQueueId) {
+      const prev = useQueuedTurnsStore
+        .getState()
+        .list(conversationId)
+        .find((e) => e.queueId === trackedQueueId);
+      if (prev) {
+        useQueuedTurnsStore.getState().upsert({ ...prev, messageId: id });
+      }
     }
   };
 
   const dispatchOne = (event: SSEEvent): void => {
     if (event.type === "turn_queue_started" && result.kind === "queued") {
       const p = event.payload as TurnQueueStartedPayload;
-      // 轻态主清在 messageStream；此处对齐 midFlight 跟踪 + 补插防御。
+      // 轻态主清在 messageStream；此处补插用户泡再交 dispatch 清条。
       if (!userMessageId && p.queue_id === result.queueId) {
-        insertQueuedUserBubble(
-          result.queueId,
-          result.position,
-          result.queueDepth,
-        );
+        insertUserBubbleOnStart();
       }
       if (trackedQueueId === p.queue_id) {
         trackedQueueId = null;
@@ -239,94 +234,126 @@ export async function sendMidFlightMessage(
       return { kind: "error" };
     }
 
-    await pumpSseBody(response, conversationId, (event: SSEEvent) => {
-      if (gate.mode === "aborted" || ac.signal.aborted) return;
-
-      if (event.type === "user_interjection") {
-        // 协调插话：即时送达，不缓冲、不占主路门。
-        gate.mode = "live";
-        const p = event.payload as { interjection_id?: string };
-        const iid = (p.interjection_id || "").trim();
-        if (iid) result = { kind: "received", interjectionId: iid };
-        dispatchSSEEvent(event, { conversationId, source: "server" });
-        return;
-      }
-
-      if (event.type === "turn_steer_accepted") {
-        // 经典 soft-insert ack：不插主时间线气泡；toast 由 messageStream 呈现。
-        gate.mode = "live";
-        const p = event.payload as TurnSteerAcceptedPayload;
-        const sid = (p.steer_id || "").trim();
-        if (sid) result = { kind: "steered", steerId: sid };
-        dispatchSSEEvent(event, { conversationId, source: "server" });
-        return;
-      }
-
-      if (event.type === "turn_queued") {
-        const p = event.payload as TurnQueuedPayload;
-        const position = p.position ?? 1;
-        const queueDepth = p.queue_depth ?? 1;
-        const queueId = p.queue_id;
-        result = { kind: "queued", position, queueDepth, queueId };
-        // 立即主时间线用户气泡 + 排队轻态（产品：Queue 可见可取消）。
-        insertQueuedUserBubble(
-          queueId,
-          position,
-          queueDepth,
-          p.degraded_from === "steer" ? "steer" : undefined,
-        );
-        // toast / degraded 由 dispatch → messageStream 呈现。
-        dispatchSSEEvent(event, { conversationId, source: "server" });
-        gate.mode = "buffering";
-        armIdleFlush();
-        return;
-      }
-
-      if (gate.mode === "buffering") {
-        buffer.push(event);
-        if (isPrimaryStreamIdle(conversationId)) flushBufferAndGoLive();
-        return;
-      }
-
-      dispatchOne(event);
+    // ack 后即可 resolve；泵 / 缓冲 / drain 后台续跑。
+    let settleAck: ((r: MidFlightSendResult) => void) | null = null;
+    let ackSettled = false;
+    const ackPromise = new Promise<MidFlightSendResult>((resolve) => {
+      settleAck = resolve;
     });
+    const finishAck = (r: MidFlightSendResult): void => {
+      if (ackSettled) return;
+      ackSettled = true;
+      settleAck?.(r);
+    };
 
-    // 泵正常结束但仍 buffering：主路空则放行；若已 abort（mock 流 close 未抛）则丢缓冲。
-    if (ac.signal.aborted) {
-      gate.mode = "aborted";
-      buffer.length = 0;
-      return result;
-    }
-    if (gate.mode === "buffering") {
-      if (!isPrimaryStreamIdle(conversationId)) {
-        await waitForPrimaryStreamIdle(conversationId);
-      }
-      if (!ac.signal.aborted) flushBufferAndGoLive();
-      else {
-        gate.mode = "aborted";
-        buffer.length = 0;
-      }
-    }
+    const runPump = async (): Promise<void> => {
+      try {
+        await pumpSseBody(response, conversationId, (event: SSEEvent) => {
+          if (gate.mode === "aborted" || ac.signal.aborted) return;
 
-    return result;
+          if (event.type === "user_interjection") {
+            // 协调插话：即时送达，不缓冲、不占主路门。
+            gate.mode = "live";
+            const p = event.payload as { interjection_id?: string };
+            const iid = (p.interjection_id || "").trim();
+            if (iid) result = { kind: "received", interjectionId: iid };
+            dispatchSSEEvent(event, { conversationId, source: "server" });
+            finishAck(result);
+            return;
+          }
+
+          if (event.type === "turn_steer_accepted") {
+            // 经典 soft-insert ack：不插主时间线气泡；toast 由 messageStream 呈现。
+            gate.mode = "live";
+            const p = event.payload as TurnSteerAcceptedPayload;
+            const sid = (p.steer_id || "").trim();
+            if (sid) result = { kind: "steered", steerId: sid };
+            dispatchSSEEvent(event, { conversationId, source: "server" });
+            finishAck(result);
+            return;
+          }
+
+          if (event.type === "turn_queued") {
+            const p = event.payload as TurnQueuedPayload;
+            const position = p.position ?? 1;
+            const queueDepth = p.queue_depth ?? 1;
+            const queueId = p.queue_id;
+            result = { kind: "queued", position, queueDepth, queueId };
+            trackedQueueId = queueId;
+            // 仅 QueuedTurnsBar；出队开跑再插用户泡。
+            useQueuedTurnsStore.getState().upsert({
+              queueId,
+              conversationId,
+              content,
+              position,
+              queueDepth,
+              degradedFrom: p.degraded_from === "steer" ? "steer" : undefined,
+            });
+            registerAbort();
+            // toast / degraded 由 dispatch → messageStream 呈现。
+            dispatchSSEEvent(event, { conversationId, source: "server" });
+            finishAck(result);
+            gate.mode = "buffering";
+            armIdleFlush();
+            return;
+          }
+
+          if (gate.mode === "buffering") {
+            buffer.push(event);
+            if (isPrimaryStreamIdle(conversationId)) flushBufferAndGoLive();
+            return;
+          }
+
+          dispatchOne(event);
+        });
+
+        // 泵正常结束但仍 buffering：主路空则放行；若已 abort（mock 流 close 未抛）则丢缓冲。
+        if (ac.signal.aborted) {
+          gate.mode = "aborted";
+          buffer.length = 0;
+          return;
+        }
+        if (gate.mode === "buffering") {
+          if (!isPrimaryStreamIdle(conversationId)) {
+            await waitForPrimaryStreamIdle(conversationId);
+          }
+          if (!ac.signal.aborted) flushBufferAndGoLive();
+          else {
+            gate.mode = "aborted";
+            buffer.length = 0;
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          // 排队等待中断连：丢未放行缓冲；**保留**排队条（Stop ≠ 取消排队）。
+          gate.mode = "aborted";
+          buffer.length = 0;
+          return;
+        }
+        notifyError(err, "发送失败");
+        result = { kind: "error" };
+      } finally {
+        parentAbort?.signal.removeEventListener("abort", onParentAbort);
+        unsubIdle();
+        if (queuedPrimaryToken) {
+          releasePrimaryStream(conversationId, queuedPrimaryToken);
+          queuedPrimaryToken = null;
+        }
+        if (abortRegistered && getRuntime(conversationId).abort === ac) {
+          useConversationStore.getState().setAbort(null, conversationId);
+        }
+        finishAck(result);
+      }
+    };
+
+    void runPump();
+    return ackPromise;
   } catch (err) {
+    parentAbort?.signal.removeEventListener("abort", onParentAbort);
     if (err instanceof DOMException && err.name === "AbortError") {
-      // 排队等待中断连：丢未放行缓冲；**保留**排队气泡/条（Stop ≠ 取消排队）。
-      gate.mode = "aborted";
-      buffer.length = 0;
       return result;
     }
     notifyError(err, "发送失败");
     return { kind: "error" };
-  } finally {
-    parentAbort?.signal.removeEventListener("abort", onParentAbort);
-    unsubIdle();
-    if (queuedPrimaryToken) {
-      releasePrimaryStream(conversationId, queuedPrimaryToken);
-      queuedPrimaryToken = null;
-    }
-    if (abortRegistered && getRuntime(conversationId).abort === ac) {
-      useConversationStore.getState().setAbort(null, conversationId);
-    }
   }
 }

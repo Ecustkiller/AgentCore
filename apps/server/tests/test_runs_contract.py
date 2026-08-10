@@ -398,6 +398,16 @@ def test_requires_files_soft_when_none_written():
 
 
 def test_requires_files_zero_disk_attributes_channel_dead_not_paste():
+    from agentcore.runtime.runs.contract import zero_files_gap_message
+
+    tip = zero_files_gap_message(landing_failure_kind="channel_dead")
+    assert "写盘通道不可用" in tip
+    assert "handoff 或正文交结论" in tip
+    assert "禁止再尝试落盘" in tip
+    assert "恢复工作区通道后重试" in tip
+    assert "勿改用正文粘贴冒充落盘" not in tip
+    assert "粘在回复正文" not in tip
+
     v = check_contract(
         "写了但通道挂了",
         RunContract(requires_files=True),
@@ -405,7 +415,11 @@ def test_requires_files_zero_disk_attributes_channel_dead_not_paste():
         landing_failure_kind="channel_dead",
     )
     assert v.ok
+    assert tip in v.warnings
     assert any("写盘通道不可用" in w and "粘在回复正文" not in w for w in v.warnings)
+    assert any("handoff 或正文交结论" in w for w in v.warnings)
+    # Default paste framing must remain for non-channel_dead zero-landing.
+    assert "粘在回复正文" in zero_files_gap_message()
 
 
 def test_requires_files_zero_disk_attributes_write_failed_not_paste():

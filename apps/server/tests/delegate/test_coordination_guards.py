@@ -1924,7 +1924,8 @@ def _fake_replan_tool(*, execution_id: str, plan, completed: dict | None = None)
     return tool
 
 
-def test_replan_adds_same_seat_takeover_transfers_write_locks():
+@pytest.mark.asyncio
+async def test_replan_adds_same_seat_takeover_transfers_write_locks():
     """活跃协调下 replan.adds 同座位接手 → auto replaces + 写锁归新主。"""
     from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
     from agentcore.runtime.delegate.supervised import apply_replan
@@ -1958,7 +1959,7 @@ def test_replan_adds_same_seat_takeover_transfers_write_locks():
         tool = _fake_replan_tool(
             execution_id="e-replan-xfer", plan=live, completed=completed
         )
-        errors = apply_replan(
+        errors = await apply_replan(
             tool,
             live,
             completed,
@@ -1988,7 +1989,8 @@ def test_replan_adds_same_seat_takeover_transfers_write_locks():
         clear_active_coordination("e-replan-xfer")
 
 
-def test_replan_adds_rejects_incomplete_seat_with_append_family_message():
+@pytest.mark.asyncio
+async def test_replan_adds_rejects_incomplete_seat_with_append_family_message():
     """活跃协调下 replan.adds 撞未完成同座位 → 拒，文案与 append 同族。"""
     from agentcore.runtime.delegate.supervised import apply_replan
     from agentcore.runtime.runs.types import Deliverable
@@ -2014,7 +2016,7 @@ def test_replan_adds_rejects_incomplete_seat_with_append_family_message():
     try:
         tool = _fake_replan_tool(execution_id="e-replan-rej", plan=live, completed={})
         before_ids = {n.run_id for n in live.nodes}
-        errors = apply_replan(
+        errors = await apply_replan(
             tool,
             live,
             {},

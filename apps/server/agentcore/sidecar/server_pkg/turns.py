@@ -323,7 +323,7 @@ class TurnExecutionMixin:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.
-                sink.close()
+                sink.close(reason="sidecar_turn_finally")
             await pump  # sink closed above → all events flushed
             # finalize / READY only after close AND after any detached drive settled
             # (await above), so post-detach DURABLE journal appends are not dropped
@@ -370,7 +370,7 @@ class TurnExecutionMixin:
                     await pump
             else:
                 with contextlib.suppress(Exception):
-                    sink.close()
+                    sink.close(reason="sidecar_turn_cancelled")
             # Reply on an independent task: this one is unwinding from cancellation.
             self._send_soon(
                 protocol.make_error(request_id, protocol.TURN_CANCELLED, "turn cancelled")
@@ -390,7 +390,7 @@ class TurnExecutionMixin:
                     await pump
             else:
                 with contextlib.suppress(Exception):
-                    sink.close()
+                    sink.close(reason="sidecar_turn_failed")
             logger.error("sidecar.turn_failed", turn_id=turn_id, error=str(e), exc_info=True)
             await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
         finally:
@@ -456,6 +456,7 @@ class TurnExecutionMixin:
         *,
         excluded_run_ids: list[str] | None = None,
         write_capability_overrides: list[dict[str, str]] | None = None,
+        model_overrides: dict[str, dict[str, str]] | None = None,
     ) -> None:
         """Rebuild + finish a durably-paused turn; stream events; reply when done.
 
@@ -464,8 +465,9 @@ class TurnExecutionMixin:
         (:meth:`confirm_claim`). Pipeline failure after that does **not** restore
         the frame (decision card stays settled; user continues via a new message).
 
-        ``excluded_run_ids`` / ``write_capability_overrides`` mirror cloud POST
-        resume (开工组队有限否决) through settlement prewrite → resume pipeline.
+        ``excluded_run_ids`` / ``write_capability_overrides`` / ``model_overrides``
+        mirror cloud POST resume (开工组队有限否决 + 人盖模型) through settlement
+        prewrite → resume pipeline.
         """
         assert self._root is not None  # guarded by _on_resume
         turn_id = suspension.message_id
@@ -478,6 +480,7 @@ class TurnExecutionMixin:
         decision_value = decision.value if hasattr(decision, "value") else str(decision)
         excluded = list(excluded_run_ids or [])
         overrides = list(write_capability_overrides or [])
+        models = dict(model_overrides or {})
         # Resolved once so the pipeline runs on it AND the reply surfaces the same model.
         resume_creds = self._creds_for(conversation_id, trace_id, turn_id)
         sink = EventSink()
@@ -521,6 +524,7 @@ class TurnExecutionMixin:
                     trace_id=trace_id,
                     excluded_run_ids=excluded,
                     write_capability_overrides=overrides,
+                    model_overrides=models,
                 )
             except Exception as e:
                 if self._paused_store is not None:
@@ -593,6 +597,7 @@ class TurnExecutionMixin:
                             x_client_platform="desktop",
                             excluded_run_ids=excluded,
                             write_capability_overrides=overrides,
+                            model_overrides=models,
                         )
                         # Same D1 hold as _run_turn: delay close while detached drive lives.
                         from agentcore.runtime.coordination import await_live_detached_drive
@@ -603,7 +608,7 @@ class TurnExecutionMixin:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.
-                sink.close()
+                sink.close(reason="sidecar_resume_finally")
             await pump  # sink closed above → all events flushed
             # finalize / READY only after close AND after any detached drive settled.
             if outbox is not None:

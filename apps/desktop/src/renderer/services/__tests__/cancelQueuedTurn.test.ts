@@ -18,7 +18,20 @@ vi.mock("@/services/api", async (importOriginal) => {
 const post = vi.mocked(api.post);
 const CID = "conv-cancel-q";
 
-function seedQueued() {
+/** Happy path：排队期无用户泡，仅条。 */
+function seedQueuedBarOnly() {
+  useConversationStore.getState().switchConversation(CID);
+  useQueuedTurnsStore.getState().upsert({
+    queueId: "q1",
+    conversationId: CID,
+    content: "queued",
+    position: 1,
+    queueDepth: 1,
+  });
+}
+
+/** 防御：出队插泡后仍挂 messageId 时取消可顺带删泡。 */
+function seedQueuedWithBubble() {
   useConversationStore.getState().switchConversation(CID);
   useConversationStore.getState().addMessage(
     {
@@ -48,8 +61,15 @@ beforeEach(() => {
 });
 
 describe("clearQueuedTurnLocally", () => {
-  it("移除 store 项与乐观用户气泡（幂等）", () => {
-    seedQueued();
+  it("无泡：只清条（幂等）", () => {
+    seedQueuedBarOnly();
+    expect(clearQueuedTurnLocally(CID, "q1")?.queueId).toBe("q1");
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(clearQueuedTurnLocally(CID, "q1")).toBeNull();
+  });
+
+  it("有 messageId：清条并删对应泡", () => {
+    seedQueuedWithBubble();
     expect(clearQueuedTurnLocally(CID, "q1")?.messageId).toBe("user-q");
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
     expect(
@@ -57,13 +77,12 @@ describe("clearQueuedTurnLocally", () => {
         .getState()
         .byId[CID]?.messages.find((m) => m.id === "user-q"),
     ).toBeUndefined();
-    expect(clearQueuedTurnLocally(CID, "q1")).toBeNull();
   });
 });
 
 describe("cancelQueuedTurn", () => {
-  it("HTTP 成功 → 立刻本地清 UI", async () => {
-    seedQueued();
+  it("HTTP 成功 → 立刻本地清条（无泡）", async () => {
+    seedQueuedBarOnly();
     post.mockResolvedValueOnce({});
     await cancelQueuedTurn(CID, "q1");
     expect(post).toHaveBeenCalledWith(
@@ -71,34 +90,19 @@ describe("cancelQueuedTurn", () => {
       {},
     );
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-    expect(
-      useConversationStore
-        .getState()
-        .byId[CID]?.messages.find((m) => m.id === "user-q"),
-    ).toBeUndefined();
   });
 
   it("404（已不在队）→ 同样本地清该项", async () => {
-    seedQueued();
+    seedQueuedBarOnly();
     post.mockRejectedValueOnce(new ApiError(404, "{}"));
     await expect(cancelQueuedTurn(CID, "q1")).resolves.toBeUndefined();
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-    expect(
-      useConversationStore
-        .getState()
-        .byId[CID]?.messages.find((m) => m.id === "user-q"),
-    ).toBeUndefined();
   });
 
   it("其它错误 → 抛出且不清 UI", async () => {
-    seedQueued();
+    seedQueuedBarOnly();
     post.mockRejectedValueOnce(new ApiError(500, "{}"));
     await expect(cancelQueuedTurn(CID, "q1")).rejects.toBeInstanceOf(ApiError);
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
-    expect(
-      useConversationStore
-        .getState()
-        .byId[CID]?.messages.find((m) => m.id === "user-q"),
-    ).toBeDefined();
   });
 });

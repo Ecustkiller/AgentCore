@@ -104,6 +104,7 @@ async def run_finalize_round(
     files_expected: bool = False,
     form_prose: bool = False,
     ceiling_reason: str = "",
+    workspace_channel_dead: bool = False,
 ) -> FinalizeRoundResult:
     """One finalize LLM round: coordination (+ persist when files), or tool-free."""
     persist = finalize_allows_persist(
@@ -111,6 +112,7 @@ async def run_finalize_round(
         allowed_tool_names,
         files_expected=files_expected,
         form_prose=form_prose,
+        workspace_channel_dead=workspace_channel_dead,
     )
     if inject_instruction:
         _inject_finalize_instructions(
@@ -137,6 +139,7 @@ async def run_finalize_round(
             disabled_tools,
             files_expected=files_expected,
             form_prose=form_prose,
+            workspace_channel_dead=workspace_channel_dead,
         )
         tool_choice = "auto" if tool_defs else "none"
 
@@ -234,6 +237,7 @@ async def force_finalize(
     outstanding_tool_failures: list | None = None,
     files_expected: bool = False,
     form_prose: bool = False,
+    workspace_channel_dead: bool = False,
 ) -> tuple[str, str, TokenUsage, int, FinalizeRoundResult | None]:
     """Attempt a coordination-tool finalize round, then fall back to tool-free.
 
@@ -287,6 +291,7 @@ async def force_finalize(
             files_expected=files_expected,
             form_prose=form_prose,
             ceiling_reason=reason,
+            workspace_channel_dead=workspace_channel_dead,
         )
     except Exception as e:
         logger.error("engine.force_finalize_failed", reason=reason, error=str(e))
@@ -325,6 +330,7 @@ async def force_finalize(
             files_expected=files_expected,
             form_prose=form_prose,
             ceiling_reason=reason,
+            workspace_channel_dead=workspace_channel_dead,
         )
     except Exception as e:
         logger.error("engine.force_finalize_hard_failed", reason=reason, error=str(e))

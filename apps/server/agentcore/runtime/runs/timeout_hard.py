@@ -6,7 +6,7 @@
 墙钟语义：阈值只累计 worker **自身编排 / 空转**时间。以下区间暂停倒计时：
 
 - LLM 调用在飞（:func:`mark_llm_inflight`）——避免慢上游单次调用被误判；
-- 嵌套子团队阻塞等待（:func:`mark_waiting_children`）—— depth-1 lead 在
+- 嵌套子团队阻塞等待（:func:`mark_waiting_children`）—— 凡 captain 在
   nested ``drive`` 墙钟内等子队员时，不得按「自己在干活」耗尽 hard-timeout /
   ``grace_wall`` 强杀父节点。
 

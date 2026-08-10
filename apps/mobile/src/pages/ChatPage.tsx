@@ -89,6 +89,7 @@ import {
 import {
   type ColdResumeHost,
   pausedSummaryToRequiredPayload,
+  resolveColdBindHostId,
   selectVisibleColdResumes,
 } from "@/lib/coldResume";
 import { composerTrailingSlots } from "@/lib/composerTrailing";
@@ -1359,12 +1360,47 @@ export function ChatPage() {
         kindFromColdResolvedEvent(event.type) != null ||
         event.type === "interaction_orphaned";
       if (isColdWire) {
-        const hostId =
+        // Cold bind: never nail pending to an unsealed client bubble when a
+        // same-turn stamp / resume key exists (ask continue → team_preview).
+        const preferred =
           hostServerMessageIdRef.current ??
           turnId ??
           activeTurnIdRef.current ??
           createdId ??
           "";
+        const bindHosts: ColdResumeHost[] = [];
+        for (const m of history ?? []) {
+          if (m.role === "assistant") {
+            bindHosts.push({
+              role: "assistant",
+              id: m.id,
+              serverMessageId: m.id,
+            });
+          }
+        }
+        const targetTurnId =
+          turnId ?? activeTurnIdRef.current ?? createdId ?? null;
+        for (const t of turns) {
+          const events =
+            targetTurnId && t.id === targetTurnId
+              ? [...t.events, event]
+              : t.events;
+          bindHosts.push({
+            role: "assistant",
+            id: t.id,
+            serverMessageId: extractMessageId(events),
+          });
+        }
+        if (createdId && !turns.some((t) => t.id === createdId)) {
+          bindHosts.push({
+            role: "assistant",
+            id: createdId,
+            serverMessageId: extractMessageId([event]),
+          });
+        }
+        const hostId = resolveColdBindHostId(bindHosts, preferred, {
+          resumeStamp: hostServerMessageIdRef.current,
+        });
         applyColdInteractionWireEvent(
           event.type,
           (event.payload ?? {}) as Record<string, unknown>,
@@ -2357,7 +2393,6 @@ export function ChatPage() {
     setError(null);
     clearStopping();
     setSending(true);
-    hostServerMessageIdRef.current = messageId;
     const prepared = prepareResumePausedTurn({
       messageId,
       turns,
@@ -2365,25 +2400,26 @@ export function ChatPage() {
       newTurnId: crypto.randomUUID(),
     });
     const turnId = prepared.turnId;
+    // setActiveTurn clears host stamp when the active turn id changes — re-seal
+    // after so ask_user continue → same-turn team_preview keeps the projection key.
     setActiveTurn(turnId);
+    hostServerMessageIdRef.current = messageId;
     setTurns(prepared.turns);
     if (prepared.history !== history) setHistory(prepared.history);
 
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      // stop / adjust / ask·debate：不带组队修正；delegate continue 才附排除/收紧
-      //（定案 A：手机确认面不附 model_overrides；类型字段仍可保留）。
+      // stop / adjust / ask·debate：不带组队修正；delegate continue 才附写盘收紧
+      //（确认面不附 excluded_run_ids / model_overrides；契约类型字段仍可保留）。
       const body: ResumeTurnBody = { decision, note, selected };
       if (decision === "continue" && amendments) {
-        const hasExclude = (amendments.excluded_run_ids?.length ?? 0) > 0;
         const hasWrite =
           (amendments.write_capability_overrides?.length ?? 0) > 0;
         const hasModels =
           !!amendments.model_overrides &&
           Object.keys(amendments.model_overrides).length > 0;
-        if (hasExclude || hasWrite || hasModels) {
-          if (hasExclude) body.excluded_run_ids = amendments.excluded_run_ids;
+        if (hasWrite || hasModels) {
           if (hasWrite) {
             body.write_capability_overrides =
               amendments.write_capability_overrides;

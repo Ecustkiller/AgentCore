@@ -138,6 +138,17 @@ export function FileArtifactsCard({
 
   const open = (a: FileArtifact) => {
     if (!conversationId) return;
+    // 有落地 desk → 跟桌面一样按 workspace 取字节（跨 desk 产物）；否则会话出生桌。
+    if (a.workspaceId) {
+      navigate(`/files/${encodeURIComponent(a.workspaceId)}`, {
+        state: {
+          openPath: a.path,
+          name: a.name,
+          fromConversationId: conversationId,
+        },
+      });
+      return;
+    }
     navigate(`/c/${conversationId}/files`, { state: { openPath: a.path } });
   };
 

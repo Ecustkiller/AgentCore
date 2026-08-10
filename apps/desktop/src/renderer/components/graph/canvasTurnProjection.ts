@@ -11,6 +11,7 @@ import {
   graphDocumentFingerprint,
   graphShellSnapshotKey,
 } from "./graphDocument";
+import { resolveCaptainSinkId } from "./helpers";
 import { projectTurnGraph } from "./projectTurnGraph";
 import { type TurnLayoutSlice, expandedUnitsFromFold } from "./useGraphLayout";
 
@@ -97,7 +98,10 @@ export function buildCanvasTurnProjections(
       execution.runs,
       ctx.collapsedSubtrees,
     );
-    const captain = execution.runs.find((r) => r.kind === "captain") ?? null;
+    const sinkId = resolveCaptainSinkId(execution.runs);
+    const captain = sinkId
+      ? (execution.runs.find((r) => r.id === sinkId) ?? null)
+      : null;
     const projected = projectTurnGraph({
       execution,
       scene: slice.scene,

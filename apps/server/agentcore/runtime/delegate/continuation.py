@@ -235,6 +235,11 @@ async def run_continuation(
     if merged_tools != spec.tools:
         spec.tools = merged_tools
 
+    # Per-worker 模型：本次显式改则覆盖 session；省略则继承该 run 已解析模型。
+    explicit_model = (spec.model or "").strip()
+    if explicit_model and explicit_model != (session.spec.model or "").strip():
+        session.spec = replace(session.spec, model=explicit_model)
+
     # 依赖产物：与冷开局同构，写入续干 feedback 正文（LLM）+ continuation 通道块（UI）。
     feedback, context_blocks = _continuation_prompt(spec, completed)
     try:

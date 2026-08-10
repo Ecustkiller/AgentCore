@@ -1,4 +1,8 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { selectVisibleColdResumes } from "@/services/resume";
+import { ensureStreamingAssistant } from "@/services/sse/contentBuffer";
+import { handleInteractionEvent } from "@/services/sse/handlers/interaction";
+import { handleMessageStreamEvent } from "@/services/sse/handlers/messageStream";
 import { useConversationStore } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
@@ -11,6 +15,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
+import { TeamPreviewCard } from "../TeamPreviewCard";
 
 vi.mock("@/services/interactionSubmit", () => ({
   submitInteraction: vi.fn().mockResolvedValue("ok"),
@@ -389,5 +394,235 @@ describe("ResumePrompt · live InteractionStore authority", () => {
     expect(useInteractionStore.getState().byId.get("tp-side")?.origin).toBe(
       "sidecar",
     );
+  });
+});
+
+describe("ResumePrompt · ask continue → same-turn team_preview", () => {
+  const SERVER = "m-server-ask-tp";
+
+  function seedAskPaused(): void {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+    useInteractionStore.getState().clear();
+    usePausedTurnStore.getState().clear();
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    useConversationStore.getState().addMessage({
+      id: "u1",
+      role: "user",
+      content: "怎么推进？",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-ask",
+      role: "assistant",
+      content: "先确认路径",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+    useConversationStore
+      .getState()
+      .setServerMessageIdOnLastMessage(SERVER, CID);
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: SERVER,
+      origin: "server",
+      payload: {
+        checkpoint_id: "cp-ask",
+        conversation_id: CID,
+        question: "这次讨论怎么推进？",
+        context: "",
+        assumptions: [],
+        questions: [],
+      },
+    });
+    useConversationStore.getState().finalizeLastMessage(CID);
+    useInteractionStore.getState().markResolved({
+      kind: "ask_user",
+      id: "cp-ask",
+      resolution: { decision: "continue" },
+    });
+  }
+
+  it("binds team_preview to stamped host after continue (no client UUID pin)", () => {
+    seedAskPaused();
+    // Resume path: flip paused assistant (same turn), then SSE team_preview_required.
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    expect(
+      useConversationStore.getState().resumePausedAssistant(SERVER, CID),
+    ).toBe("client-ask");
+
+    handleInteractionEvent(
+      {
+        type: "team_preview_required",
+        timestamp: "",
+        payload: tpPayload("tp-after-ask"),
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    const entry = useInteractionStore.getState().byId.get("tp-after-ask");
+    expect(entry?.messageId).toBe(SERVER);
+    expect(
+      selectVisibleColdResumes({
+        conversationId: CID,
+        byId: useInteractionStore.getState().byId,
+        pausedPending: usePausedTurnStore.getState().pending,
+        messages: useConversationStore.getState().byId[CID]?.messages,
+      }),
+    ).toHaveLength(1);
+
+    renderResume();
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+  });
+
+  it("ensureStreamingAssistant reuses stamped paused bubble (no unstamped mint)", () => {
+    seedAskPaused();
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    const before = useConversationStore
+      .getState()
+      .byId[CID]?.messages.filter((m) => m.role === "assistant").length;
+
+    ensureStreamingAssistant(CID);
+
+    const assistants = useConversationStore
+      .getState()
+      .byId[CID]?.messages.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(before);
+    expect(assistants[0].id).toBe("client-ask");
+    expect(assistants[0].serverMessageId).toBe(SERVER);
+    expect(assistants[0].isStreaming).toBe(true);
+
+    handleInteractionEvent(
+      {
+        type: "team_preview_required",
+        timestamp: "",
+        payload: tpPayload("tp-ensure"),
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(
+      useInteractionStore.getState().byId.get("tp-ensure")?.messageId,
+    ).toBe(SERVER);
+    renderResume();
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+  });
+
+  it("message_start after continue keeps stamp; team_preview paints", () => {
+    seedAskPaused();
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    useConversationStore.getState().resumePausedAssistant(SERVER, CID);
+
+    handleMessageStreamEvent(
+      {
+        type: "message_start",
+        timestamp: "",
+        payload: { message_id: SERVER, trace_id: "tr-cont" },
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    handleInteractionEvent(
+      {
+        type: "team_preview_required",
+        timestamp: "",
+        payload: tpPayload("tp-after-start"),
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    const assistant = useConversationStore
+      .getState()
+      .byId[CID]?.messages.find((m) => m.role === "assistant");
+    expect(assistant?.serverMessageId).toBe(SERVER);
+    expect(
+      useInteractionStore.getState().byId.get("tp-after-start")?.messageId,
+    ).toBe(SERVER);
+
+    renderResume();
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+  });
+
+  it("unstamped window: no clickable card and no「入口在下方拍板卡」marker", () => {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+    useInteractionStore.getState().clear();
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    useConversationStore.getState().addMessage({
+      id: "u1",
+      role: "user",
+      content: "组团",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-new",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+
+    handleInteractionEvent(
+      {
+        type: "team_preview_required",
+        timestamp: "",
+        payload: tpPayload("tp-nostamp-window"),
+      },
+      { conversationId: CID, source: "server" },
+    );
+
+    // Cold bind must not pin client UUID — empty until message_start stamps.
+    expect(
+      useInteractionStore.getState().byId.get("tp-nostamp-window")?.messageId,
+    ).toBe("");
+    expect(
+      selectVisibleColdResumes({
+        conversationId: CID,
+        byId: useInteractionStore.getState().byId,
+        pausedPending: [],
+        messages: useConversationStore.getState().byId[CID]?.messages,
+      }),
+    ).toHaveLength(0);
+
+    const { container } = renderResume();
+    expect(container.querySelector(".mx-4")).toBeNull();
+    expect(screen.queryByText("授权并开工")).toBeNull();
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <TeamPreviewCard
+            preview={{
+              id: "tp-nostamp-window",
+              primitive: "delegate",
+              workers: [
+                {
+                  run_id: "r1",
+                  role: "研究员",
+                  task: "调研",
+                  depends_on: [],
+                },
+              ],
+              tools: [],
+              motion: "",
+              form: "",
+              sides: [],
+              maxRounds: 0,
+              thorough: true,
+              status: "pending",
+              decision: null,
+              note: "",
+            }}
+          />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("pending-decision-marker")).toBeNull();
   });
 });

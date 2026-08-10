@@ -14,7 +14,6 @@ import {
 } from "@/components/ProcessTimeline";
 import { SourceCards, buildCitationDisplayMap } from "@/components/SourceCards";
 import { TeamView } from "@/components/TeamView";
-import { CONTEXT_CHANNEL_LABEL } from "@/components/assistantLabels";
 import { copyText } from "@/lib/messageExport";
 import {
   type SupportDiagnosticIds,
@@ -105,8 +104,8 @@ export function AssistantContent({
   /** Turn message id（可选；时间线披露稳定键）。 */
   messageId?: string | null;
   /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): what the CEO captain actually read this
-   *  turn (系统提示 / 对话历史 / 原始请求), rendered turn-level on its bubble — present even on a
-   *  pure-chat turn (no team). */
+   *  turn (系统提示 / 对话历史 / 原始请求). Entry lives in AssistantMessageFooter「更多」
+   *  (aligned with desktop); present even on a pure-chat turn (no team). */
   captainContext?: ContextBlockWire[];
   team?: TeamProjection;
   debate?: DebateResultPayload | null;
@@ -232,9 +231,6 @@ export function AssistantContent({
           ) : null}
         </>
       )}
-      {captainContext && captainContext.length > 0 ? (
-        <ReceivedContext blocks={captainContext} />
-      ) : null}
       {!hasTeam && deliveryStatus ? (
         <DeliveryShortfallHint status={deliveryStatus} />
       ) : null}
@@ -249,6 +245,7 @@ export function AssistantContent({
         content={content}
         process={process}
         supportIds={supportIds}
+        captainContext={captainContext}
         usage={usage}
         rounds={rounds}
         costText={costText}
@@ -285,44 +282,5 @@ export function SupportDiagnosticCopyButton({
     >
       {copied ? "已复制" : "复制排查包"}
     </button>
-  );
-}
-
-/** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the structured context the CEO captain was
- *  fed this turn (系统提示 / 对话历史 / 原始请求), shown turn-level on its bubble. Collapsible
- *  like 思考 (secondary to the answer). 决策②: the `system` block (verbatim 系统提示) is hidden
- *  — full prompt stays a desktop power-user surface. */
-function ReceivedContext({ blocks }: { blocks: ContextBlockWire[] }) {
-  const visible = blocks.filter((b) => b.channel !== "system");
-  if (visible.length === 0) return null;
-  return (
-    <details className="recv">
-      <summary>收到的上下文 · {visible.length} 段</summary>
-      <div className="recv-list">
-        {visible.map((b, i) => (
-          <div key={`${b.channel}-${i}`} className="recv-item">
-            <div className="recv-head">
-              <span className="recv-channel">
-                {CONTEXT_CHANNEL_LABEL[b.channel] ?? b.channel}
-              </span>
-              {b.heading && <span className="recv-heading">{b.heading}</span>}
-            </div>
-            {b.body && <pre className="recv-body">{b.body}</pre>}
-            {b.files.length > 0 && (
-              <div className="recv-files">
-                {b.files.map((f) => (
-                  <span key={f} className="recv-file">
-                    {f}
-                  </span>
-                ))}
-              </div>
-            )}
-            {b.truncated && (
-              <div className="recv-trunc">已截断（完整内容已传给 AI）</div>
-            )}
-          </div>
-        ))}
-      </div>
-    </details>
   );
 }

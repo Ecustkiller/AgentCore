@@ -83,14 +83,16 @@ async def test_nested_delegate_offered_only_within_depth_cap():
 
     plan = RunPlan()
     plan.add(_spec("d1", depth=1))
-    plan.add(_spec("d2", depth=2))  # at the cap
-    executor = _nesting_executor(plan, _ContentProvider(["X", "Y"]), factory)
+    plan.add(_spec("d2", depth=2))  # within cap (MAX=3)
+    plan.add(_spec("d3", depth=3))  # at the cap → leaf
+    executor = _nesting_executor(plan, _ContentProvider(["X", "Y", "Z"]), factory)
     await executor(plan.by_id("d1"), {})
     await executor(plan.by_id("d2"), {})
-    # The depth-1 worker (within the cap) is handed a delegate tool bound to itself;
-    # the depth-2 worker (at the cap) never is — delegation is on by default, the
+    await executor(plan.by_id("d3"), {})
+    # depth-1 and depth-2 workers (within the cap) get a delegate tool;
+    # depth-3 (at the cap) never does — delegation is on by default, the
     # depth cap is the hard stop.
-    assert calls == [("d1", 1)]
+    assert calls == [("d1", 1), ("d2", 2)]
 
 
 async def test_nested_delegate_withheld_at_depth_cap():
@@ -101,10 +103,10 @@ async def test_nested_delegate_withheld_at_depth_cap():
         return _stub_subteam()
 
     plan = RunPlan()
-    plan.add(_spec("d2", depth=2))  # at the cap
+    plan.add(_spec("d3", depth=3))  # at the cap
     executor = _nesting_executor(plan, _ContentProvider(["X"]), factory)
-    await executor(plan.by_id("d2"), {})
-    assert calls == []  # depth-2 sub-worker → leaf, no delegate tool
+    await executor(plan.by_id("d3"), {})
+    assert calls == []  # depth-3 sub-worker → leaf, no delegate tool
 
 
 async def test_captain_worker_gets_captain_identity_and_delegate_tool():
@@ -113,8 +115,11 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
     plan.add(_spec("d1", depth=1))
     executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("d1"), {})
-    # A within-cap worker is told it may lead one nested sub-team (on by default).
+    # A within-cap worker is told it may lead a nested sub-team (on by default).
     assert "再向下委派一层子团队" in provider.system_messages[0]
+    # depth-1 children may still nest — honesty must not claim they cannot.
+    assert "你的子成员仍可再向下委派一层" in provider.system_messages[0]
+    assert "你的子成员不能再向下委派" not in provider.system_messages[0]
 
 
 async def test_default_worker_is_captain_within_depth_cap():
@@ -127,6 +132,19 @@ async def test_default_worker_is_captain_within_depth_cap():
     # Captain-only markers — the leaf intro carries neither.
     assert "再向下委派一层子团队" in sys
     assert "不要为委派而委派" in sys
+
+
+async def test_depth_two_captain_children_are_leaves():
+    """depth-2 is still captain (MAX=3); honesty says its children cannot nest."""
+    provider = _ContentProvider(["X"])
+    plan = RunPlan()
+    plan.add(_spec("d2", depth=2))
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    await executor(plan.by_id("d2"), {})
+    sys = provider.system_messages[0]
+    assert "再向下委派一层子团队" in sys
+    assert "只能再嵌套这一层，你的子成员不能再向下委派" in sys
+    assert "你的子成员仍可再向下委派一层" not in sys
 
 
 async def test_captain_identity_carries_when_to_split_guidance():
@@ -152,15 +170,15 @@ async def test_captain_identity_carries_when_to_split_guidance():
     assert "4 个 sub-worker" in sys
 
 
-async def test_depth_two_subworker_keeps_leaf_identity():
+async def test_depth_three_subworker_keeps_leaf_identity():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A"}],
         id_prefix="t",
         parent_run_id="cap",
-        depth=2,
+        depth=3,
     )
-    # At the depth cap: delegate tools withheld — depth-2 sub-workers are always leaves.
+    # At the depth cap: delegate tools withheld — depth-3 sub-workers are always leaves.
     executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("t_1"), {})
     assert "不能再向下委派" in provider.system_messages[0]
@@ -179,7 +197,7 @@ async def test_worker_identities_carry_tool_safety_caution():
         [{"role": "A", "task": "做A"}],
         id_prefix="t",
         parent_run_id="cap",
-        depth=2,  # depth cap → leaf identity
+        depth=3,  # depth cap → leaf identity
     )
     leaf_exec = _nesting_executor(leaf_plan, leaf_provider, lambda rid, d: _stub_subteam())
     await leaf_exec(leaf_plan.by_id("t_1"), {})

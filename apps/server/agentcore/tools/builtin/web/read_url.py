@@ -62,8 +62,10 @@ _SUSPICIOUS_QUERY_LEN = 64
 # workers stop empty-spinning after stall→Wave retry (P1 2026-07-29).
 _POLICY_FAILURE = "policy_failure"
 # Shared stop-read trailer for hard-dead fetch classes (403/404/timeout/SSRF/egress).
+# Points at existing materials — not «下一招再 web_search» (that fuels search thrash
+# after deep-read death; retirement steer closes search separately).
 _STOP_READ_HINT = (
-    "——请停止对该来源换 URL / 同策略重试；基于已有 web_search 摘要与已读材料收口写作，"
+    "——请停止对该来源换 URL / 同策略重试；基于已有材料收口写作，"
     "不要再空转外网深读。"
     "收口 ≠ 可伪精确逐步菜单：无现行可核证据时，后台点击路径须标「易变/待实测」+ 查找关键词"
 )
@@ -509,7 +511,7 @@ class ReadUrlTool:
                     "。该站点反爬 / 拒绝访问，换 URL 或同策略重试都读不到"
                     f"{_STOP_READ_HINT}"
                     f"{_ANTI_CRAWL_SAME_REJECT_HINT}"
-                    "下一招：改查公开可抓来源，或直接用已有 web_search 摘要收口；"
+                    "下一招：改查公开可抓来源，或直接基于已有摘要/材料收口；"
                     "若必须站内数据，请用户自行打开页面后贴关键数字/截图（手脑），"
                     "勿假装已登录抓取。"
                 )

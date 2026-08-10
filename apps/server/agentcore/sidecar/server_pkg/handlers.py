@@ -473,6 +473,24 @@ class HandlerMixin:
             cap = str(raw.get("capability") or "").strip()
             if rid:
                 write_capability_overrides.append({"run_id": rid, "capability": cap})
+        model_overrides: dict[str, dict[str, str]] = {}
+        raw_models = params.get("model_overrides") or {}
+        if isinstance(raw_models, dict):
+            for rid, row in raw_models.items():
+                key = str(rid or "").strip()
+                if not key or not isinstance(row, dict):
+                    continue
+                model = str(row.get("model") or "").strip()
+                if not model:
+                    continue
+                entry: dict[str, str] = {"model": model}
+                origin = str(row.get("origin") or "").strip().lower()
+                if origin in ("platform", "byok"):
+                    entry["origin"] = origin
+                provider_id = str(row.get("provider_id") or "").strip()
+                if provider_id:
+                    entry["provider_id"] = provider_id
+                model_overrides[key] = entry
         # Per-turn trace_id (mirrors startTurn): ties this continuation's proxied LLM
         # calls to its write-back so the resumed reply is greppable as one trace.
         trace_id = str(params.get("traceId") or "")
@@ -491,10 +509,12 @@ class HandlerMixin:
 
         apply_rpc_folder_binding_to_suspension(suspension, params)
 
-        # Cold peek 无 plan blob → workers 行校验（同云端）；非法修正 rollback claim。
+        # Cold peek 无 plan blob → workers / debate sides 校验（同云端）；非法修正 rollback claim。
         from agentcore.core.errors import ValidationError as CoreValidationError
         from agentcore.runtime.kickoff.team_veto import (
+            should_apply_debate_model_overrides,
             should_apply_team_veto,
+            validate_debate_model_overrides,
             validate_team_preview_veto_workers,
         )
         from agentcore.runtime.suspension import TeamPreviewSuspension
@@ -507,6 +527,24 @@ class HandlerMixin:
                     suspension.workers,
                     excluded_run_ids=excluded_run_ids,
                     write_capability_overrides=write_capability_overrides,
+                    model_overrides=model_overrides,
+                )
+            except CoreValidationError as e:
+                await self._paused_store.rollback_claim(message_id)
+                await self._send(
+                    protocol.make_error(
+                        request_id, protocol.INVALID_PARAMS, str(e)
+                    )
+                )
+                return
+        elif isinstance(suspension, TeamPreviewSuspension) and should_apply_debate_model_overrides(
+            suspension, decision
+        ):
+            try:
+                validate_debate_model_overrides(
+                    suspension.sides,
+                    debate_arguments=suspension.debate_arguments,
+                    model_overrides=model_overrides,
                 )
             except CoreValidationError as e:
                 await self._paused_store.rollback_claim(message_id)
@@ -529,6 +567,7 @@ class HandlerMixin:
                 params.get("externalMounts"),
                 excluded_run_ids=excluded_run_ids,
                 write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
             )
         )
         self._register_turn(message_id, task, conversation_id=conversation_id)

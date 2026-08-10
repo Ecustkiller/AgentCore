@@ -391,6 +391,144 @@ async def test_document_store_bound_session_skips_cloud(
     assert cloud_called is False
 
 
+# --- on_demand rules via account narrow ticket (禁静默空转) --------------------
+
+
+def test_on_demand_user_rules_from_cloud_maps_catalog():
+    from agentcore.memory.rules_injection import on_demand_user_rules_from_cloud
+
+    rules = on_demand_user_rules_from_cloud(
+        {
+            "global_rules": [{"name": "用户规则.md", "content": "- always"}],
+            "global_on_demand_rules": [
+                {"name": "合规附录.md", "content": "- 对外须用中文\n"},
+            ],
+            "project_on_demand_rules": [
+                {"name": "出差报销.md", "content": "- 先走审批\n"},
+            ],
+        },
+        folder_id="F1",
+    )
+    assert [r.name for r in rules] == ["出差报销", "合规附录"]
+    assert any(r.name == "合规附录" and r.summary for r in rules)
+
+
+def test_on_demand_from_cloud_empty_when_keys_absent():
+    """Older clouds without on_demand fields must not invent catalog entries."""
+    from agentcore.memory.rules_injection import on_demand_user_rules_from_cloud
+
+    assert on_demand_user_rules_from_cloud(
+        {"global_rules": [{"name": "用户规则.md", "content": "- x"}]},
+        folder_id=None,
+    ) == []
+
+
+def test_lookup_on_demand_body_project_then_global():
+    from agentcore.memory.rules_injection import lookup_on_demand_rule_body_from_cloud
+
+    payload = {
+        "global_on_demand_rules": [
+            {"name": "合规附录.md", "content": "- global body\n"},
+        ],
+        "project_on_demand_rules": [
+            {"name": "合规附录.md", "content": "- project body\n"},
+        ],
+    }
+    assert (
+        lookup_on_demand_rule_body_from_cloud(
+            payload, folder_id="F1", name="合规附录"
+        )
+        == "- project body\n"
+    )
+    assert (
+        lookup_on_demand_rule_body_from_cloud(
+            payload, folder_id=None, name="合规附录"
+        )
+        == "- global body\n"
+    )
+
+
+async def test_load_on_demand_uses_cloud_when_ticketed(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    """Regression: account path must NOT silently return [] when on_demand exists."""
+    from agentcore.memory.rules_injection import load_on_demand_user_rules
+
+    async def _fake_list(creds, *, folder_id):
+        assert creds is account_creds
+        assert folder_id == "F1"
+        return {
+            "global_rules": [{"name": "用户规则.md", "content": "- always"}],
+            "project_rules": [],
+            "global_on_demand_rules": [
+                {"name": "合规附录.md", "content": "- 对外须用中文\n"},
+            ],
+            "project_on_demand_rules": [],
+        }
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_list_user_rules", _fake_list
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: (_ for _ in ()).throw(AssertionError("must not open local DB")),
+    )
+
+    with account_credentials_scope(account_creds):
+        rules = await load_on_demand_user_rules("u1", folder_id="F1")
+    assert len(rules) == 1
+    assert rules[0].name == "合规附录"
+
+
+async def test_load_on_demand_ticketed_empty_catalog_is_honest(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    from agentcore.memory.rules_injection import load_on_demand_user_rules
+
+    async def _fake_list(creds, *, folder_id):
+        return {
+            "global_rules": [{"name": "用户规则.md", "content": "- always"}],
+            "global_on_demand_rules": [],
+            "project_on_demand_rules": [],
+        }
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_list_user_rules", _fake_list
+    )
+    with account_credentials_scope(account_creds):
+        assert await load_on_demand_user_rules("u1", folder_id=None) == []
+
+
+async def test_consult_rule_cloud_hit(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    from agentcore.tools.builtin.consult_rule import ConsultRuleTool
+
+    body = "- 对外沟通须用中文\n"
+
+    async def _fake_list(creds, *, folder_id):
+        assert folder_id == "F1"
+        return {
+            "global_on_demand_rules": [{"name": "合规附录.md", "content": body}],
+            "project_on_demand_rules": [],
+        }
+
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_list_user_rules", _fake_list
+    )
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        lambda: (_ for _ in ()).throw(AssertionError("must not open local DB")),
+    )
+
+    tool = ConsultRuleTool(folder_id="F1")
+    with account_credentials_scope(account_creds):
+        result = await tool.execute({"name": "合规附录"}, _ctx())
+    assert result.success
+    assert result.output == body
+    assert result.display == {"rule": "合规附录"}
+
+
 async def test_assemble_without_ticket_uses_db_path(
     monkeypatch: pytest.MonkeyPatch,
 ):

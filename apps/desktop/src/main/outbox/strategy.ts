@@ -130,21 +130,48 @@ export function journalEntriesFromMap(
 
 const TOOL_FAILURE_MESSAGE_MAX = 200;
 
-/** Coarse write-back failure codes (mirrors server ``normalize_local_turn_tool_failure_code``). */
+/** Known local-turn write-back failure codes (mirrors server frozenset). */
+const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
+  "searxng_unreachable",
+  "egress_connect",
+  "declaration_empty",
+  "declaration_xor",
+  "declaration_unknown",
+  "other",
+]);
+
+/**
+ * Coarse write-back failure codes (mirrors server
+ * ``normalize_local_turn_tool_failure_code``).
+ * Declaration gate: structured reject templates only (not free-text intent).
+ */
 export function normalizeToolFailureCode(
   message: string,
   code?: string | null,
 ): string {
   const rawCode = (code || "").trim();
-  if (
-    rawCode === "searxng_unreachable" ||
-    rawCode === "egress_connect" ||
-    rawCode === "other"
-  ) {
+  if (LOCAL_TURN_TOOL_FAILURE_CODES.has(rawCode)) {
     return rawCode;
   }
-  const text = (message || "").toLowerCase();
   const raw = message || "";
+  // Mirror server try_declaration_reject_gate prefixes / templates.
+  if (
+    raw.startsWith("playbook 与 tasks 二选一") ||
+    raw.startsWith("playbook 与 playbook_id 指向不同") ||
+    raw.startsWith("手写 tasks 时勿传")
+  ) {
+    return "declaration_xor";
+  }
+  if (
+    raw.startsWith("delegate 须传手写") ||
+    raw.startsWith("delegate 缺 tasks/playbook")
+  ) {
+    return "declaration_empty";
+  }
+  if (raw.startsWith("未知 playbook")) {
+    return "declaration_unknown";
+  }
+  const text = raw.toLowerCase();
   if (
     text.includes("searxng") ||
     raw.includes("搜索服务") ||

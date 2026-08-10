@@ -8,6 +8,7 @@ import {
 } from "@/stores/sidePanel";
 import { useCallback, useMemo } from "react";
 import { INPUT_ID, isEndpointId } from "./constants";
+import { resolveCaptainSinkId } from "./helpers";
 
 export interface GraphDrillHandoff {
   interactive: boolean;
@@ -89,10 +90,11 @@ export function useGraphDrillIn(
     return null;
   }, [messages, execution]);
 
-  const captainRun = useMemo(
-    () => execution?.runs.find((r) => r.kind === "captain") ?? null,
-    [execution],
-  );
+  const captainRun = useMemo(() => {
+    if (!execution) return null;
+    const id = resolveCaptainSinkId(execution.runs);
+    return id ? (execution.runs.find((r) => r.id === id) ?? null) : null;
+  }, [execution]);
 
   const activateNode = useCallback(
     (id: string) => {

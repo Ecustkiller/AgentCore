@@ -394,6 +394,42 @@ async def _drive_body(
                 has_deps=False,
             )
 
+    # Sticky channel-dead + write-desk 硬拒（与 post_close 同层；并入/续跑未完成写盘节点也拒）。
+    # prose / 无写盘需求批次放行；不扫 task 自由文。force 不逃生（能力缺失非收口策略）。
+    from agentcore.core.logging import get_logger
+    from agentcore.core.types import ToolEffect
+    from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+    from agentcore.runtime.delegate.channel_dead_gate import (
+        channel_dead_write_desk_error,
+    )
+    from agentcore.tools.protocol import ToolResult
+
+    channel_dead_err = channel_dead_write_desk_error(
+        tool,
+        plan,
+        session=session,
+        skip_run_ids=set(seed_completed or ()),
+    )
+    if channel_dead_err is not None:
+        get_logger(__name__).info(
+            "delegate.channel_dead_write_desk_rejected",
+            execution_id=execution_id,
+            nodes=len(plan.nodes),
+            call=call_idx,
+        )
+        return annotate_batch_meta(
+            ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=channel_dead_err,
+                effect=ToolEffect.CONTINUE,
+                contract_failure=True,
+            ),
+            node_count=0,
+            has_deps=False,
+        )
+
     if session is None:
         preview_early = await team_preview_before_workers(
             tool,

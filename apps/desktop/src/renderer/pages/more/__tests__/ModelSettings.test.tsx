@@ -186,6 +186,7 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     expect(screen.getByText("模型组合")).toBeTruthy();
+    expect(screen.getByText(/多人协作（委派）对工具调用要求较高/)).toBeTruthy();
     expect(screen.getByText("GLM-5.2")).toBeTruthy();
     expect(screen.getByText("办公")).toBeTruthy();
     expect(screen.getByText("默认组合")).toBeTruthy();
@@ -288,12 +289,21 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getAllByRole("button", { name: "删除" })).toHaveLength(1);
   });
 
-  it("opens the create editor from 新建 with optional slots visible", () => {
+  it("opens the create editor with optional slots collapsed under 高级", () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
     expect(screen.getByText("主模型（必填）")).toBeTruthy();
+    expect(screen.getByText("高级 · 分槽覆盖")).toBeTruthy();
+    expect(
+      screen.getByText("Worker/后台：跟随主模型 · 识图：不配置"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Worker 模型")).toBeNull();
+    expect(screen.queryByText("后台任务模型")).toBeNull();
+    expect(screen.queryByText("识图模型（可选）")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
     expect(screen.getByText("Worker 模型")).toBeTruthy();
     expect(screen.getByText("后台任务模型")).toBeTruthy();
     expect(screen.getByText("识图模型（可选）")).toBeTruthy();
@@ -301,11 +311,9 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getByText("不配置")).toBeTruthy();
     expect(screen.getByText(/辩论用主模型/)).toBeTruthy();
     expect(screen.getByText(/标题、记忆等后台任务/)).toBeTruthy();
-    expect(screen.getByText(/主模型目录标有视觉时，贴图走主模型/)).toBeTruthy();
-    expect(
-      screen.getByText(/留空=平台 VISION_\* 兜底或无 reader/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/当前主模型目录标有视觉/)).toBeNull();
+    expect(screen.getByText(/主模型不能看图时再配/)).toBeTruthy();
+    expect(screen.queryByText(/VISION_/)).toBeNull();
+    expect(screen.queryByText(/当前主模型标有视觉/)).toBeNull();
   });
 
   it("hints when draft main is curated vision-capable", () => {
@@ -353,8 +361,9 @@ describe("ModelSettings (profiles)", () => {
         target: { value: "gpt-4o" },
       },
     );
+    fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
     expect(
-      screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
+      screen.getByText(/当前主模型标有视觉，贴图优先走主模型/),
     ).toBeTruthy();
   });
 
@@ -571,6 +580,7 @@ describe("ModelSettings (profiles)", () => {
     );
     expect(document.getElementById("profile-main-provider")).toBeTruthy();
 
+    fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
     expect(document.getElementById("profile-worker")).toHaveProperty(
       "disabled",
       false,
@@ -857,6 +867,7 @@ describe("ModelSettings (profiles)", () => {
     fireEvent.change(screen.getByLabelText(/名称/), {
       target: { value: "识图组合" },
     });
+    fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
     const visionProvider = document.getElementById(
       "profile-vision-provider",
     ) as HTMLSelectElement;
@@ -930,6 +941,7 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.click(screen.getByRole("button", { name: /高级 · 分槽覆盖/ }));
     const visionProvider = document.getElementById(
       "profile-vision-provider",
     ) as HTMLSelectElement;

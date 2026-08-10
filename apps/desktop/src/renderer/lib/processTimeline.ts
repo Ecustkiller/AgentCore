@@ -522,10 +522,10 @@ function precedingToolsAreOnlyWait(
 }
 
 /**
- * View-layer omit for CEO bubble chrome (S4 Thought 降噪): drop `wait` tool steps
- * and wait-idle reasoning so coordination spin does not paint Thought/tool rows.
- * Does not mutate fold / journal — callers keep the full `process` for counts.
- * Returns the same reference when nothing was removed.
+ * View-layer omit: drop `wait` tool steps and wait-idle reasoning.
+ * Retained for non-bubble callers; CEO bubble ProcessTimeline no longer applies
+ * this by default (wait rows stay visible under collapseProcessSteps).
+ * Does not mutate fold / journal. Returns the same reference when nothing removed.
  */
 export function omitCoordinationIdleSteps(
   process: ProcessStep[],

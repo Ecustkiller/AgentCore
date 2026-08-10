@@ -47,8 +47,11 @@ from agentcore.runtime.kickoff.summary import (
 )
 from agentcore.runtime.kickoff.team_veto import (
     WriteCapabilityOverride,
+    apply_debate_model_overrides,
     apply_team_preview_veto,
+    should_apply_debate_model_overrides,
     should_apply_team_veto,
+    validate_debate_model_overrides,
     validate_team_preview_veto,
     validate_team_preview_veto_workers,
 )
@@ -58,6 +61,7 @@ __all__ = [
     "KickoffPrimitive",
     "KickoffSummary",
     "WriteCapabilityOverride",
+    "apply_debate_model_overrides",
     "apply_motion_override",
     "apply_team_preview_veto",
     "await_kickoff",
@@ -79,12 +83,14 @@ __all__ = [
     "is_short_affirmation",
     "research_first_tool_result",
     "resolve_debate_host_attach",
+    "should_apply_debate_model_overrides",
     "should_apply_team_veto",
     "should_kickoff",
     "should_offer_research_first",
     "should_preview_delegate_plan",
     "should_recommend_research_first",
     "turn_keeps_stage_card",
+    "validate_debate_model_overrides",
     "validate_team_preview_veto",
     "validate_team_preview_veto_workers",
 ]

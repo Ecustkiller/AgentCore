@@ -1,3 +1,4 @@
+import { useConversationStore } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 // @vitest-environment jsdom
@@ -18,6 +19,7 @@ beforeEach(() => {
   resetSendDespitePendingAcks();
   usePausedTurnStore.getState().clear();
   useInteractionStore.getState().clear();
+  useConversationStore.setState({ currentConversationId: null, byId: {} });
   vi.restoreAllMocks();
 });
 
@@ -64,6 +66,24 @@ describe("composerPendingHint", () => {
   });
 
   it("detects cold InteractionStore pending without pausedTurns", () => {
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().addMessage({
+      id: "u1",
+      role: "user",
+      content: "组团",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+    useConversationStore.getState().addMessage({
+      id: "client-a",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+      serverMessageId: "m1",
+    });
     useInteractionStore.getState().upsertRequired({
       kind: "team_preview",
       conversationId: CID,
@@ -79,6 +99,32 @@ describe("composerPendingHint", () => {
     });
     expect(conversationHasPendingDecision(CID)).toBe(true);
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
+  });
+
+  it("ignores cold pending until assistant has a server stamp", () => {
+    useConversationStore.getState().switchConversation(CID);
+    useConversationStore.getState().addMessage({
+      id: "client-only",
+      role: "assistant",
+      content: "",
+      createdAt: "",
+      executionId: null,
+      isStreaming: true,
+    });
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "client-only",
+      origin: "server",
+      payload: {
+        checkpoint_id: "tp-nostamp-hint",
+        conversation_id: CID,
+        primitive: "delegate",
+        workers: [],
+        tools: [],
+      },
+    });
+    expect(conversationHasPendingDecision(CID)).toBe(false);
   });
 
   it("detects pending approval interactions", () => {

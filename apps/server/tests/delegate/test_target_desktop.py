@@ -16,6 +16,8 @@ from agentcore.runtime.delegate.target_desktop import (
     format_bare_chat_no_target_error,
     gate_bare_chat_requires_target,
     load_target_folder_binding,
+    resolve_bare_chat_write_scope,
+    task_structurally_requires_write_desk,
 )
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.tools.protocol import ToolContext
@@ -30,27 +32,138 @@ def test_effective_target_folder_id_prefers_explicit():
     assert effective_target_folder_id("  ", default="  ") is None
 
 
-def test_gate_bare_chat_blocks_without_target():
-    msg = gate_bare_chat_requires_target(
-        session_folder_id=None,
-        tasks_raw=[{"role": "工", "task": "写文件"}],
+def test_task_structurally_requires_write_desk():
+    assert task_structurally_requires_write_desk({"task": "打招呼"}) is False
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"form": "prose"}}
+    ) is False
+    assert task_structurally_requires_write_desk({"deliverable": {}}) is False
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"form": "files"}}
+    ) is True
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"requires_files": True}}
+    ) is True
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"requires_files": False}}
+    ) is False
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"artifacts": ["a.py"]}}
+    ) is True
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"artifacts": ["  ", ""]}}
+    ) is False
+    assert task_structurally_requires_write_desk(
+        {"deliverable": {"artifacts": []}}
+    ) is False
+
+
+def test_resolve_bare_chat_write_scope():
+    assert (
+        resolve_bare_chat_write_scope(
+            target_folder_id=None,
+            session_folder_id=None,
+            base_write_scope="project",
+        )
+        == "none"
     )
-    assert msg is not None
-    assert msg.startswith(NO_TARGET_SCRATCH_GATE_MSG)
-    assert "缺目标任务：" in msg
-    assert "role=工" in msg
-    assert "缺 target_folder_id" in msg
-    assert "写文件" not in msg  # 勿倾倒 task 正文
+    assert (
+        resolve_bare_chat_write_scope(
+            target_folder_id=None,
+            session_folder_id=None,
+            base_write_scope="explore_memory",
+        )
+        == "explore_memory"
+    )
+    assert (
+        resolve_bare_chat_write_scope(
+            target_folder_id="t",
+            session_folder_id=None,
+            base_write_scope="project",
+        )
+        == "project"
+    )
+    assert (
+        resolve_bare_chat_write_scope(
+            target_folder_id=None,
+            session_folder_id="birth",
+            base_write_scope="project",
+        )
+        == "project"
+    )
 
 
-def test_gate_bare_chat_lists_all_missing_targets():
-    """部分缺 target → 整批拒，回执点名全部缺项。"""
+def test_gate_bare_chat_blocks_write_deliverable_without_target():
+    """纯闸：无目标 + form=files → 拒（ensure 未跑时的残余拒文案）。"""
     msg = gate_bare_chat_requires_target(
         session_folder_id=None,
         tasks_raw=[
-            {"role": "甲", "task": "有目标正文勿泄露", "target_folder_id": "proj_a"},
-            {"id": "n2", "role": "乙", "task": "缺目标的长任务说明不应出现"},
-            {"role": "丙", "task": "也缺"},
+            {
+                "role": "工",
+                "task": "写文件勿泄露正文",
+                "deliverable": {"form": "files"},
+            }
+        ],
+    )
+    assert msg is not None
+    assert msg.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert "写盘任务必须点名" in msg
+    assert "纯对话/只读可不点名" in msg
+    assert "create" not in msg.lower()
+    assert "ask_user" not in msg
+    assert "缺目标任务：" in msg
+    assert "role=工" in msg
+    assert "缺 target_folder_id" in msg
+    assert "写文件勿泄露正文" not in msg
+
+
+def test_gate_bare_chat_allows_prose_and_no_deliverable():
+    """无 deliverable / form=prose → 放行（坐 scratch、禁写由 write_scope 管）。"""
+    assert (
+        gate_bare_chat_requires_target(
+            session_folder_id=None,
+            tasks_raw=[{"role": "客服", "task": "打招呼"}],
+        )
+        is None
+    )
+    assert (
+        gate_bare_chat_requires_target(
+            session_folder_id=None,
+            tasks_raw=[
+                {
+                    "role": "写手",
+                    "task": "写段说明",
+                    "deliverable": {"form": "prose"},
+                }
+            ],
+        )
+        is None
+    )
+
+
+def test_gate_bare_chat_lists_all_missing_write_targets():
+    """部分缺 target 的写盘 task → 整批拒，回执只点名写盘缺项。"""
+    msg = gate_bare_chat_requires_target(
+        session_folder_id=None,
+        tasks_raw=[
+            {
+                "role": "甲",
+                "task": "有目标正文勿泄露",
+                "target_folder_id": "proj_a",
+                "deliverable": {"form": "files"},
+            },
+            {
+                "id": "n2",
+                "role": "乙",
+                "task": "缺目标的长任务说明不应出现",
+                "deliverable": {"form": "files"},
+            },
+            {
+                "role": "丙",
+                "task": "也缺写盘",
+                "deliverable": {"requires_files": True},
+            },
+            {"role": "丁", "task": "纯对话不进拒名单"},
         ],
     )
     assert msg is not None
@@ -58,14 +171,25 @@ def test_gate_bare_chat_lists_all_missing_targets():
     assert "role=乙" in msg and "id=n2" in msg
     assert "role=丙" in msg
     assert "role=甲" not in msg  # 有 target 的不进骨架
+    assert "role=丁" not in msg  # 无写盘 deliverable 不进骨架
     assert "有目标正文勿泄露" not in msg
     assert "缺目标的长任务说明不应出现" not in msg
-    assert "也缺" not in msg
+    assert "也缺写盘" not in msg
+    assert "纯对话不进拒名单" not in msg
     # 同源组装函数契约
     assert msg == format_bare_chat_no_target_error(
         [
-            {"id": "n2", "role": "乙", "task": "缺目标的长任务说明不应出现"},
-            {"role": "丙", "task": "也缺"},
+            {
+                "id": "n2",
+                "role": "乙",
+                "task": "缺目标的长任务说明不应出现",
+                "deliverable": {"form": "files"},
+            },
+            {
+                "role": "丙",
+                "task": "也缺写盘",
+                "deliverable": {"requires_files": True},
+            },
         ]
     )
 
@@ -74,7 +198,14 @@ def test_gate_bare_chat_allows_with_target():
     assert (
         gate_bare_chat_requires_target(
             session_folder_id=None,
-            tasks_raw=[{"role": "工", "task": "写", "target_folder_id": "proj_a"}],
+            tasks_raw=[
+                {
+                    "role": "工",
+                    "task": "写",
+                    "target_folder_id": "proj_a",
+                    "deliverable": {"form": "files"},
+                }
+            ],
         )
         is None
     )
@@ -97,7 +228,9 @@ def test_gate_birth_allows_omit_target():
     assert (
         gate_bare_chat_requires_target(
             session_folder_id="birth",
-            tasks_raw=[{"role": "工", "task": "写"}],
+            tasks_raw=[
+                {"role": "工", "task": "写", "deliverable": {"form": "files"}}
+            ],
         )
         is None
     )
@@ -107,7 +240,9 @@ def test_gate_bare_inherits_default_target():
     assert (
         gate_bare_chat_requires_target(
             session_folder_id=None,
-            tasks_raw=[{"role": "子", "task": "续"}],
+            tasks_raw=[
+                {"role": "子", "task": "续", "deliverable": {"form": "files"}}
+            ],
             default_target_folder_id="parent_desk",
         )
         is None
@@ -216,7 +351,7 @@ async def test_apply_target_desktop_switches_backend_and_memory():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "TARGET_PROMPT", False
+        return "TARGET_PROMPT", False, False
 
     with (
         patch(
@@ -454,7 +589,7 @@ async def test_apply_target_desktop_allows_second_local_root():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "LOCAL_B_PROMPT", False
+        return "LOCAL_B_PROMPT", False, False
 
     with (
         patch(
@@ -515,7 +650,7 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT", False
+        return "CLOUD_PROMPT", False, False
 
     with (
         patch(
@@ -551,8 +686,8 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
 
 
 @pytest.mark.asyncio
-async def test_delegate_execute_bare_chat_gate(monkeypatch):
-    """DelegateTool.execute rejects bare chat without target before drive."""
+async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
+    """DelegateTool.execute：裸聊写盘缺 target → 静默建云桌并过闸。"""
     from agentcore.llm.provider.protocol import LLMProvider
     from agentcore.runtime.events import EventSink
     from agentcore.tools.builtin.delegate.tool import DelegateTool
@@ -564,6 +699,18 @@ async def test_delegate_execute_bare_chat_gate(monkeypatch):
         async def stream(self, *args, **kwargs):  # noqa: ANN002, ANN003
             raise NotImplementedError
             yield  # pragma: no cover
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        return {"id": "auto_desk", "name": name, "mode": "cloud"}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_conversation_title",
+        AsyncMock(return_value="会话标题甲"),
+    )
 
     backend = SimpleNamespace(location="server")
     ctx = ToolContext(
@@ -578,32 +725,99 @@ async def test_delegate_execute_bare_chat_gate(monkeypatch):
         llm=_DummyLLM(),  # type: ignore[arg-type]
         sink=EventSink(),
         system_prompt="sys",
-        user_message="user",
+        user_message="用户消息预览应被标题覆盖",
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx,
         folder_id=None,
         captain_run_id="CEO",
     )
-    recorded: list[dict[str, object]] = []
+    provisioned: list[dict[str, object]] = []
+
+    import agentcore.runtime.delegate.target_desktop as td_mod
+
+    _orig_info = td_mod.logger.info
 
     def _capture(event: str, **fields: object) -> None:
-        if event == "delegate.bare_chat_no_target_rejected":
-            recorded.append(fields)
+        if event == "delegate.auto_cloud_desk_provisioned":
+            provisioned.append(fields)
+        _orig_info(event, **fields)
 
-    import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
-
-    monkeypatch.setattr(
-        delegate_tool_mod.logger,
-        "info",
-        lambda event, **fields: _capture(event, **fields),
-    )
+    monkeypatch.setattr(td_mod.logger, "info", _capture)
 
     result = await t.execute(
-        {"tasks": [{"role": "工", "task": "写 README"}]},
+        {
+            "tasks": [
+                {
+                    "role": "工",
+                    "task": "写 README",
+                    "deliverable": {"form": "files"},
+                }
+            ]
+        },
         ctx,
     )
-    assert result.success is False
-    assert result.contract_failure is True
-    assert "scratch" in (result.error or "") or "目标项目" in (result.error or "")
-    assert recorded and recorded[0].get("session_folder_id") is None
+    err = result.error or ""
+    assert not err.startswith(NO_TARGET_SCRATCH_GATE_MSG)
+    assert ctx.turn_target_desk.folder_id == "auto_desk"
+    assert provisioned and provisioned[0].get("folder_id") == "auto_desk"
+    assert provisioned[0].get("name") == "会话标题甲"
+    assert provisioned[0].get("conversation_untouched") is True
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_auto_cloud_desk_skips_when_hint_exists(monkeypatch):
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "x", "name": name}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    hint = TurnTargetDeskHint()
+    hint.note_folder("existing")
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id="existing",
+        turn_target_desk=hint,
+        user_id="u1",
+        user_message="msg",
+    )
+    assert out is None
+    assert creates == []
+    assert hint.auto_cloud_provisioned is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_auto_cloud_desk_skips_prose(monkeypatch):
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "x", "name": name}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    hint = TurnTargetDeskHint()
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "客", "deliverable": {"form": "prose"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        user_message="闲聊",
+    )
+    assert out is None
+    assert creates == []

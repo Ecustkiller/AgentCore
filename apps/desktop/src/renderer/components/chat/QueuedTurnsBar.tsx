@@ -5,8 +5,8 @@ import { Loader2, X } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 排队可见条：drain 前展示 FIFO 项，可按项取消（Stop ≠ 取消排队）。
- * 挂在 composer 上方，滚动离开气泡时仍可见。
+ * 排队唯一 UI：drain 前展示 FIFO 项，可按项取消（Stop ≠ 取消排队）。
+ * 挂在 composer 上方；排队期不插主时间线用户泡。
  */
 export function QueuedTurnsBar({
   conversationId,
@@ -45,7 +45,7 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
     setBusy(true);
     try {
       await cancelQueuedTurn(item.conversationId, item.queueId);
-      // 成功 / 404 已在 cancelQueuedTurn 内本地清 store + 乐观气泡。
+      // 成功 / 404 已在 cancelQueuedTurn 内本地清条。
     } catch (err) {
       notifyError(err, "取消排队失败");
     } finally {

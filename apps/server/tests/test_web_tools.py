@@ -2840,3 +2840,47 @@ def test_stop_read_hint_aligns_closing_with_howto_path_honesty():
     assert "收口" in _STOP_READ_HINT
     assert "伪精确" in _STOP_READ_HINT or "逐步菜单" in _STOP_READ_HINT
     assert "易变" in _STOP_READ_HINT or "待实测" in _STOP_READ_HINT
+    # C2: per-failure trailer must not name web_search as the default next move.
+    assert "web_search" not in _STOP_READ_HINT
+
+
+def test_read_url_retire_steer_closes_web_search_thrash():
+    """Retirement copy must close «继续 web_search» — not point at more search."""
+    from agentcore.tools.builtin.web._net import READ_URL_RETIRE_STEER
+
+    assert "停用" in READ_URL_RETIRE_STEER
+    assert "收束继续 web_search" in READ_URL_RETIRE_STEER
+    assert "不要把继续检索当默认出路" in READ_URL_RETIRE_STEER
+    assert "基于已有材料" in READ_URL_RETIRE_STEER
+
+
+def test_search_notes_skip_read_url_nudge_when_retired():
+    """After read_url retirement, empty/hit search notes must not urge deep-read."""
+    from agentcore.tools.builtin.web._net import (
+        POST_READ_RETIRE_SEARCH_HINT,
+        clear_read_url_retired,
+        consume_post_read_retire_search_hint,
+        mark_read_url_retired,
+    )
+    from agentcore.tools.builtin.web.search import (
+        _empty_result_note,
+        _strategy_change_note,
+    )
+
+    run_id = "search-after-read-retire"
+    clear_read_url_retired(run_id)
+    mark_read_url_retired(run_id)
+
+    empty = _empty_result_note("q", empty_streak=2, read_url_retired=True)
+    assert "先对已有命中 read_url" not in empty
+    assert "勿再催 read_url" in empty
+    assert "继续检索当默认出路" in empty
+
+    weak = _strategy_change_note(empty_streak=2, read_url_retired=True)
+    assert "先 read_url" not in weak
+    assert "勿再催 read_url" in weak
+
+    hint = consume_post_read_retire_search_hint(run_id)
+    assert hint == POST_READ_RETIRE_SEARCH_HINT
+    assert consume_post_read_retire_search_hint(run_id) is None  # one-shot
+    clear_read_url_retired(run_id)

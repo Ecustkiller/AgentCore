@@ -184,7 +184,7 @@ def describe_net_error(
     if _is_ssl_error(e):
         return (
             "SSL 证书校验失败（站点证书链不被信任，常见于国内部分政务/法院站点）；"
-            "改用 web_search 摘要或换其它来源，勿对同一站点反复重试"
+            "改用已有摘要或换其它来源，勿对同一站点反复重试"
         )
     host = _error_target_host(e, url)
     treat_as_local = local_service or (host is not None and is_loopback_host(host))

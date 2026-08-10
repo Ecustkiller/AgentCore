@@ -19,6 +19,12 @@ describe("workspaceIgnore", () => {
     expect(shouldSkipDirName(".agentcore")).toBe(false);
     expect(shouldSkipDirName(".git")).toBe(true);
     expect(shouldSkipDirName("node_modules")).toBe(true);
+    expect(shouldSkipDirName("vendor")).toBe(true);
+    expect(shouldSkipDirName("logs")).toBe(true);
+    expect(shouldSkipDirName("tmp")).toBe(true);
+    expect(shouldSkipDirName("temp")).toBe(true);
+    expect(shouldSkipDirName(".tmp")).toBe(true);
+    expect(shouldSkipDirName("htmlcov")).toBe(true);
     expect(shouldSkipDirName(".mypy_cache")).toBe(true);
     expect(shouldSkipDirName(".pytest_cache")).toBe(true);
     expect(shouldSkipDirName(".pytest_tmp")).toBe(true);
@@ -56,6 +62,7 @@ describe("workspaceIgnore", () => {
   it("AI noise covers media/archives; not system .db", () => {
     expect(shouldSkipAiNoiseFileName("hero.png")).toBe(true);
     expect(shouldSkipAiNoiseFileName("out.zip")).toBe(true);
+    expect(shouldSkipAiNoiseFileName("app.log")).toBe(true);
     expect(shouldSkipAiNoiseFileName("data.parquet")).toBe(true);
     expect(shouldSkipAiNoiseFileName("arr.feather")).toBe(true);
     expect(shouldSkipAiNoiseFileName("x.arrow")).toBe(true);
@@ -67,6 +74,7 @@ describe("workspaceIgnore", () => {
     expect(shouldSkipAiNoiseFileName("code_search.db")).toBe(false);
     expect(shouldSkipFileName("hero.png")).toBe(true);
     expect(shouldSkipFileName("data.parquet")).toBe(true);
+    expect(shouldSkipFileName("app.log")).toBe(true);
     expect(shouldSkipFileName("code_search.db")).toBe(true);
   });
 

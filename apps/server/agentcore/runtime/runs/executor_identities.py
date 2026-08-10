@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from agentcore.runtime.runs.constants import MAX_DELEGATION_DEPTH
 from agentcore.tools.protocol import Tool
 
 DeliverableForm = Literal["prose", "files"]
@@ -305,7 +306,9 @@ _WORKER_TOOL_SAFETY_POLICY = """\
 调用即可，由确认机制处理同意，不必在正文里反复征求许可。对不可逆或破坏性的操作\
 （删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。\
 【第三方 Key】【禁止】把用户粘贴的 API Key 写入工作区明文（含 env）；脚本用环境变量占位，\
-用户本机自备。云端无任意 HTTPS 出口时【禁止】用 code_execute 代调外网生图 API 交差。
+用户本机自备。handoff / 进度摘要【禁止】复述密码、token、私钥、hostkey、完整 Key 原文——\
+改写为「已识别凭据，请到原会话或密钥处查看」。云端无任意 HTTPS 出口时【禁止】用 code_execute \
+代调外网生图 API 交差。
 </tool_safety>"""
 
 # Shared problem-handling tiers for leaf + captain workers. Both identities embed
@@ -346,9 +349,24 @@ _WORKER_LEAF_INTRO = f"""\
 # Captain intro for any worker within the depth cap (delegation is on by default —
 # there is no per-node opt-in flag). Path-B briefs (成果级目标·约束·验收, no structure
 # pins this round) get a priority nudge to delegate-then-integrate — not a hard
-# workflow, and never「凡大活必嵌套 / 未嵌套禁写」. Depth-2 sub-workers cannot
-# delegate further (executor withholds the tool).
-_WORKER_CAPTAIN_INTRO = f"""\
+# workflow, and never「凡大活必嵌套 / 未嵌套禁写」. Nesting honesty branches on
+# ``depth`` vs ``MAX_DELEGATION_DEPTH``: children of a near-cap captain are leaves;
+# shallower captains' children may still nest. Workers at the cap get the leaf intro.
+
+
+def _worker_captain_intro(*, depth: int) -> str:
+    # Children land at depth+1; they may nest iff depth+1 < MAX (i.e. depth < MAX-1).
+    if depth < MAX_DELEGATION_DEPTH - 1:
+        nest_honesty = (
+            "你可以把它拆给一支由你指挥的子团队（你的子成员仍可再向下委派一层），看到他们的"
+            "产出后由你整合。"
+        )
+    else:
+        nest_honesty = (
+            "你可以把它拆给一支由你指挥的子团队（只能再嵌套这一层，你的子成员不能再向下委派），"
+            "看到他们的产出后由你整合。"
+        )
+    return f"""\
 你是团队中的一名专家 worker，除了自己干活，你还可以再向下委派一层子团队来分担。你负责一个划定\
 好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。
 
@@ -368,8 +386,7 @@ _WORKER_CAPTAIN_INTRO = f"""\
 
 【拆分粒度】每个 sub-worker 应是一个可独立完成、可独立验证的单元；单次最多带 4 个 sub-worker。
 
-你可以把它拆给一支由你指挥的子团队（只能再嵌套这一层，你的子成员不能再向下委派），看到他们的\
-产出后由你整合。你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
+{nest_honesty}你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
 escalate kind=scope 报告了职责偏离，控制权会在波边界交回你（子队输出『计划已让出』）——\
 这时用 replan 据上游产出把待定稿步骤定稿 / 操舵尚未运行的步骤，续跑【同一张】子计划；确认\
 无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。{_WORKER_PROBLEM_HANDLING}"""
@@ -379,6 +396,7 @@ def build_worker_identity(
     *,
     has_dependents: bool,
     captain: bool = False,
+    depth: int = 1,
     form: DeliverableForm | None = None,
     requires_files: bool = False,
     artifacts: Sequence[str] | None = None,
@@ -388,7 +406,8 @@ def build_worker_identity(
 
     ``has_dependents`` comes from the DAG at identity-build time (``node_has_dependents``):
     upstream nodes get the imperative handoff relay; leaves get the conditional
-   「有增量才写」wording. ``captain`` selects the nested-delegation intro.
+    「有增量才写」wording. ``captain`` selects the nested-delegation intro;
+    ``depth`` (when captain) picks honest child-nesting copy vs ``MAX_DELEGATION_DEPTH``.
     ``form`` selects the deliverable-form block (omit = legacy two-way guidance).
     ``requires_files`` / ``artifacts`` coerce omit → files block when the CEO declared
     a file deliverable without setting ``form`` (等效 form=files).
@@ -399,7 +418,7 @@ def build_worker_identity(
     effective_form = resolve_identity_form(
         form, requires_files=requires_files, artifacts=artifacts
     )
-    intro = _WORKER_CAPTAIN_INTRO if captain else _WORKER_LEAF_INTRO
+    intro = _worker_captain_intro(depth=depth) if captain else _WORKER_LEAF_INTRO
     no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
     return (
         f"{intro}\n\n"

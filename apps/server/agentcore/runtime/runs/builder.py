@@ -824,9 +824,8 @@ def _inline_spec(
             else ""
         ),
         tools=_tools(item.get("tools"), valid_tools),
-        # Explicit model override (真·多模型辩手)：宽松解析（仅收非空字符串，否则空=按
-        # 统一 profile 解析），由执行器覆写 profile.model 并经路由器分发。普通 worker
-        # 不带此字段 → 空。
+        # Explicit model override：路由键字符串（真·多模型辩手 / per-worker 三元组编码后）。
+        # 普通 worker 省略 → 空 = 跟组合 Worker 槽；执行器覆写 profile 并经路由器分发。
         model=model_raw.strip() if isinstance(model_raw, str) else "",
         thinking=thinking_raw if isinstance(thinking_raw, bool) else None,
         deliverable=_parse_deliverable(item),

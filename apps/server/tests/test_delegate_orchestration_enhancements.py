@@ -172,7 +172,7 @@ def test_widen_aggressive_fans_from_checkpoint():
     assert set(plan.by_id("verifier").depends_on) == {"core", "table", "power"}
 
 
-# ── 3. handoff 写参清理（非写工具短状态，禁 _landed_summary 回灌形）────────
+# ── 3. handoff 写参清理（原写工具名 + landed 短状态，禁 _write_landed 诱饵）──
 
 
 def test_write_args_landed_summary_is_readonly_not_writing_args():
@@ -194,6 +194,7 @@ def test_write_args_landed_summary_is_readonly_not_writing_args():
     assert "old_string" not in data
     assert "_cleared" not in data
     assert "[已清理]" not in projected
+    # Constant kept for residual-imitation rejection only — never a projected name.
     assert LANDED_STATUS_TOOL == "_write_landed"
     assert LANDED_STATUS_TOOL not in {"file_write", "file_append", "str_replace"}
 
@@ -286,8 +287,9 @@ def test_project_cleared_write_args_collapses_completed_writes():
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
     call = out[1].tool_calls[0]
-    assert call.function.name == LANDED_STATUS_TOOL
-    assert call.function.name not in {"file_write", "file_append", "str_replace"}
+    # Keep original write name — never emit _write_landed as function.name bait.
+    assert call.function.name == "file_write"
+    assert call.function.name != LANDED_STATUS_TOOL
     args = json.loads(call.function.arguments)
     assert args["path"] == "docs/a.md"
     assert args["status"] == "landed"
@@ -295,16 +297,21 @@ def test_project_cleared_write_args_collapses_completed_writes():
     assert "_landed_summary" not in args
     assert "content" not in args
     assert big not in call.function.arguments
-    # canonical-shape: status is stable on re-project (name left WRITE_ARG_TOOLS)
+    # No bait name anywhere in the projected window's tool_calls.
+    for msg in out:
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                assert tc.function.name != LANDED_STATUS_TOOL
+    # canonical-shape: status is stable on re-project
     out2 = project_cleared_write_args(out, min_chars=100)
     assert out2 is out or out2[1].tool_calls[0].function.arguments == (
         out[1].tool_calls[0].function.arguments
     )
-    assert out2[1].tool_calls[0].function.name == LANDED_STATUS_TOOL
+    assert out2[1].tool_calls[0].function.name == "file_write"
 
 
 def test_project_cleared_write_args_str_replace_readonly_summary():
-    """完成后投影为非写工具短状态，不再保留可提交的 old/new 形状。"""
+    """完成后投影为原名 + landed 短状态，不再保留可提交的 old/new 形状。"""
     from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
 
     anchor = "END_MARK\n---\n"
@@ -335,7 +342,8 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
     call = out[0].tool_calls[0]
-    assert call.function.name == LANDED_STATUS_TOOL
+    assert call.function.name == "str_replace"
+    assert call.function.name != LANDED_STATUS_TOOL
     args = json.loads(call.function.arguments)
     assert args["path"] == "notes.md"
     assert args["via"] == "str_replace"
@@ -343,6 +351,40 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
     assert "old_string" not in args
     assert "new_string" not in args
     assert big not in call.function.arguments
+
+
+def test_project_cleared_write_args_migrates_legacy_write_landed_name():
+    """旧窗里的 `_write_landed` function.name 迁回 via，去掉仿调诱饵。"""
+    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+
+    call_id = "legacy1"
+    status = json.dumps(
+        {
+            "status": "landed",
+            "via": "file_append",
+            "chars": 900,
+            "path": "docs/a.md",
+            "note": "已写入",
+        },
+        ensure_ascii=False,
+    )
+    msgs = [
+        LLMMessage(
+            role="assistant",
+            tool_calls=[
+                ToolCall(
+                    id=call_id,
+                    function=ToolCallFunction(name=LANDED_STATUS_TOOL, arguments=status),
+                )
+            ],
+        ),
+        LLMMessage(role="tool", content="ok", tool_call_id=call_id),
+    ]
+    out = project_cleared_write_args(msgs, min_chars=100)
+    assert out is not msgs
+    assert out[0].tool_calls[0].function.name == "file_append"
+    assert out[0].tool_calls[0].function.name != LANDED_STATUS_TOOL
+    assert json.loads(out[0].tool_calls[0].function.arguments)["via"] == "file_append"
 
 
 def test_project_cleared_write_args_skips_pending_write():
@@ -366,7 +408,7 @@ def test_project_cleared_write_args_skips_pending_write():
 
 
 def test_cleared_write_stub_rejection_exact_markers_only():
-    """硬拒仅命中 stub 形；正常短文 / 含「已清理」散文不拦。"""
+    """硬拒仅命中 stub / landed 形；正常短文 / 含「已清理」散文不拦。"""
     assert cleared_write_stub_rejection({"path": "a.md", "content": "[已清理]"}) is not None
     assert (
         cleared_write_stub_rejection(
@@ -386,6 +428,13 @@ def test_cleared_write_stub_rejection_exact_markers_only():
         )
         is not None
     )
+    # Compact landed-status echo under a write tool name.
+    landed_err = cleared_write_stub_rejection(
+        {"path": "a.md", "status": "landed", "via": "file_write", "chars": 100}
+    )
+    assert landed_err is not None
+    assert "已落盘" in landed_err
+    assert "不是可提交写参" in landed_err or "落盘" in landed_err
     # Normal short / prose must pass.
     assert cleared_write_stub_rejection({"path": "a.md", "content": "短文"}) is None
     assert (
@@ -400,6 +449,24 @@ def test_cleared_write_stub_rejection_exact_markers_only():
         )
         is None
     )
+
+
+def test_landed_status_name_rejection_is_explicit():
+    """仿调 `_write_landed` → 早拒文案点名「落盘状态不是工具」，非神秘 not_found。"""
+    from agentcore.runtime.engine.write_args_clear import (
+        LANDED_STATUS_TOOL,
+        landed_status_name_rejection,
+    )
+
+    err = landed_status_name_rejection(LANDED_STATUS_TOOL)
+    assert err is not None
+    assert "_write_landed" in err
+    assert "落盘" in err
+    assert "不是可调用工具" in err
+    assert "not_found" not in err.lower()
+    assert "file_read" in err
+    assert landed_status_name_rejection("file_write") is None
+    assert landed_status_name_rejection("web_search") is None
 
 
 def test_landed_summary_echo_fingerprint_collapses_per_path():
@@ -454,6 +521,21 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
     assert fp_a == fp_stub
     assert fp_a != fp_other
     assert fp_a != fp_ok
+
+    # Compact landed-status echo (no _landed_summary) also collapses per path.
+    fp_status = fingerprint_tool_call(
+        "file_write",
+        json.dumps(
+            {
+                "path": "docs/a.md",
+                "status": "landed",
+                "via": "file_write",
+                "chars": 1200,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    assert fp_status == fp_a
 
     fp_sr_a = fingerprint_tool_call(
         "str_replace",

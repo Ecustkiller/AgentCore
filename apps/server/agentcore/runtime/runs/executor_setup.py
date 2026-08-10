@@ -122,6 +122,17 @@ async def prepare_agent_node(
         system_prompt = applied.system_prompt
         base_ctx = applied.tool_ctx
 
+    # 方案 C：无出生且无 target → 坐会话 scratch，默认禁写（冷启动 explore_memory 例外）。
+    from agentcore.runtime.delegate.target_desktop import (
+        SCRATCH_NO_WRITE_IDENTITY_HINT,
+        resolve_bare_chat_write_scope,
+    )
+
+    worker_write_scope = resolve_bare_chat_write_scope(
+        target_folder_id=spec.target_folder_id,
+        session_folder_id=env.session_folder_id,
+        base_write_scope=getattr(base_ctx, "write_scope", "project") or "project",
+    )
     tool_ctx = replace(
         base_ctx,
         run_id=spec.run_id,
@@ -132,6 +143,7 @@ async def prepare_agent_node(
         ownership_desk_id=(
             str(spec.target_folder_id or env.session_folder_id or "").strip() or None
         ),
+        write_scope=worker_write_scope,  # type: ignore[arg-type]
         # 升级实时可见: give this worker's escalate tool a live channel back to the
         # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
         # hands it the (question, assumption, blocking) triple. run_id/agent_id are
@@ -202,7 +214,7 @@ async def prepare_agent_node(
     # 真纯丙：不再用 spec.tools 做 allow-list；默认全开相关工具面。
     allowed_tools = None
     # A worker may nest a sub-team purely by tree position: any depth below the
-    # cap is a captain (delegation is on by default); depth-2 sub-workers are
+    # cap is a captain (delegation is on by default); depth-3 sub-workers are
     # leaves because the executor withholds the delegate tools here.
     lead_subteam: LeadSubteam | None = None
     is_captain = (
@@ -234,6 +246,7 @@ async def prepare_agent_node(
     identity = build_worker_identity(
         has_dependents=node_has_dependents(env.plan, spec.run_id),
         captain=is_captain,
+        depth=spec.depth,
         form=deliverable_form,
         requires_files=bool(deliverable.requires_files) if deliverable else False,
         artifacts=list(deliverable.artifacts) if deliverable else None,
@@ -244,6 +257,10 @@ async def prepare_agent_node(
     )
     if not env.collaboration:
         identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")
+    if worker_write_scope == "none" and not (
+        spec.target_folder_id or env.session_folder_id
+    ):
+        identity = f"{identity.rstrip()}\n\n{SCRATCH_NO_WRITE_IDENTITY_HINT}"
     # 真纯丙·H2：form=prose 不再硬卸写盘工具；形态靠 identity 提示自觉守岗。
     # Short-round repair posture tool strip retired (no-op kept for compat).
     # CEO / repair_code may still stamp max_rounds; tools stay full surface.

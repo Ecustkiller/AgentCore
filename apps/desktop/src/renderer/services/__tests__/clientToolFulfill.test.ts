@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const resolveInteraction = vi.fn().mockResolvedValue(undefined);
+const forceSseTransportDrop = vi.fn().mockReturnValue(false);
 
 vi.mock("@/services/interaction", () => ({
   resolveInteraction: (...args: unknown[]) => resolveInteraction(...args),
 }));
 
-import { ApiError } from "@/services/api";
+vi.mock("@/services/streamConversation", () => ({
+  forceSseTransportDrop: (...args: unknown[]) => forceSseTransportDrop(...args),
+}));
+
+import { ApiError, NetworkError } from "@/services/api";
 import {
   fulfillClientToolOnce,
   resetClientToolFulfillmentForTests,
@@ -17,8 +22,13 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     resetClientToolFulfillmentForTests();
     resolveInteraction.mockReset();
     resolveInteraction.mockResolvedValue(undefined);
+    forceSseTransportDrop.mockReset();
+    forceSseTransportDrop.mockReturnValue(false);
   });
-  afterEach(() => resetClientToolFulfillmentForTests());
+  afterEach(() => {
+    resetClientToolFulfillmentForTests();
+    vi.useRealTimers();
+  });
 
   it("runs perform once and resolves with the result", async () => {
     const perform = vi.fn().mockResolvedValue({ ok: true, value: { x: 1 } });
@@ -90,6 +100,7 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
 
   it("retries resolve (not perform) when first settle failed and side effect succeeded", async () => {
     const perform = vi.fn().mockResolvedValue({ ok: true, value: "x" });
+    // Non-transient Error → no in-process retry; redelivery retries resolve.
     resolveInteraction
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce(undefined);
@@ -109,6 +120,46 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
 
     expect(perform).toHaveBeenCalledTimes(1);
     expect(resolveInteraction).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries NetworkError in-process before giving up", async () => {
+    vi.useFakeTimers();
+    const perform = vi.fn().mockResolvedValue({ ok: true, value: "x" });
+    resolveInteraction
+      .mockRejectedValueOnce(new NetworkError())
+      .mockResolvedValueOnce(undefined);
+
+    const done = fulfillClientToolOnce({
+      requestId: "r1",
+      conversationId: "c1",
+      logLabel: "workspaceOps",
+      perform,
+    });
+    await vi.runAllTimersAsync();
+    await done;
+
+    expect(perform).toHaveBeenCalledTimes(1);
+    expect(resolveInteraction).toHaveBeenCalledTimes(2);
+    expect(forceSseTransportDrop).not.toHaveBeenCalled();
+  });
+
+  it("nudges SSE transport drop after workspace settle retries exhaust", async () => {
+    vi.useFakeTimers();
+    forceSseTransportDrop.mockReturnValue(true);
+    const perform = vi.fn().mockResolvedValue({ ok: true, value: "x" });
+    resolveInteraction.mockRejectedValue(new NetworkError());
+
+    const done = fulfillClientToolOnce({
+      requestId: "r1",
+      conversationId: "c1",
+      logLabel: "workspaceOps",
+      perform,
+    });
+    await vi.runAllTimersAsync();
+    await done;
+
+    expect(resolveInteraction).toHaveBeenCalledTimes(3);
+    expect(forceSseTransportDrop).toHaveBeenCalledWith("c1");
   });
 
   it("treats resolve 404 as settled (no-op) and does not re-resolve", async () => {

@@ -28,8 +28,8 @@ import {
 // organize_plan / daily_review 勾选墙；proposal_pick 行式单选；risk_ack 行式多选；
 // decision/kickoff = default 预选 + compose 答复模型 +「其他」逃逸；
 // 本机目录 action 可点 → LocalPickerFailureCard（unavailable），禁灰掉无解释。
-// Delegate team_preview：纳入开关 + 写盘单向收紧 + 嘱咐（定案 A：人改模型 UI 已藏；
-// model_overrides 契约仍在 stream 类型，本卡 continue 不附）。
+// Delegate team_preview：写盘单向收紧 + 嘱咐（确认面不提供排除岗 / 人改模；
+// excluded_run_ids / model_overrides 契约可保留，本卡 continue 不附）。
 // Debate team_preview：辩手 / 裁判节点显式；不展示模型下拉、不附 model_overrides。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
 // Cold × live deferred：``resume_deferred`` →「放行已记下…」；settlement 已锁，不可再改口取消。
@@ -513,11 +513,7 @@ function ResumeCardBody({
     [isDebateKickoff, paused],
   );
 
-  const [included, setIncluded] = useState<Set<string>>(
-    () => new Set(workers.map((w) => w.run_id)),
-  );
   const [tightened, setTightened] = useState<Set<string>>(() => new Set());
-  const [includeHint, setIncludeHint] = useState<string | null>(null);
 
   const batchTools = Array.isArray(paused.tools)
     ? paused.tools.filter((t): t is string => typeof t === "string" && !!t)
@@ -577,52 +573,20 @@ function ResumeCardBody({
     decision: CheckpointDecision,
   ): TeamPreviewAmendments | undefined => {
     if (decision !== "continue") return undefined;
-    // Debate：无排除/写盘修正；定案 A 也不附 model_overrides。
+    // Debate：无写盘修正。确认面不收集 excluded_run_ids / model_overrides
+    //（契约字段仍保留；与桌面人改模已藏对齐）。
     if (isDebateKickoff) return undefined;
     if (!isDelegateKickoff || workers.length === 0) {
       return undefined;
     }
-    const excluded_run_ids = workers
-      .map((w) => w.run_id)
-      .filter((id) => !included.has(id));
     const write_capability_overrides = workers
-      .filter((w) => included.has(w.run_id) && tightened.has(w.run_id))
+      .filter((w) => tightened.has(w.run_id))
       .map((w) => ({
         run_id: w.run_id,
         capability: "text_only" as const,
       }));
-    return {
-      excluded_run_ids,
-      write_capability_overrides,
-    };
-  };
-
-  const tryExclude = (runId: string) => {
-    if (!included.has(runId)) {
-      setIncluded((prev) => new Set([...prev, runId]));
-      setIncludeHint(null);
-      return;
-    }
-    const stillIncluded = [...included].filter((id) => id !== runId);
-    if (stillIncluded.length === 0) {
-      setIncludeHint("至少保留 1 名队员");
-      return;
-    }
-    const blocked = workers.some(
-      (w) => stillIncluded.includes(w.run_id) && w.depends_on.includes(runId),
-    );
-    if (blocked) {
-      setIncludeHint("仍有队员依赖此岗");
-      return;
-    }
-    setIncluded(new Set(stillIncluded));
-    setTightened((prev) => {
-      if (!prev.has(runId)) return prev;
-      const next = new Set(prev);
-      next.delete(runId);
-      return next;
-    });
-    setIncludeHint(null);
+    if (write_capability_overrides.length === 0) return undefined;
+    return { write_capability_overrides };
   };
 
   const toggleTighten = (runId: string) => {
@@ -773,7 +737,7 @@ function ResumeCardBody({
 
   const latchSummaryText = (() => {
     if (isDelegateKickoff) {
-      return `${included.size} 人待确认 · 点开授权开工`;
+      return `${workers.length} 人待确认 · 点开授权开工`;
     }
     if (isDebateKickoff) {
       const motion = ((paused as { motion?: string }).motion ?? "")
@@ -1163,14 +1127,13 @@ function ResumeCardBody({
       {isDelegateKickoff && workers.length > 0 && (
         <div className="pause-steps" data-testid="team-preview-workers">
           {workers.map((w) => {
-            const on = included.has(w.run_id);
             const writeCap = effectiveWriteCap(w);
             const writeLabel = effectiveWriteLabel(w);
             const canTighten = w.write_capability === "can_write_files";
             return (
               <div
                 key={w.run_id}
-                className={on ? "pause-step" : "pause-step pause-step-excluded"}
+                className="pause-step"
                 data-testid={`team-worker-${w.run_id}`}
               >
                 <div className="pause-worker-head">
@@ -1193,17 +1156,8 @@ function ResumeCardBody({
                   )}
                 </div>
                 {w.task && <div className="pause-step-summary">{w.task}</div>}
-                <div className="pause-worker-controls">
-                  <label className="pause-worker-include">
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      aria-label={`纳入本轮 ${w.role || w.run_id}`}
-                      onChange={() => tryExclude(w.run_id)}
-                    />
-                    <span>纳入本轮</span>
-                  </label>
-                  {canTighten && on && (
+                {canTighten ? (
+                  <div className="pause-worker-controls">
                     <button
                       type="button"
                       className={
@@ -1216,16 +1170,11 @@ function ResumeCardBody({
                     >
                       {tightened.has(w.run_id) ? "仅文字报告" : "改为仅文字"}
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}
-          {includeHint && (
-            <div className="pause-hint" data-testid="team-include-hint">
-              {includeHint}
-            </div>
-          )}
           {batchTools.length > 0 && (
             <div className="pause-hint" data-testid="team-tools-summary">
               本批工具：{batchTools.join(" · ")}

@@ -283,6 +283,8 @@ describe("TurnComposer variants", () => {
     expect(within(menu).getByText("附加文件")).toBeTruthy();
     expect(menu.className).not.toMatch(/\bw-72\b/);
     expectWorkspaceBeforeModel(menu);
+    expect(within(menu).queryByText("后台云端")).toBeNull();
+    expect(within(menu).queryByRole("button", { name: /后台云端/ })).toBeNull();
   });
 
   it("N4-A: offline hard-disables 发送 even with draft text", async () => {

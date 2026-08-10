@@ -100,6 +100,37 @@ async def test_documents_require_auth(client):
 # --- User-rule injection (two-tier + budget) -------------------------------------------------
 
 
+async def test_on_demand_user_rule_excluded_from_injected_rules(session_factory):
+    """on_demand user rules never enter the always ``<rules>`` budget/compose path."""
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        store = DocumentMemoryStore(session=session)
+        await repo.create(
+            uid,
+            name="常驻.md",
+            role="rule",
+            ai_maintained=False,
+            apply_mode="always",
+            content="- always 规则",
+        )
+        await repo.create(
+            uid,
+            name="按需.md",
+            role="rule",
+            ai_maintained=False,
+            apply_mode="on_demand",
+            content="- on_demand 规则",
+        )
+        user_md, _ = await assemble_injected_rules(
+            store, repo, uid, folder_id=None, enabled=True, **_BUDGET
+        )
+        on_demand = await repo.list_on_demand_user_rules(uid, None)
+    assert "always 规则" in user_md
+    assert "on_demand 规则" not in user_md
+    assert {d.name for d in on_demand} == {"按需.md"}
+
+
 async def test_user_rule_injected_ahead_of_memory(session_factory):
     uid = str(uuid.uuid4())
     async with session_factory() as session:
@@ -514,6 +545,7 @@ async def test_create_rule_api_auto_parents_under_agentcore(client):
     assert r.status_code == 200, r.text
     doc = r.json()
     assert doc["role"] == "rule" and doc["parent_id"] is not None
+    assert doc["apply_mode"] == "always"
 
     r = await client.get(f"/v1/documents/{doc['parent_id']}")
     assert r.status_code == 200
@@ -523,4 +555,73 @@ async def test_create_rule_api_auto_parents_under_agentcore(client):
     r = await client.get(f"/v1/documents/{rules_dir['parent_id']}")
     assert r.status_code == 200
     assert r.json()["name"] == "AgentCore"
+
+
+async def test_user_rule_apply_mode_always_on_demand_and_reject_conditional(
+    client, session_factory
+):
+    """定案 B: create/PATCH always|on_demand; conditional 422; on_demand not injectable."""
+    uid = await register_and_login(client, "apmode")
+
+    r = await client.post(
+        "/v1/documents",
+        json={
+            "name": "合规附录.md",
+            "role": "rule",
+            "content": "- 对外须用中文",
+            "apply_mode": "on_demand",
+        },
+    )
+    assert r.status_code == 200, r.text
+    on_demand = r.json()
+    assert on_demand["apply_mode"] == "on_demand"
+
+    r = await client.post(
+        "/v1/documents",
+        json={
+            "name": "常驻规则.md",
+            "role": "rule",
+            "content": "- 必须写测试",
+            "apply_mode": "always",
+        },
+    )
+    assert r.status_code == 200, r.text
+    always = r.json()
+    assert always["apply_mode"] == "always"
+
+    r = await client.post(
+        "/v1/documents",
+        json={
+            "name": "条件规则.md",
+            "role": "rule",
+            "content": "x",
+            "apply_mode": "conditional",
+        },
+    )
+    assert r.status_code == 422
+
+    r = await client.patch(
+        f"/v1/documents/{always['id']}", json={"apply_mode": "on_demand"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["apply_mode"] == "on_demand"
+
+    r = await client.patch(
+        f"/v1/documents/{on_demand['id']}", json={"apply_mode": "always"}
+    )
+    assert r.status_code == 200
+    assert r.json()["apply_mode"] == "always"
+
+    # Flip back for injectable check: one always + one on_demand.
+    await client.patch(f"/v1/documents/{on_demand['id']}", json={"apply_mode": "on_demand"})
+    await client.patch(f"/v1/documents/{always['id']}", json={"apply_mode": "always"})
+
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        injectable = await repo.list_injectable_rules(uid, None, ai_maintained=False)
+        names = {d.name for d in injectable}
+        assert "常驻规则.md" in names
+        assert "合规附录.md" not in names
+        on_demand_docs = await repo.list_on_demand_user_rules(uid, None)
+        assert {d.name for d in on_demand_docs} == {"合规附录.md"}
 

@@ -34,6 +34,19 @@ _TRACE = "0123456789abcdef0123456789abcdef"
         ("ConnectError: connection refused", None, "egress_connect"),
         ("连接超时（无法连上该站点）", None, "egress_connect"),
         ("缺少必填参数：query", None, "other"),
+        (
+            "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
+            None,
+            "declaration_empty",
+        ),
+        ("delegate 须传手写 `tasks`，其余…", None, "declaration_empty"),
+        (
+            "playbook 与 tasks 二选一，不可同时传。手写 tasks：去掉具名…",
+            None,
+            "declaration_xor",
+        ),
+        ("未知 playbook『x』；可用：a, b。", None, "declaration_unknown"),
+        ("anything", "declaration_empty", "declaration_empty"),
         ("anything", "searxng_unreachable", "searxng_unreachable"),
         ("searxng down", "egress_connect", "egress_connect"),
         ("unknown", "weird", "other"),
@@ -41,6 +54,27 @@ _TRACE = "0123456789abcdef0123456789abcdef"
 )
 def test_normalize_local_turn_tool_failure_code(message, code, expected):
     assert normalize_local_turn_tool_failure_code(message, code=code) == expected
+
+
+def test_tool_failures_from_journal_declaration_empty():
+    """Local delegate declaration empty → code is declaration_empty, not other."""
+    from agentcore.runtime.delegate.playbook_declaration import _EMPTY_DELEGATE_MSG
+
+    failures = tool_failures_from_journal(
+        [
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "name": "delegate",
+                    "success": False,
+                    "result": _EMPTY_DELEGATE_MSG,
+                },
+            }
+        ]
+    )
+    assert len(failures) == 1
+    assert failures[0]["tool"] == "delegate"
+    assert failures[0]["code"] == "declaration_empty"
 
 
 def test_truncate_tool_failure_message_caps_at_200():

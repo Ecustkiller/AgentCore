@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.logging import get_logger
 from agentcore.memory import default_memory_store
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+from agentcore.tools.builtin.consult_rule import ConsultRuleTool
 from agentcore.tools.builtin.read_conversation import ReadConversationTool
 from agentcore.tools.builtin.search_conversations import SearchConversationsTool
 from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — seam
@@ -116,18 +117,20 @@ def _wire_worker_memory_tools(
     memory_enabled: bool = True,
     folder_id: str | None = None,
     has_memory_topics: bool = False,
+    has_on_demand_rules: bool = False,
 ) -> None:
-    """Register ``consult_memory`` on the delegated worker toolset when memory is on
-    AND the turn has at least one consultable TOPIC note.
+    """Register ``consult_memory`` / ``consult_rule`` on the delegated worker toolset.
 
-    Same store + project scope as the CEO path (``folder_id`` ⇒ project-then-global
-    resolution). Off or empty topics ⇒ not wired — mirrors ``_assemble_ceo_toolset``
-    (caller-supplied ``memory_enabled`` + empty-catalog alignment: no directory ⇒ no tool).
+    ``consult_memory``: memory on AND at least one TOPIC note (same as CEO).
+    ``consult_rule``: at least one on_demand user rule (independent of memory gate —
+    mirrors CEO; empty catalog ⇒ not wired).
     """
     if memory_enabled and has_memory_topics:
         worker_tools.register(
             ConsultMemoryTool(store=default_memory_store(), folder_id=folder_id)
         )
+    if has_on_demand_rules:
+        worker_tools.register(ConsultRuleTool(folder_id=folder_id))
 
 
 def _wire_worker_conversation_log_tools(

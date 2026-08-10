@@ -20,6 +20,10 @@ lists the available topic names so the model can retry, and still logs
 ``consult_memory.miss``. Only a missing / empty ``name`` is a real parameter failure
 (``success=False``). Empty topic libraries never wire this tool (see
 ``tools.ceo_toolset`` / ``_wire_worker_memory_tools``).
+
+待收敛: shares the small :class:`~agentcore.runtime.context.consultable.Consultable`
+shape with ``consult_rule`` (目录 + 按名取文); this tool keeps its MemoryStore-specific
+behaviour for now rather than a behaviour-changing rewrite through the Protocol.
 """
 
 from __future__ import annotations

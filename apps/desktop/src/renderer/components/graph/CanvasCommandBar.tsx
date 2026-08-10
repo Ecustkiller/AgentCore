@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * Floating command bar for the conversation-level team canvas
  * ({@link import("./ConversationCanvas").ConversationCanvas}；前端UX设计.md
  * §6.1 · §6.2): the unified {@link TurnComposer} — the SAME full composer as the
- * chat view's MessageInput (附件 / @ 文件引用 / 停止生成 / 后台云端 / 字数 / 回填),
+ * chat view's MessageInput (附件 / @ 文件引用 / 停止生成 / 字数 / 回填),
  * in canvas chrome. Default = collapsed floating trigger so the canvas reads as a
  * pure board; expand to compose. Empty conversations (no turns) open expanded so
  * the first order can be typed immediately.
@@ -28,8 +28,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * ({@link import("../../pages/TurnDetailPage").TurnDetailPage}) is a pure
  * deep-read / replay surface and does not host this bar.
  *
- * 后台云端 toggle (`allowBackground`): offered ONLY where the resulting 后台云端任务
- * card is afterward visible (the overview's 指挥台 feed).
+ * Legacy handoff arm (`allowBackground`): honors ModeControl arm ONLY where the
+ * resulting handoff job card is afterward visible (the overview's 指挥台 feed).
+ * No Composer「＋」toggle.
  */
 export function CanvasCommandBar({
   onDispatch,

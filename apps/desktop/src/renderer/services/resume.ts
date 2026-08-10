@@ -592,14 +592,24 @@ export function resolveResumeOrigin(
   return paused?.origin ?? "server";
 }
 
+/**
+ * True when a cold pending entry can paint a clickable ResumePrompt card
+ * (stamped server key). Shared by marker / composer so copy never claims a
+ * card that selectVisibleColdResumes would skip.
+ */
+export function isColdPendingDrawable(
+  conversationId: string,
+  entryMessageId: string,
+): boolean {
+  return resolveColdResumeKey(conversationId, entryMessageId) != null;
+}
+
 export function conversationHasColdPending(conversationId: string): boolean {
-  if (
-    useInteractionStore
-      .getState()
-      .listPending(conversationId, ["ask_user", "plan_review", "team_preview"])
-      .length > 0
-  ) {
-    return true;
+  const messages = getRuntime(conversationId).messages;
+  for (const e of useInteractionStore
+    .getState()
+    .listPending(conversationId, ["ask_user", "plan_review", "team_preview"])) {
+    if (resolveColdResumeKeyFromMessages(messages, e.messageId)) return true;
   }
   return usePausedTurnStore
     .getState()

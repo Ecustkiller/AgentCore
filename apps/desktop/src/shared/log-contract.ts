@@ -33,12 +33,20 @@
  * `workspace_op.dropped`（turnPhase 门丢掉）/ `workspace_op.ipc_begin|end`（成功多为
  * debug）/ `workspace_op.aborted`（超时 Abort · warn，含 `inflight_cid` /
  * `inflight_total` / `queue_depth` / `duration_ms`）/ `workspace_op.fulfill_begin`
- *（debug）/ `workspace_op.resolve`（`outcome`=ok|stale_404|fail）/
- * `sse.idle_stall`（泵空闲 60s）。字段对齐服务端 `workspace.op_timeout`：
- * `conversation_id` / `request_id` / `op`。
- * 主进程墙钟（对齐 desktop.jsonl）：`workspace_op.main_begin`（debug）/
- * `workspace_op.main_end`（成功 debug / 失败 warn）/ `workspace_op.main_timeout`
- *（warn；含 inflight / queue_depth / duration；可选 conversation_id / request_id）。
+ *（debug）/ `workspace_op.resolve`（`outcome`=ok|stale_404|fail；可含
+ * `resolve_attempts` / `resolve_ms`）/ `workspace_op.resolve_retry` /
+ * `workspace_op.settle_exhausted`（`stream_nudged`）/ `sse.idle_stall`（泵空闲 60s）/
+ * `sse.forced_transport_drop`（settle 耗尽后踢泵 → rejoin）。字段对齐服务端
+ * `workspace.op_timeout`：`conversation_id` / `request_id` / `op`。
+ * 主进程墙钟 + 物理并发闸（对齐 desktop.jsonl）：`workspace_op.queued`（debug；
+ * CAP 满入队）/ `workspace_op.admitted`（debug；获物理槽，含 `queue_wait_ms`）/
+ * `workspace_op.main_begin`（debug）/ `workspace_op.main_end`（成功 debug / 失败
+ * warn）/ `workspace_op.main_timeout`（warn；活性；含 inflight / physical_running /
+ * zombie_count / queue_depth / duration）/ `workspace_op.zombie_enter`（warn；超时
+ * leave-once 后底层仍占物理槽）/ `workspace_op.zombie_end`（debug；底层 finally）/
+ * `workspace_op.rejected_capacity`（warn；排队耗尽 deadline，detail ≠ 活性挂起 /
+ * timed out）。字段另含 `physical_running` / `zombie_count` / `cap`；`queue_depth`
+ * = 真实排队等待者数（非 leave-once 伪争用）。可选 conversation_id / request_id。
  * 铁律：禁止把 token / 密码 / 消息正文放进 `fields`（只记可观测信号，不记机密与正文）。
  *
  * 与 ipc-contract（文件系统）/ sidecar-contract（本地引擎）/ updater-contract（自动更新）

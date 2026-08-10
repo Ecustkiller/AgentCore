@@ -101,6 +101,23 @@ async function streamErrorFromResponse(
 /** Latest journal seq seen on this conversation's SSE (for Last-Event-ID). */
 const lastEventIds = new Map<string, string>();
 
+/**
+ * Force the active SSE pump for ``conversationId`` to die as a transport drop
+ * (same {@link StreamError} ``network`` path as ``sse.idle_stall``), so the turn
+ * catcher rejoins rather than treating it as an honest user stop.
+ *
+ * Used when a cloud workspace settle exhausts transient retries — the same blip
+ * often strands later ``workspace_op_required`` frames on a half-dead pump.
+ */
+const pumpForceDrop = new Map<string, () => void>();
+
+export function forceSseTransportDrop(conversationId: string): boolean {
+  const drop = pumpForceDrop.get(conversationId);
+  if (!drop) return false;
+  drop();
+  return true;
+}
+
 /** Read the cursor used for precise stream resume. */
 export function peekLastEventId(conversationId: string): string | undefined {
   return lastEventIds.get(conversationId);
@@ -140,7 +157,7 @@ export async function pumpSseBody(
   if (!reader) return;
 
   // 缺省 = 唯一 dispatch 通道（live / reload / reconnect）；调用方可注入 onEvent
-  //（如 midFlight 在 message_start 前插入乐观用户气泡）。
+  //（如 midFlight 在 turn_queue_started 时补插用户泡、缓冲至主路空闲再 fold）。
   const deliver =
     onEvent ??
     ((event: SSEEvent) =>
@@ -152,9 +169,24 @@ export async function pumpSseBody(
   let frameId: string | null = null;
 
   const IDLE_TIMEOUT_MS = 60_000;
+  let pendingReject: ((err: unknown) => void) | null = null;
+
+  const forceTransportDrop = (): void => {
+    logEvent("warn", "sse.forced_transport_drop", {
+      conversation_id: conversationId,
+    });
+    void reader.cancel().catch(() => {});
+    const reject = pendingReject;
+    pendingReject = null;
+    reject?.(new StreamError("network"));
+  };
+  pumpForceDrop.set(conversationId, forceTransportDrop);
+
   const readChunk = (): ReturnType<typeof reader.read> =>
     new Promise((resolve, reject) => {
+      pendingReject = reject;
       const timer = setTimeout(() => {
+        if (pendingReject === reject) pendingReject = null;
         // L3：空闲 60s 无字节 → 泵自杀；此后 workspace_op 可能无人履行。
         logEvent("warn", "sse.idle_stall", {
           conversation_id: conversationId,
@@ -166,49 +198,57 @@ export async function pumpSseBody(
       reader.read().then(
         (r) => {
           clearTimeout(timer);
+          if (pendingReject === reject) pendingReject = null;
           resolve(r);
         },
         (e) => {
           clearTimeout(timer);
+          if (pendingReject === reject) pendingReject = null;
           reject(e);
         },
       );
     });
 
-  while (true) {
-    const { done, value } = await readChunk();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await readChunk();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
-    for (const line of lines) {
-      if (line === "") {
-        frameId = null;
-        continue;
-      }
-      if (line.startsWith(":")) {
-        // Heartbeat (``: ping``) or attach boundary (``: attach-caught-up``).
-        onComment?.(line.slice(1).trim());
-        continue;
-      }
-      if (line.startsWith("id:")) {
-        const id = line.slice(3).trim();
-        if (id) {
-          frameId = id;
-          lastEventIds.set(conversationId, id);
+      for (const line of lines) {
+        if (line === "") {
+          frameId = null;
+          continue;
         }
-        continue;
+        if (line.startsWith(":")) {
+          // Heartbeat (``: ping``) or attach boundary (``: attach-caught-up``).
+          onComment?.(line.slice(1).trim());
+          continue;
+        }
+        if (line.startsWith("id:")) {
+          const id = line.slice(3).trim();
+          if (id) {
+            frameId = id;
+            lastEventIds.set(conversationId, id);
+          }
+          continue;
+        }
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const event = JSON.parse(line.slice(6)) as SSEEvent;
+          if (frameId) lastEventIds.set(conversationId, frameId);
+          deliver(event);
+        } catch {
+          /* malformed event — skip */
+        }
       }
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const event = JSON.parse(line.slice(6)) as SSEEvent;
-        if (frameId) lastEventIds.set(conversationId, frameId);
-        deliver(event);
-      } catch {
-        /* malformed event — skip */
-      }
+    }
+  } finally {
+    if (pumpForceDrop.get(conversationId) === forceTransportDrop) {
+      pumpForceDrop.delete(conversationId);
     }
   }
 }
@@ -506,6 +546,11 @@ export interface ResumeConversationOptions {
     run_id: string;
     capability: "text_only";
   }>;
+  /** 人盖 CEO 的 per-run 模型；空/缺 = 不改。 */
+  model_overrides?: Record<
+    string,
+    { model: string; origin?: "platform" | "byok"; provider_id?: string }
+  >;
   /** Structured website style pick (s0/s1/…). */
   signal?: AbortSignal;
 }
@@ -518,6 +563,7 @@ export async function resumeConversation({
   selected = [],
   excluded_run_ids,
   write_capability_overrides,
+  model_overrides,
   signal,
 }: ResumeConversationOptions): Promise<void> {
   const body = JSON.stringify({
@@ -529,6 +575,9 @@ export async function resumeConversation({
       : {}),
     ...(write_capability_overrides && write_capability_overrides.length > 0
       ? { write_capability_overrides }
+      : {}),
+    ...(model_overrides && Object.keys(model_overrides).length > 0
+      ? { model_overrides }
       : {}),
   });
   await runMessageStream(

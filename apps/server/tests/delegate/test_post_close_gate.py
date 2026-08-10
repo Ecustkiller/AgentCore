@@ -143,7 +143,8 @@ def test_trivial_batch_not_gated():
     assert err is None
 
 
-def test_same_graph_replan_gap_fill_unchanged():
+@pytest.mark.asyncio
+async def test_same_graph_replan_gap_fill_unchanged():
     """同图 replan 补跑闸不回归（仍复用 MAX_GAP_FILL_ADDS）。"""
     from agentcore.runtime.delegate.supervised import apply_replan
     from agentcore.runtime.runs.types import RunPhase, RunState
@@ -176,7 +177,9 @@ def test_same_graph_replan_gap_fill_unchanged():
         {"role": f"R{i}", "task": f"retry {i}", "replaces_run_id": f"f{i}"}
         for i in range(1, 5)
     ]
-    err = apply_replan(_FakeDelegate(), plan, completed, binds=[], steers=[], adds=too_many)
+    err = await apply_replan(
+        _FakeDelegate(), plan, completed, binds=[], steers=[], adds=too_many
+    )
     assert err
     assert any("补跑一次最多" in e for e in err)
     assert any(str(MAX_GAP_FILL_ADDS) in e for e in err)

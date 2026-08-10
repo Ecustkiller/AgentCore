@@ -828,10 +828,14 @@ def test_core_teaches_image_gen_egress_and_key_boundary():
     assert "代调" in hint or "出图" in hint
     assert "API Key" in hint or "明文" in hint
     assert "本机脚本" in hint or "只帮写" in hint
+    # 案 47ae：跨会话进度摘要禁回显密码/token（扩既有 Key 族，非新硬闸）
+    assert "跨会话凭据脱敏" in hint
+    assert "密码" in hint and "原会话" in hint
     orch = _TEAM_ORCHESTRATION_ADVANCED
     assert "生图" in orch
     assert "出站网络" in orch or "egress" in orch.lower() or "HTTPS" in orch
     assert "明文" in orch or "env" in orch
+    assert "跨会话凭据脱敏" in orch
 
 
 def test_core_teaches_cloud_web_install_verify_honesty():
@@ -842,6 +846,10 @@ def test_core_teaches_cloud_web_install_verify_honesty():
     assert "跑绿" in hint
     assert "单测已绿" in hint
     assert "export_to_local" in hint
+    # 案 88625：记分板 N/N OK 须对齐成功 test_run（提示轻补，不扩姿势 A）
+    assert "外环验绿对账" in hint
+    assert "test_run" in hint
+    assert "N/N OK" in hint or "passed" in hint
     # 与生图 / Office / 软Ⅱ′分轴提示仍在邻近段落
     assert "分轴" in hint or "零写盘" in hint
 
@@ -1135,7 +1143,7 @@ def test_ceo_core_platform_knowledge_two_way_routing():
 
 
 def test_ceo_core_cross_product_rule_paradigm_routing_hook():
-    """问还是派附近：跨产品规则范式窄钩——未钉死载体先查再短问；禁默迁 skill JSON。"""
+    """问还是派附近：跨产品规则范式窄钩——consult 后至多一次 list，仍不清再短问；禁默迁 skill JSON。"""
     hint = _CEO_CORE_HINT
     assert "【跨产品规则范式】" in hint
     # 紧挨「问还是派·中性」之后（路由窄钩，非 platform_knowledge HOW）
@@ -1149,6 +1157,8 @@ def test_ceo_core_cross_product_rule_paradigm_routing_hook():
     assert "未钉死目标载体" in paradigm
     assert "consult_skill(product_help)" in paradigm
     assert "ask_user" in paradigm
+    assert "至多一次窄 list `.cursor/rules`" in paradigm
+    assert "多轮 list / 通读 `.mdc`" in paradigm
     assert "AgentCore/规则/" in paradigm
     assert "只解释不动文件" in paradigm
     assert "default" in paradigm

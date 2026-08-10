@@ -4,16 +4,18 @@ After a worker ``file_write`` / ``file_append`` / ``str_replace`` lands, the ass
 message still carries the FULL body inside ``tool_calls[].function.arguments``. Later
 rounds re-pay that body as cache_miss (case: handoff round ~28k in / ~27k miss).
 
-This projection — applied at request-assembly time only, like ``tool_clear`` — replaces
-completed bulky write calls with a **non-write short status** (synthetic tool name
-``_write_landed`` + compact status JSON). Canonical ``messages`` / journal keep the
-full args; resume rebuilds then re-applies.
+This projection — applied at request-assembly time only, like ``tool_clear`` — keeps the
+**original write tool name** and replaces bulky args with compact landed-status JSON
+(``status`` / ``via`` / ``chars`` / optional ``_structure``). Canonical ``messages`` /
+journal keep the full args; resume rebuilds then re-applies.
 
 定案：投影**不是**可提交的 writing-args（禁 ``content:"[已清理]"`` 假稿纸，也禁
-``file_write``/``str_replace`` + ``_landed_summary`` 可回灌模板）。短状态只报告
-路径 / 规模 / 已成功；要改须先 ``file_read`` 取盘上真文，再 ``str_replace``（优先）
-或按真文重填。过渡期 mutate 路径对遗留 stub / ``_landed_summary`` 回灌做结构化硬拒
-（见 ``cleared_write_stub_rejection``）。
+``_landed_summary`` 回灌模板，也禁把合成名 ``_write_landed`` 当 ``function.name`` ——
+那会诱饵模型仿调 → allowlist_deny / not_found）。短状态只报告路径 / 规模 / 已成功；
+要改须先 ``file_read`` 取盘上真文，再 ``str_replace``（优先）或按真文重填。mutate
+路径对遗留 stub / ``_landed_summary`` / landed-status 回灌做结构化硬拒；执行层对残留
+仿调 ``_write_landed`` 早拒（见 ``cleared_write_stub_rejection`` /
+``landed_status_name_rejection``）。
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFuncti
 
 WRITE_ARG_TOOLS = frozenset({"file_write", "file_append", "str_replace"})
 
-# Synthetic name for the projected short status — not a callable write tool.
+# Legacy synthetic name formerly used as projected ``function.name``. Kept only so
+# residual imitation can be early-rejected; new projection never emits this name.
 LANDED_STATUS_TOOL = "_write_landed"
 
 # Argument keys that hold the bulky body for each write tool.
@@ -180,19 +183,26 @@ def _body_text(data: dict) -> str:
 
 
 def _is_projected_write_args(arguments: str) -> bool:
-    """True when args are a legacy cleared / ``_landed_summary`` projection under a write name.
+    """True when args are already a landed-status / legacy cleared projection.
 
-    New projection renames the call to ``LANDED_STATUS_TOOL`` (not in ``WRITE_ARG_TOOLS``),
-    so re-entry skips by name; this only guards leftover write-name + legacy keys.
+    New projection keeps the original write tool name and emits ``status: landed``
+    compact JSON (no body keys). Legacy forms used ``_landed_summary`` / ``_cleared``
+    under a write name, or renamed the call to ``LANDED_STATUS_TOOL``.
     """
-    return (
+    if (
         f'"{_LANDED_SUMMARY_KEY}"' in arguments
         or f'"{_LEGACY_CLEARED_KEY}"' in arguments
-    )
+    ):
+        return True
+    try:
+        data = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("status") == "landed"
 
 
 def write_args_landed_summary(tool_name: str, arguments: str, original_len: int) -> str:
-    """Non-write short status JSON for the model window — not schema-shaped writing args.
+    """Compact landed-status JSON for the model window — not schema-shaped writing args.
 
     Keeps path identity + optional structural digest; drops ``content`` / ``old_string`` /
     ``new_string``. Does **not** emit ``_landed_summary`` (that template induced echo).
@@ -229,13 +239,16 @@ write_args_stub = write_args_landed_summary
 def is_cleared_write_stub_args(arguments: dict[str, Any]) -> bool:
     """Same surface as ``cleared_write_stub_rejection`` — True for stub / landed summary.
 
-    Narrow surface: projection keys (``_landed_summary`` / ``_cleared``) or body fields
-    whose **entire** value equals a known placeholder (``[已清理]`` /
-    ``[已清理·须重填]``). Does **not** scan free prose for the substring「已清理」.
+    Narrow surface: projection keys (``_landed_summary`` / ``_cleared``), landed-status
+    shape (``status == "landed"``), or body fields whose **entire** value equals a known
+    placeholder (``[已清理]`` / ``[已清理·须重填]``). Does **not** scan free prose for
+    the substring「已清理」.
     """
     if not isinstance(arguments, dict):
         return False
     if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
+        return True
+    if arguments.get("status") == "landed":
         return True
     for key in (
         "content",
@@ -273,6 +286,14 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
             "content / old_string / new_string。"
             "禁止把 `_landed_summary`、清理条或摘要原样当写盘参数重发。"
         )
+    if arguments.get("status") == "landed":
+        return (
+            "拒绝：参数是请求窗里的只读「已落盘」压缩状态，不是可提交写参，不能写入磁盘。"
+            f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
+            "② 再 str_replace（优先）或 file_write，按真文填完整 "
+            "content / old_string / new_string。"
+            "禁止把 landed 状态原样当写盘参数重发。"
+        )
     for key in (
         "content",
         "new_string",
@@ -292,6 +313,20 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
     return None
 
 
+def landed_status_name_rejection(tool_name: str) -> str | None:
+    """Early-reject when the model imitates legacy projected name ``_write_landed``.
+
+    That name is a landed-status marker, not a registered tool. Must not fall through
+    to generic allowlist_deny / not_found.
+    """
+    if (tool_name or "").strip() != LANDED_STATUS_TOOL:
+        return None
+    return (
+        "拒绝：`_write_landed` 是请求窗里的「已落盘」压缩状态，不是可调用工具。"
+        "勿仿调该名称。改稿：先 file_read 取盘上真文，再 str_replace（优先）或 file_write。"
+    )
+
+
 def _body_len(arguments: str) -> int:
     try:
         data = json.loads(arguments) if arguments else {}
@@ -307,15 +342,31 @@ def _body_len(arguments: str) -> int:
     return total or len(arguments or "")
 
 
+def _via_from_landed_args(arguments: str) -> str | None:
+    """Restore original write tool name from compact landed-status args."""
+    try:
+        data = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    via = data.get("via")
+    if isinstance(via, str) and via in WRITE_ARG_TOOLS:
+        return via
+    return None
+
+
 def project_cleared_write_args(
     messages: list[LLMMessage],
     *,
     min_chars: int = 500,
 ) -> list[LLMMessage]:
-    """Collapse bulky write-tool calls once their tool result is present.
+    """Collapse bulky write-tool args once their tool result is present.
 
-    Rewrites completed write ``tool_calls`` to ``LANDED_STATUS_TOOL`` + short status
-    args (non-write form). Returns the same list when nothing qualifies.
+    Keeps the original write ``function.name`` and replaces args with compact
+    landed-status JSON (never emits ``LANDED_STATUS_TOOL`` as a call name). Also
+    migrates any leftover ``_write_landed`` names back to ``via`` so old windows
+    lose the imitation bait. Returns the same list when nothing qualifies.
     Prefix-cache safe for a given completed write: status is a pure function of
     (tool, path, body structure, original_len).
     """
@@ -324,22 +375,28 @@ def project_cleared_write_args(
 
     # tool_call_id → (tool_name, arguments, assistant_msg_index, call_index)
     call_meta: dict[str, tuple[str, str, int, int]] = {}
+    # Legacy bait names to rewrite back to via (args already compact).
+    bait_ids: dict[str, tuple[str, int, int]] = {}  # id → (restore_name, mi, ci)
     for mi, message in enumerate(messages):
         if message.role != "assistant" or not message.tool_calls:
             continue
         for ci, call in enumerate(message.tool_calls):
             name = call.function.name
+            args = call.function.arguments or ""
+            if name == LANDED_STATUS_TOOL:
+                restore = _via_from_landed_args(args) or "file_write"
+                bait_ids[call.id] = (restore, mi, ci)
+                continue
             if name not in WRITE_ARG_TOOLS:
                 continue
-            args = call.function.arguments or ""
             if _body_len(args) < min_chars:
                 continue
-            # Already projected (legacy summary keys under a write name).
+            # Already projected (landed status / legacy summary under a write name).
             if _is_projected_write_args(args):
                 continue
             call_meta[call.id] = (name, args, mi, ci)
 
-    if not call_meta:
+    if not call_meta and not bait_ids:
         return messages
 
     # Only collapse writes that already have a tool result (completed round).
@@ -348,11 +405,13 @@ def project_cleared_write_args(
         for m in messages
         if m.role == "tool" and m.tool_call_id and m.tool_call_id in call_meta
     }
-    if not completed_ids:
+    if not completed_ids and not bait_ids:
         return messages
 
     # Rebuild only assistant messages that need a call rewritten.
-    touch_indices = {call_meta[cid][2] for cid in completed_ids}
+    touch_indices = {call_meta[cid][2] for cid in completed_ids} | {
+        bait_ids[cid][1] for cid in bait_ids
+    }
     projected: list[LLMMessage] = []
     for mi, message in enumerate(messages):
         if mi not in touch_indices or not message.tool_calls:
@@ -368,8 +427,20 @@ def project_cleared_write_args(
                     ToolCall(
                         id=call.id,
                         function=ToolCallFunction(
-                            name=LANDED_STATUS_TOOL,
+                            name=name,
                             arguments=summary,
+                        ),
+                    )
+                )
+                changed = True
+            elif call.id in bait_ids:
+                restore_name, _, _ = bait_ids[call.id]
+                new_calls.append(
+                    ToolCall(
+                        id=call.id,
+                        function=ToolCallFunction(
+                            name=restore_name,
+                            arguments=call.function.arguments or "",
                         ),
                     )
                 )

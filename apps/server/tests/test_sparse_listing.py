@@ -36,14 +36,21 @@ def test_ignored_dirs_include_git_and_ide_caches_not_bare_internal():
     assert "baselines" not in IGNORED_DIRS
     assert ".git" in IGNORED_DIRS
     assert "node_modules" in IGNORED_DIRS
+    assert "vendor" in IGNORED_DIRS
     assert ".turbo" in IGNORED_DIRS
     assert "coverage" in IGNORED_DIRS
+    assert "htmlcov" in IGNORED_DIRS
+    assert "logs" in IGNORED_DIRS
+    assert "tmp" in IGNORED_DIRS
+    assert "temp" in IGNORED_DIRS
+    assert ".tmp" in IGNORED_DIRS
     assert ".pytest_cache" in IGNORED_DIRS
     assert ".pytest_tmp" in IGNORED_DIRS
     assert ".idea" in IGNORED_DIRS
     assert ".vscode" in IGNORED_DIRS
     assert is_ignored_dir_name(".git")
     assert is_ignored_dir_name(".pytest_tmp")
+    assert is_ignored_dir_name("logs")
     assert not is_ignored_dir_name("src")
     assert not is_ignored_dir_name("index")
     assert is_access_denied_oserror(PermissionError(13, "Permission denied"))
@@ -89,6 +96,7 @@ def test_ai_noise_suffixes_are_media_archives_binaries():
     assert ".png" in AI_NOISE_FILE_SUFFIXES
     assert ".zip" in AI_NOISE_FILE_SUFFIXES
     assert ".pack" in AI_NOISE_FILE_SUFFIXES
+    assert ".log" in AI_NOISE_FILE_SUFFIXES
     assert ".parquet" in AI_NOISE_FILE_SUFFIXES
     assert ".feather" in AI_NOISE_FILE_SUFFIXES
     assert ".arrow" in AI_NOISE_FILE_SUFFIXES
@@ -99,6 +107,7 @@ def test_ai_noise_suffixes_are_media_archives_binaries():
     assert ".pickle" in AI_NOISE_FILE_SUFFIXES
     assert is_ai_noise_file_name("photo.PNG")
     assert is_ai_noise_file_name("out.zip")
+    assert is_ai_noise_file_name("app.LOG")
     assert is_ai_noise_file_name("data.PARQUET")
     assert is_ai_noise_file_name("model.pkl")
     assert not is_ai_noise_file_name("code_search.db")  # system tier
@@ -117,8 +126,13 @@ def test_ignored_file_suffixes_combine_both_tiers():
 def test_ignored_relpath_prunes_nested_noise():
     assert is_ignored_relpath("AgentCore/index/code_search.db")
     assert is_ignored_relpath("node_modules/pkg/index.js")
+    assert is_ignored_relpath("vendor/github.com/foo/bar.go")
+    assert is_ignored_relpath("logs/dev.jsonl")
+    assert is_ignored_relpath("apps/logs/trace.json")
+    assert is_ignored_relpath("apps/server/tmp/scratch.txt")
     assert is_ignored_relpath("src/cache.db")
     assert is_ignored_relpath("out/hero.png")
+    assert is_ignored_relpath("debug.log")  # AI noise suffix (combined ignore)
     assert not is_ignored_relpath("src/app.ts")
     assert not is_ignored_relpath("index/app.ts")  # bare user index/
     assert not is_ignored_relpath("AgentCore/规则/x.md")

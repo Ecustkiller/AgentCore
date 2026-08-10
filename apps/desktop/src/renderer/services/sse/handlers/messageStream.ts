@@ -1,4 +1,5 @@
 import { logEvent } from "@/lib/log";
+import { parseResumeDeferredPayload } from "@/lib/resumeDeferred";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
@@ -21,6 +22,7 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { useInteractionStore } from "@/stores/interactions";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import type {
   ContentDeltaPayload,
@@ -65,7 +67,7 @@ export function handleMessageStreamEvent(
   switch (event.type) {
     case "turn_queued": {
       // EPHEMERAL（不进 journal / conformance ProjectedTurn）——与 fold 穷尽 no-op
-      // 对齐；live toast +（midFlight 已插）排队轻态。
+      // 对齐；live toast。条由 midFlight upsert QueuedTurnsBar（不插用户泡）。
       const p = event.payload as TurnQueuedPayload;
       notifyTurnQueued(p.position ?? 1, p.queue_depth ?? 1);
       if (p.degraded_from === "steer") {
@@ -80,7 +82,7 @@ export function handleMessageStreamEvent(
     }
     case "turn_queue_started": {
       // EPHEMERAL：FIFO 出队开跑（新回合 sink 首帧，先于 message_start）。
-      // 按 queue_id 清 QueuedTurnsBar + 气泡「排队中」；保留用户泡。
+      // 按 queue_id 清 QueuedTurnsBar；用户泡由 midFlight 在本帧前补插。
       const p = event.payload as TurnQueueStartedPayload;
       useQueuedTurnsStore.getState().remove(conversationId, p.queue_id);
       return true;
@@ -89,6 +91,18 @@ export function handleMessageStreamEvent(
       // EPHEMERAL：多端同步清排队 UI（本地 cancel 已清则幂等 no-op）。
       const p = event.payload as TurnQueueCancelledPayload;
       clearQueuedTurnLocally(conversationId, p.queue_id);
+      return true;
+    }
+    case "resume_deferred": {
+      // EPHEMERAL：settlement 已锁；戳 IX，卡面「已记下」，同连接等待。非错误。
+      const p = parseResumeDeferredPayload(event.payload);
+      if (p) {
+        useInteractionStore.getState().markResumeDeferred({
+          conversationId: p.conversation_id || conversationId,
+          messageId: p.message_id,
+          busyReason: p.busy_reason,
+        });
+      }
       return true;
     }
     case "turn_warning": {
@@ -132,7 +146,22 @@ export function handleMessageStreamEvent(
           store.setGenerating(true, conversationId);
         }
       } else {
-        ensureStreamingAssistant(conversationId);
+        // Cross-turn: last assistant already stamped under a different server id —
+        // mint a fresh bubble. ensureStreamingAssistant would resumePausedAssistant
+        // (same-turn cold-resume path) and wipe the prior turn's process/team.
+        const last = getRuntime(conversationId).messages.at(-1);
+        if (
+          last?.role === "assistant" &&
+          last.serverMessageId &&
+          last.serverMessageId !== payload.message_id
+        ) {
+          if (last.isStreaming) {
+            store.finalizeLastMessage(conversationId);
+          }
+          store.createAssistantMessage(conversationId);
+        } else {
+          ensureStreamingAssistant(conversationId);
+        }
         // 换回合（陌生 message_id）：复用的尾部占位气泡若带着上一段生命的残留
         // 正文/思考/过程（如被上一回合回放污染的乐观占位），先清干净再开流——
         // 对齐 conformanceFold 的 message_start 语义（message_id 变化 ⇒ 空正文），
@@ -141,7 +170,7 @@ export function handleMessageStreamEvent(
         store.resetAssistantForNewTurn(payload.message_id, conversationId);
         store.setGenerating(true, conversationId);
       }
-      // 排队轻态出队真相源 = turn_queue_started（勿再靠 message_start 猜末条用户泡）。
+      // 排队条出队真相源 = turn_queue_started（勿再靠 message_start 猜末条用户泡）。
       store.stampPendingTurnWarning(conversationId);
       if (payload.trace_id)
         store.setTraceIdOnLastMessage(payload.trace_id, conversationId);

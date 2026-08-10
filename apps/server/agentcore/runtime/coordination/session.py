@@ -1565,6 +1565,7 @@ def emit_execution_detached(
 def release_turn_coordination(
     execution_id: str | None,
     *,
+    conversation_id: str | None = None,
     _followed_conversation_host: bool = False,
 ) -> None:
     """Chat-turn teardown: drop idle sessions; preserve live background coordination.
@@ -1581,20 +1582,33 @@ def release_turn_coordination(
     Cross-turn append may leave ContextVar on the mint eid while
     ``_by_conversation`` points at the host execution — also release that host
     so ``turn_attached`` is not stuck True on the live drive.
+
+    When the mint eid was never registered (gather child wrote host into its
+    ContextVar copy; parent still holds mint), pass ``conversation_id`` so we
+    can still resolve the host via ``_by_conversation`` without a mint session.
     """
     eid = (execution_id or "").strip()
-    if not eid:
+    cid_hint = (conversation_id or "").strip()
+    if not eid and not cid_hint:
         return
-    session = _sessions.get(eid)
+    session = _sessions.get(eid) if eid else None
     # Conversation-active host may differ from the ContextVar mint id.
     extra_eid: str | None = None
-    if session is not None and not _followed_conversation_host:
-        cid = (session.conversation_id or "").strip()
+    if not _followed_conversation_host:
+        cid = ""
+        if session is not None:
+            cid = (session.conversation_id or "").strip()
+        if not cid:
+            cid = cid_hint
         if cid:
             mapped = _by_conversation.get(cid)
             if mapped and mapped != eid:
                 extra_eid = mapped
-    _release_turn_one(eid, session)
+            elif not eid and mapped:
+                eid = mapped
+                session = _sessions.get(eid)
+    if eid:
+        _release_turn_one(eid, session)
     if extra_eid:
         release_turn_coordination(extra_eid, _followed_conversation_host=True)
 

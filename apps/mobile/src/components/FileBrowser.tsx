@@ -7,6 +7,7 @@ import {
 } from "@/api/workspace";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
+import { FILE_NOT_IN_CLOUD_TREE } from "@/lib/fileDownloadError";
 import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 import {
   countDescendantFiles,
@@ -271,7 +272,7 @@ export function FileBrowser({
   reloadKey?: number;
   emptyHint?: string;
   /** 深链：树加载后自动打开该路径文件的预览并落到其所在目录（聊天「本回合产出文件」卡的
-   *  一键直达）。只消费一次；树里找不到则按路径直接构造节点（下载失败由预览器兜底报错）。 */
+   *  一键直达）。只消费一次；树里找不到则提示诚实缺文件，不再合成节点硬下（避免假 404）。 */
   openPath?: string | null;
   /** Optional empty-state CTA — typically opens the parent page's hidden upload input. */
   onUpload?: () => void;
@@ -280,6 +281,7 @@ export function FileBrowser({
   const [tree, setTree] = useState<Map<string, FileNode[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<FileNode | null>(null);
+  const [openMissing, setOpenMissing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [localReload, setLocalReload] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -296,6 +298,7 @@ export function FileBrowser({
     setTree(null);
     setError(null);
     setQuery("");
+    setOpenMissing(null);
     openedRef.current = false;
   }, [source]);
 
@@ -335,18 +338,22 @@ export function FileBrowser({
   }, [cwd]);
 
   // 一键直达：树就绪后，把请求的文件落到其目录并打开预览。只跑一次（openedRef 守门），
-  // 避免折回目录/二次打开。找不到精确节点就按路径构造一个（预览器自行下载、失败兜底）。
+  // 避免折回目录/二次打开。树里没有精确节点 → 诚实提示，禁止合成节点硬打下载。
   useEffect(() => {
     if (!openPath || openedRef.current || tree === null) return;
     openedRef.current = true;
     const slash = openPath.lastIndexOf("/");
     const dir = slash >= 0 ? openPath.slice(0, slash) : "";
-    const name = openPath.slice(slash + 1) || openPath;
     const node = (tree.get(dir) ?? []).find(
       (n) => !n.isDir && n.path === openPath,
-    ) ?? { name, path: openPath, isDir: false };
+    );
     if (dir) onCwdChange(dir);
-    setViewing(node);
+    if (node) {
+      setOpenMissing(null);
+      setViewing(node);
+    } else {
+      setOpenMissing(openPath);
+    }
   }, [openPath, tree, onCwdChange]);
 
   const children = tree?.get(cwd) ?? [];
@@ -394,6 +401,12 @@ export function FileBrowser({
 
   return (
     <>
+      {openMissing && (
+        <p className="error hint" style={{ padding: "8px 16px", margin: 0 }}>
+          打不开「{openMissing}」：{FILE_NOT_IN_CLOUD_TREE}
+        </p>
+      )}
+
       {tree !== null && (
         <div className="file-browser-toolbar">
           <div className="file-search">

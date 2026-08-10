@@ -4,6 +4,7 @@ import {
   DeliveryShortfallHint,
   FinishReasonChip,
 } from "@/components/AssistantMessageFooter";
+import type { ContextBlockWire } from "@agentcore/contract-types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -160,5 +161,64 @@ describe("AssistantMessageFooter", () => {
     ).toBe("复制");
     expect(screen.queryByTestId("assistant-usage-summary")).toBeNull();
     expect(screen.queryByTestId("assistant-footer-more")).toBeNull();
+  });
+
+  it("shows 收到的上下文 in 更多 with full length including system", () => {
+    const blocks: ContextBlockWire[] = [
+      {
+        channel: "system",
+        heading: "",
+        body: "SYS",
+        chars: 3,
+        truncated: false,
+        source_role: "",
+        source_run_id: "",
+        fidelity: "",
+        files: [],
+      },
+      {
+        channel: "request",
+        heading: "目标",
+        body: "做个登录页",
+        chars: 5,
+        truncated: false,
+        source_role: "",
+        source_run_id: "",
+        fidelity: "",
+        files: [],
+      },
+    ];
+    render(<AssistantMessageFooter content="答案" captainContext={blocks} />);
+    fireEvent.click(screen.getByTestId("assistant-footer-more"));
+    expect(screen.getByTestId("received-context-menu-item").textContent).toBe(
+      "收到的上下文 · 2 段",
+    );
+    fireEvent.click(screen.getByTestId("received-context-menu-item"));
+    expect(
+      screen.getByTestId("interaction-sheet").getAttribute("data-title"),
+    ).toBe("收到的上下文");
+    expect(screen.getByTestId("received-context-blocks")).toBeTruthy();
+    expect(screen.getByText("系统提示")).toBeTruthy();
+    expect(screen.getByText("SYS")).toBeTruthy();
+    expect(screen.getByText("原始请求")).toBeTruthy();
+    expect(screen.getByText("做个登录页")).toBeTruthy();
+  });
+
+  it("omits 收到的上下文 menu item without captainContext", () => {
+    render(
+      <AssistantMessageFooter
+        content="答案"
+        usage={{
+          input: 100,
+          output: 50,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 100,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("assistant-footer-more"));
+    expect(screen.queryByTestId("received-context-menu-item")).toBeNull();
+    expect(screen.getByText("用量详情")).toBeTruthy();
   });
 });

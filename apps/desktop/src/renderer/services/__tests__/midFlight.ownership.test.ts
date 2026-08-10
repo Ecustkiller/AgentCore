@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 describe("midFlight · 主路门 + store 断言", () => {
-  it("经典排队：turn_queued 立即插用户气泡；message_start 缓冲至主路释放", async () => {
+  it("经典排队：turn_queued 无用户泡仅条；ack 即 resolve；started 后插泡", async () => {
     const turn1Token = claimPrimaryStream(CID);
     const conv = useConversationStore.getState();
     conv.addMessage(
@@ -127,13 +127,20 @@ describe("midFlight · 主路门 + store 断言", () => {
         expect.stringContaining("已排队"),
       );
     });
-    // 产品：Queue → 主时间线用户气泡立即可见
+    // queued 后无用户泡；仅 QueuedTurnsBar
     expect(
       getRuntime(CID).messages.some(
         (m) => m.role === "user" && m.content === "第二问",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+    expect(useQueuedTurnsStore.getState().list(CID)[0]?.content).toBe("第二问");
+    // ack 后 composer 可清（Promise 已 settle）
+    await expect(pending).resolves.toMatchObject({
+      kind: "queued",
+      position: 1,
+      queueId: "q1",
+    });
 
     // drain 边界交错：conn2 已到 turn_queue_started + message_start，但 turn1 主路未释放 → 缓冲
     sse.push(
@@ -146,8 +153,13 @@ describe("midFlight · 主路门 + store 断言", () => {
     sse.push(ev("message_start", { message_id: "srv-turn2" }));
     await new Promise((r) => setTimeout(r, 10));
 
-    // 缓冲中：轻态仍在（尚未 flush）
+    // 缓冲中：轻态仍在（尚未 flush）；用户泡仍未进时间线
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+    expect(
+      getRuntime(CID).messages.some(
+        (m) => m.role === "user" && m.content === "第二问",
+      ),
+    ).toBe(false);
 
     // 不变式 c：turn1 正文未被 resetAssistant 清掉
     const midRace = getRuntime(CID).messages;
@@ -172,7 +184,6 @@ describe("midFlight · 主路门 + store 断言", () => {
       }),
       { conversationId: CID, source: "server" },
     );
-    // turn1 仍在；排队用户气泡已在末尾（cost 可能落在末条助手上，不在此断言）
     expect(
       getRuntime(CID).messages.find((m) => m.serverMessageId === "srv-turn1")
         ?.content,
@@ -185,7 +196,7 @@ describe("midFlight · 主路门 + store 断言", () => {
       ).toBe(true);
     });
 
-    // 放行后：turn_queue_started 清轻态；用户气泡仍在
+    // 放行后：turn_queue_started 插用户泡并清轻态
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
     const after = getRuntime(CID).messages;
     const turn2 = after.find(
@@ -202,18 +213,16 @@ describe("midFlight · 主路门 + store 断言", () => {
     sse.push(ev("content_delta", { delta: "turn2-答" }));
     sse.push(ev("message_end", { finish_reason: "end_turn" }));
     sse.close();
-    await expect(pending).resolves.toMatchObject({
-      kind: "queued",
-      position: 1,
+    await vi.waitFor(() => {
+      flushPendingContent(CID);
+      expect(
+        getRuntime(CID).messages.find((m) => m.serverMessageId === "srv-turn2")
+          ?.content,
+      ).toContain("turn2");
     });
-    flushPendingContent(CID);
-    expect(
-      getRuntime(CID).messages.find((m) => m.serverMessageId === "srv-turn2")
-        ?.content,
-    ).toContain("turn2");
   });
 
-  it("排队等待中 Abort：丢缓冲；保留排队用户气泡（Stop≠取消）", async () => {
+  it("排队等待中 Abort：丢缓冲；保留排队条、无用户泡（Stop≠取消）", async () => {
     const turn1Token = claimPrimaryStream(CID);
     const parentAc = new AbortController();
     useConversationStore.getState().setAbort(parentAc, CID);
@@ -238,9 +247,14 @@ describe("midFlight · 主路门 + store 断言", () => {
         conversation_id: CID,
       }),
     );
-    await vi.waitFor(() => {
-      expect(notifyInfoMock).toHaveBeenCalled();
-    });
+    await expect(pending).resolves.toMatchObject({ kind: "queued" });
+    expect(
+      getRuntime(CID).messages.some(
+        (m) => m.role === "user" && m.content === "排队后停止",
+      ),
+    ).toBe(false);
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+
     sse.push(ev("message_start", { message_id: "srv-should-not-land" }));
     await new Promise((r) => setTimeout(r, 10));
 
@@ -248,13 +262,13 @@ describe("midFlight · 主路门 + store 断言", () => {
     parentAc.abort();
     sse.error(new DOMException("Aborted", "AbortError"));
 
-    await expect(pending).resolves.toMatchObject({ kind: "queued" });
+    await new Promise((r) => setTimeout(r, 10));
     expect(
       getRuntime(CID).messages.some(
         (m) => m.role === "user" && m.content === "排队后停止",
       ),
-    ).toBe(true);
-    // Abort 丢缓冲：轻态保留（Stop ≠ 取消排队；亦未收到 turn_queue_started）
+    ).toBe(false);
+    // Abort 丢缓冲：条保留（Stop ≠ 取消排队；亦未收到 turn_queue_started）
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
     expect(
       getRuntime(CID).messages.some(
@@ -290,15 +304,14 @@ describe("midFlight · 主路门 + store 断言", () => {
         conversation_id: CID,
       }),
     );
-    await vi.waitFor(() => {
-      expect(notifyInfoMock).toHaveBeenCalled();
-    });
-    // turn_queued 已插气泡
+    await expect(pending).resolves.toMatchObject({ kind: "queued" });
+    // turn_queued 后无用户泡
     expect(
       getRuntime(CID).messages.some(
         (m) => m.role === "user" && m.content === "同刻停止",
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
     sse.push(ev("message_start", { message_id: "srv-race-abort-flush" }));
     await new Promise((r) => setTimeout(r, 10));
 
@@ -312,13 +325,14 @@ describe("midFlight · 主路门 + store 断言", () => {
     ).toBe(false);
 
     sse.error(new DOMException("Aborted", "AbortError"));
-    await expect(pending).resolves.toMatchObject({ kind: "queued" });
-    // 气泡保留；message_start 未 fold
+    await new Promise((r) => setTimeout(r, 10));
+    // 仍无泡；message_start 未 fold；条保留
     expect(
       getRuntime(CID).messages.some(
         (m) => m.role === "user" && m.content === "同刻停止",
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
     expect(
       getRuntime(CID).messages.some(
         (m) => m.serverMessageId === "srv-race-abort-flush",

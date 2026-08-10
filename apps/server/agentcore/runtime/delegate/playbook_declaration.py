@@ -40,28 +40,48 @@ HANDWRITTEN_PLAYBOOK_ARGS_MSG = (
     "playbook_args 仅配合具名 playbook/playbook_id 使用。"
 )
 
+# 弱模型可抄的顶层 tasks 三件套（role/task + 可选 deliverable）；schema 与 empty 拒收共用。
+HANDWRITTEN_TASKS_SKELETON = (
+    '{"tasks":[{"role":"角色","task":"目标+边界+验收","deliverable":{"form":"prose"}}]}'
+)
+
 _EMPTY_DELEGATE_MSG = (
-    "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`，"
+    "delegate 缺 tasks/playbook：顶层放非空 `tasks`，"
     "或具名 `playbook`/`playbook_id`（+ playbook_args）。"
-    "禁止再包一层 `arguments` 字符串；可用形状见工具 schema。"
+    f"手写可抄：{HANDWRITTEN_TASKS_SKELETON}"
+    "（deliverable 可选）。"
 )
 
 
-def declaration_reject_gate(error: str | None) -> DeclarationRejectGate:
-    """Classify a declaration reject for logging / probes."""
+def try_declaration_reject_gate(error: str | None) -> DeclarationRejectGate | None:
+    """Return gate when ``error`` matches a known declaration reject template.
+
+    Structured template / prefix match only (not free-text intent scan).
+    ``None`` when the message is not a declaration-gate reject — callers must
+    not treat arbitrary tool errors as ``unknown``.
+    """
     if not error:
-        return "unknown"
+        return None
     if error in (
         PLAYBOOK_TASKS_XOR_MSG,
         PLAYBOOK_ID_CONFLICT_MSG,
         HANDWRITTEN_PLAYBOOK_ARGS_MSG,
-    ) or error.startswith("playbook 与 tasks 二选一"):
+    ) or error.startswith(
+        ("playbook 与 tasks 二选一", "playbook 与 playbook_id 指向不同", "手写 tasks 时勿传")
+    ):
         return "xor"
     if error == _EMPTY_DELEGATE_MSG or error.startswith(
         ("delegate 须传手写", "delegate 缺 tasks/playbook")
     ):
         return "empty"
-    return "unknown"
+    if error.startswith("未知 playbook"):
+        return "unknown"
+    return None
+
+
+def declaration_reject_gate(error: str | None) -> DeclarationRejectGate:
+    """Classify a declaration reject for logging / probes."""
+    return try_declaration_reject_gate(error) or "unknown"
 
 
 def resolve_playbook_declaration(

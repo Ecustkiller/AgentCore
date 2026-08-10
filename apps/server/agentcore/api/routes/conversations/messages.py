@@ -464,7 +464,7 @@ async def send_message(
                         attachments=att_meta or None,
                     )
                 )
-                confirm.close()
+                confirm.close(reason="interjection_confirm")
                 return sse_response(confirm, detach_on_disconnect=True)
 
         elif body.delivery == "steer":
@@ -503,7 +503,7 @@ async def send_message(
                         pending=pending,
                     )
                 )
-                confirm.close()
+                confirm.close(reason="steer_confirm")
                 return sse_response(confirm, detach_on_disconnect=True)
             degraded_from = "steer"
 

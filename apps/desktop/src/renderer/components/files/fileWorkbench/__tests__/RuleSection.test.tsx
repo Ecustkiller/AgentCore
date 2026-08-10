@@ -22,26 +22,38 @@ vi.mock("@/services/documents", () => ({
   createRuleDocument: vi.fn(),
   deleteDocument: vi.fn(),
   renameDocument: vi.fn(),
+  updateDocumentApplyMode: vi.fn(),
 }));
 vi.mock("@/lib/toast", () => ({
   notifyActionError: vi.fn(),
   notifySuccess: vi.fn(),
 }));
 
-import { createRuleDocument, listUserRules } from "@/services/documents";
+import {
+  type DocumentDetail,
+  type DocumentNode,
+  createRuleDocument,
+  listUserRules,
+  updateDocumentApplyMode,
+} from "@/services/documents";
 import { RuleSection } from "../RuleSection";
 
-const rule = (over: Record<string, unknown> = {}) => ({
+const rule = (over: Partial<DocumentNode> = {}): DocumentNode => ({
   id: "r",
   parentId: null,
   folderId: null,
-  kind: "document" as const,
-  role: "rule" as const,
+  kind: "document",
+  role: "rule",
   aiMaintained: false,
   applyMode: "always",
   name: "r.md",
-  content: "",
-  version: "v",
+  ...over,
+});
+
+const ruleDetail = (over: Partial<DocumentDetail> = {}): DocumentDetail => ({
+  ...rule(over),
+  content: over.content ?? "",
+  version: over.version ?? "v",
   ...over,
 });
 
@@ -118,7 +130,29 @@ describe("RuleSection (global)", () => {
   it("shows an empty hint with CTA when there are no global rules yet", async () => {
     renderGlobal();
     expect(await screen.findByText("还没有全局规则")).toBeTruthy();
+    expect(screen.getByText("短硬约束用常驻，长条文或偶发用按需")).toBeTruthy();
     expect(screen.getByText("新建规则")).toBeTruthy();
+  });
+
+  it("shows 常驻/按需 badges and toggles apply_mode via the chip", async () => {
+    vi.mocked(listUserRules).mockResolvedValue([
+      rule({ id: "g1", name: "语气规则.md", applyMode: "always" }),
+      rule({ id: "g2", name: "偶发.md", applyMode: "on_demand" }),
+    ]);
+    vi.mocked(updateDocumentApplyMode).mockResolvedValue(
+      rule({ id: "g1", name: "语气规则.md", applyMode: "on_demand" }),
+    );
+    renderGlobal();
+
+    expect(await screen.findByText("语气规则.md")).toBeTruthy();
+    expect(screen.getByText("常驻")).toBeTruthy();
+    expect(screen.getByText("按需")).toBeTruthy();
+    expect(screen.queryByText("conditional")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("应用方式：常驻，点击切换"));
+    });
+    expect(updateDocumentApplyMode).toHaveBeenCalledWith("g1", "on_demand");
   });
 
   it("opens a rule in the detail pane (path = its doc id)", async () => {
@@ -136,7 +170,7 @@ describe("RuleSection (global)", () => {
       rule({ id: "g1", name: "语气规则.md" }),
     ]);
     vi.mocked(createRuleDocument).mockResolvedValue(
-      rule({ id: "new", name: "新规则.md" }),
+      ruleDetail({ id: "new", name: "新规则.md" }),
     );
     const { onOpen } = renderGlobal();
 
@@ -153,7 +187,7 @@ describe("RuleSection (global)", () => {
 
   it("creates a GLOBAL rule from the empty-state CTA", async () => {
     vi.mocked(createRuleDocument).mockResolvedValue(
-      rule({ id: "new", name: "新规则.md" }),
+      ruleDetail({ id: "new", name: "新规则.md" }),
     );
     const { onOpen } = renderGlobal();
 
@@ -183,7 +217,7 @@ describe("RuleSection (project)", () => {
       rule({ id: "p2", folderId: "F2", name: "别的项目.md" }),
     ]);
     vi.mocked(createRuleDocument).mockResolvedValue(
-      rule({ id: "p3", folderId: "F1", name: "新规则.md" }),
+      ruleDetail({ id: "p3", folderId: "F1", name: "新规则.md" }),
     );
     const { onOpen } = renderProject("F1");
 
