@@ -319,7 +319,7 @@ async def test_ensure_index_aborts_after_consecutive_liveness_timeouts(tmp_path:
 
         async def read(self, path: str) -> str:
             reads.append(path)
-            raise WorkspaceIOError(f"local workspace op 'read' timed out（活性挂起）")
+            raise WorkspaceIOError("local workspace op 'read' timed out（活性挂起）")
 
     manager = IndexManager(str(tmp_path / "idx"))
     updated = await manager.ensure_index(_Backend())
