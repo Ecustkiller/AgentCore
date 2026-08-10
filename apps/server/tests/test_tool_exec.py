@@ -870,6 +870,45 @@ async def test_execute_end_ok_omits_reason():
     assert "reason" not in ends[0]
 
 
+class _CodeSearchMetaTool:
+    """Stub that mirrors code_search metadata (index_status) for execute_end forward."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="code_search",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.FILESYSTEM,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="hit",
+            metadata={"match_count": 1, "index_status": "ready"},
+        )
+
+
+async def test_execute_end_forwards_code_search_index_status():
+    reg = ToolRegistry()
+    reg.register(_CodeSearchMetaTool())
+    with capture_logs() as logs:
+        await execute_tools(
+            [_call("c1", "code_search", '{"query":"ApprovalGate"}')],
+            reg,
+            _ctx(),
+            EventSink(),
+            run_id="r1",
+        )
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert len(ends) == 1
+    assert ends[0]["status"] == "ok"
+    assert ends[0]["tool"] == "code_search"
+    assert ends[0]["index_status"] == "ready"
+
+
 @pytest.mark.asyncio
 async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
     """同批 file_write+handoff：handoff 须在 write 之后执行，才能看到 prose stamp。"""

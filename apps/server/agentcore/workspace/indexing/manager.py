@@ -42,6 +42,10 @@ class IndexManager:
     Build/refresh belongs to ``IndexMaintainer`` (or synchronous ``ensure_index``
     for tests). ``search`` never triggers a build.
 
+    Status is two-axis: a committed queryable snapshot (persisted ``index_meta``)
+    versus freshness (dirty / truncated). ``BUILDING`` only when no snapshot
+    exists yet and maintenance is in flight.
+
     When ``index_files`` supplies local-stat fingerprints (mtime_ms + size_bytes),
     ``ensure_index`` skips ``backend.read`` for files whose fingerprint still
     matches the BM25 ``file_hashes`` row — so Local mode does not re-bridge
@@ -51,8 +55,10 @@ class IndexManager:
     def __init__(self, index_dir: str) -> None:
         self._index_dir = str(Path(index_dir))
         self._bm25: BM25Index | None = None
+        self._hydrated = False
+        self._has_snapshot = False
+        self._generation = 0
         self._index_truncated = False
-        self._last_ensure_complete = False
         self._building = False
         self._content_dirty = False
 
@@ -67,6 +73,21 @@ class IndexManager:
             self._bm25 = BM25Index(db_path)
         return self._bm25
 
+    def _hydrate_from_db(self, bm25: BM25Index) -> None:
+        """Load committed snapshot flags from ``index_meta`` (or legacy rows)."""
+        has_snapshot, truncated, generation, dirty = bm25.snapshot_state()
+        self._has_snapshot = has_snapshot
+        self._index_truncated = truncated
+        self._generation = generation
+        self._content_dirty = dirty
+
+    def _ensure_hydrated(self) -> BM25Index:
+        bm25 = self._get_bm25()
+        if not self._hydrated:
+            self._hydrate_from_db(bm25)
+            self._hydrated = True
+        return bm25
+
     def set_building(self, building: bool) -> None:
         self._building = building
 
@@ -76,30 +97,45 @@ class IndexManager:
 
     def mark_content_dirty(self) -> None:
         """Workspace files changed since the last completed ensure."""
+        self._ensure_hydrated()
         self._content_dirty = True
+        # Persist across turn/backend rebuild when a committed meta row exists.
+        self._get_bm25().mark_meta_dirty_sync()
 
     @property
     def content_dirty(self) -> bool:
         """True when files changed since the last completed ensure."""
         return self._content_dirty
 
+    @property
+    def generation(self) -> int:
+        """Committed snapshot generation (0 = none / legacy without meta)."""
+        self._ensure_hydrated()
+        return self._generation
+
+    @property
+    def index_truncated(self) -> bool:
+        """True when the committed snapshot was capped (file list truncated)."""
+        self._ensure_hydrated()
+        return self._index_truncated
+
     def index_status(self) -> CodeIndexStatus:
         """Compute readiness without running ensure.
 
-        ``BUILDING`` only when no completed ensure exists yet. A refresh of an
+        ``BUILDING`` only when no committed snapshot exists yet. A refresh of an
         already-built index stays ``READY`` / ``STALE`` so query keeps serving.
         """
-        if self._building and not self._last_ensure_complete:
+        self._ensure_hydrated()
+        if self._building and not self._has_snapshot:
             return CodeIndexStatus.BUILDING
-        if not self._last_ensure_complete or self._index_truncated or self._content_dirty:
+        if not self._has_snapshot or self._index_truncated or self._content_dirty:
             return CodeIndexStatus.STALE
         return CodeIndexStatus.READY
 
     async def ensure_index(self, backend: WorkspaceBackend, *, force: bool = False) -> bool:
         """Ensure the index is up to date. Returns whether any file was re-indexed."""
-        bm25 = self._get_bm25()
+        bm25 = self._ensure_hydrated()
         paths, truncated, fingerprints = await self._collect_indexable_paths(backend)
-        self._index_truncated = truncated
 
         indexed_paths = await bm25.list_indexed_paths()
         current_set = set(paths)
@@ -140,8 +176,9 @@ class IndexManager:
                             "workspace.index_abort_consecutive_timeouts streak=%s",
                             consecutive_timeouts,
                         )
-                        # Incomplete round — leave dirty so a later schedule can retry.
-                        self._last_ensure_complete = False
+                        # Incomplete round — persist dirty; keep committed meta.
+                        self._content_dirty = True
+                        await bm25.mark_meta_dirty()
                         return updated
                     continue
                 consecutive_timeouts = 0
@@ -166,7 +203,10 @@ class IndexManager:
             )
             updated = True
 
-        self._last_ensure_complete = not truncated
+        meta = await bm25.commit_meta(truncated=truncated)
+        self._has_snapshot = True
+        self._generation = int(meta.generation)
+        self._index_truncated = truncated
         self._content_dirty = False
         return updated
 
@@ -201,7 +241,7 @@ class IndexManager:
         path_prefix: str = ".",
         max_results: int = 10,
     ) -> CodeSearchResult:
-        bm25 = self._get_bm25()
+        bm25 = self._ensure_hydrated()
         hits = await bm25.search(
             query,
             language=language,

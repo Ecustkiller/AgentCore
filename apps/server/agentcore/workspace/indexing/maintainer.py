@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -17,6 +18,33 @@ logger = get_logger(__name__)
 # Wait for Local tool-channel quiet before index IO; skip+reschedule if still busy.
 _CHANNEL_QUIET_POLL_S = 0.05
 _CHANNEL_QUIET_WAIT_MAX_S = 2.0
+
+
+def _optional_build_fields(manager: Any) -> dict[str, Any]:
+    """Pick up short build context when manager exposes public read-only attrs.
+
+    Core bucket may add ``generation`` / truncated / file-count accessors later;
+    omit quietly when absent — do not reach into private status fields.
+    """
+    out: dict[str, Any] = {}
+    for key, names in (
+        ("generation", ("generation", "index_generation")),
+        ("truncated", ("index_truncated", "truncated")),
+        ("files", ("indexed_file_count", "file_count", "files")),
+    ):
+        for name in names:
+            if not hasattr(manager, name):
+                continue
+            val = getattr(manager, name)
+            if callable(val):
+                try:
+                    val = val()
+                except Exception:
+                    continue
+            if val is not None:
+                out[key] = val
+                break
+    return out
 
 
 class IndexMaintainer:
@@ -90,6 +118,8 @@ class IndexMaintainer:
 
     async def _run(self) -> None:
         async with self._lock:
+            force = False
+            started = time.perf_counter()
             try:
                 channel = getattr(self._backend, "_channel", None)
                 if (
@@ -99,15 +129,37 @@ class IndexMaintainer:
                 ):
                     # Tool hot path still using the shared Local channel — skip
                     # this round and coalesce a follow-up instead of hard-charging.
-                    logger.info("workspace.index_skip_channel_busy")
+                    inflight = getattr(channel, "_inflight", None) or ()
+                    logger.info(
+                        "workspace.index_skip_channel_busy",
+                        force=self._force,
+                        wait_ms=int(_CHANNEL_QUIET_WAIT_MAX_S * 1000),
+                        inflight=len(inflight),
+                    )
                     self._rerun = True
                     return
                 force = self._force
                 self._force = False
+                logger.info("workspace.index_build_start", force=force)
+                started = time.perf_counter()
                 with index_io_mode():
-                    await self._manager.ensure_index(self._backend, force=force)
-            except Exception:
-                logger.exception("workspace.index_failed")
+                    updated = await self._manager.ensure_index(self._backend, force=force)
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                logger.info(
+                    "workspace.index_build_complete",
+                    force=force,
+                    updated=bool(updated),
+                    duration_ms=duration_ms,
+                    **_optional_build_fields(self._manager),
+                )
+            except Exception as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                logger.exception(
+                    "workspace.index_failed",
+                    force=force,
+                    duration_ms=duration_ms,
+                    error=type(exc).__name__,
+                )
             finally:
                 self._manager.set_building(False)
                 if self._rerun:

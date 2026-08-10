@@ -503,3 +503,196 @@ async def test_symbol_column_ranks_above_body_only_hit(tmp_path: Path):
     assert hits
     assert hits[0][0].path == "sym.py"
     assert hits[0][0].symbol == "ApprovalGate"
+
+
+@pytest.mark.asyncio
+async def test_index_status_hydrates_across_manager_rounds(sample_py: Path):
+    """Committed meta survives a new IndexManager; status is READY before ensure."""
+    from agentcore.workspace.protocol import CodeIndexStatus
+
+    ws = ServerWorkspace(root=sample_py, sandbox=SubprocessSandbox())
+    first = IndexManager.for_workspace_root(str(sample_py))
+    assert await first.ensure_index(ws) is True
+    assert first.index_status() == CodeIndexStatus.READY
+
+    second = IndexManager.for_workspace_root(str(sample_py))
+    assert second.index_status() == CodeIndexStatus.READY
+    second.set_building(True)
+    assert second.index_status() == CodeIndexStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_index_status_building_only_without_snapshot(tmp_path: Path):
+    """Empty DB + building → BUILDING; snapshot + building → not BUILDING."""
+    from agentcore.workspace.protocol import (
+        CodeIndexStatus,
+        IndexFileEntry,
+        IndexFilesResult,
+    )
+
+    empty = IndexManager(str(tmp_path / "empty"))
+    assert empty.index_status() == CodeIndexStatus.STALE
+    empty.set_building(True)
+    assert empty.index_status() == CodeIndexStatus.BUILDING
+
+    class _Backend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["a.py"],
+                truncated=False,
+                entries=(IndexFileEntry(path="a.py", mtime_ms=1, size_bytes=8),),
+            )
+
+        async def read(self, path: str) -> str:
+            _ = path
+            return "def a():\n    return 1\n"
+
+    built = IndexManager(str(tmp_path / "built"))
+    assert await built.ensure_index(_Backend()) is True
+    assert built.index_status() == CodeIndexStatus.READY
+    built.set_building(True)
+    assert built.index_status() == CodeIndexStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_index_status_truncated_ensure_is_stale_snapshot(tmp_path: Path):
+    """Truncated ensure still commits a snapshot → STALE, never BUILDING."""
+    from agentcore.workspace.protocol import (
+        CodeIndexStatus,
+        IndexFileEntry,
+        IndexFilesResult,
+    )
+
+    class _Backend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["a.py"],
+                truncated=True,
+                entries=(IndexFileEntry(path="a.py", mtime_ms=1, size_bytes=8),),
+            )
+
+        async def read(self, path: str) -> str:
+            _ = path
+            return "def a():\n    return 1\n"
+
+    manager = IndexManager(str(tmp_path / "trunc"))
+    assert await manager.ensure_index(_Backend()) is True
+    assert manager.index_status() == CodeIndexStatus.STALE
+    manager.set_building(True)
+    assert manager.index_status() == CodeIndexStatus.STALE
+
+    # New manager hydrates truncated meta → still STALE (has snapshot).
+    again = IndexManager(str(tmp_path / "trunc"))
+    assert again.index_status() == CodeIndexStatus.STALE
+    again.set_building(True)
+    assert again.index_status() == CodeIndexStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_index_abort_preserves_committed_meta(tmp_path: Path):
+    """Timeout abort must not wipe a previously committed snapshot meta."""
+    from agentcore.workspace.indexing.bm25 import BM25Index
+    from agentcore.workspace.protocol import (
+        CodeIndexStatus,
+        IndexFileEntry,
+        IndexFilesResult,
+        WorkspaceIOError,
+    )
+
+    class _OkBackend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["a.py"],
+                truncated=False,
+                entries=(IndexFileEntry(path="a.py", mtime_ms=1, size_bytes=8),),
+            )
+
+        async def read(self, path: str) -> str:
+            _ = path
+            return "def a():\n    return 1\n"
+
+    class _TimeoutBackend:
+        async def index_files(self, cap=None, *, order="path"):  # noqa: ANN001
+            _ = (cap, order)
+            return IndexFilesResult(
+                paths=["a.py", "b.py", "c.py"],
+                truncated=False,
+                entries=(
+                    IndexFileEntry(path="a.py", mtime_ms=2, size_bytes=8),
+                    IndexFileEntry(path="b.py", mtime_ms=1, size_bytes=1),
+                    IndexFileEntry(path="c.py", mtime_ms=1, size_bytes=1),
+                ),
+            )
+
+        async def read(self, path: str) -> str:
+            if path == "a.py":
+                return "def a():\n    return 2\n"
+            raise WorkspaceIOError("local workspace op 'read' timed out（活性挂起）")
+
+    idx_dir = tmp_path / "abort-meta"
+    manager = IndexManager(str(idx_dir))
+    assert await manager.ensure_index(_OkBackend()) is True
+    meta_before = await BM25Index(str(idx_dir / "code_search.db")).read_meta()
+    assert meta_before is not None
+    assert meta_before.truncated is False
+    assert meta_before.dirty is False
+
+    updated = await manager.ensure_index(_TimeoutBackend())
+    assert updated is True  # a.py re-indexed before abort
+    meta_after = await BM25Index(str(idx_dir / "code_search.db")).read_meta()
+    assert meta_after is not None
+    assert meta_after.generation == meta_before.generation
+    assert meta_after.last_complete_at == meta_before.last_complete_at
+    assert meta_after.dirty is True
+    assert manager.index_status() == CodeIndexStatus.STALE
+    manager.set_building(True)
+    assert manager.index_status() == CodeIndexStatus.STALE
+
+    # Dirty must survive a fresh IndexManager (new turn / backend).
+    again = IndexManager(str(idx_dir))
+    assert again.index_status() == CodeIndexStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_legacy_db_without_meta_counts_as_snapshot(tmp_path: Path):
+    """Pre-meta DB with file_hashes is queryable but STALE until commit_meta."""
+    import sqlite3
+
+    from agentcore.workspace.protocol import CodeIndexStatus
+
+    idx_dir = tmp_path / "legacy"
+    idx_dir.mkdir()
+    db = idx_dir / "code_search.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE chunks USING fts5(
+                path UNINDEXED, symbol, symbol_type, language UNINDEXED,
+                content, start_line UNINDEXED, end_line UNINDEXED,
+                tokenize='unicode61'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE file_hashes (
+                path TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL,
+                indexed_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO file_hashes(path, content_hash, indexed_at) VALUES (?, ?, ?)",
+            ("old.py", "abc", 1.0),
+        )
+        conn.commit()
+
+    manager = IndexManager(str(idx_dir))
+    assert manager.index_status() == CodeIndexStatus.STALE
+    manager.set_building(True)
+    # Has rows ⇒ snapshot exists ⇒ refresh must not flip to BUILDING.
+    assert manager.index_status() == CodeIndexStatus.STALE

@@ -1303,6 +1303,7 @@ EVENTS: list[EventSpec] = [
         description='工具执行结束（status/duration_ms；error 时带 reason）',
         fields={
             'duration_ms': FieldType('int'),
+            'index_status': FieldType('str'),
             'reason': FieldType('str'),
             'status': FieldType('str'),
             'tool': FieldType('str'),
@@ -1455,8 +1456,43 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='workspace.context_inject_failed'),
     EventSpec(name='workspace.design_md_read_failed'),
     EventSpec(name='workspace.exec_languages_probe_failed'),
-    EventSpec(name='workspace.index_failed'),
-    EventSpec(name='workspace.index_skip_channel_busy'),
+    EventSpec(
+        name='workspace.index_build_complete',
+        description='后台代码索引 ensure 完成（duration_ms；可取则带 generation/truncated/files）',
+        fields={
+            'duration_ms': FieldType('int'),
+            'files': FieldType('int'),
+            'force': FieldType('bool'),
+            'generation': FieldType('int'),
+            'truncated': FieldType('bool'),
+            'updated': FieldType('bool'),
+        },
+    ),
+    EventSpec(
+        name='workspace.index_build_start',
+        description='后台代码索引 ensure 开始（IndexMaintainer）',
+        fields={
+            'force': FieldType('bool'),
+        },
+    ),
+    EventSpec(
+        name='workspace.index_failed',
+        description='后台代码索引 ensure 失败（带 error/duration_ms）',
+        fields={
+            'duration_ms': FieldType('int'),
+            'error': FieldType('str'),
+            'force': FieldType('bool'),
+        },
+    ),
+    EventSpec(
+        name='workspace.index_skip_channel_busy',
+        description='Local channel 仍忙，跳过本轮索引并 coalesce 重试',
+        fields={
+            'force': FieldType('bool'),
+            'inflight': FieldType('int'),
+            'wait_ms': FieldType('int'),
+        },
+    ),
     EventSpec(name='workspace.op_rejected_channel_dead'),
     EventSpec(name='workspace.op_timeout'),
     EventSpec(name='workspace.overview_index_failed'),

@@ -34,9 +34,12 @@ from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 class CodeIndexStatus(StrEnum):
     """Readiness of the BM25 code index relative to the workspace.
 
-    ``code_search`` is query-only; the maintainer owns build/refresh. Callers
-    must not treat ``BUILDING`` / ``STALE`` as tool failure — prefer ``grep``
-    when the index is not ``READY`` and exactness matters.
+    Two axes: committed queryable snapshot vs freshness. ``BUILDING`` only when
+    no snapshot exists yet and maintenance is in flight; a refresh of an existing
+    snapshot is ``READY`` / ``STALE``, never ``BUILDING``. ``code_search`` is
+    query-only; the maintainer owns build/refresh. Callers must not treat
+    ``BUILDING`` / ``STALE`` as tool failure — prefer ``grep`` when the index is
+    not ``READY`` and exactness matters.
     """
 
     READY = "ready"

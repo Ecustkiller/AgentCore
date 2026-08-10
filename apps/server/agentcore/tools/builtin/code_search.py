@@ -76,7 +76,8 @@ class CodeSearchTool:
                 "「User 模型在哪」这类自然语言或关键词定位；返回匹配的函数/类/方法"
                 "及路径。命中后用 file_read（带 offset/limit）精读，禁止整目录通读。"
                 "精确符号名、字符串或正则请用 grep——两工具并存，勿互相替代。"
-                "索引由后台维护：若返回 building/stale，请改用 grep，勿空等。"
+                "查当前索引快照：ready 命中可信；building=尚无快照（首次构建）请改用"
+                "grep、勿空等；stale 时建议配合 grep 核对。"
             ),
             parameters=CODE_SEARCH_PARAMETERS,
             category=ToolCategory.FILESYSTEM,
@@ -173,7 +174,7 @@ def _status_footer(status: CodeIndexStatus) -> str:
     if status == CodeIndexStatus.READY:
         return ""
     if status == CodeIndexStatus.BUILDING:
-        return "\n⚠️ 索引仍在后台构建/更新；结果可能不完整，关键结论请用 grep 核对。"
+        return "\n⚠️ 代码索引尚无可用快照（首次构建中）；请改用 grep，勿空等。"
     return "\n⚠️ 索引可能过旧或不完整，建议配合 grep 验证。"
 
 
@@ -196,7 +197,7 @@ def _empty_result_note(
 
     if status == CodeIndexStatus.BUILDING:
         return (
-            f"代码索引仍在后台构建中{scope}，本次无可用命中。"
+            f"代码索引尚无可用快照（首次构建中）{scope}，本次无可用命中。"
             f"请立刻改用 grep（精确符号/字符串），不要空等 code_search。"
             f"{kw_line}"
         )

@@ -610,8 +610,9 @@ async def execute_tools(
                     run_id=event_run_id,
                 )
             )
-        # 检索观测：web_search 把 query / hosts 放进 metadata，转发到 execute_end
-        # 以便从统一工具结束事件还原「搜了什么 / 命中哪些域」。
+        # 检索观测：web_search 把 query / hosts 放进 metadata；code_search 把
+        # index_status 放进 metadata——一并转发到 execute_end，便于从统一工具结束
+        # 事件还原「搜了什么 / 命中哪些域 / 索引快照新鲜度」。
         end_fields: dict[str, Any] = {
             "tool": name,
             "status": "ok" if result.success else "error",
@@ -633,6 +634,8 @@ async def execute_tools(
             end_fields["subcommand"] = meta["subcommand"]
         if isinstance(meta.get("timeout_layer"), str) and meta["timeout_layer"]:
             end_fields["timeout_layer"] = meta["timeout_layer"]
+        if isinstance(meta.get("index_status"), str) and meta["index_status"]:
+            end_fields["index_status"] = meta["index_status"]
         logger.info("tool.execute_end", **end_fields)
 
         citations = result.citations if (result.success and result.citations) else []

@@ -7,6 +7,7 @@ import hashlib
 import re
 import sqlite3
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from agentcore.workspace.indexing.chunker import RawChunk
@@ -20,6 +21,20 @@ _QUERY_TOKEN = re.compile(
 # content, start_line, end_line. Boost symbol / symbol_type so name hits
 # outrank body-only hits. One weight per column (SQLite FTS5 contract).
 _BM25_WEIGHTS = "bm25(chunks, 1.0, 10.0, 5.0, 1.0, 1.0, 1.0, 1.0)"
+
+# Library-level committed-snapshot row (queryable generation × freshness).
+_INDEX_META_SCHEMA_VERSION = 2
+
+
+@dataclass(frozen=True)
+class IndexMeta:
+    """Committed index snapshot metadata (singleton row in ``index_meta``)."""
+
+    generation: int
+    last_complete_at: float
+    truncated: bool
+    schema_version: int
+    dirty: bool = False
 
 
 class BM25Index:
@@ -63,6 +78,19 @@ class BM25Index:
                 """
             )
             _ensure_file_hash_fingerprint_columns(conn)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS index_meta (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    generation INTEGER NOT NULL,
+                    last_complete_at REAL NOT NULL,
+                    truncated INTEGER NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    dirty INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            _ensure_index_meta_dirty_column(conn)
             conn.commit()
 
     @staticmethod
@@ -132,6 +160,105 @@ class BM25Index:
         with self._connect() as conn:
             rows = conn.execute("SELECT path FROM file_hashes").fetchall()
         return {str(r["path"]) for r in rows}
+
+    async def read_meta(self) -> IndexMeta | None:
+        return await asyncio.to_thread(self._read_meta_sync)
+
+    def _read_meta_sync(self) -> IndexMeta | None:
+        with self._connect() as conn:
+            _ensure_index_meta_dirty_column(conn)
+            row = conn.execute(
+                """
+                SELECT generation, last_complete_at, truncated, schema_version, dirty
+                FROM index_meta WHERE id = 1
+                """
+            ).fetchone()
+            conn.commit()
+        if row is None:
+            return None
+        return IndexMeta(
+            generation=int(row["generation"]),
+            last_complete_at=float(row["last_complete_at"]),
+            truncated=bool(row["truncated"]),
+            schema_version=int(row["schema_version"]),
+            dirty=bool(row["dirty"]),
+        )
+
+    async def commit_meta(self, *, truncated: bool) -> IndexMeta:
+        """Persist a successful ensure round (including truncated); clears dirty."""
+        return await asyncio.to_thread(self._commit_meta_sync, truncated)
+
+    def _commit_meta_sync(self, truncated: bool) -> IndexMeta:
+        now = time.time()
+        with self._connect() as conn:
+            _ensure_index_meta_dirty_column(conn)
+            existing = conn.execute(
+                "SELECT generation FROM index_meta WHERE id = 1"
+            ).fetchone()
+            generation = (int(existing["generation"]) + 1) if existing else 1
+            conn.execute(
+                """
+                INSERT INTO index_meta(
+                    id, generation, last_complete_at, truncated, schema_version, dirty
+                )
+                VALUES (1, ?, ?, ?, ?, 0)
+                ON CONFLICT(id) DO UPDATE SET
+                    generation = excluded.generation,
+                    last_complete_at = excluded.last_complete_at,
+                    truncated = excluded.truncated,
+                    schema_version = excluded.schema_version,
+                    dirty = 0
+                """,
+                (
+                    generation,
+                    now,
+                    1 if truncated else 0,
+                    _INDEX_META_SCHEMA_VERSION,
+                ),
+            )
+            conn.commit()
+        return IndexMeta(
+            generation=generation,
+            last_complete_at=now,
+            truncated=truncated,
+            schema_version=_INDEX_META_SCHEMA_VERSION,
+            dirty=False,
+        )
+
+    async def mark_meta_dirty(self) -> None:
+        """Persist freshness dirty when a committed meta row exists (no-op otherwise)."""
+        await asyncio.to_thread(self.mark_meta_dirty_sync)
+
+    def mark_meta_dirty_sync(self) -> None:
+        with self._connect() as conn:
+            _ensure_index_meta_dirty_column(conn)
+            conn.execute("UPDATE index_meta SET dirty = 1 WHERE id = 1")
+            conn.commit()
+
+    def snapshot_state(self) -> tuple[bool, bool, int, bool]:
+        """Return ``(has_snapshot, truncated, generation, dirty)``.
+
+        Sync so ``IndexManager.index_status`` can hydrate without an event loop.
+        Rows without ``index_meta`` (legacy or aborted first build) are queryable
+        but dirty — never trusted READY until a successful ``commit_meta``.
+        """
+        meta = self._read_meta_sync()
+        if meta is not None:
+            return True, meta.truncated, int(meta.generation), bool(meta.dirty)
+        if self._has_indexed_rows_sync():
+            return True, False, 0, True
+        return False, False, 0, False
+
+    def _has_indexed_rows_sync(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM file_hashes LIMIT 1").fetchone()
+            if row is not None:
+                return True
+            try:
+                row = conn.execute("SELECT 1 FROM chunks LIMIT 1").fetchone()
+            except sqlite3.OperationalError:
+                return False
+        return row is not None
 
     async def upsert_file(
         self,
@@ -285,6 +412,21 @@ def _ensure_file_hash_fingerprint_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE file_hashes ADD COLUMN mtime_ms INTEGER")
     if "size_bytes" not in cols:
         conn.execute("ALTER TABLE file_hashes ADD COLUMN size_bytes INTEGER")
+
+
+def _ensure_index_meta_dirty_column(conn: sqlite3.Connection) -> None:
+    """Add ``dirty`` to legacy ``index_meta`` tables (0 = fresh committed snapshot)."""
+    try:
+        cols = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(index_meta)").fetchall()
+        }
+    except sqlite3.OperationalError:
+        return
+    if not cols or "dirty" in cols:
+        return
+    conn.execute(
+        "ALTER TABLE index_meta ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0"
+    )
 
 
 def tokenize_query(query: str) -> list[str]:

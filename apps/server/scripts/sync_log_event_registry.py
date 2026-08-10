@@ -119,6 +119,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "status": "str",
         "duration_ms": "int",
         "reason": "str",
+        "index_status": "str",
     },
     "tool.args_parse_failed": {
         "pos": "int",
@@ -203,6 +204,27 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     "cost.ledger_drain_before_reconcile_failed": {},
     "workspace.snapshot_created": {},
     "workspace.snapshot_failed": {"error": "str"},
+    "workspace.index_build_start": {
+        "force": "bool",
+    },
+    "workspace.index_build_complete": {
+        "force": "bool",
+        "updated": "bool",
+        "duration_ms": "int",
+        "generation": "int",
+        "truncated": "bool",
+        "files": "int",
+    },
+    "workspace.index_skip_channel_busy": {
+        "force": "bool",
+        "wait_ms": "int",
+        "inflight": "int",
+    },
+    "workspace.index_failed": {
+        "force": "bool",
+        "duration_ms": "int",
+        "error": "str",
+    },
     "pipeline.error": {"error": "str"},
     "http.unhandled_error": {"method": "str", "path": "str", "error": "str"},
     "approval.sandbox_auto_pass": {"tool": "str"},
@@ -337,6 +359,14 @@ KEY_DESC: dict[str, str] = {
     "event_sink.close": (
         "EventSink 真 close（开→关仅一条）；was_detached 区分先前仅断线 vs 仍附着收口"
     ),
+    "workspace.index_build_start": "后台代码索引 ensure 开始（IndexMaintainer）",
+    "workspace.index_build_complete": (
+        "后台代码索引 ensure 完成（duration_ms；可取则带 generation/truncated/files）"
+    ),
+    "workspace.index_skip_channel_busy": (
+        "Local channel 仍忙，跳过本轮索引并 coalesce 重试"
+    ),
+    "workspace.index_failed": "后台代码索引 ensure 失败（带 error/duration_ms）",
 }
 
 
