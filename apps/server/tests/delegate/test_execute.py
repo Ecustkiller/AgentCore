@@ -213,8 +213,8 @@ async def test_explicit_light_with_file_deliverable_kept_for_repair(monkeypatch)
     assert captured["max_rounds"] is None
 
 
-async def test_explicit_light_with_long_form_ignored(monkeypatch):
-    """显式 light + 成篇长文仍忽略 → standard。"""
+async def test_explicit_light_with_retired_min_length_kept(monkeypatch):
+    """显式 light + 已删 min_length 不再忽略 → 保留 light。"""
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
     t = tool(Provider(["OUT"]))
@@ -231,8 +231,8 @@ async def test_explicit_light_with_long_form_ignored(monkeypatch):
         },
         ctx(),
     )
-    assert spy.get("delegate.started")["complexity_hint"] == "standard"
-    assert spy.get("delegate.complexity_hint_ignored")["reason"] == "long_form_deliverable"
+    assert spy.get("delegate.started")["complexity_hint"] == "light"
+    assert not any(name == "delegate.complexity_hint_ignored" for name, _ in spy.events)
 
 
 async def test_multi_worker_keeps_standard_complexity_hint(monkeypatch):
@@ -610,13 +610,12 @@ def test_task_description_matches_what_worker_actually_receives():
     task_desc = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["task"][
         "description"
     ]
-    # 定案甲：自包含=目标+边界+验收；细则进任务范围/章节/落盘，勿主推细清单进 must_contain。
+    # 定案甲：自包含=目标+边界+验收；细则进任务范围/章节/落盘。
     assert "自包含" in task_desc
     assert "看不到完整历史" in task_desc
     assert "目标" in task_desc and "边界" in task_desc and "验收" in task_desc
     assert "required_sections" in task_desc or "artifacts" in task_desc
-    assert "must_contain" in task_desc
-    assert "软提醒" in task_desc or "短主题词" in task_desc
+    assert "must_contain" not in task_desc
     assert "细则进 deliverable.must_contain" not in task_desc
     assert "team_brief" in task_desc
 

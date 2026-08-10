@@ -258,7 +258,7 @@ class LoopController(
 
         ``node_count`` / ``has_deps`` describe this batch so the audit gate can tell
         a substantial first batch (nodes ≥3 or any depends_on) from a light one.
-        ``audit_hard`` / ``includes_review`` stamp成篇硬门（research_report / 结构字段）.
+        ``audit_hard`` / ``includes_review`` stamp成篇硬门（research_report playbook）.
         """
         self._post_delegate = True
         self._post_delegate_investigation_count = 0

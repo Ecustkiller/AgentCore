@@ -10,12 +10,10 @@ import pytest
 from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 from agentcore.runtime.delegate.delivery_status import build_delivery_status
 from agentcore.runtime.delegate.playbook_declaration import (
-    resolve_playbook_declaration,
-)
+    resolve_playbook_declaration)
 from agentcore.runtime.engine.governance import (
     maybe_inject_audit_hard_block,
-    should_audit_hard_block,
-)
+    should_audit_hard_block)
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.research_quality import (
@@ -31,8 +29,7 @@ from agentcore.runtime.runs.research_quality import (
     plan_is_literature_report_delivery,
     plan_signals_long_form_audit,
     promote_brief_to_deliverable,
-    upstream_body_floor_satisfied,
-)
+    upstream_body_floor_satisfied)
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.file_ops import FileDeleteTool, FileWriteTool
 from agentcore.tools.builtin.handoff import HandoffTool
@@ -49,8 +46,7 @@ def test_deliverable_is_report_delivery_structured_or():
     from agentcore.workspace.stage_dirs import (
         DEBATE_DIR,
         RESEARCH_DIR,
-        REVIEWS_DIR,
-    )
+        REVIEWS_DIR)
 
     assert deliverable_is_report_delivery(
         Deliverable(code_audit_gate=True, form="files", artifacts=["x.audit.json"])
@@ -69,11 +65,11 @@ def test_deliverable_is_report_delivery_structured_or():
     )
     # Bare repair/build files — not a report post.
     assert not deliverable_is_report_delivery(
-        Deliverable(form="files", artifacts=["src/foo.py"], requires_files=True)
+        Deliverable(form="files", artifacts=["src/foo.py"])
     )
     assert not deliverable_is_report_delivery(None)
     assert not deliverable_is_report_delivery(
-        Deliverable(form="prose", min_length=100)
+        Deliverable(form="prose")
     )
 
 
@@ -84,15 +80,14 @@ def _ctx(tmp_path: Path, **kwargs) -> ToolContext:
         agent_id="a",
         backend=ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox()),
         user_id="u",
-        **kwargs,
-    )
+        **kwargs)
 
 
-def test_long_form_audit_only_structured_deliverable():
-    """成篇硬审计不扫自由文；只认 deliverable.min_length≥3000 等结构腿。"""
+def test_long_form_audit_retired_length_leg():
+    """成篇硬审计不扫自由文；已删 min_length 腿恒 False。"""
     assert not deliverable_signals_long_form({"min_length": 500})
-    assert deliverable_signals_long_form({"min_length": 3000})
-    assert deliverable_signals_long_form({"min_length": 5000, "name": "报告"})
+    assert not deliverable_signals_long_form({"min_length": 3000})
+    assert not deliverable_signals_long_form({"min_length": 5000, "name": "报告"})
     # Free-text task/role alone must not trip the audit signal.
     assert not plan_signals_long_form_audit(
         [
@@ -103,7 +98,7 @@ def test_long_form_audit_only_structured_deliverable():
             }
         ]
     )
-    assert plan_signals_long_form_audit(
+    assert not plan_signals_long_form_audit(
         [
             {
                 "role": "撰稿",
@@ -126,8 +121,7 @@ def test_paper_parallel_merge_discipline_constant():
     from agentcore.runtime.runs.research_quality import (
         DEFAULT_RESEARCH_REPORT_ARTIFACT,
         PAPER_PARALLEL_MERGE_DISCIPLINE,
-        research_report_main_artifact,
-    )
+        research_report_main_artifact)
 
     assert "单主文件" in PAPER_PARALLEL_MERGE_DISCIPLINE
     assert "合并责任" in PAPER_PARALLEL_MERGE_DISCIPLINE
@@ -143,8 +137,7 @@ def test_research_handwritten_ok_without_declaration():
         {
             "tasks": [{"role": "调研员", "task": "写实务研究报告"}],
         },
-        user_message="写一篇调研报告",
-    )
+        user_message="写一篇调研报告")
     assert err is None
     assert name is None
     assert reason is None
@@ -170,25 +163,23 @@ def test_annotate_batch_meta_audit_flags():
         has_deps=True,
         playbook="research_report",
         audit_hard=True,
-        includes_review=True,
-    )
+        includes_review=True)
     assert stamped.metadata["batch_playbook"] == "research_report"
     assert stamped.metadata["audit_hard"] is True
     assert stamped.metadata["batch_includes_review"] is True
 
 
 def test_parallel_brief_does_not_signal_long_form_audit():
-    """A 档摸底批：无 min_length 成篇信号；硬门只认 research_report / 结构字段。"""
+    """A 档摸底批：硬门只认 research_report；min_length 腿已撤。"""
     from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import plan_signals_long_form_audit
 
     tasks, errors = expand_playbook(
         "parallel_brief",
-        {"topic": "开源选型", "angles": ["兼容", "闭源风险", "生态"]},
-    )
+        {"topic": "开源选型", "angles": ["兼容", "闭源风险", "生态"]})
     assert errors == []
     assert plan_signals_long_form_audit(tasks) is False
-    # 对照：显式成篇 min_length 才进结构硬门信号
+    # 对照：即使显式成篇 min_length 也不再进结构硬门信号
     tasks_long = [
         {
             "id": "w",
@@ -197,7 +188,7 @@ def test_parallel_brief_does_not_signal_long_form_audit():
             "deliverable": {"form": "files", "min_length": 4000},
         }
     ]
-    assert plan_signals_long_form_audit(tasks_long) is True
+    assert plan_signals_long_form_audit(tasks_long) is False
 
 
 def test_audit_hard_block_after_soft_nudge():
@@ -259,8 +250,7 @@ def test_upstream_body_floor_predicate():
     assert upstream_body_floor_satisfied(
         body_chars=MIN_UPSTREAM_BODY_CHARS,
         landed_artifact_kinds={},
-        min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-    )
+        min_body_chars=MIN_UPSTREAM_BODY_CHARS)
     assert not upstream_body_floor_satisfied(
         body_chars=10, landed_artifact_kinds={}, min_body_chars=MIN_UPSTREAM_BODY_CHARS
     )
@@ -302,12 +292,10 @@ async def test_handoff_promotes_brief_when_empty_body_min0(tmp_path: Path):
         handoff_requires_body=True,
         handoff_min_body_chars=0,
         handoff_deliverable_form=None,
-        round_content_chars=0,
-    )
+        round_content_chars=0)
     result = await HandoffTool().execute(
         {"summary": "Greeter 问好", "key_points": ["已完成打招呼"]},
-        ctx,
-    )
+        ctx)
     assert result.success is True
     assert "Greeter 问好" in (result.final_text or "")
     assert "已完成打招呼" in (result.final_text or "")
@@ -323,8 +311,7 @@ async def test_handoff_rejects_brief_promote_for_prose_with_dependents(tmp_path:
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_deliverable_form="prose",
-        round_content_chars=0,
-    )
+        round_content_chars=0)
     result = await HandoffTool().execute({"summary": summary}, ctx)
     assert result.success is False
     assert "空交付不得交接" in (result.error or "")
@@ -341,8 +328,7 @@ async def test_handoff_rejects_promoted_brief_below_floor(tmp_path: Path):
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_deliverable_form=None,
-        round_content_chars=0,
-    )
+        round_content_chars=0)
     result = await HandoffTool().execute({"summary": "太短"}, ctx)
     assert result.success is False
     assert "空交付不得交接" in (result.error or "")
@@ -360,8 +346,7 @@ async def test_handoff_promotes_brief_when_meets_floor_non_prose(tmp_path: Path)
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_deliverable_form="files",
-        round_content_chars=0,
-    )
+        round_content_chars=0)
     result = await HandoffTool().execute({"summary": summary}, ctx)
     assert result.success is True
     assert (result.final_text or "") == summary
@@ -375,8 +360,7 @@ async def test_handoff_prose_allows_when_real_body_meets_floor(tmp_path: Path):
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_deliverable_form="prose",
-        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5,
-    )
+        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5)
     result = await HandoffTool().execute({"summary": "诊断已写入正文"}, ctx)
     assert result.success is True
     assert (result.final_text or "") == ""
@@ -388,8 +372,7 @@ async def test_handoff_rejects_empty_body_when_required(tmp_path: Path):
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-        round_content_chars=10,
-    )
+        round_content_chars=10)
     result = await HandoffTool().execute({"summary": "结论够长" * 10}, ctx)
     assert result.success is False
     assert "空交付不得交接" in (result.error or "")
@@ -404,8 +387,7 @@ async def test_handoff_rejects_empty_summary_when_body_zero(tmp_path: Path):
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=0,
-        round_content_chars=0,
-    )
+        round_content_chars=0)
     result = await HandoffTool().execute({"summary": "   "}, ctx)
     assert result.success is False
     assert "空交付不得交接" in (result.error or "")
@@ -418,8 +400,7 @@ async def test_handoff_real_body_keeps_empty_final_text(tmp_path: Path):
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=0,
-        round_content_chars=19,
-    )
+        round_content_chars=19)
     result = await HandoffTool().execute({"summary": "Greeter 问好"}, ctx)
     assert result.success is True
     assert (result.final_text or "") == ""
@@ -451,8 +432,7 @@ async def test_handoff_allows_short_body_when_no_contract_floor(tmp_path: Path):
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=0,
-        round_content_chars=19,
-    )
+        round_content_chars=19)
     result = await HandoffTool().execute({"summary": "Greeter 问好"}, ctx)
     assert result.success is True
 
@@ -466,8 +446,7 @@ async def test_handoff_allows_empty_body_when_prose_landed(tmp_path: Path):
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_deliverable_form="prose",
         round_content_chars=0,
-        landed_artifact_kinds={"notes.md": "prose"},
-    )
+        landed_artifact_kinds={"notes.md": "prose"})
     result = await HandoffTool().execute({"summary": "已落盘调研"}, ctx)
     assert result.success is True
 
@@ -494,8 +473,7 @@ async def test_handoff_prose_landed_survives_replace_empty_body(tmp_path: Path):
     base = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-    )
+        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS)
     # tool_round stamps round_content_chars; tool_exec replace()s again per call.
     write_round = replace(base, round_content_chars=12)
     write_ctx = replace(write_round)
@@ -518,8 +496,7 @@ async def test_handoff_skeleton_write_after_replace_still_blocks(tmp_path: Path)
     base = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-    )
+        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS)
     write_ctx = replace(replace(base, round_content_chars=0))
     written = await FileWriteTool().execute(
         {"path": "outline.md", "content": _SKELETON_BODY}, write_ctx
@@ -539,8 +516,7 @@ async def test_handoff_allows_sufficient_body(tmp_path: Path):
         tmp_path,
         handoff_requires_body=True,
         handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5,
-    )
+        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5)
     result = await HandoffTool().execute({"summary": "调研要点已齐"}, ctx)
     assert result.success is True
 
@@ -566,8 +542,7 @@ def test_delivery_status_no_continue_writing_action():
             run_id="write",
             role="撰稿人",
             task="写成报告",
-            deliverable=Deliverable(name="报告", requires_files=True),
-        )
+            deliverable=Deliverable())
     )
     results = {
         "write": RunState(
@@ -582,8 +557,7 @@ def test_delivery_status_no_continue_writing_action():
                     "description": "队员因 token 预算触顶被迫收口，产出可能不完整",
                     "reason": "token_budget",
                 }
-            ],
-        )
+            ])
     }
     payload = build_delivery_status(plan, results, execution_id="e1")
     assert payload is not None
@@ -673,10 +647,10 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
             {"role": "学术审校员", "deliverable": {"name": "审校"}},
         ]
     ) is False
-    # 仅 long-form 结构信号
+    # 仅 long-form 结构信号（已撤）→ 不进文献降档
     assert plan_is_literature_report_delivery(
         [{"role": "撰稿", "deliverable": {"min_length": 4000}}]
-    )
+    ) is False
 
 
 def test_academic_usable_url_and_citation_count():
@@ -703,18 +677,14 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             deliverable=Deliverable(
                 form="files",
                 artifacts=[f"{RESEARCH_PREFIX}报告.md"],
-                citation_mode="two_phase",
-            ),
-        ),
+                citation_mode="two_phase")),
         RunSpec(
             run_id="review",
             role="学术审校员",
             task="审",
             deliverable=Deliverable(
                 form="files",
-                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
-            ),
-        ),
+                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"])),
     ]
     # Adequate → no gap
     ok = {
@@ -724,8 +694,7 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             citations=[
                 {"url": "https://arxiv.org/abs/1"},
                 {"url": "https://pubmed.ncbi.nlm.nih.gov/1/"},
-            ],
-        ),
+            ]),
         "review": RunState(phase=RunPhase.COMPLETED, content="可接受"),
     }
     assert collect_evidence_deficit_gaps(nodes, ok) == []
@@ -741,8 +710,7 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             citations=[
                 {"url": "https://baike.baidu.com/a"},
                 {"url": "https://www.iciba.com/b"},
-            ],
-        ),
+            ]),
         "review": RunState(phase=RunPhase.COMPLETED, content="ok"),
     }
     gaps = collect_evidence_deficit_gaps(nodes, junk)
@@ -754,8 +722,7 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
     stamped_writer = RunState(
         phase=RunPhase.COMPLETED,
         content="成稿",
-        citations=[{"url": "https://arxiv.org/abs/1"}],
-    )
+        citations=[{"url": "https://arxiv.org/abs/1"}])
     stamped_writer.evidence_meta = {
         "evidence_gap": True,
         "search_policy": "academic_literature",
@@ -772,29 +739,25 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
     legacy_writer = RunState(
         phase=RunPhase.COMPLETED,
         content="成稿",
-        citations=[{"url": "https://arxiv.org/abs/1"}],
-    )
+        citations=[{"url": "https://arxiv.org/abs/1"}])
     legacy_writer.evidence_meta = {"evidence_deficit": True}
     gaps3 = collect_evidence_deficit_gaps(
         nodes,
         {
             "write": legacy_writer,
             "review": RunState(phase=RunPhase.COMPLETED, content="ok"),
-        },
-    )
+        })
     assert gaps3 and gaps3[0]["reason"] == "evidence_deficit"
 
     # Sticky attr path (executor copies RetrievalBudgetState.evidence_gap → state)
     sticky = RunState(
         phase=RunPhase.COMPLETED,
         content="成稿",
-        citations=[{"url": "https://arxiv.org/abs/1"}],
-    )
+        citations=[{"url": "https://arxiv.org/abs/1"}])
     sticky.evidence_gap = True
     gaps4 = collect_evidence_deficit_gaps(
         nodes,
-        {"write": sticky, "review": RunState(phase=RunPhase.COMPLETED, content="ok")},
-    )
+        {"write": sticky, "review": RunState(phase=RunPhase.COMPLETED, content="ok")})
     assert gaps4 and gaps4[0]["reason"] == "evidence_deficit"
 
 
@@ -835,18 +798,14 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
             deliverable=Deliverable(
                 form="files",
                 artifacts=[f"{RESEARCH_PREFIX}报告.md"],
-                citation_mode="two_phase",
-            ),
-        ),
+                citation_mode="two_phase")),
         RunSpec(
             run_id="review",
             role="学术审校员",
             task="审",
             deliverable=Deliverable(
                 form="files",
-                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
-            ),
-        ),
+                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"])),
     ]
     transcript = [
         LLMMessage(
@@ -855,29 +814,24 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
             tool_calls=[
                 ToolCall(
                     id="tc1",
-                    function=ToolCallFunction(name="web_search", arguments="{}"),
-                )
-            ],
-        ),
+                    function=ToolCallFunction(name="web_search", arguments="{}"))
+            ]),
         LLMMessage(
             role="tool",
             content=(
                 '{"query":"q","results":[],"evidence_gap":true,'
                 '"search_policy":"academic_literature"}'
             ),
-            tool_call_id="tc1",
-        ),
+            tool_call_id="tc1"),
     ]
     writer = RunState(
         phase=RunPhase.COMPLETED,
         content="成稿",
         citations=[{"url": "https://arxiv.org/abs/1"}],
-        transcript=transcript,
-    )
+        transcript=transcript)
     gaps = collect_evidence_deficit_gaps(
         nodes,
-        {"write": writer, "review": RunState(phase=RunPhase.COMPLETED, content="ok")},
-    )
+        {"write": writer, "review": RunState(phase=RunPhase.COMPLETED, content="ok")})
     assert gaps and gaps[0]["reason"] == "evidence_deficit"
     assert "结构化证据差" in gaps[0]["description"]
 
@@ -888,8 +842,7 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
     from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import (
         INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
-        batch_declares_review_files,
-    )
+        batch_declares_review_files)
     from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
     assert not batch_declares_review_files(
@@ -929,15 +882,13 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
                 "deliverable": {"form": "prose", "min_length": 40},
             },
         ],
-        id_prefix="thin_review",
-    )
+        id_prefix="thin_review")
     assert errors == []
     by_role = {n.role: n for n in plan.nodes}
     review = by_role["独立复核员"]
     # 未声明 files → 不再静默抬 form/artifacts
     assert review.deliverable is None or (
         review.deliverable.form != "files"
-        and not review.deliverable.requires_files
         and not review.deliverable.artifacts
     )
     assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in (review.task or "")
@@ -945,7 +896,6 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
     verify = by_role["验证员"]
     assert verify.deliverable is not None
     assert verify.deliverable.form == "prose"
-    assert verify.deliverable.requires_files is False
 
     # playbook 审校默认落盘仍成立
     tasks, pb_errs = expand_playbook(
@@ -955,8 +905,9 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
     pb_review = next(t for t in tasks if t["id"] == "review")
     d = pb_review["deliverable"]
     assert d["form"] == "files"
-    assert d["requires_files"] is True
+    assert "requires_files" not in d
+    assert "min_length" not in d
+    assert "name" not in d
     assert d["artifacts"] == [f"{REVIEWS_DIR}/审校报告.md"]
-    assert d["min_length"] >= 80
     assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE in pb_review["task"]
     assert batch_declares_review_files(tasks) is True

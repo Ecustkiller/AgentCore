@@ -1,6 +1,6 @@
 """Delegate playbook declaration gate（结构校验）.
 
-自由组队：可不传 playbook，直接手写 ``tasks``（``playbook_none_reason`` 可选）。
+自由组队：可不传 playbook，直接手写 ``tasks``。
 建站 / 工具台 / 绿场软件：推荐具名 ``build_website``（工具台气质用
 ``style=toolshed``）/ ``build_app``（软引导见 skill / schema）；
 ``none`` / 手写不再因意图硬拒。
@@ -92,8 +92,9 @@ def resolve_playbook_declaration(
 ) -> tuple[str | None, str | None, str | None]:
     """Resolve declaration → ``(playbook_name|None, none_reason|None, error|None)``.
 
-    ``playbook_name`` set ⇒ expand that playbook. ``none_reason`` may be set on the
-    hand-written path (optional). ``error`` set ⇒ reject the call.
+    ``playbook_name`` set ⇒ expand that playbook. ``none_reason`` is always ``None``
+    (legacy slot retained for call-site compat; field removed from CEO schema).
+    ``error`` set ⇒ reject the call.
 
     Free teaming may omit playbook entirely and pass ``tasks`` only. Named playbooks
     still expand when declared. ``automation_delivery`` retained for call-site
@@ -104,12 +105,6 @@ def resolve_playbook_declaration(
     _ = automation_delivery  # scene ledger removed; kw kept for call-site compat
     legacy = arguments.get("playbook")
     playbook_id = arguments.get("playbook_id")
-    none_reason_raw = arguments.get("playbook_none_reason")
-    none_reason = (
-        none_reason_raw.strip()
-        if isinstance(none_reason_raw, str) and none_reason_raw.strip()
-        else ""
-    )
 
     # Prefer explicit playbook / playbook_id naming a registry entry.
     legacy_s = legacy.strip() if isinstance(legacy, str) and legacy.strip() else ""
@@ -151,10 +146,10 @@ def resolve_playbook_declaration(
 
     explicit_none = pid_s.casefold() == _PLAYBOOK_NONE
 
-    # Hand-written path: explicit none and/or tasks (none_reason optional).
+    # Hand-written path: explicit none and/or tasks.
     if explicit_none or has_tasks:
         if arguments.get("playbook_args"):
             return None, None, HANDWRITTEN_PLAYBOOK_ARGS_MSG
-        return None, (none_reason or None), None
+        return None, None, None
 
     return None, None, _EMPTY_DELEGATE_MSG

@@ -49,7 +49,7 @@ INTENSITY_SOLO = "solo"
 INTENSITY_STANDARD = "standard"
 _ALLOWED_INTENSITIES = frozenset({INTENSITY_SOLO, INTENSITY_STANDARD})
 
-# 文案包结构化板块（验收用 required_sections，替代高 min_length）
+# 文案包结构化板块（验收用 required_sections；主题约束进 task / required_sections）
 # 首项对齐 task 里 visual thesis / 信息架构，must_contain_soft 仍软拦。
 _BUILD_WEBSITE_COPY_SECTIONS = (
     "视觉 thesis",
@@ -242,7 +242,6 @@ def _build_three_chain_site(
             ),
             "deliverable": {
                 "form": "files",
-                "name": f"站点文案包（已落盘 {_BUILD_WEBSITE_COPY}）",
                 "artifacts": [_BUILD_WEBSITE_COPY],
                 "required_sections": list(copy_sections),
                 "must_contain_soft": True,
@@ -278,11 +277,6 @@ def _build_three_chain_site(
             "depends_on": ["copy"],
             "deliverable": {
                 "form": "files",
-                "name": (
-                    f"DESIGN + 整页 + 契约"
-                    f"（{_BUILD_WEBSITE_DESIGN} / {_BUILD_WEBSITE_HTML} / "
-                    f"{_BUILD_WEBSITE_CONTRACT} 等）"
-                ),
                 "artifacts": [
                     _BUILD_WEBSITE_DESIGN,
                     _BUILD_WEBSITE_HTML,
@@ -311,7 +305,6 @@ def _build_three_chain_site(
             "ceiling_priority": True,
             "deliverable": {
                 "form": "files",
-                "name": f"QA 报告（已落盘 {_BUILD_WEBSITE_QA}）",
                 "artifacts": [_BUILD_WEBSITE_QA],
                 "web_seam_scope": f"{_BUILD_WEBSITE_DIR}/",
                 "placeholder_hard_exempt": True,
@@ -387,11 +380,6 @@ def _build_solo_site(
             ),
             "deliverable": {
                 "form": "files",
-                "name": (
-                    f"文案 + DESIGN + 整页 + 契约"
-                    f"（{_BUILD_WEBSITE_COPY} / {_BUILD_WEBSITE_DESIGN} / "
-                    f"{_BUILD_WEBSITE_HTML} 等）"
-                ),
                 "artifacts": [
                     _BUILD_WEBSITE_COPY,
                     _BUILD_WEBSITE_DESIGN,
@@ -488,7 +476,6 @@ def build_website_verify(args: dict[str, Any]) -> tuple[list[dict[str, Any]], li
             "ceiling_priority": True,
             "deliverable": {
                 "form": "files",
-                "name": f"QA 报告（已落盘 {_BUILD_WEBSITE_QA}）",
                 "artifacts": [_BUILD_WEBSITE_QA],
                 "web_seam_scope": f"{_BUILD_WEBSITE_DIR}/",
                 "placeholder_hard_exempt": True,

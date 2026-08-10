@@ -4,7 +4,7 @@ Single / parallel / DAG stop being distinct *modes* and become one RunPlan whose
 shape falls out of the ``depends_on`` edges (no deps + 1 task = single; no deps +
 N = parallel; any deps = a DAG). Pure and dict-based.
 
-第一阶段：每个 task 自带「内联角色」（role / objective / tools /
+第一阶段：每个 task 自带「内联角色」（role / tools /
 …），无独立 Agent 实体与 allow-list。``agent_id`` 铸成 == ``run_id``，``agent_name``
 取 ``role``，仅供 ``run_*`` 事件与图展示。
 
@@ -41,11 +41,10 @@ _VALID_STANCES = frozenset({"pro", "con"})
 _VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
 # DAG 节点可显式声明 timeout_ms；缺省不填 → ``apply_worker_budgets`` 填统一 backstop。
 _DEFAULT_RETRY_DELAY_MS = 2_000
-# Per-sibling excerpt caps in a fan-out awareness summary: a scope line (责任/任务)
-# plus a shorter deliverable note (预期产出), kept tight so a wide fan-out's
-# awareness block stays scannable and can't blow up a worker's context.
+# Per-sibling excerpt caps in a fan-out awareness summary: a scope line (任务),
+# kept tight so a wide fan-out's awareness block stays scannable and can't blow
+# up a worker's context.
 _SIBLING_TASK_CHARS = 150
-_SIBLING_OUTPUT_CHARS = 80
 # Consumer-oriented phrasing only — bare 「上游」「前置」 false-fire on seed tasks
 # that *are* the upstream ("作为上游产出…"). Keep advisory; never a hard reject.
 _UPSTREAM_HINTS = re.compile(
@@ -804,7 +803,6 @@ def _inline_spec(
         kind=RunKind.AGENT,
         task=item["task"],
         role=role,
-        objective=item.get("objective", "") or "",
         system_prompt_supplement=item.get("system_prompt_supplement") or None,
         research_then_draft=bool(item.get("research_then_draft")),
         evidence_ledger_check=bool(item.get("evidence_ledger_check")),
@@ -957,24 +955,17 @@ def _sibling_summary(group: list[RunSpec], me: RunSpec) -> str:
     """Fan-out awareness body for ``me``: one bullet per *other* node in its
     fan-out group, carrying enough for a peer to draw its own boundary —
 
-      ``- {role}：{scope}（预期产出：{deliverable.name}）``
+      ``- {role}：{task}``
 
-    ``scope`` is the sibling's ``objective`` (its declared 责任/负责的部分) when the
-    CEO set one, else the ``task`` instruction (always present) so a peer is never
-    blank; ``deliverable.name`` (its declared 产出) is appended only when given. This
-    enriches the bare role+task list so parallel peers see *who owns what* and *what
-    each will hand back* — and can avoid both overlapping the same ground and leaving
-    a seam uncovered. Excerpts are capped (:func:`_excerpt`). Assumes
-    ``len(group) >= 2`` (caller skips a lone node)."""
+    Scope is the sibling's ``task`` instruction (always present) so a peer is never
+    blank. Excerpts are capped (:func:`_excerpt`). Assumes ``len(group) >= 2``
+    (caller skips a lone node)."""
     lines: list[str] = []
     for other in group:
         if other.run_id == me.run_id:
             continue
-        scope = _excerpt(other.objective or other.task, _SIBLING_TASK_CHARS)
-        line = f"- {other.role}：{scope}"
-        if other.deliverable and other.deliverable.name:
-            line += f"（预期产出：{_excerpt(other.deliverable.name, _SIBLING_OUTPUT_CHARS)}）"
-        lines.append(line)
+        scope = _excerpt(other.task, _SIBLING_TASK_CHARS)
+        lines.append(f"- {other.role}：{scope}")
     return "\n".join(lines)
 
 
@@ -1018,16 +1009,13 @@ def _dag_policy(item: dict[str, Any]) -> RunPolicy:
 def _parse_deliverable(item: dict[str, Any]) -> Deliverable | None:
     """Parse a task's ``deliverable`` object into a :class:`Deliverable`.
 
-    Returns None when no name and no enforceable rule is declared — the executor still
-    enforces the non-empty baseline regardless. Invalid knob values are dropped (lenient
-    handling)."""
+    Returns None when no enforceable rule is declared — the executor still
+    enforces the non-empty baseline regardless. Invalid knob values are dropped
+    (lenient handling). Unknown keys are ignored (not consumed as contract)."""
     raw = item.get("deliverable")
     if not isinstance(raw, dict):
         return None
-    name = ""
-    if isinstance(raw.get("name"), str) and raw["name"].strip():
-        name = raw["name"].strip()
-    deliverable = _deliverable_from_dict(raw, name=name)
+    deliverable = _deliverable_from_dict(raw)
     return deliverable if _deliverable_has_content(deliverable) else None
 
 
@@ -1035,51 +1023,42 @@ _VALID_DELIVERABLE_FORMS = frozenset({"prose", "files"})
 
 
 def prose_form_conflict_error(item: dict[str, Any]) -> str | None:
-    """Reject raw ``form=prose`` ∩ (``requires_files`` | non-empty ``artifacts``).
+    """Reject raw ``form=prose`` ∩ non-empty ``artifacts``.
 
     Must run on the CEO's raw task dict **before** :func:`_deliverable_from_dict`
-    clears those fields — otherwise the gate never fires.
+    clears artifacts for prose — otherwise the gate never fires.
     """
     raw = item.get("deliverable")
     if not isinstance(raw, dict):
         return None
     if raw.get("form") != "prose":
         return None
-    has_requires = bool(raw.get("requires_files"))
     arts = raw.get("artifacts")
     has_artifacts = isinstance(arts, list) and any(
         isinstance(a, str) and a.strip() for a in arts
     )
-    if not has_requires and not has_artifacts:
+    if not has_artifacts:
         return None
     return (
-        "契约矛盾：deliverable.form=prose 不能同时声明 requires_files 或 artifacts。"
-        "纯文字交付请去掉这两项；若需落盘/钉路径请改 form=files。"
+        "契约矛盾：deliverable.form=prose 不能同时声明 artifacts。"
+        "纯文字交付请去掉 artifacts；若需落盘/钉路径请改 form=files。"
     )
 
 
-def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverable:
+def _deliverable_from_dict(raw: dict[str, Any]) -> Deliverable:
     required_sections = _str_list(raw.get("required_sections"))
-    must_contain = _str_list(raw.get("must_contain"))
     artifacts = _str_list(raw.get("artifacts"))
-    min_length = raw.get("min_length")
-    min_length = min_length if isinstance(min_length, int) and min_length > 0 else 0
     fmt = raw.get("output_format")
     output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
     form_raw = raw.get("form")
     form = form_raw if form_raw in _VALID_DELIVERABLE_FORMS else None
-    # Declaring concrete artifact paths or form=files implies a file deliverable —
-    # path reconciliation is stricter than a bare requires_files count check.
-    # form=prose ∩ (requires_files | artifacts) is rejected upstream
-    # (:func:`prose_form_conflict_error`); do not silently coerce that combo away.
+    # Write-disk recognition: form=files and/or non-empty artifacts only.
+    # form=prose ∩ artifacts is rejected upstream (:func:`prose_form_conflict_error`);
+    # do not silently coerce that combo away.
     if form == "prose":
-        requires_files = False
         artifacts = []  # path reconciliation meaningless for prose delivery
         artifact_dir = ""
     else:
-        requires_files = (
-            bool(raw.get("requires_files", False)) or bool(artifacts) or form == "files"
-        )
         artifact_dir_raw = raw.get("artifact_dir", "")
         artifact_dir = (
             artifact_dir_raw.replace("\\", "/").strip().rstrip("/")
@@ -1107,13 +1086,9 @@ def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverabl
         else None
     )
     return Deliverable(
-        name=name,
         output_format=output_format,
         required_sections=required_sections,
-        must_contain=must_contain,
-        min_length=min_length,
         form=form,  # type: ignore[arg-type]
-        requires_files=requires_files,
         artifacts=artifacts,
         artifact_dir=artifact_dir,
         web_seam_scope=web_seam_scope.strip(),
@@ -1132,13 +1107,9 @@ def _deliverable_from_dict(raw: dict[str, Any], *, name: str = "") -> Deliverabl
 
 def _deliverable_has_content(deliverable: Deliverable) -> bool:
     return bool(
-        deliverable.name.strip()
-        or deliverable.form
+        deliverable.form
         or deliverable.required_sections
-        or deliverable.must_contain
-        or deliverable.min_length
         or deliverable.output_format == "json"
-        or deliverable.requires_files
         or deliverable.artifacts
         or deliverable.artifact_dir
         or deliverable.web_quality_scan

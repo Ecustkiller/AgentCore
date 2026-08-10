@@ -98,7 +98,7 @@ def thrash_record_from_node(
         artifacts = tuple(state.files_touched)
     return ThrashRecord(
         run_id=node.run_id,
-        task=str(getattr(node, "task", None) or getattr(node, "objective", None) or ""),
+        task=str(getattr(node, "task", None) or ""),
         artifacts=artifacts,
         role=str(getattr(node, "role", None) or getattr(node, "agent_name", None) or ""),
     )
@@ -121,7 +121,7 @@ def _node_artifacts(node: Any) -> tuple[str, ...]:
 
 
 def _node_task(node: Any) -> str:
-    return str(getattr(node, "task", None) or getattr(node, "objective", None) or "")
+    return str(getattr(node, "task", None) or "")
 
 
 def find_thrash_collision(

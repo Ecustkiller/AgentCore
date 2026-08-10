@@ -44,7 +44,7 @@ DEFAULT_TOKEN_WIND_DOWN_RESERVE = 30_000
 DEFAULT_TIMEOUT_WARN_RATIO = 0.75
 
 # 收尾窗口允许的工具（落盘 + 内环诊断 + handoff；调查/执行类一律剔除）
-# file_read 不在此基础集：仅交付类（form=files / requires_files，工具面仍含
+# file_read 不在此基础集：仅交付类（form=files / 非空 artifacts，工具面仍含
 # file_write）经 :func:`wind_down_allowed_tools` 叠加——回读自己产物属于写作，
 # 不是继续调查；web_search / read_url / grep 等检索类不放回。
 # code_diagnostics：修码自检（内环），收尾/delivery_idle 收窄后仍可用。
@@ -152,7 +152,7 @@ def worker_keeps_file_read_in_wind_down(
     available: set[str],
     allowed: list[str] | None,
 ) -> bool:
-    """True for files-form / requires_files workers (live surface still offers file_write).
+    """True for files-form / artifacts workers (live surface still offers file_write).
 
     Prose workers withhold ``file_write``; deliverable workers keep it — same heuristic
     as finalize persist. ``file_read`` must also be registered / allowed to keep.

@@ -13,7 +13,7 @@ from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
 
 
 def test_resolve_research_dossier_from_semantic():
-    d = Deliverable(form="files", name="竞品笔记")
+    d = Deliverable(form="files")
     assert (
         resolve_artifact_dir(d, role="竞品分析师", task="调研 Miro 并落盘笔记")
         == RESEARCH_DIR
@@ -46,7 +46,6 @@ def test_apply_fills_dir_prefix_and_relocates_bare_filename():
     apply_artifact_dir_defaults(d, role="竞品分析师", task="调研 Miro 落盘")
     assert d.artifact_dir == RESEARCH_DIR
     assert d.artifacts == [f"{RESEARCH_DIR}/miro-research.md"]
-    assert d.requires_files is True
 
 
 def test_apply_empty_artifacts_keeps_shared_dir_without_fake_artifact():
@@ -55,7 +54,6 @@ def test_apply_empty_artifacts_keeps_shared_dir_without_fake_artifact():
     apply_artifact_dir_defaults(d, role="研究员", task="讨论白板并写调研笔记")
     assert d.artifact_dir == RESEARCH_DIR
     assert d.artifacts == []
-    assert d.requires_files is True
 
 
 def test_describe_mentions_artifact_dir_filename_only():
@@ -67,7 +65,7 @@ def test_describe_mentions_artifact_dir_filename_only():
 
 
 def test_contract_root_write_warns_under_artifact_dir():
-    d = Deliverable(form="files", artifact_dir=RESEARCH_DIR, requires_files=True, artifacts=[])
+    d = Deliverable(form="files", artifact_dir=RESEARCH_DIR, artifacts=[])
     root = check_contract(
         "已写",
         d,
@@ -95,7 +93,7 @@ def test_artifact_dir_warning_stays_soft_on_delivery_status():
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
-    d = Deliverable(form="files", artifact_dir=RESEARCH_DIR, requires_files=True, artifacts=[])
+    d = Deliverable(form="files", artifact_dir=RESEARCH_DIR, artifacts=[])
     verdict = check_contract(
         "已写",
         d,
@@ -133,7 +131,7 @@ def test_build_run_plan_injects_artifact_dir_for_dossier_batch():
             {
                 "role": "竞品分析师",
                 "task": "调研 Excalidraw 竞品并落盘笔记",
-                "deliverable": {"form": "files", "name": "竞品笔记"},
+                "deliverable": {"form": "files"},
             }
         ]
     )
@@ -294,7 +292,7 @@ def test_resolve_derives_custom_docs_subtree_from_artifacts():
         f"{_AI_DEV_DIR}/01-仓库地图.md",
         f"{_AI_DEV_DIR}/04-开发约定与禁忌.md",
     ]
-    d = Deliverable(form="files", artifacts=artifacts, name="AI 开发文档集")
+    d = Deliverable(form="files", artifacts=artifacts)
     assert (
         resolve_artifact_dir(d, role="文档写手", task="根据调研笔记撰写 AI 开发文档")
         == _AI_DEV_DIR
@@ -311,8 +309,6 @@ def test_apply_overrides_mismatched_research_artifact_dir():
         form="files",
         artifact_dir=RESEARCH_DIR,
         artifacts=artifacts,
-        requires_files=True,
-        name="AI 开发文档集",
     )
     apply_artifact_dir_defaults(d, role="文档写手", task="写便于 AI 开发的文档")
     assert d.artifact_dir == _AI_DEV_DIR
@@ -331,8 +327,6 @@ def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
         form="files",
         artifact_dir=RESEARCH_DIR,  # 复现钉错
         artifacts=writer_artifacts,
-        requires_files=True,
-        name="AI 开发文档集",
     )
     apply_artifact_dir_defaults(
         writer, role="文档写手", task="根据笔记撰写 AI 开发文档集"
@@ -355,7 +349,6 @@ def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
     note = Deliverable(
         form="files",
         artifacts=[f"{RESEARCH_DIR}/ai-dev-docs-文档侧笔记.md"],
-        name="文档侧调研笔记",
     )
     apply_artifact_dir_defaults(note, role="文档调研员", task="调研文档并落盘笔记")
     assert note.artifact_dir == RESEARCH_DIR
@@ -377,7 +370,6 @@ def test_build_run_plan_writer_custom_docs_dir_aligns_artifact_dir():
                 "task": "根据调研笔记撰写便于 AI 开发的文档",
                 "deliverable": {
                     "form": "files",
-                    "name": "AI 开发文档集",
                     "artifact_dir": RESEARCH_DIR,
                     "artifacts": [
                         f"{_AI_DEV_DIR}/00-导航与任务路由.md",

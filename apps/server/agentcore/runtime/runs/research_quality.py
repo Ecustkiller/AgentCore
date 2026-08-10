@@ -6,9 +6,8 @@
 ``research_report`` = 成文专线（进硬门）。本模块只放纯谓词与文案常量，
 供 playbook 声明、skill、检索预算、audit gate、delivery_status 复用——不新建子系统。
 
-成篇硬审计**只认结构化成文契约**：``playbook=="research_report"``（入口另判）与
-deliverable 结构字段（如 ``min_length≥3000``）。不扫 task/角色自由文猜意图；
-``parallel_brief`` / 普通多角摸底**不**因多人而进硬门。审校落盘**不**靠角色名
+成篇硬审计**只认** ``playbook=="research_report"``（入口另判）。不扫 task/角色自由文猜意图；
+不认已删字数字段腿。``parallel_brief`` / 普通多角摸底**不**因多人而进硬门。审校落盘**不**靠角色名
 抬 files——只认 playbook / 已声明的 ``form=files``·``reviews/`` artifacts。
 
 调研两阶段引用（块 2）：``citation_mode=="two_phase"``（playbook 盖戳）或
@@ -77,11 +76,8 @@ INDEPENDENT_REVIEW_REPORT_DISCIPLINE = (
 )
 
 # Playbook 显式声明上游 prose 地板时的默认值（如 repair_code 诊断员）。
-# 不再作为「有下游 → 一律抬 min」的拓扑常量；交接地板只认 deliverable.min_length。
+# 不再作为「有下游 → 一律抬 min」的拓扑常量；运行时交接地板固定非空。
 MIN_UPSTREAM_BODY_CHARS = 80
-
-# 成篇门槛：派单时已知的 min_length（字）。≥ 此值视作成篇报告结构信号。
-_LONG_FORM_MIN_LENGTH = 3_000
 
 
 def _deliverable_files_shaped(deliverable: Any) -> bool:
@@ -90,13 +86,11 @@ def _deliverable_files_shaped(deliverable: Any) -> bool:
         return False
     if isinstance(deliverable, dict):
         return bool(
-            deliverable.get("requires_files")
-            or deliverable.get("form") == "files"
+            deliverable.get("form") == "files"
             or bool(deliverable.get("artifacts"))
         )
     return bool(
-        getattr(deliverable, "requires_files", False)
-        or getattr(deliverable, "form", None) == "files"
+        getattr(deliverable, "form", None) == "files"
         or bool(getattr(deliverable, "artifacts", None))
     )
 
@@ -212,12 +206,11 @@ def upstream_body_floor_satisfied(
     landed_artifact_kinds: object,
     min_body_chars: int = 0,
 ) -> bool:
-    """Upstream floor from the same deliverable contract as ``check_contract``.
+    """Upstream floor for handoff / executor completion.
 
-    ``min_body_chars`` = ``deliverable.min_length``（0 = 无字数地板）。已落盘 prose
-    一律满足。无地板时：非空正文即视为可消费产出（拓扑仍靠
+    ``min_body_chars`` is an optional internal floor (0 = 非空即可；不暴露 CEO 合同字段）。
+    已落盘 prose 一律满足。无地板时：非空正文即视为可消费产出（拓扑仍靠
     ``handoff_requires_body`` 挡真正空交）；有地板时须 ``body ≥ min``。
-    禁止再用全局 80 发明地板。
     """
     if has_landed_prose_artifact(landed_artifact_kinds):
         return True
@@ -267,29 +260,20 @@ def promote_brief_to_deliverable(
 
 
 def deliverable_signals_long_form(deliverable: Any) -> bool:
-    """True when a deliverable dict/object signals long-form via structured fields."""
-    if deliverable is None:
-        return False
-    if isinstance(deliverable, dict):
-        min_length = int(deliverable.get("min_length") or 0)
-    else:
-        min_length = int(getattr(deliverable, "min_length", 0) or 0)
-    return min_length >= _LONG_FORM_MIN_LENGTH
+    """Retired: long-form audit no longer keys off deleted length fields.
+
+    Always False. Kept so call sites / tests can assert the leg is gone.
+    """
+    _ = deliverable
+    return False
 
 
 def plan_signals_long_form_audit(plan_nodes: object) -> bool:
-    """True when any plan node deliverable has structured long-form signals.
+    """Retired: hard audit entry is ``playbook==research_report`` only.
 
-    Does **not** scan free-text ``task`` / ``role`` for research/word-count intent.
+    Does **not** scan free-text ``task`` / ``role`` or deleted length fields.
     """
-    if not isinstance(plan_nodes, (list, tuple)):
-        return False
-    for node in plan_nodes:
-        deliverable = getattr(node, "deliverable", None)
-        if deliverable is None and isinstance(node, dict):
-            deliverable = node.get("deliverable")
-        if deliverable_signals_long_form(deliverable):
-            return True
+    _ = plan_nodes
     return False
 
 
@@ -473,13 +457,10 @@ def _node_role(node: Any) -> str:
 def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
     """True for ``research_report`` / 同等成文综述；``parallel_brief`` 默认 False.
 
-    判定（结构字段，不扫 task/角色自由文）：
-    - ``deliverable.min_length≥3000`` 成篇信号；或
+    判定（结构字段，不扫 task/角色自由文；不认已删字数字段）：
     - 批内已声明 reviews/ files 审校座 **且** 存在 two_phase / research·reviews 约定文档 deliverable
       （``research_report`` 与手写同构；``parallel_brief`` 无审校落盘 → 不进）。
     """
-    if plan_signals_long_form_audit(plan_nodes):
-        return True
     if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
         return False
     as_tasks = [
@@ -757,7 +738,7 @@ def collect_evidence_deficit_gaps(
 
 REASON_THIN_REVIEW = "thin_review"
 
-# 空壳：骨架占位硬软信号 / 合同 min_length 软篇幅提醒（已有 warnings，不重读盘）。
+# 空壳：骨架占位硬软信号（已有 warnings，不重读盘）。
 _REVIEW_SHELL_MARKERS: tuple[str, ...] = (
     "含未替换骨架占位",
     "篇幅提醒（软）",

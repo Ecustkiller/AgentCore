@@ -198,13 +198,9 @@ async def prepare_agent_node(
         search_policy=spec.search_policy or "",
         # Investigate/review posture: refuse outer typecheck/build on test_run.
         verify_policy=spec.verify_policy or "",
-        # 成篇交接：有下游时禁止空交；地板 = 合同 min_length（0 → 仅非空）。
+        # 成篇交接：有下游时禁止空交；地板固定非空（不跟合同字数字段）。
         handoff_requires_body=node_has_dependents(env.plan, spec.run_id),
-        handoff_min_body_chars=(
-            int(deliverable.min_length)
-            if deliverable is not None and int(deliverable.min_length or 0) > 0
-            else 0
-        ),
+        handoff_min_body_chars=0,
         handoff_deliverable_form=(
             deliverable.form if deliverable is not None else None
         ),
@@ -241,14 +237,13 @@ async def prepare_agent_node(
     # Topology-split handoff wording + deliverable.form: DAG is known at identity
     # build — upstream nodes get imperative「必须 handoff」; leaves get conditional
     # 「有增量才写」. form=prose/files selects the landing block (omit = legacy).
-    # requires_files / artifacts with form omitted → files block (not「可当文字」).
+    # Non-empty artifacts with form omitted → files block (not「可当文字」).
     deliverable_form = deliverable.form if deliverable is not None else None
     identity = build_worker_identity(
         has_dependents=node_has_dependents(env.plan, spec.run_id),
         captain=is_captain,
         depth=spec.depth,
         form=deliverable_form,
-        requires_files=bool(deliverable.requires_files) if deliverable else False,
         artifacts=list(deliverable.artifacts) if deliverable else None,
         # 能写≠能跑 (能力闸门与交付诚实性): the registry is the capability truth —
         # execution class absent (cloud without sandbox) ⇒ the identity says so,

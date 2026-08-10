@@ -43,7 +43,11 @@ def test_code_audit_single_module_one_auditor():
     assert d["artifacts"][0] == f"{REVIEWS_DIR}/code-audit-0-main.md"
     assert d["artifacts"][1].endswith(".audit.json")
     assert "〇、人审速览" in d["required_sections"]
-    assert "验证方式" in d["must_contain"]
+    assert "验证方式" in t["task"] and "定案" in t["task"]
+    assert "must_contain" not in d
+    assert "name" not in d
+    assert "requires_files" not in d
+    assert "min_length" not in d
     assert "两阶段" in t["task"] or "A 宽扫" in t["task"]
     assert "K=8" in t["task"] or "最多定案 K=8" in t["task"]
     assert ".audit.json" in t["task"]
@@ -167,7 +171,7 @@ def test_code_audit_folds_modules_beyond_eight_into_last_slot():
     assert len(auditors) == CODE_AUDIT_FANOUT
     last = auditors[-1]
     for i in range(CODE_AUDIT_FANOUT - 1, n):
-        assert f"m{i}" in last["task"] or f"m{i}" in last["deliverable"]["name"]
+        assert f"m{i}" in last["task"]
     notes = collect_playbook_notes(tasks)
     assert notes and "扇出折叠" in notes[0]
     assert f"m{CODE_AUDIT_FANOUT}" in notes[0]
@@ -219,7 +223,8 @@ def test_parallel_brief_fans_out_notes_without_write_pipeline():
         assert "含糊" in t["task"] and "根" in t["task"]
         assert "handoff" in t["task"].lower()
         assert "禁" in t["task"] and "业务代码" in t["task"]
-        assert "够用即停" in d["name"] or "handoff" in d["name"].lower()
+        assert "够用即停" in t["task"] or "handoff" in t["task"].lower()
+        assert "name" not in d
         # A 档摸底不盖学术检索挡位
         assert t.get("search_policy") in (None, "", False) or not t.get("search_policy")
         assert "学术检索" not in t["task"]
@@ -274,14 +279,17 @@ def test_research_report_fans_out_one_researcher_per_angle_then_outline_then_wri
     # 审校落盘契约写死在 playbook（form=files + reviews/），不靠运行时扫角色名抬契约。
     review_d = by_id["review"]["deliverable"]
     assert review_d["form"] == "files"
-    assert review_d["requires_files"] is True
+    assert "requires_files" not in review_d
+    assert "name" not in review_d
+    assert "min_length" not in review_d
     assert review_d["artifacts"] == ["AgentCore/文档/reviews/审校报告.md"]
     assert "复核落盘" in by_id["review"]["task"]
     # 审校节点显式墙钟 300s（CEO 显式 timeout_ms 恒优先于统一 backstop）。
     assert by_id["review"]["timeout_ms"] == 300_000
     # checkpoint flag rides the 提纲 step (成纲后写作前过目); the write step requires file landing.
     assert by_id["outline"]["checkpoint_after"] is True
-    assert by_id["write"]["deliverable"]["requires_files"] is True
+    assert "requires_files" not in by_id["write"]["deliverable"]
+    assert "name" not in by_id["write"]["deliverable"]
     assert by_id["write"]["deliverable"]["form"] == "files"
     assert by_id["write"]["deliverable"]["artifacts"] == ["AgentCore/文档/research/报告.md"]
     assert "单主文件" in by_id["write"]["task"]
@@ -440,7 +448,7 @@ def test_research_report_folds_angle_fanout_with_note():
     last = researchers[-1]
     # Tail angles folded into last researcher (not silently dropped).
     for i in range(MAX_PLAYBOOK_FANOUT - 1, n):
-        assert f"a{i}" in last["task"] or f"a{i}" in last["deliverable"]["name"]
+        assert f"a{i}" in last["task"]
     notes = collect_playbook_notes(tasks)
     assert notes and "扇出折叠" in notes[0]
     assert f"a{MAX_PLAYBOOK_FANOUT}" in notes[0]
@@ -648,7 +656,9 @@ def test_repair_code_diagnose_patch_verify_shape():
     assert by_id["verify"]["depends_on"] == ["patch"]
     assert by_id["diagnose"]["max_rounds"] == 4
     assert by_id["patch"]["max_rounds"] == 6
-    assert by_id["patch"]["deliverable"]["requires_files"] is True
+    assert by_id["patch"]["deliverable"]["form"] == "files"
+    assert "requires_files" not in by_id["patch"]["deliverable"]
+    assert "name" not in by_id["patch"]["deliverable"]
     assert "src/app.ts" in by_id["patch"]["deliverable"]["artifacts"]
     # 真纯丙：repair_* 不再靠显式 tools 名单收窄；纪律写在 task 正文。
     assert "tools" not in by_id["diagnose"]
@@ -669,12 +679,13 @@ def test_repair_code_diagnose_patch_verify_shape():
     assert "冒充白屏" in by_id["verify"]["task"]
     assert "verify_policy=inner" not in by_id["verify"]["task"]
     assert "verify_policy" not in by_id["verify"]
-    from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
-
-    assert by_id["diagnose"]["deliverable"]["min_length"] == MIN_UPSTREAM_BODY_CHARS
-    assert by_id["diagnose"]["deliverable"]["min_length"] >= 80
-    # verify 无下游，不抬到 body 地板
-    assert by_id["verify"]["deliverable"]["min_length"] == 40
+    # 原 min_length 迁出：可消费短文 / 通过或失败证据写在 task，勿填已删键。
+    assert "可消费短文" in by_id["diagnose"]["task"]
+    assert "通过或失败证据" in by_id["verify"]["task"]
+    assert "min_length" not in by_id["diagnose"]["deliverable"]
+    assert "min_length" not in by_id["verify"]["deliverable"]
+    assert by_id["diagnose"]["deliverable"]["form"] == "prose"
+    assert by_id["verify"]["deliverable"]["form"] == "prose"
 
 
 def test_repair_code_ui_verify_slot_flows_into_verify_task():
@@ -1032,7 +1043,6 @@ def test_build_website_files_form_builds_run_plan():
     by_role = {n.role: n for n in plan.nodes}
     assert by_role["内容文案"].deliverable is not None
     assert by_role["内容文案"].deliverable.form == "files"
-    assert by_role["内容文案"].deliverable.requires_files is True
     assert by_role["内容文案"].deliverable.strict is True
     assert by_role["前端开发者"].deliverable.artifacts == [
         "site/DESIGN.md",
@@ -1283,7 +1293,7 @@ def test_multi_lens_research_lens_budgets_survive_build_run_plan():
 
 
 def test_multi_lens_research_files_form_builds_run_plan_with_artifacts():
-    """form=files + artifacts 经真实 builder 接通验收闸（requires_files 隐含）。"""
+    """form=files + artifacts 经真实 builder 接通写盘验收。"""
     tasks, errors = expand_playbook(
         "multi_lens_research", {"topic": "T", "lenses": ["法律", "品牌商业"]}
     )
@@ -1294,7 +1304,6 @@ def test_multi_lens_research_files_form_builds_run_plan_with_artifacts():
     legal = by_role["法律视角"]
     assert legal.deliverable is not None
     assert legal.deliverable.form == "files"
-    assert legal.deliverable.requires_files is True
     assert legal.deliverable.artifacts == ["AgentCore/文档/research/法律透镜报告.md"]
     synth = by_role["汇总分析师"]
     assert synth.deliverable is not None

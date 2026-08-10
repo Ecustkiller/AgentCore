@@ -19,7 +19,7 @@ DelegateTool = Any
 
 CHANNEL_DEAD_WRITE_DESK_REJECT = (
     "本地工作区通道已挂起（channel dead）：拒绝再派需要写盘的队员"
-    "（deliverable.form=files / requires_files / artifacts）。"
+    "（deliverable.form=files / 非空 artifacts）。"
     "请基于已有材料收口，或改派纯 prose 队员；请用户检查桌面连接后重试。"
 )
 
@@ -76,9 +76,8 @@ def _deliverable_as_dict(deliverable: Any) -> dict[str, Any] | None:
     if is_dataclass(deliverable) and not isinstance(deliverable, type):
         return asdict(deliverable)
     form = getattr(deliverable, "form", None)
-    requires = bool(getattr(deliverable, "requires_files", False))
     arts = list(getattr(deliverable, "artifacts", None) or [])
-    return {"form": form, "requires_files": requires, "artifacts": arts}
+    return {"form": form, "artifacts": arts}
 
 
 def node_structurally_requires_write_desk(node: Any) -> bool:

@@ -49,7 +49,7 @@ def compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                     f"针对决策问题【{question}】，深入评估这一个选项：{opt}{crit_eval}。"
                     "给出它的优点 / 缺点 / 适用与不适用场景，只评这一个、保持客观。"
                 ),
-                "deliverable": {"name": f"对选项【{opt}】的评估"},
+                "deliverable": {"form": "prose"},
             }
         )
     tasks.append(
@@ -61,7 +61,7 @@ def compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 "一张对比表 + 明确推荐及理由；若各选项各有适用场景，说清分别何时选谁。"
             ),
             "depends_on": eval_ids,
-            "deliverable": {"name": "对比表 + 推荐结论"},
+            "deliverable": {"form": "prose"},
         }
     )
     return tasks, []

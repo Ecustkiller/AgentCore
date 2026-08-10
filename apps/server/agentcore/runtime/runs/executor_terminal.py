@@ -218,11 +218,11 @@ def build_terminal_run_state(
         # 交付真相：零落盘硬失败时上浮 escalate，供 CEO 续派 / 收口（非自愈旁路）。
         if (
             deliverable is not None
-            and deliverable.requires_files
+            and (deliverable.form == "files" or bool(deliverable.artifacts))
             and not product_touched
         ):
             esc_q = (
-                "落盘契约未满足：requires_files 且零落盘"
+                "落盘契约未满足：form=files/artifacts 且零落盘"
                 + ("（写盘 pass 已用尽）" if write_pass_used else "")
                 + "——请 continue_from_run_id 续派或冷补派，勿当作已完成。"
             )
@@ -321,7 +321,7 @@ def build_terminal_run_state(
     )
     # 成篇质量：有下游 + 相对合同未满足且无成篇 prose 落盘 → 失败（与 handoff 同口径）。
     # 认 tool_ctx.landed_artifact_kinds（跨 replace 存活）；勿用 has_landed_files /
-    # 泛 files_touched（骨架落盘会误豁免）。地板只认 deliverable.min_length。
+    # 泛 files_touched（骨架落盘会误豁免）。地板固定非空（不跟合同字数字段）。
     # 非 prose：正文空但 debrief.summary 在 → 先升格再验地板。
     # prose + 有下游：summary 不算正文，禁止升格顶地板。
     from agentcore.runtime.runs.research_quality import (
@@ -331,11 +331,7 @@ def build_terminal_run_state(
     )
 
     body_chars = len((content or "").strip())
-    floor = (
-        int(deliverable.min_length)
-        if deliverable is not None and int(deliverable.min_length or 0) > 0
-        else 0
-    )
+    floor = 0
     form = deliverable.form if deliverable is not None else None
     if (
         body_chars == 0
@@ -377,7 +373,7 @@ def build_terminal_run_state(
         landed_artifact_kinds=tool_ctx.landed_artifact_kinds,
         min_body_chars=floor,
     ):
-        floor_hint = f"不足 {floor} 字（合同 min_length）" if floor > 0 else "为空"
+        floor_hint = "为空"
         summary_hint = (
             "（summary 不算正文）"
             if (

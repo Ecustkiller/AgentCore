@@ -288,10 +288,9 @@ def audit_gate_nudge_prompt() -> str:
 
 
 def audit_gate_hard_prompt() -> str:
-    """Hard audit gate for research_report / structured long-form deliverables."""
+    """Hard audit gate for research_report (playbook stamp only)."""
     return (
-        "[系统提示] 成篇审计硬门：本回合含成文专线 playbook=research_report "
-        "或 deliverable 结构成篇信号（如 min_length≥3000），"
+        "[系统提示] 成篇审计硬门：本回合含成文专线 playbook=research_report，"
         "收尾前【必须】派独立审计员（审计者≠作者）审校落盘成稿，"
         "或用 playbook=research_report（内含审校）完成路径。"
         "对齐推进 playbook=parallel_brief / 普通多角摸底不进本门（软闸亦同）。"
@@ -306,8 +305,8 @@ def audit_gate_hard_prompt() -> str:
 def should_audit_gate(controller: LoopController, *, role: str) -> bool:
     """Whether the soft audit gate should fire (wrap-up or all_completed path).
 
-    Soft nudge aligns with the hard gate: only research_report / structured
-    long-form (``audit_hard_required``). ``parallel_brief`` / ordinary multi-angle
+    Soft nudge aligns with the hard gate: only research_report
+    (``audit_hard_required``). ``parallel_brief`` / ordinary multi-angle
     scouting never enter the soft gate.
     """
     if role != "captain" or controller.audit_gate_fired:
@@ -701,7 +700,7 @@ def resolve_finalize_coordination_tools(
     """OpenAI tool defs for a forced-finalize round.
 
     Default = coordination only. When the worker surface still offers ``file_write``
-    (requires_files / form=files / wind_down), also keep ``file_write`` + ``handoff``
+    (form=files / artifacts / wind_down), also keep ``file_write`` + ``handoff``
     so landing is possible — never strip persist tools then demand a final answer.
     """
     if allowed_tool_names is None:

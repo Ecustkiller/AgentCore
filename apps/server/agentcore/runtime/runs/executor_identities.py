@@ -182,7 +182,7 @@ def _handoff_policy_with_dependents(form: DeliverableForm | None) -> str:
     )
     if form == "prose":
         body += (
-            "\n【正文门槛】结论与根因必须写在回复正文（≥合同 min_length）；"
+            "\n【正文门槛】结论与根因必须写在回复正文（非空即可）；"
             "handoff 的 summary 不算正文——只交 summary、正文为空会被拒收，"
             "加长 summary 也不能代替正文。"
         )
@@ -216,19 +216,17 @@ def _form_block(form: DeliverableForm | None) -> str:
 def resolve_identity_form(
     form: DeliverableForm | None,
     *,
-    requires_files: bool = False,
     artifacts: Sequence[str] | None = None,
 ) -> DeliverableForm | None:
-    """Coerce identity form: requires_files / artifacts ⇒ files block (not legacy).
+    """Coerce identity form: non-empty artifacts ⇒ files block (not legacy).
 
     Explicit ``form`` wins (``prose`` stays prose). When form is omitted but the
-    CEO declared a file deliverable (``requires_files`` or artifacts), inject the
-    files-form prompt — otherwise the legacy two-way block says「分析可当文字产出」
-    and fights the contract gate.
+    CEO declared non-empty ``artifacts``, inject the files-form prompt — otherwise
+    the legacy two-way block says「分析可当文字产出」and fights the contract gate.
     """
     if form is not None:
         return form
-    if requires_files or bool(artifacts):
+    if bool(artifacts):
         return "files"
     return None
 
@@ -398,7 +396,6 @@ def build_worker_identity(
     captain: bool = False,
     depth: int = 1,
     form: DeliverableForm | None = None,
-    requires_files: bool = False,
     artifacts: Sequence[str] | None = None,
     can_execute: bool = True,
 ) -> str:
@@ -409,15 +406,13 @@ def build_worker_identity(
     「有增量才写」wording. ``captain`` selects the nested-delegation intro;
     ``depth`` (when captain) picks honest child-nesting copy vs ``MAX_DELEGATION_DEPTH``.
     ``form`` selects the deliverable-form block (omit = legacy two-way guidance).
-    ``requires_files`` / ``artifacts`` coerce omit → files block when the CEO declared
+    Non-empty ``artifacts`` coerce omit → files block when the CEO declared
     a file deliverable without setting ``form`` (等效 form=files).
     ``can_execute`` mirrors whether the execution class (code_execute / test_run) is in
     this turn's worker registry — False layers the 能写≠能跑 self-description in so the
     prompt never over-claims capability the toolset withheld (能力闸门与交付诚实性).
     """
-    effective_form = resolve_identity_form(
-        form, requires_files=requires_files, artifacts=artifacts
-    )
+    effective_form = resolve_identity_form(form, artifacts=artifacts)
     intro = _worker_captain_intro(depth=depth) if captain else _WORKER_LEAF_INTRO
     no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
     return (

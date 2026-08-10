@@ -744,22 +744,26 @@ def test_build_app_skill_teaches_admission_and_agent_diversion():
     assert "intensity=full" in body or ("禁止" in body and "满编" in body)
 
 
-def test_team_orchestration_skill_teaches_must_contain_and_sections_discipline():
-    # 定案甲：细则进任务范围/章节/落盘路径；停止主推细清单进 must_contain；
-    # 若保留须标软提醒/短主题词。禁机构名/取证路径词；required_sections 只留少数验收点。
+def test_team_orchestration_skill_teaches_sections_not_deleted_deliverable_keys():
+    # 定案：已删 name/must_contain/min_length/requires_files；主题约束进 task /
+    # required_sections / team_brief；写盘用 form=files 和/或 artifacts。
     body = _body("team_orchestration_advanced")
-    assert "must_contain" in body
-    assert "软提醒" in body or "短主题词" in body
-    assert "停止" in body or "勿塞细" in body or "细枚举" in body
-    assert "取证路径" in body or "机构名" in body
-    assert "字面" in body or "硬门槛" in body or "假失败" in body
-    assert "Stanford" not in body and "McKinsey" not in body
     assert "required_sections" in body
     assert "验收点" in body or "验收项" in body
     assert "2–4" in body or "2-4" in body
-    # 不再主推「细则清单进 must_contain」
+    assert "form=files" in body or "form\": \"files\"" in body or '"form": "files"' in body
+    assert "artifacts" in body
+    assert "team_brief" in body
+    # 教「勿填」已删键，勿再教填 must_contain / name / min_length / requires_files
+    assert "已删" in body or "勿】再填" in body or "勿】填已删" in body
+    assert "must_contain" in body  # 仅出现在「勿填」语境
     assert "细则清单进 `deliverable.must_contain`" not in body
     assert "细则清单进 deliverable.must_contain" not in body
+    assert '"name": "审查意见' not in body
+    assert "deliverable.name" in body  # 勿填语境
+    assert "Stanford" not in body and "McKinsey" not in body
+    assert "取证路径" in body or "机构名" in body
+    assert "objective" in body  # 勿填 task.objective
 
 
 def test_team_orchestration_skill_teaches_parallel_review_notewall():

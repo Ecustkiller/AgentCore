@@ -318,7 +318,7 @@ class HandoffTool:
                 output="",
                 error=_MOTION_CARD_MISSING_TIP,
             )
-        # 成篇质量：有下游时禁止空交（地板 = 合同 min_length，0 则仅要求非空）。
+        # 成篇质量：有下游时禁止空交（地板 = 非空即可；生产 handoff_min_body_chars=0）。
         # 豁免认 landed_artifact_kinds 中的 prose（跨 replace 存活）；骨架/空落盘不算。
         # 非 prose：同轮正文 0 字但 summary 非空 → 可升格简报为候选正文。
         # prose + 有下游：summary 不算正文，禁止升格顶地板（对齐 identity）。
@@ -360,9 +360,7 @@ class HandoffTool:
                             v == "skeleton" for v in kinds_map.values()
                         )
                         floor_hint = (
-                            f"至少 {floor} 字（合同 min_length）"
-                            if floor > 0
-                            else "非空正文"
+                            f"至少 {floor} 字" if floor > 0 else "非空正文"
                         )
                         land_hint = (
                             "已落盘的是骨架/提纲（skeleton），不算成篇交付；"
@@ -399,9 +397,7 @@ class HandoffTool:
                         v == "skeleton" for v in kinds_map.values()
                     )
                     floor_hint = (
-                        f"至少 {floor} 字（合同 min_length）"
-                        if floor > 0
-                        else "非空正文"
+                        f"至少 {floor} 字" if floor > 0 else "非空正文"
                     )
                     prose_summary_hint = (
                         "handoff 的 summary 不算正文；"

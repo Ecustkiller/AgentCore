@@ -32,7 +32,7 @@ FINALIZE_INSTRUCTION = (
     "切勿在正文里书写或模拟任何工具调用格式（如 <tool_call>…</> 之类标签），那不会被执行。"
 )
 
-# Files-form / requires_files workers: finalize must still allow real landing (align
+# Files-form / artifacts workers: finalize must still allow real landing (align
 # with wind_down). Without this the model is told to "give a final answer" while
 # file_write is stripped — and may paste a DSML pseudo tool_call into prose.
 FINALIZE_INSTRUCTION_FILES = (
@@ -52,7 +52,7 @@ FINALIZE_INSTRUCTION_FILES = (
 FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult_skill", "ask_user"})
 
 # Persist tools kept on finalize when the worker's tool surface still offers
-# file_write (requires_files / form=files / wind_down) — mirrors wind_down intent.
+# file_write (form=files / artifacts / wind_down) — mirrors wind_down intent.
 FINALIZE_PERSIST_TOOLS = frozenset({"file_write", "handoff"})
 
 # Investigation + execution tools blocked during finalize (by name, explicit list).

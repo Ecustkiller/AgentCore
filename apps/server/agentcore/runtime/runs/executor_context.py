@@ -133,8 +133,8 @@ def _build_messages(
     list is handed back so the caller can ship it as the ``run_context`` event — what the
     user sees == what the LLM eats, one assembly, no second「展示」path to drift."""
     sys_parts = [system_prompt, identity]
-    if spec.role or spec.objective:
-        sys_parts.append(f"你的角色：{spec.role}\n你的目标：{spec.objective}")
+    if spec.role:
+        sys_parts.append(f"你的角色：{spec.role}")
     if spec.system_prompt_supplement:
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)

@@ -66,31 +66,24 @@ def _has_wave_boundary_features(tasks_raw: list[Any]) -> bool:
 
 
 def _has_deep_deliverable_signal(tasks_raw: list[Any]) -> bool:
-    """True when any task's deliverable signals deep / long-form file work.
+    """True when any task declares ``form=files`` / non-empty ``artifacts``.
 
     Orchestration shape (single worker, no DAG) is orthogonal to output weight —
-    deep deliverable must not be collapsed into auto-light.
+    file-shaped deliverable must not be collapsed into auto-light.
+    Retired fields (``min_length`` / ``requires_files``) are not consulted.
     """
-    from agentcore.runtime.runs.builder import _parse_deliverable
-    from agentcore.runtime.runs.worker_budget import is_deep_deliverable
-
     for task in tasks_raw:
         if not isinstance(task, dict):
             continue
-        if is_deep_deliverable(_parse_deliverable(task)):
+        raw = task.get("deliverable")
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("form") == "files":
             return True
-    return False
-
-
-def _blocks_explicit_light(tasks_raw: list[Any]) -> bool:
-    """True when explicit light must be ignored (long-form only, not file landing)."""
-    from agentcore.runtime.runs.builder import _parse_deliverable
-    from agentcore.runtime.runs.worker_budget import blocks_light_complexity
-
-    for task in tasks_raw:
-        if not isinstance(task, dict):
-            continue
-        if blocks_light_complexity(_parse_deliverable(task)):
+        arts = raw.get("artifacts")
+        if isinstance(arts, list) and any(
+            isinstance(a, str) and a.strip() for a in arts
+        ):
             return True
     return False
 
@@ -98,7 +91,7 @@ def _blocks_explicit_light(tasks_raw: list[Any]) -> bool:
 def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
     """True when a single dependency-free worker needs no multi-agent coordination.
 
-    Skips auto-light when deliverable signals deep work (files / artifacts / long-form)
+    Skips auto-light when deliverable is file-shaped (``form=files`` / artifacts)
     so budget mapping can still promote standard → deep.
     ``complexity_hint=light`` no longer stamps short ``max_rounds``; browser tool
     surfaces are not excluded from auto-light for round-budget reasons.
@@ -395,7 +388,7 @@ class DelegateTool:
 
         # Playbook 声明闸：结构校验；建站/绿场 none 不硬拒。场面账（style/format/delivery）已拆除。
         automation_delivery_warning: str | None = None
-        declared_playbook, none_reason, decl_error = resolve_playbook_declaration(
+        declared_playbook, _none_reason, decl_error = resolve_playbook_declaration(
             arguments,
             user_message=self._user_message or "",
         )
@@ -417,7 +410,6 @@ class DelegateTool:
         logger.info(
             "delegate.playbook_declaration",
             playbook_id=declared_playbook or "none",
-            none_reason=(none_reason[:120] if none_reason else ""),
         )
 
         # 拆·playbook 固化 (§2.1): a固化形状 instantiates the whole tasks array, then flows through
@@ -499,21 +491,13 @@ class DelegateTool:
             complexity_hint = "light"
             # info 级：档位归责的关键决策事件，debug 级曾导致线上排查只能靠 demo_tape 反推。
             logger.info("delegate.complexity_hint_inferred", hint="light")
-        elif complexity_hint == "light" and (
-            _has_wave_boundary_features(tasks_raw) or _blocks_explicit_light(tasks_raw)
-        ):
-            # 显式 light 与 DAG/波边界或成篇长文并存时忽略 light：
-            # 前者避免关掉 on_boundary；后者保留成篇调研的 standard 编排。
-            # requires_files / form=files / artifacts  alone 不再挡 light（修码快修）。
-            reason = (
-                "wave_boundary_features"
-                if _has_wave_boundary_features(tasks_raw)
-                else "long_form_deliverable"
-            )
+        elif complexity_hint == "light" and _has_wave_boundary_features(tasks_raw):
+            # 显式 light 与 DAG/波边界并存时忽略 light（避免关掉 on_boundary）。
+            # 已删字数字段 / form=files / artifacts alone 不挡 light（修码快修）。
             complexity_hint = "standard"
             logger.info(
                 "delegate.complexity_hint_ignored",
-                reason=reason,
+                reason="wave_boundary_features",
             )
 
         if self._depth >= 1:
@@ -927,7 +911,6 @@ class DelegateTool:
         from agentcore.runtime.delegate.continuation import apply_continuation_tool_merges
         from agentcore.runtime.runs.research_quality import (
             batch_declares_review_files,
-            plan_signals_long_form_audit,
         )
 
         # 真纯丙：续派 tools 声明已忽略；merge 保留兼容旧 session 字段（执行层不收窄）。
@@ -936,10 +919,8 @@ class DelegateTool:
         batch_includes_review = (
             playbook == "research_report" or batch_declares_review_files(tasks_raw)
         )
-        batch_audit_hard = (
-            playbook == "research_report"
-            or plan_signals_long_form_audit(plan.nodes)
-        )
+        # 成篇硬门只认 playbook==research_report（及既有非字数结构腿由 includes_review 覆盖）。
+        batch_audit_hard = playbook == "research_report"
         from agentcore.runtime.delegate.completion import (
             execution_capability_warning,
             validate_cold_start_explore_deliverables,

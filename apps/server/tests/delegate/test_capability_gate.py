@@ -13,7 +13,7 @@ class _CloudBackend:
 
 
 def _plan(task: str = "写文件") -> RunPlan:
-    return RunPlan(nodes=[RunSpec(run_id="a", role="dev", task=task, objective="")])
+    return RunPlan(nodes=[RunSpec(run_id="a", role="dev", task=task)])
 
 
 def test_soft_warning_on_run_text_without_execution_class():

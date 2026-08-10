@@ -66,7 +66,6 @@ def test_plan_suggests_code_verification():
                 run_id="a",
                 role="dev",
                 task="跑通测试并修好",
-                objective="",
             )
         ]
     )
@@ -77,7 +76,7 @@ def test_plan_suggests_code_verification_skips_bare_open():
     """裸「打开文件 / 打开 .mdc」不得命中 plan_suggests_code_verification。"""
     for task in ("打开文件", "打开 `.cursor/rules/x.mdc`"):
         plan = RunPlan(
-            nodes=[RunSpec(run_id="a", role="dev", task=task, objective="")]
+            nodes=[RunSpec(run_id="a", role="dev", task=task)]
         )
         assert not plan_suggests_code_verification(plan)
 
@@ -85,14 +84,14 @@ def test_plan_suggests_code_verification_skips_bare_open():
 def test_plan_suggests_code_verification_open_acceptance():
     """「打开验收」仍经「验收」命中。"""
     plan = RunPlan(
-        nodes=[RunSpec(run_id="a", role="dev", task="打开验收", objective="")]
+        nodes=[RunSpec(run_id="a", role="dev", task="打开验收")]
     )
     assert plan_suggests_code_verification(plan)
 
 
 def test_cold_start_explore_requires_two_workers():
     thin = RunPlan(
-        nodes=[RunSpec(run_id="a", role="explorer", task="摸仓", objective="")]
+        nodes=[RunSpec(run_id="a", role="explorer", task="摸仓")]
     )
     msg = validate_cold_start_explore_deliverables(thin)
     assert msg is not None
@@ -100,8 +99,8 @@ def test_cold_start_explore_requires_two_workers():
 
     wide = RunPlan(
         nodes=[
-            RunSpec(run_id="a", role="A", task="目录", objective=""),
-            RunSpec(run_id="b", role="B", task="文档", objective=""),
+            RunSpec(run_id="a", role="A", task="目录"),
+            RunSpec(run_id="b", role="B", task="文档"),
         ]
     )
     assert validate_cold_start_explore_deliverables(wide) is None
@@ -134,6 +133,6 @@ def test_format_worker_gaps_block_empty():
 
 def test_collect_worker_gaps_empty_when_clean():
     plan = RunPlan(
-        nodes=[RunSpec(run_id="a", role="dev", task="写", objective="")]
+        nodes=[RunSpec(run_id="a", role="dev", task="写")]
     )
     assert collect_worker_gaps(plan, {"a": _run(files=["a.py"])}) == []

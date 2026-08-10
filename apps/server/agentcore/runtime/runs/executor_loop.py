@@ -171,7 +171,7 @@ async def run_contract_loop(
     pass_controller_seed: dict | None = None
     controller_seed_out: list[dict] = []
     # Format-only / handoff-thin: one in-place light repair before full contract.retry.
-    # Zero-disk (requires_files): one short write pass — never a full investigation retry.
+    # Zero-disk (form=files / artifacts): one short write pass — never a full investigation retry.
     # 调研两阶段：A 跳过引用闸；cite 不干净时同 worker 自动升 B（一次），不过则 rejected。
     light_repair_used = False
     write_pass_used = False
@@ -295,10 +295,10 @@ async def run_contract_loop(
         elif (content or "").strip():
             # No prior body: accept this pass (incl. promoted brief as sole product).
             retained_content = content
-        # files_written backs the contract's requires_files gate; workspace_paths
+        # files_written backs form=files / artifacts landing; workspace_paths
         # reconciles declarative artifacts against the live workspace (+ this
         # run's own writes). Handoff gate: nodes with downstream dependents must
-        # submit a minimum-quality brief (one correction shot, then degraded synth).
+        # submit a non-empty brief (one correction shot, then degraded synth).
         # Product gate: any successful write counts (dossier notes under
         # research/reviews/debate included — see landing_product).
         touched_now = files_touched_from_transcript(messages)

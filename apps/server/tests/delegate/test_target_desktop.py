@@ -43,7 +43,7 @@ def test_task_structurally_requires_write_desk():
     ) is True
     assert task_structurally_requires_write_desk(
         {"deliverable": {"requires_files": True}}
-    ) is True
+    ) is False
     assert task_structurally_requires_write_desk(
         {"deliverable": {"requires_files": False}}
     ) is False
@@ -161,7 +161,7 @@ def test_gate_bare_chat_lists_all_missing_write_targets():
             {
                 "role": "丙",
                 "task": "也缺写盘",
-                "deliverable": {"requires_files": True},
+                "deliverable": {"form": "files"},
             },
             {"role": "丁", "task": "纯对话不进拒名单"},
         ],
@@ -188,7 +188,7 @@ def test_gate_bare_chat_lists_all_missing_write_targets():
             {
                 "role": "丙",
                 "task": "也缺写盘",
-                "deliverable": {"requires_files": True},
+                "deliverable": {"form": "files"},
             },
         ]
     )

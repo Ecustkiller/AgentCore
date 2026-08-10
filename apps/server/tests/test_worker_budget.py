@@ -29,7 +29,7 @@ def test_apply_preserves_pre_set_token_ceiling_and_timeout():
         run_id="x",
         task="t",
         role="r",
-        deliverable=Deliverable(requires_files=True),
+        deliverable=Deliverable(form="files"),
         token_ceiling=50_000,
         policy=RunPolicy(timeout_s=90),
     )
@@ -62,13 +62,13 @@ def test_build_plan_applies_unified_backstop_regardless_of_shape():
                 "role": "学术审校员",
                 "task": "审校",
                 "depends_on": ["r"],
-                "deliverable": {"name": "审校报告"},
+                "deliverable": {"form": "prose"},
             },
             {
                 "id": "d",
                 "role": "写手",
                 "task": "成篇落盘",
-                "deliverable": {"requires_files": True},
+                "deliverable": {"form": "files"},
             },
         ],
         complexity_hint="standard",
@@ -86,7 +86,7 @@ def test_build_plan_research_root_still_gets_research_retrieval():
             {
                 "role": "数据研究员",
                 "task": "深度调研并成篇汇报",
-                "deliverable": {"form": "files", "name": "调研报告", "artifacts": ["AgentCore/文档/research/r.md"]},
+                "deliverable": {"form": "files", "artifacts": ["AgentCore/文档/research/r.md"]},
             }
         ],
         complexity_hint="standard",
@@ -108,7 +108,7 @@ def test_explicit_timeout_ms_wins_over_backstop():
                 "role": "写手",
                 "task": "成篇落盘",
                 "timeout_ms": 90_000,
-                "deliverable": {"requires_files": True},
+                "deliverable": {"form": "files"},
             }
         ],
         complexity_hint="standard",
@@ -127,25 +127,24 @@ def test_is_research_root_predicate():
     assert not is_research_root("standard", None, has_upstream=True, retrieval_budget=10)
     assert not is_research_root("standard", None, has_upstream=False, retrieval_budget=0)
     assert not is_research_root(
-        "standard", Deliverable(requires_files=True), has_upstream=False, retrieval_budget=10
+        "standard", Deliverable(form="files"), has_upstream=False, retrieval_budget=10
     )
 
 
 def test_deep_deliverable_signals():
     assert is_deep_deliverable(Deliverable(form="files"))
     assert is_deep_deliverable(Deliverable(artifacts=["report.md"]))
-    assert is_deep_deliverable(Deliverable(min_length=3_000))
-    assert not is_deep_deliverable(Deliverable(min_length=500))
-    assert not is_deep_deliverable(Deliverable(form="prose", name="短答"))
+    assert not is_deep_deliverable(Deliverable(form="prose"))
+    assert not is_deep_deliverable(Deliverable())
     assert not is_deep_deliverable(None)
 
 
-def test_blocks_light_complexity_only_long_form():
+def test_blocks_light_complexity_never():
     from agentcore.runtime.runs.worker_budget import blocks_light_complexity
 
     assert not blocks_light_complexity(Deliverable(form="files", artifacts=["a.py"]))
-    assert not blocks_light_complexity(Deliverable(requires_files=True))
-    assert blocks_light_complexity(Deliverable(min_length=3_000))
+    assert not blocks_light_complexity(Deliverable(form="prose"))
+    assert not blocks_light_complexity(Deliverable())
     assert not blocks_light_complexity(None)
 
 
@@ -262,7 +261,6 @@ def test_build_plan_ignores_reviewer_least_privilege_tools():
                 "tools": ["file_list", "file_read"],
                 "deliverable": {
                     "form": "prose",
-                    "name": "审查意见",
                     "required_sections": ["问题", "建议", "评分"],
                 },
             }

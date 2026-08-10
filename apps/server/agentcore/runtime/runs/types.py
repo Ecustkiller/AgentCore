@@ -80,28 +80,18 @@ class RunOrigin(StrEnum):
 class Deliverable:
     """一个 node 的完整交付物规格——描述性 + 约束性合一。"""
 
-    name: str = ""
     output_format: str = "text"
     required_sections: list[str] = field(default_factory=list)
-    must_contain: list[str] = field(default_factory=list)
-    min_length: int = 0
     # Structured deliverable form: ``prose`` = text body only (tools still assembled;
     # identity asks the worker not to land files); ``files`` = must land via
-    # file_write (implies ``requires_files``). Omit = worker follows the legacy
-    # two-way identity guidance and decides itself.
+    # file_write. Omit = worker follows the legacy two-way identity guidance and
+    # decides itself. Write-disk recognition = ``form=files`` and/or non-empty
+    # ``artifacts`` (no separate requires_files flag).
     form: Literal["prose", "files"] | None = None
-    # Deliverable-landed postcondition: when True, the run must have called a
-    # file-writing tool (file_write / file_append / str_replace / file_move /
-    # code_execute write-back) at least once, or the contract gate fails it and
-    # auto-reworks. Turns the soft「文件交付物必须落盘、别粘进聊天」prompt rule into a
-    # verifiable code gate over the deterministic files_touched signal (the model
-    # declares a file deliverable; the code enforces it landed). Off by default →
-    # prose deliverables are unaffected.
-    requires_files: bool = False
     # Declarative artifact path list (files / dirs / globs). When non-empty, the
     # contract gate reconciles each pattern against the live workspace (existence),
-    # auto-implies ``requires_files``, and a batch that declares any artifacts
-    # auto-enables completion acceptance. Omit = no path enforcement.
+    # and a batch that declares any artifacts auto-enables completion acceptance.
+    # Omit = no path enforcement.
     artifacts: list[str] = field(default_factory=list)
     # Dossier landing directory (workspace-relative, no trailing slash). Runtime may
     # fill from ``stage_dirs`` when form=files / files_written is dossier-semantic;
@@ -131,7 +121,7 @@ class Deliverable:
     # Runs after web_quality hard; missing browser/vision ⇒ 未目验 (never fake pass).
     # Critical findings → up to 2 contract reworks, then partial warnings.
     visual_critic: bool = False
-    # Legacy：定案乙后 ``must_contain`` 缺词一律 soft；保留字段兼容旧派单 JSON。
+    # Legacy soft keyword flag（旧派单 JSON 兼容；关键词字段已撤，仅保留位）。
     must_contain_soft: bool = False
     strict: bool = False
     # 调研类两阶段引用验收（块 2）：``two_phase`` = 广搜落盘为 draft（A，不跑成稿
@@ -202,7 +192,6 @@ class RunSpec:
     agent_name: str = ""
     # ── 内联 worker 定义（阶段1：替代独立 Agent 实体） ──
     role: str = ""
-    objective: str = ""
     system_prompt_supplement: str | None = None
     # 辩手两阶段发言（辩论编排设计 §4-2.5）：True → ReAct 检索产证据笔记（不进卡片正文），
     # 再以 draft_system + draft_brief + 笔记做无工具干净成稿（流式进 run_output_delta）。

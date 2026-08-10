@@ -1,7 +1,7 @@
 """约定文档 ``artifact_dir``：布局常量 → 委派交付默认目录 + 验收前缀。
 
 工作区布局事实见 ``workspace_context``；本模块只在 ``form=files`` /
-``requires_files`` / 已声明 ``artifacts`` 且语义为约定文档时，按 ``stage_dirs``
+已声明 ``artifacts`` 且语义为约定文档时，按 ``stage_dirs``
 填默认落盘目录。Worker 只定文件名。
 
 **验收 vs 归属分键**：``artifact_dir`` / 目录前缀 / 通配 = 验收覆盖；具体文件
@@ -94,13 +94,13 @@ def _strip_dossier_path_refs(text: str) -> str:
     return _DOSSIER_PATH_REF.sub(" ", text.replace("\\", "/"))
 
 
-def _is_dossier_semantic(role: str, task: str, name: str = "") -> bool:
-    text = _strip_dossier_path_refs(f"{role}\n{task}\n{name}")
+def _is_dossier_semantic(role: str, task: str) -> bool:
+    text = _strip_dossier_path_refs(f"{role}\n{task}")
     return bool(_DOSSIER_SEMANTIC.search(text))
 
 
-def _default_stage_dir(role: str, task: str, name: str = "") -> str:
-    text = _strip_dossier_path_refs(f"{role}\n{task}\n{name}")
+def _default_stage_dir(role: str, task: str) -> str:
+    text = _strip_dossier_path_refs(f"{role}\n{task}")
     if _REVIEW_SEMANTIC.search(text):
         return REVIEWS_DIR
     return RESEARCH_DIR
@@ -190,11 +190,7 @@ def resolve_artifact_dir(
     """
     if deliverable.form == "prose":
         return ""
-    fileish = (
-        deliverable.form == "files"
-        or deliverable.requires_files
-        or bool(deliverable.artifacts)
-    )
+    fileish = deliverable.form == "files" or bool(deliverable.artifacts)
     if not fileish:
         return ""
 
@@ -215,10 +211,10 @@ def resolve_artifact_dir(
     if code_verified:
         return ""
 
-    if not _is_dossier_semantic(role, task, deliverable.name):
+    if not _is_dossier_semantic(role, task):
         return ""
 
-    return _default_stage_dir(role, task, deliverable.name)
+    return _default_stage_dir(role, task)
 
 
 def is_acceptance_only_artifact_pattern(path: str) -> bool:
@@ -259,7 +255,6 @@ def apply_artifact_dir_defaults(
         return
 
     deliverable.artifact_dir = resolved
-    deliverable.requires_files = True
 
     if not deliverable.artifacts:
         return

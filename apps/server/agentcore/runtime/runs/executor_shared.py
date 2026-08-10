@@ -272,7 +272,7 @@ def _is_hard_failure(
     """Whether a contract miss should FAIL the run vs. soft-accept with a warning.
 
     An empty product is always hard (the non-empty baseline, 决策②).
-    甲⁺：``requires_files`` / ``form=files`` 零落盘已降为 soft tip，不再硬失败。
+    甲⁺：``form=files`` / 非空 ``artifacts`` 零落盘已降为 soft tip，不再硬失败。
     Any other shortfall is hard only when the deliverable is ``strict`` (默认软提醒, 决策③).
     ``files_touched`` retained for call-site compatibility (unused after 甲⁺).
     """

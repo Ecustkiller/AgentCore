@@ -93,7 +93,7 @@ def test_resolve_none_without_reason_ok():
     assert reason is None
 
 
-def test_resolve_none_with_reason_ok():
+def test_resolve_none_with_legacy_reason_ignored():
     name, reason, err = resolve_playbook_declaration(
         {
             "playbook_id": "none",
@@ -103,7 +103,7 @@ def test_resolve_none_with_reason_ok():
     )
     assert err is None
     assert name is None
-    assert "机械单步" in (reason or "")
+    assert reason is None  # playbook_none_reason removed
 
 
 def test_resolve_named_playbook_ok():
@@ -154,7 +154,7 @@ def test_website_intent_none_allowed():
     )
     assert err is None
     assert name is None
-    assert reason is not None
+    assert reason is None  # playbook_none_reason removed
 
 
 def test_website_intent_handwritten_without_declaration_allowed():
@@ -335,7 +335,7 @@ def test_non_website_none_still_ok():
     )
     assert err is None
     assert name is None
-    assert reason is not None
+    assert reason is None  # playbook_none_reason removed
 
 
 def test_research_handwritten_no_prefer_pressure():
@@ -379,7 +379,7 @@ def test_website_followup_audit_none_ok():
     )
     assert err is None
     assert name is None
-    assert "审计" in (reason or "")
+    assert reason is None  # playbook_none_reason removed
 
 
 def test_build_website_verify_named_ok():
@@ -538,8 +538,7 @@ def test_software_greenfield_audit_readonly_none_ok():
     )
     assert err is None
     assert name is None
-    assert reason is not None
-    assert "审计" in reason
+    assert reason is None  # playbook_none_reason removed
 
 
 def test_software_greenfield_vue_spa_from_scratch_none_allowed():

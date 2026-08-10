@@ -144,9 +144,6 @@ def _task_delivery_blob(tasks_raw: list[Any] | None) -> str:
             parts.append(str(task))
         deliverable = raw.get("deliverable")
         if isinstance(deliverable, dict):
-            name = deliverable.get("name")
-            if name:
-                parts.append(str(name))
             arts = deliverable.get("artifacts")
             if isinstance(arts, list):
                 parts.extend(str(a) for a in arts if a)

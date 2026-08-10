@@ -200,7 +200,7 @@ def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
     - **Structured write-back** (primary for ``code_execute``): a ``code_execute`` result
       carries the sandbox copy-out paths in a machine marker (``staging.write_back`` →
       ``ExecutionResult.written_files`` → tool output). This makes a product landed
-      *indirectly by an executed script* visible to the ``requires_files`` gate / CEO
+      *indirectly by an executed script* visible to the files-form / artifacts gate / CEO
       manifest — read off the marker, never the fragile「已写回工作区」prose. Correlated
       to its issuing ``code_execute`` call by ``tool_call_id`` so an incidental marker in
       some other tool's result (e.g. a file_read echoing one) is never counted.
@@ -453,8 +453,6 @@ def spec_from_json(data: dict[str, Any]) -> RunSpec:
     deliverable: Deliverable | None = None
     if isinstance(deliverable_raw, dict):
         fields = _filtered(Deliverable, deliverable_raw)
-        name = fields.get("name", "")
-        fields["name"] = name.strip() if isinstance(name, str) else ""
         deliverable = Deliverable(**fields)
     kwargs = _filtered(RunSpec, data)
     kwargs["policy"] = policy

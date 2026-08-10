@@ -24,7 +24,8 @@ def test_warn_single_handwritten_files_no_nail():
     assert "不拒收" in warn
 
 
-def test_warn_requires_files_without_form():
+def test_warn_requires_files_without_form_not_write_engineering():
+    """仅 legacy requires_files、无 form=files → 不算显式写工程。"""
     warn = check_root_slice_honesty(
         [
             {
@@ -35,7 +36,7 @@ def test_warn_requires_files_without_form():
         ],
         depth=0,
     )
-    assert warn is not None
+    assert warn is None
 
 
 def test_ok_form_omitted():
@@ -94,12 +95,14 @@ def test_ok_artifact_dir_nail():
     assert warn is None
 
 
-def test_ok_min_length_nail():
+def test_min_length_no_longer_a_slice_nail():
+    """已删 min_length 不再豁免切片钉；form=files 无白名单钉 → 仍告警。"""
     warn = check_root_slice_honesty(
         [_files_task(min_length=500)],
         depth=0,
     )
-    assert warn is None
+    assert warn == root_slice_honesty_soft_message()
+    assert "min_length" not in warn
 
 
 def test_ok_required_sections_nail():

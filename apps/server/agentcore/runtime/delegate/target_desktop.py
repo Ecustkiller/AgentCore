@@ -109,15 +109,13 @@ def effective_target_folder_id(
 def task_structurally_requires_write_desk(task: dict[str, Any]) -> bool:
     """True when deliverable structurally needs a write desk (no task-body scan).
 
-    Conditions (any): ``form=="files"`` / ``requires_files is True`` /
-    non-empty string ``artifacts``. No deliverable / ``form=prose`` / omit → False.
+    Conditions (any): ``form=="files"`` / non-empty string ``artifacts``.
+    No deliverable / ``form=prose`` / omit / legacy flags alone → False.
     """
     raw = task.get("deliverable")
     if not isinstance(raw, dict):
         return False
     if raw.get("form") == "files":
-        return True
-    if raw.get("requires_files") is True:
         return True
     arts = raw.get("artifacts")
     return isinstance(arts, list) and any(

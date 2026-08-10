@@ -118,7 +118,7 @@ def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
     limit = PLAN_REVIEW_SUMMARY_CHARS
     rows: list[dict[str, Any]] = []
     for n in plan.nodes:
-        task = (n.task or n.objective or "").strip()
+        task = (n.task or "").strip()
         if len(task) > limit:
             task = task[:limit] + "…"
         form = getattr(n.deliverable, "form", None) if n.deliverable else None

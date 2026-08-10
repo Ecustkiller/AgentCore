@@ -339,8 +339,7 @@ class ToolContext:
     # 成篇交接：有下游依赖时 handoff 须带可消费交付（非空正文或已落盘 prose）；
     # 由 worker executor 按 DAG 写入。False/默认 = 叶节点或不强制。
     handoff_requires_body: bool = False
-    # 与 deliverable.min_length 同值（契约唯一真理源）。0 = 无字数地板，仅要求非空。
-    # 旧拓扑常量 80 已撤；禁止发明地板。
+    # 有下游时正文地板字数；生产恒为 0（仅要求非空）。禁止从已删字段回填或发明地板。
     handoff_min_body_chars: int = 0
     # ``deliverable.form``（``prose`` / ``files`` / None）。有下游 + prose 时禁止
     # 用 summary 升格冒充交接地板正文；其它 form 仍可升格。

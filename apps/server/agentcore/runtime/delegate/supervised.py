@@ -248,9 +248,6 @@ async def apply_replan(
             errors.append(f"binds[{i}]: `{rid}` 定稿需要 task")
             continue
         fields: dict[str, Any] = {"role": final_role, "task": final_task}
-        objective = b.get("objective")
-        if isinstance(objective, str) and objective.strip():
-            fields["objective"] = objective.strip()
         raw_deliverable = b.get("deliverable")
         if isinstance(raw_deliverable, dict):
             parsed = _parse_deliverable({"deliverable": raw_deliverable})

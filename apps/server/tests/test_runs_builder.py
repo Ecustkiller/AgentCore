@@ -238,49 +238,45 @@ def test_sibling_summary_task_excerpt_capped():
     assert b.sibling_summary.endswith("…")
 
 
-def test_sibling_summary_carries_objective_and_deliverable_name():
-    # Boundary-drawing enrichment: a peer's bullet shows its 责任(objective, preferred
-    # over the raw task) AND its 预期产出(deliverable.name), so parallel workers can see
-    # who owns what and what each hands back — and not overlap / leave a seam.
+def test_sibling_summary_uses_task_only():
+    # Scope is always the task instruction (objective / deliverable.name removed).
     plan, errs = build_run_plan(
         [
             {
                 "role": "后端",
-                "task": "实现下单接口的全部细节……",
+                "task": "实现下单接口",
                 "objective": "负责服务端 API",
-                "deliverable": {"name": "OpenAPI 契约 + 实现"},
+                "deliverable": {"name": "OpenAPI 契约 + 实现", "form": "files"},
             },
             {
                 "role": "前端",
                 "task": "做下单页",
                 "objective": "负责下单页面",
-                "deliverable": {"name": "可交互页面"},
+                "deliverable": {"name": "可交互页面", "form": "files"},
             },
         ],
         id_prefix="t",
     )
     assert errs == []
     backend, frontend = plan.nodes
-    # frontend sees backend's objective (not the raw task) + its expected output.
-    assert "负责服务端 API" in frontend.sibling_summary
-    assert "实现下单接口的全部细节" not in frontend.sibling_summary  # objective wins over task
-    assert "预期产出：OpenAPI 契约 + 实现" in frontend.sibling_summary
-    assert "负责下单页面" in backend.sibling_summary
+    assert "实现下单接口" in frontend.sibling_summary
+    assert "负责服务端 API" not in frontend.sibling_summary
+    assert "预期产出" not in frontend.sibling_summary
+    assert "做下单页" in backend.sibling_summary
 
 
 def test_sibling_summary_falls_back_to_task_without_objective():
-    # No objective declared → the task instruction is the scope so a peer is never
-    # blank; no deliverable.name → no 产出 note appended.
+    # task instruction is the scope so a peer is never blank.
     plan, errs = build_run_plan(
         [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="t"
     )
     assert errs == []
     a = plan.nodes[0]
-    assert a.sibling_summary == "- B：做B"  # task as scope, no（预期产出：…）tail
+    assert a.sibling_summary == "- B：做B"
 
 
-def test_sibling_summary_deliverable_name_excerpt_capped():
-    # The 预期产出 note has its own shorter cap, independent of the scope cap.
+def test_sibling_summary_ignores_deleted_deliverable_name():
+    # Deleted name key is not consumed; sibling summary is role + task only.
     plan, errs = build_run_plan(
         [
             {"role": "A", "task": "a", "deliverable": {"name": "y" * 300}},
@@ -290,8 +286,8 @@ def test_sibling_summary_deliverable_name_excerpt_capped():
     )
     assert errs == []
     b = plan.nodes[1]
-    assert "y" * 80 in b.sibling_summary
-    assert "y" * 120 not in b.sibling_summary
+    assert b.sibling_summary == "- A：a"
+    assert plan.nodes[0].deliverable is None
 
 
 def test_dag_namespaces_ids_and_rewrites_edges():
@@ -539,8 +535,8 @@ def test_deliverable_parsed_onto_policy():
                 "task": "a",
                 "deliverable": {
                     "required_sections": ["结论", "  "],  # blank dropped
-                    "must_contain": ["风险"],
-                    "min_length": 100,
+                    "must_contain": ["风险"],  # deleted — ignored
+                    "min_length": 100,  # deleted — ignored
                     "output_format": "json",
                     "strict": True,
                 },
@@ -551,10 +547,10 @@ def test_deliverable_parsed_onto_policy():
     c = plan.nodes[0].deliverable
     assert c is not None
     assert c.required_sections == ["结论"]
-    assert c.must_contain == ["风险"]
-    assert c.min_length == 100
     assert c.output_format == "json"
     assert c.strict is True
+    assert not hasattr(c, "must_contain")
+    assert not hasattr(c, "min_length")
 
 
 def test_no_deliverable_leaves_deliverable_none():
@@ -570,15 +566,12 @@ def test_deliverable_block_with_no_rule_is_none():
     assert plan.nodes[0].deliverable is None
 
 
-def test_requires_files_parsed_onto_deliverable():
-    # requires_files alone IS an enforceable rule (unlike strict alone), so a deliverable
-    # is built and the deliverable-landed gate actually fires.
+def test_requires_files_alone_is_ignored():
+    # Deleted requires_files key is not consumed as contract.
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "deliverable": {"requires_files": True}}], id_prefix="t"
     )
-    c = plan.nodes[0].deliverable
-    assert c is not None
-    assert c.requires_files is True
+    assert plan.nodes[0].deliverable is None
 
 
 def test_requires_files_false_alone_is_no_rule():
@@ -588,7 +581,7 @@ def test_requires_files_false_alone_is_no_rule():
     assert plan.nodes[0].deliverable is None
 
 
-def test_artifacts_parsed_and_imply_requires_files():
+def test_artifacts_parsed_without_requires_files_backfill():
     plan, _ = build_run_plan(
         [
             {
@@ -602,36 +595,36 @@ def test_artifacts_parsed_and_imply_requires_files():
     d = plan.nodes[0].deliverable
     assert d is not None
     assert d.artifacts == ["README.md", "examples/", "pkg/**/*.py"]
-    assert d.requires_files is True
+    assert not hasattr(d, "requires_files")
 
 
 def test_dag_step_deliverable_parsed_independently():
     tasks = [
-        {"id": "s1", "role": "A", "task": "a", "deliverable": {"min_length": 50}},
+        {"id": "s1", "role": "A", "task": "a", "deliverable": {"form": "prose"}},
         {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"]},
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs == []
-    assert plan.by_id("t_s1").deliverable.min_length == 50
+    assert plan.by_id("t_s1").deliverable.form == "prose"
     assert plan.by_id("t_s2").deliverable is None
 
 
-def test_prose_with_downstream_keeps_declared_min_length():
-    """交付契约是唯一真理源：prose∧有下游不再抬 min 到 80。"""
+def test_prose_with_downstream_keeps_form():
+    """交付契约是唯一真理源：prose∧有下游不再抬 min。"""
     plan, errs = build_run_plan(
         [
             {
                 "id": "diagnose",
                 "role": "诊断员",
                 "task": "短诊断",
-                "deliverable": {"form": "prose", "min_length": 40},
+                "deliverable": {"form": "prose"},
             },
             {
                 "id": "patch",
                 "role": "修补员",
                 "task": "修补",
                 "depends_on": ["diagnose"],
-                "deliverable": {"form": "files", "requires_files": True},
+                "deliverable": {"form": "files"},
             },
         ],
         id_prefix="t",
@@ -639,12 +632,19 @@ def test_prose_with_downstream_keeps_declared_min_length():
     assert errs == []
     d = plan.by_id("t_diagnose").deliverable
     assert d is not None
-    assert d.min_length == 40
+    assert d.form == "prose"
+    assert not hasattr(d, "min_length")
 
 
 def test_deliverable_invalid_output_format_falls_back_to_text():
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "deliverable": {"output_format": "xml", "min_length": 10}}],
+        [
+            {
+                "role": "A",
+                "task": "a",
+                "deliverable": {"output_format": "xml", "form": "prose"},
+            }
+        ],
         id_prefix="t",
     )
     assert plan.nodes[0].deliverable.output_format == "text"

@@ -19,21 +19,13 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
         "细节→team_orchestration_advanced。"
     ),
     "properties": {
-        "name": {"type": "string"},
         "form": {
             "type": "string",
             "enum": ["prose", "files"],
             "description": "prose=看；files=用（须落盘）。",
         },
         "required_sections": {"type": "array", "items": {"type": "string"}},
-        "must_contain": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "短主题词软提醒（勿塞细枚举清单）。",
-        },
-        "min_length": {"type": "integer"},
         "output_format": {"type": "string", "enum": ["text", "json"]},
-        "requires_files": {"type": "boolean"},
         "artifacts": {"type": "array", "items": {"type": "string"}},
         "artifact_dir": {
             "type": "string",
@@ -55,7 +47,7 @@ DELEGATE_DESCRIPTION = (
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
     "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
     "建站必填 playbook_args.topic；绿场必填 app。"
-    "勿再填已删的 completion_criteria。"
+    "勿再填已删的 completion_criteria / requires_files / name / must_contain / min_length / objective / playbook_none_reason。"
     "HOW→consult_skill(team_orchestration_advanced)。"
 )
 
@@ -80,10 +72,9 @@ DELEGATE_PARAMETERS = {
                             "自包含=目标+边界+验收（宜短；worker 看不到完整历史）。"
                             "已拍板项写入「已确认约束：…」块；"
                             "细则进任务范围/required_sections/artifacts；"
-                            "must_contain 仅短主题词软提醒；全队共识进 team_brief。"
+                            "全队共识进 team_brief。"
                         ),
                     },
-                    "objective": {"type": "string"},
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "id": {
                         "type": "string",
@@ -158,10 +149,6 @@ DELEGATE_PARAMETERS = {
                 '可选 playbook 名，或 "none"（手写 tasks 时用 none/省略，勿再带具名 playbook）；'
                 "与 playbook 同义优先。"
             ),
-        },
-        "playbook_none_reason": {
-            "type": "string",
-            "description": "可选：手写 tasks 时一句说明（不强制）。",
         },
         "playbook_args": {
             "type": "object",

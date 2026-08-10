@@ -95,33 +95,28 @@ _OUTER_VERIFY_ROLE_MARKERS: tuple[str, ...] = (
     "qa lead",
 )
 
-# 成篇门槛：派单时已知的 min_length（字）。≥ 此值视作成篇报告信号。
-_LONG_FORM_MIN_LENGTH = 3_000
-
-
 def is_deep_deliverable(deliverable: Deliverable | None) -> bool:
-    """True when dispatch-time deliverable signals a deep / long-form file report."""
+    """True when dispatch-time deliverable signals a write-desk / file report.
+
+    Write-disk recognition only: ``form=files`` and/or non-empty ``artifacts``.
+    No word-count / retired-field heuristics.
+    """
     if deliverable is None:
         return False
-    if deliverable.requires_files:
-        return True
     if deliverable.form == "files":
         return True
-    if deliverable.artifacts:
-        return True
-    return deliverable.min_length >= _LONG_FORM_MIN_LENGTH
+    return bool(deliverable.artifacts)
 
 
 def blocks_light_complexity(deliverable: Deliverable | None) -> bool:
     """True when deliverable must not keep ``complexity_hint=light``.
 
-    Long-form research (min_length ≥ 3k) still blocks light. File landing alone
-    (``requires_files`` / ``form=files`` / ``artifacts``) does **not** — repair /
-    single-file runtime fixes may be light + requires_files.
+    Retired: long-form used to block light via word-count; that signal is gone.
+    File landing (``form=files`` / ``artifacts``) does **not** block light —
+    repair / single-file runtime fixes may stay light. Always ``False``.
     """
-    if deliverable is None:
-        return False
-    return deliverable.min_length >= _LONG_FORM_MIN_LENGTH
+    _ = deliverable
+    return False
 
 
 def apply_light_round_budgets(

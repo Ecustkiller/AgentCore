@@ -2,16 +2,16 @@
 
 A worker's product is accepted only if it satisfies its node's delivery spec
 (:class:`Deliverable`). 阶段2 第一刀做「机械校验」——看产出的*形*而非*质*：非空（系统
-兜底，始终生效）、最短/最长长度、必含关键词、必备小标题、（声明
+兜底，始终生效）、必备小标题、（声明
 ``output_format="json"`` 时）能否解析为 JSON、以及声明式 ``artifacts`` 路径清单相对
 工作区的存在性对账。当 ``output_format=json`` 与 ``artifacts`` 同用时，JSON 可解析性
 改验工作区文件（结构化文件通道），不再要求聊天正文是 JSON。``output_format=json`` 与
 ``required_sections``（Markdown 小标题语义）混用时跳过章节校验，避免自相矛盾的假失败。
 
 交付形态对齐：文件形态交付（:func:`is_file_deliverable` — ``form=files`` /
-``requires_files`` / ``artifacts``）的长度 / 关键词 / 章节检查读「正文 + 本 run 落盘
-文件」——任一通道命中即满足，有效长度 = max(正文, 各文件)。产品在盘上时不再因正文只是
-简报而假失败「缺章节 / 太短」；prose 交付保持只看正文。
+非空 ``artifacts``）的章节检查读「正文 + 本 run 落盘
+文件」——任一通道命中即满足。产品在盘上时不再因正文只是
+简报而假失败「缺章节」；prose 交付保持只看正文。
 
 网页接缝静态检查：同批落盘出现 HTML + CSS/JS 时，交叉校验 HTML class/id 与 CSS/JS
 选择器命中率（未命中率超过阈值则 fail → ``contract.retry``）；普通文档交付不触发。
@@ -19,7 +19,7 @@ A worker's product is accepted only if it satisfies its node's delivery spec
 占位符 / 未核实内容扫描（定案乙）：内容类落盘（HTML / Markdown / …）检出骨架标记
 （``400-XXX-XXXX``、``PLACEHOLDER``、``[占位]``、lorem ipsum 等）与自注（「示例数据」
 「待核实」等）一律写入 :class:`ContractVerdict` 的 ``warnings``（不阻断验收、不占满
-``contract.retry``）。字数 ``min_length`` / 必含词 ``must_contain`` 同为 soft。
+``contract.retry``）。已删字数/必含词字段不再被运行时消费。
 代码文件豁免 TODO/XXX 习惯。建站链 ``web_quality`` / ``web_seam`` 硬闸与引用/书目硬闸不变。
 
 引用 / 书目质量（台账接通时）：对内容类 ``artifact_contents`` 复用
@@ -90,19 +90,15 @@ class ContractVerdict:
 def is_file_deliverable(deliverable: Deliverable | None) -> bool:
     """Whether the deliverable's product lands as workspace files (not chat prose).
 
-    ``form="files"`` (explicit), ``requires_files`` (must ``file_write``), or a non-empty
-    ``artifacts`` list all mean the product is a file — so the contract's content checks
-    (length / keyword / section) must read the landed files, not only the chat body
-    (交付形态对齐: a paper written to disk with a terse chat note must not fail「缺章节 /
-    太短」). Prose / unspecified deliverables keep body-only semantics.
+    ``form="files"`` (explicit) or a non-empty ``artifacts`` list mean the product is a
+    file — so the contract's content checks (section) must read the landed files, not
+    only the chat body (交付形态对齐: a paper written to disk with a terse chat note must
+    not fail「缺章节」). Prose / unspecified deliverables keep body-only semantics.
+    Legacy flags alone do not qualify.
     """
     return bool(
         deliverable is not None
-        and (
-            deliverable.form == "files"
-            or deliverable.requires_files
-            or deliverable.artifacts
-        )
+        and (deliverable.form == "files" or deliverable.artifacts)
     )
 
 
@@ -114,11 +110,11 @@ def needs_file_contents(
     """Whether :func:`check_contract` will consult landed-file text for this deliverable.
 
     Consumers that read file contents: the JSON file gate (``output_format="json"`` +
-    ``artifacts``), the file-form content channel (length / keyword / section on a file
+    ``artifacts``), the file-form content channel (section checks on a file
     deliverable), the web seam gate (HTML + CSS/JS in ``landed_paths``), the
     placeholder scan, and (when the executor passes ledger ids into
     :func:`check_contract`) the citation / bibliography gate on the same content
-    surfaces. A file deliverable with only existence / ``requires_files`` rules needs
+    surfaces. A file deliverable with only existence rules needs
     no read unless the landed batch is a web artifact set or a content surface. The
     executor uses this to skip file I/O when the contract would ignore the contents
     anyway.
@@ -137,9 +133,7 @@ def needs_file_contents(
         return True
     if deliverable.web_quality_scan:
         return True
-    if (
-        deliverable.form == "files" or deliverable.requires_files
-    ) and deliverable.artifacts:
+    if deliverable.form == "files" and deliverable.artifacts:
         return True
     if deliverable.output_format == "json" and deliverable.artifacts:
         return True
@@ -147,11 +141,7 @@ def needs_file_contents(
         return True
     if not is_file_deliverable(deliverable):
         return False
-    return bool(
-        deliverable.min_length
-        or deliverable.must_contain
-        or deliverable.required_sections
-    )
+    return bool(deliverable.required_sections)
 
 
 def _placeholder_hard_exempt_paths(
@@ -230,7 +220,7 @@ def check_contract(
     ``files_written`` is the count of workspace paths the run actually landed (from
     ``files_touched_from_transcript`` — successful file_write/append/str_replace/move/
     copy results AND ``code_execute`` sandbox write-backs). ``form=files`` /
-    ``requires_files`` with zero successful landing becomes a soft ``warnings`` tip
+    non-empty ``artifacts`` with zero successful landing becomes a soft ``warnings`` tip
     (甲⁺：不再契约 fail / 短写盘 pass). ``landing_failure_kind`` (optional)
     attributes the soft tip: ``channel_dead`` / ``write_failed`` vs paste framing.
     When ``code_audit_gate`` is on, the same kind also demotes missing/unreadable
@@ -258,10 +248,9 @@ def check_contract(
     enforced when contents are given.
 
     交付形态对齐: for a FILE deliverable (:func:`is_file_deliverable` — ``form=files`` /
-    ``requires_files`` / ``artifacts``) the same texts back the length / keyword / section
-    checks, which then read the run's landed files ALONGSIDE the chat body — a section or
-    keyword hit in either satisfies it, and the effective length is ``max(body, each
-    file)`` (NOT concatenated). The executor loads them (matching ``artifacts`` when
+    ``artifacts``) the same texts back the section
+    checks, which then read the run's landed files ALONGSIDE the chat body — a section
+    hit in either satisfies it. The executor loads them (matching ``artifacts`` when
     declared, else this run's ``files_touched``); check_contract stays a pure function.
     Empty / absent contents fall back to body-only (graceful when a read failed).
 
@@ -293,8 +282,6 @@ def check_contract(
 
     exempt_paths = _placeholder_hard_exempt_paths(deliverable, artifact_contents)
     failures = []  # deliverable-specific failures (distinct from early-return above)
-    soft_length_warnings: list[str] = []
-    soft_keyword_warnings: list[str] = []
     # 交付形态对齐: a FILE deliverable's product lives on disk, so the content checks read
     # the run's landed files alongside the chat body. Prose deliverables (no file channel)
     # keep body-only semantics. Contents come from the caller via ``artifact_contents``;
@@ -302,24 +289,6 @@ def check_contract(
     file_texts: list[str] = []
     if is_file_deliverable(deliverable) and artifact_contents:
         file_texts = [t for t in artifact_contents.values() if t and t.strip()]
-    # 有效长度 = max(正文, 各交付文件)，不拼接（避免正文+文件虚高绕过 min）。
-    length = max([len(text), *(len(t) for t in file_texts)])
-    # 定案乙：min_length / must_contain 一律 soft（不 fail、不占满 contract.retry）。
-    if deliverable.min_length and length < deliverable.min_length:
-        soft_length_warnings.append(
-            f"篇幅提醒（软）：产出 {length} 字，少于要求的 {deliverable.min_length} 字"
-        )
-    if deliverable.must_contain:
-        # Case-insensitive, mirroring required_sections' casefold match — the keyword
-        # is a content requirement, not a literal-byte check, so casing must not flip
-        # the soft tip. The reminder still shows the operator's original text.
-        # 正文或任一交付文件命中即满足。
-        haystacks = [content.casefold(), *(t.casefold() for t in file_texts)]
-        for keyword in deliverable.must_contain:
-            if keyword and not any(keyword.casefold() in h for h in haystacks):
-                soft_keyword_warnings.append(
-                    f"素材覆盖提醒（软）：未命中「{keyword}」——若有同级替代表达可保留并说明"
-                )
     # required_sections = Markdown heading semantics. Skip when output_format=json to
     # avoid false failures from JSON field names stuffed into required_sections.
     # 章节在正文或任一交付文件中作为小标题出现即满足。
@@ -343,9 +312,10 @@ def check_contract(
             )
         elif not _is_json(content):
             failures.append("产出不是可解析的 JSON")
-    # 甲⁺：form=files / requires_files 零成功落盘 → soft tip（不 fail、不触发 write_pass）。
+    # 甲⁺：form=files / 非空 artifacts 零成功落盘 → soft tip（不 fail、不触发 write_pass）。
     zero_files_warnings: list[str] = []
-    if (deliverable.requires_files or deliverable.form == "files") and files_written <= 0:
+    expects_files = deliverable.form == "files" or bool(deliverable.artifacts)
+    if expects_files and files_written <= 0:
         zero_files_warnings.append(
             zero_files_gap_message(landing_failure_kind=landing_failure_kind)
         )
@@ -357,7 +327,7 @@ def check_contract(
             listed = "、".join(f"`{p}`" for p in missing)
             path_mismatch_warnings.append(f"声明的交付物路径未落盘：{listed}")
     # 约定文档目录对账（与归属分键）：artifact_dir 不进 ownership；不对齐仅提醒。
-    if deliverable.artifact_dir and deliverable.requires_files:
+    if deliverable.artifact_dir and expects_files:
         from agentcore.runtime.runs.artifact_dir import normalize_artifact_dir
 
         dir_pat = f"{normalize_artifact_dir(deliverable.artifact_dir)}/"
@@ -439,8 +409,6 @@ def check_contract(
         soft_failures.extend(wq.soft_failures)
     warnings = [
         *ph.warnings,
-        *soft_length_warnings,
-        *soft_keyword_warnings,
         *zero_files_warnings,
         *path_mismatch_warnings,
     ]
@@ -799,7 +767,7 @@ def _json_artifact_failures(
 
 
 # Format-only failures eligible for one in-place light repair (缺章节).
-# 定案乙：min_length / must_contain 已降 soft，不再进 failures / light_repair。
+# 已删字数/必含词字段不再进 failures / soft / light_repair。
 # Placeholders, web seam, empty product, missing files, JSON parse, etc. stay on full retry.
 _FORMAT_REPAIR_SECTION_PREFIX = "缺少必备章节："
 _FORMAT_REPAIR_KEYWORD_PREFIX = "缺少必须包含的内容："  # legacy residual only
@@ -811,7 +779,7 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
 
     Used by the executor to try one cheap in-place completion before a full
     ``contract.retry`` that re-opens investigation. Mixed or non-format failures
-    (网页接缝 / 网页质量 / 空产出 / JSON …) return False. 定案乙后字数 / 必含词
+    (网页接缝 / 网页质量 / 空产出 / JSON …) return False. 已删字数 / 必含词
     不再出现在 ``failures``；保留 keyword/short markers 仅兼容遗留 verdict。
     """
     if verdict.ok or not verdict.failures or verdict.soft_failures or verdict.visual_failures:
@@ -1087,8 +1055,6 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
     if deliverable is None:
         return ""
     lines: list[str] = []
-    if deliverable.name:
-        lines.append(f"交付物：{deliverable.name}")
     if deliverable.form == "prose":
         lines.append("- 交付形态：纯文字（正文直接交付，不要落盘）")
     elif deliverable.form == "files":
@@ -1110,10 +1076,6 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
         # 避免 worker 只看到「必须包含」枚举却在正文里用错标题 → contract.retry。
         skeleton = "\n".join(f"## {section}\n" for section in deliverable.required_sections)
         lines.append("- 建议正文骨架（小标题须与上列一致，可在节内自由展开）：\n" + skeleton)
-    if deliverable.must_contain:
-        lines.append("- 建议覆盖（软）：" + "、".join(deliverable.must_contain))
-    if deliverable.min_length:
-        lines.append(f"- 篇幅不少于 {deliverable.min_length} 字")
     # prose form never surfaces file-landing requirements (even if a stale flag slipped in).
     if deliverable.form != "prose":
         if deliverable.artifact_dir:
@@ -1145,7 +1107,7 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
             elif not deliverable.artifact_dir:
                 listed = "、".join(f"`{p}`" for p in deliverable.artifacts)
                 lines.append(f"- 建议把以下交付物路径写入工作区（可用目录或通配）：{listed}")
-        elif deliverable.requires_files:
+        elif deliverable.form == "files":
             lines.append(
                 "- 必须调用 file_write / str_replace / file_append 把产物写进工作区"
                 "（成品是落盘文件，不能只贴在回复正文里）"

@@ -25,9 +25,9 @@ def test_form_parsed_onto_deliverable():
     d = plan.nodes[0].deliverable
     assert d is not None
     assert d.form == "prose"
-    assert d.requires_files is False
 
-def test_form_files_implies_requires_files():
+
+def test_form_files_is_write_disk():
     plan, errs = build_run_plan(
         [{"role": "A", "task": "建站", "deliverable": {"form": "files"}}],
         id_prefix="t",
@@ -36,8 +36,6 @@ def test_form_files_implies_requires_files():
     d = plan.nodes[0].deliverable
     assert d is not None
     assert d.form == "files"
-    assert d.requires_files is True
-
 def test_form_alone_is_enough_content():
     plan, errs = build_run_plan(
         [{"role": "A", "task": "a", "deliverable": {"form": "prose"}}],
@@ -46,8 +44,28 @@ def test_form_alone_is_enough_content():
     assert errs == []
     assert plan.nodes[0].deliverable is not None
 
-def test_form_prose_rejects_requires_files_and_artifacts():
-    """D1: raw form=prose ∩ requires_files/artifacts must hard-reject (gate before clear)."""
+def test_form_prose_rejects_artifacts():
+    """D1: raw form=prose ∩ non-empty artifacts must hard-reject (gate before clear)."""
+    plan, errs = build_run_plan(
+        [
+            {
+                "role": "A",
+                "task": "a",
+                "deliverable": {
+                    "form": "prose",
+                    "artifacts": ["hello.md"],
+                },
+            }
+        ],
+        id_prefix="t",
+    )
+    assert errs
+    assert any("form=prose" in e and "artifacts" in e for e in errs)
+    assert plan.nodes == [] or not plan.nodes
+
+
+def test_form_prose_ignores_legacy_requires_files_key():
+    """Unknown requires_files is not consumed; prose alone still builds."""
     plan, errs = build_run_plan(
         [
             {
@@ -56,16 +74,16 @@ def test_form_prose_rejects_requires_files_and_artifacts():
                 "deliverable": {
                     "form": "prose",
                     "requires_files": True,
-                    "artifacts": ["hello.md"],
                 },
             }
         ],
         id_prefix="t",
     )
-    assert errs
-    assert any("form=prose" in e and "requires_files" in e for e in errs)
-    assert plan.nodes == [] or not plan.nodes
-
+    assert errs == []
+    d = plan.nodes[0].deliverable
+    assert d is not None
+    assert d.form == "prose"
+    assert d.artifacts == []
 def test_form_prose_alone_still_builds():
     plan, errs = build_run_plan(
         [
@@ -81,18 +99,15 @@ def test_form_prose_alone_still_builds():
     d = plan.nodes[0].deliverable
     assert d is not None
     assert d.form == "prose"
-    assert d.requires_files is False
     assert d.artifacts == []
 
-def test_invalid_form_dropped():
+def test_invalid_form_alone_is_no_deliverable():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "deliverable": {"form": "slides", "name": "x"}}],
         id_prefix="t",
     )
-    d = plan.nodes[0].deliverable
-    assert d is not None
-    assert d.form is None
-    assert d.name == "x"
+    # Invalid form + deleted name key → no enforceable rule.
+    assert plan.nodes[0].deliverable is None
 
 def test_identity_form_prose_has_no_file_write_guidance():
     prose = build_worker_identity(has_dependents=False, form="prose")
@@ -121,26 +136,30 @@ def test_identity_form_prose_has_no_file_write_guidance():
     assert "落盘与修订" in omitted
     assert "Artifact-first" in omitted or "短骨架" in omitted
 
-def test_requires_files_injects_files_form_identity_block():
-    """requires_files（或 artifacts）且 form 省略 ⇒ 强制 files 形态提示，非 legacy。"""
-    by_flag = build_worker_identity(has_dependents=False, requires_files=True)
-    assert "form=files" in by_flag
-    assert "落盘文件" in by_flag
-    assert "file_write" in by_flag
-    assert "可独立阅读的文字" not in by_flag
-
+def test_artifacts_inject_files_form_identity_block():
+    """非空 artifacts 且 form 省略 ⇒ 强制 files 形态提示，非 legacy。"""
     by_artifacts = build_worker_identity(
         has_dependents=False, artifacts=["report.md"]
     )
     assert "form=files" in by_artifacts
     assert "落盘文件" in by_artifacts
 
-    # Explicit prose still wins (builder clears requires_files, but API stays coherent).
+    # Omit form + empty artifacts → legacy (no files-form coerce).
+    by_omit = build_worker_identity(has_dependents=False)
+    assert "form=files" not in by_omit
+
+    # Explicit prose still wins.
     prose_wins = build_worker_identity(
-        has_dependents=False, form="prose", requires_files=True
+        has_dependents=False, form="prose", artifacts=["x.md"]
     )
     assert "form=prose" in prose_wins
     assert "form=files" not in prose_wins
+
+
+def test_identity_prose_body_floor_copy_nonempty():
+    up = build_worker_identity(has_dependents=True, form="prose")
+    assert "非空即可" in up
+    assert "min_length" not in up
 
 def test_identity_handoff_topology_preserved_with_form():
     up = build_worker_identity(has_dependents=True, form="prose")
@@ -153,11 +172,11 @@ def test_identity_handoff_topology_preserved_with_form():
     assert "不算正文" not in leaf
 
 def test_describe_deliverable_form_split():
-    prose = describe_deliverable(Deliverable(form="prose", name="问候"))
+    prose = describe_deliverable(Deliverable(form="prose"))
     assert "纯文字" in prose
     assert "file_write" not in prose
 
-    files = describe_deliverable(Deliverable(form="files", name="站点"))
+    files = describe_deliverable(Deliverable(form="files"))
     assert "落盘" in files
     assert "file_write" in files
 
@@ -217,9 +236,13 @@ def test_schema_exposes_form_enum():
     assert "stance" not in props_task
     assert "group" not in props_task
     assert "round" not in props_task
-    mc = props["must_contain"]
-    assert "软提醒" in mc.get("description", "") or "短主题词" in mc.get("description", "")
-    assert "细" in mc.get("description", "")  # 勿塞细枚举/细清单
+    # 已删 A+B+C 字段：schema 不再暴露。
+    assert "must_contain" not in props
+    assert "min_length" not in props
+    assert "requires_files" not in props
+    assert "name" not in props
+    assert "objective" not in props_task
+    assert "playbook_none_reason" not in DELEGATE_PARAMETERS["properties"]
 
 def test_schema_depends_on_teaches_when_to_declare_dependency():
     # 工具面瘦身：【何时填】长引导（生产者→消费者 + 正反例）已迁入 CEO core
@@ -310,7 +333,7 @@ async def test_files_worker_keeps_write_tools_and_identity():
     )
     reg = ToolRegistry()
     reg.register(_FileWriteTool())
-    # form=files ⇒ requires_files：须真实落盘才能 COMPLETED（交付真相）。
+    # form=files：须真实落盘才能 COMPLETED（交付真相）。
     rounds = [
         [
             LLMChunk(

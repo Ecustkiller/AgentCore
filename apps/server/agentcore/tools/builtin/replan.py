@@ -82,10 +82,6 @@ _REPLAN_PARAMETERS = {
                         "type": "string",
                         "description": "定稿子任务（自包含）；省略沿用占位。",
                     },
-                    "objective": {
-                        "type": "string",
-                        "description": "可选：职责 / 目标。",
-                    },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     **TASK_MODEL_SCHEMA_PROPS,
                 },
@@ -134,10 +130,6 @@ _REPLAN_PARAMETERS = {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "可选：上游 run_id 或本批 id。",
-                    },
-                    "objective": {
-                        "type": "string",
-                        "description": "可选：职责 / 目标。",
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     **TASK_MODEL_SCHEMA_PROPS,

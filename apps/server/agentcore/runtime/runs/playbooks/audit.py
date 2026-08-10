@@ -177,14 +177,13 @@ def _auditor_task_body(
     )
 
 
-def _auditor_deliverable(artifact: str, name: str) -> dict[str, Any]:
+def _auditor_deliverable(artifact: str) -> dict[str, Any]:
     json_artifact = companion_audit_json_path(artifact)
+    # 写盘靠 form=files + artifacts；原 must_contain（验证方式/定案）已在 task 纪律正文。
     return {
         "form": "files",
-        "name": name,
         "artifacts": [artifact, json_artifact],
         "required_sections": list(_REQUIRED_SECTIONS),
-        "must_contain": ["验证方式", "定案"],
         "strict": True,
         "code_audit_gate": True,
     }
@@ -228,9 +227,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "task": _auditor_task_body(
                     scope=scope, module=scope, focus=focus, k=k, artifact=artifact
                 ),
-                "deliverable": _auditor_deliverable(
-                    artifact, f"代码审计报告（已落盘 {artifact}）"
-                ),
+                "deliverable": _auditor_deliverable(artifact),
             }
         ], []
 
@@ -251,7 +248,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         merged = len(parts) > 1
         label = " + ".join(parts)
         tid = f"audit_{i}"
-        # 路径用短 slug；完整 modules 文案只进 module_desc / deliverable 展示名。
+        # 路径用短 slug；完整 modules 文案只进 module_desc / task。
         path_hint = parts[0] if not merged else f"merged-{i}"
         artifact = _report_artifact(i, path_hint)
         module_desc = (
@@ -269,9 +266,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 )
                 + fold_hint
             ),
-            "deliverable": _auditor_deliverable(
-                artifact, f"【{label}】审计报告（已落盘 {artifact}）"
-            ),
+            "deliverable": _auditor_deliverable(artifact),
         }
         if fold_note and merged:
             body["playbook_note"] = fold_note
@@ -301,10 +296,9 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             ),
             "deliverable": {
                 "form": "files",
-                "name": f"跨模块审计人审速览（已落盘 {synth_path}）",
                 "artifacts": [synth_path],
+                # 原 must_contain（属实/撤销）主题约束已在 task + required_sections。
                 "required_sections": ["人审速览", "属实中+", "缺口"],
-                "must_contain": ["属实", "撤销"],
             },
         }
     )

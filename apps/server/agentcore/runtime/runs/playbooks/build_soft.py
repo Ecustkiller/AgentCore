@@ -6,7 +6,6 @@ from typing import Any
 
 from agentcore.runtime.runs.build_app import _build_app
 from agentcore.runtime.runs.playbooks._common import clean_str, clean_str_list
-from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
 
 
 def build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -31,11 +30,9 @@ def build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
                 f"实现【{feature}】的后端接口{stack_hint}。先把接口契约（路径 / 方法 / 入参 / "
                 "返回结构 / 错误形状）用 post_note(kind=decision) 广播到团队便签墙，再实现；"
                 "务必用 file_write 把代码写进工作区。"
+                "交付：可用的后端接口 + 已广播的接口契约。"
             ),
-            "deliverable": {
-                "name": "可用的后端接口 + 已广播的接口契约",
-                "requires_files": True,
-            },
+            "deliverable": {"form": "files"},
         }
     ]
     if want_ui:
@@ -48,12 +45,10 @@ def build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
                     "（路径 / 字段 / 返回）。发现契约对不上就按最新契约对齐、"
                     "必要时 post_note 提醒；"
                     "务必用 file_write 把代码写进工作区。"
+                    "交付：可用的前端页面，对接后端接口。"
                 ),
                 "depends_on": ["api"],
-                "deliverable": {
-                    "name": "可用的前端页面，对接后端接口",
-                    "requires_files": True,
-                },
+                "deliverable": {"form": "files"},
             }
         )
     if want_test:
@@ -65,12 +60,10 @@ def build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]
                     f"为【{feature}】写测试，按便签墙上 api 广播的接口契约"
                     "覆盖正常 + 边界 + 错误形状；"
                     "务必用 file_write 把测试文件写进工作区。"
+                    "交付：覆盖接口契约的测试。"
                 ),
                 "depends_on": ["api"],
-                "deliverable": {
-                    "name": "覆盖接口契约的测试",
-                    "requires_files": True,
-                },
+                "deliverable": {"form": "files"},
             }
         )
     return tasks, []
@@ -104,11 +97,7 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     artifacts = clean_str_list(args.get("artifacts"), cap=4)
     if target and target not in artifacts:
         artifacts = [target, *artifacts]
-    patch_deliverable: dict[str, Any] = {
-        "name": "已修补的代码文件",
-        "form": "files",
-        "requires_files": True,
-    }
+    patch_deliverable: dict[str, Any] = {"form": "files"}
     if artifacts:
         patch_deliverable["artifacts"] = artifacts
 
@@ -121,18 +110,14 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "运行时空白/挂载/渲染复现：先 browser 证据（browser_navigate + "
                 "browser_console + snapshot），再 ≤少数目标文件；无栈时可组件二分，"
                 "勿空等用户 F12。"
-                "最多读少数相关文件 / grep；输出：根因一句话 + 拟改路径与改法；"
+                "最多读少数相关文件 / grep；输出：可消费短文——根因一句话 + 拟改路径与改法"
+                "（勿空话一两句交差）；"
                 "禁止全仓 list、禁止大范围通读、禁止在本步改文件。"
                 "多已知问题 / 已有调查批确认要修 → 勿套 repair_code，改用手写 tasks +"
                 "continue_from_run_id。"
             ),
             "max_rounds": 4,
-            "deliverable": {
-                "name": "短诊断（根因 + 拟改点）",
-                "form": "prose",
-                # 结构化声明：诊断须可消费短文；交接地板跟此 min，非拓扑抬升。
-                "min_length": MIN_UPSTREAM_BODY_CHARS,
-            },
+            "deliverable": {"form": "prose"},
         },
         {
             "id": "patch",
@@ -143,6 +128,7 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "改完用内环 code_diagnostics / 写盘回执中的诊断自检；"
                 "禁止全量 typecheck/`test_run`（本批无 test_run）；"
                 "禁止重新从零巡仓。"
+                "交付：已修补的代码文件须落盘。"
             ),
             "depends_on": ["diagnose"],
             "max_rounds": 6,
@@ -162,16 +148,13 @@ def repair_code(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
                 "全量 typecheck/build/`tsc -b` 仅当约定本就是 CLI 验绿时"
                 "由本验收员独占执行（外环），"
                 "勿与 fix 批并行全仓；内环 code_diagnostics 不能代替本步验绿；"
-                "纯 prose 交卷不算过门。失败则 escalate 说明缺口，"
+                "纯 prose 交卷不算过门；验证结果须写清通过或失败证据（勿空话交差）。"
+                "失败则 escalate 说明缺口，"
                 "禁止新开巡读或换马甲从零读仓库；禁止无产出反复空跑同一失败命令。"
             ),
             "depends_on": ["patch"],
             "max_rounds": 4,
-            "deliverable": {
-                "name": "验证结果（通过或失败证据）",
-                "form": "prose",
-                "min_length": 40,
-            },
+            "deliverable": {"form": "prose"},
         },
     ]
     return tasks, []

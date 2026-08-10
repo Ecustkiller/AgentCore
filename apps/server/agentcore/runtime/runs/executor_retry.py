@@ -34,11 +34,12 @@ _LIGHT_REPAIR_MAX_ROUNDS = 4
 
 
 def _files_expected(deliverable: Any) -> bool:
-    """True when this run's contract expects workspace landing."""
+    """True when this run's contract expects workspace landing.
+
+    Only ``form=files`` and/or non-empty ``artifacts`` — legacy flags alone do not.
+    """
     if deliverable is None:
         return False
-    if getattr(deliverable, "requires_files", False):
-        return True
     if getattr(deliverable, "form", None) == "files":
         return True
     return bool(getattr(deliverable, "artifacts", None))
@@ -149,7 +150,7 @@ def _can_write_pass(
     files_written: int,
     write_pass_used: bool,
 ) -> bool:
-    """``requires_files`` + zero disk → one short write pass (not full contract.retry)."""
+    """Files-expected + zero disk → one short write pass (not full contract.retry)."""
     if write_pass_used or not files_expected:
         return False
     if int(files_written or 0) > 0:

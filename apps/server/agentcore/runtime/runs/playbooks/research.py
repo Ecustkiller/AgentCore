@@ -114,7 +114,7 @@ def _user_request_anchor_block(user_message: str) -> str:
     )
 
 
-# A 档摸底验收：写进 parallel_brief task/deliverable（提示词纪律，非完成硬闸）。
+# A 档摸底验收：写进 parallel_brief task（提示词纪律，非完成硬闸）。
 _BRIEF_ACCEPTANCE = (
     "【摸底验收·够用即停】"
     "目标：本方向能讲清「定位 / 技术栈或手段 / 进度或开放问题」即算够"
@@ -183,10 +183,6 @@ def parallel_brief(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
             ),
             "deliverable": {
                 "form": "files",
-                "name": (
-                    f"【{label}】方向笔记 + 来源（已落盘 {artifact}）；"
-                    "handoff 短摘要必交；定位/技术栈或手段/进度够用即停"
-                ),
                 "artifacts": [artifact],
                 "citation_mode": "two_phase",
             },
@@ -266,7 +262,6 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 ),
                 "deliverable": {
                     "form": "files",
-                    "name": f"【{label}】方向的调研要点 + 来源（已落盘 {artifact}）",
                     "artifacts": [artifact],
                     "citation_mode": "two_phase",
                 },
@@ -298,7 +293,6 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 ),
                 "deliverable": {
                     "form": "files",
-                    "name": f"【{topic}】的调研要点 + 来源（已落盘 {artifact}）",
                     "artifacts": [artifact],
                     "citation_mode": "two_phase",
                 },
@@ -321,7 +315,6 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
             "depends_on": research_ids,
             "deliverable": {
                 "form": "files",
-                "name": f"一份结构化报告提纲（已落盘 {outline_path}）",
                 "artifacts": [outline_path],
                 "citation_mode": "two_phase",
             },
@@ -355,9 +348,7 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
             ),
             "depends_on": ["outline"],
             "deliverable": {
-                "name": deliverable,
                 "form": "files",
-                "requires_files": True,
                 "artifacts": [main_path],
                 "citation_mode": "two_phase",
             },
@@ -379,11 +370,8 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
             ),
             "depends_on": ["write"],
             "deliverable": {
-                "name": "审校报告 + 修改建议",
                 "form": "files",
-                "requires_files": True,
                 "artifacts": [_RESEARCH_REPORT_REVIEW_ARTIFACT],
-                "min_length": 80,
             },
             # 审校为依赖写作的收尾节点：通读长稿 + 核对出处。墙钟显式 300s（优先于统一
             # backstop）；token 顶走 worker_budget 统一回填。真纯丙：不再靠显式 tools
@@ -455,7 +443,6 @@ def multi_lens_research(args: dict[str, Any]) -> tuple[list[dict[str, Any]], lis
             ),
             "deliverable": {
                 "form": "files",
-                "name": f"【{label}】透镜调研报告（已落盘 {artifact}）",
                 "artifacts": [artifact],
                 "citation_mode": "two_phase",
             },
@@ -484,10 +471,6 @@ def multi_lens_research(args: dict[str, Any]) -> tuple[list[dict[str, Any]], lis
             "depends_on": lens_ids,
             "deliverable": {
                 "form": "files",
-                "name": (
-                    "交叉验证综述 + 汇总与命题卡"
-                    f"（已落盘 {_SYNTHESIZER_ARTIFACT}；必要时附建议开辩命题卡）"
-                ),
                 "artifacts": [_SYNTHESIZER_ARTIFACT],
                 "citation_mode": "two_phase",
             },

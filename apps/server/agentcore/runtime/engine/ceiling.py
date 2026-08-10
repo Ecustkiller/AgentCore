@@ -208,7 +208,7 @@ async def ceiling_finalize(
 
     # force_finalize contract: when soft round returns tools, caller must execute.
     # Files workers may call file_write/handoff here — discarding would leave
-    # requires_files unmet after we explicitly kept those tools on the surface.
+    # form=files / artifacts unmet after we explicitly kept those tools on the surface.
     if coordination is not None and coordination.kind == "coordination_tools":
         if coordination.content:
             final_content = join_segments(final_content, coordination.content)

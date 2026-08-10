@@ -330,8 +330,7 @@ def debater_task(
     )
     payload: dict[str, Any] = {
         "role": side.name,
-        "task": research_task,
-        "objective": f"代表「{side.name}」就「{focus}」立论",
+        "task": f"代表「{side.name}」就「{focus}」立论。\n\n{research_task}",
         "system_prompt_supplement": side_system(config, side),
         # 真纯丙·H4：不再注入系统只读 tools 名单；默认全开相关工具面。
         "group": f"debate:{config.form.value}",

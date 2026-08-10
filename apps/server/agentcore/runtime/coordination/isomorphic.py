@@ -40,7 +40,7 @@ def _node_role(node: Any) -> str:
 
 
 def _node_task(node: Any) -> str:
-    return str(getattr(node, "task", None) or getattr(node, "objective", None) or "")
+    return str(getattr(node, "task", None) or "")
 
 
 def _format_skipped_entries(skipped: list[tuple[Any, str]]) -> str:

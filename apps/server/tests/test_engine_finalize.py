@@ -86,7 +86,7 @@ def test_resolve_finalize_coordination_tools_filters_to_allowlist():
 
 
 def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
-    """requires_files / form=files：force_finalize 工具面含 file_write+handoff。"""
+    """form=files / artifacts：force_finalize 工具面含 file_write+handoff。"""
     reg = _registry(with_persist=True)
     assert finalize_allows_persist(reg, None) is True
     defs = resolve_finalize_coordination_tools(reg, None, set())

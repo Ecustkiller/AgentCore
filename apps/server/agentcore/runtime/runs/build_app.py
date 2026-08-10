@@ -106,7 +106,6 @@ def _scaffold_task(
         ),
         "deliverable": {
             "form": "files",
-            "name": f"Vite+TS 脚手架（已落盘 {root}/，含模块 stub）",
             "artifacts": scaffold_artifacts,
             "strict": True,
         },
@@ -130,9 +129,7 @@ def _smoke_task(*, root: str, depends_on: list[str]) -> dict[str, Any]:
         "depends_on": depends_on,
         "deliverable": {
             "form": "files",
-            "name": f"冒烟 / QA 笔记（{root}/QA.md）",
             "artifacts": [f"{root}/QA.md"],
-            "requires_files": True,
         },
         "timeout_ms": 300_000,
     }
@@ -178,7 +175,6 @@ def _build_app_lean(
             "depends_on": ["scaffold"],
             "deliverable": {
                 "form": "files",
-                "name": f"公共层 + 主流程页（{root}/src）",
                 "artifacts": [*shared_arts, *stub_pages],
                 "strict": True,
             },
@@ -222,7 +218,6 @@ def _build_app_full(
             "depends_on": ["scaffold"],
             "deliverable": {
                 "form": "files",
-                "name": f"设计 token / 公共组件 / store（{root}/src）",
                 "artifacts": [
                     f"{root}/src/styles/tokens.css",
                     f"{root}/src/components/AppButton.vue",
@@ -265,7 +260,6 @@ def _build_app_full(
             "depends_on": ["shared"],
             "deliverable": {
                 "form": "files",
-                "name": f"模块【{label}】源码",
                 "artifacts": page_paths,
                 "strict": True,
             },
@@ -287,7 +281,6 @@ def _build_app_full(
             "depends_on": list(module_ids),
             "deliverable": {
                 "form": "files",
-                "name": f"已闭合的路由与 import 图（{root}/）",
                 "artifacts": [
                     f"{root}/src/router/index.ts",
                     f"{root}/src/App.vue",

@@ -129,9 +129,9 @@ def validate_repair_how_fixed(
     )
 
 def plan_suggests_code_verification(plan: RunPlan) -> bool:
-    """True when any worker task/objective reads like run/open/install acceptance."""
+    """True when any worker task reads like run/open/install acceptance."""
     for node in plan.nodes:
-        text = f"{node.task}\n{node.objective}".strip()
+        text = (node.task or "").strip()
         if text and _EXECUTION_TASK_HINTS.search(text):
             return True
     return False
@@ -139,7 +139,7 @@ def plan_suggests_code_verification(plan: RunPlan) -> bool:
 def plan_suggests_runtime_ready(plan: RunPlan) -> bool:
     """True when any task reads like start-a-long-running-process acceptance."""
     for node in plan.nodes:
-        text = f"{node.task}\n{node.objective}".strip()
+        text = (node.task or "").strip()
         if text and _RUNTIME_READY_TASK_HINTS.search(text):
             return True
     return False
@@ -147,7 +147,7 @@ def plan_suggests_runtime_ready(plan: RunPlan) -> bool:
 def plan_suggests_verify(plan: RunPlan) -> bool:
     """True when any task reads like compile/test/build verify acceptance."""
     for node in plan.nodes:
-        text = f"{node.task}\n{node.objective}".strip()
+        text = (node.task or "").strip()
         if text and _VERIFY_TASK_HINTS.search(text):
             return True
     return False
@@ -213,9 +213,9 @@ def validate_cold_start_explore_deliverables(
     return None
 
 def plan_mentions_binary_artifact(plan: RunPlan) -> bool:
-    """True when any worker task/objective reads like a binary / playable deliverable."""
+    """True when any worker task reads like a binary / playable deliverable."""
     for node in plan.nodes:
-        text = f"{node.task}\n{node.objective}".strip()
+        text = (node.task or "").strip()
         if text and _BINARY_ARTIFACT_HINTS.search(text):
             return True
     return False
@@ -233,7 +233,7 @@ def plan_suggests_office_deliverable(plan: RunPlan) -> bool:
     Used by soft capability warnings for Office/document batches.
     """
     for node in plan.nodes:
-        text = f"{node.task}\n{node.objective}".strip()
+        text = (node.task or "").strip()
         if text and _OFFICE_DELIVERABLE_HINTS.search(text):
             return True
         d = node.deliverable

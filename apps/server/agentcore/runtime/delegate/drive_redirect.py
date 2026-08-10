@@ -68,7 +68,6 @@ class RedirectController:
             agent_id=new_id,
             agent_name=original.agent_name,
             role=original.role,
-            objective=original.objective,
             system_prompt_supplement=original.system_prompt_supplement,
             tools=original.tools,
             model=original.model,
