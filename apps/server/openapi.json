@@ -10410,6 +10410,17 @@
             ],
             "title": "Credential Source"
           },
+          "harvest_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harvest Kind"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -10431,6 +10442,17 @@
             },
             "title": "Models",
             "type": "array"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "role": {
             "title": "Role",
@@ -15740,7 +15762,7 @@
     },
     "/readyz": {
       "get": {
-        "description": "Readiness probe: 200 when every hard dependency is reachable, else 503.",
+        "description": "Readiness probe: HTTP 200/503 follows DB only; Redis is observational.\n\nPostgreSQL is the hard dependency that decides ``ready`` / ``not_ready``\n(and thus 200 vs 503). Redis is a soft dependency for distributed rate\nlimiting: still probed and, when ``rate_limit_backend=redis``, written to\n``body[\"redis\"]`` for ops/alerting; a Redis outage must not return 503.",
         "operationId": "readiness_readyz_get",
         "responses": {
           "200": {

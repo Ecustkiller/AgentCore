@@ -1281,6 +1281,8 @@ async def test_admin_conversation_replay_merges_timeline(client, make_admin, ses
     assert user_msg["metrics"] is None
     assert user_msg["cost_total"] == 0
     assert user_msg["spans"] == []
+    assert user_msg["origin"] is None
+    assert user_msg["harvest_kind"] is None
 
     # The assistant message merges its turn telemetry (by trace_id) + spend
     # (by message_id) onto the thread row.
@@ -1317,6 +1319,46 @@ async def test_admin_conversation_replay_merges_timeline(client, make_admin, ses
     assert spans[1]["result_preview"] == "file body"
     # Plain tool journal (no team surface) → empty runs list.
     assert assistant_msg["runs"] == []
+
+
+async def test_admin_conversation_replay_projects_execution_harvest_origin(
+    client, make_admin, session_factory
+):
+    """Synthetic harvest closing rows expose origin (not ordinary user prompts)."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_harvest")
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(
+            user_id=alice, title="收口复盘"
+        )
+        conv_id = conv.id
+        await MessageRepository(session).create(
+            conversation_id=conv_id,
+            role="user",
+            content="【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+            metadata={
+                "origin": "execution_harvest",
+                "harvest_kind": "cancelled",
+                "execution_id": "exec-harvest-1",
+            },
+        )
+        await MessageRepository(session).create(
+            conversation_id=conv_id,
+            role="assistant",
+            content="按已完成部分收尾。",
+            trace_id=uuid4().hex,
+        )
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    msgs = r.json()["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    harvest, assistant = msgs
+    assert harvest["origin"] == "execution_harvest"
+    assert harvest["harvest_kind"] == "cancelled"
+    assert assistant["origin"] is None
+    assert assistant["harvest_kind"] is None
 
 
 async def test_admin_conversation_replay_projects_multi_agent_runs(

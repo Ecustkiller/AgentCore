@@ -1,0 +1,32 @@
+{
+  "id": "product_rules_faq_diff",
+  "category": "qa",
+  "user_message": "Cursor 的 .cursor/rules 和 AgentCore 规则有什么区别？",
+  "path": "team",
+  "mode": "economy",
+  "workspace_fixture": "cursor_rules_trap",
+  "_note": "纯 FAQ：对照口径应落到 AgentCore/规则/ + remember；skills/*.json 不是『平台规则』迁移目标。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "args": { "tool": "consult_skill" } },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "AgentCore/规则" }
+    },
+    {
+      "name": "NoFabricationMarker",
+      "args": {
+        "forbidden": [
+          "skills 就是平台规则",
+          "skills 即平台规则",
+          "平台规则在 skills",
+          "好的，我来把",
+          "我这就迁成 skill",
+          "开始把 .mdc 转成 skill"
+        ]
+      }
+    }
+  ],
+  "rubric": "短答区分 Cursor .mdc 与 AgentCore 用户规则落点；正文出现 AgentCore/规则。"
+}

@@ -270,6 +270,152 @@ async def test_pillar_c_finish_detached_schedules_harvest():
 
 
 @pytest.mark.asyncio
+async def test_pillar_c_stale_attach_after_terminal_still_harvests():
+    """复现：terminal 后 turn_attached 误粘滞 → 必须仍进 harvest（禁静默结束）。
+
+    对应线上 ContextVar 错放：跨图 append 在 gather 子任务写了 host eid，
+    父回合 teardown 只 release 了 mint id，宿主 session 的 turn_attached 一直 True，
+    旧 finish_detached 直接 return → 只有 terminal_posted、无 harvest_*。
+    """
+    from structlog.testing import capture_logs
+
+    import agentcore.runtime.coordination.session as session_mod
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    session = CoordinationSession(
+        execution_id="exec-stale-attach",
+        total_workers=2,
+        conversation_id="conv-stale-attach",
+    )
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 2, "total": 2, "output": "done"},
+        )
+    )
+    assert session.terminal_posted is True
+    # Teardown never detached this session (wrong eid released).
+    session.turn_attached = True
+    set_active_coordination(session)
+
+    with (
+        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 0.05),
+        patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.01),
+        patch(
+            "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+            new_callable=AsyncMock,
+        ) as harvest,
+        capture_logs() as logs,
+    ):
+        finish_detached_coordination(session)
+        assert session.harvest_scheduled is True
+        assert any(
+            e.get("event") == "coordination.harvest_armed_while_attached" for e in logs
+        )
+        await asyncio.sleep(0.2)
+        harvest.assert_awaited_once()
+        assert session.turn_attached is False
+        assert any(
+            e.get("event") == "coordination.harvest_stale_attach_forcing" for e in logs
+        )
+
+
+@pytest.mark.asyncio
+async def test_pillar_c_attached_inject_cancels_armed_harvest():
+    """同回合 wait 注入赢了 → 取消已武装的 harvest，避免双收口。"""
+    import agentcore.runtime.coordination.session as session_mod
+
+    session = CoordinationSession(
+        execution_id="exec-inject-wins",
+        total_workers=1,
+        conversation_id="conv-inject-wins",
+    )
+    session.turn_attached = True
+    set_active_coordination(session)
+
+    with (
+        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 0.3),
+        patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.02),
+        patch(
+            "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+            new_callable=AsyncMock,
+        ) as harvest,
+    ):
+        finish_detached_coordination(session)
+        assert session.harvest_scheduled is True
+        await asyncio.sleep(0.05)
+        session.all_completed_injected = True
+        session.mark_settled("attached_inject")
+        await asyncio.sleep(0.15)
+        harvest.assert_not_awaited()
+        assert session.harvest_scheduled is False
+
+
+@pytest.mark.asyncio
+async def test_pillar_c_detach_during_grace_runs_harvest():
+    """grace 期内 release 清掉 turn_attached → 立即 harvest（不必等满 grace）。"""
+    import agentcore.runtime.coordination.session as session_mod
+
+    session = CoordinationSession(
+        execution_id="exec-grace-detach",
+        total_workers=1,
+        conversation_id="conv-grace-detach",
+    )
+    session.turn_attached = True
+    set_active_coordination(session)
+
+    with (
+        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 2.0),
+        patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.02),
+        patch(
+            "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+            new_callable=AsyncMock,
+        ) as harvest,
+    ):
+        finish_detached_coordination(session)
+        await asyncio.sleep(0.05)
+        session.turn_attached = False
+        await asyncio.sleep(0.1)
+        harvest.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_release_follows_conversation_host_when_mint_differs():
+    """ContextVar mint ≠ conversation host → release mint 也须 detach 宿主 drive。"""
+
+    async def _slow():
+        await asyncio.sleep(0.3)
+
+    mint = CoordinationSession(
+        execution_id="exec-mint",
+        total_workers=1,
+        conversation_id="conv-follow",
+        active=False,
+    )
+    host = CoordinationSession(
+        execution_id="exec-host",
+        total_workers=2,
+        conversation_id="conv-follow",
+    )
+    host.drive_task = asyncio.create_task(_slow())
+    host.turn_attached = True
+    # Mint still registered but conversation index points at host (append).
+    set_active_coordination(mint)
+    set_active_coordination(host)
+    assert active_coordination_for_conversation("conv-follow") is host
+
+    release_turn_coordination("exec-mint")
+    assert host.turn_attached is False
+
+    host.drive_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await host.drive_task
+
+
+@pytest.mark.asyncio
 async def test_pillar_c_harvest_skips_when_reattached():
     from agentcore.runtime.coordination.harvest import harvest_detached_execution
 
@@ -279,10 +425,14 @@ async def test_pillar_c_harvest_skips_when_reattached():
         conversation_id="conv-c2",
     )
     session.turn_attached = True
+    session.harvest_scheduled = True
+    session.mark_settled("harvest")
     set_active_coordination(session)
     await harvest_detached_execution(session)
     assert active_coordination("exec-c2") is session
-
+    # Must clear false settlement so release / re-finish can re-arm.
+    assert session.harvest_scheduled is False
+    assert session.settled_via is None
 
 @pytest.mark.asyncio
 async def test_pillar_c_harvest_deferred_keeps_registry_and_retries():

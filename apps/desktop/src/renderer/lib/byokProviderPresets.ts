@@ -78,8 +78,9 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     id: "doubao",
     label: "豆包 (火山方舟)",
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    defaultModel: "doubao-pro-32k",
-    models: ["doubao-pro-32k", "doubao-lite-32k"],
+    defaultModel: "doubao-seed-2-1-turbo-260628",
+    // Short seed; doubao-pro-32k / doubao-lite-32k retired — use dated seed IDs or ep-… endpoints.
+    models: ["doubao-seed-2-1-turbo-260628"],
     keyHelpUrl:
       "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
   },

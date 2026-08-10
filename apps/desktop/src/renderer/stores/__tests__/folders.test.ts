@@ -7,6 +7,10 @@ beforeEach(() => {
   useFoldersStore.setState({
     pendingRenameId: null,
     draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
+    importToCloudOpen: false,
+    importToCloudPrefill: null,
+    connectGitOpen: false,
+    connectGitWsId: null,
   });
 });
 
@@ -28,7 +32,7 @@ describe("pending markers", () => {
     });
   });
 
-  it("switches among quick local / cloud / project intents", () => {
+  it("switches among quick cloud / project intents", () => {
     store().setDraftWorkspaceIntent({ kind: "quick_cloud" });
     expect(store().draftWorkspaceIntent).toEqual({ kind: "quick_cloud" });
 
@@ -46,5 +50,37 @@ describe("pending markers", () => {
 describe("defaultDraftWorkspaceIntent", () => {
   it("defaults to quick_cloud (桌面裸聊默认切云)", () => {
     expect(defaultDraftWorkspaceIntent()).toEqual({ kind: "quick_cloud" });
+  });
+});
+
+describe("import / connect git dialog flags", () => {
+  it("openImportToCloud toggles independently of connectGit", () => {
+    store().openImportToCloud();
+    expect(store().importToCloudOpen).toBe(true);
+    expect(store().connectGitOpen).toBe(false);
+    store().closeImportToCloud();
+    expect(store().importToCloudOpen).toBe(false);
+
+    store().openConnectGit("folder:x");
+    expect(store().connectGitOpen).toBe(true);
+    expect(store().connectGitWsId).toBe("folder:x");
+    store().closeConnectGit();
+    expect(store().connectGitOpen).toBe(false);
+    expect(store().connectGitWsId).toBeNull();
+  });
+
+  it("openImportToCloud accepts legacy localRootId prefill and clears on close", () => {
+    store().openImportToCloud({
+      rootId: "root-legacy",
+      projectName: "旧项目",
+    });
+    expect(store().importToCloudOpen).toBe(true);
+    expect(store().importToCloudPrefill).toEqual({
+      rootId: "root-legacy",
+      projectName: "旧项目",
+    });
+    store().closeImportToCloud();
+    expect(store().importToCloudOpen).toBe(false);
+    expect(store().importToCloudPrefill).toBeNull();
   });
 });

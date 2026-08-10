@@ -785,6 +785,72 @@ describe("drainOutbox", () => {
     expect(status.pending[0]?.phase).toBe("open");
   });
 
+  it("salvageOpen discards begin-only empty open shells (no um / no body)", async () => {
+    const { recoverLocalPersistence } = await import("../outbox-writeback");
+    writeReady("u-empty-shell", {
+      phase: "open",
+      user_message: "",
+      content: "",
+      finish_reason: null,
+      runs: null,
+      journal: undefined,
+      reasoning_content: null,
+      stream_segments: undefined,
+      ops: ["begin_turn"],
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await recoverLocalPersistence();
+      expect(h.bearerPostJson).not.toHaveBeenCalled();
+      expect(existsSync(join(dir(), "u-empty-shell.json"))).toBe(false);
+      expect(
+        warnSpy.mock.calls.some(
+          (c) =>
+            typeof c[0] === "string" &&
+            c[0].includes("discard empty open shell"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("salvageOpen seals user_message-only open shells as cancelled writeback", async () => {
+    const { recoverLocalPersistence } = await import("../outbox-writeback");
+    writeReady("u-um-only", {
+      phase: "open",
+      user_message: "hello before crash",
+      content: "",
+      finish_reason: null,
+      runs: null,
+      journal: undefined,
+      reasoning_content: null,
+      stream_segments: undefined,
+      ops: ["begin_turn"],
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-um-only",
+        assistant_message_id: null,
+        title: null,
+        noop: true,
+      },
+    });
+    await recoverLocalPersistence();
+    expect(h.bearerPostJson).toHaveBeenCalledOnce();
+    const body = h.bearerPostJson.mock.calls[0]?.[1] as {
+      user_message?: string;
+      content?: string;
+      finish_reason?: string;
+    };
+    expect(body.user_message).toBe("hello before crash");
+    expect(body.content).toBe("");
+    expect(body.finish_reason).toBe("cancelled");
+    expect(existsSync(join(dir(), "u-um-only.json"))).toBe(false);
+  });
+
   it("ready drain fills captain stream_segments into POST body", async () => {
     writeReady("u-ready-segs", {
       content: "",

@@ -64,7 +64,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点）。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。
 
-**跨项目（✅ / ⏳）**：CEO 摸已登记项目用只读跨桌（`list_project_dir` / `read_project_file`）；写/重活带 `target_folder_id`；均不改会话 `folder_id`。点名或先建：`list_projects` / `resolve_project` / `create_project`（云）。⏳ **新产品路径**用导入到云 / 连接 Git 后再派；`register_local_project` / `open_local_project` / `bind_local_folder` 仅遗留或改导，禁止再教「绑本地文件夹继续干活」当主路径。裸聊未点名目标禁止默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
+**跨项目（✅）**：CEO 摸已登记项目用只读跨桌（`list_project_dir` / `read_project_file`）；写/重活带 `target_folder_id`；均不改会话 `folder_id`。点名或先建：`list_projects` / `resolve_project` / `create_project`（云）。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊未点名目标禁止默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
 
 | 动作 | 语义 |
 |---|---|

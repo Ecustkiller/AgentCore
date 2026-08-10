@@ -107,6 +107,30 @@ async function drainOutboxDetailed(opts?: {
             console.error("[outbox] salvage promote failed", err);
             continue;
           }
+        } else {
+          // Begin-only / hard-kill empty shell: no body to salvage.
+          // Drop when not writeback-able; else seal cancelled so user_message can settle
+          // (avoids permanent phase=open ghosts on every recovery hydrate).
+          const um = (record.user_message || "").trim();
+          const hasUm = !!um && um !== EMPTY_USER_MESSAGE_PLACEHOLDER;
+          const hasTrace = (record.trace_id || "").trim().length === 32;
+          if (!hasUm || !hasTrace) {
+            console.warn(
+              "[outbox] discard empty open shell",
+              record.user_message_id,
+              { hasUm, hasTrace },
+            );
+            await deleteRecord(record.user_message_id);
+            continue;
+          }
+          record.phase = PHASE_READY;
+          record.finish_reason = record.finish_reason || "cancelled";
+          try {
+            await writeRecord(record);
+          } catch (err) {
+            console.error("[outbox] empty-shell promote failed", err);
+            continue;
+          }
         }
       }
       if (record.phase !== PHASE_READY) continue;
@@ -316,8 +340,8 @@ export async function flushTurn(
 
 /**
  * Local-persistence recovery (as-built: 双模式工作区 §10.4): pause stale-claim
- * recovery is owned by the Python store on sidecar start; here we drain outbox
- * and salvage abandoned open rows.
+ * recovery is owned by the Python store on sidecar start; here we drain outbox,
+ * salvage abandoned open rows with body/process, and discard begin-only empty shells.
  */
 export async function recoverLocalPersistence(): Promise<void> {
   await drainOutboxDetailed({ salvageOpen: true });

@@ -111,98 +111,127 @@ describe("pickLocalFolderRoot structured failures", () => {
   });
 });
 
-describe("pickAndOpenLocalProject without language marker", () => {
-  beforeEach(() => {
+describe("pickAndOpenLocalProject mode=local", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { findLocalFolderByBinding } = await import("@/services/folders");
+    vi.mocked(findLocalFolderByBinding).mockReturnValue(undefined);
     window.fsApi = {
       addRoot: vi.fn().mockResolvedValue({
         ok: true,
-        root: { id: "r1", name: "docs-only" },
+        root: { id: "root-1", name: "MyRepo", path: "C:\\MyRepo" },
       }),
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
   });
 
-  it("opens a folder that has no package.json", async () => {
+  it("addRoot + createFolder(mode=local) then startNewConversation", async () => {
     const { createFolder } = await import("@/services/folders");
-    vi.mocked(createFolder).mockResolvedValue({
-      folder: {
-        id: "f1",
-        name: "docs-only",
-        mode: "local",
-        localRootId: "r1",
-        localSubpath: null,
-      },
-      created: true,
-    });
+    const { startNewConversation } = await import("@/lib/newConversation");
+    const { addFolderCache } = await import("@/hooks/useFolders");
+    const folder = {
+      id: "folder-1",
+      name: "MyRepo",
+      mode: "local" as const,
+      localRootId: "root-1",
+      localSubpath: null,
+    };
+    vi.mocked(createFolder).mockResolvedValue({ folder, created: true });
 
-    const result = await pickAndOpenLocalProject(vi.fn(), {
+    const navigate = vi.fn();
+    const result = await pickAndOpenLocalProject(navigate, {
       notifyOnFailure: false,
     });
+
     expect(result.ok).toBe(true);
-    expect(window.fsApi.listDir).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.folder).toEqual(folder);
+      expect(result.created).toBe(true);
+    }
+    expect(window.fsApi.addRoot).toHaveBeenCalled();
+    expect(createFolder).toHaveBeenCalledWith({
+      name: "MyRepo",
+      mode: "local",
+      localRootId: "root-1",
+      localSubpath: null,
+    });
+    expect(addFolderCache).toHaveBeenCalledWith(folder);
+    expect(startNewConversation).toHaveBeenCalledWith(navigate, "folder-1");
+  });
+
+  it("reuses existing local binding without createFolder", async () => {
+    const { createFolder, findLocalFolderByBinding } = await import(
+      "@/services/folders"
+    );
+    const { startNewConversation } = await import("@/lib/newConversation");
+    const existing = {
+      id: "folder-existing",
+      name: "MyRepo",
+      mode: "local" as const,
+      localRootId: "root-1",
+      localSubpath: null,
+    };
+    vi.mocked(findLocalFolderByBinding).mockReturnValue(existing);
+
+    const navigate = vi.fn();
+    const result = await pickAndOpenLocalProject(navigate, {
+      notifyOnFailure: false,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.created).toBe(false);
+    expect(createFolder).not.toHaveBeenCalled();
+    expect(startNewConversation).toHaveBeenCalledWith(
+      navigate,
+      "folder-existing",
+    );
   });
 });
 
-describe("pickAndRegisterLocalProject stays on conversation", () => {
+describe("pickAndRegisterLocalProject mode=local", () => {
   beforeEach(async () => {
+    vi.clearAllMocks();
+    const { findLocalFolderByBinding } = await import("@/services/folders");
+    vi.mocked(findLocalFolderByBinding).mockReturnValue(undefined);
     window.fsApi = {
       addRoot: vi.fn().mockResolvedValue({
         ok: true,
-        root: { id: "r1", name: "my-repo" },
+        root: { id: "root-2", name: "OtherRepo", path: "C:\\OtherRepo" },
       }),
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
-    const { findLocalFolderByBinding } = await import("@/services/folders");
-    const { startNewConversation } = await import("@/lib/newConversation");
-    vi.mocked(findLocalFolderByBinding).mockReturnValue(undefined);
-    vi.mocked(startNewConversation).mockClear();
   });
 
-  it("creates folder without package.json and without startNewConversation", async () => {
+  it("addRoot + createFolder(mode=local) without startNewConversation", async () => {
     const { createFolder } = await import("@/services/folders");
     const { startNewConversation } = await import("@/lib/newConversation");
-    vi.mocked(createFolder).mockResolvedValue({
-      folder: {
-        id: "f2",
-        name: "my-repo",
-        mode: "local",
-        localRootId: "r1",
-        localSubpath: null,
-      },
-      created: true,
-    });
+    const { addFolderCache } = await import("@/hooks/useFolders");
+    const folder = {
+      id: "folder-2",
+      name: "OtherRepo",
+      mode: "local" as const,
+      localRootId: "root-2",
+      localSubpath: null,
+    };
+    vi.mocked(createFolder).mockResolvedValue({ folder, created: true });
 
     const result = await pickAndRegisterLocalProject({
       notifyOnFailure: false,
     });
+
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.folder.id).toBe("f2");
+      expect(result.folder).toEqual(folder);
       expect(result.created).toBe(true);
     }
-    expect(startNewConversation).not.toHaveBeenCalled();
-    expect(window.fsApi.listDir).not.toHaveBeenCalled();
-  });
-
-  it("reuses existing folder by binding without new conversation", async () => {
-    const { findLocalFolderByBinding } = await import("@/services/folders");
-    const { startNewConversation } = await import("@/lib/newConversation");
-    vi.mocked(findLocalFolderByBinding).mockReturnValue({
-      id: "existing",
-      name: "my-repo",
+    expect(window.fsApi.addRoot).toHaveBeenCalled();
+    expect(createFolder).toHaveBeenCalledWith({
+      name: "OtherRepo",
       mode: "local",
-      localRootId: "r1",
+      localRootId: "root-2",
       localSubpath: null,
     });
-
-    const result = await pickAndRegisterLocalProject({
-      notifyOnFailure: false,
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.folder.id).toBe("existing");
-      expect(result.created).toBe(false);
-    }
+    expect(addFolderCache).toHaveBeenCalledWith(folder);
     expect(startNewConversation).not.toHaveBeenCalled();
   });
 });

@@ -12,12 +12,12 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
 /**
  * 会话路由判定：一个回合该走本地 sidecar，还是云端 SSE。
  *
- * 双模式工作区 §十。大众默认**永不走 sidecar**（全云端过桥）；仅高级在设置里显式打开
- * 「本地引擎」后，绑定本机本地根且本回合无附件 / 无点名时才走 sidecar。启动失败会自动
- * 降级回云（见 `turns.sendTurn`）。无本地绑定 / 带附件 / 开关关（含 unset→默认关）→ 云链路。
+ * 双模式工作区 §7.2：本机传统（`mode=local` + 本机根可用）新开回合**默认同侧** sidecar；
+ * 云协作永不 sidecar。过桥仅探活失败等机制兜底（见 `turns.sendTurn`），不当默认。
+ * 设置「允许本机执行」显式关 = 诊断强制走云；unset / 默认关**不**挡本机传统同侧。
  *
  * 续跑例外：`origin=sidecar` / 已有本机活回合须跟本地事实（{@link resolveConversationLocalTarget}
- * / {@link getActiveSidecarTarget}），**忽略**大众默认关——本机帧云端没有。新开回合仍跟偏好。
+ * / {@link getActiveSidecarTarget}），忽略强制关——本机帧云端没有。
  *
  * sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门。
  */
@@ -85,9 +85,21 @@ export function getActiveSidecarTarget(
   return activeSidecarTurns.get(conversationId) ?? null;
 }
 
-/** sidecar 路由是否启用（桌面本地引擎可用 + 用户设置开关「本地引擎」；web 恒 false → 走云）。 */
+/**
+ * 用户是否显式强制关闭本机执行（设置「允许本机执行」关 → 偏好 `off`）。
+ * unset / 默认关**不算**强制关——本机传统仍可默认同侧。web 无本地引擎时亦视为不可用。
+ */
+export function isSidecarForceOff(): boolean {
+  return useUIStore.getState().sidecarPreference === "off";
+}
+
+/**
+ * 桌面本地引擎能力面是否可用（有引擎 + 未强制关）。
+ * 新开回合路由见 {@link resolveSidecarRoot}（另要求本机绑定）；本函数供诊断 / 过桥 reason 等。
+ * web 恒 false。
+ */
 export function isSidecarEnabled(): boolean {
-  return hasLocalEngine() && useUIStore.getState().sidecarEnabled;
+  return hasLocalEngine() && !isSidecarForceOff();
 }
 
 function scratchFromWorkspaceCache(
@@ -150,24 +162,27 @@ export async function resolveConversationLocalTarget(
 /**
  * 解析**新开回合**应在其上跑 sidecar 的目标；不该走 sidecar 则 null（早退，不 probe / 不 spawn）。
  *
- * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}；unset→默认关）**且**该会话能用本地引擎
- * （{@link resolveConversationLocalTarget}）。开关关 / 无本地绑定 / 根不在本机 → null（交回云链路）。
+ * = 桌面有本地引擎、用户未显式强制关（{@link isSidecarForceOff}），**且**该会话有本机绑定
+ * （{@link resolveConversationLocalTarget}：`mode=local` 项目 / 本机根在盘上）。
+ * 云项目 / 无本地绑定 / 根不在本机 / 显式强制关 → null（交回云链路）。
+ * **不**因 unset→`SIDECAR_DEFAULT_ENABLED=false` 早退。
  *
  * 纯「新回合路由意图」，**不掺运行时健康**（探活由 `sendTurn` 收敛）。**续跑勿用本函数**：
  * `origin=sidecar` 须跟本地事实（{@link resolveConversationLocalTarget} /
- * {@link getActiveSidecarTarget}），忽略大众默认关——见 `runResume`。
+ * {@link getActiveSidecarTarget}），忽略强制关——见 `runResume`。
  */
 export async function resolveSidecarRoot(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
-  if (!isSidecarEnabled()) return null;
+  if (!hasLocalEngine() || isSidecarForceOff()) return null;
   return resolveConversationLocalTarget(conversationId);
 }
 
 /**
- * 该会话是否「能用本地引擎」（桌面端 + 绑定本机存在的本地根），**不看开关是否已开**——与
- * {@link isSidecarEnabled}（开关）正交的公共查询。供 UI 判断某对话是否值得围绕本地引擎做
- * 状态展示 / 提示（如启动探活），只有真能走 sidecar 的对话（local 模式 + 根在本机）才返回 true。
+ * 该会话是否「能用本地引擎」（桌面端 + 绑定本机存在的本地根），**不看强制关**——与
+ * {@link isSidecarForceOff} / {@link isSidecarEnabled} 正交的公共查询。供 UI 判断某对话是否
+ * 值得围绕本地引擎做状态展示 / 提示（如启动探活），只有真能走 sidecar 的对话
+ * （local 模式 + 根在本机）才返回 true。
  */
 export async function canConversationUseSidecar(
   conversationId: string,

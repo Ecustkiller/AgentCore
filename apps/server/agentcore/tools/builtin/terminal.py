@@ -251,10 +251,8 @@ class TerminalTool:
         if channel is None:
             return _error(
                 "terminal 仅在本地工作区可用：当前无桌面进程通道，无法托管后台进程。"
-                "需本机终端时：桌面在线则立即发 ask_user 卡——"
-                "本会话要跑通 → action=bind_local_folder（本机执行环境，≠打开项目）；"
-                "用户要打开本机目录当项目 → action=open_local_project；"
-                "勿用纯文本询问。",
+                "需本机终端时：**推荐**引导 Composer「导入到云 / 连接 Git」"
+                "或诚实说明本回合无法托管；本机传统 open/bind 合法非默认（≠离线）。",
                 start,
             )
 

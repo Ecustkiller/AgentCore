@@ -35,8 +35,10 @@ class ModelMeta:
 
 # Curated enrichment for ids AgentCore commonly sees (platform + popular BYOK
 # endpoints). Keys are lowercase, provider-prefix-stripped; matching also does a
-# longest-family prefix scan so a dated variant (…-2606xx) inherits its family's
-# metadata. Context lengths are rounded display hints, not billing facts.
+# longest-family prefix scan so a dated / channel variant (…-0731, …-free) inherits
+# vendor / capabilities / context — but display_name always gets a · qualifier so
+# two variants never collide as identical labels. Exact rows still win for curated
+# branding (e.g. hy3-preview, glm-5.2-jiu). Context lengths are display hints.
 _METADATA: dict[str, ModelMeta] = {
     "deepseek-v4-flash": ModelMeta(
         display_name="DeepSeek V4 Flash",
@@ -231,11 +233,47 @@ def _humanize(model_id: str) -> str:
     return tail.replace("_", " ").replace("-", " ").strip() or tail
 
 
+# Separators that mark a family→variant boundary (``flash-0731``, ``k2.6``, ``o3_mini``).
+_FAMILY_BOUNDARY = frozenset({"-", "_", "."})
+
+
+def _longest_family_key(key: str) -> str | None:
+    """Longest curated key that ``key`` extends past a separator boundary.
+
+    Requires a boundary char after the family id so ``gpt-4`` cannot claim ``gpt-4o``
+    as a "variant". Exact id matches are handled by the caller before this.
+    """
+    best_key: str | None = None
+    for known in _METADATA:
+        if len(known) >= len(key) or not key.startswith(known):
+            continue
+        if key[len(known)] not in _FAMILY_BOUNDARY:
+            continue
+        if best_key is None or len(known) > len(best_key):
+            best_key = known
+    return best_key
+
+
+def _family_variant_meta(family: ModelMeta, key: str, family_key: str) -> ModelMeta:
+    """Inherit family enrichment; distinguish display with the leftover qualifier."""
+    qualifier = key[len(family_key) :].lstrip("-_.")
+    if not qualifier:
+        return family
+    return ModelMeta(
+        display_name=f"{family.display_name} · {qualifier}",
+        vendor=family.vendor,
+        capabilities=family.capabilities,
+        context_length=family.context_length,
+    )
+
+
 def model_metadata_for(model_id: str) -> ModelMeta:
     """Enrichment for ``model_id`` — exact, then family-prefix, then derived.
 
     Never returns ``None``: an unknown id yields a derived entry (humanized name,
     vendor guess, keyword-inferred capabilities) so the catalog stays complete.
+    Family-prefix hits keep vendor / caps / context but append a · qualifier to
+    ``display_name`` so dated / channel siblings stay distinguishable in pickers.
     """
     key = _normalize(model_id)
     if not key:
@@ -243,13 +281,9 @@ def model_metadata_for(model_id: str) -> ModelMeta:
     exact = _METADATA.get(key)
     if exact is not None:
         return exact
-    # Longest-family prefix: a dated / sized variant inherits its family entry.
-    best_key: str | None = None
-    for known in _METADATA:
-        if key.startswith(known) and (best_key is None or len(known) > len(best_key)):
-            best_key = known
+    best_key = _longest_family_key(key)
     if best_key is not None:
-        return _METADATA[best_key]
+        return _family_variant_meta(_METADATA[best_key], key, best_key)
     return ModelMeta(
         display_name=_humanize(model_id),
         vendor=_derive_vendor(key),
@@ -271,10 +305,7 @@ def model_has_curated_vision(model_id: str) -> bool:
     exact = _METADATA.get(key)
     if exact is not None:
         return CAPABILITY_VISION in exact.capabilities
-    best_key: str | None = None
-    for known in _METADATA:
-        if key.startswith(known) and (best_key is None or len(known) > len(best_key)):
-            best_key = known
+    best_key = _longest_family_key(key)
     if best_key is None:
         return False
     return CAPABILITY_VISION in _METADATA[best_key].capabilities

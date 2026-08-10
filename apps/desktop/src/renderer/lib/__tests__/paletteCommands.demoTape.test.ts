@@ -36,6 +36,10 @@ vi.mock("@/lib/openLocalProject", () => ({
   pickAndOpenLocalProject: vi.fn(),
 }));
 
+vi.mock("@/lib/composerChannelPreference", () => ({
+  setComposerChannelPreference: vi.fn(),
+}));
+
 vi.mock("@/lib/bindLocalFolder", () => ({
   pickAndBindLocalFolder: vi.fn(),
 }));
@@ -120,8 +124,11 @@ describe("paletteCommands · 区外只读授权", () => {
     vi.mocked(hasLocalFiles).mockReturnValue(false);
     const cmds = buildPaletteCommands(baseCtx);
     expect(cmds.some((c) => c.id === "grant-readonly-folder")).toBe(false);
+    expect(cmds.some((c) => c.id === "import-to-cloud")).toBe(false);
+    expect(cmds.some((c) => c.id === "connect-git")).toBe(false);
     expect(cmds.some((c) => c.id === "open-local-project")).toBe(false);
     expect(cmds.some((c) => c.id === "bind-local-folder")).toBe(false);
+    expect(cmds.some((c) => c.id === "new-local-conversation")).toBe(false);
   });
 
   it("injects grant command on desktop FS (hint only — no blank picker)", async () => {
@@ -140,39 +147,52 @@ describe("paletteCommands · 区外只读授权", () => {
     );
   });
 
-  it("injects open-local-project and bind-local-folder on desktop FS", async () => {
+  it("injects connect-git, import-to-cloud, and 打开本机项目 on desktop FS", async () => {
     const { hasLocalFiles } = await import("../capabilities");
-    vi.mocked(hasLocalFiles).mockReturnValue(true);
-    const cmds = buildPaletteCommands(baseCtx);
-    const open = cmds.find((c) => c.id === "open-local-project");
-    const bind = cmds.find((c) => c.id === "bind-local-folder");
-    expect(open?.title).toBe("打开本地项目");
-    expect(bind?.title).toBe("绑定本机执行环境");
-    if (!open || !bind) return;
-    expect(commandMatches(open, "xiangmu")).toBe(true);
-    expect(commandMatches(bind, "bangding")).toBe(true);
-  });
-
-  it("blocks bind on project conversation", async () => {
-    const { hasLocalFiles } = await import("../capabilities");
-    const { getConversations } = await import("@/hooks/useConversations");
-    const { useConversationStore } = await import("@/stores/conversation");
-    const { pickAndBindLocalFolder } = await import("@/lib/bindLocalFolder");
-    const { notifyError } = await import("@/lib/toast");
-    vi.mocked(hasLocalFiles).mockReturnValue(true);
-    vi.mocked(useConversationStore.getState).mockReturnValue({
-      currentConversationId: "c-proj",
-    } as ReturnType<typeof useConversationStore.getState>);
-    vi.mocked(getConversations).mockReturnValue([
-      { id: "c-proj", folderId: "folder-1" } as never,
-    ]);
-    const cmds = buildPaletteCommands(baseCtx);
-    const bind = cmds.find((c) => c.id === "bind-local-folder");
-    expect(bind).toBeTruthy();
-    bind?.run();
-    expect(notifyError).toHaveBeenCalledWith(
-      expect.stringContaining("打开本地项目"),
+    const { useFoldersStore } = await import("@/stores/folders");
+    const { pickAndOpenLocalProject } = await import("@/lib/openLocalProject");
+    const { setComposerChannelPreference } = await import(
+      "@/lib/composerChannelPreference"
     );
-    expect(pickAndBindLocalFolder).not.toHaveBeenCalled();
+    const openConnectGit = vi.spyOn(
+      useFoldersStore.getState(),
+      "openConnectGit",
+    );
+    const openImportToCloud = vi.spyOn(
+      useFoldersStore.getState(),
+      "openImportToCloud",
+    );
+    vi.mocked(hasLocalFiles).mockReturnValue(true);
+    const cmds = buildPaletteCommands(baseCtx);
+    expect(cmds.some((c) => c.id === "bind-local-folder")).toBe(false);
+    expect(cmds.some((c) => c.id === "new-local-conversation")).toBe(false);
+
+    const connectCmd = cmds.find((c) => c.id === "connect-git");
+    expect(connectCmd?.title).toBe("从 Git 克隆");
+    expect(connectCmd?.hint).toContain("推荐");
+    if (!connectCmd) return;
+    expect(commandMatches(connectCmd, "kelong")).toBe(true);
+    connectCmd.run();
+    expect(openConnectGit).toHaveBeenCalled();
+    expect(setComposerChannelPreference).toHaveBeenCalledWith("cloud");
+
+    const importCmd = cmds.find((c) => c.id === "import-to-cloud");
+    expect(importCmd?.title).toBe("导入本机项目到云");
+    expect(importCmd?.hint).toContain("推荐");
+    if (!importCmd) return;
+    expect(commandMatches(importCmd, "daoru")).toBe(true);
+    importCmd.run();
+    expect(openImportToCloud).toHaveBeenCalled();
+
+    const localCmd = cmds.find((c) => c.id === "open-local-project");
+    expect(localCmd?.title).toBe("打开本机项目");
+    expect(localCmd?.hint).toContain("≠离线");
+    if (!localCmd) return;
+    expect(commandMatches(localCmd, "benji")).toBe(true);
+    localCmd.run();
+    expect(setComposerChannelPreference).toHaveBeenCalledWith(
+      "local_traditional",
+    );
+    expect(pickAndOpenLocalProject).toHaveBeenCalledWith(baseCtx.navigate);
   });
 });

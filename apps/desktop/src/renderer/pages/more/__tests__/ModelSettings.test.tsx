@@ -343,10 +343,16 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    const mainSelect = document.getElementById(
-      "profile-main",
-    ) as HTMLSelectElement;
-    fireEvent.change(mainSelect, { target: { value: "p2::gpt-4o" } });
+    fireEvent.change(
+      document.getElementById("profile-main-provider") as HTMLSelectElement,
+      { target: { value: "p2" } },
+    );
+    fireEvent.change(
+      document.getElementById("profile-main") as HTMLInputElement,
+      {
+        target: { value: "gpt-4o" },
+      },
+    );
     expect(
       screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
     ).toBeTruthy();
@@ -452,7 +458,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.queryByText("模型组合")).toBeNull();
   });
 
-  it("on 新建 with BYOK but empty catalog opens editor for custom model id", () => {
+  it("on 新建 with BYOK but empty catalog opens editor with freeform model id", () => {
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: true,
@@ -483,12 +489,11 @@ describe("ModelSettings (profiles)", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
-    const mainSelect = document.getElementById(
-      "profile-main",
-    ) as HTMLSelectElement;
-    expect(
-      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
-    ).toBe(true);
+    expect(document.getElementById("profile-main")).toBeInstanceOf(
+      HTMLInputElement,
+    );
+    expect(document.getElementById("profile-main-provider")).toBeTruthy();
+    expect(screen.queryByText("自定义…")).toBeNull();
     expect(screen.queryByText(/暂无可用模型/)).toBeNull();
   });
 
@@ -521,9 +526,9 @@ describe("ModelSettings (profiles)", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("when groups have no catalog models but BYOK exists, custom is available and Worker stays enabled", () => {
+  it("when groups have no catalog models but BYOK exists, freeform is available and Worker stays enabled", () => {
     // current 可 seedMain，但 provider 不在列表且无 catalog/default → groups.models 合计为空；
-    // 仍可经「自定义…」手填 BYOK model id。
+    // 仍可手填 BYOK model id。
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: true,
@@ -559,13 +564,12 @@ describe("ModelSettings (profiles)", () => {
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("新建组合", { selector: "p" })).toBeTruthy();
     expect(screen.queryByText(/暂无可用模型/)).toBeNull();
+    expect(screen.queryByText("自定义…")).toBeNull();
 
-    const mainSelect = document.getElementById(
-      "profile-main",
-    ) as HTMLSelectElement;
-    expect(
-      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
-    ).toBe(true);
+    expect(document.getElementById("profile-main")).toBeInstanceOf(
+      HTMLInputElement,
+    );
+    expect(document.getElementById("profile-main-provider")).toBeTruthy();
 
     expect(document.getElementById("profile-worker")).toHaveProperty(
       "disabled",
@@ -615,12 +619,12 @@ describe("ModelSettings (profiles)", () => {
     const mainSelect = document.getElementById(
       "profile-main",
     ) as HTMLSelectElement;
-    expect(
-      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
-    ).toBe(false);
+    expect(mainSelect).toBeInstanceOf(HTMLSelectElement);
+    expect(document.getElementById("profile-main-provider")).toBeNull();
+    expect(screen.queryByText("自定义…")).toBeNull();
   });
 
-  it("saves a hand-filled BYOK custom model id from 自定义…", async () => {
+  it("saves a hand-filled BYOK model id without 自定义… hop", async () => {
     vi.mocked(updateLlmModelProfile).mockResolvedValue({
       id: "user-mine",
       name: "办公",
@@ -634,17 +638,16 @@ describe("ModelSettings (profiles)", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
 
-    const mainSelect = document.getElementById(
-      "profile-main",
-    ) as HTMLSelectElement;
-    fireEvent.change(mainSelect, { target: { value: "__custom__" } });
-    expect(screen.getByLabelText("自定义服务商")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("自定义服务商"), {
-      target: { value: "p1" },
-    });
-    fireEvent.change(screen.getByLabelText("自定义 model id"), {
-      target: { value: "ep-volc-123" },
-    });
+    fireEvent.change(
+      document.getElementById("profile-main-provider") as HTMLSelectElement,
+      { target: { value: "p1" } },
+    );
+    fireEvent.change(
+      document.getElementById("profile-main") as HTMLInputElement,
+      {
+        target: { value: "ep-volc-123" },
+      },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
@@ -661,7 +664,7 @@ describe("ModelSettings (profiles)", () => {
     );
   });
 
-  it("echoes a saved custom BYOK model id in the edit select via folded group", () => {
+  it("echoes a saved custom BYOK model id in the edit combobox", () => {
     mockProviders(providersResponse());
     mockProfiles(
       profilesResponse({
@@ -684,18 +687,23 @@ describe("ModelSettings (profiles)", () => {
     );
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
-    const mainSelect = document.getElementById(
-      "profile-main",
+    const providerSelect = document.getElementById(
+      "profile-main-provider",
     ) as HTMLSelectElement;
-    expect(mainSelect.value).toBe("p1::ep-already-saved");
+    const modelInput = document.getElementById(
+      "profile-main",
+    ) as HTMLInputElement;
+    expect(providerSelect.value).toBe("p1");
+    expect(modelInput.value).toBe("ep-already-saved");
+    const suggestions = document.getElementById("profile-main-suggestions");
     expect(
-      [...mainSelect.options].some((o) => o.value === "p1::ep-already-saved"),
+      [...(suggestions?.querySelectorAll("option") ?? [])].some(
+        (o) => o.value === "ep-already-saved",
+      ),
     ).toBe(true);
-    // 已在目录折叠项里，不强制展开自定义面板
-    expect(screen.queryByLabelText("自定义 model id")).toBeNull();
   });
 
-  it("platform-only catalog does not offer 自定义…", () => {
+  it("platform-only catalog stays a pure select without freeform", () => {
     useModelsMock.mockReturnValue({
       data: {
         byok_configured: false,
@@ -747,10 +755,10 @@ describe("ModelSettings (profiles)", () => {
     const mainSelect = document.getElementById(
       "profile-main",
     ) as HTMLSelectElement;
-    expect(
-      [...mainSelect.options].some((o) => o.textContent === "自定义…"),
-    ).toBe(false);
-    expect(screen.queryByLabelText("自定义 model id")).toBeNull();
+    expect(mainSelect).toBeInstanceOf(HTMLSelectElement);
+    expect(document.getElementById("profile-main-provider")).toBeNull();
+    expect(screen.queryByText("自定义…")).toBeNull();
+    expect(screen.queryByPlaceholderText(/model id/)).toBeNull();
   });
 
   it("surfaces ADMIN_PRODUCT_FORBIDDEN instead of a generic load failure", () => {
@@ -849,14 +857,28 @@ describe("ModelSettings (profiles)", () => {
     fireEvent.change(screen.getByLabelText(/名称/), {
       target: { value: "识图组合" },
     });
-    const visionSelect = document.getElementById(
-      "profile-vision",
+    const visionProvider = document.getElementById(
+      "profile-vision-provider",
     ) as HTMLSelectElement;
-    // 有 vision capability 时下拉优先只列识图模型（不含无 vision 的 deepseek）
-    const visionValues = [...visionSelect.options].map((o) => o.value);
-    expect(visionValues).toContain("p2::gpt-4o");
-    expect(visionValues).not.toContain("p1::deepseek-v4-pro");
-    fireEvent.change(visionSelect, { target: { value: "p2::gpt-4o" } });
+    // 有 vision capability 时 datalist 优先只列识图模型（不含无 vision 的 deepseek）
+    fireEvent.change(visionProvider, { target: { value: "p1" } });
+    const p1Suggestions = [
+      ...(document
+        .getElementById("profile-vision-suggestions")
+        ?.querySelectorAll("option") ?? []),
+    ].map((o) => o.value);
+    expect(p1Suggestions).not.toContain("deepseek-v4-pro");
+    fireEvent.change(visionProvider, { target: { value: "p2" } });
+    const p2Suggestions = [
+      ...(document
+        .getElementById("profile-vision-suggestions")
+        ?.querySelectorAll("option") ?? []),
+    ].map((o) => o.value);
+    expect(p2Suggestions).toContain("gpt-4o");
+    fireEvent.change(
+      document.getElementById("profile-vision") as HTMLInputElement,
+      { target: { value: "gpt-4o" } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
       expect(createLlmModelProfile).toHaveBeenCalledWith(
@@ -888,9 +910,13 @@ describe("ModelSettings (profiles)", () => {
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     const editVision = document.getElementById(
       "profile-vision",
-    ) as HTMLSelectElement;
-    expect(editVision.value).toBe("p2::gpt-4o");
-    fireEvent.change(editVision, { target: { value: "" } });
+    ) as HTMLInputElement;
+    expect(editVision.value).toBe("gpt-4o");
+    expect(
+      (document.getElementById("profile-vision-provider") as HTMLSelectElement)
+        .value,
+    ).toBe("p2");
+    fireEvent.click(screen.getByRole("button", { name: "不配置" }));
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
       expect(updateLlmModelProfile).toHaveBeenCalledWith(
@@ -904,12 +930,23 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    const visionSelect = document.getElementById(
-      "profile-vision",
+    const visionProvider = document.getElementById(
+      "profile-vision-provider",
     ) as HTMLSelectElement;
-    const visionValues = [...visionSelect.options].map((o) => o.value);
-    expect(visionValues).toContain("p1::deepseek-v4-pro");
-    expect(visionValues).toContain("p2::gpt-4o");
+    fireEvent.change(visionProvider, { target: { value: "p1" } });
+    const p1Suggestions = [
+      ...(document
+        .getElementById("profile-vision-suggestions")
+        ?.querySelectorAll("option") ?? []),
+    ].map((o) => o.value);
+    expect(p1Suggestions).toContain("deepseek-v4-pro");
+    fireEvent.change(visionProvider, { target: { value: "p2" } });
+    const p2Suggestions = [
+      ...(document
+        .getElementById("profile-vision-suggestions")
+        ?.querySelectorAll("option") ?? []),
+    ].map((o) => o.value);
+    expect(p2Suggestions).toContain("gpt-4o");
   });
 
   it("copies vision slot when duplicating a profile", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "agentcore-desktop",
-  "version": "0.6.48",
+  "version": "0.6.49",
   "description": "AgentCore Desktop - Multi-Agent AI Workspace",
   "author": "AgentCore",
   "main": "./out/main/index.js",
@@ -34,14 +34,15 @@
     "build:webapp": "vite build --config vite.webapp.config.ts",
     "deploy:web": "node scripts/deploy-web.mjs",
     "release:win": "node scripts/release-win.mjs",
+    "generate:beta-icons": "node scripts/generate-beta-icons.mjs",
     "preview": "electron-vite preview",
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
     "fetch:rg": "node scripts/fetch-rg.mjs",
-    "build:unpack": "pnpm bundle:sidecar && electron-vite build && electron-builder --dir",
-    "build:win": "pnpm bundle:sidecar && electron-vite build && electron-builder --win",
+    "build:unpack": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --dir",
+    "build:win": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --win",
     "build:win:cn": "node scripts/build-win-cn.mjs",
-    "build:mac": "pnpm bundle:sidecar && electron-vite build && electron-builder --mac --arm64",
-    "build:linux": "pnpm bundle:sidecar && electron-vite build && electron-builder --linux",
+    "build:mac": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --mac --arm64",
+    "build:linux": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --linux",
     "lint": "biome check src/ && node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer && node ../../scripts/check-no-localstorage.mjs --src apps/desktop/src/renderer",
     "lint:fix": "biome check --write src/",
     "check-ui-tokens": "node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer",
@@ -50,6 +51,9 @@
     "typecheck": "tsc --noEmit",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "postinstall": "node ./scripts/install-electron.mjs && node ./scripts/rebuild-native.mjs"
+  },
+  "build": {
+    "extends": "./electron-builder.config.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

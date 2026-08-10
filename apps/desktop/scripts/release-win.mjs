@@ -5,6 +5,8 @@
  *
  *   pnpm -C apps/desktop release:win
  *   pnpm -C apps/desktop release:win -- --skip-draft   # draft already exists
+ *   pnpm -C apps/desktop release:win -- --channel=beta
+ *   DESKTOP_RELEASE_CHANNEL=beta pnpm -C apps/desktop release:win
  *
  * Prerequisites:
  *   - `gh auth login` with write access to Lawofall/AgentCore-releases
@@ -25,12 +27,20 @@ import {
   loadDeployEnv,
   run,
 } from "../../../deploy/scripts/load-deploy-env.mjs";
+import {
+  RELEASE_CHANNEL_ENV,
+  resolveChannelFromArgv,
+  resolveReleaseIdentity,
+} from "./release-channel.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DESKTOP_DIR = join(__dir, "..");
 const RELEASES_REPO = "Lawofall/AgentCore-releases";
 
 const skipDraft = process.argv.includes("--skip-draft");
+const channel = resolveChannelFromArgv(process.argv.slice(2));
+const identity = resolveReleaseIdentity(channel);
+process.env[RELEASE_CHANNEL_ENV] = channel;
 
 function readVersion() {
   const pkg = JSON.parse(
@@ -40,9 +50,10 @@ function readVersion() {
 }
 
 function winAssetNames(version) {
+  const slug = identity.artifactSlug;
   return [
-    `AgentCore-${version}-win-x64.exe`,
-    `AgentCore-${version}-win-x64.exe.blockmap`,
+    `${slug}-${version}-win-x64.exe`,
+    `${slug}-${version}-win-x64.exe.blockmap`,
     "latest.yml",
   ];
 }
@@ -168,18 +179,29 @@ function main() {
   const tag = `v${version}`;
   const releaseDir = join(DESKTOP_DIR, "release", version);
 
-  console.log(`→ desktop release ${version} (Windows)`);
+  console.log(
+    `→ desktop release ${version} (Windows, channel=${channel}, appId=${identity.appId})`,
+  );
   ensureDraftRelease(tag);
 
   run("bundle:sidecar", "pnpm", ["bundle:sidecar"], { cwd: DESKTOP_DIR });
   run("electron-vite build", "pnpm", ["exec", "electron-vite", "build"], {
     cwd: DESKTOP_DIR,
+    env: process.env,
   });
   // Mac-aligned: never publish via electron-builder (avoids #6676 / #2393).
   run(
     "electron-builder --win --publish never",
     "pnpm",
-    ["exec", "electron-builder", "--win", "--publish", "never"],
+    [
+      "exec",
+      "electron-builder",
+      "--config",
+      "electron-builder.config.mjs",
+      "--win",
+      "--publish",
+      "never",
+    ],
     { cwd: DESKTOP_DIR, env: process.env },
   );
 
@@ -187,6 +209,7 @@ function main() {
   uploadAndVerify(tag, version, paths);
 
   // Brand host (nginx) — electron-updater feed；官网首装走 GitHub Releases。
+  // CDN 分目录（…/desktop/{channel}）由 sync-release-cdn 块落地；此处仍传本地产物目录。
   run(
     "sync:release-cdn (desktop)",
     process.execPath,
@@ -196,14 +219,17 @@ function main() {
       releaseDir,
       "--version",
       version,
+      "--channel",
+      channel,
     ],
     { cwd: REPO_ROOT, env: process.env },
   );
 
   console.log("");
   console.log(`✓ Win release ${tag} built and uploaded to ${RELEASES_REPO}`);
+  console.log(`  channel: ${channel} (${identity.productName})`);
   console.log(`  local: ${releaseDir}`);
-  console.log(`  CDN: https://downloads.fashitianxia.xyz/desktop/`);
+  console.log(`  feed: ${identity.publishUrl}`);
   console.log("");
   console.log("Win-only dev publish (optional):");
   console.log(

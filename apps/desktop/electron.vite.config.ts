@@ -4,11 +4,24 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { searchForWorkspaceRoot } from "vite";
 import { viteClientBuildDefine } from "../../scripts/client-build-info.mjs";
+import {
+  parseReleaseChannel,
+  resolveReleaseIdentity,
+} from "./scripts/release-channel.mjs";
 import { resolveApiBaseUrl } from "./scripts/resolve-api-base-url";
 
 const clientBuildDefine = viteClientBuildDefine(
   new URL("./package.json", import.meta.url),
 );
+const releaseIdentity = resolveReleaseIdentity(
+  parseReleaseChannel(process.env.DESKTOP_RELEASE_CHANNEL),
+);
+const channelBuildDefine = {
+  __DESKTOP_RELEASE_CHANNEL__: JSON.stringify(releaseIdentity.channel),
+  __WINDOWS_APP_USER_MODEL_ID__: JSON.stringify(
+    releaseIdentity.windowsAppUserModelId,
+  ),
+};
 
 // 包根（本文件所在目录）——与 renderer envDir / .env.production 同目录。
 // 禁止用 process.cwd()：cwd ≠ 包根时主进程读不到 .env.production，CSP 会钉死 localhost，
@@ -30,6 +43,7 @@ export default defineConfig(({ mode, command }) => {
       plugins: [externalizeDepsPlugin()],
       define: {
         __API_BASE_URL__: JSON.stringify(apiBaseUrl),
+        ...channelBuildDefine,
       },
       resolve: {
         alias: {
@@ -51,7 +65,7 @@ export default defineConfig(({ mode, command }) => {
       publicDir: resolve(packageDir, "public"),
       // 与主进程 resolveApiBaseUrl 同一包根，避免 cwd 漂移导致主/渲染 API 源分叉。
       envDir: packageDir,
-      define: clientBuildDefine,
+      define: { ...clientBuildDefine, ...channelBuildDefine },
       // SECURITY (XSS-001 前端XSS·CSP): drop Vite's inline modulepreload polyfill. Electron's
       // bundled Chromium supports <link rel=modulepreload> natively, so the polyfill is dead
       // weight — and removing it means the built index.html has NO inline <script>, which is

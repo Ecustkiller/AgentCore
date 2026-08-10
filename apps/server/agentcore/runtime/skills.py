@@ -55,7 +55,8 @@ CONSULT_TEAM_ORCH_BY_SCENE = (
 # Shared with能力目录 preamble — carve product UX out of「纯对话无需 consult」.
 CONSULT_PRODUCT_HELP_BY_SCENE = (
     "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ"
-    "（为何没组团、费用、Key、断网、.md/文件面板怎么打开…）→ 必查 `product_help`；"
+    "（为何没组团、费用、Key、断网、.md/文件面板怎么打开、"
+    "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 必查 `product_help`；"
     "细节按场面再查 `product_help_map` / `product_help_faq`；"
     "非产品用法的知识问答 / 闲聊 → 直接答不必查"
 )
@@ -181,17 +182,19 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 协作图不改（并行支线即表达）。【禁止】CEO 串行翻两空目录代替两路派工；\
 【禁止】指望只读跨桌工具写盘。
 6. **默认桌（派工未点名）**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名 → 会被拒**（禁默写 scratch）。
-7. **先建后派**：云→`create_project`（同指挥面）；本地→`ask_user` `action=register_local_project`\
-（登记留本对话）；**勿**用 `open_local_project` 冒充先建后干（那是打开当出生=**新会话**）。\
-与 midtask「打开/登记/bind」分流一致——open/register/bind/mount **不是**跨仓开发捷径。\
-**ask 齐且点名新建**（用户已点名多新项目/多线要建）→ **先**把各目标 `create_project` / 登记**齐**，\
+7. **先建后派**：云→`create_project`（同指挥面；只建云）；新产品要本机目录进桌 → **推荐**\
+Composer「导入到云 / 连接 Git」后再 `resolve`；\
+本机传统（合法非默认，≠离线）→ 可教 `open_local_project` / `register_local_project` / \
+`bind_local_folder`，勿当默认推荐、勿与云平级主推。\
+与 midtask 分流一致——open/register/bind/mount **不是**跨仓开发捷径。\
+**ask 齐且点名新建**（用户已点名多新项目/多线要建）→ **先**把各目标 `create_project` **齐**，\
 **再**同一次 `delegate` 全员带已解析 `target_folder_id`；【禁止】先扇出再补建。\
 **裸聊单目标捷径**：同回合仅一次唯一 `create_project` / `resolve_project` 后，\
 缺省 `delegate` 可省略 `target_folder_id`（运行时继承该桌）；多项目同回合仍须显式点名。
 8. **拒后禁塌缩（窄例外）**：仅裸聊 + 用户已点名多新项目/多线 + 本回合刚被\
 `bare_chat_no_target`（无出生未点名）拒且已补齐目标后的重试 → 恢复先前已声明的同线量级同次扇出；\
 **不**覆盖一般「能少则少 / 拿不准先少派」。勿因拒闸把已声明多线塌成单线。
-9. **混部**：local+cloud 可同指挥面；多 local 同回合可并行（每目标一桌）；\
+9. **混部**：云+遗留 local 可同指挥面；多遗留 local 同回合可并行（每目标一桌）；\
 单线无法接通异根时诚实失败该线，勿因一失败拒整锅、勿硬装全成。
 10. **开发双仓 ≠ open/register/bind/挂载冒充**：同时**开发**两项目 = 名册指认 + \
 只读跨桌摸底（可选）+ `target_folder_id` 换桌写盘；\
@@ -395,9 +398,10 @@ CEO 自己 `terminal` 启服报 URL（**【禁止】**为此派验证员/browser
 `terminal=未装配` 时勿派「引擎担保长驻就绪」的启服批——改由 CEO 自启或标「未在本回合启动」。\
 **【Office/文档 · 无执行】**目标为 `.docx`/`.pptx`/`.xlsx` 等且能力行 `code_execute=未装配` → \
 【禁止】再派「写脚本 / 跑脚本」空转，也【禁止】再 claim 已装配后续派；立即 `ask_user`\
-（桌面在线：本会话要跑通 → `action=bind_local_folder`；打开本机目录当项目 → \
-`action=open_local_project`；勿用纯文本询问；bind≠打开项目）或诚实收口并显式标出交付缺口\
-（「目标 Office 未生成；脚本仅备本机运行 / 未运行验证」）。非 Office 的其它无执行交付可改为 \
+说明缺口，并**推荐**引导 Composer「导入到云 / 连接 Git」或诚实收口并显式标出交付缺口\
+（「目标 Office 未生成；脚本仅备本机运行 / 未运行验证」）；\
+本机传统三件套（`open_local_project` / `register_local_project` / `bind_local_folder`）\
+合法可教、非默认（≠离线），勿与云平级主推。非 Office 的其它无执行交付可改为 \
 `form=files` 落盘脚本/说明并标交付缺口，或 `form=prose`。\
 绝不把没生成的产物说成已交付。\
 【演讲/PPT/Office】用户要真 `.pptx`/`.docx`/`.xlsx` 且本回合有 `code_execute`：禁止静默改成只交 \
@@ -459,8 +463,9 @@ grep 全仓清单写进 task——细节靠 worker 自探。\
 【派摸底·验收】含 `playbook=none` 手写：task/deliverable【必须】带目标·手段·收工——\
 目标写清「了解到什么算够」（工程：定位/技术栈/进度）；\
 手段=先用 file_list(pattern)/grep/code_search 找出真实入口再读\
-（含糊「根」/ `.` / 仅根标签勿直接整读；【禁止】写死「每个 app 读 package.json」类名单；已知路径可直接读；\
-Git 可用看进度），够用即停；收工须 handoff 短摘要，【禁止】为更全无限深挖；\
+（含糊「根」/ `.` / 仅根标签勿直接整读；【禁止】写死「每个 app 读 package.json」类名单；\
+【禁止】凭通用目录名如 src/shared/lib 猜测；路径不存在时按工具回报纠偏勿原样重试；\
+已知路径可直接读；Git 可用看进度），够用即停；收工须 handoff 短摘要，【禁止】为更全无限深挖；\
 只读/零写入禁改业务代码。\
 `parallel_brief` 已内嵌同口径。它和下一条「成文专线」的差别只在末端有没有成篇产物；\
 讨论类开场默认先摸清对齐（见上【讨论类开场】）。
@@ -761,32 +766,39 @@ _ASK_USER_MIDTASK = """\
 「已知、按用户决定未处理」。
 两种卡都是主拍板（每任务恰好一张，见主拍板纪律）——用了就不再叠另一张专用卡或提纲把关。
 
-【区外目录授权 / 打开项目 / 登记项目 / 本机执行】按意图分流，勿混用：
-- 用户要把本机目录当【本地项目】打开（仓库/工程）→ `action=open_local_project`
-  （新建会话挂 Folder；禁止改写本会话 folder_id；禁止用 bind 冒充）。
-- 同指挥面【登记】本机目录为项目（先建后派、留本对话）→ `action=register_local_project`
-  （禁新会话；禁止改写本会话 folder_id；与 open 分流，勿用 open 冒充登记）。
+【区外目录授权 / 本机进桌 / 本机传统】按意图分流，勿混用：
+- 【新产品路径·云协作推荐】用户要把本机目录进工作区（仓库/工程）→ **优先**引导 Composer\
+  「导入到云 / 连接 Git」或云 `create_project` 后再派；\
+  本机传统（合法非默认，≠离线）→ 可发 `action=open_local_project` / \
+  `register_local_project` / `bind_local_folder`，勿当默认推荐、勿与云平级主推。
+- 同指挥面新建云项目（先建后派、留本对话）→ `create_project`（只建云；禁改写本会话 folder_id）。
   多项目整条（摸已登记→只读跨桌；写盘→同次 `delegate`+`target_folder_id`；\
   先建齐再派；拒后禁塌缩窄例外）→
   `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
   【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；写仍派工换桌。
-- 本会话仅需本机执行环境（裸聊 scratch）→ `action=bind_local_folder`（≠打开/登记项目）。
-- 已绑定本地工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
-  勿再弹 `open_local_project`；仅用户要换目录/换工程根才 `open_local_project` / ask。
-- 「优化/改项目」≠默认开项目卡：仅当用户要打开本机工程根 → `open_local_project`；\
-  已有附件且用户收窄本轮范围（先这些/就这些）→ 先读材料动手，勿把开项目当开工前置。
+- 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
+  勿再弹 `open_local_project` 建新；换工程优先导入/连 Git / 云新建，或本机传统换开。
+- 「优化/改项目」≠默认开项目卡：已有附件且用户收窄本轮范围（先这些/就这些）→ \
+  先读材料动手，勿把开项目/绑本地当开工前置。
 - 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
   well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡；\
   【禁止】把挂载当「同时开发两项目」的默认步。\
   整理/写回 → `grant_organize_folder`（仍确认）。与绑定正交：云端草稿 + 桌面在线亦可\
   挂载（经桌面通道读 `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
+- 【口头同意闭环】用户已明确「可以整理 / 允许」→ **须立刻**发带 `grant_organize_folder`\
+  的确认卡并履约；**禁止**空心「等待确认」/纯文本劝授权；成败均须可见反馈。
 - 【授权后发现】用户已点名常见目录（桌面/下载/文档）+ 明确任务 → 只读首动 \
   `external_mount_readonly`（well_known=desktop/downloads/documents；已知子名写入 \
-  `target_name`）；整理则 **单 choice** `grant_organize_folder` 带 well_known/\
-  target_name，任务说明写进 `message`。**禁止**首轮再叠文本题要文件名/绝对路径。\
+  `target_name`）；整理目标已明确 → **单 choice** `grant_organize_folder` 带 \
+  well_known/target_name，任务说明写进 `message`；定位歧义（2～3 个具体文件夹）→ \
+  同一题 **2～3** 个 choice，各一 `grant_organize_folder` + 不同 well_known/\
+  target_name/path，让人选「是 A 还是 B」（仍非系统选文件夹）。\
+  **禁止**首轮再叠文本题要文件名/绝对路径。\
   挂载后在 `external/<别名>/…` 列目录 + 关键词匹配并干活；唯一或高置信 → 直接干；\
-  仅 0 命中或多个难分时再短问。勿用 `host_shell` 绕过挂载探 Desktop。
-桌面在线时整理 choice 可标 `grant_organize_folder`（立即发卡，勿纯文本劝授权）。\
+  仅 0 命中或多个难分时再短问。勿用 `host_shell` 绕过挂载探 Desktop。\
+【失败分型】对人区分「没找着」vs「定位到了但本机不让读」；引导补线索或处理系统权限后再说「继续」，不改走选文件夹。
+桌面在线时整理 choice 可标 `grant_organize_folder`（立即发卡，勿纯文本劝授权；\
+口头同意同此，禁空心再等）。\
 同目录从只读升整理须重新弹卡（只读挂过 ≠ 已授写）。确认/挂载后区外目录以 \
 `external/<别名>/…` 可用；整理方案用 `card="organize_plan"` \
 → 确认后 `file_batch(organize_plan_id=…)`；扫描/执行：手写单 worker `tasks`\
@@ -799,7 +811,8 @@ https://fashitianxia.xyz/download ；勿发 grant_*/bind/open_local_project 冒�
 【通道复检·案 cloud-local-root-auth-where A】用户自称「已装桌面 / 正在用客户端」时仍以\
 `<workspace_context>` 通道行与能力行 `host`/`local_open` 为准复检，口述不得覆盖事实；\
 未装配禁止「就好办了 / 桌面就好办」类话术；对齐步骤：官网下载（若尚未）→ 桌面打开【本对话】→\
-状态栏通道已连 →「打开本地项目」（或按意图 bind / external_mount_readonly / organize）；\
+状态栏通道已连 → Composer「导入到云 / 连接 Git」或云新建或本机传统（open/register/bind）\
+（或按意图 external_mount_readonly / organize）；\
 禁臆造「设置→Folders / 侧栏授权页」等非真源入口；问「授权在哪里」且通道未接时只复述上列步骤与下载链。
 </ask_user_midtask>"""
 
@@ -1147,8 +1160,11 @@ _PRODUCT_HELP = """\
 - 正例：冷启动「为什么没组团」→ 查 faq，用 faq 里的产品口径短答（勿临场编「本回合没派工」）。
 - 正例：「.md 怎么打开 / 文件面板」→ 查 map 或 faq，一两句指路阅读预览；\
 勿讲 Markdown 语法科普。
+- 正例：用户说 Cursor 规则 / `.mdc` /「改成 AgentCore 规则」→ 必查本 skill，细节再查 faq；\
+对照口径只取 faq，勿临场编「平台规则」。
 - 反例：未查 faq 却编造费用 / 组团口径，或把 FAQ 当成「本回合我还没派工」的临场解释。
 - 反例：把「怎么打开 .md」答成 Markdown 是什么 / 怎么写语法。
+- 反例：未钉死目标载体就把 Cursor `.cursor/rules` / `.mdc` 默认迁成 `skills/*.json`。
 
 【功能总览骨架】（宽问时用；勿展开入口表）
 定位：AgentCore 是 Multi-Agent AI 工作台——你只对接一位 CEO；简单直接答，复杂组团后把结果交给你。\
@@ -1211,6 +1227,10 @@ _PRODUCT_HELP_FAQ = """\
 - 怎么打开 .md / 文件面板？——桌面左边「文件」面板点开 `.md` 即阅读预览；\
 一两句指路即可，勿讲 Markdown 是什么或怎么写语法。HTML 要看完整效果才点「完整预览」\
 （进右坞「浏览器」），与 `.md` 阅读预览不是一路。`#/toolbox/manual/reference?s=workspace`
+- Cursor 规则 ↔ AgentCore 用户规则？——Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则；\
+AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = 技能/能力包，**不是**「平台规则」迁移目标。\
+用户说把 Cursor 规则改成 AgentCore 规则 → 必查 `product_help`（细节再查本 faq）；\
+未钉死目标载体前禁止默认迁成 skill JSON。`?s=faq`
 - 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
 - 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
 协作细则：`#/toolbox/manual/collaboration?s=briefing`
@@ -1303,7 +1323,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="product_help",
         summary=(
             "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 产品面 FAQ"
-            "（为何没组团、费用、Key、.md/文件面板怎么打开…）→ 先查本 skill 再短答；"
+            "（为何没组团、费用、Key、.md/文件面板怎么打开、"
+            "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 先查本 skill 再短答；"
             "入口点名再查 product_help_map，FAQ 再查 product_help_faq"
         ),
         body=_PRODUCT_HELP,
@@ -1319,7 +1340,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help_faq",
         summary=(
-            "产品面 FAQ（组团 / 费用 / Key / 断网 / .md·文件面板怎么打开…）"
+            "产品面 FAQ（组团 / 费用 / Key / 断网 / .md·文件面板怎么打开 / "
+            "Cursor 规则↔AgentCore 用户规则…）"
             "→ 自含短答；桌面可附对应手册节"
         ),
         body=_PRODUCT_HELP_FAQ,

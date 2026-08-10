@@ -433,6 +433,66 @@ async def test_sink_closed_fail_fast_without_wall_clock_wait():
     assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
 
 
+async def test_sink_detached_does_not_fail_fast_keeps_delivery_path():
+    """SSE detach ≠ bridge dead: keep Future open for attach / resolve (协调期 Local op).
+
+    After CEO end_turn the primary observer may detach while coordination workers
+    still issue workspace ops. Conflating detach with closed caused collective
+    ``sink closed（未入队）``. Detach skips the live queue; registry + reattach
+    (or a direct resolve) remains the delivery path.
+    """
+    from agentcore.runtime.events.client_tool_reattach import pending_client_tool_events
+    from agentcore.runtime.interaction import default_interaction_registry
+
+    sink = EventSink()
+    sink.detach()
+    assert sink.is_detached is True
+    assert sink.is_closed is False
+
+    # Use the process-wide registry so pending_client_tool_events can see the op
+    # (same path attach uses). Isolate leftovers from other tests.
+    registry = default_interaction_registry()
+    for leftover in list(registry.list_pending(CONV)):
+        registry.discard(leftover.id)
+
+    channel = WorkspaceChannel(
+        sink=sink,
+        conversation_id=CONV,
+        registry=registry,
+        timeout_seconds=5.0,
+        root_id=ROOT_ID,
+    )
+    task = asyncio.create_task(
+        channel.request(WorkspaceOp.READ, {"path": "after-detach.txt"})
+    )
+    # Detach must not settle immediately as sink-closed.
+    await asyncio.sleep(0)
+    assert not task.done()
+    assert sink._queue.empty()  # noqa: SLF001 — not live-queued while detached
+
+    pending = [r for r in registry.list_pending(CONV) if not r.future.done()]
+    assert len(pending) == 1
+    request_id = pending[0].id
+
+    # Attach re-hang path can rebuild the EPHEMERAL frame from the registry.
+    rehung = pending_client_tool_events(CONV)
+    assert any(
+        e.type == EventType.WORKSPACE_OP_REQUIRED
+        and e.payload.get("request_id") == request_id
+        and e.payload.get("op") == "read"
+        for e in rehung
+    )
+
+    assert registry.resolve(
+        request_id,
+        {"ok": True, "value": "from-reattach"},
+        conversation_id=CONV,
+    )
+    assert await task == "from-reattach"
+    assert channel._dead is False  # noqa: SLF001
+    assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
+
+
 async def test_index_io_timeout_does_not_sticky_dead_channel():
     """Background index read hang must not drag tool-family siblings into channel-dead."""
     sink = EventSink()

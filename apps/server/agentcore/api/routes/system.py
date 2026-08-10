@@ -7,9 +7,10 @@ acts on the right signal:
   touches no external dependency, so a transient database outage never trips it
   into a restart loop. Always ``200``.
 - ``GET /readyz`` — *readiness*: can the service actually handle requests right
-  now? It exercises every hard dependency (currently PostgreSQL via the shared
-  ``database_ready`` probe) and returns ``503`` when one is unreachable, so
-  traffic is held back until recovery.
+  now? HTTP 200/503 is decided solely by PostgreSQL (``database_ready``). Redis
+  (rate-limit backend) is probed as a soft dependency: when
+  ``rate_limit_backend=redis`` the body still includes ``redis``, but a Redis
+  failure does **not** flip the status to ``503`` (limiters fail-open / degrade).
 - ``GET /version`` — build provenance (semantic version + git SHA + build time)
   for traceability and instant rollback.
 - ``GET /updates/policy`` — desktop auto-update remote circuit breaker + hard
@@ -59,10 +60,16 @@ async def liveness() -> dict[str, str]:
 
 @router.get("/readyz")
 async def readiness(response: Response) -> dict[str, object]:
-    """Readiness probe: 200 when every hard dependency is reachable, else 503."""
+    """Readiness probe: HTTP 200/503 follows DB only; Redis is observational.
+
+    PostgreSQL is the hard dependency that decides ``ready`` / ``not_ready``
+    (and thus 200 vs 503). Redis is a soft dependency for distributed rate
+    limiting: still probed and, when ``rate_limit_backend=redis``, written to
+    ``body["redis"]`` for ops/alerting; a Redis outage must not return 503.
+    """
     db_ok = await database_ready()
     redis_ok = await redis_ready()
-    ready = db_ok and redis_ok
+    ready = db_ok
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     body: dict[str, object] = {

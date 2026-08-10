@@ -1,0 +1,25 @@
+---
+description: 本地产品 AI / eval / probe 真跑 LLM——用 dev 账号 OpenCode Zen BYOK，禁止默认踩 PLATFORM_API_KEY。
+alwaysApply: false
+---
+
+# 本地 LLM dogfood 凭据
+
+## 症状 → 原因 → 对策
+
+- **症状**：eval / 探针报缺 key、或踩过期 `PLATFORM_API_KEY`。
+- **原因**：本地默认应走测试账号 BYOK，不是平台 key。
+- **对策**：`dev` / `devpassword`（`DEV_USERNAME` / `DEV_PASSWORD` 可覆盖）+ 账号已配 **OpenCode Zen**（如 `deepseek-v4-flash-free`）；先 `uv run python scripts/seed_dev_user.py`，再设置页或 `scripts/set_dev_llm_key.py`。
+
+## 真跑入口
+
+- 产品回合：`scripts/archive/probe_turn.py`（HTTP，与桌面同路）。
+- Eval / 多数探针：`EvalHarness` → `await eval_credentials()`（已回落本地 BYOK；**异步路径必须 await**，勿在 running loop 里同步调 `_eval_credentials` 以免 DB BYOK 静默失败回落到过期 PLATFORM）。
+
+## 优先级（勿颠倒）
+
+1. `EVAL_DEEPSEEK_*`（显式覆盖）
+2. 本地库测试账号 BYOK（默认；模型跟账号默认，常为 `deepseek-v4-flash-free`）
+3. `PLATFORM_*`（最后；本地 dogfood **禁止**默认依赖）
+
+无 key → 按上面配，**勿编造**密钥。细节 → [本地开发 · evals](/docs/02-架构/本地开发.md) · `apps/server/agentcore/evals/harness.py`。

@@ -20,6 +20,7 @@ import {
   ORGANIZE_CONFIRM_CAPTION,
   ORGANIZE_CONFIRM_CTA,
   grantHintsFromAskOption,
+  isOrganizeOralConsent,
   organizeConfirmDetail,
 } from "@/lib/grantFolderHints";
 import {
@@ -122,6 +123,24 @@ export function AskDecisionBody({
           return { q, opt };
         }
       }
+    }
+    return null;
+  };
+
+  /**
+   * 「其他…」短允许表口头同意 → 同题 pending `grant_organize_folder`（hints 取自该选项）。
+   * 禁对长文意图分类；未命中返回 null，Continue 走原 compose。
+   */
+  const findOralOrganizeGrant = (): {
+    q: AskQuestion;
+    opt: AskOption;
+  } | null => {
+    for (const q of content.questions) {
+      if (q.kind === "text") continue;
+      if (!answer.otherOn[q.id]) continue;
+      if (!isOrganizeOralConsent(answer.otherText[q.id] ?? "")) continue;
+      const opt = q.options.find((o) => o.action === "grant_organize_folder");
+      if (opt) return { q, opt };
     }
     return null;
   };
@@ -263,11 +282,12 @@ export function AskDecisionBody({
    * 继续：普通选项 → 原 onContinue；选中 grant_* / bind_* / open_local_project /
    * register_local_project → 一键履约（对齐点选项行）。grant 无系统选文件夹；
    * 找不到则卡面失败、不提交口头授权。同 root 只读已挂仍须点允许走 organize 履约
-   *（禁止静默升写）。register 履约后 resume 本对话；open 开新会话不 resume。
+   *（禁止静默升写）。「其他…」命中整理短允许表 → 同真 grant（非纯文本冒充已授权）。
+   * register 履约后 resume 本对话；open 开新会话不 resume。
    */
   const handleContinue = () => {
     if (busy || bindBusyLabel) return;
-    const pending = findPendingFolderOption();
+    const pending = findPendingFolderOption() ?? findOralOrganizeGrant();
     if (!pending) {
       onContinue();
       return;

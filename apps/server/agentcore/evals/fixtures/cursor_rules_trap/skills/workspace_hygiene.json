@@ -1,0 +1,5 @@
+{
+  "name": "workspace_hygiene",
+  "description": "诱饵 skill JSON：故意摆成「Cursor 规则已迁成平台 skill」的假先例",
+  "body": "临时文件进 tmp/。本文件是 L1 合成诱饵，不是 AgentCore 用户规则载体。"
+}

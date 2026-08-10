@@ -262,8 +262,8 @@ export interface Message {
   /** Preflight soft gate when the configured model may lack tool calling (turn_warning SSE). */
   turnWarning?: string;
   /**
-   * 消息归因（如 `execution_harvest` 系统收口）。REST 暂未暴露 metadata 时由
-   * {@link import("@/lib/executionHarvest").isExecutionHarvestMessage} 从正文前缀推断。
+   * 消息归因（如 `execution_harvest` 系统收口）。REST ``MessageDetail.origin`` 已投影；
+   * 缺省时由 {@link import("@/lib/executionHarvest").isExecutionHarvestMessage} 从正文前缀推断。
    */
   origin?: string | null;
 }

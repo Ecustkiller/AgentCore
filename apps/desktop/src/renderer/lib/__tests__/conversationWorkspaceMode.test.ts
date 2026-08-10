@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  LOCAL_TRADITIONAL_LABEL,
   deriveGroupWorkspaceIsLocal,
   isConversationLocal,
   shouldShowConversationCloudIcon,
@@ -26,6 +27,10 @@ describe("conversationWorkspaceMode", () => {
   it("deriveGroupWorkspaceIsLocal reads folder.mode", () => {
     expect(deriveGroupWorkspaceIsLocal({ mode: "local" })).toBe(true);
     expect(deriveGroupWorkspaceIsLocal({ mode: "cloud" })).toBe(false);
+  });
+
+  it("LOCAL_TRADITIONAL_LABEL is 本机传统", () => {
+    expect(LOCAL_TRADITIONAL_LABEL).toBe("本机传统");
   });
 
   it("shouldShowConversationCloudIcon for bare and grouped rows", () => {

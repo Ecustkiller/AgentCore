@@ -1,7 +1,8 @@
 /**
- * 云 scratch → 本地单向 checkout（双模式工作区 §八.7）。
+ * 云 scratch → 本机单向 checkout（双模式工作区 §八.7 / §7.6）。
  *
- * 用户选目录后，把云端快照 zip 解压落地。不登记授权根、不绑工作区——纯导出。
+ * 弹目录选择器解压落地（不登记授权根）。合回落点写出走 Diff / 只合回产物，
+ * 不经本模块。仍 ≠ mode=local 工作区、≠ 过桥。
  */
 
 import { promises as fs } from "node:fs";
@@ -52,8 +53,8 @@ async function extractZipTo(
 }
 
 /**
- * 弹目录选择器，把 base64 zip 解压到所选目录（覆盖同名文件）。
- * 成功后在系统文件管理器中打开该目录。
+ * 把 base64 zip 解压到本机目录（覆盖同名文件），成功后在文件管理器中打开。
+ * 弹目录选择器（纯导出，不登记根）；合回落点不经此路径。
  */
 export async function checkoutArchive(
   archiveBase64: string,
@@ -74,7 +75,6 @@ export async function checkoutArchive(
   if (result.canceled || result.filePaths.length === 0) {
     return { ok: false, reason: "cancelled" };
   }
-
   let destAbs: string;
   try {
     destAbs = await fs.realpath(result.filePaths[0]);

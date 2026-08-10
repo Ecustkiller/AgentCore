@@ -25,9 +25,9 @@ from agentcore.runtime.turn_token_budget import (
 
 def test_engine_turn_token_ceiling_default():
     s = EngineSettings()
-    assert s.engine_turn_token_ceiling == 12_000_000
+    assert s.engine_turn_token_ceiling == 30_000_000
     assert s.engine_turn_token_delivery_reserve == 400_000
-    assert s.engine_nested_turn_token_ceiling == 5_000_000
+    assert s.engine_nested_turn_token_ceiling == 8_000_000
     assert s.engine_worker_token_ceiling == 4_000_000  # orthogonal
 
 
@@ -481,7 +481,7 @@ def test_reason_constant_reserved_in_cutoff():
     from agentcore.runtime.runs.cutoff import REASON_TURN_TOKEN_BUDGET as CUTOFF_REASON
 
     assert CUTOFF_REASON == REASON_TURN_TOKEN_BUDGET
-    assert resolve_turn_token_ceiling() in (0, 12_000_000) or resolve_turn_token_ceiling() >= 0
+    assert resolve_turn_token_ceiling() in (0, 30_000_000) or resolve_turn_token_ceiling() >= 0
 
 
 def test_wrap_prompt_is_explicit_close_not_fake_done(monkeypatch):

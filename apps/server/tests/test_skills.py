@@ -146,6 +146,10 @@ def test_directory_preamble_carves_out_product_help_consult():
     assert "必查 `product_help`" in out
     assert "product_help_map" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_faq" in CONSULT_PRODUCT_HELP_BY_SCENE
+    # 定案 A：Cursor / .mdc / 改成 AgentCore 规则 → 必查 product_help*
+    assert "Cursor" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert ".mdc" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert "改成 AgentCore 规则" in CONSULT_PRODUCT_HELP_BY_SCENE
     # 收紧触发：主动查/报产品本身；勿宽「出问题必查」、勿第二个无条件必查与 FAQ 对打
     assert "用户主动查/报产品本身可证伪故障" in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
     assert "查 `product_bug_triage`" in CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE
@@ -462,6 +466,24 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "怎么打开 .md" in faq_body or ".md" in faq_body and "阅读预览" in faq_body
     assert "Markdown 是什么" in faq_body or "语法" in faq_body  # 禁科普口径
     assert "完整预览" in faq_body and "不是一路" in faq_body
+    # 定案 A：Cursor 规则 ↔ AgentCore 用户规则（权威对照须字面在 faq，可独立短答）
+    assert "Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则" in faq_body
+    assert "AgentCore 用户规则 = `AgentCore/规则/` + `remember`" in faq_body
+    assert "`skills/*.json` = 技能/能力包" in faq_body
+    assert "不是" in faq_body and "平台规则" in faq_body
+    assert "必查 `product_help`" in faq_body
+    assert "未钉死目标载体前禁止默认迁成 skill JSON" in faq_body
+    # help 正反例短钩；整本对照勿膨胀进 help
+    assert "Cursor" in help_body and "改成 AgentCore 规则" in help_body
+    assert "skills/*.json" in help_body
+    assert "Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则" not in help_body
+    # summary / CONSULT 短钩可见
+    help_skill = build_system_skill_registry().get("product_help")
+    assert help_skill is not None
+    assert "Cursor" in help_skill.summary and "改成 AgentCore 规则" in help_skill.summary
+    faq_skill = build_system_skill_registry().get("product_help_faq")
+    assert faq_skill is not None
+    assert "Cursor" in faq_skill.summary
 
     assert "Markdown 语法" in help_body or ".md 怎么打开" in help_body
     # 与 product_bug_triage 分轨：用法短答不承载诊断仪式
@@ -511,11 +533,14 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "默认桌" in body
     assert "scratch" in body
     assert "create_project" in body
-    assert "register_local_project" in body
+    assert "register_local_project" in body  # 本机传统可教
     assert "open_local_project" in body
-    assert "新会话" in body
+    assert "导入到云" in body or "连接 Git" in body
+    assert "合法非默认" in body or "非默认" in body
+    assert "本机传统" in body
+    assert "新会话" in body or "遗留" in body or "打开当出生" in body or "只建云" in body
     assert "混部" in body
-    assert "多 local" in body and "并行" in body
+    assert "多" in body and "并行" in body
     assert "暂不支持" not in body
     assert "协作图不改" in body or "并行支线" in body
     # 先建齐再派（禁先扇出再补建）vs 拒后禁塌缩窄例外 vs 一般少派
@@ -1016,20 +1041,23 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     # 定向修订委派须写明局部改纪律（risk_ack → 有界返工环）。
     assert "str_replace" in body
     assert "中间省略" in body or "file_write" in body
-    # 定案 A：优化项目 ≠ 默认催 open_local_project；附件收窄范围时先干活。
+    # 定案：优化项目 ≠ 默认催 open_local；附件收窄范围时先干活；本机传统可教非默认。
     assert "open_local_project" in body
     assert "≠默认开项目卡" in body or "收窄本轮" in body
     assert "开工前置" in body
-    # 登记留指挥面 + 跨项目整条回指 team_orchestration（勿与 open 分流打架）
     assert "register_local_project" in body
+    assert "导入到云" in body or "连接 Git" in body
+    assert "合法非默认" in body or "非默认" in body
+    assert "本机传统" in body
+    assert "Ask" not in body or "改导" not in body  # 不得再写 Ask 点了会改导
     assert "team_orchestration_advanced" in body
     assert "跨项目并行指挥" in body
     assert "开发双仓" in body
     assert "target_folder_id" in body
     assert "只读跨桌" in body or "写仍派工换桌" in body
     assert "写仍派工换桌" in body
-    # 已绑定本地工程：「打开项目」=跑当前项目，换目录才开卡。
-    assert "已绑定本地工程" in body
+    # 已绑/本机传统工程：跑当前；换工程优先导入/连 Git。
+    assert "本机传统" in body or "已绑" in body or "跑" in body
     assert "跑" in body and "当前" in body
     # Web 假确认修复：引导桌面下载 + 未见挂载勿称已确认
     assert "https://fashitianxia.xyz/download" in body
@@ -1040,12 +1068,19 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "well_known" in body
     assert "target_name" in body
     assert "禁止" in body and "文件名" in body
+    # 口头同意闭环 + 歧义 2～3 候选（非系统选文件夹）+ 失败分型
+    assert "口头同意" in body
+    assert "等待确认" in body and "禁止" in body
+    assert "2～3" in body or "2-3" in body
+    assert "失败分型" in body
+    assert "没找着" in body
+    assert "单 choice" in body  # 目标明确仍可单卡
     # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检；禁「就好办了」/臆造 Folders
     assert "通道复检" in body
     assert "就好办了" in body
     assert "口述不得覆盖" in body
     assert "Folders" in body
-    assert "打开本地项目" in body
+    assert "导入到云" in body or "连接 Git" in body or "Composer" in body
     assert "授权在哪里" in body
     # 案 79789150：承诺落盘前对齐 / 用户点名确认后再存 → 阻塞短问 + default
     assert "落盘前对齐" in body

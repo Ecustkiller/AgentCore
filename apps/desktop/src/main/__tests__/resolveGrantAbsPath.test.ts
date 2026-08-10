@@ -1,11 +1,21 @@
 /**
  * @vitest-environment node
  */
+import { promises as fs } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { resolveGrantAbsPath } from "../fs/resolveGrantAbsPath";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  isPermissionDeniedError,
+  resolveGrantAbsPath,
+} from "../fs/resolveGrantAbsPath";
+
+function errno(code: string, message = code): NodeJS.ErrnoException {
+  const err = new Error(message) as NodeJS.ErrnoException;
+  err.code = code;
+  return err;
+}
 
 describe("resolveGrantAbsPath", () => {
   const temps: string[] = [];
@@ -133,5 +143,59 @@ describe("resolveGrantAbsPath", () => {
     if (!result.ok) return;
     expect(result.displayLabel).toBe("优先");
     expect(result.absPath.replace(/\\/g, "/")).toContain("优先");
+  });
+
+  it("isPermissionDeniedError recognizes EACCES/EPERM only", () => {
+    expect(isPermissionDeniedError(errno("EACCES"))).toBe(true);
+    expect(isPermissionDeniedError(errno("EPERM"))).toBe(true);
+    expect(isPermissionDeniedError(errno("ENOENT"))).toBe(false);
+    expect(isPermissionDeniedError(new Error("no code"))).toBe(false);
+  });
+
+  it("returns permission_denied when stat hits EACCES (≠ not_found)", async () => {
+    const root = await makeTemp();
+    const target = join(root, "locked");
+    await mkdir(target);
+    const spy = vi.spyOn(fs, "stat").mockRejectedValueOnce(errno("EACCES"));
+
+    const result = await resolveGrantAbsPath({
+      path: target,
+      resolveWellKnown: async () => root,
+    });
+    spy.mockRestore();
+    expect(result).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  it("returns permission_denied when readdir hits EPERM", async () => {
+    const desktop = await makeTemp();
+    const spy = vi.spyOn(fs, "readdir").mockRejectedValueOnce(errno("EPERM"));
+
+    const result = await resolveGrantAbsPath({
+      wellKnown: "desktop",
+      targetName: "咨询",
+      resolveWellKnown: async () => desktop,
+    });
+    spy.mockRestore();
+    expect(result).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  it("returns permission_denied when resolveWellKnown throws EACCES", async () => {
+    const result = await resolveGrantAbsPath({
+      wellKnown: "downloads",
+      resolveWellKnown: async () => {
+        throw errno("EACCES", "access denied");
+      },
+    });
+    expect(result).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  it("returns not_found when resolveWellKnown throws ENOENT", async () => {
+    const result = await resolveGrantAbsPath({
+      wellKnown: "documents",
+      resolveWellKnown: async () => {
+        throw errno("ENOENT", "missing");
+      },
+    });
+    expect(result).toEqual({ ok: false, reason: "not_found" });
   });
 });

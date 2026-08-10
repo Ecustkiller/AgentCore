@@ -1,14 +1,9 @@
-import { getConversations } from "@/hooks/useConversations";
-import {
-  isLocalPickerFailureKind,
-  notifyLocalPickerFailure,
-  pickAndBindLocalFolder,
-} from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
+import { setComposerChannelPreference } from "@/lib/composerChannelPreference";
 import { startNewConversation } from "@/lib/newConversation";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { chord } from "@/lib/shortcuts";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { exportConversation } from "@/services/conversations";
 import {
@@ -34,8 +29,8 @@ import {
   Files,
   FlaskConical,
   FolderKey,
-  FolderOpen,
   FolderPlus,
+  GitBranch,
   HardDrive,
   Inbox,
   Info,
@@ -55,6 +50,7 @@ import {
   Sun,
   Terminal,
   Timer,
+  Upload,
   UserCog,
   Workflow,
   Wrench,
@@ -135,7 +131,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     },
     {
       id: "new-project",
-      title: "新建项目",
+      title: "新建云项目",
       category: "操作",
       icon: FolderPlus,
       keywords: [
@@ -149,28 +145,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       ],
       run: () => useFoldersStore.getState().openCreateFolder(),
     },
-    ...(hasLocalFiles()
-      ? [
-          {
-            // 显式本机草稿：文件落本机默认目录（逃生口）；≠本机引擎、≠打开项目。
-            id: "new-local-conversation",
-            title: "本机草稿",
-            category: "操作" as const,
-            icon: HardDrive,
-            hint: "文件落本机默认目录",
-            keywords: [
-              "local",
-              "benji",
-              "bendi",
-              "scratch",
-              "caogao",
-              "new",
-              "chat",
-            ],
-            run: () => startNewConversation(navigate, null, { local: true }),
-          },
-        ]
-      : []),
     // Dev-only 磁带回放：仅当服务端 DEMO_TAPE_REPLAY_ENABLED 且目录非空时注入。
     // 主入口 = 准备模式（空会话，用户亲自发消息开播）；立即开播为备选。
     ...demoTapes.flatMap((tape) => [
@@ -294,74 +268,70 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     ...(hasLocalFiles()
       ? [
           {
-            id: "open-local-project",
-            title: "打开本地项目",
+            id: "connect-git",
+            title: "从 Git 克隆",
             category: "操作" as const,
-            icon: FolderOpen,
+            icon: GitBranch,
             keywords: [
-              "open",
-              "local",
+              "git",
+              "clone",
+              "cloud",
+              "connect",
+              "repo",
+              "lianjie",
+              "cangku",
               "project",
-              "folder",
-              "workspace",
-              "dakai",
-              "bendi",
               "xiangmu",
-              "benji",
+              "kelong",
             ],
-            hint: "新会话 · 本机文件夹",
+            hint: "推荐 · 云端浅克隆",
             run: () => {
-              void pickAndOpenLocalProject(navigate, {
-                notifyOnFailure: false,
-              }).then((result) => {
-                if (result.ok || result.reason === "cancelled") return;
-                if (isLocalPickerFailureKind(result.reason)) {
-                  notifyLocalPickerFailure(result.reason, result.message);
-                }
-              });
+              setComposerChannelPreference("cloud");
+              useFoldersStore.getState().openConnectGit();
             },
           },
           {
-            id: "bind-local-folder",
-            title: "绑定本机执行环境",
+            id: "import-to-cloud",
+            title: "导入本机项目到云",
+            category: "操作" as const,
+            icon: Upload,
+            keywords: [
+              "import",
+              "cloud",
+              "local",
+              "folder",
+              "daoru",
+              "bendi",
+              "benji",
+              "xiangmu",
+            ],
+            hint: "推荐 · 本机快照到云",
+            run: () => {
+              setComposerChannelPreference("cloud");
+              useFoldersStore.getState().openImportToCloud();
+            },
+          },
+          {
+            // §七：本机传统入口（打开本机项目）；履约由 openLocal 并行桶恢复。
+            id: "open-local-project",
+            title: "打开本机项目",
             category: "操作" as const,
             icon: HardDrive,
             keywords: [
-              "bind",
               "local",
+              "traditional",
               "folder",
-              "sidecar",
-              "scratch",
-              "bangding",
+              "open",
               "benji",
-              "zhixing",
+              "chuantong",
+              "dakai",
+              "bendi",
+              "xiangmu",
             ],
-            hint: "仅当前云端闲聊；项目请用打开本地项目",
+            hint: "本机传统 · 直改目录，≠离线",
             run: () => {
-              const id = useConversationStore.getState().currentConversationId;
-              if (!id) {
-                notifyError("请先打开一个对话");
-                return;
-              }
-              const conv = getConversations().find((c) => c.id === id);
-              if (conv?.folderId) {
-                notifyError(
-                  "项目会话请用「打开本地项目」开新会话，不能在本会话绑定本机",
-                );
-                return;
-              }
-              void pickAndBindLocalFolder(id).then((result) => {
-                if (result.ok) {
-                  notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
-                    description: "仅本会话；≠打开本地项目",
-                  });
-                  return;
-                }
-                if (result.reason === "cancelled") return;
-                if (isLocalPickerFailureKind(result.reason)) {
-                  notifyLocalPickerFailure(result.reason, result.message);
-                }
-              });
+              setComposerChannelPreference("local_traditional");
+              void pickAndOpenLocalProject(navigate);
             },
           },
           {

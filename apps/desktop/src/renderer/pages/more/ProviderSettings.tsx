@@ -235,7 +235,7 @@ function StatusBadge({
     return (
       <span className="flex items-center gap-1.5 text-xs text-success">
         <CheckCircle2 size={14} />
-        连接正常
+        {message ?? "连接正常"}
       </span>
     );
   }

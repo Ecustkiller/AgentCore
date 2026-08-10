@@ -9,7 +9,8 @@ const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
 
 /**
  * Draft-time「在哪工作」intent — single discriminant union.
- * Default = quick cloud scratch（桌面裸聊默认切云 §八.7）；显式本机草稿 = quick_local。
+ * Default = quick cloud scratch（桌面裸聊默认切云 §八.7）。
+ * `quick_local` 仅类型遗留（入口已砍；发送时改导云，不再造本机草稿）。
  */
 export type DraftWorkspaceIntent =
   | { kind: "quick_local" }
@@ -26,6 +27,14 @@ export type CreateFolderAnchorRect = {
   left: number;
   width: number;
   height: number;
+};
+
+/** Prefill for {@link useFoldersStore}'s `openImportToCloud`. */
+export type ImportToCloudPrefill = {
+  /** Existing desktop `FsRoot.id` (e.g. Folder.localRootId). */
+  rootId?: string | null;
+  /** Suggested cloud project name. */
+  projectName?: string | null;
 };
 
 /**
@@ -45,12 +54,30 @@ interface FoldersUiState {
   createFolderOpen: boolean;
   /** Optional trigger rect; null → host centers the cascade. */
   createFolderAnchor: CreateFolderAnchorRect | null;
+  /** Composer / palette「连接 Git」→ G3 云 clone 对话框。 */
+  connectGitOpen: boolean;
+  /**
+   * Target cloud wsId (`folder:…` / `conv:…`). Null = 先建云项目再 clone
+   *（入口「连接 Git = 云 clone remote」）。
+   */
+  connectGitWsId: string | null;
+  /** Composer / palette「导入到云」→ 本机夹快照上传对话框。 */
+  importToCloudOpen: boolean;
+  /**
+   * Optional prefill for legacy local migrate：已有 `Folder.localRootId` /
+   * 有效根 id，少一次选夹；找不到仍走 picker。
+   */
+  importToCloudPrefill: ImportToCloudPrefill | null;
 
   setPendingRename: (id: string | null) => void;
   setDraftWorkspaceIntent: (intent: DraftWorkspaceIntent) => void;
   resetDraftWorkspaceIntent: () => void;
   openCreateFolder: (anchorEl?: Element | null) => void;
   closeCreateFolder: () => void;
+  openConnectGit: (wsId?: string | null) => void;
+  closeConnectGit: () => void;
+  openImportToCloud: (prefill?: ImportToCloudPrefill | null) => void;
+  closeImportToCloud: () => void;
   togglePinFolder: (id: string) => void;
 }
 
@@ -70,6 +97,10 @@ export const useFoldersStore = create<FoldersUiState>()(
       pinnedFolderIds: [],
       createFolderOpen: false,
       createFolderAnchor: null,
+      connectGitOpen: false,
+      connectGitWsId: null,
+      importToCloudOpen: false,
+      importToCloudPrefill: null,
       setPendingRename: (id) => set({ pendingRenameId: id }),
       setDraftWorkspaceIntent: (intent) =>
         set({ draftWorkspaceIntent: intent }),
@@ -85,6 +116,20 @@ export const useFoldersStore = create<FoldersUiState>()(
       },
       closeCreateFolder: () =>
         set({ createFolderOpen: false, createFolderAnchor: null }),
+      openConnectGit: (wsId) =>
+        set({
+          connectGitOpen: true,
+          connectGitWsId: wsId ?? null,
+        }),
+      closeConnectGit: () =>
+        set({ connectGitOpen: false, connectGitWsId: null }),
+      openImportToCloud: (prefill) =>
+        set({
+          importToCloudOpen: true,
+          importToCloudPrefill: prefill ?? null,
+        }),
+      closeImportToCloud: () =>
+        set({ importToCloudOpen: false, importToCloudPrefill: null }),
       togglePinFolder: (id) =>
         set((s) => ({
           pinnedFolderIds: s.pinnedFolderIds.includes(id)

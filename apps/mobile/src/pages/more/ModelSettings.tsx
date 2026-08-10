@@ -68,8 +68,6 @@ type ProviderModelGroup = {
 };
 
 const PLATFORM_POINTER_ID = "__platform__";
-/** Select sentinel for「自定义」— not a pointer; BYOK provider + free-text model id. */
-const CUSTOM_SELECT_VALUE = "__custom__";
 
 function encodeSlot(slot: ModelProfileSlot): string {
   if (slot.origin === "platform" || !slot.provider_id) {
@@ -94,7 +92,7 @@ function decodeSlot(value: string): ModelProfileSlot | null {
  * Per-provider option groups for slot selectors.
  * BYOK candidates = catalog rows ∪ provider.default_model ∪ live slot models;
  * platform group only from available catalog (+ optional platform_model fallback).
- * Platform has no「自定义」entry — custom is a separate select sentinel.
+ * 有 BYOK 时槽位用 combobox 手填；仅 platform 时用本分组喂纯 select。
  */
 function defaultModelGroups(
   catalog: ModelCatalog | null,
@@ -211,14 +209,6 @@ function visionModelGroups(
     platformModel,
     ...slots,
   );
-}
-
-function knownPointerValues(groups: ProviderModelGroup[]): Set<string> {
-  const out = new Set<string>();
-  for (const g of groups) {
-    for (const item of g.items) out.add(item.value);
-  }
-  return out;
 }
 
 type Surface =
@@ -583,21 +573,14 @@ function ProfilesSection({
   );
 }
 
-/**
- * Slot picker: known catalog/provider options + optional「自定义」
- * (BYOK provider + free-text model id). Platform has no custom entry.
- * `value` is an encoded pointer or "" (follow).
- */
-function SlotModelSelect({
-  id,
-  label,
-  groups,
-  providers,
-  value,
-  followLabel,
-  disabled,
-  onChange,
-}: {
+function slotProviderKey(slot: ModelProfileSlot | null): string {
+  if (!slot) return "";
+  if (slot.origin === "platform" || !slot.provider_id)
+    return PLATFORM_POINTER_ID;
+  return slot.provider_id;
+}
+
+type SlotModelSelectProps = {
   id: string;
   label: string;
   groups: ProviderModelGroup[];
@@ -606,58 +589,31 @@ function SlotModelSelect({
   followLabel?: string;
   disabled?: boolean;
   onChange: (value: string) => void;
-}) {
-  const known = knownPointerValues(groups);
-  const decoded = value ? decodeSlot(value) : null;
-  const knownHas = Boolean(value && known.has(value));
-  const isOrphanByok = Boolean(
-    value && !knownHas && decoded?.origin === "byok" && decoded.provider_id,
-  );
+};
 
-  const [customMode, setCustomMode] = useState(isOrphanByok);
-  const [customProviderId, setCustomProviderId] = useState(
-    () =>
-      (decoded?.origin === "byok" && decoded.provider_id) ||
-      providers[0]?.id ||
-      "",
-  );
-  const [customModel, setCustomModel] = useState(() =>
-    isOrphanByok && decoded ? decoded.model : "",
-  );
-
-  // Echo orphan BYOK pointers in custom mode; leave custom mode only when a known option is chosen.
-  useEffect(() => {
-    if (isOrphanByok && decoded?.provider_id) {
-      setCustomMode(true);
-      setCustomProviderId(decoded.provider_id);
-      setCustomModel(decoded.model);
-    } else if (knownHas) {
-      setCustomMode(false);
-    }
-  }, [isOrphanByok, knownHas, decoded?.provider_id, decoded?.model]);
-
-  const allowCustom = providers.length > 0;
-  const selectValue = customMode ? CUSTOM_SELECT_VALUE : value;
-
-  function emitCustom(providerId: string, model: string) {
-    const m = model.trim();
-    if (providerId && m) onChange(`${providerId}::${m}`);
-    else onChange("");
+/**
+ * Slot picker.
+ * - 有 BYOK：始终「服务商下拉 + 模型 id 输入」；目录项进 datalist 建议，可直接粘贴任意 id。
+ * - 仅 platform：纯 select，无手填。
+ * `value` 为编码 pointer，或 ""（可选槽 = follow / 不配置）。
+ */
+function SlotModelSelect(props: SlotModelSelectProps) {
+  if (props.providers.length > 0) {
+    return <SlotModelCombobox {...props} />;
   }
+  return <SlotModelPlatformSelect {...props} />;
+}
 
-  function onSelectChange(next: string) {
-    if (next === CUSTOM_SELECT_VALUE) {
-      setCustomMode(true);
-      const providerId = customProviderId || providers[0]?.id || "";
-      setCustomProviderId(providerId);
-      setCustomModel("");
-      onChange("");
-      return;
-    }
-    setCustomMode(false);
-    onChange(next);
-  }
-
+/** 仅 platform、无 BYOK：纯目录 select。 */
+function SlotModelPlatformSelect({
+  id,
+  label,
+  groups,
+  value,
+  followLabel,
+  disabled,
+  onChange,
+}: SlotModelSelectProps) {
   return (
     <div className="field">
       <label className="field-label" htmlFor={id}>
@@ -666,16 +622,15 @@ function SlotModelSelect({
       <select
         id={id}
         className="text-input"
-        value={selectValue}
+        value={value}
         disabled={disabled}
-        onChange={(e) => onSelectChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         data-testid={`${id}-select`}
       >
         {followLabel !== undefined ? (
           <option value="">{followLabel}</option>
         ) : (
-          !value &&
-          !customMode && (
+          !value && (
             <option value="" disabled>
               选择模型
             </option>
@@ -690,59 +645,155 @@ function SlotModelSelect({
             ))}
           </optgroup>
         ))}
-        {allowCustom && <option value={CUSTOM_SELECT_VALUE}>自定义…</option>}
       </select>
+    </div>
+  );
+}
 
-      {customMode && allowCustom && (
-        <div
-          className="custom-model-fields"
-          data-testid={`${id}-custom`}
+/** 有 BYOK：服务商 + 可手填 model id（datalist 建议）。 */
+function SlotModelCombobox({
+  id,
+  label,
+  groups,
+  providers,
+  value,
+  followLabel,
+  disabled,
+  onChange,
+}: SlotModelSelectProps) {
+  const decoded = value ? decodeSlot(value) : null;
+  const platformGroup = groups.find((g) => g.key === PLATFORM_POINTER_ID);
+
+  const providerOptions: { id: string; title: string }[] = [];
+  if (platformGroup) {
+    providerOptions.push({
+      id: PLATFORM_POINTER_ID,
+      title: platformGroup.title,
+    });
+  }
+  for (const p of providers) {
+    providerOptions.push({
+      id: p.id,
+      title: p.label?.trim() || endpointHost(p.base_url) || p.id,
+    });
+  }
+  // 孤儿 BYOK provider_id 不在列表时仍回显可选。
+  if (
+    decoded?.origin === "byok" &&
+    decoded.provider_id &&
+    !providerOptions.some((o) => o.id === decoded.provider_id)
+  ) {
+    providerOptions.push({
+      id: decoded.provider_id,
+      title: decoded.provider_id,
+    });
+  }
+
+  const [providerId, setProviderId] = useState(
+    () =>
+      slotProviderKey(decoded) ||
+      providerOptions[0]?.id ||
+      providers[0]?.id ||
+      "",
+  );
+  const [model, setModel] = useState(() => (decoded ? decoded.model : ""));
+
+  useEffect(() => {
+    const next = value ? decodeSlot(value) : null;
+    if (next) {
+      const key = slotProviderKey(next);
+      if (key) setProviderId(key);
+      // 已有手填内容时勿用 decode 回写，避免 trim 后吞掉正在输入的空格。
+      setModel((prev) => (prev.trim() === next.model ? prev : next.model));
+      return;
+    }
+    setModel("");
+  }, [value]);
+
+  const suggestions = groups.find((g) => g.key === providerId)?.items ?? [];
+  const datalistId = `${id}-suggestions`;
+
+  function emit(nextProviderId: string, nextModel: string) {
+    const m = nextModel.trim();
+    if (nextProviderId && m) onChange(`${nextProviderId}::${m}`);
+    else onChange("");
+  }
+
+  return (
+    <div className="field" data-testid={`${id}-combobox`}>
+      <span className="field-label">{label}</span>
+      <label className="field-label" htmlFor={`${id}-provider`}>
+        服务商
+      </label>
+      <select
+        id={`${id}-provider`}
+        className="text-input"
+        value={providerId}
+        disabled={disabled}
+        data-testid={`${id}-provider`}
+        onChange={(e) => {
+          const pid = e.target.value;
+          setProviderId(pid);
+          emit(pid, model);
+        }}
+      >
+        {providerOptions.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.title}
+          </option>
+        ))}
+      </select>
+      <label
+        className="field-label"
+        htmlFor={`${id}-model`}
+        style={{ marginTop: 8 }}
+      >
+        模型 ID
+      </label>
+      <input
+        id={`${id}-model`}
+        className="text-input"
+        value={model}
+        disabled={disabled}
+        list={datalistId}
+        placeholder={
+          followLabel !== undefined
+            ? `${followLabel}，或填写模型 ID`
+            : "model id，如 ep-xxxx"
+        }
+        data-testid={`${id}-model`}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(e) => {
+          const m = e.target.value;
+          setModel(m);
+          emit(providerId, m);
+        }}
+      />
+      <datalist id={datalistId}>
+        {suggestions.map((s) => (
+          <option key={s.id} value={s.id} label={s.display_name} />
+        ))}
+      </datalist>
+      {followLabel !== undefined && value ? (
+        <button
+          type="button"
+          className="btn-outline"
           style={{ marginTop: 8 }}
+          disabled={disabled}
+          data-testid={`${id}-clear`}
+          onClick={() => {
+            setModel("");
+            onChange("");
+          }}
         >
-          <label className="field-label" htmlFor={`${id}-provider`}>
-            服务商
-          </label>
-          <select
-            id={`${id}-provider`}
-            className="text-input"
-            value={customProviderId}
-            disabled={disabled}
-            onChange={(e) => {
-              const pid = e.target.value;
-              setCustomProviderId(pid);
-              emitCustom(pid, customModel);
-            }}
-          >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label?.trim() || endpointHost(p.base_url) || p.id}
-              </option>
-            ))}
-          </select>
-          <label
-            className="field-label"
-            htmlFor={`${id}-model`}
-            style={{ marginTop: 8 }}
-          >
-            模型 ID
-          </label>
-          <input
-            id={`${id}-model`}
-            className="text-input"
-            value={customModel}
-            disabled={disabled}
-            placeholder="model id，如 ep-xxxx"
-            onChange={(e) => {
-              const m = e.target.value;
-              setCustomModel(m);
-              emitCustom(customProviderId, m);
-            }}
-          />
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            目录未覆盖时可手填（火山 ep-、中转私有 id 等）。
-          </p>
-        </div>
-      )}
+          {followLabel}
+        </button>
+      ) : null}
+      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        可从建议选择或直接粘贴（火山 ep-、中转私有 id 等）。
+        {followLabel !== undefined && !value ? ` 空则${followLabel}。` : null}
+      </p>
     </div>
   );
 }
@@ -1017,7 +1068,9 @@ function StatusBadge({
   message?: string | null;
 }) {
   if (status === "active") {
-    return <span className="status-line status-ok">● 连接正常</span>;
+    return (
+      <span className="status-line status-ok">● {message ?? "连接正常"}</span>
+    );
   }
   if (status === "error") {
     return (

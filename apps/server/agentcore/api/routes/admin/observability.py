@@ -53,6 +53,19 @@ _ERROR_FEED = 20
 _REPLAY_MAX_MESSAGES = 500
 
 
+def _usage_origin_fields(usage: object) -> tuple[str | None, str | None]:
+    """Lift ``usage.origin`` / ``usage.harvest_kind`` for ReplayMessage attribution."""
+    if not isinstance(usage, dict):
+        return None, None
+    origin_raw = usage.get("origin")
+    origin = origin_raw.strip() if isinstance(origin_raw, str) and origin_raw.strip() else None
+    kind_raw = usage.get("harvest_kind")
+    harvest_kind = (
+        kind_raw.strip() if isinstance(kind_raw, str) and kind_raw.strip() else None
+    )
+    return origin, harvest_kind
+
+
 @router.get("/observability/summary", response_model=AdminObservabilitySummary)
 async def observability_summary(
     admin: AdminUser,
@@ -165,6 +178,7 @@ async def observability_conversation(
             consumed.add(m.trace_id)
         journal = journals.get(m.id, [])
         models, cred_src = call_by_message.get(m.id, ([], None))
+        origin, harvest_kind = _usage_origin_fields(m.usage)
         timeline.append(
             ReplayMessage(
                 id=m.id,
@@ -176,6 +190,8 @@ async def observability_conversation(
                 cost_total=cost_by_message.get(m.id, 0),
                 models=models,
                 credential_source=cred_src,
+                origin=origin,
+                harvest_kind=harvest_kind,
                 spans=_project_spans(journal),
                 runs=_project_runs(journal) if m.role == "assistant" else [],
             )

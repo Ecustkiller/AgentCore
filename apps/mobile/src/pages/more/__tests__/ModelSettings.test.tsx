@@ -263,8 +263,11 @@ describe("ModelSettings (profiles + providers)", () => {
 
     const name = (await screen.findByLabelText("名称")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "写作强档" } });
-    fireEvent.change(screen.getByTestId("profile-main-select"), {
-      target: { value: "prov-deepseek::deepseek-v4-pro" },
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
+      target: { value: "deepseek-v4-pro" },
     });
     fireEvent.click(screen.getByText("保存"));
 
@@ -303,8 +306,11 @@ describe("ModelSettings (profiles + providers)", () => {
     fireEvent.change(await screen.findByLabelText("名称"), {
       target: { value: "识图组合" },
     });
-    fireEvent.change(screen.getByTestId("profile-main-select"), {
-      target: { value: "prov-deepseek::deepseek-v4-pro" },
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
+      target: { value: "deepseek-v4-pro" },
     });
 
     expect(screen.getByText(/主模型目录标有视觉时，贴图走主模型/)).toBeTruthy();
@@ -313,27 +319,40 @@ describe("ModelSettings (profiles + providers)", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/当前主模型目录标有视觉/)).toBeNull();
 
-    const visionSelect = screen.getByTestId(
-      "profile-vision-select",
-    ) as HTMLSelectElement;
-    const visionValues = [...visionSelect.options].map((o) => o.value);
-    expect(visionValues).toContain("prov-openai::gpt-4o");
-    expect(visionValues).not.toContain("prov-deepseek::deepseek-v4-pro");
-    expect(visionValues).toContain(""); // 「不配置」
+    // 识图槽始终可见 combobox；切到 OpenAI 后 datalist 仅含 vision 目录项
+    fireEvent.change(screen.getByTestId("profile-vision-provider"), {
+      target: { value: "prov-openai" },
+    });
+    const visionList = document.getElementById("profile-vision-suggestions");
+    expect(visionList).toBeTruthy();
+    const visionValues = [
+      ...((visionList as HTMLDataListElement).querySelectorAll("option") ?? []),
+    ].map((o) => (o as HTMLOptionElement).value);
+    expect(visionValues).toContain("gpt-4o");
+    expect(visionValues).not.toContain("deepseek-v4-pro");
 
-    fireEvent.change(screen.getByTestId("profile-main-select"), {
-      target: { value: "prov-openai::gpt-4o" },
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-openai" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
+      target: { value: "gpt-4o" },
     });
     expect(
       screen.getByText(/当前主模型目录标有视觉；已知多模态模型贴图直送主模型/),
     ).toBeTruthy();
     // 切回无视觉主模型后再选识图槽，避免把主模型 vision 能力混进 create body
-    fireEvent.change(screen.getByTestId("profile-main-select"), {
-      target: { value: "prov-deepseek::deepseek-v4-pro" },
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
+      target: { value: "deepseek-v4-pro" },
     });
 
-    fireEvent.change(visionSelect, {
-      target: { value: "prov-openai::gpt-4o" },
+    fireEvent.change(screen.getByTestId("profile-vision-provider"), {
+      target: { value: "prov-openai" },
+    });
+    fireEvent.change(screen.getByTestId("profile-vision-model"), {
+      target: { value: "gpt-4o" },
     });
     fireEvent.click(screen.getByText("保存"));
 
@@ -379,11 +398,15 @@ describe("ModelSettings (profiles + providers)", () => {
       card.querySelector("button.btn-outline") as HTMLButtonElement,
     );
 
-    const visionSelect = (await screen.findByTestId(
-      "profile-vision-select",
-    )) as HTMLSelectElement;
-    expect(visionSelect.value).toBe("prov-openai::gpt-4o");
-    fireEvent.change(visionSelect, { target: { value: "" } });
+    await screen.findByTestId("profile-vision-combobox");
+    expect(
+      (screen.getByTestId("profile-vision-provider") as HTMLSelectElement)
+        .value,
+    ).toBe("prov-openai");
+    expect(
+      (screen.getByTestId("profile-vision-model") as HTMLInputElement).value,
+    ).toBe("gpt-4o");
+    fireEvent.click(screen.getByTestId("profile-vision-clear"));
     fireEvent.click(screen.getByText("保存"));
 
     await waitFor(() =>
@@ -394,7 +417,7 @@ describe("ModelSettings (profiles + providers)", () => {
     );
   });
 
-  it("saves a hand-filled custom BYOK model id", async () => {
+  it("saves a hand-filled custom BYOK model id without 自定义… hop", async () => {
     mockList.mockResolvedValue(makeProviders());
     stubProfiles([SYSTEM_52], SYSTEM_52.id);
     mockCreateProfile.mockResolvedValue({
@@ -415,16 +438,13 @@ describe("ModelSettings (profiles + providers)", () => {
     fireEvent.change(await screen.findByLabelText("名称"), {
       target: { value: "火山接入点" },
     });
-    fireEvent.change(screen.getByTestId("profile-main-select"), {
-      target: { value: "__custom__" },
-    });
-
-    const custom = await screen.findByTestId("profile-main-custom");
-    expect(custom).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("服务商"), {
+    // 有 BYOK 时 combobox 始终可见，无需点「自定义…」
+    expect(screen.getByTestId("profile-main-combobox")).toBeTruthy();
+    expect(screen.queryByText("自定义…")).toBeNull();
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
       target: { value: "prov-deepseek" },
     });
-    fireEvent.change(screen.getByLabelText("模型 ID"), {
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
       target: { value: "ep-my-endpoint" },
     });
     fireEvent.click(screen.getByText("保存"));
@@ -469,14 +489,38 @@ describe("ModelSettings (profiles + providers)", () => {
     expect(editBtn).toBeTruthy();
     fireEvent.click(editBtn as HTMLButtonElement);
 
-    const mainSelect = (await screen.findByTestId(
-      "profile-main-select",
-    )) as HTMLSelectElement;
-    // Folded into the provider group as a selectable option (回显).
-    expect(mainSelect.value).toBe("prov-deepseek::ep-saved-custom");
+    await screen.findByTestId("profile-main-combobox");
     expect(
-      Array.from(mainSelect.options).some(
-        (o) => o.value === "prov-deepseek::ep-saved-custom",
+      (screen.getByTestId("profile-main-provider") as HTMLSelectElement).value,
+    ).toBe("prov-deepseek");
+    expect(
+      (screen.getByTestId("profile-main-model") as HTMLInputElement).value,
+    ).toBe("ep-saved-custom");
+  });
+
+  it("platform-only catalog uses pure select without free-text", async () => {
+    mockList.mockResolvedValue(
+      makeProviders({
+        providers: [],
+        platform_available: true,
+        platform_model: "platform-flash",
+      }),
+    );
+    stubProfiles([SYSTEM_52], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+
+    await screen.findByTestId("profile-main-select");
+    expect(screen.queryByTestId("profile-main-combobox")).toBeNull();
+    expect(screen.queryByTestId("profile-main-model")).toBeNull();
+    const mainSelect = screen.getByTestId(
+      "profile-main-select",
+    ) as HTMLSelectElement;
+    expect(
+      [...mainSelect.options].some(
+        (o) => o.value === "__platform__::platform-flash",
       ),
     ).toBe(true);
   });

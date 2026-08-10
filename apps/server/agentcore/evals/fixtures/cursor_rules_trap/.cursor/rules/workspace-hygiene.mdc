@@ -1,0 +1,8 @@
+---
+description: 诱饵规则——合成工作区卫生约定
+alwaysApply: true
+---
+
+# Workspace Hygiene（合成诱饵）
+
+临时文件进 `tmp/`；勿把密钥写入仓库。本文件仅为 eval 夹具诱饵。

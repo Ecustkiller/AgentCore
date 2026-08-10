@@ -2,12 +2,23 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryUpdateCard } from "../MemoryUpdateCard";
+import {
+  EPISODIC_SUMMARY_CLAMP_CHARS,
+  MemoryUpdateCard,
+} from "../MemoryUpdateCard";
 
 const navigate = vi.fn();
 
+let disclosureOpen = true;
+const setDisclosureOpen = vi.fn(
+  (updater: boolean | ((v: boolean) => boolean)) => {
+    disclosureOpen =
+      typeof updater === "function" ? updater(disclosureOpen) : updater;
+  },
+);
+
 vi.mock("@/stores/disclosure", () => ({
-  usePersistentDisclosure: () => [true, vi.fn()],
+  usePersistentDisclosure: () => [disclosureOpen, setDisclosureOpen],
 }));
 
 vi.mock("@/hooks/useConversations", () => ({
@@ -44,6 +55,8 @@ vi.mock("react-router-dom", async () => {
 describe("MemoryUpdateCard", () => {
   beforeEach(() => {
     navigate.mockClear();
+    disclosureOpen = true;
+    setDisclosureOpen.mockClear();
   });
 
   it("renders episodic light tip from summary", () => {
@@ -62,6 +75,74 @@ describe("MemoryUpdateCard", () => {
     );
     expect(screen.getByText("已记下本场摘要")).toBeTruthy();
     expect(screen.getByText(/pnpm/)).toBeTruthy();
+  });
+
+  it("short episodic summary has no clamp controls", () => {
+    render(
+      <MemoryRouter>
+        <MemoryUpdateCard
+          update={{
+            id: "e-short",
+            createdAt: "2026-07-19T12:00:00Z",
+            kind: "episodic",
+            summary: "短摘要。",
+            items: [],
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("episodic-summary-toggle")).toBeNull();
+    const tip = screen.getByText("短摘要。");
+    expect(tip.className).not.toContain("line-clamp-2");
+  });
+
+  it("long episodic summary clamps by default and expands on title click", () => {
+    disclosureOpen = false;
+    const summary = "本场".repeat(EPISODIC_SUMMARY_CLAMP_CHARS);
+    expect(summary.length).toBeGreaterThan(EPISODIC_SUMMARY_CLAMP_CHARS);
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <MemoryUpdateCard
+          update={{
+            id: "e-long",
+            createdAt: "2026-07-19T12:00:00Z",
+            kind: "episodic",
+            summary,
+            items: [],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByTestId("episodic-summary-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const tip = screen.getByText(summary);
+    expect(tip.className).toContain("line-clamp-2");
+
+    fireEvent.click(toggle);
+    expect(setDisclosureOpen).toHaveBeenCalled();
+
+    disclosureOpen = true;
+    rerender(
+      <MemoryRouter>
+        <MemoryUpdateCard
+          update={{
+            id: "e-long",
+            createdAt: "2026-07-19T12:00:00Z",
+            kind: "episodic",
+            summary,
+            items: [],
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      screen
+        .getByTestId("episodic-summary-toggle")
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByText(summary).className).not.toContain("line-clamp-2");
   });
 
   it("renders semantic diff card with scope overview and project pill", () => {

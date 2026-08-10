@@ -15,18 +15,21 @@ import {
 } from "@/hooks/useSharedSpaces";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import {
+  type FriendSummary,
   type UserSearchResult,
   messagingErrorMessage,
   searchUsers,
 } from "@/services/messaging";
 import {
   type InviteRole,
+  type SharedSpaceMemberState,
   type SharedSpaceRole,
   sharedSpaceRoleLabel,
 } from "@/services/sharedSpaces";
 import { useAuthStore } from "@/stores/auth";
-import { Loader2, UserPlus, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useMessagingStore } from "@/stores/messaging";
+import { Check, Loader2, UserPlus, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 function roleTone(role: SharedSpaceRole): "primary" | "success" | "muted" {
   if (role === "owner") return "primary";
@@ -34,9 +37,13 @@ function roleTone(role: SharedSpaceRole): "primary" | "success" | "muted" {
   return "muted";
 }
 
+function membershipLabel(state: SharedSpaceMemberState): string {
+  return state === "pending" ? "待接受" : "已加入";
+}
+
 /**
- * Owner: invite (IM exact search) / change role / remove.
- * Member: view roster + leave self.
+ * Owner: friend multi-select invite + exact search / change role / remove
+ * (pending →「取消邀请」). Member: view roster + leave self.
  */
 export function SharedSpaceMembersDialog({
   open,
@@ -61,11 +68,25 @@ export function SharedSpaceMembersDialog({
   const changeRole = useChangeSharedMemberRole();
   const removeOrLeave = useRemoveOrLeaveSharedMember();
 
+  const friends = useMessagingStore((s) => s.friends);
+  const friendsLoaded = useMessagingStore((s) => s.friendsLoaded);
+  const fetchFriends = useMessagingStore((s) => s.fetchFriends);
+
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [inviteRole, setInviteRole] = useState<InviteRole>("editor");
+  const [selectedFriendIds, setSelectedFriendIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [batchInviting, setBatchInviting] = useState(false);
+
+  const memberStateByUserId = useMemo(() => {
+    const map = new Map<string, SharedSpaceMemberState>();
+    for (const m of members) map.set(m.user_id, m.state);
+    return map;
+  }, [members]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,7 +94,30 @@ export function SharedSpaceMembersDialog({
     setResults([]);
     setSearchError(null);
     setInviteRole("editor");
+    setSelectedFriendIds(new Set());
+    setBatchInviting(false);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !isOwner) return;
+    void fetchFriends();
+  }, [open, isOwner, fetchFriends]);
+
+  useEffect(() => {
+    setSelectedFriendIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (memberStateByUserId.has(id)) {
+          changed = true;
+          continue;
+        }
+        next.add(id);
+      }
+      return changed ? next : prev;
+    });
+  }, [memberStateByUserId]);
 
   useEffect(() => {
     if (!open || !isOwner) return;
@@ -91,8 +135,7 @@ export function SharedSpaceMembersDialog({
         try {
           const users = await searchUsers(q);
           if (!cancelled) {
-            const memberIds = new Set(members.map((m) => m.user_id));
-            setResults(users.filter((u) => !memberIds.has(u.id)));
+            setResults(users);
             setSearchError(null);
           }
         } catch (err) {
@@ -109,9 +152,24 @@ export function SharedSpaceMembersDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, open, isOwner, members]);
+  }, [query, open, isOwner]);
 
-  const handleInvite = (user: UserSearchResult) => {
+  const toggleFriend = (friend: FriendSummary) => {
+    if (memberStateByUserId.has(friend.id)) return;
+    setSelectedFriendIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(friend.id)) next.delete(friend.id);
+      else next.add(friend.id);
+      return next;
+    });
+  };
+
+  const handleInviteOne = (user: {
+    id: string;
+    display_name: string;
+    username: string;
+  }) => {
+    if (memberStateByUserId.has(user.id)) return;
     invite.mutate(
       { spaceId, userId: user.id, role: inviteRole },
       {
@@ -119,11 +177,42 @@ export function SharedSpaceMembersDialog({
           notifySuccess(`已邀请 ${user.display_name || user.username}`);
           setQuery("");
           setResults([]);
+          setSelectedFriendIds((prev) => {
+            if (!prev.has(user.id)) return prev;
+            const next = new Set(prev);
+            next.delete(user.id);
+            return next;
+          });
         },
         onError: (err) => notifyError(err, "邀请失败"),
       },
     );
   };
+
+  const handleInviteSelected = async () => {
+    const ids = [...selectedFriendIds].filter(
+      (id) => !memberStateByUserId.has(id),
+    );
+    if (ids.length === 0) return;
+    setBatchInviting(true);
+    let ok = 0;
+    let failed = 0;
+    for (const userId of ids) {
+      try {
+        await invite.mutateAsync({ spaceId, userId, role: inviteRole });
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setBatchInviting(false);
+    setSelectedFriendIds(new Set());
+    if (ok > 0) notifySuccess(`已邀请 ${ok} 人`);
+    if (failed > 0) notifyError(`有 ${failed} 人邀请失败`);
+  };
+
+  const inviteBusy = invite.isPending || batchInviting;
+  const selectedCount = selectedFriendIds.size;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -161,6 +250,88 @@ export function SharedSpaceMembersDialog({
                 ))}
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              可从好友选择，或精确搜索用户名 / ID。
+            </p>
+
+            <div className="space-y-1.5">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <Users size={12} aria-hidden />
+                好友
+              </p>
+              {!friendsLoaded && friends.length === 0 ? (
+                <p className="py-3 text-center text-xs text-muted-foreground">
+                  加载中…
+                </p>
+              ) : friends.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                  暂无好友。可精确搜索用户名或 ID 邀请。
+                </p>
+              ) : (
+                <ul className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                  {friends.map((f) => {
+                    const membership = memberStateByUserId.get(f.id);
+                    const disabled = !!membership || inviteBusy;
+                    const selected = selectedFriendIds.has(f.id);
+                    const label = f.display_name || f.username;
+                    return (
+                      <li key={f.id}>
+                        <Button
+                          variant="ghost"
+                          disabled={disabled}
+                          aria-pressed={selected}
+                          onClick={() => toggleFriend(f)}
+                          className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 font-normal disabled:opacity-60"
+                        >
+                          <span
+                            className={`flex size-4 shrink-0 items-center justify-center rounded border ${
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-background"
+                            } ${membership ? "opacity-40" : ""}`}
+                            aria-hidden
+                          >
+                            {selected ? (
+                              <Check size={10} strokeWidth={3} />
+                            ) : null}
+                          </span>
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                            {avatarInitial(label)}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-left text-sm">
+                            {label}
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              @{f.username}
+                            </span>
+                          </span>
+                          {membership ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {membershipLabel(membership)}
+                            </span>
+                          ) : null}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {selectedCount > 0 && (
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <span className="text-xs text-muted-foreground">
+                    已选 {selectedCount} 人
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={inviteBusy}
+                    onClick={() => void handleInviteSelected()}
+                  >
+                    {batchInviting ? "邀请中…" : `邀请 ${selectedCount} 人`}
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <SearchField
               variant="plain"
               value={query}
@@ -185,26 +356,39 @@ export function SharedSpaceMembersDialog({
               )}
             {results.length > 0 && (
               <ul className="max-h-40 overflow-y-auto rounded-lg border border-border">
-                {results.map((u) => (
-                  <li key={u.id}>
-                    <Button
-                      variant="ghost"
-                      disabled={invite.isPending}
-                      onClick={() => handleInvite(u)}
-                      className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 font-normal"
-                    >
-                      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                        {avatarInitial(u.display_name || u.username)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-left text-sm">
-                        {u.display_name || u.username}
-                        <span className="ml-1 text-xs text-muted-foreground">
-                          @{u.username}
+                {results.map((u) => {
+                  const membership = memberStateByUserId.get(u.id);
+                  const disabled = !!membership || inviteBusy;
+                  return (
+                    <li key={u.id}>
+                      <Button
+                        variant="ghost"
+                        disabled={disabled}
+                        onClick={() => handleInviteOne(u)}
+                        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 font-normal disabled:opacity-60"
+                      >
+                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                          {avatarInitial(u.display_name || u.username)}
                         </span>
-                      </span>
-                    </Button>
-                  </li>
-                ))}
+                        <span className="min-w-0 flex-1 truncate text-left text-sm">
+                          {u.display_name || u.username}
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            @{u.username}
+                          </span>
+                        </span>
+                        {membership ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {membershipLabel(membership)}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            邀请
+                          </span>
+                        )}
+                      </Button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -238,6 +422,7 @@ export function SharedSpaceMembersDialog({
                     changeRole.variables?.memberUserId === m.user_id) ||
                   (removeOrLeave.isPending &&
                     removeOrLeave.variables?.memberUserId === m.user_id);
+                const isPending = m.state === "pending";
                 return (
                   <li
                     key={m.user_id}
@@ -259,7 +444,7 @@ export function SharedSpaceMembersDialog({
                         <Badge tone={roleTone(m.role)} pill>
                           {sharedSpaceRoleLabel(m.role)}
                         </Badge>
-                        {m.state === "pending" && (
+                        {isPending && (
                           <Badge tone="muted" pill>
                             待接受
                           </Badge>
@@ -303,7 +488,11 @@ export function SharedSpaceMembersDialog({
                         variant="danger"
                         disabled={busy}
                         onClick={() => {
-                          if (
+                          if (isPending) {
+                            if (!window.confirm(`取消对「${label}」的邀请？`)) {
+                              return;
+                            }
+                          } else if (
                             !window.confirm(
                               `确定移除成员「${label}」？其挂载将立即失效。`,
                             )
@@ -313,14 +502,22 @@ export function SharedSpaceMembersDialog({
                           removeOrLeave.mutate(
                             { spaceId, memberUserId: m.user_id },
                             {
-                              onSuccess: () => notifySuccess(`已移除 ${label}`),
+                              onSuccess: () =>
+                                notifySuccess(
+                                  isPending
+                                    ? `已取消对 ${label} 的邀请`
+                                    : `已移除 ${label}`,
+                                ),
                               onError: (err) =>
-                                notifyError(err, "移除成员失败"),
+                                notifyError(
+                                  err,
+                                  isPending ? "取消邀请失败" : "移除成员失败",
+                                ),
                             },
                           );
                         }}
                       >
-                        移除
+                        {isPending ? "取消邀请" : "移除"}
                       </Button>
                     )}
                     {!isOwner && isSelf && (

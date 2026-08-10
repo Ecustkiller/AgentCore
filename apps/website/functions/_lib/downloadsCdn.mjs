@@ -2,15 +2,20 @@
  * Brand download CDN + GitHub Releases URL helpers.
  *
  * - 官网首装 / 用户面安装包按钮 → GitHub Releases（`releases/download/...`）
- * - electron-updater feed + latest.json 宿主 → 品牌域 downloads.*（自有机 nginx；你试国内 OSS 时可换）
+ * - electron-updater feed + latest.json 宿主 → 品牌域 downloads.*（自有机 nginx）
  * - GitHub AgentCore-releases 同时是上传源与历史归档
  *
- * Layout on brand host:
- *   {BASE}/desktop/latest.yml|latest-mac.yml|latest.json|AgentCore-*
+ * Desktop layout on brand host（§7.6c 双轨）:
+ *   {BASE}/desktop/stable/latest.yml|latest-mac.yml|latest.json|AgentCore-*
+ *   {BASE}/desktop/beta/…（同上；仅测试通道）
+ *   {BASE}/desktop/latest.yml|…  — 旧客户端兼容：sync stable 时镜像与 stable 同内容；
+ *     beta 绝不写入扁平 desktop/ 或 stable/
  *   {BASE}/android/latest.json|AgentCore-*-android.apk
  *
- * → docs/05-平台与运维/发布与门禁.md §7.6b
+ * → docs/05-平台与运维/发布与门禁.md §7.6b / §7.6c
  */
+
+/** @typedef {"stable" | "beta"} DesktopChannel */
 
 /** Resolve base URL — Node (sync/fetch-release) may override via env; Pages Functions have no `process`. */
 function resolveDownloadsBase() {
@@ -33,8 +38,53 @@ export const DOWNLOADS_BASE = resolveDownloadsBase();
 export const DOWNLOADS_DESKTOP_PREFIX = "desktop";
 export const DOWNLOADS_ANDROID_PREFIX = "android";
 
+/** @type {readonly DesktopChannel[]} */
+export const DESKTOP_CHANNELS = Object.freeze(["stable", "beta"]);
+export const DESKTOP_CHANNEL_DEFAULT = /** @type {DesktopChannel} */ ("stable");
+
 export const RELEASES_REPO = "Lawofall/AgentCore-releases";
 export const RELEASES_REPO_URL = `https://github.com/${RELEASES_REPO}`;
+
+/**
+ * @param {string} value
+ * @returns {DesktopChannel}
+ */
+export function normalizeDesktopChannel(value) {
+  const c = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (c === "beta") return "beta";
+  if (c === "stable" || c === "") return "stable";
+  throw new Error(`Invalid desktop channel: ${value} (use stable|beta)`);
+}
+
+/**
+ * Channel directory under desktop/ (e.g. "desktop/stable").
+ * @param {DesktopChannel} [channel]
+ */
+export function desktopChannelPrefix(channel = DESKTOP_CHANNEL_DEFAULT) {
+  return `${DOWNLOADS_DESKTOP_PREFIX}/${normalizeDesktopChannel(channel)}`;
+}
+
+/**
+ * Flat legacy prefix for old installed clients (`desktop/latest.yml` feed).
+ * Only stable sync may write here (mirror of desktop/stable/).
+ */
+export function desktopLegacyFlatPrefix() {
+  return DOWNLOADS_DESKTOP_PREFIX;
+}
+
+/**
+ * Remote relative dirs to write for a channel sync.
+ * stable → ["desktop/stable", "desktop"]；beta → ["desktop/beta"] only.
+ * @param {DesktopChannel} [channel]
+ * @returns {string[]}
+ */
+export function desktopSyncDestPrefixes(channel = DESKTOP_CHANNEL_DEFAULT) {
+  const ch = normalizeDesktopChannel(channel);
+  if (ch === "beta") return [desktopChannelPrefix("beta")];
+  return [desktopChannelPrefix("stable"), desktopLegacyFlatPrefix()];
+}
 
 /** @param {string} version */
 export function winInstallerFilename(version) {
@@ -81,7 +131,7 @@ export function githubAndroidAssetUrl(version, filename) {
 
 /**
  * Absolute brand-host URL for a key (updater feed / manifests — not官网首装主链).
- * @param {string} key e.g. "desktop/latest.yml"
+ * @param {string} key e.g. "desktop/stable/latest.yml"
  */
 export function cdnUrl(key) {
   const base = DOWNLOADS_BASE.replace(/\/$/, "");
@@ -89,13 +139,19 @@ export function cdnUrl(key) {
   return `${base}/${path}`;
 }
 
-/** electron-updater generic feed (latest.yml + installers share this directory). */
-export function desktopFeedUrl() {
-  return cdnUrl(DOWNLOADS_DESKTOP_PREFIX);
+/**
+ * electron-updater generic feed directory for a channel.
+ * @param {DesktopChannel} [channel]
+ */
+export function desktopFeedUrl(channel = DESKTOP_CHANNEL_DEFAULT) {
+  return cdnUrl(desktopChannelPrefix(channel));
 }
 
-export function desktopLatestJsonUrl() {
-  return cdnUrl(`${DOWNLOADS_DESKTOP_PREFIX}/latest.json`);
+/**
+ * @param {DesktopChannel} [channel]
+ */
+export function desktopLatestJsonUrl(channel = DESKTOP_CHANNEL_DEFAULT) {
+  return cdnUrl(`${desktopChannelPrefix(channel)}/latest.json`);
 }
 
 export function androidLatestJsonUrl() {
@@ -104,13 +160,16 @@ export function androidLatestJsonUrl() {
 
 /**
  * Build website artifact URLs for a known desktop version (GitHub Releases).
- * macFilename may be "" when that asset is not published yet.
+ * Filenames may be overridden from CDN latest.json (always reconstruct GitHub URLs).
  *
  * @param {string} version
- * @param {{ macFilename?: string }} [opts]
+ * @param {{ macFilename?: string, winFilename?: string }} [opts]
  */
 export function artifactUrlsForVersion(version, opts = {}) {
-  const winFilename = winInstallerFilename(version);
+  const winFilename =
+    opts.winFilename === undefined
+      ? winInstallerFilename(version)
+      : opts.winFilename;
   const macFilename =
     opts.macFilename === undefined
       ? macDmgFilename(version)
@@ -118,8 +177,10 @@ export function artifactUrlsForVersion(version, opts = {}) {
   return {
     version,
     releaseNotesUrl: githubReleaseNotesUrl(version),
-    winUrl: githubDesktopAssetUrl(version, winFilename),
-    winFilename,
+    winUrl: winFilename
+      ? githubDesktopAssetUrl(version, winFilename)
+      : "",
+    winFilename: winFilename || "",
     macUrl: macFilename
       ? githubDesktopAssetUrl(version, macFilename)
       : "",

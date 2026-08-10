@@ -43,6 +43,7 @@ from .errors import (
     _office_extract_budget_error,
     _outside_workspace_msg,
 )
+from .path_hints import enrich_missing_path_message
 
 _DEFAULT_READ_LINES = 500
 
@@ -191,63 +192,18 @@ def _no_match_hint(
     )
 
 
-def _parent_dir_of(rel_path: str) -> str:
-    """Workspace-relative parent of ``rel_path`` (``.`` when path is top-level)."""
-    raw = (rel_path or "").strip().replace("\\", "/").strip("/")
-    if not raw or "/" not in raw:
-        return "."
-    parent = raw.rsplit("/", 1)[0].strip("/")
-    return parent or "."
-
-
-def _missing_file_landmark_suffix(*, parent: str, bare_entries: list) -> str:
-    """Sibling samples + wider-search tip when parent exists (align ``_no_match_hint``)."""
-    root = "./" if parent in (".", "") else f"{parent.rstrip('/')}/"
-    tips = (
-        "可换 file_list(pattern)/grep/code_search 更宽查找后再读"
-        "（已知路径仍可直接读）"
-    )
-    if not bare_entries:
-        return f"（父目录 {root} 存在但当前层无可列样本。{tips}。）"
-    sample_parts: list[str] = []
-    for entry in bare_entries[:8]:
-        sample_parts.append(f"{'d ' if entry.is_dir else 'f '}{entry.path}")
-    sample = "；".join(sample_parts)
-    more = (
-        f" 等共 {len(bare_entries)} 项"
-        if len(bare_entries) > 8
-        else f"（共 {len(bare_entries)} 项）"
-    )
-    return (
-        f"（父目录 {root} 存在{more}。"
-        f"可见同层示例：{sample}。"
-        f"{tips}。）"
-    )
-
-
 async def _file_not_found_error(
     rel_path: str,
     *,
     start: float,
     context: ToolContext,
 ) -> ToolResult:
-    """``PathNotFound`` for file_read — landmark when parent directory is listable."""
+    """``PathNotFound`` for file_read — landmark / root-search tip (shared path_hints)."""
     base = f"文件不存在：{rel_path}"
-    parent = _parent_dir_of(rel_path)
-    try:
-        bare = [
-            e
-            for e in await context.backend.list(parent, "*")
-            if e.is_dir
-            or not should_hide_ai_noise_from_list(
-                e.path,
-                materials=context.material_paths,
-                reveal_archives=False,
-            )
-        ]
-    except (PathNotFound, NotADirectory, OutsideWorkspace, WorkspaceError):
-        return _error(base, start)
-    return _error(base + _missing_file_landmark_suffix(parent=parent, bare_entries=bare), start)
+    return _error(
+        await enrich_missing_path_message(context, rel_path, base=base),
+        start,
+    )
 
 
 def _render_file_tree(
@@ -797,7 +753,12 @@ class FileListTool:
                     + _external_directory_hint(context.backend),
                     start,
                 )
-            return _error(f"不是目录：{directory}", start)
+            # ServerWorkspace.list maps missing paths to NotADirectory (not PathNotFound).
+            base = f"不是目录：{directory}"
+            return _error(
+                await enrich_missing_path_message(context, str(directory), base=base),
+                start,
+            )
         except PathNotFound:
             if _looks_like_external_directory(str(directory)):
                 return _error(
@@ -805,7 +766,11 @@ class FileListTool:
                     + _external_directory_hint(context.backend),
                     start,
                 )
-            return _error(f"列目录失败：路径不存在：{directory}", start)
+            base = f"列目录失败：路径不存在：{directory}"
+            return _error(
+                await enrich_missing_path_message(context, str(directory), base=base),
+                start,
+            )
         except WorkspaceError as e:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:

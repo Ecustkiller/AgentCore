@@ -71,6 +71,17 @@ vi.mock("@/components/conversation/ShareConversationDialog", () => ({
 vi.mock("@/components/folders/CreateFolderMenu", () => ({
   CreateFolderMenuHost: () => null,
 }));
+vi.mock("@/components/files/CloneRepoDialog", () => ({
+  ConnectGitDialogHost: () => null,
+  CloneRepoDialog: () => null,
+}));
+vi.mock("@/components/files/ImportToCloudDialog", () => ({
+  ImportToCloudDialogHost: () => null,
+  ImportToCloudDialog: () => null,
+}));
+vi.mock("@/components/workspace/MergeLandingReview", () => ({
+  MergeLandingReviewHost: () => null,
+}));
 vi.mock("@/components/layout/SidePanelFloatHost", () => ({
   SidePanelFloatHost: () => <div data-testid="side-panel-float-host" />,
 }));

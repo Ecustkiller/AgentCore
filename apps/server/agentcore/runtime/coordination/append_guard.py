@@ -7,6 +7,14 @@ claims the same **seat** (normalized role-name equality) is rejected.
 equality only. Shared job suffixes / CJK prefixes / edit distance do **not**
 merge seats (痛点调研员 ≠ 定价调研员; 前端工程师 ≠ 测试工程师).
 
+**Seat universe (new∪live)**: incomplete live holders **and** same-batch new
+nodes share one seat map. Two new nodes whose roles collide after
+``_norm_role`` without an ancestor edge **and** without disjoint deliverable
+scopes (e.g.「V2专项测试员」vs「V2 专项测试员」with empty deliverables) are
+rejected as ``sibling_role``. Serial ``depends_on`` and scoped fan-out
+(same role, distinct deliverable names/artifacts) are legal — see
+:mod:`append_sibling`.
+
 **Seat reclaim**: FAILED / CANCELLED / SKIPPED (vacated) **and** successfully
 COMPLETED same-seat terminals auto-fill ``replaces_run_id`` when a new node
 reclaims the seat with no incomplete same-seat peer (file lock transfer +
@@ -17,10 +25,10 @@ keep the seat; overlap still rejects.
 **Completed** holders of a declared path are **not** append-rejected — dispatch
 ``declare_plan_artifacts`` handoffs those paths to the new node (审校→修订 /
 同岗位补派). Still-running / incomplete holders keep blocking. Role-only
-overlap still requires incomplete live nodes.
+overlap still requires incomplete live nodes (plus same-batch peers above).
 
-Same-batch sibling artifact crosses are rejected at dispatch (name the pair),
-**before** durable ``run_plan`` emit (admit → commit → execute).
+Same-batch sibling role / artifact crosses are rejected at dispatch (name the
+pair), **before** durable ``run_plan`` emit (admit → commit → execute).
 
 Cross-turn ``append_to_execution_id`` admits the **new batch only** against the
 host plan + journal completed seed (auto-``replaces`` on free seats) — never
@@ -36,42 +44,49 @@ claims. Same ``rel_path`` on different desks does not collide.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from agentcore.runtime.coordination.isomorphic import _node_role, _node_task
+from agentcore.runtime.coordination.append_sibling import (
+    AppendOverlap,
+    _ancestors_for_plan,
+    _norm_role,
+    find_sibling_artifact_crosses,
+    find_sibling_role_crosses,
+    node_artifact_keys,
+    node_artifact_paths,
+    node_file_targets,
+    node_ownership_desk,
+    roles_overlap,
+)
+from agentcore.runtime.coordination.isomorphic import _node_role
 from agentcore.workspace.write_claims import (
     WriteCoordinator,
     file_ownership_v2_enabled,
-    make_ownership_key,
-    normalize_ownership_path,
     ownership_display_path,
-    resolve_ownership_desk,
 )
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
 
-# Paths like site/copy.md, `site/index.html`, ./foo/bar.ts
-_PATH_RE = re.compile(
-    r"(?:`|\"|')?"
-    r"((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9.+-]+)"
-    r"(?:`|\"|')?"
-)
-
-
-@dataclass(frozen=True)
-class AppendOverlap:
-    """One new node colliding with one live / ownership holder."""
-
-    new_role: str
-    new_run_id: str
-    live_role: str
-    live_run_id: str
-    reason: str  # "role" | "deliverable" | "role+deliverable" | "sibling_artifact"
-    # Bare rel_path for user-facing reject text (sibling / deliverable); never desk key.
-    path: str = ""
+# Re-export sibling gate + seat helpers for stable import paths.
+__all__ = [
+    "AppendOverlap",
+    "admit_added_nodes",
+    "append_overlap_reject_message",
+    "apply_vacated_seat_replaces",
+    "declare_nested_drive_artifacts",
+    "declare_plan_artifacts",
+    "find_append_overlaps",
+    "find_sibling_artifact_crosses",
+    "find_sibling_role_crosses",
+    "handoff_owned_paths_on_complete",
+    "has_incomplete_nodes",
+    "node_artifact_keys",
+    "node_artifact_paths",
+    "node_file_targets",
+    "node_ownership_desk",
+    "roles_overlap",
+]
 
 
 def has_incomplete_nodes(
@@ -84,19 +99,6 @@ def has_incomplete_nodes(
         return False
     done = set(completed_run_ids or ())
     return any(n.run_id not in done for n in live_plan.nodes)
-
-
-def _norm_role(role: str) -> str:
-    """Seat key: strip whitespace, lowercase."""
-    return "".join((role or "").lower().split())
-
-
-def roles_overlap(a: str, b: str) -> bool:
-    """True when two roles claim the same seat (normalized name equality)."""
-    na, nb = _norm_role(a), _norm_role(b)
-    if not na or not nb:
-        return False
-    return na == nb
 
 
 def apply_vacated_seat_replaces(
@@ -163,119 +165,6 @@ def apply_vacated_seat_replaces(
     return applied
 
 
-def _normalize_path(path: str) -> str:
-    """Align with WriteCoordinator keys (case-preserving)."""
-    return normalize_ownership_path(path)
-
-
-def _paths_in_text(text: str) -> set[str]:
-    if not text:
-        return set()
-    return {_normalize_path(m.group(1)) for m in _PATH_RE.finditer(text)}
-
-
-def node_artifact_paths(node: Any) -> set[str]:
-    """Concrete ``deliverable.artifacts`` bare file paths (display / acceptance).
-
-    Directory prefixes, stage dirs, and globs are acceptance-only — excluded here.
-    Ledger keys use :func:`node_artifact_keys` (desk × path).
-    """
-    from agentcore.runtime.runs.artifact_dir import is_file_ownership_path
-
-    out: set[str] = set()
-    deliverable = getattr(node, "deliverable", None)
-    if deliverable is None:
-        return out
-    for art in getattr(deliverable, "artifacts", None) or []:
-        if isinstance(art, str) and art.strip() and is_file_ownership_path(art):
-            key = _normalize_path(art)
-            if key:
-                out.add(key)
-    return out
-
-
-def node_ownership_desk(
-    node: Any,
-    *,
-    birth_desk_id: str | None = None,
-) -> str:
-    """Effective desk for a plan node: ``target_folder_id or birth desk``."""
-    return resolve_ownership_desk(
-        target_folder_id=getattr(node, "target_folder_id", None),
-        birth_desk_id=birth_desk_id,
-    )
-
-
-def node_artifact_keys(
-    node: Any,
-    *,
-    birth_desk_id: str | None = None,
-) -> set[str]:
-    """Composite ownership keys (desk × path) for declare / sibling / handoff."""
-    desk = node_ownership_desk(node, birth_desk_id=birth_desk_id)
-    return {make_ownership_key(desk, p) for p in node_artifact_paths(node) if p}
-
-
-def node_file_targets(node: Any) -> set[str]:
-    """Declared artifact paths + paths mentioned in task / deliverable name."""
-    out = set(node_artifact_paths(node))
-    deliverable = getattr(node, "deliverable", None)
-    if deliverable is not None:
-        name = getattr(deliverable, "name", None)
-        if isinstance(name, str):
-            out |= _paths_in_text(name)
-    out |= _paths_in_text(_node_task(node))
-    return out
-
-
-def _ancestors_for_plan(plan: RunPlan) -> dict[str, frozenset[str]]:
-    from agentcore.runtime.runs.executor_context import _ancestors_by_id
-
-    return _ancestors_by_id(plan)
-
-
-def find_sibling_artifact_crosses(
-    plan: RunPlan,
-    *,
-    birth_desk_id: str | None = None,
-) -> list[AppendOverlap]:
-    """Same-batch nodes declaring the same desk×artifact without ancestor handoff."""
-    if not plan.nodes:
-        return []
-    ancestors = _ancestors_for_plan(plan)
-    by_key: dict[str, list[Any]] = {}
-    for n in plan.nodes:
-        for key in node_artifact_keys(n, birth_desk_id=birth_desk_id):
-            by_key.setdefault(key, []).append(n)
-    hits: list[AppendOverlap] = []
-    seen_pairs: set[tuple[str, str]] = set()
-    for key, holders in by_key.items():
-        if len(holders) < 2:
-            continue
-        bare = ownership_display_path(key)
-        for i, a in enumerate(holders):
-            for b in holders[i + 1 :]:
-                a_anc = ancestors.get(a.run_id, frozenset())
-                b_anc = ancestors.get(b.run_id, frozenset())
-                if a.run_id in b_anc or b.run_id in a_anc:
-                    continue
-                pair = tuple(sorted((a.run_id, b.run_id)))
-                if pair in seen_pairs:
-                    continue
-                seen_pairs.add(pair)
-                hits.append(
-                    AppendOverlap(
-                        new_role=_node_role(b) or b.run_id,
-                        new_run_id=b.run_id,
-                        live_role=_node_role(a) or a.run_id,
-                        live_run_id=a.run_id,
-                        reason="sibling_artifact",
-                        path=bare,
-                    )
-                )
-    return hits
-
-
 def find_append_overlaps(
     new_plan: RunPlan,
     live_plan: RunPlan | None,
@@ -288,10 +177,13 @@ def find_append_overlaps(
     if not new_plan.nodes:
         return []
 
-    # Same-batch sibling artifact crosses (C3 declare-time).
-    hits: list[AppendOverlap] = []
+    # Same-batch sibling seat (+ artifact when v2) crosses before live checks.
     if file_ownership_v2_enabled():
-        hits = find_sibling_artifact_crosses(new_plan, birth_desk_id=birth_desk_id)
+        hits: list[AppendOverlap] = find_sibling_artifact_crosses(
+            new_plan, birth_desk_id=birth_desk_id
+        )
+    else:
+        hits = find_sibling_role_crosses(new_plan)
 
     if live_plan is None:
         return hits
@@ -490,7 +382,11 @@ def append_overlap_reject_message(
             "显式调整现有计划后再派。"
             "已完成/已交接节点不能靠 cancel_worker 撤销，须 replaces_run_id 接手补派。"
         )
-    all_sibling = all(o.reason == "sibling_artifact" for o in overlaps)
+    all_sibling_artifact = all(o.reason == "sibling_artifact" for o in overlaps)
+    all_sibling_role = all(o.reason == "sibling_role" for o in overlaps)
+    all_same_batch = all(
+        o.reason in ("sibling_artifact", "sibling_role") for o in overlaps
+    )
     detail_parts: list[str] = []
     for o in overlaps:
         path_bit = f"`{o.path}`" if (o.path or "").strip() else ""
@@ -503,6 +399,11 @@ def append_overlap_reject_message(
             else:
                 why = f"同批交付物交叉（`{o.live_run_id}` 与 `{o.new_run_id}`）"
             detail_parts.append(f"【{o.new_role}】与【{o.live_role}】{why}")
+        elif o.reason == "sibling_role":
+            detail_parts.append(
+                f"【{o.new_role}】与同批【{o.live_role}】（`{o.live_run_id}`）"
+                "座位（角色名）重叠"
+            )
         elif o.reason == "role":
             detail_parts.append(
                 f"【{o.new_role}】与在图座位【{o.live_role}】（`{o.live_run_id}`）"
@@ -525,12 +426,27 @@ def append_overlap_reject_message(
                 f"【{o.new_role}】与在图【{o.live_role}】（`{o.live_run_id}`）{o.reason}"
             )
     detail = "；".join(detail_parts)
-    if all_sibling:
+    if all_sibling_artifact:
         return (
             "【同批交付物交叉已拒绝】"
             f"（本批 {total} 人）。冲突：{detail}。"
             "请为并行队员分配不同文件路径，或用 depends_on 标明交接关系后再派；"
             "跨项目同相对路径不互拦——确认是否误用同一 target_folder_id。"
+        )
+    if all_sibling_role:
+        return (
+            "【同批座位重叠已拒绝】"
+            f"（本批 {total} 人）。冲突：{detail}。"
+            "同一批内空白/大小写归一后相同的角色名视为同座位，不可并行双双入座；"
+            "请改用不同角色名，或用 depends_on 标明串行交接 / 拆批 / "
+            "replaces_run_id 接手后再派。"
+        )
+    if all_same_batch:
+        return (
+            "【同批座位/交付物重叠已拒绝】"
+            f"（本批 {total} 人）。冲突：{detail}。"
+            "请为并行队员使用不同角色名与文件路径，或用 depends_on / replaces_run_id "
+            "标明交接后再派。"
         )
     return (
         "【队员追加已拒绝·座位/交付物重叠】"

@@ -1,8 +1,12 @@
 // Memory-write notices (two-layer memory). Episodic = light tip; semantic = diff list.
 // Mobile has no per-user firehose; ChatPage polls after message_end.
 import type { MemoryUpdate } from "@/api/conversations";
-import { Brain, ChevronRight, NotebookPen } from "lucide-react";
+import { Brain, ChevronDown, ChevronRight, NotebookPen } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+/** 本场摘要超过此长度（或含换行）默认两行截断，可展开全文（对齐桌面 / ConclusionHero）。 */
+export const EPISODIC_SUMMARY_CLAMP_CHARS = 60;
 
 const ACTION_META: Record<string, { label: string; cls: string }> = {
   add: { label: "新增", cls: "mem-add" },
@@ -23,6 +27,60 @@ function formatWhen(iso: string): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+function EpisodicUpdateTip({
+  tip,
+  createdAt,
+}: {
+  tip: string;
+  createdAt: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const long = tip.length > EPISODIC_SUMMARY_CLAMP_CHARS || tip.includes("\n");
+  const when = formatWhen(createdAt);
+
+  return (
+    <div className="mem-update mem-update-episodic">
+      {long ? (
+        <button
+          type="button"
+          className="mem-update-head mem-episodic-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          data-testid="episodic-summary-toggle"
+        >
+          <NotebookPen size={15} className="mem-update-icon" aria-hidden />
+          <span className="mem-update-title">已记下本场摘要</span>
+          <span className="mem-update-when">{when}</span>
+          {open ? (
+            <ChevronDown
+              size={14}
+              className="mem-episodic-chevron"
+              aria-hidden
+            />
+          ) : (
+            <ChevronRight
+              size={14}
+              className="mem-episodic-chevron"
+              aria-hidden
+            />
+          )}
+        </button>
+      ) : (
+        <div className="mem-update-head">
+          <NotebookPen size={15} className="mem-update-icon" aria-hidden />
+          <span className="mem-update-title">已记下本场摘要</span>
+          <span className="mem-update-when">{when}</span>
+        </div>
+      )}
+      <p
+        className={`mem-episodic-summary${!open && long ? " is-clamped" : ""}`}
+      >
+        {tip}
+      </p>
+    </div>
+  );
+}
+
 export function MemoryUpdateCard({ updates }: { updates: MemoryUpdate[] }) {
   const navigate = useNavigate();
   const visible = updates.filter((u) =>
@@ -36,14 +94,11 @@ export function MemoryUpdateCard({ updates }: { updates: MemoryUpdate[] }) {
     <div className="mem-updates">
       {visible.map((u) =>
         u.kind === "episodic" ? (
-          <div key={u.id} className="mem-update mem-update-episodic">
-            <div className="mem-update-head">
-              <NotebookPen size={15} className="mem-update-icon" aria-hidden />
-              <span className="mem-update-title">已记下本场摘要</span>
-              <span className="mem-update-when">{formatWhen(u.createdAt)}</span>
-            </div>
-            <p className="mem-episodic-summary">{(u.summary ?? "").trim()}</p>
-          </div>
+          <EpisodicUpdateTip
+            key={u.id}
+            tip={(u.summary ?? "").trim()}
+            createdAt={u.createdAt}
+          />
         ) : (
           <div key={u.id} className="mem-update">
             <div className="mem-update-head">

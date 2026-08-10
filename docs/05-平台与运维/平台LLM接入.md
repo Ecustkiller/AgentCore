@@ -20,7 +20,7 @@ skip_if:
 | **多厂商 provider 路由** | model 串带 `厂商/` 前缀 | 豆包 / Moonshot / 智谱 等（§四） |
 | **platform 平台凭据** | `billing_mode=platform` / 显式 platform | `PLATFORM_*` 三项 |
 
-**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，选预设静默预填），**不是**日常聊天默认。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
+**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认。测连成功文案须标明「只验证连通，聊天看模型组合」。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
 
 ## 二、模型与凭据解析
 
@@ -37,7 +37,7 @@ skip_if:
 - **回合内鉴权死短路（甲+乙）**：同一用户回合首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）后，`llm/turn_auth_dead.py` 回合级死位短路后续未启动的 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
 - **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member` 按 Worker 槽重解析。
-- **统一目录** `GET /v1/users/me/models`：键 `(id, origin, provider_id)`；BYOK 行 = `default_model` ∪ 按 `base_url` 匹配的厂商预设 models ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设，避免同厂商下拉只剩一项）；**不是**用前端硬编码清单取代发现。组合编辑另支持对 BYOK 服务商**手填** model id（火山 `ep-…`、私有中转等；platform 仍只 allowlist）。platform 行有补贴才列。
+- **统一目录** `GET /v1/users/me/models`：键 `(id, origin, provider_id)`；BYOK 行 = `default_model` ∪ 按 `base_url` 匹配的厂商预设 models ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设，避免同厂商下拉只剩一项）；**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
 
 ## 三、sidecar 推理代理
 
@@ -50,7 +50,7 @@ skip_if:
 `provider/model` 前缀 → `ProviderRouter`（空 key = 不注册）。辩论多凭据 → [辩论编排 §7.5](/docs/03-AI核心/辩论编排设计.md)。
 
 - 带前缀 → 厂商；无前缀 → 默认 DeepSeek BYOK；未注册前缀 → 回退默认、模型名透传。
-- **火山方舟**：一把 `ark-…` key + `https://ark.cn-beijing.volces.com/api/v3`；model 必须传**接入点 ID（`ep-…`）或已开通模型 ID**。
+- **火山方舟**：一把 `ark-…` key + `https://ark.cn-beijing.volces.com/api/v3`；model 必须传**接入点 ID（`ep-…`）或已开通模型 ID**。BYOK 预设种子为 `doubao-seed-2-1-turbo-260628`，旧 `doubao-pro-32k` / `doubao-lite-32k` 裸名不可用。
 - **兼容性铁律**：只发标准 OpenAI 字段，不发 DeepSeek 特有 `thinking` 等（别家网关会 400）。
 
 ## 四·附、DeepSeek API 易错约束（BYOK 常用）

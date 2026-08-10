@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Tests for BYOK ModelKeyForm — advanced「连接测试用模型」select +「其他…」escape.
+ * Tests for BYOK ModelKeyForm — advanced「连接测试用模型」Input + datalist.
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -26,11 +26,12 @@ import {
   createLlmProvider,
   updateLlmProvider,
 } from "@/services/llmProviders";
-import { ModelKeyForm, OTHER_DEFAULT_MODEL_VALUE } from "../ModelKeyForm";
+import { ModelKeyForm } from "../ModelKeyForm";
 
 const moonshot = getByokProviderPreset("moonshot");
 const deepseek = getByokProviderPreset("deepseek");
 const jiurelay = getByokProviderPreset("jiurelay");
+const openai = getByokProviderPreset("openai");
 
 function savedProvider(over: Partial<LlmProviderView> = {}): LlmProviderView {
   return {
@@ -74,6 +75,19 @@ function defaultModelControl(): HTMLElement {
   return screen.getByLabelText("连接测试用模型");
 }
 
+/** Options from the datalist bound to the connection-test model Input. */
+function defaultModelDatalistOptions(input: HTMLInputElement): string[] {
+  const listId = input.getAttribute("list");
+  expect(listId).toBeTruthy();
+  if (!listId) return [];
+  const list = document.getElementById(listId);
+  expect(list?.tagName).toBe("DATALIST");
+  if (!list) return [];
+  return Array.from(list.querySelectorAll("option")).map(
+    (o) => (o as HTMLOptionElement).value,
+  );
+}
+
 beforeEach(() => {
   vi.mocked(createLlmProvider).mockReset();
   vi.mocked(updateLlmProvider).mockReset();
@@ -95,43 +109,37 @@ describe("ModelKeyForm", () => {
     ).toBeTruthy();
     expect(defaultModelControl()).toBeTruthy();
     expect(
-      screen.getByText(/连接测试与目录兜底用；日常选用请到「模型组合」/),
+      screen.getByText(/可直接粘贴模型 ID；连接测试与目录兜底用/),
     ).toBeTruthy();
   });
 
-  it("shows DeepSeek preset models in a select including deepseek-v4-flash", () => {
+  it("shows DeepSeek preset models as Input + datalist including deepseek-v4-flash", () => {
     renderForm();
 
     fireEvent.change(providerSelect(), { target: { value: "deepseek" } });
 
-    const modelSelect = defaultModelControl() as HTMLSelectElement;
-    expect(modelSelect.tagName).toBe("SELECT");
-    expect(modelSelect.value).toBe(deepseek.defaultModel);
+    const modelInput = defaultModelControl() as HTMLInputElement;
+    expect(modelInput.tagName).toBe("INPUT");
+    expect(modelInput.value).toBe(deepseek.defaultModel);
 
-    const optionValues = Array.from(modelSelect.options).map((o) => o.value);
+    const optionValues = defaultModelDatalistOptions(modelInput);
     for (const model of deepseek.models) {
       expect(optionValues).toContain(model);
     }
-    expect(optionValues).toContain(OTHER_DEFAULT_MODEL_VALUE);
-    expect(screen.getByText("其他…")).toBeTruthy();
+    expect(screen.queryByText("其他…")).toBeNull();
   });
 
-  it("lets preset vendors pick「其他…」then free-type a custom default model", async () => {
+  it("lets preset vendors free-type a custom default model in the visible Input", async () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider());
     const { onSaved } = renderForm();
 
     fireEvent.change(providerSelect(), { target: { value: "moonshot" } });
 
-    const modelSelect = defaultModelControl() as HTMLSelectElement;
-    expect(modelSelect.value).toBe(moonshot.defaultModel);
+    const modelInput = defaultModelControl() as HTMLInputElement;
+    expect(modelInput.tagName).toBe("INPUT");
+    expect(modelInput.value).toBe(moonshot.defaultModel);
 
-    fireEvent.change(modelSelect, {
-      target: { value: OTHER_DEFAULT_MODEL_VALUE },
-    });
-    const customInput = screen.getByLabelText(
-      "自定义连接测试用模型",
-    ) as HTMLInputElement;
-    fireEvent.change(customInput, {
+    fireEvent.change(modelInput, {
       target: { value: "kimi-custom-test" },
     });
     fireEvent.change(screen.getByPlaceholderText("sk-..."), {
@@ -152,6 +160,27 @@ describe("ModelKeyForm", () => {
     expect(onSaved).toHaveBeenCalled();
   });
 
+  it("preserves a custom typed model when switching preset vendors", () => {
+    renderForm();
+
+    fireEvent.change(providerSelect(), { target: { value: "moonshot" } });
+    const modelInput = defaultModelControl() as HTMLInputElement;
+    fireEvent.change(modelInput, {
+      target: { value: "my-custom-model-id" },
+    });
+
+    fireEvent.change(providerSelect(), { target: { value: "openai" } });
+
+    const after = defaultModelControl() as HTMLInputElement;
+    expect(after.value).toBe("my-custom-model-id");
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe(
+      openai.label,
+    );
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      openai.baseUrl,
+    );
+  });
+
   it("opens advanced when editing a stored model not in the preset list", async () => {
     vi.mocked(updateLlmProvider).mockResolvedValue(
       savedProvider({
@@ -168,15 +197,13 @@ describe("ModelKeyForm", () => {
 
     const details = screen.getByText("高级选项").closest("details");
     expect(details?.open).toBe(true);
-    expect(
-      (screen.getByLabelText("连接测试用模型") as HTMLSelectElement).value,
-    ).toBe(OTHER_DEFAULT_MODEL_VALUE);
-    const customInput = screen.getByLabelText(
-      "自定义连接测试用模型",
+    const modelInput = screen.getByLabelText(
+      "连接测试用模型",
     ) as HTMLInputElement;
-    expect(customInput.value).toBe("already-saved-model");
+    expect(modelInput.tagName).toBe("INPUT");
+    expect(modelInput.value).toBe("already-saved-model");
 
-    fireEvent.change(customInput, {
+    fireEvent.change(modelInput, {
       target: { value: "edited-model" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -202,23 +229,24 @@ describe("ModelKeyForm", () => {
 
     const defaultModelInput = defaultModelControl() as HTMLInputElement;
     expect(defaultModelInput.tagName).toBe("INPUT");
+    expect(defaultModelInput.getAttribute("list")).toBeNull();
     expect(screen.queryByText("其他…")).toBeNull();
   });
 
-  it("shows JiuRelay key-model tip and all three models in the select", () => {
+  it("shows JiuRelay key-model tip and all three models in the datalist", () => {
     renderForm();
     fireEvent.change(providerSelect(), { target: { value: "jiurelay" } });
 
-    const modelSelect = defaultModelControl() as HTMLSelectElement;
-    const optionValues = Array.from(modelSelect.options).map((o) => o.value);
+    const modelInput = defaultModelControl() as HTMLInputElement;
+    const optionValues = defaultModelDatalistOptions(modelInput);
     for (const model of jiurelay.models) {
       expect(optionValues).toContain(model);
     }
-    expect(modelSelect.value).toBe(jiurelay.defaultModel);
+    expect(modelInput.value).toBe(jiurelay.defaultModel);
     expect(screen.getByText("领取的 Key 须与所选模型对应。")).toBeTruthy();
   });
 
-  it("silently pre-fills default_model on preset change and still submits it", async () => {
+  it("pre-fills default_model on preset change when still on prior default and still submits it", async () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider());
     renderForm();
 

@@ -11,7 +11,7 @@ alwaysApply: true
 
 AgentCore = 面向大众的 Multi-Agent AI 工作台，核心差异是**真正的 Agent 团队协作**（非「单 Agent + 子任务派发」）。Monorepo：`apps/server`（FastAPI · runtime 执行引擎 · LLM 网关）+ `apps/desktop`（Electron+React）+ `apps/mobile` + `apps/admin` + `packages/`（跨端契约）。
 
-定位任务/找文档 → 先读 `docs/索引.md`「任务路由」表，别盲 grep；跑通项目 → `docs/02-架构/本地开发.md`；接缝/漂移排查 → `seam-audit.mdc`；桌面前端自检渲染 → `frontend-preview.mdc`；沉淀可复用经验 → `memory.mdc`。
+定位任务/找文档 → 先读 `docs/索引.md`「任务路由」表，别盲 grep；跑通项目 → `docs/02-架构/本地开发.md`；接缝/漂移排查 → `seam-audit.mdc`；桌面前端自检渲染 → `frontend-preview.mdc`；本地产品 AI / eval / probe 真跑 LLM → `local-llm-dogfood.mdc`（`dev` OpenCode Zen，禁默认踩 `PLATFORM_API_KEY`）；沉淀可复用经验 → `memory.mdc`。
 
 ## 决策权限
 

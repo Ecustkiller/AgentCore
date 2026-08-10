@@ -148,7 +148,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(formatWorkspaceChipLabel(ws)).toBe("本机草稿");
   });
 
-  it("labels project inheritance as 项目名 · 本地", () => {
+  it("labels project inheritance as 项目名 · 本机传统", () => {
     const ws = resolveEffectiveWorkspace({
       binding: projectLocal,
       localContainerRootId: null,
@@ -156,9 +156,9 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
       projectName: "Acme",
     });
     expect(ws.viaProject).toBe(true);
-    expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 本地");
+    expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 本机传统");
     expect(formatWorkspaceChipTitle(ws)).toBe(
-      "工作区·本地（文件夹绑定，≠执行路径）",
+      "本机传统（本机文件夹权威，≠离线）",
     );
   });
 

@@ -4,10 +4,11 @@ import { is } from "@electron-toolkit/utils";
 import { isSafeExternalUrl } from "@shared/safe-url";
 import { WINDOW_CHANNELS } from "@shared/window-contract";
 import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
+import iconBeta from "../../resources/icon-beta.png?asset";
 // `?asset` 让 electron-vite 把图标拷入产物并解析为运行时绝对路径；用作窗口/任务栏图标
-// （resources/icon.png = rounded squircle，Win 任务栏/窗口优先；打包 exe/.app 图标另由
-// electron-builder 按平台分源：build/icon-win.png · build/icon-mac.png）。
-import icon from "../../resources/icon.png?asset";
+// （resources/icon.png = rounded squircle；测试轨用 icon-beta.png。打包 exe/.app 图标另由
+// electron-builder 按平台分源：build/icon-win|mac.png 或 resources/channel-icons/*-beta.png）。
+import iconStable from "../../resources/icon.png?asset";
 import { registerAgentTownIpc } from "./agenttown-service";
 import {
   apiOriginForCsp,
@@ -115,7 +116,19 @@ const RENDERER_ROOT = join(__dirname, "../renderer");
 // 见 .env.production）。用于把 img-src 精确收窄到「自己 + 后端」——只放行后端头像 / favicon，任意
 // 第三方远程图被 Chromium 拦死。无法解析（极端构建配置缺失）→ 空串 → 退化为「只允许自己 + data:」。
 declare const __API_BASE_URL__: string;
+declare const __DESKTOP_RELEASE_CHANNEL__: string | undefined;
+declare const __WINDOWS_APP_USER_MODEL_ID__: string | undefined;
 const API_ORIGIN = apiOriginForCsp(__API_BASE_URL__);
+const WINDOWS_APP_USER_MODEL_ID =
+  typeof __WINDOWS_APP_USER_MODEL_ID__ !== "undefined" &&
+  __WINDOWS_APP_USER_MODEL_ID__
+    ? __WINDOWS_APP_USER_MODEL_ID__
+    : "com.agentcore.desktop";
+const icon =
+  typeof __DESKTOP_RELEASE_CHANNEL__ !== "undefined" &&
+  __DESKTOP_RELEASE_CHANNEL__ === "beta"
+    ? iconBeta
+    : iconStable;
 
 // connect-src（XSS-001·纵深）: connect-src 管的是渲染层 fetch / SSE / WebSocket 出网。后端源是
 // 【构建期】烘焙的——渲染层 services/api.ts 的 BASE_URL 与本 CSP 的 __API_BASE_URL__ 同出一个
@@ -308,7 +321,7 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(async () => {
   // Windows 通知中心需要 AppUserModelId，否则 toast 静默失败。
   if (process.platform === "win32") {
-    app.setAppUserModelId("com.agentcore.desktop");
+    app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
   }
   registerAppProtocol();
   registerLogIpc();

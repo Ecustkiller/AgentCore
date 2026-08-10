@@ -75,11 +75,14 @@ class EngineSettings(BaseModel):
     engine_worker_token_ceiling: int = 4_000_000
     # 用户回合 turn 级累计 token 硬顶（CEO + 全树 worker，含续派）：触顶后禁新
     # delegate / debate / 新波派发，在飞跑完不 cancel。与 per-worker 顶正交。≤0 关闭。
-    engine_turn_token_ceiling: int = 12_000_000
+    # 默认 30M：对齐「用户认可多路嵌套」的全仓级专班尽量一回合跑完（dogfood 全仓
+    # AI 审计全树 input≈27M 仍未收完）；多路嵌套预占与收尾留余量。
+    engine_turn_token_ceiling: int = 30_000_000
     # 嵌套子团队（depth≥1）准入拨付信封：开工时从父剩余原子预留
     # min(本值, 父剩余)；子 DAG 波内只看信封触顶，中途不以父顶砍子尾。
     # 消耗仍计入回合总量。≤0 关闭并回退「全树共父顶」现状。
-    engine_nested_turn_token_ceiling: int = 5_000_000
+    # 默认 8M：单路嵌套略放宽；三路同时预占仍依赖父 turn 顶（约 24M+ 父已耗）。
+    engine_nested_turn_token_ceiling: int = 8_000_000
     # Turn 交付预留（对齐 worker wind_down）：spent ≥ ceiling − reserve 时只放行
     # ``ceiling_priority`` 节点（如 build_website QA），未开跑的次要节点软跳过以便依赖汇合。
     # 默认 400k（够一次 QA/目验；不随 worker 顶同步抬）；≤0 或

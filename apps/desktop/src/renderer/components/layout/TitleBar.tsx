@@ -3,6 +3,7 @@ import { WindowControls } from "@/components/layout/WindowControls";
 import { WindowFrameMenu } from "@/components/layout/WindowFrameMenu";
 import { IconButton, TitleBarSearchTrigger } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
+import { clientReleaseChannel } from "@/lib/releaseChannel";
 import { SIDEBAR_COLLAPSED_WIDTH, useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import { PanelLeft, PanelLeftClose } from "lucide-react";
@@ -17,6 +18,7 @@ export function TitleBar() {
   const resizing = useSidebarStore((s) => s.resizing);
   const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
   const openSearch = useUIStore((s) => s.openSearch);
+  const isBeta = clientReleaseChannel() === "beta";
 
   return (
     <header className={shellClass}>
@@ -28,6 +30,11 @@ export function TitleBar() {
         {!collapsed && (
           <span className="flex flex-1 items-center gap-1.5 text-sidebar-foreground [-webkit-app-region:no-drag]">
             <BrandMark size="sm" />
+            {isBeta && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                测试
+              </span>
+            )}
             {import.meta.env.DEV && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                 DEV

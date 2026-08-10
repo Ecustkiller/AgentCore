@@ -20,6 +20,9 @@ export function deriveGroupWorkspaceIsLocal(
   return folder.mode === "local";
 }
 
+/** Sidebar / chip label for `mode=local`（合法本机传统通道，非遗留催迁）. */
+export const LOCAL_TRADITIONAL_LABEL = "本机传统";
+
 /**
  * Whether a conversation row should show the cloud icon.
  * Bare rows: cloud only. Group rows: cloud exceptions when the group default

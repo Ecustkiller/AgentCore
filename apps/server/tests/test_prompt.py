@@ -863,7 +863,9 @@ def test_skill_teaches_environment_capability_constraint():
     assert "环境能力约束" in skill
     assert "code_execute=未装配" in skill
     assert "交付缺口" in skill
-    assert "bind_local_folder" in skill
+    assert "bind_local_folder" in skill  # 本机传统可教仍点名
+    assert "导入到云" in skill or "连接 Git" in skill
+    assert "合法非默认" in skill or "非默认" in skill or "本机传统" in skill
     assert "ask_user" in skill
     assert "form=files" in skill
     assert "能力策略收口" not in skill
@@ -969,6 +971,12 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "授权后发现" in hint
     assert "well_known" in hint
     assert "禁止" in hint and "文件名" in hint
+    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型（提示面；禁空心等待）。
+    assert "口头同意" in hint
+    assert "等待确认" in hint and "禁止" in hint
+    assert "2～3" in hint or "2-3" in hint
+    assert "失败分型" in hint
+    assert "没找着" in hint
     # 不得无条件鼓动「立即发卡」——本机 Host/区外叙述只留在 workspace_context。
     assert "立即发卡" not in hint
     mid = build_system_skill_registry().get("ask_user_midtask")
@@ -981,6 +989,10 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "选择器兜底" not in mid.body
     assert "grant_readonly_folder" in mid.body  # 禁新发叙事仍点名旧 action
     assert "禁止" in mid.body and "grant_readonly_folder" in mid.body
+    assert "口头同意" in mid.body
+    assert "2～3" in mid.body or "2-3" in mid.body
+    assert "失败分型" in mid.body
+    assert "单 choice" in mid.body  # 目标已明确仍可单卡；歧义才 2～3
 
 
 def test_core_teaches_narrowed_attachment_scope_must_start():
@@ -992,7 +1004,7 @@ def test_core_teaches_narrowed_attachment_scope_must_start():
     assert "禁止整轮" in hint and ("催" in hint or "完整源码" in hint)
     assert "单点缺件" in hint or "局限" in hint
     assert "open_local_project" in hint
-    assert "换工程面" in hint or "收窄本轮输入" in hint
+    assert "退役" in hint or "收窄本轮输入" in hint
     assert "开工前置" in hint
     # 案 adsense-zip-resident-missing B + AI_NOISE 假空：只认结构化缺件，禁用 list 当 oracle。
     assert "附件驻留·缺件" in hint
@@ -1096,7 +1108,7 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     hint = _CEO_CORE_HINT
     assert "<platform_knowledge>" in hint and "</platform_knowledge>" in hint
     block = hint.split("<platform_knowledge>", 1)[1].split("</platform_knowledge>", 1)[0]
-    # 常驻产品面地图短：品类 + 高频入口 + 两分路由，勿膨胀整本手册
+    # 常驻产品面地图短：品类 + 高频入口 + 两分路由 + 规则载体对照短钩，勿膨胀整本手册
     assert len(block.strip().splitlines()) <= 30
     assert "【品类】" in block
     assert "【产品面地图·高频入口】" in block
@@ -1113,6 +1125,42 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     assert "可证伪故障" in block
     assert "四类结论" not in block
     assert "复现要点" not in block
+    # 跨产品规则范式：载体对照短钩（≠.mdc / ≠skills JSON；迁移先查 product_help）
+    assert "【用户规则·载体对照】" in block
+    assert "AgentCore/规则/" in block
+    assert "remember" in block
+    assert ".mdc" in block
+    assert "skills/*.json" in block
+    assert "Cursor" in block and "AgentCore" in block
+
+
+def test_ceo_core_cross_product_rule_paradigm_routing_hook():
+    """问还是派附近：跨产品规则范式窄钩——未钉死载体先查再短问；禁默迁 skill JSON。"""
+    hint = _CEO_CORE_HINT
+    assert "【跨产品规则范式】" in hint
+    # 紧挨「问还是派·中性」之后（路由窄钩，非 platform_knowledge HOW）
+    ask_or_delegate = hint.split("【问还是派·中性】", 1)[1]
+    assert ask_or_delegate.index("【跨产品规则范式】") < ask_or_delegate.index(
+        "【决策/澄清短问·default】"
+    )
+    paradigm = ask_or_delegate.split("【跨产品规则范式】", 1)[1].split(
+        "【决策/澄清短问·default】", 1
+    )[0]
+    assert "未钉死目标载体" in paradigm
+    assert "consult_skill(product_help)" in paradigm
+    assert "ask_user" in paradigm
+    assert "AgentCore/规则/" in paradigm
+    assert "只解释不动文件" in paradigm
+    assert "default" in paradigm
+    assert "skills/*.json" in paradigm
+    assert "平台规则" in paradigm
+    assert "delegate" in paradigm
+    assert ".mdc" in paradigm and "skill JSON" in paradigm
+    assert "扫自由文" in paradigm and "猜意图" in paradigm
+    assert "硬闸" in paradigm
+    # 禁大段 HOW 常驻（细则在 skill）
+    assert "细则在 skill" in paradigm
+    assert "意图分类器" not in paradigm
 
 
 def test_ceo_core_teaches_intent_routing_for_adversarial_entry():

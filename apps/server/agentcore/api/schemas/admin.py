@@ -535,6 +535,13 @@ class ReplayMessage(BaseModel):
     # Rows present but key missing → ``platform`` (matches ledger ``split_cost``).
     # Mixed sources → ``user`` if any call is user, else ``platform`` (vendor→platform).
     credential_source: Literal["user", "platform"] | None = None
+    # Message provenance from ``messages.usage.origin`` (e.g. ``execution_harvest`` for
+    # system closing-turn synthetic user rows). Parity with MessageDetail.origin —
+    # admin timeline must not paint these as ordinary user prompts. null otherwise.
+    origin: str | None = None
+    # From ``messages.usage.harvest_kind`` when origin is execution_harvest
+    # (success / failure / cancelled). null for ordinary rows.
+    harvest_kind: str | None = None
     # The turn's tool/LLM spans (turn_journal projection); empty for user prompts and
     # for turns that journaled nothing (a plain single-agent chat with no tools).
     spans: list[ReplaySpan] = []

@@ -652,25 +652,48 @@ class DelegateTool:
             ):
                 append_to = None
             else:
-                from agentcore.runtime.delegate.graph_append import (
-                    resolve_latest_appendable_execution,
-                )
-
-                resolved = await resolve_latest_appendable_execution(
-                    conversation_id=self._conversation_id or "",
-                    exclude_message_id=self._message_id,
-                )
-                if not resolved:
-                    # 无图可追加：自动降级为不带 append 新建（勿 success=False 空转）。
-                    latest_miss_degraded_note = (
-                        '【latest 未命中·已自动新建】append_to_execution_id="latest" '
-                        "未解析到可追加协作图（旧图已收口或本对话尚无图）；"
-                        "已自动不带 append 新开团队。"
-                        "向用户如实告知：本次是新组建团队、未在旧图上追加。"
+                # 同回合第一波已收口：内存宿主优先于跨 message DB latest，禁静默挂旧图。
+                last_eid = getattr(self, "_last_graph_execution_id", None)
+                if (
+                    self._calls >= 1
+                    and isinstance(last_eid, str)
+                    and last_eid.strip()
+                ):
+                    append_to = last_eid.strip()
+                    last_plan = getattr(self, "_last_graph_plan", None)
+                    if last_plan is not None:
+                        host_plan_for_append = last_plan
+                        last_seed = getattr(self, "_last_graph_seed", None)
+                        if last_seed is not None and append_seed is None:
+                            append_seed = last_seed
+                    logger.info(
+                        "delegate.graph_append_latest",
+                        conversation_id=self._conversation_id or "",
+                        resolved=append_to,
+                        prefer_message_id=self._message_id,
+                        exclude_message_id=None,
+                        via="same_turn_memory",
                     )
-                    append_to = None
                 else:
-                    append_to = resolved
+                    from agentcore.runtime.delegate.graph_append import (
+                        resolve_latest_appendable_execution,
+                    )
+
+                    resolved = await resolve_latest_appendable_execution(
+                        conversation_id=self._conversation_id or "",
+                        prefer_message_id=self._message_id,
+                    )
+                    if not resolved:
+                        # 无图可追加：自动降级为不带 append 新建（勿 success=False 空转）。
+                        latest_miss_degraded_note = (
+                            '【latest 未命中·已自动新建】append_to_execution_id="latest" '
+                            "未解析到可追加协作图（旧图已收口或本对话尚无图）；"
+                            "已自动不带 append 新开团队。"
+                            "向用户如实告知：本次是新组建团队、未在旧图上追加。"
+                        )
+                        append_to = None
+                    else:
+                        append_to = resolved
         # 同回合显式 append_to 命中当前活跃协作图 ≡ 不传 append（与 latest 软化对齐）。
         # 跨回合 adopt 后同 eid 仍须走跨图 load；活跃图 A + append_to=B（B≠A）禁误吞。
         if append_to:

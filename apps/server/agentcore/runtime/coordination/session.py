@@ -1562,7 +1562,11 @@ def emit_execution_detached(
     )
 
 
-def release_turn_coordination(execution_id: str | None) -> None:
+def release_turn_coordination(
+    execution_id: str | None,
+    *,
+    _followed_conversation_host: bool = False,
+) -> None:
     """Chat-turn teardown: drop idle sessions; preserve live background coordination.
 
     Coordination lifecycle is decoupled from the chat turn — when a background
@@ -1573,11 +1577,29 @@ def release_turn_coordination(execution_id: str | None) -> None:
     Explicit user /stop is different: :func:`cancel_coordination_on_user_stop`
     marks ``user_stopped`` and cancels the drive; this path then clears instead
     of detaching so workers do not keep running after the turn is closed.
+
+    Cross-turn append may leave ContextVar on the mint eid while
+    ``_by_conversation`` points at the host execution — also release that host
+    so ``turn_attached`` is not stuck True on the live drive.
     """
     eid = (execution_id or "").strip()
     if not eid:
         return
     session = _sessions.get(eid)
+    # Conversation-active host may differ from the ContextVar mint id.
+    extra_eid: str | None = None
+    if session is not None and not _followed_conversation_host:
+        cid = (session.conversation_id or "").strip()
+        if cid:
+            mapped = _by_conversation.get(cid)
+            if mapped and mapped != eid:
+                extra_eid = mapped
+    _release_turn_one(eid, session)
+    if extra_eid:
+        release_turn_coordination(extra_eid, _followed_conversation_host=True)
+
+
+def _release_turn_one(eid: str, session: CoordinationSession | None) -> None:
     if session is None:
         return
     if session.user_stopped:
@@ -1633,14 +1655,23 @@ def release_turn_coordination(execution_id: str | None) -> None:
     clear_active_coordination(eid)
 
 
-def finish_detached_coordination(session: CoordinationSession) -> None:
-    """Background drive finally: harvest when unattached; else no-op.
+# After drive finally: wait this long for same-turn ALL_COMPLETED inject or
+# release_turn detach before force-harvesting. Covers fire-and-forget and the
+# cross-turn append ContextVar miss (gather child wrote host eid; parent
+# teardown released the mint id → turn_attached stuck True).
+_HARVEST_ATTACH_GRACE_S = 5.0
+_HARVEST_ATTACH_POLL_S = 0.05
 
-    When the arming turn already ended, schedule the execution harvester (pillar C)
-    instead of silently close+unregister — ALL_COMPLETED must reach a consumer.
+
+def finish_detached_coordination(session: CoordinationSession) -> None:
+    """Background drive finally: arm harvest for unsettled terminals (pillar C).
+
+    ``turn_attached=True`` must **not** silently no-op. The arming turn may have
+    fire-and-forget ``end_turn``'d without waiting, or turn teardown may have
+    released a different ContextVar eid after cross-turn append — leaving this
+    session flagged attached forever. Defer briefly so a same-turn wait inject
+    can win; then harvest (or explicit fallback inside the harvester).
     """
-    if session.turn_attached:
-        return
     if session.user_stopped:
         if session.active:
             session.close()
@@ -1650,11 +1681,44 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
         return
     if session.harvest_scheduled:
         return
-    # No conversation to deliver into (unit tests / orphan sessions): sync clear.
-    if not (session.conversation_id or "").strip():
+    if session.all_completed_injected:
+        # Attached inject already settled the terminal.
+        if not session.turn_attached:
+            _close_detached_session(session)
+        return
+    # Empty conversation_id: orphan / unit sessions sync-clear only when already
+    # detached. turn_attached=True must keep attach-grace semantics (same as with
+    # a cid) so same-turn CEO wait can inject — never sync-clear into a false
+    # terminal_unsettled while the arming turn is still attached.
+    if not (session.conversation_id or "").strip() and not session.turn_attached:
         _close_detached_session(session)
         return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _close_detached_session(session)
+        return
+
     session.harvest_scheduled = True
+    if session.turn_attached:
+        logger.info(
+            "coordination.harvest_armed_while_attached",
+            execution_id=session.execution_id,
+            conversation_id=session.conversation_id or "",
+            terminal_posted=session.terminal_posted,
+            completed=len(session.completed_run_ids),
+            total=session.total_workers,
+        )
+        loop.create_task(
+            _run_harvest_after_attach_grace(session),
+            name=f"coord-harvest-grace-{session.execution_id[:8]}",
+        )
+        return
+    _arm_harvest_now(session)
+
+
+def _arm_harvest_now(session: CoordinationSession) -> None:
+    """Mark settled, emit execution_completed, schedule async closing turn."""
     session.mark_settled("harvest")
     # Emit *before* scheduling the async harvest so owners that
     # ``await_live_detached_drive`` still have the turn sink open and can push
@@ -1672,6 +1736,50 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
         _run_harvest(session),
         name=f"coord-harvest-{session.execution_id[:8]}",
     )
+
+
+async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
+    """Wait for inject / detach; on grace expiry force-harvest stale attach."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _HARVEST_ATTACH_GRACE_S
+    while True:
+        if session.user_stopped:
+            session.harvest_scheduled = False
+            if session.active:
+                session.close()
+            current = _sessions.get(session.execution_id)
+            if current is session:
+                clear_active_coordination(session.execution_id)
+            return
+        if session.all_completed_injected:
+            logger.info(
+                "coordination.harvest_cancelled_attached_inject",
+                execution_id=session.execution_id,
+            )
+            session.harvest_scheduled = False
+            return
+        if not session.turn_attached:
+            logger.info(
+                "coordination.harvest_attach_cleared",
+                execution_id=session.execution_id,
+            )
+            break
+        if loop.time() >= deadline:
+            logger.warning(
+                "coordination.harvest_stale_attach_forcing",
+                execution_id=session.execution_id,
+                conversation_id=session.conversation_id or "",
+                grace_s=_HARVEST_ATTACH_GRACE_S,
+                terminal_posted=session.terminal_posted,
+            )
+            session.turn_attached = False
+            break
+        await asyncio.sleep(_HARVEST_ATTACH_POLL_S)
+
+    if session.user_stopped or session.all_completed_injected:
+        session.harvest_scheduled = False
+        return
+    _arm_harvest_now(session)
 
 
 def _close_detached_session(session: CoordinationSession) -> None:

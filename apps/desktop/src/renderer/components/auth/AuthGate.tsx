@@ -19,6 +19,7 @@ import {
   hasOfflineCache,
   hydrateOfflineShell,
 } from "@/services/offlineCache";
+import { confirmMidSessionOutage } from "@/services/serverHealth";
 import { useAuthStore } from "@/stores/auth";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import { type ReactNode, useCallback, useEffect } from "react";
@@ -63,7 +64,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       const user = await hydrateOfflineShell();
       if (!user) return false;
       useAuthStore.getState().setAuthenticated(user);
-      useServerHealthStore.getState().markOffline(outageReason);
+      useServerHealthStore.getState().markOffline(outageReason, "bootstrap");
       return true;
     },
     [],
@@ -115,18 +116,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
     });
     setSessionRenewedHandler(() => void persistAgentTownSession());
     // Mid-session outage (N4-A): stay inside the shell with a soft banner when
-    // already authenticated (or already offline-readonly). Only confirm via
-    // /readyz and mark serverHealth — never blank the app. Cold-start still
-    // uses the hard wall when there is no local-store cache.
+    // already authenticated (or already offline-readonly). Confirm via /readyz
+    // before markOffline — a healthy probe means ignore the transient API blip
+    // (see confirmMidSessionOutage). Never blank the app. Cold-start still uses
+    // the hard wall when there is no local-store cache.
     setServiceUnavailableHandler(() => {
       const cur = useAuthStore.getState().status;
       if (cur === "loading" || cur === "unavailable") return;
       if (cur === "authenticated") {
-        void (async () => {
-          const reason =
-            (await diagnoseOutage()) ?? "连不上 AgentCore 服务，请稍后重试。";
-          useServerHealthStore.getState().markOffline(reason);
-        })();
+        void confirmMidSessionOutage();
         return;
       }
       void (async () => {
@@ -142,8 +140,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     };
   }, [runBootstrap]);
 
-  // 认证成功后预热桌面默认本地容器根（§八.7：仅服务显式本机草稿 / 本地项目创建），
-  // 摊薄用户点「本机草稿」时的授权等待。非桌面 / 失败时 no-op，不阻断渲染。
+  // 认证成功后预热桌面默认本地容器根（遗留本机草稿 / 本地项目创建仍可能用到），
+  // 非桌面 / 失败时 no-op，不阻断渲染。
   useEffect(() => {
     if (status === "authenticated") void ensureDefaultContainerRoot();
   }, [status]);

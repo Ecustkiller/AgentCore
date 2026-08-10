@@ -96,3 +96,70 @@ async def test_resolve_local_binding_cloud_project_returns_none(monkeypatch):
     )
 
     assert await resolve_local_binding(MagicMock(), conv) is None
+
+
+@pytest.mark.asyncio
+async def test_section_72_cloud_folder_binding_none_then_server_workspace(
+    monkeypatch, tmp_path
+):
+    """§7.2：云桌 → resolve_local_binding None → ServerWorkspace（永不默认过桥）。"""
+    from agentcore.config import settings
+    from agentcore.runtime.events import EventSink
+    from agentcore.workspace.locate import build_workspace
+    from agentcore.workspace.server import ServerWorkspace
+
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    folder = _folder(local_root_id=None, local_subpath=None)
+    conv = _conv(folder_id=folder.id)
+
+    mock_repo = MagicMock()
+    mock_repo.get_by_id_unscoped = AsyncMock(return_value=folder)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.FolderRepository",
+        lambda session: mock_repo,
+    )
+
+    binding = await resolve_local_binding(MagicMock(), conv)
+    assert binding is None
+    ws = build_workspace(
+        user_id="u1",
+        folder_id=folder.id,
+        conversation_id=conv.id,
+        sink=EventSink(),
+        local_binding=binding,
+    )
+    assert isinstance(ws, ServerWorkspace)
+    assert ws.location == "server"
+
+
+@pytest.mark.asyncio
+async def test_section_72_local_root_yields_local_workspace_bridge(monkeypatch):
+    """§7.2：有 local_root_id → LocalWorkspace（云端过桥语义；sidecar 另径）。"""
+    from agentcore.runtime.events import EventSink
+    from agentcore.workspace.local import LocalWorkspace
+    from agentcore.workspace.locate import build_workspace
+
+    folder = _folder(local_root_id="legacy-root", local_subpath="")
+    conv = _conv(folder_id=folder.id)
+
+    mock_repo = MagicMock()
+    mock_repo.get_by_id_unscoped = AsyncMock(return_value=folder)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.FolderRepository",
+        lambda session: mock_repo,
+    )
+
+    binding = await resolve_local_binding(MagicMock(), conv)
+    assert binding is not None
+    assert binding.root_id == "legacy-root"
+    ws = build_workspace(
+        user_id="u1",
+        folder_id=folder.id,
+        conversation_id=conv.id,
+        sink=EventSink(),
+        local_binding=binding,
+    )
+    assert isinstance(ws, LocalWorkspace)
+    assert ws.location == "local"
+    # Bridge = LocalWorkspace over WorkspaceChannel（云 SSE → 桌面盘），非 sidecar spawn。
+    assert ws._channel.root_id == "legacy-root"  # noqa: SLF001

@@ -2,7 +2,7 @@
 
 Mirrors ``storage/factory.py``: one place builds the client from
 ``settings.redis_url``, cached with ``lru_cache`` so the connection pool is
-shared across rate limiters, readiness probes, and future callers.
+shared across rate limiters, soft ``/readyz`` redis observation, and future callers.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def get_redis_client() -> Any:
 
     ``decode_responses=False`` matches rate-limiter key/member handling (bytes).
     Does not ping — connectivity checks belong at construct (``redis_client``)
-    or readiness (``redis_ready``).
+    or the soft ``/readyz`` body probe (``redis_ready``; does not decide HTTP 503).
     """
     import redis
 

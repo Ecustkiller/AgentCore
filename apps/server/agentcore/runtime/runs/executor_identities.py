@@ -332,7 +332,8 @@ escalate 的 blocking 按题自选（默认 false）：已有合理默认、报�
 # Inserted in build_worker_identity — not inside captain nesting preamble (P3 surface).
 _WORKER_PATH_FIND_NUDGE = """\
 【找路径】含糊「根」/ `.` / 仅根标签时：先 file_list(pattern)/grep/code_search 钉真实文件再 \
-file_read；已知具体相对路径可直接读。"""
+file_read；已知具体相对路径可直接读。禁止凭通用目录名（如 src、shared、lib、app）猜测路径；\
+工具报「路径不存在」时按回报里的上级样本或根查找提示纠偏，禁止原样重试同一假路径。"""
 
 # Leaf-worker intro (no nested delegate). A leaf runs in an isolated context with
 # one scoped task, no chance to ask follow-ups, and no `delegate` tool — stated

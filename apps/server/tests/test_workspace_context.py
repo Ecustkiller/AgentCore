@@ -107,9 +107,13 @@ def test_cloud_scratch_facts():
     assert "触达不了用户的电脑" not in out
     assert "本机 Host" in out or "host=" in out
     assert "host=已装配" in out
-    assert "bind_local_folder" in out
+    assert "bind_local_folder" in out  # 本机传统可教
     assert "open_local_project" in out
     assert "register_local_project" in out
+    assert "导入到云" in out or "连接 Git" in out
+    assert "合法非默认" in out or "非默认" in out
+    assert "本机传统" in out
+    assert "改导" not in out  # skill/context 不得写 Ask 改导导入
     # 跨项目指挥事实面（与 skills 第二教学面互补）
     assert "跨项目指挥" in out
     assert "list_projects" in out and "resolve_project" in out
@@ -117,7 +121,7 @@ def test_cloud_scratch_facts():
     assert "create_project" in out
     assert "禁猜最近" in out or "猜最近" in out
     assert "禁默写 scratch" in out or "scratch" in out
-    assert "多 local" in out and "并行" in out
+    assert "多" in out and "并行" in out
     assert "可能降级" not in out
     assert "协作图不改" in out
     # 一句短指针（HOW 在 skill）
@@ -142,21 +146,26 @@ def test_cloud_scratch_facts():
     assert "禁止" in out and "grant_readonly_folder" in out
     assert "选择器兜底" not in out
     assert "立即" in out and "勿用纯文本" in out
+    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型
+    assert "口头同意" in out
+    assert "等待确认" in out
+    assert "2～3" in out or "2-3" in out
+    assert "失败分型" in out
+    assert "没找着" in out
     # 授权后发现：禁首轮文本题要文件名；须提示 well_known
     assert "授权后发现" in out or "well_known" in out
     assert "well_known" in out
     assert "文件名" in out
     assert "在哪工作" in out
     assert "仅新建会话" in out
-    assert "ask_user" in out  # 本机整理/打开仍走卡
-    assert "≠打开项目" in out or "禁止用 bind 冒充" in out
+    assert "ask_user" in out  # 本机整理仍走卡
     assert "勿引导用户去设置改模式" in out
     # 定案 A：优化项目 ≠ 默认催开项目；附件收窄范围时先干活。
     assert "≠默认开项目卡" in out or "收窄本轮" in out
     assert "开工前置" in out
     assert "不可改绑" not in out
     assert "严禁引导" not in out
-    assert "本机草稿" in out
+    assert "本机草稿" not in out or "勿推销本机草稿" in out
     assert "本会话发绑定卡" not in out  # 旧口径：已改为意图分流
     assert "code_execute=未装配" in out
     assert "package_install=未装配" in out
@@ -237,12 +246,13 @@ def test_local_remote_channel_facts():
     assert "terminal=已装配" in out
     assert "browser=未装配" in out
     assert "local_open=已装配" in out
-    assert "bind_local_folder" not in out  # already local — no bind nudge
     assert "产物出口" in out  # 产物出口事实对本地会话同样注入
-    # 已绑定本地工程：「打开项目」=跑当前，换目录才 open_local_project
-    assert "已绑定本地工程" in out
-    assert "跑当前项目" in out
-    assert "open_local_project" in out
+    # 本机传统工程：跑当前；换工程优先导入/连 Git，勿再弹 open 建新
+    assert "本机传统" in out or "跑" in out
+    assert "导入到云" in out or "连接 Git" in out
+    assert "open_local_project" in out  # 仍出现于「勿再弹」禁令
+    # 桌面分流可教三件套，但不得写成 action= 履约广告句
+    assert "action=bind_local_folder" not in out
 
 
 def test_browser_capability_override():
@@ -323,8 +333,10 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
         browser_enabled=False,
     )
     assert "浏览器指引" in out
-    assert "bind_local_folder" in out or "open_local_project" in out
     assert "gVisor" in out or "沙箱" in out or "netns" in out
+    # 本机传统可教非默认；云协作仍推荐
+    assert "本机传统" in out or "合法非默认" in out or "非默认" in out
+    assert "bind_local_folder" in out or "open_local_project" in out or "open/bind" in out
     # 禁误导：未装配时勿暗示「本机未装就可随手启用云端沙箱」旧句
     assert "或启用云端沙箱浏览器" not in out
     assert "ask_user(browser_login=true)" in out
@@ -420,7 +432,7 @@ def test_mobile_session_omits_bind_nudge():
     assert "就好办了" in out
     assert "打开【本对话】" in out or "打开本对话" in out
     assert "状态栏" in out
-    assert "打开本地项目" in out
+    assert "导入到云" in out or "连接 Git" in out or "Composer" in out
     assert "Folders" in out  # 禁语点名非真源
     assert "臆造" in out
 
@@ -442,7 +454,7 @@ def test_channel_offline_self_claim_desktop_recheck_honesty():
     assert "桌面就好办" in out
     assert "①" in out and "②" in out and "③" in out and "④" in out
     assert "https://fashitianxia.xyz/download" in out
-    assert "打开本地项目" in out
+    assert "导入到云" in out or "连接 Git" in out or "Composer" in out
     assert "Folders" in out
     assert "设置→Folders" in out or "侧栏授权页" in out
     assert "授权在哪里" in out

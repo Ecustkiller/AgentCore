@@ -9,8 +9,9 @@
 
 过程事实（工具调用、委派角色）由 :class:`~agentcore.evals.recording_sink.RecordingSink`
 （在现有 ``EventSink`` 上挂钩）截获。
-真实 DeepSeek key 经 :func:`_eval_credentials` 从 eval 专用环境变量读（BYOK 下平台 key 为空，
-见 §十三）；单测注入脚本化假 provider（``EvalHarness(provider=...)``），零成本验证 harness 本身。
+真实 LLM 凭据经 :func:`_eval_credentials` / :func:`eval_credentials` 解析（优先
+``EVAL_DEEPSEEK_*`` → 本地测试账号 BYOK → ``PLATFORM_*``）；单测注入脚本化假 provider
+（``EvalHarness(provider=...)``），零成本验证 harness 本身。
 
 ``plan_only=True``：经 :func:`~agentcore.runtime.plan_only.use_plan_only` 打开默认关闭的
 delegate/debate 干跑开关——真实规划路径照走，首个 ``run_plan`` 后 HANDOFF 收束；CEO
@@ -20,10 +21,13 @@ delegate/debate 干跑开关——真实规划路径照走，首个 ``run_plan``
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import os
 import shutil
 import tempfile
 import time
+from collections.abc import Coroutine
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,11 +44,11 @@ from agentcore.evals.types import (
     TurnOutcome,
     artifacts_from_tool_calls,
 )
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.pricing import NANO_PER_CNY, calculate_cost
 from agentcore.llm.profiles import ProfileParams, TurnProfiles
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
-from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import FinishReason
@@ -85,32 +89,96 @@ def _clamp_ceo_rounds(profiles: TurnProfiles, max_rounds: int) -> TurnProfiles:
     return _Clamped(model=profiles.model, model_overrides=dict(profiles.model_overrides))
 
 
-def _eval_credentials() -> LLMCredentials:
-    """eval 的 DeepSeek / 平台凭据：优先 eval 专用环境变量，否则显式平台凭据.
+_CREDENTIALS_HINT = (
+    "eval needs LLM credentials. Prefer: seed the local test account "
+    "(uv run python scripts/seed_dev_user.py) and configure OpenCode Zen BYOK in "
+    "Settings (or scripts/set_dev_llm_key.py), then use probe_turn / EvalHarness. "
+    "Explicit override: EVAL_DEEPSEEK_API_KEY. Last resort: PLATFORM_API_KEY "
+    "(local dogfood should prefer OpenCode BYOK; build_provider no longer silent-falls back)."
+)
 
-    BYOK 内测下平台 ``platform_api_key`` 多为空 → 真跑必须自带 ``EVAL_DEEPSEEK_API_KEY``
-    （建议配低额度账号 + nightly 限次）。不再经 ``build_provider(None)`` 静默回落。
-    单测走注入的假 provider，不读这里。
+
+def _run_coro_sync[T](coro: Coroutine[object, object, T]) -> T:
+    """Run ``coro`` from sync callers; safe inside an already-running event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _credentials_from_eval_env() -> LLMCredentials | None:
+    key = os.environ.get("EVAL_DEEPSEEK_API_KEY", "").strip()
+    if not key:
+        return None
+    base = (
+        os.environ.get("EVAL_DEEPSEEK_BASE_URL", "").strip() or settings.platform_base_url
+    )
+    model = os.environ.get("EVAL_DEEPSEEK_MODEL", "").strip() or settings.platform_model
+    return LLMCredentials(api_key=key, base_url=base, default_model=model)
+
+
+async def _credentials_from_dev_byok() -> LLMCredentials | None:
+    """Load decryptable BYOK for ``DEV_USERNAME`` (default ``dev``) via resolve path."""
+    from agentcore.db.base import async_session_factory
+    from agentcore.db.repositories import UserRepository
+    from agentcore.llm.resolve import resolve_credentials
+
+    username = (os.environ.get("DEV_USERNAME") or "dev").strip() or "dev"
+    try:
+        async with async_session_factory() as session:
+            user = await UserRepository(session).get_by_username(username)
+            if user is None:
+                return None
+            creds = await resolve_credentials(session, user.user_id, "user_facing")
+    except Exception as exc:  # noqa: BLE001 — DB/encrypt missing → fall through
+        logger.warning("evals.dev_byok_lookup_failed", username=username, error=str(exc))
+        return None
+    if creds is None or creds.source != "user":
+        return None
+    return creds
+
+
+async def eval_credentials() -> LLMCredentials:
+    """Resolve LLM credentials for eval / local probes (async).
+
+    Priority:
+    1. ``EVAL_DEEPSEEK_*`` — explicit override (CI / nightly / low-quota keys).
+    2. Local test-account BYOK — username ``dev`` / ``DEV_USERNAME``; via
+       :func:`~agentcore.llm.resolve.resolve_credentials` + DB decrypt. When the
+       account default is OpenCode Zen this hits the same path as desktop /
+       ``probe_turn``.
+    3. ``PLATFORM_*`` — last resort; logs a warning that local dogfood should
+       prefer OpenCode BYOK.
+
+    Sync callers use :func:`_eval_credentials` (same priority; runs this safely
+    off-loop when needed). Unit tests inject a fake provider and skip this.
     """
     from agentcore.llm.resolve import platform_llm_credentials
 
-    key = os.environ.get("EVAL_DEEPSEEK_API_KEY", "").strip()
-    if key:
-        base = (
-            os.environ.get("EVAL_DEEPSEEK_BASE_URL", "").strip()
-            or settings.platform_base_url
-        )
-        model = (
-            os.environ.get("EVAL_DEEPSEEK_MODEL", "").strip() or settings.platform_model
-        )
-        return LLMCredentials(api_key=key, base_url=base, default_model=model)
+    env_creds = _credentials_from_eval_env()
+    if env_creds is not None:
+        return env_creds
+
+    byok = await _credentials_from_dev_byok()
+    if byok is not None:
+        return byok
+
     plat = platform_llm_credentials()
-    if plat is None:
-        raise RuntimeError(
-            "eval needs EVAL_DEEPSEEK_API_KEY or a configured PLATFORM_API_KEY "
-            "(build_provider no longer silent-falls back)"
+    if plat is not None:
+        logger.warning(
+            "evals.credentials_using_platform",
+            hint="local dogfood should prefer OpenCode Zen BYOK on the dev account",
         )
-    return plat
+        return plat
+
+    raise RuntimeError(_CREDENTIALS_HINT)
+
+
+def _eval_credentials() -> LLMCredentials:
+    """Sync wrapper for :func:`eval_credentials` (same priority; for sync call sites)."""
+    return _run_coro_sync(eval_credentials())
 
 
 def _history_messages(history: list[dict]) -> list[LLMMessage]:
@@ -248,7 +316,24 @@ class EvalHarness:
         sink = RecordingSink()
         ws_root = self._fixture_root(case)
         backend = ServerWorkspace(root=ws_root, sandbox=SubprocessSandbox())
+        # Await credentials on the running loop — sync ``_eval_credentials()`` inside
+        # an active event loop uses a thread+``asyncio.run`` for DB BYOK and can
+        # silently miss OpenCode, falling through to a stale PLATFORM_API_KEY.
+        llm_credentials = (
+            None if self._provider is not None else await eval_credentials()
+        )
         profiles = resolve_profile_set(case.mode, custom_modes={}, ceiling=_EVAL_CEILING)
+        # OpenCode Zen free vs paid ids differ; prefer account default when caller
+        # did not pin EVAL_BASE_MODEL (same path as desktop / probe_turn).
+        if (
+            llm_credentials is not None
+            and (llm_credentials.default_model or "").strip()
+            and not os.environ.get("EVAL_BASE_MODEL", "").strip()
+        ):
+            profiles = TurnProfiles(
+                model=llm_credentials.default_model.strip(),
+                model_overrides=dict(profiles.model_overrides),
+            )
         if self._plan_only:
             profiles = _clamp_ceo_rounds(profiles, PLAN_ONLY_CEO_MAX_ROUNDS)
         # 方向①：在本例运行期激活声明的 prompt 变体（None=基线/恒等）。装配函数（深在
@@ -272,10 +357,22 @@ class EvalHarness:
             try:
                 if case.path == "single":
                     return await self._run_single(
-                        case, backend, profiles, sink, t0, workspace_root=ws
+                        case,
+                        backend,
+                        profiles,
+                        sink,
+                        t0,
+                        workspace_root=ws,
+                        llm_credentials=llm_credentials,
                     )
                 return await self._run_team(
-                    case, backend, profiles, sink, t0, workspace_root=ws
+                    case,
+                    backend,
+                    profiles,
+                    sink,
+                    t0,
+                    workspace_root=ws,
+                    llm_credentials=llm_credentials,
                 )
             except Exception as e:  # react_loop/pipeline 失败 → error 态（不让一例炸掉整套）
                 logger.error("evals.run_case_failed", case=case.id, error=str(e), exc_info=True)
@@ -295,9 +392,19 @@ class EvalHarness:
                 )
 
     async def _run_single(
-        self, case, backend, profiles, sink, t0, *, workspace_root: str | None = None
+        self,
+        case,
+        backend,
+        profiles,
+        sink,
+        t0,
+        *,
+        workspace_root: str | None = None,
+        llm_credentials: LLMCredentials | None = None,
     ) -> TurnOutcome:
-        provider = self._provider or build_provider(_eval_credentials())
+        provider = self._provider or build_provider(
+            llm_credentials or await eval_credentials()
+        )
         # toolset="worker" gets the REAL delegated-worker registry (builtins + the
         # worker-only ``escalate`` upward channel), so a worker-path eval exercises
         # escalate exactly as production does; "ceo" gets the coordinator read-only subset.
@@ -352,7 +459,15 @@ class EvalHarness:
         )
 
     async def _run_team(
-        self, case, backend, profiles, sink, t0, *, workspace_root: str | None = None
+        self,
+        case,
+        backend,
+        profiles,
+        sink,
+        t0,
+        *,
+        workspace_root: str | None = None,
+        llm_credentials: LLMCredentials | None = None,
     ) -> TurnOutcome:
         result = await run_chat_pipeline(
             conversation_id=new_id(),
@@ -363,7 +478,7 @@ class EvalHarness:
             backend=backend,
             approvals_enabled=False,
             profile_set=profiles,
-            llm_credentials=_eval_credentials(),
+            llm_credentials=llm_credentials or await eval_credentials(),
         )
         return team_outcome(result, sink, latency_ms=_ms(t0), workspace_root=workspace_root)
 

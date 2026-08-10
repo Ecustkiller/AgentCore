@@ -6,6 +6,7 @@ import {
 import { Card } from "@/components/ui";
 import { countPillMuted, statusCardChrome } from "@/components/ui/tone-presets";
 import { getConversations } from "@/hooks/useConversations";
+import { cn } from "@/lib/utils";
 import {
   memoryLeafTabName,
   parseProjectMemoryFolderId,
@@ -15,6 +16,9 @@ import { useConversationStore } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { Brain, ChevronDown, ChevronRight, NotebookPen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
+/** 本场摘要超过此长度（或含换行）默认两行截断，可展开全文（对齐 ConclusionHero）。 */
+export const EPISODIC_SUMMARY_CLAMP_CHARS = 60;
 
 /**
  * Memory-write notice on the conversation timeline (two-layer memory).
@@ -34,6 +38,8 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   if (isEpisodic) {
     const tip = (update.summary ?? "").trim();
     if (!tip) return null;
+    const long =
+      tip.length > EPISODIC_SUMMARY_CLAMP_CHARS || tip.includes("\n");
     return (
       <Card
         className={`animate-task-card-enter ${chrome.border} ${chrome.surface}`}
@@ -44,15 +50,48 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
             className={`mt-0.5 shrink-0 ${chrome.accent}`}
           />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${chrome.accent}`}>
-                已记下本场摘要
-              </span>
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                {formatMemoryTime(update.createdAt)}
-              </span>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+            {long ? (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="flex w-full items-center gap-2 text-left"
+                data-testid="episodic-summary-toggle"
+              >
+                <span className={`text-xs font-medium ${chrome.accent}`}>
+                  已记下本场摘要
+                </span>
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  {formatMemoryTime(update.createdAt)}
+                </span>
+                {open ? (
+                  <ChevronDown
+                    size={14}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <ChevronRight
+                    size={14}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                )}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-medium ${chrome.accent}`}>
+                  已记下本场摘要
+                </span>
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  {formatMemoryTime(update.createdAt)}
+                </span>
+              </div>
+            )}
+            <p
+              className={cn(
+                "mt-0.5 text-xs text-muted-foreground",
+                !open && long && "line-clamp-2",
+              )}
+            >
               {tip}
             </p>
           </div>

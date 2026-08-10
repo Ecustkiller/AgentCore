@@ -552,21 +552,53 @@ class TurnJournalRepository:
         return str(row[0]) if row and row[0] else None
 
     async def find_latest_multi_agent_execution(
-        self, *, conversation_id: str, exclude_turn_id: str | None = None
+        self,
+        *,
+        conversation_id: str,
+        exclude_turn_id: str | None = None,
+        prefer_turn_id: str | None = None,
+        prefer_only: bool = False,
     ) -> str | None:
         """Newest team-graph ``execution_id`` in ``conversation_id`` (跨回合同图追加 latest 解析).
 
         Candidates are ``run_plan`` facts with ``plan_type='multi_agent'`` — debate graphs
         (``plan_type='debate'``) are not appendable and are excluded here. Cross-turn growth
         ``run_plan`` facts divert to the HOST turn's journal, so the newest matching row
-        already points at the graph as last grown. ``exclude_turn_id`` drops the current
-        turn (same-turn merges never need ``append_to_execution_id``).
+        already points at the graph as last grown.
+
+        ``prefer_turn_id``（本回合图优先）：若该 turn 上已有 multi_agent 图，返回其最新
+        ``execution_id``。``prefer_only=True`` 时未命中本回合则返回 ``None``（不回落对话级）；
+        默认未命中再回落对话级最新。``exclude_turn_id`` 仅用于 prompt 回显等「刻意不看本回合」
+        场景——append ``latest`` 解析应传 ``prefer_turn_id``，勿排除本回合。
         """
         from sqlalchemy import text
 
         cid = (conversation_id or "").strip()
         if not cid:
             return None
+        prefer = (prefer_turn_id or "").strip()
+        if prefer:
+            preferred = await self._session.execute(
+                text(
+                    """
+                    SELECT payload->>'execution_id'
+                    FROM turn_journal
+                    WHERE conversation_id = :cid
+                      AND turn_id = :pref
+                      AND kind = 'run_plan'
+                      AND payload->>'plan_type' = 'multi_agent'
+                      AND COALESCE(payload->>'execution_id', '') != ''
+                    ORDER BY created_at DESC, seq DESC
+                    LIMIT 1
+                    """
+                ),
+                {"cid": cid, "pref": prefer},
+            )
+            pref_row = preferred.first()
+            if pref_row and pref_row[0]:
+                return str(pref_row[0])
+            if prefer_only:
+                return None
         exclude = (exclude_turn_id or "").strip()
         exclusion = "AND turn_id != :ex" if exclude else ""
         result = await self._session.execute(

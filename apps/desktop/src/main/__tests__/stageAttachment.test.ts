@@ -41,6 +41,7 @@ import {
   finalizeStagedAttachment,
   isCloudPlaceholder,
   stageFromAbsPath,
+  stageFromBytes,
 } from "../fs/stageAttachment";
 
 describe("stageAttachment", () => {
@@ -300,5 +301,78 @@ describe("stageAttachment", () => {
     if (res.ok) return;
     expect(res.reason).toContain("未同步");
     expect(res.code).toBe("busy");
+  });
+
+  it("stageFromBytes stages a clipboard PNG into attach-staging", async () => {
+    // Minimal PNG header + IHDR (not a valid full PNG; enough for binary image path).
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3,
+    ]);
+    const res = await stageFromBytes("image.png", png, undefined, "image/png");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.binary).toBe(true);
+    expect(res.data.name).toBe("image.png");
+    expect(res.data.stagingId).toBeTruthy();
+    expect(res.data.sizeBytes).toBe(png.byteLength);
+
+    const stagingId = res.data.stagingId;
+    if (!stagingId) return;
+    const consumed = await consumeStagedBytes(stagingId);
+    expect(consumed.ok).toBe(true);
+    if (!consumed.ok) return;
+    expect(Array.from(consumed.data.data)).toEqual(Array.from(png));
+  });
+
+  it("stageFromBytes writes into workspace attachments when dest is set", async () => {
+    const destDir = await mkdtemp(join(tmpdir(), "stage-bytes-dest-"));
+    const destRoot: StoredRoot = {
+      id: "bytes-dest",
+      name: "bytes-dest",
+      absPath: destDir,
+    };
+    setRoot(destRoot);
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const res = await stageFromBytes(
+      "clip.png",
+      bytes,
+      { rootId: "bytes-dest" },
+      "image/png",
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.workspacePath).toBe("attachments/clip.png");
+    const onDisk = await readFile(join(destDir, "attachments", "clip.png"));
+    expect(Array.from(onDisk)).toEqual([1, 2, 3, 4]);
+    await rm(destDir, { recursive: true, force: true });
+  });
+
+  it("stageFromBytes appends extension from mime when name has none", async () => {
+    const bytes = new Uint8Array([9, 9, 9]);
+    const res = await stageFromBytes(
+      "attachment",
+      bytes,
+      undefined,
+      "image/png",
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.name).toBe("attachment.png");
+    expect(res.data.binary).toBe(true);
+  });
+
+  it("stageFromBytes rejects oversize payloads", async () => {
+    const bytes = new Uint8Array(ATTACH_MAX_BYTES + 1);
+    const res = await stageFromBytes("big.bin", bytes);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toContain("25MB");
+  });
+
+  it("stageFromBytes rejects empty payloads", async () => {
+    const res = await stageFromBytes("empty.png", new Uint8Array(0));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toContain("空");
   });
 });

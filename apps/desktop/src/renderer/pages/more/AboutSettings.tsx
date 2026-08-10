@@ -1,13 +1,18 @@
 import { BrandMark } from "@/components/brand/BrandMark";
 import { Button } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
-import { hasAutoUpdater } from "@/lib/capabilities";
+import { hasAutoUpdater, isWebRuntime } from "@/lib/capabilities";
 import {
   clientGitSha,
   clientVersion,
   formatGitSha,
 } from "@/lib/clientBuildInfo";
 import { formatDownloadProgress } from "@/lib/format";
+import {
+  clientChannelLabelZh,
+  otherChannelDownloadLabel,
+  otherChannelDownloadUrl,
+} from "@/lib/releaseChannel";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { type VersionInfo, fetchVersion } from "@/services/system";
 import { useUIStore } from "@/stores/ui";
@@ -79,18 +84,13 @@ function UpdateSection() {
       <p className="mt-1 text-xs text-muted-foreground">
         {updateStatusText(status)}
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {status.phase === "downloaded" ? (
-          <Button size="md" onClick={() => void install()}>
-            重启安装
-          </Button>
-        ) : null}
-        {status.phase === "available" ? (
-          <Button size="md" onClick={() => openUpdateDialog()}>
-            查看更新
-          </Button>
-        ) : null}
-        {status.phase === "downloading" ? (
+      {status.phase === "downloading" ? (
+        <div className="mt-3 space-y-2">
+          <progress
+            className="h-2 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
+            value={Math.min(100, status.percent)}
+            max={100}
+          />
           <Button
             variant="neutral"
             size="md"
@@ -99,37 +99,48 @@ function UpdateSection() {
           >
             下载中…
           </Button>
-        ) : null}
-        {status.phase !== "downloaded" &&
-        status.phase !== "available" &&
-        status.phase !== "downloading" ? (
-          <Button
-            variant="neutral"
-            size="md"
-            disabled={busy || status.phase === "unsupported"}
-            icon={
-              busy ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <RefreshCw size={14} />
-              )
-            }
-            onClick={() => void check()}
-          >
-            检查更新
-          </Button>
-        ) : null}
-        {status.phase === "available" ? (
-          <Button
-            variant="neutral"
-            size="md"
-            icon={<RefreshCw size={14} />}
-            onClick={() => void check()}
-          >
-            重新检查
-          </Button>
-        ) : null}
-      </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {status.phase === "downloaded" ? (
+            <Button size="md" onClick={() => void install()}>
+              重启安装
+            </Button>
+          ) : null}
+          {status.phase === "available" ? (
+            <Button size="md" onClick={() => openUpdateDialog()}>
+              查看更新
+            </Button>
+          ) : null}
+          {status.phase !== "downloaded" && status.phase !== "available" ? (
+            <Button
+              variant="neutral"
+              size="md"
+              disabled={busy || status.phase === "unsupported"}
+              icon={
+                busy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={14} />
+                )
+              }
+              onClick={() => void check()}
+            >
+              检查更新
+            </Button>
+          ) : null}
+          {status.phase === "available" ? (
+            <Button
+              variant="neutral"
+              size="md"
+              icon={<RefreshCw size={14} />}
+              onClick={() => void check()}
+            >
+              重新检查
+            </Button>
+          ) : null}
+        </div>
+      )}
     </section>
   );
 }
@@ -216,6 +227,10 @@ export function AboutSettings() {
               value={formatGitSha(clientGitSha())}
               mono={clientGitSha() !== "unknown"}
             />
+            {/* 桌面双轨：构建期通道；web 无并列安装身份，不展示。 */}
+            {!isWebRuntime() ? (
+              <Row label="更新通道" value={clientChannelLabelZh()} />
+            ) : null}
             <Row label="API 版本" value={info.version} />
             <Row
               label="API 构建"
@@ -229,6 +244,20 @@ export function AboutSettings() {
           </>
         ) : null}
       </div>
+
+      {/* 桌面：链到另一轨官网下载页（外链；不做同装热切 feed）。 */}
+      {!isWebRuntime() ? (
+        <p className="mt-3 text-sm">
+          <a
+            href={otherChannelDownloadUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline-offset-2 hover:underline"
+          >
+            {otherChannelDownloadLabel()}
+          </a>
+        </p>
+      ) : null}
 
       {/* 自动更新仅桌面外壳；web 客户端随刷新拿到新版，故 web 不挂「软件更新」。 */}
       {hasAutoUpdater() && <UpdateSection />}

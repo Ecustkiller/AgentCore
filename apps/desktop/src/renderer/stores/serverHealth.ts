@@ -1,3 +1,4 @@
+import { logEvent } from "@/lib/log";
 import { create } from "zustand";
 
 /**
@@ -10,8 +11,29 @@ import { create } from "zustand";
  * - `checking`: the first probe hasn't resolved yet (startup) — never flashed as
  *   "offline" so a healthy session doesn't blink red on load.
  * - `online` / `offline`: the last probe's verdict.
+ *
+ * Edge-only product logs (`server_health.offline` / `server_health.online`) land in
+ * `desktop.jsonl` so dogfood dumps can explain the composer's disconnect banner.
+ * Soft probe misses before the failure threshold log `server_health.probe_failed`
+ * (see `services/serverHealth`); mid-session API blips that `/readyz` rejects as
+ * outages log `server_health.api_outage_ignored`. First `checking → online` is
+ * silent (cold-start noise); only offline edges and recoveries are recorded on
+ * the store itself.
  */
+
 export type ServerConn = "checking" | "online" | "offline";
+
+/** Why the store entered offline — for desktop.jsonl attribution. */
+export type ServerHealthOfflineSource =
+  | "heartbeat"
+  | "api_outage"
+  | "browser_offline"
+  | "bootstrap";
+
+/** Optional fields folded into the offline-edge log (heartbeat hysteresis). */
+export type ServerHealthOfflineMeta = {
+  consecutive_failures?: number;
+};
 
 interface ServerHealthState {
   status: ServerConn;
@@ -21,8 +43,14 @@ interface ServerHealthState {
   reason: string | null;
   /** True briefly right after recovering, so the chip can flash "已恢复连接". */
   justRecovered: boolean;
+  /** Epoch ms when we last entered offline (for recovery duration); else null. */
+  offlineSince: number | null;
   markOnline: () => void;
-  markOffline: (reason: string | null) => void;
+  markOffline: (
+    reason: string | null,
+    source: ServerHealthOfflineSource,
+    meta?: ServerHealthOfflineMeta,
+  ) => void;
   clearRecovered: () => void;
 }
 
@@ -31,14 +59,52 @@ export const useServerHealthStore = create<ServerHealthState>((set, get) => ({
   lastOkAt: null,
   reason: null,
   justRecovered: false,
-  markOnline: () =>
+  offlineSince: null,
+  markOnline: () => {
+    const prev = get();
+    const recovered = prev.status === "offline";
+    const sinceOfflineMs =
+      recovered && prev.offlineSince != null
+        ? Date.now() - prev.offlineSince
+        : null;
     set({
       status: "online",
       lastOkAt: Date.now(),
       reason: null,
+      offlineSince: null,
       // Only celebrate a recovery if we were actually offline before.
-      justRecovered: get().status === "offline",
-    }),
-  markOffline: (reason) => set({ status: "offline", reason }),
+      justRecovered: recovered,
+    });
+    if (recovered) {
+      logEvent("info", "server_health.online", {
+        since_offline_ms: sinceOfflineMs,
+        last_ok_at: prev.lastOkAt,
+      });
+    }
+  },
+  markOffline: (reason, source, meta) => {
+    const prev = get();
+    if (prev.status === "offline") {
+      // Already offline — keep first edge; refresh reason if the probe refined it.
+      if (reason !== prev.reason) set({ reason });
+      return;
+    }
+    const offlineSince = Date.now();
+    set({
+      status: "offline",
+      reason,
+      offlineSince,
+      justRecovered: false,
+    });
+    logEvent("warn", "server_health.offline", {
+      source,
+      reason,
+      last_ok_at: prev.lastOkAt,
+      from: prev.status,
+      ...(meta?.consecutive_failures != null
+        ? { consecutive_failures: meta.consecutive_failures }
+        : {}),
+    });
+  },
   clearRecovered: () => set({ justRecovered: false }),
 }));

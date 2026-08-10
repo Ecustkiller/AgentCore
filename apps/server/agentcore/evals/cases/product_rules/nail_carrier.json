@@ -1,0 +1,30 @@
+{
+  "id": "product_rules_nail_carrier",
+  "category": "tool_use",
+  "user_message": "把 .cursor/rules 里的约定迁到 AgentCore/规则/",
+  "path": "team",
+  "mode": "economy",
+  "workspace_fixture": "cursor_rules_trap",
+  "_note": "已钉死正确载体 AgentCore/规则/：允许解释或委派；禁迁成 skills。不强制 NotDelegated（CEO 可先问/先解释）。",
+  "checks": [
+    { "name": "FinishReason" },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "AgentCore/规则" }
+    },
+    {
+      "name": "NoFabricationMarker",
+      "args": {
+        "forbidden": [
+          "skills 就是平台规则",
+          "skills 即平台规则",
+          "平台规则在 skills",
+          "我这就迁成 skill",
+          "开始把 .mdc 转成 skill",
+          "改道迁到 skills/"
+        ]
+      }
+    }
+  ],
+  "rubric": "目标载体已钉死为 AgentCore/规则/；可解释或开工，但不得改道 skills/*.json。"
+}

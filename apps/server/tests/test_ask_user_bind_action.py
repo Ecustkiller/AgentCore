@@ -76,7 +76,18 @@ def test_normalize_options_passthrough_well_known_and_target_name():
                 "well_known": "desktop",
                 "target_name": r"a\b",
             },
-        ]
+            {
+                "label": "绝对 path",
+                "action": "grant_organize_folder",
+                "path": r"D:\新建文件夹\资料",
+            },
+            {
+                "label": "相对 path 丢",
+                "action": "grant_organize_folder",
+                "path": "relative/folder",
+            },
+        ],
+        max_options=10,
     )
     assert out[0]["well_known"] == "desktop"
     assert out[0]["target_name"] == "咨询报告"
@@ -89,6 +100,8 @@ def test_normalize_options_passthrough_well_known_and_target_name():
     assert "well_known" not in out[4]
     assert "target_name" not in out[4]
     assert "target_name" not in out[5]
+    assert out[6]["path"] == r"D:\新建文件夹\资料"
+    assert "path" not in out[7]
 
 
 def test_normalize_questions_passthrough_to_checkpoint_shape():
@@ -399,19 +412,26 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     ]
     assert props2["well_known"]["enum"] == ["desktop", "downloads", "documents"]
     assert "target_name" in props2
-    assert "open_local_project" in advertised.schema.description
-    assert "register_local_project" in advertised.schema.description
-    assert "bind_local_folder" in advertised.schema.description
+    assert "path" in props2
+    assert "open_local_project" in advertised.schema.description or "open/register/bind" in advertised.schema.description
+    assert "register_local_project" in advertised.schema.description or "open/register/bind" in advertised.schema.description
+    assert "bind_local_folder" in advertised.schema.description or "bind_local_*" in advertised.schema.description
     assert "grant_readonly_folder" in advertised.schema.description
     assert "grant_organize_folder" in advertised.schema.description
     assert "external_mount_readonly" in advertised.schema.description
-    assert "禁止" in advertised.schema.description
+    assert "禁止" in advertised.schema.description  # grant_readonly 仍禁新发
+    assert "改导" not in advertised.schema.description
+    # 允许多 organize choice：口头同意立刻发卡；歧义 2～3
+    assert "口头同意" in advertised.schema.description or "2～3" in advertised.schema.description
+    assert "2～3" in advertised.schema.description or "2-3" in advertised.schema.description
     action_desc = props2["action"]["description"]
-    assert "open_local_project" in action_desc
-    assert "register_local_project" in action_desc
-    assert "本地项目" in action_desc
-    assert "bind_local_folder" in action_desc
+    assert "open_local_project" in action_desc or "open/register/bind" in action_desc
+    assert "register_local_project" in action_desc or "open/register/bind" in action_desc
+    assert "本机传统" in action_desc or "非默认" in action_desc
+    assert "改导" not in action_desc
+    assert "bind_local_folder" in action_desc or "open/register/bind" in action_desc
     assert "external_mount_readonly" in action_desc or "禁止" in action_desc
+    assert "2～3" in action_desc or "口头同意" in action_desc
     assert "选择器兜底" not in props2["well_known"]["description"]
     assert "picker" not in props2["target_name"]["description"].lower()
     # Desktop advertise must stay compact (dogfood ~3796 before slim); HOW → skill.
@@ -421,6 +441,6 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     plain_blob = plain.schema.description + json.dumps(
         plain.schema.parameters, ensure_ascii=False
     )
-    assert len(adv_blob) < 3300, f"desktop ask_user schema too fat: {len(adv_blob)}"
+    assert len(adv_blob) < 3600, f"desktop ask_user schema too fat: {len(adv_blob)}"
     assert len(plain_blob) < len(adv_blob)
     assert abs(len(plain_blob) - 2397) < 80  # non-desktop path must not inflate

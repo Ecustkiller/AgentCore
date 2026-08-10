@@ -275,14 +275,19 @@ def build_workspace_context(
             "区外目录：桌面在线时只读用工具 `external_mount_readonly`"
             "（path 和/或 well_known+target_name；静默、无决策卡）；"
             "整理用 ask_user 选项 `action=grant_organize_folder`（仍须确认）。"
+            "【口头同意闭环】用户已明确「可以整理 / 允许」→ 须立刻发带 "
+            "`grant_organize_folder` 的确认卡并履约；禁止空心「等待确认」/纯文本劝授权。"
             "成功后以 `external/<别名>/…` 访问（经桌面通道、仅本次对话、可撤销）。"
             "与工作区绑定正交——不必先改绑或打开本地项目。"
             "「看桌面/看本机某目录」只走 `external_mount_readonly`：直接调用，"
             "【禁止】为只读新发 `grant_readonly_folder` 卡；"
             "已点名常见目录+任务 → well_known（desktop/downloads/documents），"
             "已知子名带 target_name；禁止首轮文本题要文件名/绝对路径"
-            "（挂载后在 external/ 匹配，0/多歧义再问）；"
+            "（挂载后在 external/ 匹配；定位歧义 → 同一题 2～3 个 "
+            "`grant_organize_folder` choice，各带不同 well_known/target_name/path，"
+            "仍非系统选文件夹）；"
             "找不到 → 工具明确失败（不再弹系统选文件夹）；"
+            "【失败分型】对人区分「没找着」vs「定位到了但本机不让读」；"
             "只读挂过 ≠ 已授写，同目录升整理须再确认；"
             "禁止要用户手填绝对路径；禁止用 code_execute/terminal/host_shell "
             "探主机家目录找路径。"
@@ -290,30 +295,29 @@ def build_workspace_context(
         if is_local:
             desktop_line = (
                 "客户端通道：桌面端在线（本机执行通道可用）。"
-                "已绑定本地工程：「打开项目 / 跑起来看一下」=跑当前项目"
-                "（terminal 启服报 URL），勿再弹 open_local_project；"
-                "仅换目录/换工程根才 `action=open_local_project`。"
+                "本机传统/已绑工程会话：「打开项目 / 跑起来看一下」=跑**当前**项目"
+                "（terminal 启服报 URL），勿再弹 open_local_project 建新本地工作区；"
+                "换工程优先引导 Composer「导入到云 / 连接 Git」或云 `create_project`；"
+                "本机传统换开合法非默认（≠离线）。"
             )
         else:
             desktop_line = (
                 "客户端通道：桌面端在线——本机相关出路按意图分流（立即发 ask_user 卡，"
                 "勿用纯文本解释或询问；完成前不要委派本机任务）："
-                "① 用户要把本机目录当【本地项目】打开（仓库/工程根）→ "
-                "`action=open_local_project`（新建会话挂 Folder，空 subpath；"
-                "禁止改写本会话 folder_id；禁止用 bind 冒充打开项目）；"
-                "①b 同指挥面登记本机目录为项目（先建后派、留本对话）→ "
-                "`action=register_local_project`（禁新会话；禁止改写 folder_id；"
-                "勿用 open 冒充登记）；"
-                "② 本会话仅需本机执行环境（继续云端/裸聊 scratch）→ "
-                "`action=bind_local_folder`（绑 conversations/<id>，≠打开/登记项目）；"
-                "③ 看/分析本机某目录 → `external_mount_readonly`（只读静默；"
+                "① 【新产品路径·云协作推荐】要本机目录进工作区 → **优先**引导 Composer"
+                "「导入到云 / 连接 Git」或同指挥面云 `create_project` 后再派；"
+                "本机传统（合法非默认，≠离线）→ 可发 `open_local_project` / "
+                "`register_local_project` / `bind_local_folder`，勿当默认推荐、"
+                "勿与云平级主推；"
+                "② 看/分析本机某目录 → `external_mount_readonly`（只读静默；"
                 "【禁止】为只读新发 grant_readonly_folder）；整理 → "
-                "`grant_organize_folder`（与①②正交，勿改绑冒充）；"
-                "④ 「优化/改项目」≠默认开项目卡：仅当用户要打开本机工程根才开 "
-                "`open_local_project`；已有附件且用户收窄本轮范围（先这些/就这些）→ "
-                "先读材料与工作区已有产物动手，勿把开项目当开工前置；"
-                "「在哪工作」仅新建会话可选（快速对话=云端默认 / 本机草稿 / 项目），"
-                "勿引导用户去设置改模式。"
+                "`grant_organize_folder`（与①正交，勿改绑冒充；"
+                "口头同意须立刻发卡；歧义可 2～3 个具体文件夹候选）；"
+                "③ 「优化/改项目」≠默认开项目卡：已有附件且用户收窄本轮范围（先这些/就这些）→ "
+                "先读材料与工作区已有产物动手，勿把开项目/绑本地当开工前置；"
+                "「在哪工作」仅新建会话可选（云协作推荐：快速对话/云项目/导入·连 Git；"
+                "本机传统可选非默认），"
+                "勿引导用户去设置改模式、勿推销本机草稿当默认。"
             )
     else:
         # desktop_online=False covers missing header, unknown surface, and true
@@ -334,9 +338,11 @@ def build_workspace_context(
             "（可能仍在网页、或桌面未打开【本对话】、或状态栏通道未连），并复述固定步骤："
             "① 官网下载安装桌面端（若尚未）→ ② 在桌面客户端打开【本对话】→ "
             "③ 确认状态栏桌面回填通道已连接（host/local_open=已装配）→ "
-            "④ 用「打开本地项目」（要本机写根/工程根）或按意图 bind_local_folder / grant_*；"
+            "④ 用 Composer「导入到云 / 连接 Git」或云 `create_project`（云协作推荐），"
+            "或本机传统 open/register/bind（合法非默认，≠离线），"
+            "或按意图 grant_organize / external_mount_readonly；"
             "禁止臆造「设置→Folders / 侧栏授权页」等非产品真源入口路径——"
-            "只指真源入口名（「打开本地项目」等）与官网下载链。"
+            "只指真源入口名（Composer 导入·连 Git / 云新建 / 本机传统）与官网下载链。"
         )
         grant_line = (
             "区外目录授权仅桌面端可用；当前客户端无法履行。"
@@ -560,8 +566,9 @@ def build_workspace_context(
             )
             how_enable = (
                 "装配启用：云端路径需 gVisor/沙箱/netns 健康；"
-                "桌面端也可 `bind_local_folder` / `open_local_project` 后走本机 Bridge"
-                "（或过桥会话在云侧沙箱健康时装配 sandbox）。"
+                "本机传统/已绑会话可走本机 Bridge"
+                "（或过桥会话在云侧沙箱健康时装配 sandbox）；"
+                "云协作仍推荐；本机传统 open/bind 合法非默认（≠离线）。"
             )
         else:
             browser_base = (
@@ -628,10 +635,11 @@ def build_workspace_context(
         "开发双仓≠open/register/bind/`external_mount_readonly` 冒充"
         "（挂载=区外只读，正交；写仍派工换桌）；"
         "有出生未点名=默认桌，无出生未点名禁默写 scratch；"
-        "先建：云 `create_project`；本地 ask `register_local_project`（留本对话）；"
+        "先建：云 `create_project`（只建云）/ Composer「导入到云 / 连接 Git」（云协作推荐）；"
+        "本机传统 `open_local_project` / `register_local_project` / `bind_local_folder` "
+        "合法非默认（≠离线），勿与云平级主推；"
         "ask齐点名新建→先建齐再同次派；拒后禁塌缩→consult skill；"
-        "`open_local_project`=新会话当出生，勿冒充先建后干；"
-        "多 local 同回合可并行；协作图不改。"
+        "多本机传统/local 同回合可并行；协作图不改。"
     )
 
     body_lines = [

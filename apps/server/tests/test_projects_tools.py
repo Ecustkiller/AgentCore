@@ -298,7 +298,7 @@ async def test_list_projects_empty(monkeypatch: pytest.MonkeyPatch):
     assert "没有项目" in result.output
     assert "create_project" in result.output
     # Empty roster must not default-nudge open_local_project as the create path.
-    assert "勿默认催 open_local_project" in result.output or "create_project" in result.output
+    assert "勿默认催 open_local_project" in result.output or "导入到云" in result.output
     assert "target_folder_id" in result.output
     assert "external_mount_readonly" in result.output
 
@@ -328,11 +328,13 @@ async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     assert result.success
     assert result.display["status"] == "not_found"
     assert "ask_user" in result.output or "list_projects" in result.output
-    assert "create_project" in result.output  # zero-hit → 登记/create
+    assert "create_project" in result.output  # zero-hit → 云新建
     assert "禁止静默猜" in result.output
     # Must not default-urge open_local_project as the create path (§4.9 ③A).
     assert "新建本机项目才用 open_local_project" not in result.output
-    assert "勿用 open_local_project" in result.output or "open_local_project" in result.output
+    assert "open_local_project" in result.output or "导入到云" in result.output
+    assert "合法非默认" in result.output or "非默认" in result.output
+    assert "本机传统" in result.output or "导入到云" in result.output
 
 
 async def test_resolve_ambiguous(monkeypatch: pytest.MonkeyPatch):

@@ -38,7 +38,7 @@ Dogfood 入槽（出包后）：仓库根 `python evals/dogfood/fill_from_pack.p
 
 生产：本地无命中且像线上 → `pnpm sync:logs`（Node；读 `DEPLOY_SSH_*`；默认瘦身跳过 `turn_journal`，深挖加 `--full`）后 `--export-dir ../../logs/prod-export`（可再 `--pack`）。勿再用 `AGENTCORE_SSH` / `$AGENTCORE_HOME/logs`（已退役）。
 
-**线上巡检**：父级拆桶 / 默认窗 / 审阅桶纪律 / **归因闸** / **状态两轴（代码态≠发布态）** / ④先纠发布态再归因再码核 → [`logs/reviews/README.md`](/logs/reviews/README.md)；开案/修码前先读 [`logs/reviews/STATUS.md`](/logs/reviews/STATUS.md)。
+**线上巡检**：父级拆桶 / 默认窗 / 审阅桶纪律 / **终稿实质审查** / **可优化栏** / **归因闸（仅挡需新修）** / **状态两轴（代码态≠发布态）** / ④四栏（先纠发布态再归因再码核） → [`logs/reviews/README.md`](/logs/reviews/README.md)；开案/修码前先读 [`logs/reviews/STATUS.md`](/logs/reviews/STATUS.md)。
 
 → 详解：[对话日志分析指南](/docs/05-平台与运维/对话日志分析指南.md)
 

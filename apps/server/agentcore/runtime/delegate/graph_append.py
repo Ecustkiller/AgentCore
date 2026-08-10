@@ -145,31 +145,54 @@ async def resolve_latest_appendable_execution(
     *,
     conversation_id: str,
     exclude_message_id: str | None = None,
+    prefer_message_id: str | None = None,
 ) -> str | None:
-    """Resolve ``append_to_execution_id="latest"``: the conversation's newest appendable graph.
+    """Resolve ``append_to_execution_id="latest"``: newest appendable graph (本回合优先).
 
     可追加 = 本对话内、``plan_type='multi_agent'`` 的团队协作图（辩论图不可追加）；宿主消息
-    可解析、plan_snapshot 可合并等深校验仍由既有精确-id 追加路径把关。``exclude_message_id``
-    排除当前回合（同回合合并无需本参数）。``None`` = 无候选或查询失败——调用方必须把失败
-    显式回给 CEO，禁止静默新建图。
+    可解析、plan_snapshot 可合并等深校验仍由既有精确-id 追加路径把关。
+
+    ``prefer_message_id``：该回合上已有 multi_agent 图则用之（同 turn 第一波收口后再
+    ``latest`` 续派不得静默挂到跨 message 旧宿主）。``exclude_message_id`` 仅 prompt
+    回显等场景排除本回合——delegate append 路径应传 prefer、勿 exclude。
+    ``None`` = 无候选或查询失败——调用方必须把失败显式回给 CEO，禁止静默新建图。
     """
     cid = (conversation_id or "").strip()
     if not cid:
         return None
+    prefer = (prefer_message_id or "").strip() or None
+    exclude = (exclude_message_id or "").strip() or None
     try:
         from agentcore.db.base import async_session_factory
         from agentcore.db.repositories import TurnJournalRepository
 
         async with async_session_factory() as session:
             repo = TurnJournalRepository(session)
-            resolved = await repo.find_latest_multi_agent_execution(
-                conversation_id=cid,
-                exclude_turn_id=(exclude_message_id or "").strip() or None,
-            )
+            resolved: str | None = None
+            via = "none"
+            if prefer:
+                preferred = await repo.find_latest_multi_agent_execution(
+                    conversation_id=cid,
+                    prefer_turn_id=prefer,
+                    prefer_only=True,
+                )
+                if preferred:
+                    resolved = preferred
+                    via = "prefer_turn"
+            if not resolved:
+                resolved = await repo.find_latest_multi_agent_execution(
+                    conversation_id=cid,
+                    exclude_turn_id=exclude,
+                )
+                if resolved:
+                    via = "conversation_excluded" if exclude else "conversation"
         logger.info(
             "delegate.graph_append_latest",
             conversation_id=cid,
             resolved=resolved,
+            prefer_message_id=prefer,
+            exclude_message_id=exclude,
+            via=via,
         )
         return resolved
     except Exception as exc:  # noqa: BLE001 — resolve miss → None；tool 层自动降级新建
@@ -177,6 +200,9 @@ async def resolve_latest_appendable_execution(
             "delegate.graph_append_latest",
             conversation_id=cid,
             resolved=None,
+            prefer_message_id=prefer,
+            exclude_message_id=exclude,
+            via="error",
             error=str(exc),
         )
         return None

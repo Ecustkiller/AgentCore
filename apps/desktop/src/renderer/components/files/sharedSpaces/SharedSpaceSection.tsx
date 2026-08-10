@@ -424,7 +424,7 @@ export function ProjectsRailHeader({
                     新建
                   </Button>
                   <span className="px-1 text-xs font-medium text-foreground">
-                    新建项目
+                    新建云项目
                   </span>
                 </div>
                 <CreateFolderCascadePanel onClose={closePick} />
@@ -442,7 +442,7 @@ export function ProjectsRailHeader({
                     />
                   }
                 >
-                  <span className="flex-1 truncate">新建项目…</span>
+                  <span className="flex-1 truncate">新建云项目</span>
                 </Button>
                 <Button
                   variant="ghost"

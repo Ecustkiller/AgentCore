@@ -25,9 +25,14 @@ const MIN_HEIGHT = 240;
 const DEFAULT_OFFSET = 48;
 /**
  * 与主进程 `app.setAppUserModelId` 同源——Windows 任务栏「单图标分组 + 多预览」。
- * 否决每真窗独立 AppUserModelID / 独立钉选图标。
+ * 否决每真窗独立 AppUserModelID / 独立钉选图标。构建期按通道注入（beta 与 stable 隔离）。
  */
-const WINDOWS_APP_USER_MODEL_ID = "com.agentcore.desktop";
+declare const __WINDOWS_APP_USER_MODEL_ID__: string | undefined;
+const WINDOWS_APP_USER_MODEL_ID =
+  typeof __WINDOWS_APP_USER_MODEL_ID__ !== "undefined" &&
+  __WINDOWS_APP_USER_MODEL_ID__
+    ? __WINDOWS_APP_USER_MODEL_ID__
+    : "com.agentcore.desktop";
 
 export type FloatWindowDeps = {
   /** 主窗（收 closed 事件）；可暂为空。 */

@@ -10,6 +10,7 @@ import {
   RELEASE_NOTES_URL,
   WIN_INSTALLER_FILENAME,
   WIN_INSTALLER_URL,
+  buildTimeBetaArtifacts,
 } from "@/lib/download";
 import {
   DESKTOP_RELEASE_API,
@@ -28,6 +29,7 @@ function buildTimeFallback(): ReleaseArtifacts {
     androidUrl: ANDROID_APK_URL,
     androidFilename: ANDROID_APK_FILENAME,
     androidVersion: ANDROID_VERSION,
+    beta: buildTimeBetaArtifacts(),
   };
 }
 
@@ -53,6 +55,10 @@ export function useDesktopRelease() {
             androidUrl: data.androidUrl ?? "",
             androidFilename: data.androidFilename ?? "",
             androidVersion: data.androidVersion ?? "",
+            beta:
+              data.beta && data.beta.version && data.beta.winUrl
+                ? data.beta
+                : null,
           });
         }
       } catch {

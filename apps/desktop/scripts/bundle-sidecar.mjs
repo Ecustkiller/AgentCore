@@ -16,7 +16,7 @@
  * 器上不存在」的重定位之痛。
  *
  * 产物：`apps/desktop/resources/sidecar/{python, site-packages}`（被 .gitignore 忽略），
- * 由 electron-builder `extraResources` 拷进安装包（见 electron-builder.yml）。
+ * 由 electron-builder `extraResources` 拷进安装包（见 electron-builder.config.mjs）。
  *
  * **平台约束**：原生 wheel / 解释器无法交叉编译，故本脚本只为**当前运行平台**构建；三平台产物
  * 由各自的 CI runner 分别跑 `pnpm build:<os>`（package.json 已把本脚本前置）。

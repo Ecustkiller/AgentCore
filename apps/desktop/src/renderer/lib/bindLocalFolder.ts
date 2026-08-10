@@ -142,7 +142,7 @@ function mapAddRootFailure(
 /**
  * OS folder picker → authorize root → bind conversation **scratch** workspace
  * (``conversations/<id>``) for local execution. Not 「打开项目」—
- * see {@link pickAndOpenLocalProject} for Folder + new conversation.
+ * Ask / 产品入口已改导；本函数仅遗留调用面（若仍触达）。
  * Returns `cancelled` when the user dismisses the picker (caller must not resolve).
  */
 export async function pickAndBindLocalFolder(

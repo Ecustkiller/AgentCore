@@ -6,6 +6,12 @@ import {
   ANDROID_APK_FILENAME,
   ANDROID_APK_URL,
   ANDROID_VERSION,
+  BETA_DESKTOP_VERSION,
+  BETA_MAC_DMG_FILENAME,
+  BETA_MAC_DMG_URL,
+  BETA_RELEASE_NOTES_URL,
+  BETA_WIN_INSTALLER_FILENAME,
+  BETA_WIN_INSTALLER_URL,
   DESKTOP_VERSION,
   MAC_DMG_FILENAME,
   MAC_DMG_URL,
@@ -13,11 +19,18 @@ import {
   WIN_INSTALLER_FILENAME,
   WIN_INSTALLER_URL,
 } from "./download.generated";
+import type { DesktopChannelArtifacts } from "./release";
 
 export {
   ANDROID_APK_FILENAME,
   ANDROID_APK_URL,
   ANDROID_VERSION,
+  BETA_DESKTOP_VERSION,
+  BETA_MAC_DMG_FILENAME,
+  BETA_MAC_DMG_URL,
+  BETA_RELEASE_NOTES_URL,
+  BETA_WIN_INSTALLER_FILENAME,
+  BETA_WIN_INSTALLER_URL,
   DESKTOP_VERSION,
   MAC_DMG_FILENAME,
   MAC_DMG_URL,
@@ -140,6 +153,19 @@ export const ANDROID_INSTALL_STEPS = [
 ];
 
 export const DOWNLOAD_PAGE_PATH = "/download" as const;
+
+/** 构建时 beta 回退（无版本则 null）。 */
+export function buildTimeBetaArtifacts(): DesktopChannelArtifacts | null {
+  if (!BETA_DESKTOP_VERSION || !BETA_WIN_INSTALLER_URL) return null;
+  return {
+    version: BETA_DESKTOP_VERSION,
+    releaseNotesUrl: BETA_RELEASE_NOTES_URL,
+    winUrl: BETA_WIN_INSTALLER_URL,
+    winFilename: BETA_WIN_INSTALLER_FILENAME,
+    macUrl: BETA_MAC_DMG_URL,
+    macFilename: BETA_MAC_DMG_FILENAME,
+  };
+}
 
 /** 手机端 web SPA（Cloudflare Pages · deploy-mobile-web.yml） */
 export const MOBILE_WEB_URL = "https://m.fashitianxia.xyz" as const;

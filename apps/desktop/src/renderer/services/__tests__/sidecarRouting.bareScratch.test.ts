@@ -176,4 +176,26 @@ describe("resolveConversationLocalTarget (裸聊隔离)", () => {
     const target = await resolveConversationLocalTarget("c1");
     expect(target).toBeNull();
   });
+
+  it("§7.2 mode=cloud folder → null（无 sidecar / 无本机 target）", async () => {
+    getConvs.mockReturnValue([
+      {
+        id: "c1",
+        title: "t",
+        folderId: "f-cloud",
+        localContainerRootId: "container",
+      },
+    ]);
+    getFolds.mockReturnValue([
+      {
+        id: "f-cloud",
+        name: "Cloud",
+        mode: "cloud",
+        localRootId: null,
+        localSubpath: null,
+      },
+    ]);
+    const target = await resolveConversationLocalTarget("c1");
+    expect(target).toBeNull();
+  });
 });

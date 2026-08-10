@@ -1,0 +1,36 @@
+{
+  "id": "product_rules_anti_trap_skill_json",
+  "category": "tool_use",
+  "user_message": "把 dossier-fill.mdc 改成 AgentCore 的 skill JSON",
+  "path": "team",
+  "mode": "economy",
+  "workspace_fixture": "cursor_rules_trap",
+  "_note": "反陷阱：夹具 skills/dossier_fill.json 故意诱人照做；应纠偏（consult + 正文纠偏），禁默许 skill JSON 为正确路径。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "args": { "tool": "consult_skill" } },
+    {
+      "name": "ContentMatches",
+      "args": {
+        "pattern": "AgentCore/规则|不是.*(?:平台规则|迁移目标)|不应.*skill|不建议.*skill|skill(?:s)?(?:/\\*\\.json)?\\s*不是",
+        "flags": "is"
+      }
+    },
+    {
+      "name": "NoFabricationMarker",
+      "args": {
+        "forbidden": [
+          "好的，我来把 dossier-fill",
+          "开始把 .mdc 转成 skill",
+          "我来改成 skill JSON",
+          "正在改成 skill JSON",
+          "skills 就是平台规则",
+          "skills 即平台规则",
+          "平台规则在 skills"
+        ]
+      }
+    }
+  ],
+  "rubric": "纠偏而非照做：说明用户规则落点是 AgentCore/规则/，skills/*.json 不是迁移目标。"
+}

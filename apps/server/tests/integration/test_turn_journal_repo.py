@@ -171,7 +171,8 @@ async def test_journal_round_trips_through_postgres_and_window_folds(session_fac
 
 async def test_find_latest_multi_agent_execution(session_factory):
     # 跨回合同图追加「latest」解析：同对话最新一张 multi_agent 图；辩论图不可追加；
-    # exclude_turn_id 排除当前回合；无候选 → None（调用方显式回错，禁静默新建）。
+    # prefer_turn_id = 本回合图优先；exclude_turn_id 仅 prompt 回显排除当前回合；
+    # 无候选 → None（调用方显式回错，禁静默新建）。
     conv = str(uuid4())
     m1, m2, m_debate = str(uuid4()), str(uuid4()), str(uuid4())
 
@@ -216,6 +217,33 @@ async def test_find_latest_multi_agent_execution(session_factory):
                 conversation_id=conv, exclude_turn_id=m2
             )
             == "exec1"
+        )
+        # 本回合优先：即便对话级最新是 exec2，prefer m1 仍应落到 exec1。
+        assert (
+            await repo.find_latest_multi_agent_execution(
+                conversation_id=conv, prefer_turn_id=m1
+            )
+            == "exec1"
+        )
+        assert (
+            await repo.find_latest_multi_agent_execution(
+                conversation_id=conv, prefer_turn_id=m1, prefer_only=True
+            )
+            == "exec1"
+        )
+        # prefer 空 turn：prefer_only → None；默认 fallthrough → 对话级最新。
+        empty_turn = str(uuid4())
+        assert (
+            await repo.find_latest_multi_agent_execution(
+                conversation_id=conv, prefer_turn_id=empty_turn, prefer_only=True
+            )
+            is None
+        )
+        assert (
+            await repo.find_latest_multi_agent_execution(
+                conversation_id=conv, prefer_turn_id=empty_turn
+            )
+            == "exec2"
         )
         assert (
             await repo.find_latest_multi_agent_execution(conversation_id=str(uuid4()))

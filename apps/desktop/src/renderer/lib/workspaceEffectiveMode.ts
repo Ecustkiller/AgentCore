@@ -1,3 +1,4 @@
+import { LOCAL_TRADITIONAL_LABEL } from "@/lib/conversationWorkspaceMode";
 import type { WorkspaceBinding } from "@/services/workspaceBinding";
 import { isBoundRootMissing } from "@/services/workspaceBinding";
 import type { FsRoot } from "@shared/ipc-contract";
@@ -76,8 +77,8 @@ export function resolveEffectiveWorkspace(opts: {
 }
 
 /**
- * Chip / mode-bar label（可见短标；「· 本地」= 工作区文件夹绑定，≠ 执行引擎）:
- * - project local: 「项目名 · 本地」
+ * Chip / mode-bar label（可见短标；「· 本机传统」= 工作区文件夹绑定，≠ 执行引擎）:
+ * - project local: 「项目名 · 本机传统」
  * - project cloud: 「项目名 · 云端对话」
  * - bare local: 「本机草稿」
  * - bare cloud（已建会话）: 「云端对话」（草稿 chip 仍用「快速对话」）
@@ -85,7 +86,7 @@ export function resolveEffectiveWorkspace(opts: {
 export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
   if (ws.viaProject && ws.projectName) {
     return ws.isLocal
-      ? `${ws.projectName} · 本地`
+      ? `${ws.projectName} · ${LOCAL_TRADITIONAL_LABEL}`
       : `${ws.projectName} · 云端对话`;
   }
   if (ws.isLocal) return "本机草稿";
@@ -93,12 +94,14 @@ export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
 }
 
 /**
- * Bound workspace chip `title` / `aria-label`：与可见「· 本地」配套，说清是工作区绑定
+ * Bound workspace chip `title` / `aria-label`：与可见「· 本机传统」配套，说清是工作区绑定
  * （文件夹绑定，≠ 执行路径）。执行路径不在大众 Composer 产品面展示。
  */
 export function formatWorkspaceChipTitle(ws: EffectiveWorkspace): string {
   if (ws.viaProject) {
-    return ws.isLocal ? "工作区·本地（文件夹绑定，≠执行路径）" : "云端对话";
+    return ws.isLocal
+      ? `${LOCAL_TRADITIONAL_LABEL}（本机文件夹权威，≠离线）`
+      : "云端对话";
   }
   return ws.isLocal ? "本机草稿（文件落本机默认目录，不算项目）" : "云端对话";
 }

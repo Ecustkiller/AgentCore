@@ -1,4 +1,9 @@
-"""Redis connectivity probe for readiness checks."""
+"""Redis connectivity probe for ``/readyz`` body observation (soft dependency).
+
+Does **not** decide HTTP readiness: ``/readyz`` returns 503 only when
+PostgreSQL is down. Callers still surface ``redis`` in the probe body when
+``rate_limit_backend=redis``.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +21,9 @@ _REDIS_PROBE_TIMEOUT_S = 2.0
 async def redis_ready() -> bool:
     """Return whether Redis is reachable when ``rate_limit_backend=redis``.
 
-    When the backend is ``memory``, Redis is optional and this returns ``True``.
+    Soft dependency for ``/readyz``: a ``False`` result is observational only
+    (body field / ``redis.probe_failed`` log), not a 503 trigger. When the
+    backend is ``memory``, Redis is unused and this returns ``True``.
     Uses the process-wide client (``get_redis_client``) — does not open a new
     connection per probe.
     """

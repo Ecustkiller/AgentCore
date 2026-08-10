@@ -528,6 +528,155 @@ export async function stageFromAbsPath(
   return stageFromAbs(absPath, dest);
 }
 
+/** MIME → 扩展名（剪贴板图常无可靠 basename）。 */
+const MIME_EXT: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "image/bmp": ".bmp",
+  "image/avif": ".avif",
+  "image/svg+xml": ".svg",
+};
+
+function classifyBytes(
+  name: string,
+  bytes: Uint8Array,
+  mime?: string,
+): { binary: boolean; text: string; truncated: boolean } {
+  const ext = extname(name).toLowerCase();
+  if (IMAGE_MIME[ext] || mime?.toLowerCase().startsWith("image/")) {
+    return { binary: true, text: "", truncated: false };
+  }
+  const head = Buffer.from(
+    bytes.subarray(0, Math.min(bytes.byteLength, TEXT_PREVIEW_CAP + 1)),
+  );
+  if (sniffBinary(head)) {
+    return { binary: true, text: "", truncated: false };
+  }
+  const truncated = bytes.byteLength > TEXT_PREVIEW_CAP;
+  const text = head
+    .subarray(0, Math.min(head.length, TEXT_PREVIEW_CAP))
+    .toString("utf-8");
+  return { binary: false, text, truncated };
+}
+
+/**
+ * 无磁盘路径的 File（剪贴板截图 / JS 构造的 File）：按字节驻留。
+ * 与 stageFromAbs 同出口（有 dest → attachments/；否则 attach-staging）。
+ */
+export async function stageFromBytes(
+  name: string,
+  bytes: Uint8Array,
+  dest?: StageDest,
+  mime?: string,
+): Promise<FsResult<StagedAttachmentData>> {
+  if (!(bytes instanceof Uint8Array)) {
+    return { ok: false, reason: "无效的请求参数", code: "invalid" };
+  }
+  if (bytes.byteLength === 0) {
+    return { ok: false, reason: "文件内容为空", code: "invalid" };
+  }
+  if (bytes.byteLength > ATTACH_MAX_BYTES) {
+    return {
+      ok: false,
+      reason: `文件超过 ${Math.round(ATTACH_MAX_BYTES / (1024 * 1024))}MB 上限`,
+      code: "invalid",
+    };
+  }
+
+  let fileName = safeName(name);
+  if (!extname(fileName) && mime) {
+    const ext = MIME_EXT[mime.toLowerCase()];
+    if (ext) fileName = `${fileName}${ext}`;
+  }
+  const meta = classifyBytes(fileName, bytes, mime);
+  const sizeBytes = bytes.byteLength;
+
+  if (dest) {
+    const used = await listExistingAttachmentNames(
+      dest.rootId,
+      dest.subpath || "",
+    );
+    const deduped = dedupName(fileName, used);
+    const destRes = await resolveDestAbs(dest, deduped);
+    if (!destRes.ok) return destRes;
+    try {
+      await withTimeout(
+        fs.writeFile(destRes.data, bytes),
+        ATTACH_COPY_TIMEOUT_MS,
+        "WRITE",
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("TIMEOUT")) {
+        return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
+      }
+      return {
+        ok: false,
+        reason: "写入工作区失败",
+        code: "error",
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        name: deduped,
+        workspacePath: `${ATTACHMENTS_DIR}/${deduped}`,
+        binary: meta.binary,
+        text: meta.text,
+        truncated: meta.truncated,
+        sizeBytes,
+      },
+    };
+  }
+
+  const id = randomUUID();
+  const dir = join(stagingDir(), id);
+  await fs.mkdir(dir, { recursive: true });
+  const stagedAbs = join(dir, fileName);
+  try {
+    await withTimeout(
+      fs.writeFile(stagedAbs, bytes),
+      ATTACH_COPY_TIMEOUT_MS,
+      "WRITE",
+    );
+  } catch (e) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    const msg = e instanceof Error ? e.message : "";
+    if (msg.includes("TIMEOUT")) {
+      return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
+    }
+    return { ok: false, reason: "暂存附件失败", code: "error" };
+  }
+
+  staging.set(id, {
+    absPath: stagedAbs,
+    name: fileName,
+    binary: meta.binary,
+    text: meta.text,
+    truncated: meta.truncated,
+    sizeBytes,
+  });
+
+  return {
+    ok: true,
+    data: {
+      name: fileName,
+      stagingId: id,
+      binary: meta.binary,
+      text: meta.text,
+      truncated: meta.truncated,
+      sizeBytes,
+    },
+  };
+}
+
 /** 草稿/云端：把暂存文件写入本地工作区 attachments/。 */
 export async function finalizeStagedAttachment(
   stagingId: string,

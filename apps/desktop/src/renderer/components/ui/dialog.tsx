@@ -76,7 +76,9 @@ export function DialogContent({
 export function DialogHeader({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("flex flex-col gap-1 px-5 pb-3 pt-5", className)}
+      // Default pr-12 reserves room for DialogContent's top-right close;
+      // override via className (e.g. pr-5) when showClose={false}.
+      className={cn("flex flex-col gap-1 px-5 pb-3 pt-5 pr-12", className)}
       {...props}
     />
   );

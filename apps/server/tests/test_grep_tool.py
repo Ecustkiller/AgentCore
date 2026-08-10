@@ -128,6 +128,26 @@ async def test_grep_rejects_missing_path(tmp_path: Path):
     result = await GrepTool().execute({"pattern": "x", "path": "nope.txt"}, _ctx(tmp_path))
     assert result.success is False
     assert "不存在" in result.error
+    assert "父目录" in result.error or "上级目录也找不到" in result.error
+    assert "原样重试" in result.error
+
+
+async def test_grep_missing_dir_with_parent_gives_landmark(tmp_path: Path):
+    """grep 假目录但上级可列：同层样本纠偏（如 apps/server/src → agentcore）。"""
+    server = tmp_path / "apps" / "server"
+    server.mkdir(parents=True)
+    (server / "agentcore").mkdir()
+    (server / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    result = await GrepTool().execute(
+        {"pattern": "x", "path": "apps/server/src"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.startswith("路径不存在：apps/server/src")
+    assert "父目录" in result.error
+    assert "apps/server/" in result.error
+    assert "agentcore" in result.error or "pyproject.toml" in result.error
+    assert "原样重试" in result.error
 
 
 # --- core search behavior ---

@@ -63,8 +63,10 @@ function msg(p: Partial<ReplayMessage> & { id: string; role: string }): ReplayMe
     cost_total: 0,
     created_at: "2026-08-01T00:00:00Z",
     credential_source: null,
+    harvest_kind: null,
     metrics: null,
     models: [],
+    origin: null,
     runs: [],
     spans: [],
     trace_id: null,
@@ -115,6 +117,69 @@ describe("ChatTimeline chat layout", () => {
     expect(screen.getByText("1 次模型调用 · 1 次工具")).toBeTruthy();
     // Collapsed by default — tool name not visible until expand
     expect(screen.queryByText("web_search")).toBeNull();
+  });
+
+  it("renders execution_harvest synthetic row as 系统收口 (not 用户)", () => {
+    const messages: ReplayMessage[] = [
+      msg({
+        id: "h1",
+        role: "user",
+        origin: "execution_harvest",
+        harvest_kind: "cancelled",
+        content:
+          "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+      }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "按已完成部分收尾。",
+      }),
+    ];
+
+    render(
+      <ChatTimeline
+        messages={messages}
+        selectedId={null}
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+      />,
+    );
+
+    expect(screen.getByText("系统收口")).toBeTruthy();
+    expect(screen.getByText("已取消")).toBeTruthy();
+    expect(screen.queryByText("用户")).toBeNull();
+    expect(
+      screen.getByText(
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to 系统收口 when only 【系统收口】 prefix is present", () => {
+    const messages: ReplayMessage[] = [
+      msg({
+        id: "h1",
+        role: "user",
+        content: "【系统收口】后台团队任务已全部完成。请综合队员产出。",
+      }),
+    ];
+
+    render(
+      <ChatTimeline
+        messages={messages}
+        selectedId={null}
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+      />,
+    );
+
+    expect(screen.getByText("系统收口")).toBeTruthy();
+    expect(screen.getByText("已完成")).toBeTruthy();
+    expect(screen.queryByText("用户")).toBeNull();
   });
 
   it("does not dump worker body into the timeline; graph click selects run", () => {

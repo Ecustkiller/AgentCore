@@ -6,34 +6,43 @@ import {
 } from "@/components/ui/popover";
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
-import {
-  WORKSPACE_BINDING_CHANGED,
-  isLocalPickerFailureKind,
-  notifyLocalPickerFailure,
-  pickAndBindLocalFolder,
-} from "@/lib/bindLocalFolder";
+import { WORKSPACE_BINDING_CHANGED } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyActionError, notifySuccess } from "@/lib/toast";
 import {
   type EffectiveWorkspace,
   formatWorkspaceChipLabel,
   resolveEffectiveWorkspace,
 } from "@/lib/workspaceEffectiveMode";
+import {
+  exportCloudDeskToPickedFolder,
+  exportCloudDeskZip,
+  mergeArtifactsOnlyToLanding,
+  mergeBackToLanding,
+  peekMergeLanding,
+  registerMergeLanding,
+} from "@/services/cloudDeskExit";
 import { runHandoff } from "@/services/handoff";
 import {
   type WorkspaceBinding,
   getWorkspaceBinding,
 } from "@/services/workspaceBinding";
+import { useFoldersStore } from "@/stores/folders";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   Cloud,
-  FolderOpen,
+  Download,
+  FolderDown,
+  FolderInput,
+  GitBranch,
   HardDrive,
   Loader2,
+  MapPin,
+  Package,
+  Upload,
   UploadCloud,
 } from "lucide-react";
 import {
@@ -44,12 +53,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
 
 /**
  * Shared workspace mode control — status for established chats (project inherit /
- * bare scratch). 出生定终身：不改当前会话 folder；云会话可发现入口 =
- * 打开本地项目（新会话）/ 裸聊绑定本机执行环境。Local workspaces keep backup.
+ * bare scratch). 出生定终身：不改当前会话 folder。§五：云会话不再主推打开本地 /
+ * 绑定本机；遗留本机会话保留备份。云桌出口（ZIP / 合回落点）见 §7.6。
  */
 
 export interface WorkspaceModeState {
@@ -214,7 +222,7 @@ export function WorkspaceModeTrigger({
   );
 }
 
-/** Status + local backup, or cloud-session discoverable open/bind actions. */
+/** Status + local backup; cloud sessions: ZIP/合回出口 + import/Git（无 mode=local create）。 */
 export function WorkspaceModeMenu({
   state,
   conversationId,
@@ -224,11 +232,19 @@ export function WorkspaceModeMenu({
   conversationId?: string;
   onActionDone?: () => void;
 }) {
-  const navigate = useNavigate();
-  const { effective, busy, error, backingUp, backupDone, backup } = state;
+  const {
+    effective,
+    busy,
+    error,
+    backingUp,
+    backupDone,
+    backup,
+    roots,
+    refresh,
+  } = state;
   const { isLocal, rootMissing, rootName, viaProject, projectName } = effective;
   const desktop = hasLocalFiles();
-  const [actionBusy, setActionBusy] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
 
   const title = viaProject
     ? projectName
@@ -243,51 +259,107 @@ export function WorkspaceModeMenu({
       ? "目录在本机不可用"
       : rootName
         ? viaProject
-          ? `工作区本地 · ${rootName}`
+          ? `本机路径 · ${rootName}`
           : `默认容器 · ${rootName}`
         : "本机草稿"
     : viaProject
       ? "云端共享空间"
       : "云端对话";
 
-  const runOpenLocalProject = () => {
-    setActionBusy(true);
-    void pickAndOpenLocalProject(navigate, { notifyOnFailure: false })
-      .then((result) => {
-        if (result.ok) {
-          onActionDone?.();
-          return;
-        }
-        if (result.reason === "cancelled") return;
-        if (isLocalPickerFailureKind(result.reason)) {
-          notifyLocalPickerFailure(result.reason, result.message);
-        }
-      })
-      .finally(() => setActionBusy(false));
+  const landing =
+    !isLocal && conversationId ? peekMergeLanding(conversationId, roots) : null;
+  const landingHint =
+    landing && !landing.missing
+      ? `当前 · ${landing.rootName ?? "已登记目录"}`
+      : landing?.missing
+        ? "原目录已失效，请重新登记"
+        : "首次合回时也会询问";
+
+  const runExit = async (fn: () => Promise<unknown>) => {
+    if (exitBusy) return;
+    setExitBusy(true);
+    try {
+      await fn();
+      await refresh();
+    } finally {
+      setExitBusy(false);
+    }
   };
 
-  const runBindLocal = () => {
-    if (!conversationId) {
-      notifyError("请先打开一个对话");
-      return;
-    }
-    setActionBusy(true);
-    void pickAndBindLocalFolder(conversationId)
-      .then((result) => {
-        if (!result.ok) {
-          if (result.reason === "cancelled") return;
-          if (isLocalPickerFailureKind(result.reason)) {
-            notifyLocalPickerFailure(result.reason, result.message);
-          }
-          return;
-        }
-        notifySuccess(`已绑定「${result.root.name}」本机执行环境`, {
-          description: "仅本会话；≠打开本地项目",
-        });
-        onActionDone?.();
-      })
-      .finally(() => setActionBusy(false));
+  const onRegisterLanding = () => {
+    if (!conversationId) return;
+    void runExit(async () => {
+      const result = await registerMergeLanding(conversationId);
+      if (result.ok && result.root) {
+        notifySuccess(`已登记合回落点「${result.root.name}」`);
+      } else if (!result.ok && result.reason === "error") {
+        notifyActionError(
+          "登记合回落点失败",
+          new Error(result.message ?? "登记失败"),
+        );
+      }
+    });
   };
+
+  const onMergeBack = () => {
+    if (!conversationId) return;
+    onActionDone?.();
+    void runExit(async () => {
+      await mergeBackToLanding(conversationId, roots);
+    });
+  };
+
+  const onMergeArtifactsOnly = () => {
+    if (!conversationId) return;
+    onActionDone?.();
+    void runExit(async () => {
+      await mergeArtifactsOnlyToLanding(conversationId, roots);
+    });
+  };
+
+  const onExportZip = () => {
+    if (!conversationId) return;
+    onActionDone?.();
+    void runExit(async () => {
+      await exportCloudDeskZip(conversationId);
+    });
+  };
+
+  const onExportToFolder = () => {
+    if (!conversationId) return;
+    onActionDone?.();
+    void runExit(async () => {
+      await exportCloudDeskToPickedFolder(conversationId);
+    });
+  };
+
+  const importToCloud = () => {
+    onActionDone?.();
+    const prefillRootId = effective.rootId;
+    useFoldersStore.getState().openImportToCloud(
+      prefillRootId
+        ? {
+            rootId: prefillRootId,
+            projectName: projectName ?? rootName,
+          }
+        : null,
+    );
+  };
+
+  /** 云会话 → 当前 desk；遗留本机 → 新建云项目再 clone（不改绑本会话）。 */
+  const connectGit = () => {
+    let wsId: string | null = null;
+    if (!isLocal && conversationId) {
+      const conv = getConversations().find((c) => c.id === conversationId);
+      wsId = conv?.folderId
+        ? `folder:${conv.folderId}`
+        : `conv:${conversationId}`;
+    }
+    onActionDone?.();
+    useFoldersStore.getState().openConnectGit(wsId);
+  };
+
+  const anyBusy = busy || exitBusy;
 
   return (
     <>
@@ -313,48 +385,117 @@ export function WorkspaceModeMenu({
 
       <div className="p-1.5">
         {isLocal && !rootMissing ? (
-          backingUp ? (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <Loader2 size={14} className="animate-spin" />
-              备份中…
-            </div>
-          ) : backupDone ? (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-success">
-              <Check size={14} />
-              已备份
-            </div>
-          ) : (
-            <ModeAction
-              icon={<UploadCloud size={14} />}
-              label="备份到云"
-              onClick={() => void backup()}
-              disabled={busy || actionBusy}
-            />
-          )
-        ) : isLocal && rootMissing ? (
-          <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-            目录在本机不可用。可打开本地项目换到可用文件夹（新会话）。
-          </p>
-        ) : desktop ? (
           <>
             <ModeAction
-              icon={<FolderOpen size={14} />}
-              label="打开本地项目"
-              hint="选本机文件夹 · 新会话"
-              onClick={runOpenLocalProject}
-              disabled={busy || actionBusy}
+              icon={<Upload size={14} />}
+              label="导入本机项目到云"
+              hint="可选：新建云项目并导入"
+              onClick={importToCloud}
+              disabled={anyBusy}
             />
-            {!viaProject && conversationId ? (
+            {backingUp ? (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                备份中…
+              </div>
+            ) : backupDone ? (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-success">
+                <Check size={14} />
+                已备份
+              </div>
+            ) : (
               <ModeAction
-                icon={<HardDrive size={14} />}
-                label="绑定本机执行环境"
-                hint="仅本会话；≠打开项目"
-                onClick={runBindLocal}
-                disabled={busy || actionBusy}
+                icon={<UploadCloud size={14} />}
+                label="备份到云"
+                hint="快照交接（次要）"
+                onClick={() => void backup()}
+                disabled={anyBusy}
               />
-            ) : null}
+            )}
+          </>
+        ) : isLocal && rootMissing ? (
+          <>
             <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-              本会话工作区仍是云端；要在本机落盘请用上面入口（不改当前会话绑定）。
+              目录在本机不可用。请导入本机项目到云或重新绑定本机路径后再继续。
+            </p>
+            <ModeAction
+              icon={<Upload size={14} />}
+              label="导入本机项目到云"
+              hint="本机文件夹快照 → 新建云项目"
+              onClick={importToCloud}
+              disabled={anyBusy}
+            />
+            <ModeAction
+              icon={<GitBranch size={14} />}
+              label="从 Git 克隆"
+              hint="新建云项目并浅克隆"
+              onClick={connectGit}
+              disabled={anyBusy}
+            />
+          </>
+        ) : desktop ? (
+          <>
+            {/* §7.6 云桌→本机标准出口（常驻；不绑「后台云端」job） */}
+            {conversationId ? (
+              <>
+                <ModeAction
+                  icon={<Download size={14} />}
+                  label="导出 ZIP"
+                  hint="下载云端快照拷贝"
+                  onClick={onExportZip}
+                  disabled={anyBusy}
+                />
+                <ModeAction
+                  icon={<FolderDown size={14} />}
+                  label="导出到本机文件夹"
+                  hint="每次可选目录；不必先登记落点"
+                  onClick={onExportToFolder}
+                  disabled={anyBusy}
+                />
+                <ModeAction
+                  icon={<MapPin size={14} />}
+                  label={
+                    landing && !landing.missing
+                      ? "更换合回落点"
+                      : "登记合回落点"
+                  }
+                  hint={landingHint}
+                  onClick={onRegisterLanding}
+                  disabled={anyBusy}
+                />
+                <ModeAction
+                  icon={<FolderInput size={14} />}
+                  label="合回到本机"
+                  hint="Diff 勾选写入落点；冲突默认保留本机"
+                  onClick={onMergeBack}
+                  disabled={anyBusy}
+                />
+                <ModeAction
+                  icon={<Package size={14} />}
+                  label="只合回产物"
+                  hint="仅写入本回合交付产物；无则提示"
+                  onClick={onMergeArtifactsOnly}
+                  disabled={anyBusy}
+                />
+                <div className="my-1 border-t border-border" />
+              </>
+            ) : null}
+            <ModeAction
+              icon={<Upload size={14} />}
+              label="导入本机项目到云"
+              hint="本机文件夹快照"
+              onClick={importToCloud}
+              disabled={anyBusy}
+            />
+            <ModeAction
+              icon={<GitBranch size={14} />}
+              label="从 Git 克隆"
+              hint="云端浅克隆到本工作区"
+              onClick={connectGit}
+              disabled={anyBusy}
+            />
+            <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+              本会话工作区在创建时已确定，不可改绑。
             </p>
           </>
         ) : (
@@ -363,12 +504,12 @@ export function WorkspaceModeMenu({
           </p>
         )}
 
-        {(busy || actionBusy) && !backingUp && (
+        {(busy && !backingUp) || exitBusy ? (
           <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
             处理中…
           </div>
-        )}
+        ) : null}
         {error && (
           <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
         )}

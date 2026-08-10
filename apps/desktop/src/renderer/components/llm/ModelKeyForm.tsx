@@ -23,9 +23,6 @@ import { useId, useState } from "react";
 export const MODEL_CONFIG_INPUT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring";
 
-/** Sentinel for「其他…」escape hatch in preset default-model select. */
-export const OTHER_DEFAULT_MODEL_VALUE = "__other__";
-
 /** Same phrasing as LoginPage / lib/errors — admin sessions cannot use product APIs. */
 export const ADMIN_PRODUCT_FORBIDDEN_MESSAGE =
   "此账号为管理员账号，请使用管理后台登录";
@@ -80,7 +77,7 @@ export type ModelKeyFormProps = {
  * BYOK 服务商表单 — 设置·服务商的「添加服务商」/「编辑服务商」共用单一真相源。
  *
  * 主路径 = 厂商 + 名称 + Key（自定义另有 Base URL）。
- * 「连接测试用模型」进高级（仍提交 default_model；选预设静默预填，编辑保留已存值）。
+ * 「连接测试用模型」进高级（仍提交 default_model；预设用 Input+datalist 可手填/粘贴，编辑保留已存值）。
  * 预设厂商：Base URL 也进高级。自定义端点：Base URL 主路径必填。
  * 对话日常选用在「模型组合」/ picker，不在本表单。
  */
@@ -102,6 +99,7 @@ export function ModelKeyForm({
   const apiKeyId = `${formId}-api-key`;
   const baseUrlId = `${formId}-base-url`;
   const defaultModelId = `${formId}-default-model`;
+  const defaultModelListId = `${formId}-default-model-list`;
   const [apiKey, setApiKey] = useState("");
   const [providerPreset, setProviderPreset] = useState<ByokProviderId>(() =>
     resolveByokProviderFromConfig(initialBaseUrl),
@@ -121,15 +119,6 @@ export function ModelKeyForm({
     if (initialModel.trim()) return initialModel;
     return getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).defaultModel;
   });
-  /** Preset path only: true =「其他…」+ free-text; custom ignores this. */
-  const [useOtherModel, setUseOtherModel] = useState(() => {
-    const resolved = resolveByokProviderFromConfig(initialBaseUrl);
-    if (isCustomByokProvider(resolved)) return false;
-    const model = initialModel.trim()
-      ? initialModel.trim()
-      : getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).defaultModel;
-    return !getByokProviderPreset(resolved).models.includes(model);
-  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +127,6 @@ export function ModelKeyForm({
   const preset = !isCustom ? getByokProviderPreset(providerPreset) : null;
   const keyHelpUrl =
     preset?.keyHelpUrl ?? "https://platform.openai.com/api-keys";
-  const otherModelId = `${formId}-default-model-other`;
 
   const baseUrlOverride =
     !isCustom &&
@@ -149,28 +137,34 @@ export function ModelKeyForm({
       (alias) => normalizeByokBaseUrl(alias) === normalizeByokBaseUrl(baseUrl),
     );
   /** 非预设模型或已覆盖 Base URL → 高级默认展开（与既有 baseUrlOverride 同类）。 */
+  const initialModelNotInPreset = (() => {
+    const resolved = resolveByokProviderFromConfig(initialBaseUrl);
+    if (isCustomByokProvider(resolved)) return false;
+    const model = initialModel.trim()
+      ? initialModel.trim()
+      : getByokProviderPreset(DEFAULT_BYOK_PROVIDER_ID).defaultModel;
+    return !getByokProviderPreset(resolved).models.includes(model);
+  })();
   const [advancedOpen, setAdvancedOpen] = useState(
-    () => baseUrlOverride || useOtherModel,
+    () => baseUrlOverride || initialModelNotInPreset,
   );
 
   const selectProvider = (next: ByokProviderId) => {
+    const prev = providerPreset;
     setProviderPreset(next);
     if (!isCustomByokProvider(next)) {
       const p = getByokProviderPreset(next);
       setBaseUrl(p.baseUrl);
-      setDefaultModel(p.defaultModel);
-      setUseOtherModel(false);
       setLabel(p.label);
+      const current = defaultModel.trim();
+      const oldDefault = !isCustomByokProvider(prev)
+        ? getByokProviderPreset(prev).defaultModel
+        : null;
+      if (!current || (oldDefault != null && current === oldDefault)) {
+        setDefaultModel(p.defaultModel);
+      }
+      // else: 当前值 ∈ 新预设 models → 保留；否则保留为自定义（勿静默冲掉）
     }
-  };
-
-  const selectDefaultModel = (value: string) => {
-    if (value === OTHER_DEFAULT_MODEL_VALUE) {
-      setUseOtherModel(true);
-      return;
-    }
-    setUseOtherModel(false);
-    setDefaultModel(value);
   };
 
   const keyOk = isEdit || apiKey.trim().length > 0;
@@ -329,58 +323,32 @@ export function ModelKeyForm({
               </div>
             )}
             <div>
-              {isCustom ? (
-                <label className="block" htmlFor={defaultModelId}>
-                  <span className="text-xs text-muted-foreground">
-                    连接测试用模型
-                  </span>
-                  <Input
-                    id={defaultModelId}
-                    type="text"
-                    value={defaultModel}
-                    onChange={(e) => setDefaultModel(e.target.value)}
-                    placeholder="model-name"
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="mt-1 w-full font-mono"
-                  />
-                </label>
-              ) : (
-                <div>
-                  <label className="block" htmlFor={defaultModelId}>
-                    <span className="text-xs text-muted-foreground">
-                      连接测试用模型
-                    </span>
-                    <select
-                      id={defaultModelId}
-                      value={
-                        useOtherModel ? OTHER_DEFAULT_MODEL_VALUE : defaultModel
-                      }
-                      onChange={(e) => selectDefaultModel(e.target.value)}
-                      className={`mt-1 ${MODEL_CONFIG_INPUT_CLASS}`}
-                    >
-                      {(preset?.models ?? []).map((model) => (
-                        <option key={model} value={model}>
-                          {model}
-                        </option>
-                      ))}
-                      <option value={OTHER_DEFAULT_MODEL_VALUE}>其他…</option>
-                    </select>
-                  </label>
-                  {useOtherModel && (
-                    <Input
-                      id={otherModelId}
-                      type="text"
-                      value={defaultModel}
-                      onChange={(e) => setDefaultModel(e.target.value)}
-                      placeholder={preset?.defaultModel ?? "model-name"}
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label="自定义连接测试用模型"
-                      className="mt-2 w-full font-mono"
-                    />
-                  )}
-                </div>
+              <label className="block" htmlFor={defaultModelId}>
+                <span className="text-xs text-muted-foreground">
+                  连接测试用模型
+                </span>
+                <Input
+                  id={defaultModelId}
+                  type="text"
+                  value={defaultModel}
+                  onChange={(e) => setDefaultModel(e.target.value)}
+                  list={!isCustom ? defaultModelListId : undefined}
+                  placeholder={
+                    isCustom
+                      ? "model-name"
+                      : (preset?.defaultModel ?? "model-name")
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="mt-1 w-full font-mono"
+                />
+              </label>
+              {!isCustom && (
+                <datalist id={defaultModelListId}>
+                  {(preset?.models ?? []).map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
               )}
               {providerPreset === "jiurelay" && (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -388,7 +356,8 @@ export function ModelKeyForm({
                 </p>
               )}
               <p className="mt-1 text-xs text-muted-foreground">
-                连接测试与目录兜底用；日常选用请到「模型组合」。
+                可直接粘贴模型
+                ID；连接测试与目录兜底用。日常选用请到「模型组合」。
               </p>
             </div>
           </div>

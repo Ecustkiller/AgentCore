@@ -25,6 +25,7 @@ import { notifyError, notifyInfo } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import {
   Archive,
   ChevronRight,
@@ -33,6 +34,7 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -88,6 +90,15 @@ export function WorkspaceGroupHeader({
     startNewConversation(navigate, folder.id);
   };
 
+  /** Quiet optional convert — same as Composer「导入本机项目到云」（非催债）. */
+  const openImportToCloud = () => {
+    setMoreOpen(false);
+    useFoldersStore.getState().openImportToCloud({
+      rootId: folder.localRootId ?? undefined,
+      projectName: folder.name,
+    });
+  };
+
   const handleArchiveAll = async () => {
     setMoreOpen(false);
     if (convs.length === 0) return;
@@ -139,8 +150,29 @@ export function WorkspaceGroupHeader({
   const archiveLabel =
     liveConvCount > 0 ? `归档全部对话 (${liveConvCount})` : "归档全部对话";
 
+  const importMenuItem = groupIsLocal ? (
+    <>
+      <ContextMenuItem onSelect={openImportToCloud}>
+        <Upload size={14} className="shrink-0" />
+        <span className="flex-1 truncate">导入本机项目到云</span>
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+    </>
+  ) : null;
+
+  const importDropdownItem = groupIsLocal ? (
+    <>
+      <DropdownMenuItem onSelect={openImportToCloud}>
+        <Upload size={14} className="shrink-0" />
+        <span className="flex-1 truncate">导入本机项目到云</span>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
+  ) : null;
+
   const menuItems = (
     <>
+      {importMenuItem}
       <ContextMenuItem onSelect={newChatInProject}>
         <Plus size={14} className="shrink-0" />
         <span className="flex-1 truncate">新建对话</span>
@@ -171,6 +203,7 @@ export function WorkspaceGroupHeader({
 
   const dropdownItems = (
     <>
+      {importDropdownItem}
       <DropdownMenuItem onSelect={newChatInProject}>
         <Plus size={14} className="shrink-0" />
         <span className="flex-1 truncate">新建对话</span>
@@ -267,8 +300,12 @@ export function WorkspaceGroupHeader({
               </DropdownMenu>
               <IconButton
                 tone="sidebar"
-                aria-label="在此项目新建对话"
-                title="在此项目新建对话"
+                aria-label={
+                  groupIsLocal ? "在本机项目中新开对话" : "在云项目中新开对话"
+                }
+                title={
+                  groupIsLocal ? "在本机项目中新开对话" : "在云项目中新开对话"
+                }
                 className={rowActionClass}
                 onClick={(e) => {
                   e.stopPropagation();

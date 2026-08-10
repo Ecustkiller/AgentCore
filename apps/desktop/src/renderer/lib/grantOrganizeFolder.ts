@@ -35,6 +35,7 @@ const RESOLVE_FAIL_FALLBACK: Record<
   string
 > = {
   not_found: "找不到该目录",
+  permission_denied: "定位到了，但这台电脑不让程序读取该目录",
   not_directory: "路径指向的是文件，不是目录",
   ambiguous: "匹配到多个目录，请说得更具体",
 };

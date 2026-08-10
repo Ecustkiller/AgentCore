@@ -2,12 +2,17 @@
 /**
  * Sync desktop / Android release assets to the brand download host (self-hosted nginx).
  *
- *   pnpm sync:release-cdn --desktop <dir> --version <ver>
+ *   pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]
  *   pnpm sync:release-cdn --android <apkPath> --version <ver>
- *   pnpm sync:release-cdn --from-github              # bootstrap from published GH
+ *   pnpm sync:release-cdn --from-github [--channel stable|beta]
  *   pnpm sync:release-cdn --from-github --desktop-only
  *   pnpm sync:release-cdn --from-github --android-only
  *   pnpm sync:release-cdn --install-nginx            # one-time nginx site on :8092
+ *
+ * Desktop channels (§7.6c):
+ *   stable (default) → write desktop/stable/* and mirror same content to flat desktop/
+ *     (旧客户端曾把 desktop/latest.yml 当 feed；镜像避免断更)
+ *   beta → write desktop/beta/* only（绝不污染 flat 或 stable）
  *
  * Env (deploy/.env.deploy.local):
  *   DEPLOY_SSH_*                 (same as deploy:web / admin)
@@ -26,16 +31,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   REPO_ROOT,
   loadDeployEnv,
   requireEnv,
-  run,
   scp,
   sshScript,
 } from "./load-deploy-env.mjs";
 import {
+  DESKTOP_CHANNEL_DEFAULT,
   DOWNLOADS_ANDROID_PREFIX,
   DOWNLOADS_DESKTOP_PREFIX,
   RELEASES_REPO,
@@ -44,11 +48,13 @@ import {
   buildAndroidLatestJson,
   buildDesktopLatestJson,
   cdnUrl,
+  desktopChannelPrefix,
+  desktopLatestJsonUrl,
+  desktopSyncDestPrefixes,
   macDmgFilename,
+  normalizeDesktopChannel,
   winInstallerFilename,
 } from "../../apps/website/functions/_lib/downloadsCdn.mjs";
-
-const __dir = dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
   /** @type {Record<string, string | boolean>} */
@@ -56,6 +62,7 @@ function parseArgs(argv) {
     desktopDir: "",
     androidPath: "",
     version: "",
+    channel: DESKTOP_CHANNEL_DEFAULT,
     fromGithub: false,
     desktopOnly: false,
     androidOnly: false,
@@ -66,7 +73,9 @@ function parseArgs(argv) {
     if (a === "--desktop" && argv[i + 1]) out.desktopDir = argv[++i];
     else if (a === "--android" && argv[i + 1]) out.androidPath = argv[++i];
     else if (a === "--version" && argv[i + 1]) out.version = argv[++i];
-    else if (a === "--from-github") out.fromGithub = true;
+    else if (a === "--channel" && argv[i + 1]) {
+      out.channel = normalizeDesktopChannel(argv[++i]);
+    } else if (a === "--from-github") out.fromGithub = true;
     else if (a === "--desktop-only") out.desktopOnly = true;
     else if (a === "--android-only") out.androidOnly = true;
     else if (a === "--install-nginx") out.installNginx = true;
@@ -135,25 +144,34 @@ async function downloadTo(url, dest) {
 }
 
 /**
- * Merge desktop latest.json: keep the other platform's filename when only
- * win or mac is being synced this run.
+ * Merge desktop latest.json for a channel: keep the other platform's filename
+ * when only win or mac is being synced this run.
+ * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
+ * @param {object} nextPartial
  */
-async function mergeDesktopLatestJson(nextPartial) {
-  const url = cdnUrl(`${DOWNLOADS_DESKTOP_PREFIX}/latest.json`);
-  try {
-    const prev = await fetchJson(url);
-    return buildDesktopLatestJson({
-      version: nextPartial.version || prev.version,
-      winFilename: nextPartial.winFilename || prev.winFilename,
-      macFilename:
-        nextPartial.macFilename !== undefined
-          ? nextPartial.macFilename
-          : prev.macFilename || "",
-      releaseNotesUrl: nextPartial.releaseNotesUrl || prev.releaseNotesUrl,
-    });
-  } catch {
-    return buildDesktopLatestJson(nextPartial);
+async function mergeDesktopLatestJson(channel, nextPartial) {
+  const candidates = [desktopLatestJsonUrl(channel)];
+  // Migration: first stable sync may only have flat desktop/latest.json.
+  if (channel === "stable") {
+    candidates.push(cdnUrl(`${DOWNLOADS_DESKTOP_PREFIX}/latest.json`));
   }
+  for (const url of candidates) {
+    try {
+      const prev = await fetchJson(url);
+      return buildDesktopLatestJson({
+        version: nextPartial.version || prev.version,
+        winFilename: nextPartial.winFilename || prev.winFilename,
+        macFilename:
+          nextPartial.macFilename !== undefined
+            ? nextPartial.macFilename
+            : prev.macFilename || "",
+        releaseNotesUrl: nextPartial.releaseNotesUrl || prev.releaseNotesUrl,
+      });
+    } catch {
+      // try next candidate
+    }
+  }
+  return buildDesktopLatestJson(nextPartial);
 }
 
 function collectDesktopNames(version, desktopDir) {
@@ -180,7 +198,12 @@ function collectDesktopNames(version, desktopDir) {
   };
 }
 
-function syncDesktopDir(version, desktopDir) {
+/**
+ * @param {string} version
+ * @param {string} desktopDir
+ * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
+ */
+function syncDesktopDir(version, desktopDir, channel) {
   if (!existsSync(desktopDir)) {
     console.error(`desktop dir not found: ${desktopDir}`);
     process.exit(1);
@@ -197,16 +220,24 @@ function syncDesktopDir(version, desktopDir) {
     process.exit(1);
   }
   const root = downloadsRoot();
-  putRemoteDirFiles(
-    desktopDir,
-    `${root}/${DOWNLOADS_DESKTOP_PREFIX}`,
-    flags.present,
+  const dests = desktopSyncDestPrefixes(channel);
+  for (const rel of dests) {
+    putRemoteDirFiles(desktopDir, `${root}/${rel}`, flags.present);
+  }
+  console.log(
+    `✓ desktop assets → ${dests.map((d) => `${d}/`).join(" + ")} (channel=${channel})`,
   );
   return flags;
 }
 
-async function writeDesktopManifest(version, { hasWin, hasMac, winName, macName }) {
-  const manifest = await mergeDesktopLatestJson({
+/**
+ * @param {string} version
+ * @param {object} flags
+ * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
+ */
+async function writeDesktopManifest(version, flags, channel) {
+  const { hasWin, hasMac, winName, macName } = flags;
+  const manifest = await mergeDesktopLatestJson(channel, {
     version,
     ...(hasWin ? { winFilename: winName } : {}),
     ...(hasMac ? { macFilename: macName } : {}),
@@ -221,9 +252,15 @@ async function writeDesktopManifest(version, { hasWin, hasMac, winName, macName 
   const tmpDir = mkdtempSync(join(tmpdir(), "ac-cdn-"));
   const tmp = join(tmpDir, "latest.json");
   writeFileSync(tmp, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  putRemoteFile(tmp, `${downloadsRoot()}/${DOWNLOADS_DESKTOP_PREFIX}/latest.json`);
+  const root = downloadsRoot();
+  for (const rel of desktopSyncDestPrefixes(channel)) {
+    putRemoteFile(tmp, `${root}/${rel}/latest.json`);
+  }
   rmSync(tmpDir, { recursive: true, force: true });
-  console.log(`✓ desktop latest.json → v${manifest.version}`);
+  console.log(
+    `✓ desktop/${channel} latest.json → v${manifest.version}` +
+      (channel === "stable" ? " (+ flat mirror)" : ""),
+  );
   console.log(`  win: ${manifest.winFilename}`);
   console.log(`  mac: ${manifest.macFilename || "(none)"}`);
   return manifest;
@@ -251,19 +288,31 @@ async function syncAndroidFile(version, apkPath) {
   return manifest;
 }
 
+/** @param {string} tag */
+function isStableDesktopTag(tag) {
+  return /^v\d+\.\d+\.\d+$/i.test(tag);
+}
+
+/** @param {string} tag */
+function isBetaDesktopTag(tag) {
+  return /^v\d+\.\d+\.\d+-.+/i.test(tag) && !tag.startsWith("android-");
+}
+
 /**
  * Desktop "latest" on GitHub is NOT always /releases/latest (Android tags can win).
- * Prefer newest non-draft tag `v*` that has a win exe or latest.yml.
+ * Prefer newest matching non-draft tag for the requested channel.
+ * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
  */
-async function fetchLatestDesktopGithubRelease() {
+async function fetchLatestDesktopGithubRelease(channel) {
   const releases = await fetchJson(
     `https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=30`,
   );
   if (!Array.isArray(releases)) throw new Error("GitHub releases list invalid");
+  const tagOk = channel === "beta" ? isBetaDesktopTag : isStableDesktopTag;
   for (const release of releases) {
     if (release.draft) continue;
     const tag = String(release.tag_name ?? "");
-    if (!/^v\d/i.test(tag) || tag.startsWith("android-")) continue;
+    if (!tagOk(tag)) continue;
     const assets = release.assets ?? [];
     const hasDesktop = assets.some(
       (a) =>
@@ -274,14 +323,19 @@ async function fetchLatestDesktopGithubRelease() {
     if (!hasDesktop) continue;
     return release;
   }
-  throw new Error("No published desktop release found on GitHub");
+  throw new Error(
+    `No published desktop ${channel} release found on GitHub`,
+  );
 }
 
-async function syncFromGithub({ desktopOnly, androidOnly }) {
+/**
+ * @param {{ desktopOnly: boolean, androidOnly: boolean, channel: string }} opts
+ */
+async function syncFromGithub({ desktopOnly, androidOnly, channel }) {
   const tmpRoot = mkdtempSync(join(tmpdir(), "ac-cdn-gh-"));
   try {
     if (!androidOnly) {
-      const latest = await fetchLatestDesktopGithubRelease();
+      const latest = await fetchLatestDesktopGithubRelease(channel);
       const version = String(latest.tag_name).replace(/^v/, "");
       const assets = latest.assets ?? [];
       const dir = join(tmpRoot, "desktop");
@@ -302,8 +356,8 @@ async function syncFromGithub({ desktopOnly, androidOnly }) {
         console.log(`→ download GH ${asset.name}`);
         await downloadTo(asset.browser_download_url, join(dir, asset.name));
       }
-      const flags = syncDesktopDir(version, dir);
-      await writeDesktopManifest(version, flags);
+      const flags = syncDesktopDir(version, dir, channel);
+      await writeDesktopManifest(version, flags, channel);
     }
 
     if (!desktopOnly) {
@@ -362,9 +416,9 @@ async function main() {
   if (args.help) {
     console.log(`Usage:
   pnpm sync:release-cdn --install-nginx
-  pnpm sync:release-cdn --desktop <dir> --version <ver>
+  pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]
   pnpm sync:release-cdn --android <apk> --version <ver>
-  pnpm sync:release-cdn --from-github [--desktop-only|--android-only]
+  pnpm sync:release-cdn --from-github [--channel stable|beta] [--desktop-only|--android-only]
 `);
     process.exit(0);
   }
@@ -378,21 +432,30 @@ async function main() {
     return;
   }
 
+  const channel = normalizeDesktopChannel(
+    /** @type {string} */ (args.channel || DESKTOP_CHANNEL_DEFAULT),
+  );
+
   if (args.fromGithub) {
-    console.log(`→ sync from GitHub → ${downloadsRoot()} @ ${downloadsHost()}`);
+    console.log(
+      `→ sync from GitHub → ${downloadsRoot()} @ ${downloadsHost()} (channel=${channel})`,
+    );
     await syncFromGithub({
       desktopOnly: Boolean(args.desktopOnly),
       androidOnly: Boolean(args.androidOnly),
+      channel,
     });
-    console.log(`✓ CDN sync complete → ${cdnUrl("")}`);
+    console.log(
+      `✓ CDN sync complete → ${cdnUrl(desktopChannelPrefix(channel))}/`,
+    );
     return;
   }
 
   if (!args.desktopDir && !args.androidPath) {
     console.error(
-      "usage: pnpm sync:release-cdn --desktop <dir> --version <ver>\n" +
+      "usage: pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]\n" +
         "       pnpm sync:release-cdn --android <apk> --version <ver>\n" +
-        "       pnpm sync:release-cdn --from-github\n" +
+        "       pnpm sync:release-cdn --from-github [--channel stable|beta]\n" +
         "       pnpm sync:release-cdn --install-nginx",
     );
     process.exit(1);
@@ -403,11 +466,27 @@ async function main() {
   }
 
   if (args.desktopDir) {
-    const flags = syncDesktopDir(args.version, args.desktopDir);
-    await writeDesktopManifest(args.version, flags);
+    const flags = syncDesktopDir(
+      /** @type {string} */ (args.version),
+      /** @type {string} */ (args.desktopDir),
+      channel,
+    );
+    await writeDesktopManifest(
+      /** @type {string} */ (args.version),
+      flags,
+      channel,
+    );
   }
   if (args.androidPath) {
-    await syncAndroidFile(args.version, args.androidPath);
+    if (channel === "beta") {
+      console.warn(
+        "⚠ --android ignores --channel (android rail unchanged); writing android/",
+      );
+    }
+    await syncAndroidFile(
+      /** @type {string} */ (args.version),
+      /** @type {string} */ (args.androidPath),
+    );
   }
   console.log(`✓ CDN sync complete → ${cdnUrl("")}`);
 }

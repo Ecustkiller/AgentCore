@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.builtin.file_ops.path_hints import enrich_missing_path_message
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -143,7 +144,11 @@ class GrepTool:
         except OutsideWorkspace:
             return _fail(_outside_workspace_msg(rel_dir), start)
         except PathNotFound:
-            return _fail(f"路径不存在：{rel_dir}", start)
+            base = f"路径不存在：{rel_dir}"
+            return _fail(
+                await enrich_missing_path_message(context, str(rel_dir), base=base),
+                start,
+            )
         except WorkspaceError as e:
             msg = str(e)
             if is_channel_dead_detail(msg):

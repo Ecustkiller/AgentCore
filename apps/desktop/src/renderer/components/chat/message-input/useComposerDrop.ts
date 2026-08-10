@@ -1,4 +1,5 @@
 import { hasLocalFiles } from "@/lib/capabilities";
+import { collectClipboardFiles } from "@/lib/clipboardFiles";
 import {
   type Dispatch,
   type SetStateAction,
@@ -121,18 +122,19 @@ export function useComposerDrop(
     setDragOver(false);
   }, []);
 
-  // 粘贴入框: Ctrl/Cmd+V of a file (or a screenshot) attaches via the SAME path as drop.
+  // 粘贴入框: Ctrl/Cmd+V 文件或截图 → 与 drop 同驻留链（桌面无 path 时 preload 走字节旁路）。
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       if (isGenerating) return;
-      const files = Array.from(e.clipboardData?.files ?? []);
+      const files = collectClipboardFiles(e.clipboardData);
       if (files.length === 0) return;
       e.preventDefault();
+      clearDropError();
       void (async () => {
         for (const f of files) await attachDroppedFile(f);
       })();
     },
-    [isGenerating, attachDroppedFile],
+    [isGenerating, attachDroppedFile, clearDropError],
   );
 
   const handleDrop = useCallback(

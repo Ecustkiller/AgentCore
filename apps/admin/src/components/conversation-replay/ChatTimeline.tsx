@@ -7,6 +7,10 @@ import {
   credentialSourceLabel,
 } from "@/components/conversation-replay/shared";
 import { Badge } from "@/components/ui/Badge";
+import {
+  harvestKindLabel,
+  isExecutionHarvestMessage,
+} from "@/lib/executionHarvest";
 import { cn, fmtCny, fmtMs, fmtTime, nanoToYuan } from "@/lib/utils";
 import type { ReplayMessage } from "@/services/adminObservability";
 import { Users } from "lucide-react";
@@ -48,7 +52,14 @@ export function ChatTimeline({
             else refs.current.delete(m.id);
           }}
         >
-          {m.role === "user" ? (
+          {isExecutionHarvestMessage(m) ? (
+            <SystemHarvestBubble
+              message={m}
+              selected={m.id === selectedId}
+              anchored={isAnchored(m)}
+              onSelect={() => onSelect(m.id)}
+            />
+          ) : m.role === "user" ? (
             <UserBubble
               message={m}
               selected={m.id === selectedId}
@@ -115,6 +126,71 @@ function UserBubble({
           <span className="font-medium text-foreground">
             {ROLE_LABEL.user}
           </span>
+          <span className="tabular-nums">{fmtTime(message.created_at)}</span>
+        </div>
+        {message.content ? (
+          <CollapsibleBody content={message.content} />
+        ) : (
+          <div className="text-muted-foreground text-sm italic">（无正文）</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Synthetic harvest closing prompt — ops-visible, not painted as a user bubble. */
+function SystemHarvestBubble({
+  message,
+  selected,
+  anchored,
+  onSelect,
+}: {
+  message: ReplayMessage;
+  selected: boolean;
+  anchored: boolean;
+  onSelect: () => void;
+}) {
+  const kindLabel = harvestKindLabel(message.harvest_kind, message.content);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "flex justify-start outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl",
+        selected && "ring-1 ring-primary/30",
+        anchored && !selected && "ring-1 ring-primary/20",
+      )}
+    >
+      <div
+        className={cn(
+          "max-w-[min(100%,42rem)] rounded-xl border border-dashed px-4 py-2.5",
+          selected
+            ? "border-primary/40 bg-primary/5"
+            : "border-border/70 bg-muted/30",
+        )}
+      >
+        <div className="mb-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+          <span className="font-medium text-foreground">系统收口</span>
+          {kindLabel && (
+            <Badge
+              tone={
+                kindLabel === "已取消"
+                  ? "warning"
+                  : kindLabel === "有失败"
+                    ? "destructive"
+                    : "success"
+              }
+            >
+              {kindLabel}
+            </Badge>
+          )}
           <span className="tabular-nums">{fmtTime(message.created_at)}</span>
         </div>
         {message.content ? (

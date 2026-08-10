@@ -8,7 +8,7 @@ import {
   type PlatformId,
 } from "@/lib/download";
 import { useDesktopRelease } from "@/hooks/useDesktopRelease";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function detectPlatform(): PlatformId {
   if (typeof navigator === "undefined") return "win";
@@ -43,8 +43,20 @@ function DownloadIcon() {
   );
 }
 
+function readChannelQuery(): "beta" | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const q = new URLSearchParams(window.location.search).get("channel");
+    return q?.toLowerCase() === "beta" ? "beta" : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function DownloadPanel() {
   const [platform, setPlatform] = useState<PlatformId>("win");
+  const [focusBeta, setFocusBeta] = useState(false);
+  const betaRef = useRef<HTMLElement | null>(null);
   const { artifacts } = useDesktopRelease();
 
   const platforms = useMemo(
@@ -52,9 +64,30 @@ export default function DownloadPanel() {
     [artifacts],
   );
 
+  const betaDesktopPlatform = platform === "mac" ? "mac" : "win";
+  const beta = artifacts.beta;
+  const betaReady =
+    Boolean(beta?.version) &&
+    (betaDesktopPlatform === "mac"
+      ? Boolean(beta?.macUrl)
+      : Boolean(beta?.winUrl));
+  const betaUrl =
+    betaDesktopPlatform === "mac" ? beta?.macUrl : beta?.winUrl;
+  const betaFileLabel =
+    betaDesktopPlatform === "mac" ? beta?.macFilename : beta?.winFilename;
+  const betaLabel = betaDesktopPlatform === "mac" ? "macOS" : "Windows";
+
   useEffect(() => {
     setPlatform(detectPlatform());
+    if (readChannelQuery() === "beta") {
+      setFocusBeta(true);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!focusBeta || !betaRef.current) return;
+    betaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusBeta, beta]);
 
   const primary = platforms.find((p) => p.id === platform) ?? platforms[0];
   const primaryReady = primary.available && primary.url;
@@ -65,9 +98,9 @@ export default function DownloadPanel() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr]">
-      {/* 主 CTA：OS 感知 */}
+      {/* 主 CTA：OS 感知 · 稳定版 */}
       <div className="surface p-8 sm:p-10">
-        <p className="eyebrow">推荐下载</p>
+        <p className="eyebrow">推荐下载 · 稳定版</p>
         <h2 className="mt-3 text-2xl font-bold sm:text-3xl">
           {primary.label}
           <span className="ml-2 text-base font-normal text-muted-foreground">
@@ -171,6 +204,53 @@ export default function DownloadPanel() {
           </ul>
         </div>
       </div>
+
+      {/* 次入口：测试版（§7.6c） */}
+      <section
+        id="beta"
+        ref={betaRef}
+        className={`surface p-6 sm:p-8 lg:col-span-2 ${
+          focusBeta ? "ring-2 ring-primary/40" : ""
+        }`}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="eyebrow">测试通道</p>
+            <h2 className="mt-2 text-xl font-bold">下载测试版</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              测试版可能不稳定、含未完成功能，且与稳定版并列安装、数据默认隔离。日常使用请优先稳定版。
+            </p>
+            {beta?.version ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                当前测试版 v{beta.version}
+                {betaDesktopPlatform === "mac" && !beta.macUrl
+                  ? "（macOS 包尚未发布）"
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+          <div className="shrink-0">
+            {betaReady && betaUrl ? (
+              <a
+                href={betaUrl}
+                className="btn btn-ghost inline-flex w-full justify-center px-6 py-3 sm:w-auto"
+              >
+                <DownloadIcon />
+                下载测试版 · {betaLabel}
+              </a>
+            ) : (
+              <span className="inline-flex rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
+                即将推出
+              </span>
+            )}
+            {betaReady && betaFileLabel ? (
+              <p className="mt-2 text-center text-xs text-muted-foreground sm:text-right">
+                {betaFileLabel}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
       {/* 系统要求 */}
       <div className="surface p-6 lg:col-span-2">

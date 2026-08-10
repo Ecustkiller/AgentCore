@@ -256,6 +256,11 @@ export const FS_CHANNELS = {
   stageFromRoot: "fs:stageFromRoot",
   /** 拖拽绝对路径驻留（仅 preload 调用，不下发 renderer）。 */
   stageFromAbsPath: "fs:stageFromAbsPath",
+  /**
+   * 无磁盘路径的 File（剪贴板截图等）按字节驻留（仅 preload 调用，不下发 renderer）。
+   * Electron ``webUtils.getPathForFile`` 对非盘文件返回空串时走此通道。
+   */
+  stageFromBytes: "fs:stageFromBytes",
   /** 草稿暂存 → 本地工作区 attachments/。 */
   finalizeStagedAttachment: "fs:finalizeStagedAttachment",
   /** 云端：取出暂存字节后清除。 */
@@ -335,6 +340,7 @@ export interface GrantSessionReadonlyRootParams {
 /** Failure reasons from grant resolve (no picker; not_found ≠ cancelled). */
 export type GrantSessionReadonlyRootFailReason =
   | "not_found"
+  | "permission_denied"
   | "not_directory"
   | "ambiguous"
   | "invalid";
@@ -382,7 +388,8 @@ export interface FsApi {
    */
   ensureDefaultRoot(): Promise<FsRoot>;
   /**
-   * 云 scratch → 本地单向 checkout：选目录并解压 zip。取消 → `{ reason:"cancelled" }`。
+   * 云 → 本机单向 checkout：弹目录选择器并解压 zip（纯导出，不登记授权根）。
+   * 合回落点写出走 Diff / 只合回产物，不经本 API。取消 → `{ reason:"cancelled" }`。
    */
   checkoutArchive(archiveBase64: string): Promise<CheckoutArchiveResult>;
   /**
@@ -407,7 +414,7 @@ export interface FsApi {
    * W3/P1: session root (readonly | organize) bound to conversation.
    * Accepts legacy `(conversationId, mode?)` or a params object with optional
    * `path` / `wellKnown` / `targetName` (resolve only — never opens a folder picker).
-   * Failure reasons distinguish not_found / not_directory / ambiguous (≠ cancelled).
+   * Failure reasons distinguish not_found / permission_denied / not_directory / ambiguous (≠ cancelled).
    */
   grantSessionReadonlyRoot(
     conversationIdOrParams: string | GrantSessionReadonlyRootParams,
@@ -535,8 +542,8 @@ export interface FsApi {
     dest?: StageAttachmentDest,
   ): Promise<FsResult<StagedAttachment>>;
   /**
-   * 拖拽/粘贴文件：preload 用 ``webUtils.getPathForFile`` 取绝对路径后调用。
-   * 绝对路径不进入 renderer 业务状态。
+   * 拖拽/粘贴文件：preload 优先 ``webUtils.getPathForFile``；无盘路径时读 File
+   * 字节走 ``stageFromBytes``。绝对路径不进入 renderer 业务状态。
    */
   stageDroppedFile(
     file: File,

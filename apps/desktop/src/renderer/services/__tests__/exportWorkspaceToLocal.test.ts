@@ -67,6 +67,7 @@ describe("exportWorkspaceToLocal", () => {
     );
     expect(checkout).toHaveBeenCalledOnce();
     expect(typeof checkout.mock.calls[0][0]).toBe("string");
+    expect(checkout.mock.calls[0][1]).toBeUndefined();
     expect(result).toEqual({
       ok: true,
       destName: "Desktop",

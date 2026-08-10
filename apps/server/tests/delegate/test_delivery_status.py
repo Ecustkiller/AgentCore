@@ -214,8 +214,15 @@ def test_blocked_with_criteria_gap_and_bind_action_on_cloud():
     assert payload["delivered_files"] == []
     assert payload["gaps"][0]["role"] == "验收"
     assert payload["actions"] and payload["actions"][0]["kind"] == "bind_local_folder"
-    assert "未能交付" in payload["summary"]
-    assert "未完成" in payload["summary"]
+    assert "导入到云" in payload["actions"][0]["description"] or "连接 Git" in payload[
+        "actions"
+    ][0]["description"]
+    assert "绑定本机执行环境" not in payload["actions"][0]["description"]
+    assert "合法非默认" in payload["actions"][0]["description"] or "本机传统" in payload[
+        "actions"
+    ][0]["description"]
+    assert "改导" not in payload["actions"][0]["description"]
+    assert "勿再绑" not in payload["actions"][0]["description"]
 
 
 def test_zero_landing_worker_keeps_role_soft_gap():

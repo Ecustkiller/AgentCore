@@ -333,7 +333,8 @@ class DeliveryGap(WirePayload):
 class DeliveryAction(WirePayload):
     """One user action that would close a delivery gap. ``kind`` is a widened string
     on the wire (like ``ToolPhase``) so the backend can add kinds without a client
-    bump — known: ``bind_local_folder`` (云端无执行环境 → 绑定本机执行环境后可运行生成；≠打开项目);
+    bump — known: ``bind_local_folder`` (wire kind；产品文案优先云协作「导入到云 / 连接 Git」；
+    本机传统合法非默认，≠离线)；
     ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
     与 bind_local_folder 可并存但语义不同);
     ``website_verify`` (整页 QA 因预算 defer → 一键续派 ``build_website_verify``);

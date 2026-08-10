@@ -71,7 +71,9 @@ async def test_readyz_includes_redis_when_redis_backend(monkeypatch):
     assert r.json() == {"status": "ready", "database": True, "redis": True}
 
 
-async def test_readyz_returns_503_when_redis_required_but_down(monkeypatch):
+async def test_readyz_returns_200_when_db_up_but_redis_down(monkeypatch):
+    """Redis is soft: DB healthy → HTTP 200 even if redis probe fails."""
+
     async def _db_ok() -> bool:
         return True
 
@@ -84,8 +86,8 @@ async def test_readyz_returns_503_when_redis_required_but_down(monkeypatch):
     async with _client() as c:
         r = await c.get("/readyz")
 
-    assert r.status_code == 503
-    assert r.json() == {"status": "not_ready", "database": True, "redis": False}
+    assert r.status_code == 200
+    assert r.json() == {"status": "ready", "database": True, "redis": False}
 
 
 async def test_version_exposes_build_provenance(monkeypatch):

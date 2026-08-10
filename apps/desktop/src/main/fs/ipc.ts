@@ -44,6 +44,7 @@ import {
   finalizeStagedAttachment,
   pickAndStageAttachment,
   stageFromAbsPath,
+  stageFromBytes,
   stageFromRoot,
 } from "./stageAttachment";
 import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
@@ -162,10 +163,11 @@ async function createOrUpgradeSessionRoot(
 }
 
 const GRANT_FAIL_MESSAGES: Record<
-  "not_found" | "not_directory" | "ambiguous",
+  "not_found" | "permission_denied" | "not_directory" | "ambiguous",
   string
 > = {
   not_found: "找不到该目录",
+  permission_denied: "定位到了，但这台电脑不让程序读取该目录",
   not_directory: "路径指向的是文件，不是目录",
   ambiguous: "匹配到多个目录，请说得更具体",
 };
@@ -259,7 +261,7 @@ export function registerFsIpc(): void {
     return { id, name };
   });
 
-  // 云 scratch → 本地单向 checkout（§八.7）：弹目录 + 解压 zip，不登记根。
+  // 云 → 本机单向 checkout（§八.7 / §7.6）：弹目录解压落地（纯导出）。
   ipcMain.handle(FS_CHANNELS.checkoutArchive, async (_e, p: unknown) => {
     if (!isRecord(p) || typeof p.archiveBase64 !== "string") {
       return {
@@ -597,6 +599,14 @@ export function registerFsIpc(): void {
     const args = requireStringFields(p, ["absPath"]);
     if (!args) return invalidFsResult();
     return stageFromAbsPath(args.absPath, parseStageDest(p));
+  });
+
+  ipcMain.handle(FS_CHANNELS.stageFromBytes, (_e, p: unknown) => {
+    if (!isRecord(p) || typeof p.name !== "string") return invalidFsResult();
+    const bytes = coerceIpcBytes(p.bytes);
+    if (!bytes) return invalidFsResult();
+    const mime = typeof p.mime === "string" ? p.mime : undefined;
+    return stageFromBytes(p.name, bytes, parseStageDest(p), mime);
   });
 
   ipcMain.handle(FS_CHANNELS.finalizeStagedAttachment, (_e, p: unknown) => {

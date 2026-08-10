@@ -142,10 +142,10 @@ class AskUserTool:
                     "grant_organize_folder",
                 ],
                 "description": (
-                    "可选。open_local_project=新会话打开本地项目；"
-                    "register_local_project=本对话登记本地项目；"
-                    "bind_local_folder=本会话绑执行环境（≠打开/登记）；"
-                    "grant_organize_folder=区外整理授权；"
+                    "可选。open/register/bind_local_* = 本机传统入口"
+                    "（合法非默认；云协作仍推荐；≠离线；勿当默认主推）；"
+                    "grant_organize_folder=区外整理授权（口头同意须立刻发卡；"
+                    "歧义可同一题 2～3 个 organize choice）；"
                     "grant_readonly_folder=旧帧保留（【禁止】新发；只读用 "
                     "external_mount_readonly）。"
                 ),
@@ -163,12 +163,23 @@ class AskUserTool:
                     "仅 grant_*。子目录/压缩包模糊名（禁 / \\）；有 well_known 时在其下匹配。"
                 ),
             }
-            questions_desc += " 桌面 options.action 见 enum；grant_* 可带 well_known/target_name。"
+            option_properties["path"] = {
+                "type": "string",
+                "description": (
+                    "仅 grant_*。已知运输 path（与 well_known/target_name 互补；"
+                    "歧义候选宜各不同）。"
+                ),
+            }
+            questions_desc += (
+                " 桌面 options.action 见 enum；grant_* 可带 well_known/target_name/path；"
+                "整理歧义可 2～3 个 grant_organize_folder choice。"
+            )
             tool_desc += (
-                " 桌面可标 open_local_project / register_local_project / "
-                "bind_local_folder / grant_organize_folder；"
+                " 桌面可标 grant_organize_folder（口头同意须立刻发卡；"
+                "歧义可 2～3 个 organize choice，各不同 well_known/target_name/path）；"
+                "open/register/bind_local_* = 本机传统（合法非默认，云仍推荐，≠离线）；"
                 "只读→external_mount_readonly（【禁止】新发 grant_readonly_folder）；"
-                "grant_* 可加 well_known/target_name。"
+                "grant_* 可加 well_known/target_name/path。"
             )
 
         return ToolSchema(
@@ -353,6 +364,7 @@ class AskUserTool:
                         opt.pop("action", None)
                         opt.pop("well_known", None)
                         opt.pop("target_name", None)
+                        opt.pop("path", None)
 
         # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
         # any suspend / durable-frame machinery — it shares none of it.

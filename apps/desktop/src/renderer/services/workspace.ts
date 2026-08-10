@@ -314,8 +314,8 @@ export type ExportWorkspaceToLocalResult =
   | { ok: false; reason: "error"; message: string };
 
 /**
- * 云 scratch → 本地单向 checkout（§八.7）：快照 → 用户选目录 → 解压落地。
- * 预览仍走既有云工作区浏览面；本函数只负责落地。非桌面 → unavailable。
+ * 云 scratch → 本机单向 checkout（§八.7 / §7.6）：快照 → 用户选目录解压落地。
+ * 不必登记合回落点；合回落点写出走 Diff / 只合回产物。非桌面 → unavailable。
  */
 export async function exportWorkspaceToLocal(
   conversationId: string,

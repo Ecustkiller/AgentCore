@@ -38,8 +38,9 @@ export type UpdaterStatus =
       sizeBytes?: number | null;
     }
   /**
-   * 下载中。`percent` 为 0–100 整数；`bytesPerSecond` / `transferred` / `total`
-   * 来自 electron-updater 真实字节进度（非假进度），供 UI 显示速度与已传量。
+   * 下载中。`percent` 为 0–100 整数；`transferred` / `total` 来自 electron-updater
+   * 真实字节进度（非假进度）。`bytesPerSecond` 为主进程近期窗口速率（非全程平均），
+   * 避免续传/缓存冲高后百分比几乎不动、速度却看起来很快。
    */
   | {
       phase: "downloading";

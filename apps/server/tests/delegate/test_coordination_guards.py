@@ -414,6 +414,8 @@ def test_roles_and_file_targets_detect_geo_class_overlap():
     assert not roles_overlap("痛点调研员", "定价调研员")
     assert roles_overlap("页面 QA", "页面 QA")
     assert roles_overlap("痛点调研员", " 痛点调研员 ")
+    assert roles_overlap("V2专项测试员", "V2 专项测试员")
+    assert roles_overlap("V2专项测试员", "v2专项测试员")
     assert not roles_overlap("前端工程师", "测试工程师")
     assert not roles_overlap("SEO 优化师", "内容文案")
 
@@ -594,6 +596,99 @@ def test_same_seat_incomplete_still_rejects():
     assert hits
     assert hits[0].reason == "role"
     assert hits[0].live_run_id == "price"
+
+
+def test_same_batch_norm_role_whitespace_variant_rejects():
+    """同批「V2专项测试员」与「V2 专项测试员」→ sibling_role 拒收。"""
+    from agentcore.runtime.coordination.append_guard import (
+        admit_added_nodes,
+        append_overlap_reject_message,
+        find_append_overlaps,
+        find_sibling_role_crosses,
+    )
+
+    batch = _plan(
+        RunSpec(run_id="qa1", role="V2专项测试员", task="测 A"),
+        RunSpec(run_id="qa2", role="V2 专项测试员", task="测 B"),
+    )
+    sibling = find_sibling_role_crosses(batch)
+    assert len(sibling) == 1
+    assert sibling[0].reason == "sibling_role"
+    assert {sibling[0].live_run_id, sibling[0].new_run_id} == {"qa1", "qa2"}
+
+    hits = find_append_overlaps(batch, None, completed_run_ids=set())
+    assert hits
+    assert all(h.reason == "sibling_role" for h in hits)
+
+    msg = append_overlap_reject_message(hits, completed=0, total=len(batch.nodes))
+    assert "同批座位重叠已拒绝" in msg
+    assert "V2" in msg
+
+    reject = admit_added_nodes(batch, None, completed_run_ids=set())
+    assert reject is not None
+    assert "同批座位重叠已拒绝" in reject
+
+    # Distinct seats after norm still admit.
+    ok = _plan(
+        RunSpec(run_id="a", role="V2专项测试员", task="测 A"),
+        RunSpec(run_id="b", role="V2专项开发员", task="写 B"),
+    )
+    assert find_sibling_role_crosses(ok) == []
+    assert find_append_overlaps(ok, None, completed_run_ids=set()) == []
+    assert admit_added_nodes(ok, None, completed_run_ids=set()) is None
+
+
+def test_same_batch_serial_same_role_with_depends_on_admits():
+    """同批同座但 depends_on 串行交接 → 非 sibling_role（勿靠改角色名）。"""
+    from agentcore.runtime.coordination.append_guard import (
+        admit_added_nodes,
+        find_sibling_role_crosses,
+    )
+
+    batch = _plan(
+        RunSpec(run_id="r1", role="正方", task="首轮"),
+        RunSpec(run_id="r2", role="正方", task="次轮", depends_on=["r1"]),
+    )
+    assert find_sibling_role_crosses(batch) == []
+    assert admit_added_nodes(batch, None, completed_run_ids=set()) is None
+
+
+def test_same_batch_scoped_fanout_same_role_admits():
+    """同批同角色但交付物 scope 互斥（compare_options 扇出）→ 放行。"""
+    from agentcore.runtime.coordination.append_guard import (
+        admit_added_nodes,
+        find_sibling_role_crosses,
+    )
+    from agentcore.runtime.runs.types import Deliverable
+
+    batch = _plan(
+        RunSpec(
+            run_id="eval_0",
+            role="评估员",
+            task="评 A",
+            deliverable=Deliverable(name="对选项【A】的评估"),
+        ),
+        RunSpec(
+            run_id="eval_1",
+            role="评估员",
+            task="评 B",
+            deliverable=Deliverable(name="对选项【B】的评估"),
+        ),
+    )
+    assert find_sibling_role_crosses(batch) == []
+    assert admit_added_nodes(batch, None, completed_run_ids=set()) is None
+
+
+def test_same_batch_norm_role_conflicts_with_live_incomplete():
+    """新批空格变体撞 live 未完成同座 → role 拒（new∪live）。"""
+    from agentcore.runtime.coordination.append_guard import find_append_overlaps
+
+    live = _plan(RunSpec(run_id="live_qa", role="V2专项测试员", task="在跑"))
+    new = _plan(RunSpec(run_id="qa2", role="V2 专项测试员", task="再派"))
+    hits = find_append_overlaps(new, live, completed_run_ids=set())
+    assert hits
+    assert hits[0].reason == "role"
+    assert hits[0].live_run_id == "live_qa"
 
 
 async def test_merge_auto_replaces_vacated_seat_and_rewrites_deps():

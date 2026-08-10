@@ -22,6 +22,14 @@ on:
         type: choice
         options:
           - mac
+      channel:
+        description: "Release channel (stable=默认；beta=并列测试轨)"
+        required: false
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
 
 jobs:
   precreate-release:
@@ -98,29 +106,33 @@ jobs:
         env:
           # electron-vite + large renderer OOMs on default Node heap (macos-latest)
           NODE_OPTIONS: --max-old-space-size=8192
+          DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
           pnpm build
-          pnpm exec electron-builder --mac --arm64 --publish never
+          pnpm exec electron-builder --config electron-builder.config.mjs --mac --arm64 --publish never
 
       - name: Upload mac assets to AgentCore-releases
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+          DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
           ver="$(node -p "require('./package.json').version")"
+          channel="${DESKTOP_RELEASE_CHANNEL:-stable}"
+          slug="$(node --input-type=module -e "import { parseReleaseChannel, resolveReleaseIdentity } from './scripts/release-channel.mjs'; console.log(resolveReleaseIdentity(parseReleaseChannel(process.env.DESKTOP_RELEASE_CHANNEL)).artifactSlug)")"
           tag="v${ver}"
           repo="Lawofall/AgentCore-releases"
           dir="release/${ver}"
-          test -f "${dir}/AgentCore-${ver}-mac-arm64.dmg"
-          test -f "${dir}/AgentCore-${ver}-mac-arm64.zip"
+          test -f "${dir}/${slug}-${ver}-mac-arm64.dmg"
+          test -f "${dir}/${slug}-${ver}-mac-arm64.zip"
           test -f "${dir}/latest-mac.yml"
           gh release upload "$tag" \
-            "${dir}/AgentCore-${ver}-mac-arm64.dmg" \
-            "${dir}/AgentCore-${ver}-mac-arm64.dmg.blockmap" \
-            "${dir}/AgentCore-${ver}-mac-arm64.zip" \
-            "${dir}/AgentCore-${ver}-mac-arm64.zip.blockmap" \
+            "${dir}/${slug}-${ver}-mac-arm64.dmg" \
+            "${dir}/${slug}-${ver}-mac-arm64.dmg.blockmap" \
+            "${dir}/${slug}-${ver}-mac-arm64.zip" \
+            "${dir}/${slug}-${ver}-mac-arm64.zip.blockmap" \
             "${dir}/latest-mac.yml" \
             --repo "$repo" --clobber
-          echo "uploaded mac assets to ${repo} ${tag}"
+          echo "uploaded mac assets to ${repo} ${tag} (channel=${channel}, slug=${slug})"
           gh release view "$tag" --repo "$repo"
 
       # Brand download host for electron-updater (发布与门禁 §7.6b). 官网首装 = GitHub.
@@ -128,6 +140,7 @@ jobs:
       - name: Sync mac assets to download CDN
         working-directory: .
         env:
+          DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
@@ -135,14 +148,16 @@ jobs:
         run: |
           ver="$(node -p "require('./apps/desktop/package.json').version")"
           if [[ -z "${DEPLOY_SSH_HOST}" || -z "${DEPLOY_SSH_USER}" || -z "${DEPLOY_SSH_KEY}" ]]; then
-            echo "::warning::DEPLOY_SSH_* secrets missing — skip CDN sync; run: pnpm sync:release-cdn --desktop apps/desktop/release/${ver} --version ${ver}"
+            echo "::warning::DEPLOY_SSH_* secrets missing — skip CDN sync; run: pnpm sync:release-cdn --desktop apps/desktop/release/${ver} --version ${ver} --channel ${DESKTOP_RELEASE_CHANNEL:-stable}"
             exit 0
           fi
           KEY_FILE="$(mktemp)"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
           export DEPLOY_SSH_KEY_PATH="$KEY_FILE"
+          channel="${DESKTOP_RELEASE_CHANNEL:-stable}"
           node deploy/scripts/sync-release-cdn.mjs \
             --desktop "apps/desktop/release/${ver}" \
-            --version "${ver}"
+            --version "${ver}" \
+            --channel "${channel}"
           rm -f "$KEY_FILE"

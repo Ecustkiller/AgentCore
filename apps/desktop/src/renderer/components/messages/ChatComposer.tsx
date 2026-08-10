@@ -1,4 +1,5 @@
 import { IconButton } from "@/components/ui";
+import { collectClipboardFiles } from "@/lib/clipboardFiles";
 import {
   type ChatMention,
   type MessageReplyTo,
@@ -440,7 +441,7 @@ export function ChatComposer({
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.files);
+    const files = collectClipboardFiles(e.clipboardData);
     if (files.length > 0) {
       e.preventDefault();
       addFiles(files);

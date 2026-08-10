@@ -41,6 +41,12 @@ from agentcore.security.keys import KeyEncryptor
 
 logger = get_logger(__name__)
 
+# Shown when connectivity test succeeds with no other message — clarifies that
+# green ≠ chat-ready; daily chat uses 模型组合 main model, not this probe.
+CONNECTIVITY_OK_HINT = (
+    "连接正常。此测试只验证连通；日常聊天请到「模型组合」配置主模型。"
+)
+
 
 @dataclass(frozen=True)
 class LlmProviderView:
@@ -324,6 +330,8 @@ class LlmProviderService:
         await self._repo.update_status(provider_id, status)
         if status == "active":
             await self._repo.update_supports_tools(provider_id, supports_tools)
+            if not message:
+                message = CONNECTIVITY_OK_HINT
         fresh = await self._repo.get(provider_id, user_id=user_id)
         assert fresh is not None
         return self._view(fresh, enc=enc, message=message)
@@ -337,8 +345,12 @@ class LlmProviderService:
         """Prefer ``list_models`` (connection OK); fall back to ``probe(default_model)``.
 
         Auth / balance failures from ``list_models`` are hard errors. Other
-        ``list_models`` failures fall through to the legacy probe path. Tools
-        probing is best-effort and never flips an otherwise-active result to error.
+        ``list_models`` failures fall through to the legacy probe path. When
+        ``list_models`` succeeds but the default model is absent from a
+        non-empty upstream list, also fall through to ``probe`` (e.g. Ark
+        ``ep-`` endpoints that chat but are omitted from ``/models``). An empty
+        upstream list does not trigger that check. Tools probing is best-effort
+        and never flips an otherwise-active result to error.
         """
         list_fn = getattr(provider, "list_models", None)
         if callable(list_fn):
@@ -350,13 +362,12 @@ class LlmProviderService:
                 # Non-auth discovery failure → fall back to chat probe.
                 pass
             else:
-                message: str | None = None
-                if model and model_ids and model not in model_ids:
-                    message = (
-                        f"连接正常，但默认模型 {model} 不在上游列表，请更换"
+                # Non-empty list missing default model → probe (do not soft-green).
+                if not (model and model_ids and model not in model_ids):
+                    supports_tools = await self._best_effort_probe_tools(
+                        provider, model=model
                     )
-                supports_tools = await self._best_effort_probe_tools(provider, model=model)
-                return "active", message, supports_tools
+                    return "active", None, supports_tools
 
         try:
             await provider.probe(model=model)  # type: ignore[attr-defined]

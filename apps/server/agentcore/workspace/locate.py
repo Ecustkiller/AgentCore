@@ -258,12 +258,18 @@ def build_local_workspace(
     """Construct the ``LocalWorkspace`` for a conversation bound to a desktop root.
 
     Builds the per-turn ``WorkspaceChannel`` — the generalized approval-gate
-    transport — over the live SSE ``sink`` plus the process-wide op registry (the
+    transport — over the turn SSE ``sink`` plus the process-wide op registry (the
     same one the resolve endpoint settles), then wraps it. The channel carries
     ``binding.root_id`` so every op the engine issues runs against the right
     authorized directory on the user's machine. State (the suspended op Future)
     lives in the registry, so it must be the *shared* default unless a test injects
     its own.
+
+    Bridge lifetime aligns with coordination, not the SSE observer: after CEO
+    ``end_turn`` the sink may :meth:`~EventSink.detach` while a background drive
+    still issues Local ops. Detach skips the live queue but keeps CLIENT_TOOL
+    Futures open; attach re-emits pending ``workspace_op_required`` frames. Only
+    :meth:`~EventSink.close` (after ``await_live_detached_drive``) ends the bridge.
     """
     channel = WorkspaceChannel(
         sink=sink,

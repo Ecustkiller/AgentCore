@@ -976,7 +976,9 @@ def build_delivery_status(
     blocking = [g for g in gaps if _is_blocking(g)]
     warnings = [g for g in gaps if not _is_blocking(g)]
 
-    # 待用户操作：① 无执行环境 → 绑定本地文件夹；② 整页 QA 预算 defer → 一键续派验收；
+    # 待用户操作：① 无执行环境 → 优先引导导入/连 Git（wire kind 仍可 bind_local_folder；
+    #    本机传统合法非默认）；
+    # ② 整页 QA 预算 defer → 一键续派验收；
     # ③ 额度 SKIPPED 未跑节点 → 续跑入口。
     # 成篇未写完不再挂 continue_writing——改由对话框接着说。
     # ① 判定复用 code_execution_enabled_for 单一真相源（与 worker registry / 委派闸同一谓词）。
@@ -1011,9 +1013,8 @@ def build_delivery_status(
                 {
                     "kind": "bind_local_folder",
                     "description": (
-                        "本回合为云端会话、未装配执行环境：绑定本机执行环境"
-                        "（本会话 scratch，≠打开本地项目）后，"
-                        "团队可在你的电脑上运行脚本、生成并验证产物。"
+                        "本回合为云端会话、未装配执行环境：**推荐** Composer「导入到云 / 连接 Git」"
+                        "把工程进云后再跑；本机传统（打开本地文件夹）合法非默认，≠离线。"
                     ),
                 }
             )

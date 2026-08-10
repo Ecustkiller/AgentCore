@@ -15,8 +15,11 @@ import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
+import { ConnectGitDialogHost } from "../files/CloneRepoDialog";
+import { ImportToCloudDialogHost } from "../files/ImportToCloudDialog";
 import { CreateFolderMenuHost } from "../folders/CreateFolderMenu";
 import { Sidebar } from "../sidebar/Sidebar";
+import { MergeLandingReviewHost } from "../workspace/MergeLandingReview";
 import { CommandPalette } from "./CommandPalette";
 import { ForceUpdateGate } from "./ForceUpdateGate";
 import { ProductNoticeBanner } from "./ProductNoticeBanner";
@@ -149,6 +152,9 @@ export function AppShell() {
       <CommandPalette />
       <ShareConversationDialog />
       <CreateFolderMenuHost />
+      <ConnectGitDialogHost />
+      <ImportToCloudDialogHost />
+      <MergeLandingReviewHost />
     </div>
   );
 }

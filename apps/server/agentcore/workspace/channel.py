@@ -194,7 +194,9 @@ class WorkspaceChannel:
     One channel per local-mode turn (constructed where the sink is available),
     bound to one desktop FS ``root_id``. ``request`` is the only entry point;
     ``LocalWorkspace`` builds the JSON-safe ``args`` and interprets the returned
-    ``value`` per op.
+    ``value`` per op. SSE detach (no live observer) does **not** kill the bridge —
+    CLIENT_TOOL Futures stay open for attach re-hang; only a closed sink
+    fail-fasts with ``sink closed（未入队）``.
 
     Sticky dead: **consecutive** transport ``TimeoutError``s on **real** workspace
     ops (desktop liveness hang, N=2) mark the channel dead for the rest of the turn —
@@ -332,7 +334,15 @@ class WorkspaceChannel:
             rid = self.root_id if root_id is None else root_id
 
             def _emit_op_required() -> None:
-                """Emit SSE; if not live-queued, settle immediately (no wall-clock wait)."""
+                """Emit SSE; fail-fast only when the turn sink is truly closed.
+
+                ``emit`` returns False for both closed and detached. Detach is
+                temporary (SSE observer dropped while coordination may still
+                drive Local ops): the CLIENT_TOOL Future stays open and attach
+                re-hangs via ``pending_client_tool_events``. Closed means this
+                sink will never accept a live consumer again — settle now so we
+                do not burn the channel deadline for an op no desktop can see.
+                """
                 live = self.sink.emit(
                     workspace_op_required(
                         request_id=request_id,
@@ -343,9 +353,8 @@ class WorkspaceChannel:
                         timeout_ms=timeout_ms,
                     )
                 )
-                if live:
+                if live or not self.sink.is_closed:
                     return
-                # Sink closed / detached: desktop never saw the op — fail settle now.
                 self.registry.resolve(
                     request_id,
                     {

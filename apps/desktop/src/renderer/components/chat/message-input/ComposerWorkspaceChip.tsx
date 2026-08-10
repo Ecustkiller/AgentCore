@@ -1,4 +1,3 @@
-import { LocalPickerFailureCard } from "@/components/chat/ask/LocalPickerFailureCard";
 import { CreateFolderCascadePanel } from "@/components/folders/CreateFolderMenu";
 import { Button, SearchField } from "@/components/ui";
 import {
@@ -12,15 +11,15 @@ import {
   useWorkspaceModeState,
 } from "@/components/workspace/WorkspaceModeControl";
 import { useGroupedConversations } from "@/hooks/useConversations";
-import {
-  type LocalPickerFailureKind,
-  isLocalPickerFailureKind,
-} from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
+import {
+  getComposerChannelPreference,
+  setComposerChannelPreference,
+} from "@/lib/composerChannelPreference";
+import { LOCAL_TRADITIONAL_LABEL } from "@/lib/conversationWorkspaceMode";
 import { visibleDraftProjects } from "@/lib/draftWorkspaceProjects";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
-import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import {
   type FolderMeta,
   dedupeFoldersByLocalBinding,
@@ -33,17 +32,20 @@ import {
   ChevronUp,
   Cloud,
   FolderOpen,
+  GitBranch,
   HardDrive,
   Loader2,
   Plus,
+  Upload,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { WorkspaceChannelGuideDialog } from "./WorkspaceChannelGuideDialog";
 
 /**
  * Always-on「在哪工作」chip for the TurnComposer 底栏左簇（工作区首位）。
- * Draft: single menu (quick local / cloud / projects / create).
- * Bound conversation: read-only status (+ backup when local).
+ * Draft: 云入口 + 本机传统（桌面）+ 已有项目；禁本机草稿；记上次通道（无顶栏说明壳）。
+ * Bound conversation: read-only status (+ backup when local legacy).
  */
 export function ComposerWorkspaceChip({
   conversationId,
@@ -106,6 +108,7 @@ function draftLabel(
   if (intent.kind === "quick_cloud") {
     return { icon: "cloud", text: "快速对话" };
   }
+  // Legacy intent（入口已砍；发送时改导云，不再造本机草稿）
   if (intent.kind === "quick_local") {
     return { icon: "local", text: "本机草稿" };
   }
@@ -113,30 +116,28 @@ function draftLabel(
   if (!folder) return { icon: "project", text: "项目" };
   return {
     icon: folder.mode === "local" ? "local" : "cloud",
-    text: `${folder.name} · ${folder.mode === "local" ? "本地" : "云端"}`,
+    text: `${folder.name} · ${folder.mode === "local" ? LOCAL_TRADITIONAL_LABEL : "云端"}`,
   };
 }
 
 function folderLocationHint(f: FolderMeta): string {
   if (f.mode === "cloud") return "云端空间";
   if (f.localSubpath) return `本地 · ${f.localSubpath}`;
-  return "本地文件夹";
+  return "本机文件夹";
 }
 
 function DraftChip() {
   const navigate = useNavigate();
   const [pop, setPop] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [projectsExpanded, setProjectsExpanded] = useState(false);
   /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
   const [view, setView] = useState<"pick" | "create">("pick");
-  const [pickerFailure, setPickerFailure] = useState<{
-    kind: LocalPickerFailureKind;
-    message?: string;
-  } | null>(null);
   const intent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const setIntent = useFoldersStore((s) => s.setDraftWorkspaceIntent);
   const isDesktop = hasLocalFiles();
+  const lastChannel = getComposerChannelPreference();
 
   const grouped = useGroupedConversations().data;
   const folders = useMemo(() => {
@@ -182,48 +183,55 @@ function DraftChip() {
     resetPickChrome();
   };
 
-  const openLocalProject = () => {
-    closePick();
-    setPickerFailure(null);
-    void pickAndOpenLocalProject(navigate, { notifyOnFailure: false }).then(
-      (result) => {
-        if (result.ok || result.reason === "cancelled") return;
-        if (isLocalPickerFailureKind(result.reason)) {
-          setPickerFailure({
-            kind: result.reason,
-            message: result.message,
-          });
-        }
-      },
-    );
-  };
-
-  const pickQuickLocal = () => {
-    setIntent({ kind: "quick_local" });
-    void ensureDefaultContainerRoot();
-    closePick();
-  };
-
   const pickQuickCloud = () => {
+    setComposerChannelPreference("cloud");
     setIntent({ kind: "quick_cloud" });
     closePick();
   };
 
-  const pickProject = (id: string) => {
-    setIntent({ kind: "project", folderId: id });
+  const pickProject = (folder: FolderMeta) => {
+    setComposerChannelPreference(
+      folder.mode === "local" ? "local_traditional" : "cloud",
+    );
+    setIntent({ kind: "project", folderId: folder.id });
     closePick();
+  };
+
+  const connectGit = () => {
+    setComposerChannelPreference("cloud");
+    closePick();
+    useFoldersStore.getState().openConnectGit();
+  };
+
+  const importToCloud = () => {
+    setComposerChannelPreference("cloud");
+    closePick();
+    useFoldersStore.getState().openImportToCloud();
+  };
+
+  const pickLocalTraditional = () => {
+    setComposerChannelPreference("local_traditional");
+    closePick();
+    void pickAndOpenLocalProject(navigate);
+  };
+
+  const openCreateCloud = () => {
+    setComposerChannelPreference("cloud");
+    setView("create");
+  };
+
+  const openGuide = () => {
+    setPop(false);
+    setGuideOpen(true);
   };
 
   return (
     <div className="relative shrink-0">
-      {pickerFailure ? (
-        <div className="absolute bottom-full left-0 z-20 mb-1 w-72">
-          <LocalPickerFailureCard
-            kind={pickerFailure.kind}
-            message={pickerFailure.message}
-          />
-        </div>
-      ) : null}
+      <WorkspaceChannelGuideDialog
+        open={guideOpen}
+        onOpenChange={setGuideOpen}
+        showLocalTraditional={isDesktop}
+      />
       <Popover
         open={pop}
         onOpenChange={(o) => {
@@ -269,102 +277,100 @@ function DraftChip() {
                   在哪工作
                 </Button>
                 <span className="px-1 text-xs font-medium text-foreground">
-                  新建项目
+                  新建云项目
                 </span>
               </div>
               <CreateFolderCascadePanel onClose={closePick} />
             </div>
           ) : (
-            <>
-              <div className="border-b border-border px-3 py-2.5">
-                <div className="text-xs font-medium text-foreground">
-                  在哪工作
-                </div>
-                {!isDesktop ? (
-                  <div className="text-xs text-muted-foreground">
-                    仅支持云端
-                  </div>
-                ) : null}
-              </div>
-              <div className="max-h-[360px] overflow-y-auto p-1.5">
-                <DraftRow
-                  icon={<Cloud size={14} />}
-                  label="快速对话"
-                  hint="云端临时空间（默认）"
-                  selected={intent.kind === "quick_cloud"}
-                  onClick={pickQuickCloud}
-                />
-                {isDesktop ? (
+            <div className="max-h-[360px] overflow-y-auto p-1.5">
+              <DraftRow
+                icon={<Cloud size={14} />}
+                label="快速对话"
+                selected={intent.kind === "quick_cloud"}
+                onClick={pickQuickCloud}
+              />
+              <DraftRow
+                icon={<Plus size={14} />}
+                label="新建云项目"
+                onClick={openCreateCloud}
+              />
+              {isDesktop ? (
+                <>
+                  <DraftRow
+                    icon={<Upload size={14} />}
+                    label="导入本机项目到云"
+                    onClick={importToCloud}
+                  />
+                  <DraftRow
+                    icon={<GitBranch size={14} />}
+                    label="从 Git 克隆"
+                    onClick={connectGit}
+                  />
                   <DraftRow
                     icon={<HardDrive size={14} />}
-                    label="本机草稿"
-                    hint="文件落本机默认目录，不建项目"
-                    selected={intent.kind === "quick_local"}
-                    onClick={pickQuickLocal}
-                  />
-                ) : null}
-                {isDesktop ? (
-                  <DraftRow
-                    icon={<FolderOpen size={14} />}
-                    label="打开本地项目…"
-                    hint="选本机文件夹，开新会话"
-                    onClick={openLocalProject}
-                  />
-                ) : null}
-                <DraftRow
-                  icon={<Plus size={14} />}
-                  label="新建项目…"
-                  hint={isDesktop ? "空白项目，或从文件夹建档" : "云端空白项目"}
-                  onClick={() => setView("create")}
-                />
-
-                <div className="my-1 border-t border-border" />
-                <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    项目
-                  </span>
-                  <SearchField
-                    value={query}
-                    onValueChange={setQuery}
-                    placeholder="筛选…"
-                    aria-label="筛选项目"
-                    className="min-w-0 flex-1"
-                    inputClassName="text-xs"
-                  />
-                </div>
-                {projectRows.map((f) => (
-                  <DraftRow
-                    key={f.id}
-                    icon={<FolderOpen size={14} />}
-                    label={f.name}
-                    hint={folderLocationHint(f)}
-                    selected={
-                      intent.kind === "project" && intent.folderId === f.id
+                    label="打开本机项目"
+                    badge={
+                      lastChannel === "local_traditional" ? "上次" : undefined
                     }
-                    onClick={() => pickProject(f.id)}
+                    onClick={pickLocalTraditional}
                   />
-                ))}
-                {matchCount === 0 && (
-                  <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                    {query.trim() ? "没有匹配的项目" : "还没有项目"}
-                  </p>
-                )}
-                {canExpand && !projectsExpanded && hiddenCount > 0 ? (
-                  <DraftRow
-                    icon={<ChevronDown size={14} />}
-                    label={`查看全部（${matchCount}）`}
-                    onClick={() => setProjectsExpanded(true)}
-                  />
-                ) : null}
-                {canExpand && projectsExpanded ? (
-                  <DraftRow
-                    icon={<ChevronUp size={14} />}
-                    label="收起"
-                    onClick={() => setProjectsExpanded(false)}
-                  />
-                ) : null}
+                </>
+              ) : null}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                onClick={openGuide}
+              >
+                了解区别
+              </button>
+
+              <div className="my-1 border-t border-border" />
+              <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  项目
+                </span>
+                <SearchField
+                  value={query}
+                  onValueChange={setQuery}
+                  placeholder="筛选…"
+                  aria-label="筛选项目"
+                  className="min-w-0 flex-1"
+                  inputClassName="text-xs"
+                />
               </div>
-            </>
+              {projectRows.map((f) => (
+                <DraftRow
+                  key={f.id}
+                  icon={<FolderOpen size={14} />}
+                  label={f.name}
+                  hint={folderLocationHint(f)}
+                  selected={
+                    intent.kind === "project" && intent.folderId === f.id
+                  }
+                  onClick={() => pickProject(f)}
+                />
+              ))}
+              {matchCount === 0 && (
+                <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                  {query.trim() ? "没有匹配的项目" : "还没有项目"}
+                </p>
+              )}
+              {canExpand && !projectsExpanded && hiddenCount > 0 ? (
+                <DraftRow
+                  icon={<ChevronDown size={14} />}
+                  label={`查看全部（${matchCount}）`}
+                  onClick={() => setProjectsExpanded(true)}
+                />
+              ) : null}
+              {canExpand && projectsExpanded ? (
+                <DraftRow
+                  icon={<ChevronUp size={14} />}
+                  label="收起"
+                  onClick={() => setProjectsExpanded(false)}
+                />
+              ) : null}
+            </div>
           )}
         </PopoverContent>
       </Popover>
@@ -376,12 +382,14 @@ function DraftRow({
   icon,
   label,
   hint,
+  badge,
   selected,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
   hint?: string;
+  badge?: string;
   selected?: boolean;
   onClick: () => void;
 }) {
@@ -393,7 +401,14 @@ function DraftRow({
       icon={<span className="shrink-0 text-muted-foreground">{icon}</span>}
     >
       <span className="min-w-0 flex-1">
-        <span className="block truncate">{label}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{label}</span>
+          {badge ? (
+            <span className="shrink-0 rounded-lg bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+              {badge}
+            </span>
+          ) : null}
+        </span>
         {hint && (
           <span className="block truncate text-xs font-normal text-muted-foreground">
             {hint}

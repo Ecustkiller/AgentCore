@@ -47,18 +47,22 @@ function persistTheme(v: Theme): void {
   uiSet(THEME_KEY, v);
 }
 
-// 本机执行（sidecar）开关——三态偏好（双模式工作区 §一.1）。高级 opt-in，非大众默认卖点。
+// 本机执行（sidecar）开关——三态偏好（双模式工作区 §7.2）。
 //
-// 设置 UI「允许本机执行」打开 → 偏好 `on`。持久化的是**偏好**而非有效值，
-// 故翻产品默认时不静默改写已落盘的 `on`/`off`：
-//   - "unset"（无 key）→ 跟随 `SIDECAR_DEFAULT_ENABLED`（用户没表态，由产品默认决定）；
-//   - "on" / "off" → 用户显式选择，恒被尊重，不受默认值变化影响。
-// 有效开关 = `resolveSidecarEnabled(偏好)`，消费方（sidecarRouting）只读那个 boolean。
+// 产品：本机传统（mode=local）新开回合默认同侧 sidecar；本开关是诊断/强制关，不是「默认关→整段过桥」。
+// 设置 UI「允许本机执行」：
+//   - 打开 → 偏好 `on`（允许本机同侧；与 unset 对路由等价）
+//   - 关闭 → 偏好 `off`（显式强制走云，诊断用）
+// 持久化的是**偏好**而非有效值，故翻产品默认时不静默改写已落盘的 `on`/`off`：
+//   - "unset"（无 key）→ 跟随 `SIDECAR_DEFAULT_ENABLED`（仅影响 {@link sidecarEnabled} 展示布尔；
+//     路由以 `sidecarPreference === "off"` 为强制关，unset **不**挡本机传统）
+//   - "on" / "off" → 用户显式选择，恒被尊重
+// 新开回合路由读 `sidecarPreference`（见 `isSidecarForceOff`），勿把 `sidecarEnabled` 当默认挡板。
 type SidecarPreference = "unset" | "on" | "off";
 
-/** 本机执行默认是否开启（用户未表态时）。**默认关**：仅高级在外观设置里显式打开后，
- * 绑定本机本地文件夹的对话才走 sidecar（启动失败仍可降级回云，见 `turns.sendTurn`）。
- * "unset" 跟随此默认；显式 "on"/"off" 不受影响，勿静默改写已落盘偏好。 */
+/** 未表态时 {@link sidecarEnabled} 布尔默认。保持 false——**勿**翻成全站 true 当「默认同侧」捷径；
+ * 本机传统默认同侧由 `resolveSidecarRoot` 按绑定判定，与本常量解耦。"unset" 跟随此默认记入
+ * `sidecarEnabled`；显式 "on"/"off" 不受影响，勿静默改写已落盘偏好。 */
 const SIDECAR_DEFAULT_ENABLED = false;
 
 /**
@@ -106,15 +110,12 @@ interface UIState {
    * **持久化**到 `agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
    * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
-  /** 本机执行（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
-   * 消费方（路由）只读这个 boolean。设置「允许本机执行」打开后，绑定本机本地文件夹的对话可由
-   * 用户机器上的 `python -m agentcore.sidecar` 跑（直连本地盘）；裸聊 / 云端项目 / 带附件的
-   * 回合仍走云。**默认关**（高级 opt-in）；启动失败可降级回云。sidecar 暂非真离线
-   * （LLM 仍经云推理代理），断网时不可用。 */
+  /** 本机执行偏好折成的展示布尔（= `resolveSidecarEnabled`；unset→`SIDECAR_DEFAULT_ENABLED`）。
+   * **不是**新开回合路由挡板——路由看 {@link sidecarPreference} 是否显式 `off`（强制关）。
+   * 设置面应用 `preference !== "off"` 表示「允许」，以免 unset 显示关却仍默认同侧。 */
   sidecarEnabled: boolean;
-  /** 本机执行开关的**持久化偏好**（三态）：`unset` 跟随 `SIDECAR_DEFAULT_ENABLED`、`on`/`off` 为
-   * 用户显式选择——翻产品默认时不静默改写已落盘偏好。持久化到
-   * `agentcore:sidecar-enabled`；设置「允许本机执行」只关心 {@link sidecarEnabled}。 */
+  /** 本机执行**持久化偏好**（三态）：`unset` / `on` = 允许本机传统同侧；`off` = 诊断强制走云。
+   * 翻产品默认时不静默改写已落盘偏好。持久化到 `agentcore:sidecar-enabled`。 */
   sidecarPreference: SidecarPreference;
 
   openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;

@@ -33,7 +33,12 @@ export interface paths {
         };
         /**
          * Readiness
-         * @description Readiness probe: 200 when every hard dependency is reachable, else 503.
+         * @description Readiness probe: HTTP 200/503 follows DB only; Redis is observational.
+         *
+         *     PostgreSQL is the hard dependency that decides ``ready`` / ``not_ready``
+         *     (and thus 200 vs 503). Redis is a soft dependency for distributed rate
+         *     limiting: still probed and, when ``rate_limit_backend=redis``, written to
+         *     ``body["redis"]`` for ops/alerting; a Redis outage must not return 503.
          */
         get: operations["readiness_readyz_get"];
         put?: never;
@@ -10003,6 +10008,8 @@ export interface components {
             created_at: string;
             /** Credential Source */
             credential_source?: ("user" | "platform") | null;
+            /** Harvest Kind */
+            harvest_kind?: string | null;
             /** Id */
             id: string;
             metrics?: components["schemas"]["TurnMetricLine"] | null;
@@ -10011,6 +10018,8 @@ export interface components {
              * @default []
              */
             models: string[];
+            /** Origin */
+            origin?: string | null;
             /** Role */
             role: string;
             /**

@@ -380,6 +380,96 @@ describe("AskDecisionBody organize confirm card", () => {
     expect(pickAndGrantOrganizeFolder).not.toHaveBeenCalled();
     expect(screen.getByText("将整理：桌面 › 咨询")).toBeTruthy();
   });
+
+  it("其他… short affirm fulfills organize grant (not bare compose)", async () => {
+    const onContinue = vi.fn();
+    const onBindResolve = vi.fn(async (_answer: string) => {});
+    pickAndGrantOrganizeFolder.mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "咨询", alias: "咨询", mode: "organize" },
+      alias: "咨询",
+      namespace: "external/咨询",
+      displayLabel: "桌面 › 咨询",
+    });
+
+    render(
+      <Harness
+        content={organizeContent}
+        onContinue={onContinue}
+        onBindResolve={onBindResolve}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /其他…/ }));
+    fireEvent.change(screen.getByPlaceholderText("填写你的答案"), {
+      target: { value: "可以" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
+
+    await waitFor(() => {
+      expect(pickAndGrantOrganizeFolder).toHaveBeenCalledWith("conv-1", {
+        wellKnown: "desktop",
+        targetName: "咨询",
+      });
+    });
+    expect(onContinue).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(onBindResolve).toHaveBeenCalled();
+    });
+    const composed = onBindResolve.mock.calls[0]?.[0] ?? "";
+    expect(composed).toContain("授权整理该目录");
+  });
+
+  it("其他… ordinary text does not trigger organize grant", async () => {
+    const onContinue = vi.fn();
+    const onBindResolve = vi.fn(async () => {});
+
+    render(
+      <Harness
+        content={organizeContent}
+        onContinue={onContinue}
+        onBindResolve={onBindResolve}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /其他…/ }));
+    fireEvent.change(screen.getByPlaceholderText("填写你的答案"), {
+      target: { value: "先放一放，下周再说" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
+
+    expect(pickAndGrantOrganizeFolder).not.toHaveBeenCalled();
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onBindResolve).not.toHaveBeenCalled();
+  });
+
+  it("其他… short affirm failure stays on card via setBindError", async () => {
+    const onContinue = vi.fn();
+    const onBindResolve = vi.fn(async () => {});
+    pickAndGrantOrganizeFolder.mockResolvedValue({
+      ok: false,
+      reason: "not_found",
+      message: "找不到该目录",
+    });
+
+    render(
+      <Harness
+        content={organizeContent}
+        onContinue={onContinue}
+        onBindResolve={onBindResolve}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /其他…/ }));
+    fireEvent.change(screen.getByPlaceholderText("填写你的答案"), {
+      target: { value: "允许整理" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
+
+    await waitFor(() => {
+      expect(pickAndGrantOrganizeFolder).toHaveBeenCalled();
+    });
+    expect(onContinue).not.toHaveBeenCalled();
+    expect(onBindResolve).not.toHaveBeenCalled();
+    expect(screen.getByText("找不到该目录")).toBeTruthy();
+  });
 });
 
 describe("AskDecisionBody Continue + grant on Web", () => {

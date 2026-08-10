@@ -36,10 +36,15 @@ _HARVEST_MAX_ATTEMPTS = 60
 async def harvest_detached_execution(session: CoordinationSession) -> None:
     """Complete journal terminal facts and launch the system closing turn."""
     if session.turn_attached:
+        # Do not leave a false ``harvest_scheduled`` / ``settled_via=harvest`` that
+        # blocks release_prefers_harvest — re-arm must remain possible.
         logger.info(
             "coordination.harvest_skipped_reattached",
             execution_id=session.execution_id,
         )
+        session.harvest_scheduled = False
+        if session.settled_via == "harvest":
+            session.settled_via = None
         return
     if session.user_stopped:
         _close_detached_session(session)
@@ -69,7 +74,16 @@ async def harvest_detached_execution(session: CoordinationSession) -> None:
     from agentcore.runtime.coordination.session import _sessions
 
     for attempt in range(_HARVEST_MAX_ATTEMPTS):
-        if session.turn_attached or session.user_stopped:
+        if session.user_stopped:
+            return
+        if session.turn_attached:
+            logger.info(
+                "coordination.harvest_skipped_reattached",
+                execution_id=session.execution_id,
+            )
+            session.harvest_scheduled = False
+            if session.settled_via == "harvest":
+                session.settled_via = None
             return
         if _sessions.get(session.execution_id) is not session:
             return

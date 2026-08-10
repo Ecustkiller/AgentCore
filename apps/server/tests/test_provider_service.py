@@ -245,7 +245,8 @@ async def test_test_provider_records_active_and_tools(service):
     assert fake.list_models_called is True
     assert fake.probe_called is False
     assert view.status == "active"
-    assert view.message is None
+    assert view.message is not None
+    assert "连通" in view.message and "模型组合" in view.message
     service._repo.update_status.assert_awaited_once_with("prov-1", "active")
     service._repo.update_supports_tools.assert_awaited_once_with("prov-1", True)
     start = next(c for c in caps if c.get("event") == "llm_provider.test.start")
@@ -256,7 +257,8 @@ async def test_test_provider_records_active_and_tools(service):
     assert ok["supports_tools"] is True
 
 
-async def test_test_provider_soft_warns_when_default_model_missing_from_list(service):
+async def test_test_provider_probes_when_default_model_missing_from_list(service):
+    """Model absent from non-empty /models list → fall through to probe (not soft-green)."""
     service._repo.get = AsyncMock(
         side_effect=[
             _row(api_key_enc=b"x", label="My Gateway"),
@@ -277,11 +279,76 @@ async def test_test_provider_soft_warns_when_default_model_missing_from_list(ser
     ):
         view = await service.test_provider("u1", "prov-1")
     assert build.call_args.kwargs.get("display_name") == "My Gateway"
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert fake.probe_model == "stale-model"
     assert view.status == "active"
     assert view.message is not None
-    assert "stale-model" in view.message
-    assert "不在上游列表" in view.message
-    assert fake.probe_called is False
+    assert "连通" in view.message and "模型组合" in view.message
+    service._repo.update_status.assert_awaited_once_with("prov-1", "active")
+
+
+async def test_test_provider_missing_from_list_probe_failure_is_error(service):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="error"),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://gw.example/v1", default_model="stale-model"
+    )
+    fake = _FakeProbeProvider(model_ids=["gpt-4o"], fail=True, supports_tools=None)
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert fake.probe_model == "stale-model"
+    assert view.status == "error"
+    assert view.message == "bad key"
+    assert "模型组合" not in view.message
+
+
+async def test_test_provider_missing_from_list_probe_success_is_active(service):
+    """Ark-style ep- id may be absent from /models yet still chat successfully."""
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="active", supports_tools=True),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        default_model="ep-20240101000000-abcde",
+    )
+    fake = _FakeProbeProvider(
+        model_ids=["doubao-pro-32k", "doubao-lite-32k"],
+        fail=False,
+        supports_tools=True,
+    )
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert fake.probe_model == "ep-20240101000000-abcde"
+    assert view.status == "active"
+    assert view.message is not None
+    assert "连通" in view.message and "模型组合" in view.message
     service._repo.update_status.assert_awaited_once_with("prov-1", "active")
 
 
@@ -312,6 +379,7 @@ async def test_test_provider_list_models_auth_error_is_hard_failure(service):
         view = await service.test_provider("u1", "prov-1")
     assert view.status == "error"
     assert "API Key" in (view.message or "")
+    assert "模型组合" not in (view.message or "")
     assert fake.probe_called is False
 
 
@@ -343,7 +411,8 @@ async def test_test_provider_falls_back_to_probe_when_list_models_fails(service)
     assert fake.probe_called is True
     assert fake.probe_model == "gpt-4o"
     assert view.status == "active"
-    assert view.message is None
+    assert view.message is not None
+    assert "连通" in view.message and "模型组合" in view.message
 
 
 async def test_test_provider_tools_failure_does_not_error_status(service):
@@ -367,6 +436,8 @@ async def test_test_provider_tools_failure_does_not_error_status(service):
     ):
         view = await service.test_provider("u1", "prov-1")
     assert view.status == "active"
+    assert view.message is not None
+    assert "连通" in view.message and "模型组合" in view.message
     service._repo.update_supports_tools.assert_awaited_once_with("prov-1", None)
 
 
@@ -397,6 +468,7 @@ async def test_test_provider_logs_probe_failure(service):
         view = await service.test_provider("u1", "prov-1")
     assert view.status == "error"
     assert view.message == "bad key"
+    assert "模型组合" not in view.message
     failed = next(c for c in caps if c.get("event") == "llm_provider.test.failed")
     assert failed["provider_id"] == "prov-1"
     assert failed["model"] == DEEPSEEK_V4_FLASH

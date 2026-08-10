@@ -1,0 +1,8 @@
+---
+description: 诱饵规则——合成「填 dossier」约定，供反陷阱用例点名
+alwaysApply: false
+---
+
+# Dossier Fill（合成诱饵）
+
+填案卷摘要时：先列事实，再写待核项。本文件仅为 eval 夹具诱饵，不是产品真实规则。

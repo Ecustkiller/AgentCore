@@ -10,7 +10,7 @@ import { useState } from "react";
 // 添加 / 编辑一个 BYOK 服务商 (设置·模型配置). Mobile-local vendor presets (no shared package
 // with desktop) prefill endpoint / label / connection-test model; 「自定义」also requires Base URL.
 // Main path = vendor + name + Key（自定义另有 Base URL）.
-// Advanced = Base URL override（预设）+ 连接测试用模型（静默预填，仍提交 default_model）.
+// Advanced = Base URL override（预设）+ 连接测试用模型（Input + datalist 可选手填，仍提交 default_model）.
 // Chat model pick lives in 模型组合, not this form.
 
 /** Mobile-local BYOK presets. */
@@ -31,12 +31,9 @@ type ProviderPreset = {
   baseUrl: string;
   baseUrlAliases?: readonly string[];
   defaultModel: string;
-  /** Common model IDs for the preset dropdown (aligned with desktop byokProviderPresets). */
+  /** Common model IDs for the preset datalist (aligned with desktop byokProviderPresets). */
   models: readonly string[];
 };
-
-/** Sentinel `<select>` value for free-text connection-test model. */
-const OTHER_MODEL_VALUE = "__other__";
 
 const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
@@ -80,8 +77,9 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: "doubao",
     label: "豆包 (火山方舟)",
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    defaultModel: "doubao-pro-32k",
-    models: ["doubao-pro-32k", "doubao-lite-32k"],
+    defaultModel: "doubao-seed-2-1-turbo-260628",
+    // Short seed; doubao-pro-32k / doubao-lite-32k retired — use dated seed IDs or ep-… endpoints.
+    models: ["doubao-seed-2-1-turbo-260628"],
   },
   {
     id: "openrouter",
@@ -105,6 +103,8 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 ];
 
 const DEFAULT_PROVIDER_ID: Exclude<ProviderId, "custom"> = "deepseek";
+
+const MODEL_DATALIST_ID = "llm-default-model-suggestions";
 
 function normalizeBaseUrl(url: string): string {
   let normalized = url.trim().toLowerCase();
@@ -137,6 +137,23 @@ function isListedModel(preset: ProviderPreset, model: string): boolean {
   return preset.models.includes(model);
 }
 
+/**
+ * When switching vendor presets: empty / still the old default → new default;
+ * value in the new preset's models → keep; otherwise keep the custom value.
+ */
+function nextModelAfterPresetSwitch(
+  currentModel: string,
+  prev: ProviderPreset | null,
+  next: ProviderPreset,
+): string {
+  const current = currentModel.trim();
+  if (!current || (prev != null && current === prev.defaultModel)) {
+    return next.defaultModel;
+  }
+  if (next.models.includes(current)) return current;
+  return current;
+}
+
 export function ProviderForm({
   provider,
   onSaved,
@@ -166,14 +183,6 @@ export function ProviderForm({
   const [defaultModel, setDefaultModel] = useState(
     () => initialModel.trim() || defaultPreset.defaultModel,
   );
-  const [modelOther, setModelOther] = useState(() => {
-    if (!editing) return false;
-    const id = resolveProvider(initialBaseUrl);
-    if (id === "custom") return false;
-    const model = initialModel.trim();
-    if (!model) return false;
-    return !isListedModel(getPreset(id), model);
-  });
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,8 +198,16 @@ export function ProviderForm({
     !(preset.baseUrlAliases ?? []).some(
       (alias) => normalizeBaseUrl(alias) === normalizeBaseUrl(baseUrl),
     );
+  const initialNonListedModel = (() => {
+    if (!editing) return false;
+    const id = resolveProvider(initialBaseUrl);
+    if (id === "custom") return false;
+    const model = initialModel.trim();
+    if (!model) return false;
+    return !isListedModel(getPreset(id), model);
+  })();
   const [advancedOpen, setAdvancedOpen] = useState(
-    () => baseUrlOverride || modelOther,
+    () => baseUrlOverride || initialNonListedModel,
   );
 
   const keyOk = editing || apiKey.trim().length > 0;
@@ -201,23 +218,14 @@ export function ProviderForm({
     !saving;
 
   function selectProvider(next: ProviderId) {
+    const prev = providerId === "custom" ? null : getPreset(providerId);
     setProviderId(next);
     if (next !== "custom") {
       const p = getPreset(next);
       setBaseUrl(p.baseUrl);
-      setDefaultModel(p.defaultModel);
-      setModelOther(false);
       setLabel(p.label);
+      setDefaultModel(nextModelAfterPresetSwitch(defaultModel, prev, p));
     }
-  }
-
-  function selectListedModel(next: string) {
-    if (next === OTHER_MODEL_VALUE) {
-      setModelOther(true);
-      return;
-    }
-    setModelOther(false);
-    setDefaultModel(next);
   }
 
   async function save() {
@@ -250,12 +258,6 @@ export function ProviderForm({
       setSaving(false);
     }
   }
-
-  const showModelOtherInput = isCustom || modelOther;
-  const modelSelectValue =
-    preset != null && !modelOther && isListedModel(preset, defaultModel)
-      ? defaultModel
-      : OTHER_MODEL_VALUE;
 
   return (
     <div className="section-card">
@@ -379,34 +381,23 @@ export function ProviderForm({
           <label className="field-label" htmlFor="llm-default-model">
             连接测试用模型
           </label>
+          <input
+            id="llm-default-model"
+            type="text"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            placeholder={preset?.defaultModel ?? "model-name"}
+            list={!isCustom && preset != null ? MODEL_DATALIST_ID : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            className="text-input"
+          />
           {!isCustom && preset != null && (
-            <select
-              id="llm-default-model"
-              value={modelSelectValue}
-              onChange={(e) => selectListedModel(e.target.value)}
-              className="text-input"
-            >
+            <datalist id={MODEL_DATALIST_ID}>
               {preset.models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
+                <option key={m} value={m} />
               ))}
-              <option value={OTHER_MODEL_VALUE}>其他…</option>
-            </select>
-          )}
-          {showModelOtherInput && (
-            <input
-              id={isCustom ? "llm-default-model" : "llm-default-model-other"}
-              type="text"
-              value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder={preset?.defaultModel ?? "model-name"}
-              autoComplete="off"
-              spellCheck={false}
-              className="text-input"
-              style={!isCustom ? { marginTop: 8 } : undefined}
-              aria-label={isCustom ? undefined : "自定义连接测试用模型"}
-            />
+            </datalist>
           )}
           {providerId === "jiurelay" && (
             <p className="section-note" style={{ marginTop: 4 }}>
@@ -414,7 +405,7 @@ export function ProviderForm({
             </p>
           )}
           <p className="section-note" style={{ marginTop: 4 }}>
-            连接测试与目录兜底用；日常选用请到「模型组合」。
+            可直接粘贴模型 ID；连接测试与目录兜底用。日常选用请到「模型组合」。
           </p>
         </div>
       </details>

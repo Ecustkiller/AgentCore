@@ -6,8 +6,9 @@ P0 桶 A（跨项目并行指挥 §4.5–4.7）：名册与 ``GET /folders`` 同
 
 P1 桶 C（§4.8–4.10）：``create_project`` 经账号 API 同形路径新建 **云** Folder
 （``POST /folders`` mode=cloud）；**不**改 ``conversation.folder_id``、**不**新开会话。
-与 ``open_local_project``（打开当出生=新会话）分流；
-本地「登记留指挥面」走 ask ``register_local_project``。
+与 ``open_local_project``（本机传统·打开当出生=新会话）分流；
+本机进桌：**推荐** Composer「导入到云 / 连接 Git」；本机传统 open/register/bind
+合法非默认（≠离线）；``create_project`` 仍只建云。
 """
 
 from __future__ import annotations
@@ -49,14 +50,16 @@ _AMBIGUOUS_HINT = (
 _NOT_FOUND_HINT = (
     "零命中：请向用户确认项目名，或用 list_projects 核对名册后再 ask_user；"
     "若需新建：云项目用 create_project（同指挥面登记，不改本会话归属、不新开会话）；"
-    "本地项目请走 ask_user（action=register_local_project）登记留指挥面；"
-    "勿用 open_local_project——那是打开当出生、会新会话；"
+    "本机目录进桌：**推荐** Composer「导入到云 / 连接 Git」；"
+    "本机传统 open_local_project / register_local_project / bind_local_folder "
+    "合法非默认（≠离线），勿与云平级主推；"
     "禁止静默猜「最近」。"
 )
 _EMPTY_LIST_HINT = (
     "当前账号下没有项目。需要新建时：云项目用 create_project（同指挥面）；"
-    "本地登记留指挥面：ask_user action=register_local_project——"
-    "勿默认催 open_local_project（那会新会话）。"
+    "本机目录进桌：**推荐** Composer「导入到云 / 连接 Git」——"
+    "勿默认催 open_local_project / register_local_project"
+    "（本机传统合法非默认，≠离线）。"
     "多项目同时开工须先有名册项再 resolve→同次 delegate(target_folder_id)；"
     "开发双仓≠external_mount_readonly。"
 )
@@ -272,9 +275,8 @@ class ResolveProjectTool:
                 "开发双仓≠external_mount_readonly）；"
                 "零命中或多名 → 返回候选并提示用 ask_user kind=choice 让用户选"
                 "（选项须可区分 name/mode 等；禁止静默猜「最近」）。"
-                "零命中若需新建：云 → create_project；本地 → ask_user "
-                "register_local_project（勿用 open_local_project 冒充先建后干——"
-                "那会新会话）。"
+                "零命中若需新建：云 → create_project；本机目录进桌 → **推荐** Composer"
+                "「导入到云 / 连接 Git」；本机传统 register/open/bind 合法非默认（≠离线）。"
                 "【禁止】用 open_local_project 代替本工具选已有项目（那会新会话）。"
             ),
             parameters={
@@ -424,8 +426,9 @@ class CreateProjectTool:
                 "delegate(target_folder_id=…) 使用。"
                 "【不变式】不改本会话 conversation.folder_id / 出生 / 默认桌；不新开会话；"
                 "≠ 写盘改代码（CEO 仍无 file mutation）。"
-                "【禁止】用 open_local_project 冒充本能力——那是「打开当出生」、会新会话。"
-                "本地登记留指挥面走 ask register_local_project；本工具只建云。"
+                "【禁止】用 open_local_project 冒充本能力——那是本机传统「打开当出生」、会新会话。"
+                "本机目录进桌：**推荐** Composer「导入到云 / 连接 Git」；"
+                "本机传统合法非默认（≠离线）；本工具只建云。"
             ),
             parameters={
                 "type": "object",

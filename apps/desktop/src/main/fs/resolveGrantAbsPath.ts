@@ -15,7 +15,7 @@ export type GrantAbsResolveOk = {
 
 export type GrantAbsResolveFail = {
   ok: false;
-  reason: "not_found" | "not_directory" | "ambiguous";
+  reason: "not_found" | "not_directory" | "ambiguous" | "permission_denied";
 };
 
 export type GrantAbsResolveResult = GrantAbsResolveOk | GrantAbsResolveFail;
@@ -34,10 +34,24 @@ const WELL_KNOWN_LABEL_ZH: Record<GrantSessionWellKnown, string> = {
   documents: "文档",
 };
 
+/** Node errno codes for “located but OS denies read” (incl. Windows). */
+export function isPermissionDeniedError(e: unknown): boolean {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  return code === "EACCES" || code === "EPERM";
+}
+
+function failFromErrno(e: unknown): GrantAbsResolveFail {
+  return {
+    ok: false,
+    reason: isPermissionDeniedError(e) ? "permission_denied" : "not_found",
+  };
+}
+
 async function realpathOrSelf(absPath: string): Promise<string> {
   try {
     return await fs.realpath(absPath);
-  } catch {
+  } catch (e) {
+    if (isPermissionDeniedError(e)) throw e;
     return absPath;
   }
 }
@@ -66,18 +80,22 @@ async function classifyExistingPath(
   let st: Awaited<ReturnType<typeof fs.stat>>;
   try {
     st = await fs.stat(candidate);
-  } catch {
-    return { ok: false, reason: "not_found" };
+  } catch (e) {
+    return failFromErrno(e);
   }
   if (!st.isDirectory()) {
     return { ok: false, reason: "not_directory" };
   }
-  const absPath = await realpathOrSelf(candidate);
-  return {
-    ok: true,
-    absPath,
-    displayLabel: displayLabelFor(absPath, wellKnown, targetName),
-  };
+  try {
+    const absPath = await realpathOrSelf(candidate);
+    return {
+      ok: true,
+      absPath,
+      displayLabel: displayLabelFor(absPath, wellKnown, targetName),
+    };
+  } catch (e) {
+    return failFromErrno(e);
+  }
 }
 
 /**
@@ -108,8 +126,8 @@ export async function resolveGrantAbsPath(
     wellKnownAbs = await realpathOrSelf(
       await input.resolveWellKnown(input.wellKnown),
     );
-  } catch {
-    return { ok: false, reason: "not_found" };
+  } catch (e) {
+    return failFromErrno(e);
   }
 
   if (!input.targetName) {
@@ -123,8 +141,8 @@ export async function resolveGrantAbsPath(
       name: d.name,
       isDirectory: d.isDirectory(),
     }));
-  } catch {
-    return { ok: false, reason: "not_found" };
+  } catch (e) {
+    return failFromErrno(e);
   }
 
   const matched = matchTargetName(entries, input.targetName);

@@ -41,7 +41,7 @@ const desktopDir = resolve(here, "..");
 const repoRoot = resolve(desktopDir, "..", "..");
 const fixturesDir = resolve(repoRoot, "packages/protocol-conformance/fixtures");
 // Dev-only screenshot output. MUST stay outside electron-vite `out/` — electron-builder
-// packs `out/**` into the installer (see electron-builder.yml `files`).
+// packs `out/**` into the installer (see electron-builder.config.mjs `files`).
 const SHOOT_OUT_DIR = "shoot-out";
 const outDir = resolve(desktopDir, SHOOT_OUT_DIR);
 

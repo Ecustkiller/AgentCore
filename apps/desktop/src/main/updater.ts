@@ -7,6 +7,10 @@ import { logDesktop } from "./log-service";
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** download-progress 落盘节流，避免刷盘。 */
 const PROGRESS_LOG_MIN_MS = 1000;
+/** UI 速度用近期窗口，避免 electron-updater 全程平均被续传冲高。 */
+const SPEED_SAMPLE_MIN_MS = 1500;
+/** 单样本速度上限：挡住续传首包把已有字节算进瞬时速率的离谱尖峰。 */
+const SPEED_CAP_BPS = 50 * 1024 * 1024;
 
 type CheckTrigger = "startup" | "interval" | "resume" | "manual";
 
@@ -27,6 +31,47 @@ let checkStartedAt = 0;
 let lastCheckTrigger: CheckTrigger | null = null;
 let lastProgressLogAt = 0;
 let downloadStartedAt = 0;
+/** 近期速度窗口锚点（ms / transferred）。 */
+let speedSampleAt = 0;
+let speedSampleTransferred = 0;
+/** 最近一次算稳的窗口速率（B/s），推给 UI。 */
+let displayBytesPerSecond = 0;
+
+function resetSpeedTracker(): void {
+  speedSampleAt = 0;
+  speedSampleTransferred = 0;
+  displayBytesPerSecond = 0;
+}
+
+/**
+ * 用 transferred 增量估近期速率；窗口未满时沿用上一稳值。
+ * 续传/回退时重置，避免把缓存字节算成「几十 MB/s」。
+ */
+function recentBytesPerSecond(now: number, transferred: number): number {
+  if (speedSampleAt === 0) {
+    speedSampleAt = now;
+    speedSampleTransferred = transferred;
+    return displayBytesPerSecond;
+  }
+  const dt = now - speedSampleAt;
+  const dBytes = transferred - speedSampleTransferred;
+  if (dBytes < 0) {
+    speedSampleAt = now;
+    speedSampleTransferred = transferred;
+    displayBytesPerSecond = 0;
+    return 0;
+  }
+  if (dt >= SPEED_SAMPLE_MIN_MS) {
+    const rate = (dBytes / dt) * 1000;
+    displayBytesPerSecond = Math.min(
+      SPEED_CAP_BPS,
+      Math.max(0, Math.round(rate)),
+    );
+    speedSampleAt = now;
+    speedSampleTransferred = transferred;
+  }
+  return displayBytesPerSecond;
+}
 
 function pushStatus(next: UpdaterStatus): void {
   status = next;
@@ -172,6 +217,7 @@ async function runDownload(): Promise<void> {
   downloadInFlight = true;
   downloadStartedAt = Date.now();
   lastProgressLogAt = 0;
+  resetSpeedTracker();
   // 立刻进入 downloading，避免首包 progress 前 UI /「关于」仍停在 available。
   pushStatus({
     phase: "downloading",
@@ -282,13 +328,16 @@ export function initUpdater(window: BrowserWindow): void {
     });
   });
   autoUpdater.on("download-progress", (progress) => {
+    const now = Date.now();
     const percent = Math.round(progress.percent);
-    const bytesPerSecond = Math.max(
+    const transferred = Math.max(0, Math.round(progress.transferred || 0));
+    const total = Math.max(0, Math.round(progress.total || 0));
+    // UI / 日志用近期窗口速率；reportedAvg 仅诊断（续传会虚高）。
+    const reportedAvgBps = Math.max(
       0,
       Math.round(progress.bytesPerSecond || 0),
     );
-    const transferred = Math.max(0, Math.round(progress.transferred || 0));
-    const total = Math.max(0, Math.round(progress.total || 0));
+    const bytesPerSecond = recentBytesPerSecond(now, transferred);
     pushStatus({
       phase: "downloading",
       version: pendingVersion,
@@ -297,7 +346,6 @@ export function initUpdater(window: BrowserWindow): void {
       transferred,
       total,
     });
-    const now = Date.now();
     if (
       lastProgressLogAt === 0 ||
       now - lastProgressLogAt >= PROGRESS_LOG_MIN_MS ||
@@ -308,6 +356,7 @@ export function initUpdater(window: BrowserWindow): void {
         version: pendingVersion || undefined,
         percent,
         bytesPerSecond,
+        reportedAvgBps,
         transferred,
         total,
         sinceDownloadMs: downloadStartedAt > 0 ? now - downloadStartedAt : null,

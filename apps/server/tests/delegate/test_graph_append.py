@@ -473,6 +473,69 @@ async def test_delegate_append_resolves_depends_on_host_node(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resolve_latest_prefer_turn_over_older_conversation_graph(monkeypatch):
+    """候选池：prefer 本回合图优先于对话级更旧宿主；无本回合则回落跨回合 latest。"""
+    from agentcore.runtime.delegate import graph_append as ga
+
+    calls: list[dict[str, Any]] = []
+
+    class _Repo:
+        async def find_latest_multi_agent_execution(
+            self,
+            *,
+            conversation_id: str,
+            exclude_turn_id: str | None = None,
+            prefer_turn_id: str | None = None,
+            prefer_only: bool = False,
+        ):
+            calls.append(
+                {
+                    "conversation_id": conversation_id,
+                    "exclude_turn_id": exclude_turn_id,
+                    "prefer_turn_id": prefer_turn_id,
+                    "prefer_only": prefer_only,
+                }
+            )
+            if prefer_only and prefer_turn_id == "m-this":
+                return "exec-this-turn"
+            if prefer_only:
+                return None
+            return "exec-old"
+
+    class _CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    import agentcore.db.base as base_mod
+    import agentcore.db.repositories as repos_mod
+
+    monkeypatch.setattr(base_mod, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(repos_mod, "TurnJournalRepository", lambda _s: _Repo())
+
+    got = await ga.resolve_latest_appendable_execution(
+        conversation_id="c",
+        prefer_message_id="m-this",
+    )
+    assert got == "exec-this-turn"
+    assert calls[0]["prefer_only"] is True
+    assert calls[0]["prefer_turn_id"] == "m-this"
+    assert len(calls) == 1  # 本回合命中，不再回落对话级
+
+    calls.clear()
+    got_fallback = await ga.resolve_latest_appendable_execution(
+        conversation_id="c",
+        prefer_message_id="m-empty",
+    )
+    assert got_fallback == "exec-old"
+    assert calls[0]["prefer_only"] is True
+    assert calls[1]["prefer_turn_id"] is None
+    assert calls[1]["exclude_turn_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_delegate_append_latest_resolves_recent_graph(monkeypatch):
     """append_to_execution_id="latest" → 服务端解析到本对话最近一张协作图，语义同显式 id。"""
     host_plan = RunPlan(
@@ -481,9 +544,15 @@ async def test_delegate_append_latest_resolves_recent_graph(monkeypatch):
     seed = {"r_old": RunState(phase=RunPhase.COMPLETED, content="done")}
     latest_calls: dict[str, Any] = {}
 
-    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
+    async def fake_latest(
+        *,
+        conversation_id: str,
+        exclude_message_id=None,
+        prefer_message_id=None,
+    ) -> str | None:
         latest_calls["conversation_id"] = conversation_id
         latest_calls["exclude_message_id"] = exclude_message_id
+        latest_calls["prefer_message_id"] = prefer_message_id
         return "exec-host"
 
     async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
@@ -535,7 +604,11 @@ async def test_delegate_append_latest_resolves_recent_graph(monkeypatch):
         ctx(),
     )
     assert result.success is True
-    assert latest_calls == {"conversation_id": "c", "exclude_message_id": "m-new"}
+    assert latest_calls == {
+        "conversation_id": "c",
+        "exclude_message_id": None,
+        "prefer_message_id": "m-new",
+    }
     assert captured["execution_id"] == "exec-host"
     # 口径与产品呈现一致 + 回显 execution_id。
     assert "已往上方协作图追加 1 名成员" in (result.output or "")
@@ -549,7 +622,9 @@ async def test_delegate_append_latest_resolves_recent_graph(monkeypatch):
 async def test_delegate_append_latest_without_graph_auto_creates(monkeypatch):
     """latest 解析不到候选 → 自动不带 append 新建团队（成功回执写明未命中）。"""
 
-    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
+    async def fake_latest(
+        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
+    ) -> str | None:
         return None
 
     async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
@@ -591,9 +666,15 @@ async def test_delegate_append_latest_with_active_coord_merges_like_no_append(mo
     clear_active_coordination()
     latest_calls: list[dict[str, Any]] = []
 
-    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
+    async def fake_latest(
+        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
+    ) -> str | None:
         latest_calls.append(
-            {"conversation_id": conversation_id, "exclude_message_id": exclude_message_id}
+            {
+                "conversation_id": conversation_id,
+                "exclude_message_id": exclude_message_id,
+                "prefer_message_id": prefer_message_id,
+            }
         )
         return None  # 即使返回 None 也不应硬失败
 
@@ -644,6 +725,86 @@ async def test_delegate_append_latest_with_active_coord_merges_like_no_append(mo
     drive.cancel()
     with pytest.raises(asyncio.CancelledError):
         await drive
+    clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_delegate_append_latest_same_turn_after_wave1_uses_this_turn_graph(
+    monkeypatch,
+):
+    """同 turn 两波：call1 完成 → call2 latest → eid=本轮图（禁静默挂跨 message 旧宿主）。"""
+    from agentcore.runtime.coordination.session import (
+        active_coordination,
+        clear_active_coordination,
+    )
+
+    clear_active_coordination()
+    latest_calls: list[dict[str, Any]] = []
+
+    async def fake_latest(
+        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
+    ) -> str | None:
+        # 若误走 DB latest 且仍 exclude 本回合，会返回旧宿主——必须永不被采用。
+        latest_calls.append(
+            {
+                "conversation_id": conversation_id,
+                "exclude_message_id": exclude_message_id,
+                "prefer_message_id": prefer_message_id,
+            }
+        )
+        return "exec-OLD-cross-message"
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
+        fake_latest,
+    )
+
+    t = tool(Provider(["调研完成"]))
+    t._message_id = "m-this-turn"
+    t._conversation_id = "c"
+    first = await t.execute(
+        {
+            "tasks": [{"id": "recon", "role": "调研员", "task": "做调研"}],
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert first.success is True, first.error
+    host_eid = t._last_graph_execution_id
+    assert host_eid
+    assert t._last_graph_plan is not None
+    active = active_coordination("e")
+    assert active is None or not active.active
+
+    captured: dict[str, Any] = {}
+
+    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
+        captured["execution_id"] = kwargs.get("execution_id")
+        captured["deps"] = {n.run_id: list(n.depends_on) for n in plan.nodes}
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
+
+    second = await t.execute(
+        {
+            "tasks": [
+                {
+                    "id": "write",
+                    "role": "写手",
+                    "task": "基于调研写",
+                    "depends_on": ["recon"],
+                }
+            ],
+            "append_to_execution_id": "latest",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert second.success is True, second.error
+    assert captured["execution_id"] == host_eid
+    assert captured["execution_id"] != "exec-OLD-cross-message"
+    # 同回合收口后 latest 走内存宿主，不应再查跨 message DB latest。
+    assert latest_calls == []
     clear_active_coordination("e")
 
 
@@ -739,9 +900,15 @@ async def test_delegate_append_latest_after_adopt_keeps_graph_append(monkeypatch
     }
     latest_calls: list[dict[str, Any]] = []
 
-    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
+    async def fake_latest(
+        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
+    ) -> str | None:
         latest_calls.append(
-            {"conversation_id": conversation_id, "exclude_message_id": exclude_message_id}
+            {
+                "conversation_id": conversation_id,
+                "exclude_message_id": exclude_message_id,
+                "prefer_message_id": prefer_message_id,
+            }
         )
         return "e"
 
@@ -802,7 +969,13 @@ async def test_delegate_append_latest_after_adopt_keeps_graph_append(monkeypatch
         ctx(),
     )
     assert result.success is True
-    assert latest_calls == [{"conversation_id": "c", "exclude_message_id": "m-new"}]
+    assert latest_calls == [
+        {
+            "conversation_id": "c",
+            "exclude_message_id": None,
+            "prefer_message_id": "m-new",
+        }
+    ]
     kinds = [e.type for e in t._sink._history]
     assert EventType.GRAPH_APPEND in kinds
     ga = next(e for e in t._sink._history if e.type is EventType.GRAPH_APPEND)

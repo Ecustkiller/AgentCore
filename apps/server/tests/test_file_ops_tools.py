@@ -227,9 +227,11 @@ async def test_outside_workspace_error_is_actionable(tmp_path: Path):
     assert "超出了工作区范围" in result.error
     assert "相对路径" in result.error
     assert "AgentCore/文档/research/report.md" in result.error
-    assert "bind_local_folder" in result.error
-    assert "open_local_project" in result.error
-    assert "勿用纯文本" in result.error
+    assert "bind_local_folder" in result.error or "open_local_project" in result.error
+    assert "open_local_project" in result.error or "本机传统" in result.error
+    assert "导入到云" in result.error or "连接 Git" in result.error
+    assert "合法非默认" in result.error or "非默认" in result.error
+    assert "推荐" in result.error or "导入到云" in result.error
 
 
 # --- file_read (Wave3 B same-path ceiling) ---
@@ -1438,16 +1440,40 @@ async def test_file_read_missing_with_parent_gives_landmark(tmp_path: Path):
     assert "file_list" in result.error
     assert "更宽查找" in result.error
     assert "已知路径" in result.error
+    assert "原样重试" in result.error
 
 
-async def test_file_read_missing_parent_stays_concise(tmp_path: Path):
-    """路径与父目录都不在：保持简洁报错，不编造路标。"""
+async def test_file_list_missing_with_parent_gives_landmark(tmp_path: Path):
+    """列目录路径不存在但上级可列：同层样本 + 禁原样重试。"""
+    server = tmp_path / "apps" / "server"
+    server.mkdir(parents=True)
+    (server / "agentcore").mkdir()
+    (server / "README.md").write_text("x", encoding="utf-8")
+    result = await FileListTool().execute(
+        {"directory": "apps/server/src", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.startswith("不是目录：apps/server/src")
+    assert "父目录" in result.error
+    assert "apps/server/" in result.error
+    assert "agentcore" in result.error or "README.md" in result.error
+    assert "原样重试" in result.error
+
+
+async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
+    """路径与父目录都不在：不编造同层样本，但给根查找 / 禁原样重试提示。"""
     (tmp_path / "apps").mkdir()
     result = await FileReadTool().execute(
         {"path": "apps/ghost/package.json"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert result.error == "文件不存在：apps/ghost/package.json"
+    assert result.error is not None
+    assert result.error.startswith("文件不存在：apps/ghost/package.json")
+    assert "上级目录也找不到" in result.error
+    assert "禁止凭通用目录名" in result.error
+    assert "原样重试" in result.error
+    assert "可见同层示例" not in result.error
 
 
 async def test_file_read_missing_top_level_uses_root_landmark(tmp_path: Path):

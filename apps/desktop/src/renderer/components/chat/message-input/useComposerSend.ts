@@ -8,6 +8,7 @@ import {
 } from "@/lib/composerDelivery";
 import { confirmSendDespitePendingIfNeeded } from "@/lib/composerPendingHint";
 import { isReadOnlyOffline } from "@/lib/offlineMode";
+import { redirectLocalWorkspaceAskAction } from "@/lib/redirectLocalWorkspaceAsk";
 import { notifyError } from "@/lib/toast";
 import { api } from "@/services/api";
 import {
@@ -15,7 +16,6 @@ import {
   requestAutoTitle,
   setConversationModelProfile,
 } from "@/services/conversations";
-import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
 import { getLastUsedProfileId } from "@/services/models";
 import {
@@ -216,10 +216,14 @@ export function useComposerSend({
         const targetFolderId =
           intent.kind === "project" ? intent.folderId : null;
         // Project chats inherit workspace — never write session-level local_*.
-        // Quick cloud (default) → null container. Quick local → default container root.
-        let localContainerRootId: string | null = null;
+        // Quick cloud (default) → null container.
+        // §7.2：残留 quick_local 意图硬改导云（禁新建本机草稿）；存量会话不经此分支。
+        const localContainerRootId: string | null = null;
         if (intent.kind === "quick_local") {
-          localContainerRootId = await ensureDefaultContainerRoot();
+          redirectLocalWorkspaceAskAction();
+          useFoldersStore
+            .getState()
+            .setDraftWorkspaceIntent({ kind: "quick_cloud" });
         }
         // 新会话继承上次在聊天里选的组合 id（会话级组合引用）：last_profile_id 作默认建议。
         const inheritedProfileId = getLastUsedProfileId();

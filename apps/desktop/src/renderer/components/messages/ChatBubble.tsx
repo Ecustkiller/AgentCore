@@ -154,7 +154,7 @@ function ReplyQuote({
     <button
       type="button"
       onClick={onClick}
-      className={`mb-1.5 w-full rounded-lg border-l-2 px-2 py-1 text-left transition-colors ${
+      className={`mb-1.5 w-full min-w-0 max-w-full rounded-lg border-l-2 px-2 py-1 text-left transition-colors ${
         mine
           ? "border-primary-foreground/40 bg-primary-foreground/10 text-primary-foreground/80 hover:bg-primary-foreground/15"
           : "border-primary/50 bg-muted/60 text-muted-foreground hover:bg-muted"
@@ -244,6 +244,10 @@ function MentionBody({
  * Markdown): a stray `#`/`*` in a person's message shouldn't become a heading,
  * and own-bubble theming (primary background) would fight Markdown's fixed
  * foreground color.
+ *
+ * Width follows mainstream IM (WeChat / WhatsApp): shrink-wrap short messages,
+ * cap at `min(75%, 24rem)` so wide threads don't paint full-row blue bars.
+ * Long tokens use `overflow-wrap: anywhere` so URLs don't blow the cap.
  *
  * 富消息: image attachments render via {@link ChatImageGallery} (thumb grid +
  * lightbox); other files render as download chips. `system_card` renders as a
@@ -351,9 +355,7 @@ export function ChatBubble({
 
   const bubbleBody = (
     <div
-      className={`flex min-w-0 flex-col ${
-        mine ? "items-end" : "flex-1 items-start"
-      }`}
+      className={`flex min-w-0 flex-col ${mine ? "items-end" : "items-start"}`}
     >
       {!mine && layout.showSenderName && senderName && (
         <span className="mb-0.5 px-1 text-xs text-muted-foreground">
@@ -362,13 +364,13 @@ export function ChatBubble({
       )}
 
       <div
-        className={`flex flex-col gap-1.5 ${
+        className={`flex min-w-0 max-w-full flex-col gap-1.5 ${
           mine ? "items-end" : "items-start"
         }`}
       >
         {(hasText || reply) && (
           <div
-            className={`whitespace-pre-wrap break-words px-3 py-2 text-sm ${textBubbleRadius(
+            className={`w-fit max-w-full min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] px-3 py-2 text-sm ${textBubbleRadius(
               mine,
               layout.clusterPosition,
             )} ${
@@ -469,7 +471,7 @@ export function ChatBubble({
   const content = (
     <div
       data-message-id={message.id}
-      className={`group flex max-w-[75%] flex-col rounded-xl transition-colors ${
+      className={`group flex w-fit max-w-[min(75%,24rem)] flex-col rounded-xl transition-colors ${
         mine ? "ml-auto items-end" : "items-start"
       } ${layout.tightTop ? "-mt-1" : ""} ${
         highlighted ? "bg-primary/10 ring-1 ring-primary/30" : ""

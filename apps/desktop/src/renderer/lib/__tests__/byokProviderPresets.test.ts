@@ -114,6 +114,14 @@ describe("getByokProviderPreset", () => {
     expect(preset.models).not.toContain("moonshot-v1-8k");
   });
 
+  it("defaults Doubao to seed turbo and drops retired pro/lite ids", () => {
+    const preset = getByokProviderPreset("doubao");
+    expect(preset.defaultModel).toBe("doubao-seed-2-1-turbo-260628");
+    expect(preset.models).toEqual(["doubao-seed-2-1-turbo-260628"]);
+    expect(preset.models).not.toContain("doubao-pro-32k");
+    expect(preset.models).not.toContain("doubao-lite-32k");
+  });
+
   it("returns Hy TokenHub domestic metadata", () => {
     const preset = getByokProviderPreset("hy");
     expect(preset.label).toBe("腾讯 Hy (TokenHub)");

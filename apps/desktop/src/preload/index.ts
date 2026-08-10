@@ -181,28 +181,43 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.pickAndStageAttachment, { dest }),
   stageFromRoot: (rootId, relPath, dest) =>
     ipcRenderer.invoke(FS_CHANNELS.stageFromRoot, { rootId, relPath, dest }),
-  stageDroppedFile: (file, dest) => {
-    let absPath: string;
+  stageDroppedFile: async (file, dest) => {
+    let absPath = "";
     try {
       absPath = webUtils.getPathForFile(file);
     } catch {
-      return Promise.resolve({
-        ok: false as const,
-        reason: "无法读取拖入的文件，请改用回形针选择",
-        code: "invalid" as const,
-      } satisfies FsResult<StagedAttachment>);
+      absPath = "";
     }
-    if (!absPath) {
-      return Promise.resolve({
-        ok: false as const,
-        reason: "无法读取拖入的文件，请改用回形针选择",
-        code: "invalid" as const,
-      } satisfies FsResult<StagedAttachment>);
+    if (absPath) {
+      return ipcRenderer.invoke(FS_CHANNELS.stageFromAbsPath, {
+        absPath,
+        dest,
+      }) as Promise<FsResult<StagedAttachment>>;
     }
-    return ipcRenderer.invoke(FS_CHANNELS.stageFromAbsPath, {
-      absPath,
-      dest,
-    }) as Promise<FsResult<StagedAttachment>>;
+    // 剪贴板截图等：File 无盘路径（Electron getPathForFile → ""）。按字节驻留。
+    const maxBytes = 25 * 1024 * 1024;
+    if (typeof file.size === "number" && file.size > maxBytes) {
+      return {
+        ok: false as const,
+        reason: `文件超过 ${Math.round(maxBytes / (1024 * 1024))}MB 上限`,
+        code: "invalid" as const,
+      } satisfies FsResult<StagedAttachment>;
+    }
+    try {
+      const buf = await file.arrayBuffer();
+      return (await ipcRenderer.invoke(FS_CHANNELS.stageFromBytes, {
+        name: file.name || "attachment",
+        bytes: new Uint8Array(buf),
+        mime: file.type || undefined,
+        dest,
+      })) as FsResult<StagedAttachment>;
+    } catch {
+      return {
+        ok: false as const,
+        reason: "无法读取该文件，请改用回形针选择",
+        code: "invalid" as const,
+      } satisfies FsResult<StagedAttachment>;
+    }
   },
   finalizeStagedAttachment: (stagingId, dest: StageAttachmentDest) =>
     ipcRenderer.invoke(FS_CHANNELS.finalizeStagedAttachment, {

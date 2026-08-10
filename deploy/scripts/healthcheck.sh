@@ -2,9 +2,12 @@
 #
 # AgentCore 健康巡检 + 告警（部署与运维.md §7.8「可观测·巡检」）。
 #
-# 单次探测 /readyz（含 DB 探测，未就绪回 503）→ 连续 N 次失败才告警（防抖）→
-# 恢复时补一条恢复通知。由 systemd timer（或 cron）每 1–2 分钟驱动一次；本脚本
-# 自身无状态循环，连续失败计数落 STATE_FILE 跨次累积。
+# 单次探测 /readyz：HTTP 200/503 **仅由 PostgreSQL 决定**（Redis 是限流软依赖，
+# 不因 redis 失败回 503；详见 body 字段 / 日志 redis.probe_failed）。HTTP 非 200
+# → 连续 N 次失败才告警（防抖）→ 恢复时补一条恢复通知。HTTP 200 但 body 含
+# `"redis": false` 时另发一条软告警（不挡部署、不计入失败计数）。由 systemd
+# timer（或 cron）每 1–2 分钟驱动一次；本脚本自身无状态循环，连续失败计数落
+# STATE_FILE 跨次累积。
 #
 # 告警出口是「可插拔 notifier」：配了 ALERT_WEBHOOK_URL（飞书群机器人）就推飞书，
 # 没配就降级到 journald（stderr，systemd 自动收）+ 非零退出。换钉钉/换渠道只改
@@ -36,6 +39,8 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
 REALERT_EVERY="${REALERT_EVERY:-30}"
 STATE_FILE="${STATE_FILE:-$AGENTCORE_HOME/.healthcheck.state}"
+# Redis 软依赖告警边沿状态（0=正常/未知，1=已报过 redis=false）；与 HTTP 失败计数分离
+REDIS_STATE_FILE="${REDIS_STATE_FILE:-$AGENTCORE_HOME/.healthcheck.redis.state}"
 ALERT_WEBHOOK_URL="${ALERT_WEBHOOK_URL:-}"
 ALERT_KEYWORD="${ALERT_KEYWORD:-AgentCore}"
 
@@ -84,9 +89,25 @@ write_state() {  # 写计数；状态目录不可写则仅告警（防抖退化�
   fi
 }
 
-# ── 单次探测：仅 HTTP 200 视为健康。curl 的 %{http_code} 在连接失败时本身就输出
-#    000，故不能再 `|| echo 000`（会拼成 000000）；用 `|| true` 仅吞掉非零退出。──
-code="$(curl -s -o /dev/null -w '%{http_code}' -m "$HEALTH_TIMEOUT" "$HEALTH_URL" 2>/dev/null)" || true
+read_redis_state() {
+  local v=0
+  if [[ -f "$REDIS_STATE_FILE" ]]; then
+    v="$(cat "$REDIS_STATE_FILE" 2>/dev/null || echo 0)"
+    [[ "$v" =~ ^[01]$ ]] || v=0
+  fi
+  printf '%s' "$v"
+}
+write_redis_state() {
+  mkdir -p "$(dirname "$REDIS_STATE_FILE")" 2>/dev/null || true
+  printf '%s' "$1" >"$REDIS_STATE_FILE" 2>/dev/null || true
+}
+
+# ── 单次探测：仅 HTTP 200 视为健康（DB ready）。curl 的 %{http_code} 在连接失败
+#    时本身就输出 000，故不能再 `|| echo 000`（会拼成 000000）；用 `|| true` 仅
+#    吞掉非零退出。同时抓 body，便于 Redis 软依赖观测告警。──
+body_file="$(mktemp)"
+trap 'rm -f "$body_file"' EXIT
+code="$(curl -s -o "$body_file" -w '%{http_code}' -m "$HEALTH_TIMEOUT" "$HEALTH_URL" 2>/dev/null)" || true
 code="${code:-000}"
 
 if [[ "$code" == "200" ]]; then
@@ -94,7 +115,21 @@ if [[ "$code" == "200" ]]; then
     send_alert "✅ 已恢复：$HEALTH_URL 200（此前连续失败 ${prev} 次）"
   fi
   write_state 0
-  log "healthy: $HEALTH_URL 200"
+  # Redis 软依赖：HTTP 仍健康；body redis=false 时边沿告警一次（不 exit 1、不挡部署）
+  redis_prev="$(read_redis_state)"
+  if grep -Eq '"redis"[[:space:]]*:[[:space:]]*false' "$body_file" 2>/dev/null; then
+    if [[ "$redis_prev" != "1" ]]; then
+      send_alert "⚠️ Redis 软依赖异常：$HEALTH_URL 200 但 body redis=false（限流可降级；见日志 redis.probe_failed）"
+      write_redis_state 1
+    fi
+    warn "redis soft-dep unhealthy: $HEALTH_URL 200 redis=false"
+  else
+    if [[ "$redis_prev" == "1" ]]; then
+      send_alert "✅ Redis 软依赖已恢复：$HEALTH_URL body redis 不再为 false"
+      write_redis_state 0
+    fi
+    log "healthy: $HEALTH_URL 200"
+  fi
   exit 0
 fi
 

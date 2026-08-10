@@ -63,8 +63,9 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
         id="doubao",
         label="豆包 (火山方舟)",
         base_url="https://ark.cn-beijing.volces.com/api/v3",
-        default_model="doubao-pro-32k",
-        models=("doubao-pro-32k", "doubao-lite-32k"),
+        default_model="doubao-seed-2-1-turbo-260628",
+        # Short seed; doubao-pro/lite-32k retired — use dated seed IDs or ep-… endpoints.
+        models=("doubao-seed-2-1-turbo-260628",),
     ),
     ByokProviderPreset(
         id="hy",

@@ -318,13 +318,32 @@ class EventSink:
         task.add_done_callback(self._barrier_tasks.discard)
         return combined
 
+    @property
+    def is_closed(self) -> bool:
+        """True after :meth:`close` — this sink will never grow a live SSE consumer again."""
+        return self._closed
+
+    @property
+    def is_detached(self) -> bool:
+        """True while no SSE consumer is attached (disconnect / observer drop).
+
+        Detach is temporary: :meth:`take_over` re-arms the live queue. CLIENT_TOOL
+        ``*_required`` frames are EPHEMERAL (not in ``_history``); open requests stay
+        in the interaction registry and are re-hung on attach via
+        ``pending_client_tool_events``.
+        """
+        return self._detached
+
     def emit(self, event: SSEEvent) -> bool:
         """Emit ``event``. Returns True iff it was put on the live SSE queue.
 
         Closed / detached sinks skip the live queue (Pillar A may still journal
-        DURABLE facts when closed). Callers that need a desktop round-trip
-        (workspace / board op channels) must fail-fast when this returns False
-        instead of awaiting a full settle timeout for an op the client never saw.
+        DURABLE facts when closed). ``False`` means *not live-queued* — not
+        "bridge dead". Client-tool channels (workspace / board / desktop) must
+        fail-fast only when :attr:`is_closed`; when merely :attr:`is_detached`,
+        keep the registry Future open so attach can re-emit pending CLIENT_TOOL
+        frames. Awaiting a full settle timeout for a closed sink is wrong; doing
+        the same for detach would race the designed reattach path.
         """
         if self._closed:
             # Pillar A: DURABLE display facts persist at execution/host journal scope

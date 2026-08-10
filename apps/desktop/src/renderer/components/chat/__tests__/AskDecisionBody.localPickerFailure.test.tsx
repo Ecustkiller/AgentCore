@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
  * B4：本机选择器失败须出固定结构化卡，禁静默/空转。
+ * 本机传统：open_local_project 走 pickAndOpenLocalProject，不 toast 改导 Composer。
  */
 import { AskDecisionBody } from "@/components/chat/ask/AskDecisionBody";
 import type { AskUserContent } from "@/components/chat/ask/AskUserFields";
@@ -17,6 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const pickAndOpenLocalProject = vi.fn();
 const pickAndBindLocalFolder = vi.fn();
+
+vi.mock("@/lib/toast", () => ({
+  notifyError: vi.fn(),
+}));
 
 vi.mock("@/lib/capabilities", () => ({
   hasLocalFiles: vi.fn(() => true),

@@ -38,7 +38,7 @@ export default defineConfig({
   },
   build: {
     // MUST stay outside electron-vite `out/` — electron-builder packs `out/**` into
-    // the installer (electron-builder.yml `files`), same constraint as shoot-out/.
+    // the installer (electron-builder.config.mjs `files`), same constraint as shoot-out/.
     outDir: resolve("dist-web"),
     emptyOutDir: true,
     rollupOptions: {

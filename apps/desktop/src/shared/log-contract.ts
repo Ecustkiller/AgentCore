@@ -11,11 +11,19 @@
  * 事件命名沿用后端「组件.动作」式（如 `auth.bootstrap`），动作/状态走 snake_case 字段。
  * 鉴权可观测：`auth.bootstrap`（冷启动）、`auth.refresh`（静默刷新失败/歧义 cookie）、
  * `auth.session_kicked`（中途踢回登录页）。
+ * 后端连通性（composer 断线只读红条）：`server_health.offline`（边沿；`source`=
+ * heartbeat|api_outage|browser_offline|bootstrap，`reason`/`last_ok_at`/`from`；
+ * heartbeat 另可带 `consecutive_failures`）/ `server_health.online`（仅从 offline
+ * 恢复；`since_offline_ms`）。心跳探活成功不打。软失败（未达阈值、UI 未翻红）：
+ * `server_health.probe_failed`（`consecutive_failures`/`failure_threshold`/`reason`/
+ * `status`）→ 自愈未翻红则 `server_health.probe_recovered`。会话中 API 5xx/断传输
+ * 但 `/readyz` 仍健康：`server_health.api_outage_ignored`（不标 offline）。
  * 自动更新可观测（主进程直写）：`updater.configure` / `updater.schedule_start` /
  * `updater.policy` / `updater.check_begin|end` / `updater.phase` /
  * `updater.download_begin|progress|end` / `updater.error` / `updater.quit_and_install`
  *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点；
- * `configure` 另记 `disableDifferentialDownload`——临时全量开关是否开启）。
+ * `download_progress` 的 `bytesPerSecond`=近期窗口，`reportedAvgBps`=electron-updater
+ * 全程平均；`configure` 另记 `disableDifferentialDownload`——临时全量开关是否开启）。
  * 切对话消息窗诊断（临时）：`conversation.slice_diag`（`action`=
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /

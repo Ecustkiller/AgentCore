@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   grantHintsFromAskOption,
+  isOrganizeOralConsent,
   organizeConfirmDetail,
   previewOrganizeTargetLabel,
 } from "../grantFolderHints";
@@ -97,5 +98,29 @@ describe("organizeConfirmDetail", () => {
         detail: "只读说明",
       }),
     ).toBe("只读说明");
+  });
+});
+
+describe("isOrganizeOralConsent", () => {
+  it("hits short allowlist exactly", () => {
+    for (const phrase of [
+      "可以",
+      "允许",
+      "同意",
+      "好的",
+      "可以整理",
+      "允许整理",
+      "升级可整理",
+    ]) {
+      expect(isOrganizeOralConsent(phrase)).toBe(true);
+    }
+    expect(isOrganizeOralConsent("  可以。  ")).toBe(true);
+  });
+
+  it("rejects ordinary / long other text (no intent classify)", () => {
+    expect(isOrganizeOralConsent("先放一放，下周再说")).toBe(false);
+    expect(isOrganizeOralConsent("不可以")).toBe(false);
+    expect(isOrganizeOralConsent("可以整理一下桌面上的咨询文件夹")).toBe(false);
+    expect(isOrganizeOralConsent("")).toBe(false);
   });
 });

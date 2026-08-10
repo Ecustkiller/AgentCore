@@ -26,6 +26,38 @@ export const ORGANIZE_CONFIRM_CAPTION = "整理确认 · 允许后可写回";
 export const ORGANIZE_CONFIRM_CTA = "允许整理";
 
 /**
+ * 「其他…」口头同意短允许表（精确匹配，非意图分类 / 不扫长文）。
+ * 命中 → 与点「允许整理」同一次真 grant；未命中保持原 compose。
+ * → 双模式工作区 §六口头同意闭环
+ */
+const ORGANIZE_ORAL_CONSENT = new Set([
+  "可以",
+  "允许",
+  "同意",
+  "好的",
+  "好",
+  "可以整理",
+  "允许整理",
+  "同意整理",
+  "升级可整理",
+]);
+
+/** Strip trailing sentence punctuation so 「可以。」仍命中短表. */
+function normalizeOralConsentText(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[\s。．.！!？?，,、；;：:]+$/u, "")
+    .trim();
+}
+
+/** True when「其他…」提交字面命中整理口头同意短允许表. */
+export function isOrganizeOralConsent(text: string): boolean {
+  const normalized = normalizeOralConsentText(text);
+  if (!normalized) return false;
+  return ORGANIZE_ORAL_CONSENT.has(normalized);
+}
+
+/**
  * Map AskOption grant_* wire fields to IPC camelCase hints.
  * Callers only invoke this for `grant_readonly_folder` / `grant_organize_folder`
  * (not organize_plan rows): optional `path` is the C1 mount-only abs transport

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from os.path import isabs
 from typing import Any
 
 # Caps so a runaway prompt can't bloat the card / event. The free-form note on the
@@ -147,8 +148,9 @@ def normalize_options(
     client action such as ``open_local_project`` / ``register_local_project`` /
     ``bind_local_folder`` — unknown values drop so a hallucinated action never reaches
     the wire). For ``grant_*`` actions only,
-    ``well_known`` (``desktop`` / ``downloads`` / ``documents``) and ``target_name``
-    (basename fuzzy token; path separators rejected; truncated ≤120) pass through.
+    ``well_known`` (``desktop`` / ``downloads`` / ``documents``), ``target_name``
+    (basename fuzzy token; path separators rejected; truncated ≤120), and absolute
+    ``path`` (C1 mount transport; non-absolute dropped) pass through.
     Empty-label entries drop, and only the FIRST
     ``recommended`` survives (至多一个推荐项), so the card shows one clear「推荐」without
     a wall of badges. Labels that embed recommendation markup (e.g. ``（推荐）``) raise
@@ -182,6 +184,10 @@ def normalize_options(
                 target_name = str(it.get("target_name") or "").strip()
                 if target_name and "/" not in target_name and "\\" not in target_name:
                     opt["target_name"] = target_name[:_MAX_TARGET_NAME]
+                # Absolute only — matches desktop resolveGrantAbsPath (no CWD-relative).
+                grant_path = str(it.get("path") or "").strip()
+                if grant_path and isabs(grant_path):
+                    opt["path"] = grant_path[:512]
             # organize_plan structured fields (passed through for plan binding).
             op = str(it.get("op") or "").strip()
             if op in ("move", "copy", "delete", "mkdir"):
