@@ -1,8 +1,8 @@
 import { assertNever } from "@/lib/assertNever";
 import { logEvent } from "@/lib/log";
+import { rejectHostOpForTurnPhase } from "@/services/hostOps";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
-import { rejectHostOpForTurnPhase } from "@/services/hostOps";
 import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
 import { allowsSseEvent } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
