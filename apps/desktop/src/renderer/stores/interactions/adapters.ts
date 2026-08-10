@@ -40,6 +40,10 @@ function parseTeamPreviewCorrections(
     run_id: string;
     capability: "text_only";
   }>;
+  model_overrides?: Record<
+    string,
+    { model: string; origin?: "platform" | "byok"; provider_id?: string }
+  >;
 } {
   if (!source) return {};
   const excluded = arr<unknown>(source.excluded_run_ids).filter(
@@ -56,9 +60,33 @@ function parseTeamPreviewCorrections(
     .filter(
       (row): row is { run_id: string; capability: "text_only" } => row != null,
     );
+  const model_overrides: Record<
+    string,
+    { model: string; origin?: "platform" | "byok"; provider_id?: string }
+  > = {};
+  const rawModels = source.model_overrides;
+  if (rawModels && typeof rawModels === "object" && !Array.isArray(rawModels)) {
+    for (const [runId, row] of Object.entries(
+      rawModels as Record<string, unknown>,
+    )) {
+      if (!runId || !row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      if (typeof r.model !== "string" || !r.model.trim()) continue;
+      model_overrides[runId] = {
+        model: r.model.trim(),
+        ...(r.origin === "platform" || r.origin === "byok"
+          ? { origin: r.origin }
+          : {}),
+        ...(typeof r.provider_id === "string" && r.provider_id
+          ? { provider_id: r.provider_id }
+          : {}),
+      };
+    }
+  }
   return {
     ...(excluded.length > 0 ? { excluded_run_ids: excluded } : {}),
     ...(overrides.length > 0 ? { write_capability_overrides: overrides } : {}),
+    ...(Object.keys(model_overrides).length > 0 ? { model_overrides } : {}),
   };
 }
 
@@ -166,6 +194,7 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       name: string;
       stance: string;
       is_subject?: boolean;
+      run_id?: string;
       model?: string;
       origin?: "platform" | "byok";
       provider_id?: string;
@@ -174,6 +203,9 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       name: s.name,
       stance: s.stance,
       ...(s.is_subject ? { is_subject: true } : {}),
+      ...(typeof s.run_id === "string" && s.run_id.trim()
+        ? { run_id: s.run_id.trim() }
+        : {}),
       ...(typeof s.model === "string" && s.model.trim()
         ? { model: s.model }
         : {}),
@@ -186,6 +218,9 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
     })),
     maxRounds: typeof p.max_rounds === "number" ? p.max_rounds : 0,
     thorough: p.thorough !== false,
+    ...(typeof p.moderator_run_id === "string" && p.moderator_run_id.trim()
+      ? { moderatorRunId: p.moderator_run_id.trim() }
+      : {}),
     ...(typeof p.moderator_model === "string" && p.moderator_model.trim()
       ? { moderatorModel: p.moderator_model }
       : {}),
@@ -419,6 +454,7 @@ export function entryToColdResume(
     sides: tp.sides,
     maxRounds: tp.maxRounds,
     thorough: tp.thorough,
+    ...(tp.moderatorRunId ? { moderatorRunId: tp.moderatorRunId } : {}),
     ...(tp.moderatorModel ? { moderatorModel: tp.moderatorModel } : {}),
     ...(tp.moderatorOrigin ? { moderatorOrigin: tp.moderatorOrigin } : {}),
     ...(tp.moderatorProviderId

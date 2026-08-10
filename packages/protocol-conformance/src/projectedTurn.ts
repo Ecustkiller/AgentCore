@@ -330,6 +330,11 @@ export type ProjectedInteraction =
         runId: string;
         capability: "text_only";
       }>;
+      /** Resolved 修正：人盖 CEO 的队员模型（run_id → 三元组）。 */
+      modelOverrides?: Record<
+        string,
+        { model: string; origin?: string; provider_id?: string }
+      >;
     }
   | {
       kind: "delegation_authorization";

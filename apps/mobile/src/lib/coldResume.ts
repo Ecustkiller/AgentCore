@@ -7,7 +7,9 @@
  */
 import type { PausedTurnSummary } from "@/api/turn";
 import {
+  type ColdDeferredBusyReason,
   type ColdInteractionEntry,
+  type ColdInteractionStatus,
   type ColdResumeKind,
   isColdResumeKind,
 } from "@/lib/coldInteractions";
@@ -28,6 +30,12 @@ export interface ColdResumeHost {
   /** Server message_id once message_start stamped it. */
   serverMessageId?: string | null;
 }
+
+/** ResumeCard paint DTO — recovery shell + live IX status / deferred wait. */
+export type VisibleColdResume = PausedTurnSummary & {
+  interactionStatus?: ColdInteractionStatus;
+  deferredBusyReason?: ColdDeferredBusyReason;
+};
 
 /**
  * Resolve the stamped server resume key for a cold Interaction entry.
@@ -111,7 +119,27 @@ export function entryToPausedSummary(
     workers: arr(p.workers) as PausedTurnSummary["workers"],
     tools: arr(p.tools).filter((t): t is string => typeof t === "string"),
     sides: arr(p.sides) as PausedTurnSummary["sides"],
-  };
+    // REST / journal 可选 moderator_*；schema 未列时宽松透传（absent → 不写）。
+    ...(() => {
+      const extra: Record<string, unknown> = {};
+      if (typeof p.moderator_run_id === "string" && p.moderator_run_id.trim()) {
+        extra.moderator_run_id = p.moderator_run_id.trim();
+      }
+      if (typeof p.moderator_model === "string" && p.moderator_model.trim()) {
+        extra.moderator_model = p.moderator_model.trim();
+      }
+      if (p.moderator_origin === "platform" || p.moderator_origin === "byok") {
+        extra.moderator_origin = p.moderator_origin;
+      }
+      if (
+        typeof p.moderator_provider_id === "string" &&
+        p.moderator_provider_id
+      ) {
+        extra.moderator_provider_id = p.moderator_provider_id;
+      }
+      return extra;
+    })(),
+  } as PausedTurnSummary;
 }
 
 /** Reconstruct a minimal `*_required` payload from a recovery paused frame. */
@@ -138,6 +166,25 @@ export function pausedSummaryToRequiredPayload(
   if (paused.workers) payload.workers = paused.workers;
   if (paused.tools) payload.tools = paused.tools;
   if (paused.sides) payload.sides = paused.sides;
+  const loose = paused as PausedTurnSummary & Record<string, unknown>;
+  if (typeof loose.moderator_run_id === "string" && loose.moderator_run_id) {
+    payload.moderator_run_id = loose.moderator_run_id;
+  }
+  if (typeof loose.moderator_model === "string" && loose.moderator_model) {
+    payload.moderator_model = loose.moderator_model;
+  }
+  if (
+    loose.moderator_origin === "platform" ||
+    loose.moderator_origin === "byok"
+  ) {
+    payload.moderator_origin = loose.moderator_origin;
+  }
+  if (
+    typeof loose.moderator_provider_id === "string" &&
+    loose.moderator_provider_id
+  ) {
+    payload.moderator_provider_id = loose.moderator_provider_id;
+  }
   return payload;
 }
 
@@ -152,10 +199,10 @@ export function selectVisibleColdResumes(args: {
   hosts: ColdResumeHost[];
   userMessage?: string;
   userMessageId?: string;
-}): PausedTurnSummary[] {
+}): VisibleColdResume[] {
   const { conversationId, byId, paused, hosts } = args;
   const covered = new Set<string>();
-  const out: PausedTurnSummary[] = [];
+  const out: VisibleColdResume[] = [];
 
   for (const entry of byId.values()) {
     if (entry.conversationId !== conversationId) continue;
@@ -169,7 +216,11 @@ export function selectVisibleColdResumes(args: {
       userMessageId: args.userMessageId,
     });
     if (!turn) continue;
-    out.push(turn);
+    out.push({
+      ...turn,
+      interactionStatus: entry.status,
+      deferredBusyReason: entry.deferredBusyReason,
+    });
     covered.add(entry.id);
   }
 

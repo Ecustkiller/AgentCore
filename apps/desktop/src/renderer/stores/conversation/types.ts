@@ -68,6 +68,8 @@ export interface TeamPreviewSideDisplay {
   name: string;
   stance: string;
   is_subject?: boolean;
+  /** 开赛前预分配；缺省 = 旧帧，开工卡不展示改模。 */
+  run_id?: string;
   /** Phase 3：该方辩手模型 id；缺省 = 同模型场，不展示跨模型行。 */
   model?: string;
   origin?: "platform" | "byok";
@@ -101,6 +103,8 @@ export interface TeamPreviewDisplay {
   sides: TeamPreviewSideDisplay[];
   maxRounds: number;
   thorough: boolean;
+  /** 裁判预分配 run_id；缺省 = 旧帧，不展示改模。 */
+  moderatorRunId?: string;
   /** Phase 3：裁判模型；缺省不展示跨模型署名。 */
   moderatorModel?: string;
   moderatorOrigin?: "platform" | "byok";
@@ -124,6 +128,11 @@ export interface TeamPreviewDisplay {
     run_id: string;
     capability: "text_only";
   }>;
+  /** Resolved 对账：人盖 CEO 的 per-run 模型。缺省 / 空 = 未改。 */
+  model_overrides?: Record<
+    string,
+    { model: string; origin?: "platform" | "byok"; provider_id?: string }
+  >;
 }
 
 export interface Conversation {
@@ -300,8 +309,8 @@ export interface ConversationRuntime {
   toolStartedMs: Record<string, number>;
   /**
    * 桌面：本会话最近一回合的执行路径（绑本机工作区时有意义）。
-   * `sidecar` = 本地引擎；`cloud_bridge` = 云端过桥（含探活失败 / 关开关 / 附件退云）；
-   * `null` = 纯云会话或尚未判定。不落盘，仅驱动轻量状态指示。
+   * `sidecar` = 本地引擎；`cloud_bridge` = 云端过桥（含探活失败 / 显式强制关 / 附件退云）；
+   * `null` = 纯云会话或尚未判定。不落盘；驱动 Composer 弱状态（非引擎切换器）。
    */
   executionVia: "sidecar" | "cloud_bridge" | null;
   /**

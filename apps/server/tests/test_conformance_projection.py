@@ -277,6 +277,19 @@ def test_team_preview_tighten_write_continue(projected):
     assert p["progress"]["completed"] == 2
 
 
+def test_team_preview_model_override_continue(projected):
+    p = projected["team_preview_model_override_continue"]
+    assert p["status"] == "completed"
+    assert _pending_gates(p) == []
+    tp = next(i for i in p["interactions"] if i["kind"] == "team_preview")
+    assert tp["status"] == "resolved"
+    assert tp["modelOverrides"] == {
+        "r2": {"model": "deepseek-v4-pro", "origin": "platform"},
+    }
+    r2 = next(r for r in p["runs"] if r["id"] == "r2")
+    assert r2["model"] == "deepseek-v4-pro"
+
+
 def test_debate_team_preview_resolved_continue(projected):
     p = projected["debate_team_preview_resolved_continue"]
     assert p["status"] == "running"

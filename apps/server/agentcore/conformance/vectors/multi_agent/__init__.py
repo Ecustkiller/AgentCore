@@ -140,7 +140,8 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     ),
     "multi_agent_cross_turn_append": (
         "跨回合同图追加：m1 建图完成 → m2 graph_append + 同 execution_id merge → 追加批收口；"
-        "生长帧 host_message_id 归属旧图，新回合仅锚点",
+        "生长帧 host_message_id 归属旧图，新回合仅锚点；两回合 run_plan 仅同一宿主 captain"
+        "（kind=captain 至多 1），workers parent_run_id 指向宿主，禁止第二 captain",
         _multi_agent_cross_turn_append,
     ),
     "multi_agent_multi_lens_research": (

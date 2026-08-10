@@ -27,6 +27,38 @@ vi.mock("@/lib/toast", () => ({
   notifyError: (...args: unknown[]) => notifyError(...args),
 }));
 
+vi.mock("@/hooks/useModels", () => ({
+  useModels: () => ({
+    data: {
+      models: [
+        {
+          id: "ceo-flash",
+          display_name: "CEO Flash",
+          origin: "platform",
+          available: true,
+        },
+        {
+          id: "worker-pro",
+          display_name: "Worker Pro",
+          origin: "platform",
+          available: true,
+        },
+      ],
+      current: { id: "ceo-flash", origin: "platform" },
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+vi.mock("@/hooks/useLlmProviders", () => ({
+  useLlmProviders: () => ({
+    data: { providers: [], platform_available: true },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 const pendingRef: { current: unknown[] } = { current: [] };
 
 vi.mock("@/stores/conversation", () => ({
@@ -365,6 +397,43 @@ describe("ResumePrompt · team_preview delegate", () => {
     >;
     expect(cold.excluded_run_ids).toBeUndefined();
     expect(cold.write_capability_overrides).toBeUndefined();
+    expect(cold.model_overrides).toBeUndefined();
+  });
+
+  it("确认面无队员模型下拉；continue 不带 model_overrides", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+            model: "ceo-flash",
+            origin: "platform",
+          },
+          {
+            run_id: "r2",
+            role: "撰写员",
+            task: "写报告",
+            depends_on: [],
+            model: "ceo-flash",
+            origin: "platform",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
+    expect(screen.getAllByText("ceo-flash").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText("授权并开工"));
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.decision).toBe("continue");
+    expect(cold.model_overrides).toBeUndefined();
+    expect(cold.excluded_run_ids).toBeUndefined();
   });
 });
 
@@ -403,7 +472,7 @@ describe("ResumePrompt · team_preview debate", () => {
     expect(screen.getByText("认真辩透 · 上限 5 轮")).toBeTruthy();
   });
 
-  it("主按钮带嘱咐发 continue；辩论不附修正字段", () => {
+  it("主按钮带嘱咐发 continue；辩论未改模型不附修正字段", () => {
     render(<ResumePrompt />);
     fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
       target: { value: "最关心成本谁买单" },
@@ -423,7 +492,53 @@ describe("ResumePrompt · team_preview debate", () => {
     >;
     expect(cold.excluded_run_ids).toBeUndefined();
     expect(cold.write_capability_overrides).toBeUndefined();
+    expect(cold.model_overrides).toBeUndefined();
     expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("确认面无辩手/裁判模型下拉；有 run_id 时 continue 仍不带 model_overrides", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        primitive: "debate",
+        tools: [],
+        workers: [],
+        motion: "该不该上四天工作制？",
+        sides: [
+          {
+            key: "pro",
+            name: "正方",
+            stance: "应推广",
+            run_id: "side-pro",
+            model: "ceo-flash",
+            origin: "platform",
+          },
+          {
+            key: "con",
+            name: "反方",
+            stance: "暂缓",
+            run_id: "side-con",
+            model: "ceo-flash",
+            origin: "platform",
+          },
+        ],
+        moderatorRunId: "mod-1",
+        moderatorModel: "ceo-flash",
+        moderatorOrigin: "platform",
+        maxRounds: 5,
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
+    expect(screen.queryByTestId(/debate-moderator-/)).toBeNull();
+    fireEvent.click(screen.getByText("授权开赛"));
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.decision).toBe("continue");
+    expect(cold.model_overrides).toBeUndefined();
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.write_capability_overrides).toBeUndefined();
   });
 
   it("开工卡不再提供 research_first 第三键（庭前取证内化）", () => {

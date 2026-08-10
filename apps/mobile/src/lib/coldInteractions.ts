@@ -21,6 +21,9 @@ export type ColdInteractionStatus =
   | "resolved"
   | "orphaned";
 
+/** EPHEMERAL ``resume_deferred.busy_reason`` (冷 resume × live · deferred). */
+export type ColdDeferredBusyReason = "wrap_up" | "live_turn";
+
 export interface ColdInteractionEntry {
   id: string;
   kind: ColdResumeKind;
@@ -30,6 +33,11 @@ export interface ColdInteractionEntry {
   messageId: string;
   payload: Record<string, unknown>;
   resolution?: Record<string, unknown>;
+  /**
+   * Set when the resume SSE emits ``resume_deferred`` — settlement is locked;
+   * card paints「放行已记下…」while the same connection waits for the slot.
+   */
+  deferredBusyReason?: ColdDeferredBusyReason;
 }
 
 export function isColdResumeKind(kind: string): kind is ColdResumeKind {
@@ -193,6 +201,71 @@ export function upsertColdRequired(input: {
   setById(next);
 }
 
+/** Flip pending → submitting (cold resume click); no-op if not pending. */
+export function markColdSubmitting(input: {
+  kind: ColdResumeKind;
+  id: string;
+  resolution?: Record<string, unknown>;
+}): boolean {
+  const prev = byId.get(input.id);
+  if (!prev || prev.status !== "pending") return false;
+  const next = mapCopy(byId);
+  next.set(input.id, {
+    ...prev,
+    status: "submitting",
+    resolution: input.resolution ?? prev.resolution,
+    deferredBusyReason: undefined,
+  });
+  setById(next);
+  return true;
+}
+
+/**
+ * EPHEMERAL ``resume_deferred`` — lock the card as「已记下」while the same
+ * SSE waits for wrap_up / live_turn to free the slot (not a 409).
+ */
+export function markColdDeferred(input: {
+  messageId: string;
+  conversationId?: string;
+  busyReason: ColdDeferredBusyReason;
+}): void {
+  if (!input.messageId) return;
+  let changed = false;
+  const next = mapCopy(byId);
+  for (const [id, entry] of byId) {
+    if (entry.messageId !== input.messageId) continue;
+    if (
+      input.conversationId &&
+      entry.conversationId &&
+      entry.conversationId !== input.conversationId
+    ) {
+      continue;
+    }
+    if (entry.status !== "pending" && entry.status !== "submitting") continue;
+    next.set(id, {
+      ...entry,
+      status: "submitting",
+      deferredBusyReason: input.busyReason,
+    });
+    changed = true;
+  }
+  if (changed) setById(next);
+}
+
+/** Resume stream refused / aborted before claim — restore an editable card. */
+export function reopenColdPending(id: string): void {
+  const prev = byId.get(id);
+  if (!prev || prev.status !== "submitting") return;
+  const next = mapCopy(byId);
+  next.set(id, {
+    ...prev,
+    status: "pending",
+    deferredBusyReason: undefined,
+    resolution: undefined,
+  });
+  setById(next);
+}
+
 export function markColdResolved(input: {
   kind: ColdResumeKind;
   id: string;
@@ -205,6 +278,7 @@ export function markColdResolved(input: {
       ...prev,
       status: "resolved",
       resolution: input.resolution ?? prev.resolution,
+      deferredBusyReason: undefined,
     });
   } else {
     next.set(input.id, {
@@ -339,6 +413,19 @@ export function applyColdInteractionWireEvent(
   if (resolvedKind) {
     const id = idFromColdRequiredPayload(resolvedKind, payload);
     if (id) {
+      const prev = byId.get(id);
+      // Settlement may prewrite ``*_resolved`` while the resume SSE is still
+      // deferred (busy slot). Keep submitting so the card stays「已记下」until
+      // claim+续跑 (message_start) or the stream settles.
+      if (prev?.status === "submitting") {
+        const next = mapCopy(byId);
+        next.set(id, {
+          ...prev,
+          resolution: payload,
+        });
+        setById(next);
+        return true;
+      }
       markColdResolved({
         kind: resolvedKind,
         id,

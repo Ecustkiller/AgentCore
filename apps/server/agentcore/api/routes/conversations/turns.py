@@ -18,7 +18,7 @@ from agentcore.api.schemas import (
     ResumeTurnRequest,
     TurnRecoveryResponse,
 )
-from agentcore.api.sse import sse_response
+from agentcore.api.sse import sse_response, sse_resume_deferred_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import regenerate_chat, resume_chat
 from agentcore.core.errors import NotFoundError
@@ -44,6 +44,7 @@ from agentcore.runtime.suspension_persistence import (
     list_paused_turns,
     load_paused_turn,
 )
+from agentcore.runtime.turn.runs import ResumeDeferredWaiter
 from agentcore.runtime.turn_runs import turn_runs
 
 from ._helpers import (
@@ -216,10 +217,10 @@ async def resume_message(
     The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
     live stream (disconnect / restart); only its persisted frame survived.
 
-    Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
-    ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
-    写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。settlement 落库后
-    pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
+    Settlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，
+    槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume
+    pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状
+    404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
 
     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -234,16 +235,9 @@ async def resume_message(
     if peeked is None:
         raise NotFoundError("挂起的回合不存在或已处理")
 
-    # D9: paused 不占锁，会话可另开新回合。Resume 不得 cancel 在跑回合——只等已收口残余
-    # 解栈；仍 live ⇒ 409 且不 claim（帧保留可重试）。
-    if not await turn_runs.drain(conversation_id):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "turn_in_progress",
-                "message": "会话有正在进行的回合，先等它结束或显式停止",
-            },
-        )
+    # D9: paused 不占锁，会话可另开新回合。Resume 不得 cancel 在跑回合——busy 时收下
+    # 决策（deferred），槽空后再 claim + 同连接续跑（否决 409 丢意图）。
+    busy_reason = turn_runs.busy_reason_for_resume(conversation_id, message_id)
 
     decision = body.decision.value if hasattr(body.decision, "value") else str(body.decision)
     excluded = list(body.excluded_run_ids or [])
@@ -251,8 +245,17 @@ async def resume_message(
         {"run_id": o.run_id, "capability": o.capability}
         for o in (body.write_capability_overrides or [])
     ]
-    # 开工组队有限否决：仅 delegate team_preview continue 校验。
-    # 冷 peek 帧无 plan blob（plan 由 journal 重建）→ 用 workers 行校验。
+    model_overrides = {
+        rid: {
+            "model": ov.model,
+            **({"origin": ov.origin} if ov.origin else {}),
+            **({"provider_id": ov.provider_id} if ov.provider_id else {}),
+        }
+        for rid, ov in (body.model_overrides or {}).items()
+        if ov.model
+    }
+    # 开工组队有限否决 + 人盖模型：delegate continue 用 workers；debate continue 用人盖槽位。
+    # 冷 peek 帧无 plan blob（plan 由 journal 重建）→ 用 workers / sides 行校验。
     if should_apply_team_veto(peeked, body.decision) and isinstance(
         peeked, TeamPreviewSuspension
     ):
@@ -260,7 +263,20 @@ async def resume_message(
             peeked.workers,
             excluded_run_ids=excluded,
             write_capability_overrides=overrides,
+            model_overrides=model_overrides,
         )
+    elif isinstance(peeked, TeamPreviewSuspension):
+        from agentcore.runtime.kickoff.team_veto import (
+            should_apply_debate_model_overrides,
+            validate_debate_model_overrides,
+        )
+
+        if should_apply_debate_model_overrides(peeked, body.decision):
+            validate_debate_model_overrides(
+                peeked.sides,
+                debate_arguments=peeked.debate_arguments,
+                model_overrides=model_overrides,
+            )
     try:
         await prewrite_cold_resume_settlement(
             peeked,
@@ -269,6 +285,7 @@ async def resume_message(
             selected=list(body.selected or []),
             excluded_run_ids=excluded,
             write_capability_overrides=overrides,
+            model_overrides=model_overrides,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -281,6 +298,37 @@ async def resume_message(
             detail={"code": "settlement_write_failed"},
         ) from e
 
+    checkpoint_response = CheckpointResponse(
+        decision=body.decision,
+        note=body.note,
+        selected=body.selected,
+        excluded_run_ids=excluded,
+        write_capability_overrides=overrides,
+        model_overrides=model_overrides,
+    )
+
+    if busy_reason is not None:
+        started: asyncio.Future = asyncio.get_running_loop().create_future()
+        turn_runs.register_resume_deferred(
+            ResumeDeferredWaiter(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                busy_reason=busy_reason,
+                checkpoint_response=checkpoint_response,
+                llm_credentials=preflight.credentials,
+                llm_supports_tools=preflight.supports_tools,
+                x_client_platform=x_client_platform,
+                preflight_warnings=list(preflight.warnings),
+                started=started,
+            )
+        )
+        return sse_resume_deferred_response(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            busy_reason=busy_reason,
+            started=started,
+        )
+
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:
         raise NotFoundError("挂起的回合不存在或已处理")
@@ -290,13 +338,7 @@ async def resume_message(
     task = asyncio.create_task(
         resume_chat(
             suspension=suspension,
-            response=CheckpointResponse(
-                decision=body.decision,
-                note=body.note,
-                selected=body.selected,
-                excluded_run_ids=excluded,
-                write_capability_overrides=overrides,
-            ),
+            response=checkpoint_response,
             sink=sink,
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,

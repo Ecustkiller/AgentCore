@@ -460,6 +460,19 @@ class TurnSteerAcceptedPayload(WirePayload):
     pending: int
 
 
+class ResumeDeferredPayload(WirePayload):
+    """Cold resume deferred while a live turn holds the slot. EPHEMERAL — same-connection wait.
+
+    Settlement is already prewritten; claim + continuation start after the slot frees.
+    ``busy_reason=wrap_up`` when the live sink is still this ``message_id`` (host winding
+    down); ``live_turn`` when another turn occupies the conversation slot.
+    """
+
+    message_id: str
+    conversation_id: str
+    busy_reason: Literal["wrap_up", "live_turn"]
+
+
 class ExecutionDetachedPayload(WirePayload):
     """执行转后台（``execution_detached``）：附着回合已收口，团队继续跑。"""
 

@@ -1126,6 +1126,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "turn_queue_cancelled":
       // 经典软插入 ack（EPHEMERAL）：toast 由 ChatPage 消费；不进 ProjectedTurn。
       case "turn_steer_accepted":
+      // 冷 resume × live deferred（EPHEMERAL）：同连接等待槽空；fold no-op。
+      case "resume_deferred":
       // L3 团队浏览器直播 (D13/D14): ephemeral 直播侧信道——base64 jpeg 帧 + 粗粒度通道状态，
       // 从不落 turn journal，喂桌面工作区直播面板。手机 fold no-op（与桌面 conformanceFold 同款枚举）。
       case "browser_live_frame":
@@ -1313,8 +1315,8 @@ export type TurnQueuedState = {
 /**
  * FIFO 排队态列表（``turn_queued``）：多 queue_id 并存，勿单槽覆盖。
  * ``turn_queue_cancelled`` / ``turn_queue_started`` 按 ``queue_id`` 清一项
- * （取消撤回 / 出队开跑）；否决靠 ``message_start`` 猜出队。
- * Live UI 以 ``queuedTurns`` store 为准。
+ * （取消只清条 / 出队开跑再进主时间线用户泡）；否决靠 ``message_start`` 猜出队。
+ * Live UI 以 ``queuedTurns`` store + QueuedTurnsBar 为准（排队期不插主时间线用户泡）。
  */
 export function extractTurnQueued(events: SSEEvent[]): TurnQueuedState[] {
   const byId = new Map<string, TurnQueuedState>();

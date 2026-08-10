@@ -5,8 +5,11 @@ import {
   clearColdInteractions,
   getColdInteraction,
   listColdPending,
+  markColdDeferred,
   markColdResolved,
+  markColdSubmitting,
   rekeyColdMessageId,
+  reopenColdPending,
   upsertColdRequired,
 } from "../coldInteractions";
 
@@ -180,5 +183,76 @@ describe("coldInteractions · wire events", () => {
       "m1",
     );
     expect(getColdInteraction("tp-wire")?.status).toBe("resolved");
+  });
+});
+
+describe("coldInteractions · resume_deferred submitting", () => {
+  it("markColdSubmitting then resume_deferred locks busy_reason", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m-def",
+      payload: { checkpoint_id: "cp-def", question: "继续？" },
+    });
+    expect(
+      markColdSubmitting({
+        kind: "ask_user",
+        id: "cp-def",
+        resolution: { decision: "continue" },
+      }),
+    ).toBe(true);
+    expect(getColdInteraction("cp-def")?.status).toBe("submitting");
+
+    markColdDeferred({
+      messageId: "m-def",
+      conversationId: "c1",
+      busyReason: "live_turn",
+    });
+    expect(getColdInteraction("cp-def")?.deferredBusyReason).toBe("live_turn");
+    expect(getColdInteraction("cp-def")?.status).toBe("submitting");
+    expect(listColdPending("c1")).toHaveLength(1);
+  });
+
+  it("prewrite *_resolved while submitting keeps card submitting", () => {
+    upsertColdRequired({
+      kind: "plan_review",
+      conversationId: "c1",
+      messageId: "m-pr",
+      payload: { checkpoint_id: "pr-def", question: "" },
+    });
+    markColdSubmitting({
+      kind: "plan_review",
+      id: "pr-def",
+      resolution: { decision: "continue" },
+    });
+    markColdDeferred({
+      messageId: "m-pr",
+      busyReason: "wrap_up",
+    });
+    applyColdInteractionWireEvent(
+      "plan_review_resolved",
+      { checkpoint_id: "pr-def", decision: "continue" },
+      "c1",
+      "m-pr",
+    );
+    expect(getColdInteraction("pr-def")?.status).toBe("submitting");
+    expect(getColdInteraction("pr-def")?.deferredBusyReason).toBe("wrap_up");
+    expect(getColdInteraction("pr-def")?.resolution).toMatchObject({
+      decision: "continue",
+    });
+  });
+
+  it("reopenColdPending restores editable pending after refuse", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m-re",
+      payload: { checkpoint_id: "cp-re", question: "?" },
+    });
+    markColdSubmitting({ kind: "ask_user", id: "cp-re" });
+    markColdDeferred({ messageId: "m-re", busyReason: "wrap_up" });
+    reopenColdPending("cp-re");
+    expect(getColdInteraction("cp-re")?.status).toBe("pending");
+    expect(getColdInteraction("cp-re")?.deferredBusyReason).toBeUndefined();
   });
 });

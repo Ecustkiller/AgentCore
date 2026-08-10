@@ -6,6 +6,8 @@ lives in the CEO core; advanced HOW lives in ``consult_skill(team_orchestration_
 
 from __future__ import annotations
 
+from agentcore.runtime.delegate.playbook_declaration import HANDWRITTEN_TASKS_SKELETON
+from agentcore.runtime.delegate.task_models import TASK_MODEL_SCHEMA_PROPS
 from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_description
 
@@ -47,10 +49,12 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
 # Trigger + short cues. Long HOW → CEO core / team_orchestration_advanced.
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
+    f"手写可抄：{HANDWRITTEN_TASKS_SKELETON}（deliverable 可选）。"
     "【看】→deliverable.form=prose；【用】→files。"
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
-    "playbook 与 tasks 二选一；建站必填 playbook_args.topic；绿场必填 app。"
+    "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
+    "建站必填 playbook_args.topic；绿场必填 app。"
     "勿再填已删的 completion_criteria。"
     "HOW→consult_skill(team_orchestration_advanced)。"
 )
@@ -60,7 +64,12 @@ DELEGATE_PARAMETERS = {
     "properties": {
         "tasks": {
             "type": "array",
-            "description": f"子任务（≤{MAX_DELEGATION_TASKS}）。",
+            "description": (
+                f"子任务（≤{MAX_DELEGATION_TASKS}）。"
+                f"顶层非空数组可抄：{HANDWRITTEN_TASKS_SKELETON}（deliverable 可选）。"
+                "手写此数组时勿填 playbook/playbook_id（或 playbook_id=\"none\"）；"
+                "与具名 playbook 互斥。"
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -111,10 +120,12 @@ DELEGATE_PARAMETERS = {
                     "target_folder_id": {
                         "type": "string",
                         "description": (
-                            "已解析项目 folder id。裸聊写盘必填；"
+                            "已解析项目 folder id。跨项目/换桌写盘点名用；"
+                            "裸聊写盘缺桌由运行时自动建云桌，勿为过闸 create_project；"
                             "有出生省略=默认桌；子派默认继承。"
                         ),
                     },
+                    **TASK_MODEL_SCHEMA_PROPS,
                 },
                 "required": ["role", "task"],
             },
@@ -137,13 +148,16 @@ DELEGATE_PARAMETERS = {
             "type": "string",
             "enum": sorted(PLAYBOOKS),
             "description": (
-                "可选固化形状（与 tasks 二选一；槽位进 playbook_args）。"
+                "可选固化形状（与 tasks 二选一：填了就不要传 tasks；槽位进 playbook_args）。"
                 "建站→build_website；绿场→build_app；亦可用 playbook_id。"
             ),
         },
         "playbook_id": {
             "type": "string",
-            "description": '可选 playbook 名，或 "none"（手写 tasks）；与 playbook 同义优先。',
+            "description": (
+                '可选 playbook 名，或 "none"（手写 tasks 时用 none/省略，勿再带具名 playbook）；'
+                "与 playbook 同义优先。"
+            ),
         },
         "playbook_none_reason": {
             "type": "string",

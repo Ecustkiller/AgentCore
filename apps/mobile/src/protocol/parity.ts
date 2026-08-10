@@ -93,7 +93,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   run_context: {
     verdict: "ported",
     surface:
-      "AssistantView · 收到的上下文 (CEO 侧 captainContext) + RunDetail · 队员收到的上下文 (worker 侧 receivedContext)",
+      "AssistantMessageFooter · 更多 → 收到的上下文 (CEO 侧 captainContext) + RunDetail · 队员收到的上下文 (worker 侧 receivedContext)",
   },
   run_output_delta: {
     verdict: "ported",
@@ -197,22 +197,27 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   turn_queued: {
     verdict: "ported",
     surface:
-      "ChatPage · turn_queued 立即主时间线用户气泡 + queuedTurns 轻态（多项 FIFO）",
+      "ChatPage · turn_queued 仅 QueuedTurnsBar（queuedTurns 多项 FIFO；排队期不插主时间线用户泡）",
   },
   turn_queue_started: {
     verdict: "ported",
     surface:
-      "ChatPage · 按 queue_id 清 queuedTurns / 气泡轻态（出队开跑；fold no-op）",
+      "ChatPage · 出队开跑：插主时间线用户泡 + 按 queue_id 清 queuedTurns 条（fold no-op）",
   },
   turn_queue_cancelled: {
     verdict: "ported",
     surface:
-      "ChatPage · 按 queue_id 清 store + 乐观气泡（cancel API 成功/404 本地清；fold no-op）",
+      "ChatPage · 按 queue_id 只清条（cancel API 成功/404 本地清；fold no-op）",
   },
   turn_steer_accepted: {
     verdict: "ported",
     surface:
       "ChatPage · toast「已插入，下一工具步生效」（fold no-op；midFlight steered）",
+  },
+  resume_deferred: {
+    verdict: "ported",
+    surface:
+      "ResumeCard ·「放行已记下…」；ChatPage appendEventToTurn 同连接等待（fold no-op）",
   },
   execution_detached: {
     verdict: "internal",
@@ -479,7 +484,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   },
   ReceivedContext: {
     verdict: "ported",
-    surface: "AssistantView · 收到的上下文",
+    surface: "AssistantMessageFooter · 更多 → 收到的上下文（含 system）",
   },
   TeamNotesPanel: { verdict: "ported", surface: "TeamView · 团队便签" },
   UserInterjectionsPanel: {
@@ -495,7 +500,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   QueuedTurnsBar: {
     verdict: "ported",
     surface:
-      "ChatPage · QueuedTurnsBar + 用户气泡排队轻态（queuedTurns 多 FIFO；按项取消）",
+      "ChatPage · QueuedTurnsBar 为唯一排队 UI（queuedTurns 多 FIFO；按项取消；出队再进泡）",
   },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
   CitationTierBadge: {

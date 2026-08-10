@@ -1,3 +1,4 @@
+import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
 import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type { InteractionStatus } from "@/types/interactionExt";
 import {
@@ -51,6 +52,11 @@ export interface InteractionEntry {
    * recovery/`setForConversation` shell + origin fallback.
    */
   origin?: ResumeOrigin;
+  /**
+   * Cold resume accepted while slot busy (EPHEMERAL `resume_deferred`).
+   * Settlement is locked — UI keeps submitting and hides cancel-改口.
+   */
+  resumeDeferred?: { busyReason: ResumeDeferredBusyReason };
 }
 
 /**

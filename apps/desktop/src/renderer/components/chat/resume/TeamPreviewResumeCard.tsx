@@ -26,20 +26,19 @@ import {
   Users,
 } from "lucide-react";
 import { useState } from "react";
+import { ResumeDeferredNotice } from "./ResumeDeferredNotice";
 import { useColdSubmit } from "./useColdSubmit";
 
 /** Cold-path team_preview resume card (delegate / debate). */
 export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const [capsOpen, setCapsOpen] = useState(false);
-  const [excludedRunIds, setExcludedRunIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
   const [textOnlyRunIds, setTextOnlyRunIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const { submitting, busy, send } = useColdSubmit(turn);
   const isDebate = turn.primitive === "debate";
+  const { submitting, busy, deferredBusyReason, send } = useColdSubmit(turn);
+  const settlementLocked = deferredBusyReason !== null;
   const family = TEAM_PRIMITIVE_META[isDebate ? "debate" : "delegate"];
   const lead = teamPreviewLead({
     primitive: isDebate ? "debate" : "delegate",
@@ -56,7 +55,7 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
     decision: PlanReviewUserDecision,
     icon: React.ReactNode,
   ) =>
-    submitting === decision ? (
+    submitting === decision || (settlementLocked && decision === "continue") ? (
       <Loader2 size={13} className="animate-spin" />
     ) : (
       icon
@@ -65,6 +64,7 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const capPreview = turn.tools.slice(0, 2).map(toolLabelZh);
   const capRest = turn.tools.length - capPreview.length;
 
+  /** 人改模型 UI 已撤：不再收集/发送 model_overrides（契约透传路径仍在 useColdSubmit）。 */
   const buildCorrections = (): TeamPreviewResumeCorrections | undefined => {
     if (isDebate) return undefined;
     const excluded_run_ids = turn.workers
@@ -138,8 +138,8 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
               </div>
               {isDebate ? (
                 <DebatePreviewBody
-                  debate={turn}
                   mode="collapsible"
+                  debate={turn}
                   showBudget={false}
                   motionClassName="whitespace-pre-wrap text-sm text-foreground"
                 />
@@ -147,8 +147,6 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                 <WorkerPreviewRows
                   mode="interactive"
                   workers={turn.workers}
-                  excludedRunIds={excludedRunIds}
-                  onExcludedChange={onExcludedChange}
                   textOnlyRunIds={textOnlyRunIds}
                   onTextOnlyChange={onTextOnlyChange}
                   disabled={busy}
@@ -203,24 +201,31 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
         </div>
 
         <div className="shrink-0 space-y-2 border-t border-border bg-card/95 px-3 py-3 backdrop-blur-sm">
-          <Textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={busy}
-            rows={2}
-            placeholder={family.notePlaceholder}
-            className="w-full border-border bg-card/70 focus:border-primary/60"
-          />
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="ghost"
-              className="text-muted-foreground hover:text-foreground"
-              icon={spinnerOr("stop", <OctagonX size={13} />)}
+          {settlementLocked && deferredBusyReason ? (
+            <ResumeDeferredNotice busyReason={deferredBusyReason} />
+          ) : null}
+          {!settlementLocked ? (
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
               disabled={busy}
-              onClick={() => send("stop", [], note.trim())}
-            >
-              取消
-            </Button>
+              rows={2}
+              placeholder={family.notePlaceholder}
+              className="w-full border-border bg-card/70 focus:border-primary/60"
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!settlementLocked ? (
+              <Button
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+                icon={spinnerOr("stop", <OctagonX size={13} />)}
+                disabled={busy}
+                onClick={() => send("stop", [], note.trim())}
+              >
+                取消
+              </Button>
+            ) : null}
             <span className="ml-auto" />
             <Button
               variant="primary"
@@ -230,11 +235,13 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                 send("continue", [], note.trim(), buildCorrections())
               }
             >
-              {isDebate
-                ? family.resumeCta
-                : showCapabilities
+              {settlementLocked
+                ? "已记下"
+                : isDebate
                   ? family.resumeCta
-                  : "开做"}
+                  : showCapabilities
+                    ? family.resumeCta
+                    : "开做"}
             </Button>
           </div>
         </div>

@@ -226,6 +226,26 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
                 projected_overrides.append({"runId": rid, "capability": "text_only"})
             if projected_overrides:
                 leaf["writeCapabilityOverrides"] = projected_overrides
+        models = resolution.get("model_overrides")
+        if isinstance(models, dict) and models:
+            projected_models: dict[str, dict[str, str]] = {}
+            for rid, row in models.items():
+                key = str(rid or "").strip()
+                if not key or not isinstance(row, dict):
+                    continue
+                model = str(row.get("model") or "").strip()
+                if not model:
+                    continue
+                entry: dict[str, str] = {"model": model}
+                origin = str(row.get("origin") or "").strip()
+                if origin:
+                    entry["origin"] = origin
+                provider_id = str(row.get("provider_id") or "").strip()
+                if provider_id:
+                    entry["provider_id"] = provider_id
+                projected_models[key] = entry
+            if projected_models:
+                leaf["modelOverrides"] = projected_models
         return leaf
     if rec.kind == "delegation_authorization":
         # Wire field is ``tools`` (not grantable_tools) — P3 drift fix.

@@ -462,6 +462,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "turn_steer_accepted":
       case "turn_queue_started":
       case "turn_queue_cancelled":
+      case "resume_deferred":
       case "browser_live_frame":
       case "browser_live_status":
       case "batch_metrics":

@@ -216,6 +216,10 @@ class TeamPreviewWorker(WirePayload):
     write_capability_label: str | None = absent(
         "写盘能力展示文案（可改文件 / 仅文字报告）。"
     )
+    # Per-worker 模型身份（与辩论 TeamPreviewSide / ModelIdentity 同族）；缺字段=跟槽。
+    model: str | None = absent("该队员模型 id（可展示裸 id）。")
+    origin: Literal["platform", "byok"] | None = absent("模型来源；有三元组时透出。")
+    provider_id: str | None = absent("BYOK 服务商 id；platform 缺省。")
 
 
 class TeamPreviewSide(WirePayload):
@@ -225,6 +229,8 @@ class TeamPreviewSide(WirePayload):
     name: str
     stance: str
     is_subject: bool | None = absent()
+    # 开赛前预分配稳定槽位；人盖 ``model_overrides`` 键（≠ 各拍发言 run）。旧帧缺省。
+    run_id: str | None = absent("开赛前预分配稳定 id；人盖 model_overrides 键。")
     # §7.5 真·多模型：三元组；缺字段（老 journal / 同模型场）→ 前端跟 turn 主模型。
     model: str | None = absent("该方辩手模型 id。")
     origin: Literal["platform", "byok"] | None = absent("模型来源。")
@@ -261,6 +267,8 @@ class TeamPreviewRequiredPayload(WirePayload):
     sides: list[TeamPreviewSide] | None = absent("辩论各方立场。")
     max_rounds: int | None = absent("辩论轮次安全上限（预算展示）。")
     thorough: bool | None = absent("辩论认真辩透 vs 快速对碰。")
+    # 开赛前预分配主持人稳定 id；人盖 ``model_overrides`` 键。旧帧缺省。
+    moderator_run_id: str | None = absent("开赛前预分配主持人 run_id；人盖 model_overrides 键。")
     # §7.5 裁判选型；缺字段（老 journal）→ 前端不展示裁判行。
     moderator_model: str | None = absent("裁判 / 主持人模型 id。")
     moderator_origin: Literal["platform", "byok"] | None = absent("裁判模型来源。")
@@ -285,6 +293,17 @@ class WriteCapabilityOverride(WirePayload):
     capability: Literal["text_only"]
 
 
+class ModelOverride(WirePayload):
+    """开工卡 continue 人盖：按 run_id 覆盖队员 / 辩手 / 主持人模型三元组。
+
+    空 model = 该项不改（与 map 缺键同效）。非法三元组 → 422（引擎侧硬失败）。
+    """
+
+    model: str
+    origin: Literal["platform", "byok"] | None = absent("模型来源；非空时须合法。")
+    provider_id: str | None = absent("BYOK 服务商 id；origin=byok 时必填。")
+
+
 class TeamPreviewResolvedPayload(WirePayload):
     checkpoint_id: str
     # continue(=grant[+steer]) / adjust / stop / research_first / …
@@ -296,6 +315,10 @@ class TeamPreviewResolvedPayload(WirePayload):
     )
     write_capability_overrides: list[WriteCapabilityOverride] | None = absent(
         "写盘单向收紧；仅 capability=text_only；未知 run_id / 升权 → 422（引擎侧）。"
+    )
+    model_overrides: dict[str, ModelOverride] | None = absent(
+        "人确认盖 CEO：run_id → {model, origin?, provider_id?}；"
+        "delegate=队员；debate=sides[].run_id / moderator_run_id；空/缺=不改。"
     )
 
 

@@ -525,8 +525,21 @@ class EventSink:
             return
         self._history.append(SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp))
 
-    def detach(self) -> None:
+    def detach(self, *, reason: str = "unspecified") -> None:
+        """Drop the live SSE consumer without closing the sink (reattach via take_over).
+
+        Observability: always logs ``event_sink.detach`` (including idempotent re-detach)
+        so operators can tell disconnect detach from a true :meth:`close`.
+        """
+        already_detached = self._detached
         self._detached = True
+        logger.info(
+            "event_sink.detach",
+            reason=reason,
+            conversation_id=self._conversation_id,
+            message_id=self._message_id,
+            already_detached=already_detached,
+        )
 
     def take_over(self) -> list[SSEEvent]:
         while True:
@@ -1054,8 +1067,14 @@ class EventSink:
                 blocks.extend(payload.get("blocks") or [])
         return blocks if found else None
 
-    def close(self) -> None:
+    def close(self, *, reason: str = "unspecified") -> None:
+        """Permanently close this sink (sentinel for SSE consumers). Idempotent.
+
+        Observability: logs ``event_sink.close`` only on the open→closed transition
+        (``was_detached`` distinguishes a prior consumer drop from a still-attached close).
+        """
         if not self._closed:
+            was_detached = self._detached
             self._closed = True
             for task in list(self._barrier_tasks):
                 task.cancel()
@@ -1070,6 +1089,13 @@ class EventSink:
                 self._checkpointer = None
             self._queue.put_nowait(None)
             self._persist_barriers.put_nowait(None)
+            logger.info(
+                "event_sink.close",
+                reason=reason,
+                conversation_id=self._conversation_id,
+                message_id=self._message_id,
+                was_detached=was_detached,
+            )
 
     async def get(self) -> SSEEvent | None:
         event = await self._queue.get()

@@ -209,11 +209,33 @@ export function foldInteractions(
           if (!rid) continue;
           overrides.push({ runId: rid, capability: "text_only" });
         }
+        const modelOverridesRaw = asRecord(p.model_overrides);
+        const modelOverrides: Record<
+          string,
+          { model: string; origin?: string; provider_id?: string }
+        > = {};
+        for (const [rid, row] of Object.entries(modelOverridesRaw)) {
+          if (!rid || typeof row !== "object" || row === null) continue;
+          const r = asRecord(row);
+          const model = str(r.model);
+          if (!model) continue;
+          const entry: {
+            model: string;
+            origin?: string;
+            provider_id?: string;
+          } = { model };
+          const origin = str(r.origin);
+          if (origin) entry.origin = origin;
+          const providerId = str(r.provider_id);
+          if (providerId) entry.provider_id = providerId;
+          modelOverrides[rid] = entry;
+        }
         prev.leaf = {
           ...prev.leaf,
           status: "resolved",
           ...(excluded.length ? { excludedRunIds: excluded } : {}),
           ...(overrides.length ? { writeCapabilityOverrides: overrides } : {}),
+          ...(Object.keys(modelOverrides).length ? { modelOverrides } : {}),
         };
         break;
       }

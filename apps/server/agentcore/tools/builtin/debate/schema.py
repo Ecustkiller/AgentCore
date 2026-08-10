@@ -272,6 +272,7 @@ def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
                 model=model,
                 origin=origin if origin in ("platform", "byok") else "",
                 provider_id=provider_id if origin == "byok" else "",
+                run_id=str(item.get("run_id") or "").strip(),
             )
         )
     if len(sides) < 2:

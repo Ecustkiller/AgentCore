@@ -26,6 +26,10 @@ export const useActiveMemoryUpdates = (): MemoryUpdate[] =>
 export const useActiveGenerating = (): boolean =>
   useConversationStore((s) => activeRuntime(s).isGenerating);
 
+/** 桌面：最近一回合执行路径（`sidecar` / `cloud_bridge` / null）。 */
+export const useActiveExecutionVia = (): ConversationRuntime["executionVia"] =>
+  useConversationStore((s) => activeRuntime(s).executionVia);
+
 export const useActiveTurnPhase = () =>
   useConversationStore((s) => activeRuntime(s).turnPhase);
 

@@ -83,7 +83,7 @@ def _state(plan: RunPlan) -> TurnState:
 def test_exclude_one_worker_keeps_other():
     plan = _plan_two_independent()
     validate_team_preview_veto(plan, excluded_run_ids=["b"])
-    excl, _ = apply_team_preview_veto(plan, excluded_run_ids=["b"])
+    excl, _, _ = apply_team_preview_veto(plan, excluded_run_ids=["b"])
     assert excl == ["b"]
     assert [n.run_id for n in plan.nodes] == ["a"]
 
@@ -94,7 +94,7 @@ def test_tighten_write_sets_form_prose():
         plan,
         write_capability_overrides=[{"run_id": "a", "capability": "text_only"}],
     )
-    _, overrides = apply_team_preview_veto(
+    _, overrides, _ = apply_team_preview_veto(
         plan,
         write_capability_overrides=[{"run_id": "a", "capability": "text_only"}],
     )
@@ -104,6 +104,51 @@ def test_tighten_write_sets_form_prose():
     assert node.deliverable.form == "prose"
     # 禁硬卸写工具：deliverable 仍在，仅 form 收紧。
     assert node.deliverable.artifacts == ["notes.md"]
+
+
+def test_model_override_writes_route_key():
+    plan = _plan_two_independent()
+    validate_team_preview_veto(
+        plan,
+        model_overrides={
+            "a": {"model": "deepseek-v4-pro", "origin": "platform"},
+        },
+    )
+    _, _, models = apply_team_preview_veto(
+        plan,
+        model_overrides={
+            "a": {"model": "deepseek-v4-pro", "origin": "platform"},
+        },
+    )
+    assert models[0].run_id == "a"
+    assert plan.by_id("a").model == "platform/deepseek-v4-pro"
+    assert plan.by_id("b").model == ""
+
+
+def test_model_override_bare_model_rejected():
+    plan = _plan_two_independent()
+    with pytest.raises(ValidationError, match="origin"):
+        validate_team_preview_veto(
+            plan,
+            model_overrides={"a": {"model": "deepseek-v4-pro"}},
+        )
+
+
+def test_model_override_unknown_run_rejected():
+    plan = _plan_two_independent()
+    with pytest.raises(ValidationError, match="未知"):
+        validate_team_preview_veto(
+            plan,
+            model_overrides={"nope": {"model": "x", "origin": "platform"}},
+        )
+
+
+def test_model_override_empty_skips():
+    plan = _plan_two_independent()
+    validate_team_preview_veto(plan, model_overrides={"a": {"model": ""}})
+    _, _, models = apply_team_preview_veto(plan, model_overrides={"a": {"model": ""}})
+    assert models == []
+    assert plan.by_id("a").model == ""
 
 
 def test_exclude_dependency_target_rejected():
@@ -137,6 +182,151 @@ def test_debate_should_not_apply_veto():
     frame = _frame(RunPlan(), primitive="debate")
     assert should_apply_team_veto(frame, CheckpointDecision.CONTINUE) is False
     assert should_apply_team_veto(frame, "continue") is False
+
+
+def test_debate_should_apply_model_overrides():
+    from agentcore.runtime.kickoff.team_veto import should_apply_debate_model_overrides
+
+    frame = _frame(RunPlan(), primitive="debate")
+    assert should_apply_debate_model_overrides(frame, CheckpointDecision.CONTINUE) is True
+    assert should_apply_debate_model_overrides(frame, CheckpointDecision.STOP) is False
+    assert should_apply_debate_model_overrides(_frame(RunPlan()), CheckpointDecision.CONTINUE) is False
+
+
+def test_allocate_debate_run_ids_idempotent():
+    from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
+    from agentcore.runtime.debate.models import allocate_debate_run_ids
+
+    config = DebateConfig(
+        motion="命题",
+        form=DebateForm.DEBATE,
+        sides=[
+            DebateSide(key="pro", name="正方", stance="赞"),
+            DebateSide(key="con", name="反方", stance="反"),
+        ],
+        policy=RoundPolicy(thorough=True, max_rounds=3),
+    )
+    args = {
+        "motion": "命题",
+        "form": "debate",
+        "sides": [
+            {"key": "pro", "name": "正方", "stance": "赞"},
+            {"key": "con", "name": "反方", "stance": "反"},
+        ],
+    }
+    mod = allocate_debate_run_ids(config, args)
+    assert mod.startswith("debate_")
+    assert config.moderator_run_id == mod
+    assert config.sides[0].run_id == f"{mod}_pro"
+    assert config.sides[1].run_id == f"{mod}_con"
+    assert args["moderator_run_id"] == mod
+    assert args["sides"][0]["run_id"] == f"{mod}_pro"
+    mod2 = allocate_debate_run_ids(config, args)
+    assert mod2 == mod
+    assert config.sides[0].run_id == f"{mod}_pro"
+
+
+def test_apply_debate_model_overrides_writes_arguments():
+    from agentcore.runtime.kickoff.team_veto import (
+        apply_debate_model_overrides,
+        validate_debate_model_overrides,
+    )
+
+    mod = "debate_abc"
+    pro = f"{mod}_pro"
+    args = {
+        "moderator_run_id": mod,
+        "moderator_model": "deepseek-v4-flash",
+        "moderator_origin": "platform",
+        "sides": [
+            {"key": "pro", "name": "正方", "stance": "赞", "run_id": pro, "model": "a", "origin": "platform"},
+            {
+                "key": "con",
+                "name": "反方",
+                "stance": "反",
+                "run_id": f"{mod}_con",
+                "model": "b",
+                "origin": "platform",
+            },
+        ],
+    }
+    sides = [dict(s) for s in args["sides"]]
+    ov = {
+        pro: {"model": "deepseek-v4-pro", "origin": "platform"},
+        mod: {"model": "gpt-test", "origin": "platform"},
+    }
+    validate_debate_model_overrides(sides, debate_arguments=args, model_overrides=ov)
+    applied = apply_debate_model_overrides(args, ov, sides=sides)
+    assert applied[pro]["model"] == "deepseek-v4-pro"
+    assert applied[mod]["model"] == "gpt-test"
+    assert args["sides"][0]["model"] == "deepseek-v4-pro"
+    assert args["moderator_model"] == "gpt-test"
+    assert sides[0]["model"] == "deepseek-v4-pro"
+
+
+def test_debate_model_override_unknown_run_rejected():
+    from agentcore.runtime.kickoff.team_veto import validate_debate_model_overrides
+
+    with pytest.raises(ValidationError, match="未知"):
+        validate_debate_model_overrides(
+            [{"key": "pro", "run_id": "debate_x_pro"}],
+            moderator_run_id="debate_x",
+            model_overrides={"nope": {"model": "m", "origin": "platform"}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_recover_debate_applies_model_overrides():
+    mod = "debate_abc"
+    pro = f"{mod}_pro"
+    args = {
+        "motion": "是否",
+        "form": "debate",
+        "moderator_run_id": mod,
+        "sides": [
+            {"key": "pro", "name": "正方", "stance": "赞", "run_id": pro},
+            {"key": "con", "name": "反方", "stance": "反", "run_id": f"{mod}_con"},
+        ],
+    }
+    frame = _frame(
+        RunPlan(),
+        primitive="debate",
+        debate_arguments=args,
+    )
+    frame.sides = [dict(s) for s in args["sides"]]
+    sink = EventSink()
+    seen_args = {}
+
+    async def _resume_debate(**kwargs):
+        seen_args.update(kwargs.get("arguments") or {})
+        return ToolResult(
+            tool_call_id="", success=True, output="开辩", effect=ToolEffect.CONTINUE
+        )
+
+    debate = AsyncMock()
+    debate.resume_after_kickoff = _resume_debate
+    delegate = AsyncMock()
+    settled = await recover_turn(
+        state=_state(RunPlan()),
+        sink=sink,
+        delegate_tool=delegate,
+        debate_tool=debate,
+        execution_id="e1",
+        suspension=frame,
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        model_overrides={
+            pro: {"model": "deepseek-v4-pro", "origin": "platform"},
+        },
+        excluded_run_ids=["b"],
+    )
+    assert settled.output == "开辩"
+    assert seen_args["sides"][0]["model"] == "deepseek-v4-pro"
+    resolved = [e for e in sink._history if e.type is EventType.TEAM_PREVIEW_RESOLVED]
+    assert resolved[0].payload.get("model_overrides") == {
+        pro: {"model": "deepseek-v4-pro", "origin": "platform"},
+    }
+    assert "excluded_run_ids" not in resolved[0].payload
 
 
 def test_prose_override_idempotent():
@@ -227,6 +417,94 @@ async def test_recover_debate_ignores_excluded_fields():
     resolved = [e for e in sink._history if e.type is EventType.TEAM_PREVIEW_RESOLVED]
     assert "excluded_run_ids" not in resolved[0].payload
     assert [n.run_id for n in plan.nodes] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_recover_model_override_registers_route_extras(monkeypatch):
+    """人盖模后须补 ensure_delegate_route_extras（跨 provider 云端 in-process）。"""
+    plan = _plan_two_independent()
+    frame = _frame(plan)
+    sink = EventSink()
+    seen: list[object] = []
+
+    async def _extras(llm, identities, *, user_id=None):
+        seen.append(list(identities))
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.task_models.ensure_delegate_route_extras",
+        _extras,
+    )
+
+    async def _resume(p, seed, **kwargs):
+        assert p.by_id("a").model == "platform/deepseek-v4-pro"
+        return ToolResult(
+            tool_call_id="", success=True, output="ok", effect=ToolEffect.CONTINUE
+        )
+
+    delegate = AsyncMock()
+    delegate.resume_plan = _resume
+    delegate._llm = object()
+    delegate._base_tool_context = type("Ctx", (), {"user_id": "u1"})()
+
+    await recover_turn(
+        state=_state(plan),
+        sink=sink,
+        delegate_tool=delegate,
+        execution_id="e1",
+        suspension=frame,
+        decision=CheckpointDecision.CONTINUE,
+        model_overrides={
+            "a": {"model": "deepseek-v4-pro", "origin": "platform"},
+        },
+    )
+    assert len(seen) == 1
+    assert seen[0][0].model == "deepseek-v4-pro"
+    assert seen[0][0].origin == "platform"
+    resolved = [e for e in sink._history if e.type is EventType.TEAM_PREVIEW_RESOLVED]
+    assert resolved[0].payload.get("model_overrides") == {
+        "a": {"model": "deepseek-v4-pro", "origin": "platform"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_recover_ceo_route_key_registers_extras_without_override(monkeypatch):
+    """冷 resume：人未改模时，plan 上 CEO 已写路由键也须补 extras。"""
+    plan = _plan_two_independent()
+    plan.by_id("a").model = "prov-x/custom-model"
+    frame = _frame(plan)
+    sink = EventSink()
+    seen: list[object] = []
+
+    async def _extras(llm, identities, *, user_id=None):
+        seen.append(list(identities))
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.task_models.ensure_delegate_route_extras",
+        _extras,
+    )
+
+    async def _resume(p, seed, **kwargs):
+        return ToolResult(
+            tool_call_id="", success=True, output="ok", effect=ToolEffect.CONTINUE
+        )
+
+    delegate = AsyncMock()
+    delegate.resume_plan = _resume
+    delegate._llm = object()
+    delegate._base_tool_context = type("Ctx", (), {"user_id": "u1"})()
+
+    await recover_turn(
+        state=_state(plan),
+        sink=sink,
+        delegate_tool=delegate,
+        execution_id="e1",
+        suspension=frame,
+        decision=CheckpointDecision.CONTINUE,
+    )
+    assert len(seen) == 1
+    assert seen[0][0].model == "custom-model"
+    assert seen[0][0].origin == "byok"
+    assert seen[0][0].provider_id == "prov-x"
 
 
 @pytest.mark.asyncio

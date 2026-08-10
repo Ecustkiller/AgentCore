@@ -65,6 +65,9 @@ class DebateSide:
     模型身份（Phase 3 · 真·多模型辩手，§7.5）为三元组：``model`` + ``origin``
     （platform|byok）+ ``provider_id``（byok 必填）。空 ``model`` = 回退 turn 主模型；
     非空须过目录校验后注入路由键。见 ``runtime.debate.models``。
+
+    ``run_id`` 是开赛前预分配的稳定槽位 id（开工卡 wire / ``model_overrides`` 键）；
+    与各拍发言 run（``{moderator}_rN_{key}``）不同。空 = 旧帧 / 未分配。
     """
 
     key: str
@@ -74,6 +77,7 @@ class DebateSide:
     model: str = ""
     origin: str = ""  # platform | byok | ""
     provider_id: str = ""
+    run_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -155,6 +159,8 @@ class DebateConfig:
     moderator_origin: str = ""
     moderator_provider_id: str = ""
     moderator_route: str = ""
+    # 开赛前预分配的主持人稳定 run_id（开工卡 / model_overrides 键；开赛后沿用，不重铸）。
+    moderator_run_id: str = ""
     # True = 目录只剩一模型，本场降级同模型并在开赛卡明示。
     same_model_debate: bool = False
     # §7.5 D：消歧零/多候选时挂结构化候选（开赛卡 / 工具错误载荷）；旧帧缺省空。

@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearColdInteractions,
   getColdInteractionSnapshot,
+  markColdDeferred,
   markColdResolved,
+  markColdSubmitting,
   rekeyColdMessageId,
   upsertColdRequired,
 } from "../coldInteractions";
@@ -199,5 +201,41 @@ describe("coldResume · live Interaction authority", () => {
     });
     expect(visible).toHaveLength(1);
     expect(visible[0]?.checkpoint_id).toBe("cp-shell");
+  });
+
+  it("submitting + resume_deferred still paints with deferredBusyReason", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-deferred",
+      payload: { checkpoint_id: "cp-deferred", question: "放行？" },
+    });
+    markColdSubmitting({
+      kind: "ask_user",
+      id: "cp-deferred",
+      resolution: { decision: "continue" },
+    });
+    markColdDeferred({
+      messageId: "m-deferred",
+      conversationId: "conv-live",
+      busyReason: "live_turn",
+    });
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts: [
+        {
+          role: "assistant",
+          id: "client",
+          serverMessageId: "m-deferred",
+        },
+      ],
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.interactionStatus).toBe("submitting");
+    expect(visible[0]?.deferredBusyReason).toBe("live_turn");
+    expect(visible[0]?.message_id).toBe("m-deferred");
   });
 });

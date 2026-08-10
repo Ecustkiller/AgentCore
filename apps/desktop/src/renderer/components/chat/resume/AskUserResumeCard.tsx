@@ -1,5 +1,6 @@
 import { BrowserLoginDecisionCard } from "@/components/chat/BrowserLoginDecisionCard";
 import { AskUserCard } from "@/components/chat/CheckpointCard";
+import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import {
   submitInteraction,
@@ -8,7 +9,9 @@ import {
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { useInteractionStore } from "@/stores/interactions";
 import type { PendingResume } from "@/stores/pausedTurns";
+import { MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
+import { ResumeDeferredNotice } from "./ResumeDeferredNotice";
 
 function formatBrowserLoginAssumption(
   assumptions: PendingResume["assumptions"],
@@ -33,8 +36,30 @@ function AskUserBrowserLoginResumeCard({ turn }: { turn: PendingResume }) {
   const entryStatus = useInteractionStore(
     (s) => s.byId.get(turn.checkpointId)?.status,
   );
-  const busy = submitting !== null || entryStatus === "submitting";
+  const deferredBusyReason = useInteractionStore(
+    (s) => s.byId.get(turn.checkpointId)?.resumeDeferred?.busyReason ?? null,
+  );
+  const busy =
+    submitting !== null ||
+    entryStatus === "submitting" ||
+    deferredBusyReason !== null;
   const assumption = formatBrowserLoginAssumption(turn.assumptions);
+
+  if (deferredBusyReason) {
+    return (
+      <DecisionCard tone="neutral" animate className="mx-0 p-3">
+        <div className="flex items-start gap-2">
+          <DecisionCardIcon tone="neutral">
+            <MessageCircleQuestion size={16} />
+          </DecisionCardIcon>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-sm font-semibold text-foreground">已记下</p>
+            <ResumeDeferredNotice busyReason={deferredBusyReason} />
+          </div>
+        </div>
+      </DecisionCard>
+    );
+  }
 
   const send = async (
     decision: "continue" | "stop",
@@ -97,6 +122,26 @@ function AskUserBrowserLoginResumeCard({ turn }: { turn: PendingResume }) {
 
 /** Cold-path ask_user resume card — reuses hot AskUserCard / browser-login shell. */
 export function AskUserResumeCard({ turn }: { turn: PendingResume }) {
+  const deferredBusyReason = useInteractionStore(
+    (s) => s.byId.get(turn.checkpointId)?.resumeDeferred?.busyReason ?? null,
+  );
+
+  if (deferredBusyReason) {
+    return (
+      <DecisionCard tone="neutral" animate className="mx-0 p-3">
+        <div className="flex items-start gap-2">
+          <DecisionCardIcon tone="neutral">
+            <MessageCircleQuestion size={16} />
+          </DecisionCardIcon>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-sm font-semibold text-foreground">已记下</p>
+            <ResumeDeferredNotice busyReason={deferredBusyReason} />
+          </div>
+        </div>
+      </DecisionCard>
+    );
+  }
+
   if (turn.browserLogin) {
     return <AskUserBrowserLoginResumeCard turn={turn} />;
   }

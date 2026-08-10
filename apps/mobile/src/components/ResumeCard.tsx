@@ -12,6 +12,8 @@ import {
   RISK_SEVERITY_TAG,
   parseRiskLabel,
 } from "@/components/ask/parseRiskLabel";
+import type { ColdDeferredBusyReason } from "@/lib/coldInteractions";
+import type { VisibleColdResume } from "@/lib/coldResume";
 import {
   type LocalPickerFailureKind,
   isDesktopFolderAction,
@@ -26,11 +28,14 @@ import {
 // organize_plan / daily_review 勾选墙；proposal_pick 行式单选；risk_ack 行式多选；
 // decision/kickoff = default 预选 + compose 答复模型 +「其他」逃逸；
 // 本机目录 action 可点 → LocalPickerFailureCard（unavailable），禁灰掉无解释。
-// Delegate team_preview：纳入开关 + 写盘单向收紧（开工组队有限否决 · 块 C）。
+// Delegate team_preview：纳入开关 + 写盘单向收紧 + 嘱咐（定案 A：人改模型 UI 已藏；
+// model_overrides 契约仍在 stream 类型，本卡 continue 不附）。
+// Debate team_preview：辩手 / 裁判节点显式；不展示模型下拉、不附 model_overrides。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
+// Cold × live deferred：``resume_deferred`` →「放行已记下…」；settlement 已锁，不可再改口取消。
 // Dense kinds use Latch + Interaction Sheet so long worker lists never inflate .screen.
 import type { CheckpointDecision } from "@agentcore/contract-types";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 function str(record: Record<string, unknown>, key: string): string | null {
   const v = record[key];
@@ -75,7 +80,11 @@ function vendorLabel(model: string | null | undefined): string | null {
 }
 
 function formatDebateRosterLine(
-  sides: Array<{ name?: string; model?: string; origin?: string }>,
+  sides: Array<{
+    name?: string;
+    model?: string | null;
+    origin?: string | null;
+  }>,
   moderatorModel?: string | null,
   moderatorOrigin?: string | null,
 ): string | null {
@@ -164,6 +173,27 @@ type PreviewWorker = {
   depends_on: string[];
   write_capability: "text_only" | "can_write_files" | null;
   write_capability_label: string | null;
+  model: string | null;
+  origin: "platform" | "byok" | null;
+  provider_id: string | null;
+};
+
+type PreviewDebateSide = {
+  key: string;
+  name: string;
+  stance: string;
+  run_id: string | null;
+  model: string | null;
+  origin: "platform" | "byok" | null;
+  provider_id: string | null;
+};
+
+type PreviewDebateKickoff = {
+  sides: PreviewDebateSide[];
+  moderatorRunId: string | null;
+  moderatorModel: string | null;
+  moderatorOrigin: "platform" | "byok" | null;
+  moderatorProviderId: string | null;
 };
 
 function parseDependsOn(v: unknown): string[] {
@@ -190,6 +220,7 @@ export function parseTeamPreviewWorkers(
   for (const w of raw ?? []) {
     const run_id = str(w, "run_id");
     if (!run_id) continue;
+    const originRaw = str(w, "origin");
     out.push({
       run_id,
       role: str(w, "role") ?? "",
@@ -197,9 +228,47 @@ export function parseTeamPreviewWorkers(
       depends_on: parseDependsOn(w.depends_on),
       write_capability: parseWriteCapability(w),
       write_capability_label: str(w, "write_capability_label"),
+      model: str(w, "model"),
+      origin:
+        originRaw === "platform" || originRaw === "byok" ? originRaw : null,
+      provider_id: str(w, "provider_id"),
     });
   }
   return out;
+}
+
+function parseOrigin(raw: string | null): "platform" | "byok" | null {
+  return raw === "platform" || raw === "byok" ? raw : null;
+}
+
+/** Parse debate kickoff sides + moderator（有 run_id 才可改模）. */
+export function parseDebateKickoff(
+  paused: Record<string, unknown>,
+): PreviewDebateKickoff {
+  const sidesRaw = Array.isArray(paused.sides) ? paused.sides : [];
+  const sides: PreviewDebateSide[] = [];
+  for (const row of sidesRaw) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const s = row as Record<string, unknown>;
+    const originRaw = str(s, "origin");
+    sides.push({
+      key: str(s, "key") ?? "",
+      name: str(s, "name") ?? "",
+      stance: str(s, "stance") ?? "",
+      run_id: str(s, "run_id"),
+      model: str(s, "model"),
+      origin: parseOrigin(originRaw),
+      provider_id: str(s, "provider_id"),
+    });
+  }
+  const modOrigin = parseOrigin(str(paused, "moderator_origin"));
+  return {
+    sides,
+    moderatorRunId: str(paused, "moderator_run_id"),
+    moderatorModel: str(paused, "moderator_model"),
+    moderatorOrigin: modOrigin,
+    moderatorProviderId: str(paused, "moderator_provider_id"),
+  };
 }
 
 /** Intents whose continue settle carries `selected` (mirrors desktop CheckpointCard). */
@@ -213,12 +282,40 @@ const CARRIES_SELECTED = new Set([
 /** Intents with row checkbox wall (default all on; uncheck = skip/exclude). */
 const CHECKBOX_WALL = new Set(["daily_review", "organize_plan"]);
 
+/** Deferred wait copy after EPHEMERAL ``resume_deferred`` (settlement locked). */
+export const RESUME_DEFERRED_HINT = "放行已记下…当前回合结束后继续";
+
+function ResumeDeferredLatch({
+  busyReason,
+}: {
+  busyReason?: ColdDeferredBusyReason;
+}) {
+  const detail =
+    busyReason === "wrap_up"
+      ? "宿主回合收口中"
+      : busyReason === "live_turn"
+        ? "其它回合进行中"
+        : null;
+  return (
+    <div
+      className="pause pause--budget"
+      data-testid="resume-card-deferred"
+      data-busy-reason={busyReason}
+    >
+      <div className="pause-scroll">
+        <div className="pause-hint">{RESUME_DEFERRED_HINT}</div>
+        {detail ? <div className="pause-hint">{detail}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export function ResumeCard({
   paused,
   onResume,
   onOpenLive,
 }: {
-  paused: PausedTurnSummary;
+  paused: VisibleColdResume;
   onResume: (
     decision: CheckpointDecision,
     note: string,
@@ -228,6 +325,11 @@ export function ResumeCard({
   /** Open BrowserLiveSheet from cold-path browser_login card. */
   onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
 }) {
+  // Settlement prewrite + slot wait: card stays, actions locked.
+  if (paused.deferredBusyReason) {
+    return <ResumeDeferredLatch busyReason={paused.deferredBusyReason} />;
+  }
+
   const isPlanReview = paused.kind === "plan_review";
   const isTeamPreview = paused.kind === "team_preview";
   const isAskUser =
@@ -240,6 +342,7 @@ export function ResumeCard({
         paused={paused}
         onResume={onResume}
         onOpenLive={onOpenLive}
+        locked={paused.interactionStatus === "submitting"}
       />
     );
   }
@@ -251,6 +354,7 @@ export function ResumeCard({
       isPlanReview={isPlanReview}
       isTeamPreview={isTeamPreview}
       isAskUser={isAskUser}
+      locked={paused.interactionStatus === "submitting"}
     />
   );
 }
@@ -261,6 +365,7 @@ function AskUserBrowserLoginResumeCard({
   paused,
   onResume,
   onOpenLive,
+  locked = false,
 }: {
   paused: PausedTurnSummary;
   onResume: (
@@ -270,11 +375,12 @@ function AskUserBrowserLoginResumeCard({
     amendments?: TeamPreviewAmendments,
   ) => void;
   onOpenLive?: (opts?: OpenBrowserLiveOpts) => void;
+  locked?: boolean;
 }) {
   const [submitting, setSubmitting] = useState<BrowserLoginSubmitKind | null>(
     null,
   );
-  const busy = submitting !== null;
+  const busy = locked || submitting !== null;
   const assumption = formatBrowserLoginAssumption(paused.assumptions);
 
   const send = (
@@ -346,6 +452,7 @@ function ResumeCardBody({
   isPlanReview,
   isTeamPreview,
   isAskUser,
+  locked = false,
 }: {
   paused: PausedTurnSummary;
   onResume: (
@@ -357,8 +464,11 @@ function ResumeCardBody({
   isPlanReview: boolean;
   isTeamPreview: boolean;
   isAskUser: boolean;
+  locked?: boolean;
 }) {
   const [note, setNote] = useState("");
+  const [localSubmitting, setLocalSubmitting] = useState(false);
+  const busy = locked || localSubmitting;
   const showWorkers = isPlanReview || isTeamPreview;
   const questions = asRecords(paused.questions);
   const assumptions = asRecords(paused.assumptions);
@@ -395,6 +505,13 @@ function ResumeCardBody({
         paused.workers as Array<Record<string, unknown>> | undefined,
       )
     : [];
+  const debateKickoff = useMemo(
+    () =>
+      isDebateKickoff
+        ? parseDebateKickoff(paused as unknown as Record<string, unknown>)
+        : null,
+    [isDebateKickoff, paused],
+  );
 
   const [included, setIncluded] = useState<Set<string>>(
     () => new Set(workers.map((w) => w.run_id)),
@@ -459,7 +576,10 @@ function ResumeCardBody({
   const collectAmendments = (
     decision: CheckpointDecision,
   ): TeamPreviewAmendments | undefined => {
-    if (decision !== "continue" || !isDelegateKickoff || workers.length === 0) {
+    if (decision !== "continue") return undefined;
+    // Debate：无排除/写盘修正；定案 A 也不附 model_overrides。
+    if (isDebateKickoff) return undefined;
+    if (!isDelegateKickoff || workers.length === 0) {
       return undefined;
     }
     const excluded_run_ids = workers
@@ -471,7 +591,10 @@ function ResumeCardBody({
         run_id: w.run_id,
         capability: "text_only" as const,
       }));
-    return { excluded_run_ids, write_capability_overrides };
+    return {
+      excluded_run_ids,
+      write_capability_overrides,
+    };
   };
 
   const tryExclude = (runId: string) => {
@@ -540,6 +663,7 @@ function ResumeCardBody({
   };
 
   const submit = (decision: CheckpointDecision) => {
+    if (busy) return;
     if (decision === "continue" && findPendingFolderOption()) {
       setPickerFailure({ kind: "unavailable" });
       return;
@@ -564,6 +688,7 @@ function ResumeCardBody({
     } else if (CARRIES_SELECTED.has(intent ?? "")) {
       n = note.trim();
     }
+    setLocalSubmitting(true);
     if (amendments) {
       onResume(decision, n, selected, amendments);
     } else {
@@ -584,9 +709,10 @@ function ResumeCardBody({
   };
 
   const ctaDisabled =
-    (isDailyReview || isOrganizePlan) && wallPicked === 0
+    busy ||
+    ((isDailyReview || isOrganizePlan) && wallPicked === 0
       ? true
-      : isProposalPick && proposalPicked === 0;
+      : isProposalPick && proposalPicked === 0);
 
   const askIntentAttr =
     intent === "daily_review" ||
@@ -992,53 +1118,48 @@ function ResumeCardBody({
           })}
         </div>
       )}
-      {isTeamPreview &&
-        (paused as { primitive?: string }).primitive === "debate" && (
-          <div className="pause-steps">
-            {(paused as { motion?: string }).motion && (
-              <div className="pause-step">
-                <div className="pause-step-role">辩题</div>
-                <div className="pause-step-summary">
-                  {(paused as { motion: string }).motion}
-                </div>
+      {isDebateKickoff && debateKickoff && (
+        <div className="pause-steps">
+          {(paused as { motion?: string }).motion && (
+            <div className="pause-step">
+              <div className="pause-step-role">辩题</div>
+              <div className="pause-step-summary">
+                {(paused as { motion: string }).motion}
               </div>
-            )}
-            {(() => {
-              const kick = paused as {
-                sides?: Array<{
-                  name?: string;
-                  model?: string;
-                  origin?: string;
-                }>;
-                moderator_model?: string;
-                moderator_origin?: string;
-              };
-              const roster = formatDebateRosterLine(
-                kick.sides ?? [],
-                kick.moderator_model,
-                kick.moderator_origin,
-              );
-              return roster ? (
-                <div className="pause-step" data-testid="debate-roster-line">
-                  <div className="pause-step-summary">{roster}</div>
-                </div>
-              ) : null;
-            })()}
-            {(
-              (paused as { sides?: Array<Record<string, unknown>> }).sides ?? []
-            ).map((s, i) => {
-              const name = str(s, "name");
-              const stance = str(s, "stance");
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: persisted, stable order
-                <div key={i} className="pause-step">
-                  {name && <div className="pause-step-role">{name}</div>}
-                  {stance && <div className="pause-step-summary">{stance}</div>}
-                </div>
-              );
-            })}
-          </div>
-        )}
+            </div>
+          )}
+          {(() => {
+            const roster = formatDebateRosterLine(
+              debateKickoff.sides,
+              debateKickoff.moderatorModel,
+              debateKickoff.moderatorOrigin,
+            );
+            return roster ? (
+              <div className="pause-step" data-testid="debate-roster-line">
+                <div className="pause-step-summary">{roster}</div>
+              </div>
+            ) : null;
+          })()}
+          {debateKickoff.sides.map((s, i) => (
+            <div
+              key={s.run_id || s.key || `side-${i}`}
+              className="pause-step"
+              data-testid={s.run_id ? `debate-side-${s.run_id}` : undefined}
+            >
+              {s.name && <div className="pause-step-role">{s.name}</div>}
+              {s.stance && <div className="pause-step-summary">{s.stance}</div>}
+            </div>
+          ))}
+          {debateKickoff.moderatorRunId ? (
+            <div
+              className="pause-step"
+              data-testid={`debate-moderator-${debateKickoff.moderatorRunId}`}
+            >
+              <div className="pause-step-role">裁判</div>
+            </div>
+          ) : null}
+        </div>
+      )}
       {isDelegateKickoff && workers.length > 0 && (
         <div className="pause-steps" data-testid="team-preview-workers">
           {workers.map((w) => {
@@ -1168,13 +1289,13 @@ function ResumeCardBody({
         disabled={ctaDisabled}
         onClick={() => submit("continue")}
       >
-        {primaryCta}
+        {busy ? "提交中…" : primaryCta}
       </button>
       {isPlanReview && (
         <button
           type="button"
           className="pause-btn pause-btn-neutral"
-          disabled={!note.trim()}
+          disabled={busy || !note.trim()}
           onClick={() => submit("adjust")}
         >
           调整
@@ -1183,6 +1304,7 @@ function ResumeCardBody({
       <button
         type="button"
         className="pause-btn pause-btn-danger"
+        disabled={busy}
         onClick={() => submit("stop")}
       >
         取消

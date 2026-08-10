@@ -365,6 +365,18 @@ class WriteCapabilityOverride(BaseModel):
     capability: Literal["text_only"]
 
 
+class ModelOverride(BaseModel):
+    """Delegate ``team_preview`` continue: human model cover (人盖 CEO).
+
+    Same triple family as debate ``ModelIdentity``. Empty map / missing key = leave
+    that node unchanged. Illegal shape → 422 (no silent fallback).
+    """
+
+    model: str = Field(..., min_length=1, max_length=256)
+    origin: Literal["platform", "byok"] | None = None
+    provider_id: str | None = Field(None, max_length=128)
+
+
 class ResumeTurnRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
 
@@ -378,9 +390,12 @@ class ResumeTurnRequest(BaseModel):
     plan_review; the server drops any pick not actually offered). The engine-only
     ``timeout`` is never sent by a client.
 
-    ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
-    ``team_preview`` ``continue`` (开工组队有限否决). Debate / ask / plan_review /
-    stop ignore them (no 422). Hot-path ``ResolveInteraction`` is not extended.
+    ``excluded_run_ids`` / ``write_capability_overrides`` apply
+    only to delegate ``team_preview`` ``continue`` (开工组队有限否决).
+    ``model_overrides`` also apply to debate ``team_preview`` ``continue``
+    (人盖辩手 / 主持人；键 = 开赛前预分配 ``sides[].run_id`` / ``moderator_run_id``).
+    Ask / plan_review / stop ignore them (no 422). Hot-path
+    ``ResolveInteraction`` is not extended.
     """
 
     decision: CheckpointDecision
@@ -389,6 +404,10 @@ class ResumeTurnRequest(BaseModel):
     excluded_run_ids: list[str] = Field(default_factory=list, max_length=50)
     write_capability_overrides: list[WriteCapabilityOverride] = Field(
         default_factory=list, max_length=50
+    )
+    model_overrides: dict[str, ModelOverride] = Field(
+        default_factory=dict,
+        description="run_id → {model, origin?, provider_id?}；空/缺键=不改该节点。",
     )
 
 
@@ -744,8 +763,16 @@ class MessageListResponse(BaseModel):
 # handoff is the separate explicit bridge).
 
 # Coarse failure codes for local-turn write-back stats (not a full taxonomy).
+# ``declaration_*`` = delegate playbook declaration gate (empty / xor / unknown).
 LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
-    {"searxng_unreachable", "egress_connect", "other"}
+    {
+        "searxng_unreachable",
+        "egress_connect",
+        "declaration_empty",
+        "declaration_xor",
+        "declaration_unknown",
+        "other",
+    }
 )
 TOOL_FAILURE_MESSAGE_MAX = 200
 
@@ -753,12 +780,20 @@ TOOL_FAILURE_MESSAGE_MAX = 200
 def normalize_local_turn_tool_failure_code(message: str, *, code: str | None = None) -> str:
     """Map a tool-failure message (and optional client code) to a coarse stats bucket.
 
-    Intentional coarse heuristics — prefer known client ``code``, else keyword scan
-    on Chinese/English error text. Unknown → ``other``.
+    Prefer known client ``code``. Else: structured declaration-gate templates,
+    then coarse keyword buckets for searxng/egress. Unknown → ``other``.
     """
     raw_code = (code or "").strip()
     if raw_code in LOCAL_TURN_TOOL_FAILURE_CODES:
         return raw_code
+    # Declaration gate: structured reject templates (not free-text intent scan).
+    from agentcore.runtime.delegate.playbook_declaration import (
+        try_declaration_reject_gate,
+    )
+
+    gate = try_declaration_reject_gate(message or "")
+    if gate is not None:
+        return f"declaration_{gate}"
     text = (message or "").lower()
     raw = message or ""
     if (

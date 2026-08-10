@@ -161,6 +161,9 @@ class EventType(StrEnum):
     # 当前 turn 的进程内 pending 后发射；下一 ReAct 步边界注入 LLM 窗。EPHEMERAL——
     # 客户端 toast「已插入，下一工具步生效」；勿复用 user_interjection。
     TURN_STEER_ACCEPTED = "turn_steer_accepted"
+    # 冷 resume × live（deferred）：点继续时槽仍 busy → settlement 预写后同连接先发本帧，
+    # 槽空后再 claim + 续跑。busy_reason=wrap_up|live_turn。EPHEMERAL——对齐 turn_queued。
+    RESUME_DEFERRED = "resume_deferred"
     # 异步团队产出投递（批次 1）：执行与附着回合解耦后的一等状态。
     # DURABLE——落宿主 turn journal；前端 v1 静态「后台运行中」/完成后刷新（实时通道二期）。
     EXECUTION_DETACHED = "execution_detached"

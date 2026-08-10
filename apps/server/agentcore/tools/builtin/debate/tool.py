@@ -362,6 +362,7 @@ class DebateTool:
             moderator_model=mod_model,
             moderator_origin=mod_origin,
             moderator_provider_id=mod_provider_id,
+            moderator_run_id=str(arguments.get("moderator_run_id") or "").strip(),
         )
 
         # §7.5：校验非空三元组 + 解析裁判（点名优先；空=系统默认，可同模）。
@@ -431,6 +432,11 @@ class DebateTool:
             collect_debate_identities(config, turn_model=turn_model),
             user_id=user_id or None,
         )
+
+        # 开赛前预分配稳定 run_id（开工卡 wire + model_overrides 键）；resume 复用。
+        from agentcore.runtime.debate.models import allocate_debate_run_ids
+
+        allocate_debate_run_ids(config, arguments)
 
         if not skip_kickoff:
             early = await self._kickoff_before_moderator(config, arguments)
@@ -713,7 +719,10 @@ class DebateTool:
         else:
             execution_id = self._base_tool_context.execution_id or new_id()
 
-        moderator_run_id = f"debate_{new_id()}"
+        moderator_run_id = (getattr(config, "moderator_run_id", "") or "").strip() or (
+            f"debate_{new_id()}"
+        )
+        config.moderator_run_id = moderator_run_id
         # §7.5：裁判选型（prepare_debate_model_plan）；无则回退 turn 主模型。
         moderator_model = (
             (config.moderator_route or "").strip()

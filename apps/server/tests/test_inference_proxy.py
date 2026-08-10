@@ -36,6 +36,7 @@ from agentcore.core.errors import (
     BYOKKeyMissingError,
     LLMUpstreamError,
     QuotaExceededError,
+    ValidationError,
 )
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
@@ -241,6 +242,160 @@ async def test_resolve_credentials_platform_quota_exceeded_propagates(monkeypatc
         await inference._resolve_inference_credentials(
             None, None, SimpleNamespace(user_id="u1")
         )
+
+
+def test_explicit_selection_from_requested_parses_route_keys():
+    from agentcore.api.routes.inference.proxy import _explicit_selection_from_requested
+
+    assert _explicit_selection_from_requested(None) is None
+    assert _explicit_selection_from_requested("deepseek-v4-flash") is None
+    assert _explicit_selection_from_requested("doubao/ep-123") is None  # vendor, not identity
+
+    plat = _explicit_selection_from_requested("platform/glm-5.2")
+    assert plat is not None
+    assert (plat.model, plat.origin, plat.provider_id) == ("glm-5.2", "platform", None)
+
+    byok = _explicit_selection_from_requested("prov-1/openrouter/auto")
+    assert byok is not None
+    assert (byok.model, byok.origin, byok.provider_id) == (
+        "openrouter/auto",
+        "byok",
+        "prov-1",
+    )
+
+
+async def test_resolve_member_explicit_route_key_overrides_worker_slot(monkeypatch):
+    """member + catalog route key → resolve that identity, not the Worker slot."""
+    seen: dict = {}
+
+    async def _fake_preflight(**kw):
+        seen["origin"] = kw["model_origin"]
+        seen["provider_id"] = kw["provider_id"]
+        return LLMCredentials(
+            api_key="sk-node",
+            base_url="https://api.example.com",
+            default_model="node-model",
+        )
+
+    monkeypatch.setattr(inference.proxy, "preflight_llm_credentials", _fake_preflight)
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="main-model", origin="byok", provider_id="prov-main"
+            )
+        ),
+    )
+    worker_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            model="worker-slot", origin="byok", provider_id="prov-worker"
+        )
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_worker_selection", worker_mock
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.catalog.validate_model_choice",
+        AsyncMock(return_value=True),
+    )
+
+    cfg = await inference._resolve_inference_credentials(
+        None,
+        None,
+        SimpleNamespace(user_id="u1"),
+        cost_role="member",
+        requested_model="prov-node/node-model",
+    )
+    assert cfg.model == "node-model"
+    assert cfg.api_key == "sk-node"
+    assert seen == {"origin": "byok", "provider_id": "prov-node"}
+    worker_mock.assert_not_awaited()
+
+
+async def test_resolve_member_bare_model_follows_worker_slot(monkeypatch):
+    """member + bare mint/chat model → still follow the composite Worker slot."""
+    seen: dict = {}
+
+    async def _fake_preflight(**kw):
+        seen["origin"] = kw["model_origin"]
+        seen["provider_id"] = kw["provider_id"]
+        return LLMCredentials(
+            api_key="sk-worker",
+            base_url="https://api.example.com",
+            default_model="worker-slot",
+        )
+
+    monkeypatch.setattr(inference.proxy, "preflight_llm_credentials", _fake_preflight)
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="main-model", origin="byok", provider_id="prov-main"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_worker_selection",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="worker-slot", origin="byok", provider_id="prov-worker"
+            )
+        ),
+    )
+    validate = AsyncMock(return_value=True)
+    monkeypatch.setattr("agentcore.llm.catalog.validate_model_choice", validate)
+
+    cfg = await inference._resolve_inference_credentials(
+        None,
+        None,
+        SimpleNamespace(user_id="u1"),
+        cost_role="member",
+        requested_model="main-model",  # bare mint echo — not an identity route key
+    )
+    assert cfg.model == "worker-slot"
+    assert seen == {"origin": "byok", "provider_id": "prov-worker"}
+    validate.assert_not_awaited()
+
+
+async def test_resolve_member_illegal_explicit_hard_fails(monkeypatch):
+    """member + illegal route key → ValidationError; never silent-fallback to Worker."""
+    preflight = AsyncMock(
+        return_value=LLMCredentials(
+            api_key="sk", base_url="https://x", default_model="x"
+        )
+    )
+    monkeypatch.setattr(inference.proxy, "preflight_llm_credentials", preflight)
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="main-model", origin="byok", provider_id="prov-main"
+            )
+        ),
+    )
+    worker_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            model="worker-slot", origin="byok", provider_id="prov-worker"
+        )
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_worker_selection", worker_mock
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.catalog.validate_model_choice",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(ValidationError, match="节点模型不可用"):
+        await inference._resolve_inference_credentials(
+            None,
+            None,
+            SimpleNamespace(user_id="u1"),
+            cost_role="member",
+            requested_model="prov-bad/wild-model",
+        )
+    preflight.assert_not_awaited()
+    worker_mock.assert_not_awaited()
 
 
 # --- authoritative metering --------------------------------------------------

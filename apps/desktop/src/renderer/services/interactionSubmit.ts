@@ -91,6 +91,7 @@ export interface ColdSubmitArgs {
   /** delegate team_preview continue only；stop / debate 不传。 */
   excluded_run_ids?: string[];
   write_capability_overrides?: TeamPreviewResumeCorrections["write_capability_overrides"];
+  model_overrides?: TeamPreviewResumeCorrections["model_overrides"];
 }
 
 /**
@@ -174,6 +175,10 @@ export async function submitInteraction(args: {
         ? {
             write_capability_overrides: args.cold.write_capability_overrides,
           }
+        : {}),
+      ...(args.cold.model_overrides &&
+      Object.keys(args.cold.model_overrides).length > 0
+        ? { model_overrides: args.cold.model_overrides }
         : {}),
     };
     const hasCorrections = Object.keys(corrections).length > 0;

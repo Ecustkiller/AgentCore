@@ -199,6 +199,29 @@ def priced_model_from_route(route_or_model: str) -> str:
     return rest
 
 
+def identity_from_route_key(route_or_model: str) -> ModelIdentity:
+    """``RunSpec.model`` 路由键 → 开工卡可展示三元组（空=未指定）。
+
+    ``platform/{id}`` / ``{provider_id}/{id}`` 还原 origin；厂商前缀裸串
+    （如 ``doubao/…``）与无前缀裸 id 仅透出 ``model``（无 origin）。
+    """
+    raw = (route_or_model or "").strip()
+    if not raw:
+        return ModelIdentity()
+    if "/" not in raw:
+        return ModelIdentity(model=raw)
+    prefix, _, rest = raw.partition("/")
+    if not rest:
+        return ModelIdentity(model=raw)
+    if prefix == PLATFORM_PROVIDER_SENTINEL:
+        return ModelIdentity(model=rest, origin="platform").normalized()
+    from agentcore.llm.pricing import _VENDOR_PREFIXES
+
+    if prefix in _VENDOR_PREFIXES:
+        return ModelIdentity(model=raw)
+    return ModelIdentity(model=rest, origin="byok", provider_id=prefix).normalized()
+
+
 def _is_deepseek_family(model_id: str) -> bool:
     return "deepseek" in (model_id or "").lower()
 
@@ -250,6 +273,7 @@ def apply_identity_to_side(side: DebateSide, ident: ModelIdentity) -> DebateSide
         model=ident.model,
         origin=ident.origin,
         provider_id=ident.provider_id,
+        run_id=getattr(side, "run_id", "") or "",
     )
 
 
@@ -794,6 +818,9 @@ def side_wire_fields(side: DebateSide) -> dict[str, Any]:
         "stance": side.stance,
         "is_subject": bool(side.is_subject),
     }
+    rid = (getattr(side, "run_id", "") or "").strip()
+    if rid:
+        row["run_id"] = rid
     ident = identity_from_side(side)
     if not ident.is_empty():
         row["model"] = ident.model
@@ -802,3 +829,82 @@ def side_wire_fields(side: DebateSide) -> dict[str, Any]:
         if ident.provider_id:
             row["provider_id"] = ident.provider_id
     return row
+
+
+def allocate_debate_run_ids(
+    config: DebateConfig,
+    arguments: dict[str, Any] | None = None,
+) -> str:
+    """开赛前预分配主持人 + 各方稳定 ``run_id``（幂等：已有则复用）。
+
+    - 主持人：``debate_{uuid}``（与开赛后主持人节点 id 同形）
+    - 各方槽位：``{moderator_run_id}_{side.key}``（``model_overrides`` 键；≠ 各拍发言 run）
+
+    写回 ``config`` 与可选 ``arguments``（resume blob / 开工卡持久化）。
+    """
+    from dataclasses import replace
+
+    from agentcore.core.types import new_id
+
+    args = arguments if isinstance(arguments, dict) else None
+    mod = (getattr(config, "moderator_run_id", "") or "").strip()
+    if not mod and args is not None:
+        mod = str(args.get("moderator_run_id") or "").strip()
+    if not mod:
+        mod = f"debate_{new_id()}"
+    config.moderator_run_id = mod
+
+    arg_sides_by_key: dict[str, dict[str, Any]] = {}
+    if args is not None:
+        raw_sides = args.get("sides")
+        if isinstance(raw_sides, list):
+            for row in raw_sides:
+                if not isinstance(row, dict):
+                    continue
+                key = str(row.get("key") or "").strip()
+                if key:
+                    arg_sides_by_key[key] = row
+
+    new_sides: list[DebateSide] = []
+    for side in config.sides:
+        rid = (getattr(side, "run_id", "") or "").strip()
+        if not rid:
+            arg_row = arg_sides_by_key.get(side.key)
+            if arg_row is not None:
+                rid = str(arg_row.get("run_id") or "").strip()
+        if not rid:
+            rid = f"{mod}_{side.key}"
+        new_sides.append(replace(side, run_id=rid))
+    config.sides = new_sides
+
+    if args is not None:
+        args["moderator_run_id"] = mod
+        if (config.moderator_model or "").strip():
+            args["moderator_model"] = config.moderator_model
+            if (config.moderator_origin or "").strip():
+                args["moderator_origin"] = config.moderator_origin
+            if (config.moderator_provider_id or "").strip():
+                args["moderator_provider_id"] = config.moderator_provider_id
+        synced: list[dict[str, Any]] = []
+        for side in config.sides:
+            row = arg_sides_by_key.get(side.key)
+            if row is None:
+                row = {
+                    "key": side.key,
+                    "name": side.name,
+                    "stance": side.stance,
+                    "is_subject": bool(side.is_subject),
+                }
+            else:
+                row = dict(row)
+            wire = side_wire_fields(side)
+            row["run_id"] = side.run_id
+            for k in ("model", "origin", "provider_id"):
+                if k in wire:
+                    row[k] = wire[k]
+                else:
+                    row.pop(k, None)
+            synced.append(row)
+        args["sides"] = synced
+
+    return mod

@@ -120,7 +120,12 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "duration_ms": "int",
         "reason": "str",
     },
-    "tool.args_parse_failed": {"pos": "int", "msg": "str", "args_preview": "str"},
+    "tool.args_parse_failed": {
+        "pos": "int",
+        "msg": "str",
+        "args_preview": "str",
+        "parse_class": "str",
+    },
     "tool.args_salvaged": {"args_preview": "str"},
     "tool.web_search": {"query": "str", "hosts": "list"},
     "worker.handoff": {
@@ -248,6 +253,18 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "error": "str",
         "count": "int",
     },
+    "event_sink.detach": {
+        "reason": "str",
+        "conversation_id": "str",
+        "message_id": "str",
+        "already_detached": "bool",
+    },
+    "event_sink.close": {
+        "reason": "str",
+        "conversation_id": "str",
+        "message_id": "str",
+        "was_detached": "bool",
+    },
 }
 
 # S3-retired names: no emit site, kept so old JSONL still validates against the registry.
@@ -313,6 +330,12 @@ KEY_DESC: dict[str, str] = {
     "rate_limit.redis_fail_open": (
         "Redis 限流请求中途失败 → fail-open 放行本请求（可告警；与 construct 期 "
         "security.rate_limit_redis_fallback 对偶）"
+    ),
+    "event_sink.detach": (
+        "SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach"
+    ),
+    "event_sink.close": (
+        "EventSink 真 close（开→关仅一条）；was_detached 区分先前仅断线 vs 仍附着收口"
     ),
 }
 

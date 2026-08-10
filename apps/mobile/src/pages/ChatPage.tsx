@@ -34,11 +34,9 @@ import {
   streamMessage,
 } from "@/api/stream";
 import {
-  type CancelQueuedResult,
   type PausedTurnSummary,
   type PendingInteractionSummary,
   type TurnRecovery,
-  cancelQueuedTurn,
   getRecovery,
   stopConversation,
 } from "@/api/turn";
@@ -75,12 +73,16 @@ import {
   applyColdInteractionWireEvent,
   bindEmptyColdMessageId,
   clearColdInteractions,
+  getColdInteraction,
   isColdResumeKind,
   kindFromColdRequiredEvent,
   kindFromColdResolvedEvent,
   listColdPending,
+  markColdDeferred,
   markColdResolved,
+  markColdSubmitting,
   rekeyColdMessageId,
+  reopenColdPending,
   upsertColdRequired,
   useColdInteractions,
 } from "@/lib/coldInteractions";
@@ -107,10 +109,8 @@ import {
 } from "@/lib/messageDelivery";
 import {
   type QueuedTurnEntry,
-  listQueuedTurns,
   removeQueuedTurn,
   upsertQueuedTurn,
-  useQueuedTurns,
 } from "@/lib/queuedTurns";
 import { clearLiveTurnEvents, removeLiveTurn } from "@/lib/reconnectLiveTurn";
 import {
@@ -154,6 +154,7 @@ import type {
   ErrorPayload,
   MessageEndPayload,
   MessageStartPayload,
+  ResumeDeferredPayload,
   SSEEvent,
   TurnQueueCancelledPayload,
   TurnQueueStartedPayload,
@@ -228,55 +229,15 @@ function AttachmentChips({
   );
 }
 
-/** 主时间线用户气泡：排队轻态（drain 前可取消）。 */
-function UserTurnBubble({
-  turn,
-  queued,
-  onCancelQueued,
-}: {
-  turn: Turn;
-  queued: QueuedTurnEntry | null;
-  onCancelQueued?: (queueId: string) => void;
-}) {
+/** 主时间线用户气泡（排队期不插泡；出队开跑后再出现）。 */
+function UserTurnBubble({ turn }: { turn: Turn }) {
   if (turn.userText === null) return null;
-  const queueLabel = queued
-    ? queued.queueDepth > 1
-      ? `排队中（第 ${queued.position}/${queued.queueDepth}）`
-      : "排队中"
-    : null;
   return (
-    <div
-      className={`bubble user${queued ? " user-queued" : ""}`}
-      data-queued={queued ? "true" : undefined}
-      data-testid={queued ? "user-queued-bubble" : undefined}
-    >
+    <div className="bubble user">
       <CollapsibleUserText contentKey={turn.userText}>
         {turn.userText}
       </CollapsibleUserText>
       <AttachmentChips items={turn.attachments ?? []} />
-      {queueLabel && (
-        <div
-          className="user-queue-state"
-          data-testid="user-message-queue-state"
-        >
-          <Loader2 size={12} className="queued-turn-spinner" aria-hidden />
-          <span>
-            {queueLabel}
-            {queued?.degradedFrom === "steer" ? " · 插话暂不可用，已排队" : ""}
-          </span>
-          {onCancelQueued && queued ? (
-            <button
-              type="button"
-              className="queue-cancel-btn"
-              data-testid="turn-queued-cancel"
-              onClick={() => onCancelQueued(queued.queueId)}
-              aria-label="取消排队"
-            >
-              取消
-            </button>
-          ) : null}
-        </div>
-      )}
     </div>
   );
 }
@@ -1213,7 +1174,7 @@ export function ChatPage() {
   const midFlightControllersRef = useRef(new Set<AbortController>());
   /** queue_id → mid-flight AC（取消成功后再 abort，避免失败留下断连坏态）。 */
   const midFlightByQueueRef = useRef(new Map<string, AbortController>());
-  /** 当前主路 / 续流写入目标 turn id（排队插泡后仍指向主路，勿写到队尾）。 */
+  /** 当前主路 / 续流写入目标 turn id（排队期条外仍指向主路，勿写到队尾）。 */
   const activeTurnIdRef = useRef<string | null>(null);
   const [activeStreamTurnId, setActiveStreamTurnId] = useState<string | null>(
     null,
@@ -1231,7 +1192,6 @@ export function ChatPage() {
   /** 主路 + mid-flight 在途数；>0 则 sending。 */
   const inflightRef = useRef(0);
   const stopPhaseRef = useRef<StopUiPhase>("idle");
-  const queuedEntries = useQueuedTurns(conversationId);
 
   const markStreamStart = () => {
     inflightRef.current += 1;
@@ -1309,22 +1269,34 @@ export function ChatPage() {
     ) {
       return;
     }
-    // EPHEMERAL：按项取消 → 本地清排队轻态 + 乐观用户气泡（与 store 对齐）。
-    if (event.type === "turn_queue_cancelled" && conversationId) {
-      const p = event.payload as TurnQueueCancelledPayload;
-      const removed = removeQueuedTurn(conversationId, p.queue_id);
-      if (removed) {
-        setTurns((t) => t.filter((x) => x.id !== removed.turnId));
-        const ac = midFlightByQueueRef.current.get(p.queue_id);
-        if (ac) {
-          ac.abort();
-          midFlightByQueueRef.current.delete(p.queue_id);
-          midFlightControllersRef.current.delete(ac);
-        }
+    // EPHEMERAL：冷 resume × live deferred — 同连接等待槽空，不是 409。
+    if (event.type === "resume_deferred") {
+      const p = event.payload as ResumeDeferredPayload;
+      if (
+        p.message_id &&
+        (p.busy_reason === "wrap_up" || p.busy_reason === "live_turn")
+      ) {
+        markColdDeferred({
+          messageId: p.message_id,
+          conversationId: p.conversation_id || conversationId || undefined,
+          busyReason: p.busy_reason,
+        });
       }
       return;
     }
-    // EPHEMERAL：出队开跑（sink 首帧，先于 message_start）→ 只清排队轻态，保留用户气泡。
+    // EPHEMERAL：按项取消 → 只清条 + abort mid-flight（排队期无主时间线用户泡）。
+    if (event.type === "turn_queue_cancelled" && conversationId) {
+      const p = event.payload as TurnQueueCancelledPayload;
+      removeQueuedTurn(conversationId, p.queue_id);
+      const ac = midFlightByQueueRef.current.get(p.queue_id);
+      if (ac) {
+        ac.abort();
+        midFlightByQueueRef.current.delete(p.queue_id);
+        midFlightControllersRef.current.delete(ac);
+      }
+      return;
+    }
+    // EPHEMERAL：出队开跑（sink 首帧，先于 message_start）→ 清条；用户泡由 beginTurn2 插入。
     // 否决靠 message_start 猜出队。
     if (event.type === "turn_queue_started" && conversationId) {
       const p = event.payload as TurnQueueStartedPayload;
@@ -1333,7 +1305,7 @@ export function ChatPage() {
       midFlightByQueueRef.current.delete(p.queue_id);
       return;
     }
-    // turn_queued 由 onQueued 插泡；不写入主路 events（避免单槽 chip 语义）。
+    // turn_queued 由 onQueued 写条；不写入主路 events（避免单槽 chip 语义）。
     if (event.type === "turn_queued") {
       return;
     }
@@ -1370,6 +1342,16 @@ export function ChatPage() {
           hostServerMessageIdRef.current = serverId;
           if (clientId) rekeyColdMessageId(clientId, serverId);
           bindEmptyColdMessageId(conversationId, serverId);
+          // Deferred wait ends when claim+续跑 stamps message_start on this host.
+          for (const e of listColdPending(conversationId)) {
+            if (e.messageId !== serverId) continue;
+            if (e.status !== "submitting") continue;
+            markColdResolved({
+              kind: e.kind,
+              id: e.id,
+              resolution: e.resolution,
+            });
+          }
         }
       }
       const isColdWire =
@@ -1668,7 +1650,7 @@ export function ChatPage() {
   // held open (`busy`) and the fold reports a gate, the PauseCard below offers
   // resolution — equally for a fresh turn and one rejoined via reattach (a run paused at
   // an approval shows its live card on reconnect).
-  // 排队插泡后「最后一项」可能是尚未开跑的排队 turn——投影须跟 activeTurnId。
+  // 出队开跑后「最后一项」可能是新 turn——投影须跟 activeTurnId。
   const liveTurn =
     turns.find((t) => t.id === activeStreamTurnId) ??
     (turns.length > 0 ? turns[turns.length - 1] : null);
@@ -1781,12 +1763,17 @@ export function ChatPage() {
     });
   }, [conversationId, coldById, paused, coldHosts, history, turns]);
 
-  // Cold pending with stamp ⇒ unlock composer lock (desktop finalizeGenerating parity).
+  // Cold actionable pending with stamp ⇒ unlock composer (desktop finalizeGenerating
+  // parity). Submitting / resume_deferred wait keeps 提交中态 — do not clear sending.
   useEffect(() => {
-    if (visibleResumes.length > 0 && sending) {
-      setSending(false);
-    }
-  }, [visibleResumes.length, sending]);
+    if (!sending) return;
+    const hasActionable = visibleResumes.some(
+      (p) =>
+        (p.interactionStatus ?? "pending") === "pending" &&
+        !p.deferredBusyReason,
+    );
+    if (hasActionable) setSending(false);
+  }, [visibleResumes, sending]);
 
   // Stage picked files (composer 附件). Text is extracted; images/binary are resident-first
   // (upload when a conversation exists, else hold File until first send). The input is reset
@@ -1892,50 +1879,15 @@ export function ChatPage() {
     void send(undefined, "steer");
   };
 
-  /** 取消 FIFO 排队项（Stop ≠ 取消排队）。
-   * 成功 / 404 本地清 UI；仅成功后再 abort mid-flight（失败勿断连留下 chip）。 */
-  function applyQueueCancelLocal(
-    entry: QueuedTurnEntry,
-    outcome: CancelQueuedResult,
-  ) {
+  /** 取消 FIFO 排队项（Stop ≠ 取消排队）：只清条 + abort mid-flight。 */
+  function applyQueueCancelLocal(entry: QueuedTurnEntry) {
     removeQueuedTurn(entry.conversationId, entry.queueId);
-    if (outcome === "cancelled") {
-      // 撤回成功：移除乐观用户气泡。
-      setTurns((t) => t.filter((x) => x.id !== entry.turnId));
-    }
-    // 404 gone：可能已开跑——只清轻态，保留气泡。
     const ac = midFlightByQueueRef.current.get(entry.queueId);
     if (ac) {
       ac.abort();
       midFlightByQueueRef.current.delete(entry.queueId);
       midFlightControllersRef.current.delete(ac);
     }
-  }
-
-  function cancelQueued(queueId: string) {
-    if (!conversationId || !queueId) return;
-    const entry = listQueuedTurns(conversationId).find(
-      (e) => e.queueId === queueId,
-    );
-    void cancelQueuedTurn(conversationId, queueId)
-      .then((outcome) => {
-        if (entry) applyQueueCancelLocal(entry, outcome);
-        else {
-          removeQueuedTurn(conversationId, queueId);
-          const ac = midFlightByQueueRef.current.get(queueId);
-          if (ac) {
-            ac.abort();
-            midFlightByQueueRef.current.delete(queueId);
-            midFlightControllersRef.current.delete(ac);
-          }
-        }
-      })
-      .catch((e) => {
-        // 失败：不 abort——避免「chip 在、连接已断」。
-        setError({
-          text: e instanceof Error ? e.message : "取消排队失败",
-        });
-      });
   }
 
   // Stream a turn into the open conversation. `override` carries a draft's first message
@@ -2036,7 +1988,7 @@ export function ChatPage() {
     }
   }
 
-  /** 生成中发送：独立 POST SSE；queue → turn_queued 立即插泡，主路空闲后续流。 */
+  /** 生成中发送：独立 POST SSE；queue → 仅条；出队开跑再进主时间线用户泡。 */
   async function sendWhileBusy(text: string, delivery: MessageDelivery) {
     if (!conversationId) return;
     const outgoing = attachments;
@@ -2052,8 +2004,7 @@ export function ChatPage() {
       }
       wireAttachments = finalized.attachments;
     }
-    setInput("");
-    setAttachments([]);
+    // ack 前不清：等 turn_queued / steer / 插话确认后再清（勿等整段泵）。
     setAttachError(null);
     setError(null);
     jumpToBottom();
@@ -2063,6 +2014,13 @@ export function ChatPage() {
     midFlightControllersRef.current.add(ac);
     let queuedTurnId: string | null = null;
     let trackedQueueId: string | null = null;
+    let composerCleared = false;
+    const clearComposerOnAck = () => {
+      if (composerCleared) return;
+      composerCleared = true;
+      setInput("");
+      setAttachments([]);
+    };
 
     try {
       const result = await sendMidFlightMessage(
@@ -2070,31 +2028,24 @@ export function ChatPage() {
         text,
         {
           onLiveEvent: (event) => {
-            // 插话 / steer ack 写入当前主路；turn_queued 由 onQueued 处理。
+            // 插话 / steer ack：清输入并写入当前主路；turn_queued 由 onQueued 处理。
             if (event.type === "turn_queued") return;
+            if (
+              event.type === "user_interjection" ||
+              event.type === "turn_steer_accepted"
+            ) {
+              clearComposerOnAck();
+            }
             appendEventToTurn(activeTurnIdRef.current, event);
           },
           onQueued: (info) => {
-            const turnId = crypto.randomUUID();
-            queuedTurnId = turnId;
+            // 仅 QueuedTurnsBar；排队期不插主时间线用户泡。
+            clearComposerOnAck();
             trackedQueueId = info.queueId;
             midFlightByQueueRef.current.set(info.queueId, ac);
-            setTurns((t) => [
-              ...t,
-              {
-                id: turnId,
-                userText: text,
-                events: [],
-                attachments: wireAttachments.map((a) => ({
-                  name: a.name,
-                  truncated: a.truncated,
-                })),
-              },
-            ]);
             upsertQueuedTurn({
               queueId: info.queueId,
               conversationId,
-              turnId,
               content: text,
               position: info.position,
               queueDepth: info.queueDepth,
@@ -2102,8 +2053,8 @@ export function ChatPage() {
             });
           },
           beginTurn2: () => {
-            // 用户气泡已由 onQueued 插入；此处只接管 abort 槽并切写入目标。
-            // 排队轻态由 turn_queue_started（sink 首帧）清，勿在此猜出队。
+            // 出队开跑：插入主时间线用户泡，并接管 abort 槽。
+            // 条由 turn_queue_started（sink 首帧）清，勿在此猜出队。
             if (!queuedTurnId) {
               const turnId = crypto.randomUUID();
               queuedTurnId = turnId;
@@ -2137,6 +2088,13 @@ export function ChatPage() {
         setError({ text: result.message ?? "请先处理待确认事项" });
       } else if (result.kind === "error") {
         setError({ text: result.message });
+      } else if (
+        result.kind === "received" ||
+        result.kind === "steered" ||
+        result.kind === "queued"
+      ) {
+        // 泵已结束时仍兜底清一次（ack 回调已清则 no-op）。
+        clearComposerOnAck();
       }
     } finally {
       midFlightControllersRef.current.delete(ac);
@@ -2173,7 +2131,7 @@ export function ChatPage() {
   // replay + live tail. On "none" the detached run already finished — reload the persisted
   // transcript so the live turn is replaced by its saved reply. A second drop offers a
   // manual 重连.
-  // 排队插泡后队尾可能是未开跑 turn——目标须跟 activeTurnIdRef（与投影约定一致），禁 turns[-1]。
+  // 出队开跑后队尾可能是新 turn——目标须跟 activeTurnIdRef（与投影约定一致），禁 turns[-1]。
   async function reconnect() {
     if (!conversationId) return;
     setError(null);
@@ -2374,9 +2332,8 @@ export function ChatPage() {
   // Continue a durably-paused turn (结构化挂起 2b). Option A: reuse the paused
   // assistant by server message_id (same bubble → streaming) — never push a second
   // assistant turn (dual TeamView). Desktop parity: resumePausedAssistant / runResume.
-  // The resume endpoint claims the frame (atomic — a stale double-tap 404s) and drives
-  // the rest on fresh SSE into that turn (`userText: null`; user bubble stays in
-  // history). Card dropped optimistically; mid-stream drop rejoins rather than re-resumes.
+  // Busy slot → EPHEMERAL resume_deferred on the same SSE (not 409); card stays as
+  // 「放行已记下…」until claim+续跑. Mid-stream drop rejoins rather than re-resumes.
   async function resume(
     messageId: string,
     decision: CheckpointDecision,
@@ -2385,14 +2342,16 @@ export function ChatPage() {
     amendments?: TeamPreviewAmendments,
   ) {
     if (!conversationId || busy) return;
-    for (const e of listColdPending(conversationId)) {
-      if (e.messageId === messageId) {
-        markColdResolved({
-          kind: e.kind,
-          id: e.id,
-          resolution: { decision, note, selected },
-        });
-      }
+    const coldTargets = listColdPending(conversationId).filter(
+      (e) => e.messageId === messageId,
+    );
+    const resolution = { decision, note, selected };
+    for (const e of coldTargets) {
+      markColdSubmitting({
+        kind: e.kind,
+        id: e.id,
+        resolution,
+      });
     }
     setPaused((p) => p.filter((x) => x.message_id !== messageId));
     setError(null);
@@ -2413,16 +2372,24 @@ export function ChatPage() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      // stop / adjust / ask·debate：不带组队修正；delegate continue 才附排除/收紧。
+      // stop / adjust / ask·debate：不带组队修正；delegate continue 才附排除/收紧
+      //（定案 A：手机确认面不附 model_overrides；类型字段仍可保留）。
       const body: ResumeTurnBody = { decision, note, selected };
-      if (
-        decision === "continue" &&
-        amendments &&
-        (amendments.excluded_run_ids.length > 0 ||
-          amendments.write_capability_overrides.length > 0)
-      ) {
-        body.excluded_run_ids = amendments.excluded_run_ids;
-        body.write_capability_overrides = amendments.write_capability_overrides;
+      if (decision === "continue" && amendments) {
+        const hasExclude = (amendments.excluded_run_ids?.length ?? 0) > 0;
+        const hasWrite =
+          (amendments.write_capability_overrides?.length ?? 0) > 0;
+        const hasModels =
+          !!amendments.model_overrides &&
+          Object.keys(amendments.model_overrides).length > 0;
+        if (hasExclude || hasWrite || hasModels) {
+          if (hasExclude) body.excluded_run_ids = amendments.excluded_run_ids;
+          if (hasWrite) {
+            body.write_capability_overrides =
+              amendments.write_capability_overrides;
+          }
+          if (hasModels) body.model_overrides = amendments.model_overrides;
+        }
       }
       await resumeStream(
         conversationId,
@@ -2431,8 +2398,20 @@ export function ChatPage() {
         (event) => appendEventToTurn(turnId, event),
         ac.signal,
       );
-    } catch (e) {
-      if (isAbort(e)) return;
+      // Stream settled without an earlier message_start settle — drop submitting cards.
+      for (const e of coldTargets) {
+        if (getColdInteraction(e.id)?.status === "submitting") {
+          markColdResolved({ kind: e.kind, id: e.id, resolution });
+        }
+      }
+    } catch (err) {
+      for (const entry of coldTargets) {
+        const cur = getColdInteraction(entry.id);
+        // Deferred 后 settlement 已锁：断连不清「已记下」；仅 claim 前失败才恢复可编辑。
+        if (cur?.deferredBusyReason) continue;
+        reopenColdPending(entry.id);
+      }
+      if (isAbort(err)) return;
       if (stopPhaseRef.current === "stopping") return;
       await reconnect();
     } finally {
@@ -2618,24 +2597,15 @@ export function ChatPage() {
             );
           })}
           {turns.map((turn) => {
-            const queued =
-              queuedEntries.find((e) => e.turnId === turn.id) ?? null;
             const isLiveStream =
               busy &&
               activeStreamTurnId != null &&
-              turn.id === activeStreamTurnId &&
-              !queued;
+              turn.id === activeStreamTurnId;
             const showAssistant =
-              turn.events.length > 0 ||
-              isLiveStream ||
-              (!queued && turn.userText === null);
+              turn.events.length > 0 || isLiveStream || turn.userText === null;
             return (
               <div key={turn.id} className="turn">
-                <UserTurnBubble
-                  turn={turn}
-                  queued={queued}
-                  onCancelQueued={queued ? cancelQueued : undefined}
-                />
+                <UserTurnBubble turn={turn} />
                 {showAssistant ? (
                   <AssistantBubble
                     turn={turn}
@@ -2819,7 +2789,7 @@ export function ChatPage() {
 
       <QueuedTurnsBar
         conversationId={conversationId ?? null}
-        onCancelled={(entry, outcome) => applyQueueCancelLocal(entry, outcome)}
+        onCancelled={(entry) => applyQueueCancelLocal(entry)}
         onCancelFailed={(text) => setError({ text })}
       />
       {voice.isRecording && (

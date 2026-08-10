@@ -129,6 +129,32 @@ def test_worker_rows_shape():
     # D4: omitted form → can write files (legacy)
     assert rows[0]["write_capability"] == "can_write_files"
     assert rows[0]["write_capability_label"] == "可改文件"
+    # 无显式 model → 行上不透出（跟槽）
+    assert "model" not in rows[0]
+
+
+def test_worker_rows_emits_model_identity():
+    plan = _plan(
+        RunSpec(
+            run_id="r1",
+            task="调研",
+            role="调研",
+            model="platform/deepseek-v4-pro",
+        ),
+        RunSpec(
+            run_id="r2",
+            task="写",
+            role="撰写",
+            model="prov-1/gpt-4o",
+        ),
+    )
+    rows = worker_rows(plan)
+    assert rows[0]["model"] == "deepseek-v4-pro"
+    assert rows[0]["origin"] == "platform"
+    assert "provider_id" not in rows[0]
+    assert rows[1]["model"] == "gpt-4o"
+    assert rows[1]["origin"] == "byok"
+    assert rows[1]["provider_id"] == "prov-1"
 
 
 def test_worker_rows_write_capability_from_form():

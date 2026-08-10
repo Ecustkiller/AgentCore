@@ -22,6 +22,38 @@ vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
 }));
 
+vi.mock("@/hooks/useModels", () => ({
+  useModels: () => ({
+    data: {
+      models: [
+        {
+          id: "ceo-flash",
+          display_name: "CEO Flash",
+          origin: "platform",
+          available: true,
+        },
+        {
+          id: "worker-pro",
+          display_name: "Worker Pro",
+          origin: "platform",
+          available: true,
+        },
+      ],
+      current: { id: "ceo-flash", origin: "platform" },
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+vi.mock("@/hooks/useLlmProviders", () => ({
+  useLlmProviders: () => ({
+    data: { providers: [], platform_available: true },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 const CID = "conv-live-ix";
 
 const tpPayload = (

@@ -426,9 +426,9 @@ function resolveMessage(f: ErrorFacts): string {
     return f.serverMessage ?? "有待拍板的确认卡，先处理或停止当前任务";
   }
   if (f.code === "turn_in_progress") {
-    // Product copy wins over backend detail: cold resume 409 often means the
-    // prior turn is still in finally wrap-up (e.g. index flush), not a vague
-    // "another turn" — keep one honest zh line for RetryBanner / toast.
+    // Residual 409 only (non-cold-resume / older server). Cold resume busy is
+    // EPHEMERAL `resume_deferred` on the same SSE — not this error path; do not
+    // toast this line as a deferred-success state.
     return "回合收尾尚未完成，请稍候或先显式停止后再试";
   }
   // A 402 LLM_KEY_REQUIRED is a deliberate BYOK refusal (no DeepSeek key yet);

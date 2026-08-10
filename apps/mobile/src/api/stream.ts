@@ -253,35 +253,52 @@ export async function attachStream(
   return "attached";
 }
 
-/** Delegate team_preview 开工卡修正：排除岗 + 单向收紧写盘（定案 §3.3）。 */
+/** Delegate team_preview 开工卡修正：排除岗 + 单向收紧写盘 + 人盖模型（定案 §3.3）. */
 export interface WriteCapabilityOverride {
   run_id: string;
   capability: "text_only";
 }
 
+/** Per-run model cover（人盖 CEO）；键 = run_id。 */
+export type TeamPreviewModelOverride = {
+  model: string;
+  origin?: "platform" | "byok";
+  provider_id?: string;
+};
+
 export interface TeamPreviewAmendments {
-  excluded_run_ids: string[];
-  write_capability_overrides: WriteCapabilityOverride[];
+  /** Delegate only; empty/omit = keep all workers. */
+  excluded_run_ids?: string[];
+  /** Delegate only; empty/omit = no write tighten. */
+  write_capability_overrides?: WriteCapabilityOverride[];
+  /** 仅非空时附带；空/缺 = 不改节点模型。辩论/队员共用。 */
+  model_overrides?: Record<string, TeamPreviewModelOverride>;
 }
 
 /** The user's settlement of a durably-paused turn (mirrors backend ResumeTurnRequest).
  *  `note` steers an `adjust`; `selected` carries ask_user picks (ignored for plan_review).
- *  `excluded_run_ids` / `write_capability_overrides` only on delegate team_preview continue. */
+ *  `excluded_run_ids` / `write_capability_overrides` / `model_overrides` only on
+ *  delegate team_preview continue. */
 export interface ResumeTurnBody {
   decision: CheckpointDecision;
   note: string;
   selected: string[];
   excluded_run_ids?: string[];
   write_capability_overrides?: WriteCapabilityOverride[];
+  model_overrides?: Record<string, TeamPreviewModelOverride>;
 }
 
 /**
  * Continue a durably-paused turn via SSE (结构化挂起 2b `POST .../resume`).
  *
  * The turn paused at a plan_review / ask_user checkpoint and lost its live stream
- * (disconnect / restart); only its persisted frame survived. The backend claims the
- * frame (atomic — a second/stale call 404s) and drives the rest of the turn on a fresh
- * SSE, folded through the same path as a send. Throws on transport / claim failure.
+ * (disconnect / restart); only its persisted frame survived. On success the backend
+ * claims the frame and drives the rest of the turn on a fresh SSE, folded through
+ * the same path as a send.
+ *
+ * Busy slot (parallel live / host wrap-up): same connection first emits EPHEMERAL
+ * ``resume_deferred`` ``{ message_id, conversation_id, busy_reason }`` then waits
+ * and continues — not a 409. Throws on transport / claim failure.
  */
 export async function resumeStream(
   conversationId: string,

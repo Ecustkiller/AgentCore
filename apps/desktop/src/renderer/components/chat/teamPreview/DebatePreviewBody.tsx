@@ -2,26 +2,28 @@ import { formatCrossModelRosterLine } from "@/components/chat/debate/model";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { formatDebateBudgetLabel } from "./budget";
-import type { TeamPreviewDebateView } from "./types";
+import type { TeamPreviewDebateView, TeamPreviewSideView } from "./types";
+
+type DebatePreviewBodyProps = {
+  mode?: "readonly" | "collapsible";
+  debate: TeamPreviewDebateView;
+  showBudget?: boolean;
+  motionClassName?: string;
+};
+
+export type { DebatePreviewBodyProps };
 
 /**
  * Debate motion / roster / sides — shared by hot TeamPreviewCard/Graph and cold
- * TeamPreviewResumeCard. Cold keeps collapsible stance + budget in header Badge;
- * hot is read-only with budget inline.
+ * TeamPreviewResumeCard. Cold keeps collapsible stance + budget in header Badge.
+ * 人改辩手/裁判模型 UI 已撤（后端 model_overrides 契约仍保留）。
  */
 export function DebatePreviewBody({
   debate,
   mode = "readonly",
   showBudget = true,
   motionClassName = "whitespace-pre-wrap text-xs text-foreground",
-}: {
-  debate: TeamPreviewDebateView;
-  /** cold = collapsible stance; hot = always expanded. */
-  mode?: "readonly" | "collapsible";
-  /** hot body shows budget line; cold puts it in the header Badge. */
-  showBudget?: boolean;
-  motionClassName?: string;
-}) {
+}: DebatePreviewBodyProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -82,16 +84,7 @@ export function DebatePreviewBody({
         </div>
       )}
       {debate.sides.map((s) => {
-        const meta = (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="min-w-0 text-xs font-medium text-foreground">
-              {s.name}
-            </p>
-            {s.is_subject && (
-              <span className="text-xs text-muted-foreground">方案方</span>
-            )}
-          </div>
-        );
+        const meta = <SideMeta s={s} />;
 
         if (!collapsible) {
           return (
@@ -160,6 +153,17 @@ export function DebatePreviewBody({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function SideMeta({ s }: { s: TeamPreviewSideView }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <p className="min-w-0 text-xs font-medium text-foreground">{s.name}</p>
+      {s.is_subject && (
+        <span className="text-xs text-muted-foreground">方案方</span>
+      )}
     </div>
   );
 }

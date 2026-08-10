@@ -1,3 +1,4 @@
+import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
 import { notifyError } from "@/lib/toast";
 import {
   type TeamPreviewResumeCorrections,
@@ -17,7 +18,15 @@ export function useColdSubmit(turn: PendingResume) {
   const entryStatus = useInteractionStore(
     (s) => s.byId.get(turn.checkpointId)?.status,
   );
-  const busy = submitting !== null || entryStatus === "submitting";
+  const deferredBusyReason: ResumeDeferredBusyReason | null =
+    useInteractionStore(
+      (s) => s.byId.get(turn.checkpointId)?.resumeDeferred?.busyReason ?? null,
+    );
+  // Deferred keeps busy even if local state remounts — settlement already locked.
+  const busy =
+    submitting !== null ||
+    entryStatus === "submitting" ||
+    deferredBusyReason !== null;
 
   const send = (
     decision: PlanReviewUserDecision,
@@ -40,6 +49,10 @@ export function useColdSubmit(turn: PendingResume) {
                   write_capability_overrides:
                     corrections.write_capability_overrides,
                 }
+              : {}),
+            ...(corrections.model_overrides &&
+            Object.keys(corrections.model_overrides).length > 0
+              ? { model_overrides: corrections.model_overrides }
               : {}),
           }
         : {};
@@ -67,5 +80,10 @@ export function useColdSubmit(turn: PendingResume) {
       });
   };
 
-  return { submitting, busy, send };
+  return {
+    submitting,
+    busy,
+    deferredBusyReason,
+    send,
+  };
 }

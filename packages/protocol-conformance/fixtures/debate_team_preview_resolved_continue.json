@@ -56,16 +56,19 @@
           {
             "key": "pro",
             "name": "正方",
-            "stance": "应推广"
+            "stance": "应推广",
+            "run_id": "debate_mod1_pro"
           },
           {
             "key": "con",
             "name": "反方",
-            "stance": "暂缓"
+            "stance": "暂缓",
+            "run_id": "debate_mod1_con"
           }
         ],
         "max_rounds": 5,
-        "thorough": true
+        "thorough": true,
+        "moderator_run_id": "debate_mod1"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },

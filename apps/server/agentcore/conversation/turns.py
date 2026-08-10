@@ -211,7 +211,7 @@ async def stream_chat(
             await _flush_code_index_before_close(
                 backend, block=_block_code_index_flush(sink)
             )
-            sink.close()
+            sink.close(reason="turn_finally")
 
 
 async def regenerate_chat(
@@ -337,7 +337,7 @@ async def regenerate_chat(
             await _flush_code_index_before_close(
                 backend, block=_block_code_index_flush(sink)
             )
-            sink.close()
+            sink.close(reason="regenerate_finally")
 
 
 async def resume_chat(
@@ -496,6 +496,7 @@ async def resume_chat(
                             write_capability_overrides=list(
                                 response.write_capability_overrides or []
                             ),
+                            model_overrides=dict(response.model_overrides or {}),
                         )
                 except asyncio.CancelledError:
                     # Hard cancel / lifespan / hard kill.
@@ -623,4 +624,4 @@ async def resume_chat(
             await _flush_code_index_before_close(
                 backend, block=_block_code_index_flush(sink)
             )
-            sink.close()
+            sink.close(reason="resume_finally")

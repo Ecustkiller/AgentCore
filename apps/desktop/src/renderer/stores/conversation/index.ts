@@ -22,6 +22,7 @@ export {
   useActiveMessageContent,
   useActiveMemoryUpdates,
   useActiveGenerating,
+  useActiveExecutionVia,
   useActiveTurnPhase,
   useConversationGenerating,
   useActiveError,

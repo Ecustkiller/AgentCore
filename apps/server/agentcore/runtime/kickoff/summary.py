@@ -73,6 +73,8 @@ class KickoffSummary:
     moderator_model: str = ""
     moderator_origin: str = ""
     moderator_provider_id: str = ""
+    # 开赛前预分配主持人稳定 id（人盖 model_overrides 键）；缺省空 = 旧帧。
+    moderator_run_id: str = ""
     same_model_debate: bool = False
     # §7.5 D：消歧候选（开赛卡展示）；缺省空，旧 journal 兼容。
     model_candidates: list[dict[str, Any]] = field(default_factory=list)
@@ -93,6 +95,8 @@ class KickoffSummary:
         }
         if self.headline:
             out["headline"] = self.headline
+        if self.moderator_run_id:
+            out["moderator_run_id"] = self.moderator_run_id
         if self.moderator_model:
             out["moderator_model"] = self.moderator_model
             if self.moderator_origin:
@@ -107,7 +111,8 @@ class KickoffSummary:
 
 
 def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
-    """Delegate card rows: role / task excerpt / depends_on / write capability."""
+    """Delegate card rows: role / task excerpt / depends_on / write capability / model."""
+    from agentcore.runtime.debate.models import identity_from_route_key
     from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
 
     limit = PLAN_REVIEW_SUMMARY_CHARS
@@ -124,17 +129,36 @@ def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
         else:
             write_capability = "can_write_files"
             write_capability_label = "可改文件"
-        rows.append(
-            {
-                "run_id": n.run_id,
-                "role": n.role or n.agent_name or n.run_id,
-                "task": task,
-                "depends_on": list(n.depends_on),
-                "form": form,
-                "write_capability": write_capability,
-                "write_capability_label": write_capability_label,
-            }
-        )
+        row: dict[str, Any] = {
+            "run_id": n.run_id,
+            "role": n.role or n.agent_name or n.run_id,
+            "task": task,
+            "depends_on": list(n.depends_on),
+            "form": form,
+            "write_capability": write_capability,
+            "write_capability_label": write_capability_label,
+        }
+        # Per-worker 模型：优先显式三元组 attrs（若执行链写入）；否则从 RunSpec.model 路由键还原。
+        origin_attr = str(getattr(n, "origin", "") or "").strip().lower()
+        provider_attr = str(getattr(n, "provider_id", "") or "").strip()
+        model_raw = (n.model or "").strip()
+        if origin_attr in ("platform", "byok") and model_raw:
+            # model 可能已是路由键——展示用裸 id。
+            from agentcore.runtime.debate.models import priced_model_from_route
+
+            row["model"] = priced_model_from_route(model_raw)
+            row["origin"] = origin_attr
+            if origin_attr == "byok" and provider_attr:
+                row["provider_id"] = provider_attr
+        elif model_raw:
+            ident = identity_from_route_key(model_raw)
+            if not ident.is_empty():
+                row["model"] = ident.model
+                if ident.origin:
+                    row["origin"] = ident.origin
+                if ident.provider_id:
+                    row["provider_id"] = ident.provider_id
+        rows.append(row)
     return rows
 
 
@@ -178,6 +202,7 @@ def debate_kickoff_summary(
         moderator_model=config.moderator_model or "",
         moderator_origin=config.moderator_origin or "",
         moderator_provider_id=config.moderator_provider_id or "",
+        moderator_run_id=getattr(config, "moderator_run_id", "") or "",
         same_model_debate=bool(config.same_model_debate),
         model_candidates=list(getattr(config, "model_candidates", None) or []),
         headline=format_kickoff_headline(

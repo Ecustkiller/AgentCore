@@ -291,7 +291,9 @@ async def run_stage_card_debate_pipeline(
             live_eid = current_execution_id.get() or bound_execution_id
             if live_eid:
                 with contextlib.suppress(Exception):
-                    release_turn_coordination(live_eid)
+                    release_turn_coordination(
+                        live_eid, conversation_id=conversation_id
+                    )
             current_execution_id.reset(execution_id_token)
         if llm is not None:
             with contextlib.suppress(Exception):

@@ -185,6 +185,7 @@ def team_preview_required(
     moderator_model: str = "",
     moderator_origin: str = "",
     moderator_provider_id: str = "",
+    moderator_run_id: str = "",
     same_model_debate: bool = False,
     model_candidates: list[dict[str, Any]] | None = None,
     headline: str = "",
@@ -196,6 +197,7 @@ def team_preview_required(
     ``tools`` = 将授权的执行能力（execution_class；文件改动由会话档信任，不再列入；
     debate 辩手只读 → 常空；full_auto / always_ask 亦可空）。
     ``headline`` = 主导语（交付档 + 人数）；空则 ABSENT（旧客户端兼容）。
+    ``moderator_run_id`` / ``sides[].run_id`` = 开赛前预分配稳定槽位（人盖键）。
     """
     payload: dict[str, Any] = {
         "checkpoint_id": checkpoint_id,
@@ -211,6 +213,8 @@ def team_preview_required(
     }
     if headline:
         payload["headline"] = headline
+    if moderator_run_id:
+        payload["moderator_run_id"] = moderator_run_id
     if moderator_model:
         payload["moderator_model"] = moderator_model
         if moderator_origin:
@@ -234,6 +238,7 @@ def team_preview_resolved(
     note: str = "",
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, Any]] | None = None,
+    model_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> SSEEvent:
     """Settle team_preview. Optional corrections are ABSENT when unset (旧客户端兼容)."""
     payload: dict[str, Any] = {
@@ -249,6 +254,25 @@ def team_preview_resolved(
             for row in write_capability_overrides
             if isinstance(row, dict) and str(row.get("run_id") or "").strip()
         ]
+    if model_overrides:
+        cleaned: dict[str, dict[str, Any]] = {}
+        for rid, row in model_overrides.items():
+            key = str(rid or "").strip()
+            if not key or not isinstance(row, dict):
+                continue
+            model = str(row.get("model") or "").strip()
+            if not model:
+                continue
+            entry: dict[str, Any] = {"model": model}
+            origin = str(row.get("origin") or "").strip().lower()
+            if origin in ("platform", "byok"):
+                entry["origin"] = origin
+            provider_id = str(row.get("provider_id") or "").strip()
+            if provider_id:
+                entry["provider_id"] = provider_id
+            cleaned[key] = entry
+        if cleaned:
+            payload["model_overrides"] = cleaned
     return SSEEvent(
         type=EventType.TEAM_PREVIEW_RESOLVED,
         payload=payload,

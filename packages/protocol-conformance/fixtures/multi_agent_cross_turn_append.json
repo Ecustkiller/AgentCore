@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_cross_turn_append",
-  "description": "跨回合同图追加：m1 建图完成 → m2 graph_append + 同 execution_id merge → 追加批收口；生长帧 host_message_id 归属旧图，新回合仅锚点",
+  "description": "跨回合同图追加：m1 建图完成 → m2 graph_append + 同 execution_id merge → 追加批收口；生长帧 host_message_id 归属旧图，新回合仅锚点；两回合 run_plan 仅同一宿主 captain（kind=captain 至多 1），workers parent_run_id 指向宿主，禁止第二 captain",
   "events": [
     {
       "type": "message_start",
@@ -44,6 +44,11 @@
         "task_summary": "调研分析",
         "agents": [
           {
+            "id": "c1",
+            "role": "CEO",
+            "thinking": true
+          },
+          {
             "id": "w1",
             "role": "研究员",
             "thinking": true
@@ -56,10 +61,19 @@
         ],
         "runs": [
           {
+            "id": "c1",
+            "agent_id": "c1",
+            "task": "",
+            "depends_on": [],
+            "parent_run_id": null,
+            "kind": "captain"
+          },
+          {
             "id": "r1",
             "agent_id": "w1",
             "task": "调研素材",
-            "depends_on": []
+            "depends_on": [],
+            "parent_run_id": "c1"
           },
           {
             "id": "r2",
@@ -67,7 +81,8 @@
             "task": "分析结论",
             "depends_on": [
               "r1"
-            ]
+            ],
+            "parent_run_id": "c1"
           }
         ]
       },
@@ -78,7 +93,7 @@
       "payload": {
         "run_id": "r1",
         "agent_id": "w1",
-        "parent_run_id": null,
+        "parent_run_id": "c1",
         "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
@@ -124,7 +139,7 @@
       "payload": {
         "run_id": "r2",
         "agent_id": "w2",
-        "parent_run_id": null,
+        "parent_run_id": "c1",
         "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:00.906Z"
@@ -262,6 +277,11 @@
         "task_summary": "调研分析撰写",
         "agents": [
           {
+            "id": "c1",
+            "role": "CEO",
+            "thinking": true
+          },
+          {
             "id": "w1",
             "role": "研究员",
             "thinking": true
@@ -279,10 +299,19 @@
         ],
         "runs": [
           {
+            "id": "c1",
+            "agent_id": "c1",
+            "task": "",
+            "depends_on": [],
+            "parent_run_id": null,
+            "kind": "captain"
+          },
+          {
             "id": "r1",
             "agent_id": "w1",
             "task": "调研素材",
-            "depends_on": []
+            "depends_on": [],
+            "parent_run_id": "c1"
           },
           {
             "id": "r2",
@@ -290,13 +319,15 @@
             "task": "分析结论",
             "depends_on": [
               "r1"
-            ]
+            ],
+            "parent_run_id": "c1"
           },
           {
             "id": "r3",
             "agent_id": "w3",
             "task": "撰写文稿",
-            "depends_on": []
+            "depends_on": [],
+            "parent_run_id": "c1"
           }
         ],
         "host_message_id": "m1"
@@ -308,7 +339,7 @@
       "payload": {
         "run_id": "r3",
         "agent_id": "w3",
-        "parent_run_id": null,
+        "parent_run_id": "c1",
         "kind": "agent"
       },
       "timestamp": "2026-01-01T00:00:02.015Z"
@@ -417,6 +448,16 @@
     "citedIds": [],
     "agents": [
       {
+        "id": "c1",
+        "role": "CEO",
+        "thinking": true,
+        "status": "idle",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
         "id": "w1",
         "role": "研究员",
         "thinking": true,
@@ -449,6 +490,36 @@
     ],
     "runs": [
       {
+        "id": "c1",
+        "agentId": "c1",
+        "task": "",
+        "status": "skipped",
+        "dependsOn": [],
+        "outputSummary": null,
+        "debrief": null,
+        "durationMs": null,
+        "error": null,
+        "failureKind": null,
+        "productLanded": null,
+        "parentRunId": null,
+        "kind": "captain",
+        "role": null,
+        "model": null,
+        "usage": null,
+        "cost": null,
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "continuesRunId": null,
+        "revised": null,
+        "replacesRunId": null,
+        "actId": "act-1",
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": [],
+        "process": []
+      },
+      {
         "id": "r1",
         "agentId": "w1",
         "task": "调研素材",
@@ -460,7 +531,7 @@
         "error": null,
         "failureKind": null,
         "productLanded": null,
-        "parentRunId": null,
+        "parentRunId": "c1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -510,7 +581,7 @@
         "error": null,
         "failureKind": null,
         "productLanded": null,
-        "parentRunId": null,
+        "parentRunId": "c1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -558,7 +629,7 @@
         "error": null,
         "failureKind": null,
         "productLanded": null,
-        "parentRunId": null,
+        "parentRunId": "c1",
         "kind": "agent",
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -606,7 +677,7 @@
     ],
     "progress": {
       "completed": 3,
-      "total": 3
+      "total": 4
     },
     "interactions": [],
     "cost": {

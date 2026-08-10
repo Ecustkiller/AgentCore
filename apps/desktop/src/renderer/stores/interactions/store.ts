@@ -1,3 +1,4 @@
+import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
 import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type {
   InteractionKind,
@@ -48,6 +49,15 @@ interface InteractionState {
   ) => void;
   /** Flip pending → submitting (returns false if not pending). */
   beginSubmit: (id: string) => boolean;
+  /**
+   * Cold resume accepted while slot busy (EPHEMERAL `resume_deferred`).
+   * Keeps / forces submitting so ResumePrompt stays busy until stream settles.
+   */
+  markResumeDeferred: (input: {
+    conversationId: string;
+    messageId: string;
+    busyReason: ResumeDeferredBusyReason;
+  }) => void;
   /** Re-open after a failed submit (not 410). */
   reopen: (id: string) => void;
   /** Drop one entry (legacy remove paths / tests). */
@@ -175,6 +185,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
           ...prev,
           status: "resolved",
           resolution: resolution ?? prev.resolution,
+          resumeDeferred: undefined,
         });
       } else {
         // Resolved without a prior required (reload edge) — keep a stub so UI
@@ -231,12 +242,38 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
     return true;
   },
 
+  markResumeDeferred: ({ conversationId, messageId, busyReason }) => {
+    set((state) => {
+      const next = mapCopy(state.byId);
+      let changed = false;
+      for (const [id, entry] of state.byId) {
+        if (entry.conversationId !== conversationId) continue;
+        if (!isColdResumeKind(entry.kind)) continue;
+        if (entry.status !== "pending" && entry.status !== "submitting")
+          continue;
+        if (entry.messageId && entry.messageId !== messageId) continue;
+        next.set(id, {
+          ...entry,
+          status: "submitting",
+          messageId: entry.messageId || messageId,
+          resumeDeferred: { busyReason },
+        });
+        changed = true;
+      }
+      return changed ? { byId: next } : {};
+    });
+  },
+
   reopen: (id) => {
     set((state) => {
       const prev = state.byId.get(id);
       if (!prev || prev.status !== "submitting") return {};
       const next = mapCopy(state.byId);
-      next.set(id, { ...prev, status: "pending" });
+      next.set(id, {
+        ...prev,
+        status: "pending",
+        resumeDeferred: undefined,
+      });
       return { byId: next };
     });
   },

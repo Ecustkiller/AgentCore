@@ -24,7 +24,7 @@ skip_if:
 
 ## 二、模型与凭据解析
 
-**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（null = 账号默认；**活引用**）。系统预置由平台目录 / `PLATFORM_MODELS`（空则 `[PLATFORM_MODEL, PLATFORM_BACKGROUND_MODEL]`）动态投影，稳定 id = `uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID；逻辑默认 = `PLATFORM_MODEL` 对应预置（须在目录内）否则 allowlist 首个。明确不做：质量档矩阵、角色→模型矩阵、输入框双 picker。
+**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（null = 账号默认；**活引用**）。系统预置由平台目录 / `PLATFORM_MODELS`（空则 `[PLATFORM_MODEL, PLATFORM_BACKGROUND_MODEL]`）动态投影，稳定 id = `uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID；逻辑默认 = `PLATFORM_MODEL` 对应预置（须在目录内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交——定案权威 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 
 **识图槽 `vision`（可选）**：与 main **独立**，空 **不** follow main。有槽 → 用该槽凭据建独立 `VisionReader`（BYOK 填槽即可，不因 `billing_mode=byok` 关死）。槽空 → 仅当 `billing_mode=platform` 且 `VISION_API_KEY`/`VISION_BASE_URL` 齐全时走运维兜底（默认 `kimi-k2.5`，不上架 `PLATFORM_MODELS`）。
 
@@ -36,7 +36,7 @@ skip_if:
 - **后台档**（title/memory/compaction）：**平台优先** + 必过 `enforce_quota`（防白嫖）；平台不可用（配置缺失 **或** 上游 auth 拒绝）才回落用户 BYOK。统一入口 `billing/gate.py::run_background_llm`（`resolve_and_gate_background` 解析 + 一次 auth→BYOK；耗尽 / 两边都失败 → `None`，不 429 主回合）。禁止调用点各自 try/except 拼回落、禁止进程内 auth 熔断缓存。原 followups（「下一步」chips）已下线，不再走后台档。
 - **回合内鉴权死短路（甲+乙）**：同一用户回合首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）后，`llm/turn_auth_dead.py` 回合级死位短路后续未启动的 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
-- **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member` 按 Worker 槽重解析。
+- **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member`：请求 body `model` 为目录路由键（`platform/{id}` / `{provider_id}/{id}`）且合法 → **按该身份重解析凭据/model**；裸 mint/chat id 或未带显式 → 仍跟本槽。非法路由键 **硬失败**（`VALIDATION_ERROR`），禁 silent 回退野模型。→ [编排器 · Per-worker](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 - **统一目录** `GET /v1/users/me/models`：键 `(id, origin, provider_id)`；BYOK 行 = `default_model` ∪ 按 `base_url` 匹配的厂商预设 models ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设，避免同厂商下拉只剩一项）；**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
 
 ## 三、sidecar 推理代理

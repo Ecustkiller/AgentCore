@@ -328,6 +328,12 @@ export interface TeamPreviewWorker {
   write_capability?: "text_only" | "can_write_files";
   /** 写盘能力展示文案（可改文件 / 仅文字报告）。 */
   write_capability_label?: string;
+  /** 该队员模型 id（可展示裸 id）。 */
+  model?: string;
+  /** 模型来源；有三元组时透出。 */
+  origin?: "platform" | "byok";
+  /** BYOK 服务商 id；platform 缺省。 */
+  provider_id?: string;
 }
 
 /** One debate participant on the debate kickoff card. */
@@ -336,6 +342,8 @@ export interface TeamPreviewSide {
   name: string;
   stance: string;
   is_subject?: boolean;
+  /** 开赛前预分配稳定 id；人盖 model_overrides 键。 */
+  run_id?: string;
   /** 该方辩手模型 id。 */
   model?: string;
   /** 模型来源。 */
@@ -376,6 +384,8 @@ export interface TeamPreviewRequiredPayload {
   max_rounds?: number;
   /** 辩论认真辩透 vs 快速对碰。 */
   thorough?: boolean;
+  /** 开赛前预分配主持人 run_id；人盖 model_overrides 键。 */
+  moderator_run_id?: string;
   /** 裁判 / 主持人模型 id。 */
   moderator_model?: string;
   /** 裁判模型来源。 */
@@ -396,6 +406,17 @@ export interface WriteCapabilityOverride {
   capability: "text_only";
 }
 
+/** 开工卡 continue 人盖：按 run_id 覆盖队员 / 辩手 / 主持人模型三元组。
+ * 
+ * 空 model = 该项不改（与 map 缺键同效）。非法三元组 → 422（引擎侧硬失败）。 */
+export interface ModelOverride {
+  model: string;
+  /** 模型来源；非空时须合法。 */
+  origin?: "platform" | "byok";
+  /** BYOK 服务商 id；origin=byok 时必填。 */
+  provider_id?: string;
+}
+
 export interface TeamPreviewResolvedPayload {
   checkpoint_id: string;
   decision: CheckpointDecision;
@@ -404,6 +425,8 @@ export interface TeamPreviewResolvedPayload {
   excluded_run_ids?: string[];
   /** 写盘单向收紧；仅 capability=text_only；未知 run_id / 升权 → 422（引擎侧）。 */
   write_capability_overrides?: WriteCapabilityOverride[];
+  /** 人确认盖 CEO：run_id → {model, origin?, provider_id?}；delegate=队员；debate=sides[].run_id / moderator_run_id；空/缺=不改。 */
+  model_overrides?: Record<string, ModelOverride>;
 }
 
 /** 阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。
@@ -876,6 +899,17 @@ export interface TurnSteerAcceptedPayload {
   conversation_id: string;
   content: string;
   pending: number;
+}
+
+/** Cold resume deferred while a live turn holds the slot. EPHEMERAL — same-connection wait.
+ * 
+ * Settlement is already prewritten; claim + continuation start after the slot frees.
+ * ``busy_reason=wrap_up`` when the live sink is still this ``message_id`` (host winding
+ * down); ``live_turn`` when another turn occupies the conversation slot. */
+export interface ResumeDeferredPayload {
+  message_id: string;
+  conversation_id: string;
+  busy_reason: "wrap_up" | "live_turn";
 }
 
 /** 执行转后台（``execution_detached``）：附着回合已收口，团队继续跑。 */
@@ -1889,6 +1923,7 @@ export type SSEPayloadMap = {
   turn_queue_started: TurnQueueStartedPayload;
   turn_queue_cancelled: TurnQueueCancelledPayload;
   turn_steer_accepted: TurnSteerAcceptedPayload;
+  resume_deferred: ResumeDeferredPayload;
   execution_detached: ExecutionDetachedPayload;
   execution_completed: ExecutionCompletedPayload;
   debate_result: DebateResultPayload;

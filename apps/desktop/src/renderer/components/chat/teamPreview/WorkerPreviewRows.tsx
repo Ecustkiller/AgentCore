@@ -1,4 +1,3 @@
-import { Switch } from "@/components/ui/Switch";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { TeamPreviewWorkerView } from "./types";
@@ -11,8 +10,6 @@ type ReadonlyProps = {
 type InteractiveProps = {
   mode: "interactive";
   workers: readonly TeamPreviewWorkerView[];
-  excludedRunIds: ReadonlySet<string>;
-  onExcludedChange: (runId: string, included: boolean) => void;
   textOnlyRunIds: ReadonlySet<string>;
   onTextOnlyChange: (runId: string, textOnly: boolean) => void;
   disabled?: boolean;
@@ -22,7 +19,8 @@ export type WorkerPreviewRowsProps = ReadonlyProps | InteractiveProps;
 
 /**
  * Worker 分工表 — shared by hot TeamPreviewCard/Graph (readonly) and cold
- * TeamPreviewResumeCard (interactive: 纳入开关 / 写盘收紧 / 任务折叠).
+ * TeamPreviewResumeCard (interactive: 写盘收紧 / 任务折叠).
+ * CEO 提案模型只读展示；人改模型 / 排除岗 UI 已撤（后端契约仍保留）。
  */
 export function WorkerPreviewRows(props: WorkerPreviewRowsProps) {
   if (props.mode === "interactive") {
@@ -45,6 +43,9 @@ function ReadonlyWorkerRows({
         >
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="text-xs font-medium text-foreground">{w.role}</p>
+            {w.model && (
+              <span className="text-xs text-muted-foreground">{w.model}</span>
+            )}
             {w.write_capability_label && (
               <span
                 className={
@@ -75,8 +76,6 @@ function ReadonlyWorkerRows({
 
 function InteractiveWorkerRows({
   workers,
-  excludedRunIds,
-  onExcludedChange,
   textOnlyRunIds,
   onTextOnlyChange,
   disabled,
@@ -94,26 +93,13 @@ function InteractiveWorkerRows({
     });
   };
 
-  const includedIds = new Set(
-    workers.map((w) => w.run_id).filter((id) => !excludedRunIds.has(id)),
-  );
-
   return (
     <div className="mt-2 space-y-1.5">
       {workers.map((w) => {
         const open = expanded.has(w.run_id);
-        const included = !excludedRunIds.has(w.run_id);
-        const dependedOn = [...includedIds].some((otherId) => {
-          if (otherId === w.run_id) return false;
-          const other = workers.find((x) => x.run_id === otherId);
-          return other?.depends_on.includes(w.run_id) ?? false;
-        });
-        const lastIncluded = included && includedIds.size <= 1;
-        const excludeBlocked = included && (dependedOn || lastIncluded);
         const effectiveTextOnly =
           textOnlyRunIds.has(w.run_id) || w.write_capability === "text_only";
         const canTighten =
-          included &&
           w.write_capability === "can_write_files" &&
           !textOnlyRunIds.has(w.run_id);
         const writeLabel = effectiveTextOnly
@@ -124,21 +110,12 @@ function InteractiveWorkerRows({
 
         const meta = (
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            <Switch
-              checked={included}
-              disabled={disabled || (included && excludeBlocked)}
-              label={`纳入本轮 · ${w.role}`}
-              onCheckedChange={(next) => onExcludedChange(w.run_id, next)}
-            />
-            <p
-              className={`min-w-0 text-xs font-medium ${
-                included
-                  ? "text-foreground"
-                  : "text-muted-foreground line-through"
-              }`}
-            >
+            <p className="min-w-0 text-xs font-medium text-foreground">
               {w.role}
             </p>
+            {w.model && (
+              <span className="text-xs text-muted-foreground">{w.model}</span>
+            )}
             {(w.write_capability || textOnlyRunIds.has(w.run_id)) &&
               (canTighten ? (
                 <button
@@ -188,16 +165,6 @@ function InteractiveWorkerRows({
           </div>
         );
 
-        const depHint =
-          included && dependedOn ? (
-            <p
-              className="mt-1 text-xs text-muted-foreground"
-              data-testid="team-preview-dep-block-hint"
-            >
-              仍有队员依赖此岗
-            </p>
-          ) : null;
-
         if (!w.task) {
           return (
             <div
@@ -205,7 +172,6 @@ function InteractiveWorkerRows({
               className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
             >
               <div className="flex items-start gap-1.5">{meta}</div>
-              {depHint}
             </div>
           );
         }
@@ -246,7 +212,6 @@ function InteractiveWorkerRows({
                 )}
               </div>
             </button>
-            {depHint}
           </div>
         );
       })}

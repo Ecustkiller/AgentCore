@@ -547,6 +547,7 @@ def _team_preview_finalized() -> list[SSEEvent]:
 
 def _debate_team_preview_finalized() -> list[SSEEvent]:
     """辩论开工卡：顶层 debate 在主持人循环启动前挂起收口。"""
+    mod = "debate_mod1"
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta("我来组织一场辩论。"),
@@ -572,11 +573,22 @@ def _debate_team_preview_finalized() -> list[SSEEvent]:
             motion="该不该上四天工作制？",
             form="debate",
             sides=[
-                {"key": "pro", "name": "正方", "stance": "应推广"},
-                {"key": "con", "name": "反方", "stance": "暂缓"},
+                {
+                    "key": "pro",
+                    "name": "正方",
+                    "stance": "应推广",
+                    "run_id": f"{mod}_pro",
+                },
+                {
+                    "key": "con",
+                    "name": "反方",
+                    "stance": "暂缓",
+                    "run_id": f"{mod}_con",
+                },
             ],
             max_rounds=5,
             thorough=True,
+            moderator_run_id=mod,
         ),
         message_end(FinishReason.PAUSED, input_tokens=800, output_tokens=40, cost=_COST),
     ]
@@ -728,6 +740,39 @@ def _debate_team_preview_resolved_continue() -> list[SSEEvent]:
             "反方：服务业与协作密集岗位难以压缩工时，仓促推广会抬高成本与排班摩擦。",
         ),
         # 无 message_end：回合仍在辩论中（status=running），协作图可见主持人+正反双方。
+    ]
+
+
+def _debate_team_preview_model_override_continue() -> list[SSEEvent]:
+    """辩论开工卡人盖模型：continue + model_overrides → resolved 投影；开赛沿用预分配 id。"""
+    mod = "debate_mod1"
+    pro_slot = f"{mod}_pro"
+    return [
+        *_debate_team_preview_finalized()[:-1],
+        team_preview_resolved(
+            checkpoint_id="tp-debate",
+            decision="continue",
+            model_overrides={
+                pro_slot: {"model": "deepseek-v4-pro", "origin": "platform"},
+                mod: {"model": "deepseek-v4-flash", "origin": "platform"},
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="正反辩论：该不该上四天工作制？",
+            agents=[{"id": mod, "role": "主持人", "thinking": True}],
+            runs=[
+                {
+                    "id": mod,
+                    "agent_id": mod,
+                    "task": "主持正反辩论：该不该上四天工作制？",
+                    "depends_on": [],
+                }
+            ],
+        ),
+        run_started(mod, mod, parent_run_id="captain1"),
+        # 无 message_end：人盖后已开赛（协作图可见主持人）；辩手模型写在 config，不在本帧展开。
     ]
 
 
@@ -923,6 +968,92 @@ def _team_preview_tighten_write_continue() -> list[SSEEvent]:
     ]
 
 
+def _team_preview_model_override_continue() -> list[SSEEvent]:
+    """人盖 CEO 模型：continue + model_overrides → resolved 投影 modelOverrides；该 run 用覆盖模。"""
+    agents = [
+        {"id": "w1", "role": "调研", "thinking": True},
+        {"id": "w2", "role": "撰写", "thinking": True},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研方案", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "写初稿", "depends_on": ["r1"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "调研"}, {"role": "撰写"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="调研撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        team_preview_required(
+            checkpoint_id="tp-mo1",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "调研",
+                    "task": "调研方案",
+                    "depends_on": [],
+                    "write_capability": "can_write_files",
+                    "write_capability_label": "可改文件",
+                    "model": "deepseek-v4-flash",
+                    "origin": "platform",
+                },
+                {
+                    "run_id": "r2",
+                    "role": "撰写",
+                    "task": "写初稿",
+                    "depends_on": ["r1"],
+                    "write_capability": "can_write_files",
+                    "write_capability_label": "可改文件",
+                },
+            ],
+            tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
+        ),
+        team_preview_resolved(
+            checkpoint_id="tp-mo1",
+            decision="continue",
+            model_overrides={
+                "r2": {"model": "deepseek-v4-pro", "origin": "platform"},
+            },
+        ),
+        run_started("r1", "w1"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="调研完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="初稿完成（人指定 Pro）",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-pro",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成"),
+        content_delta("撰写岗已改用 Pro，团队已交付。"),
+        message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
+
 def _decision_then_kill() -> list[SSEEvent]:
     """决策后杀进程：settlement 已落、无终态 → fold 无 pending gate，status=running。
 
@@ -979,6 +1110,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "开工组队有限否决：收紧写盘 continue → resolved 投影 write_capability_overrides",
         _team_preview_tighten_write_continue,
     ),
+    "team_preview_model_override_continue": (
+        "开工卡人盖模型：continue + model_overrides → resolved 投影 modelOverrides",
+        _team_preview_model_override_continue,
+    ),
     "decision_then_kill": (
         "恢复收口：决策后杀进程 → fold 无待授权、status=running（已决策·执行中断 / 救火继续）",
         _decision_then_kill,
@@ -999,6 +1134,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "debate_team_preview_resolved_continue": (
         "辩论开工卡：开赛后主持人+正反已 start（协作图可见）",
         _debate_team_preview_resolved_continue,
+    ),
+    "debate_team_preview_model_override_continue": (
+        "辩论开工卡人盖模型：continue + model_overrides → resolved 投影（预分配 run_id）",
+        _debate_team_preview_model_override_continue,
     ),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),

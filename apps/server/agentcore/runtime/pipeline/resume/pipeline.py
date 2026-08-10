@@ -76,6 +76,7 @@ async def resume_chat_pipeline(
     x_client_platform: str | None = None,
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
+    model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
@@ -293,6 +294,7 @@ async def resume_chat_pipeline(
             pre_pause_override=hydrated.pre_pause_content,
             excluded_run_ids=excluded_run_ids,
             write_capability_overrides=write_capability_overrides,
+            model_overrides=model_overrides,
         )
         pre_pause = recovered.pre_pause
         settled = recovered.settled
@@ -496,10 +498,13 @@ async def resume_chat_pipeline(
 
             # Settle may realign to the pause-turn id; release that registry key
             # (preserve live background drives — async team model).
+            # Pass conversation_id for mint-never-registered host follow.
             eid = current_execution_id.get() or bound_execution_id
             if eid:
                 with contextlib.suppress(Exception):
-                    release_turn_coordination(eid)
+                    release_turn_coordination(
+                        eid, conversation_id=conversation_id
+                    )
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
         # resumed turn's persist_turn_result tail (title / stage_card) still reaches the client.

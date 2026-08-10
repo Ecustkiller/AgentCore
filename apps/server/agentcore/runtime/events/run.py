@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentcore.core.types import new_id
 from agentcore.runtime.events.types import EventType, SSEEvent
@@ -689,6 +689,23 @@ def turn_steer_accepted(
             "conversation_id": conversation_id,
             "content": content,
             "pending": pending,
+        },
+    )
+
+
+def resume_deferred(
+    *,
+    message_id: str,
+    conversation_id: str,
+    busy_reason: Literal["wrap_up", "live_turn"],
+) -> SSEEvent:
+    """冷 resume × live deferred ack——settlement 已预写；槽空后同连接 claim + 续跑。"""
+    return SSEEvent(
+        type=EventType.RESUME_DEFERRED,
+        payload={
+            "message_id": message_id,
+            "conversation_id": conversation_id,
+            "busy_reason": busy_reason,
         },
     )
 

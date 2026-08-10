@@ -24,6 +24,12 @@ beforeEach(() => {
 describe("composerPendingHint", () => {
   it("exposes short zh copy", () => {
     expect(COMPOSER_PENDING_HINT).toContain("待你确认");
+    expect(COMPOSER_PENDING_HINT).toContain("另开一轮");
+    expect(COMPOSER_PENDING_HINT).toContain("确认卡仍保留");
+    expect(COMPOSER_PENDING_HINT).not.toContain("取消等待");
+    expect(COMPOSER_PENDING_SEND_CONFIRM).toContain("另开一轮");
+    expect(COMPOSER_PENDING_SEND_CONFIRM).toContain("确认卡仍保留");
+    expect(COMPOSER_PENDING_SEND_CONFIRM).not.toContain("取消等待");
     expect(COMPOSER_PENDING_SEND_CONFIRM).toContain("确定继续");
   });
 

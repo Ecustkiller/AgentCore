@@ -584,6 +584,49 @@ describe("ResumeCard · team_preview", () => {
     });
   });
 
+  it("delegate 开工卡无模型下拉；continue 不附 model_overrides", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              model: "ceo-flash",
+              origin: "platform",
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: [],
+              model: "ceo-flash",
+              origin: "platform",
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+          ],
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
+    fireEvent.click(screen.getByText("授权并开工"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", [], {
+      excluded_run_ids: [],
+      write_capability_overrides: [],
+    });
+    const amendments = onResume.mock.calls[0]?.[3] as
+      | Record<string, unknown>
+      | undefined;
+    expect(amendments).not.toHaveProperty("model_overrides");
+  });
+
   it("已是仅文字无升权入口；stop 不带修正", () => {
     const onResume = vi.fn();
     render(
@@ -637,11 +680,57 @@ describe("ResumeCard · team_preview", () => {
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.queryByText("先多视角调研再辩")).toBeNull();
+    expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
     fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
       target: { value: "最关心成本谁买单" },
     });
     fireEvent.click(screen.getByText("开赛"));
     expect(onResume).toHaveBeenCalledWith("continue", "最关心成本谁买单", []);
+  });
+
+  it("辩论有 run_id：裁判节点显式；无模型下拉；continue 不附 model_overrides", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          primitive: "debate",
+          workers: [],
+          motion: "辩题",
+          sides: [
+            {
+              key: "pro",
+              name: "正方",
+              stance: "赞成",
+              run_id: "side-pro",
+              model: "ceo-flash",
+              origin: "platform",
+            },
+            {
+              key: "con",
+              name: "反方",
+              stance: "反对",
+              run_id: "side-con",
+              model: "ceo-flash",
+              origin: "platform",
+            },
+          ],
+          ...({
+            moderator_run_id: "mod-1",
+            moderator_model: "ceo-flash",
+            moderator_origin: "platform",
+          } as Partial<PausedTurnSummary>),
+        })}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.getByTestId("debate-side-side-pro")).toBeTruthy();
+    expect(screen.getByTestId("debate-side-side-con")).toBeTruthy();
+    expect(screen.getByTestId("debate-moderator-mod-1")).toBeTruthy();
+    expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
+    expect(screen.queryByText("纳入本轮")).toBeNull();
+    fireEvent.click(screen.getByText("开赛"));
+    expect(onResume).toHaveBeenCalledWith("continue", "", []);
+    expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
 
   it("开工卡不再提供 research_first 第三键（庭前取证内化）", () => {
@@ -759,5 +848,38 @@ describe("ResumeCard · ask_user browser_login", () => {
     expect(screen.getByText("取消")).toBeTruthy();
     expect(screen.queryByText(/需要你登录/)).toBeNull();
     expect(screen.queryByTestId("browser-login-decision")).toBeNull();
+  });
+});
+
+describe("ResumeCard · resume_deferred", () => {
+  it("deferredBusyReason paints 放行已记下 and hides actions", () => {
+    render(
+      <ResumeCard
+        paused={{
+          ...summary(),
+          interactionStatus: "submitting",
+          deferredBusyReason: "live_turn",
+        }}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("resume-card-deferred")).toBeTruthy();
+    expect(screen.getByText(/放行已记下/)).toBeTruthy();
+    expect(screen.getByText("其它回合进行中")).toBeTruthy();
+    expect(screen.queryByText("取消")).toBeNull();
+  });
+
+  it("wrap_up reason shows host wrap-up detail", () => {
+    render(
+      <ResumeCard
+        paused={{
+          ...summary(),
+          interactionStatus: "submitting",
+          deferredBusyReason: "wrap_up",
+        }}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("宿主回合收口中")).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ related:
   - docs/03-AI核心/运行时总览.md
   - docs/03-AI核心/执行引擎架构设计.md
   - docs/03-AI核心/检查点与开工卡.md
+  - docs/05-平台与运维/平台LLM接入.md
 skip_if:
   - 只改检查点卡片 UX（读检查点与开工卡 / 前端UX）
 ---
@@ -64,7 +65,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点）。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。
 
-**跨项目（✅）**：CEO 摸已登记项目用只读跨桌（`list_project_dir` / `read_project_file`）；写/重活带 `target_folder_id`；均不改会话 `folder_id`。点名或先建：`list_projects` / `resolve_project` / `create_project`（云）。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊未点名目标禁止默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
+**跨项目（✅）**：CEO 摸已登记项目用只读跨桌（`list_project_dir` / `read_project_file`）；写/重活带 `target_folder_id`；均不改会话 `folder_id`。点名：`list_projects` / `resolve_project`；**显式**新建云桌用 `create_project`（仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 静默建云桌并 `turn_target_desk` 继承。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读可不点名（scratch 禁写）；写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
 
 | 动作 | 语义 |
 |---|---|
@@ -105,9 +106,9 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `write_scope` ✅ | worker 本批可写范围：`none` / `explore_memory`（仅 `AgentCore/` 约定记忆与探索笔记）/ `project`（用户工程树，默认满权限批次）。探索硬挡 pending 时上限 `explore_memory`；越权在**写工具层**拒，不在 `delegate` 入口因 `form=files` 拒整批。否决：explore 专用 playbook 分叉、pending 时静默把 files 改成 prose |
 | ~~`completion_criteria`~~ | ✅ **已删**（S3）——见下节；工具面 `test_run`↔`code_execute` 分流仍在（与 kind 正交） |
 | `continue_from_run_id` | 带现场续派；权威 → [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md) |
-| worker 模型 | CEO **不**选 per-task 模型档；力度用协作结构表达；用户侧「模型组合」可选 Worker 槽 |
+| worker 模型 ✅ | 每 worker **节点/run** 可选显式模型身份（与辩论辩手身份同族）；**省略** = Worker 槽（空则 follow 主）。CEO/`tasks[]` 节点显式仍有效；开工卡确认面**不**提供人改模。定案全文 ↓ |
 
-嵌套委派：默认开一层（`depth≤2`），无 `can_delegate` 字段。worker 工具集缺省全量（内部装配）；CEO **不必也不应**手填 `tasks[].tools` 收窄（填了也不生效）。depth=1 captain 对路径 B 形 brief（成果级目标·约束·验收、本轮无结构钉成单切片）→ **优先**先再 `delegate` 补编制再整合（优先级 nudge，非硬流程、非「未嵌套禁写」）；豁免：单文件 / 已钉薄壳 / 强耦合同 run 切片 / 小修·finalize 机械单步。整里程碑 M0 / 空仓多模块骨架不在豁免内。**禁止**「凡大活必嵌套」；失败只回退提示词，不升级闸。父节点已盖 `code_audit_gate` 时，手写嵌套 tasks **继承**收工纪律（盖 gate、补 `*.audit.json`、注入一次交接短提示）——不重跑整本 `code_audit` playbook，以免单点子审被扩成多模块团；普通非审计嵌套不误挂。
+嵌套委派：硬上限 `depth≤3`（合法链 CEO → depth1 → depth2 → depth3 叶子；depth&lt;3 默认获 `delegate`+`replan`），无 `can_delegate` 字段。worker 工具集缺省全量（内部装配）；CEO **不必也不应**手填 `tasks[].tools` 收窄（填了也不生效）。depth=1 captain 对路径 B 形 brief（成果级目标·约束·验收、本轮无结构钉成单切片）→ **优先**先再 `delegate` 补编制再整合（优先级 nudge，非硬流程、非「未嵌套禁写」）；豁免：单文件 / 已钉薄壳 / 强耦合同 run 切片 / 小修·finalize 机械单步。整里程碑 M0 / 空仓多模块骨架不在豁免内。**禁止**「凡大活必嵌套」；失败只回退提示词，不升级闸。父节点已盖 `code_audit_gate` 时，手写嵌套 tasks **继承**收工纪律（盖 gate、补 `*.audit.json`、注入一次交接短提示）——不重跑整本 `code_audit` playbook，以免单点子审被扩成多模块团；普通非审计嵌套不误挂。
 
 ### ✅ S3 · 删除 `completion_criteria` kind 体系
 
@@ -147,6 +148,14 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 - **边界**：仍**不拒收、不改图**；不做硬拒；不扫用户/task 长文；不用 `write_scope`（非 grant 槽）。阶梯沿用 `design_impl` 先例（提示词后直接软提示）。
 - **验收**：单 task + `form=files` + 无钉 → CEO 可见告警；`finalize` / 具名 playbook / 有 artifacts 等 → 不告警。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/root_slice_honesty.py`
 
+### ✅ Per-worker 模型覆盖（A+B+C 同一功能）
+
+- **目标**：每个 worker run 可绑与队友不同的大模型——**一个功能**：① 省钱默认（组合 Worker 槽便宜、节点不填）；③ CEO 在 `delegate`/`tasks[]` 填写节点显式。效果好坏另说，能力要有；默认路径与今日一致（不填=跟槽）。开工卡等**产品确认面不提供**人手改模（原「人盖 CEO」产品入口已藏）。
+- **边界**：解析优先级 **节点显式 > 组合 Worker 槽 > follow 主模型**。CEO/`tasks[]` 节点显式仍有效。wire 可保留 `model_overrides` 契约，**不**写产品确认面用法。续派 / 同人续跑：默认 **继承该 run 已解析模型**；本次 payload 显式改则覆盖。候选与组合槽、辩论身份对齐（统一目录 + BYOK 手填；platform allowlist）；非法配置 **硬失败**，禁 silent 回退。协作图与用量须能看见该队员用了哪个模型。凭据 / sidecar / 跨 origin → [平台 LLM 接入](/docs/05-平台与运维/平台LLM接入.md)。
+- **关键取舍**：能力开放（含 CEO 可选填）优先于「怕选不好就关能力」；确认面藏人改模 UI，**不**删后端节点显式 / 契约字段。**否决**角色名猜模、质量档矩阵、账号级角色→模型主设置、无可见性的暗箱路由。旧 `ModelTier` / `model_preference` 档位体系仍废，不复活。
+- **落地 ✅**：① CEO/`replan` `tasks[]` 三元组→路由键→`RunSpec.model`（`runtime/delegate/task_models.py`）；跨 provider 窄接 extras；续派继承可改。③ 节点显式仍走执行链；`model_overrides` 契约可保留（非确认面产品用法；开工卡 UI 不暴露人改模）。sidecar inference proxy 认节点路由键。图 peek / 用量详情经 `run_completed.model`（跑中 Face chip 非本切片）。
+- **验收**：省略显式 → 行为同今日全体 Worker 槽；节点显式且合法 → 仅该 run 用该模；非法 → 硬失败可见；开工卡确认面无人改模入口；续跑继承可改；完成后图/用量可观测。
+
 ## 冷启动探索幕
 
 **触发（有项目）** ✅ 软硬分层（取代「空画像即挡请求」）：
@@ -185,6 +194,8 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `design_impl_same_grant` 设计+实现同 grant | **已接通**软提示（见上节）；禁硬拒 / 自动改图 |
 | `root_slice_honesty` 根单节点手写写工程无切片钉 | **已接通**软提示（见上节）；路径 B 嵌套合法且可响；禁硬拒 / 扫长文 / 用 `write_scope` |
 | 载体/手段纠偏靠硬闸 / 意图分类器 / 复活 `format_options` | **否决**；定案为提示词/Skill 顾问短问（见上节 · 载体/手段顾问） |
+| 账号级角色→模型矩阵 / `ModelTier{fast,strong}` 质量档 / 自动降级 / silent 回退野模型 | **否决**（与 per-run 显式覆盖正交；见上节 Per-worker） |
+| 无 UI 的 CEO 暗箱选模（有字段但图/用量不可见） | **否决** |
 
 ## 开场卡 / 检查点
 

@@ -18,6 +18,7 @@ from agentcore.core.errors import (
     BYOKKeyMissingError,
     LLMError,
     QuotaExceededError,
+    ValidationError,
     error_fields_for,
 )
 from agentcore.core.log_context import log_context
@@ -31,6 +32,7 @@ from agentcore.llm.credentials import (
     LLMCredentials,
 )
 from agentcore.llm.factory import build_provider
+from agentcore.llm.profiles import PLATFORM_PROVIDER_SENTINEL
 from agentcore.llm.provider.protocol import (
     LLMMessage,
     LLMRequest,
@@ -41,6 +43,7 @@ from agentcore.llm.provider.protocol import (
 )
 from agentcore.llm.resolve import (
     ModelConfig,
+    ModelSelection,
     platform_llm_credentials,
     resolve_conversation_model_selection,
 )
@@ -84,6 +87,27 @@ def _credentials_from_config(cfg: ModelConfig, *, conversation_id: str | None, t
     )
 
 
+def _explicit_selection_from_requested(requested: str | None) -> ModelSelection | None:
+    """Parse a node route key (``platform/{id}`` / ``{provider_id}/{id}``) into a selection.
+
+    Bare mint / chat model ids are not explicit — callers keep role-slot defaults.
+    Vendor router prefixes (``doubao/`` …) are not catalog identity triples; ignore.
+    """
+    raw = (requested or "").strip()
+    if not raw or "/" not in raw:
+        return None
+    prefix, _, rest = raw.partition("/")
+    if not prefix or not rest:
+        return None
+    from agentcore.llm.pricing import _VENDOR_PREFIXES
+
+    if prefix in _VENDOR_PREFIXES:
+        return None
+    if prefix == PLATFORM_PROVIDER_SENTINEL:
+        return ModelSelection(model=rest, origin="platform", provider_id=None)
+    return ModelSelection(model=rest, origin="byok", provider_id=prefix)
+
+
 async def _resolve_inference_credentials(
     session: AsyncSession,
     cost_repo: CostEventRepository,
@@ -91,8 +115,10 @@ async def _resolve_inference_credentials(
     *,
     conversation_id: str | None = None,
     cost_role: str | None = None,
+    requested_model: str | None = None,
 ) -> ModelConfig:
     from agentcore.db.repositories import ConversationRepository
+    from agentcore.llm.catalog import validate_model_choice
     from agentcore.llm.resolve import (
         resolve_account_default_model,
         resolve_account_worker_selection,
@@ -109,9 +135,32 @@ async def _resolve_inference_credentials(
     else:
         selection = await resolve_account_default_model(session, user.user_id)
 
-    # Delegated workers (member): profile worker slot when set (else follow main).
-    # Captain / arena / product-chrome roles keep the conversation main model.
-    if cost_role == ROLE_MEMBER:
+    # Per-worker / debate node override: body ``model`` as a catalog route key wins
+    # over role-slot defaults. Illegal identities hard-fail (no silent wild fallback).
+    explicit = _explicit_selection_from_requested(requested_model)
+    if explicit is not None:
+        ok = await validate_model_choice(
+            session,
+            user.user_id,
+            explicit.model,
+            explicit.origin,
+            explicit.provider_id,
+        )
+        if not ok:
+            raise ValidationError(
+                "节点模型不可用或未在目录中："
+                f"model={explicit.model} · origin={explicit.origin}"
+                + (
+                    f" · provider_id={explicit.provider_id}"
+                    if explicit.provider_id
+                    else ""
+                )
+                + "。请改选可用模型，禁止 silent 回退。"
+            )
+        selection = explicit
+    elif cost_role == ROLE_MEMBER:
+        # Delegated workers without a node identity: profile Worker slot (else main).
+        # Captain / arena / product-chrome roles keep the conversation main model.
         worker = await resolve_account_worker_selection(
             session, user.user_id, conv=conv
         )
@@ -318,6 +367,9 @@ async def inference_chat_completions(
                 user,
                 conversation_id=conversation_id,
                 cost_role=attribution.get("role"),
+                requested_model=payload.get("model")
+                if isinstance(payload.get("model"), str)
+                else None,
             )
         except BYOKKeyMissingError as e:
             return JSONResponse(
@@ -326,6 +378,11 @@ async def inference_chat_completions(
         except QuotaExceededError as e:
             return JSONResponse(
                 status_code=429, content={"error": {"code": e.code, "message": e.message}}
+            )
+        except ValidationError as e:
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"error": {"code": e.code, "message": e.message}},
             )
 
         creds = _credentials_from_config(cfg, conversation_id=conversation_id, trace_id=trace_id)

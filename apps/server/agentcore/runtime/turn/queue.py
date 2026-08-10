@@ -2,7 +2,9 @@
 
 When a turn is already in-flight for a conversation, subsequent ``POST …/messages``
 requests enqueue here instead of overlapping ``turn_runs`` slots / dual sinks.
-The active turn's done-callback drains the queue FIFO and starts the next turn.
+The active turn's done-callback drains the queue FIFO and starts the next turn —
+unless a cold-resume deferred waiter owns the next slot (see ``turn.runs``;
+deferred finishes first, then FIFO).
 
 发送即有流 (D9): the enqueueing POST keeps an SSE open — it immediately emits
 ``turn_queued``, then when drain starts that entry the **same connection** becomes
@@ -215,6 +217,11 @@ class TurnQueue:
             return
         if not self._queues.get(conversation_id):
             return
+        from .runs import turn_runs
+
+        # Cold resume deferred owns the next free slot — do not steal it for FIFO.
+        if turn_runs.has_resume_deferred(conversation_id):
+            return
         self._drain_scheduled.add(conversation_id)
         try:
             loop = asyncio.get_running_loop()
@@ -230,6 +237,9 @@ class TurnQueue:
         # If another turn already claimed the slot, wait for its done-callback.
         existing = turn_runs.get(conversation_id)
         if existing is not None and not existing.task.done():
+            return
+        # Deferred cold resume has priority over FIFO.
+        if turn_runs.has_resume_deferred(conversation_id):
             return
 
         item = self.pop_next(conversation_id)
@@ -287,7 +297,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
         item.started.set_result(sink)
     else:
         # No waiter / disconnected mid-queue → detached (attach / recovery as before).
-        sink.detach()
+        sink.detach(reason="queue_drain_no_waiter")
 
     task = asyncio.create_task(
         stream_chat(

@@ -3,11 +3,11 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
 
 /** Persistent composer hint while a decision card is waiting (弱提示 · 不强拦). */
 export const COMPOSER_PENDING_HINT =
-  "当前有待你确认的事项；直接发送将取消等待并开始新一轮";
+  "当前有待你确认的事项；另开一轮，确认卡仍保留";
 
 /** Confirm copy on first send while pending (同会话确认一次后不再弹). */
 export const COMPOSER_PENDING_SEND_CONFIRM =
-  "仍有待确认事项。发送将取消等待并开始新一轮，确定继续？";
+  "仍有待确认事项。发送将另开一轮，确认卡仍保留，确定继续？";
 
 /** Conversations where the user already confirmed「仍要发送」this session. */
 const sendDespitePendingAcks = new Set<string>();

@@ -263,7 +263,7 @@ export interface paths {
         put?: never;
         /**
          * List Account User Rules
-         * @description Injectable user rules (``ai_maintained=false``) for turn ``<rules>`` assembly.
+         * @description User rules for turn assembly: always → ``<rules>``; on_demand → catalog + consult.
          */
         post: operations["list_account_user_rules_v1_account_rules_list_post"];
         delete?: never;
@@ -2134,10 +2134,10 @@ export interface paths {
          *     The turn paused at a plan_review / ask_user / team_preview checkpoint and lost its
          *     live stream (disconnect / restart); only its persisted frame survived.
          *
-         *     Settlement 预写 (D8)：① peek frame → ② live-task drain（不 cancel；仍 live ⇒ 409）→
-         *     ③ ``*_resolved`` 落库成功 → ④ ``claim_paused_turn`` → ⑤ resume pipeline。settlement
-         *     写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状 404。settlement 落库后
-         *     pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
+         *     Settlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，
+         *     槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume
+         *     pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状
+         *     404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
          *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -3065,7 +3065,7 @@ export interface paths {
         head?: never;
         /**
          * Patch Document
-         * @description Rename and/or reparent a node (set ``reparent`` to apply ``parent_id``).
+         * @description Rename, reparent, and/or set apply_mode (set ``reparent`` to apply ``parent_id``).
          */
         patch: operations["patch_document_v1_documents__document_id__patch"];
         trace?: never;
@@ -5640,10 +5640,17 @@ export interface components {
             /** Folder Id */
             folder_id?: string | null;
         };
-        /** AccountRulesListResponse */
+        /**
+         * AccountRulesListResponse
+         * @description Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult_rule``.
+         */
         AccountRulesListResponse: {
+            /** Global On Demand Rules */
+            global_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Global Rules */
             global_rules: components["schemas"]["AccountRuleDoc"][];
+            /** Project On Demand Rules */
+            project_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Project Rules */
             project_rules: components["schemas"]["AccountRuleDoc"][];
         };
@@ -8031,6 +8038,12 @@ export interface components {
         /** DocumentCreateRequest */
         DocumentCreateRequest: {
             /**
+             * Apply Mode
+             * @default always
+             * @enum {string}
+             */
+            apply_mode: "always" | "on_demand";
+            /**
              * Content
              * @default
              */
@@ -8124,9 +8137,11 @@ export interface components {
         };
         /**
          * DocumentPatchRequest
-         * @description Rename and/or reparent a node (content untouched — that goes through PUT).
+         * @description Rename, reparent, and/or change apply_mode (content untouched — that goes through PUT).
          */
         DocumentPatchRequest: {
+            /** Apply Mode */
+            apply_mode?: ("always" | "on_demand") | null;
             /** Name */
             name?: string | null;
             /** Parent Id */
@@ -9482,6 +9497,21 @@ export interface components {
             tokens_total: number;
         };
         /**
+         * ModelOverride
+         * @description Delegate ``team_preview`` continue: human model cover (人盖 CEO).
+         *
+         *     Same triple family as debate ``ModelIdentity``. Empty map / missing key = leave
+         *     that node unchanged. Illegal shape → 422 (no silent fallback).
+         */
+        ModelOverride: {
+            /** Model */
+            model: string;
+            /** Origin */
+            origin?: ("platform" | "byok") | null;
+            /** Provider Id */
+            provider_id?: string | null;
+        };
+        /**
          * ModelPriceCard
          * @description Reused price card — USD per 1M tokens as decimal strings (money is never float).
          */
@@ -10258,14 +10288,24 @@ export interface components {
          *     plan_review; the server drops any pick not actually offered). The engine-only
          *     ``timeout`` is never sent by a client.
          *
-         *     ``excluded_run_ids`` / ``write_capability_overrides`` apply only to delegate
-         *     ``team_preview`` ``continue`` (开工组队有限否决). Debate / ask / plan_review /
-         *     stop ignore them (no 422). Hot-path ``ResolveInteraction`` is not extended.
+         *     ``excluded_run_ids`` / ``write_capability_overrides`` apply
+         *     only to delegate ``team_preview`` ``continue`` (开工组队有限否决).
+         *     ``model_overrides`` also apply to debate ``team_preview`` ``continue``
+         *     (人盖辩手 / 主持人；键 = 开赛前预分配 ``sides[].run_id`` / ``moderator_run_id``).
+         *     Ask / plan_review / stop ignore them (no 422). Hot-path
+         *     ``ResolveInteraction`` is not extended.
          */
         ResumeTurnRequest: {
             decision: components["schemas"]["CheckpointDecision"];
             /** Excluded Run Ids */
             excluded_run_ids?: string[];
+            /**
+             * Model Overrides
+             * @description run_id → {model, origin?, provider_id?}；空/缺键=不改该节点。
+             */
+            model_overrides?: {
+                [key: string]: components["schemas"]["ModelOverride"];
+            };
             /**
              * Note
              * @default

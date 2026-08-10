@@ -11,6 +11,7 @@ import { Check, GitBranch, Loader2, OctagonX, Pencil } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ConclusionHero } from "./ConclusionHero";
 import { PlanReviewContextBand } from "./PlanReviewContextBand";
+import { ResumeDeferredNotice } from "./ResumeDeferredNotice";
 import { useColdSubmit } from "./useColdSubmit";
 
 /** Cold-path plan_review resume card (拍板中心). */
@@ -18,13 +19,14 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
-  const { submitting, busy, send } = useColdSubmit(turn);
+  const { submitting, busy, deferredBusyReason, send } = useColdSubmit(turn);
+  const settlementLocked = deferredBusyReason !== null;
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
     icon: React.ReactNode,
   ) =>
-    submitting === decision ? (
+    submitting === decision || (settlementLocked && decision === "continue") ? (
       <Loader2 size={13} className="animate-spin" />
     ) : (
       icon
@@ -53,7 +55,7 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
       onClick={() => send("continue", [], note.trim())}
       aria-label={gateHint ? "继续。继续后，把关要点将发给下游" : undefined}
     >
-      继续
+      {settlementLocked ? "已记下" : "继续"}
     </Button>
   );
 
@@ -86,7 +88,10 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
         </div>
 
         <div className="shrink-0 space-y-2 border-t border-border bg-card/95 px-3 py-3 backdrop-blur-sm">
-          {noteOpen && (
+          {settlementLocked && deferredBusyReason ? (
+            <ResumeDeferredNotice busyReason={deferredBusyReason} />
+          ) : null}
+          {noteOpen && !settlementLocked && (
             <Textarea
               ref={noteRef}
               value={note}
@@ -99,35 +104,39 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
             />
           )}
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="ghost"
-              className="text-muted-foreground hover:text-foreground"
-              icon={spinnerOr("stop", <OctagonX size={13} />)}
-              disabled={busy}
-              onClick={() => send("stop", [], note.trim())}
-            >
-              取消
-            </Button>
-            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {!settlementLocked ? (
               <Button
-                variant="neutral"
-                icon={spinnerOr("adjust", <Pencil size={13} />)}
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+                icon={spinnerOr("stop", <OctagonX size={13} />)}
                 disabled={busy}
-                onClick={() => {
-                  if (!note.trim()) {
-                    if (noteOpen) {
-                      noteRef.current?.focus();
-                    } else {
-                      setNoteOpen(true);
-                    }
-                    return;
-                  }
-                  send("adjust", [], note.trim());
-                }}
+                onClick={() => send("stop", [], note.trim())}
               >
-                调整
+                取消
               </Button>
-              {gateHint ? (
+            ) : null}
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {!settlementLocked ? (
+                <Button
+                  variant="neutral"
+                  icon={spinnerOr("adjust", <Pencil size={13} />)}
+                  disabled={busy}
+                  onClick={() => {
+                    if (!note.trim()) {
+                      if (noteOpen) {
+                        noteRef.current?.focus();
+                      } else {
+                        setNoteOpen(true);
+                      }
+                      return;
+                    }
+                    send("adjust", [], note.trim());
+                  }}
+                >
+                  调整
+                </Button>
+              ) : null}
+              {gateHint && !settlementLocked ? (
                 <SimpleTooltip label="继续后，把关要点将发给下游">
                   <span
                     className="inline-flex"

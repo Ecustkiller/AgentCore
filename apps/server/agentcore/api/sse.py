@@ -6,6 +6,7 @@ Consumes an EventSink and serializes events as text/event-stream lines.
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from starlette.responses import StreamingResponse
 
@@ -100,7 +101,7 @@ async def _event_generator(
         #
         # Normal completion (sink closed by the pipeline) skips this branch.
         if detach_on_disconnect:
-            sink.detach()
+            sink.detach(reason="sse_disconnect")
         elif producer is not None and not producer.done():
             producer.cancel()
         raise
@@ -201,7 +202,7 @@ async def _attach_generator(
         async for frame in _live_tail(sink):
             yield frame
     except (asyncio.CancelledError, GeneratorExit):
-        sink.detach()
+        sink.detach(reason="sse_attach_disconnect")
         raise
 
 
@@ -274,7 +275,7 @@ async def _queued_turn_generator(
             if handed is None and not started.cancelled() and started.exception() is None:
                 handed = started.result()
             if handed is not None:
-                handed.detach()
+                handed.detach(reason="sse_queued_disconnect")
         raise
 
 
@@ -296,6 +297,68 @@ def sse_queued_response(
             queue_depth=queue_depth,
             started=started,
             degraded_from=degraded_from,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _resume_deferred_generator(
+    *,
+    message_id: str,
+    conversation_id: str,
+    busy_reason: Literal["wrap_up", "live_turn"],
+    started: asyncio.Future[EventSink],
+) -> AsyncIterator[str]:
+    """Emit ``resume_deferred``, wait for slot, then consume the resume sink.
+
+    Disconnect while waiting cancels ``started`` so wake starts resume detached
+    (settlement already durable — aligned with FIFO queued disconnect).
+    """
+    from agentcore.runtime.events import resume_deferred
+
+    sink: EventSink | None = None
+    try:
+        yield _format_sse(
+            resume_deferred(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                busy_reason=busy_reason,
+            )
+        )
+        sink = await started
+        async for frame in _event_generator(sink, None, detach_on_disconnect=True):
+            yield frame
+    except (asyncio.CancelledError, GeneratorExit):
+        if not started.done():
+            started.cancel()
+        else:
+            handed = sink
+            if handed is None and not started.cancelled() and started.exception() is None:
+                handed = started.result()
+            if handed is not None:
+                handed.detach(reason="sse_resume_deferred_disconnect")
+        raise
+
+
+def sse_resume_deferred_response(
+    *,
+    message_id: str,
+    conversation_id: str,
+    busy_reason: Literal["wrap_up", "live_turn"],
+    started: asyncio.Future[EventSink],
+) -> StreamingResponse:
+    """SSE for busy cold resume: ``resume_deferred`` then same-connection continuation."""
+    return StreamingResponse(
+        _resume_deferred_generator(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            busy_reason=busy_reason,
+            started=started,
         ),
         media_type="text/event-stream",
         headers={
