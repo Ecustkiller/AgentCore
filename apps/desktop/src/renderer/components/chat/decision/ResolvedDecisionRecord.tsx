@@ -1,4 +1,3 @@
-import { DecisionCard } from "@/components/ui";
 import { resolvedCheckpointTone } from "@/components/ui/tone-presets";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
@@ -8,9 +7,9 @@ import type { ResolvedToneKey } from "./meta";
 /**
  * Shared settled-record shell for ask_user + team_preview.
  *
- * Two layouts preserve the historical pixel contracts (tone-colored stub vs
- * neutral DecisionCard collapsible) — callers pick the layout; meta labels /
- * icons come from {@link ./meta}.
+ * Timeline metadata light card (ghost) — not the white DecisionCard box used by
+ * live collaboration / pending decisions. Callers pick toneStub vs
+ * neutralCollapsible; meta labels / icons come from {@link ./meta}.
  */
 export function ResolvedDecisionRecord(
   props:
@@ -61,7 +60,7 @@ function ToneStubRecord({
 
   return (
     <div
-      className={`mt-2 animate-task-card-enter rounded-xl border motion-reduce:animate-none ${tone.wrap}`}
+      className={`mt-2 animate-task-card-enter motion-reduce:animate-none${tone.wrap ? ` ${tone.wrap}` : ""}`}
       data-ask-intent={askIntent}
       data-ask-status="resolved"
     >
@@ -69,7 +68,7 @@ function ToneStubRecord({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 p-3 text-left"
+        className="flex w-full items-center gap-2 py-1.5 text-left"
       >
         <span
           className={`flex size-5 shrink-0 items-center justify-center rounded-full ${tone.badge}`}
@@ -109,7 +108,7 @@ function NeutralCollapsibleRecord({
   const [open, setOpen] = usePersistentDisclosure(disclosureKey, false);
 
   return (
-    <DecisionCard tone="neutral" className="bg-card/60">
+    <div className="mt-2 animate-task-card-enter">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0 text-muted-foreground">
           <Icon size={14} />
@@ -139,6 +138,6 @@ function NeutralCollapsibleRecord({
           {open && children}
         </div>
       </div>
-    </DecisionCard>
+    </div>
   );
 }

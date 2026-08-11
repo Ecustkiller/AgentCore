@@ -40,13 +40,16 @@ import {
   Link2,
   Maximize2,
   MoreHorizontal,
-  RefreshCw,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DeleteMessageAction, MessageTime } from "./MessageActions";
+import {
+  DeleteMessageAction,
+  MessageTime,
+  RegenerateMessageAction,
+} from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
 function cacheRatePercent(usage: UsageBreakdown): number | null {
@@ -433,11 +436,7 @@ export function AssistantMessageFooter({
         )}
         <FeedbackButtons message={message} />
         <BookmarkButton message={message} />
-        <SimpleTooltip label="重新生成">
-          <IconButton size="sm" aria-label="重新生成" onClick={onRegenerate}>
-            <RefreshCw size={14} />
-          </IconButton>
-        </SimpleTooltip>
+        <RegenerateMessageAction onRegenerate={onRegenerate} />
         <DeleteMessageAction messageId={message.id} compact />
         <MessageMoreMenu
           message={message}

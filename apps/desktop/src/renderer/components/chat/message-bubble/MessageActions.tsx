@@ -4,7 +4,7 @@ import { formatMessageTime } from "@/lib/format";
 import { notifyError } from "@/lib/toast";
 import { deleteMessage } from "@/services/messages";
 import { useConversationStore } from "@/stores/conversation";
-import { Check, Trash2, X } from "lucide-react";
+import { Check, RefreshCw, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 /** Small icon+label action shown beneath a message on hover. */
@@ -113,6 +113,55 @@ export function DeleteMessageAction({
       label="删除"
       onClick={() => setConfirming(true)}
     />
+  );
+}
+
+/**
+ * Assistant footer regenerate — always confirm (定案：对齐删除；截断历史+新贵回合).
+ * Does not cover edit-and-resend on the user bubble (intentional edit path).
+ */
+export function RegenerateMessageAction({ onRegenerate }: { onRegenerate: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (confirming) {
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <SimpleTooltip label="确认重新生成">
+          <IconButton
+            size="sm"
+            tone="destructive"
+            aria-label="确认重新生成"
+            onClick={() => {
+              setConfirming(false);
+              onRegenerate();
+            }}
+          >
+            <Check size={14} />
+          </IconButton>
+        </SimpleTooltip>
+        <SimpleTooltip label="取消">
+          <IconButton
+            size="sm"
+            aria-label="取消"
+            onClick={() => setConfirming(false)}
+          >
+            <X size={14} />
+          </IconButton>
+        </SimpleTooltip>
+      </span>
+    );
+  }
+
+  return (
+    <SimpleTooltip label="重新生成">
+      <IconButton
+        size="sm"
+        aria-label="重新生成"
+        onClick={() => setConfirming(true)}
+      >
+        <RefreshCw size={14} />
+      </IconButton>
+    </SimpleTooltip>
   );
 }
 

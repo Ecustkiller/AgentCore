@@ -23,8 +23,11 @@ export const EPISODIC_SUMMARY_CLAMP_CHARS = 60;
 /**
  * Memory-write notice on the conversation timeline (two-layer memory).
  *
+ * Bordered muted Card shell (摘要 / 记忆 only) — other timeline metadata stays ghost.
+ * Expand / navigate behavior unchanged.
+ *
  * - ``episodic``: light tip — session digest was filed for later consolidation.
- * - ``semantic``: expandable diff card — what changed in 偏好 / 画像 / 主题.
+ * - ``semantic``: expandable diff — what changed in 偏好 / 画像 / 主题.
  */
 export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   const navigate = useNavigate();

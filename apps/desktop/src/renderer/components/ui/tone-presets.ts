@@ -187,21 +187,22 @@ export const interactiveCheckpointTone = {
   },
 } as const;
 
-/** Settled ask_user record shells. */
+/** Settled ask_user / team_preview record shells (timeline metadata light cards). */
 export const resolvedCheckpointTone = {
   success: {
-    // Fully archival chrome; continue vs stop still differs by icon shape + label.
-    wrap: "border-border bg-card/60",
+    // Ghost row — no thick border/card fill; continue vs stop still differs by icon + label.
+    wrap: "",
     badge: "bg-muted text-muted-foreground",
     label: "text-muted-foreground",
   },
   destructive: {
-    wrap: "border-destructive/25 bg-destructive/5",
+    // Weak warning chrome only; still not a white DecisionCard box.
+    wrap: "border border-destructive/25 bg-destructive/5 px-3",
     badge: "bg-destructive/10 text-destructive",
     label: "text-destructive",
   },
   muted: {
-    wrap: "border-border bg-muted/30",
+    wrap: "",
     badge: "bg-muted text-muted-foreground",
     label: "text-muted-foreground",
   },
