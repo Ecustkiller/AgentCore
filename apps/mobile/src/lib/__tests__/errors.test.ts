@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  MODEL_CONFIG_PATH,
-  StreamHttpError,
   FINISH_REASON_LABELS,
   FINISH_REASON_META,
+  MODEL_CONFIG_PATH,
+  StreamHttpError,
   degradedFinishChipLabel,
   describeStreamHttpError,
   emptyChatCopy,

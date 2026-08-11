@@ -1911,9 +1911,7 @@ export function ChatPage() {
     try {
       // 定案 B: snapshot chosen / last-used profile at create (omit → server writes then-default).
       const id = await createConversation(undefined, {
-        ...(permissionDraftTouched
-          ? { permission_axes: permissionAxes }
-          : {}),
+        ...(permissionDraftTouched ? { permission_axes: permissionAxes } : {}),
         ...(currentProfileId ? { model_profile_id: currentProfileId } : {}),
       });
       pendingFirstSend = { id, text, attachments: outgoing };
