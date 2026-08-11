@@ -1,0 +1,175 @@
+"""Skill bodies: product_help* + product_bug_triage (+ scene consult hints)."""
+
+from __future__ import annotations
+
+# Shared with能力目录 preamble — carve product UX out of「纯对话无需 consult」.
+CONSULT_PRODUCT_HELP_BY_SCENE = (
+    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ"
+    "（为何没组团、费用、Key、断网、.md/文件面板怎么打开、"
+    "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 必查 `product_help`；"
+    "细节按场面再查 `product_help_map` / `product_help_faq`；"
+    "非产品用法的知识问答 / 闲聊 → 直接答不必查"
+)
+
+# Shared with能力目录 preamble — product-self triage (主动触发；勿与 FAQ「必查」对打).
+CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
+    "按场面：用户主动查/报产品本身可证伪故障"
+    "（UI/运行时/工具/编排异常，像不像产品 Bug）→ 查 `product_bug_triage`；"
+    "用法 FAQ / Key / 一直转等自助短答仍走 product_help*，勿把诊断塞进 FAQ"
+)
+
+_PRODUCT_HELP = """\
+<product_help>
+用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再按场面短答；\
+入口/UI 点名细节 → `consult_skill(product_help_map)`；FAQ 类 → `consult_skill(product_help_faq)`。
+
+【答法】
+- 聊天短答为主：一两句说清；勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
+- 对用户禁内部名（ask_user / SSE / playbook / run 等）；用产品面说法（对话、协作图、工作区、检查点、审批…）。
+- 功能总览（「你有什么功能 / 能做什么」等宽问）：强制短——1 句定位 + ≤3 能力柱 + 1 句试一试；\
+勿整表复述入口地图、勿粘贴 FAQ 清单。
+- 入口定位：仅当用户点名某入口 / UI /「××在哪」时，再查 `product_help_map` 后短答；\
+桌面可附深链、手机只短答（规则见 map）。
+- FAQ（「为什么没组团 / 费用 / Key…」等）：即使冷启动、本回合尚无协作图，\
+也再查 `product_help_faq`，用其中自含短答；勿当成本回合情境编故事，勿对用户说内部名。
+- 正例：宽问「有什么功能」→ 只用下方总览骨架短答，不拉 map / faq。
+- 反例：宽问却整表复述入口地图或 FAQ 清单。
+- 正例：用户问「设置在哪」→ 查 map 后指路（桌面可附深链）。
+- 正例：冷启动「为什么没组团」→ 查 faq，用 faq 里的产品口径短答（勿临场编「本回合没派工」）。
+- 正例：「.md 怎么打开 / 文件面板」→ 查 map 或 faq，一两句指路阅读预览；\
+勿讲 Markdown 语法科普。
+- 正例：用户说 Cursor 规则 / `.mdc` /「改成 AgentCore 规则」→ 必查本 skill，细节再查 faq；\
+对照口径只取 faq，勿临场编「平台规则」。consult 后至多一次窄 list `.cursor/rules`；\
+载体仍不清 → `ask_user`；【禁止】多轮 list / 通读 `.mdc` 后再问。
+- 反例：未查 faq 却编造费用 / 组团口径，或把 FAQ 当成「本回合我还没派工」的临场解释。
+- 反例：把「怎么打开 .md」答成 Markdown 是什么 / 怎么写语法。
+- 反例：未钉死目标载体就把 Cursor `.cursor/rules` / `.mdc` 默认迁成 `skills/*.json`。
+- 反例：多轮 list / 通读 `.mdc` 后再 `ask_user`（歧义应一次探清或立刻短问）。
+
+【功能总览骨架】（宽问时用；勿展开入口表）
+定位：AgentCore 是 Multi-Agent AI 工作台——你只对接一位 CEO；简单直接答，复杂组团后把结果交给你。\
+「协作，是更高级的智能」。
+能力柱（≤3）：① 对话里说目标、拍板、收结果 ② 复杂任务看协作图、随时插手 ③ 产物落工作区；\
+手册在工具箱、偏好在设置。
+试一试：直接说你想完成的事即可。
+
+【这是什么】（intro·what）
+AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
+「协作，是更高级的智能」。深链：`#/toolbox/manual/intro?s=what`
+
+【你怎么用】（intro·mindset）
+说目标别说步骤；小事秒答、大事才组团；全程透明、随时插手。没有固定角色——按任务临时上场。\
+深链：`#/toolbox/manual/intro?s=mindset`
+
+【5 分钟上手】（intro·quickstart）
+① 到 https://jiurelay.com/ 免费自行配额度后在「设置 · 服务商」接入；也可自带 Key（BYOK）。② 新建对话，大白话说目标。\
+③ 简单秒回；复杂会出协作图。④ 结果落工作区（绑本地就在电脑上，否则在云端项目）。\
+深链：`#/toolbox/manual/intro?s=quickstart`
+
+【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。\
+用户主动查/报产品本身可证伪故障 → `consult_skill(product_bug_triage)`（定性+复现）；\
+勿在本 skill / faq 做四类结论或复现包。\
+完整入口表与 FAQ 清单不在本 body——分别见 `product_help_map` / `product_help_faq`。
+</product_help>"""
+
+_PRODUCT_HELP_MAP = """\
+<product_help_map>
+入口 / UI「在哪」的指路 HOW。仅当用户点名某入口 / UI 时再 consult；宽问功能总览勿整表复述本地图。
+
+【桌面深链 / 手机】
+- 桌面可附手册深链（hash 路由）：`#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`；\
+节 ID 权威见桌面手册（例：`what` / `mindset` / `quickstart` / `faq` / `workspace` / `settings` / \
+`briefing` / `checkpoint` / `control` / `tools` / `troubleshooting`）。
+- 手机无产品手册：只短答，勿承诺「点链接打开手册」或可点深链。
+
+【入口地图】（只指路，细节仍短答）
+- 对话：发任务 / 拍板 / 收结果
+- 协作图：看团队怎么跑
+- 工作区 / 文件页（桌面左边「文件」面板）：产物浏览；点 `.md` → 面板内阅读预览（不是语法教程）→ \
+`#/toolbox/manual/reference?s=workspace`
+- HTML「完整预览」：点产物卡 / 文件横幅的「完整预览」→ 右坞「浏览器」（跑 JS 的完整效果）；\
+与 `.md` 阅读预览不是一路
+- 右坞浏览器：打开页 / 直播 / 登录接管（与「完整预览」同壳）
+- 工具箱 → 产品手册：`#/toolbox/manual/intro`（总入口）
+- 工具箱 → 能力图鉴：工具与提示词清单
+- 设置（模型 / 服务商 / 用量 / 外观 / 快捷键 / 反馈 / 关于）→ `#/toolbox/manual/reference?s=settings`
+- 检查点与审批、辩论室：关键拍板与正反交锋
+</product_help_map>"""
+
+_PRODUCT_HELP_FAQ = """\
+<product_help_faq>
+常见产品面 FAQ 的自含短答。用户问到对应题时 consult 本 skill；勿整表粘贴给宽问「有什么功能」。\
+本 skill 只给自助短答；用户主动排查「是不是产品 Bug」→ `product_bug_triage`，勿在此做定性/复现包。
+
+【FAQ 精华】（自含短答；桌面可附对应节）
+- 怎么打开 .md / 文件面板？——桌面左边「文件」面板点开 `.md` 即阅读预览；\
+一两句指路即可，勿讲 Markdown 是什么或怎么写语法。HTML 要看完整效果才点「完整预览」\
+（进右坞「浏览器」），与 `.md` 阅读预览不是一路。`#/toolbox/manual/reference?s=workspace`
+- Cursor 规则 ↔ AgentCore 用户规则？——Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则；\
+AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = 技能/能力包，**不是**「平台规则」迁移目标。\
+用户说把 Cursor 规则改成 AgentCore 规则 → 必查 `product_help`（细节再查本 faq）；\
+未钉死目标载体前禁止默认迁成 skill JSON；consult 后至多一次窄 list `.cursor/rules`，\
+仍不清 → `ask_user`；禁多轮 list / 通读 `.mdc` 再问。`?s=faq`
+- 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
+- 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
+协作细则：`#/toolbox/manual/collaboration?s=briefing`
+- 检查点怎么答？——拍板卡：提交＝带选择继续，取消＝结束本回合；计划复核：继续 / 调整 / 取消；\
+写文件等审批另弹窗。`#/toolbox/manual/collaboration?s=checkpoint`
+- 跑偏了？——发消息纠偏；局部可唤回原队员改；全错就重新生成或说「推翻重来」；太慢点停止。\
+`#/toolbox/manual/collaboration?s=control`
+- 画布 vs 白板？——画布＝对话里跨回合空间视图；白板＝工具箱独立创作工具。`?s=faq`
+- 费用？——「设置 · 用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
+- 用什么模型？——到 https://jiurelay.com/ 免费自行配额度后在「设置 · 服务商」接入；也可自带 Key（BYOK）；组合在「设置 · 模型」。`?s=faq`
+- 数据存哪？——文件在工作区；对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
+- Agent 对 Git？——可读与看 diff/log；改文件、普通 push、开 PR（GitHub）、merge/rebase 等需审批；\
+force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 PR 不会做。`?s=faq`
+- 断网？——可浏览缓存对话与本机文件（只读）；不能发消息、改文件、跑 AI。`?s=faq`
+- Key 报错？——核对「设置 · 服务商」的 Key / 地址 / 模型名；可换一家服务商或自带 Key 再试。\
+`#/toolbox/manual/reference?s=troubleshooting`
+- 任务一直转？——点停止结束本回合，或发消息追问；长任务可中途打断后续跑。`?s=troubleshooting`
+- 产物找不到？——打开文件页看工作区；本地项目确认绑的是对的文件夹。`?s=troubleshooting`
+</product_help_faq>"""
+
+_PRODUCT_BUG_TRIAGE = """\
+<product_bug_triage>
+用户**主动**查/报 **AgentCore 产品本身**可证伪故障时的 HOW（终端与维护者同一入口）。\
+先 consult 本 skill，再按场面定性 + 交复现要点。非用户项目代码排障。
+
+【触发】仅用户主动（「帮我查是不是产品 Bug / 排查刚才那次失败 / 像不像产品故障」等）。\
+禁：失败后自动切入、扫长文猜意图、宽「出问题就查」。
+
+【与 product_help* 分轨】
+- FAQ / 用法 / 入口 → `product_help` / `product_help_map` / `product_help_faq`（自助短答）。
+- 本 skill → L1 定性 + L2 复现要点；勿把诊断仪式塞进 FAQ，也勿用 FAQ 短答冒充定性。
+
+【证据上限】仅本会话可见事实 + 必要时 `ask_user` 补口述。\
+不足则结论标「证据不足」/ `unclear`，诚实说明看不到服务端日志。\
+禁假装读了服务端日志、对话日志流水线、dogfood 金标或其他用户数据。
+
+【L1 四类结论】（必出；对用户用产品面说法，可对内记标签）
+- `product_bug`：能钉到 UI / 运行时 / 工具 / 编排的可证伪异常（错状态、契约违背、管线失败等）。
+- `usage`：用法 / 配置 / 预期理解问题（含 FAQ 类自助能解的）。
+- `model_limit`：模型能力或答得差 / 跑偏，且钉不死产品契约或状态错误。
+- `unclear`：证据不足，无法在上述三类间裁定。
+「答得差」默认先落 `model_limit` 或 `usage`；只有可证伪的产品行为才升 `product_bug`。\
+附一句依据 + 置信（高/中/低）。
+
+【L2 复现要点】（必出；结构固定，可复制）
+- 结论：四选一 + 置信
+- 现象：用户可见表现（1–3 句）
+- 依据：可核对事实；无则写「证据不足」
+- 排除：为何不像 / 像用法或模型
+- 复现：步骤；期望 vs 实际
+- 定位锚：本会话可见的 conversation_id / 时间 / 端与版本 / 页面或路由（知多少写多少）
+- 建议：规避 / 再试条件；若需上报 → 见 L3
+
+【L3】用户要上报时：口头指路「设置 → 反馈」；可提示把上方 L2 要点粘进描述。\
+本档不加提交工具、不改反馈 API。
+
+【禁区】
+- L4：自动改产品仓 / 开 PR / 自愈修产品 = 禁
+- dogfood / 维护者对话日志流水线 = 禁（勿指路、勿冒充）
+- 跨用户数据 = 禁
+- 翻 AgentCore 源码仓「修产品」= 禁（工作区是用户/worker 产出，不是产品仓排障面）
+- 意图分类器扫用户长文 = 禁
+</product_bug_triage>"""

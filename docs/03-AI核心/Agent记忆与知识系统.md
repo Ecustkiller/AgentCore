@@ -117,7 +117,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 
 **系统模板 · 每日对话复盘** ✅：站立任务 `template_key=daily_conversation_review`（引导开、默认日跑）。作用域可配（全局裸聊 / 多云项目 / 回看小时）。**无新料硬闸**：作用域内无近期对话则收件箱直接「今日无新料」、不跑 LLM。有料时代跑 brief 要求 `ask_user card=daily_review`；用户勾选确认后**服务端直接**写记忆 / 用户规则 / `AgentCore/文档/reviews/`（不再依赖 LLM 再调 remember）。与语义巩固并存。→ `standing_tasks/templates.py` · `review_apply.py` · `review_preflight.py`；桌面 Toolbox → 自动化。
 
-**对外口径**（CEO 对用户说话）：白话三层——当前会话 / 偏好与笔记 / 点名可派队员查旧场；不报工具名与内部角色；手头无原文时说明「需要派人去查」再行动，禁止装不知道或空口编造。→ 见代码：`runtime/resolve/prompt.py`（【记忆/历史·对外口径】【跨会话原文】）
+**对外口径**（CEO 对用户说话）：白话三层——当前会话 / 偏好与笔记 / 点名可派队员查旧场；不报工具名与内部角色；手头无原文时说明「需要派人去查」再行动，禁止装不知道或空口编造。→ 见代码：`runtime/resolve/prompt/`（【记忆/历史·对外口径】【跨会话原文】）
 
 → 见代码：`conversation/log_export.py`、`tools/builtin/search_conversations.py`
 

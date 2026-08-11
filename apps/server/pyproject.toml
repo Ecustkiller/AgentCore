@@ -90,8 +90,7 @@ ignore = ["B008", "A002", "E402"]
 # Prompt-template module: long lines are verbatim LLM instructions, not code;
 # reflowing them would change what the planner model receives.
 "agentcore/runtime/planner.py" = ["E501"]
-"agentcore/runtime/prompt.py" = ["E501"]
-"agentcore/runtime/resolve/prompt.py" = ["E501"]
+"agentcore/runtime/resolve/prompt/*.py" = ["E501"]
 # Debate orchestration + tool packages: dense Chinese design commentary (主持人循环 /
 # 质询·记分·举证·结辩 各阶段的 why) + verbatim LLM feedback templates. Same reason-to-exempt as
 # the vectors glob below — reflowing the CJK prose hurts readability/diff, and E501 counts CJK
@@ -100,7 +99,7 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/runtime/debate/*.py" = ["E501"]
 "agentcore/tools/builtin/debate/*.py" = ["E501"]
 # Legal-vertical Skill bodies are verbatim Chinese LLM guidance (string literals),
-# same reason-to-exempt as runtime/skills.py: reflowing changes what the CEO consults.
+# same reason-to-exempt as runtime/skills/**: reflowing changes what the CEO consults.
 "agentcore/runtime/legal_skills.py" = ["E501"]
 # Conformance vectors embed long Chinese fixture strings; reflowing hurts diff readability.
 # (vectors became a package — match every vector module, not just the old single file.)
@@ -125,7 +124,7 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/sidecar/server_pkg/handlers.py" = ["E501"]
 "tests/**" = ["E501", "B017", "N818", "UP031"]
 "scripts/**" = ["E501"]
-"agentcore/runtime/skills.py" = ["E501"]
+"agentcore/runtime/skills/**" = ["E501"]
 "agentcore/runtime/events/disposition.py" = ["E501"]
 "agentcore/runtime/runs/executor/identities.py" = ["E501"]
 "agentcore/evals/spikes/**" = ["E501", "B007", "SIM103", "N818"]
