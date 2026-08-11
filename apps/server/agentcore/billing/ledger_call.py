@@ -13,6 +13,8 @@ shared) and is **not** an ``LLMService`` facade.
 
 from __future__ import annotations
 
+from typing import cast
+
 from agentcore.billing.attribution import resolve_ledger_role
 from agentcore.costing import CallCost
 from agentcore.llm.pricing import CredentialSource, resolve_credential_source
@@ -39,7 +41,9 @@ def assemble_ledger_call(
     reshape to :func:`~agentcore.runtime.costing.priced_call_cost` (不变量 #2).
     """
     explicit: CredentialSource | None = (
-        credential_source if credential_source in ("user", "platform", "vendor") else None
+        cast(CredentialSource, credential_source)
+        if credential_source in ("user", "platform", "vendor")
+        else None
     )
     source = resolve_credential_source(credential_source=explicit, model=model)
     return priced_call_cost(
