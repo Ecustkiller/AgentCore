@@ -1,6 +1,6 @@
 """AGENT-node setup: registry / identity / opening messages / note pull.
 
-Split from ``executor_node`` — pure move; consumed only by the node facade.
+Split from ``.node`` — pure move; consumed only by the node facade.
 """
 
 from __future__ import annotations
@@ -29,21 +29,21 @@ from agentcore.runtime.runs.constants import (
     READ_NOTES_TOOL_NAME,
 )
 from agentcore.runtime.runs.contract import node_has_dependents
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _build_messages,
     _context_block_payloads,
     _safe_index_files,
     load_context_inject_files,
 )
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_escalation import build_escalation_channel
-from agentcore.runtime.runs.executor_identities import (
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.escalation import build_escalation_channel
+from agentcore.runtime.runs.executor.identities import (
     _WORKER_TEAM_NOTE_POLICY,
     LeadSubteam,
     build_worker_identity,
 )
-from agentcore.runtime.runs.executor_retry import _files_expected
-from agentcore.runtime.runs.executor_shared import (
+from agentcore.runtime.runs.executor.retry import _files_expected
+from agentcore.runtime.runs.executor.shared import (
     _continuation_message,
     _registry_with,
     _registry_without,
@@ -374,7 +374,7 @@ async def prepare_agent_node(
         and prior_attempt.transcript
     )
     if not cold_open:
-        from agentcore.runtime.runs.executor_continue import (
+        from agentcore.runtime.runs.executor.continuation import (
             _record_continuation_run_head,
             _strip_historical_reasoning,
         )
@@ -478,7 +478,7 @@ async def prepare_agent_node(
             MAX_CONTRACT_RETRIES,
         )
 
-    from agentcore.runtime.runs.executor_hooks import _two_phase_citation
+    from agentcore.runtime.runs.executor.hooks import _two_phase_citation
 
     two_phase = _two_phase_citation(deliverable)
 

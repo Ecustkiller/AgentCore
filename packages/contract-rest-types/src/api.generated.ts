@@ -355,6 +355,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/beta-group/moderators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Beta Group Moderators
+         * @description List 内测群版主 (``chat_members.role=admin``).
+         */
+        get: operations["list_beta_group_moderators_v1_admin_beta_group_moderators_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/beta-group/moderators/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Appoint Beta Group Moderator
+         * @description Appoint a user as 内测群版主 (ensures membership).
+         */
+        put: operations["appoint_beta_group_moderator_v1_admin_beta_group_moderators__user_id__put"];
+        post?: never;
+        /**
+         * Revoke Beta Group Moderator
+         * @description Revoke 内测群版主 (role → member; stays in group).
+         */
+        delete: operations["revoke_beta_group_moderator_v1_admin_beta_group_moderators__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/conversations": {
         parameters: {
             query?: never;
@@ -3432,8 +3476,8 @@ export interface paths {
         put?: never;
         /**
          * Announce
-         * @description Post an admin announcement as a centered system_card, fanned out to members
-         *     (platform-admin only). 404 unknown chat; 422 for a dm.
+         * @description Post a group announcement as a centered system_card, fanned out to members.
+         *     404 unknown chat; 422 for a dm; 403 if not a moderator.
          */
         post: operations["announce_v1_messages_chats__chat_id__announce_post"];
         delete?: never;
@@ -3532,10 +3576,11 @@ export interface paths {
         post?: never;
         /**
          * Kick Member
-         * @description Remove a member from a group (platform-admin only); posts a system notice.
+         * @description Remove a member from a group; posts a system notice.
          *
-         *     403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for
-         *     a dm; 403 when the target is an admin (admins can't be moderated).
+         *     403 if actor is not a platform admin or group moderator; 404 unknown chat or
+         *     non-member target; 422 for a dm; 403 when the target is a platform admin (or,
+         *     for group mods, another group moderator).
          */
         delete: operations["kick_member_v1_messages_chats__chat_id__members__target_id__delete"];
         options?: never;
@@ -3554,8 +3599,8 @@ export interface paths {
         put?: never;
         /**
          * Mute Member
-         * @description Mute / unmute a member (platform-admin only): a muted member can read but
-         *     not send (403 on send). Same gates as kick.
+         * @description Mute / unmute a member: a muted member can read but not send (403 on send).
+         *     Same gates as kick.
          */
         post: operations["mute_member_v1_messages_chats__chat_id__members__target_id__mute_post"];
         delete?: never;
@@ -6456,6 +6501,37 @@ export interface components {
             /** @default less_interrupt */
             policy: components["schemas"]["AutonomyPolicy"];
         };
+        /**
+         * BetaGroupModerator
+         * @description One 内测群版主 row for the admin console appoint surface.
+         */
+        BetaGroupModerator: {
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            /**
+             * Is Platform Admin
+             * @default false
+             */
+            is_platform_admin: boolean;
+            /** Username */
+            username: string;
+        };
+        /**
+         * BetaGroupModeratorsResponse
+         * @description 内测群 roster of group-level moderators (``chat_members.role=admin``).
+         */
+        BetaGroupModeratorsResponse: {
+            /** Chat Id */
+            chat_id: string;
+            /** Data */
+            data: components["schemas"]["BetaGroupModerator"][];
+            /** Title */
+            title: string;
+            /** Total */
+            total: number;
+        };
         /** BigFive */
         BigFive: {
             /**
@@ -6991,6 +7067,12 @@ export interface components {
         ChatParticipant: {
             /** Display Name */
             display_name: string;
+            /**
+             * Group Role
+             * @default member
+             * @enum {string}
+             */
+            group_role: "owner" | "admin" | "member";
             /** Id */
             id: string;
             /**
@@ -9342,7 +9424,7 @@ export interface components {
         };
         /**
          * MessageMentionEveryone
-         * @description @所有人 — group chats only; platform admin gate enforced in service.
+         * @description @所有人 — group chats only; platform admin or group moderator gate in service.
          */
         MessageMentionEveryone: {
             /**
@@ -12919,6 +13001,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminAgentAuditSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_beta_group_moderators_v1_admin_beta_group_moderators_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetaGroupModeratorsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    appoint_beta_group_moderator_v1_admin_beta_group_moderators__user_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetaGroupModerator"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_beta_group_moderator_v1_admin_beta_group_moderators__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */

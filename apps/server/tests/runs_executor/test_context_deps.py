@@ -2,7 +2,7 @@ from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
-from agentcore.runtime.runs.executor_context import _dep_context_blocks
+from agentcore.runtime.runs.executor.context import _dep_context_blocks
 from agentcore.runtime.runs.types import RunPhase, RunPolicy, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.registry import ToolRegistry

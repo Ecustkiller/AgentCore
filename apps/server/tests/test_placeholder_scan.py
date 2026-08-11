@@ -29,7 +29,7 @@ def test_skeleton_placeholder_phone_soft_warns_with_location():
 
     v = check_contract(
         "官网已写入",
-        Deliverable(form="files", requires_files=True, artifacts=["index.html"]),
+        Deliverable(form="files", artifacts=["index.html"]),
         files_written=1,
         workspace_paths=["index.html"],
         artifact_contents={"index.html": html},
@@ -53,7 +53,7 @@ def test_soft_unverified_self_note_warns_only():
 
     v = check_contract(
         "报告已写入",
-        Deliverable(form="files", requires_files=True, artifacts=["report.md"]),
+        Deliverable(form="files", artifacts=["report.md"]),
         files_written=1,
         workspace_paths=["report.md"],
         artifact_contents={"report.md": md},
@@ -81,7 +81,7 @@ def test_code_file_todo_xxx_exempt_from_skeleton():
 
     v = check_contract(
         "代码已写入",
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         files_written=2,
         workspace_paths=["svc.py", "ui.ts"],
         artifact_contents={"svc.py": py, "ui.ts": ts},
@@ -98,12 +98,12 @@ def test_needs_file_contents_true_for_content_surface_paths():
     assert is_content_deliverable_path("site/index.html")
     assert is_code_deliverable_path("src/main.py")
     assert needs_file_contents(
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         landed_paths=["report.md"],
     )
     assert needs_file_contents(None, landed_paths=["about.html"])
     assert not needs_file_contents(
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         landed_paths=["main.py"],
     )
 
@@ -204,7 +204,6 @@ def test_placeholder_hard_exempt_artifact_skips_skeleton_keeps_soft():
         "契约已写入",
         Deliverable(
             form="files",
-            requires_files=True,
             artifacts=["site/CONTRACT.md"],
             placeholder_hard_exempt_artifacts=["site/CONTRACT.md"],
         ),
@@ -224,7 +223,6 @@ def test_placeholder_exempt_does_not_shield_user_html():
         "骨架已落盘",
         Deliverable(
             form="files",
-            requires_files=True,
             artifacts=["site/index.html", "site/CONTRACT.md"],
             placeholder_hard_exempt_artifacts=["site/CONTRACT.md"],
         ),
@@ -247,7 +245,6 @@ def test_placeholder_hard_exempt_bool_covers_all_artifacts():
         "QA 已写入",
         Deliverable(
             form="files",
-            requires_files=True,
             artifacts=["site/QA.md"],
             placeholder_hard_exempt=True,
         ),

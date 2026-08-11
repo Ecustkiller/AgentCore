@@ -5,7 +5,7 @@ from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
-from agentcore.runtime.runs.executor_identities import LeadSubteam
+from agentcore.runtime.runs.executor.identities import LeadSubteam
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler
@@ -222,7 +222,7 @@ async def test_handoff_prompt_splits_by_topology():
     substantial-work guidance + short-answer exemption「不必为交而交」— aligned
     with the engine gate and the handoff tool description.
     """
-    from agentcore.runtime.runs.executor_identities import build_worker_identity
+    from agentcore.runtime.runs.executor.identities import build_worker_identity
     from agentcore.tools.builtin.handoff import HandoffTool
 
     upstream = build_worker_identity(has_dependents=True, captain=False)
@@ -288,7 +288,7 @@ def test_worker_identity_states_no_execution_capability():
     能写脚本落盘、不能运行、不能生成需运行程序才产出的二进制文件、禁止谎称已运行/已生成；
     can_execute=True（默认）保持原样，本地/沙箱路径字节不变。
     """
-    from agentcore.runtime.runs.executor_identities import build_worker_identity
+    from agentcore.runtime.runs.executor.identities import build_worker_identity
 
     no_exec = build_worker_identity(has_dependents=False, can_execute=False)
     assert "本回合执行环境未装配" in no_exec
@@ -306,7 +306,7 @@ def test_worker_identity_states_no_execution_capability():
 
 def test_worker_identity_teaches_escalate_blocking_choice():
     """Worker 按题自选 blocking：identity 须写清该停 / 能报，且不再写「escalate 不会打断你」。"""
-    from agentcore.runtime.runs.executor_identities import build_worker_identity
+    from agentcore.runtime.runs.executor.identities import build_worker_identity
 
     body = build_worker_identity(has_dependents=False)
     assert "blocking=false" in body

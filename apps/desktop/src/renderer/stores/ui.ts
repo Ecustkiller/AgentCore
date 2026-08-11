@@ -47,18 +47,21 @@ function persistTheme(v: Theme): void {
   uiSet(THEME_KEY, v);
 }
 
-// 本机执行（sidecar）开关——三态偏好（双模式工作区 §7.2）。
+// 本机执行（sidecar）偏好——三态（双模式工作区 §7.2）。
 //
-// 产品：本机传统（mode=local）新开回合默认同侧 sidecar；本开关是诊断/强制关，不是「默认关→整段过桥」。
-// 设置 UI「允许本机执行」：
-//   - 打开 → 偏好 `on`（允许本机同侧；与 unset 对路由等价）
-//   - 关闭 → 偏好 `off`（显式强制走云，诊断用）
+// 产品：本机传统（mode=local）新开回合默认同侧 sidecar。大众 Appearance **不再**暴露本开关；
+// 强制关（偏好 `off`）仅诊断入口可写——不是「默认关→整段过桥」。
+//   - `setSidecarEnabled(true)` → 偏好 `on`（允许本机同侧；与 unset 对路由等价）
+//   - `setSidecarEnabled(false)` → 偏好 `off`（显式强制走云，诊断用）
 // 持久化的是**偏好**而非有效值，故翻产品默认时不静默改写已落盘的 `on`/`off`：
 //   - "unset"（无 key）→ 跟随 `SIDECAR_DEFAULT_ENABLED`（仅影响 {@link sidecarEnabled} 展示布尔；
 //     路由以 `sidecarPreference === "off"` 为强制关，unset **不**挡本机传统）
-//   - "on" / "off" → 用户显式选择，恒被尊重
+//   - "on" / "off" → 显式选择，恒被尊重（历史大众路径落盘的 `off` 见一次性迁移）
 // 新开回合路由读 `sidecarPreference`（见 `isSidecarForceOff`），勿把 `sidecarEnabled` 当默认挡板。
 type SidecarPreference = "unset" | "on" | "off";
+
+/** 一次性清历史：大众 Appearance 曾可写 `off`；毕业后加载时把历史 off→unset，之后诊断仍可显式写 off。 */
+const SIDECAR_OFF_CLEARED_KEY = "sidecar-off-cleared-v1";
 
 /** 未表态时 {@link sidecarEnabled} 布尔默认。保持 false——**勿**翻成全站 true 当「默认同侧」捷径；
  * 本机传统默认同侧由 `resolveSidecarRoot` 按绑定判定，与本常量解耦。"unset" 跟随此默认记入
@@ -76,8 +79,18 @@ export function parseSidecarPreference(raw: unknown): SidecarPreference {
   return "unset";
 }
 
-function loadSidecarPreference(): SidecarPreference {
-  return parseSidecarPreference(uiGet<unknown>(SIDECAR_KEY));
+/**
+ * 加载本机执行偏好。尚未写过 {@link SIDECAR_OFF_CLEARED_KEY} 时做一次性迁移：
+ * 已落盘 `off`（含旧 boolean `false` 经 {@link parseSidecarPreference}）删键 → `unset`，并写 flag。
+ * 之后诊断入口 `setSidecarEnabled(false)` 再写的 `off` 不会被二次清掉。
+ */
+export function loadSidecarPreference(): SidecarPreference {
+  const pref = parseSidecarPreference(uiGet<unknown>(SIDECAR_KEY));
+  if (uiGet<boolean>(SIDECAR_OFF_CLEARED_KEY) === true) return pref;
+  uiSet(SIDECAR_OFF_CLEARED_KEY, true);
+  if (pref !== "off") return pref;
+  uiSet(SIDECAR_KEY, undefined);
+  return "unset";
 }
 
 function persistSidecarPreference(p: "on" | "off"): void {
@@ -115,7 +128,8 @@ interface UIState {
    * 设置面应用 `preference !== "off"` 表示「允许」，以免 unset 显示关却仍默认同侧。 */
   sidecarEnabled: boolean;
   /** 本机执行**持久化偏好**（三态）：`unset` / `on` = 允许本机传统同侧；`off` = 诊断强制走云。
-   * 翻产品默认时不静默改写已落盘偏好。持久化到 `agentcore:sidecar-enabled`。 */
+   * 翻产品默认时不静默改写已落盘偏好。持久化到 `agentcore:sidecar-enabled`。
+   * 大众 Appearance 无此开关；强制关仅诊断入口。 */
   sidecarPreference: SidecarPreference;
 
   openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;

@@ -21,6 +21,7 @@ import {
   degradedFinishChipLabel,
   errorActionForCode,
   formatAssistantErrorMessage,
+  isEmptyResponseUserSurface,
   syntheticErrorForEmptyFailure,
   visibleMessageText,
 } from "@/lib/errors";
@@ -31,7 +32,11 @@ import {
   pickCostMoney,
 } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
-import { formatSupportDiagnosticText } from "@/lib/supportDiagnostics";
+import {
+  formatSupportDiagnosticText,
+  precedingUserMessageId,
+  supportDiagnosticExtrasFromError,
+} from "@/lib/supportDiagnostics";
 import { notifySuccess } from "@/lib/toast";
 import { runRegenerate } from "@/services/turns";
 import {
@@ -134,11 +139,22 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   // User-stop: no chat-timeline「已停止」face (P1); team StatusStrip still labels cancelled.
   // 定案 A：红错误卡不挂「重新生成」（整轮推翻易乱；失败救火改再说/改发）。底栏 footer 仍保留。
   const isUserStopped = displayError?.code === "TURN_CANCELLED";
+  const emptyDiagnosis = message.error?.context?.empty_diagnosis;
+  const hideFinishReasonChip = isEmptyResponseUserSurface({
+    code: displayError?.code ?? message.error?.code,
+    emptyDiagnosis,
+    message: displayError?.message ?? message.error?.message,
+  });
   const supportDiagnosticText = formatSupportDiagnosticText({
     conversationId,
     messageId: assistantProjectionId(message),
+    userMessageId: precedingUserMessageId(
+      getActiveRuntime().messages,
+      message.id,
+    ),
     traceId: message.traceId,
     executionId: message.executionId,
+    ...supportDiagnosticExtrasFromError(message.error),
   });
   const copySupportDiagnostics = () => {
     if (!supportDiagnosticText) return;
@@ -257,16 +273,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     );
 
   const handleRegenerate = () => {
-    const msgs = getActiveRuntime().messages;
-    const idx = msgs.findIndex((m) => m.id === message.id);
-    if (idx <= 0) return;
-    let userId: string | null = null;
-    for (let i = idx - 1; i >= 0; i--) {
-      if (msgs[i].role === "user") {
-        userId = msgs[i].id;
-        break;
-      }
-    }
+    const userId = precedingUserMessageId(
+      getActiveRuntime().messages,
+      message.id,
+    );
     if (userId) void runRegenerate(userId);
   };
 
@@ -363,13 +373,15 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
-      <FinishReasonChip
-        reason={finishReason}
-        diagnosisLabel={degradedFinishChipLabel(
-          message.error?.context?.empty_diagnosis,
-          displayError?.message ?? message.error?.message,
-        )}
-      />
+      {!hideFinishReasonChip && (
+        <FinishReasonChip
+          reason={finishReason}
+          diagnosisLabel={degradedFinishChipLabel(
+            emptyDiagnosis,
+            displayError?.message ?? message.error?.message,
+          )}
+        />
+      )}
       {message.turnWarning && (
         <TurnWarningBanner message={message.turnWarning} />
       )}
@@ -397,6 +409,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             {connectivityEscalationSuffix(displayError.code, message.id, {
               message: displayError.message,
               upstreamStatus: message.error?.context?.upstream_status,
+              emptyDiagnosis,
             })}
           </p>
           {supportDiagnosticText && (

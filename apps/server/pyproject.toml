@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.3.51"
+version = "0.3.52"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -112,13 +112,13 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/tools/builtin/delegate/schema.py" = ["E501"]
 "agentcore/runtime/delegate/drive.py" = ["E501"]
 "agentcore/tools/builtin/delegate/tool.py" = ["E501"]
-"agentcore/runtime/runs/executor_node.py" = ["E501"]
-"agentcore/runtime/runs/executor_setup.py" = ["E501"]
-"agentcore/runtime/runs/executor_loop.py" = ["E501"]
-"agentcore/runtime/runs/executor_retry.py" = ["E501"]
-"agentcore/runtime/runs/executor_hooks.py" = ["E501"]
-"agentcore/runtime/runs/executor_terminal.py" = ["E501"]
-"agentcore/runtime/runs/executor_escalation.py" = ["E501"]
+"agentcore/runtime/runs/executor/node.py" = ["E501"]
+"agentcore/runtime/runs/executor/setup.py" = ["E501"]
+"agentcore/runtime/runs/executor/loop.py" = ["E501"]
+"agentcore/runtime/runs/executor/retry.py" = ["E501"]
+"agentcore/runtime/runs/executor/hooks.py" = ["E501"]
+"agentcore/runtime/runs/executor/terminal.py" = ["E501"]
+"agentcore/runtime/runs/executor/escalation.py" = ["E501"]
 "agentcore/tools/protocol.py" = ["E501"]
 "agentcore/tools/builtin/git_ops/**" = ["E501"]
 "agentcore/tools/builtin/revise.py" = ["E501"]
@@ -127,7 +127,7 @@ ignore = ["B008", "A002", "E402"]
 "scripts/**" = ["E501"]
 "agentcore/runtime/skills.py" = ["E501"]
 "agentcore/runtime/events/disposition.py" = ["E501"]
-"agentcore/runtime/runs/executor_identities.py" = ["E501"]
+"agentcore/runtime/runs/executor/identities.py" = ["E501"]
 "agentcore/evals/spikes/**" = ["E501", "B007", "SIM103", "N818"]
 "agentcore/simulation/**" = ["E501", "N818"]
 "agentcore/conformance/vectors/__init__.py" = ["F401"]
@@ -315,14 +315,14 @@ module = [
     "agentcore.runtime.pipeline.run",
     "agentcore.runtime.pipeline.stage_card_debate",
     "agentcore.runtime.resolve.prepare",
-    "agentcore.runtime.runs.executor_captain",
-    "agentcore.runtime.runs.executor_node",
-    "agentcore.runtime.runs.executor_setup",
-    "agentcore.runtime.runs.executor_loop",
-    "agentcore.runtime.runs.executor_retry",
-    "agentcore.runtime.runs.executor_hooks",
-    "agentcore.runtime.runs.executor_terminal",
-    "agentcore.runtime.runs.executor_shared",
+    "agentcore.runtime.runs.executor.captain",
+    "agentcore.runtime.runs.executor.node",
+    "agentcore.runtime.runs.executor.setup",
+    "agentcore.runtime.runs.executor.loop",
+    "agentcore.runtime.runs.executor.retry",
+    "agentcore.runtime.runs.executor.hooks",
+    "agentcore.runtime.runs.executor.terminal",
+    "agentcore.runtime.runs.executor.shared",
     "agentcore.runtime.runs.wave",
     "agentcore.runtime.safety_breaker",
     "agentcore.runtime.session_persistence",

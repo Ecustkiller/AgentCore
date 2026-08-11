@@ -29,7 +29,10 @@ from agentcore.runtime.pipeline.resume import (
 )
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
-from agentcore.tools.builtin.ask_user.result import confirmed_defaults_summary
+from agentcore.tools.builtin.ask_user.result import (
+    confirmed_defaults_summary,
+    structured_options_summary,
+)
 
 
 def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
@@ -91,6 +94,56 @@ def test_result_continue_empty_injects_confirmed_defaults():
     assert "按确认默认" in res.output
     assert "先问你" in res.output  # 禁表出现在注入文案里
     assert "上班族 + 半天块通用模板" in res.output
+
+
+def test_result_continue_empty_injects_path_default():
+    """53f08：新建仓库/本地路径 default + option.path → 空 continue 注入路径。"""
+    questions = [
+        {
+            "id": "q0",
+            "prompt": "仓库路径",
+            "kind": "choice",
+            "options": [
+                {"label": "当前目录建仓", "path": "C:/Work/demo-repo"},
+                {"label": "另选文件夹"},
+            ],
+            "multiple": False,
+            "default": "当前目录建仓",
+        }
+    ]
+    summary = confirmed_defaults_summary(questions)
+    assert "当前目录建仓" in summary
+    assert "C:/Work/demo-repo" in summary
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[]),
+        questions=questions,
+    )
+    assert res.output.startswith("用户确认默认：")
+    assert "C:/Work/demo-repo" in res.output
+    assert "按确认默认" in res.output
+
+
+def test_result_continue_empty_restates_options_without_default():
+    """d4d5：空 continue + 有选项无 default → 复述选项，禁冲成空模板。"""
+    questions = [
+        {
+            "id": "q0",
+            "prompt": "目录恢复后怎么走",
+            "kind": "choice",
+            "options": ["重新打开/授权", "告知新路径", "改审名册其他项目"],
+            "multiple": False,
+            "default": "",
+        }
+    ]
+    assert "重新打开/授权" in structured_options_summary(questions)
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[]),
+        questions=questions,
+    )
+    assert "复述" in res.output
+    assert "重新打开/授权" in res.output
+    assert "等待确认后再派工" in res.output  # 禁表出现在注入文案里
+    assert "按你提出的方向继续" not in res.output
 
 
 # --- ask_user_tool_result: the shared answer → ToolResult mapping ------------------

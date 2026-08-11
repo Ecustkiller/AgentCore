@@ -2,7 +2,7 @@ from agentcore.runtime.runs.cutoff import (
     DEGRADED_HANDOFF_WARNING,
     REASON_DEGRADED_HANDOFF,
 )
-from agentcore.runtime.runs.executor_shared import (
+from agentcore.runtime.runs.executor.shared import (
     _hard_gap_blocks_completion,
     _is_hard_failure,
 )
@@ -20,9 +20,9 @@ def test_is_hard_failure_nonempty_depends_on_strict():
     assert _is_hard_failure("x", Deliverable(strict=True)) is True
 
 
-def test_is_hard_failure_requires_files_zero_disk_is_soft():
-    """甲⁺：requires_files ∧ files_touched==0 不再硬失败（有正文即可 soft-complete）。"""
-    d = Deliverable(requires_files=True, strict=False)
+def test_is_hard_failure_files_form_zero_disk_is_soft():
+    """甲⁺：form=files ∧ files_touched==0 不再硬失败（有正文即可 soft-complete）。"""
+    d = Deliverable(form="files", strict=False)
     assert _is_hard_failure("有正文但未落盘", d, files_touched=0) is False
     assert _is_hard_failure("有正文且已落盘", d, files_touched=1) is False
 

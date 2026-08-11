@@ -95,7 +95,7 @@ def test_llm_gateway_does_not_import_db() -> None:
 
     Exemptions are intentional llm↔db bridges:
     - ``provider_service`` / ``resolve`` — BYOK credential resolution
-    - ``model_profiles`` — named profile CRUD + expand (slots → live selections)
+    - ``model_profiles`` — combo CRUD + expand (derived from catalog 上架; not metadata owner)
     - ``factory`` — ``build_turn_router`` may open a session to inject a cross-provider
       worker (agent provider_id ≠ chat provider)
     """
@@ -231,8 +231,8 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "resolve/prompt.py",
         "runs/builder.py",
         "runs/contract.py",
-        "runs/executor_context.py",
-        "runs/executor_loop.py",
+        "runs/executor/context.py",
+        "runs/executor/loop.py",
         "runs/research_quality.py",
         "runs/wave.py",
         "skills.py",
@@ -291,3 +291,39 @@ def test_runtime_root_shims_are_aliases_not_logic() -> None:
         if text.count("\n") > 20:
             fat.append(f"{path.name}: too large for a shim ({text.count(chr(10))} lines)")
     assert fat == [], "runtime root shims drifted from alias form:\n  " + "\n  ".join(fat)
+
+
+def test_runs_executor_has_no_flat_shims() -> None:
+    """``runs/executor/`` is the only path — forbid resurrecting ``runs/executor_*.py``."""
+    runs = _PKG_ROOT / "runtime" / "runs"
+    flat = sorted(p.name for p in runs.glob("executor_*.py"))
+    assert flat == [], (
+        "flat runs/executor_*.py shims are retired; use "
+        "agentcore.runtime.runs.executor.<leaf>:\n  " + "\n  ".join(flat)
+    )
+    # Real imports only (AST) — ``…runs.executor`` package ok; ``…executor_*`` not.
+    prefix = "agentcore.runtime.runs.executor_"
+    bad_imports: list[str] = []
+    for root in (
+        _PKG_ROOT / "runtime",
+        _PKG_ROOT / "tools",
+        _PKG_ROOT / "evals",
+        _SERVER_ROOT / "tests",
+    ):
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                mods = _module_imports(path)
+            except SyntaxError:
+                continue
+            for mod in mods:
+                if mod.startswith(prefix):
+                    bad_imports.append(
+                        f"{path.relative_to(_SERVER_ROOT).as_posix()}: {mod}"
+                    )
+    assert bad_imports == [], (
+        "old flat executor_* import paths still referenced:\n  " + "\n  ".join(bad_imports)
+    )

@@ -53,6 +53,9 @@ class ErrorCode(StrEnum):
 
     # ── LLM provider (DeepSeek / BYOK) ───────────────────────────────────
     LLM_ERROR = "LLM_ERROR"
+    # Empty-response ladder → finish_reason=degraded; dedicated code so clients
+    # do not treat it as transport failure (Base URL / API Key escalation).
+    LLM_EMPTY_RESPONSE = "LLM_EMPTY_RESPONSE"
     LLM_RATE_LIMIT = "LLM_RATE_LIMIT"
     LLM_TIMEOUT = "LLM_TIMEOUT"
     LLM_INSUFFICIENT_BALANCE = "LLM_INSUFFICIENT_BALANCE"  # valid key, empty wallet (402)

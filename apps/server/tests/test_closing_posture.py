@@ -86,6 +86,24 @@ def test_reconcile_drops_ask_pre_pause_when_resume_dispatched():
     assert "按确认默认" in out
 
 
+def test_reconcile_keeps_structured_pre_pause_over_hollow_template():
+    """d4d5 / 53f08：续写若只剩空 pause 模板，保留上轮结构化确认正文。"""
+    from agentcore.runtime.engine.ask_user_pause_visible import (
+        ASK_USER_PAUSE_USER_VISIBLE,
+    )
+
+    pre = (
+        "交付状态：尚未开工（等待目录恢复）。请选择："
+        "重新打开/授权 / 告知新路径 / 改审名册其他项目，然后回复「已恢复」。"
+    )
+    out = reconcile_resume_closing(pre, ASK_USER_PAUSE_USER_VISIBLE)
+    assert "重新打开/授权" in out
+    assert "已恢复" in out
+    assert out != ASK_USER_PAUSE_USER_VISIBLE
+    # Hollow pre_pause must not seed / join over real resume content.
+    assert reconcile_resume_closing(ASK_USER_PAUSE_USER_VISIBLE, "日程已落盘。") == "日程已落盘。"
+
+
 def test_rewrite_stale_ask_after_dispatch_same_message():
     """同条叠写「先问你」+「派团队」→ 剥 ask 残留，标已按默认开工。"""
     from agentcore.runtime.closing_posture import rewrite_stale_ask_after_dispatch
@@ -112,6 +130,9 @@ def test_resume_continuity_steer_for_confirm_pre_pause():
     assert "档位" in steer
     assert "按确认默认" in steer
     assert "先问你" in steer
+    assert "复述" in steer or "沿用" in steer
+    assert "路径" in steer
+    assert "等待确认后再派工" in steer
 
 
 def test_reconcile_drops_confirm_pre_pause_when_new_delivers():

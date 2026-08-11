@@ -125,6 +125,10 @@ export function ProviderSettings() {
             <PlatformStatusLine response={response} />
           )}
 
+          <p className="text-xs text-muted-foreground">
+            测连绿≠可聊天；自定义 Base URL 常需 /v1
+          </p>
+
           {providers.map((provider) =>
             form?.mode === "edit" && form.provider.id === provider.id ? (
               <ModelKeyForm

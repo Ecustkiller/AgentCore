@@ -223,6 +223,10 @@ def test_read_url_description_does_not_overclaim_completeness():
     desc = schemas["read_url"].description
     assert "max_chars" in desc  # truncation is disclosed
     assert "完整正文" not in desc  # no blanket "complete body" claim
+    # 可信优先：成稿挂 #rN 须先深读；仅 search 不可挂号
+    assert "#rN" in desc
+    assert "深读" in desc
+    assert "search" in desc
 
 
 def test_ceo_registry_is_read_only_subset():

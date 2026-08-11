@@ -128,17 +128,17 @@ function handleFrame(frame: string): void {
       const e = event as ChatMessageUpdatedEvent;
       useMessagingStore.getState().applyMessageUpdated(e.chat_id, e.message);
     } else if (event.type === "memory_updated") {
-      // The offline consolidation pass refreshed the user's long-term memory (off the
-      // turn path). 记忆更新对话内可见 (§1.6): live-append the「记忆已更新」card to the
-      // conversation it came from (no-op if that conversation isn't loaded — it fetches
-      // the card itself on next open).
+      // Offline consolidation nudge (off the turn path). 记忆更新对话内可见 (§1.6):
+      // live-append the card to the source conversation (no-op if unloaded — fetched on
+      // next open). Episodic = session digest only; semantic = 偏好/画像/主题 rewrite.
       const e = event as MemoryUpdatedEvent;
       const conv = useConversationStore.getState();
+      const kind = e.update?.kind ?? e.kind ?? "semantic";
       if (e.update && e.conversation_id) {
         conv.addMemoryUpdate(
           toMemoryUpdate({
             ...e.update,
-            kind: e.update.kind ?? e.kind ?? "semantic",
+            kind,
           }),
           e.conversation_id,
         );
@@ -149,13 +149,17 @@ function handleFrame(frame: string): void {
       // until the user reopens the tab. Fires on every pass, card shown or not.
       void queryClient.invalidateQueries({ queryKey: ["memory-updates"] });
       // When the user is looking at that very conversation the inline card IS the signal,
-      // so skip the toast; otherwise a heads-up so another surface (e.g. an open「AI 记忆」
-      // editor) knows to reload.
+      // so skip the toast; otherwise a heads-up. Copy must match the card: episodic ≠
+      // long-term memory file write (Agent记忆与知识系统 §三).
       const cardShown =
         !!(e.update && e.conversation_id) &&
         conv.currentConversationId === e.conversation_id;
       if (!cardShown) {
-        notifyInfo("AI 刚刚更新了你的记忆");
+        notifyInfo(
+          kind === "episodic"
+            ? "AI 刚刚记下了本场摘要"
+            : "AI 刚刚更新了你的记忆",
+        );
       }
     } else if (event.type === "shared_space_invite") {
       const e = event as SharedSpaceInviteEvent;

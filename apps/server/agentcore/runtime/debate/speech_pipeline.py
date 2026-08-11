@@ -12,7 +12,8 @@ from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.profiles import ProfileParams, build_request
+from agentcore.llm.model_selection import SelectedCall, build_selected_request
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.debate.evidence_guard import (
@@ -315,12 +316,11 @@ async def _stream_draft(
             ),
         ),
     ]
-    request = build_request(
-        profile,
+    request = build_selected_request(
+        SelectedCall(model=turn_model, profile=profile),
         draft_messages,
         tools=None,
         tool_choice="none",
-        model=turn_model,
     )
     # stream_llm_round 类型标注 OpenAICompatibleProvider；运行时协议兼容。
     streamed = await stream_llm_round(

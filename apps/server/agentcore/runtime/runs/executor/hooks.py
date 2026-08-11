@@ -1,7 +1,7 @@
 """Domain hooks for AGENT-node execution: visual / retrieval / citation.
 
-Split from ``executor_node`` — pure move; call only via the node facade or
-sibling executor_* modules (do not grow new external ``_`` importers).
+Split from ``.node`` — pure move; call only via the node facade or
+sibling ``executor.*`` modules (do not grow new external ``_`` importers).
 """
 
 from __future__ import annotations

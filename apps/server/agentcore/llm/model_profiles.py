@@ -1,15 +1,19 @@
-"""Model combination profiles (模型组合) — CRUD + expand + system presets.
+"""Model combination profiles (模型组合) — CRUD + expand as a **derived query layer**.
 
 A profile is ``{main, worker?, background?, vision?}``. Empty worker / background =
 follow_main. Empty vision does **not** follow main (VisionReader uses platform
 ``VISION_*`` only when ``billing_mode=platform``).
 
-System presets are virtual well-known ids projected from the live platform catalog /
-allowlist (``PLATFORM_MODELS``, or ``[PLATFORM_MODEL, PLATFORM_BACKGROUND_MODEL]`` when
-empty). Each listable platform model id → one system combo (main = that platform model;
-worker / background / vision follow-null). Display names come from ``model_metadata``.
-Stable ids use ``uuid5(NAMESPACE_URL, "agentcore:platform-preset:{model_id}")`` — no
-hardcoded product UUID table.
+**Not a model-metadata owner.** Platform 上架 / display enrichment live in
+:mod:`agentcore.llm.catalog` (+ :mod:`agentcore.llm.model_metadata`). System presets
+are virtual well-known ids **projected** from
+:func:`agentcore.llm.catalog.platform_listable_model_ids` (recognition) /
+:func:`agentcore.llm.catalog.visible_platform_listable_model_ids` (list / select).
+Each listable platform model id → one system combo (main = that platform model;
+worker / background / vision follow-null). Display names come from
+:func:`agentcore.llm.catalog.platform_model_display_name`. Stable ids use
+``uuid5(NAMESPACE_URL, "agentcore:platform-preset:{model_id}")`` — no hardcoded
+product UUID table.
 
 Distinct from scenario ``ProfileParams`` (temperature / rounds) in ``llm/profiles.py``.
 """
@@ -32,7 +36,6 @@ from agentcore.db.repositories import (
     UserRepository,
 )
 from agentcore.db.repositories._base import _UNSET
-from agentcore.llm.model_metadata import model_metadata_for
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.llm.resolve import ModelOrigin, ModelSelection
 
@@ -80,13 +83,17 @@ def platform_preset_id(model_id: str) -> str:
 
 
 def system_presets() -> dict[str, str]:
-    """profile_id → platform model id, projected from listable platform catalog ids.
+    """profile_id → platform model id, projected from catalog 上架 ids.
 
-    Late-imports catalog so tests can monkeypatch ``_platform_listable_model_ids``.
+    Recognition map includes dormant (gate-off) listable ids so a DB pin on a
+    system preset still identifies as system. Listing / selection use
+    :func:`_visible_system_ids` instead.
+
+    Late-imports catalog so tests can monkeypatch ``platform_listable_model_ids``.
     """
-    from agentcore.llm.catalog import _platform_listable_model_ids
+    from agentcore.llm.catalog import platform_listable_model_ids
 
-    return {platform_preset_id(mid): mid for mid in _platform_listable_model_ids()}
+    return {platform_preset_id(mid): mid for mid in platform_listable_model_ids()}
 
 
 def system_profile_default_id() -> str | None:
@@ -106,19 +113,24 @@ def is_system_profile_id(profile_id: str | None) -> bool:
 
 
 def _system_preset_display_name(model_id: str) -> str:
-    return model_metadata_for(model_id).display_name
+    from agentcore.llm.catalog import platform_model_display_name
+
+    return platform_model_display_name(model_id)
+
+
+def _visible_system_ids() -> list[str]:
+    """System preset ids currently listable (= catalog visible 上架 projection)."""
+    from agentcore.llm.catalog import visible_platform_listable_model_ids
+
+    return [platform_preset_id(mid) for mid in visible_platform_listable_model_ids()]
 
 
 def _system_preset_available(profile_id: str) -> bool:
     """True when this system preset may appear in list / be selected.
 
-    Align with catalog: :func:`platform_catalog_visible` ∧ id in current projection.
+    Derived solely from catalog's visible 上架 set (no parallel gate).
     """
-    from agentcore.billing.preference import platform_catalog_visible as _visible
-
-    if not _visible():
-        return False
-    return profile_id in system_presets()
+    return profile_id in set(_visible_system_ids())
 
 
 def resolve_system_preset_main(profile_id: str) -> ModelSelection:
@@ -184,7 +196,7 @@ async def _live_selection(
 
 
 class LlmModelProfileService:
-    """CRUD + default + expand for model combination profiles."""
+    """CRUD + default + expand for model combination profiles (derived query layer)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -235,7 +247,7 @@ class LlmModelProfileService:
         )
 
     def _visible_system_ids(self) -> list[str]:
-        return [pid for pid in system_presets() if _system_preset_available(pid)]
+        return _visible_system_ids()
 
     def _mark_default(
         self, views: list[ModelProfileView], default_id: str | None
@@ -300,9 +312,9 @@ class LlmModelProfileService:
                 raise ValidationError(f"{label} 平台模型不能指定服务商")
             if not platform_catalog_visible():
                 raise ValidationError("当前部署不可用平台模型")
-            from agentcore.llm.catalog import _platform_listable_model_ids
+            from agentcore.llm.catalog import is_platform_listable
 
-            if slot.model.strip() not in _platform_listable_model_ids():
+            if not is_platform_listable(slot.model):
                 raise ValidationError(f"{label} 所选模型不在平台目录中")
             return
         if not slot.provider_id:
@@ -488,13 +500,15 @@ class LlmModelProfileService:
 
     async def _expand_logical_fallback(self, user_id: str) -> ExpandedProfile:
         """Visible BYOK combo or provider-first; name/origin match runtime (no DB write)."""
+        from agentcore.llm.catalog import platform_model_display_name
+
         rows = await self._repo.list_for_user(user_id, include_implicit=False)
         if rows:
             return await self.expand(user_id, rows[0].id)
         main = await _provider_first_fallback(self._session, user_id)
         return ExpandedProfile(
             profile_id=main.provider_id or "",
-            name=model_metadata_for(main.model).display_name,
+            name=platform_model_display_name(main.model),
             kind="implicit",
             main=main,
             worker=None,

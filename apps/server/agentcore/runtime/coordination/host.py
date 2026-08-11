@@ -653,7 +653,7 @@ def _merge_into_active_coordination(
     session.total_workers = len(live.nodes)
     # C3: reserve artifacts for newly admitted nodes (replaces/continue transfer).
     if file_ownership_v2_enabled() and added_nodes:
-        from agentcore.runtime.runs.executor_context import _ancestors_by_id
+        from agentcore.runtime.runs.executor.context import _ancestors_by_id
 
         declare_plan_artifacts(
             live,

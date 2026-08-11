@@ -151,12 +151,30 @@ export function resolveEmptyFailureNotice(opts: {
 
 /** Short diagnosis labels for degraded empty-response finishes (mirrors backend / desktop). */
 export const EMPTY_RESPONSE_CHIP_LABELS: Record<string, string> = {
-  oauth_expired: "模型无响应 · 可能需要刷新 Sub2API OAuth",
+  upstream_non_api: "上游返回了网页或登录页，请检查服务商地址与鉴权",
+  // Old journals may still stamp oauth_expired — same surface as upstream_non_api.
+  oauth_expired: "上游返回了网页或登录页，请检查服务商地址与鉴权",
   content_filtered: "内容被过滤",
   model_unknown: "模型名未被上游识别",
   silent_empty: "模型返回空内容",
   format_mismatch: "上游响应格式异常",
+  length_empty: "输出长度截断 · 返回空内容",
 };
+
+/**
+ * True when the assistant bubble already owns the empty-response red card —
+ * FinishReasonChip must not stack on top (单一用户面).
+ */
+export function isEmptyResponseUserSurface(opts: {
+  code?: string | null;
+  emptyDiagnosis?: string | null;
+  message?: string | null;
+}): boolean {
+  if (opts.code === "LLM_EMPTY_RESPONSE") return true;
+  if (opts.emptyDiagnosis) return true;
+  const msg = opts.message ?? "";
+  return msg.includes("模型多次空响应") || msg.includes("模型空响应");
+}
 
 /** Chip suffix for degraded finish when an empty-response diagnosis is available. */
 export function degradedFinishChipLabel(
@@ -178,7 +196,7 @@ export function degradedFinishChipLabel(
  */
 export const FINISH_REASON_META: Record<string, { label: string }> = {
   max_rounds: { label: "已达最大轮次 · 提前收尾" },
-  degraded: { label: "降级完成 · 模型多次空响应" },
+  degraded: { label: "空响应收尾" },
   unproductive: { label: "无有效进展 · 提前收尾" },
   error: { label: "调用失败" },
 };

@@ -4,6 +4,7 @@ import {
 } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import { StreamError } from "@/lib/errors";
+import { logEvent } from "@/lib/log";
 import { notifyWarning } from "@/lib/toast";
 import { resolveSidecarAccountAuth } from "@/services/accountToken";
 import { resolveSidecarFoldersAuth } from "@/services/foldersToken";
@@ -240,6 +241,7 @@ export async function streamConversationViaSidecar({
     rootId,
     subpath,
     turnId,
+    op: "startTurn",
     signal,
     // 无令牌 = 本回合会落到 sidecar 的本机平台模型回退（非账号模型）——据此在回合跑完后提示。
     usedFallback: inference === undefined,
@@ -323,6 +325,7 @@ export async function resumeConversationViaSidecar({
       rootId,
       subpath,
       turnId: messageId,
+      op: "resume",
       signal,
       // 同 startTurn：无令牌 = 续跑落到本机平台模型回退，回合跑完后提示。
       usedFallback: inference === undefined,
@@ -387,6 +390,8 @@ interface RunSidecarTurnOptions {
   subpath?: string;
   /** 事件路由 + cancel 的寻址键：新回合用 turnId，续跑用 message_id。 */
   turnId: string;
+  /** RPC 名：拒因 `turn already running` 落 desktop.jsonl 时区分 start vs resume。 */
+  op: "startTurn" | "resume";
   signal?: AbortSignal;
   /** 本回合是否取不到云推理令牌（→ sidecar 落本机平台模型回退）：据此在回合成功跑完后弹一条
    *  非阻断提示，告知这轮用了本机平台模型而非账号模型。 */
@@ -413,6 +418,7 @@ async function runSidecarTurn({
   rootId,
   subpath,
   turnId,
+  op,
   signal,
   usedFallback,
   failMessage,
@@ -493,6 +499,16 @@ async function runSidecarTurn({
       takeRecentSidecarFailure(rootId) ??
       describeSidecarTurnError(err) ??
       failMessage;
+    // 本机互斥拒不进云端 jsonl——落到 desktop.jsonl，下次可对照横幅 UUID 排查。
+    const rejectMsg = unwrapSidecarRejectMessage(err) ?? "";
+    if (/turn already running/i.test(rejectMsg)) {
+      logEvent("warn", "sidecar.turn_already_running", {
+        op,
+        turn_id: turnId,
+        conversation_id: conversationId,
+        saw_any_event: sawAnyEvent,
+      });
+    }
     // 启动期失败（一个事件都没派发）= 无任何输出 / 副作用，可安全改道云端重跑（阶段二降级）；
     // 中途失败（已开始流式 / 已调工具）则否，照常走「本地引擎出错」横幅 + 重试。
     throw new StreamError("sidecar", undefined, {

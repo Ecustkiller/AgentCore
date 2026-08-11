@@ -7,12 +7,16 @@ waiting for confirm, not silently empty / frozen on a kickoff claim.
 Also ac890 ⑥B: forbid stacking「装完了/依赖就绪」with「尚未真正开工」on the same
 pause face (append-always used to produce that contradiction).
 
+午后巡 d4d5 / 53f08：空模板不得冲掉上轮已有结构化确认/选项；卡上有 default/选项时
+pause 脸须能复述（同族 ask-empty-continue，不新发明硬闸）。
+
 Deliberately not a soft-banner gate on free-form closing (that was option B — skipped).
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from agentcore.runtime.closing_posture import is_process_dispatch_preamble
 
@@ -58,6 +62,12 @@ def claims_install_or_deps_ready(content: str) -> bool:
     return bool(_INSTALL_OR_DEPS_READY_CLAIM.search(text))
 
 
+def is_hollow_ask_pause(content: str) -> bool:
+    """True when body is empty or exactly the wait-confirm constant (d4d5 / 53f08)."""
+    text = (content or "").strip()
+    return (not text) or text == ASK_USER_PAUSE_USER_VISIBLE
+
+
 def _already_wait_confirm(text: str) -> bool:
     return any(
         m in text
@@ -80,20 +90,64 @@ def honest_ask_user_message(message: str) -> str:
     return text
 
 
-def ensure_ask_user_pause_body(content: str) -> str:
+def structured_confirm_restatement(
+    questions: list[dict[str, Any]] | None = None,
+    assumptions: list[dict[str, Any]] | None = None,
+) -> str:
+    """Build a short user-visible restatement of card defaults / options / paths.
+
+    Shared with empty-continue inject（``result.confirmed_defaults_summary`` family）so
+    pause face and resume inject stay on one axis — no new hard gate.
+    """
+    from agentcore.tools.builtin.ask_user.result import (
+        confirmed_defaults_summary,
+        structured_options_summary,
+    )
+
+    defaults = confirmed_defaults_summary(questions, assumptions)
+    if defaults:
+        return f"确认默认：{defaults}"
+    options = structured_options_summary(questions)
+    if options:
+        return f"可选：{options}"
+    return ""
+
+
+def ensure_ask_user_pause_body(
+    content: str,
+    *,
+    questions: list[dict[str, Any]] | None = None,
+    assumptions: list[dict[str, Any]] | None = None,
+    prior_visible: str | None = None,
+) -> str:
     """After absorb: bubble must surface wait-confirm (forbid silent empty / kickoff).
 
-    - Empty → fill the constant alone (204dcfda：禁 reply_chars=0).
+    - Empty / hollow-only → fill the constant alone (204dcfda：禁 reply_chars=0)，
+      **unless** card defaults/options or ``prior_visible`` structured confirm can be
+      restated（d4d5 / 53f08：禁空模板冲掉上轮选项）.
     - 「装完了/依赖就绪」类 → **replace** with wait-confirm alone (ac890 ⑥B：禁与
       「尚未真正开工」叠写；勿 append 保留完成断言).
-    - Already has wait-confirm phrasing → keep.
+    - Already has wait-confirm phrasing → keep (unless hollow-only + restatement).
     - Any other user-visible prose → **append** the constant; never wholesale-replace
       (32b78c65：整替会掩盖短问 / 卡面原意).
     """
     text = (content or "").strip()
-    if not text:
+    restatement = structured_confirm_restatement(questions, assumptions)
+    prior = (prior_visible or "").strip()
+    prior_usable = bool(prior) and not is_hollow_ask_pause(prior)
+
+    if is_hollow_ask_pause(text):
+        if restatement:
+            return f"{restatement}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"
+        if prior_usable:
+            if _already_wait_confirm(prior):
+                return prior
+            return f"{prior}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"
         return ASK_USER_PAUSE_USER_VISIBLE
+
     if claims_install_or_deps_ready(text):
+        if restatement:
+            return f"{restatement}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"
         return ASK_USER_PAUSE_USER_VISIBLE
     if _already_wait_confirm(text):
         return text

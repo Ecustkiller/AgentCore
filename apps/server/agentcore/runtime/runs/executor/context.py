@@ -1,4 +1,4 @@
-"""Split from executor.py — see executor.py module docstring."""
+"""Worker / captain context blocks, messages, and workspace manifest."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from agentcore.runtime.runs.constants import (
     WORKSPACE_MANIFEST_MAX_FILES,
 )
 from agentcore.runtime.runs.contract import describe_deliverable
-from agentcore.runtime.runs.executor_identities import (
+from agentcore.runtime.runs.executor.identities import (
     _WORKER_IDENTITY,
 )
 from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail

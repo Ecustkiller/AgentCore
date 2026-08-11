@@ -389,7 +389,10 @@ def test_spec_round_trips_with_nested_policy_and_deliverable():
         kind=RunKind.AGENT,
         role="研究员",
         tools=["web_search", "read_url"],
-        deliverable=Deliverable(must_contain=["风险"], min_length=100, strict=True),
+        deliverable=Deliverable(
+            required_sections=["结论"],
+            strict=True,
+        ),
         policy=RunPolicy(result_handling="summarize"),
     )
     restored = spec_from_json(spec_to_json(spec))
@@ -403,7 +406,7 @@ def test_spec_round_trips_with_nested_policy_and_deliverable():
     assert isinstance(restored.policy, RunPolicy)
     assert restored.policy.result_handling == "summarize"
     assert isinstance(restored.deliverable, Deliverable)
-    assert restored.deliverable.must_contain == ["风险"]
+    assert restored.deliverable.required_sections == ["结论"]
     assert restored.deliverable.strict is True
 
 

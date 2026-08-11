@@ -14,7 +14,7 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
  *
  * 双模式工作区 §7.2：本机传统（`mode=local` + 本机根可用）新开回合**默认同侧** sidecar；
  * 云协作永不 sidecar。过桥仅探活失败等机制兜底（见 `turns.sendTurn`），不当默认。
- * 设置「允许本机执行」显式关 = 诊断强制走云；unset / 默认关**不**挡本机传统同侧。
+ * 诊断模式「允许本机执行」显式关 = 诊断强制走云；unset / 默认关**不**挡本机传统同侧。
  *
  * 续跑例外：`origin=sidecar` / 已有本机活回合须跟本地事实（{@link resolveConversationLocalTarget}
  * / {@link getActiveSidecarTarget}），忽略强制关——本机帧云端没有。
@@ -86,7 +86,7 @@ export function getActiveSidecarTarget(
 }
 
 /**
- * 用户是否显式强制关闭本机执行（设置「允许本机执行」关 → 偏好 `off`）。
+ * 用户是否显式强制关闭本机执行（诊断模式「允许本机执行」关 → 偏好 `off`）。
  * unset / 默认关**不算**强制关——本机传统仍可默认同侧。web 无本地引擎时亦视为不可用。
  */
 export function isSidecarForceOff(): boolean {

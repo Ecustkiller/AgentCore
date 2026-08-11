@@ -1,6 +1,6 @@
 """AGENT-node salvage / cancel / terminal RunState builders.
 
-Split from ``executor_node`` — pure move; consumed only by the node facade.
+Split from ``.node`` — pure move; consumed only by the node facade.
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ from agentcore.runtime.runs.contract import (
     synthesize_debrief,
     worker_expects_handoff,
 )
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_hooks import _stamp_retrieval_evidence_gap
-from agentcore.runtime.runs.executor_identities import LeadSubteam
-from agentcore.runtime.runs.executor_shared import (
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.hooks import _stamp_retrieval_evidence_gap
+from agentcore.runtime.runs.executor.identities import LeadSubteam
+from agentcore.runtime.runs.executor.shared import (
     _apply_cutoff_reasons,
     _apply_finish_interrupt,
     _delivery_gaps_from_warnings,

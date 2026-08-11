@@ -10,7 +10,8 @@ from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import LLMUpstreamError, error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.llm.profiles import ProfileParams, build_request
+from agentcore.llm.model_selection import SelectedCall, build_selected_request
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.tools_gate import TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
@@ -21,8 +22,15 @@ from agentcore.runtime.citations import (
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact
+from agentcore.runtime.ledger_channel import emit_ledger_delta
 from agentcore.runtime.loop_controller import Intervention, LoopController
-from agentcore.runtime.verify import finish_guard, format_guard_steer
+from agentcore.runtime.verify import (
+    finish_guard,
+    format_guard_steer,
+    uncitable_ledger_refs_only,
+)
+from agentcore.tools.protocol import ToolContext
+from agentcore.tools.registry import ToolRegistry
 
 from .browser_snapshot_clear import project_omitted_browser_snapshots
 from .directive import Continue, LoopDirective, Return, Rework
@@ -33,6 +41,9 @@ from .tool_clear import project_cleared_window
 from .write_args_clear import project_cleared_write_args
 
 logger = get_logger(__name__)
+
+# 成稿闸「仅 search-only #rN」：每次 finish 尝试最多自动深读的 URL 数。
+AUTO_DEEP_READ_PER_FINISH = 5
 
 
 def record_round_start(*, round_idx: int, run_id: str, role: str) -> None:
@@ -127,6 +138,7 @@ class LlmRoundOutput:
     empty_raw_preview: str | None = None
     aborted: bool = False
     finish_reason: str | None = None
+    provider_base_url: str | None = None
 
 
 def _fact_finish_reason(
@@ -182,12 +194,11 @@ async def run_llm_round(
 ) -> LlmRoundOutput | LlmRoundFailure:
     """Stream one LLM round; record facts and round_end log on success."""
     request_window = build_request_window(messages, investigation_tools, round_idx)
-    request = build_request(
-        profile,
+    request = build_selected_request(
+        SelectedCall(model=active_model, profile=profile),
         request_window,
         tools=tool_defs,
         tool_choice="auto" if tool_defs else "none",
-        model=active_model,
     )
     from agentcore.runtime.runs.timeout_hard import mark_llm_inflight
 
@@ -286,7 +297,14 @@ async def run_llm_round(
         empty_raw_preview=empty_raw_preview,
         aborted=streamed.aborted,
         finish_reason=upstream_finish,
+        provider_base_url=_provider_base_url(llm),
     )
+
+
+def _provider_base_url(llm: object) -> str | None:
+    """Best-effort upstream root for empty-response diagnostics; never fail the turn."""
+    url = getattr(llm, "base_url", None)
+    return str(url) if url else None
 
 
 def _citable_ids(
@@ -320,6 +338,119 @@ def finish_guard_max_reworks(
     return settings.engine_finish_guard_max_reworks
 
 
+def search_only_deep_read_targets(
+    bad_ids: list[str],
+    ledger: EvidenceLedgerCore,
+    *,
+    limit: int = AUTO_DEEP_READ_PER_FINISH,
+) -> list[tuple[str, str]]:
+    """正文非法 ``#rN`` 中：台账有 URL、尚未 deep_read/selected 的 (id, url)，上限 ``limit``。"""
+    out: list[tuple[str, str]] = []
+    for eid in bad_ids:
+        entry = ledger.get(eid)
+        if entry is None:
+            continue
+        if entry.get("deep_read") or entry.get("selected"):
+            continue
+        url = str(entry.get("url") or "").strip()
+        if not url:
+            continue
+        out.append((eid, url))
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def maybe_auto_deep_read_search_only_refs(
+    content: str,
+    *,
+    annotate_citations: bool,
+    citation_sink: list[dict[str, Any]] | None,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+    tools: ToolRegistry,
+    tool_context: ToolContext,
+    ledger_registrant: str,
+    sink: Any,
+    run_id: str = "",
+) -> None:
+    """finish_guard 前：若**仅**因 search-only ``#rN`` 不过闸，引擎代 ``read_url`` 升级台账。
+
+    复用工具 ``citations`` → ``register_citation``（``deep_read=True``）路径；读失败不假装
+    升级。书目形态等其它闸问题不走此捷径。每次 finish 尝试最多
+    :data:`AUTO_DEEP_READ_PER_FINISH` 个 URL。
+    """
+    if not content or turn_evidence_ledger is None:
+        return
+    from agentcore.runtime.closing_posture import (
+        downgrade_verdict_for_unresolved_write_ownership,
+    )
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+
+    downgrade_verdict_for_unresolved_write_ownership()
+    bad_only = uncitable_ledger_refs_only(
+        content,
+        citation_count=len(citation_sink or []),
+        check_citations=annotate_citations,
+        citable_ids=_citable_ids(turn_evidence_ledger),
+        ledger_entries=_ledger_entries(turn_evidence_ledger),
+        delivery_verdict=current_delivery_verdict.get(),
+    )
+    if bad_only is None or not bad_only:
+        return
+    targets = search_only_deep_read_targets(bad_only, turn_evidence_ledger)
+    if not targets:
+        return
+    read_tool = tools.get_optional("read_url")
+    if read_tool is None:
+        logger.info(
+            "engine.finish_guard_auto_deep_read",
+            run_id=run_id or None,
+            attempted=0,
+            upgraded=0,
+            skipped_no_tool=True,
+            ids=[eid for eid, _ in targets],
+        )
+        return
+
+    upgraded: list[str] = []
+    failed: list[str] = []
+    for eid, url in targets:
+        try:
+            result = await read_tool.execute({"url": url}, tool_context)
+        except Exception as exc:  # noqa: BLE001 — 单 URL 失败不阻断其余
+            logger.warning(
+                "engine.finish_guard_auto_deep_read",
+                run_id=run_id or None,
+                id=eid,
+                url=url,
+                error=str(exc)[:200],
+                success=False,
+            )
+            failed.append(eid)
+            continue
+        cites = list(result.citations or []) if result.success else []
+        if not result.success or not cites:
+            failed.append(eid)
+            continue
+        registrant = ledger_registrant or "engine:auto_deep_read"
+        await turn_evidence_ledger.register_citations(cites, registrant=registrant)
+        # 仅当真升入成稿可引用集才记 upgraded（禁假装 deep_read）。
+        if eid in turn_evidence_ledger.draft_citable_ids():
+            upgraded.append(eid)
+        else:
+            failed.append(eid)
+
+    if upgraded or failed:
+        emit_ledger_delta(sink, turn_evidence_ledger)
+    logger.info(
+        "engine.finish_guard_auto_deep_read",
+        run_id=run_id or None,
+        attempted=len(targets),
+        upgraded=upgraded,
+        failed=failed,
+    )
+
+
 def decide_no_tool_round(
     outcome: RoundOutcome,
     *,
@@ -339,6 +470,9 @@ def decide_no_tool_round(
     round walks the convergence controller's degraded ladder: finish degraded
     (``Return`` + DEGRADED) or retry on the same model (``Continue``). Upstream
     ``finish_reason=length`` with empty body skips the one-shot Continue.
+
+    **仅非法 ``#rN``**（search-only / 伪造 / 越界，且无书目等其它闸）：不回炉——
+    调用方已尝试自动深读；出口由 :func:`apply_exit_ledger_ref_strip` 剥号放行。
     """
     if outcome.content:
         from agentcore.runtime.closing_posture import (
@@ -348,13 +482,30 @@ def decide_no_tool_round(
 
         # P0-B: latch from write collisions may exist without a delivery card.
         downgrade_verdict_for_unresolved_write_ownership()
+        verdict = current_delivery_verdict.get()
+        citable = _citable_ids(turn_evidence_ledger)
+        entries = _ledger_entries(turn_evidence_ledger)
+        cite_count = len(citation_sink or [])
+        # 仅 #rN 成稿闸问题：禁止 content_reset + 整篇 Rework（深读已在 decide 前尝试）。
+        if (
+            uncitable_ledger_refs_only(
+                final_content,
+                citation_count=cite_count,
+                check_citations=annotate_citations,
+                citable_ids=citable,
+                ledger_entries=entries,
+                delivery_verdict=verdict,
+            )
+            is not None
+        ):
+            return Return()
         reworks = finish_guard(
             final_content,
-            citation_count=len(citation_sink or []),
+            citation_count=cite_count,
             check_citations=annotate_citations,
-            citable_ids=_citable_ids(turn_evidence_ledger),
-            ledger_entries=_ledger_entries(turn_evidence_ledger),
-            delivery_verdict=current_delivery_verdict.get(),
+            citable_ids=citable,
+            ledger_entries=entries,
+            delivery_verdict=verdict,
         )
         max_reworks = finish_guard_max_reworks(
             annotate_citations=annotate_citations,

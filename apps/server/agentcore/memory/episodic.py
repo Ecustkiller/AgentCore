@@ -17,7 +17,7 @@ from typing import Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.conversation_title import ChatMessage
 from agentcore.memory.store import (
@@ -271,10 +271,9 @@ class LLMEpisodicSummarizer:
         self, provider: LLMProvider, *, role: str = "memory", model: str | None = None
     ) -> None:
         self._provider = provider
-        self._profile = get_profile(role)
         from agentcore.config import settings
 
-        self._model = model or settings.platform_model
+        self._selected = select_call(role, model or settings.platform_model)
         self.last_usage: TokenUsage = TokenUsage()
         self.last_model: str = ""
 
@@ -286,14 +285,13 @@ class LLMEpisodicSummarizer:
             f"# Character budget\n{max_chars}\n\n# Conversation\n{convo}\n\n"
             "Write the session summary now."
         )
-        request = build_request(
-            self._profile,
+        request = build_selected_request(
+            self._selected,
             [
                 LLMMessage(role="system", content=_EPISODIC_SYSTEM),
                 LLMMessage(role="user", content=user_prompt),
             ],
             stream=False,
-            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -303,7 +301,7 @@ class LLMEpisodicSummarizer:
             logger.warning("memory.episodic_summary_timeout")
             return ""
         self.last_usage = response.usage
-        self.last_model = response.model or self._model or ""
+        self.last_model = response.model or self._selected.model or ""
         return clamp_summary(response.content or "", max_chars)
 
 

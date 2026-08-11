@@ -36,7 +36,7 @@ def test_platform_preset_id_is_stable_uuid5():
 
 def test_system_presets_project_from_listable_catalog(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2", "grok-4.5"],
     )
     presets = system_presets()
@@ -51,7 +51,7 @@ def test_system_presets_project_from_listable_catalog(monkeypatch):
 
 def test_system_profile_default_prefers_platform_model(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["grok-4.5", "glm-5.2"],
     )
     monkeypatch.setattr(
@@ -63,7 +63,7 @@ def test_system_profile_default_prefers_platform_model(monkeypatch):
 
 def test_system_profile_default_falls_to_first_when_platform_model_absent(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["grok-4.5", "glm-5.2"],
     )
     monkeypatch.setattr(
@@ -75,7 +75,7 @@ def test_system_profile_default_falls_to_first_when_platform_model_absent(monkey
 
 def test_resolve_system_preset_main_is_fixed(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     sel = resolve_system_preset_main(_glm_preset_id())
@@ -87,7 +87,7 @@ def test_resolve_system_preset_main_is_fixed(monkeypatch):
 @pytest.mark.asyncio
 async def test_list_profiles_hides_missing_catalog_models(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: [],
     )
     monkeypatch.setattr(
@@ -110,7 +110,7 @@ async def test_list_profiles_hides_missing_catalog_models(monkeypatch):
 async def test_list_profiles_hides_system_when_platform_billing_off(monkeypatch):
     """byok + free-tier off: allowlist may still list glm-5.2 — presets must hide."""
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -132,7 +132,7 @@ async def test_list_profiles_hides_system_when_platform_billing_off(monkeypatch)
 @pytest.mark.asyncio
 async def test_list_profiles_marks_default_when_present(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -163,7 +163,7 @@ async def test_list_profiles_marks_default_when_present(monkeypatch):
 @pytest.mark.asyncio
 async def test_list_profiles_projects_multiple_models(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2", "grok-4.5"],
     )
     monkeypatch.setattr(
@@ -191,7 +191,7 @@ async def test_list_profiles_projects_multiple_models(monkeypatch):
 @pytest.mark.asyncio
 async def test_expand_none_and_dangling_fall_back_to_platform_default(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -224,7 +224,7 @@ async def test_expand_none_and_dangling_fall_back_to_platform_default(monkeypatc
 async def test_expand_legacy_hardcoded_uuid_falls_back_to_default(monkeypatch):
     """Old …0011 / …0012 ids are not system presets → dangling → PLATFORM_MODEL preset."""
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -254,7 +254,7 @@ async def test_set_default_rejects_unavailable_system_preset(monkeypatch):
     from agentcore.core.errors import ValidationError
 
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -275,7 +275,7 @@ async def test_ensure_rejects_unavailable_system_preset(monkeypatch):
     from agentcore.core.errors import ValidationError
 
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -297,7 +297,7 @@ async def test_list_marks_user_default_when_system_pin_dormant(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -343,7 +343,7 @@ async def test_expand_dormant_system_falls_to_byok_coherent(monkeypatch):
     from agentcore.llm.resolve import ModelSelection
 
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -386,7 +386,7 @@ async def test_expand_user_profile_includes_vision_slot(monkeypatch):
     from agentcore.llm.resolve import ModelSelection
 
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     monkeypatch.setattr(
@@ -440,7 +440,7 @@ async def test_expand_user_profile_includes_vision_slot(monkeypatch):
 @pytest.mark.asyncio
 async def test_system_preset_view_vision_always_null(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.llm.catalog._platform_listable_model_ids",
+        "agentcore.llm.catalog.platform_listable_model_ids",
         lambda: ["glm-5.2"],
     )
     svc = LlmModelProfileService(MagicMock())

@@ -142,13 +142,14 @@ class AttachmentUpload:
 class MemberView:
     """A group member for the roster: their user plus moderation-relevant flags.
 
-    ``is_admin`` mirrors the platform role (创始团队 = 平台 admin, the 内测群's
-    moderators) so the client can badge official accounts and hide kick/mute on
-    them; ``muted_by_admin`` surfaces the admin-imposed 禁言 state.
+    ``is_admin`` = platform ``users.role == admin`` (创始团队). ``group_role`` =
+    ``chat_members.role`` (内测群版主 = ``admin``). Clients badge both and gate
+    kick/mute on either platform admin or group moderator.
     """
 
     user: User
     is_admin: bool
+    group_role: str
     muted_by_admin: bool
 
 
@@ -289,7 +290,7 @@ class MessagingService:
         """The members of a chat (for the group roster + member panel).
 
         Non-members get 404 (IDOR-safe). Returns members in join order, each with
-        their platform-admin and admin-mute flags so the route can build a
+        platform-admin, group-role, and admin-mute flags so the route can build a
         ``ChatParticipant``. Members whose account no longer resolves are dropped.
         """
         if await self._chats.get_member(chat_id, user_id) is None:
@@ -301,10 +302,14 @@ class MessagingService:
             user = users.get(m.user_id)
             if user is None:
                 continue
+            role = getattr(m, "role", None) or "member"
+            if role not in ("owner", "admin", "member"):
+                role = "member"
             views.append(
                 MemberView(
                     user=user,
                     is_admin=user.role == "admin",
+                    group_role=role,
                     muted_by_admin=m.muted_by_admin,
                 )
             )
@@ -343,21 +348,22 @@ class MessagingService:
         await self._chats.set_membership_flags(chat_id, user_id, muted=muted, pinned=pinned)
         return await self.chat_view(chat_id=chat_id, user_id=user_id)
 
-    # --- Moderation (Stage 3 审核治理: 平台 admin kick / mute / announce) ---
-    # Platform-admin authority is gated at the route (``AdminUser``); these methods
-    # own the resource invariants (chat is a moderated group, target is a member,
-    # admins can't be moderated) and the system-card side effects.
+    # --- Moderation (审核治理: 平台 admin 或群级版主) ---
+    # Actor authority is enforced here (routes use AuthUser). Platform admin is
+    # always a moderator; group-level ``chat_members.role in {owner,admin}`` also
+    # qualifies. Appointment of 内测群版主 is admin-console-only.
 
     async def kick_member(self, *, chat_id: str, actor_id: str, target_id: str) -> None:
-        """Remove a member from a group (admin 踢人) and post a system notice.
+        """Remove a member from a group (踢人) and post a system notice.
 
         404 unknown chat / target-not-a-member; 422 for a dm (a pair, not a room);
-        403 when the target is a platform admin (admins can't be moderated — no
-        civil war / self-lockout). The kicked user is dropped, then a centered
-        ``system_card`` is fanned out to the remaining members.
+        403 when the actor is not a moderator, or the target is a platform admin /
+        (for group mods) another group moderator. The kicked user is dropped, then
+        a centered ``system_card`` is fanned out to the remaining members.
         """
         await self._require_moderatable_group(chat_id)
-        await self._assert_target_moderatable(chat_id, target_id)
+        await self._require_moderator(chat_id, actor_id)
+        await self._assert_target_moderatable(chat_id, actor_id=actor_id, target_id=target_id)
         target = await self._users.get_by_id(target_id)
         await self._chats.remove_member(chat_id, target_id)
         name = target.display_name if target else "成员"
@@ -371,15 +377,16 @@ class MessagingService:
     async def set_admin_mute(
         self, *, chat_id: str, actor_id: str, target_id: str, muted: bool
     ) -> None:
-        """Mute / unmute a member (admin 禁言): a muted member keeps reading but a
+        """Mute / unmute a member (禁言): a muted member keeps reading but a
         send is refused (403, in :meth:`send_message`).
 
         Same gates as :meth:`kick_member`. No全群 broadcast — 禁言 is targeted, not
         announced (Stage 3 decision); the member learns of it when a send is
-        refused, and the roster shows the state to admins.
+        refused, and the roster shows the state to moderators.
         """
         await self._require_moderatable_group(chat_id)
-        await self._assert_target_moderatable(chat_id, target_id)
+        await self._require_moderator(chat_id, actor_id)
+        await self._assert_target_moderatable(chat_id, actor_id=actor_id, target_id=target_id)
         await self._chats.set_admin_mute(chat_id, target_id, muted_by_admin=muted)
         logger.info(
             "chat.admin_mute",
@@ -390,13 +397,14 @@ class MessagingService:
         )
 
     async def post_announcement(self, *, chat_id: str, actor_id: str, content: str) -> ChatMessage:
-        """Post an admin announcement (官方公告) as a centered ``system_card``.
+        """Post a group announcement as a centered ``system_card``.
 
         Sent as the official/system account (NULL sender) so it renders as a
         notice rather than a normal bubble, and fanned out to every member. 404
-        unknown chat; 422 for a dm.
+        unknown chat; 422 for a dm; 403 if actor is not a moderator.
         """
         await self._require_moderatable_group(chat_id)
+        await self._require_moderator(chat_id, actor_id)
         message = await self._post_system_card(
             chat_id=chat_id,
             content=content,
@@ -404,6 +412,60 @@ class MessagingService:
         )
         logger.info("chat.announced", chat=chat_id, by=actor_id)
         return message
+
+    async def list_beta_group_moderators(self) -> tuple[str, str, list[User]]:
+        """内测群 members with ``chat_members.role=admin`` (appointment roster).
+
+        Returns ``(chat_id, title, users)``. Missing seed chat → 404.
+        """
+        from agentcore.db.repositories.chat import BETA_GROUP_ID, BETA_GROUP_TITLE
+
+        chat = await self._chats.get_chat(BETA_GROUP_ID)
+        if chat is None:
+            raise NotFoundError("内测群不存在")
+        members = await self._chats.list_members(BETA_GROUP_ID)
+        mod_ids = [m.user_id for m in members if (getattr(m, "role", None) or "member") == "admin"]
+        users_by_id = await self._users.get_by_ids(mod_ids)
+        users = [users_by_id[uid] for uid in mod_ids if uid in users_by_id]
+        title = chat.title or BETA_GROUP_TITLE
+        return BETA_GROUP_ID, title, users
+
+    async def set_beta_group_moderator(self, *, user_id: str, actor_id: str) -> User:
+        """Appoint a 内测群版主 (``chat_members.role=admin``). Admin-console only.
+
+        Ensures membership (re-adds leavers). Idempotent if already admin.
+        """
+        from agentcore.db.repositories.chat import BETA_GROUP_ID
+
+        chat = await self._chats.get_chat(BETA_GROUP_ID)
+        if chat is None:
+            raise NotFoundError("内测群不存在")
+        user = await self._users.get_by_id(user_id)
+        if user is None or getattr(user, "status", None) != "active":
+            raise NotFoundError("用户不存在")
+        member = await self._chats.get_member(BETA_GROUP_ID, user_id)
+        if member is None:
+            await self._chats.add_member(BETA_GROUP_ID, user_id, role="admin")
+        elif (getattr(member, "role", None) or "member") != "admin":
+            await self._chats.set_member_role(BETA_GROUP_ID, user_id, role="admin")
+        logger.info("chat.beta_moderator_set", chat=BETA_GROUP_ID, by=actor_id, target=user_id)
+        return user
+
+    async def clear_beta_group_moderator(self, *, user_id: str, actor_id: str) -> None:
+        """Revoke 内测群版主 (role → ``member``). Leaves membership intact."""
+        from agentcore.db.repositories.chat import BETA_GROUP_ID
+
+        chat = await self._chats.get_chat(BETA_GROUP_ID)
+        if chat is None:
+            raise NotFoundError("内测群不存在")
+        member = await self._chats.get_member(BETA_GROUP_ID, user_id)
+        if member is None:
+            raise NotFoundError("该用户不在内测群")
+        if (getattr(member, "role", None) or "member") == "admin":
+            await self._chats.set_member_role(BETA_GROUP_ID, user_id, role="member")
+        logger.info(
+            "chat.beta_moderator_cleared", chat=BETA_GROUP_ID, by=actor_id, target=user_id
+        )
 
     async def publish_product_notice(
         self,
@@ -468,17 +530,39 @@ class MessagingService:
             raise ValidationError("单聊不支持该操作")
         return chat
 
-    async def _assert_target_moderatable(self, chat_id: str, target_id: str) -> None:
-        """Guard a kick/mute target: must be a current member and not an admin.
+    async def _actor_is_moderator(self, chat_id: str, actor_id: str) -> bool:
+        """Platform admin, or group membership role in ``{owner, admin}``."""
+        actor = await self._users.get_by_id(actor_id)
+        if actor is not None and getattr(actor, "role", None) == "admin":
+            return True
+        member = await self._chats.get_member(chat_id, actor_id)
+        if member is None:
+            return False
+        return (getattr(member, "role", None) or "member") in ("owner", "admin")
 
-        Admins are exempt from moderation so creators can't kick/mute each other
-        (or themselves) out of the 内测群.
+    async def _require_moderator(self, chat_id: str, actor_id: str) -> None:
+        if not await self._actor_is_moderator(chat_id, actor_id):
+            raise AuthorizationError("无权执行该操作")
+
+    async def _assert_target_moderatable(
+        self, chat_id: str, *, actor_id: str, target_id: str
+    ) -> None:
+        """Guard a kick/mute target: member, not self, not platform admin;
+        group mods cannot act on other group mods (platform admin may).
         """
-        if await self._chats.get_member(chat_id, target_id) is None:
+        if target_id == actor_id:
+            raise ValidationError("不能对自己执行该操作")
+        member = await self._chats.get_member(chat_id, target_id)
+        if member is None:
             raise NotFoundError("该用户不在群内")
         target = await self._users.get_by_id(target_id)
         if target is not None and target.role == "admin":
             raise AuthorizationError("不能对管理员执行该操作")
+        target_group_role = getattr(member, "role", None) or "member"
+        if target_group_role in ("owner", "admin"):
+            actor = await self._users.get_by_id(actor_id)
+            if actor is None or getattr(actor, "role", None) != "admin":
+                raise AuthorizationError("不能对群管理员执行该操作")
 
     async def _post_system_card(
         self, *, chat_id: str, content: str, payload: dict[str, Any] | None = None
@@ -644,7 +728,11 @@ class MessagingService:
             return message
 
         actor = await self._users.get_by_id(actor_id)
-        is_admin = actor is not None and getattr(actor, "role", None) == "admin"
+        is_platform_admin = actor is not None and getattr(actor, "role", None) == "admin"
+        is_group_mod = False
+        if not is_platform_admin and chat.type == "group":
+            is_group_mod = await self._actor_is_moderator(chat_id, actor_id)
+        can_govern = is_platform_admin or is_group_mod
         is_protected = (
             message.content_type == "system_card"
             or message.sender_type == "official"
@@ -652,9 +740,9 @@ class MessagingService:
         )
 
         if is_protected:
-            if not is_admin:
+            if not is_platform_admin:
                 raise AuthorizationError("无权撤回该消息")
-        elif is_admin and chat.type == "group":
+        elif can_govern and chat.type == "group":
             pass  # group governance — any member message, no window
         elif message.sender_user_id == actor_id:
             created = message.created_at
@@ -791,8 +879,8 @@ class MessagingService:
         """Validate and freeze structured mentions (deduped; source of truth).
 
         ``kind=user``: ``user_id`` must be an *accepted* member of this chat (422).
-        ``kind=everyone``: group only (422 on dm); caller must be platform admin
-        (``users.role == 'admin'``) else 403. Same rule for 内测全员群 and other groups.
+        ``kind=everyone``: group only (422 on dm); caller must be platform admin or
+        group moderator else 403.
         """
         if not mentions:
             return []
@@ -821,9 +909,8 @@ class MessagingService:
                     continue
                 if chat.type != "group":
                     raise ValidationError("单聊不支持@所有人")
-                sender = await self._users.get_by_id(sender_id)
-                if sender is None or getattr(sender, "role", None) != "admin":
-                    raise AuthorizationError("仅平台管理员可@所有人")
+                if not await self._actor_is_moderator(chat.id, sender_id):
+                    raise AuthorizationError("仅管理员可@所有人")
                 saw_everyone = True
                 frozen.append({"kind": "everyone"})
             else:

@@ -2,11 +2,11 @@
 
 Thin facade — implementation split by axis:
 
-* ``executor_setup`` — registry / identity / opening messages
-* ``executor_loop`` — react+capture + contract decision ladder body
-* ``executor_retry`` — light-repair / write-pass / budget skip predicates
-* ``executor_hooks`` — visual / retrieval / citation domain hooks
-* ``executor_terminal`` — salvage / cancel / terminal RunState
+* ``.setup`` — registry / identity / opening messages
+* ``.loop`` — react+capture + contract decision ladder body
+* ``.retry`` — light-repair / write-pass / budget skip predicates
+* ``.hooks`` — visual / retrieval / citation domain hooks
+* ``.terminal`` — salvage / cancel / terminal RunState
 
 Stable imports (``execute_agent_node``, ``should_skip_contract_retry_for_budget``,
 and existing test ``_`` helpers) re-export from this module.
@@ -21,14 +21,14 @@ from typing import Any
 
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.events import run_started
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_hooks import (
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.hooks import (
     _stamp_retrieval_evidence_gap,
     _two_phase_citation,
 )
-from agentcore.runtime.runs.executor_identities import LeadSubteam
-from agentcore.runtime.runs.executor_loop import run_contract_loop
-from agentcore.runtime.runs.executor_retry import (
+from agentcore.runtime.runs.executor.identities import LeadSubteam
+from agentcore.runtime.runs.executor.loop import run_contract_loop
+from agentcore.runtime.runs.executor.retry import (
     _can_light_repair,
     _can_write_pass,
     _files_expected,
@@ -37,8 +37,8 @@ from agentcore.runtime.runs.executor_retry import (
     _wind_down_entered,
     should_skip_contract_retry_for_budget,
 )
-from agentcore.runtime.runs.executor_setup import prepare_agent_node
-from agentcore.runtime.runs.executor_terminal import (
+from agentcore.runtime.runs.executor.setup import prepare_agent_node
+from agentcore.runtime.runs.executor.terminal import (
     build_terminal_run_state,
     dispose_agent_node,
     handle_agent_node_cancel,

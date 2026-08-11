@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.types import ToolEffect
-from agentcore.llm.errors import empty_response_event_message
+from agentcore.llm.errors import empty_response_error_context, empty_response_event_message
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
@@ -130,17 +130,19 @@ async def apply_loop_directive(
                     )
                 )
             elif fr is FinishReason.DEGRADED:
-                # Only the diagnosis label rides the user-facing error. The raw
-                # SSE tail stays in the backend log (llm.empty_response) for
-                # diagnosis — it's noise in the bubble and leaked to the dev UI.
-                err_ctx = (
-                    {"empty_diagnosis": outcome.empty_diagnosis}
-                    if outcome.empty_diagnosis
-                    else None
+                # Sole user-facing surface for empty-response degraded: SSE error
+                # with LLM_EMPTY_RESPONSE (not LLM_ERROR). Clients suppress the
+                # finish chip when this card is present — finish_reason stays
+                # degraded for metrics. Raw SSE tail stays in llm.empty_response
+                # logs; context carries diagnosis / body_kind / base_url only.
+                err_ctx = empty_response_error_context(
+                    diagnosis=outcome.empty_diagnosis,
+                    raw_preview=outcome.empty_raw_preview,
+                    base_url=outcome.provider_base_url,
                 )
                 sink.emit(
                     error_event(
-                        ErrorCode.LLM_ERROR,
+                        ErrorCode.LLM_EMPTY_RESPONSE,
                         empty_response_event_message(outcome.empty_diagnosis),
                         context=err_ctx,
                     )

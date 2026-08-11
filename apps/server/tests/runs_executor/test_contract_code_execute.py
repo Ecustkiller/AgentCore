@@ -111,7 +111,7 @@ async def test_requires_files_satisfied_by_code_execute_landing(tmp_path):
             {
                 "role": "分析",
                 "task": "跑脚本生成报告并落盘",
-                "deliverable": {"requires_files": True},
+                "deliverable": {"form": "files"},
             }
         ],
         id_prefix="t",
@@ -134,7 +134,7 @@ async def test_requires_files_satisfied_by_code_execute_landing(tmp_path):
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
-    # requires_files satisfied by the code_execute landing → no contract shortfall / retry.
+    # form=files satisfied by the code_execute landing → no contract shortfall / retry.
     assert state.warnings == []
     assert provider.calls == 2  # no wasted regenerate-via-file_write round
     assert state.files_touched == ["report.md"]
@@ -142,14 +142,14 @@ async def test_requires_files_satisfied_by_code_execute_landing(tmp_path):
     assert collect_delivered_files(res) == ["report.md"]
 
 
-async def test_requires_files_soft_completes_on_pure_prose_no_landing():
-    """甲⁺：无 code_execute / file_write，仅散文；strict+requires_files 仍 soft-complete。"""
+async def test_files_form_soft_completes_on_pure_prose_no_landing():
+    """甲⁺：无 code_execute / file_write，仅散文；strict+form=files 仍 soft-complete。"""
     plan, _ = build_run_plan(
         [
             {
                 "role": "分析",
                 "task": "生成报告并落盘",
-                "deliverable": {"requires_files": True, "strict": True},
+                "deliverable": {"form": "files", "strict": True},
             }
         ],
         id_prefix="t",

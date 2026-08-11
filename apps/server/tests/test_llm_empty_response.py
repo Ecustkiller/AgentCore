@@ -21,12 +21,20 @@ def test_diagnose_content_filtered():
     )
 
 
-def test_diagnose_oauth_html():
+def test_diagnose_upstream_non_api_html():
     body = "<html><body>Please sign in to continue</body></html>"
     assert (
         diagnose_empty_response(raw_body=body)
-        is EmptyResponseDiagnosis.OAUTH_EXPIRED
+        is EmptyResponseDiagnosis.UPSTREAM_NON_API
     )
+
+
+def test_upstream_non_api_label_is_generic():
+    """Must not name Sub2API — diagnosis applies to any BYOK gateway HTML shell."""
+    label = empty_response_event_message(EmptyResponseDiagnosis.UPSTREAM_NON_API)
+    assert "Sub2API" not in label
+    assert "网页" in label or "登录" in label
+    assert label.startswith("模型多次空响应")
 
 
 def test_diagnose_model_unknown():
@@ -83,6 +91,27 @@ def test_diagnose_streaming_empty_tail_is_silent_not_format_mismatch():
         diagnose_empty_response(raw_body=sse_tail, finish_reason="tool_calls")
         is EmptyResponseDiagnosis.SILENT_EMPTY
     )
+
+
+def test_legacy_oauth_expired_wire_key_maps_to_upstream_non_api():
+    msg = empty_response_event_message("oauth_expired")
+    assert "Sub2API" not in msg
+    assert "网页" in msg or "登录" in msg
+
+
+def test_empty_response_error_context_html_and_base_url():
+    from agentcore.llm.errors import empty_response_body_kind, empty_response_error_context
+
+    assert empty_response_body_kind('<div id="root"></div>') == "html"
+    ctx = empty_response_error_context(
+        diagnosis=EmptyResponseDiagnosis.UPSTREAM_NON_API,
+        raw_preview="<html><body>x</body></html>",
+        base_url="https://api.zdc.mom/",
+    )
+    assert ctx is not None
+    assert ctx["empty_diagnosis"] == "upstream_non_api"
+    assert ctx["body_kind"] == "html"
+    assert ctx["base_url"] == "https://api.zdc.mom"
 
 
 def test_empty_response_event_message_appends_diagnosis():

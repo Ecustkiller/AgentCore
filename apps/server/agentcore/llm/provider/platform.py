@@ -33,6 +33,13 @@ class PlatformProvider:
     def name(self) -> str:
         return "platform"
 
+    @property
+    def base_url(self) -> str | None:
+        # Per-model upstream; no single leaf URL until a request picks a model.
+        from agentcore.config import settings
+
+        return (settings.platform_base_url or "").rstrip("/") or None
+
     def clone(self) -> PlatformProvider:
         """Independent leaf cache (coordination drive ownership)."""
         return PlatformProvider()

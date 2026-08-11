@@ -45,6 +45,7 @@ from .outcome import RoundOutcome
 from .round import (
     LlmRoundFailure,
     decide_no_tool_round,
+    maybe_auto_deep_read_search_only_refs,
     record_round_start,
     run_llm_round,
 )
@@ -833,6 +834,7 @@ async def react_loop(
                     empty_diagnosis=round_result.empty_diagnosis,
                     empty_raw_preview=round_result.empty_raw_preview,
                     finish_reason=round_result.finish_reason,
+                    provider_base_url=round_result.provider_base_url,
                 )
                 # 协调监听豁免：captain 在活跃协调中对纯进展事件保持静默（无正文、无工具）
                 # 是被指引的合法行为，不进 B2 空响应梯子；ALL_COMPLETED 注入即关闭 session，
@@ -857,6 +859,19 @@ async def react_loop(
                 controller.note_empty_round(counts_as_empty)
 
                 if not outcome.has_tool_calls:
+                    # 仅 search-only #rN：decide 前回炉前先自动深读升级台账（能过则免 Rework）。
+                    if outcome.content and turn_evidence_ledger is not None:
+                        await maybe_auto_deep_read_search_only_refs(
+                            final_content,
+                            annotate_citations=annotate_citations,
+                            citation_sink=citation_sink,
+                            turn_evidence_ledger=turn_evidence_ledger,
+                            tools=tools,
+                            tool_context=tool_context,
+                            ledger_registrant=ledger_registrant,
+                            sink=sink,
+                            run_id=run_id,
+                        )
                     directive = decide_no_tool_round(
                         outcome,
                         final_content=final_content,

@@ -44,7 +44,9 @@ logger = get_logger(__name__)
 # Shown when connectivity test succeeds with no other message — clarifies that
 # green ≠ chat-ready; daily chat uses 模型组合 main model, not this probe.
 CONNECTIVITY_OK_HINT = (
-    "连接正常。此测试只验证连通；日常聊天请到「模型组合」配置主模型。"
+    "连接正常。已验证服务商连通（模型列表或 chat 试探）。"
+    "日常聊天请到「模型组合」配置主模型；"
+    "自定义 Base URL 通常需含 /v1（例如 https://api.example.com/v1）。"
 )
 
 
@@ -348,9 +350,11 @@ class LlmProviderService:
         ``list_models`` failures fall through to the legacy probe path. When
         ``list_models`` succeeds but the default model is absent from a
         non-empty upstream list, also fall through to ``probe`` (e.g. Ark
-        ``ep-`` endpoints that chat but are omitted from ``/models``). An empty
-        upstream list does not trigger that check. Tools probing is best-effort
-        and never flips an otherwise-active result to error.
+        ``ep-`` endpoints that chat but are omitted from ``/models``). An
+        **empty** upstream list also falls through to ``probe`` — a JSON
+        ``data: []`` must not soft-green without a chat body check. Tools
+        probing is best-effort and never flips an otherwise-active result to
+        error.
         """
         list_fn = getattr(provider, "list_models", None)
         if callable(list_fn):
@@ -362,8 +366,9 @@ class LlmProviderService:
                 # Non-auth discovery failure → fall back to chat probe.
                 pass
             else:
-                # Non-empty list missing default model → probe (do not soft-green).
-                if not (model and model_ids and model not in model_ids):
+                # Empty discovery → probe chat (body-checked). Non-empty list
+                # missing default model → probe. Otherwise trust list_models.
+                if model_ids and not (model and model not in model_ids):
                     supports_tools = await self._best_effort_probe_tools(
                         provider, model=model
                     )

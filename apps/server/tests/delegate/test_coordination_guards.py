@@ -425,7 +425,6 @@ def test_roles_and_file_targets_detect_geo_class_overlap():
         task="写 site/index.html 与 site/styles.css",
         deliverable=Deliverable(
             form="files",
-            name="骨架",
             artifacts=["site/index.html", "site/styles.css", "site/main.js"],
         ),
     )
@@ -435,7 +434,6 @@ def test_roles_and_file_targets_detect_geo_class_overlap():
         task="基于文案实现整站，写入 site/index.html",
         deliverable=Deliverable(
             form="files",
-            name="整站前端",
             artifacts=["site/index.html"],
         ),
     )
@@ -666,13 +664,13 @@ def test_same_batch_scoped_fanout_same_role_admits():
             run_id="eval_0",
             role="评估员",
             task="评 A",
-            deliverable=Deliverable(name="对选项【A】的评估"),
+            deliverable=Deliverable(artifacts=["evals/option-a.md"]),
         ),
         RunSpec(
             run_id="eval_1",
             role="评估员",
             task="评 B",
-            deliverable=Deliverable(name="对选项【B】的评估"),
+            deliverable=Deliverable(artifacts=["evals/option-b.md"]),
         ),
     )
     assert find_sibling_role_crosses(batch) == []

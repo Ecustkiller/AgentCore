@@ -210,9 +210,21 @@ describe("AssistantContent", () => {
 
   it("shows finishReason chip for degraded turns", () => {
     render(<AssistantContent content="降级后的短答" finishReason="degraded" />);
-    expect(screen.getByTestId("finish-reason-chip").textContent).toContain(
-      "降级完成",
+    expect(screen.getByTestId("finish-reason-chip").textContent).toBe(
+      "空响应收尾",
     );
+  });
+
+  it("hides finishReason chip when failureNotice already owns the surface", () => {
+    render(
+      <AssistantContent
+        content=""
+        finishReason="degraded"
+        finishDiagnosisLabel="模型返回空内容"
+        failureNotice="模型多次空响应后收尾"
+      />,
+    );
+    expect(screen.queryByTestId("finish-reason-chip")).toBeNull();
   });
 
   it("shows single-agent delivery shortfall hint", () => {

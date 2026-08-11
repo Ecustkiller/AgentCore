@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 from agentcore.evals.types import EvalConfigError
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest
-from agentcore.runtime.runs.executor_identities import build_worker_identity
+from agentcore.runtime.runs.executor.identities import build_worker_identity
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_DESCRIPTION,

@@ -20,6 +20,8 @@ export const REST_PATH_TEMPLATES = [
   "/v1/account/token",
   "/v1/admin/audit-logs",
   "/v1/admin/audit/summary",
+  "/v1/admin/beta-group/moderators",
+  "/v1/admin/beta-group/moderators/{user_id}",
   "/v1/admin/conversations",
   "/v1/admin/conversations/turns",
   "/v1/admin/feedback",

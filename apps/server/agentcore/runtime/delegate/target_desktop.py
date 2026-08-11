@@ -454,7 +454,7 @@ def _registry_rewire_consult_tools(
     has_on_demand_rules: bool,
 ) -> ToolRegistry:
     """Fresh registry: drop old consult_* tools, optionally wire target scope."""
-    from agentcore.runtime.runs.executor_shared import _registry_without
+    from agentcore.runtime.runs.executor.shared import _registry_without
 
     registry = _registry_without(base, "consult_memory")
     registry = _registry_without(registry, "consult_rule")

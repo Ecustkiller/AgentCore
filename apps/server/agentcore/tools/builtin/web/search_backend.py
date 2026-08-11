@@ -1,7 +1,7 @@
 """Search backend — pluggable web search for built-in tools.
 
 The default primary talks to a self-hosted SearXNG instance whose engine set is
-curated to mainland-China-reachable engines (baidu/360search/sogou/quark, see
+curated to mainland-China-reachable engines (baidu/sogou + low-weight bing, see
 ``deploy/searxng/settings.yml``) — the public engines (google/ddg/brave) time out
 from a China-hosted server.
 

@@ -1,5 +1,12 @@
 """User-facing model catalog (模型目录 · 统一混排 多 BYOK 服务商 + 平台).
 
+**Sole fact source** for「which models exist / are listable / how they display in
+pickers」. Display enrichment lives in :mod:`agentcore.llm.model_metadata` (never an
+allow-list); this module owns discovery + platform 上架 + row assembly.
+:mod:`agentcore.llm.model_profiles` **derives** system presets / combo views from
+:func:`platform_listable_model_ids` / :func:`visible_platform_listable_model_ids` —
+it must not maintain a parallel model set.
+
 Resolves the set of models a user may pick, plus the account's currently-resolved
 model, for ``GET /v1/users/me/models`` and the conversation-model PATCH validation.
 
@@ -190,7 +197,7 @@ def _platform_model_ids() -> list[str]:
     Explicit ``PLATFORM_MODELS`` allowlist when set (the flip's curated set); else the
     single ``platform_model`` (+ background) fallback — byok / free-tier deployments
     keep their one dormant platform row unchanged. Does **not** filter by curated
-    pricing — see :func:`_platform_listable_model_ids` for the 上架 set.
+    pricing — see :func:`platform_listable_model_ids` for the 上架 set.
     """
     allowlist = platform_model_allowlist()
     if allowlist:
@@ -200,10 +207,12 @@ def _platform_model_ids() -> list[str]:
     return _dedupe([platform_model, background])
 
 
-def _platform_listable_model_ids() -> list[str]:
+def platform_listable_model_ids() -> list[str]:
     """Allowlist / fallback ids that may appear in catalog and system presets (F4).
 
-    Missing curated price card → hard-exclude (不上架); log once per id for ops.
+    **Public fact source** for the platform 上架 set. Missing curated price card →
+    hard-exclude (不上架); log once per id for ops. Does **not** apply the billing
+    visibility gate — see :func:`visible_platform_listable_model_ids`.
     """
     listable: list[str] = []
     for mid in _platform_model_ids():
@@ -214,15 +223,49 @@ def _platform_listable_model_ids() -> list[str]:
     return listable
 
 
+def is_platform_listable(model_id: str) -> bool:
+    """Whether ``model_id`` is in the platform 上架 set (ignores billing visibility)."""
+    target = (model_id or "").strip()
+    if not target:
+        return False
+    return target in platform_listable_model_ids()
+
+
+def visible_platform_listable_model_ids() -> list[str]:
+    """上架 set when the platform catalog gate is open; else ``[]``.
+
+    Single conjunction for catalog platform rows **and** system-preset listing —
+    callers must not re-check :func:`platform_catalog_visible` separately.
+    """
+    if not platform_catalog_visible():
+        return []
+    return platform_listable_model_ids()
+
+
+def platform_model_display_name(model_id: str) -> str:
+    """Display name via the same enrichment path catalog rows use (``model_metadata``)."""
+    return model_metadata_for(model_id).display_name
+
+
 def _platform_entry(model_id: str) -> ModelCatalogEntry:
     """One platform-billed catalog row (nominal-price ledger, F4). Caller must pass
-    a listable (curated) model id — see :func:`_platform_listable_model_ids`.
+    a listable (curated) model id — see :func:`platform_listable_model_ids`.
     """
     return _entry(model_id, origin="platform", available=True, credential_source="platform")
 
 
-def _platform_entries() -> list[ModelCatalogEntry]:
-    return [_platform_entry(mid) for mid in _platform_listable_model_ids()]
+def _platform_entries(*, require_visible: bool = False) -> list[ModelCatalogEntry]:
+    """Platform catalog rows. ``require_visible=True`` applies the billing gate."""
+    ids = (
+        visible_platform_listable_model_ids()
+        if require_visible
+        else platform_listable_model_ids()
+    )
+    return [_platform_entry(mid) for mid in ids]
+
+
+# Back-compat alias (tests / older call sites may still patch the private name).
+_platform_listable_model_ids = platform_listable_model_ids
 
 
 async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCatalog:
@@ -232,7 +275,6 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
     with that provider's id/label. Platform rows appear only when
     :func:`platform_catalog_visible` (billing selectable ∧ credentials configured).
     """
-    platform_rows_on = platform_catalog_visible()
     providers = await list_user_providers(session, user_id)
     byok_configured = len(providers) > 0
 
@@ -245,8 +287,12 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
         # Keyless: platform catalog when subsidized; otherwise an EMPTY catalog (byok
         # deployment with no platform subsidy) — the UI shows an empty state that guides
         # to 设置·模型配置 rather than greyed-out「add a key to unlock」guide rows.
-        models = _platform_entries() if platform_rows_on else []
-        return ModelCatalog(current=current, byok_configured=False, models=models)
+        # Visibility gate is inside ``_platform_entries(require_visible=True)``.
+        return ModelCatalog(
+            current=current,
+            byok_configured=False,
+            models=_platform_entries(require_visible=True),
+        )
 
     models: list[ModelCatalogEntry] = []
     seen: set[tuple[str, str, str | None]] = set()
@@ -278,9 +324,8 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
         for entry in _provider_entries(row, creds, discovered):
             _add(entry)
 
-    if platform_rows_on:
-        for entry in _platform_entries():
-            _add(entry)
+    for entry in _platform_entries(require_visible=True):
+        _add(entry)
 
     return ModelCatalog(current=current, byok_configured=True, models=models)
 

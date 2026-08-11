@@ -10,7 +10,7 @@ agent must call ``file_read`` / ``grep`` for content (agentic retrieval, the主�
 清单稀疏化 (双模式工作区): default injection is attachments + 裸聊 scratch files;
 project shared trees collapse non-attachment noise into one「另有 N 个文件」line (with a
 small newest-first supplement). Workers receive the richer per-run manifest
-(``runs/executor_context._workspace_manifest``: teammate products + the same sparse
+(``runs/executor/context._workspace_manifest``: teammate products + the same sparse
 policy).
 
 Best-effort by contract: no backend, no indexing support, an empty workspace, or a
@@ -18,7 +18,21 @@ listing failure all yield ``""`` (the caller omits the block) — workspace awar
 an enhancement, never a hard dependency (same posture as ``memory`` / global search).
 """
 
-from __future__ import annotationsfrom typing import TYPE_CHECKINGfrom agentcore.core.logging import get_loggerfrom agentcore.runtime.context.workspace_profile import (    detect_workspace_profile,    render_workspace_profile,)from agentcore.workspace.sparse_listing import (    format_remaining_summary,    partition_sparse_paths,)if TYPE_CHECKING:
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from agentcore.core.logging import get_logger
+from agentcore.runtime.context.workspace_profile import (
+    detect_workspace_profile,
+    render_workspace_profile,
+)
+from agentcore.workspace.sparse_listing import (
+    format_remaining_summary,
+    partition_sparse_paths,
+)
+
+if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -111,4 +125,4 @@ async def build_workspace_overview(
 
     body = "\n\n".join(sections)
     return f"<workspace_file_index>\n{body}\n</workspace_file_index>"
-
+

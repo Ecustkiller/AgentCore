@@ -14,7 +14,7 @@ from agentcore.runtime.delegate.completion import (
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
-from agentcore.runtime.runs.executor_shared import FINISH_INTERRUPT_WARNING
+from agentcore.runtime.runs.executor.shared import FINISH_INTERRUPT_WARNING
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.handoff import HandoffTool
@@ -92,6 +92,8 @@ class _RecordingRounds:
     """Scripted rounds that keep EVERY message of every call, so a test can read the
     correction prompt the executor appended for the contract retry."""
 
+    base_url = "http://test.invalid/v1"
+
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
         self._rounds = rounds
         self.calls = 0
@@ -145,8 +147,8 @@ async def test_interrupted_empty_pass_tells_retry_it_was_a_transport_cut():
     assert state.content.strip()
 
 
-async def test_ordinary_min_length_soft_no_contract_retry():
-    """定案乙：字数不足 soft-complete，不走 contract.retry，也无传输中断借口。"""
+async def test_unknown_deliverable_fields_ignored_no_contract_retry():
+    """Deliverable 已删 min_length：遗留字段不得触发 contract.retry / 字数 soft tip。"""
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "deliverable": {"min_length": 40}}], id_prefix="t"
     )
@@ -169,7 +171,7 @@ async def test_ordinary_min_length_soft_no_contract_retry():
     state = res["t_1"]
     assert provider.calls == 1
     assert state.phase is RunPhase.COMPLETED
-    assert any("少于" in w for w in (state.warnings or []))
+    assert not any("少于" in w for w in (state.warnings or []))
     assert not any("传输中被中断" in w for w in (state.warnings or []))
 
 

@@ -43,7 +43,6 @@ import {
 import { getMessageCostDisplay } from "@/api/usage";
 import {
   AssistantContent,
-  FinishReasonChip,
   SupportDiagnosticCopyButton,
 } from "@/components/AssistantView";
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
@@ -258,6 +257,8 @@ function extractTurnChrome(events: SSEEvent[]): {
   durationMs: number | null;
   finishReason: string | null;
   emptyDiagnosis: string | undefined;
+  bodyKind: string | undefined;
+  baseUrl: string | undefined;
   errorCode: string | undefined;
   errorMessage: string | undefined;
   credentialSource: string | null | undefined;
@@ -267,6 +268,8 @@ function extractTurnChrome(events: SSEEvent[]): {
   let durationMs: number | null = null;
   let finishReason: string | null = null;
   let emptyDiagnosis: string | undefined;
+  let bodyKind: string | undefined;
+  let baseUrl: string | undefined;
   let errorCode: string | undefined;
   let errorMessage: string | undefined;
   let credentialSource: string | null | undefined;
@@ -276,6 +279,8 @@ function extractTurnChrome(events: SSEEvent[]): {
       errorCode = p.code;
       errorMessage = p.message;
       emptyDiagnosis = p.context?.empty_diagnosis;
+      bodyKind = p.context?.body_kind;
+      baseUrl = p.context?.base_url;
       credentialSource = p.context?.credential_source;
     }
     if (e.type === "message_end") {
@@ -303,16 +308,38 @@ function extractTurnChrome(events: SSEEvent[]): {
     durationMs,
     finishReason,
     emptyDiagnosis,
+    bodyKind,
+    baseUrl,
     errorCode,
     errorMessage,
     credentialSource,
   };
 }
 
+/** Error extras for「复制排查包」(SSE ErrorContext; cold RunError only has code). */
+function supportErrorExtras(opts: {
+  errorCode?: string | null;
+  emptyDiagnosis?: string | null;
+  bodyKind?: string | null;
+  baseUrl?: string | null;
+}): Pick<
+  SupportDiagnosticIds,
+  "errorCode" | "emptyDiagnosis" | "bodyKind" | "baseUrl" | "stream"
+> {
+  const errorCode = opts.errorCode?.trim() || undefined;
+  const emptyDiagnosis = opts.emptyDiagnosis?.trim() || undefined;
+  const bodyKind = opts.bodyKind?.trim() || undefined;
+  const baseUrl = opts.baseUrl?.trim() || undefined;
+  const stream =
+    !!emptyDiagnosis || errorCode === "LLM_EMPTY_RESPONSE" ? true : undefined;
+  return { errorCode, emptyDiagnosis, bodyKind, baseUrl, stream };
+}
+
 /** Build 排查包 ids for a history assistant row (REST trace_id + journal execution_id). */
 function historySupportIds(
   m: MessageDetail,
   conversationId: string | null,
+  extras?: ReturnType<typeof supportErrorExtras>,
 ): SupportDiagnosticIds {
   const fromEvents = m.runs?.events?.length
     ? extractSupportIdsFromEvents(m.runs.events)
@@ -331,6 +358,7 @@ function historySupportIds(
     messageId: m.id,
     traceId: m.trace_id ?? fromEvents.traceId,
     executionId,
+    ...extras,
   };
 }
 
@@ -696,6 +724,12 @@ function AssistantBubble({
   const supportIds: SupportDiagnosticIds = {
     conversationId,
     ...extractSupportIdsFromEvents(turn.events),
+    ...supportErrorExtras({
+      errorCode: chrome.errorCode,
+      emptyDiagnosis: chrome.emptyDiagnosis,
+      bodyKind: chrome.bodyKind,
+      baseUrl: chrome.baseUrl,
+    }),
   };
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
@@ -718,11 +752,6 @@ function AssistantBubble({
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {empty && !failureNotice ? (
           <span className="muted">{live ? "…" : ""}</span>
-        ) : empty && failureNotice ? (
-          <FinishReasonChip
-            reason={finishReason}
-            diagnosisLabel={finishDiagnosis}
-          />
         ) : !empty ? (
           <AssistantContent
             process={p.process}
@@ -957,7 +986,16 @@ function HistoryAssistant({
         message: errorMessage,
       })
     : null;
-  const supportIds = historySupportIds(m, conversationId);
+  const supportIds = historySupportIds(
+    m,
+    conversationId,
+    supportErrorExtras({
+      errorCode,
+      emptyDiagnosis: chrome.emptyDiagnosis,
+      bodyKind: chrome.bodyKind,
+      baseUrl: chrome.baseUrl,
+    }),
+  );
   // Stopped empty = omit chat-timeline face (P1); interrupted may keep recover.
   const showRetry = !!onRetry && isLast && (interrupted || !!failureNotice);
   const finishDiagnosis = degradedFinishChipLabel(
@@ -984,12 +1022,7 @@ function HistoryAssistant({
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {streaming && !m.content && !m.reasoning_content && !process?.length ? (
           <span className="muted">…</span>
-        ) : emptyBody && failureNotice ? (
-          <FinishReasonChip
-            reason={finishReason}
-            diagnosisLabel={finishDiagnosis}
-          />
-        ) : (
+        ) : emptyBody && failureNotice ? null : (
           <AssistantContent
             process={process}
             content={m.content ?? ""}

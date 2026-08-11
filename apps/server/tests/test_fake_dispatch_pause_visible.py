@@ -6,6 +6,8 @@ from agentcore.runtime.engine.ask_user_pause_visible import (
     claims_install_or_deps_ready,
     ensure_ask_user_pause_body,
     honest_ask_user_message,
+    is_hollow_ask_pause,
+    structured_confirm_restatement,
 )
 from agentcore.runtime.turn_interrupt import (
     REDRIVE_FAILED_USER_VISIBLE,
@@ -90,6 +92,55 @@ def test_ensure_ask_user_pause_body_forbids_ready_vs_not_started_stack():
 
     stacked = f"{ready}\n\n{ASK_USER_PAUSE_USER_VISIBLE}"
     assert ensure_ask_user_pause_body(stacked) == ASK_USER_PAUSE_USER_VISIBLE
+
+
+def test_is_hollow_ask_pause_matches_empty_and_constant():
+    assert is_hollow_ask_pause("")
+    assert is_hollow_ask_pause("   ")
+    assert is_hollow_ask_pause(ASK_USER_PAUSE_USER_VISIBLE)
+    assert not is_hollow_ask_pause("选哪种风格再开工？")
+
+
+def test_ensure_ask_user_pause_body_restates_card_defaults_over_hollow():
+    # 53f08：空/空洞 pause + 卡上路径 default → 复述路径，禁只剩 18 字模板
+    questions = [
+        {
+            "id": "q0",
+            "prompt": "仓库路径",
+            "kind": "choice",
+            "options": [
+                {"label": "当前目录建仓", "path": "C:/Work/demo-repo"},
+                {"label": "另选文件夹"},
+            ],
+            "multiple": False,
+            "default": "当前目录建仓",
+        }
+    ]
+    assert "路径=" in structured_confirm_restatement(questions)
+    out_empty = ensure_ask_user_pause_body("", questions=questions)
+    assert "当前目录建仓" in out_empty
+    assert "C:/Work/demo-repo" in out_empty
+    assert ASK_USER_PAUSE_USER_VISIBLE in out_empty
+    assert out_empty != ASK_USER_PAUSE_USER_VISIBLE
+
+    out_hollow = ensure_ask_user_pause_body(ASK_USER_PAUSE_USER_VISIBLE, questions=questions)
+    assert "当前目录建仓" in out_hollow
+    assert out_hollow != ASK_USER_PAUSE_USER_VISIBLE
+
+
+def test_ensure_ask_user_pause_body_keeps_prior_structured_over_hollow():
+    # d4d5：上轮已有结构化确认选项时，空模板不得冲掉
+    prior = (
+        "交付状态：尚未开工（等待目录恢复）。请选择："
+        "重新打开/授权 / 告知新路径 / 改审名册其他项目，然后回复「已恢复」。"
+    )
+    out = ensure_ask_user_pause_body(
+        ASK_USER_PAUSE_USER_VISIBLE,
+        prior_visible=prior,
+    )
+    assert "重新打开/授权" in out
+    assert "已恢复" in out
+    assert out != ASK_USER_PAUSE_USER_VISIBLE
 
 
 def test_compose_interrupt_redrive_failed_not_silent():

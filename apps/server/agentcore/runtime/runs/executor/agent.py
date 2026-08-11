@@ -1,7 +1,6 @@
-"""Split from executor.py — see executor.py module docstring.
+"""AGENT-node entry: ``build_agent_executor`` wires turn bindings.
 
-``build_agent_executor`` wires turn bindings; node execution and escalate
-channel live in ``executor_node`` / ``executor_escalation``.
+Node execution and escalate channel live in ``.node`` / ``.escalation``.
 """
 
 from __future__ import annotations
@@ -17,10 +16,10 @@ from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import record_turn_fact
 from agentcore.runtime.ports import ClientRequestBridge
-from agentcore.runtime.runs.executor_context import _ancestors_by_id, _safe_index_files
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_identities import DelegateFactory
-from agentcore.runtime.runs.executor_node import execute_agent_node
+from agentcore.runtime.runs.executor.context import _ancestors_by_id, _safe_index_files
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.identities import DelegateFactory
+from agentcore.runtime.runs.executor.node import execute_agent_node
 from agentcore.runtime.runs.notewall import NoteWall
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor

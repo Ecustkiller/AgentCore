@@ -59,16 +59,23 @@ services:
       retries: 5
 
   searxng:
-    image: searxng/searxng:latest
+    # Digest-pin (not :latest): avoids silent engine/parser regressions on recreate.
+    # Bump deliberately after smoke-testing web_search on a staging pull.
+    image: searxng/searxng@sha256:cd22dbf7fac8b25d5e39e65af53a4b47009df5ad3162e270c477fd5b30ce03f2
     container_name: agentcore-searxng
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 512m
     ports:
-      # 与宿主机同机：API 用 SEARXNG_URL=http://127.0.0.1:18888 直连。
+      # 与宿主机同机：API 用 SEARXNG_URL=http://localhost:18888 直连（仅绑本机）。
       - "127.0.0.1:18888:8080"
     environment:
-      SEARXNG_BASE_URL: "http://127.0.0.1:18888"
+      SEARXNG_BASE_URL: "http://localhost:18888"
+      # Same rationale as docker-compose.dev.yml: default 1 granian worker saturates
+      # under a parallel Agent team burst → inbound connect timeouts → app-side
+      # per-host breaker trips search-blind. 6 workers aligns with
+      # _SEARCH_CONCURRENCY=6; upstream CAPTCHA risk stays bounded by that app-side cap.
+      GRANIAN_WORKERS: "6"
     volumes:
       - ./searxng:/etc/searxng
     healthcheck:

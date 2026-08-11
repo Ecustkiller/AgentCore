@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
 
@@ -192,14 +192,12 @@ async def run_ceo_review(
         "对照落盘内容找缺口 / 风险，勿空泛夸奖。\n\n"
         f"{artifacts}{pending_lines}"
     )
-    profile = get_profile("compaction")
     # Inherit caller model; empty → deployment default (never hardcode a product SKU).
     resolved_model = (model or "").strip() or (settings.platform_model or "").strip()
-    request = build_request(
-        profile,
+    request = build_selected_request(
+        select_call("compaction", resolved_model),
         [LLMMessage(role="user", content=prompt)],
         stream=False,
-        model=resolved_model,
     )
     try:
         response = await llm.complete(request)

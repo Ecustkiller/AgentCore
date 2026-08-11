@@ -31,16 +31,16 @@ def test_is_web_artifact_batch_requires_html_plus_style_or_script():
 def test_needs_file_contents_true_for_web_batch_even_existence_only():
     paths = ["index.html", "style.css"]
     assert needs_file_contents(
-        Deliverable(form="files", requires_files=True), landed_paths=paths
+        Deliverable(form="files"), landed_paths=paths
     )
     assert needs_file_contents(None, landed_paths=paths)
     # Markdown is a content surface → placeholder scan needs a read
     assert needs_file_contents(
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         landed_paths=["report.md"],
     )
     assert not needs_file_contents(
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         landed_paths=["main.py"],
     )
 
@@ -95,7 +95,7 @@ def test_web_seam_mismatched_sample_fails_with_orphan_list():
 
     v = check_contract(
         "已落盘网页",
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         files_written=2,
         workspace_paths=["index.html", "style.css"],
         artifact_contents=contents,
@@ -116,7 +116,7 @@ def test_web_seam_aligned_sample_passes():
     assert check_web_seam_failures(contents) == []
     v = check_contract(
         "网页已写好",
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         files_written=3,
         workspace_paths=list(contents),
         artifact_contents=contents,
@@ -150,7 +150,7 @@ def test_web_seam_below_threshold_passes():
 def test_docs_only_deliverable_unaffected():
     v = check_contract(
         "报告已写",
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         files_written=1,
         workspace_paths=["report.md"],
         artifact_contents={"report.md": "# 报告\n正文"},
@@ -184,7 +184,7 @@ def test_inline_style_and_script_count_toward_selector_pool():
     assert check_web_seam_failures(contents) == []
     v = check_contract(
         "单文件风格页已写",
-        Deliverable(form="files", requires_files=True),
+        Deliverable(form="files"),
         files_written=2,
         workspace_paths=list(contents),
         artifact_contents=contents,

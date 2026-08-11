@@ -1,4 +1,9 @@
-"""Scenario profiles: inference params per usage scenario (model resolved separately)."""
+"""Scenario profiles: static inference params + request assembly.
+
+Model × params **selection** strategy lives in :mod:`agentcore.llm.model_selection`.
+This module keeps the ``PROFILES`` table, ``TurnProfiles`` carrier, and
+:func:`build_request` packing only — no purpose→model or turn-assembly decisions.
+"""
 
 from __future__ import annotations
 
@@ -128,17 +133,8 @@ def turn_profiles_for_turn(
     profile_set: TurnProfiles | None = None,
     llm_credentials: LLMCredentials | None = None,
 ) -> TurnProfiles:
-    """Resolve turn profiles for a pipeline/sidecar run.
+    """Thin re-export — strategy lives in :func:`model_selection.turn_profiles_for_turn`."""
+    from agentcore.llm.model_selection import turn_profiles_for_turn as _select
 
-    BYOK and inference-proxy turns must not inherit ``settings.platform_model`` when
-    the caller did not supply an explicit profile set — the upstream model comes from
-    the user's credentials (direct BYOK) or from the proxy's server-side resolution.
-    """
-    if profile_set is not None:
-        return profile_set
-    if llm_credentials is not None:
-        from agentcore.llm.resolve import resolve_turn_model
-
-        return default_turn_profiles(model=resolve_turn_model(llm_credentials))
-    return default_turn_profiles()
+    return _select(profile_set, llm_credentials)
 

@@ -378,7 +378,7 @@ def _declare_replan_adds_on_coordination(
 ) -> None:
     """Dispatch ownership for admitted replan.adds (replaces → transfer_all_from)."""
     from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
-    from agentcore.runtime.runs.executor_context import _ancestors_by_id
+    from agentcore.runtime.runs.executor.context import _ancestors_by_id
     from agentcore.workspace.write_claims import file_ownership_v2_enabled
 
     session = _replan_coordination_session(tool, plan)

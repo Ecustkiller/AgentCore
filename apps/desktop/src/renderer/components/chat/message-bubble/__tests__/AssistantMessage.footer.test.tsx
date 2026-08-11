@@ -179,3 +179,58 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
   });
 });
+
+describe("AssistantMessage empty-response single surface", () => {
+  it("LLM_EMPTY_RESPONSE：只红卡，不叠 FinishReasonChip / 连通升级句", () => {
+    renderBubble(
+      settledMessage({
+        id: "empty-1",
+        content: "",
+        finishReason: "degraded",
+        error: {
+          code: "LLM_EMPTY_RESPONSE",
+          message: "模型多次空响应 · 模型返回空内容",
+          context: { empty_diagnosis: "silent_empty" },
+        },
+      }),
+    );
+    expect(screen.getByText(/模型多次空响应/)).toBeTruthy();
+    expect(screen.queryByText("空响应收尾")).toBeNull();
+    expect(screen.queryByText(/降级完成/)).toBeNull();
+    expect(screen.queryByText(/模型返回空内容/)).toBeTruthy();
+    // Chip would show diagnosis alone; red card already has it — no separate chip row.
+    expect(screen.queryByText("Base URL")).toBeNull();
+    expect(screen.queryByText(/设置 · 服务商/)).toBeNull();
+  });
+
+  it("legacy oauth_expired diagnosis：红卡唯一面，无 Sub2API / 降级完成", () => {
+    renderBubble(
+      settledMessage({
+        id: "empty-oauth",
+        content: "",
+        finishReason: "degraded",
+        error: {
+          code: "LLM_EMPTY_RESPONSE",
+          message:
+            "模型多次空响应 · 上游返回了网页或登录页，请检查服务商地址与鉴权",
+          context: { empty_diagnosis: "oauth_expired" },
+        },
+      }),
+    );
+    expect(screen.getByText(/上游返回了网页或登录页/)).toBeTruthy();
+    expect(screen.queryByText(/Sub2API/)).toBeNull();
+    expect(screen.queryByText(/降级完成/)).toBeNull();
+    expect(screen.queryByText("空响应收尾")).toBeNull();
+  });
+
+  it("degraded 无空响应错误时仍可显示 FinishReasonChip", () => {
+    renderBubble(
+      settledMessage({
+        content: "部分输出",
+        finishReason: "degraded",
+      }),
+    );
+    expect(screen.getByText("空响应收尾")).toBeTruthy();
+    expect(screen.queryByText(/降级完成/)).toBeNull();
+  });
+});

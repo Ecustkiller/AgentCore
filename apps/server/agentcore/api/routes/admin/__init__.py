@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from . import (
     agent_audit,
     audit_logs,
+    beta_group,
     conversations,
     feedback,
     notices,
@@ -38,6 +39,7 @@ router.include_router(conversations.router)
 router.include_router(observability.router)
 router.include_router(feedback.router)
 router.include_router(notices.router)
+router.include_router(beta_group.router)
 router.include_router(simulation_show.router)
 
 __all__ = ["router"]

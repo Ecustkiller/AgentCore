@@ -29,6 +29,9 @@
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
  * `reject_not_richer` / `reject_generating` / `reject_active_has_more_after` 等）。
+ * 本地引擎互斥拒（横幅「turn already running」；不进云端 sync:logs）：
+ * `sidecar.turn_already_running`（`op`=startTurn|resume，`turn_id` / `conversation_id` /
+ * `saw_any_event`；与 sidecar 进程同名事件对偶，查 `userData/logs/desktop.jsonl`）。
  * 本地工作区通道 L3（channel dead / 多对话活性挂起）：`workspace_op.received` /
  * `workspace_op.dropped`（turnPhase 门丢掉）/ `workspace_op.ipc_begin|end`（成功多为
  * debug）/ `workspace_op.aborted`（超时 Abort · warn，含 `inflight_cid` /

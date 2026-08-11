@@ -126,7 +126,7 @@ def node_file_targets(node: Any) -> set[str]:
 
 
 def _ancestors_for_plan(plan: RunPlan) -> dict[str, frozenset[str]]:
-    from agentcore.runtime.runs.executor_context import _ancestors_by_id
+    from agentcore.runtime.runs.executor.context import _ancestors_by_id
 
     return _ancestors_by_id(plan)
 

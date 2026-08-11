@@ -20,11 +20,11 @@ skip_if:
 | **多厂商 provider 路由** | model 串带 `厂商/` 前缀 | 豆包 / Moonshot / 智谱 等（§四） |
 | **platform 平台凭据** | `billing_mode=platform` / 显式 platform | `PLATFORM_*` 三项 |
 
-**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认。测连成功文案须标明「只验证连通，聊天看模型组合」。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
+**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认。测连：优先 `GET /models`（合法 JSON）；空列表或不在列表的 default → `POST /chat/completions` **且验 body**（拒 HTML/非 JSON/缺 choices）；成功文案须标明连通≠聊天就绪，并提示自定义 Base URL 通常需含 `/v1`。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
 
 ## 二、模型与凭据解析
 
-**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（null = 账号默认；**活引用**）。系统预置由平台目录 / `PLATFORM_MODELS`（空则 `[PLATFORM_MODEL, PLATFORM_BACKGROUND_MODEL]`）动态投影，稳定 id = `uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID；逻辑默认 = `PLATFORM_MODEL` 对应预置（须在目录内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交——定案权威 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
+**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（null = 账号默认；**活引用**）。**元数据事实源** = `llm/catalog.py`（上架集）+ `llm/model_metadata.py`（展示 enrichment）；`model_profiles` 只做组合 CRUD / expand，系统预置 = 对 catalog 可见上架集的 uuid5 投影（`uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID）。逻辑默认 = `PLATFORM_MODEL` 对应预置（须在上架集内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交——定案权威 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 
 **识图槽 `vision`（可选）**：与 main **独立**，空 **不** follow main。有槽 → 用该槽凭据建独立 `VisionReader`（BYOK 填槽即可，不因 `billing_mode=byok` 关死）。槽空 → 仅当 `billing_mode=platform` 且 `VISION_API_KEY`/`VISION_BASE_URL` 齐全时走运维兜底（默认 `kimi-k2.5`，不上架 `PLATFORM_MODELS`）。
 

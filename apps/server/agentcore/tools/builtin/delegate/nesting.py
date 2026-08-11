@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from agentcore.tools.builtin.replan import ReplanTool
 
 if TYPE_CHECKING:
-    from agentcore.runtime.runs.executor_identities import LeadSubteam
+    from agentcore.runtime.runs.executor.identities import LeadSubteam
     from agentcore.tools.builtin.delegate.tool import DelegateTool
 
 
@@ -66,7 +66,7 @@ def make_lead_subteam(
     Returned to the ``runs`` layer as the opaque :class:`LeadSubteam` bundle so ``runs``
     stays free of a concrete tools dependency (lazy import, as elsewhere in this package).
     """
-    from agentcore.runtime.runs.executor_identities import LeadSubteam
+    from agentcore.runtime.runs.executor.identities import LeadSubteam
 
     child = make_child(tool, captain_run_id, captain_depth)
     replan = ReplanTool(delegate=child)

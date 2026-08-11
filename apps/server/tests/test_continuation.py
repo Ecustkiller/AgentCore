@@ -354,7 +354,7 @@ def test_register_completed_session_registers_failed_with_transcript():
 def test_priced_failure_with_transcript_registers():
     """异常口 ``_priced_failure(..., transcript=…)`` 与合同硬失败同契约：可登记现场。"""
     from agentcore.llm.provider.protocol import TokenUsage
-    from agentcore.runtime.runs.executor_shared import _priced_failure
+    from agentcore.runtime.runs.executor.shared import _priced_failure
 
     store = SessionStore()
     tool = _tool(store, _Provider(["x"]))
@@ -396,7 +396,7 @@ def test_register_skips_failed_without_transcript():
 def test_priced_failure_without_transcript_does_not_register():
     """``_priced_failure`` 未挂 transcript → 与空失败同：不可登记。"""
     from agentcore.llm.provider.protocol import TokenUsage
-    from agentcore.runtime.runs.executor_shared import _priced_failure
+    from agentcore.runtime.runs.executor.shared import _priced_failure
 
     store = SessionStore()
     tool = _tool(store, _Provider(["x"]))

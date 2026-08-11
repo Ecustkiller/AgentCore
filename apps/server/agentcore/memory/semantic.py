@@ -16,7 +16,7 @@ from typing import Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.episodic import EpisodeRecord
 from agentcore.memory.maintenance import (
@@ -371,23 +371,21 @@ class LLMSemanticConsolidator:
     def __init__(
         self, provider: LLMProvider, *, role: str = "memory", model: str | None = None
     ) -> None:
-        self._provider = provider
-        self._profile = get_profile(role)
         from agentcore.config import settings
 
-        self._model = model or settings.platform_model
+        self._provider = provider
+        self._selected = select_call(role, model or settings.platform_model)
         self.last_usage: TokenUsage = TokenUsage()
         self.last_model: str = ""
 
     async def consolidate(self, data: SemanticConsolidateInput) -> SemanticConsolidateResult:
-        request = build_request(
-            self._profile,
+        request = build_selected_request(
+            self._selected,
             [
                 LLMMessage(role="system", content=_SEMANTIC_SYSTEM_PROMPT),
                 LLMMessage(role="user", content=_render_semantic_prompt(data)),
             ],
             stream=False,
-            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -397,7 +395,7 @@ class LLMSemanticConsolidator:
             logger.warning("memory.semantic_timeout", user_id=data.user_id)
             return SemanticConsolidateResult(parse_failed=True)
         self.last_usage = response.usage
-        self.last_model = response.model or self._model or ""
+        self.last_model = response.model or self._selected.model or ""
         return parse_semantic_result(response.content or "", folder_id=data.folder_id)
 
 

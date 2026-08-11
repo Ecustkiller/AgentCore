@@ -6,20 +6,22 @@ inference proxy. Call details are authoritative; per-run aggregates are
 upserted from those details (``materialize_runs=True``, isomorphic with the
 proxy path). Turn finalize still reconciles orphans (e.g. vision) and re-reads
 the product view for ``cost.recorded`` / ``messages.cost``.
+
+Pricing / attribution field assembly is shared with ``proxy_spend`` via
+:mod:`agentcore.billing.ledger_call` — this module only decides *whether* to
+enqueue and stamps ``source=inprocess_call``.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
 
+from agentcore.billing.ledger_call import assemble_ledger_call
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.runtime.costing import ROLE_CAPTAIN, ROLE_MEMBER, priced_call_cost
 
 logger = get_logger(__name__)
-
-_BACKGROUND_ROLES = frozenset({"title", "memory"})
 
 # Proxy-forwarded unary calls still emit ``llm.call`` (latency obs) via the
 # ``observe_provider`` fence around ``build_provider``, but billing must be
@@ -55,7 +57,6 @@ def maybe_enqueue_inprocess_call(
         return None
 
     from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
-    from agentcore.llm.pricing import CredentialSource, resolve_credential_source
 
     queue = get_cost_ledger_queue()
     if not queue.running:
@@ -66,45 +67,22 @@ def maybe_enqueue_inprocess_call(
     if not user_id or not conversation_id:
         return None
 
-    run_id = get_log_value("run_id") or None
-    agent_id = get_log_value("agent_id") or None
-    parent_run_id = get_log_value("parent_run_id") or None
-    persona = get_log_value("persona") or None
-    cost_role = get_log_value("cost_role") or None
-    message_id = get_log_value("message_id") or None
-    trace_id = get_log_value("trace_id") or None
-
-    if cost_role in _BACKGROUND_ROLES or cost_role in ("captain", "member", "arena", "vision"):
-        role = cost_role
-    elif agent_id in ("CEO", "captain"):
-        role = ROLE_CAPTAIN
-    elif run_id:
-        role = ROLE_MEMBER
-    else:
-        # Off-turn title/memory often lack run stamps; leave role as captain-shaped
-        # only when nothing else is known — callers that know better bind cost_role.
-        role = ROLE_CAPTAIN
-
-    explicit: CredentialSource | None = (
-        credential_source if credential_source in ("user", "platform", "vendor") else None
-    )
-    source = resolve_credential_source(credential_source=explicit, model=model)
-    call = priced_call_cost(
+    call = assemble_ledger_call(
         model=model,
         usage=usage,
-        role=role,
-        run_id=run_id,
-        parent_run_id=parent_run_id,
-        agent_id=agent_id,
-        persona=persona,
+        role=get_log_value("cost_role") or None,
+        run_id=get_log_value("run_id") or None,
+        parent_run_id=get_log_value("parent_run_id") or None,
+        agent_id=get_log_value("agent_id") or None,
+        persona=get_log_value("persona") or None,
         duration_ms=duration_ms,
-        credential_source=source,
+        credential_source=credential_source,
     )
     record_id = queue.enqueue_calls(
         user_id=user_id,
         conversation_id=conversation_id,
-        message_id=message_id,
-        trace_id=trace_id,
+        message_id=get_log_value("message_id") or None,
+        trace_id=get_log_value("trace_id") or None,
         calls=[asdict(call)],
         source="inprocess_call",
         materialize_runs=True,

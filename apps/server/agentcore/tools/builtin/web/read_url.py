@@ -311,6 +311,8 @@ class ReadUrlTool:
             description=(
                 "获取指定网页的正文文本（比 web_search 摘要更完整，但长页面会按 "
                 "max_chars 截断），用于在 web_search 摘要不足、确需深读某条结果时。"
+                "成稿挂 #rN 须先对本工具深读（或来源已 selected）；仅 search 命中不可挂号——"
+                "没读过用文字概括，勿整篇标 search 命中。"
                 "默认摘要优先：多数问题先用 web_search 摘要作答；"
                 "任务要求核对原文或需要正文细节时再调用本工具深读。"
                 "要把 URL 的原始文件/二进制写入工作区时用 download_url，不要用本工具。"

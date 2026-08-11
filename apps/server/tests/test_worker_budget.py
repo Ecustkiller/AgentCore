@@ -384,7 +384,7 @@ def test_factory_delivery_idle_not_finalize():
 def test_narrow_for_light_repair_strips_investigation():
     """Light repair 去掉调查工具，保留 light-repair 集（含写盘）；无名单补写半成品。"""
     from agentcore.core.types import ToolCategory
-    from agentcore.runtime.runs.executor_node import _narrow_for_light_repair
+    from agentcore.runtime.runs.executor.node import _narrow_for_light_repair
     from agentcore.tools.protocol import ToolResult, ToolSchema
     from agentcore.tools.registry import ToolRegistry
 
@@ -437,7 +437,7 @@ def test_narrow_for_light_repair_strips_investigation():
 
 def test_should_skip_contract_retry_for_budget_handoff_ok_wind_down():
     """定案 B：handoff_ok + wind_down → 短路；缺一不可。"""
-    from agentcore.runtime.runs.executor_node import (
+    from agentcore.runtime.runs.executor.node import (
         _wind_down_entered,
         should_skip_contract_retry_for_budget,
     )

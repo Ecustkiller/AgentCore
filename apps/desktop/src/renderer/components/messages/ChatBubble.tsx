@@ -47,6 +47,8 @@ interface Props {
   myUserId?: string | null;
   /** Platform admin — may recall others' group / system_card messages. */
   isAdmin?: boolean;
+  /** Group 版主 (owner/admin) — may recall others' group messages (not system_card). */
+  isGroupModerator?: boolean;
   /** Active chat type (gates admin recall menu). */
   chatType?: ChatType | null;
   /** Resolve a mentioned user's display name for body `@token` matching. */
@@ -263,6 +265,7 @@ export function ChatBubble({
   highlighted = false,
   myUserId,
   isAdmin = false,
+  isGroupModerator = false,
   chatType = null,
   resolveMentionName,
   onReply,
@@ -290,6 +293,7 @@ export function ChatBubble({
       const offerRecall = canOfferRecall(message, {
         mine,
         isAdmin,
+        isGroupModerator,
         chatType,
       });
       const card = <ProductNoticeCard message={message} payload={notice} />;
@@ -311,6 +315,7 @@ export function ChatBubble({
     const offerRecall = canOfferRecall(message, {
       mine,
       isAdmin,
+      isGroupModerator,
       chatType,
     });
     const pill = (
@@ -342,7 +347,12 @@ export function ChatBubble({
   const hasText = Boolean(message.content);
   const reply = message.reply_to ?? null;
   const canReply = Boolean(onReply);
-  const offerRecall = canOfferRecall(message, { mine, isAdmin, chatType });
+  const offerRecall = canOfferRecall(message, {
+    mine,
+    isAdmin,
+    isGroupModerator,
+    chatType,
+  });
   const canRecall = offerRecall && Boolean(onRecall);
   const offerEdit = canOfferEdit(message, { mine, chatType });
   const canEdit = offerEdit && Boolean(onEdit);

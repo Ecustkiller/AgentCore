@@ -1,10 +1,15 @@
-"""Unified model + credential resolution for every LLM call site.
+"""Credential resolution + profile-expand consumption for every LLM call site.
 
 BYOK is a **list of providers** (``user_llm_providers``). Account / conversation
-select a **model combination profile** (``llm_model_profiles`` / system presets);
-expand yields main / worker / background slots (empty = follow_main). This module
-is the single choke point that turns「which user / which conversation / which
-purpose」into「which upstream endpoint + which model + which price card」.
+select a **model combination profile**; this module expands via
+:class:`~agentcore.llm.model_profiles.LlmModelProfileService` (derived query layer)
+then resolves upstream credentials. Model **metadata / 上架** live in
+:mod:`agentcore.llm.catalog` (+ :mod:`agentcore.llm.model_metadata`) — not here.
+
+Scope: credentials, decrypt, platform key wiring, and expand→creds helpers.
+Strategy (purpose→model priority, turn profiles, model×params pairing) lives in
+:mod:`agentcore.llm.model_selection` — this module keeps thin re-exports for
+call-site / test compatibility.
 """
 
 from __future__ import annotations
@@ -28,8 +33,6 @@ logger = get_logger(__name__)
 ProviderPurpose = Literal["user_facing", "platform_internal"]
 ModelPurpose = str  # chat | title | memory | compaction | file.rewrite | ...
 ModelOrigin = Literal["byok", "platform"]
-
-_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction"})
 
 __all__ = [
     "ModelConfig",
@@ -84,23 +87,6 @@ def _encryptor():
         # a missing key (provider_service raises KeyStorageUnavailableError on write).
         logger.error("byok.key_malformed")
         return None
-
-
-def _model_for_purpose(
-    purpose: str,
-    *,
-    chat_model: str,
-    user_background_model: str | None = None,
-) -> str:
-    """Resolve model name for ``purpose``; background prefers background_model."""
-    if purpose not in _BACKGROUND_PURPOSES:
-        return chat_model
-    if user_background_model and user_background_model.strip():
-        return user_background_model.strip()
-    platform_bg = (settings.platform_background_model or "").strip()
-    if platform_bg:
-        return platform_bg
-    return chat_model
 
 
 def platform_llm_credentials(model: str | None = None) -> LLMCredentials | None:
@@ -378,6 +364,8 @@ async def resolve_background_user_fallback(
     ``origin=platform``. Never an authorization path — pair with
     ``resolve_and_gate_background_user_fallback`` (source=user, no platform quota).
     """
+    from agentcore.llm.model_selection import _model_for_purpose
+
     bg = await _resolve_background(session, user_id, allow_platform_origin=False)
     if bg is not None:
         creds, model = bg
@@ -398,65 +386,10 @@ async def resolve_model_config(
     user_id: str,
     purpose: ModelPurpose = "chat",
 ) -> ModelConfig | None:
-    """Resolve full upstream config for one LLM purpose.
+    """Thin re-export — strategy lives in :func:`model_selection.select_model_config`."""
+    from agentcore.llm.model_selection import select_model_config
 
-    SELECTION / ADVISORY ONLY — never an authorization path (01 F10). For a keyless
-    user this deliberately FALLS BACK to the platform model so token advisory / turn-
-    profile selection still resolves a NAME; the billing gate
-    (``preflight_llm_credentials`` / ``resolve_and_gate_background`` /
-    ``run_background_llm``) is the authorization choke point.
-
-    Background purposes (title/memory/compaction) are **platform-first**
-    product chrome (industry-aligned: Cursor-style) when
-    :func:`platform_catalog_visible`. BYOK is the fallback when the platform gate
-    is off (dormant billing / missing credentials) **or** upstream auth rejection
-    via ``run_background_llm``. Chat purpose stays user-key-first unless the
-    account default is an explicit platform pointer.
-    """
-    from agentcore.billing.preference import platform_catalog_visible
-
-    is_background = purpose in _BACKGROUND_PURPOSES
-
-    if is_background:
-        # Platform-first only while the catalog gate is open; Model 降档 via
-        # platform_background_model. Dormant BILLING_MODE → BYOK or None.
-        if platform_catalog_visible():
-            platform_model = _model_for_purpose(
-                purpose, chat_model=settings.platform_model
-            )
-            platform = platform_llm_credentials(model=platform_model)
-            if platform is not None:
-                return ModelConfig(
-                    model=platform_model,
-                    base_url=platform.base_url,
-                    api_key=platform.api_key,
-                    source="platform",
-                    purpose=purpose,
-                )
-        return await resolve_background_user_fallback(session, user_id, purpose)
-
-    row, chat_model, origin = await _account_default(session, user_id)
-    if origin == "byok" and row is not None:
-        creds = _decrypt_provider(row, user_id)
-        if creds is not None:
-            return _model_config_from_creds(creds, chat_model, purpose)
-
-    platform_model = (
-        chat_model
-        if origin == "platform"
-        else _model_for_purpose(purpose, chat_model=settings.platform_model)
-    )
-    if platform_catalog_visible():
-        platform = platform_llm_credentials(model=platform_model)
-        if platform is not None:
-            return ModelConfig(
-                model=platform_model,
-                base_url=platform.base_url,
-                api_key=platform.api_key,
-                source="platform",
-                purpose=purpose,
-            )
-    return None
+    return await select_model_config(session, user_id, purpose)
 
 
 async def resolve_credentials(
@@ -483,26 +416,14 @@ def resolve_turn_model(
     *,
     conversation_model: str | None = None,
 ) -> str:
-    """Resolve the model for a user-facing turn.
+    """Thin re-export — strategy lives in :func:`model_selection.select_turn_model`."""
+    from agentcore.llm.model_selection import select_turn_model
 
-    Priority: explicit ``conversation_model`` (already expanded main from the profile)
-    > account ``default_model`` (BYOK creds) > ``platform_model`` > Flash.
-    """
-    if conversation_model and conversation_model.strip():
-        return conversation_model.strip()
-    if credentials is not None and credentials.default_model:
-        return credentials.default_model
-    if settings.platform_model:
-        return settings.platform_model
-    return PLATFORM_MODEL_FLASH
+    return select_turn_model(credentials, conversation_model=conversation_model)
 
 
 async def resolve_user_chat_model(session: AsyncSession, user_id: str) -> str:
-    """Chat model for a user-facing turn — matches inference proxy upstream resolution."""
-    cfg = await resolve_model_config(session, user_id, "chat")
-    if cfg is not None:
-        return cfg.model
-    platform = platform_llm_credentials()
-    if platform is not None:
-        return settings.platform_model
-    return PLATFORM_MODEL_FLASH
+    """Thin re-export — strategy lives in :func:`model_selection.select_user_chat_model`."""
+    from agentcore.llm.model_selection import select_user_chat_model
+
+    return await select_user_chat_model(session, user_id)

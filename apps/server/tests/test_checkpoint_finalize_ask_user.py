@@ -28,7 +28,7 @@ from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.runtime.facts import FactKind, TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.journal import runs_from_entries, window_from_journal
-from agentcore.runtime.runs.executor_shared import resolve_finish_override
+from agentcore.runtime.runs.executor.shared import resolve_finish_override
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema

@@ -2,10 +2,13 @@ import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import {
   StreamError,
   connectivityEscalationSuffix,
+  degradedFinishChipLabel,
   describeError,
+  EMPTY_RESPONSE_CHIP_LABELS,
   errorActionForCode,
   isClientSideLlmRejection,
   isConnectivityErrorCode,
+  isEmptyResponseUserSurface,
   resetSessionConnectivityFailures,
   syntheticErrorForEmptyFailure,
   visibleMessageText,
@@ -119,6 +122,57 @@ describe("FinishReasonChip error meta", () => {
   it("includes an error entry", () => {
     expect(FINISH_REASON_META.error).toMatchObject({ label: "调用失败" });
   });
+
+  it("degraded default is 空响应收尾 (no 降级完成)", () => {
+    expect(FINISH_REASON_META.degraded.label).toBe("空响应收尾");
+    expect(FINISH_REASON_META.degraded.label).not.toContain("降级完成");
+  });
+});
+
+describe("empty-response diagnosis labels", () => {
+  it("maps upstream_non_api / legacy oauth_expired without Sub2API", () => {
+    const expected = "上游返回了网页或登录页，请检查服务商地址与鉴权";
+    expect(EMPTY_RESPONSE_CHIP_LABELS.upstream_non_api).toBe(expected);
+    expect(EMPTY_RESPONSE_CHIP_LABELS.oauth_expired).toBe(expected);
+    expect(EMPTY_RESPONSE_CHIP_LABELS.oauth_expired).not.toContain("Sub2API");
+    expect(EMPTY_RESPONSE_CHIP_LABELS.length_empty).toContain("截断");
+  });
+
+  it("degradedFinishChipLabel prefers diagnosis map", () => {
+    expect(degradedFinishChipLabel("upstream_non_api", undefined)).toBe(
+      "上游返回了网页或登录页，请检查服务商地址与鉴权",
+    );
+    expect(degradedFinishChipLabel("oauth_expired", undefined)).toBe(
+      "上游返回了网页或登录页，请检查服务商地址与鉴权",
+    );
+  });
+});
+
+describe("isEmptyResponseUserSurface", () => {
+  it("detects code / diagnosis / message markers", () => {
+    expect(
+      isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" }),
+    ).toBe(true);
+    expect(
+      isEmptyResponseUserSurface({ emptyDiagnosis: "silent_empty" }),
+    ).toBe(true);
+    expect(
+      isEmptyResponseUserSurface({
+        message: "模型多次空响应 · 模型返回空内容",
+      }),
+    ).toBe(true);
+    expect(
+      isEmptyResponseUserSurface({
+        message: "模型空响应 · 输出长度截断 · 返回空内容",
+      }),
+    ).toBe(true);
+    expect(
+      isEmptyResponseUserSurface({
+        code: "LLM_ERROR",
+        message: "模型调用失败，请重试。",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("error action by type", () => {
@@ -226,6 +280,27 @@ describe("connectivityEscalationSuffix", () => {
   it("ignores non-connectivity codes", () => {
     expect(connectivityEscalationSuffix("LLM_KEY_INVALID", "m1")).toBeNull();
     expect(connectivityEscalationSuffix(undefined, "m1")).toBeNull();
+  });
+
+  it("never escalates LLM_EMPTY_RESPONSE or emptyDiagnosis", () => {
+    expect(isConnectivityErrorCode("LLM_EMPTY_RESPONSE")).toBe(false);
+    expect(
+      connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m1"),
+    ).toBeNull();
+    expect(
+      connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m2"),
+    ).toBeNull();
+    // Even if a connectivity code somehow coexists with emptyDiagnosis, skip.
+    expect(
+      connectivityEscalationSuffix("LLM_TIMEOUT", "m1", {
+        emptyDiagnosis: "silent_empty",
+      }),
+    ).toBeNull();
+    expect(
+      connectivityEscalationSuffix("LLM_TIMEOUT", "m2", {
+        emptyDiagnosis: "upstream_non_api",
+      }),
+    ).toBeNull();
   });
 
   it("does not escalate upstream 400 invalid_request into connectivity hint", () => {

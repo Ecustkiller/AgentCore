@@ -88,7 +88,7 @@ def test_contract_root_write_warns_under_artifact_dir():
 def test_artifact_dir_warning_stays_soft_on_delivery_status():
     """Contract artifact_dir path hint → delivery_gaps soft → state=notes."""
     from agentcore.runtime.delegate.delivery_status import build_delivery_status
-    from agentcore.runtime.runs.executor_shared import _delivery_gaps_from_warnings
+    from agentcore.runtime.runs.executor.shared import _delivery_gaps_from_warnings
     from agentcore.runtime.runs.file_acceptance import build_file_acceptance
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
@@ -317,7 +317,7 @@ def test_apply_overrides_mismatched_research_artifact_dir():
 
 def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
     """回归：写手落 AI开发/ + 调研笔记落 research/ —— 不因写手误钉 research 冒假缺口。"""
-    from agentcore.runtime.runs.executor_shared import _delivery_gaps_from_warnings
+    from agentcore.runtime.runs.executor.shared import _delivery_gaps_from_warnings
 
     writer_artifacts = [
         f"{_AI_DEV_DIR}/00-导航与任务路由.md",

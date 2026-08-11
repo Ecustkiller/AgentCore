@@ -21,7 +21,7 @@ from agentcore.db.models import User
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.factory import build_provider
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
 logger = get_logger(__name__)
@@ -75,14 +75,15 @@ async def rewrite_selection(
     不剥离代码围栏等「兜底清洗」：选区本身可能就是合法的代码块/图表，系统提示已要求模型
     别套围栏——清洗反而会损坏合法输出。模型抽风是提示词调优问题，不在此处打补丁。
     """
-    request = build_request(
-        get_profile("file.rewrite"),
+    from agentcore.config import settings
+
+    request = build_selected_request(
+        select_call("file.rewrite", model or settings.platform_model),
         [
             LLMMessage(role="system", content=_REWRITE_SYSTEM_PROMPT),
             LLMMessage(role="user", content=_render_prompt(data)),
         ],
         stream=False,
-        model=model,
     )
     try:
         response = await asyncio.wait_for(

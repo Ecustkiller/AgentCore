@@ -132,7 +132,6 @@ def test_contract_web_quality_hard_fails_when_enabled():
         "ok",
         Deliverable(
             form="files",
-            requires_files=True,
             artifacts=["site/index.html"],
             web_quality_scan=True,
         ),
@@ -152,7 +151,6 @@ def test_contract_web_quality_soft_flips_ok_for_retry():
         "ok",
         Deliverable(
             form="files",
-            requires_files=True,
             artifacts=["site/index.html"],
             web_quality_scan=True,
         ),

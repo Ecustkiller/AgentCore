@@ -70,7 +70,7 @@ DEFAULT_ROSTER_MAX_CONVERSATIONS = 256
 
 # Per-worker TOTAL budget (chars) for upstream dependency products injected into a
 # downstream node's prompt, SHARED across all its pass_through deps (water-filled in
-# runs/executor.py: a dep needing less takes only what it needs, the remainder goes
+# runs/executor/: a dep needing less takes only what it needs, the remainder goes
 # to larger deps). A shared total — not a per-dep cap — so a wide fan-in can't
 # multiply into a huge prompt (the old flat 4000-per-dep cap let N deps reach
 # N×4000 unbounded). Sized to align with the CEO's own delegate-output budget
@@ -143,7 +143,7 @@ CEO_SYNTHESIS_MAX_RATIO = 4.0
 
 # 工作区产物清单: peer products (role-attributed) + sparse pre-existing paths
 # (attachments / 裸聊 scratch; project shared trees → 「另有 N 个」summary). See
-# ``workspace.sparse_listing`` + ``executor_context._workspace_manifest``.
+# ``workspace.sparse_listing`` + ``executor.context._workspace_manifest``.
 WORKSPACE_MANIFEST_MAX_FILES = 40
 WORKSPACE_MANIFEST_CHAR_BUDGET = 1800
 

@@ -26,6 +26,8 @@ class _ContentProvider:
     auto-rework test can prove the worker sees its own prior draft + the appended
     instruction (统一「续写」原语)."""
 
+    base_url = "http://test.invalid/v1"
+
     def __init__(self, contents: list[str]) -> None:
         self._contents = contents
         self.calls = 0
@@ -91,6 +93,8 @@ class _UsageProvider:
     """Fake LLM that reports a usage chunk so the executor can price the run.
     Splits input into cache hit/miss to prove the split survives to RunState."""
 
+    base_url = "http://test.invalid/v1"
+
     async def stream(self, request):
         yield LLMChunk(delta_content="OUT")
         yield LLMChunk(
@@ -109,6 +113,8 @@ class _ScriptedRounds:
 
     Records each call's first user message so a DAG test can assert what context
     (e.g. a 递指针 pointer block) reached a downstream worker's prompt."""
+
+    base_url = "http://test.invalid/v1"
 
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
         self._rounds = rounds
@@ -158,6 +164,8 @@ class _FileWriteTool:
 
 class _ToolCallThenContent:
     """Fake LLM: round 1 calls a tool, round 2 returns content (no network)."""
+
+    base_url = "http://test.invalid/v1"
 
     def __init__(self, tool_name: str, args: str, content: str) -> None:
         self._rounds = [
@@ -222,6 +230,8 @@ class _OfferRecorder:
     """Fake LLM that records the tool definitions it was OFFERED each call (proves
     the allowed_tool_names wiring), then yields one content chunk and stops."""
 
+    base_url = "http://test.invalid/v1"
+
     def __init__(self) -> None:
         self.offered: list[list[str]] = []
         self.choices: list[str] = []
@@ -259,6 +269,8 @@ class _MeteredRoundThenBoom:
     """Round 0: a tool call + usage chunk (the loop meters it and continues);
     round 1: raises. Proves a hard worker failure still bills the round that
     completed before the crash (B-deep 失败计费), instead of dropping its tokens."""
+
+    base_url = "http://test.invalid/v1"
 
     def __init__(self) -> None:
         self.calls = 0

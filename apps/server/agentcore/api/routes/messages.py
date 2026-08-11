@@ -12,7 +12,7 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from agentcore.api.dependencies import AdminUser, AuthUser, get_messaging_service
+from agentcore.api.dependencies import AuthUser, get_messaging_service
 from agentcore.api.download_headers import download_headers
 from agentcore.api.schemas import (
     AdminMuteRequest,
@@ -60,14 +60,17 @@ def _participant(
     user,
     *,
     is_admin: bool = False,
+    group_role: str = "member",
     muted_by_admin: bool = False,
     online: bool = False,
 ) -> ChatParticipant:
+    role = group_role if group_role in ("owner", "admin", "member") else "member"
     return ChatParticipant(
         id=user.user_id,
         username=user.username,
         display_name=user.display_name,
         is_admin=is_admin,
+        group_role=role,  # type: ignore[arg-type]
         muted_by_admin=muted_by_admin,
         online=online,
     )
@@ -217,6 +220,7 @@ async def list_chat_members(
         _participant(
             m.user,
             is_admin=m.is_admin,
+            group_role=m.group_role,
             muted_by_admin=m.muted_by_admin,
             online=m.user.user_id in online_ids,
         )
@@ -255,22 +259,23 @@ async def leave_chat(
     return StatusResponse()
 
 
-# --- Moderation (Stage 3 审核治理: 平台 admin only, gated by AdminUser) ---
+# --- Moderation (审核治理: 平台 admin 或群级版主; AuthUser + service gate) ---
 
 
 @router.delete("/chats/{chat_id}/members/{target_id}", response_model=StatusResponse)
 async def kick_member(
     chat_id: str,
     target_id: str,
-    admin: AdminUser,
+    user: AuthUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """Remove a member from a group (platform-admin only); posts a system notice.
+    """Remove a member from a group; posts a system notice.
 
-    403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for
-    a dm; 403 when the target is an admin (admins can't be moderated).
+    403 if actor is not a platform admin or group moderator; 404 unknown chat or
+    non-member target; 422 for a dm; 403 when the target is a platform admin (or,
+    for group mods, another group moderator).
     """
-    await svc.kick_member(chat_id=chat_id, actor_id=admin.user_id, target_id=target_id)
+    await svc.kick_member(chat_id=chat_id, actor_id=user.user_id, target_id=target_id)
     return StatusResponse()
 
 
@@ -279,15 +284,15 @@ async def mute_member(
     chat_id: str,
     target_id: str,
     body: AdminMuteRequest,
-    admin: AdminUser,
+    user: AuthUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """Mute / unmute a member (platform-admin only): a muted member can read but
-    not send (403 on send). Same gates as kick.
+    """Mute / unmute a member: a muted member can read but not send (403 on send).
+    Same gates as kick.
     """
     await svc.set_admin_mute(
         chat_id=chat_id,
-        actor_id=admin.user_id,
+        actor_id=user.user_id,
         target_id=target_id,
         muted=body.muted,
     )
@@ -298,14 +303,14 @@ async def mute_member(
 async def announce(
     chat_id: str,
     body: AnnounceRequest,
-    admin: AdminUser,
+    user: AuthUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """Post an admin announcement as a centered system_card, fanned out to members
-    (platform-admin only). 404 unknown chat; 422 for a dm.
+    """Post a group announcement as a centered system_card, fanned out to members.
+    404 unknown chat; 422 for a dm; 403 if not a moderator.
     """
     message = await svc.post_announcement(
-        chat_id=chat_id, actor_id=admin.user_id, content=body.content
+        chat_id=chat_id, actor_id=user.user_id, content=body.content
     )
     return ChatMessageDetail.model_validate(message)
 

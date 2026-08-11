@@ -24,6 +24,11 @@ class ProviderRouter:
     def available_prefixes(self) -> frozenset[str]:
         return frozenset(self._providers)
 
+    @property
+    def base_url(self) -> str | None:
+        url = getattr(self._default, "base_url", None)
+        return str(url) if url else None
+
     def _route(self, model: str) -> tuple[LLMProvider, str]:
         if _PREFIX_SEP in model:
             prefix, _, rest = model.partition(_PREFIX_SEP)

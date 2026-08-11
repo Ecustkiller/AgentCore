@@ -8,7 +8,7 @@ from agentcore.runtime.delegate.steer import (
     apply_steer,
     compress_ceo_review_for_gate,
 )
-from agentcore.runtime.runs.executor_context import _build_context_blocks
+from agentcore.runtime.runs.executor.context import _build_context_blocks
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 

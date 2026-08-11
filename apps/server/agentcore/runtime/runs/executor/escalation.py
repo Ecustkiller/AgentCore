@@ -9,8 +9,8 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.runtime.events import escalation_required, escalation_resolved
 from agentcore.runtime.interaction import InteractionKind
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_identities import ESCALATION_CONCURRENCY_CAP
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.identities import ESCALATION_CONCURRENCY_CAP
 from agentcore.tools.protocol import EscalationChannel, EscalationOutcome
 
 logger = get_logger(__name__)

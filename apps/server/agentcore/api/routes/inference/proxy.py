@@ -226,9 +226,10 @@ async def _record_proxy_spend(
     Drain writes ``cost_calls`` then upserts ``cost_events`` on the telemetry pool;
     ``call_id`` UNIQUE dedupes at-least-once retries. See ``billing.proxy_spend_queue``.
     """
-    from agentcore.billing.attribution import default_role_for_agent
     from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
 
+    # Role / credential / token / money fields are assembled inside
+    # ``assemble_ledger_call`` (shared with in-process metering).
     with log_context(trace_id=trace_id, conversation_id=conversation_id):
         get_proxy_spend_queue().enqueue(
             user_id=user_id,
@@ -240,7 +241,7 @@ async def _record_proxy_spend(
             run_id=run_id,
             parent_run_id=parent_run_id,
             agent_id=agent_id,
-            role=role or default_role_for_agent(agent_id=agent_id, run_id=run_id),
+            role=role,
             persona=persona,
             call_id=call_id,
             credential_source=credential_source,
@@ -553,7 +554,7 @@ async def _forward_stream(
                 captured["model"] = request.model
                 data["usage"] = _usage_to_openai_wire(chunk.usage)
             if chunk.empty_diagnosis:
-                # Relay the provider's precise empty-response diagnosis (OAUTH_EXPIRED /
+                # Relay the provider's precise empty-response diagnosis (upstream_non_api /
                 # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of
                 # re-deriving a generic SILENT_EMPTY from a bare empty delta (01 F8).
                 diag: dict = {"empty_diagnosis": chunk.empty_diagnosis}

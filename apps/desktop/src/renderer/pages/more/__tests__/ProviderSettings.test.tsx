@@ -100,6 +100,9 @@ describe("ProviderSettings", () => {
     expect(screen.queryByText(/默认模型/)).toBeNull();
     expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     expect(screen.queryByText("模型组合")).toBeNull();
+    expect(
+      screen.getByText("测连绿≠可聊天；自定义 Base URL 常需 /v1"),
+    ).toBeTruthy();
   });
 
   it("shows a compact platform status line when the deployment offers platform models", () => {

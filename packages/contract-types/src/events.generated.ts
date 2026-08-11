@@ -1447,6 +1447,10 @@ export interface ErrorContext {
   upstream_body_preview?: string | null;
   retry_attempts?: number;
   empty_diagnosis?: string;
+  /** empty-response body class: html | json | text | empty (no raw HTML). */
+  body_kind?: string;
+  /** Provider endpoint root for BYOK empty-response 排查包 (never the API key). */
+  base_url?: string;
   /** 上游 429 Retry-After 秒数（原始值；工程重试仍截断 ≤30s）。 */
   retry_after?: number;
   /** LLM_KEY_INVALID CTA 分流：user=去设置换 Key；platform=接入自己的 Key / 联系管理员。 */

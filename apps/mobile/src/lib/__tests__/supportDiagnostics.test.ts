@@ -48,6 +48,59 @@ describe("formatSupportDiagnosticText", () => {
   it("returns empty string when nothing to copy", () => {
     expect(formatSupportDiagnosticText({})).toBe("");
   });
+
+  it("does not emit extras-only packs (ids required)", () => {
+    expect(
+      formatSupportDiagnosticText({
+        errorCode: "LLM_EMPTY_RESPONSE",
+        emptyDiagnosis: "upstream_non_api",
+        bodyKind: "html",
+        baseUrl: "https://api.example.com",
+        stream: true,
+      }),
+    ).toBe("");
+  });
+
+  it("appends error extras after ids when present", () => {
+    expect(
+      formatSupportDiagnosticText({
+        conversationId: "conv-1",
+        messageId: "msg-1",
+        errorCode: "LLM_EMPTY_RESPONSE",
+        emptyDiagnosis: "upstream_non_api",
+        bodyKind: "html",
+        baseUrl: "https://api.zdc.mom",
+        stream: true,
+      }),
+    ).toBe(
+      [
+        "阅读这段产品AI日志：",
+        "conversation_id: conv-1",
+        "message_id: msg-1",
+        "error_code: LLM_EMPTY_RESPONSE",
+        "empty_diagnosis: upstream_non_api",
+        "body_kind: html",
+        "base_url: https://api.zdc.mom",
+        "stream: true",
+        "uv run python scripts/log_timeline.py conv-1",
+      ].join("\n"),
+    );
+  });
+
+  it("omits stream line unless explicitly true", () => {
+    expect(
+      formatSupportDiagnosticText({
+        conversationId: "conv-1",
+        stream: false,
+      }),
+    ).toBe(
+      [
+        "阅读这段产品AI日志：",
+        "conversation_id: conv-1",
+        "uv run python scripts/log_timeline.py conv-1",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("extractSupportIdsFromEvents", () => {

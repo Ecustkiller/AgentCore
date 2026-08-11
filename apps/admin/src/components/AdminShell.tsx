@@ -14,12 +14,13 @@ import {
   Server,
   ShieldCheck,
   Users,
+  UsersRound,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 /**
- * The console's sections: 概览 / 用户 / 分析 / 审计 / 公告 / 系统.
+ * The console's sections: 概览 / 用户 / 对话 / 分析 / 审计 / 公告 / 内测群 / 系统.
  * URL-routed via react-router for bookmarkable deep links.
  */
 export type AdminTab =
@@ -29,6 +30,7 @@ export type AdminTab =
   | "analytics"
   | "audit"
   | "notices"
+  | "beta-group"
   | "system";
 
 const NAV: { id: AdminTab; label: string; icon: LucideIcon; path: string }[] =
@@ -39,6 +41,7 @@ const NAV: { id: AdminTab; label: string; icon: LucideIcon; path: string }[] =
     { id: "analytics", label: "分析", icon: BarChart3, path: "/analytics/cost" },
     { id: "audit", label: "审计", icon: ScrollText, path: "/audit" },
     { id: "notices", label: "公告", icon: Megaphone, path: "/notices" },
+    { id: "beta-group", label: "内测群", icon: UsersRound, path: "/beta-group" },
     { id: "system", label: "系统", icon: Server, path: "/system" },
   ];
 

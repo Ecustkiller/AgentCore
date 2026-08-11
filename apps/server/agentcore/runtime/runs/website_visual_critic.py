@@ -11,7 +11,7 @@ Capability posture (honest degrade, board_read-shaped):
   critical findings drive up to ``MAX_VISUAL_REWORK`` contract reworks, then
   demote to partial warnings.
 
-→ 见代码接缝: deliverable ``visual_critic`` + executor_node visual rework loop.
+→ 见代码接缝: deliverable ``visual_critic`` + executor.node visual rework loop.
 """
 
 from __future__ import annotations

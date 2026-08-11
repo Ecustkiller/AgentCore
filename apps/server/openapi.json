@@ -2387,6 +2387,67 @@
         "title": "AutonomyView",
         "type": "object"
       },
+      "BetaGroupModerator": {
+        "description": "One 内测群版主 row for the admin console appoint surface.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_platform_admin": {
+            "default": false,
+            "title": "Is Platform Admin",
+            "type": "boolean"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "BetaGroupModerator",
+        "type": "object"
+      },
+      "BetaGroupModeratorsResponse": {
+        "description": "内测群 roster of group-level moderators (``chat_members.role=admin``).",
+        "properties": {
+          "chat_id": {
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BetaGroupModerator"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chat_id",
+          "title",
+          "data",
+          "total"
+        ],
+        "title": "BetaGroupModeratorsResponse",
+        "type": "object"
+      },
       "BigFive": {
         "properties": {
           "agreeableness": {
@@ -3640,6 +3701,16 @@
         "properties": {
           "display_name": {
             "title": "Display Name",
+            "type": "string"
+          },
+          "group_role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Group Role",
             "type": "string"
           },
           "id": {
@@ -9003,7 +9074,7 @@
         "type": "object"
       },
       "MessageMentionEveryone": {
-        "description": "@所有人 — group chats only; platform admin gate enforced in service.",
+        "description": "@所有人 — group chats only; platform admin or group moderator gate in service.",
         "properties": {
           "kind": {
             "const": "everyone",
@@ -16865,6 +16936,220 @@
         "summary": "Agent Audit Summary",
         "tags": [
           "admin",
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/beta-group/moderators": {
+      "get": {
+        "description": "List 内测群版主 (``chat_members.role=admin``).",
+        "operationId": "list_beta_group_moderators_v1_admin_beta_group_moderators_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetaGroupModeratorsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Beta Group Moderators",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/beta-group/moderators/{user_id}": {
+      "delete": {
+        "description": "Revoke 内测群版主 (role → member; stays in group).",
+        "operationId": "revoke_beta_group_moderator_v1_admin_beta_group_moderators__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Beta Group Moderator",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "description": "Appoint a user as 内测群版主 (ensures membership).",
+        "operationId": "appoint_beta_group_moderator_v1_admin_beta_group_moderators__user_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetaGroupModerator"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Appoint Beta Group Moderator",
+        "tags": [
           "admin"
         ]
       }
@@ -30391,7 +30676,7 @@
     },
     "/v1/messages/chats/{chat_id}/announce": {
       "post": {
-        "description": "Post an admin announcement as a centered system_card, fanned out to members\n(platform-admin only). 404 unknown chat; 422 for a dm.",
+        "description": "Post a group announcement as a centered system_card, fanned out to members.\n404 unknown chat; 422 for a dm; 403 if not a moderator.",
         "operationId": "announce_v1_messages_chats__chat_id__announce_post",
         "parameters": [
           {
@@ -30790,7 +31075,7 @@
     },
     "/v1/messages/chats/{chat_id}/members/{target_id}": {
       "delete": {
-        "description": "Remove a member from a group (platform-admin only); posts a system notice.\n\n403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for\na dm; 403 when the target is an admin (admins can't be moderated).",
+        "description": "Remove a member from a group; posts a system notice.\n\n403 if actor is not a platform admin or group moderator; 404 unknown chat or\nnon-member target; 422 for a dm; 403 when the target is a platform admin (or,\nfor group mods, another group moderator).",
         "operationId": "kick_member_v1_messages_chats__chat_id__members__target_id__delete",
         "parameters": [
           {
@@ -30874,7 +31159,7 @@
     },
     "/v1/messages/chats/{chat_id}/members/{target_id}/mute": {
       "post": {
-        "description": "Mute / unmute a member (platform-admin only): a muted member can read but\nnot send (403 on send). Same gates as kick.",
+        "description": "Mute / unmute a member: a muted member can read but not send (403 on send).\nSame gates as kick.",
         "operationId": "mute_member_v1_messages_chats__chat_id__members__target_id__mute_post",
         "parameters": [
           {

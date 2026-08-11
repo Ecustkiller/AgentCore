@@ -7,7 +7,7 @@
 #    so.com 把请求 302 跳 qcaptcha「无结果」页（空体）；quark.sm.cn 返回阿里 X5SEC
 #    punish 页（含 cloud_ip_bl）。两引擎代码对这两种软封都「静默 return []」（不抛异常、
 #    不标 unresponsive、不打日志），从这台 IP 稳定 0 产出 → 纯假冗余，故剔除。
-#    若换非云/住宅出口代理才可能恢复（见 docs/05-平台与运维/部署与运维.md）。
+#    若换非云/住宅出口代理才可能恢复（基础设施决策；本仓未内置代理配置）。
 # 4) bing 已启用（weight 0.3，base_url 指向 cn.bing.com）：同一生产 IP 实测 200 可达、
 #    未被 cloud_ip_bl，是少数独立于 baidu/sogou 的备援来源。中国 IP 上 www.bing.com 会
 #    302 到 cn.bing.com，SearXNG 自带引擎对该跳转适配不良会解析 0 条，故 base_url 直打

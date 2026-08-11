@@ -419,9 +419,7 @@ export function FinishReasonChip({
   const meta = reason ? FINISH_REASON_META[reason] : undefined;
   if (!meta) return null;
   const label =
-    reason === "degraded" && diagnosisLabel
-      ? `降级完成 · ${diagnosisLabel}`
-      : meta.label;
+    reason === "degraded" && diagnosisLabel ? diagnosisLabel : meta.label;
   return (
     <div className="finish-chip" data-testid="finish-reason-chip">
       {label}

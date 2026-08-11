@@ -1220,10 +1220,10 @@ async def test_forward_unary_includes_reasoning_content(monkeypatch):
 
 # --- empty-response diagnosis fidelity (01 F8) -------------------------------
 #
-# On an empty upstream body the provider computes a PRECISE diagnosis (OAUTH_EXPIRED /
-# MODEL_UNKNOWN ...). The proxy must relay it so the sidecar surfaces the actionable
-# hint; otherwise the sidecar re-derives a generic SILENT_EMPTY from the bare empty
-# delta and the user loses the "refresh OAuth" cue.
+# On an empty upstream body the provider computes a PRECISE diagnosis
+# (upstream_non_api / content_filtered / model_unknown / …) and emits it as a
+# terminal LLMChunk. The cloud proxy must forward that field so the sidecar can
+# surface the same diagnosis; otherwise the sidecar re-derives SILENT_EMPTY.
 
 
 async def test_forward_stream_relays_empty_diagnosis(monkeypatch):
@@ -1236,7 +1236,9 @@ async def test_forward_stream_relays_empty_diagnosis(monkeypatch):
 
     class _EmptyDiagProvider:
         async def stream(self, _request):
-            yield LLMChunk(empty_diagnosis="OAUTH_EXPIRED", empty_raw_preview="<empty>")
+            yield LLMChunk(
+                empty_diagnosis="upstream_non_api", empty_raw_preview="<empty>"
+            )
 
         async def close(self):
             pass
@@ -1248,14 +1250,14 @@ async def test_forward_stream_relays_empty_diagnosis(monkeypatch):
     async for chunk in resp.body_iterator:
         collected += chunk
 
-    assert "OAUTH_EXPIRED" in collected
+    assert "upstream_non_api" in collected
     assert "<empty>" in collected
 
 
 async def test_provider_stream_surfaces_forwarded_empty_diagnosis():
     """(parse) The sidecar's provider surfaces an inbound (proxied) empty_diagnosis
     verbatim — proof it's forwarded, not re-derived: an empty body would otherwise never
-    yield the specific OAUTH_EXPIRED value."""
+    yield the specific upstream_non_api value."""
 
     def _handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -1263,7 +1265,7 @@ async def test_provider_stream_surfaces_forwarded_empty_diagnosis():
             headers={"content-type": "text/event-stream"},
             content=(
                 b'data: {"choices":[{"delta":{}}]}\n\n'
-                b'data: {"empty_diagnosis":"OAUTH_EXPIRED","empty_raw_preview":"<empty>"}\n\n'
+                b'data: {"empty_diagnosis":"upstream_non_api","empty_raw_preview":"<empty>"}\n\n'
                 b"data: [DONE]\n\n"
             ),
         )
@@ -1272,7 +1274,7 @@ async def test_provider_stream_surfaces_forwarded_empty_diagnosis():
     chunks = [c async for c in provider.stream(_request(stream=True))]
     diag = [c for c in chunks if c.empty_diagnosis]
     assert len(diag) == 1
-    assert diag[0].empty_diagnosis == "OAUTH_EXPIRED"
+    assert diag[0].empty_diagnosis == "upstream_non_api"
     assert diag[0].empty_raw_preview == "<empty>"
 
 

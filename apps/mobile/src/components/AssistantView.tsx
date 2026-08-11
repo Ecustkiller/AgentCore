@@ -181,7 +181,7 @@ export function AssistantContent({
 
   return (
     <>
-      {!isStreaming && (
+      {!isStreaming && !failureNotice && (
         <FinishReasonChip
           reason={finishReason}
           diagnosisLabel={finishDiagnosisLabel}

@@ -763,7 +763,7 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
 
 def test_stamp_retrieval_evidence_gap_copies_sticky_budget(tmp_path: Path):
     """Executor helper: RetrievalBudgetState.evidence_gap → RunState readable fields."""
-    from agentcore.runtime.runs.executor_node import _stamp_retrieval_evidence_gap
+    from agentcore.runtime.runs.executor.node import _stamp_retrieval_evidence_gap
 
     budget = RetrievalBudgetState(limit=3)
     budget.note_evidence_gap()

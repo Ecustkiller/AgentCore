@@ -323,18 +323,19 @@ class HandlerMixin:
                 protocol.make_error(request_id, protocol.INVALID_PARAMS, "turnId is required")
             )
             return
+        conversation_id = str(params.get("conversationId") or turn_id)
         if turn_id in self._turns:
-            await self._send(
-                protocol.make_error(
-                    request_id, protocol.INVALID_PARAMS, f"turn already running: {turn_id}"
-                )
+            await self._reject_turn_already_running(
+                request_id,
+                op="startTurn",
+                turn_id=turn_id,
+                conversation_id=conversation_id,
             )
             return
 
         # Tape bindings live on the cloud process. A local/sidecar turn never sees
         # them — historically this silently became a normal AI reply. When replay
         # is armed, refuse so the operator gets an explicit error instead.
-        conversation_id = str(params.get("conversationId") or turn_id)
         if await self._reject_if_tape_bound_local(request_id, conversation_id):
             return
 
@@ -349,6 +350,32 @@ class HandlerMixin:
         # the read loop while the turn runs.
         task = asyncio.create_task(self._run_turn(request_id, turn_id, params))
         self._register_turn(turn_id, task, conversation_id=conversation_id)
+
+    async def _reject_turn_already_running(
+        self,
+        request_id: Any,
+        *,
+        op: str,
+        turn_id: str,
+        conversation_id: str,
+    ) -> None:
+        """Refuse a duplicate startTurn/resume; log enough to triage double-submit vs zombie."""
+        task = self._turns.get(turn_id)
+        logger.warning(
+            "sidecar.turn_already_running",
+            op=op,
+            turn_id=turn_id,
+            conversation_id=conversation_id
+            or self._turn_conversations.get(turn_id)
+            or None,
+            inflight_done=None if task is None else task.done(),
+            inflight_cancelled=None if task is None else task.cancelled(),
+        )
+        await self._send(
+            protocol.make_error(
+                request_id, protocol.INVALID_PARAMS, f"turn already running: {turn_id}"
+            )
+        )
 
     async def _reject_if_tape_bound_local(self, request_id: Any, conversation_id: str) -> bool:
         """Return True when the startTurn RPC was rejected (caller must return)."""
@@ -434,10 +461,11 @@ class HandlerMixin:
             )
             return
         if message_id in self._turns:
-            await self._send(
-                protocol.make_error(
-                    request_id, protocol.INVALID_PARAMS, f"turn already running: {message_id}"
-                )
+            await self._reject_turn_already_running(
+                request_id,
+                op="resume",
+                turn_id=message_id,
+                conversation_id=conversation_id,
             )
             return
         if self._paused_store is None:

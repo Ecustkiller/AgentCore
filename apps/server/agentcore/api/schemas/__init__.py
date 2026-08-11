@@ -202,6 +202,8 @@ from .messages import (
 from .messaging import (
     AdminMuteRequest,
     AnnounceRequest,
+    BetaGroupModerator,
+    BetaGroupModeratorsResponse,
     BlockedUser,
     BlockListResponse,
     BlockUserRequest,
@@ -616,6 +618,8 @@ __all__ = [
     "UserSearchResult",
     "UserSearchResponse",
     "ChatParticipant",
+    "BetaGroupModerator",
+    "BetaGroupModeratorsResponse",
     "ChatSummary",
     "ChatListResponse",
     "ChatMembersResponse",

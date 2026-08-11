@@ -182,17 +182,16 @@ async def refresh_project_explore_from_snapshot(
         "Produce the refresh JSON now."
     )
 
-    from agentcore.llm.profiles import build_request, get_profile
+    from agentcore.llm.model_selection import build_selected_request, select_call
     from agentcore.llm.provider.protocol import LLMMessage
 
-    request = build_request(
-        get_profile("memory"),
+    request = build_selected_request(
+        select_call("memory", model),
         [
             LLMMessage(role="system", content=_REFRESH_SYSTEM),
             LLMMessage(role="user", content=user_prompt),
         ],
         stream=False,
-        model=model,
     )
     try:
         response = await asyncio.wait_for(

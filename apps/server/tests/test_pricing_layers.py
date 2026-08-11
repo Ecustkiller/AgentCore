@@ -5,7 +5,7 @@ from __future__ import annotations
 from agentcore.llm.pricing import PLATFORM_RELAY_GLM_52, calculate_cost
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.llm.resolve import _model_for_purpose
+from agentcore.llm.model_selection import _model_for_purpose
 from agentcore.runtime.costing import priced_call_cost
 
 

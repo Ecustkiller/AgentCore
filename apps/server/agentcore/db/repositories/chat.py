@@ -15,6 +15,9 @@ from agentcore.db.models import Chat, ChatMember, ChatMessage
 # production converge on the same singleton row.
 OFFICIAL_CHAT_ID = "0de7a000-0000-4000-a000-000000000002"
 OFFICIAL_CHAT_TITLE = "官方号"
+# Seeded by migration ``b7e3c9a1f2d4_…`` (内测全员群); keep in sync with that revision.
+BETA_GROUP_ID = "0de7a000-0000-4000-a000-000000000001"
+BETA_GROUP_TITLE = "AgentCore 内测群"
 
 
 class ChatRepository:
@@ -181,6 +184,18 @@ class ChatRepository:
             .values(muted_by_admin=muted_by_admin)
         )
         await self._session.commit()
+
+    async def set_member_role(self, chat_id: str, user_id: str, *, role: str) -> ChatMember | None:
+        """Update ``chat_members.role`` (群级版主 / member). Returns None if not a member."""
+        result = await self._session.execute(
+            update(ChatMember)
+            .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+            .values(role=role)
+            .returning(ChatMember)
+        )
+        row = result.scalar_one_or_none()
+        await self._session.commit()
+        return row
 
     async def get_member(self, chat_id: str, user_id: str) -> ChatMember | None:
         result = await self._session.execute(

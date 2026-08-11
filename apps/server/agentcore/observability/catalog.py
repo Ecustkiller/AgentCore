@@ -148,6 +148,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='chat.assistant_placeholder_failed'),
     EventSpec(name='chat.auto_join'),
     EventSpec(name='chat.auto_join_failed'),
+    EventSpec(name='chat.beta_moderator_cleared'),
+    EventSpec(name='chat.beta_moderator_set'),
     EventSpec(name='chat.code_index_flush_failed'),
     EventSpec(name='chat.incomplete_persist_failed'),
     EventSpec(name='chat.incomplete_persist_skipped'),
@@ -702,6 +704,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.delivery_idle_narrow'),
     EventSpec(name='engine.delivery_idle_narrow_apply'),
     EventSpec(name='engine.delivery_idle_nudge'),
+    EventSpec(name='engine.finish_guard_auto_deep_read'),
     EventSpec(name='engine.finish_guard_rework'),
     EventSpec(name='engine.force_finalize_failed'),
     EventSpec(name='engine.force_finalize_hard_failed'),
@@ -851,7 +854,16 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='llm.call_retried'),
     EventSpec(name='llm.client_error'),
-    EventSpec(name='llm.empty_response'),
+    EventSpec(
+        name='llm.empty_response',
+        description='上游空响应诊断（含 base_url / diagnosis；无 API key）',
+        fields={
+            'model': FieldType('str'),
+            'diagnosis': FieldType('str'),
+            'base_url': FieldType('str'),
+            'scenario': FieldType('str'),
+        },
+    ),
     EventSpec(name='llm.inference_unary_bypass'),
     EventSpec(name='llm.rate_limit_no_retry'),
     EventSpec(
@@ -1205,6 +1217,20 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='sidecar.run_session_persist_failed'),
     EventSpec(name='sidecar.run_session_persist_skipped'),
     EventSpec(name='sidecar.stdin_closed'),
+    EventSpec(
+        name='sidecar.turn_already_running',
+        description=(
+            '本地引擎拒二次 startTurn/resume（同键仍在 _turns）；'
+            '不进云端 sync:logs——对偶查桌面 userData/logs/desktop.jsonl'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'inflight_cancelled': FieldType('bool'),
+            'inflight_done': FieldType('bool'),
+            'op': FieldType('str'),
+            'turn_id': FieldType('str'),
+        },
+    ),
     EventSpec(
         name='sidecar.turn_cancel_requested',
         description=(

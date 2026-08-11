@@ -46,13 +46,45 @@ def _provider(post_handler) -> OpenAICompatibleProvider:
     return provider
 
 
+_PROBE_OK_BODY = (
+    b'{"choices":[{"message":{"role":"assistant","content":"pong"},'
+    b'"finish_reason":"stop"}]}'
+)
+
+
 async def test_probe_passes_on_2xx():
     async def post(*a, **k):
-        return _Resp(200)
+        return _Resp(200, _PROBE_OK_BODY)
 
     provider = _provider(post)
     try:
         await provider.probe(model=DEEPSEEK_V4_FLASH)  # no raise == reachable
+    finally:
+        await provider.close()
+
+
+async def test_probe_rejects_html_shell_on_2xx():
+    html = b"<html><body><div id=\"root\"></div></body></html>"
+
+    async def post(*a, **k):
+        return _Resp(200, html)
+
+    provider = _provider(post)
+    try:
+        with pytest.raises(LLMError, match="网页|/v1"):
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+    finally:
+        await provider.close()
+
+
+async def test_probe_rejects_empty_2xx_body():
+    async def post(*a, **k):
+        return _Resp(200, b"")
+
+    provider = _provider(post)
+    try:
+        with pytest.raises(LLMError, match="空响应"):
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
     finally:
         await provider.close()
 

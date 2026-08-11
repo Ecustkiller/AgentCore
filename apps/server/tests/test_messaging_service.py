@@ -112,12 +112,12 @@ class FakeChats:
             )
         return chat
 
-    async def create_group(self, *, title="群", auto_join=False, member_ids=()):
+    async def create_group(self, *, title="群", auto_join=False, member_ids=(), chat_id=None):
         """Test helper: a group chat (the real row is created by a migration)."""
         from types import SimpleNamespace
 
         chat = SimpleNamespace(
-            id=new_id(),
+            id=chat_id or new_id(),
             type="group",
             created_by=None,
             dm_key=None,
@@ -214,6 +214,13 @@ class FakeChats:
         member = await self.get_member(chat_id, user_id)
         if member is not None:
             member.muted_by_admin = muted_by_admin
+
+    async def set_member_role(self, chat_id, user_id, *, role):
+        member = await self.get_member(chat_id, user_id)
+        if member is None:
+            return None
+        member.role = role
+        return member
 
     async def list_memberships(self, user_id):
         rows = [(self._chats[m.chat_id], m) for m in self._members if m.user_id == user_id]
@@ -778,7 +785,7 @@ async def test_send_message_mentions_everyone_non_admin_403():
     alice = users.add("alice")  # platform role=user
     bob = users.add("bob")
     chat = await chats.create_group(member_ids=(alice.user_id, bob.user_id))
-    with pytest.raises(AuthorizationError, match="仅平台管理员可@所有人"):
+    with pytest.raises(AuthorizationError, match="仅管理员可@所有人"):
         await svc.send_message(
             chat_id=chat.id,
             sender_id=alice.user_id,
@@ -1830,6 +1837,78 @@ async def test_announce_dm_rejected():
     chat = (await svc.start_dm(requester_id=admin.user_id, peer_id=bob.user_id)).chat
     with pytest.raises(ValidationError):
         await svc.post_announcement(chat_id=chat.id, actor_id=admin.user_id, content="hi")
+
+
+async def test_group_moderator_can_kick_and_everyone():
+    from agentcore.db.repositories.chat import BETA_GROUP_ID, BETA_GROUP_TITLE
+
+    svc, users, chats, _blocks, _directory, events, _friends = _make()
+    mod = users.add("mod")
+    alice = users.add("alice")
+    group = await chats.create_group(
+        title=BETA_GROUP_TITLE,
+        member_ids=[mod.user_id, alice.user_id],
+        chat_id=BETA_GROUP_ID,
+    )
+    await chats.set_member_role(group.id, mod.user_id, role="admin")
+
+    await svc.kick_member(chat_id=group.id, actor_id=mod.user_id, target_id=alice.user_id)
+    assert await chats.get_member(group.id, alice.user_id) is None
+
+    # re-add alice to exercise @所有人
+    await chats.add_member(group.id, alice.user_id)
+    msg = await svc.send_message(
+        chat_id=group.id,
+        sender_id=mod.user_id,
+        content="@所有人 hi",
+        mentions=[{"kind": "everyone"}],
+    )
+    assert msg.mentions == [{"kind": "everyone"}]
+
+
+async def test_plain_member_cannot_kick():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    group = await chats.create_group(member_ids=[alice.user_id, bob.user_id])
+    with pytest.raises(AuthorizationError, match="无权执行该操作"):
+        await svc.kick_member(chat_id=group.id, actor_id=alice.user_id, target_id=bob.user_id)
+
+
+async def test_group_moderator_cannot_kick_other_moderator():
+    svc, users, chats, *_ = _make()
+    mod_a = users.add("moda")
+    mod_b = users.add("modb")
+    group = await chats.create_group(member_ids=[mod_a.user_id, mod_b.user_id])
+    await chats.set_member_role(group.id, mod_a.user_id, role="admin")
+    await chats.set_member_role(group.id, mod_b.user_id, role="admin")
+    with pytest.raises(AuthorizationError, match="不能对群管理员"):
+        await svc.kick_member(chat_id=group.id, actor_id=mod_a.user_id, target_id=mod_b.user_id)
+
+
+async def test_beta_group_moderator_appoint_and_revoke():
+    from agentcore.db.repositories.chat import BETA_GROUP_ID, BETA_GROUP_TITLE
+
+    svc, users, chats, *_ = _make()
+    root = users.add("root", role="admin")
+    alice = users.add("alice")
+    await chats.create_group(
+        title=BETA_GROUP_TITLE, member_ids=[alice.user_id], chat_id=BETA_GROUP_ID
+    )
+    await svc.set_beta_group_moderator(user_id=alice.user_id, actor_id=root.user_id)
+    chat_id, title, mods = await svc.list_beta_group_moderators()
+    assert chat_id == BETA_GROUP_ID
+    assert title == BETA_GROUP_TITLE
+    assert [m.user_id for m in mods] == [alice.user_id]
+    members = await svc.list_members(chat_id=BETA_GROUP_ID, user_id=alice.user_id)
+    assert members[0].group_role == "admin"
+    assert members[0].is_admin is False
+
+    await svc.clear_beta_group_moderator(user_id=alice.user_id, actor_id=root.user_id)
+    _cid, _title, mods2 = await svc.list_beta_group_moderators()
+    assert mods2 == []
+    members2 = await svc.list_members(chat_id=BETA_GROUP_ID, user_id=alice.user_id)
+    assert members2[0].group_role == "member"
 
 
 # --- attachments: upload / download (Stage 4 富消息) ---

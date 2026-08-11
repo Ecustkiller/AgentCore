@@ -1,7 +1,11 @@
 import { BrandMark } from "@/components/brand/BrandMark";
-import { Button } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
-import { hasAutoUpdater, isWebRuntime } from "@/lib/capabilities";
+import {
+  hasAutoUpdater,
+  hasLocalEngine,
+  isWebRuntime,
+} from "@/lib/capabilities";
 import {
   clientGitSha,
   clientVersion,
@@ -14,6 +18,7 @@ import {
   otherChannelDownloadUrl,
 } from "@/lib/releaseChannel";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
+import { clearSidecarHealth } from "@/services/sidecarHealth";
 import { type VersionInfo, fetchVersion } from "@/services/system";
 import { useUIStore } from "@/stores/ui";
 import { useUpdatesStore } from "@/stores/updates";
@@ -146,10 +151,43 @@ function UpdateSection() {
 }
 
 /**
+ * 诊断 / 强制关：本机传统项目新开回合默认同侧 sidecar；关 = 显式强制走云。
+ * 展示用 `preference !== "off"`（unset 与 on 都算允许），勿绑 `sidecarEnabled`
+ *（unset→默认 false，会显示关却仍默认同侧）。
+ * 仅诊断模式开启且桌面有本地引擎时可见。
+ */
+function LocalEngineToggle() {
+  const preference = useUIStore((s) => s.sidecarPreference);
+  const setEnabled = useUIStore((s) => s.setSidecarEnabled);
+  const allowed = preference !== "off";
+  const onToggle = (v: boolean): void => {
+    setEnabled(v);
+    if (v) clearSidecarHealth();
+  };
+  return (
+    <Card className="mt-4 flex items-center justify-between gap-4 px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm text-foreground">允许本机执行</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          诊断用强制走云：关闭后全部走云端过桥；开启则本机传统项目默认同侧引擎（与盘同侧）。启动失败会自动改走云。云端项目始终走云。这不是离线模式：AI
+          推理仍在云端，断网时只能浏览缓存与本机文件（只读），不能发送。
+        </p>
+      </div>
+      <Switch
+        checked={allowed}
+        onCheckedChange={onToggle}
+        label="允许本机执行"
+      />
+    </Card>
+  );
+}
+
+/**
  * 开发者 / 诊断模式 (前端UX设计.md §十) — advanced, off-by-default toggle that
  * surfaces low-level execution diagnostics in run detail (裸 run / trace ids、
  * 调度埋点等)。报障出口（错误卡 / 气泡「更多」→「复制排查包」）不依赖本开关。
  * Lives on 关于 — next to build 溯源 — so this stays off 大众-facing 偏好 pages.
+ * 诊断开启且桌面有本地引擎时，附带「允许本机执行」强制关开关。
  */
 function DiagnosticModeSection() {
   const diagnosticMode = useUIStore((s) => s.diagnosticMode);
@@ -173,6 +211,7 @@ function DiagnosticModeSection() {
           label="开发者 / 诊断模式"
         />
       </div>
+      {diagnosticMode && hasLocalEngine() ? <LocalEngineToggle /> : null}
     </section>
   );
 }

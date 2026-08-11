@@ -20,7 +20,7 @@ class MessageMentionUser(BaseModel):
 
 
 class MessageMentionEveryone(BaseModel):
-    """@所有人 — group chats only; platform admin gate enforced in service."""
+    """@所有人 — group chats only; platform admin or group moderator gate in service."""
 
     kind: Literal["everyone"] = "everyone"
 
@@ -52,9 +52,11 @@ class ChatParticipant(BaseModel):
     id: str
     username: str
     display_name: str
-    # Platform admin (创始团队 = the 内测群's moderators); lets the roster badge
-    # official accounts and hide kick/mute on them. False for the dm peer.
+    # Platform ``users.role == admin`` (创始团队). Badge「平台管理员」; exempt from
+    # kick/mute. Distinct from ``group_role`` (群级版主).
     is_admin: bool = False
+    # Per-chat role from ``chat_members.role`` (内测群版主 = ``admin``; no owner yet).
+    group_role: Literal["owner", "admin", "member"] = "member"
     # Admin-imposed 禁言 (Stage 3): this group member can read but not send.
     muted_by_admin: bool = False
     # Live presence: true iff ChatHub reports ≥1 ``/v1/realtime`` subscription
@@ -62,6 +64,24 @@ class ChatParticipant(BaseModel):
     online: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class BetaGroupModerator(BaseModel):
+    """One 内测群版主 row for the admin console appoint surface."""
+
+    id: str
+    username: str
+    display_name: str
+    is_platform_admin: bool = False
+
+
+class BetaGroupModeratorsResponse(BaseModel):
+    """内测群 roster of group-level moderators (``chat_members.role=admin``)."""
+
+    chat_id: str
+    title: str
+    data: list[BetaGroupModerator]
+    total: int
 
 
 class ChatSummary(BaseModel):

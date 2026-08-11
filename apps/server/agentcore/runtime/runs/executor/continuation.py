@@ -1,4 +1,4 @@
-"""Split from executor.py — see executor.py module docstring."""
+"""Continuation entry: ``continue_run`` after suspension / human reply."""
 
 from __future__ import annotations
 
@@ -28,14 +28,14 @@ from agentcore.runtime.events import (
 from agentcore.runtime.facts import MessageFinalFact, RunHeadFact, record_turn_fact
 from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import check_contract, needs_file_contents
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _context_block_payloads,
     _load_artifact_contents,
     _safe_index_files,
     ensure_design_md_for_web_quality,
     load_web_seam_scope_contents,
 )
-from agentcore.runtime.runs.executor_shared import (
+from agentcore.runtime.runs.executor.shared import (
     _apply_cutoff_reasons,
     _apply_finish_interrupt,
     _continuation_message,
@@ -245,7 +245,7 @@ async def _continue_run_scoped(
     inflight: list[TokenUsage] = []
     priced_model: str | None = None
     # Hoisted so an exception can hang the in-flight transcript on FAILED (same
-    # recoverable-site contract as executor_node / contract hard-fail).
+    # recoverable-site contract as executor.node / contract hard-fail).
     messages: list[LLMMessage] = []
     try:
         profile = profiles.agent()
@@ -291,12 +291,12 @@ async def _continue_run_scoped(
         # 真纯丙：续派也不再靠 spec.tools 白名单收窄；H2：prose 不再硬卸写盘。
         allowed_tools = None
         if spec.retrieval_budget == 0:
-            from agentcore.runtime.runs.executor_shared import _registry_without
+            from agentcore.runtime.runs.executor.shared import _registry_without
 
             worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
             if allowed_tools is not None:
                 allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
-        # Same as executor_node: restricted allow-list must still keep handoff.
+        # Same as executor.node: restricted allow-list must still keep handoff.
         if allowed_tools is not None and HANDOFF_TOOL_NAME not in allowed_tools:
             allowed_tools = [*allowed_tools, HANDOFF_TOOL_NAME]
         finish_override: list[FinishReason] = []
@@ -535,7 +535,7 @@ async def _continue_run_scoped(
             content=content_from_transcript(frozen) if frozen else "",
         )
     finally:
-        # Browser B: same run-bind release as executor_node (continuation uses a new run id).
+        # Browser B: same run-bind release as executor.node (continuation uses a new run id).
         try:
             from agentcore.runtime.browser.registry import default_browser_session_registry
 

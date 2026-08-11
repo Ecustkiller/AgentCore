@@ -8,6 +8,7 @@ import {
   emptyFailureNotice,
   emptyFailureVisibleNotice,
   errorActionForCode,
+  isEmptyResponseUserSurface,
   resolveEmptyFailureNotice,
 } from "../errors";
 
@@ -178,11 +179,35 @@ describe("degradedFinishChipLabel", () => {
     expect(degradedFinishChipLabel("silent_empty", undefined)).toBe(
       "模型返回空内容",
     );
+    expect(degradedFinishChipLabel("upstream_non_api", undefined)).toBe(
+      "上游返回了网页或登录页，请检查服务商地址与鉴权",
+    );
+    expect(degradedFinishChipLabel("oauth_expired", undefined)).toBe(
+      "上游返回了网页或登录页，请检查服务商地址与鉴权",
+    );
+    expect(degradedFinishChipLabel("length_empty", undefined)).toBe(
+      "输出长度截断 · 返回空内容",
+    );
   });
 
   it("falls back to message suffix after ·", () => {
     expect(degradedFinishChipLabel(undefined, "降级 · 内容被过滤")).toBe(
       "内容被过滤",
     );
+  });
+});
+
+describe("isEmptyResponseUserSurface", () => {
+  it("detects LLM_EMPTY_RESPONSE / diagnosis / empty-response copy", () => {
+    expect(
+      isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" }),
+    ).toBe(true);
+    expect(isEmptyResponseUserSurface({ emptyDiagnosis: "silent_empty" })).toBe(
+      true,
+    );
+    expect(
+      isEmptyResponseUserSurface({ message: "模型多次空响应后收尾" }),
+    ).toBe(true);
+    expect(isEmptyResponseUserSurface({ code: "LLM_TIMEOUT" })).toBe(false);
   });
 });

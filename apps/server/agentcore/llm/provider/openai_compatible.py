@@ -54,6 +54,7 @@ from agentcore.llm.provider.protocol import (
     ToolCallFunction,
     connect_retry_policy,
 )
+from agentcore.llm.provider.wire_dialect import resolve_wire_dialect
 from agentcore.llm.sub2api_probe import probe_sub2api_diagnosis_result
 
 logger = get_logger(__name__)
@@ -118,55 +119,6 @@ def _is_tools_unsupported_rejection(status: int, body: str) -> bool:
     if not body.strip():
         return False
     return bool(_TOOLS_PARAM_MARKERS.search(body) and _TOOLS_REJECT_MARKERS.search(body))
-
-
-def _wire_model_leaf(model: str) -> str:
-    """Strip optional ``provider/`` prefix; compare on the leaf id only."""
-    return model.rsplit("/", 1)[-1].lower()
-
-
-def _is_deepseek_model(model: str) -> bool:
-    """True for DeepSeek ids (incl. ``provider/deepseek-…`` routed names)."""
-    return _wire_model_leaf(model).startswith("deepseek")
-
-
-def _is_deepseek_v4(model: str) -> bool:
-    """True for DeepSeek V4 ids (incl. ``provider/deepseek-v4-…`` routed names)."""
-    return _wire_model_leaf(model).startswith("deepseek-v4")
-
-
-def _is_hy3_model(model: str) -> bool:
-    """True for Hy3 ids only (``hy3`` / ``hy3-preview``), not other TokenHub ``hy-*``."""
-    return _wire_model_leaf(model) in {"hy3", "hy3-preview"}
-
-
-def _uses_reasoning_content_echo(model: str) -> bool:
-    """Upstream expects assistant+tool_calls turns to echo ``reasoning_content``."""
-    return _is_deepseek_model(model) or _is_hy3_model(model)
-
-
-def _uses_thinking_type_switch(model: str) -> bool:
-    """Upstream honors ``thinking: {type: enabled|disabled}`` (DeepSeek V4 / Hy3)."""
-    return _is_deepseek_v4(model) or _is_hy3_model(model)
-
-
-# Anthropic effort / sampling-restricted leaf markers — wire rejects ``temperature``
-# (Opus 4.7+, Opus 5, Fable/Mythos 5). Keep narrow; do not blanket all ``claude-*``.
-_TEMPERATURE_OMIT_MARKERS = (
-    "opus-4-7",
-    "opus-4.7",
-    "opus-4-8",
-    "opus-4.8",
-    "opus-5",
-    "fable-5",
-    "mythos-5",
-)
-
-
-def _omits_temperature(model: str) -> bool:
-    """True when upstream rejects wire ``temperature`` for this model id."""
-    leaf = _wire_model_leaf(model)
-    return any(marker in leaf for marker in _TEMPERATURE_OMIT_MARKERS)
 
 
 def _usage_from(usage_data: dict) -> TokenUsage:
@@ -274,6 +226,10 @@ class OpenAICompatibleProvider:
     def name(self) -> str:
         return self._name
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
     def clone(self) -> OpenAICompatibleProvider:
         """Independent HTTP client with the same credentials (coordination drive ownership)."""
         return OpenAICompatibleProvider(
@@ -322,6 +278,7 @@ class OpenAICompatibleProvider:
                 finish_reason=finish_reason,
                 usage=usage.as_dict(),
                 diagnosis=empty_diagnosis,
+                base_url=self._base_url,
             )
         # Success / failure metrics: ``observe_provider`` fence (build_provider).
         return LLMResponse(
@@ -515,6 +472,7 @@ class OpenAICompatibleProvider:
                         finish_reason=last_finish_reason,
                         usage=last_usage.as_dict() if last_usage else {},
                         diagnosis=diagnosis.value,
+                        base_url=self._base_url,
                         sse_tail=last_lines,
                     )
                     yield LLMChunk(
@@ -670,10 +628,11 @@ class OpenAICompatibleProvider:
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
 
     def _build_payload(self, request: LLMRequest, *, stream: bool) -> dict:
-        # Default wire shape is clean OpenAI Chat Completions. DeepSeek/Hy3 thinking
-        # dialect (reasoning_content echo) is gated by model id — broadcasting it
-        # to Claude/other relays triggers invalid_request on multi-turn tool loops.
-        echo_reasoning = _uses_reasoning_content_echo(request.model)
+        # Default wire shape is clean OpenAI Chat Completions. Dialect flags
+        # (reasoning_content echo / thinking.type / omit temperature) come from
+        # ``wire_dialect`` — broadcasting DeepSeek/Hy3 fields to other relays
+        # triggers invalid_request on multi-turn tool loops.
+        dialect = resolve_wire_dialect(request.model)
         messages = []
         for msg in request.messages:
             m: dict = {"role": msg.role}
@@ -693,7 +652,7 @@ class OpenAICompatibleProvider:
                 ]
             if msg.tool_call_id:
                 m["tool_call_id"] = msg.tool_call_id
-            if echo_reasoning:
+            if dialect.echo_reasoning_content:
                 if msg.reasoning_content is not None:
                     m["reasoning_content"] = msg.reasoning_content
                 elif msg.role == "assistant" and msg.tool_calls:
@@ -707,8 +666,8 @@ class OpenAICompatibleProvider:
             "messages": messages,
             "stream": stream,
         }
-        # Claude Opus 4.7+ / Opus 5 family reject temperature → omit (not default).
-        if not _omits_temperature(request.model):
+        # Restricted Anthropic leaves reject temperature → omit (not default).
+        if not dialect.omit_temperature:
             payload["temperature"] = request.temperature
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
@@ -717,13 +676,15 @@ class OpenAICompatibleProvider:
             payload["tool_choice"] = request.tool_choice
         if stream:
             payload["stream_options"] = {"include_usage": True}
-        # DeepSeek V4 / Hy3 default thinking on. Background one-shots (title / memory / …)
-        # must disable it or a tight max_tokens budget is spent on reasoning_content and
-        # the JSON body comes back empty → fallback_title = raw user input in the sidebar.
-        if request.thinking is False and _uses_thinking_type_switch(request.model):
-            payload["thinking"] = {"type": "disabled"}
-        elif request.thinking is True and _uses_thinking_type_switch(request.model):
-            payload["thinking"] = {"type": "enabled"}
+        # Models with thinking_type_switch default thinking on. Background
+        # one-shots (title / memory / …) must disable it or a tight max_tokens
+        # budget is spent on reasoning_content and the JSON body comes back
+        # empty → fallback_title = raw user input in the sidebar.
+        if dialect.thinking_type_switch:
+            if request.thinking is False:
+                payload["thinking"] = {"type": "disabled"}
+            elif request.thinking is True:
+                payload["thinking"] = {"type": "enabled"}
         return payload
 
     async def _attach_sub2api_diagnosis(self, err: LLMUpstreamError) -> LLMUpstreamError:
@@ -1043,7 +1004,11 @@ class OpenAICompatibleProvider:
         except httpx.HTTPError as e:
             raise self._probe_connect_error(e) from e
         code = response.status_code
-        if code < 300 or code == 429:
+        # 429 = authenticated but throttled — treat as reachable without body parse.
+        if code == 429:
+            return
+        if code < 300:
+            self._require_chat_completions_body(response.content)
             return
         if code in (401, 403):
             raise LLMError(f"{self._name} API Key 无效或无权限（鉴权失败），请检查后重试")
@@ -1057,6 +1022,40 @@ class OpenAICompatibleProvider:
             raise LLMError(f"上游模型服务暂时不可用（{code}），请稍后再试")
         raise LLMError(f"{self._name} 连通测试失败（HTTP {code}）")
 
+    def _require_chat_completions_body(self, content: bytes | str | None) -> None:
+        """Reject 2xx HTML / non-JSON / non-chat shells that used to soft-green probe."""
+        text = (content.decode("utf-8", errors="replace") if isinstance(content, bytes) else (content or "")).strip()
+        if not text:
+            raise LLMError(
+                f"{self._name} 连通测试返回空响应。"
+                "请检查 Base URL（自定义地址通常需含 /v1）与 API Key。"
+            )
+        lowered = text[:2000].lower()
+        if "<html" in lowered or "<!doctype" in lowered or '<div id="root"' in lowered:
+            raise LLMError(
+                f"{self._name} 连通测试返回了网页而非模型接口。"
+                "请检查 Base URL（自定义地址通常需含 /v1，"
+                "例如 https://api.example.com/v1）。"
+            )
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise LLMError(
+                f"{self._name} 连通测试响应不是合法 JSON。"
+                "请检查 Base URL（自定义地址通常需含 /v1）。"
+            ) from e
+        if not isinstance(data, dict):
+            raise LLMError(f"{self._name} 连通测试响应格式无效（非对象）")
+        if data.get("error"):
+            err = data["error"]
+            err_text = err if isinstance(err, str) else json.dumps(err, ensure_ascii=False)
+            raise LLMError(f"{self._name} 连通测试被上游拒绝：{err_text[:200]}")
+        choices = data.get("choices")
+        if not isinstance(choices, list):
+            raise LLMError(
+                f"{self._name} 连通测试响应缺少 choices，不是 chat completions。"
+                "请检查 Base URL 是否指向 OpenAI 兼容接口（通常含 /v1）。"
+            )
     async def probe_tools(self, *, model: str) -> bool | None:
         """Probe whether the endpoint *accepts* tool calling (three-state).
 
@@ -1065,8 +1064,9 @@ class OpenAICompatibleProvider:
         - ``None``: unknown — 2xx without tool_calls, timeout, network, 429,
           auth errors, or any ambiguous failure (never pretend False)
 
-        Strategy: try ``tool_choice="required"`` first; on HTTP 400 (e.g. DeepSeek
-        V4 rejecting forced tool_choice) fall back to omitting tool_choice.
+        Strategy: try ``tool_choice="required"`` first; on HTTP 400 when the
+        dialect allows (``retry_forced_tool_choice_on_400``, e.g. DeepSeek V4)
+        fall back to omitting tool_choice.
         """
         outcome = await self._probe_tools_once(model=model, tool_choice="required")
         if outcome == _PROBE_TOOLS_RETRY:
@@ -1113,8 +1113,12 @@ class OpenAICompatibleProvider:
                 return None
             message = choices[0].get("message") or {}
             return True if message.get("tool_calls") else None
-        # Any 400 under forced tool_choice → retry without it (DeepSeek V4 etc.).
-        if code == 400 and tool_choice == "required":
+        # Dialect-gated: forced tool_choice 400 → retry without it.
+        if (
+            code == 400
+            and tool_choice == "required"
+            and resolve_wire_dialect(model).retry_forced_tool_choice_on_400
+        ):
             return _PROBE_TOOLS_RETRY
         try:
             body = response.text or ""

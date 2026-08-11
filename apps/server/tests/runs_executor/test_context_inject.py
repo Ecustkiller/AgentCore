@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _build_messages,
     _context_inject_blocks,
     load_context_inject_files,

@@ -125,7 +125,7 @@ def test_tool_safety_moved_out_of_shared_base_and_ceo():
     # the shared base, so the CEO carried it too — but the coordinator CEO holds only
     # read-only tools (build_ceo_tool_registry); a caution about write/delete/execute tools
     # it cannot call was inert weight. It moved onto the worker identities
-    # (executor_identities._WORKER_TOOL_SAFETY_POLICY, pinned in test_identities.py). Pin its
+    # (executor.identities._WORKER_TOOL_SAFETY_POLICY, pinned in test_identities.py). Pin its
     # ABSENCE from the base AND the composed CEO prompt so a refactor can't quietly re-inflate
     # the CEO prefix by folding it back into the shared base.
     base = assemble_system_prompt()
@@ -161,6 +161,10 @@ def test_tool_use_block_documents_web_search_query_contract():
     assert "明示" in out
     assert "无法规范化才拒绝" not in out
     assert "≤8 词" not in out
+    # 可信优先：搜到 ≠ 可挂 #rN；成稿挂号须先深读
+    assert "搜到" in out and ("可挂来源号" in out or "可挂 #rN" in out)
+    assert "read_url" in out
+    assert "文字概括" in out
 
 
 def test_runtime_context_uses_date_granularity_for_cache_stability():
@@ -299,6 +303,10 @@ def test_core_teaches_split_criterion_over_count():
     # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default；禁空续另拟叠先问你
     assert "决策/澄清短问" in hint
     assert "先问你" in hint
+    # 午后巡 d4d5/53f0：继续须承接上轮确认项；新建仓库/本地目录须 default 路径
+    assert "继续·承接确认项" in hint
+    assert "等待确认后再派工" in hint
+    assert "默认路径" in hint
     assert "一人包办" in hint or "自搜+成文" in hint
     assert "角 prose" in hint and "仅主笔落盘" in hint
     assert "form=files" in hint
@@ -395,6 +403,16 @@ def test_core_teaches_split_criterion_over_count():
     assert "相关工具失败" in hint
     assert "启服" in hint and "复读" in hint
     assert "落盘说明" not in hint  # 不恢复 mutation honesty 横幅文案
+    # 午后巡 12d：面板可见对账；server/云端须说清；认错后禁立刻再报验收通过
+    assert "面板可见·落盘对账" in hint
+    assert "文件」面板" in hint or "文件面板" in hint
+    assert "server" in hint.lower() or "云端" in hint
+    assert "上次说错了" in hint or "此前误报" in hint
+    assert "验收通过" in hint
+    # 午后巡 e670：标完成前先报真实断点
+    assert "收尾·先报断点" in hint
+    assert "都实现了" in hint or "收尾完成" in hint
+    assert "断点" in hint
     # 案 merge-pipeline-skeleton-busy-claim A′：多源合并→单写手成篇；骨架禁审校清理连环。
     assert "多源合并" in hint and "成篇优先" in hint
     assert "CEO 自写" in hint  # 禁表出现在提示里
@@ -698,6 +716,11 @@ def test_core_teaches_delivery_path_by_workspace_type():
     assert "【产物路径】" in hint
     assert "完整" in hint and "约定文档出口" in hint
     assert "裸" in hint or "reviews/" in hint
+    # 午后巡 87de：交付下载给面板可用相对路径；404 须解释+列目录，禁闷声
+    assert "交付下载·面板路径" in hint
+    assert "下载失败" in hint or "404" in hint
+    assert "file_list" in hint
+    assert "闷声" in hint or "空泡" in hint
     assert "【交付指引】" in hint
     assert "执行位置分道" in hint
     assert "收口硬约束" in hint
@@ -889,6 +912,8 @@ def test_shared_base_teaches_delivery_baseline():
     assert "围栏必须成对闭合" in _DEFAULT_SYSTEM_PROMPT
     assert "#rN" in _DEFAULT_SYSTEM_PROMPT
     assert "真假引擎查" in _DEFAULT_SYSTEM_PROMPT
+    assert "搜到" in _DEFAULT_SYSTEM_PROMPT and "可挂来源号" in _DEFAULT_SYSTEM_PROMPT
+    assert "read_url" in _DEFAULT_SYSTEM_PROMPT  # 成稿挂号须先深读
     assert "交付验收对照" in _DEFAULT_SYSTEM_PROMPT
     assert "禁口头验收" in _DEFAULT_SYSTEM_PROMPT
     assert "只读口径" in _DEFAULT_SYSTEM_PROMPT
@@ -909,6 +934,7 @@ def test_shared_base_teaches_claim_evidence_soft_constraint():
     assert "#r1" in _DEFAULT_SYSTEM_PROMPT or "#rN" in _DEFAULT_SYSTEM_PROMPT
     assert "不强迫" in _DEFAULT_SYSTEM_PROMPT
     assert "【已核实" in _DEFAULT_SYSTEM_PROMPT  # 明示勿强迫辩词二分
+    assert "search-only" in _DEFAULT_SYSTEM_PROMPT or "文字概括" in _DEFAULT_SYSTEM_PROMPT
 
 
 def test_shared_base_teaches_work_authority():
@@ -1057,8 +1083,11 @@ def test_citation_hint_teaches_multi_source_anchoring():
 
 
 def test_citation_hint_teaches_claim_evidence_and_summary_inheritance():
-    # CEO citing 段只留汇总继承；主张须证在共享基座；核心不第三遍重复。
+    # CEO citing 段：挂号纪律 + 汇总继承；主张须证在共享基座；核心不第三遍重复。
     hint = CHAT_CITATION_HINT
+    assert "挂号纪律" in hint
+    assert "搜到" in hint and "可挂" in hint
+    assert "read_url" in hint
     assert "汇总继承" in hint
     assert "重新编号" in hint
     assert "主张须证" not in hint  # 不归 citing 段

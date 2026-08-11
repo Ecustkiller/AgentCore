@@ -2124,6 +2124,8 @@ def test_web_search_schema_documents_query_contract():
     assert "引号" in blob  # 引号短语豁免
     assert "书名号" in blob  # 中文专名豁免
     assert "摘要优先" in blob  # 默认摘要优先基调
+    assert "搜到" in blob and "可挂来源号" in blob  # 搜到 ≠ 可挂 #rN
+    assert "read_url" in blob  # 成稿挂号须先深读
     assert "2–3" in blob  # 建议一次 2–3 个核心词
     assert "规范化" in blob or "截断" in blob
     assert "明示" in blob

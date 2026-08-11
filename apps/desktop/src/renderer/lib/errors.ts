@@ -61,11 +61,14 @@ export class StreamError extends Error {
 
 /** Short diagnosis labels for degraded empty-response finishes (mirrors backend). */
 export const EMPTY_RESPONSE_CHIP_LABELS: Record<string, string> = {
-  oauth_expired: "模型无响应 · 可能需要刷新 Sub2API OAuth",
+  upstream_non_api: "上游返回了网页或登录页，请检查服务商地址与鉴权",
+  // Old journals may still stamp oauth_expired — same surface as upstream_non_api.
+  oauth_expired: "上游返回了网页或登录页，请检查服务商地址与鉴权",
   content_filtered: "内容被过滤",
   model_unknown: "模型名未被上游识别",
   silent_empty: "模型返回空内容",
   format_mismatch: "上游响应格式异常",
+  length_empty: "输出长度截断 · 返回空内容",
 };
 
 /** Chip suffix for degraded finish when an empty-response diagnosis is available. */
@@ -80,6 +83,21 @@ export function degradedFinishChipLabel(
     return errorMessage.split(" · ", 2)[1];
   }
   return undefined;
+}
+
+/**
+ * True when the assistant bubble already owns the empty-response red card —
+ * FinishReasonChip must not stack on top (单一用户面).
+ */
+export function isEmptyResponseUserSurface(opts: {
+  code?: string | null;
+  emptyDiagnosis?: string | null;
+  message?: string | null;
+}): boolean {
+  if (opts.code === "LLM_EMPTY_RESPONSE") return true;
+  if (opts.emptyDiagnosis) return true;
+  const msg = opts.message ?? "";
+  return msg.includes("模型多次空响应") || msg.includes("模型空响应");
 }
 
 /** Product copy for upstream 429 (mirrors backend LLMRateLimitError / history 注记). */
@@ -188,8 +206,14 @@ export function connectivityEscalationSuffix(
   opts?: {
     message?: string | null;
     upstreamStatus?: number;
+    /** Empty-response diagnosis — never escalate into Base URL / API Key copy. */
+    emptyDiagnosis?: string;
   },
 ): string | null {
+  // LLM_EMPTY_RESPONSE is not a connectivity code; still guard explicitly so a
+  // future catalog slip cannot append「检查 Base URL / API Key」onto the red card.
+  if (code === "LLM_EMPTY_RESPONSE") return null;
+  if (opts?.emptyDiagnosis) return null;
   if (!code || !isConnectivityErrorCode(code)) return null;
   if (isClientSideLlmRejection(opts)) return null;
   const n = noteSessionConnectivityFailure(code, messageId);
@@ -319,6 +343,8 @@ export interface DescribedError {
     upstream_body_preview?: string | null;
     retry_attempts?: number;
     empty_diagnosis?: string;
+    body_kind?: string;
+    base_url?: string;
     sub2api_diagnosis?: string;
     sub2api_account?: string;
     retry_after?: number;

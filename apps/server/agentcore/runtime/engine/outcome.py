@@ -38,6 +38,8 @@ class RoundOutcome:
     empty_raw_preview: str | None = None
     # Upstream provider finish_reason when known (stop / length / tool_calls / …).
     finish_reason: str | None = None
+    # BYOK / platform endpoint root (for empty-response 排查包); never the API key.
+    provider_base_url: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:

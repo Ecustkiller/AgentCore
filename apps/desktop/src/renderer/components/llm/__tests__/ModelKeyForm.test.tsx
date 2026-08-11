@@ -226,11 +226,22 @@ describe("ModelKeyForm", () => {
 
     expect(screen.getByLabelText("Base URL").tagName).toBe("INPUT");
     expect(screen.getByText("高级选项")).toBeTruthy();
+    expect(
+      screen.getByText(/自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/),
+    ).toBeTruthy();
 
     const defaultModelInput = defaultModelControl() as HTMLInputElement;
     expect(defaultModelInput.tagName).toBe("INPUT");
     expect(defaultModelInput.getAttribute("list")).toBeNull();
     expect(screen.queryByText("其他…")).toBeNull();
+  });
+
+  it("shows Base URL /v1 hint in advanced for preset vendors", () => {
+    renderForm();
+    openAdvancedOptions();
+    expect(
+      screen.getByText(/自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/),
+    ).toBeTruthy();
   });
 
   it("shows JiuRelay key-model tip and all three models in the datalist", () => {

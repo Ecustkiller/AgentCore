@@ -11,7 +11,7 @@ from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.ports import ClientRequestBridge
-from agentcore.runtime.runs.executor_identities import DelegateFactory
+from agentcore.runtime.runs.executor.identities import DelegateFactory
 from agentcore.runtime.runs.notewall import NoteWall
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.tools.protocol import ToolContext

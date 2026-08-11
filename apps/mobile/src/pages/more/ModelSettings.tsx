@@ -429,6 +429,9 @@ export function ModelSettings() {
             <h2 className="section-title" style={{ marginTop: 20 }}>
               服务商
             </h2>
+            <p className="section-note">
+              测连绿≠可聊天；自定义 Base URL 通常需含 /v1。
+            </p>
             <ProviderList
               providers={data.providers}
               onTest={async (id) => {

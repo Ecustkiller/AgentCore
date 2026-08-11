@@ -1,4 +1,4 @@
-"""CEO captain must unbind browser sessions on exit (parity with worker executor_node).
+"""CEO captain must unbind browser sessions on exit (parity with worker executor.node).
 
 Dogfood: conversation ed52c95d — solo browser_* without unbind stacked live:1→2→3→4
 and the dock showed duplicate WorkBuddy tabs (pageId = session_id).
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.runtime.runs.executor_captain import _drive_captain_loop
+from agentcore.runtime.runs.executor.captain import _drive_captain_loop
 from agentcore.runtime.runs.types import RunKind, RunPhase, RunSpec
 from agentcore.tools.protocol import ToolContext
 from tests.llm_helpers import make_profile_params
@@ -64,7 +64,7 @@ async def test_drive_captain_loop_unbinds_browser_run_on_success(monkeypatch: An
         return "done", "", TokenUsage(), 1
 
     monkeypatch.setattr(
-        "agentcore.runtime.runs.executor_captain.react_loop",
+        "agentcore.runtime.runs.executor.captain.react_loop",
         _fake_react_loop,
     )
 
@@ -98,7 +98,7 @@ async def test_drive_captain_loop_unbinds_browser_run_on_failure(monkeypatch: An
         raise RuntimeError("captain crashed")
 
     monkeypatch.setattr(
-        "agentcore.runtime.runs.executor_captain.react_loop",
+        "agentcore.runtime.runs.executor.captain.react_loop",
         _boom,
     )
 

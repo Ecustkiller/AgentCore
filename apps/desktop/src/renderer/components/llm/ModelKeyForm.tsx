@@ -287,7 +287,8 @@ export function ModelKeyForm({
               />
             </label>
             <p className="mt-1 text-xs text-muted-foreground">
-              须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+              须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用。自定义地址通常需含
+              /v1（例 https://api.example.com/v1）。
             </p>
           </div>
         )}
@@ -318,7 +319,8 @@ export function ModelKeyForm({
                   />
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用
+                  须为 AgentCore 云端可访问的公网地址；公司内网域名通常不可用。自定义地址通常需含
+                  /v1（例 https://api.example.com/v1）。
                 </p>
               </div>
             )}

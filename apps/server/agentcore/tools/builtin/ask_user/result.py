@@ -8,11 +8,27 @@ from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.tools.protocol import ToolEffect, ToolResult
 
 
+def _option_path(opt: Any) -> str:
+    if not isinstance(opt, dict):
+        return ""
+    return str(opt.get("path") or "").strip()
+
+
+def _option_label(opt: Any) -> str:
+    if isinstance(opt, dict):
+        return str(opt.get("label") or "").strip()
+    return str(opt or "").strip()
+
+
 def confirmed_defaults_summary(
     questions: list[dict[str, Any]] | None = None,
     assumptions: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Join card ``default`` / assumption labels for empty-continue inject (案 B)."""
+    """Join card ``default`` / assumption labels for empty-continue inject (案 B).
+
+    Path-bearing options（新建仓库/本地目录）：when ``default`` matches an option that
+    carries ``path``, surface the path alongside the default label（53f08 同族加强）.
+    """
     parts: list[str] = []
     for q in questions or []:
         if not isinstance(q, dict):
@@ -21,7 +37,19 @@ def confirmed_defaults_summary(
         if not default:
             continue
         prompt = str(q.get("prompt") or "").strip()
-        parts.append(f"{prompt}={default}" if prompt else default)
+        path = ""
+        for opt in q.get("options") or []:
+            if _option_label(opt) == default:
+                path = _option_path(opt)
+                break
+        if not path and ("/" in default or "\\" in default or default.startswith("~")):
+            path = default
+        head = f"{prompt}={default}" if prompt else default
+        if path and path != default:
+            head = f"{head}（路径={path}）"
+        elif path and prompt:
+            head = f"{prompt}={path}"
+        parts.append(head)
     for a in assumptions or []:
         if not isinstance(a, dict):
             continue
@@ -31,6 +59,29 @@ def confirmed_defaults_summary(
         value = str(a.get("value") or "").strip()
         parts.append(f"{label}={value}" if value else label)
     return "；".join(parts)
+
+
+def structured_options_summary(
+    questions: list[dict[str, Any]] | None = None,
+) -> str:
+    """Join choice labels (+ path when present) for continue/pause restatement (d4d5)."""
+    chunks: list[str] = []
+    for q in questions or []:
+        if not isinstance(q, dict):
+            continue
+        labels: list[str] = []
+        for opt in q.get("options") or []:
+            label = _option_label(opt)
+            if not label:
+                continue
+            path = _option_path(opt)
+            labels.append(f"{label}（路径={path}）" if path and path != label else label)
+        if not labels:
+            continue
+        prompt = str(q.get("prompt") or "").strip()
+        joined = " / ".join(labels)
+        chunks.append(f"{prompt}：{joined}" if prompt else joined)
+    return "；".join(chunks)
 
 
 def ask_user_tool_result(
@@ -56,7 +107,8 @@ def ask_user_tool_result(
 
     Empty continue (no note/picks) with card defaults → inject「用户确认默认：…」so the
     resumed CEO must honor those defaults and mark「按确认默认」(案 0cb83288 · B)；
-    no card default → legacy「按你提出的方向继续」fallback (Cursor 空 continue ≈ 接受默认).
+    empty continue with options but no default → inject「复述并沿用上轮确认选项」(d4d5)；
+    no card default/options → legacy「按你提出的方向继续」fallback (Cursor 空 continue ≈ 接受默认).
     """
     decision = response.decision
     if decision is CheckpointDecision.ADJUST:
@@ -80,7 +132,15 @@ def ask_user_tool_result(
                     "【禁止】借继续另拟一套，也【禁止】再写「先问你 / 请选择 / 方向：先问你」。"
                 )
             else:
-                output = "用户确认：按你提出的方向继续。"
+                options = structured_options_summary(questions)
+                if options:
+                    output = (
+                        f"用户确认继续。请复述并沿用上轮确认选项：{options}。"
+                        "【禁止】冲成空模板「等待确认后再派工；此前尚未真正开工。」；"
+                        "【禁止】另拟一套还叠「先问你 / 请选择」。"
+                    )
+                else:
+                    output = "用户确认：按你提出的方向继续。"
         return ToolResult(tool_call_id="", success=True, output=output)
     if decision is CheckpointDecision.STOP:
         # 拒答可见：回灌 CEO（对齐开工卡取消 / OpenAI reject→resume）；非空 continue。

@@ -255,7 +255,6 @@ async def test_materialise_turn_token_budget_skips():
             task="qa",
             agent_id="qa",
             deliverable=Deliverable(
-                name="QA",
                 form="files",
                 artifacts=["site/QA.md"],
                 web_quality_scan=True,
@@ -310,7 +309,6 @@ async def test_priority_reserve_admits_qa_cuts_secondary(monkeypatch):
                 depends_on=["s0", "s1"],
                 ceiling_priority=True,
                 deliverable=Deliverable(
-                    name="QA",
                     form="files",
                     web_quality_scan=True,
                     visual_critic=True,
@@ -382,7 +380,6 @@ async def test_priority_reserve_admits_assemble_and_qa_cuts_secondary(monkeypatc
                 depends_on=["assemble"],
                 ceiling_priority=True,
                 deliverable=Deliverable(
-                    name="QA",
                     form="files",
                     web_quality_scan=True,
                     visual_critic=True,
@@ -441,7 +438,6 @@ async def test_skip_qa_delivery_status_partial_with_honesty_gaps():
             depends_on=["s0"],
             ceiling_priority=True,
             deliverable=Deliverable(
-                name="QA",
                 form="files",
                 artifacts=["site/QA.md"],
                 web_quality_scan=True,
@@ -851,7 +847,6 @@ async def test_nested_disables_parent_priority_reserve_cut(monkeypatch):
                     depends_on=["s0", "s1"],
                     ceiling_priority=True,
                     deliverable=Deliverable(
-                        name="QA",
                         form="files",
                         web_quality_scan=True,
                         visual_critic=True,

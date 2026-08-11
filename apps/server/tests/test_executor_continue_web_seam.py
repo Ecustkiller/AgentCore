@@ -6,7 +6,7 @@ import pytest
 
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.runs.executor_continue import continue_run
+from agentcore.runtime.runs.executor.continuation import continue_run
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec
 from agentcore.tools.protocol import ToolContext
@@ -60,7 +60,6 @@ async def test_continue_run_final_web_seam_still_fails_over_threshold(tmp_path: 
 
     deliverable = Deliverable(
         form="files",
-        requires_files=True,
         artifacts=["site/QA.md"],
         web_seam_scope="site/",
     )

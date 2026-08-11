@@ -103,3 +103,23 @@ def default_role_for_agent(*, agent_id: str | None, run_id: str | None) -> str:
     if run_id or agent_id:
         return ROLE_MEMBER
     return ROLE_CAPTAIN
+
+
+def resolve_ledger_role(
+    *,
+    role: str | None = None,
+    agent_id: str | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Resolve the structural role stamped on a ``cost_calls`` detail row.
+
+    Shared by in-process metering and inference ``proxy_spend`` so both call
+    surfaces agree when an explicit role is present vs when only agent/run
+    stamps are available. Unknown / empty explicit roles fall through to
+    :func:`default_role_for_agent` (untrusted proxy headers already cleared
+    by :func:`parse_attribution_headers`).
+    """
+    explicit = (role or "").strip()
+    if explicit in _ALLOWED_ROLES:
+        return explicit
+    return default_role_for_agent(agent_id=agent_id, run_id=run_id)

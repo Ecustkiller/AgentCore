@@ -35,6 +35,7 @@ def test_annotate_ledger_ids_format():
     }
     out = annotate_ledger_ids("RESULT", cites, ids)
     assert "[已登记来源]" in out
+    assert "深读" in out or "selected" in out  # 尾注教法：成稿挂号须深读/selected
     assert "#r1=https://a.example/x" in out
     assert "#r3=https://b.example/y" in out
     assert "[来源编号]" not in out

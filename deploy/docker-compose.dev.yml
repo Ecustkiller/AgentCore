@@ -32,7 +32,8 @@ services:
       retries: 5
 
   searxng:
-    image: searxng/searxng:latest
+    # Keep digest in lockstep with docker-compose.server.yml (see comment there).
+    image: searxng/searxng@sha256:cd22dbf7fac8b25d5e39e65af53a4b47009df5ad3162e270c477fd5b30ce03f2
     container_name: agentcore-searxng
     restart: unless-stopped
     ports:
@@ -43,18 +44,18 @@ services:
       SEARXNG_BASE_URL: "http://localhost:18888"
       # Dev overrides the engine set: settings.yml is the *production* (Aliyun Shenzhen)
       # config — CN scraper engines only, since international engines are GFW-blocked
-      # there. This dev host is the inverse (international engines reachable & fast; the
-      # CN scrapers serve CAPTCHA / 360search returns nothing → web_search would be empty).
-      # settings.dev.yml is the international-first union; prod keeps using settings.yml.
+      # there. This dev host is the inverse (international engines reachable & fast;
+      # baidu/sogou often CAPTCHA from residential/dev IPs). settings.dev.yml is
+      # international-first + baidu/sogou aux; prod keeps using settings.yml.
       SEARXNG_SETTINGS_PATH: "/etc/searxng/settings.dev.yml"
-      # This single dev instance serves a parallel Agent team (several researchers,
-      # each fanning web_search to 4 CN engines). The image defaults to 1 granian
-      # worker (× GRANIAN_BLOCKING_THREADS=4 ≈ 4 concurrent), which the team's burst
+      # This single dev instance serves a parallel Agent team (several researchers
+      # fanning web_search). The image defaults to 1 granian worker
+      # (× GRANIAN_BLOCKING_THREADS=4 ≈ 4 concurrent), which the team's burst
       # saturates → inbound connects time out → the app-side per-host breaker trips
-      # for everyone. 4 workers (≈16 concurrent) comfortably covers the app's search
-      # concurrency cap (_SEARCH_CONCURRENCY). Peak upstream load stays bounded by
-      # that cap, so this doesn't raise engine bot-detection risk.
-      GRANIAN_WORKERS: "4"
+      # for everyone. 6 workers aligns with the app's search concurrency cap
+      # (_SEARCH_CONCURRENCY=6). Peak upstream load stays bounded by that cap, so
+      # this doesn't raise engine bot-detection risk.
+      GRANIAN_WORKERS: "6"
     volumes:
       - ./searxng:/etc/searxng
     healthcheck:

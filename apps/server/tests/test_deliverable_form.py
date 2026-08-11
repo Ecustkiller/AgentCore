@@ -7,7 +7,7 @@ from agentcore.runtime.delegate.completion import (
 )
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.contract import describe_deliverable
-from agentcore.runtime.runs.executor_identities import build_worker_identity
+from agentcore.runtime.runs.executor.identities import build_worker_identity
 from agentcore.runtime.runs.types import Deliverable
 from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_DESCRIPTION,

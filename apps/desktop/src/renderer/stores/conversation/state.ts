@@ -137,6 +137,8 @@ export interface ConversationState {
         upstream_body_preview?: string | null;
         retry_attempts?: number;
         empty_diagnosis?: string;
+        body_kind?: string;
+        base_url?: string;
         credential_source?: "user" | "platform" | string | null;
       };
     },

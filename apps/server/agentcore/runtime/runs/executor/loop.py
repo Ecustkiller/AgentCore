@@ -1,6 +1,6 @@
 """AGENT-node react+capture loop body + contract decision ladder orchestration.
 
-Split from ``executor_node`` — pure move; consumed only by the node facade.
+Split from ``.node`` — pure move; consumed only by the node facade.
 Domain hooks (visual/cite) and retry predicates live in sibling modules.
 """
 
@@ -31,18 +31,18 @@ from agentcore.runtime.runs.contract import (
     strip_invalid_ledger_refs_from_surfaces,
     worker_expects_handoff,
 )
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _load_artifact_contents,
     _safe_index_files,
     ensure_design_md_for_web_quality,
     load_web_seam_scope_contents,
 )
-from agentcore.runtime.runs.executor_env import AgentExecutorEnv
-from agentcore.runtime.runs.executor_hooks import (
+from agentcore.runtime.runs.executor.env import AgentExecutorEnv
+from agentcore.runtime.runs.executor.hooks import (
     _grant_citation_rework_reread,
     _two_phase_citation,
 )
-from agentcore.runtime.runs.executor_retry import (
+from agentcore.runtime.runs.executor.retry import (
     _LIGHT_REPAIR_MAX_ROUNDS,
     _can_light_repair,
     _can_write_pass,
@@ -51,8 +51,8 @@ from agentcore.runtime.runs.executor_retry import (
     _wind_down_entered,
     should_skip_contract_retry_for_budget,
 )
-from agentcore.runtime.runs.executor_setup import AgentNodePrepared
-from agentcore.runtime.runs.executor_shared import _react_and_capture, _retry_message
+from agentcore.runtime.runs.executor.setup import AgentNodePrepared
+from agentcore.runtime.runs.executor.shared import _react_and_capture, _retry_message
 from agentcore.runtime.runs.landing_product import filter_product_landing_paths
 from agentcore.runtime.runs.retrieval_budget import rework_refill_slots
 from agentcore.runtime.runs.serialize import (

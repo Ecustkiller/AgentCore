@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from agentcore.runtime.runs.builder import build_run_plan
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _CONTEXT_BLOCK_BODY_CAP,
     _build_captain_context_blocks,
     _build_context_blocks,
@@ -116,7 +116,7 @@ async def test_context_blocks_channel_sequence_and_single_source():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     spec = replace(
         plan.by_id("t_1"),
-        deliverable=Deliverable(name="一段结论", required_sections=["结论"]),
+        deliverable=Deliverable(required_sections=["结论"]),
         gate_notes="把关要点文",
         steer="按新方向调整",
     )

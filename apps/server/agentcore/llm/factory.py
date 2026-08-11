@@ -122,7 +122,7 @@ async def build_turn_router(
 ) -> ProviderRouter:
     """Build the turn ProviderRouter, injecting cross-provider / platform worker when needed.
 
-    ``profiles.agent_provider_id`` (from ``resolve_turn_profiles``) that differs from the
+    ``profiles.agent_provider_id`` (from ``model_selection.select_turn_profiles``) that differs from the
     turn's chat credentials causes that provider to be registered under its id so
     ``TurnProfiles.route_model_for("agent")`` can dispatch with a ``provider_id/model``
     prefix. ``PLATFORM_PROVIDER_SENTINEL`` registers :func:`build_platform_provider`

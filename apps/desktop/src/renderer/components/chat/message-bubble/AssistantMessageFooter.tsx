@@ -14,7 +14,11 @@ import { copyText } from "@/lib/clipboard";
 import { formatCollabSummary } from "@/lib/collabSummary";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
-import { formatSupportDiagnosticText } from "@/lib/supportDiagnostics";
+import {
+  formatSupportDiagnosticText,
+  precedingUserMessageId,
+  supportDiagnosticExtrasFromError,
+} from "@/lib/supportDiagnostics";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
@@ -22,6 +26,7 @@ import { useBookmarkStore } from "@/stores/bookmarks";
 import type { Message } from "@/stores/conversation";
 import {
   assistantProjectionId,
+  getActiveRuntime,
   useConversationStore,
 } from "@/stores/conversation";
 import { turnDetailPath } from "@/stores/ui";
@@ -167,8 +172,13 @@ function MessageMoreMenu({
   const diagnosticText = formatSupportDiagnosticText({
     conversationId,
     messageId: serverMessageId,
+    userMessageId: precedingUserMessageId(
+      getActiveRuntime().messages,
+      message.id,
+    ),
     traceId: message.traceId,
     executionId: message.executionId,
+    ...supportDiagnosticExtrasFromError(message.error),
   });
   const finishLabel = finishReason
     ? FINISH_REASON_META[finishReason]?.label

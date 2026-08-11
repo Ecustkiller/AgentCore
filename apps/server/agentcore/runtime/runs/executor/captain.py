@@ -1,4 +1,4 @@
-"""Split from executor.py — see executor.py module docstring."""
+"""CEO captain executor / resumer entry points and drive loop."""
 
 from __future__ import annotations
 
@@ -24,11 +24,11 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
-from agentcore.runtime.runs.executor_context import (
+from agentcore.runtime.runs.executor.context import (
     _build_captain_context_blocks,
     _context_block_payloads,
 )
-from agentcore.runtime.runs.executor_shared import _priced_failure, resolve_finish_override
+from agentcore.runtime.runs.executor.shared import _priced_failure, resolve_finish_override
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.tools.protocol import ToolContext
@@ -305,7 +305,7 @@ async def _drive_captain_loop(
             content=content_from_transcript(frozen) if frozen else "",
         )
     finally:
-        # Browser B: same as worker executor_node — release this captain run's session
+        # Browser B: same as worker executor.node — release this captain run's session
         # bind so the next user turn (new captain_run_id) can reuse the conversation's
         # unbound unique/active live tab. Without this, solo CEO browser_* stacks
         # live sessions (registry live:1→2→3…) and the dock shows duplicate tabs.

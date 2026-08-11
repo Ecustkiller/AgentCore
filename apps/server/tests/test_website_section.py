@@ -299,7 +299,6 @@ async def test_attach_light_gaps_on_qa_skip(tmp_path: Path):
             agent_id="qa",
             ceiling_priority=True,
             deliverable=Deliverable(
-                name="QA",
                 form="files",
                 artifacts=["site/QA.md"],
                 web_quality_scan=True,

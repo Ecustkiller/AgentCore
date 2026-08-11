@@ -154,6 +154,12 @@ class ErrorContext(WirePayload):
     upstream_body_preview: str | None = None
     retry_attempts: int | None = absent()
     empty_diagnosis: str | None = absent()
+    body_kind: str | None = absent(
+        "empty-response body class: html | json | text | empty (no raw HTML)."
+    )
+    base_url: str | None = absent(
+        "Provider endpoint root for BYOK empty-response 排查包 (never the API key)."
+    )
     retry_after: float | None = absent(
         "上游 429 Retry-After 秒数（原始值；工程重试仍截断 ≤30s）。"
     )

@@ -49,17 +49,17 @@ afterEach(cleanup);
 describe("FinishReasonChip", () => {
   it("renders abnormal finish reasons", () => {
     render(<FinishReasonChip reason="degraded" />);
-    expect(screen.getByTestId("finish-reason-chip").textContent).toContain(
-      "降级完成",
+    expect(screen.getByTestId("finish-reason-chip").textContent).toBe(
+      "空响应收尾",
     );
   });
 
-  it("uses diagnosis label for degraded", () => {
+  it("uses diagnosis label for degraded without 降级完成 prefix", () => {
     render(
       <FinishReasonChip reason="degraded" diagnosisLabel="模型返回空内容" />,
     );
     expect(screen.getByTestId("finish-reason-chip").textContent).toBe(
-      "降级完成 · 模型返回空内容",
+      "模型返回空内容",
     );
   });
 

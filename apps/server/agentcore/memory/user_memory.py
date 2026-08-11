@@ -22,7 +22,7 @@ from typing import Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.conversation_title import ChatMessage
 from agentcore.memory.store import (
@@ -909,10 +909,9 @@ class LLMMemoryExtractor:
         self, provider: LLMProvider, *, role: str = "memory", model: str | None = None
     ) -> None:
         self._provider = provider
-        self._profile = get_profile(role)
         from agentcore.config import settings
 
-        self._model = model or settings.platform_model
+        self._selected = select_call(role, model or settings.platform_model)
         # The most recent extract's spend, surfaced for the cost ledger (Gap C).
         # Stays zero until a call completes (timeout / error never bill), so the
         # offline pass bills the consolidation iff total_tokens > 0.
@@ -921,14 +920,13 @@ class LLMMemoryExtractor:
         self.last_parse_result: MemoryParseResult | None = None
 
     async def extract(self, data: MemoryExtractInput) -> list[MemoryOp]:
-        request = build_request(
-            self._profile,
+        request = build_selected_request(
+            self._selected,
             [
                 LLMMessage(role="system", content=_EXTRACT_SYSTEM_PROMPT),
                 LLMMessage(role="user", content=_render_extract_prompt(data)),
             ],
             stream=False,
-            model=self._model,
         )
         try:
             response = await asyncio.wait_for(
@@ -939,7 +937,7 @@ class LLMMemoryExtractor:
             self.last_parse_result = None
             return []
         self.last_usage = response.usage
-        self.last_model = response.model or self._model or ""
+        self.last_model = response.model or self._selected.model or ""
         raw = response.content or ""
         result = parse_memory_ops_detailed(raw, folder_id=data.folder_id)
         self.last_parse_result = result

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMentionMenu, type ChatMentionMenuItem } from "./ChatMentionMenu";
 import {
   EVERYONE_MENTION_LABEL,
+  canActAsGroupModerator,
   filterMentionsInContent,
   findImMentionDraft,
 } from "./chatDisplay";
@@ -110,6 +111,14 @@ export function ChatComposer({
   const isPlatformAdmin = user?.role === "admin";
   const isGroup = chat?.type === "group";
   const isEditing = Boolean(editTarget);
+  const myGroupRole = useMemo(
+    () => (myId ? members.find((m) => m.id === myId)?.group_role : undefined),
+    [members, myId],
+  );
+  const canMentionEveryone = canActAsGroupModerator(
+    isPlatformAdmin,
+    myGroupRole,
+  );
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -194,7 +203,7 @@ export function ChatComposer({
 
     if (
       isGroup &&
-      isPlatformAdmin &&
+      canMentionEveryone &&
       (!q || EVERYONE_MENTION_LABEL.includes(q) || "everyone".includes(q))
     ) {
       items.push({ kind: "everyone", label: EVERYONE_MENTION_LABEL });
@@ -218,7 +227,7 @@ export function ChatComposer({
       });
     }
     return items;
-  }, [chat?.peer, isGroup, isPlatformAdmin, members, mentionQuery, myId]);
+  }, [canMentionEveryone, chat?.peer, isGroup, members, mentionQuery, myId]);
 
   // Keep active index in range when the filtered list shrinks.
   useEffect(() => {

@@ -429,7 +429,7 @@ def test_ownership_hints_still_parse_verbatim_conflict_error():
 
 
 def test_ancestors_include_nested_parent_run_id():
-    from agentcore.runtime.runs.executor_context import _ancestors_by_id
+    from agentcore.runtime.runs.executor.context import _ancestors_by_id
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunSpec
 

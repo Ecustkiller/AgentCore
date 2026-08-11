@@ -785,3 +785,45 @@ async def test_inference_proxy_uses_conversation_profile(monkeypatch):
     assert seen["provider_id"] == "p1"
     assert cfg.model == "picked-model"
     assert cfg.source == "byok"
+
+
+# --- P2-B: catalog as sole platform 上架 fact source ---------------------------
+
+
+def test_platform_listable_public_api_and_visibility_gate(monkeypatch):
+    """Public 上架 helpers: listable vs visible share one conjunction."""
+    monkeypatch.setattr(
+        catalog,
+        "platform_listable_model_ids",
+        lambda: ["glm-5.2", "grok-4.5"],
+    )
+    monkeypatch.setattr(catalog, "platform_catalog_visible", lambda: True)
+    assert catalog.is_platform_listable("glm-5.2")
+    assert not catalog.is_platform_listable("not-listed")
+    assert catalog.visible_platform_listable_model_ids() == ["glm-5.2", "grok-4.5"]
+    assert catalog.platform_model_display_name("glm-5.2") == "GLM-5.2"
+
+    monkeypatch.setattr(catalog, "platform_catalog_visible", lambda: False)
+    assert catalog.visible_platform_listable_model_ids() == []
+    # Recognition set (no gate) still listable:
+    assert catalog.is_platform_listable("grok-4.5")
+
+
+def test_system_preset_display_name_matches_catalog_enrichment(monkeypatch):
+    """Profiles derive display names via catalog — same path as catalog rows."""
+    from agentcore.llm.model_profiles import (
+        _system_preset_display_name,
+        platform_preset_id,
+        system_presets,
+    )
+
+    monkeypatch.setattr(
+        catalog,
+        "platform_listable_model_ids",
+        lambda: ["glm-5.2"],
+    )
+    presets = system_presets()
+    assert presets[platform_preset_id("glm-5.2")] == "glm-5.2"
+    assert _system_preset_display_name("glm-5.2") == catalog.platform_model_display_name(
+        "glm-5.2"
+    )

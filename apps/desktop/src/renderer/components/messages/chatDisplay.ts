@@ -2,6 +2,7 @@ import { BASE_URL } from "@/services/api";
 import {
   type ChatMention,
   type ChatMessageDetail,
+  type ChatParticipant,
   type ChatSummary,
   type MessageReplyTo,
   isImageAttachment,
@@ -9,6 +10,58 @@ import {
 
 /** Visible body token for `@所有人` (display only; truth is `kind: "everyone"`). */
 export const EVERYONE_MENTION_LABEL = "所有人";
+
+/** Group roster roles that count as 群版主 (aligned with backend chat_members.role). */
+export type GroupRole = ChatParticipant["group_role"];
+
+/** Whether a group_role is owner/admin (群版主). */
+export function isGroupModeratorRole(
+  role: string | null | undefined,
+): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/**
+ * Platform admin or group 版主 may kick/mute/announce/@所有人 (server still enforces).
+ * Platform admin alone for protected recall (system_card / official).
+ */
+export function canActAsGroupModerator(
+  isPlatformAdmin: boolean,
+  groupRole: string | null | undefined,
+): boolean {
+  return isPlatformAdmin || isGroupModeratorRole(groupRole);
+}
+
+/**
+ * Roster badge labels. Platform admin →「平台管理员」; group mod and not
+ * platform →「群管理员」. Both → platform only (prefer platform).
+ */
+export function memberGovernanceBadges(
+  member: Pick<ChatParticipant, "is_admin" | "group_role">,
+): string[] {
+  if (member.is_admin) return ["平台管理员"];
+  if (isGroupModeratorRole(member.group_role)) return ["群管理员"];
+  return [];
+}
+
+/**
+ * Whether the actor may be shown kick/mute controls for `target` (UI hide only;
+ * server still enforces). Never self / platform admin; group mods cannot act on
+ * other group mods — only platform admin can.
+ */
+export function canModerateMemberTarget(
+  opts: {
+    myUserId: string | null | undefined;
+    isPlatformAdmin: boolean;
+    target: Pick<ChatParticipant, "id" | "is_admin" | "group_role">;
+  },
+): boolean {
+  const { myUserId, isPlatformAdmin, target } = opts;
+  if (!myUserId || target.id === myUserId) return false;
+  if (target.is_admin) return false;
+  if (isGroupModeratorRole(target.group_role) && !isPlatformAdmin) return false;
+  return true;
+}
 
 /** Resolve a backend-relative avatar URL for `<img src>`. */
 export function avatarSrc(url: string | null | undefined): string | null {
@@ -75,19 +128,23 @@ export const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Whether the viewer may be offered a recall menu item (server still enforces).
- * Own message within 2 minutes; platform admin for group any / system_card /
- * official; never for an already-recalled row.
+ * Own message within 2 minutes; platform admin or group 版主 for other group
+ * messages; platform admin only for system_card / official; never for an
+ * already-recalled row.
  */
 export function canOfferRecall(
   message: ChatMessageDetail,
   opts: {
     mine: boolean;
+    /** Platform ``users.role == admin``. */
     isAdmin: boolean;
+    /** Group ``group_role`` in {owner, admin}; ignored outside groups. */
+    isGroupModerator?: boolean;
     chatType: ChatSummary["type"] | null | undefined;
   },
 ): boolean {
   if (message.recalled_at) return false;
-  const { mine, isAdmin, chatType } = opts;
+  const { mine, isAdmin, isGroupModerator = false, chatType } = opts;
   if (
     message.content_type === "system_card" ||
     message.sender_type === "official" ||
@@ -95,7 +152,9 @@ export function canOfferRecall(
   ) {
     return isAdmin;
   }
-  if (isAdmin && chatType === "group") return true;
+  const canGovernGroup =
+    chatType === "group" && (isAdmin || isGroupModerator);
+  if (canGovernGroup) return true;
   if (!mine) return false;
   const created = new Date(message.created_at).getTime();
   if (Number.isNaN(created)) return false;

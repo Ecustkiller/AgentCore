@@ -4,12 +4,16 @@ import {
   EVERYONE_MENTION_LABEL,
   OFFICIAL_CHAT_DISPLAY_NAME,
   buildReplySnapshot,
+  canActAsGroupModerator,
+  canModerateMemberTarget,
   canOfferEdit,
   canOfferRecall,
   chatDisplayName,
   filterMentionsInContent,
   findImMentionDraft,
   findOfficialChatId,
+  isGroupModeratorRole,
+  memberGovernanceBadges,
   mentionAtToken,
   messageMentionsUser,
   replyBodyPreview,
@@ -70,6 +74,7 @@ describe("chatDisplayName", () => {
             display_name: "Alice",
             online: false,
             is_admin: false,
+            group_role: "member",
             muted_by_admin: false,
           },
         }),
@@ -195,6 +200,37 @@ describe("canOfferRecall", () => {
     ).toBe(true);
   });
 
+  it("allows group moderator to recall group member messages", () => {
+    const old = msg({
+      id: "m3b",
+      created_at: "2020-01-01T00:00:00Z",
+    });
+    expect(
+      canOfferRecall(old, {
+        mine: false,
+        isAdmin: false,
+        isGroupModerator: true,
+        chatType: "group",
+      }),
+    ).toBe(true);
+  });
+
+  it("denies group moderator recall of system_card", () => {
+    const card = msg({
+      id: "m3c",
+      content_type: "system_card",
+      created_at: new Date().toISOString(),
+    });
+    expect(
+      canOfferRecall(card, {
+        mine: false,
+        isAdmin: false,
+        isGroupModerator: true,
+        chatType: "group",
+      }),
+    ).toBe(false);
+  });
+
   it("restricts system_card to admin", () => {
     const card = msg({
       id: "m4",
@@ -206,6 +242,87 @@ describe("canOfferRecall", () => {
     ).toBe(false);
     expect(
       canOfferRecall(card, { mine: false, isAdmin: true, chatType: "group" }),
+    ).toBe(true);
+  });
+});
+
+describe("group governance helpers", () => {
+  it("detects group moderator roles", () => {
+    expect(isGroupModeratorRole("owner")).toBe(true);
+    expect(isGroupModeratorRole("admin")).toBe(true);
+    expect(isGroupModeratorRole("member")).toBe(false);
+    expect(canActAsGroupModerator(true, "member")).toBe(true);
+    expect(canActAsGroupModerator(false, "admin")).toBe(true);
+    expect(canActAsGroupModerator(false, "member")).toBe(false);
+  });
+
+  it("badges platform admin over group role", () => {
+    expect(
+      memberGovernanceBadges({ is_admin: true, group_role: "admin" }),
+    ).toEqual(["平台管理员"]);
+    expect(
+      memberGovernanceBadges({ is_admin: false, group_role: "owner" }),
+    ).toEqual(["群管理员"]);
+    expect(
+      memberGovernanceBadges({ is_admin: false, group_role: "member" }),
+    ).toEqual([]);
+  });
+
+  it("hides moderate targets for self / platform / peer group mods", () => {
+    expect(
+      canModerateMemberTarget({
+        myUserId: "me",
+        isPlatformAdmin: false,
+        target: {
+          id: "me",
+          is_admin: false,
+          group_role: "member",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      canModerateMemberTarget({
+        myUserId: "me",
+        isPlatformAdmin: true,
+        target: {
+          id: "u2",
+          is_admin: true,
+          group_role: "member",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      canModerateMemberTarget({
+        myUserId: "me",
+        isPlatformAdmin: false,
+        target: {
+          id: "u2",
+          is_admin: false,
+          group_role: "admin",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      canModerateMemberTarget({
+        myUserId: "me",
+        isPlatformAdmin: true,
+        target: {
+          id: "u2",
+          is_admin: false,
+          group_role: "admin",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      canModerateMemberTarget({
+        myUserId: "me",
+        isPlatformAdmin: false,
+        target: {
+          id: "u2",
+          is_admin: false,
+          group_role: "member",
+        },
+      }),
     ).toBe(true);
   });
 });

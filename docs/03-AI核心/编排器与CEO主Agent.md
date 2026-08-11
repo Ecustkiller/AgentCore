@@ -90,6 +90,22 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 协调模式（≥2 worker、根 CEO、非 finalize）：默认后台跑、CEO 继续 ReAct；`coordinate=false` / 单 worker / finalize / 含 `checkpoint_after` 仍阻塞。结构跟着证据走：调研成篇用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后。委派后用团队产出写综述（提示强化，非硬禁只读）；根 CEO 探路成功的 list/read/grep 可摘要注入 worker 开局。worker 协作通道 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)。协调 `wait` 在用户侧热审批/授权未决时禁止空等（勿假装推进）；用户显式停止 / regenerate 会 orphan 热交互并写入 journal（取活 turn 的 `message_id` 作 `turn_id`，非路径上的用户消息 id）。**协调期 CEO 可见面纪律**（提示/工具 schema）：图在转无新结论时可静默；禁止用用户可见 content 复述「谁还在跑」类进度（协作图是进度真相）；开口仅请示 / 报告阻塞与选项 / 宣布阶段结论；插话须先回用户句；`update_synthesis` 禁纯进度播报；协调态进度旁白经 `deliverable_only` 不进终稿 `messages.content`（过程仍进 process）。
 
+### 批次入闸 vs 回合收敛（边界）
+
+`drive` / `replan` **开工前**的批次门控（`post_close_gate`：收口后冷开整团重派硬拒；`channel_dead_gate`：通道死且需写桌则硬拒，`force` 不逃生；`completion` / `supervised`：能力·冷启动软检与补跑合入）与 engine 回合内收敛门控**分轨**——权威总述 → [执行引擎 · 治理门控双轨](/docs/03-AI核心/执行引擎架构设计.md#治理门控双轨)。新闸：能拒整批开工的挂 delegate；只影响 ReAct 继续/丢稿的挂 engine。
+
+### 执行写路径 vs 进度读视图
+
+| 面 | 职责 | 禁止 |
+|---|---|---|
+| **`drive*`**（`drive` / `drive_coordinated` + setup/preview/finalize/terminal/redirect） | 派发与执行**写路径**：建图、跑批、收口记账 | 为「好看」改写协作图投影语义冒充执行真相 |
+| **`CoordinationSession.live_plan`** | 协调态执行真相（由 supervised / host / session 恢复写入） | 经只读投影回写 |
+| **`pipeline_view`** | 只读进度投影，注入 CEO 可见面 | 当作第二写路径 |
+| **`isomorphic`（+ thrash）** | **drive 入闸**（拒同构再派），不是 UI fold | 与前端图折叠混为一谈 |
+| **前端协作图** | SSE → `projectExecution` 等**读投影** | 反向充当执行权威 |
+
+**定案**：本轮不把 drive 事件流合成进协作图通道（合成列观察项）。写只走 drive / session；读视图与 UI 只派生。→ [Agent 协作模式 · 协调态与视图](/docs/03-AI核心/Agent协作模式.md#协调态与视图写读分工) · [协作图 UX](/docs/04-前端/协作图与双视图UX.md)
+
 收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`playbook`：建站/工具台/绿场软件(`build_app`)推荐具名形状（不再硬拒 `none`/手写）；`build_website` 默认 `intensity=standard`（三串），`solo`=一人整页；`build_app` 默认 `intensity=lean`（三节点），`full`=五阶段+模块扇出——已确认 MVP /「先…以后再说」禁默升 `full`。多角摸清/讨论对齐默认 `parallel_brief`，正式长文成文专线 `research_report`（点选成文≠立刻满编；普通构想不默认学术审校），代码审计 `code_audit`（单缝只 `scope`；探路见 ≥2 可并行子面则填 `modules`，按自然缝扇出、整仓/多子系统常 4–8、能少则少，折叠顶 8；playbook **不**从 scope 自动拆、禁把多目录拼进 scope），其余自由组队（可选快捷形状）。**Agent/自动化**不靠场面账三档硬闸；缺形态信息时 `ask_user` 短问（探讨类默认推摸清对齐；糊「做个网站」须消歧展示页/工具壳/业务应用 + 本轮桌上档），由模型自洽选择交付路径 → [检查点与开工卡 · §一](/docs/03-AI核心/检查点与开工卡.md)。对抗性多视角另走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
 
 提示词分层：常驻 = 路由脊柱 + 能力目录 + 短钩子；进阶 HOW 在系统 Skill，用时 `consult_skill`。同一条知识只在唯一所有者出现。全局工作纪律分层：共享基座 `<work_authority>`（权威序 / **当前课题：工作区＞全局「正在做 X」** / 冲突通道 escalate·ask_user / 决策权限，CEO+worker）；CEO core 仅权威线索、「继续项目跟工作区」与「未定案·窄」钩；进阶 HOW → `consult_skill(work_discipline)`（设计三问、补丁绊线等）。禁止为读规则再派 worker。

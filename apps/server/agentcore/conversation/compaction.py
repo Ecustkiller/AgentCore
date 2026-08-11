@@ -62,7 +62,7 @@ from agentcore.llm import LLMMessage
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.model_metadata import model_metadata_for
-from agentcore.llm.profiles import build_request, get_profile
+from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
 logger = get_logger(__name__)
@@ -192,14 +192,13 @@ async def _summarize(
     system = _COMPACT_SYSTEM_PROMPT.replace(
         "__BUDGET__", str(settings.compaction_summary_char_budget)
     )
-    request = build_request(
-        get_profile("compaction"),
+    request = build_selected_request(
+        select_call("compaction", model),
         [
             LLMMessage(role="system", content=system),
             LLMMessage(role="user", content=_render_fold(old_summary, messages)),
         ],
         stream=False,
-        model=model,
     )
     try:
         response = await asyncio.wait_for(

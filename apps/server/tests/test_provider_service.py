@@ -257,6 +257,32 @@ async def test_test_provider_records_active_and_tools(service):
     assert ok["supports_tools"] is True
 
 
+async def test_test_provider_empty_models_list_falls_through_to_probe(service):
+    """JSON data:[] must not soft-green — chat probe (body-checked) required."""
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="active", supports_tools=None),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc", base_url="https://gw.example/v1", default_model="gpt-4o"
+    )
+    fake = _FakeProbeProvider(model_ids=[], supports_tools=None)
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert view.status == "active"
+
+
 async def test_test_provider_probes_when_default_model_missing_from_list(service):
     """Model absent from non-empty /models list → fall through to probe (not soft-green)."""
     service._repo.get = AsyncMock(

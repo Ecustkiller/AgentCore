@@ -226,7 +226,6 @@ def test_check_contract_code_audit_gate_wires_through():
         form="files",
         artifacts=[md_path, json_path],
         required_sections=["〇、人审速览", "一、属实缺陷", "二、已撤销", "三、观察与工程债"],
-        must_contain=["验证方式", "定案"],
         strict=True,
         code_audit_gate=True,
     )
@@ -257,7 +256,6 @@ def test_check_contract_accepts_p3_audit_json():
         form="files",
         artifacts=[md_path, json_path],
         required_sections=["〇、人审速览", "一、属实缺陷", "二、已撤销", "三、观察与工程债"],
-        must_contain=["验证方式", "定案"],
         strict=True,
         code_audit_gate=True,
     )
@@ -331,7 +329,6 @@ def test_check_contract_code_audit_still_validates_loaded_json_when_channel_dead
         form="files",
         artifacts=[md_path, json_path],
         required_sections=["〇、人审速览", "一、属实缺陷", "二、已撤销", "三、观察与工程债"],
-        must_contain=["验证方式", "定案"],
         strict=True,
         code_audit_gate=True,
     )

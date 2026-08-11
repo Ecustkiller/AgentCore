@@ -17,14 +17,10 @@ from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository, UserRepository
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
+from agentcore.llm.model_selection import select_turn_model as resolve_turn_model
+from agentcore.llm.model_selection import select_turn_profiles
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.llm.provider.protocol import LLMProvider
-from agentcore.llm.resolve import (
-    resolve_account_worker_selection,
-    resolve_conversation_model_selection,
-    resolve_credentials,
-    resolve_turn_model,
-)
 from agentcore.memory import (
     TITLE_MAX_CHARS,
     ChatMessage,
@@ -351,37 +347,8 @@ async def resolve_turn_profiles(
     user_id: str,
     credentials: LLMCredentials | None = None,
 ) -> TurnProfiles:
-    """Resolve model + static profiles for this turn.
-
-    Expands the conversation's model combination profile (or account default) into
-    main + optional worker override. Empty worker slot → workers follow main.
-    Cross-origin / cross-provider worker credentials land in ``agent_provider_id``.
-    """
-    from agentcore.llm.profiles import PLATFORM_PROVIDER_SENTINEL
-
-    if credentials is None:
-        credentials = await resolve_credentials(session, user_id, "user_facing")
-    selection = await resolve_conversation_model_selection(session, conv, user_id)
-    overrides: dict[str, str] = {}
-    agent_provider_id: str | None = None
-    worker = await resolve_account_worker_selection(session, user_id, conv=conv)
-    if worker is not None and (
-        worker.model != selection.model
-        or worker.origin != selection.origin
-        or worker.provider_id != selection.provider_id
-    ):
-        overrides["agent"] = worker.model
-        if worker.origin != selection.origin or worker.provider_id != selection.provider_id:
-            agent_provider_id = (
-                PLATFORM_PROVIDER_SENTINEL
-                if worker.origin == "platform"
-                else worker.provider_id
-            )
-    return TurnProfiles(
-        model=selection.model,
-        model_overrides=overrides,
-        agent_provider_id=agent_provider_id,
-    )
+    """Thin wrapper — strategy lives in :func:`model_selection.select_turn_profiles`."""
+    return await select_turn_profiles(session, conv, user_id, credentials)
 
 
 # Legacy name used by conversation service exports.

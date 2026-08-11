@@ -47,6 +47,11 @@ class ObservingLLMProvider:
         return str(getattr(self._inner, "name", getattr(self._inner, "_name", "llm")))
 
     @property
+    def base_url(self) -> str | None:
+        url = getattr(self._inner, "base_url", None)
+        return str(url) if url else None
+
+    @property
     def _name(self) -> str:
         # Compat for call sites that read ``getattr(llm, "_name", …)``.
         return str(getattr(self._inner, "_name", self.name))

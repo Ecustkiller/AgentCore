@@ -707,6 +707,13 @@ def test_team_orchestration_skill_teaches_image_gen_key_boundary():
     # 案 47ae：跨窗摘要禁回显密码
     assert "跨会话凭据脱敏" in body
     assert "密码" in body
+    # 午后巡 12d/87de：面板可见对账 + 下载 404 须列目录核对
+    assert "面板可见·落盘对账" in body
+    assert "server" in body.lower() or "云端" in body
+    assert "验收通过" in body
+    assert "交付下载·面板路径" in body
+    assert "404" in body or "下载失败" in body
+    assert "file_list" in body
 
 
 def test_build_app_skill_teaches_cloud_install_verify_honesty():
@@ -968,6 +975,10 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default
     assert "决策/澄清短问" in body
     assert "先问你" in body
+    # 午后巡 d4d5/53f0：继续须承接上轮确认项；新建仓库/本地目录须 default 路径
+    assert "继续·承接确认项" in body
+    assert "等待确认后再派工" in body
+    assert "默认路径" in body
     # 交付档：桌上结果 label → intensity/playbook；禁编制/意图分类器
     assert "交付档" in body
     assert "桌上结果" in body
@@ -1109,6 +1120,10 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "按当前设计落盘" in body
     assert "blocking=true" in body or "阻塞短问" in body
     assert "扫全文猜意图" in body
+    # 午后巡 e670：标完成前先报真实断点
+    assert "收尾·先报断点" in body
+    assert "都实现了" in body or "收尾完成" in body
+    assert "断点" in body
 
 
 def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():

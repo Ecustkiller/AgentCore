@@ -14,7 +14,9 @@ _BODY_PREVIEW_MAX = 500
 
 
 class EmptyResponseDiagnosis(StrEnum):
-    OAUTH_EXPIRED = "oauth_expired"
+    # Upstream returned HTML / login / gateway page instead of a chat completion.
+    # (Formerly oauth_expired — that name falsely implied Sub2API OAuth expiry.)
+    UPSTREAM_NON_API = "upstream_non_api"
     CONTENT_FILTERED = "content_filtered"
     MODEL_UNKNOWN = "model_unknown"
     SILENT_EMPTY = "silent_empty"
@@ -23,7 +25,8 @@ class EmptyResponseDiagnosis(StrEnum):
     LENGTH_EMPTY = "length_empty"
 
 
-_OAUTH_MARKERS = re.compile(
+# HTML shell or auth/login phrasing — not a model completion body.
+_NON_API_MARKERS = re.compile(
     r"(<html|</html>|<!doctype|oauth|sign[\s_-]?in|login|unauthorized|access[\s_-]?denied)",
     re.IGNORECASE,
 )
@@ -34,7 +37,9 @@ _MODEL_UNKNOWN_MARKERS = re.compile(
 )
 
 _DIAGNOSIS_LABELS: dict[EmptyResponseDiagnosis, str] = {
-    EmptyResponseDiagnosis.OAUTH_EXPIRED: "模型无响应 · 可能需要刷新 Sub2API OAuth",
+    EmptyResponseDiagnosis.UPSTREAM_NON_API: (
+        "上游返回了网页或登录页，请检查服务商地址与鉴权"
+    ),
     EmptyResponseDiagnosis.CONTENT_FILTERED: "内容被过滤",
     EmptyResponseDiagnosis.MODEL_UNKNOWN: "模型名未被上游识别",
     EmptyResponseDiagnosis.SILENT_EMPTY: "模型返回空内容",
@@ -58,8 +63,8 @@ def diagnose_empty_response(
     if finish_reason == "length":
         return EmptyResponseDiagnosis.LENGTH_EMPTY
     text = (raw_body or "").strip()
-    if text and _OAUTH_MARKERS.search(text):
-        return EmptyResponseDiagnosis.OAUTH_EXPIRED
+    if text and _NON_API_MARKERS.search(text):
+        return EmptyResponseDiagnosis.UPSTREAM_NON_API
     if text and _MODEL_UNKNOWN_MARKERS.search(text):
         return EmptyResponseDiagnosis.MODEL_UNKNOWN
     if text:
@@ -68,13 +73,13 @@ def diagnose_empty_response(
             if isinstance(data, dict) and data.get("error"):
                 err = data["error"]
                 err_text = err if isinstance(err, str) else json.dumps(err, ensure_ascii=False)
-                if _OAUTH_MARKERS.search(err_text):
-                    return EmptyResponseDiagnosis.OAUTH_EXPIRED
+                if _NON_API_MARKERS.search(err_text):
+                    return EmptyResponseDiagnosis.UPSTREAM_NON_API
                 if _MODEL_UNKNOWN_MARKERS.search(err_text):
                     return EmptyResponseDiagnosis.MODEL_UNKNOWN
         except json.JSONDecodeError:
             if "<" in text and ">" in text:
-                return EmptyResponseDiagnosis.OAUTH_EXPIRED
+                return EmptyResponseDiagnosis.UPSTREAM_NON_API
             # A non-JSON ``text`` here is the streaming SSE tail (several ``data:``
             # lines), NOT a real format error — the genuine "couldn't parse any
             # chunk" case is signalled up front by the explicit ``format_mismatch``
@@ -84,22 +89,75 @@ def diagnose_empty_response(
     return EmptyResponseDiagnosis.SILENT_EMPTY
 
 
+def _coerce_diagnosis(
+    diagnosis: str | EmptyResponseDiagnosis | None,
+) -> EmptyResponseDiagnosis | None:
+    """Normalize wire/journal diagnosis keys (incl. legacy oauth_expired)."""
+    if diagnosis is None:
+        return None
+    if isinstance(diagnosis, EmptyResponseDiagnosis):
+        return diagnosis
+    if diagnosis == "oauth_expired":
+        return EmptyResponseDiagnosis.UPSTREAM_NON_API
+    try:
+        return EmptyResponseDiagnosis(diagnosis)
+    except ValueError:
+        return None
+
+
+def empty_response_body_kind(raw_body: str | None) -> str:
+    """Coarse body class for SSE error context / 排查包 (not the raw HTML)."""
+    text = (raw_body or "").strip()
+    if not text:
+        return "empty"
+    lowered = text[:2000].lower()
+    if "<html" in lowered or "<!doctype" in lowered or '<div id="root"' in lowered:
+        return "html"
+    if text[0] in "{[":
+        try:
+            json.loads(text)
+            return "json"
+        except json.JSONDecodeError:
+            return "text"
+    return "text"
+
+
+def empty_response_error_context(
+    *,
+    diagnosis: str | EmptyResponseDiagnosis | None,
+    raw_preview: str | None = None,
+    base_url: str | None = None,
+) -> dict[str, str] | None:
+    """SSE ``error.context`` for empty-response degraded (no raw HTML leak)."""
+    ctx: dict[str, str] = {}
+    key = _coerce_diagnosis(diagnosis)
+    if key is not None:
+        ctx["empty_diagnosis"] = key.value
+    elif diagnosis is not None:
+        ctx["empty_diagnosis"] = str(diagnosis)
+    kind = empty_response_body_kind(raw_preview)
+    if kind != "empty" or raw_preview is not None:
+        ctx["body_kind"] = kind
+    if base_url:
+        ctx["base_url"] = base_url.rstrip("/")
+    return ctx or None
+
+
 def empty_response_event_message(diagnosis: str | EmptyResponseDiagnosis | None) -> str:
     """User-facing SSE error message for a degraded empty-response finish.
 
     ``length_empty`` is a first-round hard cutoff (not a streak), so its copy
     must not say「多次空响应」— that wording is reserved for the silent-empty ladder.
     """
-    if diagnosis is not None:
-        try:
-            key = EmptyResponseDiagnosis(diagnosis)
-        except ValueError:
-            return f"模型多次空响应 · {diagnosis}"
+    key = _coerce_diagnosis(diagnosis)
+    if key is not None:
         if key is EmptyResponseDiagnosis.LENGTH_EMPTY:
             return f"模型空响应 · {_DIAGNOSIS_LABELS[key]}"
         label = _DIAGNOSIS_LABELS.get(key)
         base = "模型多次空响应"
         return f"{base} · {label}" if label else base
+    if diagnosis is not None:
+        return f"模型多次空响应 · {diagnosis}"
     return "模型多次空响应"
 
 
@@ -107,11 +165,10 @@ def empty_response_chip_label(diagnosis: str | EmptyResponseDiagnosis | None) ->
     """Short label for the degraded finish-reason chip (diagnosis only)."""
     if diagnosis is None:
         return None
-    try:
-        key = EmptyResponseDiagnosis(diagnosis)
-    except ValueError:
-        return str(diagnosis)
-    return _DIAGNOSIS_LABELS.get(key)
+    key = _coerce_diagnosis(diagnosis)
+    if key is not None:
+        return _DIAGNOSIS_LABELS.get(key)
+    return str(diagnosis)
 
 
 @dataclass(frozen=True)

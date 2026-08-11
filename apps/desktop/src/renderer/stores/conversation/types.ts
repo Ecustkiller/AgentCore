@@ -258,6 +258,10 @@ export interface Message {
       upstream_body_preview?: string | null;
       retry_attempts?: number;
       empty_diagnosis?: string;
+      /** empty-response body class: html | json | text | empty (generated ErrorContext). */
+      body_kind?: string;
+      /** Provider endpoint root for BYOK empty-response 排查包. */
+      base_url?: string;
       sub2api_diagnosis?: string;
       sub2api_account?: string;
       credential_source?: "user" | "platform" | string | null;

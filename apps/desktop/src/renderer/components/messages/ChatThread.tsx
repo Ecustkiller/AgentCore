@@ -26,6 +26,7 @@ import {
   avatarInitial,
   buildReplySnapshot,
   chatDisplayName,
+  isGroupModeratorRole,
 } from "./chatDisplay";
 
 interface Props {
@@ -55,6 +56,11 @@ export function ChatThread({ chatId }: Props) {
   const isGroup = chat?.type === "group";
   const isOfficial = chat?.type === "official";
   const showInfo = isGroup || isOfficial;
+  const isGroupModerator = useMemo(() => {
+    if (!isGroup || !myId) return false;
+    const me = members.find((m) => m.id === myId);
+    return isGroupModeratorRole(me?.group_role);
+  }, [isGroup, members, myId]);
   const [infoOpen, setInfoOpen] = useState(false);
   const [replyTarget, setReplyTarget] = useState<ComposerReplyTarget | null>(
     null,
@@ -323,6 +329,7 @@ export function ChatThread({ chatId }: Props) {
                     highlighted={highlightId === m.id}
                     myUserId={myId}
                     isAdmin={isAdmin}
+                    isGroupModerator={isGroupModerator}
                     chatType={chat?.type}
                     resolveMentionName={(id) => nameById.get(id)}
                     onReply={

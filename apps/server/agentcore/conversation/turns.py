@@ -227,6 +227,9 @@ async def regenerate_chat(
     """Re-run a turn from an existing user message (regenerate / edit-and-resend)."""
     backend = None
     try:
+        # Align with stream_chat: resolve bindings + truncate in session 1, compact
+        # outside, load history in session 2. Never expire_all then touch ORM attrs
+        # (MissingGreenlet → chat.regenerate_error 「服务出错了」).
         async with async_session_factory() as session:
             conv_repo = ConversationRepository(session)
             msg_repo = MessageRepository(session)
@@ -259,24 +262,11 @@ async def regenerate_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
 
-            if edited_content is not None:
-                await msg_repo.update_content(message_id, edited_content, commit=False)
-
-            await msg_repo.delete_after(
-                conversation_id, after_created_at=target.created_at, commit=False
+            # Capture scalars before commit (expire_on_commit) while attrs are hot.
+            user_message = (
+                edited_content if edited_content is not None else (target.content or "")
             )
-            await session.commit()
-
-            await maybe_compact_near_ceiling(
-                conversation_id,
-                model_id=resolve_turn_model(llm_credentials),
-            )
-            # Compact writes on its own session — expire so load_chat_context sees
-            # the new summary/watermark instead of a stale ORM identity.
-            session.expire_all()
-
-            user_message = edited_content if edited_content is not None else (target.content or "")
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            target_created_at = target.created_at
             folder_id = conv.folder_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
@@ -285,11 +275,26 @@ async def regenerate_chat(
                 session, user_id
             )
             permission_axes = await resolve_permission_axes(session, conversation_id)
-
             board = await BoardRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
             board_id = board.id if board else None
+
+            if edited_content is not None:
+                await msg_repo.update_content(message_id, edited_content, commit=False)
+
+            await msg_repo.delete_after(
+                conversation_id, after_created_at=target_created_at, commit=False
+            )
+            await session.commit()
+
+        await maybe_compact_near_ceiling(
+            conversation_id,
+            model_id=resolve_turn_model(llm_credentials),
+        )
+
+        async with async_session_factory() as session:
+            history = await load_chat_context(session, conversation_id, max_messages=40)
 
         backend = await build_turn_backend(
             user_id=user_id,
@@ -323,7 +328,14 @@ async def regenerate_chat(
         await await_live_detached_drive(conversation_id)
 
     except Exception as e:
-        logger.error("chat.regenerate_error", error=str(e), exc_info=True)
+        logger.error(
+            "chat.regenerate_error",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            user_id=user_id,
+            error=str(e),
+            exc_info=True,
+        )
         if not sink._closed:
             code, message, err_ctx = error_fields_for(
                 e,

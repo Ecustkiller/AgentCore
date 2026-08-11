@@ -9,7 +9,8 @@ from typing import Literal
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.llm.profiles import ProfileParams, build_request
+from agentcore.llm.model_selection import SelectedCall, build_selected_request
+from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage, ToolCall
 from agentcore.runtime.facts import NoteFact, record_turn_fact
@@ -143,8 +144,11 @@ async def run_finalize_round(
         )
         tool_choice = "auto" if tool_defs else "none"
 
-    request = build_request(
-        profile, messages, tools=tool_defs, tool_choice=tool_choice, model=active_model
+    request = build_selected_request(
+        SelectedCall(model=active_model, profile=profile),
+        messages,
+        tools=tool_defs,
+        tool_choice=tool_choice,
     )
     from agentcore.runtime.runs.timeout_hard import mark_llm_inflight
 

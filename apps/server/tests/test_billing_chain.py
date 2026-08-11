@@ -328,7 +328,16 @@ def test_default_role_for_agent_shapes():
     assert default_role_for_agent(agent_id="CEO", run_id=None) == ROLE_CAPTAIN
     assert default_role_for_agent(agent_id="captain", run_id=None) == ROLE_CAPTAIN
     assert default_role_for_agent(agent_id="del_1", run_id="del_1") == ROLE_MEMBER
+    assert default_role_for_agent(agent_id="del_1", run_id=None) == ROLE_MEMBER
     assert default_role_for_agent(agent_id=None, run_id=None) == ROLE_CAPTAIN
+
+
+def test_resolve_ledger_role_prefer_explicit():
+    from agentcore.billing.attribution import resolve_ledger_role
+
+    assert resolve_ledger_role(role="arena", agent_id="CEO") == "arena"
+    assert resolve_ledger_role(role="memory") == "memory"
+    assert resolve_ledger_role(role=None, agent_id="del_1") == ROLE_MEMBER
 
 
 # --- upsert 幂等（materialize DO UPDATE vs record_runs DO NOTHING） ------------

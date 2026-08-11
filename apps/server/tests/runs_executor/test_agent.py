@@ -464,8 +464,8 @@ async def test_worker_failure_before_any_usage_has_no_ledger_row():
     assert not state.cost
 
 
-async def test_contract_min_length_soft_completes_first_try():
-    # 定案乙：字数不足 → soft warning，首轮即 COMPLETED，不 contract.retry。
+async def test_contract_retired_min_length_ignored_no_soft_tip():
+    # S3：已删 min_length 不再产生 soft tip / retry；短文照常 COMPLETED。
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "deliverable": {"min_length": 8}}], id_prefix="t"
     )
@@ -474,11 +474,11 @@ async def test_contract_min_length_soft_completes_first_try():
     assert provider.calls == 1
     assert res["t_1"].phase is RunPhase.COMPLETED
     assert res["t_1"].content == "短"
-    assert any("少于" in w for w in res["t_1"].warnings)
+    assert not any("少于" in w for w in (res["t_1"].warnings or []))
 
 
-async def test_contract_must_contain_soft_completes_first_try():
-    # 定案乙：缺必含词 → soft，不触发续写 / light_repair。
+async def test_contract_retired_must_contain_ignored_no_soft_tip():
+    # S3：已删 must_contain 不再 soft tip / 续写。
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "deliverable": {"must_contain": ["风险"]}}], id_prefix="t"
     )
@@ -486,7 +486,7 @@ async def test_contract_must_contain_soft_completes_first_try():
     res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     assert provider.calls == 1
     assert res["t_1"].phase is RunPhase.COMPLETED
-    assert any("风险" in w for w in (res["t_1"].warnings or []))
+    assert not any("风险" in w for w in (res["t_1"].warnings or []))
 
 
 async def test_contract_section_retry_continues_on_same_transcript():
@@ -553,8 +553,8 @@ async def test_worker_system_prompt_grants_structure_ownership():
     assert "答题边界" in sys
 
 
-async def test_contract_strict_min_length_still_soft_completes():
-    # 定案乙：min_length 已降 soft；即便 strict 也不因字数 FAILED / 不占满 retry。
+async def test_contract_retired_min_length_even_strict_ignored():
+    # S3：已删 min_length；strict 也不因字数 FAILED / soft tip。
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "deliverable": {"min_length": 50, "strict": True}}],
         id_prefix="t",
@@ -566,7 +566,7 @@ async def test_contract_strict_min_length_still_soft_completes():
     sink.close()
     assert provider.calls == 1
     assert res["t_1"].phase is RunPhase.COMPLETED
-    assert any("少于" in w for w in (res["t_1"].warnings or []))
+    assert not any("少于" in w for w in (res["t_1"].warnings or []))
 
 
 async def test_contract_empty_hard_fail_not_wave_retried():
@@ -584,8 +584,8 @@ async def test_contract_empty_hard_fail_not_wave_retried():
     assert "空" in res["t_1"].error
 
 
-async def test_contract_soft_accepts_with_warning():
-    # 定案乙：字数不足首轮即 soft-complete（不再 light_repair + retry 三轮）。
+async def test_contract_retired_min_length_dict_ignored_completes():
+    # S3：派单 JSON 仍带已删 min_length → 忽略，短文首轮 COMPLETED、无字数 soft tip。
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "deliverable": {"min_length": 50}}], id_prefix="t"
     )
@@ -594,7 +594,7 @@ async def test_contract_soft_accepts_with_warning():
     assert provider.calls == 1
     assert res["t_1"].phase is RunPhase.COMPLETED
     assert res["t_1"].content == "短"
-    assert any("少于" in w for w in res["t_1"].warnings)
+    assert not any("少于" in w for w in (res["t_1"].warnings or []))
 
 
 async def test_no_contract_passes_first_try_without_extra_call():
@@ -605,10 +605,10 @@ async def test_no_contract_passes_first_try_without_extra_call():
     assert res["t_1"].phase is RunPhase.COMPLETED
 
 
-async def test_requires_files_soft_completes_without_forcing_write():
-    """甲⁺：粘贴正文不落盘 → soft-complete；不再 write_pass 逼写。"""
+async def test_files_form_soft_completes_without_forcing_write():
+    """甲⁺：form=files 粘贴正文不落盘 → soft-complete；不再 write_pass 逼写。"""
     plan, _ = build_run_plan(
-        [{"role": "前端", "task": "建页面", "deliverable": {"requires_files": True}}],
+        [{"role": "前端", "task": "建页面", "deliverable": {"form": "files"}}],
         id_prefix="t",
     )
     reg = ToolRegistry()
@@ -633,10 +633,10 @@ async def test_requires_files_soft_completes_without_forcing_write():
     assert any("未把产物写入工作区" in w for w in (state.warnings or []))
 
 
-async def test_requires_files_soft_completes_without_write_pass():
-    """甲⁺：零落盘 soft-complete，不触发 write_pass，不 FAILED。"""
+async def test_files_form_soft_completes_without_write_pass():
+    """甲⁺：form=files 零落盘 soft-complete，不触发 write_pass，不 FAILED。"""
     plan, _ = build_run_plan(
-        [{"role": "前端", "task": "建页面", "deliverable": {"requires_files": True}}],
+        [{"role": "前端", "task": "建页面", "deliverable": {"form": "files"}}],
         id_prefix="t",
     )
     provider = _ContentProvider(["只有文字一", "只有文字二"])
@@ -648,14 +648,14 @@ async def test_requires_files_soft_completes_without_write_pass():
     assert any("未把产物写入工作区" in w for w in (state.warnings or []))
 
 
-async def test_requires_files_strict_soft_completes_when_never_written():
-    """甲⁺：即使 strict，零落盘 alone 也不 fail（已降 soft warning，verdict.ok）。"""
+async def test_files_form_strict_soft_completes_when_never_written():
+    """甲⁺：即使 strict，form=files 零落盘 alone 也不 fail（已降 soft warning，verdict.ok）。"""
     plan, _ = build_run_plan(
         [
             {
                 "role": "前端",
                 "task": "建页面",
-                "deliverable": {"requires_files": True, "strict": True},
+                "deliverable": {"form": "files", "strict": True},
             }
         ],
         id_prefix="t",
@@ -669,6 +669,19 @@ async def test_requires_files_strict_soft_completes_when_never_written():
     assert any("未把产物写入工作区" in w for w in (state.warnings or []))
     types = [e.type async for e in sink]
     assert EventType.RUN_FAILED not in types
+
+
+async def test_retired_requires_files_alone_ignored_no_zero_disk_soft():
+    """S3：仅 legacy requires_files、无 form=files → 不产生零落盘 soft tip。"""
+    plan, _ = build_run_plan(
+        [{"role": "前端", "task": "建页面", "deliverable": {"requires_files": True}}],
+        id_prefix="t",
+    )
+    provider = _ContentProvider(["只有文字"])
+    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert not any("未把产物写入工作区" in w for w in (state.warnings or []))
 
 
 async def test_worker_grantable_tool_gated_when_gate_denies():

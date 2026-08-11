@@ -1,4 +1,4 @@
-"""Split from executor.py — see executor.py module docstring."""
+"""Shared executor helpers: react capture, priced failure, finish override, registries."""
 
 from __future__ import annotations
 

@@ -513,7 +513,7 @@ class WaveScheduler:
                 if cancel_run_ids is not None and running:
                     for target_id in cancel_run_ids():
                         for task, rid in list(running.items()):
-                            # msg="redirect" so executor_agent salvages + returns CANCELLED
+                            # msg="redirect" so executor.agent salvages + returns CANCELLED
                             # instead of re-raising (整轮 stop uses bare cancel).
                             # Only claim redirect-absorb when *this* cancel took effect —
                             # if the task was already cancelling for stop/external,
@@ -654,7 +654,7 @@ class WaveScheduler:
             # cancel every in-flight child and let it unwind (subprocess kill,
             # run_cancelled(reason=stop)) before propagating, so no worker is orphaned
             # and journal/SSE always see the stop cancel. ``cancel("stop")`` matches
-            # executor_agent's dual-reason contract (redirect vs stop); ``shield`` is
+            # executor.agent's dual-reason contract (redirect vs stop); ``shield`` is
             # required because this except often runs under an already-cancelled wave
             # task — a bare await would be interrupted before children emit.
             for task in running:

@@ -47,7 +47,7 @@ WORKER_TIMEOUT_BACKSTOP_S = 1200
 
 # Short ReAct ceiling constant (repair_code playbook / CEO explicit caps).
 # ``complexity_hint=light`` no longer stamps this — see :func:`apply_light_round_budgets`.
-# Distinct from contract ``light_repair`` (format-only pass inside executor_node).
+# Distinct from contract ``light_repair`` (format-only pass inside executor.node).
 LIGHT_REPAIR_MAX_ROUNDS = 6
 
 # 审查 / 调查类 worker：定向检索工具（复用现有 grep / code_search，不新造）。

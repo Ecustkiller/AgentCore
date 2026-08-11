@@ -24,7 +24,7 @@ export const FINISH_REASON_META: Record<
     tone: "muted",
   },
   degraded: {
-    label: "降级完成 · 模型多次空响应",
+    label: "空响应收尾",
     Icon: TrendingDown,
     tone: "muted",
   },
@@ -55,9 +55,7 @@ export function FinishReasonChip({
   if (!meta) return null;
   const { Icon } = meta;
   const label =
-    reason === "degraded" && diagnosisLabel
-      ? `降级完成 · ${diagnosisLabel}`
-      : meta.label;
+    reason === "degraded" && diagnosisLabel ? diagnosisLabel : meta.label;
   return (
     <Badge
       tone="muted"

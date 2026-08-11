@@ -6,7 +6,7 @@ from agentcore.runtime.delegate.captain_recon import (
     harvest_captain_recon,
     resolve_captain_recon_for_delegate,
 )
-from agentcore.runtime.runs.executor_context import _build_messages
+from agentcore.runtime.runs.executor.context import _build_messages
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
 

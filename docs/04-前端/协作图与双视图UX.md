@@ -12,6 +12,8 @@ skip_if:
 # 协作图与双视图 UX
 
 > 入口：[前端 UX](/docs/04-前端/前端UX设计.md) · 渲染内核 → [前端技术 §9.13](/docs/04-前端/前端技术与架构.md)
+>
+> **读投影**：协作图 / 双视图消费 SSE 折叠态（如 `projectExecution`），**不是**执行写权威。派发与协调态记账在后端 `drive*` / `CoordinationSession`；边界 → [编排器 · 写/读分工](/docs/03-AI核心/编排器与CEO主Agent.md#执行写路径-vs-进度读视图) · [Agent 协作模式 · 协调态与视图](/docs/03-AI核心/Agent协作模式.md#协调态与视图写读分工)。
 
 ## 三、内嵌协作图与状态条
 

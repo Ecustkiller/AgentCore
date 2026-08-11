@@ -235,7 +235,7 @@ def test_zero_landing_worker_keeps_role_soft_gap():
             run_id="w1",
             task="生成 pptx",
             role="执行工程师",
-            deliverable=Deliverable(name="pptx", form="files"),
+            deliverable=Deliverable(form="files"),
         )
     )
     results = {
@@ -288,13 +288,13 @@ def test_zero_landing_mixed_batch_attributes_empty_worker_only():
             run_id="ok",
             task="写 A",
             role="修码员",
-            deliverable=Deliverable(form="files", requires_files=True),
+            deliverable=Deliverable(form="files"),
         ),
         RunSpec(
             run_id="empty",
             task="写 B",
             role="前端工程师",
-            deliverable=Deliverable(form="files", requires_files=True),
+            deliverable=Deliverable(form="files"),
         ),
     )
     results = {
@@ -341,7 +341,7 @@ def test_zero_landing_gap_attributes_channel_dead_from_transcript():
             run_id="w1",
             task="写文件",
             role="工程师",
-            deliverable=Deliverable(form="files", requires_files=True),
+            deliverable=Deliverable(form="files"),
         )
     )
     transcript = [
@@ -449,7 +449,7 @@ def test_zero_landing_gap_attributes_write_failed_from_transcript():
             run_id="w1",
             task="复制成品",
             role="工程师",
-            deliverable=Deliverable(form="files", requires_files=True),
+            deliverable=Deliverable(form="files"),
         )
     )
     transcript = [
@@ -818,7 +818,6 @@ def test_qa_deferred_budget_emits_website_verify_action():
             role="页面 QA",
             task="独立【整页验收】站点【GEO 官网】…",
             deliverable=Deliverable(
-                name="QA",
                 form="files",
                 artifacts=["site/QA.md"],
                 visual_critic=True,
@@ -1678,7 +1677,7 @@ def _thin_review_plan(report_path: str):
             run_id="fix",
             task="修 bug",
             role="修复工程师",
-            deliverable=Deliverable(form="files", requires_files=True, artifacts=["src/a.ts"]),
+            deliverable=Deliverable(form="files", artifacts=["src/a.ts"]),
         ),
         RunSpec(
             run_id="review",
@@ -1687,9 +1686,7 @@ def _thin_review_plan(report_path: str):
             depends_on=["fix"],
             deliverable=Deliverable(
                 form="files",
-                requires_files=True,
                 artifacts=[report_path],
-                min_length=80,
             ),
         ),
     )

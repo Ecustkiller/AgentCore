@@ -55,7 +55,7 @@ from agentcore.runtime.events import FinishReason
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.plan_only import PLAN_ONLY_CEO_MAX_ROUNDS, use_plan_only
 from agentcore.runtime.prompt_profile import use_profile
-from agentcore.runtime.runs.executor_shared import resolve_finish_override
+from agentcore.runtime.runs.executor.shared import resolve_finish_override
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -441,7 +441,7 @@ class EvalHarness:
             citation_sink=citations,
             finish_override_sink=finish_override,
             # 交付正文只留最终交付 (Fork-B, 全队对称): score the SAME deliverable a real
-            # single-agent turn persists — the executor_captain path is deliverable_only,
+            # single-agent turn persists — the executor.captain path is deliverable_only,
             # so an eval must be too, else it grades process narration users never see.
             deliverable_only=True,
         )

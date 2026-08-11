@@ -122,7 +122,7 @@ async def assemble_ceo_turn(
     # the WaveScheduler at a wave boundary when a step is marked checkpoint_after).
     checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
     # The delegate tool gets the worker base prompt — the CLEAN base (no CEO chat
-    # hints, reused verbatim by workers in runs/executor.py — they must not be told
+    # hints, reused verbatim by workers in runs/executor/ — they must not be told
     # about a delegate tool they do not hold) plus this turn's attachment block.
     # message_id + the suspension closures arm durable plan_review pauses (结构化
     # 挂起 2b) on the top-level delegate.
@@ -270,7 +270,7 @@ async def assemble_ceo_turn(
     # triage / delegate without spending a blind file_list round. Generated fresh
     # each turn from the live backend (never indexed → never stale); "" when empty /
     # unavailable. Workers don't get this — they already receive the richer per-run
-    # manifest (runs/executor_context._workspace_manifest).
+    # manifest (runs/executor/context._workspace_manifest).
     workspace_overview = await build_workspace_overview(
         backend, shared_workspace=folder_id is not None
     )

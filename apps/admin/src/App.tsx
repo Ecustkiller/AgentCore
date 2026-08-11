@@ -10,6 +10,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { MfaSetupPage } from "@/pages/MfaSetupPage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { ReplayPage } from "@/pages/ReplayPage";
+import { BetaGroupPage } from "@/pages/BetaGroupPage";
 import { NoticesPage } from "@/pages/NoticesPage";
 import { SystemPage } from "@/pages/SystemPage";
 import { UsersPage } from "@/pages/UsersPage";
@@ -149,6 +150,7 @@ export function App() {
           <Route path="replay/:conversationId" element={<ReplayPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="notices" element={<NoticesPage />} />
+          <Route path="beta-group" element={<BetaGroupPage />} />
           <Route path="system" element={<SystemPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>

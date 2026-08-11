@@ -29,6 +29,10 @@
        请下载」；有落盘但无 ``.pptx`` 时不得宣称 PPT 可打开。有交付卡时终稿超
        ``engine_ceo_overview_max_chars`` → 回炉压缩为概览（细节在卡 / run 详情）。
 
+处置（回炉 / 放行 / 计数）在 react_loop：``#rN`` **仅**成稿可引用集失败且无其它闸时，
+引擎可先自动 ``read_url`` 升级台账再验；仍不过则剥号放行（见 ``engine/round.py``），
+不因此整篇 Rework。书目形态等仍走原回炉。
+
 刻意**不**纳入「残留 TODO / 填空占位」之类：法律垂直会正当地在合同模板留空待填、worker 也会
 如实写「该资料待客户提供」，机械判会误伤——轻层的立身之本是近零误报，宁缺毋滥。后续轻层（如
 受限的 JSON 可解析）与重层（要跑 / 要重算 / 换眼睛找漏 / 回源对照）在此扩展。
@@ -177,6 +181,51 @@ def citation_quality_reworks(
         )
     reworks.extend(_bibliography_reworks(content, ledger_entries))
     return reworks
+
+
+def uncitable_ledger_refs_only(
+    content: str,
+    *,
+    citation_count: int,
+    check_citations: bool = True,
+    citable_ids: frozenset[str] | set[str] | None = None,
+    ledger_entries: list[dict] | None = None,
+    delivery_verdict: DeliveryVerdict | None = None,
+    overview_max_chars: int | None = None,
+) -> list[str] | None:
+    """若 ``finish_guard`` **仅**因非法 ``#rN`` 失败，返回那些 id；否则 ``None``。
+
+    空列表 = 本会放行（无非法 ``#rN`` 且无其它闸问题）。书目形态 / ``[n]`` /
+    围栏 / 交付诚实等任一并存 → ``None``（走原回炉，不走帮读/剥号捷径）。
+
+    供引擎在 decide→回炉前判断是否可自动 ``read_url`` 升级台账，或剥号放行。
+    """
+    bad_refs = invalid_ledger_ref_ids(content, citable_ids)
+    other: list[str] = []
+    if check_citations:
+        stray = out_of_range_markers(content, citation_count)
+        if stray:
+            other.append("bracket")
+    if ledger_entries is not None:
+        other.extend(_bibliography_reworks(content, ledger_entries))
+    other.extend(_code_fence_reworks(content))
+    if check_citations:
+        from agentcore.runtime.closing_posture import closing_honesty_rework
+
+        honesty = closing_honesty_rework(content, delivery_verdict)
+        if honesty:
+            other.append(honesty)
+        other.extend(_delivery_structure_reworks(content, delivery_verdict))
+        other.extend(
+            _overview_length_reworks(
+                content,
+                delivery_verdict,
+                overview_max_chars=overview_max_chars,
+            )
+        )
+    if other:
+        return None
+    return list(bad_refs)
 
 
 def _bibliography_bound_ref_ids(content: str) -> list[str]:

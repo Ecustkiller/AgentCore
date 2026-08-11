@@ -5,6 +5,10 @@ persona attribution from sidecar headers), then enqueues onto the shared ledger
 outbox (Postgres ``cost_ledger_outbox``). Drain inserts ``cost_calls`` and
 materializes ``cost_events`` by run_id (as-built: 成本配额 §三). Drain / lifespan
 live on ``CostLedgerQueue``.
+
+Pricing / attribution field assembly is shared with in-process metering via
+:mod:`agentcore.billing.ledger_call` — this facade only gates conversation_id
+and stamps ``source=proxy_spend``.
 """
 
 from __future__ import annotations
@@ -16,9 +20,9 @@ from agentcore.billing.cost_ledger_queue import (
     get_cost_ledger_queue,
     reset_cost_ledger_queue_for_tests,
 )
+from agentcore.billing.ledger_call import assemble_ledger_call
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.runtime.costing import ROLE_CAPTAIN, priced_call_cost
 
 logger = get_logger(__name__)
 
@@ -56,6 +60,7 @@ class ProxySpendQueue:
         persona: str | None = None,
         call_id: str | None = None,
         credential_source: str | None = None,
+        duration_ms: int = 0,
     ) -> str | None:
         """Price one inference call and enqueue a detail row (+ materialize run)."""
         if not conversation_id:
@@ -66,22 +71,17 @@ class ProxySpendQueue:
             )
             return None
 
-        from agentcore.llm.pricing import CredentialSource, resolve_credential_source
-
-        explicit: CredentialSource | None = (
-            credential_source if credential_source in ("user", "platform", "vendor") else None
-        )
-        source = resolve_credential_source(credential_source=explicit, model=model)
-        call = priced_call_cost(
-            model=model or "",
+        call = assemble_ledger_call(
+            model=model,
             usage=usage,
-            role=(role or "").strip() or ROLE_CAPTAIN,
+            role=role,
             run_id=run_id,
             parent_run_id=parent_run_id,
             agent_id=agent_id,
             persona=persona,
             call_id=call_id,
-            credential_source=source,
+            duration_ms=duration_ms,
+            credential_source=credential_source,
         )
         record_id = self._ledger.enqueue_calls(
             user_id=user_id,
