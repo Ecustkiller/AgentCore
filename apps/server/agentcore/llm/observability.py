@@ -140,7 +140,7 @@ def log_llm_call(
             pass
         # Turn 级累计：仅当 pipeline 绑定了 meter（用户回合）才记账；后台 title/memory 等无 meter。
         try:
-            from agentcore.runtime.turn_token_budget import record_turn_tokens
+            from agentcore.runtime.turn.token_budget import record_turn_tokens
 
             record_turn_tokens(usage.total_tokens)
         except Exception:  # noqa: BLE001 — budget meter must never break the LLM path

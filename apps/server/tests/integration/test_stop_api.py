@@ -20,7 +20,7 @@ from agentcore.llm.provider.protocol import LLMChunk
 from agentcore.runtime.events import EventSink, EventType, run_plan
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.wave import WaveScheduler
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 from tests.integration.conftest import register_and_login
 from tests.runs_executor.conftest import _executor
 

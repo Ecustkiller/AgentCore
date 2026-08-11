@@ -185,7 +185,7 @@ async def test_wave_stops_new_dispatch_when_auth_dead():
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
     from agentcore.runtime.runs.wave import WaveScheduler
-    from agentcore.runtime.turn_token_budget import resolve_wave_budget_hooks
+    from agentcore.runtime.turn.token_budget import resolve_wave_budget_hooks
 
     token = bind_turn_auth_dead()
     try:

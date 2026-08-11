@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.checkpoints import AskCheckpointIntent
-from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
+from agentcore.runtime.suspension.capture import SuspensionCapture, persist_suspension_capture
 from agentcore.tools.protocol import ToolContext
 
 if TYPE_CHECKING:

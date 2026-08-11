@@ -8,7 +8,7 @@ import pytest
 
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.suspension import AskUserSuspension, SuspensionKind
-from agentcore.runtime.suspension_persistence import save_paused_turn
+from agentcore.runtime.suspension.persistence import save_paused_turn
 
 
 def _ask_user_suspension() -> AskUserSuspension:
@@ -34,19 +34,19 @@ async def test_save_paused_turn_records_journal_snapshot() -> None:
         {"kind": "checkpoint_required", "payload": {"checkpoint_id": "cp-1"}, "ts": None},
     ]
     with patch(
-        "agentcore.runtime.suspension_persistence.async_session_factory"
+        "agentcore.runtime.suspension.persistence.async_session_factory"
     ) as factory:
         session = AsyncMock()
         factory.return_value.__aenter__.return_value = session
         with patch(
-            "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+            "agentcore.runtime.suspension.persistence.PausedTurnRepository"
         ) as repo_cls, patch(
-            "agentcore.runtime.suspension_persistence.TurnJournalRepository"
+            "agentcore.runtime.suspension.persistence.TurnJournalRepository"
         ) as journal_cls:
             repo_cls.return_value.upsert = AsyncMock()
             journal_cls.return_value.record = AsyncMock()
             with patch(
-                "agentcore.runtime.suspension_persistence._notify_pause",
+                "agentcore.runtime.suspension.persistence._notify_pause",
                 AsyncMock(),
             ):
                 await save_paused_turn(suspension)
@@ -70,16 +70,16 @@ async def test_save_paused_turn_marks_degraded_when_writer_failed() -> None:
     token = current_journal_writer.set(writer)
     try:
         with patch(
-            "agentcore.runtime.suspension_persistence.async_session_factory"
+            "agentcore.runtime.suspension.persistence.async_session_factory"
         ) as factory:
             session = AsyncMock()
             factory.return_value.__aenter__.return_value = session
             with patch(
-                "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+                "agentcore.runtime.suspension.persistence.PausedTurnRepository"
             ) as repo_cls:
                 repo_cls.return_value.upsert = AsyncMock()
                 with patch(
-                    "agentcore.runtime.suspension_persistence._notify_pause",
+                    "agentcore.runtime.suspension.persistence._notify_pause",
                     AsyncMock(),
                 ):
                     await save_paused_turn(suspension)
@@ -108,19 +108,19 @@ async def test_save_paused_turn_seals_writer_after_persist() -> None:
     token = current_journal_writer.set(writer)
     try:
         with patch(
-            "agentcore.runtime.suspension_persistence.async_session_factory"
+            "agentcore.runtime.suspension.persistence.async_session_factory"
         ) as factory:
             session = AsyncMock()
             factory.return_value.__aenter__.return_value = session
             with patch(
-                "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+                "agentcore.runtime.suspension.persistence.PausedTurnRepository"
             ) as repo_cls, patch(
-                "agentcore.runtime.suspension_persistence.TurnJournalRepository"
+                "agentcore.runtime.suspension.persistence.TurnJournalRepository"
             ) as journal_cls:
                 repo_cls.return_value.upsert = AsyncMock()
                 journal_cls.return_value.record = AsyncMock()
                 with patch(
-                    "agentcore.runtime.suspension_persistence._notify_pause",
+                    "agentcore.runtime.suspension.persistence._notify_pause",
                     AsyncMock(),
                 ):
                     await save_paused_turn(suspension)
@@ -143,11 +143,11 @@ async def test_save_paused_turn_raises_and_does_not_seal_on_persist_failure() ->
     token = current_journal_writer.set(writer)
     try:
         with patch(
-            "agentcore.runtime.suspension_persistence.async_session_factory"
+            "agentcore.runtime.suspension.persistence.async_session_factory"
         ) as factory:
             factory.return_value.__aenter__.side_effect = RuntimeError("db down")
             with patch(
-                "agentcore.runtime.suspension_persistence._notify_pause",
+                "agentcore.runtime.suspension.persistence._notify_pause",
                 AsyncMock(),
             ), pytest.raises(RuntimeError, match="db down"):
                 await save_paused_turn(suspension)

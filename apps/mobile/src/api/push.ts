@@ -6,7 +6,7 @@ import {
 // Native (Capacitor) push notification integration (原生推送, 前端技术与架构 §七).
 //
 // The backend already pushes a 需要你 notification when an agent durably pauses
-// (runtime/suspension_persistence.py _notify_pause → push/notify.py notify_user), carrying
+// (runtime/suspension/persistence.py _notify_pause → push/notify.py notify_user), carrying
 // deep-link data {conversation_id, message_id, kind}. This module is the missing client
 // half: register the device's FCM token with /v1/devices, and on a notification tap
 // deep-link to the paused conversation.

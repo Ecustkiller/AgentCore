@@ -19,7 +19,7 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.coordination.tools import QueueUserMessageTool
 from agentcore.runtime.events import EventSink, user_interjection
-from agentcore.runtime.turn_queue import turn_queue
+from agentcore.runtime.turn.queue import turn_queue
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.attachments import (
@@ -160,7 +160,7 @@ async def test_persist_then_repersist_keeps_text_and_skips_rewrite(tmp_path: Pat
 async def test_queue_user_message_enqueues_and_emits_queued():
     """协调升 FIFO：enqueue_and_ensure_drain + live sink ``turn_queued``（条可见可取消）。"""
     from agentcore.runtime.events import EventType
-    from agentcore.runtime.turn_runs import turn_runs
+    from agentcore.runtime.turn.runs import turn_runs
 
     session = CoordinationSession(
         execution_id="exec-inj",
@@ -232,7 +232,7 @@ async def test_queue_user_message_enqueues_and_emits_queued():
 @pytest.mark.asyncio
 async def test_queue_user_message_works_after_session_closed():
     """收口后 queue 不再死路——仍可升格 FIFO（或幂等确认已处置）。"""
-    from agentcore.runtime.turn_runs import turn_runs
+    from agentcore.runtime.turn.runs import turn_runs
 
     session = CoordinationSession(
         execution_id="exec-inj",
@@ -283,7 +283,7 @@ async def test_queue_user_message_works_after_session_closed():
 async def test_close_promotes_unseen_pending_to_fifo():
     """收口升队：ensure_drain + live sink ``turn_queued``。"""
     from agentcore.runtime.events import EventType
-    from agentcore.runtime.turn_runs import turn_runs
+    from agentcore.runtime.turn.runs import turn_runs
 
     session = CoordinationSession(
         execution_id="exec-inj",

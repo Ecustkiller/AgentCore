@@ -54,7 +54,7 @@ from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.plan_only import PLAN_ONLY_CEO_MAX_ROUNDS, use_plan_only
-from agentcore.runtime.prompt_profile import use_profile
+from agentcore.runtime.resolve.profile import use_profile
 from agentcore.runtime.runs.executor.shared import resolve_finish_override
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.protocol import ToolContext

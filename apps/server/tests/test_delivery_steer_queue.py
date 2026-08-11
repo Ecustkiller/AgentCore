@@ -11,8 +11,8 @@ from pydantic import ValidationError
 
 from agentcore.api.schemas.messages import SendMessageRequest
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
+from agentcore.runtime.turn.runs import turn_runs
 
 
 def test_send_message_request_requires_delivery():
@@ -229,7 +229,7 @@ async def test_coord_queue_skips_interjection(monkeypatch):
 async def test_classic_steer_parks_on_live_turn(monkeypatch):
     """经典 in-flight + delivery=steer（accepting）→ 不入 turn_queue，发 turn_steer_accepted。"""
     from agentcore.api.routes.conversations import messages as messages_mod
-    from agentcore.runtime import turn_steer as turn_steer_mod
+    from agentcore.runtime.turn import steer as turn_steer_mod
 
     cid = "c-classic-steer-ok"
     turn_queue.clear(cid)
@@ -284,7 +284,7 @@ async def test_classic_steer_parks_on_live_turn(monkeypatch):
 async def test_classic_steer_degrades_to_queue_without_accepting(monkeypatch):
     """经典 in-flight + delivery=steer 但无 accepting 窗口 → 回落 queue + degraded_from=steer。"""
     from agentcore.api.routes.conversations import messages as messages_mod
-    from agentcore.runtime import turn_steer as turn_steer_mod
+    from agentcore.runtime.turn import steer as turn_steer_mod
 
     cid = "c-classic-steer-fallback"
     turn_queue.clear(cid)

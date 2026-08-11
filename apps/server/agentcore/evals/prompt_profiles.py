@@ -3,7 +3,7 @@
 用例用 ``EvalCase.prompt_profile``（一个名字）声明跑哪个变体；harness 经
 :func:`resolve_prompt_profile`
 查表、在本例运行期 ``use_profile`` 注入。``seed_lint`` 用 :data:`PROFILE_NAMES` 校验名字是否存在
-（写错立刻挂）。机制细节见 [`runtime/prompt_profile.py`](../runtime/prompt_profile.py)。
+（写错立刻挂）。机制细节见 [`runtime/resolve/profile.py`](../runtime/resolve/profile.py)。
 
 **v1 内容**：``baseline``（恒等，与生产逐字节一致）+ 两个**消融**变体——用空串覆盖某片段即把
 该块整段移除（assembler 跳过 falsy 片段），用来量化「这段文案值不值这些 token」。消融**不编造
@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from agentcore.evals.types import EvalConfigError
-from agentcore.runtime.prompt_profile import (
+from agentcore.runtime.resolve.profile import (
     FRAGMENT_CEO_VISUALIZATION,
     FRAGMENT_CITATION,
     PromptProfile,

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.prompt_profile import (
+from agentcore.runtime.resolve.profile import (
     FRAGMENT_BASE,
     FRAGMENT_CEO_CORE,
     FRAGMENT_CEO_VISUALIZATION,

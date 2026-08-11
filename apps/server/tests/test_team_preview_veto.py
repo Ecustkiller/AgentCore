@@ -20,7 +20,7 @@ from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import Deliverable, RunSpec
 from agentcore.runtime.suspension import TeamPreviewSuspension
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.protocol import ToolEffect, ToolResult
 
 

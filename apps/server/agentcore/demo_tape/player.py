@@ -70,8 +70,8 @@ from agentcore.runtime.suspension import (
     TurnSuspension,
     captain_transcript,
 )
-from agentcore.runtime.suspension_capture import SuspensionPersistError, persist_suspension_capture
-from agentcore.runtime.suspension_persistence import save_paused_turn
+from agentcore.runtime.suspension.capture import SuspensionPersistError, persist_suspension_capture
+from agentcore.runtime.suspension.persistence import save_paused_turn
 
 # Patchable pacing wait — tests must NOT monkeypatch ``asyncio.sleep`` itself.
 # StreamCheckpointer's flush loop also sleeps on the stdlib alias; a process-wide

@@ -17,7 +17,7 @@ from agentcore.runtime.pipeline.resume.settle import (
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
 from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.suspension import TurnSuspension, captain_transcript
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 
 logger = get_logger(__name__)
 

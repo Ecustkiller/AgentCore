@@ -23,8 +23,8 @@ from agentcore.runtime.coordination.session import (
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
-from agentcore.runtime.turn_interrupt import TurnInterruptReason, compose_interrupt_body
-from agentcore.runtime.turn_runs import TurnRun, turn_runs
+from agentcore.runtime.turn.interrupt import TurnInterruptReason, compose_interrupt_body
+from agentcore.runtime.turn.runs import TurnRun, turn_runs
 
 
 def _plan(*nodes: RunSpec) -> RunPlan:
@@ -1234,7 +1234,7 @@ def test_user_stop_body_keeps_stream_without_chrome_notes():
 
 def test_redrive_failed_body_forces_user_visible_notice():
     """案 fake-dispatch-stall-claim C：redrive_failed 禁止静默清队无说明。"""
-    from agentcore.runtime.turn_interrupt import REDRIVE_FAILED_USER_VISIBLE
+    from agentcore.runtime.turn.interrupt import REDRIVE_FAILED_USER_VISIBLE
 
     kickoff = "好，派 3 个 worker 开工高规格版："
     body = compose_interrupt_body(kickoff, reason=TurnInterruptReason.REDRIVE_FAILED)

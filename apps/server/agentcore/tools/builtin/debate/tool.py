@@ -213,7 +213,7 @@ class DebateTool:
             debate_arguments_from_card,
             mark_turn_keeps_stage_card,
         )
-        from agentcore.runtime.turn_token_budget import (
+        from agentcore.runtime.turn.token_budget import (
             current_turn_tokens,
             is_turn_token_ceiling_hit,
             resolve_turn_token_ceiling,

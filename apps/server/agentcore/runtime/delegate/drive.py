@@ -47,7 +47,7 @@ def _materialise_turn_token_budget_skips(
     """
     from agentcore.core.logging import get_logger
     from agentcore.llm.turn_auth_dead import REASON_TURN_AUTH_DEAD, is_turn_auth_dead
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         REASON_TURN_TOKEN_BUDGET,
         budget_skip_warning_for_active_scope,
         current_nested_envelope,
@@ -164,7 +164,7 @@ async def drive(
         is_turn_auth_dead,
         turn_auth_dead_reject_message,
     )
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         NestedEnvelopeRejected,
         current_turn_tokens,
         is_turn_token_ceiling_hit,
@@ -316,7 +316,7 @@ async def _drive_body(
     session: Any,
 ) -> ToolResult:
     """Inner drive after budget admission / nested envelope bind."""
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         resolve_wave_budget_hooks,
         should_materialise_turn_token_budget_skips,
     )

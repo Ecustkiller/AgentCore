@@ -394,7 +394,7 @@ async def react_loop(
         captain_token = current_captain_loop.set(CaptainLoopMirror(controller=controller))
         steer_cid = (tool_context.conversation_id or "").strip()
         if steer_cid:
-            from agentcore.runtime.turn_steer import begin_accepting
+            from agentcore.runtime.turn.steer import begin_accepting
 
             begin_accepting(steer_cid)
 
@@ -663,7 +663,7 @@ async def react_loop(
             # every step top (incl. round 0), AFTER on_round_begin and BEFORE LLM.
             # Parallel to coordination inject below — do NOT merge / fake coord_inject.
             if role == "captain" and steer_cid:
-                from agentcore.runtime.turn_steer import drain_as_messages
+                from agentcore.runtime.turn.steer import drain_as_messages
 
                 steer_msgs = drain_as_messages(steer_cid)
                 if steer_msgs:
@@ -1313,7 +1313,7 @@ async def react_loop(
         return _exit(*result)
     finally:
         if steer_cid:
-            from agentcore.runtime.turn_steer import (
+            from agentcore.runtime.turn.steer import (
                 end_accepting,
                 promote_leftovers_to_queue,
             )

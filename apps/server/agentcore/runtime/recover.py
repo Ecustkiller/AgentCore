@@ -1,7 +1,7 @@
 """Single recover primitive: journal projection → seed WaveScheduler → settle / redrive.
 
 Resume (plan_review / team_preview / ask_user) and crash redrive both route here.
-The journal remains the唯一事实源; :class:`~agentcore.runtime.turn_state.TurnState`
+The journal remains the唯一事实源; :class:`~agentcore.runtime.turn.state.TurnState`
 is the sole projection entry.
 
 Backlog (not this iteration):
@@ -31,7 +31,7 @@ from agentcore.runtime.suspension import (
     TeamPreviewSuspension,
     TurnSuspension,
 )
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.builtin.ask_user.schema import option_label
 
 if TYPE_CHECKING:
@@ -499,7 +499,7 @@ async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
         release_turn_lease,
     )
     from agentcore.runtime.leases.sweeper import salvage_interrupted_turn
-    from agentcore.runtime.turn_interrupt import TurnInterruptReason
+    from agentcore.runtime.turn.interrupt import TurnInterruptReason
 
     message_id = lease.message_id
     conversation_id = lease.conversation_id

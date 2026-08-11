@@ -263,7 +263,7 @@ async def test_close_user_stop_turn_emits_message_end_even_when_persist_skipped(
 async def test_close_user_stop_turn_empty_body_still_durable(monkeypatch):
     """Empty journal + empty content must still durable-close (not skip)."""
     from agentcore.conversation import turn_persistence
-    from agentcore.runtime.turn_interrupt import TurnInterruptReason
+    from agentcore.runtime.turn.interrupt import TurnInterruptReason
 
     called: list[dict] = []
 

@@ -204,7 +204,7 @@ async def test_begin_turn_creates_placeholder(monkeypatch):
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", Repo)
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.settle_prior_running_assistants",
+        "agentcore.runtime.turn.interrupt.settle_prior_running_assistants",
         _settle,
     )
 
@@ -240,7 +240,7 @@ async def test_begin_turn_propagates_placeholder_failure(monkeypatch):
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", Repo)
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.settle_prior_running_assistants",
+        "agentcore.runtime.turn.interrupt.settle_prior_running_assistants",
         _settle,
     )
 

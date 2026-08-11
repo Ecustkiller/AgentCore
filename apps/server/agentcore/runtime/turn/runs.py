@@ -234,7 +234,7 @@ class TurnRunRegistry:
         """Claim the paused frame and start resume_chat (waiter SSE or detached)."""
         from agentcore.conversation.service import resume_chat
         from agentcore.runtime.events import turn_warning
-        from agentcore.runtime.suspension_persistence import claim_paused_turn
+        from agentcore.runtime.suspension.persistence import claim_paused_turn
 
         from .queue import turn_queue
 

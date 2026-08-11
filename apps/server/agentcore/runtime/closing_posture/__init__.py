@@ -35,7 +35,7 @@ Thin facade — implementation split by axis (under ``runtime/closing_posture/``
 * ``.b1`` — prepare clear_b1 + cross-latch probes
 
 Public import paths stay stable via re-exports below
-(root ``closing_posture_*`` shims alias satellites).
+(``agentcore.runtime.closing_posture`` / ``.<leaf>``; no flat root shims).
 """
 
 from __future__ import annotations

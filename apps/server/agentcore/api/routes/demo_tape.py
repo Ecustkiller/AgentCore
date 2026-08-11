@@ -50,7 +50,7 @@ from agentcore.demo_tape import director as director_ctl
 from agentcore.demo_tape.catalog import list_tapes
 from agentcore.demo_tape.launch import prepare_demo_tape_launch, require_replay_enabled
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 logger = get_logger(__name__)
 
@@ -90,7 +90,7 @@ async def _wait_for_paused_or_settled(
     ResumePrompt, and never grows a collaboration graph. Waiting here makes
     recovery authoritative on first open.
     """
-    from agentcore.runtime.suspension_persistence import list_paused_turns
+    from agentcore.runtime.suspension.persistence import list_paused_turns
 
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
+from agentcore.runtime.suspension.capture import SuspensionCapture, persist_suspension_capture
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
@@ -38,7 +38,7 @@ async def persist_suspension(
     path keys its「end the turn now」decision on this so it NEVER finalizes a plan it could
     not later resume — a nested (depth>0) / un-wired / transcript-less delegate returns
     ``False`` (caller may PROCEED). Runtime saver failure raises
-    :class:`~agentcore.runtime.suspension_capture.SuspensionPersistError`.
+    :class:`~agentcore.runtime.suspension.capture.SuspensionPersistError`.
     """
     if not can_persist_suspension(tool):
         return False

@@ -104,7 +104,7 @@ async def stream_llm_round(
 
     # Phase-0 TTFT: only the first CEO/captain stream of the turn (cost_role).
     from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.turn_latency import get_turn_latency
+    from agentcore.runtime.turn.latency import get_turn_latency
 
     latency_probe = get_turn_latency()
     record_ttft = bool(

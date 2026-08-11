@@ -314,7 +314,7 @@ def should_audit_gate(controller: LoopController, *, role: str) -> bool:
     if not controller.audit_hard_required:
         return False
     # Turn ceiling hit → new audit dispatch is rejected; don't push CEO to re-delegate.
-    from agentcore.runtime.turn_token_budget import is_turn_token_ceiling_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_ceiling_hit
 
     if is_turn_token_ceiling_hit():
         return False
@@ -332,7 +332,7 @@ def should_audit_hard_block(controller: LoopController, *, role: str) -> bool:
     # Soft nudge must have fired first (one Continue cycle), then hard-block.
     if not controller.audit_gate_fired:
         return False
-    from agentcore.runtime.turn_token_budget import is_turn_token_ceiling_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_ceiling_hit
 
     if is_turn_token_ceiling_hit():
         return False
@@ -417,7 +417,7 @@ def should_debate_gate(
     """Whether the soft debate-commitment gate should fire (wrap-up path)."""
     if role != "captain" or controller.debate_gate_fired or controller.debate_executed:
         return False
-    from agentcore.runtime.turn_token_budget import is_turn_token_ceiling_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_ceiling_hit
 
     if is_turn_token_ceiling_hit():
         return False
@@ -454,7 +454,7 @@ def should_turn_token_budget_gate(controller: LoopController, *, role: str) -> b
     """Whether the turn-token wrap-up steer should fire (ceiling hit, captain, one-shot)."""
     if role != "captain" or controller.turn_token_budget_gate_fired:
         return False
-    from agentcore.runtime.turn_token_budget import is_turn_token_ceiling_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_ceiling_hit
 
     return is_turn_token_ceiling_hit()
 
@@ -475,7 +475,7 @@ def maybe_inject_turn_token_budget_gate(
     if not should_turn_token_budget_gate(controller, role=role):
         return False
 
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         current_turn_tokens,
         resolve_turn_token_ceiling,
         turn_token_budget_wrap_prompt,

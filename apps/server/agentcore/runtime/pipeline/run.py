@@ -40,7 +40,7 @@ from agentcore.runtime.suspension import (
     turn_evidence_ledger,
     turn_history,
 )
-from agentcore.runtime.turn_latency import get_turn_latency
+from agentcore.runtime.turn.latency import get_turn_latency
 from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — test seam
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -189,7 +189,7 @@ async def run_chat_pipeline(
     citations_token = turn_citations.set(citations)
     from agentcore.llm.turn_auth_dead import bind_turn_auth_dead, reset_turn_auth_dead
     from agentcore.runtime.memory_consult_cache import consulted_memory_cache
-    from agentcore.runtime.turn_token_budget import bind_turn_token_meter, reset_turn_token_meter
+    from agentcore.runtime.turn.token_budget import bind_turn_token_meter, reset_turn_token_meter
 
     # Turn 级 token 累计 meter（CEO + 全树 worker）；log_llm_call 写入，触顶禁新派。
     turn_token_meter_token = bind_turn_token_meter(seed=0)

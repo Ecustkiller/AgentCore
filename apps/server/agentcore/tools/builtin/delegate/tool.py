@@ -351,7 +351,7 @@ class DelegateTool:
             resolve_playbook_declaration,
         )
         from agentcore.runtime.runs import build_run_plan
-        from agentcore.runtime.turn_token_budget import (
+        from agentcore.runtime.turn.token_budget import (
             current_turn_tokens,
             is_turn_token_ceiling_hit,
             resolve_turn_token_ceiling,

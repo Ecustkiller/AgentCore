@@ -890,7 +890,7 @@ def assemble_system_prompt(
     prior assembly — load-bearing for DeepSeek prefix-cache stability when the
     caller omits facts (catalog / tests).
 
-    The ``base`` fragment goes through ``prompt_profile.resolve`` (方向① 变体注入): with no
+    The ``base`` fragment goes through ``resolve.profile.resolve`` (方向① 变体注入): with no
     active profile — the production state always — it returns ``_DEFAULT_SYSTEM_PROMPT``
     verbatim, so the prefix is unchanged; an eval may swap it via ``use_profile`` to A/B
     the shared base. A base override reaches both workers and the CEO (whose base_prompt

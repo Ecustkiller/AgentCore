@@ -332,7 +332,7 @@ class RedirectController:
                 feedback_preview=redir.feedback[:120],
             )
         if post_wave_cold:
-            from agentcore.runtime.turn_token_budget import resolve_wave_budget_hooks
+            from agentcore.runtime.turn.token_budget import resolve_wave_budget_hooks
 
             should_stop, priority_reserve_hit = resolve_wave_budget_hooks()
             more = await WaveScheduler(max_parallel).run(

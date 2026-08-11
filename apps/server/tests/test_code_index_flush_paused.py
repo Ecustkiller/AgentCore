@@ -15,7 +15,7 @@ import pytest
 
 from agentcore.conversation import turns as turns_mod
 from agentcore.runtime.events import EventSink, FinishReason, message_end
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 
 class _FakeSessionCM:

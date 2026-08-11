@@ -167,7 +167,7 @@ async def test_durable_saver_runtime_failure_terminates(monkeypatch):
     """saver 抛异常（运行态失败）⇒ 显式报错终止，不得 PROCEED 继续烧钱。"""
     from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.suspension import captain_transcript
-    from agentcore.runtime.suspension_capture import SuspensionPersistError
+    from agentcore.runtime.suspension.capture import SuspensionPersistError
 
     monkeypatch.setattr(
         "agentcore.runtime.delegate.preview.should_kickoff",

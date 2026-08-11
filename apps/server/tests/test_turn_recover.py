@@ -15,7 +15,7 @@ from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.runs import RunPlan, RunSpec
 from agentcore.runtime.runs.serialize import plan_snapshot_fact, plan_to_json, run_final_fact
 from agentcore.runtime.runs.types import RunPhase, RunState
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.protocol import ToolResult
 
 

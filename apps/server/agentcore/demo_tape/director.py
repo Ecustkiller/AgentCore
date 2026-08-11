@@ -51,13 +51,13 @@ from agentcore.runtime.suspension import (
     PlanReviewSuspension,
     TeamPreviewSuspension,
 )
-from agentcore.runtime.suspension_persistence import (
+from agentcore.runtime.suspension.persistence import (
     claim_paused_turn,
     delete_paused_turn,
     list_paused_turns,
     load_paused_turn,
 )
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 logger = get_logger(__name__)
 

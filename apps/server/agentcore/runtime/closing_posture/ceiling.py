@@ -23,7 +23,7 @@ from .hollow import (
 _CEILING_HONESTY_REASONS = frozenset({"max_rounds", "token_budget"})
 
 # Writing-cutoff / token_budget only — executable next step for CEO.
-# Shared wording with closing_posture_cutoff soft banner.
+# Shared wording with closing_posture.cutoff soft banner.
 _TOKEN_BUDGET_CONTINUE_TEACH = (
     "【续作】下一刀用 `continue_from_run_id` 续同一主文件；"
     "禁止并行同角色抢同一路径；"

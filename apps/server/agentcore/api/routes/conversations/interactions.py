@@ -31,7 +31,7 @@ from agentcore.runtime.interaction import InteractionKind, default_interaction_r
 from agentcore.runtime.interaction_orphan import emit_orphan_fact
 from agentcore.runtime.journal.pending_interactions import fold_pending_interactions
 from agentcore.runtime.settlement import already_settled_in_writer, prewrite_settlement
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 from ._helpers import (
     _preflight_owned_chat_turn,

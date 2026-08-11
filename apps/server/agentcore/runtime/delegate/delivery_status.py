@@ -58,7 +58,7 @@ from typing import Any
 
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunState
-from agentcore.runtime.turn_token_budget import REASON_QA_DEFERRED, REASON_TURN_TOKEN_BUDGET
+from agentcore.runtime.turn.token_budget import REASON_QA_DEFERRED, REASON_TURN_TOKEN_BUDGET
 
 _MAX_FILES = 24
 _MAX_GAPS = 12

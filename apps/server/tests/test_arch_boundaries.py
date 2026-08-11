@@ -239,15 +239,6 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
     }
 )
 
-# Root shims are module aliases (sys.modules swap) — not substantive logic.
-_RUNTIME_ROOT_SHIM_PREFIXES: tuple[str, ...] = (
-    "closing_posture_",
-    "turn_",
-    "suspension_",
-    "loop_controller_",
-)
-
-
 def test_runtime_no_new_oversized_modules_without_exemption() -> None:
     """Forbid new ``runtime/`` files above the soft line ceiling.
 
@@ -262,9 +253,6 @@ def test_runtime_no_new_oversized_modules_without_exemption() -> None:
         if "__pycache__" in path.parts:
             continue
         rel = path.relative_to(root).as_posix()
-        # Root alias shims stay tiny; skip by convention.
-        if path.parent == root and path.name.startswith(_RUNTIME_ROOT_SHIM_PREFIXES):
-            continue
         lines = sum(1 for _ in path.open(encoding="utf-8"))
         if lines <= _RUNTIME_LINE_SOFT_MAX:
             continue
@@ -276,21 +264,6 @@ def test_runtime_no_new_oversized_modules_without_exemption() -> None:
         f"{_RUNTIME_LINE_SOFT_MAX} lines need a split or an explicit exemption:\n  "
         + "\n  ".join(sorted(offenders))
     )
-
-
-def test_runtime_root_shims_are_aliases_not_logic() -> None:
-    """Root ``*_`` cluster shims must stay thin aliases (P3-A import freeze)."""
-    root = _PKG_ROOT / "runtime"
-    fat: list[str] = []
-    for path in root.glob("*.py"):
-        if not path.name.startswith(_RUNTIME_ROOT_SHIM_PREFIXES):
-            continue
-        text = path.read_text(encoding="utf-8")
-        if "sys.modules[__name__]" not in text:
-            fat.append(f"{path.name}: missing module-alias assignment")
-        if text.count("\n") > 20:
-            fat.append(f"{path.name}: too large for a shim ({text.count(chr(10))} lines)")
-    assert fat == [], "runtime root shims drifted from alias form:\n  " + "\n  ".join(fat)
 
 
 def test_runs_executor_has_no_flat_shims() -> None:
@@ -326,4 +299,90 @@ def test_runs_executor_has_no_flat_shims() -> None:
                     )
     assert bad_imports == [], (
         "old flat executor_* import paths still referenced:\n  " + "\n  ".join(bad_imports)
+    )
+
+
+def test_prompt_profile_has_no_flat_root_shim() -> None:
+    """``resolve.profile`` is the only path — forbid resurrecting ``runtime/prompt_profile.py``."""
+    flat = _PKG_ROOT / "runtime" / "prompt_profile.py"
+    assert not flat.exists(), (
+        "flat runtime/prompt_profile.py shim is retired; use "
+        "agentcore.runtime.resolve.profile"
+    )
+    bad_mod = "agentcore.runtime.prompt_profile"
+    bad_imports: list[str] = []
+    for scan_root in (
+        _PKG_ROOT / "runtime",
+        _PKG_ROOT / "tools",
+        _PKG_ROOT / "evals",
+        _SERVER_ROOT / "tests",
+    ):
+        if not scan_root.is_dir():
+            continue
+        for path in scan_root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                mods = _module_imports(path)
+            except SyntaxError:
+                continue
+            for mod in mods:
+                if mod == bad_mod or mod.startswith(bad_mod + "."):
+                    bad_imports.append(
+                        f"{path.relative_to(_SERVER_ROOT).as_posix()}: {mod}"
+                    )
+    assert bad_imports == [], (
+        "old flat prompt_profile import paths still referenced:\n  "
+        + "\n  ".join(bad_imports)
+    )
+
+
+def test_p3a_clusters_have_no_flat_root_shims() -> None:
+    """Four P3-A clusters: package paths only — forbid resurrecting flat root shims.
+
+    Covers ``closing_posture_*`` / ``loop_controller_*`` / ``turn_*`` / ``suspension_*``.
+    """
+    root = _PKG_ROOT / "runtime"
+    flat_prefixes = (
+        "closing_posture_",
+        "loop_controller_",
+        "turn_",
+        "suspension_",
+    )
+    flat = sorted(p.name for p in root.glob("*.py") if p.name.startswith(flat_prefixes))
+    assert flat == [], (
+        "flat P3-A root shims are retired; use "
+        "agentcore.runtime.<cluster>.<leaf> "
+        "(closing_posture / loop_controller / turn / suspension):\n  "
+        + "\n  ".join(flat)
+    )
+    bad_prefixes = (
+        "agentcore.runtime.closing_posture_",
+        "agentcore.runtime.loop_controller_",
+        "agentcore.runtime.turn_",
+        "agentcore.runtime.suspension_",
+    )
+    bad_imports: list[str] = []
+    for scan_root in (
+        _PKG_ROOT / "runtime",
+        _PKG_ROOT / "tools",
+        _PKG_ROOT / "evals",
+        _SERVER_ROOT / "tests",
+    ):
+        if not scan_root.is_dir():
+            continue
+        for path in scan_root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                mods = _module_imports(path)
+            except SyntaxError:
+                continue
+            for mod in mods:
+                if any(mod.startswith(p) for p in bad_prefixes):
+                    bad_imports.append(
+                        f"{path.relative_to(_SERVER_ROOT).as_posix()}: {mod}"
+                    )
+    assert bad_imports == [], (
+        "old flat P3-A root import paths still referenced:\n  " + "\n  ".join(bad_imports)
     )

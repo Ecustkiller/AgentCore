@@ -60,7 +60,7 @@ from agentcore.middleware.errors import JSONErrorMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.audit_retention import audit_retention_loop
 from agentcore.runtime.session_retention import session_retention_loop
-from agentcore.runtime.suspension_retention import paused_turn_retention_loop
+from agentcore.runtime.suspension.retention import paused_turn_retention_loop
 from agentcore.security.keys import KeyEncryptor
 from agentcore.standing_tasks.scheduler import standing_task_scheduler_loop
 from agentcore.tools.builtin.web.search_backend import (
@@ -420,7 +420,7 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await turn_lease_sweep_task
             turn_lease_sweep_task = None
-        from agentcore.runtime.turn_runs import salvage_turns_on_shutdown
+        from agentcore.runtime.turn.runs import salvage_turns_on_shutdown
 
         with contextlib.suppress(Exception):
             await salvage_turns_on_shutdown()

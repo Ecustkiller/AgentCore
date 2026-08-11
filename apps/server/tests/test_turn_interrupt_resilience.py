@@ -20,12 +20,12 @@ from agentcore.runtime.coordination.session import (
     CoordinationSession,
 )
 from agentcore.runtime.events import FinishReason
-from agentcore.runtime.turn_interrupt import (
+from agentcore.runtime.turn.interrupt import (
     TurnInterruptReason,
     close_turn_interrupted,
     compose_interrupt_body,
 )
-from agentcore.runtime.turn_runs import TurnRun, turn_runs
+from agentcore.runtime.turn.runs import TurnRun, turn_runs
 
 
 @pytest.mark.asyncio
@@ -220,7 +220,7 @@ async def test_close_user_stop_empty_journal_still_durable(monkeypatch):
 @pytest.mark.asyncio
 async def test_settle_prior_running_assistants_closes_zombies(monkeypatch):
     """begin_turn settle: earlier non-paused RUNNING → close_turn_interrupted."""
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     closed: list[dict] = []
 
@@ -314,7 +314,7 @@ async def test_begin_turn_settles_prior_before_placeholder(monkeypatch):
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", Repo)
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.settle_prior_running_assistants",
+        "agentcore.runtime.turn.interrupt.settle_prior_running_assistants",
         _settle,
     )
 
@@ -456,7 +456,7 @@ async def test_shutdown_salvage_releases_lease_not_orphan(monkeypatch):
 @pytest.mark.asyncio
 async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
     """After grace timeout, leftovers are force-closed and lease-released (no orphan)."""
-    from agentcore.runtime import turn_runs as turn_runs_mod
+    from agentcore.runtime.turn import runs as turn_runs_mod
 
     released: list[str] = []
     orphaned: list[str] = []
@@ -520,7 +520,7 @@ async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
 @pytest.mark.asyncio
 async def test_salvage_turns_on_shutdown_close_failure_orphans(monkeypatch):
     """Shutdown force-close failure must orphan lease, not release."""
-    from agentcore.runtime import turn_runs as turn_runs_mod
+    from agentcore.runtime.turn import runs as turn_runs_mod
 
     released: list[str] = []
     orphaned: list[str] = []
@@ -554,7 +554,7 @@ async def test_salvage_turns_on_shutdown_close_failure_orphans(monkeypatch):
         _fake_close,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.close_turn_interrupted",
+        "agentcore.runtime.turn.interrupt.close_turn_interrupted",
         _fake_interrupt,
     )
     monkeypatch.setattr(
@@ -655,7 +655,7 @@ async def test_salvage_failure_keeps_orphaned_lease(monkeypatch):
 async def test_recover_salvage_failure_does_not_release(monkeypatch):
     from agentcore.runtime.recover import recover_expired_lease
     from agentcore.runtime.recover_hooks import set_crash_delegate_factory
-    from agentcore.runtime.turn_state import TurnState
+    from agentcore.runtime.turn.state import TurnState
 
     message_id = "m-recover-fail"
     lease = SimpleNamespace(
@@ -775,7 +775,7 @@ async def test_repeated_salvage_skips_body_upsert(monkeypatch):
         async def clear_stream_segments(self, *, turn_id):
             pass
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     monkeypatch.setattr(interrupt_mod, "MessageRepository", _MsgRepo)
     monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", _JournalRepo)
@@ -841,7 +841,7 @@ async def test_close_turn_interrupted_load_stream_state_merges_body_content(monk
         async def clear_stream_segments(self, *, turn_id):
             pass
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     monkeypatch.setattr(interrupt_mod, "MessageRepository", _MsgRepo)
     monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", _JournalRepo)
@@ -921,7 +921,7 @@ async def test_close_turn_interrupted_ensures_turn_end_when_merge_persist_drops_
         async def clear_stream_segments(self, *, turn_id):
             pass
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     async def _persist_noop(*_a, **_k):
         # Simulate merge-mode persist that silently drops turn_end (seq conflict).

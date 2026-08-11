@@ -19,8 +19,8 @@ from agentcore.runtime.facts import (
 )
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.suspension import AskUserSuspension, captain_transcript, turn_citations
-from agentcore.runtime.suspension_capture import persist_suspension_capture
-from agentcore.runtime.turn_paused_capture import build_turn_paused_fact
+from agentcore.runtime.suspension.capture import persist_suspension_capture
+from agentcore.runtime.turn.paused_capture import build_turn_paused_fact
 
 
 def _required(event_type: str, checkpoint_id: str = "cp-1") -> SimpleNamespace:

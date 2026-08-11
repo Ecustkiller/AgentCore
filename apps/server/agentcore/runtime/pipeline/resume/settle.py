@@ -12,7 +12,7 @@ from agentcore.runtime.events import EventSink, tool_use_end
 from agentcore.runtime.facts import ToolCallFact, record_turn_fact
 from agentcore.runtime.recover import SettledSuspension
 from agentcore.runtime.suspension import TurnSuspension
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 

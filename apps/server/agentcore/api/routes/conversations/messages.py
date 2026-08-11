@@ -53,7 +53,7 @@ from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.journal import runs_from_entries_cached
 from agentcore.runtime.journal.entries import _PROCESS_PREFIX
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 from ._helpers import (
     _preflight_owned_chat_turn,
@@ -383,12 +383,12 @@ async def send_message(
             active_coordination_for_conversation,
         )
         from agentcore.runtime.events import turn_steer_accepted, user_interjection
-        from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
-        from agentcore.runtime.turn_steer import (
+        from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
+        from agentcore.runtime.turn.steer import (
             content_preview,
             peek_count,
         )
-        from agentcore.runtime.turn_steer import (
+        from agentcore.runtime.turn.steer import (
             try_enqueue as try_enqueue_steer,
         )
 
@@ -573,7 +573,7 @@ async def cancel_queued_turn(
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     from agentcore.runtime.events import turn_queue_cancelled
-    from agentcore.runtime.turn_queue import turn_queue
+    from agentcore.runtime.turn.queue import turn_queue
 
     item = turn_queue.cancel(conversation_id, queue_id)
     if item is None:

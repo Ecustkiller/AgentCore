@@ -21,7 +21,7 @@ from agentcore.runtime.kickoff.research_first import (
 from agentcore.runtime.recover import SettledSuspension, recover_turn
 from agentcore.runtime.skills import MULTI_LENS_COURTROOM_TRIGGERS
 from agentcore.runtime.suspension import TeamPreviewSuspension
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.builtin.motion_card import parse_motion_card
 
 

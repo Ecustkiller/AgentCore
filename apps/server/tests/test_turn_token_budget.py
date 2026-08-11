@@ -10,7 +10,7 @@ from agentcore.config.engine import EngineSettings
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
-from agentcore.runtime.turn_token_budget import (
+from agentcore.runtime.turn.token_budget import (
     REASON_TURN_TOKEN_BUDGET,
     bind_turn_token_meter,
     current_turn_tokens,
@@ -42,14 +42,14 @@ def test_engine_turn_token_ceiling_disable():
 
 
 def test_delivery_reserve_hit_window(monkeypatch):
-    from agentcore.runtime.turn_token_budget import is_turn_token_delivery_reserve_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_delivery_reserve_hit
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 200,
     )
     token = bind_turn_token_meter(seed=0)
@@ -68,14 +68,14 @@ def test_delivery_reserve_hit_window(monkeypatch):
 
 
 def test_delivery_reserve_off_when_reserve_ge_ceiling(monkeypatch):
-    from agentcore.runtime.turn_token_budget import is_turn_token_delivery_reserve_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_delivery_reserve_hit
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 100,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 100,
     )
     token = bind_turn_token_meter(seed=50)
@@ -87,7 +87,7 @@ def test_delivery_reserve_off_when_reserve_ge_ceiling(monkeypatch):
 
 def test_meter_records_and_hits(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 100,
     )
     token = bind_turn_token_meter(seed=0)
@@ -108,7 +108,7 @@ def test_meter_records_and_hits(monkeypatch):
 
 def test_meter_off_when_ceiling_zero(monkeypatch):
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 0,
     )
     token = bind_turn_token_meter(seed=999_999)
@@ -175,7 +175,7 @@ async def test_delegate_execute_rejects_when_ceiling_hit(monkeypatch):
     from agentcore.tools.builtin.delegate.tool import DelegateTool
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 100,
     )
     token = bind_turn_token_meter(seed=100)
@@ -210,7 +210,7 @@ async def test_wave_should_stop_blocks_new_dispatch(monkeypatch):
     from agentcore.runtime.runs.wave import WaveScheduler
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 50,
     )
     token = bind_turn_token_meter(seed=50)
@@ -285,14 +285,14 @@ async def test_priority_reserve_admits_qa_cuts_secondary(monkeypatch):
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import Deliverable, RunState
     from agentcore.runtime.runs.wave import WaveScheduler
-    from agentcore.runtime.turn_token_budget import is_turn_token_delivery_reserve_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_delivery_reserve_hit
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 400,
     )
     token = bind_turn_token_meter(seed=0)
@@ -346,14 +346,14 @@ async def test_priority_reserve_admits_assemble_and_qa_cuts_secondary(monkeypatc
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import Deliverable, RunState
     from agentcore.runtime.runs.wave import WaveScheduler
-    from agentcore.runtime.turn_token_budget import is_turn_token_delivery_reserve_hit
+    from agentcore.runtime.turn.token_budget import is_turn_token_delivery_reserve_hit
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 400,
     )
     token = bind_turn_token_meter(seed=0)
@@ -481,10 +481,10 @@ def test_reason_constant_reserved_in_cutoff():
 
 
 def test_wrap_prompt_is_explicit_close_not_fake_done(monkeypatch):
-    from agentcore.runtime.turn_token_budget import turn_token_budget_wrap_prompt
+    from agentcore.runtime.turn.token_budget import turn_token_budget_wrap_prompt
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 100,
     )
     token = bind_turn_token_meter(seed=100)
@@ -512,7 +512,7 @@ def test_maybe_inject_turn_token_budget_gate_one_shot(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 50,
     )
     token = bind_turn_token_meter(seed=50)
@@ -568,7 +568,7 @@ def test_audit_and_debate_gates_suppressed_when_ceiling_hit(monkeypatch):
 
     # Ceiling off → gates eligible.
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 0,
     )
     controller = LoopController()
@@ -578,7 +578,7 @@ def test_audit_and_debate_gates_suppressed_when_ceiling_hit(monkeypatch):
 
     # Ceiling hit → both suppressed.
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 10,
     )
     token = bind_turn_token_meter(seed=10)
@@ -596,7 +596,7 @@ def test_should_audit_gate_skips_without_hard_when_ceiling_off(monkeypatch):
     from agentcore.runtime.loop_controller import LoopController
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 0,
     )
     controller = LoopController()
@@ -618,7 +618,7 @@ def test_turn_token_budget_gate_seed_round_trip():
 
 def test_nested_envelope_isolates_from_parent_ceiling(monkeypatch):
     """Wave hooks bind nested envelope stop; parent reserve is off while nested."""
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         bind_nested_envelope,
         is_nested_envelope_hit,
         is_turn_token_ceiling_hit,
@@ -629,11 +629,11 @@ def test_nested_envelope_isolates_from_parent_ceiling(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_nested_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_nested_turn_token_ceiling",
         lambda: 400,
     )
     token = bind_turn_token_meter(seed=100)
@@ -663,18 +663,18 @@ def test_nested_envelope_isolates_from_parent_ceiling(monkeypatch):
 
 
 def test_nested_envelope_rejects_when_parent_remaining_zero(monkeypatch):
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         NestedEnvelopeRejected,
         nested_turn_envelope_scope,
         try_reserve_nested_envelope,
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_nested_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_nested_turn_token_ceiling",
         lambda: 400,
     )
     token = bind_turn_token_meter(seed=1000)
@@ -687,17 +687,17 @@ def test_nested_envelope_rejects_when_parent_remaining_zero(monkeypatch):
 
 
 def test_nested_envelope_parallel_reserve_no_double_claim(monkeypatch):
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         release_nested_envelope,
         try_reserve_nested_envelope,
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_nested_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_nested_turn_token_ceiling",
         lambda: 800,
     )
     token = bind_turn_token_meter(seed=200)
@@ -720,7 +720,7 @@ async def test_nested_wave_ignores_parent_ceiling_until_envelope(monkeypatch):
     """Parent ceiling appearing mid-flight must not cut nested tail before envelope."""
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.wave import WaveScheduler
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         bind_nested_envelope,
         is_nested_envelope_hit,
         is_turn_token_ceiling_hit,
@@ -731,15 +731,15 @@ async def test_nested_wave_ignores_parent_ceiling_until_envelope(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_nested_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_nested_turn_token_ceiling",
         lambda: 500,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 200,
     )
     token = bind_turn_token_meter(seed=0)
@@ -802,7 +802,7 @@ async def test_nested_disables_parent_priority_reserve_cut(monkeypatch):
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import Deliverable
     from agentcore.runtime.runs.wave import WaveScheduler
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         bind_nested_envelope,
         is_turn_token_delivery_reserve_hit,
         release_nested_envelope,
@@ -812,15 +812,15 @@ async def test_nested_disables_parent_priority_reserve_cut(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
         lambda: 1000,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_nested_turn_token_ceiling",
+        "agentcore.runtime.turn.token_budget.resolve_nested_turn_token_ceiling",
         lambda: 800,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_token_budget.resolve_turn_token_delivery_reserve",
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_delivery_reserve",
         lambda: 400,
     )
     token = bind_turn_token_meter(seed=500)

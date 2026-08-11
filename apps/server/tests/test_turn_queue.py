@@ -7,8 +7,8 @@ import asyncio
 import pytest
 
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.turn_queue import QueuedTurn, TurnQueue, new_queued_turn, turn_queue
-from agentcore.runtime.turn_runs import TurnRunRegistry, turn_runs
+from agentcore.runtime.turn.queue import QueuedTurn, TurnQueue, new_queued_turn, turn_queue
+from agentcore.runtime.turn.runs import TurnRunRegistry, turn_runs
 
 
 async def _never() -> None:
@@ -37,7 +37,7 @@ async def test_turn_done_callback_drains_module_queue(monkeypatch):
         started.append(item.content)
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_queue._start_queued_turn", fake_start
+        "agentcore.runtime.turn.queue._start_queued_turn", fake_start
     )
     turn_queue.clear("c-drain")
 
@@ -67,7 +67,7 @@ async def test_enqueue_after_host_finished_arms_drain(monkeypatch):
     async def fake_start(conversation_id: str, item: QueuedTurn) -> None:
         started_items.append(item.content)
 
-    monkeypatch.setattr("agentcore.runtime.turn_queue._start_queued_turn", fake_start)
+    monkeypatch.setattr("agentcore.runtime.turn.queue._start_queued_turn", fake_start)
     turn_queue.clear("c-race")
 
     # 复现审查竞态到达 enqueue 时的世界状态：宿主已注册→结束→done-callback 已跑
@@ -100,7 +100,7 @@ async def test_enqueue_with_live_host_defers_to_done_callback(monkeypatch):
     async def fake_start(conversation_id: str, item: QueuedTurn) -> None:
         started_items.append(item.content)
 
-    monkeypatch.setattr("agentcore.runtime.turn_queue._start_queued_turn", fake_start)
+    monkeypatch.setattr("agentcore.runtime.turn.queue._start_queued_turn", fake_start)
     turn_queue.clear("c-live")
 
     blocker = asyncio.create_task(_never())
@@ -125,7 +125,7 @@ async def test_enqueue_with_live_host_defers_to_done_callback(monkeypatch):
 async def test_queued_waiter_receives_sink_on_drain(monkeypatch):
     """发送即有流：等待连接在 drain 时拿到 live sink（不 detach）。"""
     from agentcore.api.sse import _queued_turn_generator
-    from agentcore.runtime import turn_queue as tq_mod
+    from agentcore.runtime.turn import queue as tq_mod
 
     handed: list[EventSink] = []
     done = asyncio.Event()
@@ -145,7 +145,7 @@ async def test_queued_waiter_receives_sink_on_drain(monkeypatch):
         "agentcore.conversation.service.stream_chat", fake_stream_chat
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_runs.turn_runs.register",
+        "agentcore.runtime.turn.runs.turn_runs.register",
         lambda **kwargs: "run-id",
     )
 
@@ -181,7 +181,7 @@ async def test_queued_waiter_receives_sink_on_drain(monkeypatch):
 async def test_start_queued_turn_emits_started_before_stream(monkeypatch):
     """契约：pop 后新 sink 首帧为 turn_queue_started（先于 stream_chat / message_start）。"""
     from agentcore.runtime.events import EventType
-    from agentcore.runtime.turn_queue import _start_queued_turn
+    from agentcore.runtime.turn.queue import _start_queued_turn
 
     done = asyncio.Event()
 
@@ -197,7 +197,7 @@ async def test_start_queued_turn_emits_started_before_stream(monkeypatch):
 
     monkeypatch.setattr("agentcore.conversation.service.stream_chat", fake_stream_chat)
     monkeypatch.setattr(
-        "agentcore.runtime.turn_runs.turn_runs.register",
+        "agentcore.runtime.turn.runs.turn_runs.register",
         lambda **kwargs: "run-id",
     )
 
@@ -254,14 +254,14 @@ async def test_queued_disconnect_before_drain_starts_detached(monkeypatch):
         "agentcore.conversation.service.stream_chat", fake_stream_chat
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_runs.turn_runs.register",
+        "agentcore.runtime.turn.runs.turn_runs.register",
         lambda **kwargs: "run-id",
     )
 
     started: asyncio.Future[EventSink] = asyncio.get_running_loop().create_future()
     started.cancel()
     item = new_queued_turn(content="orphan", user_id="u", started=started)
-    from agentcore.runtime.turn_queue import _start_queued_turn
+    from agentcore.runtime.turn.queue import _start_queued_turn
 
     await _start_queued_turn("c-orphan", item)
     await asyncio.wait_for(done.wait(), timeout=2.0)

@@ -197,7 +197,7 @@ async def resume_chat_pipeline(
     fact_log = TurnFactLog(inherited_entries=list(suspension.journal_entries))
     fact_log_token = current_fact_log.set(fact_log)
     from agentcore.llm.turn_auth_dead import bind_turn_auth_dead, reset_turn_auth_dead
-    from agentcore.runtime.turn_token_budget import (
+    from agentcore.runtime.turn.token_budget import (
         bind_turn_token_meter,
         reset_turn_token_meter,
         tokens_from_journal_entries,

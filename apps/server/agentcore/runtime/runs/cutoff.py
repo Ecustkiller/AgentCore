@@ -12,7 +12,7 @@ from __future__ import annotations
 REASON_TOKEN_BUDGET = "token_budget"
 REASON_WORKER_TIMEOUT = "worker_timeout"
 REASON_DEGRADED_HANDOFF = "degraded_handoff"
-# Turn 级累计顶（策略 A）：与 ``runtime/turn_token_budget.REASON_TURN_TOKEN_BUDGET`` 同值。
+# Turn 级累计顶（策略 A）：与 ``runtime/turn/token_budget.REASON_TURN_TOKEN_BUDGET`` 同值。
 # 本步拒派 / 跳过未跑节点时可挂 gaps.reason，勿硬补对账层。
 REASON_TURN_TOKEN_BUDGET = "turn_token_budget"
 

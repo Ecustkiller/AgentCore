@@ -70,7 +70,7 @@ async def persist_kickoff(
         return False
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.suspension import TeamPreviewSuspension, find_tool_call_id
-    from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
+    from agentcore.runtime.suspension.capture import SuspensionCapture, persist_suspension_capture
 
     tool_name = host._kickoff_tool_name()
     plan_obj = plan if plan is not None else RunPlan()

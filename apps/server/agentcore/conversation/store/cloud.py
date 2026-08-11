@@ -211,7 +211,7 @@ class CloudStore:
         ``close_turn_interrupted``. Failures on the new placeholder propagate: a
         turn must not run SSE / pipeline without a durable assistant row.
         """
-        from agentcore.runtime.turn_interrupt import settle_prior_running_assistants
+        from agentcore.runtime.turn.interrupt import settle_prior_running_assistants
 
         await settle_prior_running_assistants(
             conversation_id=conversation_id,

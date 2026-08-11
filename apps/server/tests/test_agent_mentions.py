@@ -10,9 +10,9 @@ from agentcore.runtime.pipeline import (
     _build_agent_mention_context,
     merge_attachment_and_mention_context,
 )
-from agentcore.runtime.turn_queue import new_queued_turn
-from agentcore.runtime.turn_steer import _reset_for_tests as reset_steer
-from agentcore.runtime.turn_steer import begin_accepting, try_enqueue
+from agentcore.runtime.turn.queue import new_queued_turn
+from agentcore.runtime.turn.steer import _reset_for_tests as reset_steer
+from agentcore.runtime.turn.steer import begin_accepting, try_enqueue
 
 
 def test_send_message_request_agent_mentions_default_empty():

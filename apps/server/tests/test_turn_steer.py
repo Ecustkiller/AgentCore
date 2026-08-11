@@ -10,9 +10,9 @@ import pytest
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.turn_queue import turn_queue
-from agentcore.runtime.turn_runs import turn_runs
-from agentcore.runtime.turn_steer import (
+from agentcore.runtime.turn.queue import turn_queue
+from agentcore.runtime.turn.runs import turn_runs
+from agentcore.runtime.turn.steer import (
     _reset_for_tests,
     begin_accepting,
     drain_as_messages,

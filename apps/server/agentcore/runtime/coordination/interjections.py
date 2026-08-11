@@ -122,7 +122,7 @@ def enqueue_interjection_to_fifo(
     if not content or not conversation_id:
         return False, "插话缺少 content / conversation_id，无法转入排队。", None
 
-    from agentcore.runtime.turn_queue import new_queued_turn, turn_queue
+    from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
 
     try:
         status = turn_queue.enqueue_and_ensure_drain(

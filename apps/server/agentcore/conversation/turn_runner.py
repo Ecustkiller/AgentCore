@@ -27,9 +27,9 @@ from agentcore.runtime.leases import (
 )
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
-from agentcore.runtime.suspension_persistence import delete_paused_turn, save_paused_turn
-from agentcore.runtime.turn_latency import bind_turn_latency, reset_turn_latency
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.suspension.persistence import delete_paused_turn, save_paused_turn
+from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)

@@ -9,7 +9,7 @@ import pytest
 from agentcore.core.log_context import log_context
 from agentcore.llm.provider.protocol import LLMChunk, LLMRequest, ToolCallDelta
 from agentcore.runtime.engine.stream import stream_llm_round
-from agentcore.runtime.turn_latency import (
+from agentcore.runtime.turn.latency import (
     TurnLatencyProbe,
     bind_turn_latency,
     get_turn_latency,

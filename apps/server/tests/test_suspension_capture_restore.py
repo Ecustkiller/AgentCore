@@ -14,8 +14,8 @@ from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.suspension import AskUserSuspension, captain_transcript
-from agentcore.runtime.suspension_capture import SuspensionCapture, persist_suspension_capture
-from agentcore.runtime.suspension_persistence import restore_paused_turn
+from agentcore.runtime.suspension.capture import SuspensionCapture, persist_suspension_capture
+from agentcore.runtime.suspension.persistence import restore_paused_turn
 
 
 def _ask_user_suspension() -> AskUserSuspension:
@@ -119,7 +119,7 @@ async def test_persist_suspension_capture_skips_without_transcript() -> None:
 
 @pytest.mark.asyncio
 async def test_persist_suspension_capture_raises_on_saver_failure() -> None:
-    from agentcore.runtime.suspension_capture import SuspensionPersistError
+    from agentcore.runtime.suspension.capture import SuspensionPersistError
 
     required = SimpleNamespace(
         type=SimpleNamespace(value="checkpoint_required"),
@@ -148,7 +148,7 @@ async def test_persist_suspension_capture_raises_on_saver_failure() -> None:
 @pytest.mark.asyncio
 async def test_claim_paused_turn_restores_frame_on_hydrate_failure() -> None:
     """Claim succeeded but hydrate fails ⇒ restore frame + raise (not silent None/404)."""
-    from agentcore.runtime import suspension_persistence as persist_mod
+    from agentcore.runtime.suspension import persistence as persist_mod
 
     frame = {
         "kind": "ask_user",
@@ -198,14 +198,14 @@ async def test_claim_paused_turn_restores_frame_on_hydrate_failure() -> None:
 async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
     suspension = _ask_user_suspension()
     with patch(
-        "agentcore.runtime.suspension_persistence.async_session_factory"
+        "agentcore.runtime.suspension.persistence.async_session_factory"
     ) as factory:
         session = AsyncMock()
         factory.return_value.__aenter__.return_value = session
         with patch(
-            "agentcore.runtime.suspension_persistence.PausedTurnRepository"
+            "agentcore.runtime.suspension.persistence.PausedTurnRepository"
         ) as repo_cls, patch(
-            "agentcore.runtime.suspension_persistence._notify_pause",
+            "agentcore.runtime.suspension.persistence._notify_pause",
             AsyncMock(),
         ) as notify:
             repo_cls.return_value.upsert = AsyncMock()
@@ -348,7 +348,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
     from agentcore.conversation import turns as turns_mod
     from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
     from agentcore.runtime.events import EventSink
-    from agentcore.runtime.turn_runs import TurnRun, turn_runs
+    from agentcore.runtime.turn.runs import TurnRun, turn_runs
 
     suspension = _ask_user_suspension()
     sink = EventSink()

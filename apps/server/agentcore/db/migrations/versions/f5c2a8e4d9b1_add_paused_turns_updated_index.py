@@ -17,7 +17,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # The 7-day idle TTL sweep (runtime/suspension_retention.py) scans paused turns by
+    # The 7-day idle TTL sweep (runtime/suspension/retention.py) scans paused turns by
     # last-touch — delete rows whose updated_at < cutoff — so index that column to keep
     # the periodic sweep cheap as the table grows.
     op.create_index(

@@ -5,7 +5,7 @@ keeps the historical import paths and host-side helpers (open-pause detection,
 salvage scheduling) stable for turn_runner / turns / tests.
 
 Cancel-path incomplete close funnels through
-:func:`agentcore.runtime.turn_interrupt.close_turn_interrupted`.
+:func:`agentcore.runtime.turn.interrupt.close_turn_interrupted`.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
 from agentcore.runtime.events import EventSink, FinishReason, content_delta, message_end
 from agentcore.runtime.facts import current_fact_log, pre_pause_from_journal
-from agentcore.runtime.turn_interrupt import TurnInterruptReason, close_turn_interrupted
+from agentcore.runtime.turn.interrupt import TurnInterruptReason, close_turn_interrupted
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)

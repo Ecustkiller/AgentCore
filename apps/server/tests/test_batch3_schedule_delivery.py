@@ -285,11 +285,11 @@ async def test_nested_drive_pauses_parent_hard_timeout():
             side_effect=_track,
         ),
         patch(
-            "agentcore.runtime.turn_token_budget.is_turn_token_ceiling_hit",
+            "agentcore.runtime.turn.token_budget.is_turn_token_ceiling_hit",
             return_value=False,
         ),
         patch(
-            "agentcore.runtime.turn_token_budget.nested_turn_envelope_scope",
+            "agentcore.runtime.turn.token_budget.nested_turn_envelope_scope",
             side_effect=lambda **_k: nullcontext(),
         ),
         patch(
@@ -351,7 +351,7 @@ async def test_nested_drive_pauses_on_turn_ceiling_seed_finalize():
             side_effect=_track,
         ),
         patch(
-            "agentcore.runtime.turn_token_budget.is_turn_token_ceiling_hit",
+            "agentcore.runtime.turn.token_budget.is_turn_token_ceiling_hit",
             return_value=True,
         ),
         patch(
@@ -412,11 +412,11 @@ async def test_root_drive_does_not_pause_hard_timeout():
             side_effect=lambda rid, w: calls.append((rid, w)),
         ),
         patch(
-            "agentcore.runtime.turn_token_budget.is_turn_token_ceiling_hit",
+            "agentcore.runtime.turn.token_budget.is_turn_token_ceiling_hit",
             return_value=False,
         ),
         patch(
-            "agentcore.runtime.turn_token_budget.nested_turn_envelope_scope",
+            "agentcore.runtime.turn.token_budget.nested_turn_envelope_scope",
             side_effect=lambda **_k: nullcontext(),
         ),
         patch(

@@ -80,7 +80,7 @@ def test_message_end_omits_duration_without_probe():
 
 
 def test_message_end_auto_fills_duration_from_probe():
-    from agentcore.runtime.turn_latency import bind_turn_latency, reset_turn_latency
+    from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
 
     probe, token = bind_turn_latency()
     try:

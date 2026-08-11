@@ -24,7 +24,7 @@ from agentcore.runtime.coordination.session import (
     CoordinationSession,
     _close_detached_session,
 )
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 
 logger = get_logger(__name__)
 

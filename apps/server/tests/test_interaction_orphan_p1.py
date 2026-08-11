@@ -114,7 +114,7 @@ async def test_orphan_live_turn_hot_pending_uses_live_sink_message_id(
         fake_orphan,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_runs.turn_runs.get",
+        "agentcore.runtime.turn.runs.turn_runs.get",
         lambda _cid: live,
     )
     monkeypatch.setattr(
@@ -147,7 +147,7 @@ async def test_orphan_live_turn_hot_pending_no_live_turn(
         fake_orphan,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_runs.turn_runs.get",
+        "agentcore.runtime.turn.runs.turn_runs.get",
         lambda _cid: None,
     )
     monkeypatch.setattr(

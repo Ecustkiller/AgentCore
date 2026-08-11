@@ -9,7 +9,7 @@ a paused frame is released without redrive. Terminal journals (``turn_end``) lik
 drop the stale lease.
 
 No-DAG mid-flight turns (pure chat crash) are salvaged via
-:func:`agentcore.runtime.turn_interrupt.close_turn_interrupted` instead of being skipped.
+:func:`agentcore.runtime.turn.interrupt.close_turn_interrupted` instead of being skipped.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepositor
 from agentcore.runtime.journal.entries import KIND_TURN_END
 from agentcore.runtime.leases.repo import TurnLeaseRepository
 from agentcore.runtime.leases.service import lease_owner_id, orphan_turn_lease, release_turn_lease
-from agentcore.runtime.turn_interrupt import TurnInterruptReason, close_turn_interrupted
-from agentcore.runtime.turn_state import TurnState
+from agentcore.runtime.turn.interrupt import TurnInterruptReason, close_turn_interrupted
+from agentcore.runtime.turn.state import TurnState
 
 logger = get_logger(__name__)
 

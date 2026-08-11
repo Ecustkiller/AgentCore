@@ -16,7 +16,7 @@ from agentcore.core.logging import get_logger
 if TYPE_CHECKING:
     from agentcore.runtime.events import EventSink
     from agentcore.runtime.leases.model import TurnLeaseRow
-    from agentcore.runtime.turn_state import TurnState
+    from agentcore.runtime.turn.state import TurnState
     from agentcore.tools.builtin.delegate import DelegateTool
 
 logger = get_logger(__name__)

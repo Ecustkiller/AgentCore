@@ -1,5 +1,7 @@
 """TurnSuspension — the durable snapshot of a turn paused at a client checkpoint.
 
+Public import: ``agentcore.runtime.suspension`` / ``.<leaf>`` (no flat root shims).
+
 结构化挂起 2b (turn 级落盘 + ``POST .../resume``): 2a suspends a turn on an
 *in-memory* Future — a process restart or client disconnect loses the whole turn
 (an asyncio task + any already-finished workers). This module is the inert data
@@ -36,7 +38,7 @@ the ``base_system_prompt`` + ``user_message`` (to re-wire the CEO toolset), and 
 
 The journal-so-far is NOT in the frame: it is the §8.3 ``turn_journal`` (唯一事实源),
 written at pause and re-hydrated onto :attr:`TurnSuspension.journal_entries` when the
-resume claims the frame (see ``runtime/suspension_persistence.py``). The display
+resume claims the frame (see ``runtime/suspension/persistence.py``). The display
 :attr:`TurnSuspension.journal` (the resume seed) is a DERIVED projection of those
 entries — a property, never stored (P0-B Phase 3). The frame thus carries only the
 resume *control* state, not a second copy of the replay stream.
@@ -44,7 +46,7 @@ resume *control* state, not a second copy of the replay stream.
 The frame is captured by the suspending face (the ``delegate`` checkpoint hook /
 ``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
 published by the captain executor — and persisted by
-``runtime/suspension_persistence.py``. Pure data + a contextvar here; no DB, no engine.
+``runtime/suspension/persistence.py``. Pure data + a contextvar here; no DB, no engine.
 """
 
 from __future__ import annotations
@@ -671,7 +673,7 @@ def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
 # Persistence closures threaded from the pipeline into the suspending faces (so the
 # tools package stays free of a DB import). The saver persists a frame before the
 # suspend wait; the deleter drops it after a live in-process resolve. Wired to
-# ``runtime/suspension_persistence.py`` by the pipeline; ``None`` ⇒ 2a in-memory only.
+# ``runtime/suspension/persistence.py`` by the pipeline; ``None`` ⇒ 2a in-memory only.
 SuspensionSaver = Callable[["TurnSuspension"], Awaitable[None]]
 SuspensionDeleter = Callable[[str], Awaitable[None]]
 

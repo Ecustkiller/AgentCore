@@ -11,7 +11,7 @@ from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import TurnPausedFact
 from agentcore.runtime.pipeline.resume.rehydrate import rehydrate_from_turn_paused
 from agentcore.runtime.suspension import AskUserSuspension, turn_evidence_ledger
-from agentcore.runtime.turn_paused_capture import build_turn_paused_fact
+from agentcore.runtime.turn.paused_capture import build_turn_paused_fact
 from agentcore.runtime.verify import finish_guard
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry

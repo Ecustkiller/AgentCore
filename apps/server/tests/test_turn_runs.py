@@ -29,7 +29,7 @@ from agentcore.runtime.events import (
     tool_use_end,
     tool_use_start,
 )
-from agentcore.runtime.turn_runs import TurnRunRegistry
+from agentcore.runtime.turn.runs import TurnRunRegistry
 
 
 def _plan():
@@ -76,7 +76,7 @@ async def test_stop_unknown_conversation_is_false():
 
 
 async def test_stop_all_and_drain_cancels_every_live_run():
-    from agentcore.runtime.turn_runs import TurnRunRegistry
+    from agentcore.runtime.turn.runs import TurnRunRegistry
 
     reg = TurnRunRegistry()
     t1 = asyncio.create_task(_never())
@@ -96,7 +96,7 @@ async def test_stop_all_and_drain_cancels_every_live_run():
 
 
 async def test_is_clean_cancel_true_under_shutdown_flag():
-    from agentcore.runtime.turn_runs import TurnRunRegistry, turn_runs
+    from agentcore.runtime.turn.runs import TurnRunRegistry, turn_runs
 
     reg = TurnRunRegistry()
     turn_runs.end_shutdown_salvage()

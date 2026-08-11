@@ -239,7 +239,7 @@ async def test_reconcile_records_vision_orphan_without_calls():
 @pytest.mark.asyncio
 async def test_reconcile_interrupted_turn_cost_emits_and_stamps(monkeypatch):
     """Interrupt closer must reconcile empty cost_runs, emit cost.recorded, set messages.cost."""
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     reconcile = AsyncMock(
         return_value=[
@@ -328,7 +328,7 @@ async def test_reconcile_interrupted_turn_cost_emits_and_stamps(monkeypatch):
 @pytest.mark.asyncio
 async def test_reconcile_interrupted_turn_cost_skips_when_cost_stamped(monkeypatch):
     """Second closer must not re-emit cost.recorded once messages.cost is set."""
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     reconcile = AsyncMock(return_value=[{"run_id": "cap_1", "role": ROLE_CAPTAIN}])
     recorded: list = []
@@ -385,8 +385,8 @@ async def test_reconcile_interrupted_turn_cost_skips_when_cost_stamped(monkeypat
 @pytest.mark.asyncio
 async def test_close_turn_interrupted_invokes_cost_reconcile(monkeypatch):
     """All interrupt closers funnel through close_turn_interrupted → cost reconcile."""
-    from agentcore.runtime import turn_interrupt as interrupt_mod
-    from agentcore.runtime.turn_interrupt import TurnInterruptReason, close_turn_interrupted
+    from agentcore.runtime.turn import interrupt as interrupt_mod
+    from agentcore.runtime.turn.interrupt import TurnInterruptReason, close_turn_interrupted
 
     reconcile = AsyncMock()
     appended: list = []

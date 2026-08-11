@@ -46,7 +46,7 @@ from agentcore.llm.resolve import (
 )
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.limits import (
     CHANNEL_DEAD_PREPARE_ABORT,
     CHANNEL_DEAD_USER_VISIBLE,

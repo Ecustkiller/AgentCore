@@ -60,7 +60,7 @@ async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
         await asyncio.sleep(0)
 
     monkeypatch.setattr(
-        "agentcore.runtime.suspension_persistence.claim_paused_turn", fake_claim
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", fake_claim
     )
     monkeypatch.setattr("agentcore.conversation.service.resume_chat", fake_resume_chat)
 
@@ -124,7 +124,7 @@ async def test_fifo_yields_to_deferred_then_drains(monkeypatch):
         "agentcore.runtime.turn.queue._start_queued_turn", fake_start_queued
     )
     monkeypatch.setattr(
-        "agentcore.runtime.suspension_persistence.claim_paused_turn", fake_claim
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", fake_claim
     )
     monkeypatch.setattr("agentcore.conversation.service.resume_chat", fake_resume_chat)
 

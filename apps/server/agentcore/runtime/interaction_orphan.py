@@ -110,7 +110,7 @@ async def orphan_live_turn_hot_pending(conversation_id: str) -> list[str]:
     writer, so ``prefer_direct`` is set when a live ``turn_id`` is available.
     """
     from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.turn_runs import turn_runs
+    from agentcore.runtime.turn.runs import turn_runs
 
     live = turn_runs.get(conversation_id)
     turn_id: str | None = None

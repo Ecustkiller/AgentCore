@@ -329,15 +329,15 @@ async def test_salvage_no_dag_writes_incomplete_interrupted(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.MessageRepository",
+        "agentcore.runtime.turn.interrupt.MessageRepository",
         _MsgRepo,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.TurnJournalRepository",
+        "agentcore.runtime.turn.interrupt.TurnJournalRepository",
         _JournalRepo,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.turn_interrupt.async_session_factory",
+        "agentcore.runtime.turn.interrupt.async_session_factory",
         lambda: _FakeSession(),
     )
     monkeypatch.setattr(

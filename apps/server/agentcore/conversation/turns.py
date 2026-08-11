@@ -50,8 +50,8 @@ from agentcore.runtime.leases import (
 )
 from agentcore.runtime.pipeline import resume_chat_pipeline
 from agentcore.runtime.suspension import TurnSuspension
-from agentcore.runtime.suspension_persistence import restore_paused_turn
-from agentcore.runtime.turn_runs import turn_runs
+from agentcore.runtime.suspension.persistence import restore_paused_turn
+from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 
 logger = get_logger(__name__)

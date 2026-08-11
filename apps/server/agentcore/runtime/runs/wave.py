@@ -438,7 +438,7 @@ class WaveScheduler:
                             skipped.add(spec.run_id)
                             dispatched.add(spec.run_id)
                             if spec.run_id not in completed:
-                                from agentcore.runtime.turn_token_budget import (
+                                from agentcore.runtime.turn.token_budget import (
                                     REASON_TURN_TOKEN_BUDGET,
                                     TURN_TOKEN_RESERVE_SKIP_WARNING,
                                 )

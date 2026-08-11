@@ -207,7 +207,7 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
         async def clear_stream_segments(self, *, turn_id):
             pass
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     monkeypatch.setattr(interrupt_mod, "MessageRepository", FakeRepo)
     monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", FakeJournalRepo)
@@ -274,7 +274,7 @@ async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
         async def clear_stream_segments(self, *, turn_id):
             pass
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     monkeypatch.setattr(interrupt_mod, "MessageRepository", FakeRepo)
     monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", FakeJournalRepo)
@@ -306,7 +306,7 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
-    from agentcore.runtime import turn_interrupt as interrupt_mod
+    from agentcore.runtime.turn import interrupt as interrupt_mod
 
     monkeypatch.setattr(interrupt_mod, "async_session_factory", lambda: BoomCM())
     # Best-effort (文档铁律): a persistence failure must never escape this task.

@@ -187,7 +187,7 @@ def message_end(
 ) -> SSEEvent:
     # 未显式传入时复用 TurnLatencyProbe（与 chat.turn_complete 同锚）；无 probe 则省略字段。
     if duration_ms is None:
-        from agentcore.runtime.turn_latency import get_turn_latency
+        from agentcore.runtime.turn.latency import get_turn_latency
 
         probe = get_turn_latency()
         if probe is not None:
