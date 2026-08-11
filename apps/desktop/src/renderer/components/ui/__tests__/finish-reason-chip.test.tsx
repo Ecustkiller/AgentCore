@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { FinishReasonChip, FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
+import {
+  FINISH_REASON_META,
+  FinishReasonChip,
+} from "@/components/ui/finish-reason-chip";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 

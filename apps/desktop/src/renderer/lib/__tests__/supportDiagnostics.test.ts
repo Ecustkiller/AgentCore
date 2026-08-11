@@ -106,9 +106,11 @@ describe("formatSupportDiagnosticText", () => {
         stream: false,
       }),
     ).toBe(
-      ["阅读这段产品AI日志：", "message_id: msg-1", "error_code: LLM_ERROR"].join(
-        "\n",
-      ),
+      [
+        "阅读这段产品AI日志：",
+        "message_id: msg-1",
+        "error_code: LLM_ERROR",
+      ].join("\n"),
     );
   });
 

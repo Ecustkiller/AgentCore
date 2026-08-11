@@ -15,9 +15,7 @@ export const EVERYONE_MENTION_LABEL = "所有人";
 export type GroupRole = ChatParticipant["group_role"];
 
 /** Whether a group_role is owner/admin (群版主). */
-export function isGroupModeratorRole(
-  role: string | null | undefined,
-): boolean {
+export function isGroupModeratorRole(role: string | null | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
@@ -49,13 +47,11 @@ export function memberGovernanceBadges(
  * server still enforces). Never self / platform admin; group mods cannot act on
  * other group mods — only platform admin can.
  */
-export function canModerateMemberTarget(
-  opts: {
-    myUserId: string | null | undefined;
-    isPlatformAdmin: boolean;
-    target: Pick<ChatParticipant, "id" | "is_admin" | "group_role">;
-  },
-): boolean {
+export function canModerateMemberTarget(opts: {
+  myUserId: string | null | undefined;
+  isPlatformAdmin: boolean;
+  target: Pick<ChatParticipant, "id" | "is_admin" | "group_role">;
+}): boolean {
   const { myUserId, isPlatformAdmin, target } = opts;
   if (!myUserId || target.id === myUserId) return false;
   if (target.is_admin) return false;
@@ -152,8 +148,7 @@ export function canOfferRecall(
   ) {
     return isAdmin;
   }
-  const canGovernGroup =
-    chatType === "group" && (isAdmin || isGroupModerator);
+  const canGovernGroup = chatType === "group" && (isAdmin || isGroupModerator);
   if (canGovernGroup) return true;
   if (!mine) return false;
   const created = new Date(message.created_at).getTime();

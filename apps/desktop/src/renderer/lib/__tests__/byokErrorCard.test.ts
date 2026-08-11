@@ -1,10 +1,10 @@
 import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import {
+  EMPTY_RESPONSE_CHIP_LABELS,
   StreamError,
   connectivityEscalationSuffix,
   degradedFinishChipLabel,
   describeError,
-  EMPTY_RESPONSE_CHIP_LABELS,
   errorActionForCode,
   isClientSideLlmRejection,
   isConnectivityErrorCode,
@@ -150,12 +150,12 @@ describe("empty-response diagnosis labels", () => {
 
 describe("isEmptyResponseUserSurface", () => {
   it("detects code / diagnosis / message markers", () => {
-    expect(
-      isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" }),
-    ).toBe(true);
-    expect(
-      isEmptyResponseUserSurface({ emptyDiagnosis: "silent_empty" }),
-    ).toBe(true);
+    expect(isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" })).toBe(
+      true,
+    );
+    expect(isEmptyResponseUserSurface({ emptyDiagnosis: "silent_empty" })).toBe(
+      true,
+    );
     expect(
       isEmptyResponseUserSurface({
         message: "模型多次空响应 · 模型返回空内容",
@@ -284,12 +284,8 @@ describe("connectivityEscalationSuffix", () => {
 
   it("never escalates LLM_EMPTY_RESPONSE or emptyDiagnosis", () => {
     expect(isConnectivityErrorCode("LLM_EMPTY_RESPONSE")).toBe(false);
-    expect(
-      connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m1"),
-    ).toBeNull();
-    expect(
-      connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m2"),
-    ).toBeNull();
+    expect(connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m1")).toBeNull();
+    expect(connectivityEscalationSuffix("LLM_EMPTY_RESPONSE", "m2")).toBeNull();
     // Even if a connectivity code somehow coexists with emptyDiagnosis, skip.
     expect(
       connectivityEscalationSuffix("LLM_TIMEOUT", "m1", {

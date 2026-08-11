@@ -227,7 +227,9 @@ describe("ModelKeyForm", () => {
     expect(screen.getByLabelText("Base URL").tagName).toBe("INPUT");
     expect(screen.getByText("高级选项")).toBeTruthy();
     expect(
-      screen.getByText(/自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/),
+      screen.getByText(
+        /自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/,
+      ),
     ).toBeTruthy();
 
     const defaultModelInput = defaultModelControl() as HTMLInputElement;
@@ -240,7 +242,9 @@ describe("ModelKeyForm", () => {
     renderForm();
     openAdvancedOptions();
     expect(
-      screen.getByText(/自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/),
+      screen.getByText(
+        /自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/,
+      ),
     ).toBeTruthy();
   });
 
