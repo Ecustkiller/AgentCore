@@ -24,8 +24,9 @@ _REQUIRED_SECTIONS = [
 
 # 嵌套子任务继承父审计语境时注入（不重跑整本 playbook；防「再确认」空转）。
 _NESTED_AUDIT_HANDOFF_SUPPLEMENT = """\
-【嵌套审计·收工】父任务属代码审计。证据够定案条数后立即 file_write 报告终稿并一次 handoff；\
-禁止以「再多读一点 / 再确认」无限扩读。先落盘再 handoff；handoff 后勿改同一报告再交。\
+【嵌套审计·收工】父任务属代码审计。证据够定案条数后：先 file_write `.audit.json` 骨架\
+（findings 允许候选态/空），再补全字段，最后写 Markdown 成文并一次 handoff；\
+禁止以「再多读一点 / 再确认」无限扩读。骨架先落 → 补全 → 成文；handoff 后勿改同一报告再交。\
 summary/key_points 须可执行，禁空话「审计完成」。"""
 
 
@@ -83,6 +84,8 @@ def apply_inherited_code_audit_discipline(tasks: list[Any]) -> list[dict[str, An
 _AUDIT_DISCIPLINE = """
 【两阶段·强制】先 A 宽扫只出候选（严重度上限低/观察），
 再 B 定案（读全函数体、追上游、查根+包内配置）。
+【分段交付】Phase A 结束即先 file_write `.audit.json` 骨架（findings 允许候选态/空）；
+Phase B 补全 JSON 字段；Markdown 成文放最后再写。结构化 JSON 是便宜产物，必须前置落盘。
 向用户「共 N 条缺陷」只计 B 定案属实且落入「一、属实缺陷」者；A 候选未进 B 不进 N。
 预算不够则少报：本模块 Phase B 最多定案 K={k} 条；未覆盖面最多一行「未覆盖缺口」。
 
@@ -157,11 +160,13 @@ def _auditor_task_body(
         f"对范围【{scope}】中的模块【{module}】做代码审计（只读调查：默认不改业务源码；"
         f"允许 file_write/str_replace 写入约定文档报告，除此以外勿改工程）。{focus_line}"
         f"{_AUDIT_DISCIPLINE.format(k=k)}"
-        f"完整报告用 file_write 落到 `{artifact}`（Markdown）；"
-        f"另交配套 `{json_artifact}`（findings：severity/verification/verdict/"
-        f'evidence 等；evidence 例 `"a.ts:10"` 或 `["a.ts:10","b.ts:20"]`）。'
+        f"【交付顺序】骨架先落 → 补全 → 成文："
+        f"Phase A 结束即先 file_write `{json_artifact}` 骨架"
+        "（findings 允许候选态/空；severity/verification/verdict/evidence 字段面保持；"
+        f'evidence 例 `"a.ts:10"` 或 `["a.ts:10","b.ts:20"]`）；'
+        f"Phase B 补全该 JSON；Markdown 成文最后再 file_write 到 `{artifact}`。"
         "handoff 人审速览（可执行摘要，不代落盘）："
-        "【一次交接】先把 Markdown + .audit.json 终稿 file_write 定稿，再调用一次 handoff；"
+        "【一次交接】JSON 骨架先行、补全后再写 Markdown 终稿，再调用一次 handoff；"
         "handoff 后勿再改同一报告并二次 handoff（除非主管续派）。"
         "summary 写共 N 条属实（只计「一、属实缺陷」）与报告完整相对路径"
         f"（须含约定文档前缀，如 `{artifact}`，禁裸 reviews/…）；禁空话「审计完成」。"

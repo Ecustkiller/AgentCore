@@ -66,6 +66,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "你好，已收到。",
     "reasoning": "",
     "captainContext": [],

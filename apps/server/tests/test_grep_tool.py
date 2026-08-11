@@ -129,7 +129,8 @@ async def test_grep_rejects_missing_path(tmp_path: Path):
     assert result.success is False
     assert "不存在" in result.error
     assert "父目录" in result.error or "上级目录也找不到" in result.error
-    assert "原样重试" in result.error
+    assert "原样重试" not in result.error
+    assert "反复重试" in result.error
 
 
 async def test_grep_missing_dir_with_parent_gives_landmark(tmp_path: Path):
@@ -147,7 +148,7 @@ async def test_grep_missing_dir_with_parent_gives_landmark(tmp_path: Path):
     assert "父目录" in result.error
     assert "apps/server/" in result.error
     assert "agentcore" in result.error or "pyproject.toml" in result.error
-    assert "原样重试" in result.error
+    assert "反复重试" in result.error
 
 
 # --- core search behavior ---

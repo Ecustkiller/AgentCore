@@ -44,7 +44,8 @@ def test_usage_row_projects_to_short_keys():
 
 
 def test_no_spend_turn_omits_usage():
-    # 报错/空回合 stored zeros → no token meta on reload, parity with the live bubble.
+    # 报错/空回合 stored zeros without structured error → no token meta on reload,
+    # parity with the live bubble.
     d = MessageDetail.model_validate(
         _row(
             {
@@ -58,6 +59,32 @@ def test_no_spend_turn_omits_usage():
         )
     )
     assert d.usage is None
+
+
+def test_zero_spend_with_error_projects_usage_error():
+    """Empty-face redesign: usage.error must survive REST even when tokens are zero."""
+    d = MessageDetail.model_validate(
+        _row(
+            {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "cache_hit_tokens": 0,
+                "cache_miss_tokens": 0,
+                "error": {
+                    "code": "LLM_INSUFFICIENT_BALANCE",
+                    "message": "上游账户余额不足，请充值或更换 Key。",
+                },
+                "error_code": "LLM_INSUFFICIENT_BALANCE",
+            }
+        )
+    )
+    assert d.usage is not None
+    assert d.usage.error is not None
+    assert d.usage.error.code == "LLM_INSUFFICIENT_BALANCE"
+    assert "余额" in d.usage.error.message
+    assert d.usage.input == 0
+    assert d.usage.output == 0
 
 
 def test_missing_usage_column_omits_usage():

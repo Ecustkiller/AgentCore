@@ -46,7 +46,6 @@ beforeEach(() => {
     modeByConversation: {},
     rootIdByConversation: {},
     mergedJobIds: {},
-    toastedSucceededIds: {},
   });
 });
 

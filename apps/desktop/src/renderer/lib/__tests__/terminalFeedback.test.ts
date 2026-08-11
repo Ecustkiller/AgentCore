@@ -28,9 +28,10 @@ describe("handleTerminalResult", () => {
     expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
-  it("shows info toast on cancel", () => {
+  it("no toast on cancel", () => {
     handleTerminalResult({ ok: false, reason: "已取消" });
-    expect(notifyInfoMock).toHaveBeenCalledWith("已取消");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(notifyErrorMock).not.toHaveBeenCalled();
   });
 
   it("shows error toast on failure", () => {
@@ -69,7 +70,7 @@ describe("runTerminalBash", () => {
     window.terminalApi = undefined;
   });
 
-  it("用户取消 → info toast，不调 runBash", async () => {
+  it("用户取消 → 不 toast、不调 runBash", async () => {
     const api = mockTerminalApi();
     window.terminalApi = api;
     const pending = runTerminalBash("rm -rf /");
@@ -77,7 +78,7 @@ describe("runTerminalBash", () => {
     useRunConfirmStore.getState().decide("cancel");
     await pending;
     expect(api.runBash).not.toHaveBeenCalled();
-    expect(notifyInfoMock).toHaveBeenCalledWith("已取消在终端运行");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     window.terminalApi = undefined;
   });
 

@@ -1,6 +1,7 @@
 """Classify side-path LLM failures for observability (title / memory / compaction).
 
-Buckets are product-chrome oriented: auth vs upstream blip vs timeout vs other.
+Buckets are product-chrome oriented: auth vs upstream blip vs timeout vs
+invalid_response (2xx non-JSON) vs other.
 Quota skips stay on ``billing.background_quota_skip`` — callers pass
 ``reason=quota_skip`` only when they already know the gate returned None after quota.
 """
@@ -9,7 +10,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from agentcore.core.errors import LLMAuthError, LLMTimeoutError, LLMUpstreamError
+from agentcore.core.errors import (
+    LLMAuthError,
+    LLMInvalidResponseError,
+    LLMTimeoutError,
+    LLMUpstreamError,
+)
 
 BackgroundFailureReason = Literal[
     "auth",
@@ -17,6 +23,7 @@ BackgroundFailureReason = Literal[
     "timeout",
     "quota_skip",
     "provider_unavailable",
+    "invalid_response",
     "other",
 ]
 
@@ -27,6 +34,8 @@ def classify_background_llm_failure(exc: BaseException) -> BackgroundFailureReas
         return "auth"
     if isinstance(exc, TimeoutError | LLMTimeoutError):
         return "timeout"
+    if isinstance(exc, LLMInvalidResponseError):
+        return "invalid_response"
     if isinstance(exc, LLMUpstreamError):
         status = _upstream_status(exc)
         if status is None or status >= 500:

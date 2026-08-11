@@ -1,7 +1,7 @@
 import { Centered, EmptyHint, InlineError } from "@/components/files/parts";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { notifyActionError } from "@/lib/toast";
 import {
   type WorkspaceTrashEntry,
   listTrash,
@@ -206,7 +206,6 @@ function TrashRow({
     setBusy(true);
     try {
       await restoreTrash(conversationId, entry.entryId);
-      notifySuccess("已还原");
       onRestored();
     } catch (e) {
       notifyActionError("还原失败", e);
@@ -267,7 +266,6 @@ function LocalTrashRow({
         notifyActionError("还原失败", new Error(res.reason));
         return;
       }
-      notifySuccess("已还原");
       onRestored();
     } catch (e) {
       notifyActionError("还原失败", e);

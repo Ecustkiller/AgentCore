@@ -33,6 +33,15 @@ async def persist_job_turn(*, user_id: str, conversation_id: str, result: dict) 
     """Persist a handoff job's assistant reply + cost ledger under the job conv."""
     assistant_reply = result.get("content") or ""
     cost_runs = result.get("cost_runs") or []
+    ledger_drained = None
+    if cost_runs or result.get("message_id"):
+        from agentcore.billing.turn_ledger import drain_cost_ledger_before_reconcile
+
+        # Drain before main-pool session — same pool discipline as cloud finalize.
+        ledger_drained = await drain_cost_ledger_before_reconcile(
+            conversation_id=conversation_id,
+            message_id=result.get("message_id"),
+        )
     async with async_session_factory() as session:
         if assistant_reply:
             await MessageRepository(session).create(
@@ -58,12 +67,13 @@ async def persist_job_turn(*, user_id: str, conversation_id: str, result: dict) 
                 trace_id=None,
                 entries=result.get("journal_entries"),
             )
-        if cost_runs or result.get("message_id"):
+        if ledger_drained is not None:
             try:
                 from agentcore.billing.turn_ledger import reconcile_turn_cost_ledger
 
                 ledger_rows = await reconcile_turn_cost_ledger(
                     session,
+                    drained=ledger_drained,
                     user_id=user_id,
                     conversation_id=conversation_id,
                     message_id=result.get("message_id"),

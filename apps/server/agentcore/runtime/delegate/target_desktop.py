@@ -417,6 +417,48 @@ async def load_target_folder_binding(
         raise
 
 
+async def lookup_folder_display_names(
+    folder_ids: set[str],
+    *,
+    user_id: str,
+) -> dict[str, str]:
+    """Soft owner-scoped Folder id → display name map for kickoff card projection.
+
+    Reuses :func:`load_target_folder_binding` (cloud ticket / local DB). Misses and
+    connectivity failures are omitted from the map — callers stamp a fallback label.
+    Never raises; kickoff must not block on name resolution.
+    """
+    cleaned = {fid.strip() for fid in folder_ids if isinstance(fid, str) and fid.strip()}
+    uid = (user_id or "").strip()
+    if not cleaned or not uid:
+        return {}
+
+    async def _one(fid: str) -> tuple[str, str] | None:
+        try:
+            binding = await load_target_folder_binding(folder_id=fid, user_id=uid)
+        except TargetDesktopError:
+            return None
+        except Exception:  # noqa: BLE001 — soft: never fail kickoff on name lookup
+            logger.warning(
+                "delegate.folder_display_name_failed",
+                folder_id=fid,
+                user_id=uid,
+            )
+            return None
+        if binding is None:
+            return None
+        return fid, binding.name or ""
+
+    pairs = await asyncio.gather(*(_one(fid) for fid in cleaned))
+    out: dict[str, str] = {}
+    for item in pairs:
+        if item is None:
+            continue
+        fid, name = item
+        out[fid] = name
+    return out
+
+
 def build_target_backend(
     *,
     user_id: str,

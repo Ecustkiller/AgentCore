@@ -1,15 +1,19 @@
 import {
   AssistantMessageFooter,
-  DeliveryShortfallHint,
   FinishReasonChip,
 } from "@/components/AssistantMessageFooter";
 import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
+import {
+  InterjectionBubbles,
+  type InterjectionItem,
+} from "@/components/InterjectionBubbles";
 import { Markdown } from "@/components/Markdown";
 import {
   ProcessTimeline,
   Reasoning,
   type TeamProjection,
   graphAppendAnchorLabel,
+  prevGraphAnchorLabel,
   teamHasStartedRuns,
 } from "@/components/ProcessTimeline";
 import { SourceCards, buildCitationDisplayMap } from "@/components/SourceCards";
@@ -35,6 +39,8 @@ import type {
 // at the marker (协作图时间线落点), re-folded from MessageDetail.runs.events for history.
 // The checkpoint·ask·plan_review markers are anchors for desktop's inline cards; mobile owns
 // those interactions via its PauseCard, so they no-op in the timeline.
+// user_interjection markers pin mid-turn 插话 bubbles at their chronological slot (正文/五态
+// 旁路查 userInterjections)；旧 journal 无 marker 时由调用方挂尾部回退条。
 //
 // Citations render as a source list under the message either way.
 import type {
@@ -42,7 +48,6 @@ import type {
   ContextBlockWire,
   DebateNarrativeRound,
   DebateResultPayload,
-  DeliveryStatusPayload,
   EvidenceLedgerEntry,
   ProcessStep,
   ToolPhase,
@@ -50,10 +55,14 @@ import type {
 } from "@agentcore/contract-types";
 import { useMemo, useRef, useState } from "react";
 
-export { graphAppendAnchorLabel, teamHasStartedRuns, type TeamProjection };
+export {
+  graphAppendAnchorLabel,
+  prevGraphAnchorLabel,
+  teamHasStartedRuns,
+  type TeamProjection,
+};
 export {
   AssistantMessageFooter,
-  DeliveryShortfallHint,
   FinishReasonChip,
 } from "@/components/AssistantMessageFooter";
 
@@ -77,13 +86,15 @@ export function AssistantContent({
   toolPhases,
   graphAppendActKinds,
   graphAppendAuthorizedBy,
+  prevExecutionIds,
+  userInterjections,
+  turnClosed = false,
   onFill,
   supportIds,
   onOpenBrowserLive,
   finishReason,
   finishDiagnosisLabel,
   failureNotice,
-  deliveryStatus,
   usage,
   rounds,
   costText,
@@ -126,10 +137,17 @@ export function AssistantContent({
    *  tool, from the transport-only live sibling {@link extractToolPhases}. Live turns only; absent
    *  on history replay (the events are never journaled) → tool rows show plain status. */
   toolPhases?: Map<string, ToolPhase>;
-  /** graph_append 开幕 kind（`extractGraphAppendActKinds`）：开辩论幕锚点文案。 */
+  /** graph_append 开幕 kind（旧 journal；`extractGraphAppendActKinds`）。 */
   graphAppendActKinds?: Map<string, string>;
-  /** graph_append 授权来源（`extractGraphAppendAuthorizedBy`）：锚点副文案。 */
+  /** graph_append 授权来源（旧 journal；`extractGraphAppendAuthorizedBy`）。 */
   graphAppendAuthorizedBy?: Map<string, string>;
+  /** execution_id → prev_execution_id（新契约「续自」；`extractPrevExecutionIds`）。 */
+  prevExecutionIds?: Map<string, string>;
+  /** 旁路插话叶；process 上 `user_interjection` marker 按 id 查。无 process / 无 marker
+   *  的旧 journal 由组件尾部回退条渲染。 */
+  userInterjections?: readonly InterjectionItem[];
+  /** 回合已收口 → received 派生态「未被主 Agent 读取」。 */
+  turnClosed?: boolean;
   /** Tap an ask/chip → fill the composer (回填输入框, review before send). Absent → chips
    *  render but no-op (e.g. a read-only context with no composer). */
   onFill?: (text: string) => void;
@@ -143,8 +161,6 @@ export function AssistantContent({
   finishDiagnosisLabel?: string;
   /** Empty-failure visible notice (structured error / emptyFailureNotice) for copy/export. */
   failureNotice?: string | null;
-  /** 单 Agent 交付轻提示；多 Agent 由 TeamView 自带，此处跳过以免双份。 */
-  deliveryStatus?: DeliveryStatusPayload | null;
   usage?: UsageBreakdown | null;
   rounds?: number | null;
   costText?: string | null;
@@ -179,6 +195,23 @@ export function AssistantContent({
   }, [content, citations]);
   const citationToDisplay = citationToDisplayProp ?? citationDisplay?.toDisplay;
 
+  const markedInterjectionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of process ?? []) {
+      if (s.kind === "user_interjection" && s.interjection_id) {
+        ids.add(s.interjection_id);
+      }
+    }
+    return ids;
+  }, [process]);
+  const unmarkedInterjections = useMemo(
+    () =>
+      (userInterjections ?? []).filter(
+        (u) => !markedInterjectionIds.has(u.interjectionId),
+      ),
+    [userInterjections, markedInterjectionIds],
+  );
+
   return (
     <>
       {!isStreaming && !failureNotice && (
@@ -211,6 +244,9 @@ export function AssistantContent({
           toolPhases={toolPhases}
           graphAppendActKinds={graphAppendActKinds}
           graphAppendAuthorizedBy={graphAppendAuthorizedBy}
+          prevExecutionIds={prevExecutionIds}
+          userInterjections={userInterjections}
+          turnClosed={turnClosed}
           onFill={onFill}
           onOpenBrowserLive={onOpenBrowserLive}
         />
@@ -231,8 +267,12 @@ export function AssistantContent({
           ) : null}
         </>
       )}
-      {!hasTeam && deliveryStatus ? (
-        <DeliveryShortfallHint status={deliveryStatus} />
+      {/* 旧 journal / 无 process：无 marker 的插话仍挂尾，避免刷新丢泡。 */}
+      {unmarkedInterjections.length > 0 ? (
+        <InterjectionBubbles
+          items={unmarkedInterjections}
+          turnClosed={turnClosed}
+        />
       ) : null}
       {citations && citations.length > 0 ? (
         <SourceCards

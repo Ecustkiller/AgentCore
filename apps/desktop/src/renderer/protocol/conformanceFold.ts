@@ -26,6 +26,7 @@ import {
   foldTeamMarker,
   foldToolUseEnd,
   foldToolUseStart,
+  foldUserInterjectionMarker,
 } from "@/lib/foldMessageLane";
 import {
   type AgentState,
@@ -153,6 +154,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   }[] = [];
   const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
+  let turnError: { code: string; message: string } | null = null;
   // 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
   // run_started) + the opening context it was fed, routed turn-level — the CEO is the
   // bubble above the graph, not a peer node, so its run_context never becomes a frame.
@@ -229,7 +231,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const payload = ev.payload as RunPlanPayload;
         const next = planFromRunPlan(payload);
         plan = plan && plan.id === next.id ? mergePlanInto(plan, next) : next;
-        // 跨回合同图追加：带 host_message_id 的生长 run_plan 不插 team（锚点由 graph_append）。
+        // 旧 journal 跨回合同图追加：带 host_message_id 的生长 run_plan 不插 team
+        //（锚点由 graph_append）。新路径无此字段 → 本回合开图。
         if (!payload.host_message_id) {
           // 协作图时间线落点: the first plan of an execution drops a `team` marker fixing
           // the graph's slot in the CEO timeline (later same-id batches no-op).
@@ -413,9 +416,15 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         maybeRecordInteractionFrame(ev.type, ev, frames);
         break;
       }
-      case "error":
+      case "error": {
         sawError = true;
+        const p = ev.payload as { code?: string; message?: string };
+        turnError = {
+          code: (p.code ?? "").trim() || "LLM_ERROR",
+          message: (p.message ?? "").trim(),
+        };
         break;
+      }
       case "message_end": {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
@@ -438,6 +447,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           };
           finishReason = null;
           cost = null;
+          turnError = null;
         }
         if (mid) lastMessageId = mid;
         break;
@@ -459,7 +469,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "coordination_wait":
       case "workspace_lock_wait":
       case "turn_queued":
-      case "turn_steer_accepted":
       case "turn_queue_started":
       case "turn_queue_cancelled":
       case "resume_deferred":
@@ -531,6 +540,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         };
         const iid = (p.interjection_id || "").trim();
         if (iid) {
+          // 零宽 positional marker：同 id 首次出现钉到 process；后续 status 只改旁路。
+          messageLane = foldUserInterjectionMarker(messageLane, iid);
           const attachments = (p.attachments ?? [])
             .filter(
               (
@@ -679,6 +690,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   return {
     status,
     finishReason,
+    error: turnError,
     content: messageLane.content,
     reasoning: messageLane.reasoning,
     captainContext,

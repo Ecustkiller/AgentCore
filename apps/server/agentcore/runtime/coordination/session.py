@@ -262,20 +262,28 @@ def should_enter_coordination(
     has_checkpoint: bool = False,
     checkpoint_enabled: bool = False,
 ) -> bool:
-    """Gate: ≥2 workers + root CEO + not finalize; opt out with ``coordinate=False``.
+    """Gate: ≥1 worker + root CEO + not finalize; opt out with ``coordinate=False``.
 
     Callers default ``coordinate`` to True when the LLM omits the arg; only an
-    explicit false falls back to classic blocking. Solo / nested lead / finalize
-    still never enter.
+    explicit false falls back to classic blocking. Nested lead / finalize still
+    never enter. Solo (1 worker) enters so mid-flight interjections and
+    ``cancel_worker`` stay reachable while the worker runs.
+
+    Adjacent ≥2 gates (kickoff plan-preview, team_synthesis_preview, cold-start
+    explore roster) are independent and stay multi-worker-only — solo keeps its
+    zero-friction kickoff appearance.
 
     When the batch contains ``checkpoint_after`` nodes **and** the turn's checkpoint
     gate is open, stay on classic blocking drive so durable plan_review cards fire.
     Gate-off (evals / ``approvals_enabled=False``) leaves coordination unchanged.
 
     **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
-    is available iff a coordination session is active. Solo blocking escalate
+    is available iff a coordination session is active. Classic blocking escalate
+    (no live session — e.g. ``coordinate=false`` / finalize / nested lead)
     therefore hangs on the **user**, never the CEO — otherwise worker↔CEO deadlock
     (CEO blocked inside ``delegate``, worker waiting for ``resolve_escalation``).
+    Solo-in-coordination has a free CEO, so Invariant B holds the same way as
+    multi-worker coordination.
     """
     if coordinate is False:
         return False
@@ -285,7 +293,7 @@ def should_enter_coordination(
         return False
     if has_checkpoint and checkpoint_enabled:
         return False
-    return worker_count >= 2
+    return worker_count >= 1
 
 
 @dataclass
@@ -406,6 +414,7 @@ class CoordinationSession:
     # process-local only — journal snapshots strip ``llm_credentials``.
     pending_interjections: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     # Ids injected into a CEO wake and not yet addressed/queued/failed (process-local).
+    # ``injected`` SSE is emitted when ids enter this set.
     awaiting_disposition: set[str] = field(default_factory=set, repr=False)
     # Terminal disposition already emitted (idempotent queue_user_message after close).
     dispositioned_interjections: set[str] = field(default_factory=set, repr=False)

@@ -263,8 +263,10 @@ export interface ProjectedTeamNote {
   source?: "ceo" | "worker" | "inherited";
 }
 
-/** Mid-flight user interjection into a live coordination turn (`user_interjection`).
- * Same `interjectionId` keeps latest `status` (received → addressed / queued / failed). */
+/** Mid-flight user interjection into a live turn (`user_interjection`).
+ * Same `interjectionId` keeps latest `status`
+ * (协调: received → injected → addressed / queued / failed;
+ *  经典: received → injected | queued | failed). */
 export interface ProjectedUserInterjectionAttachment {
   name: string;
   workspacePath?: string;
@@ -275,7 +277,7 @@ export interface ProjectedUserInterjection {
   interjectionId: string;
   executionId: string;
   content: string;
-  status: "received" | "addressed" | "queued" | "failed" | string;
+  status: "received" | "injected" | "addressed" | "queued" | "failed" | string;
   note: string | null;
   attachments?: ProjectedUserInterjectionAttachment[];
 }
@@ -405,11 +407,24 @@ export interface DebatePretrialProjection {
   externalEvidenceReason?: string | null;
 }
 
+/** Turn-level structured error from the transport ``error`` SSE event (reload face
+ * authority when content is empty). Null when the turn never emitted ``error``. */
+export interface ProjectedTurnError {
+  code: string;
+  message: string;
+}
+
 export interface ProjectedTurn {
   status: TurnStatus;
   /** message_end.finish_reason (end_turn / max_rounds / degraded / unproductive /
    * error / cancelled), or null while the turn is still streaming. */
   finishReason: string | null;
+  /**
+   * Latest SSE ``error`` payload for this turn (code + user-facing message).
+   * Empty-failure face authority on live/reload when ``content`` is empty —
+   * see {@link hasProjectedFailureFace}. Null when no ``error`` event fired.
+   */
+  error: ProjectedTurnError | null;
   /** The assistant bubble: the CEO captain's reply text + thinking (always, even in
    * a multi-agent turn where the captain speaks above the team graph). */
   content: string;

@@ -69,6 +69,7 @@ const fsApi: FsApi = {
   stageDroppedFile: async () => fail(),
   finalizeStagedAttachment: async () => fail(),
   consumeStagedBytes: async () => fail(),
+  sweepStagingOrphans: async () => {},
   checkoutArchive: async () => ({
     ok: false,
     reason: "error",
@@ -92,6 +93,7 @@ const sidecarApi: SidecarApi = {
   cancel: async () => {},
   respond: async () => ({ resolved: false }),
   runRedirect: async () => {},
+  runStop: async () => ({ queued: 0 }),
   debateSteer: async () => {},
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");

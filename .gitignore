@@ -111,6 +111,12 @@ apps/server/_tmp_*
 apps/server/tmp_*
 # One-off review / audit scratch (maintainer-local; not published)
 /reviews/
+# 桌面临时自检脚本（tmp- 前缀 = 用完即删；正式探针请用无前缀名并挂进 package.json）
+apps/desktop/scripts/tmp-*
+# 浏览器工具链的分步调试截图（browser_* 工具落盘），仓库根 only
+/browser/
+# PowerShell 里 `uv run python -c "… >= …"` 之类误重定向产出的字面量文件
+=
 # Planning / proposal drafts (maintainer-local; not published — keep on disk)
 docs/06-规划/
 # Cursor agent transcripts (local IDE); never ship

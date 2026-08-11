@@ -115,7 +115,7 @@ class StuckInterventionMixin:
 
     @property
     def investigation_rounds(self) -> int:
-        """Rounds with >=1 read-only investigation call (the safety net's batch-robust clock)."""
+        """Rounds with ≥1 *successful* investigation call (all-fail rounds do not count)."""
         return self._investigation_rounds
 
     @property

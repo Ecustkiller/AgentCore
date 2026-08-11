@@ -40,7 +40,7 @@ def is_mlr_synthesizer_id(run_id: str | None, agent_id: str | None = None) -> bo
 
 @dataclass(frozen=True, slots=True)
 class DebateHostAttach:
-    """Resolved host for growing a debate act onto an MLR multi_agent graph."""
+    """Resolved prior MLR graph for chaining a debate act via ``prev_execution_id``."""
 
     execution_id: str
     host_message_id: str

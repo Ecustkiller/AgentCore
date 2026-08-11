@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -115,13 +114,26 @@ def _is_same_host_turn_append(active: Any, message_id: str | None) -> bool:
     """True only for same-turn secondary delegate (message_id ≡ host_turn_id).
 
     Cross-turn adopt keeps the host eid active but this turn's message_id differs
-    from ``host_turn_id`` — must not soft-clear ``append_to`` (growth frames need
-    divert into the host journal). Empty / unbound ``host_turn_id`` is not same-turn.
+    from ``host_turn_id`` — that path uses live session merge (no divert), not
+    ``prev_execution_id``. Empty / unbound ``host_turn_id`` is not same-turn.
     """
     host_tid = (getattr(active, "host_turn_id", None) or "").strip()
     cur_tid = (message_id or "").strip()
     return bool(host_tid) and host_tid == cur_tid
 
+
+def _is_live_execution_merge(active: Any, append_to: str | None) -> bool:
+    """True when ``append_to`` targets a still-active coordination session (合入热图).
+
+    Covers same-turn secondary delegate and adopt mid-flight (新回合接上仍在跑的后台图).
+    Finished cross-turn graphs are not live → caller mints a new eid + prev chain.
+    """
+    if active is None or not getattr(active, "active", False):
+        return False
+    eid = (append_to or "").strip()
+    if not eid:
+        return False
+    return eid == (getattr(active, "execution_id", None) or "").strip()
 
 def _waves_ids_for_log(
     plan: RunPlan,
@@ -612,15 +624,15 @@ class DelegateTool:
                 folder_id=default_target,
             )
 
-        # 跨回合同图追加：须在 build_run_plan 之前加载宿主计划，以便 depends_on 解析
-        # 同 execution 已有图节点（对齐 build_added_nodes / replan add）。
+        # 协作图身份：同回合 / adopt 热图 → 合入同一 execution_id；
+        # 跨回合已收口图 → 新 execution_id + prev_execution_id（不 divert）。
         append_raw = arguments.get("append_to_execution_id")
         append_to = (
             append_raw.strip()
             if isinstance(append_raw, str) and append_raw.strip()
             else None
         )
-        host_message_id: str | None = None
+        prev_execution_id: str | None = None
         append_seed: dict | None = None
         host_plan_for_append = None
         latest_miss_degraded_note: str | None = None
@@ -639,14 +651,11 @@ class DelegateTool:
         if append_to and append_to.lower() == "latest":
             from agentcore.runtime.coordination.session import active_coordination
 
-            # 仅真同回合二次 delegate（message_id ≡ host_turn_id）才吞 latest。
-            # 跨回合 adopt 后 eid 已是宿主、但 message_id≠host_turn_id → 须保留
-            # append，走 graph_append + divert，让生长 run_plan 进宿主 journal。
+            # 真同回合二次 / adopt 热图：吞 latest，走 live merge（不 prev）。
             active = active_coordination(self._base_tool_context.execution_id)
-            if (
-                active is not None
-                and active.active
-                and _is_same_host_turn_append(active, self._message_id)
+            if active is not None and active.active and (
+                _is_same_host_turn_append(active, self._message_id)
+                or _is_live_execution_merge(active, active.execution_id)
             ):
                 append_to = None
             else:
@@ -692,19 +701,28 @@ class DelegateTool:
                         append_to = None
                     else:
                         append_to = resolved
-        # 同回合显式 append_to 命中当前活跃协作图 ≡ 不传 append（与 latest 软化对齐）。
-        # 跨回合 adopt 后同 eid 仍须走跨图 load；活跃图 A + append_to=B（B≠A）禁误吞。
+        # 同回合显式 append_to / adopt 热图命中当前活跃协作图 ≡ 不传 append。
         if append_to:
             from agentcore.runtime.coordination.session import active_coordination
 
             active = active_coordination(self._base_tool_context.execution_id)
-            if (
+            # Keep nested: outer = live-merge eligibility; inner = soft-clear predicate
+            # (comments below belong to the clear, not the eligibility gate).
+            if (  # noqa: SIM102
                 active is not None
                 and active.active
-                and append_to == active.execution_id
-                and _is_same_host_turn_append(active, self._message_id)
+                and _is_live_execution_merge(active, append_to)
+                and (
+                    _is_same_host_turn_append(active, self._message_id)
+                    or append_to == active.execution_id
+                )
             ):
-                append_to = None
+                # Soft-clear：热图合入由 drive merging_into_active / live_plan 承担。
+                # 同回合仍可走下方 _last_graph / live_plan 注入；adopt 则已绑 eid。
+                if _is_same_host_turn_append(active, self._message_id) or (
+                    active.execution_id == (self._base_tool_context.execution_id or "")
+                ):
+                    append_to = None
 
         # 同回合注入 existing_plan：append 已加载则保持；否则活跃 live_plan；
         # 再否则本 tool 实例二次+ 自动合入上一张图（与显式 append 同路径）。
@@ -713,6 +731,7 @@ class DelegateTool:
             from agentcore.runtime.coordination.session import active_coordination
 
             active = active_coordination(self._base_tool_context.execution_id)
+            bound_eid = (self._base_tool_context.execution_id or "").strip()
             if (
                 active is not None
                 and active.active
@@ -720,6 +739,8 @@ class DelegateTool:
                 and (
                     _is_same_host_turn_append(active, self._message_id)
                     or self._calls >= 1
+                    # adopt 中途续聊：本回合已绑宿主 eid，首派也应合入热图。
+                    or bound_eid == (active.execution_id or "").strip()
                 )
             ):
                 host_plan_for_append = active.live_plan
@@ -735,46 +756,44 @@ class DelegateTool:
                         if last_seed is not None and append_seed is None:
                             append_seed = last_seed
 
-        # 跨回合 append：新建节点 parent + merge run_plan 均绑宿主幕级 captain；
-        # 解析不到 parent 回落本回合 _captain_run_id，merge 则不注入本回合 captain 卡。
+        # append_to 仍在：区分热图合入 vs 跨回合已收口 → prev 链。
         host_captain_run_id: str | None = None
         if append_to:
+            from agentcore.runtime.coordination.session import active_coordination
             from agentcore.runtime.delegate.graph_append import (
                 load_host_journal_entries,
-                load_host_plan_and_completed,
                 parse_host_captain_run_id,
                 resolve_host_message_id,
             )
 
             memory_host = host_plan_for_append is not None
-            host_message_id = await resolve_host_message_id(
-                conversation_id=self._conversation_id or "",
-                execution_id=append_to,
+            active = active_coordination(append_to) or active_coordination(
+                self._base_tool_context.execution_id
             )
-            if not host_message_id and not memory_host:
-                msg = (
-                    f"找不到 execution_id=`{append_to}` 对应的既有协作图。"
-                    "请确认 id 来自本对话上一张团队执行的 run_plan，或改为不传 "
-                    "append_to_execution_id 以新建图。"
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-            if host_message_id:
-                loaded_plan, loaded_seed = await load_host_plan_and_completed(
-                    host_message_id
-                )
-                if loaded_plan is not None:
-                    host_plan_for_append = loaded_plan
-                    append_seed = loaded_seed
-                elif not memory_host:
+            live_merge = _is_live_execution_merge(active, append_to) or memory_host
+
+            if live_merge:
+                # 同回合内存 / adopt 热图：合入同一 eid（不写 prev、不 divert）。
+                if host_plan_for_append is None and active is not None:
+                    host_plan_for_append = getattr(active, "live_plan", None)
+                if host_plan_for_append is not None and getattr(
+                    host_plan_for_append, "topology_lock", False
+                ):
+                    msg = (
+                        "当前协作图处于工作流拓扑锁：禁止追加步骤。"
+                        "可用 replan(steers=…) 改未跑步骤说明，或 stop 收口。"
+                    )
+                    return ToolResult(
+                        tool_call_id="",
+                        success=False,
+                        output="",
+                        error=msg,
+                        contract_failure=True,
+                    )
+                if host_plan_for_append is None:
                     msg = (
                         f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"
-                        "无法跨回合追加。请新建团队执行。"
+                        "无法合入。请新建团队执行。"
                     )
                     return ToolResult(
                         tool_call_id="",
@@ -784,35 +803,41 @@ class DelegateTool:
                         contract_failure=True,
                     )
                 host_captain_run_id = parse_host_captain_run_id(
-                    await load_host_journal_entries(host_message_id)
+                    await load_host_journal_entries(
+                        (getattr(active, "host_turn_id", None) or "")
+                        if active is not None
+                        else ""
+                    )
+                ) or getattr(self, "_captain_run_id", None)
+            else:
+                # 跨回合已收口图：验证存在 → 转为 prev，本回合新图。
+                host_mid = await resolve_host_message_id(
+                    conversation_id=self._conversation_id or "",
+                    execution_id=append_to,
                 )
-            if host_plan_for_append is not None and getattr(
-                host_plan_for_append, "topology_lock", False
-            ):
-                msg = (
-                    "当前协作图处于工作流拓扑锁：禁止追加步骤。"
-                    "可用 replan(steers=…) 改未跑步骤说明，或 stop 收口。"
+                if not host_mid:
+                    msg = (
+                        f"找不到 execution_id=`{append_to}` 对应的既有协作图。"
+                        "请确认 id 来自本对话上一张团队执行的 run_plan，或改为不传 "
+                        "append_to_execution_id 以新建图。"
+                    )
+                    return ToolResult(
+                        tool_call_id="",
+                        success=False,
+                        output="",
+                        error=msg,
+                        contract_failure=True,
+                    )
+                prev_execution_id = append_to
+                append_to = None
+                host_plan_for_append = None
+                append_seed = None
+                logger.info(
+                    "delegate.graph_prev",
+                    conversation_id=self._conversation_id or "",
+                    prev_execution_id=prev_execution_id,
+                    host_message_id=host_mid,
                 )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-            if host_plan_for_append is None:
-                msg = (
-                    f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"
-                    "无法跨回合追加。请新建团队执行。"
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-
         self._calls += 1
         # 冻结本次委派调用的序号：同回合并发的多个 delegate 调用共享 self._calls，若在完成侧
         # 惰性读取会把每个批次的 completed / synthesis 日志都错记到「最后自增到的序号」。这里
@@ -1036,11 +1061,9 @@ class DelegateTool:
         self._coordination = coordination
         self._seed_notes = seed_notes
 
-        # 跨回合同图追加：先对「仅新批次」入闸（用宿主 journal completed），再合并进旧图。
+        # 同回合 / 热图合入：先对「仅新批次」入闸，再合并进旧图。
         # 禁止先 merge 再 sibling 整图——会把已完成同座+同路径误判成同批交叉。
         added_nodes_for_anchor: list = list(plan.nodes)
-        graph_redirect = None
-        graph_redirect_token = None
 
         finalize_flag = bool(arguments.get("finalize"))
         from agentcore.runtime.coordination.host import (
@@ -1085,7 +1108,7 @@ class DelegateTool:
                         error=str(exc),
                     )
             if not added_nodes_for_anchor:
-                msg = "跨回合追加未并入任何新节点（可能与旧图 run_id 冲突）。请调整 tasks。"
+                msg = "合入未并入任何新节点（可能与旧图 run_id 冲突）。请调整 tasks。"
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -1095,6 +1118,12 @@ class DelegateTool:
                 )
             plan = old_plan
             execution_id = append_to
+            logger.info(
+                "delegate.same_turn_memory_append",
+                execution_id=append_to,
+                added=len(added_nodes_for_anchor),
+                total=len(plan.nodes),
+            )
         else:
             execution_id = self._base_tool_context.execution_id or new_id()
             # 准入→提交→执行：sibling / 追加重叠 / 同构闸在 durable run_plan 之前。
@@ -1107,59 +1136,6 @@ class DelegateTool:
             )
             if admitted_reject is not None:
                 return admitted_reject
-
-        if append_to and host_message_id:
-            # 有宿主 journal 才 divert；同回合内存宿主（无 journal）只合入 plan / eid。
-            from agentcore.core.log_context import get_log_value
-            from agentcore.runtime.delegate.graph_append import (
-                GraphAppendRedirect,
-                bind_redirect,
-                open_host_journal_writer,
-            )
-            from agentcore.runtime.events import graph_append as graph_append_event
-
-            host_writer = await open_host_journal_writer(
-                host_message_id=host_message_id,
-                conversation_id=self._conversation_id or "",
-                trace_id=get_log_value("trace_id"),
-            )
-            graph_redirect = GraphAppendRedirect(
-                execution_id=append_to,
-                host_message_id=host_message_id,
-                append_message_id=self._message_id or "",
-                host_writer=host_writer,
-            )
-            graph_redirect_token = bind_redirect(graph_redirect)
-            roles_anchor = [
-                n.role or n.agent_name or n.run_id for n in added_nodes_for_anchor
-            ]
-            self._sink.emit(
-                graph_append_event(
-                    execution_id=append_to,
-                    host_message_id=host_message_id,
-                    append_message_id=self._message_id or "",
-                    added_count=len(added_nodes_for_anchor),
-                    roles=roles_anchor,
-                    added_run_ids=[n.run_id for n in added_nodes_for_anchor],
-                    # 批 A1：跨回合追加暂归宿主既有幕（act-1）；开新幕是后续批次。
-                    act_id="act-1",
-                    act_kind="multi_agent",
-                )
-            )
-            logger.info(
-                "delegate.graph_append",
-                execution_id=append_to,
-                host_message_id=host_message_id,
-                added=len(added_nodes_for_anchor),
-                total=len(plan.nodes),
-            )
-        elif append_to:
-            logger.info(
-                "delegate.same_turn_memory_append",
-                execution_id=append_to,
-                added=len(added_nodes_for_anchor),
-                total=len(plan.nodes),
-            )
 
         record_plan_snapshot(plan)
 
@@ -1179,8 +1155,7 @@ class DelegateTool:
                     self,
                     execution_id,
                     plan,
-                    host_message_id=host_message_id,
-                    host_captain_run_id=host_captain_run_id,
+                    prev_execution_id=prev_execution_id,
                 )
             )
         # 决策可观测: who + what got delegated (the「派了谁、干什么」input basis), not just a
@@ -1223,10 +1198,6 @@ class DelegateTool:
             logger.info("delegate.plan_only", nodes=len(plan.nodes), call=call_idx)
             from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
-            if graph_redirect_token is not None:
-                from agentcore.runtime.delegate.graph_append import reset_redirect
-
-                reset_redirect(graph_redirect_token)
             return annotate_batch_meta(
                 ToolResult(
                     tool_call_id="",
@@ -1243,36 +1214,27 @@ class DelegateTool:
             )
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
-        # Cross-turn append seeds from host journal; fresh graphs start without seed.
+        # Live merge seeds from host journal / memory; fresh graphs (incl. prev) start without.
         seed_completed = append_seed if append_to else None
 
-        try:
-            result = await drive(
-                self,
-                plan,
-                execution_id=execution_id,
-                seed_completed=seed_completed,
-                finalize=bool(arguments.get("finalize")),
-                seed_notes=seed_notes,
-                complexity_hint=complexity_hint,
-                coordination=coordination,
-                call_idx=call_idx,
-                # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
-                # 否则缺省会落成 False，与 schema default 不一致。
-                coordinate=(
-                    bool(arguments["coordinate"])
-                    if "coordinate" in arguments
-                    else True
-                ),
-            )
-        finally:
-            if graph_redirect_token is not None:
-                from agentcore.runtime.delegate.graph_append import reset_redirect
-
-                reset_redirect(graph_redirect_token)
-            if graph_redirect is not None:
-                with contextlib.suppress(Exception):
-                    await graph_redirect.host_writer.flush()
+        result = await drive(
+            self,
+            plan,
+            execution_id=execution_id,
+            seed_completed=seed_completed,
+            finalize=bool(arguments.get("finalize")),
+            seed_notes=seed_notes,
+            complexity_hint=complexity_hint,
+            coordination=coordination,
+            call_idx=call_idx,
+            # Omit → True（默认协调）；显式 false → 经典阻塞。勿用 bool(get())，
+            # 否则缺省会落成 False，与 schema default 不一致。
+            coordinate=(
+                bool(arguments["coordinate"])
+                if "coordinate" in arguments
+                else True
+            ),
+        )
 
         # Soft warnings：挂在委派结果尾部，CEO 当轮可见。
         # SUSPEND（开工卡挂起）无 output 可挂，跳过——不改挂起语义。
@@ -1294,24 +1256,25 @@ class DelegateTool:
                 tails.append(design_impl_warn)
             if root_slice_warn:
                 tails.append(root_slice_warn)
-            if append_to:
-                # 口径与产品呈现一致：UI 在追加回合只显示「已往上方协作图追加 N 名成员」
-                # 锚点，生长发生在上方旧图。回显 execution_id 供后续追加显式指定。
+            if prev_execution_id:
                 tails.append(
-                    f"【跨回合同图追加】已往上方协作图追加 "
-                    f"{len(added_nodes_for_anchor)} 名成员（execution_id=`{append_to}`）；"
-                    "生长呈现在上方旧图，本回合只显示追加锚点；队员正在后台报到，"
-                    "完成态靠图事件异步呈现，勿宣称已全员就位；图完成态由该 execution 自身收口，"
-                    "不随本回合 message_end 结束。向用户汇报请用「已追加、正在报到」口径；"
-                    "用户要立等结果时用 finalize 阻塞收口。不要说成新组建团队。"
+                    f"【协作图·续接】本回合新开团队执行 execution_id=`{execution_id}`，"
+                    f"经 prev_execution_id 链到上一张图 `{prev_execution_id}`；"
+                    "进度与节点仅计本图，不混入上一张已完成节点。"
+                    "向用户汇报请用「新开一队、接续上一张图」口径；不要说成同图追加。"
+                )
+            elif append_to:
+                tails.append(
+                    f"【同回合合入】已往本回合协作图追加 "
+                    f"{len(added_nodes_for_anchor)} 名成员（execution_id=`{append_to}`）。"
                 )
             elif self._depth == 0:
-                # 回显本图 execution_id（跨回合追加的显式指定通道；latest 解析为主路径）。
+                # 回显本图 execution_id（跨回合续接的显式指定通道；latest 解析为主路径）。
                 # 仅根协调者——嵌套 lead 不能跨回合追加，回显只会误导。
                 tails.append(
                     f"【协作图】本次团队执行 execution_id=`{execution_id}`"
-                    '（跨回合往这张图追加队员：delegate 传 append_to_execution_id="latest" '
-                    "或此精确 id；未命中可追加图时引擎自动新建并写明）。"
+                    '（跨回合往这张图续接：delegate 传 append_to_execution_id="latest" '
+                    "或此精确 id → 新开图并链 prev；未命中可追加图时引擎自动新建并写明）。"
                 )
             result.output = f"{result.output}\n\n" + "\n\n".join(tails)
         if result.success and execution_id:
@@ -1326,8 +1289,8 @@ class DelegateTool:
                 origin=plan.origin,
             )
             # 阻塞跑完才记 completed seed；协调 kickoff 时队员未完成，勿伪造成完成。
-            # 勿仅看 coordinate 入参：默认 true 时 solo 仍走阻塞臂，须记 seed，否则同回合
-            # 二次合入会把已完成节点当成未完成 → 误判同构 / 重跑。
+            # 勿仅看 coordinate 入参：默认 true 时 ≥1 worker（含 solo）走协调臂，
+            # 须以活跃 session 为准；否则同回合二次合入会把未完成节点当成已完成。
             from agentcore.runtime.coordination.session import active_coordination
 
             active = active_coordination(execution_id)

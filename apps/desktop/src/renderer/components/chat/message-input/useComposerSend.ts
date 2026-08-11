@@ -138,8 +138,8 @@ export function useComposerSend({
 
       // Mid-flight：生成中发送走独立 POST SSE（steer 插话 / queue 排队）。
       // queue：ack 后清 composer；条进 QueuedTurnsBar，出队开跑再插用户泡。
-      // 协调插话不经 addMessage——主时间线由 InterjectionTimeline 投影
-      // execution.userInterjections（user_interjection SSE）。
+      // steer（经典/协调）不经 addMessage——主时间线由 InterjectionTimeline 投影
+      // execution.userInterjections（user_interjection SSE · DURABLE）。
       if (isGenerating && activeConvId) {
         if (midFlightSendingRef.current) return;
         midFlightSendingRef.current = true;
@@ -189,15 +189,10 @@ export function useComposerSend({
             delivery,
             outgoingMentions.length > 0 ? outgoingMentions : undefined,
           );
-          if (
-            result.kind === "received" ||
-            result.kind === "steered" ||
-            result.kind === "queued"
-          ) {
+          if (result.kind === "received" || result.kind === "queued") {
             clearComposer();
             // queued：条由 turn_queued → midFlight upsert；出队再插泡。
-            // steered toast 由 turn_steer_accepted → messageStream；
-            // received 主时间线走 SSE 投影。
+            // received：主时间线走 user_interjection SSE 投影（含经典 durable 气泡）。
           }
         } finally {
           midFlightSendingRef.current = false;

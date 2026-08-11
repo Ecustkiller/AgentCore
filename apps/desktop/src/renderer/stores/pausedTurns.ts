@@ -64,6 +64,10 @@ export interface PendingResume {
     model?: string;
     origin?: "platform" | "byok";
     provider_id?: string;
+    /** 该队员落座 Folder id；裸聊 scratch 缺省。 */
+    target_folder_id?: string;
+    /** 服务端解析的工作区显示名；旧帧 absent → 不展示。 */
+    target_folder_name?: string;
   }>;
   /** team_preview (开工卡): grantable tools listed for capability auth. */
   tools: string[];
@@ -167,6 +171,14 @@ const toWorkers = (
         : {}),
       ...(typeof row.provider_id === "string" && row.provider_id
         ? { provider_id: row.provider_id }
+        : {}),
+      ...(typeof row.target_folder_id === "string" &&
+      row.target_folder_id.trim()
+        ? { target_folder_id: row.target_folder_id.trim() }
+        : {}),
+      ...(typeof row.target_folder_name === "string" &&
+      row.target_folder_name.trim()
+        ? { target_folder_name: row.target_folder_name.trim() }
         : {}),
     };
   });

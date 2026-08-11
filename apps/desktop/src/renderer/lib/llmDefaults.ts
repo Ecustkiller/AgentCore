@@ -1,20 +1,46 @@
 import type { ModelProfileSlot } from "@/services/llmModelProfiles";
 import type { LlmProviderView } from "@/services/llmProviders";
-import type { ModelCatalog } from "@/services/models";
+import type {
+  ModelCatalog,
+  ModelCatalogItem,
+  ModelPriceCard,
+} from "@/services/models";
+import { findCatalogItem } from "@/services/models";
 
 /**
  * 模型组合槽位选择器的纯逻辑（设置·模型配置 · 编辑组合）。
  *
  * 槽位是 `(model, origin, provider_id)` 指针。选择器按服务商分组呈现 BYOK 候选，
  * 并在平台可用时追加「平台额度」分组；每个服务商的候选 = 其 `default_model` ∪
- * 模型目录里该服务商带出的模型；再把当前槽位模型并入，保证现值始终可选。
+ * 模型目录里该服务商带出的模型；再把**当前编辑组合**的槽位并入（查目录补显示名），
+ * 保证现值始终可选。已删服务商的孤儿槽会单独成组，避免 select 静默错位。
  */
 
-export type DefaultModelOption = { model: string; label: string };
+/** 目录项可选 curated 徽章（后端并行加字段；本地窄扩展读取）。 */
+export type CatalogItemWithBadge = ModelCatalogItem & {
+  badge?: string | null;
+};
+
+export type DefaultModelOption = {
+  model: string;
+  /** 品牌显示名；查不到目录时回落裸 id。 */
+  label: string;
+  /** curated 展示徽章，如「免费额度」。 */
+  badge?: string | null;
+  vendor?: string | null;
+  contextLength?: number | null;
+  capabilities?: string[];
+  price?: ModelPriceCard | null;
+  /** 不在目录中的手填 / 孤儿 id。 */
+  custom?: boolean;
+};
+
 export type DefaultProviderGroup = {
   providerId: string;
   providerLabel: string;
   models: DefaultModelOption[];
+  /** 槽位指向已删除的服务商。 */
+  orphan?: boolean;
 };
 
 const SEP = "::";
@@ -59,10 +85,55 @@ export function decodePointer(value: string): ModelProfileSlot | null {
   return { origin: "byok", provider_id, model };
 }
 
+export function isPlatformGroupId(providerId: string): boolean {
+  return providerId === PLATFORM_POINTER_ID;
+}
+
+/** 读目录可选 `badge`（生成类型未到位时的窄扩展）。 */
+export function catalogItemBadge(
+  item: ModelCatalogItem | CatalogItemWithBadge | undefined,
+): string | null {
+  if (!item) return null;
+  const badge = (item as CatalogItemWithBadge).badge;
+  return typeof badge === "string" && badge.trim() ? badge.trim() : null;
+}
+
+function optionFromCatalogItem(item: ModelCatalogItem): DefaultModelOption {
+  return {
+    model: item.id.trim(),
+    label: item.display_name?.trim() || item.id.trim(),
+    badge: catalogItemBadge(item),
+    vendor: item.vendor?.trim() || null,
+    contextLength: item.context_length ?? null,
+    capabilities: item.capabilities ?? [],
+    price: item.price ?? null,
+    custom: false,
+  };
+}
+
+function resolveSlotOption(
+  slot: ModelProfileSlot,
+  catalog: ModelCatalog | undefined,
+): DefaultModelOption {
+  const item = findCatalogItem(catalog?.models ?? [], {
+    id: slot.model,
+    origin: slot.origin,
+    providerId: slot.provider_id,
+  });
+  if (item) {
+    return optionFromCatalogItem(item);
+  }
+  return {
+    model: slot.model,
+    label: slot.model,
+    custom: true,
+  };
+}
+
 /**
  * Build the per-provider option groups for slot selectors.
  * Includes a 「平台额度」 group when the catalog exposes available `origin=platform` rows.
- * `slots` are currently-set pointers — their models are folded into the matching group.
+ * `slots` are **current-edit** pointers only — folded in with catalog labels when possible.
  */
 export function buildDefaultProviderGroups(
   providers: LlmProviderView[],
@@ -72,18 +143,32 @@ export function buildDefaultProviderGroups(
   const groups: DefaultProviderGroup[] = providers.map((p) => {
     const models: DefaultModelOption[] = [];
     const seen = new Set<string>();
-    const add = (model: string, label?: string | null) => {
-      const m = model.trim();
+    const add = (opt: DefaultModelOption) => {
+      const m = opt.model.trim();
       if (!m || seen.has(m)) return;
       seen.add(m);
-      models.push({ model: m, label: label?.trim() || m });
+      models.push({ ...opt, model: m });
     };
     for (const item of catalog?.models ?? []) {
       if (item.origin === "byok" && item.provider_id === p.id) {
-        add(item.id, item.display_name);
+        add(optionFromCatalogItem(item));
       }
     }
-    if (p.default_model) add(p.default_model);
+    if (p.default_model) {
+      const dm = p.default_model.trim();
+      if (dm && !seen.has(dm)) {
+        const item = findCatalogItem(catalog?.models ?? [], {
+          id: dm,
+          origin: "byok",
+          providerId: p.id,
+        });
+        add(
+          item
+            ? optionFromCatalogItem(item)
+            : { model: dm, label: dm, custom: false },
+        );
+      }
+    }
     return {
       providerId: p.id,
       providerLabel: p.label?.trim() || p.base_url,
@@ -98,10 +183,7 @@ export function buildDefaultProviderGroups(
     const m = item.id.trim();
     if (!m || platformSeen.has(m)) continue;
     platformSeen.add(m);
-    platformModels.push({
-      model: m,
-      label: item.display_name?.trim() || m,
-    });
+    platformModels.push(optionFromCatalogItem(item));
   }
   if (platformModels.length > 0) {
     groups.unshift({
@@ -111,6 +193,8 @@ export function buildDefaultProviderGroups(
     });
   }
 
+  const knownProviderIds = new Set(providers.map((p) => p.id));
+
   for (const slot of slots) {
     if (!slot?.model) continue;
     const groupId =
@@ -118,17 +202,41 @@ export function buildDefaultProviderGroups(
         ? PLATFORM_POINTER_ID
         : slot.provider_id;
     let group = groups.find((g) => g.providerId === groupId);
-    if (!group && groupId === PLATFORM_POINTER_ID) {
-      group = {
-        providerId: PLATFORM_POINTER_ID,
-        providerLabel: "平台额度",
-        models: [],
-      };
-      groups.unshift(group);
+    if (!group) {
+      if (groupId === PLATFORM_POINTER_ID) {
+        group = {
+          providerId: PLATFORM_POINTER_ID,
+          providerLabel: "平台额度",
+          models: [],
+        };
+        groups.unshift(group);
+      } else if (!knownProviderIds.has(groupId)) {
+        group = {
+          providerId: groupId,
+          providerLabel: "已移除的服务商",
+          models: [],
+          orphan: true,
+        };
+        // 孤儿组紧跟平台组之后，便于用户看见并改选。
+        const platformIdx = groups.findIndex(
+          (g) => g.providerId === PLATFORM_POINTER_ID,
+        );
+        groups.splice(platformIdx + 1, 0, group);
+      }
     }
     if (group && !group.models.some((m) => m.model === slot.model)) {
-      group.models.unshift({ model: slot.model, label: slot.model });
+      group.models.unshift(resolveSlotOption(slot, catalog));
     }
   }
   return groups;
+}
+
+/** 当前 model 是否属于该渠道目录（不含 custom 折叠项）。 */
+export function modelInChannelCatalog(
+  group: DefaultProviderGroup | undefined,
+  model: string,
+): boolean {
+  if (!group || !model.trim()) return false;
+  const hit = group.models.find((m) => m.model === model.trim());
+  return Boolean(hit && !hit.custom);
 }

@@ -560,6 +560,18 @@ export interface SidecarRunRedirectRequest {
   feedback: string;
 }
 
+/**
+ * 用户中途停某个 / 全部 worker（不杀回合、不杀 CEO）。
+ * `runId` 省略或 null = 停该 execution 下全部在飞与排队 worker。
+ */
+export interface SidecarRunStopRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  executionId: string;
+  runId?: string | null;
+}
+
 /** 辩论 ambient 掌舵（fire-and-forget，下一轮边界生效）。 */
 export interface SidecarDebateSteerRequest {
   rootId: string;
@@ -645,6 +657,7 @@ export const SIDECAR_CHANNELS = {
   cancel: "sidecar:cancel",
   respond: "sidecar:respond",
   runRedirect: "sidecar:runRedirect",
+  runStop: "sidecar:runStop",
   debateSteer: "sidecar:debateSteer",
   resume: "sidecar:resume",
   probe: "sidecar:probe",
@@ -672,6 +685,7 @@ export interface SidecarApi {
   cancel(req: SidecarCancelRequest): Promise<void>;
   respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }>;
   runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
+  runStop(req: SidecarRunStopRequest): Promise<{ queued: number }>;
   debateSteer(req: SidecarDebateSteerRequest): Promise<void>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */

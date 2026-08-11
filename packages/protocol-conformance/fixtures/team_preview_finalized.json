@@ -135,6 +135,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "error": null,
     "content": "我来安排团队。",
     "reasoning": "",
     "captainContext": [],

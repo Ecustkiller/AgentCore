@@ -22,6 +22,7 @@ import {
 } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
 import { runHydrateAttachSettle } from "@/services/turns";
+import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import {
   type MemoryUpdate,
@@ -319,6 +320,12 @@ export function ConversationPage() {
   useEffect(() => {
     if (!id) return;
     void reconcileExternalGrants(id);
+  }, [id]);
+
+  // 排队条对账：开会话 / 切会话拉 GET 快照（EPHEMERAL 事件只作变了信号）。
+  useEffect(() => {
+    if (!id) return;
+    void reconcileQueuedTurns(id);
   }, [id]);
 
   // Page-scoped shortcuts for the single side panel: Ctrl/Cmd+I shows / hides it

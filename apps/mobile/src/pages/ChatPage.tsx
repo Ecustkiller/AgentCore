@@ -51,7 +51,6 @@ import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
-import { InterjectionBubbles } from "@/components/InterjectionBubbles";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PauseCard } from "@/components/PauseCard";
@@ -108,9 +107,14 @@ import {
 } from "@/lib/messageDelivery";
 import {
   type QueuedTurnEntry,
+  listQueuedTurns,
   removeQueuedTurn,
   upsertQueuedTurn,
 } from "@/lib/queuedTurns";
+import {
+  QUEUE_DROPPED_HINT,
+  reconcileQueuedTurns,
+} from "@/lib/reconcileQueuedTurns";
 import { clearLiveTurnEvents, removeLiveTurn } from "@/lib/reconnectLiveTurn";
 import {
   createHarvestRefreshScheduler,
@@ -140,6 +144,7 @@ import {
   extractGraphAppendActKinds,
   extractGraphAppendAuthorizedBy,
   extractHotDecisionTraces,
+  extractPrevExecutionIds,
   extractRunToolCalls,
   extractStageCardTraces,
   extractToolPhases,
@@ -149,7 +154,6 @@ import {
 import type {
   CheckpointDecision,
   DebateNarrativeRound,
-  DeliveryStatusPayload,
   ErrorPayload,
   MessageEndPayload,
   MessageStartPayload,
@@ -157,7 +161,7 @@ import type {
   SSEEvent,
   TurnQueueCancelledPayload,
   TurnQueueStartedPayload,
-  TurnSteerAcceptedPayload,
+  TurnQueuedPayload,
   TurnWarningPayload,
   UsageBreakdown,
 } from "@agentcore/contract-types";
@@ -669,6 +673,10 @@ function AssistantBubble({
     () => extractGraphAppendAuthorizedBy(turn.events),
     [turn.events],
   );
+  const prevExecutionIds = useMemo(
+    () => extractPrevExecutionIds(turn.events),
+    [turn.events],
+  );
   const meta = summarize(p);
   const clockIso = extractTurnClock(turn.events);
   const isMulti = p.runs.length > 0;
@@ -679,7 +687,6 @@ function AssistantBubble({
         progress: p.progress,
         acts: p.acts,
         teamNotes: p.teamNotes,
-        deliveryStatus: p.deliveryStatus,
         status: p.status,
         conversationId,
         pendingEscalations,
@@ -771,17 +778,15 @@ function AssistantBubble({
             toolPhases={toolPhases}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
+            prevExecutionIds={prevExecutionIds}
+            userInterjections={p.userInterjections}
+            turnClosed={!live}
             onFill={onFill}
             supportIds={supportIds}
             onOpenBrowserLive={onOpenBrowserLive}
             finishReason={finishReason}
             finishDiagnosisLabel={finishDiagnosis}
             failureNotice={failureNotice}
-            deliveryStatus={
-              isMulti
-                ? null
-                : (p.deliveryStatus as DeliveryStatusPayload | null)
-            }
             usage={live ? null : chrome.usage}
             rounds={live ? null : chrome.rounds}
             costText={live ? null : cost}
@@ -821,7 +826,6 @@ function AssistantBubble({
             single-agent fallback. */}
         {!isMulti && meta && <div className="meta">{meta}</div>}
       </div>
-      <InterjectionBubbles items={p.userInterjections} />
     </>
   );
 }
@@ -853,8 +857,10 @@ function HistoryAssistant({
     foldEvidenceLedger,
     graphAppendActKinds,
     graphAppendAuthorizedBy,
+    prevExecutionIds,
     deliveryStatus,
     userInterjections,
+    foldedProcess,
     chrome,
   } = useMemo(() => {
     const events = m.runs?.events;
@@ -882,8 +888,10 @@ function HistoryAssistant({
         foldEvidenceLedger: [],
         graphAppendActKinds: new Map<string, string>(),
         graphAppendAuthorizedBy: new Map<string, string>(),
+        prevExecutionIds: new Map<string, string>(),
         deliveryStatus: null,
         userInterjections: [] as ProjectedTurn["userInterjections"],
+        foldedProcess: [] as ProjectedTurn["process"],
         chrome: emptyChrome,
       };
     const p = fold(events);
@@ -895,7 +903,6 @@ function HistoryAssistant({
             progress: p.progress,
             acts: p.acts,
             teamNotes: p.teamNotes,
-            deliveryStatus: p.deliveryStatus,
             status: p.status,
             runToolCalls: extractRunToolCalls(events),
             // 辩论场级 `#eN`（勿写入 Message.evidence_ledger 语义）
@@ -910,12 +917,23 @@ function HistoryAssistant({
       foldEvidenceLedger: p.evidenceLedger,
       graphAppendActKinds: extractGraphAppendActKinds(events),
       graphAppendAuthorizedBy: extractGraphAppendAuthorizedBy(events),
+      prevExecutionIds: extractPrevExecutionIds(events),
       deliveryStatus: p.deliveryStatus,
       userInterjections: p.userInterjections,
+      foldedProcess: p.process,
       chrome: extractTurnChrome(events),
     };
   }, [m.runs]);
-  const process = m.runs?.process ?? undefined;
+  // REST process 权威；旧 journal 未落 user_interjection marker 时用 fold 回放补位。
+  const restProcess = m.runs?.process ?? undefined;
+  const process = (() => {
+    const restHasInj = restProcess?.some((s) => s.kind === "user_interjection");
+    const foldHasInj = foldedProcess.some(
+      (s) => s.kind === "user_interjection",
+    );
+    if (foldHasInj && !restHasInj) return foldedProcess;
+    return restProcess;
+  })();
   // 历史冷启动优先 REST `evidence_ledger`；缺列时回退 journal fold 的回合台账。
   const historyEvidenceLedger = m.evidenceLedger?.length
     ? m.evidenceLedger
@@ -1042,12 +1060,14 @@ function HistoryAssistant({
             stageCardTraces={stageCardTraces}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
+            prevExecutionIds={prevExecutionIds}
+            userInterjections={userInterjections}
+            turnClosed
             onFill={onFill}
             supportIds={supportIds}
             finishReason={streaming ? null : finishReason}
             finishDiagnosisLabel={finishDiagnosis}
             failureNotice={failureNotice}
-            deliveryStatus={team ? null : deliveryStatus}
             usage={streaming ? null : (m.usage ?? chrome.usage)}
             rounds={streaming ? null : (m.rounds ?? chrome.rounds)}
             costText={streaming ? null : cost}
@@ -1089,7 +1109,6 @@ function HistoryAssistant({
           </button>
         )}
       </div>
-      <InterjectionBubbles items={userInterjections} />
     </>
   );
 }
@@ -1106,10 +1125,8 @@ export function ChatPage() {
   /** 诚实停止过渡：stopping 时 UI 不先于后端进终态；与 sending 合成 busy。 */
   const [stopPhase, setStopPhase] = useState<StopUiPhase>("idle");
   const [error, setError] = useState<ChatError | null>(null);
-  /** 经典软插入 ack toast（手机无 toast 原语 → composer 上方轻条，自动消）。 */
-  const [steerHint, setSteerHint] = useState<string | null>(null);
-  const steerHintIdRef = useRef<string | null>(null);
-  const steerHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 对账发现本地幽灵项（服务端重启丢队）时的一次轻提示。 */
+  const [queueDroppedHint, setQueueDroppedHint] = useState<string | null>(null);
   /** 本会话权限四轴（草稿本地；已有会话跟 conversation.permission_axes）。 */
   const [permissionAxes, setPermissionAxes] = useState<PermissionAxes>(
     DEFAULT_PERMISSION_AXES,
@@ -1209,6 +1226,19 @@ export function ChatPage() {
   const midFlightControllersRef = useRef(new Set<AbortController>());
   /** queue_id → mid-flight AC（取消成功后再 abort，避免失败留下断连坏态）。 */
   const midFlightByQueueRef = useRef(new Map<string, AbortController>());
+  /**
+   * 排队条对账（GET 权威）。ref 避免 appendEventToTurn / reconnect 闭包陈旧。
+   * 本地有项而服务端已无 → 一次轻提示再清。
+   */
+  const reconcileQueuedRef = useRef<(cid: string) => void>(() => {});
+  reconcileQueuedRef.current = (cid: string) => {
+    void reconcileQueuedTurns(cid).then((result) => {
+      if (result.failed) return;
+      if (result.droppedLocalIds.length > 0) {
+        setQueueDroppedHint(QUEUE_DROPPED_HINT);
+      }
+    });
+  };
   /** 当前主路 / 续流写入目标 turn id（排队期条外仍指向主路，勿写到队尾）。 */
   const activeTurnIdRef = useRef<string | null>(null);
   const [activeStreamTurnId, setActiveStreamTurnId] = useState<string | null>(
@@ -1261,17 +1291,6 @@ export function ChatPage() {
 
   const clearStopping = () => {
     applyStopPhase("idle");
-  };
-
-  const showSteerAcceptedHint = (steerId: string) => {
-    if (steerHintIdRef.current === steerId) return;
-    steerHintIdRef.current = steerId;
-    setSteerHint("已插入，下一工具步生效");
-    if (steerHintTimerRef.current) clearTimeout(steerHintTimerRef.current);
-    steerHintTimerRef.current = setTimeout(() => {
-      setSteerHint(null);
-      steerHintTimerRef.current = null;
-    }, 4000);
   };
 
   const busy = isStopBusy(sending, stopPhase);
@@ -1340,8 +1359,19 @@ export function ChatPage() {
       midFlightByQueueRef.current.delete(p.queue_id);
       return;
     }
-    // turn_queued 由 onQueued 写条；不写入主路 events（避免单槽 chip 语义）。
+    // turn_queued：发送路径已由 onQueued 本地即时写入；此处仅当信号缺本地项时对账
+    // （协调升格进队 / 多端同步等）。不写入主路 events。
     if (event.type === "turn_queued") {
+      if (conversationId) {
+        const p = event.payload as TurnQueuedPayload;
+        const queueId = typeof p.queue_id === "string" ? p.queue_id : "";
+        if (
+          queueId &&
+          !listQueuedTurns(conversationId).some((e) => e.queueId === queueId)
+        ) {
+          reconcileQueuedRef.current(conversationId);
+        }
+      }
       return;
     }
     let createdId: string | null = null;
@@ -1461,11 +1491,6 @@ export function ChatPage() {
     if (conversationId && event.type === "execution_completed") {
       harvestRefreshRef.current.schedule(conversationId);
     }
-    // 经典软插入 ack（EPHEMERAL）：fold no-op；按 steer_id 去重 toast。
-    if (event.type === "turn_steer_accepted") {
-      const p = event.payload as TurnSteerAcceptedPayload;
-      if (p.steer_id) showSteerAcceptedHint(p.steer_id);
-    }
   };
 
   const appendEvent = (event: SSEEvent) =>
@@ -1513,12 +1538,7 @@ export function ChatPage() {
       setHistory([]);
       setTurns([]);
       setError(null);
-      setSteerHint(null);
-      steerHintIdRef.current = null;
-      if (steerHintTimerRef.current) {
-        clearTimeout(steerHintTimerRef.current);
-        steerHintTimerRef.current = null;
-      }
+      setQueueDroppedHint(null);
       setSending(false);
       clearStopping();
       setPaused([]);
@@ -1546,12 +1566,7 @@ export function ChatPage() {
     setHistory(null);
     setTurns([]);
     setError(null);
-    setSteerHint(null);
-    steerHintIdRef.current = null;
-    if (steerHintTimerRef.current) {
-      clearTimeout(steerHintTimerRef.current);
-      steerHintTimerRef.current = null;
-    }
+    setQueueDroppedHint(null);
     setSending(false);
     setPaused([]);
     clearColdInteractions();
@@ -1588,6 +1603,8 @@ export function ChatPage() {
         pendingInteractions: [],
       }),
     );
+    // 排队条对账：开会话 / 切会话拉 GET 权威快照（禁轮询；EPHEMERAL 仅信号）。
+    reconcileQueuedRef.current(conversationId);
     void recoveryLoaded.then((r) => {
       if (!cancelled) {
         setPaused(r.paused);
@@ -2087,12 +2104,9 @@ export function ChatPage() {
         text,
         {
           onLiveEvent: (event) => {
-            // 插话 / steer ack：清输入并写入当前主路；turn_queued 由 onQueued 处理。
+            // 插话 ack：清输入并写入当前主路；turn_queued 由 onQueued 处理。
             if (event.type === "turn_queued") return;
-            if (
-              event.type === "user_interjection" ||
-              event.type === "turn_steer_accepted"
-            ) {
+            if (event.type === "user_interjection") {
               clearComposerOnAck();
             }
             appendEventToTurn(activeTurnIdRef.current, event);
@@ -2147,11 +2161,7 @@ export function ChatPage() {
         setError({ text: result.message ?? "请先处理待确认事项" });
       } else if (result.kind === "error") {
         setError({ text: result.message });
-      } else if (
-        result.kind === "received" ||
-        result.kind === "steered" ||
-        result.kind === "queued"
-      ) {
+      } else if (result.kind === "received" || result.kind === "queued") {
         // 泵已结束时仍兜底清一次（ack 回调已清则 no-op）。
         clearComposerOnAck();
       }
@@ -2196,6 +2206,8 @@ export function ChatPage() {
     setError(null);
     clearStopping();
     setSending(true);
+    // SSE 重连后对账排队条（权威 GET）。
+    reconcileQueuedRef.current(conversationId);
     const reconnectTurnId = activeTurnIdRef.current;
     if (reconnectTurnId) setActiveTurn(reconnectTurnId);
     setTurns((t) => clearLiveTurnEvents(t, reconnectTurnId));
@@ -2295,6 +2307,8 @@ export function ChatPage() {
   // conversation switch / takeover never lets this stale op clobber the next view.
   async function attachOnOpen(cid: string) {
     setSending(true);
+    // 续看 attach 亦对账（重开应用条空但队仍在 / 多端）。
+    reconcileQueuedRef.current(cid);
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -2330,6 +2344,7 @@ export function ChatPage() {
   async function rejoinRunningHistory(cid: string) {
     setError(null);
     setSending(true);
+    reconcileQueuedRef.current(cid);
     setHistory((h) => {
       if (!h || h.length === 0) return h;
       const last = h[h.length - 1];
@@ -2840,10 +2855,22 @@ export function ChatPage() {
         </div>
       )}
 
-      {steerHint && (
-        <output className="steer-hint-bar" data-testid="turn-steer-hint">
-          {steerHint}
-        </output>
+      {queueDroppedHint && (
+        <div
+          className="composer-delivery-hint"
+          data-testid="queue-dropped-hint"
+          // biome-ignore lint/a11y/useSemanticElements: 内嵌「知道了」按钮，<output> 语义不符——保留 aria live 容器。
+          role="status"
+        >
+          <span>{queueDroppedHint}</span>
+          <button
+            type="button"
+            className="queue-link"
+            onClick={() => setQueueDroppedHint(null)}
+          >
+            知道了
+          </button>
+        </div>
       )}
 
       <QueuedTurnsBar

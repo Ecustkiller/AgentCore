@@ -25,6 +25,8 @@ from agentcore.api.schemas import (
     MemoryUpdateView,
     MessageDetail,
     MessageListResponse,
+    QueuedTurnItem,
+    QueuedTurnListResponse,
     RecordTurnRequest,
     RecordTurnResponse,
     RunsPayload,
@@ -169,6 +171,23 @@ async def list_messages(
         runs = overlay_runs_with_segments(runs, segments, usage=usage)
         if runs is not None:
             detail.runs = RunsPayload.model_validate(runs)
+        # Empty-face redesign: lift usage.error → runs.error when journal omitted it,
+        # so REST reload paints the same face as live (usage JSON is the durable home).
+        usage_err = usage.get("error")
+        if isinstance(usage_err, dict) and (
+            usage_err.get("message") or usage_err.get("code")
+        ):
+            from agentcore.api.schemas.messages import RunError
+
+            lifted = RunError(
+                code=str(usage_err.get("code") or "LLM_ERROR").strip() or "LLM_ERROR",
+                message=str(usage_err.get("message") or "").strip()
+                or "本轮未能完成，请重试。",
+            )
+            if detail.runs is None:
+                detail.runs = RunsPayload(error=lifted)
+            elif detail.runs.error is None:
+                detail.runs = detail.runs.model_copy(update={"error": lifted})
         # 回合轮次 (Tier 2 重载): rounds shares the row's usage column but has no own
         # attribute, so project it on read (usage itself is normalized by the schema
         # validator). Drives the bubble's「N 轮」caption alongside usage.
@@ -320,7 +339,8 @@ async def send_message(
     - **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。
     - **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。
     - **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。
-    - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（``turn_steer_accepted``）；
+    - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE
+      ``user_interjection(received)``；步顶注入后再发 ``injected``）；
       无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。
     - **热路 pending**（approval / escalation / …）仍 409。
 
@@ -382,15 +402,12 @@ async def send_message(
             CoordinationEventKind,
             active_coordination_for_conversation,
         )
-        from agentcore.runtime.events import turn_steer_accepted, user_interjection
+        from agentcore.runtime.events import user_interjection
         from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
-        from agentcore.runtime.turn.steer import (
-            content_preview,
-            peek_count,
-        )
         from agentcore.runtime.turn.steer import (
             try_enqueue as try_enqueue_steer,
         )
+        from agentcore.workspace.attachments import interjection_attachment_meta
 
         coord = active_coordination_for_conversation(conversation_id)
         coord_active = coord is not None and coord.active
@@ -405,8 +422,6 @@ async def send_message(
             raw_agent_mentions = [m.model_dump() for m in body.agent_mentions]
             # Delivered path: persist now so CEO / queue_user_message see workspace_path.
             # Stash keeps inline text; a later drain re-pass is idempotent (path set → skip write).
-            from agentcore.workspace.attachments import interjection_attachment_meta
-
             attachments = await _persist_delivered_interjection_attachments(
                 conversation_id=conversation_id,
                 user_id=user.user_id,
@@ -483,24 +498,27 @@ async def send_message(
                 llm_supports_tools=preflight.supports_tools,
             )
             if parked is not None:
-                pending = peek_count(conversation_id)
-                preview = content_preview(body.content)
-                # Multi-client toast on the live turn; sender gets a short confirm stream.
+                att_meta = interjection_attachment_meta(parked.attachments)
+                # Live turn observers: durable once on the in-flight sink.
                 existing.sink.emit(
-                    turn_steer_accepted(
-                        steer_id=parked.steer_id,
-                        conversation_id=conversation_id,
-                        content=preview,
-                        pending=pending,
+                    user_interjection(
+                        interjection_id=parked.interjection_id,
+                        execution_id=parked.execution_id,
+                        content=body.content,
+                        status="received",
+                        attachments=att_meta or None,
                     )
                 )
+                # Sender's POST: short SSE confirm — history/SSE only, do NOT re-journal
+                # (same interjection_id must not double-write the host journal).
                 confirm = EventSink()
                 confirm.emit_sse_only(
-                    turn_steer_accepted(
-                        steer_id=parked.steer_id,
-                        conversation_id=conversation_id,
-                        content=preview,
-                        pending=pending,
+                    user_interjection(
+                        interjection_id=parked.interjection_id,
+                        execution_id=parked.execution_id,
+                        content=body.content,
+                        status="received",
+                        attachments=att_meta or None,
                     )
                 )
                 confirm.close(reason="steer_confirm")
@@ -553,6 +571,39 @@ async def send_message(
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
 
     return sse_response(sink, detach_on_disconnect=True)
+
+
+@router.get(
+    "/{conversation_id}/queued-turns",
+    response_model=QueuedTurnListResponse,
+)
+async def list_queued_turns(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """List the conversation's process-local FIFO queued turns (权威内容源).
+
+    Owner-gated like send / cancel. Returns the current in-memory snapshot in FIFO
+    order (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_started`` /
+    ``turn_queue_cancelled`` remain change signals only — clients should refresh from
+    this endpoint. Restart empties the queue (no durable queue).
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    from agentcore.runtime.turn.queue import turn_queue
+
+    pending = turn_queue.list_pending(conversation_id)
+    return QueuedTurnListResponse(
+        items=[
+            QueuedTurnItem(
+                queue_id=item.queue_id,
+                content=item.content,
+                position=idx,
+                interjection_id=item.interjection_id,
+            )
+            for idx, item in enumerate(pending, start=1)
+        ]
+    )
 
 
 @router.post(

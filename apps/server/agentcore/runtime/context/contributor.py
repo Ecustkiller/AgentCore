@@ -50,6 +50,9 @@ class SectionOrder(IntEnum):
     # On-demand user rules (consult_rule) — constraint appendices, NOT memory topics.
     # Same live-tool gate: render only when ``consult_rule`` is wired this turn.
     RULE_DIRECTORY = 560
+    # Derived cross-project roster (Folder name + 画像.md first line). CEO-only;
+    # outside ``<rules>`` so it never competes with always memory for max_instruction_*.
+    PROJECT_CATALOG = 570
     CITATION = 600
     CEO_VISUALIZATION = 700
     WORKSPACE_OVERVIEW = 800

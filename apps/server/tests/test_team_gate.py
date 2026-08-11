@@ -1,7 +1,9 @@
 """Team-gate for the CEO captain ReAct loop (hard stop after investigation threshold).
 
 Covers investigation trigger, one-shot latch, worker isolation, hard-stop tool
-strip, and post-gate long-answer reject. Scripted fake provider — zero LLM.
+strip, post-gate long-answer reject, settings-backed threshold, all-fail rounds
+(via LoopController), and post-delegate restore of gate-stripped tools only.
+Scripted fake provider — zero LLM.
 
 **不扫用户原文猜意图**分叉（无成篇/改文件/摸底正则路径）；统一硬闸文案。
 闸前长文直答仍靠提示词路由段（禁止长篇推演 / 定方向后立刻行动；see test_prompt / _CEO_CORE_HINT）。
@@ -13,20 +15,26 @@ from pathlib import Path
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.engine.governance import (
     create_loop_controller,
     maybe_inject_team_gate,
+    maybe_restore_team_gate_tools,
     team_gate_hard_stop_prompt,
+    team_gate_investigation_threshold,
 )
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.loop_controller import ToolAttempt
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 from tests.llm_helpers import make_profile_params
+
+_TEAM_GATE_ROUNDS = team_gate_investigation_threshold()
 
 
 def _tool_chunk(name: str, args: str, *, call_id: str = "c") -> LLMChunk:
@@ -59,9 +67,11 @@ class _StubTool:
         name: str = "search",
         *,
         category: ToolCategory = ToolCategory.SEARCH,
+        succeed: bool = True,
     ) -> None:
         self._name = name
         self._category = category
+        self._succeed = succeed
         self.calls = 0
 
     @property
@@ -77,8 +87,9 @@ class _StubTool:
         self.calls += 1
         return ToolResult(
             tool_call_id="",
-            success=True,
-            output="result",
+            success=self._succeed,
+            output="result" if self._succeed else "not found",
+            error=None if self._succeed else "path does not exist",
             effect=ToolEffect.CONTINUE,
         )
 
@@ -110,6 +121,10 @@ def _team_gate_msgs(messages: list[LLMMessage]) -> list[LLMMessage]:
     ]
 
 
+def _search_rounds(n: int) -> list[list[LLMChunk]]:
+    return [[_tool_chunk("search", f'{{"q": "{i}"}}')] for i in range(1, n + 1)]
+
+
 async def _run_captain(
     provider: _ScriptedProvider,
     tools: ToolRegistry,
@@ -132,10 +147,14 @@ async def _run_captain(
     return content, messages
 
 
+def test_threshold_reads_settings():
+    assert team_gate_investigation_threshold() == settings.engine_team_gate_investigation_rounds
+
+
 def test_hard_stop_copy_strips_and_steers_delegate():
     text = team_gate_hard_stop_prompt()
     assert "硬上限" in text
-    assert "5 轮" in text  # 按探路轮计，非同轮并行工具次数
+    assert f"{_TEAM_GATE_ROUNDS} 轮" in text  # 跟 settings，非硬编码
     assert "调查类工具已收回" in text
     assert "delegate" in text
     assert "归类理由" in text
@@ -149,7 +168,7 @@ def test_hard_stop_copy_strips_and_steers_delegate():
 
 
 def test_team_gate_counts_rounds_not_parallel_calls():
-    """同轮并行多工具只计 1 轮：calls 再高、rounds<5 不硬闸。"""
+    """同轮并行多工具只计 1 轮：calls 再高、rounds<threshold 不硬闸。"""
     controller = create_loop_controller(frozenset({"search", "git", "file_list"}))
     controller._investigation_calls = 5
     controller._investigation_rounds = 1
@@ -168,7 +187,7 @@ def test_team_gate_counts_rounds_not_parallel_calls():
         is False
     )
     assert disabled == set()
-    controller._investigation_rounds = 4
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS - 1
     assert (
         maybe_inject_team_gate(
             controller,
@@ -181,7 +200,7 @@ def test_team_gate_counts_rounds_not_parallel_calls():
         )
         is False
     )
-    controller._investigation_rounds = 5
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
     assert maybe_inject_team_gate(
         controller,
         messages=messages,
@@ -192,6 +211,9 @@ def test_team_gate_counts_rounds_not_parallel_calls():
         investigation_tools=frozenset({"search", "git", "file_list"}),
     )
     assert disabled == {"search", "git", "file_list"}
+    assert controller.team_gate_stripped_tools == frozenset(
+        {"search", "git", "file_list"}
+    )
 
 
 def test_user_text_does_not_branch_gate_copy():
@@ -204,7 +226,7 @@ def test_user_text_does_not_branch_gate_copy():
     ]
     for content in cases:
         controller = create_loop_controller(frozenset({"search"}))
-        controller._investigation_rounds = 5
+        controller._investigation_rounds = _TEAM_GATE_ROUNDS
         disabled: set[str] = set()
         messages = [LLMMessage(role="user", content=content)]
         assert maybe_inject_team_gate(
@@ -280,7 +302,7 @@ def test_ceo_prompt_d10_repair_routing_rules():
 
 def test_hard_stop_disables_investigation_tools_when_intent_clear():
     controller = create_loop_controller(frozenset({"search", "read_url"}))
-    controller._investigation_rounds = 5  # threshold met
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
     disabled: set[str] = set()
     messages = [
         LLMMessage(role="assistant", content="协作方案与团队分工如下……"),
@@ -303,9 +325,9 @@ def test_hard_stop_disables_investigation_tools_when_intent_clear():
 
 
 def test_open_qa_still_hard_stops_at_threshold():
-    """开放问答：≥5 轮仍硬收剥工具（无 soft、无意图分叉）。"""
+    """开放问答：达阈仍硬收剥工具（无 soft、无意图分叉）。"""
     controller = create_loop_controller(frozenset({"search"}))
-    controller._investigation_rounds = 5
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
     disabled: set[str] = set()
     messages = [LLMMessage(role="user", content="查一下 X 和 Y 的区别")]
     assert (
@@ -324,48 +346,186 @@ def test_open_qa_still_hard_stops_at_threshold():
     assert any("探路已达硬上限" in (m.content or "") for m in messages)
 
 
+def test_gate_records_only_newly_stripped_tools():
+    """闸只记录它新增禁用的名字（预禁用的如熔断/退役不进恢复集）。"""
+    controller = create_loop_controller(frozenset({"search", "read_url", "file_read"}))
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
+    disabled: set[str] = {"read_url"}  # already retired
+    messages = [LLMMessage(role="user", content="go")]
+    assert maybe_inject_team_gate(
+        controller,
+        messages=messages,
+        run_id="r",
+        round_idx=0,
+        role="captain",
+        disabled_tools=disabled,
+        investigation_tools=frozenset({"search", "read_url", "file_read"}),
+    )
+    assert disabled == {"search", "read_url", "file_read"}
+    assert controller.team_gate_stripped_tools == frozenset({"search", "file_read"})
+
+
+def test_delegate_restores_only_gate_stripped_tools():
+    """delegate 成功后只还闸收走的批；预禁用名不复活；闸锁保持。"""
+    controller = create_loop_controller(frozenset({"search", "file_read", "read_url"}))
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
+    disabled: set[str] = {"read_url"}
+    messages = [LLMMessage(role="user", content="go")]
+    assert maybe_inject_team_gate(
+        controller,
+        messages=messages,
+        run_id="r",
+        round_idx=0,
+        role="captain",
+        disabled_tools=disabled,
+        investigation_tools=frozenset({"search", "file_read", "read_url"}),
+    )
+    assert controller.team_gate_fired is True
+    disabled.add("web_search")  # unrelated; must stay
+
+    restored = maybe_restore_team_gate_tools(
+        controller,
+        disabled_tools=disabled,
+        attempts=[
+            ToolAttempt(fingerprint="d", tool_name="delegate", success=True),
+        ],
+    )
+    assert restored is True
+    assert "search" not in disabled
+    assert "file_read" not in disabled
+    assert "read_url" in disabled  # never in restore set
+    assert "web_search" in disabled  # unrelated stay
+    assert controller.team_gate_fired is True  # latch stays
+    assert controller.team_gate_stripped_tools == frozenset()  # consumed
+
+
+def test_debate_success_does_not_restore_gate_tools():
+    controller = create_loop_controller(frozenset({"search"}))
+    controller._investigation_rounds = _TEAM_GATE_ROUNDS
+    disabled: set[str] = set()
+    messages = [LLMMessage(role="user", content="go")]
+    maybe_inject_team_gate(
+        controller,
+        messages=messages,
+        run_id="r",
+        round_idx=0,
+        role="captain",
+        disabled_tools=disabled,
+        investigation_tools=frozenset({"search"}),
+    )
+    assert disabled == {"search"}
+    assert (
+        maybe_restore_team_gate_tools(
+            controller,
+            disabled_tools=disabled,
+            attempts=[
+                ToolAttempt(fingerprint="b", tool_name="debate", success=True),
+            ],
+        )
+        is False
+    )
+    assert disabled == {"search"}
+    assert controller.team_gate_stripped_tools == frozenset({"search"})
+
+
 @pytest.mark.asyncio
 async def test_investigation_threshold_fires_once_for_captain():
-    # ≥5 investigation rounds → hard gate once; tools stripped so 6th search
+    # ≥threshold investigation rounds → hard gate once; tools stripped so next search
     # cannot execute; subsequent rounds stay quiet.
     search = _StubTool(name="search")
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("search", '{"q": "1"}')],
-            [_tool_chunk("search", '{"q": "2"}')],
-            [_tool_chunk("search", '{"q": "3"}')],
-            [_tool_chunk("search", '{"q": "4"}')],
-            [_tool_chunk("search", '{"q": "5"}')],
-            [_tool_chunk("search", '{"q": "6"}')],
+            *_search_rounds(_TEAM_GATE_ROUNDS),
+            [_tool_chunk("search", '{"q": "extra"}')],
             [_content_chunk("ok")],
         ]
     )
-    content, messages = await _run_captain(provider, _registry(search))
+    content, messages = await _run_captain(
+        provider, _registry(search), max_rounds=_TEAM_GATE_ROUNDS + 5
+    )
 
     assert content == "ok"
     gates = _team_gate_msgs(messages)
     assert len(gates) == 1
     assert "探路已达硬上限" in (gates[0].content or "")
-    assert search.calls == 5  # hard path stripped tools — 6th must not execute
+    assert f"{_TEAM_GATE_ROUNDS} 轮" in (gates[0].content or "")
+    assert search.calls == _TEAM_GATE_ROUNDS  # hard path stripped — extra must not execute
 
 
 @pytest.mark.asyncio
 async def test_below_investigation_threshold_no_gate():
-    # Four calls stay under threshold=5; gate must not fire.
+    # threshold-1 successful rounds stay under bar; gate must not fire.
     search = _StubTool(name="search")
-    provider = _ScriptedProvider(
-        [
-            [_tool_chunk("search", '{"q": "1"}')],
-            [_tool_chunk("search", '{"q": "2"}')],
-            [_tool_chunk("search", '{"q": "3"}')],
-            [_tool_chunk("search", '{"q": "4"}')],
-            [_content_chunk("short answer")],
-        ]
+    n = _TEAM_GATE_ROUNDS - 1
+    provider = _ScriptedProvider([*_search_rounds(n), [_content_chunk("short answer")]])
+    content, messages = await _run_captain(
+        provider, _registry(search), max_rounds=_TEAM_GATE_ROUNDS + 2
     )
-    content, messages = await _run_captain(provider, _registry(search))
 
     assert content == "short answer"
     assert _team_gate_msgs(messages) == []
+
+
+def test_all_fail_investigation_rounds_do_not_spend_budget():
+    """全失败探路轮不计 rounds：calls 照记；达阈次失败仍不硬闸；成功轮才累加。"""
+    tools = frozenset({"search"})
+    controller = create_loop_controller(tools)
+    for i in range(_TEAM_GATE_ROUNDS):
+        controller.record(
+            [
+                ToolAttempt(
+                    fingerprint=f"bad{i}",
+                    tool_name="search",
+                    success=False,
+                )
+            ]
+        )
+    assert controller.investigation_calls == _TEAM_GATE_ROUNDS
+    assert controller.investigation_rounds == 0
+    disabled: set[str] = set()
+    messages = [LLMMessage(role="user", content="go")]
+    assert (
+        maybe_inject_team_gate(
+            controller,
+            messages=messages,
+            run_id="r",
+            round_idx=0,
+            role="captain",
+            disabled_tools=disabled,
+            investigation_tools=tools,
+        )
+        is False
+    )
+    for i in range(_TEAM_GATE_ROUNDS - 1):
+        controller.record(
+            [ToolAttempt(fingerprint=f"ok{i}", tool_name="search", success=True)]
+        )
+    assert controller.investigation_rounds == _TEAM_GATE_ROUNDS - 1
+    assert (
+        maybe_inject_team_gate(
+            controller,
+            messages=messages,
+            run_id="r",
+            round_idx=1,
+            role="captain",
+            disabled_tools=disabled,
+            investigation_tools=tools,
+        )
+        is False
+    )
+    controller.record(
+        [ToolAttempt(fingerprint="ok_last", tool_name="search", success=True)]
+    )
+    assert controller.investigation_rounds == _TEAM_GATE_ROUNDS
+    assert maybe_inject_team_gate(
+        controller,
+        messages=messages,
+        run_id="r",
+        round_idx=2,
+        role="captain",
+        disabled_tools=disabled,
+        investigation_tools=tools,
+    )
 
 
 @pytest.mark.asyncio
@@ -393,9 +553,7 @@ async def test_worker_role_never_fires():
     search = _StubTool(name="search")
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("search", '{"q": "1"}')],
-            [_tool_chunk("search", '{"q": "2"}')],
-            [_tool_chunk("search", '{"q": "3"}')],
+            *_search_rounds(min(3, _TEAM_GATE_ROUNDS)),
             [_content_chunk("甲" * 500)],
         ]
     )
@@ -428,21 +586,44 @@ async def test_after_delegate_no_gate():
 
 
 @pytest.mark.asyncio
+async def test_post_gate_delegate_restores_investigation_tools():
+    """硬闸剥工具后成功 delegate → 只读工具恢复，可再 search。"""
+    search = _StubTool(name="search")
+    delegate = _StubTool(name="delegate", category=ToolCategory.ORCHESTRATION)
+    provider = _ScriptedProvider(
+        [
+            *_search_rounds(_TEAM_GATE_ROUNDS),
+            [_tool_chunk("delegate", '{"tasks": []}', call_id="d1")],
+            [_tool_chunk("search", '{"q": "post"}')],
+            [_content_chunk("综述")],
+        ]
+    )
+    content, messages = await _run_captain(
+        provider,
+        _registry(search, delegate),
+        max_rounds=_TEAM_GATE_ROUNDS + 5,
+    )
+    assert content == "综述"
+    assert len(_team_gate_msgs(messages)) == 1
+    # threshold fires + post-delegate search executes
+    assert search.calls == _TEAM_GATE_ROUNDS + 1
+    assert delegate.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_investigation_fires_at_most_once():
     # Investigation gate first; further investigation rounds must not inject again.
     # Post-gate wrap-up uses short prose so direct-reject soft gate stays quiet.
     search = _StubTool(name="search")
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("search", '{"q": "1"}')],
-            [_tool_chunk("search", '{"q": "2"}')],
-            [_tool_chunk("search", '{"q": "3"}')],
-            [_tool_chunk("search", '{"q": "4"}')],
-            [_tool_chunk("search", '{"q": "5"}')],
+            *_search_rounds(_TEAM_GATE_ROUNDS),
             [_content_chunk("归类：单点事实。X 与 Y 的差异是超时默认值不同。")],
         ]
     )
-    _content, messages = await _run_captain(provider, _registry(search))
+    _content, messages = await _run_captain(
+        provider, _registry(search), max_rounds=_TEAM_GATE_ROUNDS + 3
+    )
 
     assert len(_team_gate_msgs(messages)) == 1
 
@@ -480,16 +661,14 @@ async def test_post_gate_long_answer_rejected_once():
     long = "甲" * 500
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("search", '{"q": "1"}')],
-            [_tool_chunk("search", '{"q": "2"}')],
-            [_tool_chunk("search", '{"q": "3"}')],
-            [_tool_chunk("search", '{"q": "4"}')],
-            [_tool_chunk("search", '{"q": "5"}')],
+            *_search_rounds(_TEAM_GATE_ROUNDS),
             [_content_chunk(long)],
             [_content_chunk("归类：单点事实。差异在超时默认值。")],
         ]
     )
-    content, messages = await _run_captain(provider, _registry(search))
+    content, messages = await _run_captain(
+        provider, _registry(search), max_rounds=_TEAM_GATE_ROUNDS + 4
+    )
 
     assert content == "归类：单点事实。差异在超时默认值。"
     assert len(_team_gate_msgs(messages)) == 1

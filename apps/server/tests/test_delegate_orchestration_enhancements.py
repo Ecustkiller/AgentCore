@@ -15,8 +15,9 @@ from agentcore.runtime.delegate.parallelism import (
 )
 from agentcore.runtime.engine.write_args_clear import (
     cleared_write_stub_rejection,
+    landed_result_note,
     project_cleared_write_args,
-    write_args_landed_summary,
+    write_args_identity,
 )
 from agentcore.runtime.events import plan_review_required
 from agentcore.runtime.events.payloads.interaction import PlanReviewRequiredPayload
@@ -172,35 +173,26 @@ def test_widen_aggressive_fans_from_checkpoint():
     assert set(plan.by_id("verifier").depends_on) == {"core", "table", "power"}
 
 
-# ── 3. handoff 写参清理（原写工具名 + landed 短状态，禁 _write_landed 诱饵）──
+# ── 3. handoff 写参清理（原写工具名 + 参数只留 path，摘要归 tool result）──
 
 
-def test_write_args_landed_summary_is_readonly_not_writing_args():
+def test_projected_write_args_carry_nothing_worth_echoing():
+    """参数槽只剩 path：不是可提交载荷，也就没有可照抄的东西。"""
     from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
 
     args = json.dumps({"path": "docs/spec.md", "content": "X" * 2000}, ensure_ascii=False)
-    projected = write_args_landed_summary("file_write", args, 2000)
-    data = json.loads(projected)
-    assert data["path"] == "docs/spec.md"
-    assert data["status"] == "landed"
-    assert data["via"] == "file_write"
-    assert data["chars"] == 2000
-    assert "file_read" in data["note"]
-    assert "str_replace" in data["note"]
-    # Must NOT look like submittable writing args / old echo template.
-    assert "_landed_summary" not in data
-    assert "content" not in data
-    assert "new_string" not in data
-    assert "old_string" not in data
-    assert "_cleared" not in data
-    assert "[已清理]" not in projected
+    projected = write_args_identity(args)
+    assert json.loads(projected) == {"path": "docs/spec.md"}
+    # 历代被回灌过的形态一个都不许再出现在参数槽里。
+    for bait in ("status", "landed", "via", "chars", "_landed_summary", "_cleared", "[已清理]"):
+        assert bait not in projected
     # Constant kept for residual-imitation rejection only — never a projected name.
     assert LANDED_STATUS_TOOL == "_write_landed"
     assert LANDED_STATUS_TOOL not in {"file_write", "file_append", "str_replace"}
 
 
-def test_write_args_landed_summary_str_replace_drops_body_keys():
-    """str_replace 清参：短状态 + via，不再挂 old/new 假写作字段。"""
+def test_projected_str_replace_drops_body_keys():
+    """str_replace 清参：old/new 全部消失，正文不回流参数槽。"""
     anchor = (
         "- 本轮检索未获得阿里 AI 板块单独营收数据（阿里整体财报口径以集团为主），"
         "标注为待核实。\n\n---\n"
@@ -214,20 +206,18 @@ def test_write_args_landed_summary_str_replace_drops_body_keys():
         },
         ensure_ascii=False,
     )
-    projected = write_args_landed_summary("str_replace", args, len(anchor + body))
-    data = json.loads(projected)
-    assert data["path"] == "research/ai_cn_notes.md"
-    assert data["status"] == "landed"
-    assert data["via"] == "str_replace"
-    assert "_landed_summary" not in data
-    assert "old_string" not in data
-    assert "new_string" not in data
+    projected = write_args_identity(args)
+    assert json.loads(projected) == {"path": "research/ai_cn_notes.md"}
     assert body not in projected
     assert "[已清理" not in projected
+    # 规模落在结果侧，供模型判断改法（整写 vs 定点替换）。
+    note = landed_result_note(args, len(anchor + body))
+    assert note is not None
+    assert str(len(anchor + body)) in note
 
 
-def test_write_args_landed_summary_keeps_html_structure():
-    """清参后保留 HTML class/id 结构摘要，供后续文件对照契约（非凭记忆盲写）。"""
+def test_landed_result_note_keeps_html_structure():
+    """结构摘要挪到 tool result：后续改稿仍能对照，不必凭记忆盲写。"""
     from agentcore.runtime.engine.write_args_clear import structural_write_summary
 
     html = (
@@ -245,19 +235,14 @@ def test_write_args_landed_summary_keeps_html_structure():
     assert "hero" in summary and "btn" in summary and "primary" in summary
 
     args = json.dumps({"path": "index.html", "content": html}, ensure_ascii=False)
-    projected = write_args_landed_summary("file_write", args, len(html))
-    data = json.loads(projected)
-    assert "content" not in data
-    assert "_landed_summary" not in data
-    assert "_structure" in data
-    assert "classes=[" in data["_structure"]
-    assert "hero" in data["_structure"]
-    assert "primary" in data["_structure"]
-    assert "ids=[" in data["_structure"]
-    assert "app" in data["_structure"]
-    # Full body must not leak back into the projection.
-    assert html[:40] not in projected
-    assert len(data["_structure"]) < 1200
+    note = landed_result_note(args, len(html))
+    assert note is not None
+    assert "classes=[" in note and "hero" in note and "primary" in note
+    assert "ids=[" in note and "app" in note
+    # 摘要不得把正文带回来；参数槽更不许留下正文。
+    assert html[:40] not in note
+    assert html[:40] not in write_args_identity(args)
+    assert len(note) < 1400  # 摘要有帽，不能变成第二份正文
 
 
 def test_project_cleared_write_args_collapses_completed_writes():
@@ -290,28 +275,26 @@ def test_project_cleared_write_args_collapses_completed_writes():
     # Keep original write name — never emit _write_landed as function.name bait.
     assert call.function.name == "file_write"
     assert call.function.name != LANDED_STATUS_TOOL
-    args = json.loads(call.function.arguments)
-    assert args["path"] == "docs/a.md"
-    assert args["status"] == "landed"
-    assert args["via"] == "file_write"
-    assert "_landed_summary" not in args
-    assert "content" not in args
+    assert json.loads(call.function.arguments) == {"path": "docs/a.md"}
     assert big not in call.function.arguments
+    # 规模落在结果侧，原结果文案保留。
+    assert out[2].role == "tool"
+    assert "已写入 100 字节到 docs/a.md" in out[2].content
+    assert "已落盘" in out[2].content
     # No bait name anywhere in the projected window's tool_calls.
     for msg in out:
         if msg.tool_calls:
             for tc in msg.tool_calls:
                 assert tc.function.name != LANDED_STATUS_TOOL
-    # canonical-shape: status is stable on re-project
+    # 幂等：再投影一次不得二次追加摘要，也不得改动参数。
     out2 = project_cleared_write_args(out, min_chars=100)
-    assert out2 is out or out2[1].tool_calls[0].function.arguments == (
-        out[1].tool_calls[0].function.arguments
-    )
+    assert out2[1].tool_calls[0].function.arguments == call.function.arguments
     assert out2[1].tool_calls[0].function.name == "file_write"
+    assert out2[2].content == out[2].content
 
 
 def test_project_cleared_write_args_str_replace_readonly_summary():
-    """完成后投影为原名 + landed 短状态，不再保留可提交的 old/new 形状。"""
+    """完成后投影为原名 + 只剩 path，不再保留可提交的 old/new 形状。"""
     from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
 
     anchor = "END_MARK\n---\n"
@@ -344,13 +327,10 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
     call = out[0].tool_calls[0]
     assert call.function.name == "str_replace"
     assert call.function.name != LANDED_STATUS_TOOL
-    args = json.loads(call.function.arguments)
-    assert args["path"] == "notes.md"
-    assert args["via"] == "str_replace"
-    assert "_landed_summary" not in args
-    assert "old_string" not in args
-    assert "new_string" not in args
+    assert json.loads(call.function.arguments) == {"path": "notes.md"}
     assert big not in call.function.arguments
+    assert "已替换 notes.md" in out[1].content
+    assert big not in out[1].content
 
 
 def test_project_cleared_write_args_migrates_legacy_write_landed_name():
@@ -609,6 +589,58 @@ def test_landed_summary_echo_validation_stop_names_file_read():
     # 同指纹再撞 → thrash 早停。
     c.record([rej])
     assert c.is_thrashing() or c.take_validation_hard_stop()
+
+
+def test_every_landed_rejection_is_recognized_by_early_stop():
+    """安全网：三种遗留形态的拒绝文案都得被早停判定认出，改措辞不得静默丢掉一拍。"""
+    from agentcore.runtime.engine.write_args_clear import (
+        cleared_write_stub_rejection,
+        is_landed_echo_rejection,
+    )
+
+    # 现投影已不再产出这些形态（参数槽只剩 path），它们仅作为回灌安全网留存。
+    shapes = {
+        "landed_status": {"path": "site/main.js", "status": "landed", "chars": 800},
+        "legacy_summary": {"path": "docs/a.md", "_landed_summary": "【已落盘摘要·只读】"},
+        "cleared_body": {"path": "docs/a.md", "content": "[已清理]"},
+    }
+    for label, args in shapes.items():
+        err = cleared_write_stub_rejection(args)
+        assert err is not None, label
+        assert is_landed_echo_rejection(err), label
+
+
+def test_landed_status_echo_gets_one_strike_stop():
+    """遗留 landed 形态若仍被回灌 → 首拍即 path-stop，与旧摘要形态同待遇。"""
+    from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
+    from agentcore.runtime.loop_controller import (
+        LoopController,
+        ToolAttempt,
+        fingerprint_tool_call,
+    )
+
+    args = {"path": "site/main.js", "status": "landed", "chars": 800}
+    err = cleared_write_stub_rejection(args)
+    assert err is not None
+    assert "已落盘摘要" not in err  # 走的是 landed-status 分支，不是旧措辞
+
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    c.record(
+        [
+            ToolAttempt(
+                fingerprint_tool_call("file_write", json.dumps(args, ensure_ascii=False)),
+                "file_write",
+                success=False,
+                contract_failure=True,
+                error_summary=err,
+                meta={"error_class": "validation", "path": "site/main.js"},
+            )
+        ]
+    )
+    stop = c.tool_circuit_breaker().validation_stop or ""
+    assert "file_read" in stop
+    assert "site/main.js" in stop
+
 
 # ── 4. 记忆复用 ──────────────────────────────────────────────────────────────
 

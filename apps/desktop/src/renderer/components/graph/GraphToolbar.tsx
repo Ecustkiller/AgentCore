@@ -3,6 +3,7 @@ import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
 import { GitBranch } from "lucide-react";
+import type { ReactNode } from "react";
 import { LAYOUT_OPTIONS } from "./constants";
 
 interface GraphToolbarProps {
@@ -14,6 +15,8 @@ interface GraphToolbarProps {
   injectFlowAvailable?: boolean;
   showAuditInjectFlow?: boolean;
   onShowAuditInjectFlowChange?: (on: boolean) => void;
+  /** Optional left-of-layout controls (e.g. mid-flight「停止任务」). */
+  leading?: ReactNode;
 }
 
 /**
@@ -28,12 +31,14 @@ export function GraphToolbar({
   injectFlowAvailable = false,
   showAuditInjectFlow = false,
   onShowAuditInjectFlowChange,
+  leading,
 }: GraphToolbarProps) {
   return (
     <div
       className="absolute right-3 top-3 z-10 flex items-center gap-2"
       onContextMenu={(e) => e.stopPropagation()}
     >
+      {leading}
       {metricsSummary && (
         <SimpleTooltip label="调度摘要：峰值并发 · 总时长 · 串行化次数（详情见诊断「调度」块）">
           <span className="rounded-lg border border-border bg-card/90 px-2 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">

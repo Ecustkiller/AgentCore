@@ -113,6 +113,10 @@ def _patch_job_runner(monkeypatch, events: list, *, pipeline):
     monkeypatch.setattr(handoff_jobs_mod, "HandoffJobRepository", _FakeJobRepo)
     monkeypatch.setattr(handoff_jobs_mod, "MessageRepository", _FakeMsgRepo)
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[{"run_id": "r1"}]),
     )

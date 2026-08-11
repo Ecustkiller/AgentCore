@@ -94,4 +94,95 @@ describe("InterjectionBubbles · 用户气泡折叠", () => {
     spy.mockRestore();
     clientSpy.mockRestore();
   });
+
+  it("turnClosed + received 显示未被读取；进行中仍等待读取", () => {
+    const { rerender } = render(
+      <InterjectionBubbles
+        items={[
+          {
+            interjectionId: "ij-r",
+            content: "补充一句",
+            status: "received",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("已送达，等待主 Agent 读取")).toBeTruthy();
+
+    rerender(
+      <InterjectionBubbles
+        turnClosed
+        items={[
+          {
+            interjectionId: "ij-r",
+            content: "补充一句",
+            status: "received",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("未被主 Agent 读取")).toBeTruthy();
+    expect(screen.queryByText("已送达，等待主 Agent 读取")).toBeNull();
+  });
+
+  it("failed 徽标为未被处理，note 原样展示", () => {
+    render(
+      <InterjectionBubbles
+        turnClosed
+        items={[
+          {
+            interjectionId: "ij-f",
+            content: "丢弃的插话",
+            status: "failed",
+            note: "你按了停止，这条插话未被读取，已丢弃",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("未被处理")).toBeTruthy();
+    expect(
+      screen.getByText("你按了停止，这条插话未被读取，已丢弃"),
+    ).toBeTruthy();
+  });
+
+  it("queued 走一行注记，不出用户气泡；note 仍保留", () => {
+    render(
+      <InterjectionBubbles
+        items={[
+          {
+            interjectionId: "ij-q",
+            content: "排队后出队会重复的话",
+            status: "queued",
+            note: "已转入下一回合排队",
+          },
+          {
+            interjectionId: "ij-i",
+            content: "已注入的插话",
+            status: "injected",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("将在下一条回复处理")).toBeTruthy();
+    expect(screen.getByTestId("interjection-queued-note-ij-q")).toBeTruthy();
+    const preview = document.querySelector(
+      "[data-testid='interjection-queued-note-ij-q'] .interjection-queued-preview",
+    );
+    expect(preview?.getAttribute("title")).toBe("排队后出队会重复的话");
+    expect(preview?.textContent).toBe("排队后出队会重复的话");
+    expect(
+      document.querySelector(
+        "[data-testid='interjection-bubble-ij-q'] .bubble.user",
+      ),
+    ).toBeNull();
+    expect(screen.getByText("已转入下一回合排队")).toBeTruthy();
+
+    expect(
+      document.querySelector(
+        "[data-testid='interjection-bubble-ij-i'] .bubble.user",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("主 Agent 已看到")).toBeTruthy();
+  });
 });

@@ -1,76 +1,23 @@
-"""跨回合同图追加：复用既有 execution_id，生长事件续写宿主 turn journal。
+"""协作图身份辅助：解析上一张图、加载宿主 journal、CEO 回显。
 
-与同回合二次 ``delegate``（协调 session merge）正交。跨回合时宿主协调会话
-通常已收口（异步团队模型下 teardown 只清 idle session；仍活跃的后台 drive 由
-detached finally 收口，见 ``coordination/session.py``）——若追加时宿主 session
-仍活跃，``try_start_coordination`` 走 merge 路径复用之；否则本模块负责
-(1) 解析宿主助手消息、(2) 合并旧计划、(3) 把生长类 DURABLE 事件 divert 到
-宿主 ``turn_id`` journal。
+跨回合 divert（同 execution 续写宿主 journal / ``graph_append`` 事件）已退役。
+新回合 = 新 ``execution_id`` + 可选 ``prev_execution_id`` 图间链。
 
+与同回合二次 ``delegate``（协调 session merge / ``_last_graph_*`` 内存合入）正交。
 ``continue_from_run_id``（唤回 worker 会话记忆）与本机制正交，互不改写。
 """
 
 from __future__ import annotations
 
-from contextvars import ContextVar
-from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.events.types import EventType
-from agentcore.runtime.journal.writer import TurnJournalWriter
 
 logger = get_logger(__name__)
 
 # execution_id → host assistant message_id（进程内；首张 run_plan 登记，DB 冷查兜底）
 _host_by_execution: dict[str, str] = {}
-
-
-@dataclass(frozen=True, slots=True)
-class GraphAppendRedirect:
-    """Active divert: growth DURABLE facts append to the host turn's journal."""
-
-    execution_id: str
-    host_message_id: str
-    append_message_id: str
-    host_writer: TurnJournalWriter
-
-
-current_graph_append_redirect: ContextVar[GraphAppendRedirect | None] = ContextVar(
-    "current_graph_append_redirect", default=None
-)
-
-# DURABLE kinds that belong on the host graph journal during an append divert.
-_GROWTH_EVENT_TYPES: frozenset[EventType] = frozenset(
-    {
-        EventType.RUN_PLAN,
-        EventType.RUN_STARTED,
-        EventType.RUN_CONTEXT,
-        EventType.RUN_COMPLETED,
-        EventType.RUN_FAILED,
-        EventType.RUN_CANCELLED,
-        EventType.RUN_SKIPPED,
-        EventType.RUN_PROGRESS,
-        EventType.BATCH_METRICS,
-        EventType.PLAN_REVISED,
-        EventType.TEAM_NOTE_POSTED,
-        EventType.TEAM_SYNTHESIS_PREVIEW,
-        EventType.DELIVERY_STATUS,
-        EventType.RUN_ESCALATION,
-        EventType.ESCALATION_REQUIRED,
-        EventType.ESCALATION_RESOLVED,
-        EventType.USER_INTERJECTION,
-        EventType.EXECUTION_DETACHED,
-        EventType.EXECUTION_COMPLETED,
-        # 批 A2：辩论新幕生长时逐轮/收场 DURABLE 续写宿主 journal（契约形状不变）。
-        EventType.DEBATE_ROUND_STARTED,
-        EventType.DEBATE_ROUND,
-        EventType.DEBATE_RESULT,
-        EventType.DEBATE_PRETRIAL_STARTED,
-        EventType.DEBATE_PRETRIAL_ORDERS,
-        EventType.DEBATE_PRETRIAL_COMPLETED,
-    }
-)
 
 
 def register_graph_host(execution_id: str, host_message_id: str) -> None:
@@ -92,17 +39,6 @@ def peek_graph_host(execution_id: str) -> str | None:
     return _host_by_execution.get(eid) if eid else None
 
 
-def is_graph_growth_event(event_type: EventType, payload: dict[str, Any]) -> bool:
-    """True when this DURABLE fact should divert to the host journal under redirect."""
-    if event_type is EventType.GRAPH_APPEND:
-        return False
-    if event_type in (EventType.TOOL_USE_START, EventType.TOOL_USE_END):
-        # Worker-scoped tools ride the host graph; CEO orchestration tools stay on the
-        # appending turn (anchor / tool card).
-        return bool(payload.get("run_id"))
-    return event_type in _GROWTH_EVENT_TYPES
-
-
 async def resolve_host_message_id(
     *,
     conversation_id: str,
@@ -111,6 +47,7 @@ async def resolve_host_message_id(
     """Resolve the assistant message that owns ``execution_id``.
 
     Order: process-local registry → Postgres ``turn_journal`` scan.
+    Used to load prior-graph journal (debate host attach / existence check), not divert.
     """
     cached = peek_graph_host(execution_id)
     if cached:
@@ -150,7 +87,8 @@ async def resolve_latest_appendable_execution(
     """Resolve ``append_to_execution_id="latest"``: newest appendable graph (本回合优先).
 
     可追加 = 本对话内、``plan_type='multi_agent'`` 的团队协作图（辩论图不可追加）；宿主消息
-    可解析、plan_snapshot 可合并等深校验仍由既有精确-id 追加路径把关。
+    可解析等深校验仍由调用方把关。跨回合命中后作为 ``prev_execution_id``（新图 + 链），
+    同回合 / adopt 热图仍合入同一 ``execution_id``。
 
     ``prefer_message_id``：该回合上已有 multi_agent 图则用之（同 turn 第一波收口后再
     ``latest`` 续派不得静默挂到跨 message 旧宿主）。``exclude_message_id`` 仅 prompt
@@ -211,7 +149,7 @@ async def resolve_latest_appendable_execution(
 async def resolve_latest_mlr_execution(*, conversation_id: str) -> str | None:
     """Newest MLR-shaped ``multi_agent`` execution (含 ``synthesizer`` run) in the conversation.
 
-    批 A2 辩论进宿主图专用：不排除当前回合（同回合 MLR→开辩须命中本回合宿主）。
+    辩论第二幕 prev 链专用：不排除当前回合（同回合 MLR→开辩须命中本回合宿主）。
     分层：SQL synthesizer 形态优先 → 与 ``graph_append_latest`` 同池的 multi_agent
     候选再经 journal ``synthesizer_run_id`` 复核（对齐两套宿主查找，避免「appendable
     找得到、MLR 找不到」）。
@@ -284,11 +222,96 @@ async def load_host_journal_entries(host_message_id: str) -> list[dict[str, Any]
 # CEO-only volatile-tail note (跨回合可见回显通道): history replays only user/assistant
 # text, so the tool-result echo alone would be dropped next turn. This block rides the
 # CEO system prompt's volatile tail (assemble.py) — never the shared worker base.
-_RECENT_GRAPH_TEMPLATE = """<recent_team_graph>
-本对话最近一张协作图（团队执行）execution_id=`{execution_id}`。用户显式要求往这支团队继续加人 / \
-接着干时，delegate 可传 append_to_execution_id="latest"（引擎自动解析到它）或直接传上述精确 id\
-（多图并存时以显式 id 优先）；新任务默认仍新建图。
-</recent_team_graph>"""
+#
+# Facts only: worker count / role / terminal-or-running status / task brief. No talk-
+# script, completion heuristics, or "don't lie" instructions (intercept-discipline).
+_MAX_RECENT_GRAPH_WORKERS = 12
+_MAX_RECENT_GRAPH_TASK_CHARS = 80
+
+_RECENT_GRAPH_APPEND_NOTE = (
+    "用户显式要求往这支团队继续加人 / 接着干时，delegate 可传 "
+    'append_to_execution_id="latest"（引擎自动解析到它）或直接传上述精确 id'
+    "（多图并存时以显式 id 优先）：跨回合会新开图并经 prev_execution_id 链到它；"
+    "同回合二次派发合入同一张图。新任务默认仍新建图。"
+)
+
+
+def _worker_status_label(phase: Any) -> str:
+    """Map a RunPhase (or missing → running) to the CEO-facing status token."""
+    from agentcore.runtime.runs.types import RunPhase
+
+    if phase is None:
+        return "running"
+    value = phase.value if isinstance(phase, RunPhase) else str(phase).strip().lower()
+    if value in ("completed", "failed", "cancelled", "skipped"):
+        return value
+    # queued / running / retrying / unknown → still in flight from the next turn's view
+    return "running"
+
+
+def _task_brief(task: str) -> str:
+    text = " ".join((task or "").split())
+    if not text:
+        return "—"
+    if len(text) > _MAX_RECENT_GRAPH_TASK_CHARS:
+        return text[:_MAX_RECENT_GRAPH_TASK_CHARS] + "…"
+    return text
+
+
+def format_recent_graph_worker_facts(
+    plan: Any,
+    completed: dict[str, Any] | None,
+) -> str:
+    """Minimal worker fact lines (role / status / task) for ``<recent_team_graph>``.
+
+    ``plan`` is a :class:`~agentcore.runtime.runs.plan.RunPlan` (or None).
+    Returns ``""`` when there are no worker nodes to list.
+    """
+    if plan is None:
+        return ""
+    nodes = getattr(plan, "nodes", None) or []
+    if not nodes:
+        return ""
+    seed = completed or {}
+    lines: list[str] = []
+    for node in nodes[:_MAX_RECENT_GRAPH_WORKERS]:
+        role = (
+            str(getattr(node, "role", "") or "").strip()
+            or str(getattr(node, "agent_name", "") or "").strip()
+            or str(getattr(node, "run_id", "") or "").strip()
+            or "—"
+        )
+        run_id = str(getattr(node, "run_id", "") or "").strip()
+        state = seed.get(run_id) if run_id else None
+        phase = getattr(state, "phase", None) if state is not None else None
+        status = _worker_status_label(phase)
+        task = _task_brief(str(getattr(node, "task", "") or ""))
+        lines.append(f"- role={role}; status={status}; task={task}")
+    extra = len(nodes) - _MAX_RECENT_GRAPH_WORKERS
+    if extra > 0:
+        lines.append(f"- …另有 {extra} 名 worker 未列出")
+    return f"workers={len(nodes)}：\n" + "\n".join(lines)
+
+
+def render_recent_graph_context(
+    *,
+    execution_id: str,
+    worker_facts: str = "",
+) -> str:
+    """Assemble the ``<recent_team_graph>`` block (facts + append channel note)."""
+    eid = (execution_id or "").strip()
+    if not eid:
+        return ""
+    parts = [
+        "<recent_team_graph>",
+        f"本对话最近一张协作图（团队执行）execution_id=`{eid}`。",
+    ]
+    facts = (worker_facts or "").strip()
+    if facts:
+        parts.append(facts)
+    parts.append(_RECENT_GRAPH_APPEND_NOTE)
+    parts.append("</recent_team_graph>")
+    return "\n".join(parts)
 
 
 async def build_recent_graph_context(
@@ -296,52 +319,37 @@ async def build_recent_graph_context(
     conversation_id: str,
     exclude_message_id: str | None = None,
 ) -> str:
-    """The ``<recent_team_graph>`` prompt note, or ``""`` when the conversation has no graph."""
+    """The ``<recent_team_graph>`` prompt note, or ``""`` when the conversation has no graph.
+
+    Resolves the newest appendable execution, then loads its host journal for a
+    compact worker roster (count / role / status / task brief). Missing journal
+    still yields the execution_id + append channel note so ``latest`` stays usable.
+    """
     execution_id = await resolve_latest_appendable_execution(
         conversation_id=conversation_id,
         exclude_message_id=exclude_message_id,
     )
     if not execution_id:
         return ""
-    return _RECENT_GRAPH_TEMPLATE.format(execution_id=execution_id)
-
-
-async def open_host_journal_writer(
-    *,
-    host_message_id: str,
-    conversation_id: str,
-    trace_id: str | None,
-) -> TurnJournalWriter:
-    """Mint a writer that continues appending to an already-finished host turn."""
-    initial_seq = 0
-    try:
-        from agentcore.db.base import async_session_factory
-        from agentcore.db.repositories import TurnJournalRepository
-
-        async with async_session_factory() as session:
-            repo = TurnJournalRepository(session)
-            max_seq = await repo.max_seq(host_message_id)
-            if max_seq is not None:
-                initial_seq = max_seq + 1
-    except Exception as exc:  # noqa: BLE001 — tests / no DB: soft seq from 0
-        logger.info(
-            "graph_append.host_writer_seq_fallback",
-            host_message_id=host_message_id,
-            error=str(exc),
-        )
-    return TurnJournalWriter(
-        turn_id=host_message_id,
+    worker_facts = ""
+    host_mid = await resolve_host_message_id(
         conversation_id=conversation_id,
-        trace_id=trace_id,
-        initial_seq=initial_seq,
+        execution_id=execution_id,
+    )
+    if host_mid:
+        plan, completed = await load_host_plan_and_completed(host_mid)
+        worker_facts = format_recent_graph_worker_facts(plan, completed)
+    return render_recent_graph_context(
+        execution_id=execution_id,
+        worker_facts=worker_facts,
     )
 
 
 def parse_host_captain_run_id(entries: list[dict[str, Any]] | None) -> str | None:
     """Parse the scene-level captain run id from host journal ``run_plan`` frames.
 
-    Prefers frames without ``host_message_id`` (original host plan). Growth / append
-    frames may still carry a captain on legacy journals; those are a fallback only.
+    Prefers frames without ``host_message_id`` (original host plan). Legacy growth /
+    append frames may still carry a captain; those are a fallback only.
     Returns ``None`` when no ``kind=captain`` run is present.
     """
     if not entries:
@@ -398,12 +406,3 @@ async def load_host_plan_and_completed(
     plan = plan_from_journal(entries)
     completed = completed_from_journal(entries)
     return plan, completed
-
-
-def bind_redirect(redirect: GraphAppendRedirect) -> Any:
-    """Bind divert for the current task (and asyncio children created after)."""
-    return current_graph_append_redirect.set(redirect)
-
-
-def reset_redirect(token: Any) -> None:
-    current_graph_append_redirect.reset(token)

@@ -9,3 +9,8 @@ export type {
   TeamPreviewSideView,
   TeamPreviewWorkerView,
 } from "./types";
+export {
+  formatWorkspaceLabel,
+  resolveWorkspacePresentation,
+} from "./workspacePresentation";
+export type { WorkspacePresentation } from "./workspacePresentation";

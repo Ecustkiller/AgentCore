@@ -36,6 +36,7 @@ from agentcore.workspace._paths import (
     resolve_safe_path,
 )
 from agentcore.workspace.channel import WorkspaceChannel
+from agentcore.workspace.declared_dirs import is_declared_latent_dir
 from agentcore.workspace.external_mounts import (
     ExternalMount,
     build_external_env,
@@ -691,6 +692,10 @@ class ServerWorkspace:
         await self._gate_shared(directory, write=False)
         base = self._safe(directory)
         if not base.is_dir():
+            # Declared stage / attachments trees: writes mkdir parents — missing
+            # means latent empty, not a guess failure. File-at-path still errors.
+            if not base.exists() and is_declared_latent_dir(directory):
+                return []
             raise NotADirectory(directory)
         try:
             entries = sorted(base.glob(pattern))[:_MAX_LIST_ENTRIES]
@@ -813,6 +818,8 @@ class ServerWorkspace:
             )
         base = self._safe(directory)
         if not base.is_dir():
+            if not base.exists() and is_declared_latent_dir(directory):
+                return TreeResult(entries=[], truncated=False, elided_count=0)
             raise NotADirectory(directory)
 
         entries: list[TreeEntry] = []
@@ -1230,9 +1237,17 @@ class ServerWorkspace:
                 if not self._exec_env_alive:
                     from agentcore.core.logging import get_logger
 
+                    # Carry the sandbox's own failure reason — the sticky marker
+                    # returned to the model is deliberately opaque, so without this
+                    # a dead exec env leaves no way to tell timeout from missing
+                    # interpreter from AV interference.
+                    failure = getattr(self._sandbox, "last_health_failure", None)
+                    reason, detail = failure if failure else (None, None)
                     get_logger(__name__).info(
                         "sandbox.exec_env_probe_failed",
                         location=self.location,
+                        reason=reason,
+                        detail=detail,
                     )
                     return probe_failure_result()
             elif not self._exec_env_alive:

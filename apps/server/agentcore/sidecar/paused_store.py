@@ -255,6 +255,41 @@ class LocalPausedTurnStore:
 
     # --- resume / listPaused backing ------------------------------------------
 
+    async def load(
+        self, message_id: str, *, conversation_id: str | None = None
+    ) -> TurnSuspension | None:
+        """Read a paused turn without claiming (D8 cold peek before settlement / deferred).
+
+        Mirrors cloud :func:`~agentcore.runtime.suspension.persistence.load_paused_turn`.
+        ``None`` when absent / wrong conversation / unreadable.
+        """
+        if not _is_safe_message_id(message_id):
+            return None
+        try:
+            record = await asyncio.to_thread(self._load_sync, message_id, conversation_id)
+        except Exception as e:  # noqa: BLE001 — peek failure reads as "not resumable"
+            logger.warning("sidecar.paused_load_failed", message_id=message_id, error=str(e))
+            return None
+        if record is None:
+            return None
+        return _suspension_from_record(record)
+
+    def _load_sync(
+        self, message_id: str, conversation_id: str | None
+    ) -> dict[str, Any] | None:
+        target = self._path(message_id)
+        try:
+            record = json.loads(target.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return None
+        if not isinstance(record, dict):
+            return None
+        if conversation_id is not None and record.get("conversation_id") != conversation_id:
+            return None
+        return record
+
     async def claim(
         self, message_id: str, *, conversation_id: str | None = None
     ) -> TurnSuspension | None:

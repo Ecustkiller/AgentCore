@@ -2,7 +2,7 @@ import { StreamError } from "@/lib/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 隔离断言 sendTurn / runResume「探活 → 路由 / 降级收敛」这一段的可观察契约：
-// sendTurn——探活 ok 走 sidecar、首探失败(probed)走云+强制提示、bad 缓存命中(!probed)走云+节流提示、
+// sendTurn——探活 ok 走 sidecar、首探失败(probed)走云+写 cloud_bridge、bad 缓存命中(!probed)走云、
 // 回合启动期失败(recoverable)降级并标坏、中途失败(!recoverable)不自动降级；
 // runResume——探活 ok 走 sidecar 续跑、探活失败保留续跑卡 + 出横幅（无 banner retry）、
 // 404/PAUSED_TURN_NOT_FOUND 丢卡、绝不降级走云（本机帧云端没有）。
@@ -24,7 +24,6 @@ vi.mock("@/services/sidecarHealth", () => ({
   probeSidecar: vi.fn(),
   markSidecarUnhealthy: vi.fn(),
   clearSidecarHealth: vi.fn(),
-  takeCloudBridgeToastSlot: vi.fn(() => true),
 }));
 vi.mock("@/lib/capabilities", () => ({
   hasLocalEngine: vi.fn(() => true),
@@ -43,7 +42,7 @@ vi.mock("@/services/streamConversationViaSidecar", () => ({
   streamConversationViaSidecar: vi.fn(),
 }));
 vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
-// notifyError 由 stream 错误路径间接引入；排队 toast 现由 turn_queued → queuedNotify。
+// notifyError 由 stream 错误路径间接引入；过桥无 toast（ComposerCloudBridgeHint）。
 vi.mock("@/lib/toast", () => ({ notifyInfo: vi.fn(), notifyError: vi.fn() }));
 
 import { hasLocalEngine } from "@/lib/capabilities";
@@ -53,7 +52,6 @@ import {
   clearSidecarHealth,
   markSidecarUnhealthy,
   probeSidecar,
-  takeCloudBridgeToastSlot,
 } from "@/services/sidecarHealth";
 import {
   getActiveSidecarTarget,
@@ -82,7 +80,6 @@ const logEventMock = vi.mocked(logEvent);
 const probeSidecarMock = vi.mocked(probeSidecar);
 const markSidecarUnhealthyMock = vi.mocked(markSidecarUnhealthy);
 const clearSidecarHealthMock = vi.mocked(clearSidecarHealth);
-const takeCloudBridgeToastSlotMock = vi.mocked(takeCloudBridgeToastSlot);
 const streamConversationMock = vi.mocked(streamConversation);
 const streamViaSidecarMock = vi.mocked(streamConversationViaSidecar);
 const resumeConversationMock = vi.mocked(resumeConversation);
@@ -125,7 +122,6 @@ beforeEach(() => {
   getActiveSidecarTargetMock.mockReturnValue(null);
   isSidecarEnabledMock.mockReturnValue(true);
   hasLocalEngineMock.mockReturnValue(true);
-  takeCloudBridgeToastSlotMock.mockReturnValue(true);
   seedOptimisticUser();
 });
 
@@ -161,7 +157,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     );
   });
 
-  it("探活失败 → 强制提示（带诊断）并走云，不走 sidecar", async () => {
+  it("探活失败 → 写 cloud_bridge 并走云，不走 sidecar（无 toast）", async () => {
     resolveSidecarRootMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: false,
@@ -171,14 +167,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
 
     await sendTurn(spec());
 
-    expect(takeCloudBridgeToastSlotMock).toHaveBeenCalledWith("r1::", {
-      force: true,
-    });
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
-    expect(String(notifyInfoMock.mock.calls[0][0])).toContain(
-      "spawn uv ENOENT",
-    );
-    expect(String(notifyInfoMock.mock.calls[0][0])).toContain("云端过桥");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(streamConversationMock).toHaveBeenCalledTimes(1);
     expect(streamViaSidecarMock).not.toHaveBeenCalled();
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
@@ -212,9 +201,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
 
     expect(markSidecarUnhealthyMock).toHaveBeenCalledWith(TARGET, "拉不起");
     expect(streamConversationMock).toHaveBeenCalledTimes(1); // 降级走云
-    expect(takeCloudBridgeToastSlotMock).toHaveBeenCalledWith("r1::", {
-      force: true,
-    });
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
     );
@@ -248,9 +235,9 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(streamConversationMock).not.toHaveBeenCalled();
   });
 
-  it("bad 缓存命中(!probed) → 走云 + 节流提示（非完全静默）", async () => {
+  it("bad 缓存命中(!probed) → 走云 + 写 cloud_bridge（无 toast）", async () => {
     resolveSidecarRootMock.mockResolvedValue(TARGET);
-    // 该根本会话已探明坏：probeSidecar 命中缓存（probed:false），仍应可感知。
+    // 该根本会话已探明坏：probeSidecar 命中缓存（probed:false）。
     probeSidecarMock.mockResolvedValue({
       healthy: false,
       probed: false,
@@ -261,11 +248,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
 
     expect(streamConversationMock).toHaveBeenCalledTimes(1);
     expect(streamViaSidecarMock).not.toHaveBeenCalled();
-    expect(takeCloudBridgeToastSlotMock).toHaveBeenCalledWith("r1::", {
-      force: false,
-    });
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
-    expect(String(notifyInfoMock.mock.calls[0][0])).toContain("云端过桥");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
     );
@@ -279,14 +262,13 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     );
   });
 
-  it("bad 缓存续云在冷却内不再 toast，但仍写 cloud_bridge 状态", async () => {
+  it("bad 缓存续云仍写 cloud_bridge 状态（无 toast）", async () => {
     resolveSidecarRootMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
       healthy: false,
       probed: false,
       detail: null,
     });
-    takeCloudBridgeToastSlotMock.mockReturnValue(false);
 
     await sendTurn(spec());
 
@@ -296,7 +278,6 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
       "cloud_bridge",
     );
   });
-
   it("开关关 + 绑本机 → 云端过桥静默（无 switch_off toast），不假装 sidecar", async () => {
     resolveSidecarRootMock.mockResolvedValue(null);
     resolveLocalTargetMock.mockResolvedValue(TARGET);
@@ -684,7 +665,7 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(usePausedTurnStore.getState().pending).toHaveLength(1);
   });
 
-  it("有冷卡 + isGenerating → 先收口再续跑（不挡死）", async () => {
+  it("有冷卡 + isGenerating → D9 共存：不抹 generating，直接续跑", async () => {
     useConversationStore.getState().setGenerating(true, "c1");
     resolveLocalTargetMock.mockResolvedValue(TARGET);
     probeSidecarMock.mockResolvedValue({
@@ -699,6 +680,8 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(resumeViaSidecarMock).toHaveBeenCalledTimes(1);
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.error).toBeNull();
+    // 不得因冷续跑把 live generating 抹掉。
+    expect(useConversationStore.getState().byId.c1?.isGenerating).toBe(true);
   });
 
   it("无冷卡 + isGenerating → 仍拦截（抛错 + 横幅）", async () => {

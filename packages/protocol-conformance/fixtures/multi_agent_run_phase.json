@@ -195,6 +195,7 @@
   "projected": {
     "status": "running",
     "finishReason": null,
+    "error": null,
     "content": "组队中。",
     "reasoning": "",
     "captainContext": [],

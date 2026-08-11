@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from contextvars import copy_context
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,12 +37,14 @@ def _clear_coord():
     current_execution_id.reset(token)
 
 
-def _fake_delegate(*, supervised: bool = False):
+def _fake_delegate(*, supervised: bool = False, depth: int = 0):
     d = MagicMock()
     d.schema = MagicMock(name="delegate")
     d.schema.name = "delegate"
     d._sink = MagicMock()
     d._supervised = object() if supervised else None
+    # depth≥1 = 队员自带的嵌套 delegate 句柄（spawn_lead_subteam）；协调套件不归它。
+    d._depth = depth
     return d
 
 
@@ -52,6 +56,35 @@ def _activate_coordination(eid: str) -> None:
             conversation_id="c1",
         )
     )
+
+
+def test_solo_worker_enters_coordination_surface():
+    """验收：total_workers=1 的活跃 session 也注入 cancel_worker 等协调工具面。"""
+    eid = "exec-solo-coord"
+    token = current_execution_id.set(eid)
+    try:
+        set_active_coordination(
+            CoordinationSession(
+                execution_id=eid,
+                total_workers=1,
+                conversation_id="c1",
+            )
+        )
+        assert coordination_surface_active(execution_id=eid)
+        reg = ToolRegistry()
+        delegate = _fake_delegate()
+        reg.register(delegate)
+        register_coordination_surface(
+            reg,
+            delegate_tool=delegate,
+            sink=MagicMock(),
+            include=True,
+        )
+        assert "cancel_worker" in reg.names
+        assert "resolve_escalation" in reg.names
+    finally:
+        clear_active_coordination()
+        current_execution_id.reset(token)
 
 
 def test_idle_surface_omits_gated_tools():
@@ -146,6 +179,123 @@ def test_ensure_before_llm_installs_wait_when_coordination_live():
         assert "wait" in reg.names
     finally:
         clear_active_coordination()
+        current_execution_id.reset(token)
+
+
+def test_member_never_gets_coordination_suite_from_parent_session():
+    """回归钉：队员不得因父图协调活跃而拿到 CEO 协调工具面。
+
+    队员 allowed_tools=None（不限名单），注册即被 offer——真实日志里 depth=1 的
+    审计员拿到了 wait / cancel_worker / resolve_escalation。
+    """
+    eid = "exec-parent-graph"
+    token = current_execution_id.set(eid)
+    try:
+        _activate_coordination(eid)
+        reg = ToolRegistry()
+        # 队员的嵌套 delegate 句柄：depth≥1，且与父图共享 execution_id
+        reg.register(_fake_delegate(depth=1))
+
+        assert promote_coordination_surface_if_needed(reg) is False
+        assert set(reg.names).isdisjoint(COORDINATION_GATED_TOOLS)
+    finally:
+        clear_active_coordination()
+        current_execution_id.reset(token)
+
+
+def test_nested_lead_still_gets_replan_on_supervised_yield():
+    """嵌套 lead 合法需要 replan：收窄协调套件不得连它一起掐掉。"""
+    reg = ToolRegistry()
+    reg.register(_fake_delegate(supervised=True, depth=1))
+
+    assert promote_coordination_surface_if_needed(reg) is True
+    assert "replan" in reg.names
+    # 但父图的协调四件套仍然不归它
+    assert "wait" not in reg.names
+    assert "cancel_worker" not in reg.names
+
+
+def test_resync_binding_follows_hot_graph_merge():
+    """回归钉：合入热图后 CEO 必须重新绑到宿主图，否则不等待也拿不到 wait。
+
+    delegate 在 asyncio.gather 子任务里改 ContextVar，父任务读不到；宿主 eid 只
+    落在共享 _base_tool_context 上。回绑前工具面判空（复现「CEO 用正文收口、把在跑
+    的队员甩成 detached」），回绑后协调四件套装上。
+
+    跨回合 append 进【已收口】的图现在改走「新图 + prev_execution_id」不再改绑；
+    但 append_to 解析到【仍在跑】的图仍走 tool.py 的热图合入改绑，本钉照旧有效。
+    """
+    from agentcore.runtime.resolve.ceo_surface import resync_coordination_binding
+
+    minted, host = "exec-minted-this-turn", "exec-host-graph"
+    token = current_execution_id.set(minted)
+    try:
+        # 真实复现而非模拟：会话在 copy_context 里注册，其 current_execution_id.set
+        # 停在副本内（等价于 delegate 跑在 asyncio.gather 子任务），父任务仍是 mint。
+        copy_context().run(_activate_coordination, host)
+        assert current_execution_id.get() == minted
+
+        reg = ToolRegistry()
+        delegate = _fake_delegate()
+        delegate._base_tool_context = SimpleNamespace(execution_id=host)
+        reg.register(delegate)
+
+        # 回绑前：父任务仍指向本回合 mint 的 eid → 找不到宿主会话
+        assert coordination_surface_active() is False
+        assert promote_coordination_surface_if_needed(reg) is False
+        assert "wait" not in reg.names
+
+        assert resync_coordination_binding(reg) is True
+        assert current_execution_id.get() == host
+        assert coordination_surface_active() is True
+        assert promote_coordination_surface_if_needed(reg) is True
+        assert set(reg.names) >= COORDINATION_GATED_TOOLS
+    finally:
+        clear_active_coordination()
+        current_execution_id.reset(token)
+
+
+def test_resync_binding_noop_when_already_bound():
+    """同回合首次 delegate（未 append）：绑定未动，不应重复回绑/ 刷日志。"""
+    from agentcore.runtime.resolve.ceo_surface import resync_coordination_binding
+
+    eid = "exec-same-turn"
+    token = current_execution_id.set(eid)
+    try:
+        reg = ToolRegistry()
+        delegate = _fake_delegate()
+        delegate._base_tool_context = SimpleNamespace(execution_id=eid)
+        reg.register(delegate)
+
+        assert resync_coordination_binding(reg) is False
+        assert current_execution_id.get() == eid
+    finally:
+        current_execution_id.reset(token)
+
+
+@pytest.mark.parametrize(
+    "delegate_factory",
+    [
+        pytest.param(None, id="no_delegate"),
+        pytest.param(lambda: SimpleNamespace(execution_id=None), id="ctx_without_eid"),
+        pytest.param(lambda: None, id="no_base_context"),
+    ],
+)
+def test_resync_binding_leaves_binding_alone_without_a_host(delegate_factory):
+    """裸装配 / 无宿主 eid：不得把绑定改成空或垃圾值。"""
+    from agentcore.runtime.resolve.ceo_surface import resync_coordination_binding
+
+    token = current_execution_id.set("exec-untouched")
+    try:
+        reg = ToolRegistry()
+        if delegate_factory is not None:
+            delegate = _fake_delegate()
+            delegate._base_tool_context = delegate_factory()
+            reg.register(delegate)
+
+        assert resync_coordination_binding(reg) is False
+        assert current_execution_id.get() == "exec-untouched"
+    finally:
         current_execution_id.reset(token)
 
 

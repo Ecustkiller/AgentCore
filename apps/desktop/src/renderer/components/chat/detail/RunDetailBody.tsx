@@ -5,6 +5,7 @@ import {
   executionGraphCapabilities,
   runActCapabilities,
 } from "@/components/graph/planCapabilities";
+import { isStoppableRunStatus } from "@/components/graph/runStopActions";
 import { Button } from "@/components/ui";
 import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
@@ -26,6 +27,7 @@ import { Pencil, RotateCcw, Shield, Square } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { RunMemberStopButton } from "./RunMemberStopButton";
 import { WorkerContextSection } from "./WorkerContextSection";
 import {
   buildModeratorLedger,
@@ -49,6 +51,7 @@ import {
   RevisionChainSection,
   revisionComparePair,
 } from "./sections/RunRevisionChain";
+import { StoppedTurnFileChangesSection } from "./sections/StoppedTurnFileChanges";
 import { Section, StatusBadge } from "./sections/shared";
 
 export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
@@ -147,7 +150,10 @@ export function RunDetailBody({
     agent.status === "working" &&
     runCaps.runRedirect &&
     conversationId != null;
+  const canStopMember =
+    conversationId != null && isStoppableRunStatus(run.status);
   const thinkingLive = isThinkingLivePlaceholder(agent);
+
   const isModerator = isDebateModeratorRun(execution, run.id);
   const moderatorLedger = isModerator ? buildModeratorLedger(execution) : null;
   const upstream = run.dependsOn
@@ -251,6 +257,14 @@ export function RunDetailBody({
             >
               记下改法（跑完后发送）
             </Button>
+            {canStopMember && conversationId != null && (
+              <RunMemberStopButton
+                conversationId={conversationId}
+                executionId={execution.id}
+                runId={run.id}
+                runStatus={run.status}
+              />
+            )}
             <Button
               variant="ghost"
               className="h-7 text-destructive hover:bg-destructive/10"
@@ -307,6 +321,20 @@ export function RunDetailBody({
           )}
         </div>
       )}
+
+      {/* 排队中也可单人停止——不提前展开「正在实时输出」banner，只露停止入口。 */}
+      {canStopMember &&
+        agent.status !== "working" &&
+        conversationId != null && (
+          <div className="mb-4">
+            <RunMemberStopButton
+              conversationId={conversationId}
+              executionId={execution.id}
+              runId={run.id}
+              runStatus={run.status}
+            />
+          </div>
+        )}
 
       <Section title={taskSection.title}>
         <CollapsibleSpeech
@@ -407,6 +435,15 @@ export function RunDetailBody({
             runId={runId}
           />
         )}
+
+      {/* 硬停后工作区改动：无 delivery harvest 时仍须露出基线 diff 入口（零 LLM）。 */}
+      {conversationId != null && execution.status === "cancelled" && (
+        <StoppedTurnFileChangesSection
+          execution={execution}
+          conversationId={conversationId}
+          messageId={messageId}
+        />
+      )}
 
       {showTimeline && (
         <div className="mb-4">

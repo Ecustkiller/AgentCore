@@ -1440,11 +1440,11 @@ async def test_file_read_missing_with_parent_gives_landmark(tmp_path: Path):
     assert "file_list" in result.error
     assert "更宽查找" in result.error
     assert "已知路径" in result.error
-    assert "原样重试" in result.error
+    assert "反复重试" in result.error
 
 
 async def test_file_list_missing_with_parent_gives_landmark(tmp_path: Path):
-    """列目录路径不存在但上级可列：同层样本 + 禁原样重试。"""
+    """列目录路径不存在但上级可列：同层样本 + 勿反复重试。"""
     server = tmp_path / "apps" / "server"
     server.mkdir(parents=True)
     (server / "agentcore").mkdir()
@@ -1458,11 +1458,11 @@ async def test_file_list_missing_with_parent_gives_landmark(tmp_path: Path):
     assert "父目录" in result.error
     assert "apps/server/" in result.error
     assert "agentcore" in result.error or "README.md" in result.error
-    assert "原样重试" in result.error
+    assert "反复重试" in result.error
 
 
 async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
-    """路径与父目录都不在：不编造同层样本，但给根查找 / 禁原样重试提示。"""
+    """路径与父目录都不在：不编造同层样本，但给根查找 / 勿反复重试提示。"""
     (tmp_path / "apps").mkdir()
     result = await FileReadTool().execute(
         {"path": "apps/ghost/package.json"}, _ctx(tmp_path)
@@ -1471,9 +1471,45 @@ async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
     assert result.error is not None
     assert result.error.startswith("文件不存在：apps/ghost/package.json")
     assert "上级目录也找不到" in result.error
-    assert "禁止凭通用目录名" in result.error
-    assert "原样重试" in result.error
+    assert "禁止凭通用目录名" not in result.error
+    assert "反复重试" in result.error
     assert "可见同层示例" not in result.error
+
+
+async def test_file_list_latent_stage_dir_returns_empty_not_error(tmp_path: Path):
+    """约定出口尚未创建：file_list 成功空态（写入会自动创建），不报 NotADirectory。"""
+    from agentcore.workspace.stage_dirs import RESEARCH_DIR
+
+    assert not (tmp_path / "AgentCore").exists()
+    result = await FileListTool().execute(
+        {"directory": RESEARCH_DIR, "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert result.error is None
+    assert "空目录" in (result.output or "")
+    assert "写入时会自动创建" in (result.output or "")
+    assert not (tmp_path / "AgentCore").exists()  # 不预创建
+
+
+async def test_file_list_latent_attachments_returns_empty_not_error(tmp_path: Path):
+    """attachments/ 尚未创建：列目录空态成功。"""
+    result = await FileListTool().execute(
+        {"directory": "attachments", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "写入时会自动创建" in (result.output or "")
+    assert not (tmp_path / "attachments").exists()
+
+
+async def test_file_list_guessed_missing_path_still_errors(tmp_path: Path):
+    """真·乱猜路径仍报错（不得因 latent 口径放成空目录）。"""
+    result = await FileListTool().execute(
+        {"directory": "apps/server/src", "pattern": "*"}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.startswith("不是目录：apps/server/src")
+    assert "写入时会自动创建" not in result.error
 
 
 async def test_file_read_missing_top_level_uses_root_landmark(tmp_path: Path):

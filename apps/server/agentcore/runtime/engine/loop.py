@@ -396,7 +396,7 @@ async def react_loop(
         if steer_cid:
             from agentcore.runtime.turn.steer import begin_accepting
 
-            begin_accepting(steer_cid)
+            begin_accepting(steer_cid, execution_id=tool_context.execution_id)
 
     def _enter_wind_down(reason: str, instruction: str | None = None) -> None:
         nonlocal wind_down_active, wind_down_reason, wind_down_effective_allowed
@@ -659,13 +659,27 @@ async def react_loop(
             if round_idx and on_round_begin is not None:
                 messages.extend(on_round_begin())
 
+            # 跨回合 append 把宿主 eid 只留在共享 tool context 上（delegate 跑在
+            # asyncio.gather 子任务里，它的 ContextVar 写不回父任务）。回绑必须早于本轮
+            # 所有按 execution 分流的消费方——插话路由、团队事件等待、wait 工具面都读它；
+            # 漏回绑时 CEO 既不等队员也拿不到 wait，只能用正文收口把在跑的队员甩成 detached。
+            if role == "captain":
+                from agentcore.runtime.resolve.ceo_surface import resync_coordination_binding
+
+                resync_coordination_binding(tools)
+
             # Classic turn steer (P1 · 同对话再发): drain mid-turn user supplements at
             # every step top (incl. round 0), AFTER on_round_begin and BEFORE LLM.
             # Parallel to coordination inject below — do NOT merge / fake coord_inject.
             if role == "captain" and steer_cid:
+                from agentcore.runtime.coordination.session import current_execution_id
                 from agentcore.runtime.turn.steer import drain_as_messages
 
-                steer_msgs = drain_as_messages(steer_cid)
+                steer_msgs = drain_as_messages(
+                    steer_cid,
+                    sink=sink,
+                    execution_id=current_execution_id.get() or tool_context.execution_id,
+                )
                 if steer_msgs:
                     messages.extend(steer_msgs)
                     logger.info(
@@ -1313,13 +1327,20 @@ async def react_loop(
         return _exit(*result)
     finally:
         if steer_cid:
+            from agentcore.runtime.turn.runs import turn_runs
             from agentcore.runtime.turn.steer import (
+                discard_leftovers_on_user_stop,
                 end_accepting,
                 promote_leftovers_to_queue,
             )
 
             leftovers = end_accepting(steer_cid)
             if leftovers:
-                promote_leftovers_to_queue(leftovers)
+                # Stop = silent: unread classic steers must not become a new turn.
+                # User-initiated FIFO is untouched (Stop ≠ 取消排队).
+                if turn_runs.is_user_stop(steer_cid):
+                    discard_leftovers_on_user_stop(leftovers)
+                else:
+                    promote_leftovers_to_queue(leftovers)
         if captain_token is not None:
             current_captain_loop.reset(captain_token)

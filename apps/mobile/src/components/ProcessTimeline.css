@@ -10,7 +10,7 @@
   color: var(--muted);
 }
 
-/* 跨回合同图追加：追加回合锚点（宿主气泡仍挂完整协作图）。 */
+/* 跨回合续接锚点：新契约「续自上一张图」/ 旧 journal graph_append（手机无跳转）。 */
 .graph-append-anchor {
   font-size: 12px;
   color: var(--muted);

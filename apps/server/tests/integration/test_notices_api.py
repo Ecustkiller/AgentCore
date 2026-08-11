@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+import pytest
+
+from agentcore.db.repositories.notices import ProductNoticeRepository
 from tests.integration.conftest import login_admin, register_and_login
 
 _PW = "password123"
@@ -122,9 +126,7 @@ async def test_outside_time_window_hidden(client, make_admin):
     past_end = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     future_start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
 
-    expired_id = await _create_and_publish(
-        client, title="已过期", end_at=past_end, surface="both"
-    )
+    expired_id = await _create_and_publish(client, title="已过期", end_at=past_end, surface="both")
     future_id = await _create_and_publish(
         client, title="未开始", start_at=future_start, surface="both"
     )
@@ -216,9 +218,7 @@ async def test_publish_banner_skips_official_im(client, make_admin):
     assert official is not None
     r = await client.get(f"/v1/messages/chats/{official['id']}/messages")
     assert r.status_code == 200, r.text
-    assert not any(
-        m.get("payload", {}).get("kind") == "product_notice" for m in r.json()["data"]
-    )
+    assert not any(m.get("payload", {}).get("kind") == "product_notice" for m in r.json()["data"])
 
 
 async def test_modal_active_and_inbox(client, make_admin):
@@ -263,9 +263,7 @@ async def test_modal_suppresses_non_critical_banner(client, make_admin):
     modal_id = await _create_and_publish(
         client, title="弹窗", body="m", surface="modal", severity="normal"
     )
-    await _create_and_publish(
-        client, title="高优横幅", body="b", surface="banner", severity="high"
-    )
+    await _create_and_publish(client, title="高优横幅", body="b", surface="banner", severity="high")
 
     await register_and_login(client, "notice-modal-suppress-user", password=_PW)
 
@@ -282,9 +280,7 @@ async def test_modal_banner_priority(client, make_admin):
     modal_id = await _create_and_publish(
         client, title="弹窗", body="m", surface="modal", severity="normal"
     )
-    await _create_and_publish(
-        client, title="高优横幅", body="h", surface="banner", severity="high"
-    )
+    await _create_and_publish(client, title="高优横幅", body="h", surface="banner", severity="high")
     critical_id = await _create_and_publish(
         client, title="紧急横幅", body="c", surface="banner", severity="critical"
     )
@@ -377,6 +373,22 @@ async def test_modal_never_rejected_on_create_and_update(client, make_admin):
         json={"surface": "modal"},
     )
     assert r.status_code == 400, r.text
+
+
+async def test_modal_never_rejected_for_non_route_writers(session_factory):
+    """Ops publishes straight through the repository (publish-product-notice.mjs runs
+    inside the api container), so the invariant must hold with no admin route in the loop."""
+    async with session_factory() as session:
+        repo = ProductNoticeRepository(session)
+        with pytest.raises(ValueError):
+            await repo.create(
+                title="绕过路由的坏弹窗",
+                body="x",
+                severity="high",
+                surface="modal",
+                dismiss_policy="never",
+                created_by=str(uuid4()),
+            )
 
 
 async def test_default_card_template_is_service(client, make_admin):

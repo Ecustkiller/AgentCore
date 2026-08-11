@@ -256,6 +256,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队。 团队已完成（计划据中途发现调整过）。",
     "reasoning": "",
     "captainContext": [],

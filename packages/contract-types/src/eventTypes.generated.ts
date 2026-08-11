@@ -93,7 +93,6 @@ export type SSEEventType =
   | "turn_queue_started"
   | "turn_queued"
   | "turn_saved"
-  | "turn_steer_accepted"
   | "turn_warning"
   | "user_interjection"
   | "workspace_lock_wait"

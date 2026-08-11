@@ -26,10 +26,10 @@ describe("GraphAppendAnchor", () => {
     cleanup();
   });
 
-  it("renders cumulative append copy and focuses the host bubble", () => {
-    render(<GraphAppendAnchor hostMessageId="m1" addedCount={2} />);
+  it("renders 续自 copy and focuses the previous graph by hostMessageId", () => {
+    render(<GraphAppendAnchor hostMessageId="m1" />);
     expect(screen.getByTestId("graph-append-anchor").textContent).toContain(
-      "↑ 已往上方协作图追加 2 名成员",
+      "↑ 续自上一张协作图",
     );
     fireEvent.click(screen.getByTestId("graph-append-anchor"));
     expect(useConversationStore.getState().byId[CID].messageFocus?.id).toBe(
@@ -37,20 +37,28 @@ describe("GraphAppendAnchor", () => {
     );
   });
 
-  it("uses debate-act copy when opening a debate act", () => {
-    render(
-      <GraphAppendAnchor hostMessageId="m1" addedCount={1} actKind="debate" />,
-    );
+  it("navigates by prevExecutionId to the prior graph bubble", () => {
+    render(<GraphAppendAnchor prevExecutionId="exec1" />);
     expect(screen.getByTestId("graph-append-anchor").textContent).toContain(
-      "↑ 开辩论幕·1 人进场",
+      "↑ 续自上一张协作图",
+    );
+    fireEvent.click(screen.getByTestId("graph-append-anchor"));
+    expect(useConversationStore.getState().byId[CID].messageFocus?.id).toBe(
+      "client-m1",
+    );
+  });
+
+  it("uses debate-act copy when continuing a debate graph", () => {
+    render(<GraphAppendAnchor prevExecutionId="exec1" actKind="debate" />);
+    expect(screen.getByTestId("graph-append-anchor").textContent).toContain(
+      "↑ 续自上一场辩论图",
     );
   });
 
   it("appends authorizedBy subtitle for stage_card / auto / preview", () => {
     render(
       <GraphAppendAnchor
-        hostMessageId="m1"
-        addedCount={1}
+        prevExecutionId="exec1"
         actKind="debate"
         authorizedBy="stage_card"
       />,

@@ -1,10 +1,9 @@
-"""跨回合同图追加 conformance 向量。
+"""跨回合协作图续接 conformance 向量。
 
-第一回合建图完成 → 第二回合 ``append_to_execution_id`` 追加 → 追加批完成收口。
-消费端契约：(a) 生长帧 ``host_message_id`` / 同 ``execution_id`` 归属旧图；
-(b) 新回合 ``graph_append`` 锚点；(c) 刷新后宿主 journal 含完整生长、追加回合仅锚点；
-(d) 两回合 ``run_plan`` 均含**同一**宿主 captain（``kind=captain``），merge 全量禁止注入
-第二 captain；workers 的 ``parent_run_id`` 指向宿主 captain（贴近生产 ``plan_event``）。
+第一回合建图完成 → 第二回合 ``append_to_execution_id`` → **新** ``execution_id`` +
+``prev_execution_id`` 链到旧图（不再 divert / ``graph_append`` / 同 eid merge）。
+消费端契约：(a) 新回合 ``run_plan`` 锚当前 message，带 ``prev_execution_id``；
+(b) 进度分母只含本图节点；(c) 旧 ``graph_append`` / ``host_message_id`` 生长帧不再出现。
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
     content_delta,
-    graph_append,
     message_end,
     message_start,
     run_completed,
@@ -26,20 +24,20 @@ from agentcore.runtime.events import (
 
 from .._common import _CONV, _COST, _USAGE
 
-# 宿主图唯一 CEO captain（跨回合 append 仍复用此 id，禁止第二 captain）。
-_HOST_CAPTAIN = "c1"
+_CAPTAIN_1 = "c1"
+_CAPTAIN_2 = "c2"
 
 
-def _captain_agent() -> dict:
+def _captain_agent(captain_id: str) -> dict:
     """Roster card — mirrors ``plan_events.captain_card``."""
-    return {"id": _HOST_CAPTAIN, "role": "CEO", "thinking": True}
+    return {"id": captain_id, "role": "CEO", "thinking": True}
 
 
-def _captain_run() -> dict:
+def _captain_run(captain_id: str) -> dict:
     """Plan-time captain root — mirrors ``plan_events.plan_event`` insert."""
     return {
-        "id": _HOST_CAPTAIN,
-        "agent_id": _HOST_CAPTAIN,
+        "id": captain_id,
+        "agent_id": captain_id,
         "task": "",
         "depends_on": [],
         "parent_run_id": None,
@@ -52,53 +50,42 @@ def _worker_run(
     agent_id: str,
     task: str,
     *,
+    parent: str,
     depends_on: list[str] | None = None,
 ) -> dict:
-    """Worker plan node under the host captain (production flat parent semantics)."""
+    """Worker plan node under the turn captain."""
     return {
         "id": run_id,
         "agent_id": agent_id,
         "task": task,
         "depends_on": list(depends_on or []),
-        "parent_run_id": _HOST_CAPTAIN,
+        "parent_run_id": parent,
     }
 
 
 def _multi_agent_cross_turn_append() -> list[SSEEvent]:
-    """跨回合同图追加：m1 建图完成 → m2 追加成员 → 追加批完成；图收口不绑 m2 message_end。
-
-    两回合 merge ``run_plan`` 均只有同一宿主 captain；第二回合新增 worker，不出现第二
-    captain id（契约：生产不再往宿主图注入追加回合 captain）。
-    """
+    """跨回合续接：m1 建图完成 → m2 新图 + prev=exec1 → 新批完成。"""
     batch1_agents = [
-        _captain_agent(),
+        _captain_agent(_CAPTAIN_1),
         {"id": "w1", "role": "研究员", "thinking": True},
         {"id": "w2", "role": "分析师", "thinking": True},
     ]
     batch1_runs = [
-        _captain_run(),
-        _worker_run("r1", "w1", "调研素材"),
-        _worker_run("r2", "w2", "分析结论", depends_on=["r1"]),
+        _captain_run(_CAPTAIN_1),
+        _worker_run("r1", "w1", "调研素材", parent=_CAPTAIN_1),
+        _worker_run("r2", "w2", "分析结论", parent=_CAPTAIN_1, depends_on=["r1"]),
     ]
+    # 第二回合：仅本图节点（撰写员），经 prev 链到 exec1；本回合 captain。
     batch2_agents = [
-        _captain_agent(),
-        {"id": "w1", "role": "研究员", "thinking": True},
-        {"id": "w2", "role": "分析师", "thinking": True},
+        _captain_agent(_CAPTAIN_2),
         {"id": "w3", "role": "撰写员", "thinking": True},
     ]
-    # 第二批 run_plan 为 merge 全量（含旧节点 + 新节点），与生产 plan_event 一致：
-    # 仍只有同一宿主 captain，新增 worker；禁止第二 captain id。
     batch2_runs = [
-        _captain_run(),
-        _worker_run("r1", "w1", "调研素材"),
-        _worker_run("r2", "w2", "分析结论", depends_on=["r1"]),
-        _worker_run("r3", "w3", "撰写文稿"),
+        _captain_run(_CAPTAIN_2),
+        _worker_run("r3", "w3", "撰写文稿", parent=_CAPTAIN_2),
     ]
     return [
         # ── 回合 1：建图并完成 ──
-        # 宿主 captain 仅由 run_plan 声明（贴近 plan_event 插根）；不另发 plan 前
-        # run_started——否则桌面 projectExecution 会把帧收成 running，与 oracle
-        # finalize(pending→skipped) 分叉。本向量钉的是「单 captain + parent」，非 captain 生命周期。
         message_start("m1", conversation_id=_CONV),
         content_delta("先组队调研分析。"),
         tool_use_start(
@@ -116,7 +103,7 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
             agents=batch1_agents,
             runs=batch1_runs,
         ),
-        run_started("r1", "w1", parent_run_id=_HOST_CAPTAIN),
+        run_started("r1", "w1", parent_run_id=_CAPTAIN_1),
         run_output_delta("r1", "w1", "素材就绪"),
         run_completed(
             "r1",
@@ -128,7 +115,7 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        run_started("r2", "w2", parent_run_id=_HOST_CAPTAIN),
+        run_started("r2", "w2", parent_run_id=_CAPTAIN_1),
         run_output_delta("r2", "w2", "分析定稿"),
         run_completed(
             "r2",
@@ -143,7 +130,7 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
         content_delta(" 第一轮结论已汇总。"),
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=700, cost=_COST),
-        # ── 回合 2：跨回合同图追加 ──
+        # ── 回合 2：新图 + prev 链 ──
         message_start("m2", conversation_id=_CONV),
         content_delta("再往上一张图加一位撰写员。"),
         tool_use_start(
@@ -155,23 +142,15 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
                 "coordinate": False,
             },
         ),
-        graph_append(
-            execution_id="exec1",
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["撰写员"],
-            added_run_ids=["r3"],
-        ),
         run_plan(
-            execution_id="exec1",
+            execution_id="exec2",
             plan_type="multi_agent",
-            task_summary="调研分析撰写",
+            task_summary="撰写文稿",
             agents=batch2_agents,
             runs=batch2_runs,
-            host_message_id="m1",
+            prev_execution_id="exec1",
         ),
-        run_started("r3", "w3", parent_run_id=_HOST_CAPTAIN),
+        run_started("r3", "w3", parent_run_id=_CAPTAIN_2),
         run_output_delta("r3", "w3", "成稿"),
         run_completed(
             "r3",
@@ -187,9 +166,8 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
             "dc2",
             "delegate",
             success=True,
-            output="【跨回合同图追加】已往协作图追加 1 名成员。",
+            output="【协作图·续接】本回合新开团队执行，经 prev 链到上一张图。",
         ),
-        content_delta(" 已追加撰写员，图上继续更新。"),
-        # m2 收口；图完成态由 execution 自身 run 终态决定（本向量中 r3 已完成）。
+        content_delta(" 已新开撰写队，接续上一张图。"),
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
     ]

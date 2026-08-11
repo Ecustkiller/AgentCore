@@ -86,6 +86,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "## 案情简介\nLV 诉茉莉奶白。检索完毕，下面给出结论。\n\n## 结论\n建议启动辩论。",
     "reasoning": "先摸清案情。",
     "captainContext": [],

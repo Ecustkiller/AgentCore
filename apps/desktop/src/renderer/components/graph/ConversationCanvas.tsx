@@ -19,6 +19,7 @@ import { DebateStageBands } from "./DebateStageBands";
 import { GraphActionBar } from "./GraphActionBar";
 import { GraphContextMenu } from "./GraphContextMenu";
 import { GraphLayoutError } from "./GraphLayoutError";
+import { GraphTeamStopControl } from "./GraphTeamStopControl";
 import { GraphToolbar } from "./GraphToolbar";
 import { SimpleTurnNode } from "./SimpleTurnNode";
 import { TurnGroupNode } from "./TurnGroupNode";
@@ -397,6 +398,15 @@ function ConversationCanvasInner() {
                       injectFlowAvailable={flow.injectFlowAvailable}
                       showAuditInjectFlow={flow.showAuditInjectFlow}
                       onShowAuditInjectFlowChange={flow.setShowAuditInjectFlow}
+                      leading={
+                        effectiveFocus ? (
+                          <ExecutionScopeContext.Provider
+                            value={effectiveFocus}
+                          >
+                            <GraphTeamStopControl />
+                          </ExecutionScopeContext.Provider>
+                        ) : null
+                      }
                     />
                   )}
 

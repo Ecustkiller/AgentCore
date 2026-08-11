@@ -312,14 +312,14 @@ describe("TurnComposer variants", () => {
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
 
-  it("generating + draft: primary 排队发送 covers 停止生成, with 插队 entry", async () => {
+  it("generating + draft: 排队发送 + 插队 + 停止生成 coexist", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer("bar");
     expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "插入" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "插队" }));
@@ -330,14 +330,14 @@ describe("TurnComposer variants", () => {
     expect(handleSendMock).toHaveBeenCalledWith();
   });
 
-  it("generating + draft: canvas card also shows 排队发送 + 插队", async () => {
+  it("generating + draft: canvas card also shows 排队发送 + 插队 + 停止", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer();
     expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
 
   it("generating + draft: Ctrl/Cmd+Enter forces steer", async () => {

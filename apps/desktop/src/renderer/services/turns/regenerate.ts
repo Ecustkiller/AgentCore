@@ -28,7 +28,6 @@ import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
-  finalizeGeneratingForPausedConversation,
   finalizeGeneratingIfNeeded,
   finalizeHonestStopAbort,
   isAbort,
@@ -67,7 +66,11 @@ function isResumeRequestRefused(err: unknown): boolean {
     const s = err.status;
     return s === 404 || s === 409 || s === 410 || s >= 500;
   }
-  return err.kind === "sidecar" && err.recoverable === true;
+  if (err.kind !== "sidecar") return false;
+  // 启动期可降级拒：恢复冷卡。
+  if (err.recoverable === true) return true;
+  // 忙槽互斥（非引擎故障、不降级）：仍恢复冷卡，让用户稍候再点 / 等 deferred。
+  return err.code === "sidecar_turn_busy";
 }
 
 /**
@@ -179,20 +182,17 @@ export async function runResume(
   if (!conversationId) {
     throw new Error("resume blocked: no active conversation");
   }
-  if (getRuntime(conversationId).isGenerating) {
-    // Defense: cold pending card + stuck generating is illegal — clear then continue.
-    // True mid-stream (no cold card) still blocks so ResumePrompt submitting resets.
-    if (conversationHasColdPending(conversationId)) {
-      finalizeGeneratingForPausedConversation(conversationId);
-    } else {
-      store.setError(
-        "当前回合仍在生成中，请稍后再点继续",
-        null,
-        conversationId,
-        null,
-      );
-      throw new Error("resume blocked: turn is still generating");
-    }
+  // D9：冷卡与 live 可合法共存。冷卡在位时不抹 generating，直接发 resume
+  // （忙槽由服务端收下决策并推 EPHEMERAL `resume_deferred`）。无冷卡的中途流式仍拦截。
+  const liveGeneratingAtStart = getRuntime(conversationId).isGenerating;
+  if (liveGeneratingAtStart && !conversationHasColdPending(conversationId)) {
+    store.setError(
+      "当前回合仍在生成中，请稍后再点继续",
+      null,
+      conversationId,
+      null,
+    );
+    throw new Error("resume blocked: turn is still generating");
   }
 
   store.clearError(conversationId);
@@ -259,8 +259,9 @@ export async function runResume(
 
   // Same-turn continuation: flip the paused assistant back to streaming.
   // Reload race: bubble may be missing → fall back to a fresh streaming slot.
+  // D9 live 并存：禁止在 live 尾气泡上再造一条 streaming assistant（会抢走 content_delta）。
   const resumed = store.resumePausedAssistant(resumeMessageId, conversationId);
-  if (!resumed) {
+  if (!resumed && !liveGeneratingAtStart) {
     store.createAssistantMessage(conversationId);
     store.setServerMessageIdOnLastMessage(resumeMessageId, conversationId);
   }
@@ -335,11 +336,12 @@ export async function runResume(
       usePausedTurnStore.getState().addLiveResume(pendingSnapshot);
     }
     const s = useConversationStore.getState();
-    if (getRuntime(conversationId).isGenerating) {
+    // D9：续跑失败不得收口本就在跑的 live 回合。
+    if (!liveGeneratingAtStart && getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
     }
     // A failed turn never delivers `approval_resolved`; drop this conversation's
-    // paused prompt (other conversations keep theirs).
+    // paused prompt (other conversations keep theirs). Hot-only orphan — cold 卡保留。
     clearInteractionPrompts(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
@@ -348,6 +350,10 @@ export async function runResume(
     // Re-throw so submitInteraction does not markResolved (假成功).
     throw err;
   } finally {
-    useConversationStore.getState().setAbort(null, conversationId);
+    // D9 deferred 下两次续跑可长时间并存（旧的一次被顶替后才退场）：只清自己登记的那个
+    // controller，否则会把仍在等槽的那次续跑的停止句柄一并抹掉。
+    if (getRuntime(conversationId).abort === ac) {
+      useConversationStore.getState().setAbort(null, conversationId);
+    }
   }
 }

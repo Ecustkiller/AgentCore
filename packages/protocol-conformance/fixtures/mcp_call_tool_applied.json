@@ -88,6 +88,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "MCP echo 返回 pong。",
     "reasoning": "先通过本机 MCP 探测 echo server。",
     "captainContext": [],

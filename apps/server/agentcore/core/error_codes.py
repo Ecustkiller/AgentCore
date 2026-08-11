@@ -64,6 +64,8 @@ class ErrorCode(StrEnum):
     LLM_KEY_REQUIRED = "LLM_KEY_REQUIRED"  # no BYOK key at preflight (402)
     PLATFORM_BILLING_UNAVAILABLE = "PLATFORM_BILLING_UNAVAILABLE"  # platform mode but no operator key (503)
     KEY_STORAGE_UNAVAILABLE = "KEY_STORAGE_UNAVAILABLE"  # no master encryption key (503)
+    # Primary pool exhausted (or DB unreachable on the request path) → HTTP 503.
+    DATABASE_UNAVAILABLE = "DATABASE_UNAVAILABLE"
 
     # ── Tools / sandbox ──────────────────────────────────────────────────
     TOOL_ERROR = "TOOL_ERROR"

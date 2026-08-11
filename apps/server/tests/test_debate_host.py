@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentcore.runtime.debate.events import debate_act_payload, moderator_plan_event
-from agentcore.runtime.events import EventType
 from agentcore.runtime.kickoff.debate_host import (
     DebateHostAttach,
     is_mlr_synthesizer_id,
@@ -328,32 +327,27 @@ def test_moderator_plan_event_host_act_2():
         _debate_act_title="正反辩论对抗",
         _debate_anchor_run_id="synthesizer",
         _debate_host_message_id="m1",
-        _debate_graph_parent_run_id="synthesizer",
+        _debate_prev_execution_id="exec_mlr",
+        # 新图+prev：parent 用本回合 captain
+        _debate_graph_parent_run_id=None,
     )
     cfg = SimpleNamespace(form=DebateForm.DEBATE, motion="命题")
-    ev = moderator_plan_event(tool, "exec_host", "mod-1", cfg)  # type: ignore[arg-type]
-    assert ev.payload["execution_id"] == "exec_host"
-    assert ev.payload["host_message_id"] == "m1"
+    ev = moderator_plan_event(tool, "exec_debate", "mod-1", cfg)  # type: ignore[arg-type]
+    assert ev.payload["execution_id"] == "exec_debate"
+    assert ev.payload["prev_execution_id"] == "exec_mlr"
+    assert "host_message_id" not in ev.payload
     assert ev.payload["act"] == {
         "act_id": "act-2",
         "kind": "debate",
         "title": "正反辩论对抗",
         "anchor_run_id": "synthesizer",
     }
-    assert ev.payload["runs"][0]["parent_run_id"] == "synthesizer"
+    assert ev.payload["runs"][0]["parent_run_id"] == "cap"
 
 
 def test_debate_act_payload_defaults():
     tool = SimpleNamespace()
     assert debate_act_payload(tool) == {"act_id": "act-1", "kind": "debate"}
-
-
-def test_is_graph_growth_includes_debate_events():
-    from agentcore.runtime.delegate.graph_append import is_graph_growth_event
-
-    assert is_graph_growth_event(EventType.DEBATE_RESULT, {"execution_id": "e"})
-    assert is_graph_growth_event(EventType.DEBATE_ROUND, {"execution_id": "e"})
-    assert is_graph_growth_event(EventType.DEBATE_ROUND_STARTED, {"execution_id": "e"})
 
 
 def test_project_turn_mlr_debate_acts_vector():
@@ -368,13 +362,15 @@ def test_project_turn_mlr_debate_acts_vector():
     ]
     projected = project_turn(wire)
     acts = projected.get("acts") or []
-    assert len(acts) == 2
-    assert acts[0]["actId"] == "act-1"
-    assert acts[0]["kind"] == "multi_agent"
-    assert acts[1]["actId"] == "act-2"
-    assert acts[1]["kind"] == "debate"
-    assert acts[1]["anchorRunId"] == "synthesizer"
+    # 新 eid 重置 slot：最终投影只剩幕 2 辩论图（prev 链留给前端跨图呈现）。
+    assert len(acts) == 1
+    assert acts[0]["actId"] == "act-2"
+    assert acts[0]["kind"] == "debate"
+    assert acts[0]["anchorRunId"] == "synthesizer"
     runs = {r["id"]: r for r in projected.get("runs") or []}
     assert runs["debate_mod_act2_r1_pro"]["actId"] == "act-2"
     assert runs["debate_mod_act2_r1_con"]["actId"] == "act-2"
-    assert runs["synthesizer"]["actId"] == "act-1"
+    assert "synthesizer" not in runs
+    # MLR 图不在最终 slot；prev 在最后一张 run_plan 上
+    last_plans = [e for e in wire if e["type"] == "run_plan"]
+    assert last_plans[-1]["payload"].get("prev_execution_id") == "exec_mlr_debate"

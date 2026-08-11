@@ -80,7 +80,9 @@ export function HorizontalTabStrip({
       {/*
         min-h-0 on the flex chain: overflow-x scrollbar/min-content height must
         not inflate this box (flex default min-height:auto) or tabs sit high
-        with empty space below inside h-* headers.
+        with empty space below inside h-* headers. `scrollbar-hidden` (globals.css)
+        drops the app's reserved 10px gutter for the same reason and must stay a
+        plain class — the Tailwind utility form loses to the global `*` rule.
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1 items-center self-stretch overflow-hidden">
         {canScrollLeft ? (
@@ -97,7 +99,7 @@ export function HorizontalTabStrip({
         ) : null}
         <div
           ref={scrollRef}
-          className="min-h-0 w-full max-h-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0"
+          className="scrollbar-hidden min-h-0 w-full max-h-full overflow-x-auto overflow-y-hidden"
         >
           <div
             ref={contentRef}

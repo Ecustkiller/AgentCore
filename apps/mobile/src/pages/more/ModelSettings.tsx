@@ -781,7 +781,29 @@ function SlotModelCombobox({
         onChange={(e) => {
           const pid = e.target.value;
           setProviderId(pid);
-          emit(pid, model);
+          const nextSuggestions =
+            groups.find((g) => g.key === pid)?.items ?? [];
+          const trimmed = model.trim();
+          // 新渠道仍有该 id → 保留；否则清掉，避免渠道/模型错配静默保存。
+          if (trimmed && nextSuggestions.some((s) => s.id === trimmed)) {
+            emit(pid, model);
+            return;
+          }
+          if (followLabel !== undefined) {
+            setModel("");
+            onChange("");
+            return;
+          }
+          const provider = providers.find((p) => p.id === pid);
+          const defaultId = provider?.default_model?.trim() ?? "";
+          const fallback =
+            (defaultId && nextSuggestions.some((s) => s.id === defaultId)
+              ? defaultId
+              : "") ||
+            nextSuggestions[0]?.id ||
+            "";
+          setModel(fallback);
+          emit(pid, fallback);
         }}
       >
         {providerOptions.map((o) => (

@@ -210,7 +210,9 @@ def test_format_for_ceo_omits_team_notes_when_no_wall_or_empty():
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="查资料", role="研究员")])
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="一段综述")}
-    assert "队员过程中广播的【当前有效】" not in format_for_ceo(t, plan, results)  # default: no wall
+    assert "队员过程中广播的【当前有效】" not in format_for_ceo(
+        t, plan, results
+    )  # default: no wall
     t._note_wall = NoteWall()  # on a team but nothing posted / all retracted
     assert "队员过程中广播的【当前有效】" not in format_for_ceo(t, plan, results)
 
@@ -358,6 +360,58 @@ def test_direct_result_keeps_deliverable_clean_of_next_steps():
     assert "可考虑加单测" not in res.final_text
 
 
+def test_direct_result_surfaces_accepted_paths_for_user():
+    """单写手有 accepted 戳 → 用户面终稿含路径（非 CEO「文件产出（已验收）」口吻）。"""
+    t = tool(Provider([]))
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="文件已完整写入（596 行，约 12914 字节）",
+        files_touched=["AgentCore/文档/research/报告.md"],
+        file_acceptance=_accepted("AgentCore/文档/research/报告.md"),
+    )
+    res = direct_result(t, state)
+    assert "`AgentCore/文档/research/报告.md`" in res.final_text
+    assert "文件位置：" in res.final_text
+    assert "可在工作区文件页打开" in res.final_text
+    assert "文件产出（已验收）" not in res.final_text
+    assert res.final_text.startswith("文件已完整写入")
+
+
+def test_direct_result_no_acceptance_without_stamp():
+    """无 file_acceptance 戳 → 不写已验收字样，也不用 files_touched 冒充路径。"""
+    t = tool(Provider([]))
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="写好了。",
+        files_touched=["ghost.md"],
+    )
+    res = direct_result(t, state)
+    assert res.final_text == "写好了。"
+    assert "已验收" not in res.final_text
+    assert "文件位置：" not in res.final_text
+    assert "`ghost.md`" not in res.final_text
+
+
+def test_direct_result_surfaces_rejected_paths_honestly():
+    """COMPLETED 但仍有 path-level rejected → 用户可见未通过验收，不得冒充已写入成功清单。"""
+    t = tool(Provider([]))
+    touched = ["ok.md", "bad.md"]
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="部分落盘。",
+        files_touched=touched,
+        file_acceptance=build_file_acceptance(
+            touched,
+            phase=RunPhase.COMPLETED,
+            path_rejections={"bad.md": ("cite_tier", "引用未核实")},
+        ),
+    )
+    res = direct_result(t, state)
+    assert "文件位置：`ok.md`" in res.final_text
+    assert "以下文件未通过验收：`bad.md`（引用未核实）" in res.final_text
+    assert "文件产出（已验收）" not in res.final_text
+
+
 def test_format_for_ceo_includes_final_synthesis_discipline():
     # 终稿纪律（瘦 footer）：交付物在前、过程至多一段、名册铁律、PPT 诚实一句。
     t = tool(Provider([]))
@@ -465,7 +519,9 @@ def test_format_for_ceo_roster_forbids_all_delivered_when_partial_failure():
     plan = RunPlan(
         nodes=[
             RunSpec(run_id="w_ms", task="调研微软", role="Microsoft 调研员"),
-            RunSpec(run_id="w_ms2", task="补调研微软", role="Microsoft 补派", replaces_run_id="w_ms"),
+            RunSpec(
+                run_id="w_ms2", task="补调研微软", role="Microsoft 补派", replaces_run_id="w_ms"
+            ),
             RunSpec(run_id="w_ok", task="调研 OpenAI", role="OpenAI 调研员"),
         ]
     )
@@ -514,6 +570,7 @@ def test_format_for_ceo_roster_budget_skipped_continue_hint():
     assert "下一回合" in out
     assert "续" in out
     assert "假装" in out or "禁止" in out
+
 
 def test_format_for_ceo_emits_uncapped_synthesis_metric():
     t = tool(Provider([]))

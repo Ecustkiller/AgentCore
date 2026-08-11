@@ -5,23 +5,26 @@ message still carries the FULL body inside ``tool_calls[].function.arguments``. 
 rounds re-pay that body as cache_miss (case: handoff round ~28k in / ~27k miss).
 
 This projection — applied at request-assembly time only, like ``tool_clear`` — keeps the
-**original write tool name** and replaces bulky args with compact landed-status JSON
-(``status`` / ``via`` / ``chars`` / optional ``_structure``). Canonical ``messages`` /
-journal keep the full args; resume rebuilds then re-applies.
+**original write tool name**, reduces args to ``{"path": …}``, and appends the size /
+structure digest to that call's **tool result**. Canonical ``messages`` / journal keep
+the full args; resume rebuilds then re-applies.
 
-定案：投影**不是**可提交的 writing-args（禁 ``content:"[已清理]"`` 假稿纸，也禁
-``_landed_summary`` 回灌模板，也禁把合成名 ``_write_landed`` 当 ``function.name`` ——
-那会诱饵模型仿调 → allowlist_deny / not_found）。短状态只报告路径 / 规模 / 已成功；
-要改须先 ``file_read`` 取盘上真文，再 ``str_replace``（优先）或按真文重填。mutate
-路径对遗留 stub / ``_landed_summary`` / landed-status 回灌做结构化硬拒；执行层对残留
-仿调 ``_write_landed`` 早拒（见 ``cleared_write_stub_rejection`` /
-``landed_status_name_rejection``）。
+定案：**参数槽里不再放任何可照抄的东西**。历代投影（``content:"[已清理]"`` 假稿纸 →
+``_landed_summary`` 模板 → 合成名 ``_write_landed`` → ``{"status": "landed", …}``）都被
+模型当写参回灌过——复用上一次调用的 arguments 是 tool-calling 的正常语义，改措辞治不住。
+裸 ``path`` 显然不是一份可提交的载荷；真被回灌也只撞普通的「缺必填 content」。结果本就
+属于 tool result，摘要因此挪到那里。
+
+遗留形态（stub / ``_landed_summary`` / landed-status / 仿调 ``_write_landed``）的结构化
+硬拒**保留为安全网**，见 ``cleared_write_stub_rejection`` / ``landed_status_name_rejection``；
+待线上连续数窗零命中再退休。
 """
 
 from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +47,11 @@ _STRUCTURE_MAX_ITEMS = 80
 _LANDED_SUMMARY_KEY = "_landed_summary"
 _LEGACY_CLEARED_KEY = "_cleared"
 _STUB_BODY_MARKERS = frozenset({"[已清理]", "[已清理·须重填]"})
+
+# Tail shared by every rejection this module emits. The loop controller keys its
+# one-strike path-stop off this marker rather than per-branch wording, so rephrasing
+# a branch cannot silently orphan the early stop.
+_REJECTION_MARKER = "不能写入磁盘"
 
 _HTML_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 _HTML_CLASS_RE = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
@@ -198,42 +206,52 @@ def _is_projected_write_args(arguments: str) -> bool:
         data = json.loads(arguments) if arguments else {}
     except (json.JSONDecodeError, TypeError, ValueError):
         return False
-    return isinstance(data, dict) and data.get("status") == "landed"
+    if not isinstance(data, dict):
+        return False
+    if data.get("status") == "landed":
+        return True
+    # Identity-only projection: path survived, every body key is gone.
+    return bool(data) and set(data) <= {"path", "file_path"}
 
 
-def write_args_landed_summary(tool_name: str, arguments: str, original_len: int) -> str:
-    """Compact landed-status JSON for the model window — not schema-shaped writing args.
-
-    Keeps path identity + optional structural digest; drops ``content`` / ``old_string`` /
-    ``new_string``. Does **not** emit ``_landed_summary`` (that template induced echo).
-    Prefix-cache safe: pure function of (tool, path, body structure, len).
-    """
-    path = ""
+def _path_and_body(arguments: str) -> tuple[str, str]:
     try:
         data = json.loads(arguments) if arguments else {}
     except (json.JSONDecodeError, TypeError, ValueError):
-        data = {}
-    body = ""
-    if isinstance(data, dict):
-        path = str(data.get("path") or data.get("file_path") or "")
-        body = _body_text(data)
+        return "", ""
+    if not isinstance(data, dict):
+        return "", ""
+    return str(data.get("path") or data.get("file_path") or ""), _body_text(data)
 
-    status: dict[str, Any] = {
-        "status": "landed",
-        "via": tool_name,
-        "chars": original_len,
-        "note": "已写入；改稿先 file_read 再 str_replace（勿把本条当写参）",
-    }
-    if path:
-        status["path"] = path
+
+def write_args_identity(arguments: str) -> str:
+    """Identity-only args for a landed write: keep ``path``, drop the body.
+
+    Earlier projections left a rich status object in this slot (``_landed_summary``,
+    then ``_write_landed``, then ``{"status": "landed", …}``) and each one got echoed
+    back as a write submission — reusing the previous call's arguments is ordinary
+    tool-calling behaviour, so no amount of rewording stopped it. A bare ``path`` is
+    visibly not a payload; an echo of it fails plain "content is required" validation.
+    The outcome moves to the tool result, where a result belongs.
+    """
+    path, _ = _path_and_body(arguments)
+    return json.dumps({"path": path} if path else {}, ensure_ascii=False)
+
+
+def landed_result_note(arguments: str, original_len: int) -> str | None:
+    """Annotation appended to a landed write's tool result.
+
+    Carries the two facts the write's own result line lacks: how large the body was,
+    and its structural outline — both useful when the model later edits the file it
+    can no longer see. Pure function of (path, body, len), so the projected window
+    stays prefix-cache stable.
+    """
+    path, body = _path_and_body(arguments)
+    if not body:
+        return None
     structure = structural_write_summary(path, body)
-    if structure:
-        status["_structure"] = structure
-    return json.dumps(status, ensure_ascii=False)
-
-
-# Back-compat alias (tests / call sites may still import the old name).
-write_args_stub = write_args_landed_summary
+    tail = f" · {structure}" if structure else ""
+    return f"（已落盘 {original_len} 字符{tail}）"
 
 
 def is_cleared_write_stub_args(arguments: dict[str, Any]) -> bool:
@@ -280,7 +298,7 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
     )
     if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
         return (
-            "拒绝：参数是上下文窗口里的只读「已落盘摘要」/清理占位，不能写入磁盘。"
+            f"拒绝：参数是上下文窗口里的只读「已落盘摘要」/清理占位，{_REJECTION_MARKER}。"
             f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
             "② 再 str_replace（优先）或 file_write，按真文填完整 "
             "content / old_string / new_string。"
@@ -288,7 +306,8 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
         )
     if arguments.get("status") == "landed":
         return (
-            "拒绝：参数是请求窗里的只读「已落盘」压缩状态，不是可提交写参，不能写入磁盘。"
+            "拒绝：参数是请求窗里的只读「已落盘」压缩状态，不是可提交写参，"
+            f"{_REJECTION_MARKER}。"
             f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
             "② 再 str_replace（优先）或 file_write，按真文填完整 "
             "content / old_string / new_string。"
@@ -306,11 +325,20 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
         if isinstance(val, str) and val.strip() in _STUB_BODY_MARKERS:
             return (
                 "拒绝：正文参数仍是清理占位"
-                f"（{val.strip()}），不能写入磁盘。"
+                f"（{val.strip()}），{_REJECTION_MARKER}。"
                 f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
                 "② 再 str_replace（优先）或按真文重填后再写。禁止原样重发 stub。"
             )
     return None
+
+
+def is_landed_echo_rejection(error_summary: str | None) -> bool:
+    """True when ``error_summary`` is a rejection from ``cleared_write_stub_rejection``.
+
+    Lives beside the rejection texts so the two cannot drift apart: the loop
+    controller uses this to grant landed-echo attempts a one-strike path stop.
+    """
+    return _REJECTION_MARKER in (error_summary or "")
 
 
 def landed_status_name_rejection(tool_name: str) -> str | None:
@@ -363,12 +391,11 @@ def project_cleared_write_args(
 ) -> list[LLMMessage]:
     """Collapse bulky write-tool args once their tool result is present.
 
-    Keeps the original write ``function.name`` and replaces args with compact
-    landed-status JSON (never emits ``LANDED_STATUS_TOOL`` as a call name). Also
-    migrates any leftover ``_write_landed`` names back to ``via`` so old windows
-    lose the imitation bait. Returns the same list when nothing qualifies.
-    Prefix-cache safe for a given completed write: status is a pure function of
-    (tool, path, body structure, original_len).
+    Keeps the original write ``function.name``, reduces args to ``path`` alone, and
+    appends the size / structure digest to that call's tool result. Also migrates any
+    leftover ``_write_landed`` names back to ``via`` so old windows lose the imitation
+    bait. Returns the same list when nothing qualifies. Prefix-cache safe for a given
+    completed write: both projections are pure functions of (path, body, original_len).
     """
     if min_chars < 0:
         return messages
@@ -408,12 +435,26 @@ def project_cleared_write_args(
     if not completed_ids and not bait_ids:
         return messages
 
+    # The digest the collapsed body is worth keeping, keyed by the call it describes.
+    notes: dict[str, str] = {}
+    for cid in completed_ids:
+        _, args, _, _ = call_meta[cid]
+        note = landed_result_note(args, _body_len(args))
+        if note:
+            notes[cid] = note
+
     # Rebuild only assistant messages that need a call rewritten.
     touch_indices = {call_meta[cid][2] for cid in completed_ids} | {
         bait_ids[cid][1] for cid in bait_ids
     }
     projected: list[LLMMessage] = []
     for mi, message in enumerate(messages):
+        if message.role == "tool" and message.tool_call_id in notes:
+            base = message.content if isinstance(message.content, str) else ""
+            projected.append(
+                replace(message, content=f"{base}\n{notes[message.tool_call_id]}")
+            )
+            continue
         if mi not in touch_indices or not message.tool_calls:
             projected.append(message)
             continue
@@ -422,13 +463,12 @@ def project_cleared_write_args(
         for call in message.tool_calls:
             if call.id in completed_ids:
                 name, args, _, _ = call_meta[call.id]
-                summary = write_args_landed_summary(name, args, _body_len(args))
                 new_calls.append(
                     ToolCall(
                         id=call.id,
                         function=ToolCallFunction(
                             name=name,
-                            arguments=summary,
+                            arguments=write_args_identity(args),
                         ),
                     )
                 )

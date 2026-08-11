@@ -8,13 +8,20 @@ handoff instead.
 
 整轮 stop still truncates without requiring hot continue; callers pass
 ``reason`` into ``run_cancelled`` separately.
+
+Cancel terminal construction also mirrors COMPLETED/FAILED honesty: harvest
+escalations already on the transcript and carry any spent token usage so a
+``cancel_worker`` batch does not evaporate escalations / member billing.
 """
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
-from agentcore.llm.provider.protocol import llm_content_text
+from agentcore.llm.pricing import calculate_cost
+from agentcore.llm.provider.protocol import TokenUsage, llm_content_text
+from agentcore.runtime.runs.serialize import escalations_from_transcript
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunPhase, RunState
 
@@ -83,13 +90,40 @@ def cancelled_state_from_salvage(
     session: RunSession | None,
     *,
     error: str = "redirected",
+    usage: TokenUsage | None = None,
+    model: str | None = None,
+    rounds: int = 0,
 ) -> RunState:
-    """Terminal CANCELLED RunState, optionally carrying salvage transcript."""
+    """Terminal CANCELLED RunState with salvage transcript, escalations, and spend.
+
+    Mirrors COMPLETED/FAILED honesty on the cancel path: escalate tool calls already
+    on the transcript are harvested (same helper as the normal terminal builder), and
+    any metered tokens are priced onto ``usage``/``cost`` so BatchMetrics / member
+    ledger / turn_worker_stats see real spend instead of an empty CANCELLED shell.
+    Empty usage when nothing was spent — same guard as ``_priced_failure``.
+    """
+    spent = usage or TokenUsage()
+    has_usage = bool(spent.input_tokens or spent.output_tokens)
+    usage_dict = spent.as_dict() if has_usage else {}
+    cost_dict = asdict(calculate_cost(model, spent)) if (model and has_usage) else {}
     if session is None:
-        return RunState(phase=RunPhase.CANCELLED, error=error)
+        return RunState(
+            phase=RunPhase.CANCELLED,
+            error=error,
+            model=model or "",
+            rounds=rounds,
+            usage=usage_dict,
+            cost=cost_dict,
+        )
+    transcript = list(session.transcript)
     return RunState(
         phase=RunPhase.CANCELLED,
         content=session.content,
         error=error,
-        transcript=list(session.transcript),
+        transcript=transcript,
+        escalations=escalations_from_transcript(transcript),
+        model=model or "",
+        rounds=rounds,
+        usage=usage_dict,
+        cost=cost_dict,
     )

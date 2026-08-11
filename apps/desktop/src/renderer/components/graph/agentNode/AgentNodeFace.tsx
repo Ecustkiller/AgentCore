@@ -8,7 +8,14 @@ import {
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact } from "@/lib/format";
 import { runningElapsedSec } from "@/lib/runningElapsed";
-import { STANCE_META, toolLabel } from "@/stores/execution";
+import {
+  STANCE_META,
+  projectRuntime,
+  toolLabel,
+  useExecutionScope,
+  useExecutionStore,
+} from "@/stores/execution";
+import { useRunStopPendingStore } from "@/stores/runStopPending";
 import {
   AlertTriangle,
   ArrowUp,
@@ -17,6 +24,7 @@ import {
   PencilLine,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { isStoppableRunStatus } from "../runStopActions";
 import {
   type AgentNodeData,
   type AgentNodePresentation,
@@ -43,13 +51,18 @@ export function AgentNodeCardFace({
   const identityColor = agentColorVar(d.role);
   const identityGlyph = agentGlyph(d.role);
   const isRunning = d.status === "running";
+  const stopPending = useAgentNodeStopPending(d.runId, d.status);
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: graph card hosts nested interactive chrome
     <div
       role="button"
       tabIndex={0}
-      aria-label={p.ariaLabel}
+      aria-label={
+        stopPending
+          ? p.ariaLabel.replace(p.statusFace.text, "停止请求中…")
+          : p.ariaLabel
+      }
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -63,7 +76,7 @@ export function AgentNodeCardFace({
           height: FACE_CARD_HEIGHT,
         } as React.CSSProperties
       }
-      className={`relative cursor-pointer overflow-hidden rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${p.style.bg} ${p.style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
+      className={`relative cursor-pointer overflow-hidden rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${p.style.bg} ${p.style.ring} ${flashing ? "animate-graph-node-flash" : ""} ${
         p.highlighted
           ? "outline outline-2 outline-offset-2 outline-primary"
           : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
@@ -97,6 +110,8 @@ export function AgentNodeCardFace({
         p={p}
         identityColor={identityColor}
         identityGlyph={identityGlyph}
+        pulsePresence={isRunning}
+        stopPending={stopPending}
       />
       <AgentNodeActivity d={d} p={p} showIdleTask />
       {p.artifacts.length > 0 && (
@@ -127,11 +142,15 @@ function AgentNodeHeader({
   p,
   identityColor,
   identityGlyph,
+  pulsePresence,
+  stopPending,
 }: {
   d: AgentNodeData;
   p: AgentNodePresentation;
   identityColor: string;
   identityGlyph: string;
+  pulsePresence: boolean;
+  stopPending: boolean;
 }) {
   return (
     <>
@@ -147,7 +166,7 @@ function AgentNodeHeader({
             {identityGlyph}
           </div>
           <span
-            className={`absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full ring-2 ring-card ${p.presence.cls}`}
+            className={`absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full ring-2 ring-card ${p.presence.cls} ${pulsePresence ? "animate-pulse" : ""}`}
           >
             {p.presence.icon}
           </span>
@@ -156,9 +175,34 @@ function AgentNodeHeader({
           {d.role}
         </p>
       </div>
-      <AgentNodeMeta d={d} p={p} />
+      <AgentNodeMeta d={d} p={p} stopPending={stopPending} />
     </>
   );
+}
+
+/**
+ * Honest mid-flight stop: when pending store covers this run, status line shows
+ * 「停止请求中…」instead of 「执行中 · Ns」. Reuses settle cleanup from the old
+ * node action bar — does not invent a parallel pending channel.
+ */
+function useAgentNodeStopPending(runId: string, status: string): boolean {
+  const messageId = useExecutionScope();
+  const executionId = useExecutionStore((s) => {
+    const rt = messageId ? s.byId[messageId] : undefined;
+    return rt ? (projectRuntime(rt)?.id ?? null) : null;
+  });
+  const covered = useRunStopPendingStore((s) =>
+    executionId ? s.isRunCovered(executionId, runId) : false,
+  );
+
+  useEffect(() => {
+    if (!executionId) return;
+    useRunStopPendingStore
+      .getState()
+      .clearIfSettled(executionId, runId, status);
+  }, [executionId, runId, status]);
+
+  return covered && isStoppableRunStatus(status);
 }
 
 /**
@@ -170,9 +214,11 @@ function AgentNodeHeader({
 function AgentNodeMeta({
   d,
   p,
+  stopPending,
 }: {
   d: AgentNodeData;
   p: AgentNodePresentation;
+  stopPending: boolean;
 }) {
   const showEscalationPending =
     (d.escalationPending ?? 0) > 0 && p.visibleFaceBadges.has("escalation");
@@ -229,7 +275,7 @@ function AgentNodeMeta({
             {escalationKindLabel(d.escalationKind)}
           </span>
         )}
-      <AgentNodeStatusLine d={d} p={p} />
+      <AgentNodeStatusLine d={d} p={p} stopPending={stopPending} />
     </div>
   );
 }
@@ -292,9 +338,11 @@ function CrossExamMarkButton({
 function AgentNodeStatusLine({
   d,
   p,
+  stopPending,
 }: {
   d: AgentNodeData;
   p: AgentNodePresentation;
+  stopPending: boolean;
 }) {
   const elapsed = useRunningElapsed(p.statusFace.tickElapsed, d.startedAt);
   const face = statusFaceLabel(
@@ -313,6 +361,7 @@ function AgentNodeStatusLine({
 
   // replace 态（质询作答失败）整行归因、可点直达质询 run；
   // suffix「含质询」已移到头部第二行（立场后），状态行不再拼后缀。
+  // 停止请求覆盖优先于正常「执行中 · Ns」，不覆盖质询失败归因行。
   if (mark?.mode === "replace" && d.onActivateCrossExam) {
     return (
       <p
@@ -327,7 +376,7 @@ function AgentNodeStatusLine({
     <p
       className={`ml-auto shrink-0 whitespace-nowrap text-xs tabular-nums leading-snug ${face.cls}`}
     >
-      {face.text}
+      {stopPending ? "停止请求中…" : face.text}
     </p>
   );
 }

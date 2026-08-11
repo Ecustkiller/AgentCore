@@ -51,7 +51,6 @@ beforeEach(() => {
     rootIdByConversation: {},
     armedHandoffByConversation: {},
     mergedJobIds: {},
-    toastedSucceededIds: {},
   });
   listJobs.mockReset();
   dispatchJob.mockReset();
@@ -208,7 +207,7 @@ describe("useBackgroundTasksSync 轮询", () => {
 });
 
 describe("succeeded discoverability (§7.6)", () => {
-  it("toasts once when an in-flight job becomes succeeded", async () => {
+  it("does not toast when an in-flight job becomes succeeded (BackgroundTaskCard)", async () => {
     useBackgroundTasksStore.setState({
       byConversation: { c1: [job({ status: "running" })] },
       modeByConversation: { c1: "local" },
@@ -219,13 +218,8 @@ describe("succeeded discoverability (§7.6)", () => {
 
     await store().load("c1");
 
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
-    expect(String(notifyInfoMock.mock.calls[0][0])).toContain("云端拷贝已改完");
-
-    // Reload same succeeded job — no second toast.
-    listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
-    await store().load("c1");
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    expect(store().byConversation.c1[0]?.status).toBe("succeeded");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
   it("does not toast historical succeeded jobs on cold load", async () => {
@@ -234,21 +228,21 @@ describe("succeeded discoverability (§7.6)", () => {
     expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
-  it("markMerged flips card state without a second toast", async () => {
+  it("markMerged flips card state without toast", async () => {
     useBackgroundTasksStore.setState({
       byConversation: { c1: [job({ status: "running" })] },
       mergedJobIds: {},
     });
     listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
     await store().load("c1");
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    expect(notifyInfoMock).not.toHaveBeenCalled();
 
     store().markMerged("job-1");
     expect(store().mergedJobIds["job-1"]).toBe(true);
 
     listJobs.mockResolvedValueOnce([job({ status: "succeeded" })]);
     await store().load("c1");
-    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
   it("load keeps backend applied/discarded on the job (no false awaiting)", async () => {

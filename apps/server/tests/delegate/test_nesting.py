@@ -37,7 +37,7 @@ async def test_nested_delegation_runs_subteam_links_tree_and_rolls_up():
     t = nesting_tool(provider, sink)
 
     result = await t.execute(
-        {"tasks": [{"role": "队长", "task": "主任务"}]}, ctx()
+        {"tasks": [{"role": "队长", "task": "主任务"}], "coordinate": False}, ctx()
     )
 
     assert result.success is True
@@ -123,7 +123,7 @@ async def test_depth_three_subworker_cannot_delegate_further():
     provider = DeepProvider()
     t = nesting_tool(provider, EventSink())
     result = await t.execute(
-        {"tasks": [{"role": "队长", "task": "主任务"}]}, ctx()
+        {"tasks": [{"role": "队长", "task": "主任务"}], "coordinate": False}, ctx()
     )
     assert result.success is True
     # depth-1 nests once, depth-2 nests once; depth-3 leaf never adds a call.
@@ -252,7 +252,7 @@ async def test_lead_drives_subplan_to_bind_boundary_then_replans_end_to_end():
     t = nesting_tool(provider, EventSink())
 
     result = await t.execute(
-        {"tasks": [{"role": "队长", "task": "主任务"}]}, ctx()
+        {"tasks": [{"role": "队长", "task": "主任务"}], "coordinate": False}, ctx()
     )
 
     assert result.success is True
@@ -349,7 +349,7 @@ async def test_lead_resteers_subplan_on_subworker_scope_deviation_end_to_end():
     t._tools.register(EscalateTool())  # the sub-worker needs escalate to raise a scope deviation
 
     result = await t.execute(
-        {"tasks": [{"role": "队长", "task": "主任务"}]}, ctx()
+        {"tasks": [{"role": "队长", "task": "主任务"}], "coordinate": False}, ctx()
     )
 
     assert result.success is True

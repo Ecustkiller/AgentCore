@@ -13,7 +13,7 @@ import {
   useRemoveOrLeaveSharedMember,
   useSharedSpaceMembers,
 } from "@/hooks/useSharedSpaces";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   type FriendSummary,
   type UserSearchResult,
@@ -174,7 +174,6 @@ export function SharedSpaceMembersDialog({
       { spaceId, userId: user.id, role: inviteRole },
       {
         onSuccess: () => {
-          notifySuccess(`已邀请 ${user.display_name || user.username}`);
           setQuery("");
           setResults([]);
           setSelectedFriendIds((prev) => {
@@ -195,19 +194,16 @@ export function SharedSpaceMembersDialog({
     );
     if (ids.length === 0) return;
     setBatchInviting(true);
-    let ok = 0;
     let failed = 0;
     for (const userId of ids) {
       try {
         await invite.mutateAsync({ spaceId, userId, role: inviteRole });
-        ok += 1;
       } catch {
         failed += 1;
       }
     }
     setBatchInviting(false);
     setSelectedFriendIds(new Set());
-    if (ok > 0) notifySuccess(`已邀请 ${ok} 人`);
     if (failed > 0) notifyError(`有 ${failed} 人邀请失败`);
   };
 
@@ -468,10 +464,6 @@ export function SharedSpaceMembersDialog({
                                 role,
                               },
                               {
-                                onSuccess: () =>
-                                  notifySuccess(
-                                    `已将 ${label} 设为${sharedSpaceRoleLabel(role)}`,
-                                  ),
                                 onError: (err) =>
                                   notifyError(err, "更改角色失败"),
                               },
@@ -502,12 +494,6 @@ export function SharedSpaceMembersDialog({
                           removeOrLeave.mutate(
                             { spaceId, memberUserId: m.user_id },
                             {
-                              onSuccess: () =>
-                                notifySuccess(
-                                  isPending
-                                    ? `已取消对 ${label} 的邀请`
-                                    : `已移除 ${label}`,
-                                ),
                               onError: (err) =>
                                 notifyError(
                                   err,
@@ -537,7 +523,6 @@ export function SharedSpaceMembersDialog({
                             { spaceId, memberUserId: m.user_id },
                             {
                               onSuccess: () => {
-                                notifySuccess("已退出共享空间");
                                 onClose();
                               },
                               onError: (err) => notifyError(err, "退出失败"),

@@ -5,7 +5,7 @@ import { FileDetail } from "@/components/files/FileDetail";
 import { EmptyHint } from "@/components/files/parts";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
-import { useConversationFileSource } from "@/hooks/useConversationFileSource";
+import { useFileTabSource } from "@/hooks/useConversationFileSource";
 import {
   useActiveMessageContent,
   useConversationStore,
@@ -69,6 +69,7 @@ export function SidePanelSurfaceBody({
       <FileSurfaceBody
         path={tab.path}
         name={tab.name}
+        workspaceId={tab.workspaceId}
         onClose={() => closeTab(tab.id)}
       />
     );
@@ -122,16 +123,18 @@ function FloatApprovalStrip() {
 function FileSurfaceBody({
   path,
   name,
+  workspaceId,
   onClose,
 }: {
   path: string;
   name: string;
+  workspaceId?: string;
   onClose: () => void;
 }) {
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
-  const source = useConversationFileSource(currentConversationId);
+  const source = useFileTabSource(currentConversationId, workspaceId);
   if (!path || !name) {
     return (
       <EmptyHint
@@ -154,7 +157,7 @@ function FileSurfaceBody({
   }
   return (
     <FileDetail
-      key={path}
+      key={`${workspaceId ?? ""}:${path}`}
       source={source}
       path={path}
       name={name}

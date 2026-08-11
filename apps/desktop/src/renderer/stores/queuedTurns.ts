@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-/** 同对话 FIFO 排队项（live · turn_queued；进程内，重启丢）。 */
+/** 同对话 FIFO 排队项（live · GET 权威 + turn_queued 信号；进程内，重启丢）。 */
 export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
@@ -13,12 +13,22 @@ export interface QueuedTurnEntry {
   position: number;
   queueDepth: number;
   degradedFrom?: "steer";
+  /**
+   * 非空 = 该项由用户插话升格进队（协调升队 / 经典 steer leftover）。
+   * 条上标注「来自你的插话」，仍可按项取消 / 立刻插队。
+   */
+  interjectionId?: string;
 }
 
 interface QueuedTurnsState {
   byConversation: Record<string, QueuedTurnEntry[]>;
   upsert: (entry: QueuedTurnEntry) => void;
   remove: (conversationId: string, queueId: string) => QueuedTurnEntry | null;
+  /** GET 对账权威替换（空数组 = 清会话条）。 */
+  replaceConversation: (
+    conversationId: string,
+    entries: QueuedTurnEntry[],
+  ) => void;
   clearConversation: (conversationId: string) => void;
   list: (conversationId: string | null | undefined) => QueuedTurnEntry[];
 }
@@ -55,6 +65,19 @@ export const useQueuedTurnsStore = create<QueuedTurnsState>((set, get) => ({
     });
     return hit;
   },
+
+  replaceConversation: (conversationId, entries) =>
+    set((state) => {
+      const byConversation = { ...state.byConversation };
+      if (entries.length === 0) {
+        delete byConversation[conversationId];
+      } else {
+        byConversation[conversationId] = [...entries].sort(
+          (a, b) => a.position - b.position,
+        );
+      }
+      return { byConversation };
+    }),
 
   clearConversation: (conversationId) =>
     set((state) => {

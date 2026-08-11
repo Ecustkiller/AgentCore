@@ -106,9 +106,9 @@ export function emptyChatCopy(): {
 }
 
 /**
- * Visible notice for an empty assistant bubble that finished abnormally
- * (`error` / `unproductive`). Desktop synthesizes a full error card; mobile
- * keeps the failure readable instead of a blank / hidden bubble.
+ * Visible notice for an empty assistant bubble that finished abnormally.
+ * Default ON for failure finishes (error / unproductive / degraded / interrupted);
+ * cancelled stays silent (user stop). Matches desktop resolveAssistantFailureFace.
  */
 export function emptyFailureNotice(
   finishReason: string | null | undefined,
@@ -116,6 +116,9 @@ export function emptyFailureNotice(
   if (finishReason === "error") return "模型调用失败，请重试。";
   if (finishReason === "unproductive")
     return "工具连续无有效进展或参数无效，请重试。";
+  if (finishReason === "degraded") return "模型返回空内容，请重试。";
+  if (finishReason === "interrupted") return "已中断。直接发送下一条即可重试。";
+  if (finishReason === "paused") return "本轮未能完成，请重试。";
   return null;
 }
 
@@ -146,10 +149,19 @@ export function resolveEmptyFailureNotice(opts: {
   errorMessage?: string | null;
   /** When true (streaming / live unfinished), never synthesize a failure line. */
   skip?: boolean;
+  /** Dedicated pause/ask card already owns the UI — silent for paused-only. */
+  hasDedicatedPauseOrAskUi?: boolean;
 }): string | null {
   if (opts.skip) return null;
   const specific = opts.errorMessage?.trim();
   if (specific) return specific;
+  if (
+    opts.finishReason === "paused" &&
+    opts.hasDedicatedPauseOrAskUi &&
+    !(opts.content ?? "").trim()
+  ) {
+    return null;
+  }
   if (!(opts.content ?? "").trim()) {
     return emptyFailureNotice(opts.finishReason);
   }

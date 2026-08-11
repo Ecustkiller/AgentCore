@@ -14,6 +14,9 @@ _JOURNAL_EVENT_TYPES = DURABLE_EVENT_TYPES
 # Surface = 「客户端可见 journal 非空」的门槛事件。无 surface → execution_journal /
 # runs_from_entries 对外清空 events（DURABLE 仍落 fact log）。对齐 question_posted
 # 先例：单聊仅有热审批 / 委派授权 / 升级时也必须能过 gate，否则 reload 丢痕迹（D5）。
+# user_interjection 同理：经典单聊 steer 只有插话、没有图/卡，被 gate 清掉就等于
+# 刷新即丢——而退役 turn_steer_accepted、改用 DURABLE 插话的全部意义就是让这条
+# 用户发言在历史里回得来。
 _JOURNAL_SURFACE_TYPES = frozenset(
     {
         EventType.RUN_PLAN.value,
@@ -26,6 +29,7 @@ _JOURNAL_SURFACE_TYPES = frozenset(
         EventType.DELEGATION_AUTHORIZATION_REQUIRED.value,
         EventType.ESCALATION_REQUIRED.value,
         EventType.RUN_ESCALATION.value,
+        EventType.USER_INTERJECTION.value,
     }
 )
 

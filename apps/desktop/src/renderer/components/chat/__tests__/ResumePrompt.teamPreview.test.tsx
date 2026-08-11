@@ -134,6 +134,59 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.getByText("MVP主流程 · 预计 1 人")).toBeTruthy();
   });
 
+  it("全员同桌时冷拍板只汇总一行工作区", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "调研",
+            task: "读甲",
+            depends_on: [],
+            target_folder_name: "本会话工作区",
+          },
+          {
+            run_id: "r2",
+            role: "撰写",
+            task: "读乙",
+            depends_on: [],
+            target_folder_name: "本会话工作区",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.getAllByText("工作区 · 本会话工作区")).toHaveLength(1);
+  });
+
+  it("队员坐不同桌时冷拍板逐人显示工作区", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "甲",
+            task: "读甲",
+            depends_on: [],
+            target_folder_id: "f1",
+            target_folder_name: "云端甲",
+          },
+          {
+            run_id: "r2",
+            role: "乙",
+            task: "读乙",
+            depends_on: [],
+            target_folder_id: "f2",
+            target_folder_name: "云端乙",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.getByText("工作区 · 云端甲")).toBeTruthy();
+    expect(screen.getByText("工作区 · 云端乙")).toBeTruthy();
+  });
+
   it("仅两按钮：左取消 + 右授权并开工；无逐次审批 / 调整 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();

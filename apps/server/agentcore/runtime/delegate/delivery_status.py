@@ -56,9 +56,12 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.runtime.turn.token_budget import REASON_QA_DEFERRED, REASON_TURN_TOKEN_BUDGET
+
+logger = get_logger(__name__)
 
 _MAX_FILES = 24
 _MAX_GAPS = 12
@@ -1038,6 +1041,14 @@ def build_delivery_status(
 
     rejected = [a for a in artifacts if a.get("status") == "rejected"]
     if not delivered and not gaps and not rejected:
+        # 无物质不发卡：必须留可诊断痕迹（仅失败态注册等于巡检瞎），载荷只记数量。
+        logger.info(
+            "delegate.delivery_status_empty",
+            execution_id=execution_id,
+            delivered_count=len(delivered),
+            gaps_count=len(gaps),
+            rejected_count=len(rejected),
+        )
         return None
 
     if not blocking and not warnings:
@@ -1111,10 +1122,19 @@ def maybe_emit_delivery_status(
         from agentcore.runtime.events import delivery_status
 
         sink.emit(delivery_status(**payload))
+        artifacts = payload.get("artifacts") or []
+        delivered_files = payload.get("delivered_files") or ()
+        logger.info(
+            "delegate.delivery_status_emitted",
+            execution_id=execution_id,
+            state=str(payload.get("state") or ""),
+            artifacts_count=len(artifacts),
+            accepted_count=len(delivered_files),
+            rejected_count=sum(1 for a in artifacts if a.get("status") == "rejected"),
+            gaps_count=len(gaps),
+        )
     except Exception:  # noqa: BLE001 — wrap-up side channel must never break the drive
-        from agentcore.core.logging import get_logger
-
-        get_logger(__name__).warning(
+        logger.warning(
             "delegate.delivery_status_failed",
             execution_id=execution_id,
             exc_info=True,
@@ -1238,9 +1258,7 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
         )
         return True
     except Exception:  # noqa: BLE001 — short-ask side channel must never break the turn
-        from agentcore.core.logging import get_logger
-
-        get_logger(__name__).warning(
+        logger.warning(
             "delegate.availability_delivery_reinject_failed",
             conversation_id=cid,
             exc_info=True,

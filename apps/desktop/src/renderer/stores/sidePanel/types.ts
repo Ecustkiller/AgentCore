@@ -175,11 +175,16 @@ export interface TerminalDetailTab {
 /** Top-bar File content tab — path reference only; body keep-alives FileDetail. */
 export interface FileDetailTab {
   kind: "file";
-  /** Dedup identity: `file:<path>`. */
+  /** Dedup identity: `file:<path>` or `file:<workspaceId>:<path>` when desk-scoped. */
   id: string;
   title: string;
   path: string;
   name: string;
+  /**
+   * 落地 desk（`folder:…` / `conv:…`）。产物预览跟落地桌；缺省由渲染层回退会话出生桌。
+   * 不同桌同路径必须是两个 tab（见 {@link fileTabId}）。
+   */
+  workspaceId?: string;
 }
 
 /**
@@ -242,7 +247,9 @@ export const contentDetailTabId = (
 export const simpleTurnDetailTabId = (messageId: string): string =>
   `simple-turn:${messageId}`;
 
-export const fileTabId = (path: string): string => `file:${path}`;
+/** File tab identity — path alone for session-desk opens; include desk when scoped. */
+export const fileTabId = (path: string, workspaceId?: string | null): string =>
+  workspaceId ? `file:${workspaceId}:${path}` : `file:${path}`;
 
 /** Tab id that currently owns focus for highlighting. */
 export function sidePanelFocusTabId(state: {
@@ -369,13 +376,20 @@ export interface SidePanelState {
   showChanges: (messageId?: string | null) => void;
   /** 清除改动深链聚焦（切对话时调用）。 */
   clearChangesFocus: () => void;
-  /** Open / focus a File content tab (path reference); reveals the panel. */
-  showFile: (path: string, name: string) => void;
+  /**
+   * Open / focus a File content tab (path reference); reveals the panel.
+   * Optional `workspaceId` scopes the tab to that landing desk (产物预览跟落地桌).
+   */
+  showFile: (path: string, name: string, workspaceId?: string | null) => void;
   /**
    * `+` → 文件：无路径时合理空态（打开一个占位文件 tab，提示从工作区点选）。
    * 有路径时等同 {@link showFile}。
    */
-  openFileTab: (path?: string, name?: string) => void;
+  openFileTab: (
+    path?: string,
+    name?: string,
+    workspaceId?: string | null,
+  ) => void;
   /** `+` → 终端：开/聚焦唯一 Terminal 壳；可选绑定 preferred session。 */
   openTerminalTab: (opts?: {
     sessionId?: string | null;

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 # One live screencast frame handed from a session to its live-hub listener (M1 · D14):
 # ``{"frame_b64": <jpeg base64>, "width": int, "height": int}`` — passed straight through
@@ -31,6 +31,31 @@ BROWSER_ACTIONS = (
     "console",
 )
 STATE_CHANGING_ACTIONS = frozenset({"navigate", "click", "type", "scroll"})
+
+
+# ---------------------------------------------------------------------------
+# Wire receipts shared with Local (Electron) host — field names are frozen.
+# Executors only report facts; success/error judgment lives in the tool layer.
+# ---------------------------------------------------------------------------
+
+
+class TypedReceipt(TypedDict):
+    """Post-condition facts after ``type`` (Local + Sandbox identical keys)."""
+
+    ref: str
+    requested_chars: int
+    actual_chars: int
+    matched: bool
+    method: Literal["cdp_insertText"]
+
+
+class ClickedReceipt(TypedDict):
+    """Pre/post click facts (disabled includes ``disabled`` + ``aria-disabled``)."""
+
+    ref: str
+    was_disabled: bool
+    role: str
+    name: str
 
 
 class BrowserSessionError(Exception):
@@ -106,6 +131,14 @@ class BrowserCommandResult:
     """The driver's reply to one command.
 
     ``data`` is the structured, model-facing result (status/title/url/a11y tree/…).
+    State-changing replies may also carry wire receipts aligned with Local host:
+
+    - ``type`` → ``data["typed"]`` :class:`TypedReceipt`
+    - ``click`` → ``data["clicked"]`` :class:`ClickedReceipt`
+    - snapshots include ``elements`` (ref table + optional ``visible_text``) and
+      Sandbox-only best-effort ``aria`` (Playwright ``aria_snapshot``; Local may
+      leave ``aria`` empty).
+
     ``frame`` is the optional raw jpeg keyframe bytes (state-changing actions +
     ``screenshot``); the host applies the keyframe budget and writes it to the
     workspace — the sandbox never touches the real workspace.

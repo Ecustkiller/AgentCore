@@ -14,6 +14,7 @@ import {
   flushPendingFrames,
 } from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
+import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import {
   claimPrimaryStream,
   releasePrimaryStream,
@@ -331,10 +332,17 @@ export async function attachConversation(
         throw new StreamError("auth");
       }
     }
-    if (response.status === 204) return "none";
+    if (response.status === 204) {
+      // 无 live turn 仍对账：清幽灵条 / 对齐他端仍在队的项。
+      void reconcileQueuedTurns(conversationId);
+      return "none";
+    }
     if (!response.ok) {
       throw await streamErrorFromResponse(response);
     }
+
+    // SSE 重连成功：队列 EPHEMERAL 可能已漏；GET 权威刷新条。
+    void reconcileQueuedTurns(conversationId);
 
     const catchUp: SSEEvent[] = [];
     let catchingUp = true;
@@ -380,7 +388,7 @@ export async function attachConversation(
  * POST to an SSE endpoint and route every event through `dispatchSSEEvent`.
  *
  * 发送即有流：本端点恒返回 SSE（含 in-flight 时先发 ``turn_queued`` 再同连接
- * 续流；协调插话为 ``user_interjection`` 短确认流）。不再有 HTTP 202 JSON。
+ * 续流；插话（经典/协调）为 ``user_interjection`` 短确认流）。不再有 HTTP 202 JSON。
  */
 async function runMessageStream(
   path: string,
@@ -490,7 +498,7 @@ export interface StreamConversationOptions {
 /** Send a user message and consume the SSE response stream (发送即有流).
  *
  * In-flight 时流上先到 ``turn_queued``（EPHEMERAL，dispatch 侧呈现「已排队」），
- * drain 后同连接续流整回合；协调插话为短确认流。 */
+ * drain 后同连接续流整回合；`delivery=steer` 插话为 `user_interjection` 短确认流。 */
 export async function streamConversation({
   conversationId,
   content,

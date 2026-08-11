@@ -36,6 +36,7 @@ def _to_response(catalog: ModelCatalog) -> ModelCatalogResponse:
                 vendor=item.vendor,
                 capabilities=item.capabilities,
                 context_length=item.context_length,
+                badge=item.badge,
                 price=ModelPriceCard(**item.price) if item.price else None,
                 available=item.available,
                 provider_id=item.provider_id,

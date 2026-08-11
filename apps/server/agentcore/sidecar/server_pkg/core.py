@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agentcore.account.credentials import AccountCredentials
 from agentcore.conversation.store.outbox import OutboxStore
@@ -28,6 +28,24 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
+
+ResumeBusyReason = Literal["wrap_up", "live_turn"]
+
+
+@dataclass
+class SidecarResumeDeferredWaiter:
+    """Cold resume parked until the conversation slot frees (对齐云端 ResumeDeferredWaiter).
+
+    Same ``message_id`` re-submits append to ``reply_ids`` (idempotent join).
+    A different ``message_id`` supersedes (prior ``slot_free`` cancelled).
+    """
+
+    conversation_id: str
+    message_id: str
+    busy_reason: ResumeBusyReason
+    slot_free: asyncio.Future[None] = field(repr=False)
+    # RPC ids that must receive the same final resume reply (primary + same-id joins).
+    reply_ids: list[Any] = field(default_factory=list)
 
 
 class SidecarServer(HandlerMixin, TurnExecutionMixin):
@@ -64,6 +82,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # turn_id → conversation_id (cancel cascades coordination without FE always
         # repeating conversationId; cleared with ``_turns``).
         self._turn_conversations: dict[str, str] = {}
+        # Cold resume × live: at most one deferred waiter per conversation.
+        # Same message_id joins; a different message_id supersedes (last click wins).
+        self._resume_deferred: dict[str, SidecarResumeDeferredWaiter] = {}
         # Fire-and-forget sends spawned during cancellation; kept referenced so
         # they are not garbage-collected before they flush.
         self._pending_sends: set[asyncio.Task[None]] = set()
@@ -79,8 +100,86 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             self._turn_conversations[turn_id] = cid
 
     def _unregister_turn(self, turn_id: str) -> None:
+        cid = self._turn_conversations.get(turn_id, "")
         self._turns.pop(turn_id, None)
         self._turn_conversations.pop(turn_id, None)
+        if cid:
+            self._wake_resume_deferred_if_idle(cid)
+
+    def busy_reason_for_resume(
+        self, conversation_id: str, message_id: str
+    ) -> ResumeBusyReason | None:
+        """``wrap_up`` / ``live_turn`` when a live task holds the conversation slot."""
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return None
+        for tid, task in self._turns.items():
+            if task.done():
+                continue
+            if self._turn_conversations.get(tid) != cid:
+                continue
+            return "wrap_up" if tid == message_id else "live_turn"
+        return None
+
+    def register_resume_deferred(
+        self, waiter: SidecarResumeDeferredWaiter
+    ) -> SidecarResumeDeferredWaiter:
+        """Park a cold resume until the slot frees.
+
+        Same ``message_id`` → join into the existing waiter (no cancel, no second park).
+        Different ``message_id`` → last click wins (prior ``slot_free`` cancelled).
+        Returns the waiter that owns the slot (existing on join, else ``waiter``).
+        """
+        prior = self._resume_deferred.get(waiter.conversation_id)
+        if (
+            prior is not None
+            and prior is not waiter
+            and prior.message_id == waiter.message_id
+        ):
+            for rid in waiter.reply_ids:
+                if rid not in prior.reply_ids:
+                    prior.reply_ids.append(rid)
+            logger.info(
+                "resume.deferred_joined",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                busy_reason=prior.busy_reason,
+                reply_count=len(prior.reply_ids),
+            )
+            return prior
+
+        prior = self._resume_deferred.pop(waiter.conversation_id, None)
+        if prior is not None and prior is not waiter and not prior.slot_free.done():
+            prior.slot_free.cancel()
+        self._resume_deferred[waiter.conversation_id] = waiter
+        logger.info(
+            "resume.deferred",
+            conversation_id=waiter.conversation_id,
+            message_id=waiter.message_id,
+            busy_reason=waiter.busy_reason,
+        )
+        if self.busy_reason_for_resume(waiter.conversation_id, waiter.message_id) is None:
+            taken = self._resume_deferred.pop(waiter.conversation_id, None)
+            if taken is waiter and not taken.slot_free.done():
+                taken.slot_free.set_result(None)
+        return waiter
+
+    def _wake_resume_deferred_if_idle(self, conversation_id: str) -> None:
+        waiter = self._resume_deferred.get(conversation_id)
+        if waiter is None:
+            return
+        if self.busy_reason_for_resume(conversation_id, waiter.message_id) is not None:
+            return
+        taken = self._resume_deferred.pop(conversation_id, None)
+        if taken is None or taken.slot_free.done():
+            return
+        taken.slot_free.set_result(None)
+        logger.info(
+            "resume.deferred_started",
+            conversation_id=taken.conversation_id,
+            message_id=taken.message_id,
+            busy_reason=taken.busy_reason,
+        )
 
     async def handle_line(self, line: str) -> None:
         """Parse and dispatch one inbound line. Never raises (loop-safe)."""
@@ -126,6 +225,8 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             await self._on_cancel(request_id, params)
         elif method == "runRedirect":
             await self._on_run_redirect(request_id, params)
+        elif method == "runStop":
+            await self._on_run_stop(request_id, params)
         elif method == "debateSteer":
             await self._on_debate_steer(request_id, params)
         elif method == "turnFilesDiff":
@@ -280,6 +381,37 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         task = asyncio.create_task(self._send(message))
         self._pending_sends.add(task)
         task.add_done_callback(self._pending_sends.discard)
+
+    @staticmethod
+    def _unique_request_ids(request_ids: list[Any] | None, primary: Any) -> list[Any]:
+        """Preserve order; drop duplicates. Fall back to ``[primary]`` when empty."""
+        out: list[Any] = []
+        seen: set[Any] = set()
+        for rid in list(request_ids or []) + ([primary] if primary is not None else []):
+            if rid is None or rid in seen:
+                continue
+            seen.add(rid)
+            out.append(rid)
+        return out
+
+    async def _send_to_request_ids(
+        self,
+        request_ids: list[Any] | None,
+        primary: Any,
+        make_message: Callable[[Any], dict[str, Any]],
+    ) -> None:
+        """Fan-out one RPC reply shape to primary + same-id joiners."""
+        for rid in self._unique_request_ids(request_ids, primary):
+            await self._send(make_message(rid))
+
+    def _send_soon_to_request_ids(
+        self,
+        request_ids: list[Any] | None,
+        primary: Any,
+        make_message: Callable[[Any], dict[str, Any]],
+    ) -> None:
+        for rid in self._unique_request_ids(request_ids, primary):
+            self._send_soon(make_message(rid))
 
     async def _reply(self, request_id: Any, result: Any) -> None:
         """Send a success response, unless the message was a notification (no id)."""

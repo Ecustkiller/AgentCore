@@ -136,16 +136,16 @@ function makeRun(p: Partial<ProjectedRun> & { id: string }): ProjectedRun {
 }
 
 describe("graphAppendAnchorLabel", () => {
-  it("开辩论幕与同幕补派文案区分", () => {
+  it("续自口径：开辩论幕与同幕补派文案区分", () => {
     expect(graphAppendAnchorLabel(2, "debate")).toBe(
-      "已开辩论幕 · 追加 2 名成员",
+      "续自上一张图 · 已开辩论幕 · 追加 2 名成员",
     );
     expect(graphAppendAnchorLabel(2, "debate", "auto")).toBe(
-      "已开辩论幕 · 追加 2 名成员 · 自动开辩",
+      "续自上一张图 · 已开辩论幕 · 追加 2 名成员 · 自动开辩",
     );
-    expect(graphAppendAnchorLabel(2)).toBe("已往上方协作图追加 2 名成员");
+    expect(graphAppendAnchorLabel(2)).toBe("续自上一张图 · 追加 2 名成员");
     expect(graphAppendAnchorLabel(1, "multi_agent")).toBe(
-      "已往上方协作图追加 1 名成员",
+      "续自上一张图 · 追加 1 名成员",
     );
   });
 });
@@ -230,25 +230,6 @@ describe("AssistantContent", () => {
       />,
     );
     expect(screen.queryByTestId("finish-reason-chip")).toBeNull();
-  });
-
-  it("shows single-agent delivery shortfall hint", () => {
-    render(
-      <AssistantContent
-        content="部分交付"
-        deliveryStatus={{
-          execution_id: "e1",
-          state: "partial",
-          summary: "缺验收项",
-          delivered_files: [],
-          gaps: [],
-          actions: [],
-        }}
-      />,
-    );
-    expect(screen.getByTestId("delivery-shortfall-hint").textContent).toBe(
-      "缺验收项",
-    );
   });
 
   it("renders citation tier badges when tier is present", () => {
@@ -506,5 +487,59 @@ describe("AssistantContent", () => {
       />,
     );
     expect(screen.queryByTestId("team")).toBeNull();
+  });
+
+  it("renders interjection bubble at user_interjection marker slot", () => {
+    const process: ProcessStep[] = [
+      { kind: "content", text: "先说一句" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+      { kind: "content", text: "再回应" },
+    ];
+    const { container } = render(
+      <AssistantContent
+        content="先说一句再回应"
+        process={process}
+        turnClosed
+        userInterjections={[
+          {
+            interjectionId: "inj-1",
+            content: "改成中文",
+            status: "injected",
+          },
+        ]}
+      />,
+    );
+    const bubble = screen.getByTestId("interjection-bubble-inj-1");
+    expect(bubble).toBeTruthy();
+    expect(screen.getByText("主 Agent 已看到")).toBeTruthy();
+    // marker 钉在两段正文之间，而非整块助手外挂。
+    const mdNodes = screen.getAllByTestId("md");
+    expect(mdNodes.map((n) => n.textContent)).toEqual(["先说一句", "再回应"]);
+    const timeline = container.querySelector(".timeline");
+    expect(timeline).toBeTruthy();
+    const kids = [...(timeline?.children ?? [])];
+    const bubbleIdx = kids.findIndex((el) =>
+      el.querySelector?.("[data-testid='interjection-bubble-inj-1']"),
+    );
+    expect(bubbleIdx).toBeGreaterThan(0);
+    expect(bubbleIdx).toBeLessThan(kids.length - 1);
+  });
+
+  it("falls back unmarked interjections when process has no marker", () => {
+    render(
+      <AssistantContent
+        content="你好"
+        process={[{ kind: "content", text: "你好" }]}
+        turnClosed
+        userInterjections={[
+          {
+            interjectionId: "inj-legacy",
+            content: "旧 journal 插话",
+            status: "injected",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("interjection-bubble-inj-legacy")).toBeTruthy();
   });
 });

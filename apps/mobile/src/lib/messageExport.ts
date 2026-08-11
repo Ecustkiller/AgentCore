@@ -60,6 +60,9 @@ export function formatProcessExport(
       case "team_preview":
         lines.push("· （团队预览）");
         break;
+      case "user_interjection":
+        // 零宽 positional marker；正文在旁路 userInterjections，导出不复述。
+        break;
       default:
         break;
     }

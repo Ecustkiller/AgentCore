@@ -705,6 +705,7 @@ export function finalizeFold(
     planType: s.plan.planType,
     taskSummary: s.plan.taskSummary,
     status,
+    prevExecutionId: s.plan.prevExecutionId ?? null,
     agents: finalAgents,
     runs: finalRuns,
     acts:

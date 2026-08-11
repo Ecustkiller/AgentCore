@@ -28,20 +28,25 @@ from .outcome import RoundOutcome
 logger = get_logger(__name__)
 
 # Team-gate (协作优先): investigation-only, captain-only, one shot per run.
-# ≥ TEAM_GATE_INVESTIGATION_THRESHOLD **探路轮** → always hard-stop
+# ≥ settings.engine_team_gate_investigation_rounds **探路轮** → always hard-stop
 # (strip investigation tools). 按轮不计同轮并行工具次数——一轮里 git×2+file_list
-# 只计 1 轮，避免并行烧尽额度。No soft nudge.
+# 只计 1 轮，避免并行烧尽额度。全失败探路轮不计（见 LoopController.record）。
+# No soft nudge.
 # **不扫用户原文猜意图**分叉闸门（禁成篇/改文件/摸底正则路径）；统一文案：
 # delegate 或短答+自报归类；闸后长文由 soft_gates 丢稿再催一次。
 # 成篇形状 / 修码选型靠提示词与结构验收（playbook、冷启动拒单 worker 等），不靠分类器。
-TEAM_GATE_INVESTIGATION_THRESHOLD = 5
 # 本地摸仓计数仍由 LoopController 维护（观测 / probe）；不再用于分阈硬闸。
 LOCAL_RECON_TOOLS = frozenset({"file_list", "file_read", "grep"})
 
 
+def team_gate_investigation_threshold() -> int:
+    """CEO 探路硬上限（探路轮）；单一真源 ``settings.engine_team_gate_investigation_rounds``."""
+    return int(settings.engine_team_gate_investigation_rounds)
+
+
 def team_gate_hard_stop_prompt() -> str:
     """Hard gate: investigation tools stripped; delegate or short classified answer."""
-    n = TEAM_GATE_INVESTIGATION_THRESHOLD
+    n = team_gate_investigation_threshold()
     return (
         f"[系统提示] 探路已达硬上限（{n} 轮）：调查类工具已收回。"
         "请立即 delegate（成规模摸底 / 成篇调研须 ≥2 角并行，禁止一人包办）；"
@@ -170,20 +175,25 @@ def maybe_inject_team_gate(
 ) -> bool:
     """Inject the team-gate once for the CEO captain. Returns True if injected.
 
-    After :data:`TEAM_GATE_INVESTIGATION_THRESHOLD` **探路轮**
+    After ``settings.engine_team_gate_investigation_rounds`` **探路轮**
     (``investigation_rounds``; 同轮并行多工具只计 1), strip investigation tools and
     inject one hard-stop copy: delegate or short classified answer. Does **not**
-    branch on user-text intent classifiers.
+    branch on user-text intent classifiers. Records only names this gate newly
+    adds to ``disabled_tools`` so a later successful ``delegate`` can restore
+    them without resurrecting breaker / channel-dead / read_url retire disables.
     """
     if role != "captain" or controller.team_gate_fired or controller.has_delegated:
         return False
 
-    if controller.investigation_rounds < TEAM_GATE_INVESTIGATION_THRESHOLD:
+    if controller.investigation_rounds < team_gate_investigation_threshold():
         return False
 
     controller.mark_team_gate_fired()
     if disabled_tools is not None and investigation_tools:
+        newly = frozenset(investigation_tools) - disabled_tools
         disabled_tools.update(investigation_tools)
+        if newly:
+            controller.record_team_gate_stripped(newly)
     nudge = team_gate_hard_stop_prompt()
     logger.info(
         "engine.team_gate_nudge",
@@ -198,6 +208,33 @@ def maybe_inject_team_gate(
         NoteFact(role="user", content=nudge, reason="team_gate", run_id=run_id).to_fact()
     )
     return True
+
+
+def maybe_restore_team_gate_tools(
+    controller: LoopController,
+    *,
+    disabled_tools: set[str],
+    attempts: list[ToolAttempt],
+) -> bool:
+    """After a successful ``delegate`` this round, restore only gate-stripped tools.
+
+    ``team_gate_fired`` stays latched (gate still one-shot). Does not restore on
+    ``debate``. Callers must refresh tool defs when this returns True, then
+    re-apply circuit breaker / channel-dead so other mechanisms can re-disable.
+    """
+    if not any(a.tool_name == "delegate" and a.success for a in attempts):
+        return False
+    names = controller.take_team_gate_stripped()
+    if not names:
+        return False
+    before = len(disabled_tools)
+    disabled_tools.difference_update(names)
+    restored = len(disabled_tools) < before
+    if restored:
+        # 独立事件名：``team_gate_nudge`` 的计数是「探路硬闸触发次数」的真源（调阈值靠它），
+        # 恢复不得混进去。
+        logger.info("engine.team_gate_restore", restored=sorted(names))
+    return restored
 
 
 def maybe_inject_delivery_idle(

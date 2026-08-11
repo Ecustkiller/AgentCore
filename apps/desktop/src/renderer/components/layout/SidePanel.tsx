@@ -32,7 +32,7 @@ import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
-import { useConversationFileSource } from "@/hooks/useConversationFileSource";
+import { useFileTabSource } from "@/hooks/useConversationFileSource";
 import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -315,8 +315,6 @@ export function SidePanel() {
   const simplePromptText = useActiveMessageContent(simplePromptId);
   const simpleAnswerText = useActiveMessageContent(simpleAnswerId);
 
-  const fileSource = useConversationFileSource(currentConversationId);
-
   // Pay for the workspace / changes bodies' first fetch only once shown; keep
   // mounted afterwards so switching back is instant and state survives.
   const [wsMounted, setWsMounted] = useState(false);
@@ -567,7 +565,7 @@ export function SidePanel() {
             <FileTabBody
               path={tab.path}
               name={tab.name}
-              source={fileSource}
+              workspaceId={tab.workspaceId}
               onClose={() => closeTab(tab.id)}
             />
           </div>
@@ -647,14 +645,18 @@ export function SidePanel() {
 function FileTabBody({
   path,
   name,
-  source,
+  workspaceId,
   onClose,
 }: {
   path: string;
   name: string;
-  source: ReturnType<typeof useConversationFileSource>;
+  workspaceId?: string;
   onClose: () => void;
 }) {
+  const currentConversationId = useConversationStore(
+    (s) => s.currentConversationId,
+  );
+  const source = useFileTabSource(currentConversationId, workspaceId);
   if (!path || !name) {
     return (
       <EmptyHint
@@ -677,7 +679,7 @@ function FileTabBody({
   }
   return (
     <FileDetail
-      key={path}
+      key={`${workspaceId ?? ""}:${path}`}
       source={source}
       path={path}
       name={name}

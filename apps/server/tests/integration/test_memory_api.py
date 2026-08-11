@@ -110,6 +110,39 @@ async def test_preferences_folder_id_is_ignored_and_stays_global(client):
     assert (await client.get("/v1/users/me/memory/projects")).json()["folders"] == []
 
 
+async def test_navigation_project_only_roundtrip(client):
+    await register_and_login(client, "mem_nav")
+
+    # 导航 is PROJECT-only — missing folder_id is rejected.
+    r = await client.get("/v1/users/me/memory/files/navigation")
+    assert r.status_code == 422, r.text
+    r = await client.put(
+        "/v1/users/me/memory/files/navigation",
+        json={"content": "不应写入", "baseline": None},
+    )
+    assert r.status_code == 422, r.text
+
+    # Empty project leaf reads as empty; write + read back under the project scope.
+    r = await client.get(
+        f"/v1/users/me/memory/files/navigation?folder_id={_PROJECT_FOLDER_ID}"
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == ""
+    empty_version = r.json()["version"]
+
+    body = "# 本项目\n\n- 我要查部署 → 先读 主题/部署流程.md\n"
+    r = await client.put(
+        f"/v1/users/me/memory/files/navigation?folder_id={_PROJECT_FOLDER_ID}",
+        json={"content": body, "baseline": empty_version},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True and r.json()["conflict"] is False
+    r = await client.get(
+        f"/v1/users/me/memory/files/navigation?folder_id={_PROJECT_FOLDER_ID}"
+    )
+    assert r.json()["content"] == body
+
+
 async def test_topics_list_read_write_clear_and_scope(client):
     await register_and_login(client, "mem4")
 

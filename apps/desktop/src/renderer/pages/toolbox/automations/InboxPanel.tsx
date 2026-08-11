@@ -114,7 +114,6 @@ export function InboxPanel() {
       const next = await ackStandingTaskRun(run.id);
       setRuns((prev) => (prev ?? []).map((r) => (r.id === run.id ? next : r)));
       void refreshBadge();
-      notifySuccess("已关闭");
     } catch (e) {
       notifyError(e, "操作失败");
     } finally {

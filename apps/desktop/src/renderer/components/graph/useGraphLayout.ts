@@ -34,6 +34,12 @@ import {
   resolveCaptainSinkId,
 } from "./helpers";
 import { logLayoutFailure } from "./layoutFailure";
+import {
+  type CachedLayoutResult,
+  getCachedLayout,
+  layoutCacheKey,
+  setCachedLayout,
+} from "./layoutResultCache";
 import { type GraphScene, buildGraphScene } from "./scene";
 import type { GraphFitMode } from "./useGraphViewport";
 
@@ -279,6 +285,44 @@ export function useGraphLayout(
       }
     };
 
+    const cacheKey = layoutCacheKey(structuralKey, layoutKind, fitMode);
+    const cached = getCachedLayout(cacheKey);
+    if (cached) {
+      if (isGraphPerfEnabled()) {
+        markGraphPerf("elk", 0, {
+          mode: isMultiActExecution(executionRef.current) ? "actLod" : "single",
+          cache: "hit",
+          nodes: Object.keys(cached.positions).length,
+          gen,
+        });
+      }
+      onOk(
+        cached.positions,
+        cached.edges,
+        cached.width,
+        cached.height,
+        cached.nodeSizes,
+        cached.groups,
+        cached.actCards,
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const applyAndCache = (res: CachedLayoutResult) => {
+      setCachedLayout(cacheKey, res);
+      return onOk(
+        res.positions,
+        res.edges,
+        res.width,
+        res.height,
+        res.nodeSizes,
+        res.groups,
+        res.actCards,
+      );
+    };
+
     const exec = executionRef.current;
     // 幕级 LOD（≥2 幕）：只为聚焦幕算完整布局 + 幕摘要卡链（画布 per-turn 范式）。
     if (exec && isMultiActExecution(exec)) {
@@ -292,19 +336,20 @@ export function useGraphLayout(
           if (perfOn) {
             markGraphPerf("elk", performance.now() - t0, {
               mode: "actLod",
+              cache: "miss",
               nodes: Object.keys(res.positions).length,
               gen,
             });
           }
-          return onOk(
-            res.positions,
-            res.edges,
-            res.bbox.width,
-            res.bbox.height,
-            res.nodeSizes,
-            res.groups,
-            res.cards,
-          );
+          return applyAndCache({
+            positions: res.positions,
+            edges: res.edges,
+            width: res.bbox.width,
+            height: res.bbox.height,
+            nodeSizes: res.nodeSizes,
+            groups: res.groups,
+            actCards: res.cards,
+          });
         })
         .catch(onErr);
       return () => {
@@ -343,19 +388,20 @@ export function useGraphLayout(
         if (perfOn) {
           markGraphPerf("elk", performance.now() - t0, {
             mode: "single",
+            cache: "miss",
             nodes: nodeIds.length,
             gen,
           });
         }
-        return onOk(
-          result.positions,
-          rawEdges,
-          result.width,
-          result.height,
-          sizeMap,
-          result.groups,
-          [],
-        );
+        return applyAndCache({
+          positions: result.positions,
+          edges: rawEdges,
+          width: result.width,
+          height: result.height,
+          nodeSizes: sizeMap,
+          groups: result.groups,
+          actCards: [],
+        });
       })
       .catch(onErr);
     return () => {
@@ -459,14 +505,60 @@ export function useMultiTurnLayouts(
           inputId: INPUT_ID,
           expandedUnits,
         });
-
-        // 幕级 LOD（≥2 幕）：只为聚焦幕算完整布局 + 幕摘要卡链，与内联/全屏同语义。
+        const units = [...expandedUnits].sort().join(",");
+        const struct = graphStructureKey(t.execution.runs);
+        let actKey = "";
+        let focus: string | null = null;
         if (isMultiActExecution(t.execution)) {
-          const focus = defaultFocusedActId(
+          focus = defaultFocusedActId(
             scene,
             t.execution.status,
             actFocusChoices.get(t.turnId),
           );
+          actKey = `#acts=${t.execution.acts.map((a) => a.actId).join(",")}#focus=${focus ?? "none"}`;
+        }
+        const cacheKey = layoutCacheKey(
+          `${t.turnId}#${struct}#${units}${actKey}`,
+          layoutKind,
+          fitMode,
+        );
+
+        const sliceFromCache = (
+          cached: CachedLayoutResult,
+        ): TurnLayoutSlice => ({
+          positions: cached.positions,
+          edges: cached.edges,
+          bbox: { width: cached.width, height: cached.height },
+          layoutReady: true,
+          layoutError: null,
+          nodeHeights: {},
+          nodeSizes: cached.nodeSizes,
+          groups: cached.groups,
+          subTeams: scene.subTeams,
+          foldInfo: scene.fold,
+          scene,
+          actCards: cached.actCards,
+        });
+
+        const cached = getCachedLayout(cacheKey);
+        if (cached) {
+          if (isGraphPerfEnabled()) {
+            markGraphPerf("elk", 0, {
+              mode: isMultiActExecution(t.execution)
+                ? "canvasActLod"
+                : "canvas",
+              cache: "hit",
+              turn: t.turnId.slice(0, 8),
+              nodes: Object.keys(cached.positions).length,
+            });
+          }
+          if (cancelled || gen !== genRef.current) return;
+          next[t.turnId] = sliceFromCache(cached);
+          continue;
+        }
+
+        // 幕级 LOD（≥2 幕）：只为聚焦幕算完整布局 + 幕摘要卡链，与内联/全屏同语义。
+        if (isMultiActExecution(t.execution)) {
           try {
             const perfOn = isGraphPerfEnabled();
             const t0 = perfOn ? performance.now() : 0;
@@ -480,25 +572,23 @@ export function useMultiTurnLayouts(
             if (perfOn) {
               markGraphPerf("elk", performance.now() - t0, {
                 mode: "canvasActLod",
+                cache: "miss",
                 turn: t.turnId.slice(0, 8),
                 nodes: Object.keys(res.positions).length,
               });
             }
             if (cancelled || gen !== genRef.current) return;
-            next[t.turnId] = {
+            const entry: CachedLayoutResult = {
               positions: res.positions,
               edges: res.edges,
-              bbox: res.bbox,
-              layoutReady: true,
-              layoutError: null,
-              nodeHeights: {},
+              width: res.bbox.width,
+              height: res.bbox.height,
               nodeSizes: res.nodeSizes,
               groups: res.groups,
-              subTeams: scene.subTeams,
-              foldInfo: scene.fold,
-              scene,
               actCards: res.cards,
             };
+            setCachedLayout(cacheKey, entry);
+            next[t.turnId] = sliceFromCache(entry);
           } catch (err) {
             if (cancelled || gen !== genRef.current) return;
             const message = logLayoutFailure(err, {
@@ -535,24 +625,26 @@ export function useMultiTurnLayouts(
           if (perfOn) {
             markGraphPerf("elk", performance.now() - t0, {
               mode: "canvas",
+              cache: "miss",
               turn: t.turnId.slice(0, 8),
               nodes: nodeIds.length,
             });
           }
           if (cancelled || gen !== genRef.current) return;
-          next[t.turnId] = {
+          const entry: CachedLayoutResult = {
             positions: result.positions,
             edges: rawEdges,
-            bbox: { width: result.width, height: result.height },
-            layoutReady: true,
-            layoutError: null,
-            nodeHeights: {},
+            width: result.width,
+            height: result.height,
             nodeSizes: sizeMap,
             groups: result.groups,
+            actCards: [],
+          };
+          setCachedLayout(cacheKey, entry);
+          next[t.turnId] = {
+            ...sliceFromCache(entry),
             subTeams,
             foldInfo,
-            scene,
-            actCards: [],
           };
         } catch (err) {
           if (cancelled || gen !== genRef.current) return;

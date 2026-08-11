@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const acceptRunOutcome = vi.fn().mockResolvedValue({ recorded: true });
 const clearExecution = vi.fn();
+const markDismissed = vi.fn();
 const projectRuntime = vi.fn();
 
 vi.mock("@/services/runRedirect", () => ({
@@ -40,22 +41,34 @@ vi.mock("@/stores/execution", () => ({
   },
 }));
 
-describe("dismissRecoverableExecutions", () => {
+vi.mock("@/stores/recoveryDismissed", () => ({
+  useRecoveryDismissedStore: {
+    getState: () => ({
+      dismissed: new Set<string>(),
+      markDismissed,
+      isDismissed: () => false,
+      reset: () => {},
+    }),
+  },
+}));
+
+describe("dismissRecoverableHints", () => {
   beforeEach(() => {
     acceptRunOutcome.mockClear();
     clearExecution.mockClear();
+    markDismissed.mockClear();
     projectRuntime.mockReset();
   });
 
-  it("audits recovery_ignored and clears recoverable slots", async () => {
+  it("audits recovery_ignored and latches UI dismiss without clearing projection", async () => {
     projectRuntime.mockReturnValue({
       status: "failed",
       runs: [{ status: "failed" }],
     });
-    const { dismissRecoverableExecutions } = await import(
+    const { dismissRecoverableHints } = await import(
       "../turns/dismissRecovery"
     );
-    dismissRecoverableExecutions("conv-1");
+    dismissRecoverableHints("conv-1");
     expect(acceptRunOutcome).toHaveBeenCalledWith(
       "conv-1",
       expect.objectContaining({
@@ -63,7 +76,8 @@ describe("dismissRecoverableExecutions", () => {
         reason: "recovery_ignored",
       }),
     );
-    expect(clearExecution).toHaveBeenCalledWith("a1");
+    expect(markDismissed).toHaveBeenCalledWith("a1");
+    expect(clearExecution).not.toHaveBeenCalled();
   });
 
   it("skips non-recoverable executions", async () => {
@@ -71,11 +85,12 @@ describe("dismissRecoverableExecutions", () => {
       status: "completed",
       runs: [{ status: "completed" }],
     });
-    const { dismissRecoverableExecutions } = await import(
+    const { dismissRecoverableHints } = await import(
       "../turns/dismissRecovery"
     );
-    dismissRecoverableExecutions("conv-1");
+    dismissRecoverableHints("conv-1");
     expect(acceptRunOutcome).not.toHaveBeenCalled();
+    expect(markDismissed).not.toHaveBeenCalled();
     expect(clearExecution).not.toHaveBeenCalled();
   });
 });

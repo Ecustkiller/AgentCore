@@ -26,19 +26,20 @@ from agentcore.runtime.costing import ROLE_CAPTAIN, ROLE_MEMBER
 _ALLOWED_ROLES = frozenset({"captain", "member", "arena", "title", "memory", "vision"})
 
 
-def _encode_persona(value: str) -> str:
-    """RFC 3986 percent-encode a persona label for HTTP header transport.
+def _encode_header_value(value: str) -> str:
+    """RFC 3986 percent-encode an attribution field for HTTP header transport.
 
-    Personas are free-form human labels the CEO invents（「调研员」「前端工程师」…）—
-    almost always non-ASCII, which httpx (rightly) refuses to put on the wire raw.
-    Percent-encoding keeps the header ASCII; the proxy decodes symmetrically.
-    ASCII-only labels pass through unchanged (``quote`` leaves unreserved chars).
+    ``run_id`` / ``agent_id`` / ``persona`` can carry free-form labels（委派任务名、
+    CEO 自拟人设「调研员」…）— almost always non-ASCII, which httpx (rightly)
+    refuses to put on the wire raw. Percent-encoding keeps the header ASCII; the
+    proxy decodes symmetrically. ASCII-only values pass through unchanged
+    (``quote`` leaves unreserved chars).
     """
     return quote(value, safe="")
 
 
-def _decode_persona(value: str) -> str:
-    """Inverse of :func:`_encode_persona`; tolerates un-encoded legacy values."""
+def _decode_header_value(value: str) -> str:
+    """Inverse of :func:`_encode_header_value`; tolerates un-encoded legacy values."""
     try:
         return unquote(value)
     except Exception:  # noqa: BLE001 — untrusted client header; keep as-is
@@ -55,19 +56,19 @@ def attribution_headers_from_context() -> dict[str, str]:
     headers: dict[str, str] = {INFERENCE_CALL_HEADER: f"call_{new_id()}"}
     run_id = get_log_value("run_id")
     if run_id:
-        headers[INFERENCE_RUN_HEADER] = run_id
+        headers[INFERENCE_RUN_HEADER] = _encode_header_value(run_id)
     parent = get_log_value("parent_run_id")
     if parent:
-        headers[INFERENCE_PARENT_RUN_HEADER] = parent
+        headers[INFERENCE_PARENT_RUN_HEADER] = _encode_header_value(parent)
     agent_id = get_log_value("agent_id")
     if agent_id:
-        headers[INFERENCE_AGENT_HEADER] = agent_id
+        headers[INFERENCE_AGENT_HEADER] = _encode_header_value(agent_id)
     role = get_log_value("cost_role")
     if role:
         headers[INFERENCE_ROLE_HEADER] = role
     persona = get_log_value("persona")
     if persona:
-        headers[INFERENCE_PERSONA_HEADER] = _encode_persona(persona)
+        headers[INFERENCE_PERSONA_HEADER] = _encode_header_value(persona)
     return headers
 
 
@@ -81,17 +82,20 @@ def parse_attribution_headers(headers) -> dict[str, str | None]:
         value = str(raw).strip()
         return value or None
 
+    def _get_decoded(name: str) -> str | None:
+        raw = _get(name)
+        return _decode_header_value(raw) if raw else None
+
     role = _get(INFERENCE_ROLE_HEADER)
     if role and role not in _ALLOWED_ROLES:
         # Untrusted client header — fall back rather than fail the turn.
         role = None
-    persona_raw = _get(INFERENCE_PERSONA_HEADER)
     return {
-        "run_id": _get(INFERENCE_RUN_HEADER),
-        "parent_run_id": _get(INFERENCE_PARENT_RUN_HEADER),
-        "agent_id": _get(INFERENCE_AGENT_HEADER),
+        "run_id": _get_decoded(INFERENCE_RUN_HEADER),
+        "parent_run_id": _get_decoded(INFERENCE_PARENT_RUN_HEADER),
+        "agent_id": _get_decoded(INFERENCE_AGENT_HEADER),
         "role": role,
-        "persona": _decode_persona(persona_raw) if persona_raw else None,
+        "persona": _get_decoded(INFERENCE_PERSONA_HEADER),
         "call_id": _get(INFERENCE_CALL_HEADER),
     }
 

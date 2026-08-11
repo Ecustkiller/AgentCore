@@ -1,25 +1,21 @@
-"""跨回合同图追加：复用 execution_id、journal divert、收口不绑 message_end。"""
+"""协作图身份：prev 链 / 同回合合入 / 宿主解析（divert 已退役）。"""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
 
 from agentcore.runtime.delegate.graph_append import (
-    GraphAppendRedirect,
-    bind_redirect,
+    build_recent_graph_context,
     clear_graph_host_registry,
-    is_graph_growth_event,
+    format_recent_graph_worker_facts,
     parse_host_captain_run_id,
     peek_graph_host,
     register_graph_host,
-    reset_redirect,
+    render_recent_graph_context,
 )
-from agentcore.runtime.events import EventSink, EventType, graph_append, run_plan
-from agentcore.runtime.facts import Fact, record_turn_fact
-from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
+from agentcore.runtime.events import EventSink, graph_append, run_plan
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.protocol import ToolResult
@@ -85,30 +81,14 @@ def test_parse_host_captain_run_id_empty():
     assert parse_host_captain_run_id([{"kind": "run_plan", "payload": {"runs": []}}]) is None
 
 
-def test_is_graph_growth_event_matrix():
-    assert is_graph_growth_event(EventType.RUN_PLAN, {"execution_id": "e"})
-    assert is_graph_growth_event(EventType.RUN_STARTED, {"run_id": "r1"})
-    assert not is_graph_growth_event(EventType.GRAPH_APPEND, {"execution_id": "e"})
-    assert not is_graph_growth_event(EventType.TOOL_USE_START, {"tool_name": "delegate"})
-    assert is_graph_growth_event(
-        EventType.TOOL_USE_START, {"tool_name": "web_search", "run_id": "r1"}
-    )
-
-
-def test_sink_registers_host_and_graph_append_marker():
+def test_sink_registers_host_and_team_marker():
     sink = EventSink(message_id="m1", conversation_id="c")
     sink.emit(
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
             task_summary="t",
-            agents=[
-                {
-                    "id": "w1",
-                    "role": "研",
-                    "thinking": True,
-                }
-            ],
+            agents=[{"id": "w1", "role": "研", "thinking": True}],
             runs=[{"id": "r1", "agent_id": "w1", "task": "x", "depends_on": []}],
         )
     )
@@ -116,7 +96,11 @@ def test_sink_registers_host_and_graph_append_marker():
     process = sink.process_timeline() or []
     assert any(s.get("kind") == "team" and s.get("execution_id") == "exec1" for s in process)
 
+
+def test_sink_prev_run_plan_inserts_team_on_new_execution():
+    """跨回合新图：无 host_message_id，新 eid 插 team；旧 graph_append 仅兼容回放。"""
     sink2 = EventSink(message_id="m2", conversation_id="c")
+    # 旧 journal 回放：graph_append 仍可落 process 锚点
     sink2.emit(
         graph_append(
             execution_id="exec1",
@@ -129,1381 +113,239 @@ def test_sink_registers_host_and_graph_append_marker():
     )
     sink2.emit(
         run_plan(
-            execution_id="exec1",
+            execution_id="exec2",
             plan_type="multi_agent",
             task_summary="t2",
-            agents=[
-                {
-                    "id": "w1",
-                    "role": "研",
-                    "thinking": True,
-                },
-                {
-                    "id": "w2",
-                    "role": "写",
-                    "thinking": True,
-                },
-            ],
-            runs=[
-                {"id": "r1", "agent_id": "w1", "task": "x", "depends_on": []},
-                {"id": "r2", "agent_id": "w2", "task": "y", "depends_on": []},
-            ],
+            agents=[{"id": "w3", "role": "写", "thinking": True}],
+            runs=[{"id": "r3", "agent_id": "w3", "task": "y", "depends_on": []}],
+            prev_execution_id="exec1",
+        )
+    )
+    process = sink2.process_timeline() or []
+    assert any(s.get("kind") == "graph_append" and s.get("added_count") == 1 for s in process)
+    assert any(s.get("kind") == "team" and s.get("execution_id") == "exec2" for s in process)
+    assert peek_graph_host("exec2") == "m2"
+
+
+def test_legacy_host_message_id_run_plan_skips_team_marker():
+    """旧 divert 生长帧：带 host_message_id 的 run_plan 不插新 team。"""
+    sink = EventSink(message_id="m2", conversation_id="c")
+    sink.emit(
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="t",
+            agents=[{"id": "w1", "role": "研", "thinking": True}],
+            runs=[{"id": "r1", "agent_id": "w1", "task": "x", "depends_on": []}],
             host_message_id="m1",
         )
     )
-    process2 = list(sink2._process)
-    assert any(s.get("kind") == "graph_append" and s.get("added_count") == 1 for s in process2)
-    assert not any(s.get("kind") == "team" for s in process2)
-
-
-@pytest.mark.asyncio
-async def test_journal_divert_to_host_writer():
-    """生长 DURABLE 进宿主 writer；graph_append 留在当前 turn writer。"""
-    host_entries: list[dict[str, Any]] = []
-    cur_entries: list[dict[str, Any]] = []
-
-    class _CaptureWriter(TurnJournalWriter):
-        def __init__(self, bucket: list[dict[str, Any]], *, turn_id: str) -> None:
-            super().__init__(
-                turn_id=turn_id, conversation_id="c", trace_id=None, initial_seq=0
-            )
-            self._bucket = bucket
-
-        def schedule_append(self, entry: dict[str, Any]):  # type: ignore[override]
-            self._bucket.append(dict(entry))
-            fut: asyncio.Future[int | None] = asyncio.get_running_loop().create_future()
-            fut.set_result(len(self._bucket))
-            return fut
-
-    host_w = _CaptureWriter(host_entries, turn_id="m1")
-    cur_w = _CaptureWriter(cur_entries, turn_id="m2")
-    tok_j = current_journal_writer.set(cur_w)
-    redir = GraphAppendRedirect(
-        execution_id="exec1",
-        host_message_id="m1",
-        append_message_id="m2",
-        host_writer=host_w,
-    )
-    tok_r = bind_redirect(redir)
-    try:
-        sink = EventSink(message_id="m2", conversation_id="c")
-        sink.emit(
-            graph_append(
-                execution_id="exec1",
-                host_message_id="m1",
-                append_message_id="m2",
-                added_count=1,
-            )
-        )
-        sink.emit(
-            run_plan(
-                execution_id="exec1",
-                plan_type="multi_agent",
-                task_summary="t",
-                agents=[],
-                runs=[{"id": "r9", "agent_id": "w9", "task": "z", "depends_on": []}],
-                host_message_id="m1",
-            )
-        )
-        record_turn_fact(Fact(kind="plan_snapshot", payload={"nodes": []}))
-    finally:
-        reset_redirect(tok_r)
-        current_journal_writer.reset(tok_j)
-
-    assert any(e.get("kind") == "graph_append" for e in cur_entries)
-    assert any(e.get("kind") == "run_plan" for e in host_entries)
-    assert any(e.get("kind") == "plan_snapshot" for e in host_entries)
-    assert not any(e.get("kind") == "run_plan" for e in cur_entries)
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_reuses_execution_id(monkeypatch):
-    """append_to_execution_id → drive 使用宿主 execution_id，不铸新 id。"""
-    register_graph_host("exec-host", "m-host")
-
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="r_old", agent_id="w_old", role="研究员", task="旧任务"),
-        ]
-    )
-    seed = {"r_old": RunState(phase=RunPhase.COMPLETED, content="done")}
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        assert execution_id == "exec-host"
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        assert host_message_id == "m-host"
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        captured["execution_id"] = kwargs.get("execution_id")
-        captured["seed"] = kwargs.get("seed_completed")
-        captured["node_ids"] = [n.run_id for n in plan.nodes]
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "exec-fresh"
-
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "exec-host",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    assert captured["execution_id"] == "exec-host"
-    assert "r_old" in captured["node_ids"]
-    assert len(captured["node_ids"]) == 2
-    assert captured["seed"] == seed
-    assert t._base_tool_context.execution_id == "exec-host"
-
-    kinds = [e.type for e in t._sink._history]
-    assert EventType.GRAPH_APPEND in kinds
-    assert EventType.RUN_PLAN in kinds
-    ga = next(e for e in t._sink._history if e.type is EventType.GRAPH_APPEND)
-    assert ga.payload["host_message_id"] == "m-host"
-    assert ga.payload["added_count"] == 1
-    rp = next(e for e in t._sink._history if e.type is EventType.RUN_PLAN)
-    assert rp.payload.get("host_message_id") == "m-host"
-    # 跨回合 divert：merge 重发同一宿主 captain，禁止本回合 captain（cap-1 / turn 新 id）
-    caps = [r for r in rp.payload.get("runs") or [] if r.get("kind") == "captain"]
-    assert len(caps) == 0  # 本用例未 stub journal captain → 不注入
-    assert not any(a.get("role") == "CEO" for a in rp.payload.get("agents") or [])
-    assert "跨回合同图追加" in (result.output or "")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_parent_uses_host_captain_id(monkeypatch):
-    """append 新建节点 parent_run_id 挂宿主 journal captain；仍不注入第二 captain 卡。"""
-    register_graph_host("exec-host", "m-host")
-
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="r_old", agent_id="w_old", role="研究员", task="旧任务"),
-        ]
-    )
-    seed = {"r_old": RunState(phase=RunPhase.COMPLETED, content="done")}
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_journal(host_message_id: str):
-        assert host_message_id == "m-host"
-        return [
-            {
-                "kind": "run_plan",
-                "payload": {
-                    "execution_id": "exec-host",
-                    "runs": [
-                        {"id": "host-cap-42", "kind": "captain", "agent_id": "host-cap-42"},
-                        {"id": "r_old", "agent_id": "w_old", "task": "旧任务", "depends_on": []},
-                    ],
-                },
-            }
-        ]
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        added = [n for n in plan.nodes if n.run_id != "r_old"]
-        captured["parents"] = {n.run_id: n.parent_run_id for n in added}
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_journal_entries",
-        fake_journal,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._captain_run_id = "turn-cap-new"
-    t._base_tool_context.execution_id = "exec-fresh"
-
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "exec-host",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    assert captured["parents"]
-    assert all(p == "host-cap-42" for p in captured["parents"].values())
-    rp = next(e for e in t._sink._history if e.type is EventType.RUN_PLAN)
-    caps = [r for r in rp.payload.get("runs") or [] if r.get("kind") == "captain"]
-    assert len(caps) == 1
-    assert caps[0]["id"] == "host-cap-42"
-    assert not any(r.get("id") == "turn-cap-new" for r in rp.payload.get("runs") or [])
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_completed_same_seat_same_artifact_admits(monkeypatch):
-    """跨回合：宿主已完成同座+同路径 → 入闸放行并 auto-replaces（勿整图 sibling 误拒）。"""
-    from agentcore.runtime.runs.types import Deliverable
-
-    register_graph_host("exec-host", "m-host")
-
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(
-                run_id="del_old_fe_1",
-                agent_id="w_old",
-                role="前端",
-                task="第一棒 site/index.html",
-                deliverable=Deliverable(artifacts=["site/index.html"]),
-            ),
-        ]
-    )
-    seed = {"del_old_fe_1": RunState(phase=RunPhase.COMPLETED, content="done")}
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        captured["node_ids"] = [n.run_id for n in plan.nodes]
-        captured["replaces"] = {
-            n.run_id: (n.replaces_run_id or "")
-            for n in plan.nodes
-            if n.run_id != "del_old_fe_1"
-        }
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "exec-fresh"
-
-    result = await t.execute(
-        {
-            "tasks": [
-                {
-                    "role": "前端",
-                    "task": "第二棒增量 site/index.html",
-                    "deliverable": {"artifacts": ["site/index.html"]},
-                }
-            ],
-            "append_to_execution_id": "exec-host",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True, result.error
-    assert "del_old_fe_1" in captured["node_ids"]
-    assert len(captured["node_ids"]) == 2
-    assert list(captured["replaces"].values()) == ["del_old_fe_1"]
-    assert EventType.GRAPH_APPEND in [e.type for e in t._sink._history]
-    assert EventType.RUN_PLAN in [e.type for e in t._sink._history]
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_incomplete_same_seat_rejects(monkeypatch):
-    """跨回合：宿主同座仍未完成 → 座位重叠拒收，无 run_plan。"""
-    from agentcore.runtime.runs.types import Deliverable
-
-    register_graph_host("exec-host", "m-host")
-
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(
-                run_id="del_live_fe_1",
-                agent_id="w_live",
-                role="前端",
-                task="仍在跑",
-                deliverable=Deliverable(artifacts=["site/index.html"]),
-            ),
-        ]
-    )
-    seed: dict[str, RunState] = {}  # 未终端 → incomplete
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "exec-fresh"
-
-    result = await t.execute(
-        {
-            "tasks": [
-                {
-                    "role": "前端",
-                    "task": "抢座位",
-                    "deliverable": {"artifacts": ["site/index.html"]},
-                }
-            ],
-            "append_to_execution_id": "exec-host",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is False
-    assert result.contract_failure is True
-    assert "队员追加已拒绝" in (result.error or "")
-    assert [e for e in t._sink._history if e.type is EventType.RUN_PLAN] == []
-    assert [e for e in t._sink._history if e.type is EventType.GRAPH_APPEND] == []
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_resolves_depends_on_host_node(monkeypatch):
-    """跨批 append：depends_on 宿主图已有 run_id → build 成功并保留边。"""
-    register_graph_host("exec-host", "m-host")
-
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="bt_l2_a", agent_id="bt_l2_a", role="调研A", task="查A"),
-        ]
-    )
-    seed = {"bt_l2_a": RunState(phase=RunPhase.COMPLETED, content="done")}
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        captured["deps"] = {
-            n.run_id: list(n.depends_on) for n in plan.nodes if n.run_id != "bt_l2_a"
-        }
-        captured["node_ids"] = [n.run_id for n in plan.nodes]
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "exec-fresh"
-
-    result = await t.execute(
-        {
-            "tasks": [
-                {
-                    "id": "l2_b",
-                    "role": "写手",
-                    "task": "基于上游写",
-                    "depends_on": ["bt_l2_a"],
-                }
-            ],
-            "append_to_execution_id": "exec-host",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True, result.error
-    assert "bt_l2_a" in captured["node_ids"]
-    assert len(captured["deps"]) == 1
-    assert list(captured["deps"].values())[0] == ["bt_l2_a"]
-
-
-@pytest.mark.asyncio
-async def test_resolve_latest_prefer_turn_over_older_conversation_graph(monkeypatch):
-    """候选池：prefer 本回合图优先于对话级更旧宿主；无本回合则回落跨回合 latest。"""
-    from agentcore.runtime.delegate import graph_append as ga
-
-    calls: list[dict[str, Any]] = []
-
-    class _Repo:
-        async def find_latest_multi_agent_execution(
-            self,
-            *,
-            conversation_id: str,
-            exclude_turn_id: str | None = None,
-            prefer_turn_id: str | None = None,
-            prefer_only: bool = False,
-        ):
-            calls.append(
-                {
-                    "conversation_id": conversation_id,
-                    "exclude_turn_id": exclude_turn_id,
-                    "prefer_turn_id": prefer_turn_id,
-                    "prefer_only": prefer_only,
-                }
-            )
-            if prefer_only and prefer_turn_id == "m-this":
-                return "exec-this-turn"
-            if prefer_only:
-                return None
-            return "exec-old"
-
-    class _CM:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, *_a):
-            return False
-
-    import agentcore.db.base as base_mod
-    import agentcore.db.repositories as repos_mod
-
-    monkeypatch.setattr(base_mod, "async_session_factory", lambda: _CM())
-    monkeypatch.setattr(repos_mod, "TurnJournalRepository", lambda _s: _Repo())
-
-    got = await ga.resolve_latest_appendable_execution(
-        conversation_id="c",
-        prefer_message_id="m-this",
-    )
-    assert got == "exec-this-turn"
-    assert calls[0]["prefer_only"] is True
-    assert calls[0]["prefer_turn_id"] == "m-this"
-    assert len(calls) == 1  # 本回合命中，不再回落对话级
-
-    calls.clear()
-    got_fallback = await ga.resolve_latest_appendable_execution(
-        conversation_id="c",
-        prefer_message_id="m-empty",
-    )
-    assert got_fallback == "exec-old"
-    assert calls[0]["prefer_only"] is True
-    assert calls[1]["prefer_turn_id"] is None
-    assert calls[1]["exclude_turn_id"] is None
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_latest_resolves_recent_graph(monkeypatch):
-    """append_to_execution_id="latest" → 服务端解析到本对话最近一张协作图，语义同显式 id。"""
-    host_plan = RunPlan(
-        nodes=[RunSpec(run_id="r_old", agent_id="w_old", role="研究员", task="旧任务")]
-    )
-    seed = {"r_old": RunState(phase=RunPhase.COMPLETED, content="done")}
-    latest_calls: dict[str, Any] = {}
-
-    async def fake_latest(
-        *,
-        conversation_id: str,
-        exclude_message_id=None,
-        prefer_message_id=None,
-    ) -> str | None:
-        latest_calls["conversation_id"] = conversation_id
-        latest_calls["exclude_message_id"] = exclude_message_id
-        latest_calls["prefer_message_id"] = prefer_message_id
-        return "exec-host"
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        assert execution_id == "exec-host"  # 解析结果走既有精确-id 路径
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        captured["execution_id"] = kwargs.get("execution_id")
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "latest",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    assert latest_calls == {
-        "conversation_id": "c",
-        "exclude_message_id": None,
-        "prefer_message_id": "m-new",
-    }
-    assert captured["execution_id"] == "exec-host"
-    # 口径与产品呈现一致 + 回显 execution_id。
-    assert "已往上方协作图追加 1 名成员" in (result.output or "")
-    assert "exec-host" in (result.output or "")
-    ga = next(e for e in t._sink._history if e.type is EventType.GRAPH_APPEND)
-    assert ga.payload["execution_id"] == "exec-host"
-    assert ga.payload["host_message_id"] == "m-host"
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_latest_without_graph_auto_creates(monkeypatch):
-    """latest 解析不到候选 → 自动不带 append 新建团队（成功回执写明未命中）。"""
-
-    async def fake_latest(
-        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
-    ) -> str | None:
-        return None
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-    t = tool(Provider(["X"]))
-    t._conversation_id = "c"
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "latest",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    out = result.output or ""
-    assert "latest 未命中" in out or "已自动新建" in out
-    assert "新开团队" in out or "新组建" in out
-    assert "已往上方协作图追加" not in out
-    kinds = [e.type for e in t._sink._history]
-    assert EventType.GRAPH_APPEND not in kinds
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_latest_with_active_coord_merges_like_no_append(monkeypatch):
-    """同回合活跃协调图 + append_to_execution_id=latest → 等同不传，并入当前图；禁硬失败。"""
-    from agentcore.runtime.coordination.session import (
-        active_coordination,
-        clear_active_coordination,
-    )
-    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
-
-    clear_active_coordination()
-    latest_calls: list[dict[str, Any]] = []
-
-    async def fake_latest(
-        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
-    ) -> str | None:
-        latest_calls.append(
-            {
-                "conversation_id": conversation_id,
-                "exclude_message_id": exclude_message_id,
-                "prefer_message_id": prefer_message_id,
-            }
-        )
-        return None  # 即使返回 None 也不应硬失败
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-    t = tool(_SlowWorkers(["A", "B", "C"], delay=0.4))
-    first = await t.execute(
-        {
-            "tasks": [
-                {"role": "研究员", "task": "做A"},
-                {"role": "写手", "task": "做B"},
-            ],
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert first.success is True
-    session = active_coordination("e")
-    assert session is not None and session.active
-    # 同回合二次：message_id ≡ host_turn_id 才 soft-merge。
-    session.host_turn_id = "m1"
-    t._message_id = "m1"
-    session_id = id(session)
-    drive = session.drive_task
-    assert drive is not None and not drive.done()
-
-    second = await t.execute(
-        {
-            "tasks": [{"role": "审查", "task": "做C"}],
-            "append_to_execution_id": "latest",
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert second.success is True
-    assert "追加解析失败" not in (second.error or "")
-    assert "无需 latest" not in (second.error or "") + (second.output or "")
-    assert "队员已追加" in (second.output or "")
-    # 同回合活跃图路径不应再去查历史 latest。
-    assert latest_calls == []
-    after = active_coordination("e")
-    assert after is not None
-    assert id(after) == session_id
-    assert after.total_workers == 3
-
-    drive.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await drive
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_latest_same_turn_after_wave1_uses_this_turn_graph(
-    monkeypatch,
-):
-    """同 turn 两波：call1 完成 → call2 latest → eid=本轮图（禁静默挂跨 message 旧宿主）。"""
-    from agentcore.runtime.coordination.session import (
-        active_coordination,
-        clear_active_coordination,
-    )
-
-    clear_active_coordination()
-    latest_calls: list[dict[str, Any]] = []
-
-    async def fake_latest(
-        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
-    ) -> str | None:
-        # 若误走 DB latest 且仍 exclude 本回合，会返回旧宿主——必须永不被采用。
-        latest_calls.append(
-            {
-                "conversation_id": conversation_id,
-                "exclude_message_id": exclude_message_id,
-                "prefer_message_id": prefer_message_id,
-            }
-        )
-        return "exec-OLD-cross-message"
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-
-    t = tool(Provider(["调研完成"]))
-    t._message_id = "m-this-turn"
-    t._conversation_id = "c"
-    first = await t.execute(
-        {
-            "tasks": [{"id": "recon", "role": "调研员", "task": "做调研"}],
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert first.success is True, first.error
-    host_eid = t._last_graph_execution_id
-    assert host_eid
-    assert t._last_graph_plan is not None
-    active = active_coordination("e")
-    assert active is None or not active.active
-
-    captured: dict[str, Any] = {}
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        captured["execution_id"] = kwargs.get("execution_id")
-        captured["deps"] = {n.run_id: list(n.depends_on) for n in plan.nodes}
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    second = await t.execute(
-        {
-            "tasks": [
-                {
-                    "id": "write",
-                    "role": "写手",
-                    "task": "基于调研写",
-                    "depends_on": ["recon"],
-                }
-            ],
-            "append_to_execution_id": "latest",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert second.success is True, second.error
-    assert captured["execution_id"] == host_eid
-    assert captured["execution_id"] != "exec-OLD-cross-message"
-    # 同回合收口后 latest 走内存宿主，不应再查跨 message DB latest。
-    assert latest_calls == []
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_explicit_same_eid_with_active_coord_merges(
-    monkeypatch,
-):
-    """同回合活跃协调图 + 显式 append_to=同一 eid → 等同不传，并入当前图；禁硬失败。"""
-    from agentcore.runtime.coordination.session import (
-        active_coordination,
-        clear_active_coordination,
-    )
-    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
-
-    clear_active_coordination()
-    resolve_calls: list[dict[str, Any]] = []
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        resolve_calls.append(
-            {"conversation_id": conversation_id, "execution_id": execution_id}
-        )
-        return None  # 若误走跨图 load 会落到「缺少可合并的计划快照」
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    t = tool(_SlowWorkers(["A", "B", "C"], delay=0.4))
-    first = await t.execute(
-        {
-            "tasks": [
-                {"role": "研究员", "task": "做A"},
-                {"role": "写手", "task": "做B"},
-            ],
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert first.success is True
-    session = active_coordination("e")
-    assert session is not None and session.active
-    # 同回合二次：message_id ≡ host_turn_id 才 soft-merge。
-    session.host_turn_id = "m1"
-    t._message_id = "m1"
-    session_id = id(session)
-    drive = session.drive_task
-    assert drive is not None and not drive.done()
-
-    second = await t.execute(
-        {
-            "tasks": [{"role": "审查", "task": "做C"}],
-            "append_to_execution_id": "e",  # 显式同 eid ≡ 不传
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert second.success is True
-    assert "缺少可合并的计划快照" not in (second.error or "") + (second.output or "")
-    assert "追加解析失败" not in (second.error or "")
-    assert "队员已追加" in (second.output or "")
-    # 同 eid 软化后不应再走跨图 resolve/load。
-    assert resolve_calls == []
-    after = active_coordination("e")
-    assert after is not None
-    assert id(after) == session_id
-    assert after.total_workers == 3
-
-    drive.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await drive
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_latest_after_adopt_keeps_graph_append(monkeypatch):
-    """跨回合 adopt：宿主仍活跃 + message_id≠host_turn_id → latest 不 soft-clear，走 graph_append。"""
-    from agentcore.runtime.coordination.session import (
-        CoordinationSession,
-        clear_active_coordination,
-        set_active_coordination,
-    )
-
-    clear_active_coordination()
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="r1", agent_id="w1", role="研究员", task="做A"),
-            RunSpec(run_id="r2", agent_id="w2", role="写手", task="做B"),
-        ]
-    )
-    seed = {
-        "r1": RunState(phase=RunPhase.COMPLETED, content="a"),
-        "r2": RunState(phase=RunPhase.COMPLETED, content="b"),
-    }
-    latest_calls: list[dict[str, Any]] = []
-
-    async def fake_latest(
-        *, conversation_id: str, exclude_message_id=None, prefer_message_id=None
-    ) -> str | None:
-        latest_calls.append(
-            {
-                "conversation_id": conversation_id,
-                "exclude_message_id": exclude_message_id,
-                "prefer_message_id": prefer_message_id,
-            }
-        )
-        return "e"
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        assert execution_id == "e"
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        assert host_message_id == "m-host"
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    # 模拟 adopt 后：宿主 session 仍 active，eid 已贴到本回合，但 host_turn_id 仍是首波。
-    session = CoordinationSession(
-        execution_id="e",
-        total_workers=2,
-        conversation_id="c",
-        host_turn_id="m-host",
-    )
-    set_active_coordination(session)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "e"
-
-    result = await t.execute(
-        {
-            "tasks": [{"role": "审查", "task": "做C"}],
-            "append_to_execution_id": "latest",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    assert latest_calls == [
-        {
-            "conversation_id": "c",
-            "exclude_message_id": None,
-            "prefer_message_id": "m-new",
-        }
-    ]
-    kinds = [e.type for e in t._sink._history]
-    assert EventType.GRAPH_APPEND in kinds
-    ga = next(e for e in t._sink._history if e.type is EventType.GRAPH_APPEND)
-    assert ga.payload["execution_id"] == "e"
-    assert ga.payload["host_message_id"] == "m-host"
-    assert "已往上方协作图追加" in (result.output or "")
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_explicit_same_eid_after_adopt_keeps_graph_append(
-    monkeypatch,
-):
-    """跨回合 adopt：显式 append_to=宿主 eid 也不 soft-clear，须走 graph_append。"""
-    from agentcore.runtime.coordination.session import (
-        CoordinationSession,
-        clear_active_coordination,
-        set_active_coordination,
-    )
-
-    clear_active_coordination()
-    host_plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="r1", agent_id="w1", role="研究员", task="做A"),
-            RunSpec(run_id="r2", agent_id="w2", role="写手", task="做B"),
-        ]
-    )
-    seed = {
-        "r1": RunState(phase=RunPhase.COMPLETED, content="a"),
-        "r2": RunState(phase=RunPhase.COMPLETED, content="b"),
-    }
-    resolve_calls: list[str] = []
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        resolve_calls.append(execution_id)
-        return "m-host"
-
-    async def fake_load(host_message_id: str):
-        return host_plan, seed
-
-    async def fake_open_writer(**kwargs):  # noqa: ANN003
-        return TurnJournalWriter(
-            turn_id="m-host", conversation_id="c", trace_id=None, initial_seq=10
-        )
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
-        fake_load,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.open_host_journal_writer",
-        fake_open_writer,
-    )
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-
-    session = CoordinationSession(
-        execution_id="e",
-        total_workers=2,
-        conversation_id="c",
-        host_turn_id="m-host",
-    )
-    set_active_coordination(session)
-
-    t = tool(Provider(["X"]))
-    t._message_id = "m-new"
-    t._conversation_id = "c"
-    t._base_tool_context.execution_id = "e"
-
-    result = await t.execute(
-        {
-            "tasks": [{"role": "审查", "task": "做C"}],
-            "append_to_execution_id": "e",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.success is True
-    assert resolve_calls == ["e"]
-    assert EventType.GRAPH_APPEND in [e.type for e in t._sink._history]
-    assert "已往上方协作图追加" in (result.output or "")
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_explicit_other_eid_with_active_coord_still_cross_graph(
-    monkeypatch,
-):
-    """活跃图 A + append_to=B（B≠A）仍走跨图 load，禁止误吞成同回合并入。"""
-    from agentcore.runtime.coordination.session import (
-        active_coordination,
-        clear_active_coordination,
-    )
-    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
-
-    clear_active_coordination()
-    resolve_calls: list[str] = []
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        resolve_calls.append(execution_id)
-        return None  # 故意 miss → 跨图拒绝路径
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    t = tool(_SlowWorkers(["A", "B"], delay=0.4))
-    first = await t.execute(
-        {
-            "tasks": [
-                {"role": "研究员", "task": "做A"},
-                {"role": "写手", "task": "做B"},
-            ],
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert first.success is True
-    session = active_coordination("e")
-    assert session is not None and session.active
-    drive = session.drive_task
-    assert drive is not None and not drive.done()
-
-    second = await t.execute(
-        {
-            "tasks": [{"role": "审查", "task": "做C"}],
-            "append_to_execution_id": "exec-other",
-            "coordinate": True,
-        },
-        ctx(),
-    )
-    assert second.success is False
-    assert resolve_calls == ["exec-other"]
-    assert "找不到" in (second.error or "") or "exec-other" in (second.error or "")
-    # 活跃图仍在，未被误吞清空。
-    after = active_coordination("e")
-    assert after is not None and after.active
-    assert after.total_workers == 2
-
-    drive.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await drive
-    clear_active_coordination("e")
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_rejected_for_nested_lead():
-    """跨回合追加仅根协调者可用：嵌套 lead（depth>0）显式拒绝，防跨图串写。"""
-    from agentcore.tools.builtin.delegate import DelegateTool
-    from agentcore.tools.registry import ToolRegistry
-
-    t = DelegateTool(
-        llm=Provider(["X"]),
-        sink=EventSink(),
-        system_prompt="SYS",
-        user_message="原始请求",
-        history=[],
-        tools=ToolRegistry(),
-        base_tool_context=ctx(),
-        depth=1,
-        folder_id="test_birth",
-    )
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "latest",
-        },
-        ctx(),
-    )
-    assert result.success is False
-    assert "根协调者" in (result.error or "")
-
-
-@pytest.mark.asyncio
-async def test_delegate_fresh_graph_echoes_execution_id(monkeypatch):
-    """首次建图（不追加）：结果尾部回显本图 execution_id + latest 用法。"""
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-    t = tool(Provider(["X"]))
-    result = await t.execute(
-        {"tasks": [{"role": "研究员", "task": "调研"}], "coordinate": False},
-        ctx(),
-    )
-    assert result.success is True
-    out = result.output or ""
-    assert "【协作图】" in out
-    assert "execution_id=`e`" in out  # conftest ctx() 的 execution_id
-    assert 'append_to_execution_id="latest"' in out
-    # 新图不承诺追加。
-    assert "已往上方协作图追加" not in out
-
-
-@pytest.mark.asyncio
-async def test_delegate_nested_lead_gets_no_execution_id_echo(monkeypatch):
-    """嵌套 lead 不能跨回合追加 → 不给它回显 execution_id 尾注。"""
-    from agentcore.tools.builtin.delegate import DelegateTool
-    from agentcore.tools.registry import ToolRegistry
-
-    async def fake_drive(tool, plan, **kwargs):  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="ok")
-
-    monkeypatch.setattr("agentcore.tools.builtin.delegate.tool.drive", fake_drive)
-    t = DelegateTool(
-        llm=Provider(["X"]),
-        sink=EventSink(),
-        system_prompt="SYS",
-        user_message="原始请求",
-        history=[],
-        tools=ToolRegistry(),
-        base_tool_context=ctx(),
-        depth=1,
-        folder_id="test_birth",
-    )
-    result = await t.execute(
-        {"tasks": [{"role": "研究员", "task": "调研"}], "coordinate": False},
-        ctx(),
-    )
-    assert result.success is True
-    assert "【协作图】" not in (result.output or "")
-
-
-@pytest.mark.asyncio
-async def test_build_recent_graph_context_note(monkeypatch):
-    """跨回合可见回显通道：有最近图 → <recent_team_graph> 注记；无图 → 空串（段落整体掉落）。"""
-    from agentcore.runtime.delegate.graph_append import build_recent_graph_context
-
-    async def fake_latest(*, conversation_id: str, exclude_message_id=None) -> str | None:
-        return "exec-9"
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_latest,
-    )
-    note = await build_recent_graph_context(conversation_id="c")
-    assert "<recent_team_graph>" in note
-    assert "exec-9" in note
-    assert "latest" in note
-
-    async def fake_none(*, conversation_id: str, exclude_message_id=None) -> str | None:
-        return None
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
-        fake_none,
-    )
-    assert await build_recent_graph_context(conversation_id="c") == ""
-
-
-@pytest.mark.asyncio
-async def test_assemble_injects_recent_graph_note_into_ceo_prompt(monkeypatch):
-    """回显跨回合可见：assemble 把 <recent_team_graph> 注入 CEO 系统提示易变尾（非 worker base）。"""
-    from types import SimpleNamespace
-
-    from agentcore.runtime.pipeline import run as run_mod
-    from agentcore.runtime.pipeline.assemble import assemble_ceo_turn
-    from agentcore.runtime.pipeline.prepare import PreparedTurn
-    from agentcore.runtime.skills import build_system_skill_registry
-    from agentcore.tools.registry import ToolRegistry
-
-    note = "<recent_team_graph>\nexecution_id=`exec-42`\n</recent_team_graph>"
-
-    async def fake_note(*, conversation_id: str, exclude_message_id=None) -> str:
-        assert conversation_id == "c"
-        assert exclude_message_id == "m-new"
-        return note
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.build_recent_graph_context",
-        fake_note,
-    )
-
-    def fake_toolset(**kwargs):  # noqa: ANN003
-        return None, None, ToolRegistry()
-
-    monkeypatch.setattr(run_mod, "_assemble_ceo_toolset", fake_toolset)
-
-    prepared = PreparedTurn(
-        llm=None,
-        system_prompt="BASE",
-        worker_base_prompt="WORKER_BASE",
-        worker_tools=ToolRegistry(),
-        skill_registry=build_system_skill_registry(),
-        board_channel=None,
-        base_tool_context=ctx(),
-        vision_cost_sink=[],
-        attachment_context="",
-        native_image_parts=[],
-        memory_topics=[],
-        on_demand_rules=[],
-        bound_execution_id="e",
-        execution_id_token=None,
-    )
-    assembled = await assemble_ceo_turn(
-        prepared=prepared,
-        conversation_id="c",
-        user_message="hi",
-        history=[],
-        sink=EventSink(),
-        backend=SimpleNamespace(location="server"),
-        folder_id=None,
-        memory_enabled=False,
-        approvals_enabled=False,
-        permission_axes=None,
-        profiles=None,
-        captain_run_id="cap",
-        message_id="m-new",
-        session_saver=None,
-        session_loader=None,
-        suspension_saver=None,
-        suspension_deleter=None,
-        x_client_platform=None,
-    )
-    assert note in assembled.chat_system_prompt
-    # CEO-only：不进 worker base（prepared.worker_base_prompt 原样）。
-    assert note not in prepared.worker_base_prompt
-
-
-@pytest.mark.asyncio
-async def test_delegate_append_unknown_execution_rejected(monkeypatch):
-    clear_graph_host_registry()
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str) -> str | None:
-        return None
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
-    t = tool(Provider(["X"]))
-    t._conversation_id = "c"
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写稿"}],
-            "append_to_execution_id": "does-not-exist",
-        },
-        ctx(),
-    )
-    assert result.success is False
-    assert "找不到" in (result.error or "")
-
-
-def test_projection_cross_turn_keeps_runs_across_message_start():
-    from agentcore.conformance.projection import project_turn
-    from agentcore.conformance.vectors.multi_agent.cross_turn_append import (
-        _HOST_CAPTAIN,
-        _multi_agent_cross_turn_append,
-    )
-
-    events = [
-        {"type": e.type.value, "payload": e.payload, "timestamp": e.timestamp}
-        for e in _multi_agent_cross_turn_append()
-    ]
-    projected = project_turn(events)
-    assert projected["status"] == "completed"
-    run_ids = {r["id"] for r in projected["runs"]}
-    assert {_HOST_CAPTAIN, "r1", "r2", "r3"} <= run_ids
-    captains = [r for r in projected["runs"] if r.get("kind") == "captain"]
-    assert len(captains) == 1
-    assert captains[0]["id"] == _HOST_CAPTAIN
-    for rid in ("r1", "r2", "r3"):
-        worker = next(r for r in projected["runs"] if r["id"] == rid)
-        assert worker["parentRunId"] == _HOST_CAPTAIN
-        assert worker.get("kind") != "captain"
-    r3 = next(r for r in projected["runs"] if r["id"] == "r3")
-    assert r3["status"] == "completed"
-    process = projected["process"]
-    assert any(s.get("kind") == "graph_append" for s in process)
+    process = sink.process_timeline() or []
     assert not any(s.get("kind") == "team" for s in process)
-    assert "追加" in projected["content"] or "撰写" in projected["content"]
 
-    # Wire: both run_plans carry the same host captain only (no second captain id).
-    plans = [e for e in events if e["type"] == "run_plan"]
-    assert len(plans) == 2
-    for plan in plans:
-        cap_ids = [
-            r["id"]
-            for r in plan["payload"]["runs"]
-            if r.get("kind") == "captain"
+
+@pytest.mark.asyncio
+async def test_delegate_cross_turn_append_mints_prev_chain(monkeypatch):
+    """跨回合已收口图：新 eid + prev_execution_id，不发 graph_append。"""
+    t = tool(Provider([]))
+    t._base_tool_context.execution_id = None
+    t._message_id = "m2"
+    t._conversation_id = "conv-1"
+    t._captain_run_id = "cap-2"
+    emitted: list[Any] = []
+    t._sink.emit = lambda ev: emitted.append(ev)  # type: ignore[method-assign]
+
+    async def fake_resolve(*, conversation_id: str, execution_id: str):
+        assert conversation_id == "conv-1"
+        assert execution_id == "exec-old"
+        return "m-host"
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_resolve,
+    )
+    monkeypatch.setattr("agentcore.runtime.plan_only.is_plan_only", lambda: True)
+
+    result = await t.execute(
+        {
+            "tasks": [{"role": "撰写员", "task": "写"}],
+            "append_to_execution_id": "exec-old",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success
+    plans = [e for e in emitted if getattr(e.type, "value", e.type) == "run_plan"]
+    assert len(plans) == 1
+    payload = plans[0].payload
+    assert payload.get("prev_execution_id") == "exec-old"
+    assert payload.get("execution_id") != "exec-old"
+    assert "host_message_id" not in payload
+    assert not any(
+        getattr(e.type, "value", e.type) == "graph_append" for e in emitted
+    )
+
+
+@pytest.mark.asyncio
+async def test_delegate_same_turn_memory_append_keeps_eid(monkeypatch):
+    """同回合二次：合入同一 execution_id，不写 prev。"""
+    t = tool(Provider([]))
+    t._base_tool_context.execution_id = "exec-live"
+    t._message_id = "m1"
+    t._conversation_id = "conv-1"
+    t._captain_run_id = "cap-1"
+    t._calls = 1
+    t._last_graph_execution_id = "exec-live"
+    t._last_graph_plan = RunPlan(
+        nodes=[RunSpec(run_id="r1", task="调研", role="研究员", agent_id="w1")]
+    )
+    t._last_graph_seed = {
+        "r1": RunState(phase=RunPhase.COMPLETED, content=""),
+    }
+    emitted: list[Any] = []
+    t._sink.emit = lambda ev: emitted.append(ev)  # type: ignore[method-assign]
+
+    monkeypatch.setattr("agentcore.runtime.plan_only.is_plan_only", lambda: True)
+
+    result = await t.execute(
+        {
+            "tasks": [{"role": "撰写员", "task": "写"}],
+            "append_to_execution_id": "latest",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert result.success
+    plans = [e for e in emitted if getattr(e.type, "value", e.type) == "run_plan"]
+    if plans:
+        assert plans[0].payload.get("execution_id") == "exec-live"
+        assert "prev_execution_id" not in plans[0].payload
+    assert not any(
+        getattr(e.type, "value", e.type) == "graph_append" for e in emitted
+    )
+
+
+def test_format_recent_graph_worker_facts_includes_status():
+    """Accident regression: next-turn CEO must see prior worker terminal states."""
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="w1", role="调研员", task="搜集竞品资料"),
+            RunSpec(run_id="w2", role="撰写员", task="写大纲"),
         ]
-        assert cap_ids == [_HOST_CAPTAIN]
-        for r in plan["payload"]["runs"]:
-            if r.get("kind") == "captain":
-                continue
-            assert r.get("parent_run_id") == _HOST_CAPTAIN
+    )
+    completed = {
+        "w1": RunState(phase=RunPhase.CANCELLED),
+        "w2": RunState(phase=RunPhase.COMPLETED, content="ok"),
+    }
+    facts = format_recent_graph_worker_facts(plan, completed)
+    assert "workers=2：" in facts
+    assert "role=调研员; status=cancelled; task=搜集竞品资料" in facts
+    assert "role=撰写员; status=completed; task=写大纲" in facts
+
+
+def test_format_recent_graph_worker_facts_missing_seed_is_running():
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", role="执行员", task="还在跑")])
+    facts = format_recent_graph_worker_facts(plan, {})
+    assert "role=执行员; status=running; task=还在跑" in facts
+
+
+def test_render_recent_graph_context_keeps_append_channel():
+    block = render_recent_graph_context(
+        execution_id="exec-1",
+        worker_facts="workers=1：\n- role=A; status=cancelled; task=x",
+    )
+    assert "<recent_team_graph>" in block
+    assert "exec-1" in block
+    assert "status=cancelled" in block
+    assert 'append_to_execution_id="latest"' in block
+    assert "prev_execution_id" in block
+
+
+@pytest.mark.asyncio
+async def test_build_recent_graph_context_mentions_prev(monkeypatch):
+    async def fake_latest(*, conversation_id: str, exclude_message_id: str | None = None):
+        return "exec-recent"
+
+    async def fake_host(**_k):
+        return None
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
+        fake_latest,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_host,
+    )
+    note = await build_recent_graph_context(conversation_id="c1")
+    assert "exec-recent" in note
+    assert "prev_execution_id" in note
+    assert 'append_to_execution_id="latest"' in note
+
+
+@pytest.mark.asyncio
+async def test_build_recent_graph_context_includes_worker_status_facts(monkeypatch):
+    """New-turn volatile tail must carry cancelled/completed worker facts from host journal."""
+
+    async def fake_latest(*, conversation_id: str, exclude_message_id: str | None = None):
+        return "exec-cancelled"
+
+    async def fake_host(*, conversation_id: str, execution_id: str):
+        assert execution_id == "exec-cancelled"
+        return "host-msg-1"
+
+    async def fake_plan_completed(host_message_id: str):
+        assert host_message_id == "host-msg-1"
+        plan = RunPlan(
+            nodes=[
+                RunSpec(run_id="del_1", role="研究员", task="查资料"),
+            ]
+        )
+        completed = {"del_1": RunState(phase=RunPhase.CANCELLED)}
+        return plan, completed
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_latest_appendable_execution",
+        fake_latest,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        fake_host,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.load_host_plan_and_completed",
+        fake_plan_completed,
+    )
+    note = await build_recent_graph_context(conversation_id="c1")
+    assert "exec-cancelled" in note
+    assert "workers=1：" in note
+    assert "role=研究员; status=cancelled; task=查资料" in note
+    assert 'append_to_execution_id="latest"' in note
+    assert "prev_execution_id" in note
+
+
+@pytest.mark.asyncio
+async def test_delegate_missing_prev_host_rejects(monkeypatch):
+    t = tool(Provider([]))
+    t._base_tool_context.execution_id = None
+    t._message_id = "m2"
+    t._conversation_id = "conv-1"
+
+    async def miss(**_k):
+        return None
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
+        miss,
+    )
+    result = await t.execute(
+        {
+            "tasks": [{"role": "撰写员", "task": "写"}],
+            "append_to_execution_id": "missing-eid",
+            "coordinate": False,
+        },
+        ctx(),
+    )
+    assert isinstance(result, ToolResult)
+    assert not result.success
+    assert "找不到" in (result.error or "")

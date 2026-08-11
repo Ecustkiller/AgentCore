@@ -41,7 +41,7 @@ COORDINATION_PERIOD_HINT = (
     "（协作图才是进度真相，易与图矛盾）。对用户开口仅三选一：请示用户 / "
     "报告阻塞与选项 / 宣布阶段结论（非纯进度）。禁止用 delegate 占位等待"
     "（同构再派会被拒绝）。可用 delegate 追加【全新角色/任务】队员"
-    "（不传 append_to 即自动并入当前协作图）；确需强制追加传 force=true。"
+    "（同回合自动并入当前协作图）；确需强制追加传 force=true。"
     "其它工具：cancel_worker / update_synthesis（仅新结论/冲突/方向修正，"
     "禁止纯进度播报）/ resolve_escalation / queue_user_message / ask_user；"
     "老板插话后须【先】用可见正文响应该句再谈团队；"
@@ -60,6 +60,61 @@ def coordination_surface_active(*, execution_id: str | None = None) -> bool:
 
     session = active_coordination(execution_id)
     return session is not None and bool(session.active)
+
+
+def _owns_coordination(delegate: Any) -> bool:
+    """True only for the root delegate handle — the one that can own a coordination session.
+
+    ``should_enter_coordination`` only ever arms a session at ``depth == 0``, but a
+    ``depth >= 1`` worker carries its own nested ``delegate`` handle AND shares the
+    parent's ``execution_id`` — so an identity-blind promote hands ``wait`` /
+    ``cancel_worker`` to plain members, which are then offered for real because
+    workers run unrestricted (``allowed_tools=None``). Nested leads get their
+    ``delegate`` + ``replan`` pre-wired by ``spawn_lead_subteam`` instead.
+    """
+    depth = getattr(delegate, "_depth", 0)
+    return depth == 0 if isinstance(depth, int) else False
+
+
+def resync_coordination_binding(chat_tools: ToolRegistry) -> bool:
+    """Re-point the turn ContextVar at the execution ``delegate`` actually coordinated.
+
+    ``current_execution_id`` is bound once at turn entry (``pipeline/prepare``) and
+    mirrors ``base_tool_context.execution_id``. Merging into a still-live graph
+    (``append_to_execution_id`` resolving to a hot execution) re-binds both onto that
+    host from inside the delegate tool's ``asyncio.gather`` child, where the ContextVar
+    write stays in the child copy while the shared tool context keeps the truth.
+    Without re-reading it, the captain's ``active_coordination()`` lookups miss the
+    host session: it neither blocks on team events nor gets the coordination tool
+    surface, and closes the turn on prose while the team is still running.
+
+    Cross-turn append into a *finished* graph no longer takes this path — it mints a
+    new execution and records ``prev_execution_id`` instead — but the hot-graph merge
+    still rebinds, so this stays load-bearing.
+
+    Returns True when the binding moved.
+    """
+    delegate = chat_tools.get_optional("delegate")
+    if delegate is None:
+        return False
+    ctx = getattr(delegate, "_base_tool_context", None)
+    raw = getattr(ctx, "execution_id", None) if ctx is not None else None
+    bound = raw.strip() if isinstance(raw, str) else ""
+    if not bound:
+        return False
+
+    from agentcore.runtime.coordination.session import current_execution_id
+
+    previous = (current_execution_id.get() or "").strip()
+    if previous == bound:
+        return False
+    current_execution_id.set(bound)
+    logger.info(
+        "coordination.binding_resynced",
+        execution_id=bound,
+        previous_execution_id=previous or None,
+    )
+    return True
 
 
 def register_coordination_surface(
@@ -115,7 +170,7 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         return False
 
     supervised = getattr(delegate, "_supervised", None) is not None
-    coord = coordination_surface_active()
+    coord = _owns_coordination(delegate) and coordination_surface_active()
     if not coord and not supervised:
         return False
 

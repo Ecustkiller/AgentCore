@@ -1,52 +1,67 @@
 {
-  "name": "single_agent_turn_steer_accepted",
-  "description": "经典+steer 真软插入：turn_steer_accepted（EPHEMERAL）→ 同连接续流单聊",
+  "name": "single_agent_user_interjection_steer_queued",
+  "description": "经典+steer 收口降级：user_interjection received→queued + turn_queued.degraded_from=steer",
   "events": [
-    {
-      "type": "turn_steer_accepted",
-      "payload": {
-        "steer_id": "steer-1",
-        "conversation_id": "conv_demo",
-        "content": "改成用中文总结",
-        "pending": 1
-      },
-      "timestamp": "2026-01-01T00:00:00.001Z"
-    },
     {
       "type": "message_start",
       "payload": {
         "message_id": "m1",
         "conversation_id": "conv_demo"
       },
-      "timestamp": "2026-01-01T00:00:00.002Z"
+      "timestamp": "2026-01-01T00:00:00.001Z"
     },
     {
       "type": "reasoning_delta",
       "payload": {
         "delta": "先想一下。"
       },
-      "timestamp": "2026-01-01T00:00:00.003Z"
-    },
-    {
-      "type": "reasoning_delta",
-      "payload": {
-        "delta": "好的。"
-      },
-      "timestamp": "2026-01-01T00:00:00.004Z"
+      "timestamp": "2026-01-01T00:00:00.002Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "你好"
       },
-      "timestamp": "2026-01-01T00:00:00.005Z"
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-steer-q",
+        "execution_id": "exec-classic-1",
+        "content": "晚到的纠偏",
+        "status": "received"
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "，世界！"
       },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-steer-q",
+        "execution_id": "exec-classic-1",
+        "content": "晚到的纠偏",
+        "status": "queued",
+        "note": "当前回合已收口，已自动转入下一回合"
+      },
       "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "turn_queued",
+      "payload": {
+        "queue_id": "q-steer-leftover",
+        "position": 1,
+        "queue_depth": 1,
+        "conversation_id": "conv_demo",
+        "degraded_from": "steer"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "message_end",
@@ -69,23 +84,32 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     }
   ],
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "你好，世界！",
-    "reasoning": "先想一下。好的。",
+    "reasoning": "先想一下。",
     "captainContext": [],
     "process": [
       {
         "kind": "reasoning",
-        "text": "先想一下。好的。"
+        "text": "先想一下。"
       },
       {
         "kind": "content",
-        "text": "你好，世界！"
+        "text": "你好"
+      },
+      {
+        "kind": "user_interjection",
+        "interjection_id": "inj-steer-q"
+      },
+      {
+        "kind": "content",
+        "text": "，世界！"
       }
     ],
     "citations": [],
@@ -116,6 +140,14 @@
     "deliveryStatus": null,
     "turnWarning": null,
     "teamNotes": [],
-    "userInterjections": []
+    "userInterjections": [
+      {
+        "interjectionId": "inj-steer-q",
+        "executionId": "exec-classic-1",
+        "content": "晚到的纠偏",
+        "status": "queued",
+        "note": "当前回合已收口，已自动转入下一回合"
+      }
+    ]
   }
 }

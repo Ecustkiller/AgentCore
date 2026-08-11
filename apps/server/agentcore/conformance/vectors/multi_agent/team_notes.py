@@ -400,9 +400,11 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
     """多 Agent·CEO 协调模式：≥2 worker 并行 + 波内便签 + 合成草稿预览 + 收束。
 
     Wire 形状对齐 coordinate=true 路径的可见事件（非阻塞 delegate 立即返回后 CEO 继续
-    ReAct）：并行两队员、中途 team_note_posted、update_synthesis 推送的
-    team_synthesis_preview（P2 DURABLE——fold 同 key 保最新进 ProjectedTurn.teamSynthesisPreview）、
-    完成后 CEO 终稿。亦作「刷新重建」钉：golden 断言末次 preview 文案。
+    ReAct）。单 worker 协调见 ``multi_agent_solo_coordinate_interjection``（无
+    team_synthesis_preview）。本向量钉并行两队员、中途 team_note_posted、
+    update_synthesis 推送的 team_synthesis_preview（P2 DURABLE——fold 同 key 保最新进
+    ProjectedTurn.teamSynthesisPreview）、完成后 CEO 终稿。亦作「刷新重建」钉：golden
+    断言末次 preview 文案。
     """
     agents = [
         {

@@ -54,9 +54,20 @@ if PROXY:
 # reaching internal methods). ``input`` (M2 · D17) injects user takeover events via CDP Input.
 _COMMANDS = frozenset(
     {
-        "navigate", "click", "type", "scroll", "snapshot", "screenshot", "console",
-        "set_content", "set_viewport",
-        "ping", "start_screencast", "stop_screencast", "input", "close",
+        "navigate",
+        "click",
+        "type",
+        "scroll",
+        "snapshot",
+        "screenshot",
+        "console",
+        "set_content",
+        "set_viewport",
+        "ping",
+        "start_screencast",
+        "stop_screencast",
+        "input",
+        "close",
     }
 )
 
@@ -81,8 +92,8 @@ def _looks_like_blob(text: str) -> bool:
     if any(c.isspace() for c in sample):
         return False
     compact = "".join(sample.split())
-    return bool(compact) and len(compact) >= 200 and all(
-        c.isalnum() or c in "+/=_-" for c in compact
+    return (
+        bool(compact) and len(compact) >= 200 and all(c.isalnum() or c in "+/=_-" for c in compact)
     )
 
 
@@ -93,6 +104,7 @@ def _scrub_console_text(raw, max_len: int = _CONSOLE_MAX_TEXT) -> str:
     if len(t) <= max_len:
         return t
     return t[: max(0, max_len - 1)] + "…"
+
 
 # CDP Input event-type maps (M2 接管注入): our compact wire verbs → CDP domain verbs.
 _MOUSE_TYPES = {
@@ -116,7 +128,13 @@ _MOUSE_BUTTONS = {
 }
 # CDP dispatchKeyEvent modifier bitmask (Alt=1, Ctrl=2, Meta=4, Shift=8).
 _MODIFIER_BITS = {
-    "alt": 1, "control": 2, "ctrl": 2, "meta": 4, "cmd": 4, "command": 4, "shift": 8,
+    "alt": 1,
+    "control": 2,
+    "ctrl": 2,
+    "meta": 4,
+    "cmd": 4,
+    "command": 4,
+    "shift": 8,
 }
 
 
@@ -143,49 +161,187 @@ def _modifier_bitmask(mods) -> int:
         bits |= _MODIFIER_BITS.get(str(name).lower(), 0)
     return bits
 
-# Interactive-element selector for the ref-annotated snapshot (click/type targets).
-# Password fields are labeled role=password; their ``value`` is NEVER included in name
-# (AI must never see or type passwords — login goes through user takeover).
+
+# Interactive-element snapshot — wire twin of Local host SNAPSHOT_JS (apps/desktop/.../host.ts).
+# Form controls: placeholder / value 分列；disabled 显式标注；尾部 visible_text（硬上限）。
+# Password: value 仅长度/掩码，绝不明文。Keep Playwright aria_snapshot separately.
 _SNAPSHOT_JS = r"""
 (version) => {
+  const NAME_MAX = 100;
+  const VALUE_MAX = 200;
+  const PLACEHOLDER_MAX = 100;
+  const TEXT_SUMMARY_MAX = 1200;
+  const MAX_ELEMENTS = 200;
   const sel = [
     'a', 'button', 'input', 'textarea', 'select',
+    '[contenteditable=""], [contenteditable="true"]',
     '[role=button]', '[role=link]', '[role=textbox]', '[role=checkbox]',
     '[role=tab]', '[role=menuitem]', '[onclick]'
   ].join(',');
+  const clip = (s, n) => s.trim().replace(/\s+/g, ' ').slice(0, n);
   const out = [];
+  const interactive = new Set();
   let n = 0;
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) continue;
+    if (r.width === 0 || r.height === 0) continue;
     const style = window.getComputedStyle(el);
     if (style.visibility === 'hidden' || style.display === 'none') continue;
     n++;
     const ref = 'e' + n;
     el.setAttribute('data-acref', ref);
+    interactive.add(el);
     const type = (el.getAttribute('type') || '').toLowerCase();
     const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
     const isPassword = type === 'password' || ac.includes('password');
-    const role = isPassword ? 'password' : (el.getAttribute('role') || el.tagName.toLowerCase());
-    // Password: never leak value into the snapshot name (DOM-as-source-of-truth).
-    const nameSrc = isPassword
-      ? (el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
-      : (el.getAttribute('aria-label') || el.textContent
-        || el.getAttribute('placeholder') || el.value || '');
-    let name = nameSrc.trim().replace(/\s+/g, ' ').slice(0, 100);
-    out.push(`[${ref}] ${role}${name ? ': ' + name : ''}`);
-    if (n >= 200) break;
+    const tag = el.tagName.toLowerCase();
+    const role = isPassword
+      ? 'password'
+      : (el.getAttribute('role') || (el.isContentEditable ? 'textbox' : tag));
+    const disabled = !!(el.disabled
+      || el.getAttribute('aria-disabled') === 'true'
+      || el.hasAttribute('disabled'));
+    const isFormControl = tag === 'input' || tag === 'textarea' || tag === 'select'
+      || el.isContentEditable || role === 'textbox';
+    let nameSrc = '';
+    if (isPassword) {
+      nameSrc = el.getAttribute('aria-label') || '';
+    } else if (isFormControl) {
+      nameSrc = el.getAttribute('aria-label') || el.getAttribute('name') || '';
+    } else {
+      nameSrc = el.getAttribute('aria-label') || el.textContent || '';
+    }
+    const name = clip(String(nameSrc || ''), NAME_MAX);
+    let line = '[' + ref + '] ' + role + (disabled ? ' disabled' : '')
+      + (name ? ': ' + name : '');
+    if (isFormControl) {
+      const ph = clip(el.getAttribute('placeholder') || '', PLACEHOLDER_MAX);
+      if (ph) line += ' | placeholder=' + JSON.stringify(ph);
+      if (isPassword) {
+        const len = typeof el.value === 'string' ? el.value.length : 0;
+        line += ' | value=' + (len > 0 ? '"***"' : '""') + ' (chars=' + len + ')';
+      } else {
+        let raw = '';
+        if (el.isContentEditable) raw = el.innerText || el.textContent || '';
+        else if ('value' in el) raw = String(el.value ?? '');
+        const full = String(raw);
+        const shown = clip(full, VALUE_MAX);
+        const truncated = full.trim().replace(/\s+/g, ' ').length > VALUE_MAX;
+        line += ' | value=' + JSON.stringify(shown)
+          + (truncated ? '…' : '');
+      }
+    }
+    out.push(line);
+    if (n >= MAX_ELEMENTS) break;
+  }
+  const root = document.querySelector('main, [role=main], #root, body') || document.body;
+  const chunks = [];
+  if (root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent) continue;
+      if (interactive.has(parent) || parent.closest('[data-acref]')) continue;
+      const tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA') continue;
+      const st = window.getComputedStyle(parent);
+      if (st.visibility === 'hidden' || st.display === 'none') continue;
+      const t = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!t) continue;
+      chunks.push(t);
+    }
+  }
+  const joined = chunks.join(' ').trim();
+  if (joined) {
+    const tail = joined.length > TEXT_SUMMARY_MAX
+      ? joined.slice(joined.length - TEXT_SUMMARY_MAX)
+      : joined;
+    out.push('---');
+    out.push('visible_text: ' + (joined.length > TEXT_SUMMARY_MAX ? '…' : '') + tail);
   }
   return out.join('\n');
 }
 """
 
-# Evaluated on the resolved element before fill — DOM type/autocomplete is authoritative.
+# Evaluated on the resolved element before type — DOM type/autocomplete is authoritative.
 _IS_PASSWORD_JS = r"""
 (el) => {
   const type = (el.getAttribute('type') || '').toLowerCase();
   const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
   return type === 'password' || ac.includes('password');
+}
+"""
+
+# Focus + select-all，供 CDP Input.insertText 替换既有内容（与 Local FOCUS_SELECT_JS 对齐）。
+_FOCUS_SELECT_JS = r"""
+(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  el.focus();
+  if (typeof el.select === 'function') {
+    try { el.select(); } catch (_) { /* type=number 等 */ }
+  } else if (el.isContentEditable
+      || el.getAttribute('contenteditable') === 'true'
+      || el.getAttribute('contenteditable') === '') {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+  } else if (typeof el.setSelectionRange === 'function') {
+    try {
+      const len = String(el.value ?? '').length;
+      el.setSelectionRange(0, len);
+    } catch (_) { /* 不可选 */ }
+  }
+  return true;
+}
+"""
+
+# 回读元素实际内容；password 只给长度，绝不明文（与 Local READ_TYPED_JS 对齐）。
+_READ_TYPED_JS = r"""
+(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const isPassword = type === 'password' || ac.includes('password');
+  let raw = '';
+  if (el.isContentEditable
+      || el.getAttribute('contenteditable') === 'true'
+      || el.getAttribute('contenteditable') === '') {
+    raw = el.innerText || el.textContent || '';
+  } else if ('value' in el) {
+    raw = String(el.value ?? '');
+  } else {
+    raw = String(el.textContent ?? '');
+  }
+  if (isPassword) {
+    return { chars: raw.length, masked: true, text: null };
+  }
+  return { chars: Array.from(raw).length, masked: false, text: raw };
+}
+"""
+
+# Click 前事实采集 + DOM click（含 disabled / aria-disabled；与 Local CLICK_PROBE_JS 对齐）。
+_CLICK_PROBE_JS = r"""
+(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const isPassword = type === 'password' || ac.includes('password');
+  const role = isPassword
+    ? 'password'
+    : (el.getAttribute('role') || (el.isContentEditable ? 'textbox' : el.tagName.toLowerCase()));
+  const was_disabled = !!(el.disabled
+    || el.getAttribute('aria-disabled') === 'true'
+    || el.hasAttribute('disabled'));
+  const nameSrc = el.getAttribute('aria-label')
+    || el.textContent || el.getAttribute('placeholder') || '';
+  const name = String(nameSrc || '').trim().replace(/\s+/g, ' ').slice(0, 100);
+  el.click();
+  return { was_disabled: was_disabled, role: role, name: name };
 }
 """
 
@@ -314,21 +470,88 @@ class Driver:
         return state
 
     async def click(self, req: dict) -> dict:
-        await self._resolve_ref(req).click(timeout=int(req.get("timeout_ms", 8000)))
-        return await self._page_state(capture=bool(req.get("capture", True)))
+        # Validate ref / snapshot_version; probe+click via DOM (not Playwright actionability)
+        # so disabled / aria-disabled still yield a structured ``clicked`` receipt.
+        self._resolve_ref(req)
+        ref = str(req.get("ref") or "")
+        probe = await self._page.evaluate(_CLICK_PROBE_JS, ref)
+        if not isinstance(probe, dict):
+            probe = {}
+        state = await self._page_state(capture=bool(req.get("capture", True)))
+        state["clicked"] = {
+            "ref": ref,
+            "was_disabled": bool(probe.get("was_disabled")),
+            "role": probe["role"] if isinstance(probe.get("role"), str) else "",
+            "name": probe["name"] if isinstance(probe.get("name"), str) else "",
+        }
+        return state
+
+    async def _type_via_cdp_insert_text(self, text: str) -> str:
+        """Real input via CDP Input.insertText (CJK/emoji/contenteditable) — Local twin.
+
+        Replace semantics: Backspace clears the focused selection, then insertText.
+        """
+        cdp = await self._ensure_cdp()
+        await cdp.send(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyDown",
+                "key": "Backspace",
+                "code": "Backspace",
+                "windowsVirtualKeyCode": 8,
+                "nativeVirtualKeyCode": 8,
+            },
+        )
+        await cdp.send(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyUp",
+                "key": "Backspace",
+                "code": "Backspace",
+                "windowsVirtualKeyCode": 8,
+                "nativeVirtualKeyCode": 8,
+            },
+        )
+        if text:
+            await cdp.send("Input.insertText", {"text": text})
+        return "cdp_insertText"
 
     async def type(self, req: dict) -> dict:
         loc = self._resolve_ref(req)
+        ref = str(req.get("ref") or "")
         # Hard-reject password fields (DOM-authoritative). Host maps ``password_blocked``
-        # in the error string to a machine-readable ToolResult; never fill.
+        # in the error string to a machine-readable ToolResult; never type.
         if await loc.evaluate(_IS_PASSWORD_JS):
             raise ValueError(
                 "password_blocked: AI 不得填写密码框；"
                 "worker 请 escalate(blocking=true, browser_login=true)；"
                 "CEO 请 ask_user(browser_login=true) 让用户接管登录"
             )
-        await loc.fill(req.get("text", ""), timeout=int(req.get("timeout_ms", 8000)))
-        return await self._page_state(capture=bool(req.get("capture", True)))
+        text = str(req.get("text", "") or "")
+        # Focus + select-all, then CDP insertText (fill 对受控/contenteditable 不可靠).
+        await self._page.evaluate(_FOCUS_SELECT_JS, ref)
+        method = await self._type_via_cdp_insert_text(text)
+        readback = await self._page.evaluate(_READ_TYPED_JS, ref)
+        if not isinstance(readback, dict):
+            readback = {}
+        requested_chars = len(text)
+        actual_chars = (
+            int(readback["chars"]) if isinstance(readback.get("chars"), (int, float)) else 0
+        )
+        matched = (
+            not readback.get("masked")
+            and isinstance(readback.get("text"), str)
+            and readback["text"] == text
+        )
+        state = await self._page_state(capture=bool(req.get("capture", True)))
+        state["typed"] = {
+            "ref": ref,
+            "requested_chars": requested_chars,
+            "actual_chars": actual_chars,
+            "matched": matched,
+            "method": method,
+        }
+        return state
 
     async def scroll(self, req: dict) -> dict:
         await self._page.mouse.wheel(0, int(req.get("dy", 600)))

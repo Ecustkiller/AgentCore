@@ -1,5 +1,6 @@
 import { MinimalTitleBar } from "@/components/layout/TitleBar";
 import { isWebClient } from "@/lib/capabilities";
+import { logEvent } from "@/lib/log";
 import { LoginPage } from "@/pages/LoginPage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import {
@@ -52,7 +53,9 @@ function PreAuthShell({ children }: { children: ReactNode }) {
  *
  * N4-A 只读离线: mid-session outages stay soft (serverHealth offline banner) when
  * already authenticated; cold-start outage with a local-store cache hydrates into
- * the shell read-only; never-logged-in + no cache still shows the hard wall.
+ * the shell read-only; never-logged-in + no cache still shows the hard wall. That
+ * cached shell is an **unverified** session — the server never acknowledged it — so
+ * regaining connectivity re-runs this same bootstrap to finish the handshake.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
@@ -63,7 +66,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       if (!(await hasOfflineCache())) return false;
       const user = await hydrateOfflineShell();
       if (!user) return false;
-      useAuthStore.getState().setAuthenticated(user);
+      useAuthStore.getState().setOfflineSession(user);
       useServerHealthStore.getState().markOffline(outageReason, "bootstrap");
       return true;
     },
@@ -147,7 +150,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [status]);
 
   // Hard-wall「服务不可用」：后端起来后自动恢复，不必只靠手点「重试」。
-  // 生产与开发同口径（先前仅 DEV 轮询）。已进壳的离线只读由 serverHealth 恢复，不走这里。
+  // 生产与开发同口径（先前仅 DEV 轮询）。已进壳的离线只读由下面的会话补正接手。
   useEffect(() => {
     if (status !== "unavailable") return;
     const id = window.setInterval(
@@ -156,6 +159,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
     return () => window.clearInterval(id);
   }, [status, runBootstrap]);
+
+  // 会话补正：离线只读壳是用缓存身份进的，服务端从未确认过这条会话，握手时才下发的东西
+  // （首当其冲是 CSRF 令牌）一样都没有——于是读请求全通、写请求全 403，用户看到的是
+  // 「点了没反应」。恢复联通只翻连接状态位，会话仍是半成品，所以这里重跑**同一条**权威
+  // bootstrap 把握手补完，而不是单独去补某个令牌。每个 online 边沿最多一次：补正失败会
+  // 重新落回离线只读，下一个边沿再试。
+  const sessionVerified = useAuthStore((s) => s.sessionVerified);
+  const conn = useServerHealthStore((s) => s.status);
+  useEffect(() => {
+    if (status !== "authenticated" || sessionVerified || conn !== "online") {
+      return;
+    }
+    logEvent("info", "auth.session_reconcile", { trigger: "reconnect" });
+    void runBootstrap({ showLoading: false });
+  }, [status, sessionVerified, conn, runBootstrap]);
 
   // Offline web preview: render the app without ever gating on auth.
   if (typeof window !== "undefined" && window.__WEB_PREVIEW__) {

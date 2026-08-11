@@ -46,6 +46,11 @@ describe("stopLifecycle · event gate", () => {
     expect(allowsEventWhileStopping("execution_completed")).toBe(true);
   });
 
+  it("stopping 放行 user_interjection 与 turn_queued", () => {
+    expect(allowsEventWhileStopping("user_interjection")).toBe(true);
+    expect(allowsEventWhileStopping("turn_queued")).toBe(true);
+  });
+
   it("isStopConfirmEvent 仅 message_end / error", () => {
     expect(isStopConfirmEvent("message_end")).toBe(true);
     expect(isStopConfirmEvent("error")).toBe(true);

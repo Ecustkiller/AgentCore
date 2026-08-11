@@ -248,6 +248,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "综合多篇报道，该案为 LV 就「茉莉奶白」商标提起的行政诉讼，将于 7 月开庭。",
     "reasoning": "先检索这个案子的背景。摘要不够，深读第一篇看细节。再多读几篇核对细节。",
     "captainContext": [],

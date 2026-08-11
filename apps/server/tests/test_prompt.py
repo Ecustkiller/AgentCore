@@ -19,6 +19,7 @@ Pins two things:
 
 import re
 
+from agentcore.config import settings
 from agentcore.runtime.resolve.prompt import (
     _CEO_CORE_HINT,
     _CEO_VISUALIZATION_HINT,
@@ -322,8 +323,11 @@ def test_core_teaches_split_criterion_over_count():
     # 路由：禁止思考里先干完（强制「方向：…」一句模板已撤，试跑中）。
     assert "禁止长篇路由推演" in hint
     assert "完整设计" in hint  # 禁思考里先写完整设计
-    assert "内部术语" in hint
-    assert "内部工具名" in hint
+    assert "面向用户·大白话" in hint
+    assert "内部机制名词" in hint or "内部术语" in hint
+    assert "内部工具" in hint or "内部工具名" in hint
+    assert "给模型看的通道" in hint
+    assert "审计报告没写完整" in hint or "重新安排人补上" in hint
     assert "短文" in hint and "存文件" in hint
     assert "主路径" in hint and "完整" in hint and "file_write" in hint
     assert "禁止】整篇一次 file_write" not in hint
@@ -526,20 +530,22 @@ def test_core_teaches_coordination_budget_awareness():
     assert "量力" in skill or "里程碑" in skill
 
 
-def test_core_teaches_cross_turn_append_routing_and_wording():
-    # 跨回合 append HOW 只留编排 skill；核心钩子即可。
+def test_core_teaches_new_turn_new_graph_not_cross_turn_append():
+    # 跨回合【合进旧图】已废除，但「接着上一支团队干」仍靠模型显式传 append_to：
+    # 引擎把它翻成「新开一张图 + prev_execution_id 链回去」。core 只留指针，HOW 在 skill。
     hint = _CEO_CORE_HINT
-    assert "跨回合" in hint
+    assert "同回合" in hint and "合图" in hint
     assert "team_orchestration_advanced" in hint
     assert 'append_to_execution_id="latest"' not in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
-    assert "【跨回合延续】" in skill
-    assert 'append_to_execution_id="latest"' in skill
-    assert "recent_team_graph" in skill
-    assert "已追加、正在报到" in skill
-    assert "在同一回合的同一张图里" in skill
-    assert "自动降级" in skill or "已自动" in skill
-    assert "硬失败再改口" in skill or "勿先硬失败" in skill
+    assert "【新回合新图】" in skill
+    assert "【跨回合延续】" not in skill
+    assert "append_to_execution_id" in skill
+    assert "prev_execution_id" in skill
+    # 续接口径：新图 + 链回，不得再教「合进旧图 / 追加到上方那张」
+    assert "只计本图" in skill
+    assert "已往上方协作图追加" not in skill
+    assert "recent_team_graph" not in skill
 
 def test_skill_teaches_same_layer_pipeline():
     # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
@@ -559,8 +565,30 @@ def test_core_teaches_delegating_parallel_research():
     hint = _CEO_CORE_HINT
     assert "广度调查" in hint
     assert "探路" in hint
-    assert "3" in hint and "轮" in hint
+    # 探路硬上限跟 settings.engine_team_gate_investigation_rounds，勿钉死字面轮数
+    n = settings.engine_team_gate_investigation_rounds
+    assert f"探路硬上限 = {n} **轮**" in hint
+    assert f"探路至多 {n} **轮**" in hint
     assert "≥2 角" in hint or "继续开发" in hint
+
+
+def test_prompt_investigation_rounds_follow_settings():
+    """提示词/编排技能文案中的探路轮上限必须与 settings 真源一致。"""
+    from agentcore.runtime.resolve.prompt.cold_start import (
+        _COLD_START_EXPLORE_HINT_EMPTY,
+        _COLD_START_EXPLORE_HINT_REBIND,
+        _COLD_START_EXPLORE_HINT_REFRESH,
+    )
+    from agentcore.runtime.skills.deep_multi_lens_research import _DEEP_MULTI_LENS_RESEARCH
+
+    n = settings.engine_team_gate_investigation_rounds
+    assert f"探路硬上限 = {n} **轮**" in _CEO_CORE_HINT
+    assert f"探路至多 {n} **轮**" in _CEO_CORE_HINT
+    assert f"轻量探路（≤{n} **轮**）" in _COLD_START_EXPLORE_HINT_EMPTY
+    assert f"轻量探路（≤{n} **轮**）" in _COLD_START_EXPLORE_HINT_REBIND
+    assert f"轻量探路（≤{n} **轮**）" in _COLD_START_EXPLORE_HINT_REFRESH
+    assert f"探路 ≤{n} 轮" in _TEAM_ORCHESTRATION_ADVANCED
+    assert f"探路检索至多【{n} 轮】" in _DEEP_MULTI_LENS_RESEARCH
 
 
 def test_core_forbids_silent_worker_count_discount():
@@ -975,15 +1003,17 @@ def test_ceo_core_workspace_outranks_global_current_project_memory():
 
 
 def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
-    """空壳/双项目 kickoff：只读跨桌摸底、写仍派工换桌、≠挂载冒充。"""
+    """空壳/双项目 kickoff：跨项目读写通吃派工换桌、CEO 只读跨桌仅认桌、≠挂载冒充。"""
     hint = _CEO_CORE_HINT
     assert "【跨项目 / 空壳 kickoff】" in hint
     assert "list_project_dir" in hint and "read_project_file" in hint
-    assert "只读跨桌" in hint
+    assert "轻量认桌" in hint or "认桌/抽样" in hint
     assert "出生桌" in hint
     assert "云端读不到本地" in hint and "禁止" in hint
     assert "target_folder_id" in hint
-    assert "写仍派工换桌" in hint
+    assert "读写" in hint or "只读摸底" in hint
+    assert "坐哪张桌" in hint or "坐那张桌" in hint or "target_folder_id" in hint
+    assert "空 scratch" in hint or "不填" in hint
     assert "file_list" in hint
     assert "external_mount_readonly" in hint
     assert "开发双仓" in hint or "乱挂" in hint or "冒充" in hint
@@ -992,6 +1022,9 @@ def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
     assert "先建齐再同次派" in hint or "先建齐" in hint
     assert "拒后禁塌缩" in hint
     assert "team_orchestration_advanced" in hint and "跨项目并行指挥" in hint
+    # 禁「派工不填 target」与「写仍派工换桌」旧读/写分叉
+    assert "写仍派工换桌" not in hint
+    assert "摸已登记项目用只读跨桌" not in hint
 
 
 def test_core_guides_out_of_workspace_absolute_paths():

@@ -236,8 +236,8 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     fireEvent.click(screen.getByLabelText("恢复到本回合开始"));
     await waitFor(() => {
       expect(restoreSnapshot).toHaveBeenCalledWith("c1", "snap-1");
-      expect(notifySuccess).toHaveBeenCalled();
     });
+    expect(notifySuccess).not.toHaveBeenCalled();
     expect(getLocalTurnFilesDiff).not.toHaveBeenCalled();
     expect(restoreLocalTurnBaseline).not.toHaveBeenCalled();
     expect(window.confirm).toHaveBeenCalledWith(

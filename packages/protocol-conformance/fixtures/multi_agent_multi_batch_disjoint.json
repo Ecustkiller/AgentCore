@@ -415,6 +415,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "先调研分析。 并行追加撰写审校。 两批任务线均已完成。",
     "reasoning": "",
     "captainContext": [],

@@ -14,6 +14,7 @@ import {
   type SidecarRestoreTurnBaselineRequest,
   type SidecarResumeRequest,
   type SidecarRunRedirectRequest,
+  type SidecarRunStopRequest,
   type SidecarStartTurnRequest,
   type SidecarStatusPush,
   type SidecarTurnFilesDiffRequest,
@@ -734,6 +735,23 @@ export class SidecarManager {
       });
     } catch {
       // sidecar 不可达时静默——与 cancel 一致。
+    }
+  }
+
+  /** 用户中途停某个 / 全部 worker（不杀回合；队列入队）。 */
+  async runStop(req: SidecarRunStopRequest): Promise<{ queued: number }> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) return { queued: 0 };
+    try {
+      const reply = (await entry.client.request("runStop", {
+        conversationId: req.conversationId,
+        executionId: req.executionId,
+        runId: req.runId ?? null,
+      })) as { queued?: number } | null;
+      return { queued: Number(reply?.queued ?? 0) };
+    } catch {
+      // sidecar 不可达时静默——与 runRedirect 一致。
+      return { queued: 0 };
     }
   }
 

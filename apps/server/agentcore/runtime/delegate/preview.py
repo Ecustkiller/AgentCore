@@ -87,7 +87,16 @@ async def await_team_preview(
         raw = pb_args.get("intensity")
         if isinstance(raw, str) and raw.strip():
             intensity = raw.strip()
-    summary = delegate_kickoff_summary(plan, tools=tools, intensity=intensity)
+    summary = delegate_kickoff_summary(
+        plan,
+        tools=tools,
+        intensity=intensity,
+        session_folder_id=getattr(tool, "_folder_id", None),
+    )
+    from agentcore.runtime.kickoff.summary import enrich_worker_desk_names
+
+    user_id = str(getattr(getattr(tool, "_base_tool_context", None), "user_id", "") or "")
+    await enrich_worker_desk_names(summary.workers, user_id=user_id)
     return await await_kickoff(tool, summary, plan=plan)
 
 

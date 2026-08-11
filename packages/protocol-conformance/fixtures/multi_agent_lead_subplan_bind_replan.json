@@ -256,6 +256,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来把后端整块交给一位负责人。 后端已完成（负责人中途自行定稿了一个晚绑定步骤）。",
     "reasoning": "",
     "captainContext": [],

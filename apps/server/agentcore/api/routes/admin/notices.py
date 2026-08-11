@@ -22,15 +22,6 @@ from agentcore.messaging import MessagingService
 router = APIRouter()
 
 
-def _reject_modal_never(*, surface: str, dismiss_policy: str) -> None:
-    """``modal`` only allows ``dismiss_policy=once``."""
-    if surface == "modal" and dismiss_policy == "never":
-        raise HTTPException(
-            status_code=400,
-            detail="modal surface requires dismiss_policy=once",
-        )
-
-
 def _reject_article_without_summary(*, card_template: str, summary: str | None) -> None:
     """``article`` publish requires a non-empty trimmed summary (card face)."""
     if card_template == "article" and not (summary or "").strip():
@@ -83,22 +74,24 @@ async def create_notice(
     repo: ProductNoticeRepository = Depends(get_notice_repo),
 ):
     """Admin: create a draft notice."""
-    _reject_modal_never(surface=body.surface, dismiss_policy=body.dismiss_policy)
-    row = await repo.create(
-        title=body.title,
-        body=body.body,
-        severity=body.severity,
-        surface=body.surface,
-        dismiss_policy=body.dismiss_policy,
-        created_by=admin.user_id,
-        card_template=body.card_template or "service",
-        summary=body.summary,
-        cover_url=body.cover_url,
-        cta_label=body.cta_label,
-        cta_url=body.cta_url,
-        start_at=body.start_at,
-        end_at=body.end_at,
-    )
+    try:
+        row = await repo.create(
+            title=body.title,
+            body=body.body,
+            severity=body.severity,
+            surface=body.surface,
+            dismiss_policy=body.dismiss_policy,
+            created_by=admin.user_id,
+            card_template=body.card_template or "service",
+            summary=body.summary,
+            cover_url=body.cover_url,
+            cta_label=body.cta_label,
+            cta_url=body.cta_url,
+            start_at=body.start_at,
+            end_at=body.end_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _summary(row)
 
 
@@ -117,29 +110,24 @@ async def update_notice(
         raise HTTPException(status_code=409, detail="Archived notices cannot be updated")
 
     fields = body.model_fields_set
-    effective_surface = body.surface if "surface" in fields else existing.surface
-    effective_dismiss = (
-        body.dismiss_policy if "dismiss_policy" in fields else existing.dismiss_policy
-    )
-    _reject_modal_never(
-        surface=effective_surface or existing.surface or "both",
-        dismiss_policy=effective_dismiss or existing.dismiss_policy or "once",
-    )
-    row = await repo.update(
-        notice_id,
-        title=body.title if "title" in fields else None,
-        body=body.body if "body" in fields else None,
-        severity=body.severity if "severity" in fields else None,
-        surface=body.surface if "surface" in fields else None,
-        dismiss_policy=body.dismiss_policy if "dismiss_policy" in fields else None,
-        card_template=body.card_template if "card_template" in fields else None,
-        summary=body.summary if "summary" in fields else ...,
-        cover_url=body.cover_url if "cover_url" in fields else ...,
-        cta_label=body.cta_label if "cta_label" in fields else ...,
-        cta_url=body.cta_url if "cta_url" in fields else ...,
-        start_at=body.start_at if "start_at" in fields else ...,
-        end_at=body.end_at if "end_at" in fields else ...,
-    )
+    try:
+        row = await repo.update(
+            notice_id,
+            title=body.title if "title" in fields else None,
+            body=body.body if "body" in fields else None,
+            severity=body.severity if "severity" in fields else None,
+            surface=body.surface if "surface" in fields else None,
+            dismiss_policy=body.dismiss_policy if "dismiss_policy" in fields else None,
+            card_template=body.card_template if "card_template" in fields else None,
+            summary=body.summary if "summary" in fields else ...,
+            cover_url=body.cover_url if "cover_url" in fields else ...,
+            cta_label=body.cta_label if "cta_label" in fields else ...,
+            cta_url=body.cta_url if "cta_url" in fields else ...,
+            start_at=body.start_at if "start_at" in fields else ...,
+            end_at=body.end_at if "end_at" in fields else ...,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="Notice not found")
     return _summary(row)

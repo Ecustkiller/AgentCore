@@ -14,6 +14,7 @@ import {
   foldToolUseEnd,
   foldToolUsePhase,
   foldToolUseStart,
+  foldUserInterjectionMarker,
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
 import { useExecutionStore } from "@/stores/execution";
@@ -49,6 +50,7 @@ type StreamProjectionActions = Pick<
   | "attachErrorToLastMessage"
   | "stampCheckpointMarker"
   | "stampAskMarker"
+  | "stampUserInterjectionMarker"
   | "stampPlanReviewMarker"
   | "stampTeamPreviewMarker"
   | "stampTimelineMarker"
@@ -397,6 +399,20 @@ export function createStreamProjectionActions(
         if (idx === -1) return null;
         const msg = messages[idx];
         const lane = foldAskMarker(messageLaneFromMessage(msg), askId);
+        messages[idx] = { ...msg, process: lane.process };
+        return { messages };
+      }),
+
+    stampUserInterjectionMarker: (interjectionId, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const idx = lastAssistantIndex(messages);
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const lane = foldUserInterjectionMarker(
+          messageLaneFromMessage(msg),
+          interjectionId,
+        );
         messages[idx] = { ...msg, process: lane.process };
         return { messages };
       }),

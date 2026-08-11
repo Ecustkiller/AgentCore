@@ -96,6 +96,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "error": null,
     "content": "我来组织一场辩论。",
     "reasoning": "",
     "captainContext": [],

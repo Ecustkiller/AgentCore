@@ -13,6 +13,7 @@ import {
   type SidecarRestoreTurnBaselineRequest,
   type SidecarResumeRequest,
   type SidecarRunRedirectRequest,
+  type SidecarRunStopRequest,
   type SidecarStartTurnRequest,
   type SidecarTurnFilesDiffRequest,
   type SidecarTurnFilesDiffResult,
@@ -41,9 +42,10 @@ function assertSidecarShape(
   payload: unknown,
   required: readonly string[],
   optionalStrings: readonly string[] = [],
+  nullableIds: readonly string[] = [],
 ): void {
   try {
-    assertShape(channel, payload, required, optionalStrings);
+    assertShape(channel, payload, required, optionalStrings, nullableIds);
   } catch (err) {
     if (err instanceof IpcInvalidArgsError) {
       logDesktop({
@@ -68,7 +70,6 @@ export function registerSidecarIpc(): void {
   ipcMain.handle(
     SIDECAR_CHANNELS.startTurn,
     async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
-      // permissionAxes / folderId / localRootId / localSubpath（可为 null）是对象/可空载荷，勿列入 optionalStrings。
       assertSidecarShape(
         SIDECAR_CHANNELS.startTurn,
         req,
@@ -81,6 +82,7 @@ export function registerSidecarIpc(): void {
           "userMessageId",
         ],
         ["subpath", "userId"],
+        ["folderId", "localRootId", "localSubpath"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -125,6 +127,17 @@ export function registerSidecarIpc(): void {
     },
   );
 
+  ipcMain.handle(SIDECAR_CHANNELS.runStop, (_e, req: SidecarRunStopRequest) => {
+    assertSidecarShape(
+      SIDECAR_CHANNELS.runStop,
+      req,
+      ["rootId", "conversationId", "executionId"],
+      ["subpath"],
+      ["runId"],
+    );
+    return manager.runStop(req);
+  });
+
   ipcMain.handle(
     SIDECAR_CHANNELS.debateSteer,
     (_e, req: SidecarDebateSteerRequest) => {
@@ -141,7 +154,6 @@ export function registerSidecarIpc(): void {
   ipcMain.handle(
     SIDECAR_CHANNELS.resume,
     async (e, req: SidecarResumeRequest): Promise<SidecarTurnResult> => {
-      // permissionAxes / folderId / localRootId / localSubpath 是对象/可空载荷，勿列入 optionalStrings（与 startTurn 同）。
       assertSidecarShape(
         SIDECAR_CHANNELS.resume,
         req,
@@ -154,6 +166,7 @@ export function registerSidecarIpc(): void {
           "note",
         ],
         ["subpath", "userMessageId", "userId"],
+        ["folderId", "localRootId", "localSubpath"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
@@ -229,8 +242,8 @@ export function registerSidecarIpc(): void {
         SIDECAR_CHANNELS.warmAccountRulesMemory,
         req,
         ["rootId"],
-        // folderId / accountAuth 是对象/可空载荷，勿列入 optionalStrings（与 startTurn 同）。
         ["subpath", "userId"],
+        ["folderId"],
       );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");

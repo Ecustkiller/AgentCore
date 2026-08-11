@@ -6,7 +6,7 @@ import {
 import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { setConversationModelProfile } from "@/services/conversations";
 import {
   type LlmModelProfileView,
@@ -211,8 +211,6 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
       patchConversationCache(conversationId, {
         modelProfileId: saved.modelProfileId ?? null,
       });
-      const name = profiles.find((p) => p.id === profileId)?.name ?? profileId;
-      notifySuccess(`已切换为「${name}」`);
     } catch (e) {
       notifyError(e, "切换模型组合失败");
     } finally {

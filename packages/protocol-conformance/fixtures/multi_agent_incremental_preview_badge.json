@@ -161,6 +161,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "error": null,
     "content": "先派首批。",
     "reasoning": "",
     "captainContext": [],

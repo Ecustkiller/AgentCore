@@ -6,7 +6,7 @@ vi.mock("@/api/client", () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
 }));
 
-import { cancelQueuedTurn, stopConversation } from "../turn";
+import { cancelQueuedTurn, fetchQueuedTurns, stopConversation } from "../turn";
 
 describe("stopConversation", () => {
   beforeEach(() => {
@@ -36,6 +36,62 @@ describe("stopConversation", () => {
   it("网络失败 → 抛错", async () => {
     apiFetch.mockRejectedValue(new TypeError("Failed to fetch"));
     await expect(stopConversation("c1")).rejects.toThrow();
+  });
+});
+
+describe("fetchQueuedTurns", () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+  });
+
+  it("GET 快照 → camelCase 项含 interjectionId", async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            queue_id: "q1",
+            content: "hello",
+            position: 1,
+            interjection_id: "inj-1",
+          },
+          {
+            queue_id: "q2",
+            content: "plain",
+            position: 2,
+            interjection_id: null,
+          },
+        ],
+      }),
+    });
+    await expect(fetchQueuedTurns("c1")).resolves.toEqual([
+      {
+        queueId: "q1",
+        content: "hello",
+        position: 1,
+        interjectionId: "inj-1",
+      },
+      {
+        queueId: "q2",
+        content: "plain",
+        position: 2,
+        interjectionId: undefined,
+      },
+    ]);
+    expect(apiFetch).toHaveBeenCalledWith("/v1/conversations/c1/queued-turns");
+  });
+
+  it("空队 → []", async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] }),
+    });
+    await expect(fetchQueuedTurns("c1")).resolves.toEqual([]);
+  });
+
+  it("非 2xx → 抛错", async () => {
+    apiFetch.mockResolvedValue({ ok: false, status: 503 });
+    await expect(fetchQueuedTurns("c1")).rejects.toThrow(/加载排队失败/);
   });
 });
 

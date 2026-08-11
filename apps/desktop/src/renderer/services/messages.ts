@@ -16,6 +16,7 @@ import {
   isMessageWindowStrictlyRicher,
   useConversationStore,
 } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
 import { hydrateInteractionsFromJournal } from "@/stores/interactions";
 import type { components } from "@/types/api.generated";
 import type {
@@ -111,8 +112,13 @@ export interface BackendMessage {
   /** 回合 token 用量 (Tier 2 重载持久化): the turn's token snapshot in the ledger short-key
    * shape, projected server-side from the row's `usage` column. Replayed onto
    * `message.usage` so the bubble's meta row caption replays on reload — live, it rode
-   * `message_end`. null for user rows and no-spend (errored/empty) turns. */
-  usage?: UsageBreakdown | null;
+   * `message_end`. null for user rows and no-spend (errored/empty) turns without a
+   * structured error. Failed empty turns may still project usage with ``error`` only. */
+  usage?:
+    | (UsageBreakdown & {
+        error?: { code: string; message: string } | null;
+      })
+    | null;
   /** Progressive assistant-row lifecycle (``usage.status``). Overlay / salvage
    * criterion — ``running`` hydrates as streaming partial; ``incomplete`` as
    * interrupted. */
@@ -249,6 +255,24 @@ export function toMessage(m: BackendMessage): Message {
       (status === "incomplete" ? "interrupted" : undefined) ??
       undefined);
   const isStreaming = role === "assistant" && status === "running" && !paused;
+  // Keep the journal whenever events exist — classic turns may have DURABLE
+  // `user_interjection` (and delivery_status) without a `run_plan`. Previously
+  // dropping `runs` when `executionId` was null meant nothing called
+  // hydrateFromJournal for classic reload (多 Agent still hydrates via
+  // InlineTeamGraph).
+  const journal =
+    events.length > 0
+      ? {
+          events,
+          finishReason: finishReason ?? "stop",
+          runProcesses: m.runs?.run_processes ?? null,
+        }
+      : undefined;
+  // Classic cold path only: multi-agent keeps hydrate timing on InlineTeamGraph
+  // mount — do not double-fold here when executionId (run_plan) is present.
+  if (!executionId && journal) {
+    useExecutionStore.getState().hydrateFromJournal(m.id, journal);
+  }
   const mapped: Message = {
     id: m.id,
     ...(role === "assistant" ? { serverMessageId: m.id } : {}),
@@ -261,26 +285,21 @@ export function toMessage(m: BackendMessage): Message {
     process,
     createdAt: m.created_at,
     // Stamp the plan id so the bubble renders its inline team graph; the journal
-    // below lets that graph replay the turn (both null for non-team turns).
+    // below lets that graph replay the turn (executionId null for classic / no plan).
     executionId,
-    runs: executionId
-      ? {
-          events,
-          finishReason: finishReason ?? "stop",
-          runProcesses: m.runs?.run_processes ?? null,
-        }
-      : undefined,
+    runs: journal,
     // 结束原因 chip (Tier 2 c): surface the persisted finish_reason turn-level so a
     // single-agent abnormal turn (max_rounds / degraded / unproductive) replays its
-    // chip on reload too — the bubble reads `finishReason ?? runs?.finishReason`, and a
-    // single-agent turn has no `runs`. A clean turn carries no journal → undefined → no
-    // chip. (Multi-agent also keeps its `runs.finishReason` above; this is redundant but
-    // harmless there.)
+    // chip on reload too — the bubble reads `finishReason ?? runs?.finishReason`.
+    // A clean turn carries no journal → undefined → no chip. (Multi-agent also
+    // keeps its `runs.finishReason` above; this is redundant but harmless there.)
     finishReason,
     status,
     // 报错回合 error card (Tier 2 a): replay the inline error card from the persisted
     // outcome, mirroring the live `error` event handler's `{code, message}` attach.
-    error: m.runs?.error ?? undefined,
+    // Prefer runs.error (journal); fall back to usage.error when journal is sparse
+    // (空泡族根因重设计 — REST 已投影 usage.error).
+    error: m.runs?.error ?? m.usage?.error ?? undefined,
     // 回合 token 用量 + 轮次 (Tier 2 重载): replay the bubble's meta row from the persisted
     // turn snapshot, mirroring the live `attachTurnMetaToLastMessage` stamp — usage is
     // already the ledger short-key shape (normalized server-side), rounds drives the

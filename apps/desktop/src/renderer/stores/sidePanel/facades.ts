@@ -134,18 +134,20 @@ export function createFacadeActions(
       );
     },
 
-    showFile: (path, name) => {
-      get().openFileTab(path, name);
+    showFile: (path, name, workspaceId) => {
+      get().openFileTab(path, name, workspaceId);
     },
 
-    openFileTab: (path, name) => {
+    openFileTab: (path, name, workspaceId) => {
       if (path && name) {
+        const desk = workspaceId?.trim() || undefined;
         get().openTab({
           kind: "file",
-          id: fileTabId(path),
+          id: fileTabId(path, desk),
           title: name,
           path,
           name,
+          ...(desk ? { workspaceId: desk } : {}),
         });
         return;
       }

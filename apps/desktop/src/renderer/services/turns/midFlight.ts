@@ -18,7 +18,7 @@ import type {
   SSEEvent,
   TurnQueueStartedPayload,
   TurnQueuedPayload,
-  TurnSteerAcceptedPayload,
+  UserInterjectionPayload,
 } from "@/types/events";
 import {
   claimPrimaryStream,
@@ -30,8 +30,6 @@ import {
 
 export type MidFlightSendResult =
   | { kind: "received"; interjectionId: string }
-  /** 经典+Steer 真软插入 ack（``turn_steer_accepted``）。 */
-  | { kind: "steered"; steerId: string }
   | { kind: "queued"; position: number; queueDepth: number; queueId: string }
   | { kind: "blocked"; code?: string }
   | { kind: "error" };
@@ -42,13 +40,14 @@ type DeliverMode = "open" | "buffering" | "live" | "aborted";
  * POST a user message while a turn is already streaming（发送即有流）.
  *
  * ``delivery=steer``：
- * - 协调 → ``user_interjection`` 短确认（主时间线由 InterjectionTimeline 投影）
- * - 经典 → ``turn_steer_accepted``（软插入 pending；下一工具步生效）
- * - 不可注入 → ``turn_queued`` + ``degraded_from=steer``
+ * - 经典 / 协调 → ``user_interjection``（ack = ``status === "received"``；主时间线
+ *   InterjectionTimeline 投影；经典终态多为 ``injected``，协调经 ``injected`` 再到
+ *   ``addressed`` / ``queued`` / ``failed``）
+ * - 不可注入 → ``user_interjection(queued)`` + ``turn_queued.degraded_from=steer``
  * ``delivery=queue``（强制）→ ``turn_queued`` 只 upsert QueuedTurnsBar；
  * ``turn_queue_started`` 出队开跑再插主时间线用户泡；后续帧缓冲至 turn1 主路释放再续流。
  *
- * ack（queued / steered / received）后 Promise 即 resolve，调用方可清 composer；
+ * ack（queued / received）后 Promise 即 resolve，调用方可清 composer；
  * SSE 泵与 buffering/drain 在后台续跑。
  * POST 在调用时刻发出（D9 FIFO 位次已占）；缓冲只推迟客户端 fold。
  * Stop/abort **不** cancel 服务端队列（可见条仍可按项取消）。
@@ -252,24 +251,16 @@ export async function sendMidFlightMessage(
           if (gate.mode === "aborted" || ac.signal.aborted) return;
 
           if (event.type === "user_interjection") {
-            // 协调插话：即时送达，不缓冲、不占主路门。
+            // 经典/协调插话：即时 dispatch，不缓冲、不占主路门。
+            // ack 仅 ``status === "received"``（与协调同形）；后续 injected/终态仍投影。
             gate.mode = "live";
-            const p = event.payload as { interjection_id?: string };
+            const p = event.payload as UserInterjectionPayload;
             const iid = (p.interjection_id || "").trim();
-            if (iid) result = { kind: "received", interjectionId: iid };
             dispatchSSEEvent(event, { conversationId, source: "server" });
-            finishAck(result);
-            return;
-          }
-
-          if (event.type === "turn_steer_accepted") {
-            // 经典 soft-insert ack：不插主时间线气泡；toast 由 messageStream 呈现。
-            gate.mode = "live";
-            const p = event.payload as TurnSteerAcceptedPayload;
-            const sid = (p.steer_id || "").trim();
-            if (sid) result = { kind: "steered", steerId: sid };
-            dispatchSSEEvent(event, { conversationId, source: "server" });
-            finishAck(result);
+            if (iid && p.status === "received") {
+              result = { kind: "received", interjectionId: iid };
+              finishAck(result);
+            }
             return;
           }
 

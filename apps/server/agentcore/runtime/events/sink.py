@@ -394,26 +394,9 @@ class EventSink:
         self, event: SSEEvent
     ) -> asyncio.Future[int | None] | None:
         """Append a DURABLE fact to the host/execution journal (sink-lifetime independent)."""
-        from agentcore.runtime.delegate.graph_append import (
-            current_graph_append_redirect,
-            is_graph_growth_event,
-            register_graph_host,
-        )
+        from agentcore.runtime.delegate.graph_append import register_graph_host
         from agentcore.runtime.journal.writer import current_journal_writer
 
-        redirect = current_graph_append_redirect.get()
-        divert = redirect is not None and is_graph_growth_event(
-            event.type, dict(event.payload or {})
-        )
-        if divert and redirect is not None:
-            # 跨回合同图追加：生长帧续写宿主 turn_id，不落追加回合 journal。
-            return redirect.host_writer.schedule_append(
-                {
-                    "kind": event.type.value,
-                    "payload": event.payload,
-                    "ts": event.timestamp,
-                }
-            )
         if event.type is EventType.RUN_PLAN and self._message_id:
             register_graph_host(
                 str(event.payload.get("execution_id") or ""),
@@ -776,8 +759,8 @@ class EventSink:
         t = event.type
         if t == EventType.RUN_PLAN:
             self._has_run_plan = True
-            # 跨回合同图追加：带 host_message_id 的生长 run_plan 不在新回合插 team 标记
-            # （锚点由 graph_append 承担；宿主回合已有 team 标记）。
+            # 旧 divert 生长帧带 host_message_id：不在新回合插 team（锚点曾由 graph_append
+            # 承担）。新路径每回合新图，无 host_message_id，正常插 team。
             if event.payload.get("host_message_id"):
                 return futures
             # 协作图时间线落点 (统一团队时间线): the FIRST run_plan of an execution drops a
@@ -793,7 +776,19 @@ class EventSink:
                 futures.extend(
                     self._process_cursor.persist_new_captain_tail(self.raw_process())
                 )
+        elif t == EventType.USER_INTERJECTION:
+            # 用户插话时间线落点: 同 interjection_id 首次出现（received）钉零宽 marker，
+            # 正文与五态仍由旁路 userInterjections 按 id 查；后续 injected/addressed/
+            # queued/failed 只更新旁路，不重复落标记。打断 content 尾部合并是预期红利。
+            iid = event.payload.get("interjection_id") or ""
+            if iid and not self._has_marker("user_interjection", "interjection_id", iid):
+                futures.extend(self._persist_closed_captain_text())
+                self._process.append({"kind": "user_interjection", "interjection_id": iid})
+                futures.extend(
+                    self._process_cursor.persist_new_captain_tail(self.raw_process())
+                )
         elif t == EventType.GRAPH_APPEND:
+            # 已停发：仅兼容旧 journal 回放。
             futures.extend(self._persist_closed_captain_text())
             self._process.append(
                 {
@@ -960,7 +955,8 @@ class EventSink:
     def process_timeline(self) -> list[dict[str, Any]] | None:
         # Persist the timeline whenever it carries STRUCTURE beyond the CEO's own text —
         # a tool, the team graph, or an interaction / 痕迹 marker (checkpoint / ask /
-        # plan_review / team_preview / escalation / approval / delegation_authorization).
+        # plan_review / team_preview / escalation / approval / delegation_authorization /
+        # user_interjection).
         # A pure reasoning/content turn needs none (the content scalar IS the answer, and
         # reasoning rides its own column), matching the fold's "tool-less single-agent turn
         # → no process" so live / reload / golden stay aligned.

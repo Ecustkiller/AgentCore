@@ -326,6 +326,60 @@ describe("ensureTimelineMarkersFromJournal", () => {
       { kind: "content", text: "终稿。" },
     ]);
   });
+
+  it("backfills user_interjection at journal slot and dedupes later statuses", () => {
+    const process = ensureTimelineMarkersFromJournal(
+      [
+        { kind: "content", text: "你好" },
+        { kind: "content", text: "，世界！" },
+      ],
+      [
+        { type: "content_delta", payload: { delta: "你好" } },
+        {
+          type: "user_interjection",
+          payload: {
+            interjection_id: "inj-1",
+            status: "received",
+          },
+        },
+        {
+          type: "user_interjection",
+          payload: {
+            interjection_id: "inj-1",
+            status: "injected",
+          },
+        },
+        { type: "content_delta", payload: { delta: "，世界！" } },
+      ],
+    );
+    expect(process).toEqual([
+      { kind: "content", text: "你好" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+      { kind: "content", text: "，世界！" },
+    ]);
+  });
+
+  it("no-ops user_interjection when marker already persisted", () => {
+    const persisted = [
+      { kind: "content", text: "你好" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+      { kind: "content", text: "，世界！" },
+    ] as const;
+    const process = ensureTimelineMarkersFromJournal(
+      [...persisted] as Parameters<typeof ensureTimelineMarkersFromJournal>[0],
+      [
+        {
+          type: "user_interjection",
+          payload: { interjection_id: "inj-1", status: "received" },
+        },
+        {
+          type: "user_interjection",
+          payload: { interjection_id: "inj-1", status: "injected" },
+        },
+      ],
+    );
+    expect(process).toEqual([...persisted]);
+  });
 });
 
 describe("foldTeamMarker", () => {

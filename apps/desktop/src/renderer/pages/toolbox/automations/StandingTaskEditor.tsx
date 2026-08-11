@@ -292,10 +292,8 @@ export function StandingTaskEditorDrawer({
             revealedSecret: created.webhookSecret,
           }));
           setPendingDismiss(true);
-          notifySuccess("任务已创建 — 请复制并妥善保存密钥");
           return;
         }
-        notifySuccess("任务已创建");
       } else if (taskId) {
         const payload = isTemplate
           ? buildTemplatePatch()
@@ -309,10 +307,8 @@ export function StandingTaskEditorDrawer({
             revealedSecret: patched.webhookSecret,
           }));
           setPendingDismiss(true);
-          notifySuccess("已保存 — 请复制并妥善保存密钥");
           return;
         }
-        notifySuccess("已保存");
       }
       await onSaved();
     } catch (e) {
@@ -337,7 +333,6 @@ export function StandingTaskEditorDrawer({
         webhookUrl: result.webhookUrl ?? f.webhookUrl,
         webhookId: result.webhookId ?? f.webhookId,
       }));
-      notifySuccess("密钥已轮换 — 请立即复制新密钥");
     } catch (e) {
       setError(errMsg(e, "轮换密钥失败"));
     } finally {

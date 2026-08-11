@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   type BlockedUser,
   listBlocks,
@@ -35,7 +35,6 @@ export function BlockedUsersDialog({ open, onClose }: Props) {
     try {
       await unblockUser(id);
       setUsers((prev) => prev.filter((u) => u.id !== id));
-      notifySuccess("已取消拉黑");
     } catch (err) {
       notifyError(err, messagingErrorMessage(err, "操作失败"));
     } finally {

@@ -6,8 +6,14 @@ import type { SidecarEventPush } from "@shared/sidecar-contract";
  * 根因：`sidecarApi.onEvent` 每次调用都 `ipcRenderer.on`，`runSidecarTurn` 与
  * `attachSidecarTurn` 可叠多个 listener → 同一 `content_delta` 进 fold 两次（叠字）。
  *
- * 契约：App 生命周期对 `sidecar:event` **只订一次**；回合方只 **claim**
- * `(conversationId, turnId)` 的 sink，同一会话同时最多一个 owner。新 claim 注销旧 owner。
+ * 契约：App 生命周期对 `sidecar:event` **只订一次**；回合方 **claim**
+ * `(conversationId, turnId)` 的 sink。
+ *
+ * - **同 turnId**（或任一方 `null` 通配）：新 claim 驱逐旧 owner（防叠字 / attach 接管）。
+ * - **不同具体 turnId**：D9 冷 resume × live 共存——两路各收各的事件，互不驱逐。
+ * - `resume_deferred`：会话级 EPHEMERAL，扇出到该会话全部 owner（turnId 不一致也能进
+ *   `dispatchSSEEvent` → `markResumeDeferred`）。
+ *
  * 禁止在 fold/contentBuffer 对相同 delta 去重。
  */
 
@@ -22,7 +28,7 @@ export interface SidecarTurnClaim {
   setTurnId(turnId: string): void;
   /** 释放本 claim；仅当仍是当前 owner 时清除登记。 */
   release(): void;
-  /** 是否仍占有该会话的 sink。 */
+  /** 是否仍占有该会话的 sink（本 token）。 */
   isOwner(): boolean;
 }
 
@@ -34,8 +40,8 @@ type Owner = {
   onRevoked?: () => void;
 };
 
-/** conversationId → 当前唯一 owner。 */
-const owners = new Map<string, Owner>();
+/** conversationId → 该会话全部 owner（D9 可多于一个具体 turn）。 */
+const ownersByConv = new Map<string, Owner[]>();
 
 let installed = false;
 let unsubscribeIpc: (() => void) | null = null;
@@ -51,18 +57,58 @@ export function installSidecarEventPump(): void {
   unsubscribeIpc = window.sidecarApi.onEvent(routePush);
 }
 
+function listOwners(conversationId: string): Owner[] {
+  return ownersByConv.get(conversationId) ?? [];
+}
+
+function setOwners(conversationId: string, next: Owner[]): void {
+  if (next.length === 0) ownersByConv.delete(conversationId);
+  else ownersByConv.set(conversationId, next);
+}
+
+function revokeOwner(owner: Owner): void {
+  owner.onRevoked?.();
+}
+
+/** Owners that a new claim with `turnId` must displace. */
+function ownersToRevoke(existing: Owner[], turnId: string | null): Owner[] {
+  if (turnId === null) {
+    // Attach / preheat：整会话独占，清掉所有既有 claim。
+    return [...existing];
+  }
+  return existing.filter((o) => o.turnId === null || o.turnId === turnId);
+}
+
 function routePush(push: SidecarEventPush): void {
-  const owner = owners.get(push.conversationId);
-  if (!owner) return;
-  if (owner.turnId !== null && owner.turnId !== push.turnId) return;
-  owner.sink(push);
+  const owners = listOwners(push.conversationId);
+  if (owners.length === 0) return;
+
+  const eventType =
+    push.event && typeof push.event === "object"
+      ? String((push.event as { type?: unknown }).type ?? "")
+      : "";
+  // 会话级 EPHEMERAL：扇出到全部 owner（冷续跑 claim 与 live claim turnId 不同）。
+  if (eventType === "resume_deferred") {
+    const seen = new Set<string>();
+    for (const owner of owners) {
+      if (seen.has(owner.token)) continue;
+      seen.add(owner.token);
+      owner.sink(push);
+    }
+    return;
+  }
+
+  for (const owner of owners) {
+    if (owner.turnId !== null && owner.turnId !== push.turnId) continue;
+    owner.sink(push);
+  }
 }
 
 /**
- * Claim 某会话 sidecar live 的唯一 sink。
+ * Claim 某会话 sidecar live 的 sink。
  *
  * @param turnId 已知则按 turn 过滤；`null` 表示 attach 预热（该会话任意 turn）。
- * @param onRevoked 被更新的 claim 顶替时回调（旧泵应停 fold / resolve）。
+ * @param onRevoked 被同 turn / 通配 claim 顶替时回调（旧泵应停 fold / resolve）。
  */
 export function claimSidecarTurnSink(
   conversationId: string,
@@ -73,11 +119,10 @@ export function claimSidecarTurnSink(
   // 单测 / 未走 main.tsx 时惰性安装，保证 claim 路径仍只有一条 IPC 订阅。
   installSidecarEventPump();
 
-  const prev = owners.get(conversationId);
-  if (prev) {
-    owners.delete(conversationId);
-    prev.onRevoked?.();
-  }
+  const existing = listOwners(conversationId);
+  const doomed = ownersToRevoke(existing, turnId);
+  const doomedTokens = new Set(doomed.map((o) => o.token));
+  for (const o of doomed) revokeOwner(o);
 
   const token = crypto.randomUUID();
   const owner: Owner = {
@@ -87,7 +132,8 @@ export function claimSidecarTurnSink(
     sink,
     onRevoked: opts?.onRevoked,
   };
-  owners.set(conversationId, owner);
+  const kept = existing.filter((o) => !doomedTokens.has(o.token));
+  setOwners(conversationId, [...kept, owner]);
 
   return {
     get token() {
@@ -100,23 +146,39 @@ export function claimSidecarTurnSink(
       return owner.turnId;
     },
     setTurnId(next: string) {
-      if (owners.get(conversationId)?.token !== token) return;
-      owner.turnId = next;
+      const cur = listOwners(conversationId).find((o) => o.token === token);
+      if (!cur) return;
+      // 收窄到具体 turn：驱逐同 turn 的其它 owner（含仍通配的 attach 竞态）。
+      const rivals = listOwners(conversationId).filter(
+        (o) => o.token !== token && (o.turnId === null || o.turnId === next),
+      );
+      for (const r of rivals) revokeOwner(r);
+      const rivalTokens = new Set(rivals.map((o) => o.token));
+      cur.turnId = next;
+      setOwners(
+        conversationId,
+        listOwners(conversationId).filter(
+          (o) => o.token === token || !rivalTokens.has(o.token),
+        ),
+      );
     },
     release() {
-      const cur = owners.get(conversationId);
-      if (cur?.token !== token) return;
-      owners.delete(conversationId);
+      const cur = listOwners(conversationId);
+      if (!cur.some((o) => o.token === token)) return;
+      setOwners(
+        conversationId,
+        cur.filter((o) => o.token !== token),
+      );
     },
     isOwner() {
-      return owners.get(conversationId)?.token === token;
+      return listOwners(conversationId).some((o) => o.token === token);
     },
   };
 }
 
 /** 测试隔离：清空 owner 并卸掉 IPC 订阅。 */
 export function resetSidecarEventPumpForTests(): void {
-  owners.clear();
+  ownersByConv.clear();
   unsubscribeIpc?.();
   unsubscribeIpc = null;
   installed = false;

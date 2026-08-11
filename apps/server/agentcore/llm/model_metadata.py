@@ -31,14 +31,20 @@ class ModelMeta:
     vendor: str
     capabilities: frozenset[str] = field(default_factory=frozenset)
     context_length: int | None = None
+    # Curated display badge for clients to render as-is (e.g. 「免费额度」); never
+    # inferred from id suffixes.
+    badge: str | None = None
 
 
 # Curated enrichment for ids AgentCore commonly sees (platform + popular BYOK
 # endpoints). Keys are lowercase, provider-prefix-stripped; matching also does a
 # longest-family prefix scan so a dated / channel variant (…-0731, …-free) inherits
 # vendor / capabilities / context — but display_name always gets a · qualifier so
-# two variants never collide as identical labels. Exact rows still win for curated
-# branding (e.g. hy3-preview, glm-5.2-jiu). Context lengths are display hints.
+# undated/channel siblings stay distinguishable when no curated ``badge`` is set.
+# Exact rows still win for curated branding (e.g. hy3-preview, glm-5.2-jiu).
+# Uniqueness is ``(display_name, badge)`` across curated rows — ``display_name``
+# alone may repeat when a badge distinguishes the SKU (e.g. Flash +「免费额度」).
+# Context lengths are display hints.
 _METADATA: dict[str, ModelMeta] = {
     "deepseek-v4-flash": ModelMeta(
         display_name="DeepSeek V4 Flash",
@@ -46,12 +52,13 @@ _METADATA: dict[str, ModelMeta] = {
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=128_000,
     ),
-    # Exact row so catalog shows curated branding (not auto「· free」qualifier).
+    # Zen limited-free SKU: brand base name + curated badge (not auto「· free」).
     "deepseek-v4-flash-free": ModelMeta(
-        display_name="DeepSeek V4 Flash Free",
+        display_name="DeepSeek V4 Flash",
         vendor="DeepSeek",
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=128_000,
+        badge="免费额度",
     ),
     "deepseek-v4-pro": ModelMeta(
         display_name="DeepSeek V4 Pro",
@@ -262,7 +269,11 @@ def _longest_family_key(key: str) -> str | None:
 
 
 def _family_variant_meta(family: ModelMeta, key: str, family_key: str) -> ModelMeta:
-    """Inherit family enrichment; distinguish display with the leftover qualifier."""
+    """Inherit family enrichment; distinguish display with the leftover qualifier.
+
+    Auto variants do **not** inherit a curated ``badge`` — only exact rows carry
+    badges. The · qualifier keeps labels unique when badge is absent.
+    """
     qualifier = key[len(family_key) :].lstrip("-_.")
     if not qualifier:
         return family
@@ -271,6 +282,7 @@ def _family_variant_meta(family: ModelMeta, key: str, family_key: str) -> ModelM
         vendor=family.vendor,
         capabilities=family.capabilities,
         context_length=family.context_length,
+        badge=None,
     )
 
 

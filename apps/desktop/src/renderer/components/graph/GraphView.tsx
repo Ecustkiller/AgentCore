@@ -28,6 +28,7 @@ import { DebateStageBands } from "./DebateStageBands";
 import { GraphActionBar } from "./GraphActionBar";
 import { GraphContextMenu } from "./GraphContextMenu";
 import { GraphLayoutError } from "./GraphLayoutError";
+import { GraphTeamStopControl } from "./GraphTeamStopControl";
 import { GraphToolbar } from "./GraphToolbar";
 import { WaveLanes } from "./WaveLanes";
 import { edgeTypes, nodeTypes } from "./constants";
@@ -622,6 +623,7 @@ export const GraphView = memo(function GraphView({
                   injectFlowAvailable={injectFlowAvailable}
                   showAuditInjectFlow={showAuditInjectFlow}
                   onShowAuditInjectFlowChange={setShowAuditInjectFlow}
+                  leading={<GraphTeamStopControl />}
                 />
               )}
 
@@ -631,6 +633,11 @@ export const GraphView = memo(function GraphView({
                   decisions={pendingDecisions}
                   onLocate={onLocateDecision}
                 />
+              )}
+
+              {/* 内联图无 GraphToolbar：任务级停止单独挂右上。 */}
+              {!interactive && layoutReady && !layoutError && (
+                <GraphTeamStopControl className="absolute right-3 top-3 z-10" />
               )}
 
               {interactive &&

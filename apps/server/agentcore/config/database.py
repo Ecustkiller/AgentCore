@@ -20,8 +20,21 @@ class DatabaseSettings(BaseModel):
     # Defaults keep the historical ~40-connection ceiling: 16+16 primary + 4+4 telemetry.
     db_pool_size: int = Field(default=16, ge=1)
     db_max_overflow: int = Field(default=16, ge=0)
-    db_pool_timeout: int = Field(default=30, ge=1)
+    # Fast-fail under pool pressure: waiting the historical 30s only delayed a
+    # 503/500 for the user while holding the request open. Keep capacity (16+16)
+    # unchanged; shorten the checkout wait and map TimeoutError → 503 product copy.
+    db_pool_timeout: int = Field(default=5, ge=1)
 
     db_telemetry_pool_size: int = Field(default=4, ge=1)
     db_telemetry_max_overflow: int = Field(default=4, ge=0)
     db_telemetry_pool_timeout: int = Field(default=30, ge=1)
+
+    # Pool holder observability (observation only — does not change capacity).
+    # Slow checkin warning: a connection returned after this many seconds.
+    db_pool_hold_warn_s: float = Field(default=10.0, ge=0.1)
+    # When checked_out / capacity crosses this ratio, checkout also stores a
+    # truncated stack (low occupancy stays contextvars-only — near-zero cost).
+    db_pool_trace_occupancy: float = Field(default=0.75, ge=0.0, le=1.0)
+    db_pool_stack_frames: int = Field(default=8, ge=0, le=32)
+    # Deduplicate exhaustion snapshots when many waiters time out together.
+    db_pool_exhaustion_snapshot_cooldown_s: float = Field(default=5.0, ge=0.0)

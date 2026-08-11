@@ -6,7 +6,7 @@ import {
   useSharedSpaces,
   useUnmountSharedSpace,
 } from "@/hooks/useSharedSpaces";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   sharedMountModeLabel,
   sharedSpaceRoleLabel,
@@ -50,11 +50,6 @@ export function SharedMountsSection({
     mount.mutate(
       { spaceId },
       {
-        onSuccess: (m) => {
-          notifySuccess(
-            `已挂载「${m.label}」（${sharedMountModeLabel(m.mode)}）`,
-          );
-        },
         onError: (err) => notifyError(err, "挂载失败"),
       },
     );
@@ -124,10 +119,7 @@ export function SharedMountsSection({
                       mount.mutate(
                         { spaceId: s.id },
                         {
-                          onSuccess: (m) => {
-                            notifySuccess(
-                              `已挂载「${m.label}」（${sharedMountModeLabel(m.mode)}）`,
-                            );
+                          onSuccess: () => {
                             setPickerOpen(false);
                           },
                           onError: (err) => notifyError(err, "挂载失败"),
@@ -188,7 +180,6 @@ export function SharedMountsSection({
                   unmount.mutate(
                     { spaceId: m.space_id, alias: m.alias },
                     {
-                      onSuccess: () => notifySuccess(`已卸载「${m.label}」`),
                       onError: (err) => notifyError(err, "卸载失败"),
                     },
                   )

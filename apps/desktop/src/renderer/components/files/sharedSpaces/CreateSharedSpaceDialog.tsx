@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateSharedSpace } from "@/hooks/useSharedSpaces";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { useEffect, useState } from "react";
 
 /**
@@ -35,7 +35,6 @@ export function CreateSharedSpaceDialog({
     if (!trimmed || create.isPending) return;
     create.mutate(trimmed, {
       onSuccess: (space) => {
-        notifySuccess(`已创建共享空间「${space.name}」`);
         onCreated?.(space.id);
         onClose();
       },

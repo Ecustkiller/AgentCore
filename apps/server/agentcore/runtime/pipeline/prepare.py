@@ -21,8 +21,10 @@ from agentcore.memory import (
     load_on_demand_user_rules,
 )
 from agentcore.runtime.context import (
+    ProjectCatalogEntry,
     build_workspace_context,
     detect_workspace_git,
+    load_project_catalog,
     resolve_channel_profile,
 )
 from agentcore.runtime.costing import RunCost
@@ -76,8 +78,9 @@ class PreparedTurn:
     vision_cost_sink: list[RunCost]
     attachment_context: str
     native_image_parts: list[dict]
-    memory_topics: list[str]
+    memory_topics: list
     on_demand_rules: list
+    project_catalog: list[ProjectCatalogEntry]
     bound_execution_id: str
     execution_id_token: object
 
@@ -152,6 +155,13 @@ async def prepare_fresh_turn(
         load_on_demand_user_rules(user_id, folder_id=folder_id),
     )
     has_on_demand_rules = bool(on_demand_rules)
+    # Derived cross-project roster (跨项目找项目): Folder name + 画像.md first line,
+    # recent-activity ordered with a hard count cap. Outside ``<rules>`` so it never
+    # evicts always memory. Empty when the user has no projects.
+    project_catalog = await _timed_phase(
+        "project_catalog",
+        load_project_catalog(memory_store, user_id),
+    )
     # Clean, stable base (base + date + workspace facts + memory): NO attachments,
     # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
     # verbatim by workers. Environment facts ride the shared base so workers also
@@ -400,6 +410,7 @@ async def prepare_fresh_turn(
         native_image_parts=native_image_parts,
         memory_topics=memory_topics,
         on_demand_rules=on_demand_rules,
+        project_catalog=project_catalog,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,
     )

@@ -272,6 +272,16 @@ def test_rework_refill_slots_zero_after_wind_down():
     assert rework_refill_slots(original_limit=1, wind_down_entered=False) == 1
 
 
+def test_rework_refill_slots_zero_for_write_disk_form():
+    """写盘形态合同返工：不补检索预算（缺的是 file_write，不是阅读额度）。"""
+    assert rework_refill_slots(
+        original_limit=14, wind_down_entered=False, write_disk_form=True
+    ) == 0
+    assert rework_refill_slots(
+        original_limit=8, wind_down_entered=False, write_disk_form=False
+    ) == 4
+
+
 @pytest.mark.asyncio
 async def test_refill_within_cap_does_not_raise_past_original():
     rb = RetrievalBudgetState(limit=4)

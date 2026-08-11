@@ -544,23 +544,28 @@ def test_client_error_message_404_path_with_unrelated_message():
 
 
 def test_client_error_message_temperature_deprecated_product_copy():
-    from agentcore.llm.errors import client_error_message
+    from agentcore.llm.errors import client_error_message, is_temperature_deprecated
 
     product = "平台 当前模型不接受 temperature 参数，请重试或更换模型"
     anthropic_body = (
         b'{"error":{"message":"user `temperature` is deprecated for this model. '
         b'(request id: req_abc)"}}'
     )
+    assert is_temperature_deprecated(anthropic_body) is True
     msg = client_error_message("平台", 400, anthropic_body)
     assert msg == product
     assert "request id" not in msg
     assert "`temperature` is deprecated" not in msg
 
     moonshot_body = b'{"error":{"message":"invalid temperature: only 1 is allowed"}}'
+    assert is_temperature_deprecated(moonshot_body) is True
     msg = client_error_message("平台", 400, moonshot_body)
     assert msg == product
     assert "invalid temperature" not in msg
     assert "only 1 is allowed" not in msg
+
+    unrelated = b'{"error":{"message":"max_tokens must be positive"}}'
+    assert is_temperature_deprecated(unrelated) is False
 
 
 def test_client_error_message_context_overflow_product_copy_aa519_shape():

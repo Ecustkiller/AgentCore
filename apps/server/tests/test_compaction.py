@@ -652,6 +652,10 @@ async def test_finalize_cloud_and_local_call_if_due(monkeypatch):
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", _if_due)
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )

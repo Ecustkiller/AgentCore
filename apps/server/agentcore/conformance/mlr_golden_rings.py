@@ -314,6 +314,7 @@ def _mlr_roles_completed(events: list[dict[str, Any]]) -> dict[str, bool]:
 def _host_and_debate_execution(events: list[dict[str, Any]]) -> dict[str, Any]:
     host_eid: str | None = None
     debate_eid: str | None = None
+    prev_eid: str | None = None
     debate_act: dict[str, Any] = {}
     graph_append: dict[str, Any] = {}
     for e in events:
@@ -329,7 +330,11 @@ def _host_and_debate_execution(events: list[dict[str, Any]]) -> dict[str, Any]:
                 debate_eid = eid
                 if act:
                     debate_act = act
+                prev = str(p.get("prev_execution_id") or "").strip()
+                if prev:
+                    prev_eid = prev
         elif et == "graph_append":
+            # 旧 divert 回放：同 eid 生长。
             graph_append = p
             eid = str(p.get("execution_id") or "").strip()
             if eid:
@@ -337,6 +342,7 @@ def _host_and_debate_execution(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "host_execution_id": host_eid,
         "debate_execution_id": debate_eid,
+        "prev_execution_id": prev_eid,
         "debate_act": debate_act,
         "graph_append": graph_append,
     }
@@ -769,10 +775,14 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
         },
     )
 
-    same_exec = bool(
+    # 幕 2 链到幕 1：新契约 = prev_execution_id；旧 divert = 同 execution_id。
+    linked = bool(
         exec_info["host_execution_id"]
         and exec_info["debate_execution_id"]
-        and exec_info["host_execution_id"] == exec_info["debate_execution_id"]
+        and (
+            exec_info["host_execution_id"] == exec_info["debate_execution_id"]
+            or exec_info.get("prev_execution_id") == exec_info["host_execution_id"]
+        )
     )
     act_id = str(ga.get("act_id") or act.get("act_id") or "")
     act2_ok = act_id.startswith("act-") and act_id != "act-1"
@@ -794,7 +804,7 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     metrics["debater_search_budget_per_run"] = SEARCH_BUDGET_PER_RUN
     metrics["debater_budget_violations"] = dict(budget_violations)
     ring4_pass = (
-        same_exec
+        linked
         and act2_ok
         and anchor_synth
         and file_reads >= 1
@@ -803,16 +813,20 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     )
     ring4 = RingResult(
         4,
-        "幕2 同图生长+约定文档消费+检索预算合规",
+        "幕2 链到幕1+约定文档消费+检索预算合规",
         "PASS" if ring4_pass else "FAIL",
         (
-            f"same_exec={same_exec} act_id={act_id!r} anchor_synth={anchor_synth} "
+            f"linked={linked} prev={exec_info.get('prev_execution_id')!r} "
+            f"act_id={act_id!r} anchor_synth={anchor_synth} "
             f"file_read_research={file_reads} "
             f"per_run≤{SEARCH_BUDGET_PER_RUN}={search_ok}"
             f"（超预算 run={len(budget_violations)}）total={searches}(观测)"
         ),
         {
-            "same_execution": same_exec,
+            "linked_to_host": linked,
+            "same_execution": exec_info["host_execution_id"]
+            == exec_info["debate_execution_id"],
+            "prev_execution_id": exec_info.get("prev_execution_id"),
             "host_execution_id": exec_info["host_execution_id"],
             "debate_execution_id": exec_info["debate_execution_id"],
             "act_id": act_id,

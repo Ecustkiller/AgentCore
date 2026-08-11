@@ -29,6 +29,10 @@ DURABLE_VECTOR_WAIVERS: dict[EventType, str] = {
         "Execution.batches / 手机 conformance fold 显式 no-op），但**不进**规范化 ProjectedTurn "
         "表面，故没有 golden 能断言其往返。属知情记账，非静默盲区。"
     ),
+    EventType.GRAPH_APPEND: (
+        "已停发：旧跨回合同图追加锚点。新路径用 run_plan.prev_execution_id；"
+        "payload 类型保留仅兼容旧 journal 回放，新向量不再 emit。"
+    ),
 }
 
 

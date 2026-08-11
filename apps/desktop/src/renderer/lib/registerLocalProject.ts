@@ -6,7 +6,7 @@ import {
   pickLocalFolderRoot,
 } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { resolveSidecarAccountAuth } from "@/services/accountToken";
 import {
   type FolderMeta,
@@ -88,11 +88,6 @@ export async function pickAndRegisterLocalProject(opts?: {
       addFolderCache(folder);
     }
 
-    notifySuccess(
-      created
-        ? `已登记项目「${folder.name}」`
-        : `项目「${folder.name}」已在名册`,
-    );
     // Silent Cursor-style index + MCP + rules/memory warm: ensure sidecar (fire-and-forget).
     if (window.sidecarApi?.warmCodeIndex) {
       void window.sidecarApi

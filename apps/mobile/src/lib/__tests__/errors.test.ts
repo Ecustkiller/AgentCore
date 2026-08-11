@@ -93,9 +93,13 @@ describe("emptyFailureNotice", () => {
 
   it("stays silent for normal / other finishes", () => {
     expect(emptyFailureNotice("end_turn")).toBeNull();
-    expect(emptyFailureNotice("degraded")).toBeNull();
     expect(emptyFailureNotice(null)).toBeNull();
     expect(emptyFailureNotice(undefined)).toBeNull();
+  });
+
+  it("flips default ON for degraded / paused empty finishes", () => {
+    expect(emptyFailureNotice("degraded")).toBe("模型返回空内容，请重试。");
+    expect(emptyFailureNotice("paused")).toBe("本轮未能完成，请重试。");
   });
 });
 

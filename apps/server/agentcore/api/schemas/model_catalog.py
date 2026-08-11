@@ -44,6 +44,13 @@ class ModelCatalogItem(BaseModel):
     context_length: int | None = Field(
         default=None, description="Context window in tokens (display hint; null if unknown)."
     )
+    badge: str | None = Field(
+        default=None,
+        description=(
+            "Curated display badge rendered as-is by clients (e.g. 免费额度). "
+            "Null when none — never inferred from model id suffixes."
+        ),
+    )
     price: ModelPriceCard | None = None
     available: bool = Field(
         default=True,

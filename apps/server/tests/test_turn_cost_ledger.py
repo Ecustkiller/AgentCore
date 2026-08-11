@@ -10,7 +10,10 @@ import pytest
 
 from agentcore.billing import cost_ledger_queue as queue_mod
 from agentcore.billing.call_meter import maybe_enqueue_inprocess_call
-from agentcore.billing.turn_ledger import reconcile_turn_cost_ledger
+from agentcore.billing.turn_ledger import (
+    drain_cost_ledger_before_reconcile,
+    reconcile_turn_cost_ledger,
+)
 from agentcore.conversation.common import log_cost_recorded
 from agentcore.core.log_context import log_context
 from agentcore.llm.provider.protocol import TokenUsage
@@ -167,12 +170,20 @@ async def test_reconcile_materializes_worker_from_calls_not_cost_runs():
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
+            "agentcore.billing.cost_ledger_queue.get_cost_ledger_queue",
+            lambda: MagicMock(drain_once=AsyncMock(return_value=0)),
+        )
+        mp.setattr(
             "agentcore.billing.turn_ledger.CostEventRepository",
             lambda _s: repo,
         )
-        # drain no-op (queue not running)
+        drained = await drain_cost_ledger_before_reconcile(
+            conversation_id="c1",
+            message_id="m1",
+        )
         rows = await reconcile_turn_cost_ledger(
             session,
+            drained=drained,
             user_id="u1",
             conversation_id="c1",
             message_id="m1",
@@ -217,11 +228,20 @@ async def test_reconcile_records_vision_orphan_without_calls():
     }
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
+            "agentcore.billing.cost_ledger_queue.get_cost_ledger_queue",
+            lambda: MagicMock(drain_once=AsyncMock(return_value=0)),
+        )
+        mp.setattr(
             "agentcore.billing.turn_ledger.CostEventRepository",
             lambda _s: repo,
         )
+        drained = await drain_cost_ledger_before_reconcile(
+            conversation_id="c1",
+            message_id="m1",
+        )
         await reconcile_turn_cost_ledger(
             session,
+            drained=drained,
             user_id="u1",
             conversation_id="c1",
             message_id="m1",
@@ -301,6 +321,10 @@ async def test_reconcile_interrupted_turn_cost_emits_and_stamps(monkeypatch):
         _MsgRepo,
     )
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         reconcile,
     )
@@ -362,6 +386,10 @@ async def test_reconcile_interrupted_turn_cost_skips_when_cost_stamped(monkeypat
     monkeypatch.setattr(
         "agentcore.db.repositories.MessageRepository",
         _MsgRepo,
+    )
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
     )
     monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",

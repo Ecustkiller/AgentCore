@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_user_interjection_handled",
-  "description": "协调插话入图：user_interjection(received) → update_synthesis，折到 userInterjections",
+  "description": "协调插话入图：user_interjection received→injected→addressed，折到 userInterjections",
   "events": [
     {
       "type": "message_start",
@@ -101,6 +101,16 @@
       "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj1",
+        "execution_id": "exec1",
+        "content": "补充一点：结论里请点明成本对比。",
+        "status": "injected"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
       "type": "tool_use_start",
       "payload": {
         "tool_call_id": "syn1",
@@ -109,7 +119,7 @@
           "draft": "已收到补充：成品会点明成本对比。"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "tool_use_end",
@@ -119,7 +129,7 @@
         "status": "success",
         "result": "已更新合成草稿（18 字），用户可见「进展中」预览。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "user_interjection",
@@ -130,7 +140,7 @@
         "status": "addressed",
         "note": "已在合成草稿中承接"
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "team_synthesis_preview",
@@ -143,7 +153,7 @@
         "workers": [],
         "in_progress": true
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "run_completed",
@@ -243,6 +253,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队并行推进。团队已按你的补充交稿。",
     "reasoning": "",
     "captainContext": [],
@@ -254,6 +265,10 @@
       {
         "kind": "team",
         "execution_id": "exec1"
+      },
+      {
+        "kind": "user_interjection",
+        "interjection_id": "inj1"
       },
       {
         "kind": "tool",

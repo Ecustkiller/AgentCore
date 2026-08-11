@@ -122,6 +122,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来组织一场辩论。好的，我先挂多视角调研。",
     "reasoning": "",
     "captainContext": [],

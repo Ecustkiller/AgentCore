@@ -87,6 +87,8 @@ class ModelCatalogEntry:
     vendor: str
     capabilities: list[str] = field(default_factory=list)
     context_length: int | None = None
+    # Curated display badge (passthrough from model_metadata); None when unset.
+    badge: str | None = None
     price: dict[str, str] | None = None
     available: bool = True
     # BYOK rows: which 服务商 this row runs on (None for platform / guide rows).
@@ -129,6 +131,7 @@ def _entry(
         vendor=meta.vendor,
         capabilities=sorted(meta.capabilities),
         context_length=meta.context_length,
+        badge=meta.badge,
         price=_price_card(model_id, credential_source=credential_source),
         available=available,
         provider_id=provider_id,

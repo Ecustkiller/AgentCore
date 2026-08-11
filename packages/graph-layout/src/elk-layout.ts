@@ -1,10 +1,8 @@
-import ELK from "elkjs/lib/elk.bundled";
 import { isDebateTaggedRun } from "./debateTag";
+import { getElk } from "./elkClient";
 import { NODE_HEIGHT, NODE_WIDTH, type NodeSizeMap } from "./graphMetrics";
 import { type LayoutHints, computeLayoutHints } from "./layoutHints";
 import type { ElkGraphLayout, GraphEdge } from "./types";
-
-const elk = new ELK();
 
 interface ElkGraphNode {
   id: string;
@@ -277,6 +275,7 @@ export async function computeLayout(
     edges: elkEdges,
   };
 
+  const elk = await getElk();
   const laidOut = await elk.layout(graph);
 
   const positions: Record<string, { x: number; y: number }> = {};

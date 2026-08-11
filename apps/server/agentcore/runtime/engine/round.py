@@ -104,7 +104,8 @@ def build_request_window(
         )
         window = write_cleared
     # Browser snapshot trees: keep only the newest full elements/accessibility_tree;
-    # older browser_* results drop those fields (field-level omit, not whole [已清理]).
+    # older browser_* results drop those fields and gain ref_delta vs the next tree
+    # (field-level omit, not whole [已清理]).
     browser_cleared = project_omitted_browser_snapshots(window, keep_recent=1)
     if browser_cleared is not window:
         n_omitted = sum(

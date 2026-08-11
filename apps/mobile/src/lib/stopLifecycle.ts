@@ -33,7 +33,10 @@ export function allowsEventWhileStopping(eventType: string): boolean {
     eventType === "citations" ||
     eventType === "evidence_ledger" ||
     eventType === "execution_detached" ||
-    eventType === "execution_completed"
+    eventType === "execution_completed" ||
+    // Stop 收口前后插话 / 排队帧须入折（勿永久卡在 received）。
+    eventType === "user_interjection" ||
+    eventType === "turn_queued"
   );
 }
 

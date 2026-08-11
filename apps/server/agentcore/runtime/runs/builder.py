@@ -157,8 +157,7 @@ def _resolve_dep_ref(
     if token in minted_values:
         return token, None
     next_step = (
-        "下一步：填无歧义角色名、本批或宿主 id 字面值，"
-        '或 append_to_execution_id="latest"。'
+        "下一步：填无歧义角色名，或本批 / 当前活跃图已有节点的 id 字面值。"
     )
     ambig = (ambiguous_raw_ids or {}).get(token) or []
     if len(ambig) > 1:

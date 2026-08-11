@@ -23,7 +23,7 @@ SUSPENDS in place. Who mediates depends on mode:
 
 - **经典路径**（无活跃协调 session）：波内没有在跑的 CEO，故直挂用户（同 ``ask_user`` 交互桥，
   ``InteractionKind.ESCALATION``）。
-- **协调模式**（根 CEO 协调 session 活跃，≥2 worker 默认）：CEO 波内存活，阻塞升级改由 CEO
+- **协调模式**（根 CEO 协调 session 活跃，≥1 worker 默认含 solo）：CEO 波内存活，阻塞升级改由 CEO
   仲裁——worker
   挂起等 ``resolve_escalation``；初始不发用户可答卡。偏好/授权/费用类由 CEO 先 ``ask_user``
   再 resolve（单一兑现路径）。默认无限期等待（D2：``checkpoint_timeout_seconds`` 默认 None）；

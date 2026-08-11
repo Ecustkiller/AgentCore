@@ -35,7 +35,6 @@ import type { EscalationSlotEsc, RunToolCall } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
 import type {
   ContextBlockWire,
-  DeliveryStatusPayload,
   EvidenceLedgerEntry,
 } from "@agentcore/contract-types";
 import type {
@@ -364,7 +363,6 @@ export function TeamView({
   progress,
   acts = [],
   teamNotes = [],
-  deliveryStatus = null,
   status,
   conversationId: _conversationId = null,
   pendingEscalations: _pendingEscalations,
@@ -380,9 +378,6 @@ export function TeamView({
   acts?: ProjectedAct[];
   /** 团队便签墙 (§2.2 通): notes workers broadcast to their concurrent siblings this turn. */
   teamNotes?: ProjectedTeamNote[];
-  /** 交付状态（`delivery_status`）：partial / blocked 一句轻提示；delivered / notes 静默。
-   *  产物清单仍由 ChatPage + FileArtifactsCard 承载。 */
-  deliveryStatus?: DeliveryStatusPayload | null;
   /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
   status?: TurnStatus | null;
   /** 阻塞式求决策 (②): present on a live multi-agent turn so a worker's pending escalation
@@ -592,19 +587,14 @@ export function TeamView({
             <div className="team-runs">{runCards}</div>
           </div>
         )}
-        {/* 交付 / 便签在折叠后仍可达（对齐桌面：便签墙不随图折叠卸载）。 */}
-        {(deliveryStatus || teamNotes.length > 0) && (
+        {/* 便签在折叠后仍可达（对齐桌面：便签墙不随图折叠卸载）。 */}
+        {teamNotes.length > 0 && (
           <div className="team-body team-body-persist">
-            {deliveryStatus ? (
-              <DeliverySection status={deliveryStatus} />
-            ) : null}
-            {teamNotes.length > 0 && (
-              <TeamNotesWall
-                key={notesDefaultOpen ? "open" : "shut"}
-                notes={teamNotes}
-                defaultOpen={notesDefaultOpen}
-              />
-            )}
+            <TeamNotesWall
+              key={notesDefaultOpen ? "open" : "shut"}
+              notes={teamNotes}
+              defaultOpen={notesDefaultOpen}
+            />
           </div>
         )}
         {selectedRun && (
@@ -619,23 +609,6 @@ export function TeamView({
         )}
       </div>
     </EvidenceLedgerProvider>
-  );
-}
-
-/** 交付轻提示（对齐桌面 DeliveryStatusMount）：砍验收大卡与卡上动作；
- *  delivered / notes 静默；partial / blocked 最多一句。产物清单不在此。 */
-function DeliverySection({ status }: { status: DeliveryStatusPayload }) {
-  if (status.state !== "partial" && status.state !== "blocked") return null;
-  const text =
-    status.summary.trim() ||
-    (status.state === "blocked" ? "交付未满足" : "部分交付未满足");
-  return (
-    <p
-      className="delivery-shortfall-hint"
-      data-testid="delivery-shortfall-hint"
-    >
-      {text}
-    </p>
   );
 }
 

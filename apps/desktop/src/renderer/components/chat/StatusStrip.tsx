@@ -1,3 +1,4 @@
+import { StoppedTurnFileChangesChip } from "@/components/chat/StoppedTurnFileChanges";
 import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
 import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
 import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
@@ -494,6 +495,8 @@ function CompletedStrip({
             }${costSegment}`}
           </span>
         </span>
+        {/* 硬停 + 本回合动过工作区 → 露出改动入口（无改动不渲染；真 diff 在右坞）。 */}
+        {stopped ? <StoppedTurnFileChangesChip execution={execution} /> : null}
         <StripControls
           execution={execution}
           expanded={expanded}

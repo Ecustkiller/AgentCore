@@ -14,7 +14,6 @@ from agentcore.runtime.events import (
     debate_result,
     debate_round,
     debate_round_started,
-    graph_append,
     message_end,
     message_start,
     run_completed,
@@ -34,7 +33,11 @@ from ..debate._builders import (
 )
 
 _TOPIC = "品牌是否应立即终止争议代言联名"
-_EXEC = "exec_mlr_debate_witness"
+_EXEC_MLR = "exec_mlr_debate_witness"
+_EXEC_DEBATE = "exec_mlr_debate_witness_act2"
+_CAPTAIN_2 = "c2"
+# Compat alias for MLR frames still using _EXEC in builders
+_EXEC = _EXEC_MLR
 _MOD = "debate_mod_wit"
 _PRO = f"{_MOD}_r1_pro"
 _CON = f"{_MOD}_r1_con"
@@ -85,7 +88,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
     mod_agents, mod_runs = _moderator_agents_runs(
         _MOD, "synthesizer", f"主持正反辩论：{_TOPIC}"
     )
-    mod_runs = [{**mod_runs[0], "parent_run_id": "synthesizer"}]
+    mod_runs = [{**mod_runs[0], "parent_run_id": _CAPTAIN_2}]
     debater_agents = _pro_con_debater_agents()
     debater_runs = _pro_con_debater_runs(
         _MOD,
@@ -297,24 +300,13 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 ],
             },
         ),
-        graph_append(
-            execution_id=_EXEC,
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["主持人"],
-            added_run_ids=[_MOD],
-            act_id="act-2",
-            act_kind="debate",
-            authorized_by="stage_card",
-        ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary=f"正反辩论：{_TOPIC}",
             agents=mod_agents,
             runs=mod_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act={
                 "act_id": "act-2",
                 "kind": "debate",
@@ -323,15 +315,15 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "authorized_by": "stage_card",
             },
         ),
-        run_started(_MOD, _MOD, parent_run_id="synthesizer"),
+        run_started(_MOD, _MOD, parent_run_id=_CAPTAIN_2),
         # 证人席位（辩论幕内）：声明后即开跑占位，避免收场被标 skipped、两端 fold 序漂移。
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=witness_agents,
             runs=witness_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act={
                 "act_id": "act-2",
                 "kind": "debate",
@@ -347,7 +339,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
             group="debate:witness",
         ),
         debate_round_started(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             round_no=1,
             focus="解除条款是否成立",
@@ -356,12 +348,12 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
             form="debate",
         ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=debater_agents,
             runs=debater_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act={
                 "act_id": "act-2",
                 "kind": "debate",
@@ -486,7 +478,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
             cost=_COST,
         ),
         debate_round(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             payload=round_payload,
         ),
@@ -510,7 +502,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        debate_result(execution_id=_EXEC, moderator_run_id=_MOD, payload=debate_payload),
+        debate_result(execution_id=_EXEC_DEBATE, moderator_run_id=_MOD, payload=debate_payload),
         tool_use_end("db1", "debate", success=True, output="辩论完成。"),
         content_delta("辩论收束；证人答问已进证据台账。"),
         message_end(FinishReason.END_TURN, input_tokens=6200, output_tokens=1200, cost=_COST),

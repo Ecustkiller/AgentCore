@@ -103,6 +103,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "综合来看，结论是 X。",
     "reasoning": "先查资料。",
     "captainContext": [],

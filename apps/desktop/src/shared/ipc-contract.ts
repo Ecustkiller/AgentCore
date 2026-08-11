@@ -266,6 +266,8 @@ export const FS_CHANNELS = {
   finalizeStagedAttachment: "fs:finalizeStagedAttachment",
   /** 云端：取出暂存字节后清除。 */
   consumeStagedBytes: "fs:consumeStagedBytes",
+  /** 启动清扫：删除历史遗留、且无草稿引用的暂存目录。 */
+  sweepStagingOrphans: "fs:sweepStagingOrphans",
   /**
    * 云 scratch 产物单向导出：弹目录选择器，把 zip（base64）解压落地。
    * 不登记授权根、不改工作区绑定（双模式工作区 §八.7）。
@@ -559,4 +561,10 @@ export interface FsApi {
   consumeStagedBytes(
     stagingId: string,
   ): Promise<FsResult<{ name: string; data: Uint8Array; binary: boolean }>>;
+  /**
+   * 清扫 ``attach-staging/``：删除本次启动前遗留、且不在 ``liveStagingIds`` 内的暂存目录。
+   * 草稿元数据只存在于渲染进程（localStorage，且有条数上限），主进程无从判断哪些
+   * 暂存仍被引用，故存活集合由渲染层给出。
+   */
+  sweepStagingOrphans(liveStagingIds: string[]): Promise<void>;
 }

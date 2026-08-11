@@ -4,7 +4,7 @@ import {
   usePendingSharedInvites,
   useRejectSharedInvite,
 } from "@/hooks/useSharedSpaces";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   type SharedSpaceSummary,
   sharedSpaceRoleLabel,
@@ -72,7 +72,6 @@ export function PendingSharedInvites({
                     onClick={() =>
                       accept.mutate(inv.id, {
                         onSuccess: (space) => {
-                          notifySuccess(`已加入「${space.name}」`);
                           onAccepted?.(space);
                         },
                         onError: (err) => notifyError(err, "接受邀请失败"),
@@ -87,7 +86,6 @@ export function PendingSharedInvites({
                     disabled={busy}
                     onClick={() =>
                       reject.mutate(inv.id, {
-                        onSuccess: () => notifySuccess("已拒绝邀请"),
                         onError: (err) => notifyError(err, "拒绝邀请失败"),
                       })
                     }

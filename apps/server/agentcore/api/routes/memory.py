@@ -23,10 +23,12 @@ Two editor surfaces sit on top, both reusing the workspace markdown editor (CAS 
   still holding preference sections splits the first time it is saved). ``enabled`` is
   always ``true`` (product gate; not a user toggle).
 - **Per-leaf surface** (``GET/PUT /users/me/memory/files/{kind}``, P2): one editable leaf
-  per (kind, scope) so the「文件」rail can show 偏好 / 画像 (global) and a project's 画像
-  separately. ``preferences`` (偏好.md) is GLOBAL-only by invariant; ``profile`` (画像.md)
-  honors an optional ``folder_id`` to address a project layer. ``GET …/projects`` lists the
-  folder_ids that have project memory so the rail only surfaces a node where there is one.
+  per (kind, scope) so the「文件」rail can show 偏好 / 画像 (global), a project's 画像, and
+  a project's 导航 separately. ``preferences`` (偏好.md) is GLOBAL-only by invariant;
+  ``profile`` (画像.md) honors an optional ``folder_id`` to address a project layer;
+  ``navigation`` (导航.md) is PROJECT-only and requires ``folder_id``. ``GET …/projects``
+  lists the folder_ids that have project memory so the rail only surfaces a node where
+  there is one.
 - **On-demand topic surface** (``GET /users/me/memory/topics`` + ``GET/PUT …/topics/{slug}``):
   lists / reads / writes the ``主题/<slug>.md`` notes the agent pulls via ``consult_memory``,
   so the rail's 主题/ folder can finally browse·edit·delete them (Agent记忆与知识系统 §1.6).
@@ -50,6 +52,7 @@ from agentcore.api.schemas import MemoryUpdateItemView
 from agentcore.db.repositories import MemoryUpdateRepository
 from agentcore.memory import (
     CORE_MEMORY_FILE,
+    NAVIGATION_MEMORY_FILE,
     PREFERENCES_MEMORY_FILE,
     DocumentMemoryStore,
     is_topic_path,
@@ -74,11 +77,13 @@ class MemoryKind(StrEnum):
     """Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).
 
     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
-    (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).
+    (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer);
+    ``navigation`` → 导航.md (短入口路由表, PROJECT-only — requires ``folder_id``).
     """
 
     preferences = "preferences"
     profile = "profile"
+    navigation = "navigation"
 
 
 def _resolve_file_scope(kind: MemoryKind, folder_id: str | None) -> tuple[str, str | None]:
@@ -86,10 +91,21 @@ def _resolve_file_scope(kind: MemoryKind, folder_id: str | None) -> tuple[str, s
 
     ``preferences`` is GLOBAL-only by invariant (§1.4 — preferences are universal, never
     copied into a project), so a ``folder_id`` is ignored. ``profile`` is global when
-    ``folder_id`` is None, else that project's 画像.md.
+    ``folder_id`` is None, else that project's 画像.md. ``navigation`` is PROJECT-only
+    (§1.4 — 导航.md exists only under a project); missing ``folder_id`` → 422.
     """
     if kind is MemoryKind.preferences:
         return PREFERENCES_MEMORY_FILE, None
+    if kind is MemoryKind.navigation:
+        if not folder_id:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "navigation_requires_folder",
+                    "message": "导航.md 仅项目作用域，须提供 folder_id",
+                },
+            )
+        return NAVIGATION_MEMORY_FILE, folder_id
     return CORE_MEMORY_FILE, folder_id
 
 
@@ -386,7 +402,7 @@ async def get_my_memory_file(
     folder_id: str | None = None,
     store: DocumentMemoryStore = Depends(get_memory_store),
 ) -> MemoryFileResponse:
-    """Load ONE memory leaf — 偏好/画像 (global) or a project's 画像 (with ``folder_id``)."""
+    """Load ONE memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航."""
     file, scope = _resolve_file_scope(kind, folder_id)
     content = await store.load(user.user_id, file, scope=scope)
     return MemoryFileResponse(content=content, version=memory_version(content))

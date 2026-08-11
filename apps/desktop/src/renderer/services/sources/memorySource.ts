@@ -14,12 +14,13 @@ import {
  * (Agent记忆与知识系统 §1.6).
  *
  * Agent记忆与知识系统 §1.4: there is no longer ONE memory doc — the always-injected core is
- * split into 偏好 (global) + 画像 (global or per-project). Each leaf is one editable virtual
- * file addressed by a synthetic PATH that encodes (kind, scope):
+ * split into 偏好 (global) + 画像 (global or per-project) + 导航 (project-only). Each leaf
+ * is one editable virtual file addressed by a synthetic PATH that encodes (kind, scope):
  *
  *   global/preferences          → 偏好.md (global)
  *   global/profile              → 画像.md (global)
  *   project/<folderId>/profile  → 画像.md (that project's layer)
+ *   project/<folderId>/navigation → 导航.md (that project's short entry — PROJECT-only)
  *   global/topics/<slug>        → 主题/<slug>.md (global on-demand note)
  *   project/<folderId>/topics/<slug> → 主题/<slug>.md (that project's on-demand note)
  *
@@ -47,6 +48,11 @@ export function memoryProjectProfilePath(folderId: string): string {
   return `project/${folderId}/profile`;
 }
 
+/** The synthetic leaf path for a project's 导航 (short entry; PROJECT-only). */
+export function memoryProjectNavigationPath(folderId: string): string {
+  return `project/${folderId}/navigation`;
+}
+
 /** The synthetic leaf path for an on-demand TOPIC note (global when `folderId` is null). */
 export function memoryTopicPath(folderId: string | null, slug: string): string {
   return folderId
@@ -59,6 +65,7 @@ type MemoryLeaf =
   | { kind: "topic"; folderId: string | null; slug: string };
 
 const PROJECT_PROFILE_RE = /^project\/([^/]+)\/profile$/;
+const PROJECT_NAVIGATION_RE = /^project\/([^/]+)\/navigation$/;
 const GLOBAL_TOPIC_RE = /^global\/topics\/(.+)$/;
 const PROJECT_TOPIC_RE = /^project\/([^/]+)\/topics\/(.+)$/;
 
@@ -69,6 +76,8 @@ function parseLeaf(path: string): MemoryLeaf {
   if (path === GLOBAL_PROFILE_PATH) return { kind: "profile", folderId: null };
   const proj = PROJECT_PROFILE_RE.exec(path);
   if (proj) return { kind: "profile", folderId: proj[1] };
+  const nav = PROJECT_NAVIGATION_RE.exec(path);
+  if (nav) return { kind: "navigation", folderId: nav[1] };
   const gt = GLOBAL_TOPIC_RE.exec(path);
   if (gt) return { kind: "topic", folderId: null, slug: gt[1] };
   const pt = PROJECT_TOPIC_RE.exec(path);
@@ -87,13 +96,15 @@ export function parseProjectProfilePath(path: string): string | null {
 }
 
 /**
- * folderId encoded in a project-scoped synthetic memory path (`project/<id>/profile` or
- * `project/<id>/topics/<slug>`), else null. Used by 最近更新 / 对话卡深链 to expand that
- * project and its「记忆」node in the file rail.
+ * folderId encoded in a project-scoped synthetic memory path (`project/<id>/profile`,
+ * `project/<id>/navigation`, or `project/<id>/topics/<slug>`), else null. Used by 最近更新 /
+ * 对话卡深链 to expand that project and its「记忆」node in the file rail.
  */
 export function parseProjectMemoryFolderId(path: string): string | null {
   const profile = PROJECT_PROFILE_RE.exec(path);
   if (profile) return profile[1];
+  const navigation = PROJECT_NAVIGATION_RE.exec(path);
+  if (navigation) return navigation[1];
   const topic = PROJECT_TOPIC_RE.exec(path);
   return topic ? topic[1] : null;
 }
@@ -106,12 +117,13 @@ export function isMemoryTopicPath(path: string): boolean {
 /**
  * The display name (tab label) for a synthetic memory-leaf path — mirrors the rail's
  * naming so a deep-linked tab matches what {@link MemorySection} would open: 偏好.md /
- * 画像.md / <slug>.md. A project 画像 opens the 双栏 editor which resolves the project
- * name from the live workspaces, so the bare「画像.md」is enough here.
+ * 画像.md / 导航.md / <slug>.md. A project 画像 opens the 双栏 editor which resolves the
+ * project name from the live workspaces, so the bare「画像.md」is enough here.
  */
 export function memoryLeafTabName(path: string): string {
   const leaf = parseLeaf(path);
   if (leaf.kind === "preferences") return "偏好.md";
+  if (leaf.kind === "navigation") return "导航.md";
   if (leaf.kind === "topic") return `${leaf.slug}.md`;
   return "画像.md";
 }

@@ -17,8 +17,11 @@ from starlette.responses import JSONResponse, Response
 from agentcore.api.dependencies import ACCESS_TOKEN_COOKIE
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
+from agentcore.core.logging import get_logger
 from agentcore.security.csrf import sign_csrf_token, verify_csrf_token
 from agentcore.security.tokens import decode_access_token
+
+logger = get_logger(__name__)
 
 CSRF_HEADER = "X-CSRF-Token"
 CSRF_COOKIE = "csrf_token"
@@ -33,9 +36,7 @@ _EXEMPT_PREFIXES = (
 )
 
 
-def issue_csrf_token(
-    response: Response, user_id: str, *, persist_session: bool = True
-) -> str:
+def issue_csrf_token(response: Response, user_id: str, *, persist_session: bool = True) -> str:
     """Mint a CSRF token for ``user_id`` and attach it to the login/refresh response.
 
     Returned via the CORS-exposed ``X-CSRF-Token`` header (what the SPA reads) plus a
@@ -108,6 +109,17 @@ class CsrfMiddleware(BaseHTTPMiddleware):
 
         header = request.headers.get(CSRF_HEADER) or ""
         if not header or not verify_csrf_token(user_id, header):
+            # A client holding a live session but no token 403s every mutating
+            # request while every GET still succeeds — a shape that reads to users
+            # as "the app ignores my clicks". Ops can alert on this event name.
+            logger.warning(
+                "security.csrf_rejected",
+                path=request.url.path,
+                method=request.method,
+                reason="missing" if not header else "invalid",
+                client_platform=request.headers.get("X-Client-Platform"),
+                client_version=request.headers.get("X-Client-Version"),
+            )
             return JSONResponse(
                 status_code=403,
                 content={

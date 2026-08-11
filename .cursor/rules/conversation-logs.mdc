@@ -48,5 +48,5 @@ Dogfood：出包后仓库根 `python evals/dogfood/fill_from_pack.py --pack <dir
 - **带连字符 UUID** → conversation_id；查全貌用位置参数，单轮细节再 `--trace`
 - **无 ID / 仅截图 /「查最新」** → `--recent` 后必须用文案/`preview` **确认匹配**再深挖，勿默认第一条
 - **本地空、ID 像线上** → 先 sync / `--export-dir`，勿在空库硬猜
-- **横幅 `turn already running`** → 本机互斥拒，**不进**云端 sync；查安装机 `userData/logs/desktop.jsonl` 事件 `sidecar.turn_already_running`（见分析指南）
+- **横幅 `turn already running`** → 本机互斥拒（仅 `startTurn`；冷 resume 撞槽改走 deferred），**不进**云端 sync；查安装机 `userData/logs/desktop.jsonl` 事件 `sidecar.turn_already_running` / `resume.deferred`（见分析指南）
 - **ID 已齐**（cid / trace / 已贴排查包）→ 主 Agent **直接**跑 `log_timeline --json` 或 `--pack`

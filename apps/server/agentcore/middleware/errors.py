@@ -24,13 +24,18 @@ from __future__ import annotations
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
+from agentcore.db.errors import (
+    DATABASE_UNAVAILABLE_MESSAGE,
+    is_pool_timeout_error,
+)
 
 logger = get_logger(__name__)
 
 
 class JSONErrorMiddleware:
-    """Catch unhandled exceptions and emit a CORS-friendly JSON 500."""
+    """Catch unhandled exceptions and emit a CORS-friendly JSON error body."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -50,21 +55,41 @@ class JSONErrorMiddleware:
 
         try:
             await self.app(scope, receive, send_wrapper)
-        except Exception:
+        except Exception as exc:
             method = scope.get("method", "?")
             path = scope.get("path", "?")
-            logger.exception("http.unhandled_error", method=method, path=path)
             # Headers already flushed (e.g. a live SSE turn) — we can no longer
             # swap the response, so let it propagate and tear the stream down.
             if response_started:
+                logger.exception("http.unhandled_error", method=method, path=path)
                 raise
-            response = JSONResponse(
-                status_code=500,
-                content={
-                    "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "服务器内部错误，请稍后重试",
-                    }
-                },
-            )
+            if is_pool_timeout_error(exc):
+                # Primary pool saturated: fail fast with the product 503, not a
+                # raw QueuePool 500 after http.unhandled_error.
+                logger.warning(
+                    "http.db_pool_exhausted",
+                    method=method,
+                    path=path,
+                    error=str(exc),
+                )
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": {
+                            "code": ErrorCode.DATABASE_UNAVAILABLE,
+                            "message": DATABASE_UNAVAILABLE_MESSAGE,
+                        }
+                    },
+                )
+            else:
+                logger.exception("http.unhandled_error", method=method, path=path)
+                response = JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": {
+                            "code": "INTERNAL_ERROR",
+                            "message": "服务器内部错误，请稍后重试",
+                        }
+                    },
+                )
             await response(scope, receive, send)

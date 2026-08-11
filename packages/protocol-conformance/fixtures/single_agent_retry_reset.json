@@ -65,6 +65,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "答案：42。",
     "reasoning": "直接作答。",
     "captainContext": [],

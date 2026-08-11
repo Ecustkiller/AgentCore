@@ -815,14 +815,14 @@ def debater_plan_event(tool: DebateTool, execution_id: str, moderator_run_id: st
     runs = [run_payload(n) for n in plan.nodes]
     from agentcore.runtime.events import run_plan
 
-    host_message_id = getattr(tool, "_debate_host_message_id", None)
+    prev_execution_id = getattr(tool, "_debate_prev_execution_id", None)
     return run_plan(
         execution_id=execution_id,
         plan_type="debate",
         task_summary="",
         agents=agents,
         runs=runs,
-        host_message_id=host_message_id,
-        # 同幕补派：与主持人共享本场辩论幕（独立图 act-1 / 宿主生长 act-N）。
+        # 同幕补派：与主持人共享本场辩论幕；prev 仅语义回显（同 execution_id）。
+        prev_execution_id=prev_execution_id,
         act=debate_act_payload(tool),
     )

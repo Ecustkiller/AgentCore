@@ -8,7 +8,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { isFeatureUnavailable } from "@/lib/errors";
-import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { notifyActionError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   type DocumentApplyMode,
@@ -189,7 +189,6 @@ export function RuleSection({
       await renameDocument(doc.id, name);
       await refresh();
       onRenamed(doc.id, name);
-      notifySuccess("已重命名");
     } catch (e) {
       notifyActionError("重命名失败", e);
     }
@@ -202,7 +201,6 @@ export function RuleSection({
       await deleteDocument(doc.id);
       onDeleted(doc.id);
       await refresh();
-      notifySuccess("已删除规则");
     } catch (e) {
       notifyActionError("删除失败", e);
     }
@@ -213,7 +211,6 @@ export function RuleSection({
     try {
       await updateDocumentApplyMode(doc.id, mode);
       await refresh();
-      notifySuccess(`已设为${APPLY_LABEL[mode]}`);
     } catch (e) {
       notifyActionError("切换失败", e);
     }

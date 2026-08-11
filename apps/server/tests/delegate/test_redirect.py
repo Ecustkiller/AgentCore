@@ -134,7 +134,11 @@ async def test_redirect_cancels_running_worker_and_cold_reruns_with_steer():
     t = tool(provider, sink)
 
     result = await t.execute(
-        {"tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}]}, ctx()
+        {
+            "tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}],
+            "coordinate": False,
+        },
+        ctx(),
     )
 
     assert result.success is True
@@ -187,7 +191,11 @@ async def test_redirect_hot_continue_when_partial_draft_exists():
     t = tool(provider, sink)
 
     result = await t.execute(
-        {"tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}]}, ctx()
+        {
+            "tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}],
+            "coordinate": False,
+        },
+        ctx(),
     )
 
     assert result.success is True
@@ -336,7 +344,10 @@ async def test_redirect_that_cannot_apply_is_recorded_ignored(monkeypatch):
     enqueue_redirect(execution_id="e", run_id="ghost", feedback="太晚了改不动", conversation_id="c")
 
     t = tool(Provider(["调研完成"]))
-    result = await t.execute({"tasks": [{"id": "a", "role": "研究员", "task": "调研"}]}, ctx())
+    result = await t.execute(
+        {"tasks": [{"id": "a", "role": "研究员", "task": "调研"}], "coordinate": False},
+        ctx(),
+    )
 
     assert result.success is True
     assert [r["run_id"] for r in recorded] == ["ghost"]
@@ -442,7 +453,11 @@ async def test_redirect_cold_redir_then_hot_continue_on_handoff():
     t = tool(provider, sink)
 
     result = await t.execute(
-        {"tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}]}, ctx()
+        {
+            "tasks": [{"id": "a", "role": "研究员", "task": "原方向调研"}],
+            "coordinate": False,
+        },
+        ctx(),
     )
 
     assert result.success is True

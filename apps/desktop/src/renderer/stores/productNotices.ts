@@ -9,6 +9,8 @@
  * Modal is always ``once`` (server-enforced); close → dismiss, never session-snoozed.
  */
 
+import { logEvent } from "@/lib/log";
+import { ApiError } from "@/services/api";
 import {
   type ActiveNotice,
   dismissNotice,
@@ -98,8 +100,16 @@ export const useProductNoticesStore = create<ProductNoticesState>(
 
       try {
         await dismissNotice(id);
-      } catch {
-        // Soft-fail: still refresh so server truth wins.
+      } catch (err) {
+        // Soft-fail: still refresh so server truth wins. The refresh re-shows the
+        // notice, so a rejected dismiss looks to the user like "关不掉" with no
+        // error anywhere — this log is the only trace ops gets.
+        logEvent("warn", "notice.dismiss_failed", {
+          notice_id: id,
+          surface: notice?.surface,
+          status: err instanceof ApiError ? err.status : undefined,
+          code: err instanceof ApiError ? err.code : undefined,
+        });
       }
       await get().refresh();
     },

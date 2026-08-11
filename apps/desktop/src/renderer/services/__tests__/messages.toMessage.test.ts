@@ -1,4 +1,5 @@
 import { useConversationStore } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +25,7 @@ function row(
 beforeEach(() => {
   usePausedTurnStore.getState().clear();
   useInteractionStore.getState().clear();
+  useExecutionStore.setState({ byId: {} });
   useConversationStore.setState({ currentConversationId: null, byId: {} });
 });
 
@@ -79,6 +81,32 @@ describe("toMessage (reload hydrate)", () => {
     expect(shouldSetGeneratingOnHydrate([msg])).toBe(false);
   });
 
+  it("reloads face from usage.error when runs.error is absent (REST path)", () => {
+    const msg = toMessage(
+      row({
+        id: "m-usage-err",
+        role: "assistant",
+        content: "",
+        status: "failed",
+        usage: {
+          input: 0,
+          output: 0,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 0,
+          error: {
+            code: "LLM_TIMEOUT",
+            message: "连接超时，请检查网络后重试。",
+          },
+        },
+      }),
+    );
+    expect(msg.error).toEqual({
+      code: "LLM_TIMEOUT",
+      message: "连接超时，请检查网络后重试。",
+    });
+  });
+
   it("does not set generating chrome when last message is cold-paused", () => {
     const live = toMessage(
       row({ id: "m1", role: "user", content: "q", status: null }),
@@ -93,6 +121,98 @@ describe("toMessage (reload hydrate)", () => {
       }),
     );
     expect(shouldSetGeneratingOnHydrate([live, paused])).toBe(false);
+  });
+
+  it("classic reload: keeps runs + hydrates interjections without run_plan", () => {
+    // 协作图文档五态：经典单聊刷新后插话仍在。REST 把 user_interjection 放在
+    // runs.events，但无 run_plan → executionId null；旧路径丢弃 runs 导致 store 空。
+    const msg = toMessage(
+      row({
+        id: "m-classic",
+        role: "assistant",
+        content: "总结如下…",
+        status: "complete",
+        runs: {
+          events: [
+            {
+              type: "user_interjection",
+              timestamp: "2026-01-01T00:00:01.000Z",
+              payload: {
+                interjection_id: "inj-classic",
+                execution_id: "exec-classic",
+                content: "改成用中文总结",
+                status: "injected",
+              },
+            },
+          ],
+          finish_reason: "stop",
+        } as NonNullable<BackendMessage["runs"]>,
+      }),
+    );
+
+    expect(msg.executionId).toBeNull();
+    expect(msg.runs?.events).toHaveLength(1);
+    expect(msg.runs?.events[0]?.type).toBe("user_interjection");
+    expect(
+      useExecutionStore.getState().byId["m-classic"]?.userInterjections,
+    ).toEqual([
+      {
+        interjectionId: "inj-classic",
+        executionId: "exec-classic",
+        content: "改成用中文总结",
+        status: "injected",
+        note: null,
+      },
+    ]);
+  });
+
+  it("multi-agent reload: keeps runs but does not hydrate in toMessage", () => {
+    // 多 Agent 仍由 InlineTeamGraph mount 时 hydrate；toMessage 不得抢先 fold。
+    const msg = toMessage(
+      row({
+        id: "m-team",
+        role: "assistant",
+        content: "团队结论…",
+        status: "complete",
+        runs: {
+          events: [
+            {
+              type: "run_plan",
+              timestamp: "2026-01-01T00:00:00.000Z",
+              payload: {
+                execution_id: "exec-team",
+                plan_type: "multi_agent",
+                task_summary: "调研",
+                agents: [{ id: "a1", role: "研究员" }],
+                runs: [
+                  {
+                    id: "r1",
+                    agent_id: "a1",
+                    task: "读文档",
+                    depends_on: [],
+                  },
+                ],
+              },
+            },
+            {
+              type: "user_interjection",
+              timestamp: "2026-01-01T00:00:01.000Z",
+              payload: {
+                interjection_id: "inj-team",
+                execution_id: "exec-team",
+                content: "补充一句",
+                status: "injected",
+              },
+            },
+          ],
+          finish_reason: "stop",
+        } as NonNullable<BackendMessage["runs"]>,
+      }),
+    );
+
+    expect(msg.executionId).toBe("exec-team");
+    expect(msg.runs?.events.length).toBe(2);
+    expect(useExecutionStore.getState().byId["m-team"]).toBeUndefined();
   });
 
   it("surfaces pausedTurns when paused + journal cold interaction (hydrate gap)", () => {

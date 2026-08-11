@@ -1990,7 +1990,8 @@ export interface paths {
          *     - **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。
          *     - **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。
          *     - **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。
-         *     - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（``turn_steer_accepted``）；
+         *     - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE
+         *       ``user_interjection(received)``；步顶注入后再发 ``injected``）；
          *       无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。
          *     - **热路 pending**（approval / escalation / …）仍 409。
          *
@@ -2237,6 +2238,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/queued-turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Queued Turns
+         * @description List the conversation's process-local FIFO queued turns (权威内容源).
+         *
+         *     Owner-gated like send / cancel. Returns the current in-memory snapshot in FIFO
+         *     order (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_started`` /
+         *     ``turn_queue_cancelled`` remain change signals only — clients should refresh from
+         *     this endpoint. Restart empties the queue (no durable queue).
+         */
+        get: operations["list_queued_turns_v1_conversations__conversation_id__queued_turns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/cancel": {
         parameters: {
             query?: never;
@@ -2302,6 +2328,31 @@ export interface paths {
          *       ``steer``). Step 1 only enqueues and logs from the drive loop.
          */
         post: operations["submit_run_redirect_v1_conversations__conversation_id__run_redirect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/run-stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Run Stop
+         * @description Queue a mid-flight stop for one or all workers in the current delegate batch.
+         *
+         *     The CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the
+         *     user直控 channel (same posture as ``run-redirect``). Unlike redirect, stop never
+         *     triggers hot revision or cold ``_redir``; WaveScheduler cancels / withdraws
+         *     targets so drive converges and the CEO keeps the turn.
+         */
+        post: operations["submit_run_stop_v1_conversations__conversation_id__run_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4865,7 +4916,7 @@ export interface paths {
         };
         /**
          * Get My Memory File
-         * @description Load ONE memory leaf — 偏好/画像 (global) or a project's 画像 (with ``folder_id``).
+         * @description Load ONE memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航.
          */
         get: operations["get_my_memory_file_v1_users_me_memory_files__kind__get"];
         /**
@@ -9123,10 +9174,11 @@ export interface components {
          * @description Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).
          *
          *     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
-         *     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).
+         *     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer);
+         *     ``navigation`` → 导航.md (短入口路由表, PROJECT-only — requires ``folder_id``).
          * @enum {string}
          */
-        MemoryKind: "preferences" | "profile";
+        MemoryKind: "preferences" | "profile" | "navigation";
         /**
          * MemoryMoveBulletRequest
          * @description Move one bullet between GLOBAL and the given project's layer (位置即作用域纠错).
@@ -9558,6 +9610,11 @@ export interface components {
              */
             available: boolean;
             /**
+             * Badge
+             * @description Curated display badge rendered as-is by clients (e.g. 免费额度). Null when none — never inferred from model id suffixes.
+             */
+            badge?: string | null;
+            /**
              * Capabilities
              * @description Enabled capability tags — a subset of vision / tools / reasoning.
              */
@@ -9974,6 +10031,32 @@ export interface components {
             title: string;
         };
         /**
+         * QueuedTurnItem
+         * @description One process-local FIFO queued turn (权威内容源；EPHEMERAL 事件只作变了信号).
+         *
+         *     ``interjection_id`` is set when the entry was promoted from a user interjection
+         *     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
+         *     ``position`` is 1-based FIFO index.
+         */
+        QueuedTurnItem: {
+            /** Content */
+            content: string;
+            /** Interjection Id */
+            interjection_id?: string | null;
+            /** Position */
+            position: number;
+            /** Queue Id */
+            queue_id: string;
+        };
+        /**
+         * QueuedTurnListResponse
+         * @description Current conversation FIFO queue snapshot (进程内；重启后为空).
+         */
+        QueuedTurnListResponse: {
+            /** Items */
+            items?: components["schemas"]["QueuedTurnItem"][];
+        };
+        /**
          * QuotaStatus
          * @description Resolved quota limits (决策④ / F2); 0 = unlimited. Money is nano-CNY internally.
          */
@@ -10354,7 +10437,8 @@ export interface components {
          *
          *     Raised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended
          *     itself. Classic (non-coordination) path asks the user; coordination path awaits CEO
-         *     ``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers
+         *     ``resolve_escalation`` (Invariant B: available iff a coordination session is active —
+         *     classic blocking has no free CEO inside ``delegate``). The user either answers
          *     (``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).
          *     Write-lock conflicts may set ``transfer_ownership`` to path-handoff to the escalator.
          *     A wall-clock miss is ``timed_out``. A late resolve falls through as 404.
@@ -11441,6 +11525,37 @@ export interface components {
              */
             queued: number;
         };
+        /**
+         * SubmitRunStopRequest
+         * @description User mid-flight stop for one or all workers in a delegate batch (只停这项工作).
+         *
+         *     Queued while ``delegate`` drives; WaveScheduler drains via the same
+         *     ``cancel_run_ids`` channel as redirect / ``cancel_worker``, but **without** hot
+         *     revision or cold ``_redir`` follow-up. Does not abort the turn, kill the CEO, or
+         *     clear FIFO queued turns.
+         *
+         *     ``run_id`` omitted / null → stop every in-flight and queued worker for
+         *     ``execution_id``; otherwise only that run.
+         */
+        SubmitRunStopRequest: {
+            /** Execution Id */
+            execution_id: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** SubmitRunStopResponse */
+        SubmitRunStopResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Queued
+             * @description Pending stop count for this execution after enqueue.
+             */
+            queued: number;
+        };
         /** SubmitShowQuizRequest */
         SubmitShowQuizRequest: {
             /** Guess */
@@ -12079,18 +12194,36 @@ export interface components {
         /**
          * UsageBreakdown
          * @description Token counts (cache_hit + cache_miss == input; reasoning ⊆ output).
+         *
+         *     ``error`` is optional: present on failed / empty turns that stored a structured
+         *     cause on the usage column. Token fields may be zeros when only ``error`` is set.
          */
         UsageBreakdown: {
             /** Cache Hit */
             cache_hit: number;
             /** Cache Miss */
             cache_miss: number;
+            error?: components["schemas"]["UsageError"] | null;
             /** Input */
             input: number;
             /** Output */
             output: number;
             /** Reasoning */
             reasoning: number;
+        };
+        /**
+         * UsageError
+         * @description Structured turn error persisted on the messages.usage JSON column.
+         *
+         *     Pure-failure rows keep ``message.content`` empty and put the cause here (and on
+         *     journal ``turn_end.error``). REST must project this so reload can paint a face
+         *     even when the journal is sparse.
+         */
+        UsageError: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
         };
         /**
          * UsageSummary
@@ -16510,6 +16643,41 @@ export interface operations {
             };
         };
     };
+    list_queued_turns_v1_conversations__conversation_id__queued_turns_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedTurnListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cancel_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__cancel_post: {
         parameters: {
             query?: never;
@@ -16607,6 +16775,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitRunRedirectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_run_stop_v1_conversations__conversation_id__run_stop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitRunStopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitRunStopResponse"];
                 };
             };
             /** @description Validation Error */

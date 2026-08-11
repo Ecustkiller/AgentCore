@@ -361,10 +361,11 @@ def check_contract(
             )
         )
     # code_audit 结构闸（L2b）：配套 *.audit.json 字段语义；与成篇硬门正交。
-    # 写盘不可用时：缺/读不到 JSON 不硬拒（归因靠零写 soft tip）；已读到的仍验语义。
+    # 写盘不可用 / Markdown 已落仅缺配套 JSON：缺产物不硬拒（部分交付）；已读到的仍验语义。
     if deliverable.code_audit_gate:
         from agentcore.runtime.runs.code_audit_gate import (
             code_audit_json_failures,
+            code_audit_report_landed,
             is_code_audit_landing_absence_failure,
         )
 
@@ -374,7 +375,13 @@ def check_contract(
             artifact_contents=artifact_contents,
         )
         write_unavailable = landing_failure_kind in ("channel_dead", "write_failed")
-        if write_unavailable:
+        report_landed = code_audit_report_landed(
+            artifacts=deliverable.artifacts,
+            workspace_paths=workspace_paths,
+            artifact_contents=artifact_contents,
+        )
+        demote_absence = write_unavailable or report_landed
+        if demote_absence:
             demoted = False
             for msg in gate_fails:
                 if is_code_audit_landing_absence_failure(msg):
@@ -382,18 +389,24 @@ def check_contract(
                     continue
                 failures.append(msg)
             if demoted and not zero_files_warnings:
-                # 已有部分落盘时零写 tip 不响；补写盘归因，避免静默跳过。
-                if landing_failure_kind == "channel_dead":
+                # 已有部分落盘时零写 tip 不响；补写盘/缺 JSON 归因，避免静默跳过。
+                if write_unavailable and landing_failure_kind == "channel_dead":
                     zero_files_warnings.append(
                         f"{_MEMBER_WAVE_UNDELIVERED}：写盘通道不可用"
                         "（local workspace channel dead / 活性挂起），"
                         "已跳过 audit JSON 缺产物结构硬闸——请恢复通道后补齐配套 *.audit.json"
                     )
-                else:
+                elif write_unavailable:
                     zero_files_warnings.append(
                         f"{_MEMBER_WAVE_UNDELIVERED}：写盘未成功落盘，"
                         "已跳过 audit JSON 缺产物结构硬闸——"
                         "请修复写盘后补齐配套 *.audit.json"
+                    )
+                else:
+                    # Markdown 已落、仅缺配套 JSON → 部分交付（可补写），勿整节点 failed。
+                    zero_files_warnings.append(
+                        f"{_MEMBER_WAVE_UNDELIVERED}：Markdown 报告已落盘，仅缺配套 *.audit.json——"
+                        "已降为部分交付（可补写 JSON 骨架/定稿，勿整轮重审）"
                     )
         else:
             failures.extend(gate_fails)
@@ -781,9 +794,16 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
     ``contract.retry`` that re-opens investigation. Mixed or non-format failures
     (网页接缝 / 网页质量 / 空产出 / JSON …) return False. 已删字数 / 必含词
     不再出现在 ``failures``；保留 keyword/short markers 仅兼容遗留 verdict。
+
+    写盘形态下仅缺配套 ``*.audit.json``（:func:`is_code_audit_landing_absence_failure`）
+    也走定向修复（读已落报告 + 写盘），不升格为全量调查返工。
     """
     if verdict.ok or not verdict.failures or verdict.soft_failures or verdict.visual_failures:
         return False
+    from agentcore.runtime.runs.code_audit_gate import (
+        is_code_audit_landing_absence_failure,
+    )
+
     for failure in verdict.failures:
         text = str(failure).strip()
         if text.startswith(_FORMAT_REPAIR_SECTION_PREFIX):
@@ -791,6 +811,8 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
         if text.startswith(_FORMAT_REPAIR_KEYWORD_PREFIX):
             continue
         if _FORMAT_REPAIR_TOO_SHORT_MARKER in text:
+            continue
+        if is_code_audit_landing_absence_failure(text):
             continue
         return False
     return True
@@ -861,6 +883,10 @@ def format_light_repair_feedback(
     """
     if verdict.ok or not verdict.failures:
         return ""
+    from agentcore.runtime.runs.code_audit_gate import (
+        is_code_audit_landing_absence_failure,
+    )
+
     items = "\n".join(f"- {f}" for f in verdict.failures)
     coverage = ""
     if checked_files:
@@ -875,6 +901,17 @@ def format_light_repair_feedback(
         if prior
         else ""
     )
+    absence_only = all(
+        is_code_audit_landing_absence_failure(str(f)) for f in verdict.failures
+    )
+    if absence_only:
+        return (
+            "你上一次的产出只差配套 `*.audit.json`（Markdown 报告可能已落盘），"
+            f"不必重新调查：\n{items}{coverage}{prior_block}\n\n"
+            "请 file_read 自己已落的报告（如需对照），再用 file_write / str_replace "
+            "补写配套 `*.audit.json` 骨架或定稿后 handoff。"
+            "不要重新检索、不要道歉、不要附带说明。"
+        )
     return (
         "你上一次的产出只差格式补全（缺章节 / 篇幅不足 / 缺关键词），"
         f"不必重新调查：\n{items}{coverage}{prior_block}\n\n"
@@ -1114,10 +1151,13 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
             )
     if deliverable.code_audit_gate:
         lines.append(
-            "- 须另交配套 `*.audit.json`（findings：severity/verification/verdict/evidence；"
+            "- 须另交配套 `*.audit.json`：建议先落 findings 骨架再成文 Markdown；"
+            "仅缺配套 JSON 时可补写修复（不整轮作废）。"
+            "findings：severity/verification/verdict/evidence；"
             "severity 权威=高|中|低|观察·工程，亦接受 P0–P3 / high|medium|low|info 等同义归一；"
-            "高须 trigger_path；安全类或高须 reachability）；"
-            "未读全/待核实不得标中+；全量 tsc/pytest 超时不得标中+；结构闸硬拒违规"
+            "高须 trigger_path；安全类或高须 reachability；"
+            "未读全/待核实不得标中+；全量 tsc/pytest 超时不得标中+；"
+            "已读到的 JSON 字段违规仍结构硬拒"
         )
     if deliverable.strict:
         lines.append("- 契约严格模式：返工后仍不达标将判定本节点失败（非软提醒）")

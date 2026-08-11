@@ -6,6 +6,10 @@ from collections.abc import Sequence
 from agentcore.memory.injection import MemoryTopic
 from agentcore.memory.rules_injection import OnDemandUserRule
 from agentcore.runtime.context import ContextAssembler, SectionOrder
+from agentcore.runtime.context.project_catalog import (
+    ProjectCatalogEntry,
+    render_project_catalog,
+)
 from agentcore.runtime.resolve.profile import (
     FRAGMENT_BASE,
     FRAGMENT_CEO_CORE,
@@ -194,6 +198,7 @@ def compose_ceo_chat_prompt(
     ceo_tool_names: set[str],
     memory_topics: Sequence[MemoryTopic] = (),
     on_demand_rules: Sequence[OnDemandUserRule] = (),
+    project_catalog: Sequence[ProjectCatalogEntry] = (),
     cold_start_explore: bool | str | None = False,
     project_nav_stale: bool = False,
     project_profile_empty_soft: bool = False,
@@ -206,11 +211,12 @@ def compose_ceo_chat_prompt(
     ``ask_user_*`` skills show only when ``ask_user`` is wired) + the CEO-only 记忆主题目录
     (``memory_topics``, listing the user's on-demand TOPIC notes as name＋一行摘要 — rendered
     only when ``consult_memory`` is wired this turn, the same live-tool gate as the skill
-    directory)
-    + inline citation guidance + the CEO-only ``<visualization>`` block (按角色 right-size:
-    the detailed charting HOW rides only the user-facing voice, not every worker — workers
-    keep the base's one-line affordance). The per-turn attachment block is appended by the
-    caller AFTER this so the stable hint stack stays prefix-cache friendly (缓存友好).
+    directory) + the derived ``<项目清单>`` (Folder name＋画像首句; outside ``<rules>`` so it
+    never evicts always memory) + inline citation guidance + the CEO-only
+    ``<visualization>`` block (按角色 right-size: the detailed charting HOW rides only the
+    user-facing voice, not every worker — workers keep the base's one-line affordance).
+    The per-turn attachment block is appended by the caller AFTER this so the stable hint
+    stack stays prefix-cache friendly (缓存友好).
 
     ``cold_start_explore``: ``False``/``None``/``\"\"`` off; ``True`` or ``\"empty\"`` empty-profile
     hard gate (工程点名); ``\"rebind\"`` workspace-identity mismatch gate (过期再探);
@@ -275,6 +281,13 @@ def compose_ceo_chat_prompt(
             if "consult_rule" in ceo_tool_names
             else "",
             SectionOrder.RULE_DIRECTORY,
+        )
+        .add(
+            "project_catalog",
+            # Empty → dropped by ``add``. Own hard count cap (settings); not under
+            # max_instruction_* so always memory is never squeezed out.
+            render_project_catalog(project_catalog),
+            SectionOrder.PROJECT_CATALOG,
         )
         .add("citation", resolve(FRAGMENT_CITATION, CHAT_CITATION_HINT), SectionOrder.CITATION)
         .add(

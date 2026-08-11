@@ -844,6 +844,64 @@ def test_maybe_emit_gates_and_emits():
     assert events[0].payload["state"] == "delivered"
 
 
+def test_maybe_emit_logs_empty_gate_counts(monkeypatch):
+    """无物质静默仍打诊断日志：三个闸条件各自为 0，巡检可证「为何没出卡」。"""
+    from agentcore.runtime.delegate import delivery_status as mod
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(mod, "logger", spy)
+    sink = EventSink()
+    plan = _plan(RunSpec(run_id="w1", task="调研", role="研究员"))
+    maybe_emit_delivery_status(
+        sink,
+        plan,
+        {"w1": RunState(phase=RunPhase.COMPLETED, content="综述正文")},
+        execution_id="e-empty-obs",
+    )
+    assert not any(e.type is EventType.DELIVERY_STATUS for e in sink._history)
+    fields = spy.get("delegate.delivery_status_empty")
+    assert fields["execution_id"] == "e-empty-obs"
+    assert fields["delivered_count"] == 0
+    assert fields["gaps_count"] == 0
+    assert fields["rejected_count"] == 0
+    assert not any(name == "delegate.delivery_status_emitted" for name, _ in spy.events)
+
+
+def test_maybe_emit_logs_emitted_counts(monkeypatch):
+    """有物质发射时打成功日志，载荷带 artifacts/accepted/rejected/gaps 数量。"""
+    from agentcore.runtime.delegate import delivery_status as mod
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(mod, "logger", spy)
+    sink = EventSink()
+    plan = _plan(RunSpec(run_id="w1", task="写文件", role="工程师"))
+    maybe_emit_delivery_status(
+        sink,
+        plan,
+        {
+            "w1": RunState(
+                phase=RunPhase.COMPLETED,
+                content="ok",
+                files_touched=["a.md", "b.md"],
+                file_acceptance=_accepted("a.md", "b.md"),
+            )
+        },
+        execution_id="e-emit-obs",
+    )
+    events = [e for e in sink._history if e.type is EventType.DELIVERY_STATUS]
+    assert len(events) == 1
+    fields = spy.get("delegate.delivery_status_emitted")
+    assert fields["execution_id"] == "e-emit-obs"
+    assert fields["state"] == "delivered"
+    assert fields["artifacts_count"] == 2
+    assert fields["accepted_count"] == 2
+    assert fields["rejected_count"] == 0
+    assert fields["gaps_count"] == 0
+    assert not any(name == "delegate.delivery_status_empty" for name, _ in spy.events)
+
+
 def test_qa_deferred_budget_emits_website_verify_action():
     from agentcore.runtime.runs.types import Deliverable
 

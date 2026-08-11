@@ -20,7 +20,10 @@ from agentcore.billing.attribution import (
 )
 from agentcore.billing.cost_ledger_queue import MemoryOutboxBackend
 from agentcore.billing.gate import preflight_llm_credentials
-from agentcore.billing.turn_ledger import reconcile_turn_cost_ledger
+from agentcore.billing.turn_ledger import (
+    drain_cost_ledger_before_reconcile,
+    reconcile_turn_cost_ledger,
+)
 from agentcore.config import settings
 from agentcore.core.errors import QuotaExceededError
 from agentcore.core.log_context import log_context
@@ -218,10 +221,12 @@ async def test_drain_redrain_same_run_id_record_runs_do_nothing(monkeypatch, led
 @pytest.mark.asyncio
 async def test_reconcile_drains_outbox_before_materialize(monkeypatch):
     order: list[str] = []
+    open_main_sessions = 0
 
     class _Queue:
         async def drain_once(self) -> int:
             order.append("drain")
+            assert open_main_sessions == 0, "drain must not run under a main-pool session"
             return 0
 
     repo = MagicMock()
@@ -240,16 +245,70 @@ async def test_reconcile_drains_outbox_before_materialize(monkeypatch):
         lambda _s: repo,
     )
 
+    drained = await drain_cost_ledger_before_reconcile(
+        conversation_id="c1",
+        message_id="m1",
+    )
+    open_main_sessions += 1
+    try:
+        await reconcile_turn_cost_ledger(
+            MagicMock(),
+            drained=drained,
+            user_id="u1",
+            conversation_id="c1",
+            message_id="m1",
+            cost_runs=[],
+        )
+    finally:
+        open_main_sessions -= 1
+    assert order == ["drain", "materialize"]
+    repo.materialize_message_runs.assert_awaited_once()
+    repo.record_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_does_not_drain_while_holding_session(monkeypatch):
+    """Acceptance: materialize path never calls drain_once (pool inversion guard)."""
+    drain_calls = 0
+
+    class _Queue:
+        async def drain_once(self) -> int:
+            nonlocal drain_calls
+            drain_calls += 1
+            return 0
+
+    repo = MagicMock()
+    repo.materialize_message_runs = AsyncMock(return_value=set())
+    repo.record_runs = AsyncMock(return_value=0)
+    repo.list_for_message = AsyncMock(return_value=[])
+
+    monkeypatch.setattr(
+        "agentcore.billing.cost_ledger_queue.get_cost_ledger_queue",
+        lambda: _Queue(),
+    )
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.CostEventRepository",
+        lambda _s: repo,
+    )
+
+    drained = await drain_cost_ledger_before_reconcile(conversation_id="c1", message_id="m1")
+    assert drain_calls == 1
     await reconcile_turn_cost_ledger(
         MagicMock(),
+        drained=drained,
         user_id="u1",
         conversation_id="c1",
         message_id="m1",
         cost_runs=[],
     )
-    assert order == ["drain", "materialize"]
-    repo.materialize_message_runs.assert_awaited_once()
-    repo.record_runs.assert_not_awaited()
+    assert drain_calls == 1, "reconcile must not re-enter telemetry drain under main session"
+
+
+def test_cost_ledger_drained_not_constructible_directly():
+    from agentcore.billing.turn_ledger import CostLedgerDrained
+
+    with pytest.raises(TypeError, match="drain_cost_ledger_before_reconcile"):
+        CostLedgerDrained()
 
 
 @pytest.mark.asyncio
@@ -277,11 +336,17 @@ async def test_reconcile_empty_cost_runs_still_materializes(monkeypatch):
     repo.list_for_message = AsyncMock(return_value=[event])
 
     monkeypatch.setattr(
+        "agentcore.billing.cost_ledger_queue.get_cost_ledger_queue",
+        lambda: MagicMock(drain_once=AsyncMock(return_value=0)),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.CostEventRepository",
         lambda _s: repo,
     )
+    drained = await drain_cost_ledger_before_reconcile(conversation_id="c1", message_id="m1")
     rows = await reconcile_turn_cost_ledger(
         session,
+        drained=drained,
         user_id="u1",
         conversation_id="c1",
         message_id="m1",

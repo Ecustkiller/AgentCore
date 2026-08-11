@@ -183,16 +183,19 @@ def rework_refill_slots(
     *,
     original_limit: int,
     wind_down_entered: bool,
+    write_disk_form: bool = False,
 ) -> int:
     """How many retrieval slots a contract rework may add (预算语义不绕过).
 
+    - Write-disk form (``form=files`` / artifacts landing) rework: **0** — worker
+      needs a directed write/repair pass, not more ``web_search``/``read_url``.
     - After token / timeout wind_down: **0** — rework must not restore investigation.
     - Otherwise: half the original resolved budget (min 1), same slice size as before.
     Caller must apply via :meth:`RetrievalBudgetState.refill_within_cap` with
     ``cap=original_limit`` so the absolute ceiling never grows past the plan-time
     budget (unlike unbounded :meth:`~RetrievalBudgetState.refill`).
     """
-    if wind_down_entered or original_limit <= 0:
+    if write_disk_form or wind_down_entered or original_limit <= 0:
         return 0
     return max(1, int(original_limit) // 2)
 

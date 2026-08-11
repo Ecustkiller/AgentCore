@@ -174,9 +174,24 @@ function unwrapSidecarRejectMessage(err: unknown): string | null {
  *
  * IPC 边界拒（`无效的 IPC 入参：…`）优先展字段级原因，避免与「浏览器未装配 / 服务不可用」混淆。
  */
+/** 本机互斥拒——正常并发态，不是引擎故障。 */
+function isSidecarTurnAlreadyRunning(err: unknown): boolean {
+  const msg = unwrapSidecarRejectMessage(err) ?? "";
+  return /turn already running/i.test(msg);
+}
+
 function describeSidecarTurnError(err: unknown): string | null {
   const unwrapped = unwrapSidecarRejectMessage(err);
   if (!unwrapped) return null;
+  // 忙槽互斥：勿套「本地引擎出错」——与云端 turn_in_progress / resume_deferred 同属并发态。
+  if (/turn already running/i.test(unwrapped)) {
+    return "当前还有回合在进行，请稍候或先停止后再继续";
+  }
+  // Deferred 等待被同会话更新的一次提交顶替（服务端 last click wins）：settlement 已预写落库，
+  // 放行不会丢——同属并发态，勿套引擎故障文案。
+  if (/resume superseded/i.test(unwrapped)) {
+    return "这次放行已由更新的一次提交接管";
+  }
   const ipcMatch =
     /^无效的 IPC 入参：([^\s（]+)(?:（字段 (.+?) 期望 (.+?)）)?$/.exec(
       unwrapped,
@@ -560,16 +575,10 @@ async function runSidecarTurn({
     if (err instanceof DOMException && err.name === "AbortError") {
       throw err;
     }
-    // 这条链路的失败**全部来自本地引擎**（拉不起 / 初始化失败 / 引擎异常 / 进程退出），从不是
-    // 真正的「网络」。优先用 onStatus 记下的生命周期诊断（uv/venv 找不到、退出码…）换出针对性
-    // 横幅；没有（如回合中途引擎报错，进程仍健康）则退回从该次拒绝里提取真因，最后兜底。
-    const detail =
-      takeRecentSidecarFailure(rootId) ??
-      describeSidecarTurnError(err) ??
-      failMessage;
-    // 本机互斥拒不进云端 jsonl——落到 desktop.jsonl，下次可对照横幅 UUID 排查。
-    const rejectMsg = unwrapSidecarRejectMessage(err) ?? "";
-    if (/turn already running/i.test(rejectMsg)) {
+    // 本机互斥拒不进云端 jsonl——落到 desktop.jsonl；文案走并发态（勿套引擎故障）。
+    // 优先于 onStatus 生命周期诊断，避免陈旧 spawn 失败文案盖住忙槽拒。
+    const busy = isSidecarTurnAlreadyRunning(err);
+    if (busy) {
       logEvent("warn", "sidecar.turn_already_running", {
         op,
         turn_id: turnId,
@@ -577,11 +586,23 @@ async function runSidecarTurn({
         saw_any_event: sawAnyEvent,
       });
     }
+    // 非忙槽：失败**来自本地引擎**（拉不起 / 初始化失败 / 引擎异常 / 进程退出），从不是
+    // 真正的「网络」。优先用 onStatus 记下的生命周期诊断（uv/venv 找不到、退出码…）换出针对性
+    // 横幅；没有（如回合中途引擎报错，进程仍健康）则退回从该次拒绝里提取真因，最后兜底。
+    const detail = busy
+      ? (describeSidecarTurnError(err) ??
+        "当前还有回合在进行，请稍候或先停止后再继续")
+      : (takeRecentSidecarFailure(rootId) ??
+        describeSidecarTurnError(err) ??
+        failMessage);
     // 启动期失败（一个事件都没派发）= 无任何输出 / 副作用，可安全改道云端重跑（阶段二降级）；
-    // 中途失败（已开始流式 / 已调工具）则否，照常走「本地引擎出错」横幅 + 重试。
+    // 中途失败（已开始流式 / 已调工具）则否。忙槽互斥不是引擎故障，也不降级云端。
     throw new StreamError("sidecar", undefined, {
       serverMessage: detail,
-      recoverable: !sawAnyEvent,
+      // 忙槽不是引擎故障：不降级云端（sendTurn 看 recoverable）。
+      recoverable: busy ? false : !sawAnyEvent,
+      // 专用码：runResume 据此恢复冷卡；勿复用 turn_in_progress（会盖掉并发文案）。
+      ...(busy ? { code: "sidecar_turn_busy" } : {}),
     });
   } finally {
     // Abort / engine failure skips message_end (and thus its flush); drain any

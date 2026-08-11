@@ -144,10 +144,13 @@ def ask_user_tool_result(
         return ToolResult(tool_call_id="", success=True, output=output)
     if decision is CheckpointDecision.STOP:
         # 拒答可见：回灌 CEO（对齐开工卡取消 / OpenAI reject→resume）；非空 continue。
+        # 拒答后默认收口——真实回合里「换假设继续」被当成了平级选项，模型接着又起了
+        # 一轮工具，用户只能去按硬停止。收口是默认，继续是例外。
         head = "用户取消了澄清，未作答。"
         guidance = (
-            "宜据此自行收口、换假设继续，或改用正文确认；"
-            "勿用同一问句立刻再弹 ask_user。"
+            "默认据此收口：用正文说清已完成什么、卡在哪、建议的下一步；"
+            "【禁止】再弹 ask_user 或开工卡追问（换个问法也不行）。"
+            "仅当手上工作已能无歧义推进时才换假设继续，并在正文写明所换假设。"
         )
         output = (
             f"{head}用户留言：{note}\n{guidance}" if note else f"{head}\n{guidance}"

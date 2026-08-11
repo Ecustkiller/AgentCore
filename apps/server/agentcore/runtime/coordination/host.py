@@ -413,7 +413,7 @@ def _coordination_start_echo(
         "再谈团队；相关则图内处置，无关则 queue_user_message 转对话级排队；"
         "全部完成后做最终合成并收口（协调态进度旁白不是终稿）。"
         "用户要立等结果的快任务请用 finalize 阻塞收口；"
-        "单 worker / finalize / 嵌套 lead / 显式 coordinate=false 仍走阻塞等待。"
+        "finalize / 嵌套 lead / 显式 coordinate=false 仍走阻塞等待。"
     )
 
 
@@ -1102,15 +1102,6 @@ async def _background_drive(
                 if close is not None:
                     await close()
         record_coordination_snapshot(session)
-        # 跨回合同图追加：后台 drive 结束时排干宿主 journal 写缓冲。
-        with contextlib.suppress(Exception):
-            from agentcore.runtime.delegate.graph_append import (
-                current_graph_append_redirect,
-            )
-
-            redir = current_graph_append_redirect.get()
-            if redir is not None and redir.execution_id == execution_id:
-                await redir.host_writer.flush()
         finish_detached_coordination(session)
 
 

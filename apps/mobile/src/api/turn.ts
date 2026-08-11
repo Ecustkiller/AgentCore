@@ -39,6 +39,41 @@ export async function stopConversation(
 /** 取消排队结果：成功撤回 / 已不在队（已开跑或不存在）。 */
 export type CancelQueuedResult = "cancelled" | "gone";
 
+type QueuedTurnListResponse = Schemas["QueuedTurnListResponse"];
+
+/** GET 快照项（内容权威；EPHEMERAL 事件只作变了信号）。 */
+export type FetchedQueuedTurn = {
+  queueId: string;
+  content: string;
+  position: number;
+  interjectionId?: string;
+};
+
+/**
+ * List the conversation's process-local FIFO queued turns (权威内容源).
+ * Restart empties the queue — clients reconcile from this endpoint.
+ */
+export async function fetchQueuedTurns(
+  conversationId: string,
+): Promise<FetchedQueuedTurn[]> {
+  const res = await apiFetch(
+    `/v1/conversations/${conversationId}/queued-turns`,
+  );
+  if (!res.ok) {
+    throw new Error(`加载排队失败 (${res.status})`);
+  }
+  const data = (await res.json()) as QueuedTurnListResponse;
+  return (data.items ?? []).map((item) => {
+    const interjectionId = (item.interjection_id ?? "").trim() || undefined;
+    return {
+      queueId: item.queue_id,
+      content: item.content,
+      position: item.position,
+      interjectionId,
+    };
+  });
+}
+
 /**
  * Cancel one FIFO queued turn before drain (同对话再发 · 按项取消).
  * Stop does **not** clear the queue — this is the only per-item withdraw.

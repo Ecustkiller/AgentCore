@@ -743,6 +743,7 @@
   "projected": {
     "status": "paused",
     "finishReason": null,
+    "error": null,
     "content": "",
     "reasoning": "",
     "captainContext": [],

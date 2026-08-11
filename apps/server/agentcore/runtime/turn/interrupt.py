@@ -120,11 +120,19 @@ async def _reconcile_interrupted_turn_cost(
     may still be lost on cancel). Skip emit when ``messages.cost`` is already stamped
     so a second closer does not double-log ``cost.recorded``.
     """
-    from agentcore.billing.turn_ledger import reconcile_turn_cost_ledger
+    from agentcore.billing.turn_ledger import (
+        drain_cost_ledger_before_reconcile,
+        reconcile_turn_cost_ledger,
+    )
     from agentcore.conversation.common import log_cost_recorded
     from agentcore.db.repositories import ConversationRepository, MessageRepository
     from agentcore.runtime.costing import aggregate_cost
 
+    # Drain before main-pool session (same discipline as cloud finalize / handoff).
+    ledger_drained = await drain_cost_ledger_before_reconcile(
+        conversation_id=conversation_id,
+        message_id=message_id,
+    )
     async with async_session_factory() as session:
         conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
         if conv is None or not conv.user_id:
@@ -144,6 +152,7 @@ async def _reconcile_interrupted_turn_cost(
         try:
             ledger_rows = await reconcile_turn_cost_ledger(
                 session,
+                drained=ledger_drained,
                 user_id=str(conv.user_id),
                 conversation_id=conversation_id,
                 message_id=message_id,

@@ -30,6 +30,7 @@ from agentcore.api.dependencies import get_db
 from agentcore.config import settings
 from agentcore.db.base import Base
 from agentcore.db.base import engine as app_engine
+from agentcore.db.base import probe_engine as app_probe_engine
 from agentcore.db.base import telemetry_engine as app_telemetry_engine
 from agentcore.db.repositories import (
     AdminMfaRepository,
@@ -198,17 +199,22 @@ def new_client(session_factory) -> Callable:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_app_engine_pool() -> AsyncIterator[None]:
-    """Drain the process-global engine's pool after each test.
+    """Drain the process-global engines after each test.
 
-    ``database_ready()`` (readiness probe + admin 系统/概览 panels) pings the global
-    ``engine`` directly, *not* the per-test ``get_db`` override. With function-scoped
-    event loops a pooled connection binds to the first test's loop, so the next test
-    that probes hits a connection on a closed loop ("Event loop is closed"). Disposing
-    here — inside each test's own loop — guarantees the next probe opens fresh.
+    ``database_ready()`` (readiness probe + admin 系统/概览 panels) uses the global
+    ``probe_engine`` (NullPool), *not* the per-test ``get_db`` override. With
+    function-scoped event loops a connection can bind to the first test's loop, so
+    the next probe hits a closed loop ("Event loop is closed"). Disposing here —
+    inside each test's own loop — guarantees the next probe opens fresh.
     """
     yield
     await app_engine.dispose()
     await app_telemetry_engine.dispose()
+    dispose = getattr(app_probe_engine, "dispose", None)
+    if dispose is not None:
+        result = dispose()
+        if hasattr(result, "__await__"):
+            await result
 
 
 @pytest.fixture(autouse=True)

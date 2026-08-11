@@ -166,10 +166,16 @@ async def _dispose_app_engine_pool() -> AsyncIterator[None]:
     """
     yield
     from agentcore.db.base import engine as app_engine
+    from agentcore.db.base import probe_engine as app_probe_engine
     from agentcore.db.base import telemetry_engine as app_telemetry_engine
 
     await app_engine.dispose()
     await app_telemetry_engine.dispose()
+    dispose = getattr(app_probe_engine, "dispose", None)
+    if dispose is not None:
+        result = dispose()
+        if hasattr(result, "__await__"):
+            await result
 
 
 def _rmtree_quiet(path: Path) -> None:

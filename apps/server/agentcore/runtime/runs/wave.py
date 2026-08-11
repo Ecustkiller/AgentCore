@@ -125,6 +125,7 @@ class WaveScheduler:
         should_stop: Callable[[], bool] | None = None,
         priority_reserve_hit: Callable[[], bool] | None = None,
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
+        stop_run_ids: Callable[[], frozenset[str]] | None = None,
         on_progress: OnProgress | None = None,
         on_node_done: OnNodeDone | None = None,
         on_boundary: OnBoundary | None = None,
@@ -165,8 +166,13 @@ class WaveScheduler:
           keeps cascade-skip on any cancel/failure. ``force_continue=True`` allows a
           node even with zero successful upstreams. A dependent revived via
           ``replaces_run_id`` still runs.
-          Used by delegate drive for user-initiated worker redirect,
+          Used by delegate drive for user-initiated worker redirect / run-stop,
           ``cancel_worker`` pending withdraw, and hard-timeout force-cancel.
+        - ``stop_run_ids`` (optional) marks which cancel targets are user「只停这项
+          工作」rather than redirect: Wave cancels them with msg=``user_stop`` so
+          the executor emits ``run_cancelled(reason=user_stop)`` and absorbs without
+          hot/cold follow-up. When omitted, all ``cancel_run_ids`` use redirect
+          absorb (legacy / coordination).
         - ``on_progress`` fires after *each* node finishes with the completed-so-far
           map, so the host gets smooth progress (one increment per node).
         - ``on_node_done`` (optional, additive) fires once per *executed* node with
@@ -322,7 +328,8 @@ class WaveScheduler:
         bind_boundaries = 0
         scope_boundaries = 0
         checkpoint_boundaries = 0
-        cancelled_by_redirect: set[str] = set()
+        # run_id → asyncio cancel msg used for absorb (``redirect`` | ``user_stop``).
+        cancelled_absorb_msg: dict[str, str] = {}
 
         try:
             while True:
@@ -507,23 +514,26 @@ class WaveScheduler:
                 if not running:
                     break  # nothing in flight and (holding, or no node is ready) ⇒ done
 
-                # Per-run user cancel (Phase 2a redirect): cancel specific in-flight tasks
+                # Per-run user cancel (redirect / run-stop): cancel specific in-flight tasks
                 # without aborting the whole batch. Checked each cycle; a cancelled task
                 # resolves on the next wait and is recorded as CANCELLED (not re-raised).
                 if cancel_run_ids is not None and running:
-                    for target_id in cancel_run_ids():
+                    pending_cancel = cancel_run_ids()
+                    stops = stop_run_ids() if stop_run_ids is not None else frozenset()
+                    for target_id in pending_cancel:
                         for task, rid in list(running.items()):
-                            # msg="redirect" so executor.agent salvages + returns CANCELLED
+                            # msg=redirect|user_stop so executor.agent returns CANCELLED
                             # instead of re-raising (整轮 stop uses bare cancel).
-                            # Only claim redirect-absorb when *this* cancel took effect —
+                            # Only claim absorb when *this* cancel took effect —
                             # if the task was already cancelling for stop/external,
                             # cancel() returns False and we must not swallow that.
+                            msg = "user_stop" if target_id in stops else "redirect"
                             if (
                                 rid == target_id
-                                and rid not in cancelled_by_redirect
-                                and task.cancel("redirect")
+                                and rid not in cancelled_absorb_msg
+                                and task.cancel(msg)
                             ):
-                                cancelled_by_redirect.add(rid)
+                                cancelled_absorb_msg[rid] = msg
 
                 done, _ = await asyncio.wait(
                     set(running),
@@ -534,20 +544,22 @@ class WaveScheduler:
                     continue
                 for task in done:
                     run_id = running.pop(task)
-                    if run_id in cancelled_by_redirect:
+                    if run_id in cancelled_absorb_msg:
                         # User-initiated single cancel: absorb gracefully, don't propagate.
                         # Prefer the executor's salvaged CANCELLED RunState (partial transcript);
-                        # fall back to empty CANCELLED if the task raised redirect / never returned.
+                        # fall back to empty CANCELLED if the task raised redirect/user_stop
+                        # / never returned.
                         # Stop/external CancelledError must re-raise — never treat as success
                         # (zombie scheduler keeps dispatching after outer cancel).
+                        absorb_msg = cancelled_absorb_msg[run_id]
                         if not task.done():
-                            task.cancel("redirect")
+                            task.cancel(absorb_msg)
                         state: RunState | None = None
                         try:
                             result = task.result()
                         except asyncio.CancelledError as e:
                             reason = str(e.args[0]) if e.args else ""
-                            if reason == "redirect":
+                            if reason in ("redirect", "user_stop"):
                                 state = RunState(phase=RunPhase.CANCELLED)
                             else:
                                 raise
@@ -654,7 +666,7 @@ class WaveScheduler:
             # cancel every in-flight child and let it unwind (subprocess kill,
             # run_cancelled(reason=stop)) before propagating, so no worker is orphaned
             # and journal/SSE always see the stop cancel. ``cancel("stop")`` matches
-            # executor.agent's dual-reason contract (redirect vs stop); ``shield`` is
+            # executor.agent's triple-reason contract (redirect / user_stop vs stop); ``shield`` is
             # required because this except often runs under an already-cancelled wave
             # task — a bare await would be interrupted before children emit.
             for task in running:

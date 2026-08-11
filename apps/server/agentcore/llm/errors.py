@@ -332,6 +332,16 @@ def is_context_overflow(body: bytes | str | None) -> bool:
     return bool(preview and _CONTEXT_OVERFLOW_MARKERS.search(preview))
 
 
+def is_temperature_deprecated(body: bytes | str | None) -> bool:
+    """True when upstream error.message says temperature is rejected/deprecated.
+
+    Matches the same structured markers as :func:`client_error_message` product
+    copy — not free-text hard gate. Used by the omit-temperature retry path.
+    """
+    extracted = _extract_upstream_message(body_preview(body)) or ""
+    return bool(extracted and _TEMPERATURE_DEPRECATED_MARKERS.search(extracted))
+
+
 def client_error_message(
     provider_name: str, status_code: int, body: bytes | str | None
 ) -> str:
@@ -350,11 +360,7 @@ def client_error_message(
     # 413 / body-proven overflow: product Chinese only (⑦A) — no upstream wall.
     if status_code == 413 or is_context_overflow(body):
         return _CONTEXT_OVERFLOW_PRODUCT
-    if (
-        status_code == 400
-        and extracted
-        and _TEMPERATURE_DEPRECATED_MARKERS.search(extracted)
-    ):
+    if status_code == 400 and is_temperature_deprecated(body):
         return f"{provider_name} 当前模型不接受 temperature 参数，请重试或更换模型"
     if extracted:
         return f"{provider_name} {extracted}"

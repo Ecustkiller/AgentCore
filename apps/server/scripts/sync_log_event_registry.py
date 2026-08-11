@@ -179,6 +179,20 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "continuation_run_id": "str",
         "recall_count": "int",
     },
+    "delegate.delivery_status_empty": {
+        "execution_id": "str",
+        "delivered_count": "int",
+        "gaps_count": "int",
+        "rejected_count": "int",
+    },
+    "delegate.delivery_status_emitted": {
+        "execution_id": "str",
+        "state": "str",
+        "artifacts_count": "int",
+        "accepted_count": "int",
+        "rejected_count": "int",
+        "gaps_count": "int",
+    },
     "worker.escalate": {
         "kind": "str",
         "blocking": "bool",
@@ -300,6 +314,23 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     },
     "pipeline.error": {"error": "str"},
     "http.unhandled_error": {"method": "str", "path": "str", "error": "str"},
+    "http.db_pool_exhausted": {"method": "str", "path": "str", "error": "str"},
+    "db.pool_exhausted_snapshot": {
+        "pool": "str",
+        "checked_out": "int",
+        "capacity": "int",
+        "holders": "list",
+    },
+    "db.pool_checkout_slow": {
+        "pool": "str",
+        "held_s": "float",
+        "task_name": "str",
+        "stack": "list",
+        "trace_id": "str",
+        "conversation_id": "str",
+        "run_id": "str",
+        "agent_id": "str",
+    },
     "approval.sandbox_auto_pass": {"tool": "str"},
     "approval.timeout": {"tool": "str"},
     "firehose.backpressure_drop": {},
@@ -342,6 +373,13 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     "compaction.schedule_failed": {
         "conversation_id": "str",
         "error": "str",
+    },
+    "memory.consolidation_window_dropped": {
+        "conversation_id": "str",
+        "error": "str",
+        "error_type": "str",
+        "reason": "str",
+        "window_through": "str",
     },
     "rate_limit.redis_fail_open": {
         "prefix": "str",
@@ -393,6 +431,12 @@ KEY_DESC: dict[str, str] = {
         "S3：CEO 误传已删 completion_criteria 时打点（忽略字段，非硬闸）"
     ),
     "delegate.run_redirect_hot": "redirect 热修续派（revise 重算桶，与 continuation_ok 同义）",
+    "delegate.delivery_status_empty": (
+        "交付卡判定无物质不发（delivered/gaps/rejected 计数；巡检可证静默原因）"
+    ),
+    "delegate.delivery_status_emitted": (
+        "交付卡已发射（state + artifacts/accepted/rejected/gaps 计数）"
+    ),
     "worker.escalate": "worker 升级求决策",
     "tool.execute_end": "工具执行结束（status/duration_ms；error 时带 reason）",
     "tool.args_salvaged": "handoff 参数 JSON 窄 salvage 成功（裸字符串字段 / 截断闭合）",
@@ -410,6 +454,11 @@ KEY_DESC: dict[str, str] = {
     "cost.prompt_assembled": "系统提示装配观测（段 chars + assembly_hash；零行为副作用）",
     "pipeline.error": "回合管线未捕获异常",
     "http.unhandled_error": "HTTP 层未捕获异常",
+    "http.db_pool_exhausted": "主库连接池耗尽（快失败 503，非 PG 宕机）",
+    "db.pool_exhausted_snapshot": (
+        "连接池枯竭快照：当前持有者上下文/已持时长（非 readiness）"
+    ),
+    "db.pool_checkout_slow": "连接归还过慢（持有超过阈值；含 checkout 时上下文）",
     "auth.login_failed": "敏感操作审计：登录失败（password/unknown/locked/mfa/role；无明文凭据）",
     "auth.mfa_enrolled": "敏感操作审计：Admin MFA 绑定确认成功",
     "auth.mfa_recovery_used": "敏感操作审计：Admin MFA 恢复码成功消费",
@@ -428,6 +477,9 @@ KEY_DESC: dict[str, str] = {
     "compaction.failed": "长对话压缩失败（顶层异常；不推水位）",
     "compaction.timeout": "长对话压缩 LLM 超时（空摘要；不推水位）",
     "compaction.schedule_failed": "压缩调度 due 判定异常",
+    "memory.consolidation_window_dropped": (
+        "不可重试 consolidation 失败：推进水位并丢弃本窗口（防 sweeper 无限重选）"
+    ),
     "rate_limit.redis_fail_open": (
         "Redis 限流请求中途失败 → fail-open 放行本请求（可告警；与 construct 期 "
         "security.rate_limit_redis_fallback 对偶）"

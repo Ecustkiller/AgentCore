@@ -516,6 +516,17 @@ class CloudStore:
             usage_extra["error_code"] = run_error["code"]
             usage_extra["error"] = run_error
 
+        # Drain telemetry outbox before opening the main-pool session (no priority
+        # inversion). Proof is required by reconcile_turn_cost_ledger.
+        ledger_drained = None
+        if cost_runs or message_id:
+            from agentcore.billing.turn_ledger import drain_cost_ledger_before_reconcile
+
+            ledger_drained = await drain_cost_ledger_before_reconcile(
+                conversation_id=conversation_id,
+                message_id=result.get("message_id"),
+            )
+
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
 
@@ -552,13 +563,14 @@ class CloudStore:
 
             # Reconcile even when in-memory cost_runs is thin: cost_calls (call meter)
             # is authority for captain+worker spend; orphans (vision) still fold from cost_runs.
-            if cost_runs or message_id:
+            if ledger_drained is not None:
                 try:
                     from agentcore.billing.turn_ledger import reconcile_turn_cost_ledger
                     from agentcore.runtime.costing import aggregate_cost
 
                     ledger_rows = await reconcile_turn_cost_ledger(
                         session,
+                        drained=ledger_drained,
                         user_id=user_id,
                         conversation_id=conversation_id,
                         message_id=result.get("message_id"),

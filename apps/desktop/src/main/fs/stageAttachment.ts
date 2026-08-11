@@ -59,6 +59,8 @@ interface StagingEntry {
 const staging = new Map<string, StagingEntry>();
 /** Disk scan once so ``stagingId`` survives app restart (files under attach-staging/). */
 let stagingHydrated = false;
+/** Module load ≈ app start — anything staged after it belongs to the live session. */
+const APP_START_MS = Date.now();
 
 function stagingDir(): string {
   return join(app.getPath("userData"), "attach-staging");
@@ -113,6 +115,41 @@ export async function hydrateStagingFromDisk(): Promise<void> {
       continue;
     }
     staging.set(id, mat.data);
+  }
+}
+
+/**
+ * Delete ``attach-staging/<id>`` dirs that no live draft references.
+ *
+ * Draft attachment metadata lives in renderer localStorage, capped to the most
+ * recent drafts — once a draft is evicted (or its conversation cleared) nothing
+ * points at its staged bytes again, so without this they accumulate forever.
+ *
+ * Only dirs predating this launch are eligible, which makes the sweep safe to
+ * run against a live session: an attachment staged right now cannot be reaped
+ * no matter what the caller's snapshot of ids says.
+ */
+export async function sweepStagingOrphans(
+  liveStagingIds: string[],
+): Promise<void> {
+  const live = new Set(liveStagingIds);
+  let ids: string[];
+  try {
+    ids = await fs.readdir(stagingDir());
+  } catch {
+    return;
+  }
+  for (const id of ids) {
+    if (live.has(id)) continue;
+    try {
+      const idDir = join(stagingDir(), id);
+      const st = await fs.stat(idDir);
+      if (!st.isDirectory() || st.mtimeMs >= APP_START_MS) continue;
+      await fs.rm(idDir, { recursive: true, force: true });
+      staging.delete(id);
+    } catch {
+      /* leave it for the next sweep */
+    }
   }
 }
 

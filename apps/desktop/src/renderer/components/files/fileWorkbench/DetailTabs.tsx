@@ -32,7 +32,7 @@ export function DetailTabs({
   onCloseAll: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-stretch overflow-x-auto border-b">
+    <div className="scrollbar-hidden flex shrink-0 items-stretch overflow-x-auto border-b">
       {tabs.map((t) => {
         const key = tabKey(t.wsId, t.path);
         const active = key === activeKey;

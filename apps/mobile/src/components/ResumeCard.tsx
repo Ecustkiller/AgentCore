@@ -12,6 +12,10 @@ import {
   RISK_SEVERITY_TAG,
   parseRiskLabel,
 } from "@/components/ask/parseRiskLabel";
+import {
+  formatWorkspaceLabel,
+  resolveWorkspacePresentation,
+} from "@/components/teamPreviewWorkspace";
 import type { ColdDeferredBusyReason } from "@/lib/coldInteractions";
 import type { VisibleColdResume } from "@/lib/coldResume";
 import {
@@ -176,6 +180,10 @@ type PreviewWorker = {
   model: string | null;
   origin: "platform" | "byok" | null;
   provider_id: string | null;
+  /** 该队员落座 Folder id；裸聊 scratch 缺省。 */
+  target_folder_id: string | null;
+  /** 服务端解析的工作区显示名；旧帧 absent → 不展示。 */
+  target_folder_name: string | null;
 };
 
 type PreviewDebateSide = {
@@ -232,6 +240,8 @@ export function parseTeamPreviewWorkers(
       origin:
         originRaw === "platform" || originRaw === "byok" ? originRaw : null,
       provider_id: str(w, "provider_id"),
+      target_folder_id: str(w, "target_folder_id"),
+      target_folder_name: str(w, "target_folder_name"),
     });
   }
   return out;
@@ -505,6 +515,7 @@ function ResumeCardBody({
         paused.workers as Array<Record<string, unknown>> | undefined,
       )
     : [];
+  const desk = resolveWorkspacePresentation(workers);
   const debateKickoff = useMemo(
     () =>
       isDebateKickoff
@@ -1126,6 +1137,14 @@ function ResumeCardBody({
       )}
       {isDelegateKickoff && workers.length > 0 && (
         <div className="pause-steps" data-testid="team-preview-workers">
+          {desk.mode === "summary" && (
+            <div
+              className="pause-workspace-summary"
+              data-testid="team-workspace-summary"
+            >
+              {formatWorkspaceLabel(desk.name)}
+            </div>
+          )}
           {workers.map((w) => {
             const writeCap = effectiveWriteCap(w);
             const writeLabel = effectiveWriteLabel(w);
@@ -1147,6 +1166,14 @@ function ResumeCardBody({
                       }
                     >
                       {writeLabel}
+                    </span>
+                  )}
+                  {desk.mode === "perWorker" && w.target_folder_name && (
+                    <span
+                      className="pause-worker-desk"
+                      data-testid={`team-worker-desk-${w.run_id}`}
+                    >
+                      {formatWorkspaceLabel(w.target_folder_name)}
                     </span>
                   )}
                   {w.depends_on.length > 0 && (

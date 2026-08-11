@@ -540,7 +540,6 @@ export function TurnFileChangesReview({
       } else {
         await restoreSnapshot(conversationId, baselineSnapshotId);
       }
-      notifySuccess("已尽力恢复到本回合开始");
       setReloadToken((n) => n + 1);
     } catch (e) {
       notifyActionError("恢复失败", e);

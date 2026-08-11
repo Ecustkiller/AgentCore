@@ -220,6 +220,14 @@ class TeamPreviewWorker(WirePayload):
     model: str | None = absent("该队员模型 id（可展示裸 id）。")
     origin: Literal["platform", "byok"] | None = absent("模型来源；有三元组时透出。")
     provider_id: str | None = absent("BYOK 服务商 id；platform 缺省。")
+    # 落座桌：有效 Folder id（节点 target 优先，否则本会话工作区）；无 Folder 的裸聊
+    # scratch 仅透出 target_folder_name=本会话工作区。缺字段=旧帧，前端不展示桌列。
+    target_folder_id: str | None = absent(
+        "该队员落座 Folder id（显式 target 或本会话工作区）；裸聊 scratch 缺省。"
+    )
+    target_folder_name: str | None = absent(
+        "服务端解析的工作区显示名；无 Folder 时为「本会话工作区」。缺省=旧帧。"
+    )
 
 
 class TeamPreviewSide(WirePayload):

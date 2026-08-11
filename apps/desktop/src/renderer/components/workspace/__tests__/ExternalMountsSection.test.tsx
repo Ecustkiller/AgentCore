@@ -96,7 +96,6 @@ describe("ExternalMountsSection", () => {
     expect(revokeMutate).toHaveBeenCalledWith(
       "root-1",
       expect.objectContaining({
-        onSuccess: expect.any(Function),
         onError: expect.any(Function),
       }),
     );

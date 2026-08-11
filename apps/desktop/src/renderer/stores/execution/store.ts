@@ -113,7 +113,7 @@ export interface ExecutionRuntime {
    * 对账（已交付/缺口/待用户操作）。DURABLE：重载由 hydrateFromJournal 取最后一条重建，
    * 驱动答复下方的交付状态卡。null = 本回合无对账（纯 prose 成功批次无声）。 */
   deliveryStatus: DeliveryStatusPayload | null;
-  /** 协调中用户插话（`user_interjection`，同 interjectionId 保最新）。DURABLE。 */
+  /** 用户插话（`user_interjection` · 经典/协调；同 interjectionId 保最新）。DURABLE。 */
   userInterjections: UserInterjection[];
 }
 
@@ -598,8 +598,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       patchExec(messageId, () => ({ deliveryStatus: status })),
 
     upsertUserInterjection: (item, messageId) =>
+      // 经典 steer 无 run_plan；协调有 plan。二者都须可写 DURABLE 插话。
       patchExec(messageId, (cur) => {
-        if (!cur.plan) return null;
         const list = [...cur.userInterjections];
         const idx = list.findIndex(
           (x) => x.interjectionId === item.interjectionId,
@@ -793,25 +793,19 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
             if (frame) frames.push(frame);
           }
         }
-        // No run_plan：单 Agent / 可用性短问复用对账——仍可只恢复 deliveryStatus。
+        // No run_plan：经典单聊 / 可用性短问——无协作图骨架，仍恢复 DURABLE 插话
+        // 与 deliveryStatus（刷新后 InterjectionTimeline / 交付卡可读）。
         if (!plan) {
-          if (!deliveryStatus) return {};
+          if (!deliveryStatus && userInterjections.length === 0) return {};
           const cur = state.byId[messageId] ?? EMPTY_EXEC;
-          if (
-            cur.deliveryStatus?.execution_id === deliveryStatus.execution_id
-          ) {
-            // Same reconciliation already stamped (live SSE) — keep other fields.
-            return {
-              byId: {
-                ...state.byId,
-                [messageId]: { ...cur, deliveryStatus },
-              },
-            };
-          }
           return {
             byId: {
               ...state.byId,
-              [messageId]: { ...cur, deliveryStatus },
+              [messageId]: {
+                ...cur,
+                ...(deliveryStatus ? { deliveryStatus } : {}),
+                ...(userInterjections.length > 0 ? { userInterjections } : {}),
+              },
             },
           };
         }

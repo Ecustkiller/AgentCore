@@ -40,12 +40,7 @@ import {
 } from "../captainContext";
 import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames, queueFrame } from "../execFrameBuffer";
-import {
-  ceoMessageId,
-  execMessageId,
-  noteGraphAppendRedirect,
-  routeHintFromPayload,
-} from "../helpers";
+import { ceoMessageId, execMessageId, routeHintFromPayload } from "../helpers";
 import { refreshAfterBackgroundExecution } from "../refreshAfterBackgroundExecution";
 import type { DispatchContext } from "../types";
 
@@ -92,25 +87,24 @@ export function handleExecutionEvent(
 
   switch (event.type) {
     case "graph_append": {
-      // 跨回合同图追加锚点——落在【追加回合】process；生长帧走 host 槽。
+      // 旧 journal 兼容：锚点落在【当时追加回合】process。新路径不再发此事件
+      //（改用 run_plan.prev_execution_id + 本回合开图）。
       const p = event.payload as GraphAppendPayload;
       flushPendingContent(conversationId);
-      noteGraphAppendRedirect(conversationId, p.host_message_id);
       useConversationStore.getState().stampGraphAppend(p, conversationId);
       return true;
     }
     case "run_plan": {
       const payload = event.payload as RunPlanPayload;
-      if (payload.host_message_id) {
-        noteGraphAppendRedirect(conversationId, payload.host_message_id);
-      }
       const mid = execMessageId(conversationId, {
+        // 旧 journal：host_message_id 仍把 plan merge 回宿主槽；新路径不写此字段。
         host_message_id: payload.host_message_id,
         execution_id: payload.execution_id,
       });
       if (!mid) return true;
       useExecutionStore.getState().ingestPlan(planFromRunPlan(payload), mid);
-      // 追加回合：不在最新助手气泡插 team / 盖 executionId（宿主卡已有）。
+      // 旧 journal 跨回合同图追加：不在最新气泡插 team（锚点由 graph_append）。
+      // 新路径无 host_message_id → 本回合正常开图。
       if (payload.host_message_id) return true;
       if (
         payload.plan_type === "multi_agent" ||
@@ -304,43 +298,43 @@ export function handleExecutionEvent(
       return true;
     }
     case "user_interjection": {
-      const mid = execMessageId(
-        conversationId,
-        routeHintFromPayload(event.payload),
-      );
-      if (mid) {
-        const p = event.payload as {
-          interjection_id?: string;
-          execution_id?: string;
-          content?: string;
-          status?: string;
-          note?: string | null;
-          attachments?: Array<{
-            name?: string;
-            workspace_path?: string;
-            binary?: boolean;
-          }>;
-        };
-        const iid = (p.interjection_id || "").trim();
-        if (iid) {
-          const attachments = (p.attachments ?? [])
-            .filter(
-              (
-                a,
-              ): a is {
-                name: string;
-                workspace_path?: string;
-                binary?: boolean;
-              } => typeof a.name === "string" && Boolean(a.name.trim()),
-            )
-            .map((a) => ({
-              name: a.name.trim(),
-              workspacePath:
-                typeof a.workspace_path === "string" && a.workspace_path.trim()
-                  ? a.workspace_path
-                  : undefined,
-              binary: Boolean(a.binary),
-            }));
+      const p = event.payload as {
+        interjection_id?: string;
+        execution_id?: string;
+        content?: string;
+        status?: string;
+        note?: string | null;
+        attachments?: Array<{
+          name?: string;
+          workspace_path?: string;
+          binary?: boolean;
+        }>;
+      };
+      const iid = (p.interjection_id || "").trim();
+      if (iid) {
+        const attachments = (p.attachments ?? [])
+          .filter(
+            (
+              a,
+            ): a is {
+              name: string;
+              workspace_path?: string;
+              binary?: boolean;
+            } => typeof a.name === "string" && Boolean(a.name.trim()),
+          )
+          .map((a) => ({
+            name: a.name.trim(),
+            workspacePath:
+              typeof a.workspace_path === "string" && a.workspace_path.trim()
+                ? a.workspace_path
+                : undefined,
+            binary: Boolean(a.binary),
+          }));
+        const mid = execMessageId(
+          conversationId,
+          routeHintFromPayload(event.payload),
+        );
+        if (mid) {
           useExecutionStore.getState().upsertUserInterjection(
             {
               interjectionId: iid,
@@ -353,12 +347,17 @@ export function handleExecutionEvent(
             mid,
           );
         }
+        // 零宽 positional marker：flush 缓冲正文后钉到当时 process 末尾（同 id dedup）。
+        flushPendingContent(conversationId);
+        useConversationStore
+          .getState()
+          .stampUserInterjectionMarker(iid, conversationId);
       }
       return true;
     }
     case "tool_use_start": {
-      // Worker-scoped tools ride the host graph under divert; CEO orchestration stays
-      // on the appending turn (anchor / tool card).
+      // Worker-scoped tools ride the execution slot (same execution_id merge);
+      // CEO orchestration stays on the current assistant (tool card).
       const startPayload = event.payload as ToolUseStartPayload;
       if (startPayload.run_id) {
         recordFrameNow(event, conversationId);

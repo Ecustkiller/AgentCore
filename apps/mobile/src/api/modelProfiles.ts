@@ -97,7 +97,10 @@ export function slotDisplayName(
   return hit?.display_name ?? model;
 }
 
-/** One-line summary: 主 · Worker（空=跟随主模型）. */
+/**
+ * One-line summary: 主 · Worker；后台 / 识图仅在已配置时追加（列表行勿撑宽）。
+ * Worker 空 =「跟随主模型」。
+ */
 export function profileSlotsSummary(
   catalog: ModelCatalog | null,
   profile: LlmModelProfileView,
@@ -106,7 +109,18 @@ export function profileSlotsSummary(
   const worker = profile.worker
     ? (slotDisplayName(catalog, profile.worker) ?? profile.worker.model)
     : "跟随主模型";
-  return `${main} · ${worker}`;
+  const parts = [`${main} · ${worker}`];
+  if (profile.background?.model) {
+    const bg =
+      slotDisplayName(catalog, profile.background) ?? profile.background.model;
+    parts.push(`后台 ${bg}`);
+  }
+  if (profile.vision?.model) {
+    const vision =
+      slotDisplayName(catalog, profile.vision) ?? profile.vision.model;
+    parts.push(`识图 ${vision}`);
+  }
+  return parts.join(" · ");
 }
 
 export function findProfile(

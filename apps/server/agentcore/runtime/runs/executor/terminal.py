@@ -545,16 +545,26 @@ def handle_agent_node_cancel(
     *,
     messages: list[LLMMessage],
     streamed_content: list[str],
+    inflight: list[TokenUsage] | None = None,
+    run_usage: TokenUsage | None = None,
+    run_rounds: int = 0,
+    priced_model: str | None = None,
 ) -> RunState | None:
-    """Dual cancel: redirect → salvage CANCELLED; stop → emit then re-raise.
+    """Triple cancel: redirect → salvage CANCELLED; user_stop → CANCELLED absorb;
+    stop → emit then re-raise.
 
-    Returns a RunState on redirect salvage; returns None when caller must ``raise``.
+    Returns a RunState on redirect/user_stop absorb; returns None when caller must ``raise``.
+    Redirect / user_stop cancel folds already-spent usage (completed rounds + in-flight pass)
+    onto the CANCELLED state — same honesty as the exception / FAILED path — so
+    ``cancel_worker`` / run-stop does not evaporate escalations or member billing.
     """
-    cancel_reason = (
-        "redirect"
-        if e.args and str(e.args[0]) == "redirect"
-        else "stop"
-    )
+    arg = str(e.args[0]) if e.args else ""
+    if arg == "redirect":
+        cancel_reason = "redirect"
+    elif arg == "user_stop":
+        cancel_reason = "user_stop"
+    else:
+        cancel_reason = "stop"
     env.sink.emit(
         run_cancelled(
             spec.run_id,
@@ -571,14 +581,42 @@ def handle_agent_node_cancel(
         if draft and not any(m.role in ("assistant", "tool") for m in salvage_msgs):
             salvage_msgs.append(LLMMessage(role="assistant", content=draft))
         session = try_salvage_session(spec=spec, messages=salvage_msgs)
+        usage_acc = run_usage or TokenUsage()
+        if inflight:
+            usage_acc = usage_acc + inflight[0]
         logger.info(
             "run.redirect_cancelled",
             run_id=spec.run_id,
             salvage=session is not None,
             transcript_len=len(session.transcript) if session else 0,
             streamed_chars=len(draft),
+            tokens=usage_acc.total_tokens,
         )
-        return cancelled_state_from_salvage(session, error="redirected")
+        return cancelled_state_from_salvage(
+            session,
+            error="redirected",
+            usage=usage_acc,
+            model=priced_model,
+            rounds=run_rounds,
+        )
+    if cancel_reason == "user_stop":
+        # Absorb like redirect so the wave continues, but do not salvage for hot
+        # continue — run-stop never triggers revision / ``_redir``.
+        usage_acc = run_usage or TokenUsage()
+        if inflight:
+            usage_acc = usage_acc + inflight[0]
+        logger.info(
+            "run.user_stop_cancelled",
+            run_id=spec.run_id,
+            tokens=usage_acc.total_tokens,
+        )
+        return cancelled_state_from_salvage(
+            None,
+            error="user_stopped",
+            usage=usage_acc,
+            model=priced_model,
+            rounds=run_rounds,
+        )
     return None
 
 

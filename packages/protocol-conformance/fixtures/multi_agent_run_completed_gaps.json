@@ -143,6 +143,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "写一份报告。报告主体完成，附录待补。",
     "reasoning": "",
     "captainContext": [],

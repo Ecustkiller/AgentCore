@@ -138,6 +138,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排调研。 调研初步完成，但引用需补齐。",
     "reasoning": "",
     "captainContext": [],

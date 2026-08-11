@@ -3,11 +3,7 @@ import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { beforeEach, describe, expect, it } from "vitest";
 import { dispatchSSEEvent } from "../dispatch";
-import {
-  clearAllGraphAppendRedirects,
-  execMessageId,
-  noteGraphAppendRedirect,
-} from "../helpers";
+import { execMessageId } from "../helpers";
 
 const CONV = "conv-graph-append-route";
 
@@ -28,15 +24,14 @@ function seedAssistant(id: string, extras: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  clearAllGraphAppendRedirects();
   useConversationStore.getState().dropConversationRuntime(CONV);
   useExecutionStore.setState({ byId: {} });
   useConversationStore.getState().switchConversation(CONV);
   enterTurnStreaming(CONV);
 });
 
-describe("execMessageId graph-append routing", () => {
-  it("routes host_message_id hint to the host slot", () => {
+describe("execMessageId graph routing", () => {
+  it("routes host_message_id hint to the host slot (detached / old journal)", () => {
     seedAssistant("m1", { executionId: "exec1" });
     seedAssistant("m2");
     expect(
@@ -44,14 +39,17 @@ describe("execMessageId graph-append routing", () => {
     ).toBe("m1");
   });
 
-  it("sticky divert sends growth frames to host after graph_append", () => {
+  it("same execution_id merges onto the existing host slot (no sticky divert)", () => {
     seedAssistant("m1", { executionId: "exec1" });
     seedAssistant("m2");
-    noteGraphAppendRedirect(CONV, "m1");
-    expect(execMessageId(CONV)).toBe("m1");
+    // Without sticky divert, same-id lookup still finds m1.
+    expect(execMessageId(CONV, { execution_id: "exec1" })).toBe("m1");
+    // Unrelated / unknown id falls through to latest assistant.
+    expect(execMessageId(CONV, { execution_id: "exec-new" })).toBe("m2");
+    expect(execMessageId(CONV)).toBe("m2");
   });
 
-  it("live replay: append run_plan + run frames land on host; m2 only gets anchor", () => {
+  it("live: new turn with prev_execution_id opens its own graph on m2", () => {
     // Turn 1 — build graph on m1
     dispatchSSEEvent(
       {
@@ -117,10 +115,154 @@ describe("execMessageId graph-append routing", () => {
     );
 
     expect(useExecutionStore.getState().byId.m1?.status).toBe("completed");
-    // 新开一轮（生产路径会 beginTurnPreflight→streaming；测试直接拨相）。
+    expect(useExecutionStore.getState().byId.m1?.plan?.id).toBe("exec1");
+
     useConversationStore.getState().setTurnPhase("streaming", CONV);
 
-    // Turn 2 — append
+    // Turn 2 — new execution + prev link (no graph_append / host_message_id)
+    dispatchSSEEvent(
+      {
+        type: "message_start",
+        payload: { message_id: "m2", conversation_id: CONV },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "run_plan",
+        payload: {
+          execution_id: "exec2",
+          plan_type: "multi_agent",
+          task_summary: "撰写",
+          prev_execution_id: "exec1",
+          agents: [
+            {
+              id: "w3",
+              role: "撰写员",
+              thinking: true,
+            },
+          ],
+          runs: [{ id: "r3", agent_id: "w3", task: "撰写", depends_on: [] }],
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+
+    const m2 = useConversationStore
+      .getState()
+      .byId[CONV].messages.find((m) => m.serverMessageId === "m2");
+    expect(m2?.process?.some((s) => s.kind === "team")).toBe(true);
+    expect(m2?.executionId).toBe("exec2");
+    expect(useExecutionStore.getState().byId.m2?.plan?.id).toBe("exec2");
+    expect(useExecutionStore.getState().byId.m2?.plan?.prevExecutionId).toBe(
+      "exec1",
+    );
+    // Prior graph untouched.
+    expect(useExecutionStore.getState().byId.m1?.plan?.id).toBe("exec1");
+    expect(useExecutionStore.getState().byId.m1?.status).toBe("completed");
+
+    dispatchSSEEvent(
+      {
+        type: "run_started",
+        payload: {
+          run_id: "r3",
+          agent_id: "w3",
+          parent_run_id: null,
+          kind: "agent",
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "run_completed",
+        payload: {
+          run_id: "r3",
+          agent_id: "w3",
+          output_summary: "写完",
+          duration_ms: 10,
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+
+    expect(useExecutionStore.getState().byId.m2?.status).toBe("completed");
+    expect(useExecutionStore.getState().byId.m1?.status).toBe("completed");
+
+    dispatchSSEEvent(
+      {
+        type: "message_end",
+        payload: { finish_reason: "end_turn" },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+  });
+
+  it("old journal live: graph_append + host_message_id still stamps anchor only on m2", () => {
+    dispatchSSEEvent(
+      {
+        type: "message_start",
+        payload: { message_id: "m1", conversation_id: CONV },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "run_plan",
+        payload: {
+          execution_id: "exec1",
+          plan_type: "multi_agent",
+          task_summary: "调研",
+          agents: [{ id: "w1", role: "研究员", thinking: true }],
+          runs: [{ id: "r1", agent_id: "w1", task: "调研", depends_on: [] }],
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "run_started",
+        payload: {
+          run_id: "r1",
+          agent_id: "w1",
+          parent_run_id: null,
+          kind: "agent",
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "run_completed",
+        payload: {
+          run_id: "r1",
+          agent_id: "w1",
+          output_summary: "done",
+          duration_ms: 10,
+        },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+    dispatchSSEEvent(
+      {
+        type: "message_end",
+        payload: { finish_reason: "end_turn" },
+        timestamp: "",
+      },
+      { conversationId: CONV, source: "server" },
+    );
+
+    useConversationStore.getState().setTurnPhase("streaming", CONV);
+
     dispatchSSEEvent(
       {
         type: "message_start",
@@ -160,16 +302,8 @@ describe("execMessageId graph-append routing", () => {
           task_summary: "调研撰写",
           host_message_id: "m1",
           agents: [
-            {
-              id: "w1",
-              role: "研究员",
-              thinking: true,
-            },
-            {
-              id: "w3",
-              role: "撰写员",
-              thinking: true,
-            },
+            { id: "w1", role: "研究员", thinking: true },
+            { id: "w3", role: "撰写员", thinking: true },
           ],
           runs: [
             { id: "r1", agent_id: "w1", task: "调研", depends_on: [] },
@@ -181,48 +315,9 @@ describe("execMessageId graph-append routing", () => {
       { conversationId: CONV, source: "server" },
     );
 
-    expect(useExecutionStore.getState().byId.m1?.status).toBe("running");
+    // Plan merges onto host; m2 stays without its own plan/team.
+    expect(useExecutionStore.getState().byId.m1?.plan?.runs.length).toBe(2);
     expect(useExecutionStore.getState().byId.m2?.plan).toBeFalsy();
-
-    dispatchSSEEvent(
-      {
-        type: "run_started",
-        payload: {
-          run_id: "r3",
-          agent_id: "w3",
-          parent_run_id: null,
-          kind: "agent",
-        },
-        timestamp: "",
-      },
-      { conversationId: CONV, source: "server" },
-    );
-    dispatchSSEEvent(
-      {
-        type: "run_completed",
-        payload: {
-          run_id: "r3",
-          agent_id: "w3",
-          output_summary: "写完",
-          duration_ms: 10,
-        },
-        timestamp: "",
-      },
-      { conversationId: CONV, source: "server" },
-    );
-
-    // Host settles by run terminals, not m2 message_end.
-    expect(useExecutionStore.getState().byId.m1?.status).toBe("completed");
-
-    dispatchSSEEvent(
-      {
-        type: "message_end",
-        payload: { finish_reason: "end_turn" },
-        timestamp: "",
-      },
-      { conversationId: CONV, source: "server" },
-    );
-    expect(useExecutionStore.getState().byId.m1?.status).toBe("completed");
-    expect(useExecutionStore.getState().byId.m2?.plan).toBeFalsy();
+    expect(m2?.process?.some((s) => s.kind === "team")).toBeFalsy();
   });
 });

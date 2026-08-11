@@ -244,6 +244,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队制作课件。脚本与讲稿已就绪；pptx 需绑定本机执行环境后在本机生成。",
     "reasoning": "",
     "captainContext": [],

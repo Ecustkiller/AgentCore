@@ -30,7 +30,7 @@ export function OnboardingPreviewPage() {
         ? "card"
         : null;
 
-  // 生成中再发态：isGenerating=true + 草稿 → 主色排队发送覆盖停止；旁路「插队」。
+  // 生成中再发态：isGenerating=true + 草稿 → 插队 / 排队 / 停止并存。
   // 切走/卸载时复位，不污染其它预览场景。
   useEffect(() => {
     if (!genVariant) return;
@@ -118,7 +118,8 @@ export function OnboardingPreviewPage() {
             data-composer-dock="bottom"
           >
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10 text-center text-sm text-muted-foreground">
-              回合执行中：有草稿时主色发送=排队；旁路插队；清空可停；Ctrl/Cmd+Enter=插队
+              回合执行中：有草稿时「插队 / 排队 /
+              停止」并存；Enter=排队；Ctrl/Cmd+Enter=插队
             </div>
             <div className="mx-auto w-full max-w-3xl">
               <MessageInput variant="bar" />
@@ -132,7 +133,8 @@ export function OnboardingPreviewPage() {
           >
             <div className="mx-auto flex w-full max-w-3xl flex-col">
               <div className="px-4 pb-2 text-center text-sm text-muted-foreground">
-                回合执行中：画布命令栏同样有草稿主色排队、旁路插队、无草稿停止
+                回合执行中：画布命令栏同样「插队 / 排队 /
+                停止」并存；无草稿仅停止
               </div>
               <MessageInput className="px-4 pb-2 pt-4" variant="card" />
             </div>

@@ -9,6 +9,7 @@ import {
   extractGraphAppendActKinds,
   extractGraphAppendAuthorizedBy,
   extractHotDecisionTraces,
+  extractPrevExecutionIds,
   extractRunToolCalls,
   extractStageCardTraces,
   extractToolPhases,
@@ -86,6 +87,10 @@ export function PreviewPage() {
     () => extractGraphAppendAuthorizedBy(events),
     [events],
   );
+  const prevExecutionIds = useMemo(
+    () => extractPrevExecutionIds(events),
+    [events],
+  );
   const artifacts = useMemo(
     () => resolveFileArtifactsForCard(projected.deliveryStatus),
     [projected.deliveryStatus],
@@ -99,7 +104,6 @@ export function PreviewPage() {
         progress: projected.progress,
         acts: projected.acts,
         teamNotes: projected.teamNotes,
-        deliveryStatus: projected.deliveryStatus,
         status: projected.status,
         conversationId: null,
         pendingEscalations,
@@ -190,6 +194,7 @@ export function PreviewPage() {
             toolPhases={toolPhases}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
+            prevExecutionIds={prevExecutionIds}
           />
           <FileArtifactsCard artifacts={artifacts} conversationId={null} />
           {pendingKinds.length > 0 && (

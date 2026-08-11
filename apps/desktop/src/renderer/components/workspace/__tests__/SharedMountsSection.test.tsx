@@ -104,7 +104,6 @@ describe("SharedMountsSection", () => {
     expect(mountMutate).toHaveBeenCalledWith(
       { spaceId: "new-space-id" },
       expect.objectContaining({
-        onSuccess: expect.any(Function),
         onError: expect.any(Function),
       }),
     );

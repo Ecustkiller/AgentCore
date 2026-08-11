@@ -19,6 +19,18 @@ def _sort_key(row: ProductNoticeRow) -> tuple:
     return (sev, -pub.timestamp())
 
 
+def _ensure_modal_dismissable(*, surface: str, dismiss_policy: str) -> None:
+    """``modal`` only allows ``dismiss_policy=once``; raises ``ValueError``.
+
+    Enforced at the write chokepoint rather than in the admin route because the
+    route is not the only writer: ops publishes through this repository directly
+    (``deploy/scripts/publish-product-notice.mjs`` runs inside the api container).
+    A modal pinned to ``never`` can never be closed — the dismiss endpoint 409s it.
+    """
+    if surface == "modal" and dismiss_policy == "never":
+        raise ValueError("modal surface requires dismiss_policy=once")
+
+
 class ProductNoticeRepository:
     """Admin CRUD + user active/dismiss for product notices."""
 
@@ -43,6 +55,7 @@ class ProductNoticeRepository:
         end_at: datetime | None = None,
         status: str = "draft",
     ) -> ProductNoticeRow:
+        _ensure_modal_dismissable(surface=surface, dismiss_policy=dismiss_policy)
         row = ProductNoticeRow(
             title=title,
             body=body,
@@ -135,6 +148,15 @@ class ProductNoticeRepository:
             values["end_at"] = end_at
         if not values:
             return await self.get(notice_id)
+
+        if "surface" in values or "dismiss_policy" in values:
+            existing = await self.get(notice_id)
+            if existing is None:
+                return None
+            _ensure_modal_dismissable(
+                surface=values.get("surface", existing.surface),
+                dismiss_policy=values.get("dismiss_policy", existing.dismiss_policy),
+            )
 
         stmt = (
             update(ProductNoticeRow)

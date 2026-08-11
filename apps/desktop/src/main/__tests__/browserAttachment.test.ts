@@ -13,6 +13,7 @@ vi.mock("electron", () => ({
   },
   WebContentsView: vi.fn().mockImplementation(() => {
     let url = "about:blank";
+    let debuggerAttached = false;
     return {
       webContents: {
         isDestroyed: () => false,
@@ -32,10 +33,34 @@ vi.mock("electron", () => ({
         isLoadingMainFrame: () => false,
         reload: vi.fn(),
         setWindowOpenHandler: vi.fn(),
-        /** SNAPSHOT_JS uses querySelectorAll; password probe uses autocomplete. */
+        debugger: {
+          isAttached: () => debuggerAttached,
+          attach: vi.fn(() => {
+            debuggerAttached = true;
+          }),
+          detach: vi.fn(() => {
+            debuggerAttached = false;
+          }),
+          sendCommand: vi.fn(async () => ({})),
+        },
         executeJavaScript: vi.fn(async (code: string) => {
           if (typeof code === "string" && code.includes("querySelectorAll")) {
             return ELEMENTS_TREE;
+          }
+          // click / type 回执探针须先于 password autocomplete 判定
+          if (typeof code === "string" && code.includes("was_disabled")) {
+            return { was_disabled: false, role: "button", name: "Go" };
+          }
+          if (typeof code === "string" && code.includes("masked")) {
+            return { chars: 2, masked: false, text: "hi" };
+          }
+          if (
+            typeof code === "string" &&
+            (code.includes("selectNodeContents") ||
+              code.includes("setSelectionRange") ||
+              code.includes("el.select"))
+          ) {
+            return true;
           }
           if (typeof code === "string" && code.includes("autocomplete")) {
             return false;
@@ -212,6 +237,12 @@ describe("Local bridge mutation returns elements", () => {
         elements: ELEMENTS_TREE,
         snapshot_version: 2,
         aria: "",
+        clicked: {
+          ref: "e1",
+          was_disabled: false,
+          role: "button",
+          name: "Go",
+        },
       },
     });
 
@@ -227,6 +258,13 @@ describe("Local bridge mutation returns elements", () => {
         elements: ELEMENTS_TREE,
         snapshot_version: 3,
         aria: "",
+        typed: {
+          ref: "e2",
+          requested_chars: 2,
+          actual_chars: 2,
+          matched: true,
+          method: "cdp_insertText",
+        },
       },
     });
 

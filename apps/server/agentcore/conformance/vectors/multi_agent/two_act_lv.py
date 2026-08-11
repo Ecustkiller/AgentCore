@@ -19,7 +19,6 @@ from agentcore.runtime.events import (
     debate_result,
     debate_round,
     debate_round_started,
-    graph_append,
     message_end,
     message_start,
     run_completed,
@@ -40,7 +39,11 @@ from ..debate._builders import (
 )
 
 _TOPIC = "品牌是否应立即终止争议代言联名"
-_EXEC = "exec_two_act_lv"
+_EXEC_MLR = "exec_two_act_lv"
+_EXEC_DEBATE = "exec_two_act_lv_act2"
+_CAPTAIN_2 = "c2"
+# Compat alias for MLR frames still using _EXEC in builders
+_EXEC = _EXEC_MLR
 _MOD = "debate_mod_lv"
 _PRO = f"{_MOD}_r1_pro"
 _CON = f"{_MOD}_r1_con"
@@ -367,7 +370,7 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
     mod_agents, mod_runs = _moderator_agents_runs(
         _MOD, "synthesizer", f"主持正反辩论：{_TOPIC}"
     )
-    mod_runs = [{**mod_runs[0], "parent_run_id": "synthesizer"}]
+    mod_runs = [{**mod_runs[0], "parent_run_id": _CAPTAIN_2}]
     debater_agents = _pro_con_debater_agents()
     debater_runs = _pro_con_debater_runs(
         _MOD,
@@ -432,40 +435,29 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
                 ],
             },
         ),
-        graph_append(
-            execution_id=_EXEC,
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["主持人"],
-            added_run_ids=[_MOD],
-            act_id="act-2",
-            act_kind="debate",
-            authorized_by="stage_card",
-        ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary=f"正反辩论：{_TOPIC}",
             agents=mod_agents,
             runs=mod_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act=act2,
         ),
-        run_started(_MOD, _MOD, parent_run_id="synthesizer"),
+        run_started(_MOD, _MOD, parent_run_id=_CAPTAIN_2),
         # 证人席位（辩论幕内）：声明后即开跑占位。
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=witness_agents,
             runs=witness_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act=act2,
         ),
         run_started(_WIT_SEAT, _WIT_SEAT, parent_run_id=_MOD, group="debate:witness"),
         debate_round_started(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             round_no=1,
             focus="解除条款是否成立",
@@ -474,12 +466,12 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
             form="debate",
         ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=debater_agents,
             runs=debater_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act=act2,
         ),
         run_started(_PRO, "d_pro", parent_run_id=_MOD, stance="pro", group="debate:debate", round_no=1),
@@ -544,10 +536,10 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        debate_round(execution_id=_EXEC, moderator_run_id=_MOD, payload=_round1_payload()),
+        debate_round(execution_id=_EXEC_DEBATE, moderator_run_id=_MOD, payload=_round1_payload()),
         # 第 2 轮补派续辩（正反各续一拍）。
         debate_round_started(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             round_no=2,
             focus="严重度门槛与赔付敞口",
@@ -575,7 +567,7 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
             output_summary="冷静观望方第2轮",
             duration_ms=720,
         ),
-        debate_round(execution_id=_EXEC, moderator_run_id=_MOD, payload=_round2_payload()),
+        debate_round(execution_id=_EXEC_DEBATE, moderator_run_id=_MOD, payload=_round2_payload()),
         # 结辩。
         *_side_continue(
             _PRO_CLOSE,
@@ -619,7 +611,7 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        debate_result(execution_id=_EXEC, moderator_run_id=_MOD, payload=_debate_payload()),
+        debate_result(execution_id=_EXEC_DEBATE, moderator_run_id=_MOD, payload=_debate_payload()),
         tool_use_end("db1", "debate", success=True, output="辩论完成。"),
         content_delta("辩论收束，决策简报已呈。"),
         message_end(FinishReason.END_TURN, input_tokens=7200, output_tokens=1400, cost=_COST),

@@ -849,6 +849,7 @@ def _team_preview_exclude_one_continue() -> list[SSEEvent]:
                     "depends_on": [],
                     "write_capability": "can_write_files",
                     "write_capability_label": "可改文件",
+                    "target_folder_name": "本会话工作区",
                 },
                 {
                     "run_id": "r2",
@@ -857,6 +858,7 @@ def _team_preview_exclude_one_continue() -> list[SSEEvent]:
                     "depends_on": [],
                     "write_capability": "text_only",
                     "write_capability_label": "仅文字报告",
+                    "target_folder_name": "本会话工作区",
                 },
             ],
             tools=["code_execute", "file_write", "test_run"],
@@ -920,6 +922,7 @@ def _team_preview_tighten_write_continue() -> list[SSEEvent]:
                     "depends_on": [],
                     "write_capability": "can_write_files",
                     "write_capability_label": "可改文件",
+                    "target_folder_name": "本会话工作区",
                 },
                 {
                     "run_id": "r2",
@@ -928,6 +931,7 @@ def _team_preview_tighten_write_continue() -> list[SSEEvent]:
                     "depends_on": ["r1"],
                     "write_capability": "can_write_files",
                     "write_capability_label": "可改文件",
+                    "target_folder_name": "本会话工作区",
                 },
             ],
             tools=["code_execute", "file_write", "test_run"],
@@ -1006,6 +1010,7 @@ def _team_preview_model_override_continue() -> list[SSEEvent]:
                     "write_capability_label": "可改文件",
                     "model": "deepseek-v4-flash",
                     "origin": "platform",
+                    "target_folder_name": "本会话工作区",
                 },
                 {
                     "run_id": "r2",
@@ -1014,6 +1019,7 @@ def _team_preview_model_override_continue() -> list[SSEEvent]:
                     "depends_on": ["r1"],
                     "write_capability": "can_write_files",
                     "write_capability_label": "可改文件",
+                    "target_folder_name": "本会话工作区",
                 },
             ],
             tools=["code_execute", "file_write", "test_run"],

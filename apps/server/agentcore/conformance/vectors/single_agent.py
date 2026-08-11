@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from agentcore.core.errors import ErrorCode
 from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
@@ -27,6 +28,7 @@ from agentcore.runtime.events import (
     turn_saved,
     turn_warning,
 )
+from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
 
 from ._common import _CONV, _COST, _USAGE, _ctx_block
 
@@ -91,21 +93,70 @@ def _single_agent_queued_degraded_from_steer() -> list[SSEEvent]:
     ]
 
 
-def _single_agent_turn_steer_accepted() -> list[SSEEvent]:
-    """经典 in-flight + ``delivery=steer`` 真软插入：``turn_steer_accepted``（EPHEMERAL）。
+def _single_agent_user_interjection_steer() -> list[SSEEvent]:
+    """经典 in-flight + ``delivery=steer`` 全链：``user_interjection`` received→injected。
 
-    fold no-op；golden 与纯单聊同形。客户端 toast「已插入，下一工具步生效」。
+    DURABLE；同 id 保最新 → golden ``userInterjections`` status=injected（经典终态）。
+    插话穿插在已开流的回合中间（``message_start`` 之后）——经典 steer 定义上只发生在
+    回合流式输出期间，与协调插话向量同序；勿把它排到 ``message_start`` 之前。
     """
-    from agentcore.runtime.events import turn_steer_accepted
+    from agentcore.runtime.events import user_interjection
 
     return [
-        turn_steer_accepted(
-            steer_id="steer-1",
-            conversation_id=_CONV,
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("先想一下。"),
+        content_delta("你好"),
+        user_interjection(
+            interjection_id="inj-steer-1",
+            execution_id="exec-classic-1",
             content="改成用中文总结",
-            pending=1,
+            status="received",
         ),
-        *_single_agent_text(),
+        user_interjection(
+            interjection_id="inj-steer-1",
+            execution_id="exec-classic-1",
+            content="改成用中文总结",
+            status="injected",
+        ),
+        content_delta("，世界！"),
+        message_end(FinishReason.END_TURN, input_tokens=1200, output_tokens=300, cost=_COST),
+    ]
+
+
+def _single_agent_user_interjection_steer_queued() -> list[SSEEvent]:
+    """经典 steer 收口 leftover 降级：received→queued + ``turn_queued.degraded_from=steer``。
+
+    双发对齐协调升队先例；queued 为经典终态之一（无 addressed）。
+    收口升队发生在回合 finally，故排在正文之后、``message_end`` 之前。
+    """
+    from agentcore.runtime.events import turn_queued, user_interjection
+
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("先想一下。"),
+        content_delta("你好"),
+        user_interjection(
+            interjection_id="inj-steer-q",
+            execution_id="exec-classic-1",
+            content="晚到的纠偏",
+            status="received",
+        ),
+        content_delta("，世界！"),
+        user_interjection(
+            interjection_id="inj-steer-q",
+            execution_id="exec-classic-1",
+            content="晚到的纠偏",
+            status="queued",
+            note="当前回合已收口，已自动转入下一回合",
+        ),
+        turn_queued(
+            queue_id="q-steer-leftover",
+            position=1,
+            queue_depth=1,
+            conversation_id=_CONV,
+            degraded_from="steer",
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=1200, output_tokens=300, cost=_COST),
     ]
 
 
@@ -573,6 +624,88 @@ def _mid_run_refresh_ceo_narration() -> list[SSEEvent]:
     ]
 
 
+def _empty_face_shell(
+    *,
+    code: str,
+    message: str,
+    finish: FinishReason,
+) -> list[SSEEvent]:
+    """Empty assistant content + structured error + terminal finish (空泡脸向量骨架)."""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        error_event(code, message),
+        message_end(finish, input_tokens=0, output_tokens=0, cost=_COST),
+    ]
+
+
+def _empty_face_degraded() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_EMPTY_RESPONSE",
+        message="模型多次空响应 · 模型返回空内容",
+        finish=FinishReason.DEGRADED,
+    )
+
+
+def _empty_face_paused() -> list[SSEEvent]:
+    """paused without interaction card — must still surface a face when error present."""
+    return _empty_face_shell(
+        code="PIPELINE_ERROR",
+        message="本轮未能完成，请重试。",
+        finish=FinishReason.PAUSED,
+    )
+
+
+def _empty_face_channel_dead() -> list[SSEEvent]:
+    # 生产真值：prepare 阶段 WorkspaceIOError(CHANNEL_DEAD_PREPARE_ABORT)
+    # 经 error_fields_for 映射为 STREAM_ERROR + 原文（见 core/errors.py）。
+    # 引常量而非抄字面量，避免文案改动后向量再次失真。
+    return _empty_face_shell(
+        code=ErrorCode.STREAM_ERROR,
+        message=CHANNEL_DEAD_PREPARE_ABORT,
+        finish=FinishReason.ERROR,
+    )
+
+
+def _empty_face_insufficient_balance() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_INSUFFICIENT_BALANCE",
+        message="上游账户余额不足，请充值或更换 Key。",
+        finish=FinishReason.ERROR,
+    )
+
+
+def _empty_face_model_acl() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_ERROR",
+        message="This token has no access to model kimi-k3",
+        finish=FinishReason.ERROR,
+    )
+
+
+def _empty_face_invalid_temperature() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_ERROR",
+        message="invalid temperature: only 1 is allowed for this model",
+        finish=FinishReason.ERROR,
+    )
+
+
+def _empty_face_timeout() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_TIMEOUT",
+        message="连接超时，请检查网络后重试。",
+        finish=FinishReason.ERROR,
+    )
+
+
+def _empty_face_empty_response() -> list[SSEEvent]:
+    return _empty_face_shell(
+        code="LLM_EMPTY_RESPONSE",
+        message="模型空响应 · 输出长度截断 · 返回空内容",
+        finish=FinishReason.DEGRADED,
+    )
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
     "single_agent_queued_then_run": (
@@ -583,9 +716,13 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "经典+steer 回落：turn_queued.degraded_from=steer → turn_queue_started → 续流",
         _single_agent_queued_degraded_from_steer,
     ),
-    "single_agent_turn_steer_accepted": (
-        "经典+steer 真软插入：turn_steer_accepted（EPHEMERAL）→ 同连接续流单聊",
-        _single_agent_turn_steer_accepted,
+    "single_agent_user_interjection_steer": (
+        "经典+steer 全链：user_interjection received→injected（DURABLE；经典终态）→ 续流单聊",
+        _single_agent_user_interjection_steer,
+    ),
+    "single_agent_user_interjection_steer_queued": (
+        "经典+steer 收口降级：user_interjection received→queued + turn_queued.degraded_from=steer",
+        _single_agent_user_interjection_steer_queued,
     ),
     "single_agent_queue_cancelled": (
         "排队项取消：turn_queued → turn_queue_cancelled（EPHEMERAL；多端清 UI）",
@@ -633,5 +770,38 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "mid_run_refresh_ceo_narration": (
         "运行中刷新：CEO 旁白→工具→旁白→交付 process 保序（process 渐进持久化）",
         _mid_run_refresh_ceo_narration,
+    ),
+    # 空泡族根因重设计：空 content + 结构化错误 → fold 后非空脸（hasProjectedFailureFace）
+    "empty_face_degraded": (
+        "空脸：degraded 收尾 + LLM_EMPTY_RESPONSE → 非空脸",
+        _empty_face_degraded,
+    ),
+    "empty_face_paused": (
+        "空脸：paused 且无暂停卡 + 结构化错误 → 非空脸",
+        _empty_face_paused,
+    ),
+    "empty_face_channel_dead": (
+        "空脸：channel_dead / STREAM_ERROR → 非空脸",
+        _empty_face_channel_dead,
+    ),
+    "empty_face_insufficient_balance": (
+        "空脸：欠费 LLM_INSUFFICIENT_BALANCE → 非空脸",
+        _empty_face_insufficient_balance,
+    ),
+    "empty_face_model_acl": (
+        "空脸：模型 ACL 无权限 → 非空脸",
+        _empty_face_model_acl,
+    ),
+    "empty_face_invalid_temperature": (
+        "空脸：invalid temperature → 非空脸",
+        _empty_face_invalid_temperature,
+    ),
+    "empty_face_timeout": (
+        "空脸：连接超时 LLM_TIMEOUT → 非空脸",
+        _empty_face_timeout,
+    ),
+    "empty_face_empty_response": (
+        "空脸：llm.empty_response（LLM_EMPTY_RESPONSE + degraded）→ 非空脸",
+        _empty_face_empty_response,
     ),
 }

@@ -206,6 +206,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排两位并行推进。 撰写已完成；调研步骤失败，可在其详情里接受此结果。",
     "reasoning": "",
     "captainContext": [],

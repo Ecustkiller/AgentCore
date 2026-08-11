@@ -1,6 +1,7 @@
 """Unit tests for model display enrichment (exact / family / derived)."""
 
 from agentcore.llm.model_metadata import (
+    _METADATA,
     CAPABILITY_REASONING,
     CAPABILITY_TOOLS,
     CAPABILITY_VISION,
@@ -56,18 +57,33 @@ def test_family_variant_appends_qualifier_not_identical_label():
     """Dated / channel siblings must not share the family's bare display_name."""
     base = model_metadata_for("deepseek-v4-flash")
     assert base.display_name == "DeepSeek V4 Flash"
+    assert base.badge is None
 
     dated = model_metadata_for("deepseek-v4-flash-0731")
     assert dated.display_name == "DeepSeek V4 Flash · 0731"
     assert dated.vendor == base.vendor
     assert dated.capabilities == base.capabilities
     assert dated.context_length == base.context_length
+    assert dated.badge is None
 
     free = model_metadata_for("deepseek/deepseek-v4-flash-free")
-    assert free.display_name == "DeepSeek V4 Flash Free"
+    assert free.display_name == "DeepSeek V4 Flash"
+    assert free.badge == "免费额度"
     assert free.vendor == "DeepSeek"
     assert free.capabilities == base.capabilities
     assert free.context_length == base.context_length
+
+
+def test_curated_display_name_badge_pairs_are_unique():
+    """Curated uniqueness is (display_name, badge), not display_name alone."""
+    pairs = [(meta.display_name, meta.badge) for meta in _METADATA.values()]
+    assert len(pairs) == len(set(pairs))
+    # Same brand base name is allowed when badge distinguishes the free SKU.
+    assert model_metadata_for("deepseek-v4-flash").display_name == (
+        model_metadata_for("deepseek-v4-flash-free").display_name
+    )
+    assert model_metadata_for("deepseek-v4-flash").badge is None
+    assert model_metadata_for("deepseek-v4-flash-free").badge == "免费额度"
 
 
 def test_family_variant_doubao_seed_and_o3_mini():

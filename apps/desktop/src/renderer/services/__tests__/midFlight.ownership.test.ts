@@ -123,10 +123,9 @@ describe("midFlight · 主路门 + store 断言", () => {
       }),
     );
     await vi.waitFor(() => {
-      expect(notifyInfoMock).toHaveBeenCalledWith(
-        expect.stringContaining("已排队"),
-      );
+      expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
     });
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     // queued 后无用户泡；仅 QueuedTurnsBar
     expect(
       getRuntime(CID).messages.some(
@@ -378,7 +377,7 @@ describe("midFlight · 主路门 + store 断言", () => {
     releasePrimaryStream(CID, turn1Token);
   });
 
-  it("经典 soft-insert：turn_steer_accepted 即时 dispatch，不插用户气泡", async () => {
+  it("经典 soft-insert：user_interjection(received) 即时 dispatch，不插 Message 气泡", async () => {
     const turn1Token = claimPrimaryStream(CID);
     const sse = controllableSse();
     vi.stubGlobal(
@@ -396,23 +395,51 @@ describe("midFlight · 主路门 + store 断言", () => {
     expect(body.delivery).toBe("steer");
 
     sse.push(
-      ev("turn_steer_accepted", {
-        steer_id: "steer-1",
-        conversation_id: CID,
+      ev("user_interjection", {
+        interjection_id: "inj-steer-1",
+        execution_id: "ex1",
         content: "改成中文",
-        pending: 1,
+        status: "received",
       }),
     );
     sse.close();
 
     await expect(pending).resolves.toEqual({
-      kind: "steered",
-      steerId: "steer-1",
+      kind: "received",
+      interjectionId: "inj-steer-1",
     });
-    expect(notifyInfoMock).toHaveBeenCalledWith("已插入，下一工具步生效");
+    // 持久气泡走 execution.userInterjections，不插 conversation Message 行；无瞬态 toast。
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(getRuntime(CID).messages.some((m) => m.content === "改成中文")).toBe(
       false,
     );
+    releasePrimaryStream(CID, turn1Token);
+  });
+
+  it("经典 soft-insert：仅 status=received 才 ack（injected 单独不 settle）", async () => {
+    const turn1Token = claimPrimaryStream(CID);
+    const sse = controllableSse();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(sse.response)),
+    );
+
+    const pending = sendMidFlightMessage(CID, "改成中文", undefined, "steer");
+    await vi.waitFor(() => {
+      expect(vi.mocked(fetch)).toHaveBeenCalled();
+    });
+
+    sse.push(
+      ev("user_interjection", {
+        interjection_id: "inj-steer-2",
+        execution_id: "ex1",
+        content: "改成中文",
+        status: "injected",
+      }),
+    );
+    sse.close();
+
+    await expect(pending).resolves.toEqual({ kind: "error" });
     releasePrimaryStream(CID, turn1Token);
   });
 });
@@ -451,7 +478,7 @@ describe("同连接 turn_queued → turn_queue_started → message_start → 收
       }),
       { conversationId: CID, source: "server" },
     );
-    expect(notifyInfoMock).toHaveBeenCalledWith("已排队，当前回合结束后处理");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
 
     dispatchSSEEvent(

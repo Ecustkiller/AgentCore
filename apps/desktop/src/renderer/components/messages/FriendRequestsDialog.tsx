@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   acceptFriendRequest,
   messagingErrorMessage,
@@ -51,7 +51,6 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
     setBusyId(id);
     try {
       await acceptFriendRequest(id);
-      notifySuccess("已成为好友");
       await fetchFriends();
       await fetchFriendRequests();
     } catch (err) {
@@ -65,7 +64,6 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
     setBusyId(id);
     try {
       await rejectFriendRequest(id);
-      notifySuccess("已拒绝");
       await fetchFriendRequests();
     } catch (err) {
       notifyError(err, messagingErrorMessage(err, "拒绝失败"));

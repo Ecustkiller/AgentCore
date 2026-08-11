@@ -74,6 +74,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "好，按 PowerPoint（.pptx）推进。",
     "reasoning": "",
     "captainContext": [],

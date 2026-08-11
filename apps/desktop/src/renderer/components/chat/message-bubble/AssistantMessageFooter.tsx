@@ -187,11 +187,13 @@ function MessageMoreMenu({
     ? FINISH_REASON_META[finishReason]?.label
     : null;
 
+  const usage = message.usage;
+  const hasSpendUsage = !!usage && (usage.input > 0 || usage.output > 0);
   const hasMenu =
     !!conversationId ||
     captainContext.length > 0 ||
     !!message.executionId ||
-    !!message.usage ||
+    hasSpendUsage ||
     !!diagnosticText ||
     !!finishLabel;
 
@@ -236,13 +238,13 @@ function MessageMoreMenu({
               在画布查看此回合
             </DropdownMenuItem>
           )}
-          {message.usage && (
+          {hasSpendUsage && usage && (
             <>
               {(!!conversationId ||
                 captainContext.length > 0 ||
                 message.executionId) && <DropdownMenuSeparator />}
               <DropdownMenuLabel>用量详情</DropdownMenuLabel>
-              <UsageDetailPanel usage={message.usage} />
+              <UsageDetailPanel usage={usage} />
               {message.rounds != null && message.rounds > 1 && (
                 <div className="flex justify-between gap-3 px-3 pb-1.5 text-xs text-muted-foreground">
                   <span>ReAct 轮次</span>

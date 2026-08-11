@@ -8399,10 +8399,11 @@
         "type": "object"
       },
       "MemoryKind": {
-        "description": "Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).\n\n``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md\n(技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).",
+        "description": "Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).\n\n``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md\n(技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer);\n``navigation`` → 导航.md (短入口路由表, PROJECT-only — requires ``folder_id``).",
         "enum": [
           "preferences",
-          "profile"
+          "profile",
+          "navigation"
         ],
         "title": "MemoryKind",
         "type": "string"
@@ -9248,6 +9249,18 @@
             "description": "Whether the user can switch to this (id, origin, provider_id) now. False = needs a BYOK key or platform unavailable — the UI greys it and guides to 设置.",
             "title": "Available",
             "type": "boolean"
+          },
+          "badge": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Curated display badge rendered as-is by clients (e.g. 免费额度). Null when none — never inferred from model id suffixes.",
+            "title": "Badge"
           },
           "capabilities": {
             "description": "Enabled capability tags — a subset of vision / tools / reasoning.",
@@ -10164,6 +10177,56 @@
         "title": "PlaybookTemplateSummary",
         "type": "object"
       },
+      "QueuedTurnItem": {
+        "description": "One process-local FIFO queued turn (权威内容源；EPHEMERAL 事件只作变了信号).\n\n``interjection_id`` is set when the entry was promoted from a user interjection\n(协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.\n``position`` is 1-based FIFO index.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "interjection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interjection Id"
+          },
+          "position": {
+            "minimum": 1.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "queue_id": {
+            "title": "Queue Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue_id",
+          "content",
+          "position"
+        ],
+        "title": "QueuedTurnItem",
+        "type": "object"
+      },
+      "QueuedTurnListResponse": {
+        "description": "Current conversation FIFO queue snapshot (进程内；重启后为空).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueuedTurnItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "QueuedTurnListResponse",
+        "type": "object"
+      },
       "QuotaStatus": {
         "description": "Resolved quota limits (决策④ / F2); 0 = unlimited. Money is nano-CNY internally.",
         "properties": {
@@ -11009,7 +11072,7 @@
         "type": "object"
       },
       "ResolveEscalationInteraction": {
-        "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself. Classic (non-coordination) path asks the user; coordination path awaits CEO\n``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers\n(``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).\nWrite-lock conflicts may set ``transfer_ownership`` to path-handoff to the escalator.\nA wall-clock miss is ``timed_out``. A late resolve falls through as 404.",
+        "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself. Classic (non-coordination) path asks the user; coordination path awaits CEO\n``resolve_escalation`` (Invariant B: available iff a coordination session is active —\nclassic blocking has no free CEO inside ``delegate``). The user either answers\n(``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).\nWrite-lock conflicts may set ``transfer_ownership`` to path-handoff to the escalator.\nA wall-clock miss is ``timed_out``. A late resolve falls through as 404.",
         "properties": {
           "answer": {
             "default": "",
@@ -13493,6 +13556,53 @@
         "title": "SubmitRunRedirectResponse",
         "type": "object"
       },
+      "SubmitRunStopRequest": {
+        "description": "User mid-flight stop for one or all workers in a delegate batch (只停这项工作).\n\nQueued while ``delegate`` drives; WaveScheduler drains via the same\n``cancel_run_ids`` channel as redirect / ``cancel_worker``, but **without** hot\nrevision or cold ``_redir`` follow-up. Does not abort the turn, kill the CEO, or\nclear FIFO queued turns.\n\n``run_id`` omitted / null → stop every in-flight and queued worker for\n``execution_id``; otherwise only that run.",
+        "properties": {
+          "execution_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "execution_id"
+        ],
+        "title": "SubmitRunStopRequest",
+        "type": "object"
+      },
+      "SubmitRunStopResponse": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "queued": {
+            "description": "Pending stop count for this execution after enqueue.",
+            "title": "Queued",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "SubmitRunStopResponse",
+        "type": "object"
+      },
       "SubmitShowQuizRequest": {
         "properties": {
           "guess": {
@@ -15073,7 +15183,7 @@
         "type": "object"
       },
       "UsageBreakdown": {
-        "description": "Token counts (cache_hit + cache_miss == input; reasoning ⊆ output).",
+        "description": "Token counts (cache_hit + cache_miss == input; reasoning ⊆ output).\n\n``error`` is optional: present on failed / empty turns that stored a structured\ncause on the usage column. Token fields may be zeros when only ``error`` is set.",
         "properties": {
           "cache_hit": {
             "title": "Cache Hit",
@@ -15082,6 +15192,16 @@
           "cache_miss": {
             "title": "Cache Miss",
             "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageError"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "input": {
             "title": "Input",
@@ -15104,6 +15224,25 @@
           "cache_miss"
         ],
         "title": "UsageBreakdown",
+        "type": "object"
+      },
+      "UsageError": {
+        "description": "Structured turn error persisted on the messages.usage JSON column.\n\nPure-failure rows keep ``message.content`` empty and put the cause here (and on\njournal ``turn_end.error``). REST must project this so reload can paint a face\neven when the journal is sparse.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "UsageError",
         "type": "object"
       },
       "UsageSummary": {
@@ -15920,7 +16059,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.53"
+    "version": "0.4.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -23914,7 +24053,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\n发送即有流 (D9): this endpoint **always** returns SSE (never 202 JSON).\n\n``delivery`` 必填（``steer`` | ``queue``；缺 → 422）：\n\n- **空闲** → 开跑并流式推送整个回合（客户端仍带 ``delivery=steer``）。\n- **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。\n- **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。\n- **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。\n- **经典 in-flight + steer** → 挂到 live turn 进程内 pending（``turn_steer_accepted``）；\n  无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。\n- **热路 pending**（approval / escalation / …）仍 409。\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\n发送即有流 (D9): this endpoint **always** returns SSE (never 202 JSON).\n\n``delivery`` 必填（``steer`` | ``queue``；缺 → 422）：\n\n- **空闲** → 开跑并流式推送整个回合（客户端仍带 ``delivery=steer``）。\n- **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。\n- **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。\n- **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。\n- **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE\n  ``user_interjection(received)``；步顶注入后再发 ``injected``）；\n  无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。\n- **热路 pending**（approval / escalation / …）仍 409。\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -24846,6 +24985,81 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/queued-turns": {
+      "get": {
+        "description": "List the conversation's process-local FIFO queued turns (权威内容源).\n\nOwner-gated like send / cancel. Returns the current in-memory snapshot in FIFO\norder (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_started`` /\n``turn_queue_cancelled`` remain change signals only — clients should refresh from\nthis endpoint. Restart empties the queue (no durable queue).",
+        "operationId": "list_queued_turns_v1_conversations__conversation_id__queued_turns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedTurnListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Queued Turns",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/cancel": {
       "post": {
         "description": "Cancel one FIFO queued turn before drain (同对话再发 · 按项取消).\n\nOwner-gated like send. Removes the entry by ``queue_id``; already started / unknown\n→ 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.\nOn success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink (multi-client).",
@@ -25085,6 +25299,91 @@
           }
         },
         "summary": "Submit Run Redirect",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/run-stop": {
+      "post": {
+        "description": "Queue a mid-flight stop for one or all workers in the current delegate batch.\n\nThe CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the\nuser直控 channel (same posture as ``run-redirect``). Unlike redirect, stop never\ntriggers hot revision or cold ``_redir``; WaveScheduler cancels / withdraws\ntargets so drive converges and the CEO keeps the turn.",
+        "operationId": "submit_run_stop_v1_conversations__conversation_id__run_stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRunStopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitRunStopResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Run Stop",
         "tags": [
           "conversations"
         ]
@@ -37619,7 +37918,7 @@
     },
     "/v1/users/me/memory/files/{kind}": {
       "get": {
-        "description": "Load ONE memory leaf — 偏好/画像 (global) or a project's 画像 (with ``folder_id``).",
+        "description": "Load ONE memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航.",
         "operationId": "get_my_memory_file_v1_users_me_memory_files__kind__get",
         "parameters": [
           {

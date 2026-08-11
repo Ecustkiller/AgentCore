@@ -621,6 +621,8 @@ class LocalWorkspace:
                 get_logger(__name__).info(
                     "sandbox.exec_env_probe_failed",
                     location="local",
+                    reason=f"exit={probe.exit_code} duration_ms={probe.duration_ms}",
+                    detail=(probe.stderr or probe.stdout or "").strip()[:200] or None,
                 )
                 return probe_failure_result(duration_ms=probe.duration_ms)
         elif not self._exec_env_alive:

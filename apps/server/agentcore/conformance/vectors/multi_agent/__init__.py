@@ -46,6 +46,9 @@ from .escalation import (
     _multi_agent_escalation,
 )
 from .interjection import (
+    _multi_agent_solo_coordinate_interjection,
+    _multi_agent_user_interjection_delegate_append,
+    _multi_agent_user_interjection_failed,
     _multi_agent_user_interjection_handled,
     _multi_agent_user_interjection_queued,
     _multi_agent_user_interjection_with_attachments,
@@ -70,6 +73,7 @@ from .run_control import (
     _multi_agent_run_redirect_ignored,
     _multi_agent_run_skipped_cascade,
     _multi_agent_run_stop_cancels_workers,
+    _multi_agent_run_user_stop_worker,
 )
 from .run_phase import _multi_agent_run_phase
 from .stage_card import (
@@ -116,16 +120,30 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_timeout_hard_gaps,
     ),
     "multi_agent_user_interjection_handled": (
-        "协调插话入图：user_interjection(received) → update_synthesis，折到 userInterjections",
+        "协调插话入图：user_interjection received→injected→addressed，折到 userInterjections",
         _multi_agent_user_interjection_handled,
     ),
     "multi_agent_user_interjection_queued": (
-        "协调插话转排队：user_interjection received→queued（同 id 保最新）+ queue_user_message",
+        "协调插话转排队：user_interjection received→injected→queued（同 id 保最新）+ queue_user_message",
         _multi_agent_user_interjection_queued,
+    ),
+    "multi_agent_user_interjection_failed": (
+        "协调插话失败：user_interjection received→injected→failed（同 id 保最新）",
+        _multi_agent_user_interjection_failed,
     ),
     "multi_agent_user_interjection_with_attachments": (
         "协调带附件插话：user_interjection(received) 携带 attachments 元数据 → userInterjections",
         _multi_agent_user_interjection_with_attachments,
+    ),
+    "multi_agent_solo_coordinate_interjection": (
+        "单 worker+协调：非阻塞 kickoff → 执行期插话 → cancel_worker 终止"
+        "（无 team_synthesis_preview；钉 solo 进协调 + 插话可达）",
+        _multi_agent_solo_coordinate_interjection,
+    ),
+    "multi_agent_user_interjection_delegate_append": (
+        "协调插话入图：user_interjection received→injected→CEO 二次 delegate 追加"
+        "→addressed（note=已在本回合据此调整团队）",
+        _multi_agent_user_interjection_delegate_append,
     ),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "multi_agent_browser_session": (
@@ -139,9 +157,8 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_browser_login_pending,
     ),
     "multi_agent_cross_turn_append": (
-        "跨回合同图追加：m1 建图完成 → m2 graph_append + 同 execution_id merge → 追加批收口；"
-        "生长帧 host_message_id 归属旧图，新回合仅锚点；两回合 run_plan 仅同一宿主 captain"
-        "（kind=captain 至多 1），workers parent_run_id 指向宿主，禁止第二 captain",
+        "跨回合协作图续接：m1 建图完成 → m2 新 execution_id + prev_execution_id=exec1 → "
+        "追加批收口；进度分母只含本图；不再 graph_append / host_message_id divert",
         _multi_agent_cross_turn_append,
     ),
     "multi_agent_multi_lens_research": (
@@ -150,22 +167,22 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_multi_lens_research,
     ),
     "multi_agent_mlr_debate_acts": (
-        "批A2·两幕同图：幕1 MLR multi_agent + 幕2 debate 同 execution 生长"
-        "（graph_append + act-2/anchor=synthesizer；辩手 runs 归 act-2；authorized_by=preview）",
+        "批A2·两幕链：幕1 MLR multi_agent + 幕2 debate 新图 + prev"
+        "（act-2/anchor=synthesizer；authorized_by=preview；不再 divert）",
         _multi_agent_mlr_debate_acts,
     ),
     "multi_agent_mlr_debate_witness": (
-        "批D1·证人模式：幕1 MLR + 幕2 辩论同图；证人席位 + witness_exam 答问进台账"
+        "批D1·证人模式：幕1 MLR + 幕2 辩论新图+prev；证人席位 + witness_exam 答问进台账"
         "（答问 run 挂辩论幕席位下，continues=席位根）",
         _multi_agent_mlr_debate_witness,
     ),
     "multi_agent_two_act_lv": (
-        "批R2·幕级 LOD 验收：LV 案量级两幕（幕1 MLR 含法律子队 + 幕2 辩论含证人/补派两轮），"
+        "批R2·幕级 LOD 验收：LV 案量级两幕（幕1 MLR 含法律子队 + 幕2 辩论新图+prev 含证人/补派两轮），"
         "约 18 节点，供三宿主协作图幕摘要卡链 + 聚焦幕验单屏可读",
         _multi_agent_two_act_lv,
     ),
     "multi_agent_stage_card_start_debate": (
-        "批B·推进卡：stage_card_required → start_debate → 幕2 同图生长"
+        "批B·推进卡：stage_card_required → start_debate → 幕2 新图+prev"
         "（authorized_by=stage_card）",
         _multi_agent_stage_card_start_debate,
     ),
@@ -234,6 +251,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_run_stop_cancels_workers": (
         "多 Agent·整轮 stop：in-flight worker 均 run_cancelled(reason=stop)，无热/冷 follow-up 节点，回合 cancelled",
         _multi_agent_run_stop_cancels_workers,
+    ),
+    "multi_agent_run_user_stop_worker": (
+        "多 Agent·只停这项工作：run_cancelled(reason=user_stop)，无热/冷 follow-up，兄弟完成，"
+        "delegate 成功返回、回合 end_turn（非整轮 cancelled）",
+        _multi_agent_run_user_stop_worker,
     ),
     "multi_agent_run_redirect_hot": (
         "多 Agent·跑一半改方向·热续写：已有 partial 产出 → cancel(reason=redirect) + continue_run 修订子节点（r1 cancelled、r1_rev1 completed、r2 completed、无 _redir）",

@@ -27,10 +27,20 @@ export type AuthStatus =
 interface AuthState {
   status: AuthStatus;
   user: AuthUser | null;
+  /**
+   * Whether the server has acknowledged this session in *this* process — i.e.
+   * the handshake actually completed. An offline read-only shell is
+   * `authenticated` off a cached identity the server has never seen, so
+   * everything the handshake hands out (the CSRF token above all) is missing
+   * until the session is reconciled; the AuthGate owns that reconciliation.
+   */
+  sessionVerified: boolean;
   /** User-facing outage reason; set only while status === "unavailable". */
   reason: string | null;
   setLoading: () => void;
   setAuthenticated: (user: AuthUser) => void;
+  /** Enter the shell from cache while the backend is unreachable (N4-A 只读离线). */
+  setOfflineSession: (user: AuthUser) => void;
   setUnauthenticated: () => void;
   setUnavailable: (reason: string) => void;
 }
@@ -38,12 +48,25 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   status: "loading",
   user: null,
+  sessionVerified: false,
   reason: null,
   setLoading: () => set({ status: "loading", reason: null }),
   setAuthenticated: (user) =>
-    set({ status: "authenticated", user, reason: null }),
+    set({ status: "authenticated", user, reason: null, sessionVerified: true }),
+  setOfflineSession: (user) =>
+    set({
+      status: "authenticated",
+      user,
+      reason: null,
+      sessionVerified: false,
+    }),
   setUnauthenticated: () =>
-    set({ status: "unauthenticated", user: null, reason: null }),
+    set({
+      status: "unauthenticated",
+      user: null,
+      reason: null,
+      sessionVerified: false,
+    }),
   setUnavailable: (reason) =>
-    set({ status: "unavailable", user: null, reason }),
+    set({ status: "unavailable", user: null, reason, sessionVerified: false }),
 }));

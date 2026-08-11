@@ -426,24 +426,3 @@ export function FinishReasonChip({
     </div>
   );
 }
-
-/** 交付轻提示（对齐桌面 DeliveryStatusMount）：partial/blocked 一句。 */
-export function DeliveryShortfallHint({
-  status,
-}: {
-  status: { state: string; summary: string } | null | undefined;
-}) {
-  if (!status) return null;
-  if (status.state !== "partial" && status.state !== "blocked") return null;
-  const text =
-    status.summary.trim() ||
-    (status.state === "blocked" ? "交付未满足" : "部分交付未满足");
-  return (
-    <p
-      className="delivery-shortfall-hint"
-      data-testid="delivery-shortfall-hint"
-    >
-      {text}
-    </p>
-  );
-}

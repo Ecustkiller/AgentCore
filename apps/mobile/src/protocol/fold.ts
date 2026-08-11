@@ -65,6 +65,7 @@ import type {
   ToolUseStartPayload,
   TurnEvidenceLedgerEntry,
   TurnWarningPayload,
+  UserInterjectionPayload,
   WorkerRunPhase,
 } from "@agentcore/contract-types";
 import type {
@@ -101,9 +102,9 @@ function pushTeamMarker(process: ProcessStep[], executionId: string): void {
   process.push({ kind: "team", execution_id: executionId });
 }
 
-/** Drop a `graph_append` anchor on the append turn (跨回合同图追加). Growth frames carry
- * `host_message_id` and merge into the host graph; this marker is the append bubble's only
- * collaboration-graph cue. */
+/** Drop a `graph_append` anchor (已停发；旧 journal 回放). Growth frames carry
+ * `host_message_id` and merge into the host graph. 新路径用 `run_plan.prev_execution_id`
+ * + 本回合 `team`（完整 TeamView），不再发本事件。 */
 function pushGraphAppendMarker(
   process: ProcessStep[],
   p: GraphAppendPayload,
@@ -189,6 +190,19 @@ function pushStageCardMarker(process: ProcessStep[], id: string): void {
   if (process.some((s) => s.kind === "stage_card" && s.stage_card_id === id))
     return;
   process.push({ kind: "stage_card", stage_card_id: id });
+}
+
+/** Drop a `user_interjection` marker（零宽 positional；正文/五态旁路查 id）。
+ *  同 interjection_id 只落一次（首次 received / journal backfill dedup）。 */
+function pushUserInterjectionMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (
+    process.some(
+      (s) => s.kind === "user_interjection" && s.interjection_id === id,
+    )
+  )
+    return;
+  process.push({ kind: "user_interjection", interjection_id: id });
 }
 
 /** Drop a `delegation_authorization` marker (委派授权痕迹锚点). 产品修正：与
@@ -468,6 +482,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   }[] = [];
   const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
+  let turnError: { code: string; message: string } | null = null;
   const checkpointSteps = new Map<string, string[]>();
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
@@ -597,21 +612,23 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "graph_append": {
-        // 跨回合同图追加锚点：落在【追加回合】process；生长帧带 host_message_id 归宿主图。
+        // 旧 journal：跨回合同图追加锚点落在【追加回合】process；生长帧带 host_message_id 归宿主图。
         pushGraphAppendMarker(process, ev.payload as GraphAppendPayload);
         break;
       }
       case "run_plan": {
         const p = ev.payload as RunPlanPayload;
         const act = actFromRunPlan(p);
-        // 跨回合同图追加：带 host_message_id 的生长 run_plan 不插新 team 标记
-        // （锚点由 graph_append 承担；宿主回合已有 team）。
+        // 旧 journal：带 host_message_id 的生长 run_plan 不插新 team（锚点由 graph_append）。
+        // 新契约：本回合 run_plan 无 host_message_id，插本回合 team；可选 prev_execution_id
+        // 仅供呈现「续自」链（不 merge 旧图；换 execution_id 走下方 else 重置）。
         if (!p.host_message_id) {
           // 协作图时间线落点: the first plan of an execution drops a `team` marker fixing the
           // collaboration graph's slot in the CEO timeline (later same-id batches no-op).
           pushTeamMarker(process, p.execution_id);
         }
         if (planId === null || planId === p.execution_id) {
+          // 同 execution_id 合并（同回合二次 delegate / 旧 journal 跨回合生长）。
           planId = p.execution_id;
           upsertAct(acts, act);
           for (const a of p.agents)
@@ -619,6 +636,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           for (const s of p.runs)
             if (!runById(s.id)) runs.push(runFromPlan(s, act.actId));
         } else {
+          // 新 execution_id = 新图（跨回合续接 / 辩论第二幕）；进度分母只含本图。
           planId = p.execution_id;
           acts = [act];
           agents.length = 0;
@@ -1079,9 +1097,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         pushAskMarker(process, p.ask_id);
         break;
       }
-      case "error":
+      case "error": {
         sawError = true;
+        const p = ev.payload as { code?: string; message?: string };
+        turnError = {
+          code: (p.code ?? "").trim() || "LLM_ERROR",
+          message: (p.message ?? "").trim(),
+        };
         break;
+      }
       case "message_end": {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
@@ -1089,8 +1113,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "message_start": {
-        // 跨回合流：message_id 变化 = 新助手气泡 → 清空正文/过程时间线；
-        // 同 execution_id 的 runs/agents 保留，使第二回合追加帧继续生长同一张协作图。
+        // 跨回合流：message_id 变化 = 新助手气泡 → 清空正文/过程时间线。
+        // runs/agents 暂留：旧 journal 同 execution_id 生长帧继续 merge；新契约换
+        // execution_id 时由后续 run_plan 的 else 分支整图重置（prev_execution_id 不进图）。
         // 同 message_id = 挂起恢复重开同一气泡 → 保留已累积正文（pause→resume）。
         const mid = String(
           (ev.payload as { message_id?: string }).message_id || "",
@@ -1101,6 +1126,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           process.length = 0;
           finishReason = null;
           cost = null;
+          turnError = null;
         }
         if (mid) lastMessageId = mid;
         break;
@@ -1124,8 +1150,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "turn_queued":
       case "turn_queue_started":
       case "turn_queue_cancelled":
-      // 经典软插入 ack（EPHEMERAL）：toast 由 ChatPage 消费；不进 ProjectedTurn。
-      case "turn_steer_accepted":
       // 冷 resume × live deferred（EPHEMERAL）：同连接等待槽空；fold no-op。
       case "resume_deferred":
       // L3 团队浏览器直播 (D13/D14): ephemeral 直播侧信道——base64 jpeg 帧 + 粗粒度通道状态，
@@ -1182,18 +1206,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "user_interjection": {
-        const p = ev.payload as {
-          interjection_id?: string;
-          execution_id?: string;
-          content?: string;
-          status?: string;
-          note?: string | null;
-          attachments?: Array<{
-            name?: string;
-            workspace_path?: string;
-            binary?: boolean;
-          }>;
-        };
+        // DURABLE（经典 + 协调）：同 interjectionId 保最新（received→injected→终态）。
+        // 零宽 process marker：仅 status=received 首次落点（后续状态更新 / reload dedup）。
+        const p = ev.payload as UserInterjectionPayload;
         const iid = (p.interjection_id || "").trim();
         if (iid) {
           const attachments = (p.attachments ?? [])
@@ -1214,11 +1229,12 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
                   : undefined,
               binary: Boolean(a.binary),
             }));
+          const status = p.status || "received";
           const leaf = {
             interjectionId: iid,
             executionId: p.execution_id || "",
             content: p.content || "",
-            status: p.status || "received",
+            status,
             note: typeof p.note === "string" ? p.note : null,
             ...(attachments.length > 0 ? { attachments } : {}),
           };
@@ -1228,6 +1244,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             userInterjections.push(leaf);
           } else {
             userInterjections[idx] = leaf;
+          }
+          if (status === "received") {
+            pushUserInterjectionMarker(process, iid);
           }
         }
         break;
@@ -1275,6 +1294,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   return {
     status,
     finishReason,
+    error: turnError,
     content,
     reasoning,
     captainContext,
@@ -1378,7 +1398,7 @@ function mergeTurnLedger(
 }
 
 /**
- * `graph_append` 开幕元数据（批 A4 呈现）：execution_id → act_kind。
+ * `graph_append` 开幕元数据（旧 journal 呈现）：execution_id → act_kind。
  * Transport-only sibling——不进 {@link ProjectedTurn.process}（后端 process 锚点亦无此字段；
  * 桌面把 act_kind 挂在 live process 扩展上，手机用旁路 map，历史/live 同源）。
  */
@@ -1396,7 +1416,7 @@ export function extractGraphAppendActKinds(
   return map;
 }
 
-/** `graph_append.authorized_by` → 锚点副文案（与幕分带角标同口径）。 */
+/** `graph_append.authorized_by` → 锚点副文案（与幕分带角标同口径；旧 journal）。 */
 export function extractGraphAppendAuthorizedBy(
   events: SSEEvent[],
 ): Map<string, string> {
@@ -1407,6 +1427,25 @@ export function extractGraphAppendAuthorizedBy(
     const executionId = p.execution_id || "";
     const auth = p.authorized_by;
     if (executionId && auth) map.set(executionId, auth);
+  }
+  return map;
+}
+
+/**
+ * `run_plan.prev_execution_id` → 图间「续自」链（新契约呈现）。
+ * Transport-only sibling——不进 {@link ProjectedTurn.process}；本回合仍有完整 `team`
+ * TeamView，手机只在时间线挂「续自上一张图」文案行（无跨气泡跳转）。
+ */
+export function extractPrevExecutionIds(
+  events: SSEEvent[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const ev of events) {
+    if (ev.type !== "run_plan") continue;
+    const p = ev.payload as RunPlanPayload;
+    const executionId = p.execution_id || "";
+    const prev = p.prev_execution_id || "";
+    if (executionId && prev) map.set(executionId, prev);
   }
   return map;
 }

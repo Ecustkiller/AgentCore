@@ -65,13 +65,13 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点）。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。**参数主路**：默认手写顶层 `tasks`；具名 `playbook` = 固化流水线快捷套餐（与 tasks XOR，禁同时有内容；建站等可点名快捷）。
 
-**跨项目（✅）**：CEO 摸已登记项目用只读跨桌（`list_project_dir` / `read_project_file`）；写/重活带 `target_folder_id`；均不改会话 `folder_id`。点名：`list_projects` / `resolve_project`；**显式**新建云桌用 `create_project`（仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 静默建云桌并 `turn_target_desk` 继承。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读可不点名（scratch 禁写）；写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
+**跨项目（✅）**：跨已登记项目（只读摸底与写盘通吃）一律 `delegate` 各填 `target_folder_id`（=该队员坐哪张桌；写不写盘由 write_scope/grant 正交）；CEO 的 `list_project_dir` / `read_project_file` 仅派前轻量认桌/抽样，非摸底主通道；均不改会话 `folder_id`。点名：`list_projects` / `resolve_project`；**显式**新建云桌用 `create_project`（仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 静默建云桌并 `turn_target_desk` 继承。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读（非名册目标）可不点名（scratch 禁写）；名册目标与写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
 
 | 动作 | 语义 |
 |---|---|
 | 一次塞 N 个 task | 全景计划（一批声明完整分工） |
 | 同回合再调 `delegate` | 并入**【同一张】**协作图（同 `execution_id`）；协调中经 `live_plan`、本回合上一张图经自动合入，均可在 `build_run_plan` 前解析宿主节点；`depends_on` 可填本批 / 宿主声明 `id`、无歧义角色名 |
-| 跨回合 `append_to_execution_id` | 复用旧图继续生长；默认新回合新建图，仅用户显式延续意图才追加；解析失败禁止静默新建（同回合二次合入≠跨回合静默吞图） |
+| 跨回合延续 | 仍由模型显式传 `append_to_execution_id`（`"latest"` / 精确 id）表达「接着上一支团队干」，但语义已改：**新开一张锚在本回合的图 + 系统写 `prev_execution_id` 链回去**，不再把新人塞进旧图。**已废**复用旧图继续生长（辩论幕挂宿主同废）——生长回流到已收口的旧宿主会让图锚错回合、进度分母吃旧节点、journal 因宿主回合已死被丢。**否决**「无参数自动链上一张」：同对话里毫不相干的新团队会被误判成延续。团队延续读图链，**否决**为此另建 team 实体（roster 仍只管同人续派的现场）。合入**仍在跑**的热图（同回合二次 / adopt）不写 prev，走原 merge |
 | 并行度 | 由节点 `depends_on` 数据声明（无依赖即同波并行），非靠模型并行 tool call |
 | 任务 `id` | flat / DAG 均保留声明 `id`（铸 `{prefix}_{raw}`）；未声明 flat 仍用序号。跨批依赖靠声明 id 或角色名，勿臆造未声明短 id |
 
@@ -88,7 +88,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `binds+steers+add` 先全量校验，任一非法 → 整批拒绝、暂停计划零改动。否决把 `delegate` 重载成「续跑旧计划」入口；带现场续派另见 [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md)。
 
-协调模式（≥2 worker、根 CEO、非 finalize）：默认后台跑、CEO 继续 ReAct；`coordinate=false` / 单 worker / finalize / 含 `checkpoint_after` 仍阻塞。结构跟着证据走：调研成篇用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后。委派后用团队产出写综述（提示强化，非硬禁只读）；根 CEO 探路成功的 list/read/grep 可摘要注入 worker 开局。worker 协作通道 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)。协调 `wait` 在用户侧热审批/授权未决时禁止空等（勿假装推进）；用户显式停止 / regenerate 会 orphan 热交互并写入 journal（取活 turn 的 `message_id` 作 `turn_id`，非路径上的用户消息 id）。**协调期 CEO 可见面纪律**（提示/工具 schema）：图在转无新结论时可静默；禁止用用户可见 content 复述「谁还在跑」类进度（协作图是进度真相）；开口仅请示 / 报告阻塞与选项 / 宣布阶段结论；插话须先回用户句；`update_synthesis` 禁纯进度播报；协调态进度旁白经 `deliverable_only` 不进终稿 `messages.content`（过程仍进 process）。
+协调模式（根 CEO、非 finalize；**含单 worker**）：默认后台跑、CEO 继续 ReAct；`coordinate=false` / finalize / 含 `checkpoint_after` 仍阻塞。单 worker 也进协调，是为让用户插话在派单期可达（阻塞路径下 CEO 把执行权交给了 worker，插话读到也无从响应）并让 CEO 手上有 `cancel_worker`；开工卡与团队合成预览各自的 ≥2 闸**独立保留**，单 worker 的零摩擦外观不因此变重。结构跟着证据走：调研成篇用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后。委派后用团队产出写综述（提示强化，非硬禁只读）；根 CEO 探路成功的 list/read/grep 可摘要注入 worker 开局。worker 协作通道 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)。协调 `wait` 在用户侧热审批/授权未决时禁止空等（勿假装推进）；用户显式停止 / regenerate 会 orphan 热交互并写入 journal（取活 turn 的 `message_id` 作 `turn_id`，非路径上的用户消息 id）。**协调期 CEO 可见面纪律**（提示/工具 schema）：图在转无新结论时可静默；禁止用用户可见 content 复述「谁还在跑」类进度（协作图是进度真相）；开口仅请示 / 报告阻塞与选项 / 宣布阶段结论；插话须先回用户句；`update_synthesis` 禁纯进度播报；协调态进度旁白经 `deliverable_only` 不进终稿 `messages.content`（过程仍进 process）。
 
 ### 批次入闸 vs 回合收敛（边界）
 
@@ -114,7 +114,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 | 字段 / 概念 | 语义要点 |
 |---|---|
-| `depends_on` | 并行 / 串行的唯一开关；空 = 可立即并行；调度器据依赖定并行度。同回合二次委派解析范围 = 本批 ∪ 宿主图（活跃 `live_plan` 或本回合上一张图）；失败回执列可用节点 + 可执行下一步（角色名 / id / `append_to_execution_id="latest"`） |
+| `depends_on` | 并行 / 串行的唯一开关；空 = 可立即并行；调度器据依赖定并行度。同回合二次委派解析范围 = 本批 ∪ 宿主图（活跃 `live_plan` 或本回合上一张图）；失败回执列可用节点 + 可执行下一步（角色名 / id） |
 | `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述 |
 | `complexity_hint` | `light`/`standard`：编排姿态（如 light 隐含 `coordination=none`），**不**映射 worker token/超时 |
 | `coordination` | 便签墙档；缺省 `none`；权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
@@ -192,9 +192,9 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 硬挡 | `_memory_meta.explore_workspace_key` 与当前绑定不一致（换绑）**或** 用户点名「先了解 / 重新了解 / 刷新项目记忆」**或** 请求带结构化工程信号（点名本仓改/建/继续开发等允许表短语，**不扫长文猜意图**）且画像仍空 | 是 → 先探索再继续原请求；pending 期间 `write_scope≤explore_memory`（✅ S3：原 `code_verified` 例外已随 kind 退役） |
 | 指纹漂移 | 相对上次探索，**顶层树 + 关键清单指纹**已变 | **不挡**。一期✅：脏标记 + `<project_nav_stale>` 软提示可点名刷新；二期✅：`schedule_explore_refresh` 旁路静默更新（→ [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)） |
 
-**硬挡流程**：注入 `<cold_start_explore>`（换绑 / 点名刷新 / 空画像+工程信号；指纹与「仅空画像」**不**进此块）→ 先轻量探路（≤5 **轮**；同轮并行多工具只计 1 轮）→ `delegate`（`team_preview`）组调研队（**≥2 角并行**，禁止 1 人包办整仓）→ 收尾经 `update_project_profile` 合并写项目 **画像 + 导航.md**，记录 `workspace_key` 与指纹；主题软顶 5 / 总数受 `memory_max_topic_files` → **立刻继续原请求**。pending 期间允许 `form=files`，但写盘不得出 `explore_memory` 根（修码批除外，见上表）；`文档/项目/` 不在本幕写。点名硬闸（与 pending 同级）✅。**resume 与开场同源**：空画像软降级走 `resolve_hard_explore_reason`，禁止 resume 把「仅空画像」误硬拦。
+**硬挡流程**：注入 `<cold_start_explore>`（换绑 / 点名刷新 / 空画像+工程信号；指纹与「仅空画像」**不**进此块）→ 先轻量探路（≤探路硬上限，见下段；同轮并行多工具只计 1 轮）→ `delegate`（`team_preview`）组调研队（**≥2 角并行**，禁止 1 人包办整仓）→ 收尾经 `update_project_profile` 合并写项目 **画像 + 导航.md**，记录 `workspace_key` 与指纹；主题软顶 5 / 总数受 `memory_max_topic_files` → **立刻继续原请求**。pending 期间允许 `form=files`，但写盘不得出 `explore_memory` 根（修码批除外，见上表）；`文档/项目/` 不在本幕写。点名硬闸（与 pending 同级）✅。**resume 与开场同源**：空画像软降级走 `resolve_hard_explore_reason`，禁止 resume 把「仅空画像」误硬拦。
 
-**强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report`（无字数结构腿）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；硬门**不**扫 task/角色自由文。✅ 已删角色名扫与静默改写 deliverable（审校落盘靠 playbook/结构声明，见上节）。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
+**强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。轮数唯一真源 = `settings.engine_team_gate_investigation_rounds`（默认 7；提示词文案与本文都跟它，禁各处硬编码）——实测触发时模型每轮并行 2–3 次调用，但 3/3 触发都有整轮花在幻觉路径上，故：**一轮内调查调用全失败不计探路轮**（那轮没换到情报，不该扣广度预算；防空转仍靠既有同目标 spin / 工具失败熔断 / unproductive 梯子，不新加兜底层）；**`delegate` 成功即归还本闸收走的只读工具**（闸的目的是逼派工，不是罚一整回合——否则 CEO 派完读不了 worker 落盘产物，收尾对账打折；只还本闸新增那批，熔断 / 通道死 / `read_url` 退役收走的不复活，`team_gate_fired` 仍锁定不重开计数）。**两处边界（已确认，勿再提案）**：① 归还只认 `delegate` 成功，`debate` 不还——闸催的出口就是派工，辩论后 CEO 消化的是辩论结论；真出现「辩后须读落盘取证才能成文」再放。② 闸后挂起（审批 / `ask_user`）→ resume 不重剥：被剥名单是 loop 局部态、不进 seed，闸标记却锁着，等于恢复后工具自动回来——**有意不堵**，堵它要改 seed 契约，而挂起点用户在场、乱查可见，收益不抵成本。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report`（无字数结构腿）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；硬门**不**扫 task/角色自由文。✅ 已删角色名扫与静默改写 deliverable（审校落盘靠 playbook/结构声明，见上节）。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
 
 **边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚约定文档另见 `文档/项目/` 且不在探索 pending 批）。权威分层 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)。
 

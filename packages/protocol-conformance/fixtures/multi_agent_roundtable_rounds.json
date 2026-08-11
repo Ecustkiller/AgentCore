@@ -532,6 +532,7 @@
   "projected": {
     "status": "cancelled",
     "finishReason": "cancelled",
+    "error": null,
     "content": "我来组织一场多方圆桌。",
     "reasoning": "",
     "captainContext": [],

@@ -20,6 +20,7 @@ from agentcore.core.errors import (
     LLMClientClosedError,
     LLMError,
     LLMInsufficientBalanceError,
+    LLMInvalidResponseError,
     LLMRateLimitError,
     LLMTimeoutError,
     LLMUpstreamError,
@@ -33,6 +34,7 @@ from agentcore.llm.errors import (
     diagnose_empty_response,
     is_auth_rejection,
     is_non_retryable_client_status,
+    is_temperature_deprecated,
     upstream_client_error,
     upstream_error,
 )
@@ -372,6 +374,10 @@ class OpenAICompatibleProvider:
                     headers=_request_attribution_headers() or None,
                 ) as response:
                     body = await response.aread() if response.status_code >= 400 else None
+                    if body is not None and self._try_omit_temperature_once(
+                        payload, response.status_code, body, stream=True
+                    ):
+                        continue
                     self._raise_for_status(
                         response.status_code,
                         backoff,
@@ -843,6 +849,35 @@ class OpenAICompatibleProvider:
         limit = _MAX_RETRIES if max_attempts is None else max_attempts
         return attempt < limit - 1
 
+    def _try_omit_temperature_once(
+        self,
+        payload: dict,
+        status_code: int,
+        body: bytes | None,
+        *,
+        stream: bool,
+    ) -> bool:
+        """Strip ``temperature`` and signal one retry when upstream rejects it.
+
+        Only fires for HTTP 400 bodies already classified by
+        :func:`is_temperature_deprecated`, and only while the payload still
+        carries ``temperature`` — so at most one extra request. Other 4xx stay
+        on the normal raise path.
+        """
+        if status_code != 400 or "temperature" not in payload:
+            return False
+        if not is_temperature_deprecated(body):
+            return False
+        del payload["temperature"]
+        logger.info(
+            "llm.temperature_omitted_retry",
+            provider=self._name,
+            model=payload.get("model"),
+            stream=stream,
+            body_preview=body_preview(body),
+        )
+        return True
+
     async def _sleep_before_retry(
         self,
         *,
@@ -893,6 +928,10 @@ class OpenAICompatibleProvider:
                     headers=_request_attribution_headers() or None,
                 )
                 body = response.content if response.status_code >= 400 else None
+                if body is not None and self._try_omit_temperature_once(
+                    payload, response.status_code, body, stream=False
+                ):
+                    continue
                 self._raise_for_status(
                     response.status_code, backoff, response.headers, body=body, attempt=attempt
                 )
@@ -901,7 +940,7 @@ class OpenAICompatibleProvider:
                 except ValueError as e:
                     # 2xx HTML / non-JSON (gateway login page, etc.): not transient —
                     # retrying the same endpoint just spins. Mirror list_models.
-                    raise LLMError(f"{self._name} 响应格式无效") from e
+                    raise LLMInvalidResponseError(f"{self._name} 响应格式无效") from e
             except LLMUpstreamError as e:
                 last_error = e
                 if not e.retryable or not self._can_retry_attempt(attempt):
@@ -1162,7 +1201,7 @@ class OpenAICompatibleProvider:
         try:
             data = response.json()
         except ValueError as e:
-            raise LLMError(f"{self._name} 模型列表响应格式无效") from e
+            raise LLMInvalidResponseError(f"{self._name} 模型列表响应格式无效") from e
         items = data.get("data") if isinstance(data, dict) else None
         if not isinstance(items, list):
             raise LLMError(f"{self._name} 模型列表响应缺少 data 字段")

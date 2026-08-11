@@ -40,7 +40,7 @@ import type { ReactNode } from "react";
 /**
  * 「本回合产出文件」卡 —— 主清单只认路径验收态（delivery_status.artifacts），挂在
  * 答复正文下方（前端UX设计.md §九「回合内文件呈现」）。点任一可预览行 → 经 {@link useSidePanelStore}
- * 的 `showFile` 开右坞顶栏 File 内容 tab。例外：HTML 产物在会话具备应用内「完整预览」能力时
+ * 的 `showFile` 开右坞顶栏 File 内容 tab（可带 artifact.workspaceId 跟落地桌）。例外：HTML 产物在会话具备应用内「完整预览」能力时
  * **直达**内置浏览器 tab（`workspace://` + BrowserPanel；desk 优先 artifact.workspaceId，
  * 否则会话工作区 wsId）。「查看改动」聚焦右坞「改动」tab（无则先挂；与
  * {@link TurnFileChangesReview} 同源，前端UX设计.md §十）。
@@ -285,7 +285,8 @@ export function FileArtifactsCard({
       );
       return;
     }
-    showFile(a.path, a.name);
+    // 非 HTML / 无完整预览能力：File tab 跟落地 desk（无 workspaceId → 会话出生桌）。
+    showFile(a.path, a.name, a.workspaceId);
   };
 
   return (

@@ -106,7 +106,6 @@ export function PermissionAxesBadge({
         .getState()
         .load(conversationId)
         .catch(() => {});
-      notifySuccess(`已切换为「${axesShortLabel(saved)}」`);
     } catch (e) {
       notifyError(e, "切换权限失败");
     } finally {

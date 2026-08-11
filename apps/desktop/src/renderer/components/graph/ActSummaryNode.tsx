@@ -5,6 +5,8 @@ import type {
   ActKind,
   ExecutionStatus,
 } from "@/stores/execution";
+import { useExecutionScope } from "@/stores/execution";
+import { useRecoveryDismissedStore } from "@/stores/recoveryDismissed";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
   AlertTriangle,
@@ -90,6 +92,10 @@ export function ActSummaryNode({ data }: NodeProps) {
   const documentMode = useGraphDocumentMode();
   const live = useActSummaryLive(shell.actId);
   const actions = useGraphActions();
+  const messageId = useExecutionScope();
+  const hintDismissed = useRecoveryDismissedStore((s) =>
+    messageId ? s.dismissed.has(messageId) : false,
+  );
 
   const status =
     (documentMode ? live?.status : shell.status) ??
@@ -102,8 +108,10 @@ export function ActSummaryNode({ data }: NodeProps) {
   const durationMs = documentMode ? live?.durationMs : shell.durationMs;
   const pendingDecisions =
     (documentMode ? live?.pendingDecisions : shell.pendingDecisions) ?? 0;
-  const recoverable =
+  const actRecoverable =
     (documentMode ? live?.recoverable : shell.recoverable) ?? false;
+  // 幕卡「待救火」follows the same session dismiss latch as turn chips.
+  const recoverable = actRecoverable && !hintDismissed;
   const onActivate = documentMode
     ? () => actions.focusAct(shell.actId)
     : shell.onActivate;

@@ -1,13 +1,15 @@
 """Two-layer memory orchestration (episodic session digests → semantic consolidation).
 
 Episodic (live path): each finished turn arms a per-conversation idle debounce /
-turn-cap. When it fires, a ≤200-char session summary is appended under ``情景/`` and
-a light ``memory_updated`` tip is pushed — never a direct preference/profile write.
+turn-cap. When it fires, a ≤200-char session summary (plus optional verified project
+facts; action inventory from turn_journal) is appended under ``情景/`` and a light
+``memory_updated`` tip is pushed — never a direct preference/profile write.
 
 Semantic (batch): after an episodic write (and on the periodic sweeper), if undigested
 episodes ≥ ``memory_semantic_min_episodes`` OR age since last success ≥
-``memory_semantic_max_age_hours``, one consolidator pass rewrites always-files and
-applies topic ops, then pushes a diff card.
+``memory_semantic_max_age_hours``, one consolidator pass rewrites always-files
+(including project ``导航.md`` incremental merge) and applies topic ops, then pushes a
+diff card.
 
 Open-turn deferral, per-user locks, and ``memory_synced_at`` watermarks are unchanged.
 """
@@ -38,10 +40,16 @@ from agentcore.db.repositories import (
     MemoryUpdateRepository,
     MessageRepository,
     PausedTurnRepository,
+    TurnJournalRepository,
 )
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
+from agentcore.memory.action_inventory import (
+    TurnActionInventory,
+    inventory_from_journal_entries,
+    merge_inventories,
+)
 from agentcore.memory.episodic import (
     LLMEpisodicSummarizer,
     append_episode,
@@ -320,6 +328,33 @@ async def run_semantic_for_scope(
     return outcome
 
 
+async def _load_conversation_action_inventory(
+    session, conversation_id: str, *, max_turns: int = 40
+) -> TurnActionInventory:
+    """Union tool actions from recent turn journals for this conversation."""
+    repo = TurnJournalRepository(session)
+    turn_ids = await repo.list_recent_turn_ids(conversation_id, limit=max_turns)
+    if not turn_ids:
+        return TurnActionInventory()
+    # Newest-first from list_recent_turn_ids; harvest all for the window.
+    parts: list[TurnActionInventory] = []
+    for turn_id in turn_ids:
+        entries = await repo.load(turn_id)
+        parts.append(inventory_from_journal_entries(entries))
+    return merge_inventories(parts)
+
+
+def _consolidation_failure_retryable(exc: BaseException) -> bool:
+    """True only for AgentCoreError with retryable=True (upstream blip / rate / timeout).
+
+    Bare exceptions (AttributeError, …) and non-retryable AgentCoreError are treated as
+    deterministic — advancing the watermark stops the sweeper from re-burning LLM on them.
+    """
+    from agentcore.core.errors import AgentCoreError
+
+    return isinstance(exc, AgentCoreError) and bool(exc.retryable)
+
+
 async def consolidate_conversation(
     conversation_id: str, *, store: MemoryStore | None = None
 ) -> bool:
@@ -329,6 +364,8 @@ async def consolidate_conversation(
     Never raises.
     """
     store = store or default_memory_store()
+    # Captured so the failure path can advance the sweeper watermark without re-query.
+    latest: datetime | None = None
     try:
         async with user_memory_lock_for(conversation_id) as user_id:
             if user_id is None:
@@ -377,6 +414,11 @@ async def consolidate_conversation(
                     conversation_id,
                     max_messages=settings.memory_consolidation_window_messages,
                 )
+                actions = await _load_conversation_action_inventory(
+                    session,
+                    conversation_id,
+                    max_turns=settings.memory_consolidation_window_messages,
+                )
 
             credentials: LLMCredentials | None = None
             wrote_episodic = False
@@ -388,7 +430,9 @@ async def consolidate_conversation(
                     try:
                         summarizer = LLMEpisodicSummarizer(provider, model=model)
                         summary = await summarizer.summarize(
-                            window, max_chars=settings.memory_episodic_summary_max_chars
+                            window,
+                            max_chars=settings.memory_episodic_summary_max_chars,
+                            actions=actions,
                         )
                         if not summary.strip():
                             summary = fallback_episode_summary(
@@ -398,9 +442,7 @@ async def consolidate_conversation(
                     finally:
                         await provider.close()
 
-                bg = await run_background_llm(
-                    user_id, purpose="memory", runner=_episodic_runner
-                )
+                bg = await run_background_llm(user_id, purpose="memory", runner=_episodic_runner)
                 if bg is None:
                     return False
                 credentials = bg.credentials
@@ -411,6 +453,7 @@ async def consolidate_conversation(
                     summary=bg.value,
                     scope=folder_id,
                     max_chars=settings.memory_episodic_summary_max_chars,
+                    actions=actions,
                 )
                 wrote_episodic = True
                 await _record_and_publish(
@@ -422,9 +465,7 @@ async def consolidate_conversation(
                 )
 
             async with async_session_factory() as session:
-                await ConversationRepository(session).set_memory_synced_at(
-                    conversation_id, latest
-                )
+                await ConversationRepository(session).set_memory_synced_at(conversation_id, latest)
 
             if wrote_episodic:
                 with contextlib.suppress(Exception):
@@ -447,12 +488,39 @@ async def consolidate_conversation(
     except Exception as e:
         from agentcore.llm.background_failure import classify_background_llm_failure
 
-        logger.warning(
-            "memory.consolidation_failed",
-            conversation_id=conversation_id,
-            error=str(e),
-            reason=classify_background_llm_failure(e),
-        )
+        reason = classify_background_llm_failure(e)
+        # Transient upstream (5xx / rate limit / timeout): leave the watermark so the
+        # next sweep retries. Deterministic failure: advance it, same posture as the
+        # abnormal-turn skip above — otherwise the 300s sweeper re-selects this
+        # conversation and re-burns an LLM call on it forever.
+        dropped_through: datetime | None = None
+        if latest is not None and not _consolidation_failure_retryable(e):
+            try:
+                async with async_session_factory() as session:
+                    await ConversationRepository(session).set_memory_synced_at(
+                        conversation_id, latest
+                    )
+                dropped_through = latest
+            except Exception:
+                # Watermark unchanged → the sweeper will retry; report it as a plain
+                # failure below rather than claiming a window was dropped.
+                pass
+        if dropped_through is not None:
+            logger.warning(
+                "memory.consolidation_window_dropped",
+                conversation_id=conversation_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                reason=reason,
+                window_through=dropped_through.isoformat(),
+            )
+        else:
+            logger.warning(
+                "memory.consolidation_failed",
+                conversation_id=conversation_id,
+                error=str(e),
+                reason=reason,
+            )
         return False
 
 

@@ -8,6 +8,7 @@ import {
   extractEvidenceLedger,
   extractGraphAppendActKinds,
   extractGraphAppendAuthorizedBy,
+  extractPrevExecutionIds,
   extractStageCardTraces,
   extractToolPhases,
   extractTurnQueued,
@@ -85,6 +86,22 @@ describe("extractGraphAppendAuthorizedBy / stage_card process", () => {
   });
 });
 
+describe("extractPrevExecutionIds", () => {
+  it("透传 run_plan.prev_execution_id", () => {
+    const map = extractPrevExecutionIds([
+      ev("run_plan", {
+        execution_id: "exec2",
+        plan_type: "multi_agent",
+        task_summary: "续接",
+        prev_execution_id: "exec1",
+        agents: [],
+        runs: [],
+      }),
+    ]);
+    expect(map.get("exec2")).toBe("exec1");
+  });
+});
+
 describe("fold · graph_append / cross-turn append", () => {
   it("multi_agent_cross_turn_append fixture aligns with golden", () => {
     const fixture = loadFixtures().find(
@@ -96,7 +113,7 @@ describe("fold · graph_append / cross-turn append", () => {
     expect(diffProjected(fixture.projected, actual)).toEqual([]);
   });
 
-  it("graph_append 透传 process 锚点；host_message_id run_plan 不插 team", () => {
+  it("旧 journal：graph_append 透传 process 锚点；host_message_id run_plan 不插 team", () => {
     const turn = fold([
       ev("message_start", { message_id: "m2", conversation_id: "c1" }),
       ev("content_delta", { delta: "再加一人。" }),
@@ -136,7 +153,7 @@ describe("fold · graph_append / cross-turn append", () => {
     expect(turn.runs.map((r) => r.id)).toEqual(["r3"]);
   });
 
-  it("message_start 清正文/process，同 execution_id 保留 agents/runs", () => {
+  it("旧 journal：message_start 清正文/process，同 execution_id 保留 agents/runs", () => {
     const turn = fold([
       ev("message_start", { message_id: "m1", conversation_id: "c1" }),
       ev("content_delta", { delta: "第一回合。" }),
@@ -221,6 +238,64 @@ describe("fold · graph_append / cross-turn append", () => {
     expect(turn.runs.find((r) => r.id === "r2")?.status).toBe("completed");
     // 不同 execution 才清空重建；同 id merge 不把宿主已完成节点 skip 掉
     expect(turn.runs.every((r) => r.status !== "skipped")).toBe(true);
+  });
+
+  it("新契约：prev_execution_id 插本回合 team；换 execution_id 重置图", () => {
+    const events = [
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("run_plan", {
+        execution_id: "exec1",
+        plan_type: "multi_agent",
+        task_summary: "建图",
+        agents: [{ id: "w1", role: "研究员", thinking: true }],
+        runs: [{ id: "r1", agent_id: "w1", task: "调研", depends_on: [] }],
+      }),
+      ev("run_started", {
+        run_id: "r1",
+        agent_id: "w1",
+        parent_run_id: null,
+        kind: "agent",
+      }),
+      ev("run_completed", {
+        run_id: "r1",
+        agent_id: "w1",
+        output_summary: "ok",
+        duration_ms: 10,
+      }),
+      ev("message_end", { finish_reason: "end_turn" }),
+      ev("message_start", { message_id: "m2", conversation_id: "c1" }),
+      ev("content_delta", { delta: "续接。" }),
+      ev("run_plan", {
+        execution_id: "exec2",
+        plan_type: "multi_agent",
+        task_summary: "新图",
+        prev_execution_id: "exec1",
+        agents: [{ id: "w3", role: "撰写员", thinking: false }],
+        runs: [{ id: "r3", agent_id: "w3", task: "写", depends_on: [] }],
+      }),
+      ev("run_started", {
+        run_id: "r3",
+        agent_id: "w3",
+        parent_run_id: null,
+        kind: "agent",
+      }),
+      ev("run_completed", {
+        run_id: "r3",
+        agent_id: "w3",
+        output_summary: "done",
+        duration_ms: 20,
+      }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ];
+    const turn = fold(events);
+    expect(turn.process).toEqual([
+      { kind: "content", text: "续接。" },
+      { kind: "team", execution_id: "exec2" },
+    ]);
+    expect(turn.process.some((s) => s.kind === "graph_append")).toBe(false);
+    expect(turn.agents.map((a) => a.id)).toEqual(["w3"]);
+    expect(turn.runs.map((r) => r.id)).toEqual(["r3"]);
+    expect(extractPrevExecutionIds(events).get("exec2")).toBe("exec1");
   });
 });
 
@@ -710,21 +785,97 @@ describe("extractTurnQueued", () => {
     expect(turn.status).toBe("completed");
   });
 
-  it("fold 对 turn_steer_accepted no-op（不炸 assertNever）", () => {
+  it("经典插话 received→injected 同 id 保最新", () => {
     const turn = fold([
-      ev("turn_steer_accepted", {
-        steer_id: "steer-1",
-        conversation_id: "c1",
+      ev("user_interjection", {
+        interjection_id: "inj-1",
+        execution_id: "exec-1",
         content: "改成中文",
-        pending: 1,
+        status: "received",
+      }),
+      ev("user_interjection", {
+        interjection_id: "inj-1",
+        execution_id: "exec-1",
+        content: "改成中文",
+        status: "injected",
       }),
       ev("message_start", { message_id: "m1", conversation_id: "c1" }),
       ev("content_delta", { delta: "好的" }),
       ev("message_end", { finish_reason: "end_turn" }),
     ]);
     expect(turn.content).toBe("好的");
-    expect(turn.status).toBe("completed");
-    expect(turn.userInterjections).toEqual([]);
+    expect(turn.userInterjections).toEqual([
+      {
+        interjectionId: "inj-1",
+        executionId: "exec-1",
+        content: "改成中文",
+        status: "injected",
+        note: null,
+      },
+    ]);
+  });
+
+  it("经典降级 received→queued 再被终态覆盖；turn_queued fold no-op", () => {
+    const turn = fold([
+      ev("user_interjection", {
+        interjection_id: "inj-q",
+        execution_id: "exec-1",
+        content: "晚到",
+        status: "received",
+      }),
+      ev("user_interjection", {
+        interjection_id: "inj-q",
+        execution_id: "exec-1",
+        content: "晚到",
+        status: "queued",
+        note: "当前回合已收口，已自动转入下一回合",
+      }),
+      ev("turn_queued", {
+        queue_id: "q1",
+        position: 1,
+        queue_depth: 1,
+        conversation_id: "c1",
+        degraded_from: "steer",
+      }),
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("content_delta", { delta: "ok" }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    expect(turn.userInterjections).toEqual([
+      {
+        interjectionId: "inj-q",
+        executionId: "exec-1",
+        content: "晚到",
+        status: "queued",
+        note: "当前回合已收口，已自动转入下一回合",
+      },
+    ]);
+  });
+
+  it("插话 marker 钉在 received 当时的 process 末尾；同 id 不重复", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("content_delta", { delta: "你好" }),
+      ev("user_interjection", {
+        interjection_id: "inj-mid",
+        execution_id: "exec-1",
+        content: "改成中文",
+        status: "received",
+      }),
+      ev("user_interjection", {
+        interjection_id: "inj-mid",
+        execution_id: "exec-1",
+        content: "改成中文",
+        status: "injected",
+      }),
+      ev("content_delta", { delta: "，世界" }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    expect(turn.process).toEqual([
+      { kind: "content", text: "你好" },
+      { kind: "user_interjection", interjection_id: "inj-mid" },
+      { kind: "content", text: "，世界" },
+    ]);
   });
 });
 

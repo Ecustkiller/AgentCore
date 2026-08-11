@@ -5,7 +5,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { useCreateFolder } from "@/hooks/useFolders";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import { useConversationStore } from "@/stores/conversation";
 import { type CreateFolderAnchorRect, useFoldersStore } from "@/stores/folders";
@@ -109,7 +109,6 @@ export function CreateFolderCascadePanel({
   const finishCreated = (folder: FolderMeta) => {
     applyDraftProjectIntent(folder.id);
     useFoldersStore.getState().setPendingRename(folder.id);
-    notifySuccess(`已创建项目「${folder.name}」`);
     onClose();
   };
 

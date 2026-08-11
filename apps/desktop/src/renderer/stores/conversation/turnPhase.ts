@@ -104,6 +104,12 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
     eventType === "turn_queue_cancelled" ||
     // FIFO 出队开跑：常紧挨上一回合 terminal 之后、message_start 之前到达。
     eventType === "turn_queue_started" ||
+    // Stop 后降级排队：user_interjection(queued) + turn_queued(degraded_from=steer)
+    // 常落在 stopping/terminal；挡掉则气泡永久卡在 received。
+    eventType === "user_interjection" ||
+    eventType === "turn_queued" ||
+    // 冷 resume deferred：wrap_up 可能落在宿主 message_end 之后的 terminal 窗。
+    eventType === "resume_deferred" ||
     // 异步团队：detached 可落在 message_end 前后；completed 常在 terminal 后同连接到达。
     eventType === "execution_detached" ||
     eventType === "execution_completed"

@@ -8,12 +8,14 @@ Connectivity faults (connection refused / WinError 1225) map to the stable
 """
 
 from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 
 from agentcore.db.errors import (
     DATABASE_UNAVAILABLE_CODE,
     DATABASE_UNAVAILABLE_MESSAGE,
     DatabaseUnavailableError,
     is_db_connectivity_error,
+    is_pool_timeout_error,
     is_schema_error,
     reraise_as_database_unavailable,
 )
@@ -85,3 +87,18 @@ def test_database_unavailable_code_stable():
     assert DATABASE_UNAVAILABLE_CODE == "database_unavailable"
     assert "服务暂时不可用" in DATABASE_UNAVAILABLE_MESSAGE
     assert "请确认数据库" not in DATABASE_UNAVAILABLE_MESSAGE
+
+
+def test_pool_timeout_is_not_connectivity_but_reraises_product_error():
+    err = SATimeoutError(
+        "QueuePool limit of size 16 overflow 16 reached, connection timed out, timeout 30.00"
+    )
+    assert is_pool_timeout_error(err) is True
+    assert is_db_connectivity_error(err) is False
+    try:
+        reraise_as_database_unavailable(err)
+        raise AssertionError("expected DatabaseUnavailableError")
+    except DatabaseUnavailableError as wrapped:
+        assert str(wrapped) == DATABASE_UNAVAILABLE_MESSAGE
+        assert wrapped.status_code == 503
+        assert wrapped.__cause__ is err

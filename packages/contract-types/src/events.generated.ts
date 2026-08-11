@@ -121,7 +121,8 @@ export type ProcessStep =
   | { kind: "escalation"; escalation_id: string }
   | { kind: "approval"; approval_id: string }
   | { kind: "delegation_authorization"; authorization_id: string }
-  | { kind: "stage_card"; stage_card_id: string };
+  | { kind: "stage_card"; stage_card_id: string }
+  | { kind: "user_interjection"; interjection_id: string };
 
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
  * `ApprovalDecision`. */
@@ -334,6 +335,10 @@ export interface TeamPreviewWorker {
   origin?: "platform" | "byok";
   /** BYOK 服务商 id；platform 缺省。 */
   provider_id?: string;
+  /** 该队员落座 Folder id（显式 target 或本会话工作区）；裸聊 scratch 缺省。 */
+  target_folder_id?: string;
+  /** 服务端解析的工作区显示名；无 Folder 时为「本会话工作区」。缺省=旧帧。 */
+  target_folder_name?: string;
 }
 
 /** One debate participant on the debate kickoff card. */
@@ -513,10 +518,11 @@ export interface RunPlanPayload {
   agents: PlanAgentPayload[];
   runs: RunPlanRunEntry[];
   host_message_id?: string;
+  prev_execution_id?: string;
   act?: RunPlanAct;
 }
 
-/** 跨回合同图追加锚点——落在【追加回合】journal；生长内容续写宿主 turn。 */
+/** 已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 prev_execution_id。 */
 export interface GraphAppendPayload {
   execution_id: string;
   host_message_id: string;
@@ -848,14 +854,17 @@ export interface UserInterjectionAttachment {
   binary?: boolean;
 }
 
-/** Mid-flight user message into a live coordination turn (CEO routes).
+/** Mid-flight user interjection into a live turn (经典 steer + 协调插话共用).
  * 
- * Lifecycle (S1): ``received`` → ``addressed`` / ``queued`` / ``failed``. */
+ * Lifecycle:
+ * - 协调: ``received`` → ``injected`` → ``addressed`` / ``queued`` / ``failed``
+ * - 经典: ``received`` → ``injected`` (终态) / ``queued`` / ``failed``（无 ``addressed``）
+ * ``injected`` = 内容真正写入模型上下文的那一刻。 */
 export interface UserInterjectionPayload {
   interjection_id: string;
   execution_id: string;
   content: string;
-  status: "received" | "addressed" | "queued" | "failed";
+  status: "received" | "injected" | "addressed" | "queued" | "failed";
   note?: string;
   attachments?: UserInterjectionAttachment[];
 }
@@ -889,18 +898,6 @@ export interface TurnQueueStartedPayload {
 export interface TurnQueueCancelledPayload {
   queue_id: string;
   conversation_id: string;
-}
-
-/** Classic in-flight soft-insert ack (同对话再发 P1). EPHEMERAL — toast on live clients.
- * 
- * Emitted when ``delivery=steer`` was parked on the live turn's pending queue
- * (not FIFO). ``content`` may be truncated for the toast; injection uses the
- * full body at the next ReAct step boundary. */
-export interface TurnSteerAcceptedPayload {
-  steer_id: string;
-  conversation_id: string;
-  content: string;
-  pending: number;
 }
 
 /** Cold resume deferred while a live turn holds the slot. EPHEMERAL — same-connection wait.
@@ -1011,7 +1008,7 @@ export interface RunFailedPayload {
 export interface RunCancelledPayload {
   run_id: string;
   agent_id: string;
-  reason: "redirect" | "stop";
+  reason: "redirect" | "stop" | "user_stop";
   execution_id?: string;
 }
 
@@ -1940,7 +1937,6 @@ export type SSEPayloadMap = {
   turn_queued: TurnQueuedPayload;
   turn_queue_started: TurnQueueStartedPayload;
   turn_queue_cancelled: TurnQueueCancelledPayload;
-  turn_steer_accepted: TurnSteerAcceptedPayload;
   resume_deferred: ResumeDeferredPayload;
   execution_detached: ExecutionDetachedPayload;
   execution_completed: ExecutionCompletedPayload;

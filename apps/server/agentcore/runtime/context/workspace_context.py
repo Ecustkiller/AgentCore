@@ -657,21 +657,23 @@ def build_workspace_context(
 
     # 跨项目并行指挥（事实面短教；整条 HOW 见 consult team_orchestration_advanced）。
     # 与 desktop_line 的 open/register/bind 分流互补，不替代。
-    # 读=只读跨桌工具；写=delegate+target_folder_id（与双模式 §五 / 编排器一致）。
+    # 跨已登记项目读写通吃 = delegate+target_folder_id；CEO list/read_project = 派前轻量认桌。
     cross_project_line = (
         "跨项目指挥：默认工作区=出生桌（通用 file_* 只绑出生桌）；"
-        "摸已登记项目→只读跨桌 `list_project_dir` / `read_project_file`"
-        "（`folder_id`+相对路径；不改挂载、不写目标桌记忆）；"
-        "【禁止】以「云端读不到本地」为由改绑/open/mount 冒充跨仓读；"
-        "写/改盘→`list_projects` / `resolve_project` 得 id"
+        "跨已登记项目（只读摸底与写盘通吃）→`list_projects` / `resolve_project` 得 id"
         "（歧义 `ask_user` choice，禁猜最近）后同一次 `delegate` 各 task 填"
-        "`target_folder_id`（换桌+记忆跟桌；不改本会话 folder_id）；"
+        "`target_folder_id`（=该队员坐哪张桌；换桌+记忆跟桌；不改本会话 folder_id；"
+        "写不写盘由 write_scope/grant 正交，默认 none）；"
+        "【禁止】派工不填 target_folder_id 坐空 scratch；"
+        "CEO `list_project_dir` / `read_project_file` 仅派前轻量认桌/抽样，非摸底主通道"
+        "（`folder_id`+相对路径；不改挂载、不写目标桌记忆；队员拿不到这两工具）；"
+        "【禁止】以「云端读不到本地」为由改绑/open/mount 冒充跨仓读；"
         "空/近空→先 `ask_user` 钉目标，禁连续 file_list 确认空；"
         "开发双仓≠open/register/bind/`external_mount_readonly` 冒充"
-        "（挂载=区外只读，正交；写仍派工换桌）；"
+        "（挂载=区外只读，正交；跨项目须派工换桌）；"
         "有出生未点名=默认桌；无出生：纯对话/只读可派（scratch 禁写）；"
         "裸聊写盘缺桌由运行时自动建云桌，勿先 ask_user/create_project；"
-        "多项目写盘须点名禁默写 scratch；"
+        "多项目/名册目标（含只读）须点名禁默写 scratch；"
         "仅用户明确新建/显式多线先建：云 `create_project`（只建云）/ "
         "Composer「导入到云 / 连接 Git」（云协作推荐）；"
         "本机传统 `open_local_project` / `register_local_project` / `bind_local_folder` "

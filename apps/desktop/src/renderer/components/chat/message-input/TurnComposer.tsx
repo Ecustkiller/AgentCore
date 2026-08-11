@@ -1,6 +1,6 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { MentionMenu } from "@/components/chat/MentionMenu";
-import { IconButton } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -27,7 +27,14 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import { CloudUpload, Paperclip, Send, Square, X } from "lucide-react";
+import {
+  CloudUpload,
+  ListPlus,
+  Paperclip,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
@@ -479,53 +486,59 @@ export function TurnComposer({
     </>
   );
 
-  // 生成中：主槽一位——无草稿=停止；有草稿=主色排队发送覆盖停止（清空即可再停）。
-  // 插队为旁路轻量入口（显式 steer），不把主槽改成 Stop&send。
+  // 生成中：停止常显（对齐手机 send+stop 并存）；有草稿时再加「插队」次级 +「排队」主键。
+  // 插队 = 显式 steer（下一步生效），不把主槽改成 Stop&send。
   // N4-A：只读离线硬禁用发送。
   const sendBlocked = serverUnhealthy;
   const hasDraft = composerHasSendableDraft(value, attachments);
   const queueDisabled = !hasDraft || sendBlocked;
   const midFlightLabel = "排队发送";
-  const midFlightHint = "排队发送（Enter）；Ctrl/Cmd+Enter 插队";
+  const midFlightHint = "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 插队";
+  const stopButton = (
+    <IconButton
+      size="sm"
+      tone="destructive"
+      onClick={stopGeneration}
+      aria-label="停止生成"
+      title="停止生成"
+    >
+      <Square size={16} />
+    </IconButton>
+  );
   const sendControls = isGenerating ? (
     hasDraft ? (
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="shrink-0 rounded-lg px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        <Button
+          variant="neutral"
+          size="sm"
+          className="border-border text-foreground"
           onClick={() => void handleSend({ delivery: "steer" })}
           disabled={queueDisabled}
           aria-label="插队"
           title={
             sendBlocked
               ? "离线时无法发送"
-              : "插队插入当前回合（Ctrl/Cmd+Enter）"
+              : "插队：下一步生效（Ctrl/Cmd+Enter）；协调模式下 CEO 仍可能改排队"
           }
           data-testid="composer-steer-link"
         >
           插队
-        </button>
-        <IconButton
+        </Button>
+        <Button
+          variant="primary"
           size="sm"
-          tone="primary"
+          icon={<ListPlus size={14} aria-hidden />}
           onClick={() => void handleSend()}
           disabled={queueDisabled}
           aria-label={midFlightLabel}
           title={sendBlocked ? "离线时无法发送" : midFlightHint}
         >
-          <Send size={16} />
-        </IconButton>
+          排队
+        </Button>
+        {stopButton}
       </div>
     ) : (
-      <IconButton
-        size="sm"
-        tone="destructive"
-        onClick={stopGeneration}
-        aria-label="停止生成"
-        title="停止生成"
-      >
-        <Square size={16} />
-      </IconButton>
+      stopButton
     )
   ) : (
     <IconButton

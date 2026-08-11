@@ -375,6 +375,45 @@ def test_execution_sourced_single_agent_tool_turn_drops_captain_events_keeps_pro
     }
 
 
+def test_classic_steer_interjection_survives_the_surface_gate():
+    # 经典单聊插话: a steer on a plain chat turn journals DURABLE ``user_interjection``
+    # facts but no run_plan / approval / question. ``user_interjection`` is itself a
+    # surface type, so the gate must NOT wipe the events — retiring
+    # ``turn_steer_accepted`` was precisely about a user utterance surviving reload
+    # (对齐 question_posted 先例). Both frames of one interjection_id replay; the client
+    # folds them to a single record (last status wins).
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "写个方案"}, "ts": None},
+        {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
+        {
+            "kind": "user_interjection",
+            "payload": {
+                "interjection_id": "ij-1",
+                "content": "换个方向",
+                "status": "received",
+            },
+            "ts": "t1",
+        },
+        {
+            "kind": "user_interjection",
+            "payload": {
+                "interjection_id": "ij-1",
+                "content": "换个方向",
+                "status": "injected",
+            },
+            "ts": "t2",
+        },
+        {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t3"},
+        {"kind": "message_final", "payload": {"run_id": "cap", "content": "好"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    projected = runs_from_entries(entries)
+    assert projected is not None
+    interjections = [e for e in projected["events"] if e["type"] == "user_interjection"]
+    assert [e["payload"]["status"] for e in interjections] == ["received", "injected"]
+    assert {e["payload"]["content"] for e in interjections} == {"换个方向"}
+
+
 # --- deltas 退场: worker output/thinking synthesized from message_final ------------
 #
 # A worker run no longer journals per-token run_output_delta / run_reasoning_delta.

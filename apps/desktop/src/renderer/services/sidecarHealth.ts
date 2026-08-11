@@ -9,22 +9,22 @@ import {
  *
  * 双模式工作区 §7.2 · 探活增强。本机传统新开回合**默认同侧** sidecar（`resolveSidecarRoot`：
  * unset 不挡；仅 `sidecarPreference==="off"` 强制云）。若用户机器环境起不来（杀软 / 缺组件 /
- * venv 损坏…），没有探活则每个回合都「试 startTurn → 启动失败 → 降级过桥 → 弹一次提示」，反复打扰。
+ * venv 损坏…），没有探活则每个回合都「试 startTurn → 启动失败 → 降级过桥」，反复打扰。
  *
  * 本模块把「首轮失败」前移成一次**主动探活**，并按 `root + subpath` 记住结果（app 进程内、
  * 会话级，不持久化）：
  *   - {@link probeSidecar}：首次走 sidecar 前调；未知则拉起进程 + initialize 握手（不跑回合）验
  *     证环境，成功标 `ok` / 失败标 `bad`（诊断取自 `sidecarStatus`）。已有结论则直接返回、不重探；
  *     `bad` 带 TTL——过期后允许再探，避免整会话无限静默走云。返回的 `probed` 区分「本次真探活」
- *     与「命中缓存」，让调用方对首探失败强制提示、对缓存续云节流提示。
+ *     与「命中缓存」，便于日志 / 诊断。
  *   - {@link getSidecarHealth}：查询本会话对某根的健康结论（`ok`/`bad`/`unknown`），供测试断言 /
  *     UI 状态展示。路由判定（`resolveSidecarRoot`）**不**看它——健康收敛由各调用方按语义处理
  *     （`sendTurn` 探活失败走云、`runResume` 探活失败保留帧），见各处。
  *   - {@link markSidecarUnhealthy}：阶段二降级（探活通过、但回合启动期仍失败的边缘）也标 `bad`，
  *     与探活**共用**同一「记坏 → 命中缓存」出口，不形成第二条降级路径。
  *   - {@link clearSidecarHealth}：用户在设置里重新开启本地引擎时清空，给「修好环境后重试」机会。
- *   - {@link takeCloudBridgeToastSlot}：降云过桥 toast 节流槽（探活/启动失败可感知；禁每轮轰炸；
- *     显式强制关路径勿用恐吓文案占槽）。
+ *
+ * 过桥可感知面 = ComposerCloudBridgeHint（executionVia），无 toast 节流槽。
  *
  * 探活成功留存的进程正好被随后的首个回合复用（主进程 `ensure` 命中缓存），故探活不浪费拉起。
  */
@@ -36,14 +36,8 @@ type HealthEntry = { health: Health; at: number; detail: string | null };
 /** `bad` 缓存 TTL：过期后 `probeSidecar` 再探一次（修好环境 / 偶发失败可恢复）。 */
 export const BAD_HEALTH_TTL_MS = 5 * 60 * 1000;
 
-/** 同一 key 的云端过桥 toast 最短间隔（首探失败 / 阶段二降级可 `force` 绕过）。 */
-export const BRIDGE_TOAST_COOLDOWN_MS = 2 * 60 * 1000;
-
 /** `rootId::subpath` → 本会话探明的健康（与主进程 `entryKey` 同构）。无项 = 未探活（unknown）。 */
 const health = new Map<string, HealthEntry>();
-
-/** 过桥 toast 节流：key → 上次成功占槽的墙钟。 */
-const bridgeToastAt = new Map<string, number>();
 
 function keyOf(target: SidecarTarget): string {
   return `${target.rootId}::${target.subpath}`;
@@ -89,31 +83,9 @@ export function noteSidecarSpawned(rootId: string): void {
   }
 }
 
-/** 清空全部健康结论与过桥 toast 节流（用户在设置里重新开启本地引擎时调）。 */
+/** 清空全部健康结论（用户在设置里重新开启本地引擎时调）。 */
 export function clearSidecarHealth(): void {
   health.clear();
-  bridgeToastAt.clear();
-}
-
-/**
- * 占用一次「云端过桥」toast 槽。返回 true = 调用方应弹出提示。
- *
- * - `force: true`：首探失败 / 阶段二启动期降级——必提示。
- * - 默认：缓存续云等路径走冷却，避免每轮轰炸，但不会整会话永远静默。
- */
-export function takeCloudBridgeToastSlot(
-  key: string,
-  opts?: { force?: boolean },
-): boolean {
-  const now = nowMs();
-  if (opts?.force) {
-    bridgeToastAt.set(key, now);
-    return true;
-  }
-  const last = bridgeToastAt.get(key) ?? 0;
-  if (now - last < BRIDGE_TOAST_COOLDOWN_MS) return false;
-  bridgeToastAt.set(key, now);
-  return true;
 }
 
 /** 一次探活的结论：是否健康 + 本次是否真探活（区分首探 / 命中缓存）+ （失败时）可读诊断。 */
@@ -141,7 +113,7 @@ export async function probeSidecar(
   }
   if (cached?.health === "bad") {
     if (nowMs() - cached.at < BAD_HEALTH_TTL_MS) {
-      // 命中缓存仍带回上次诊断，便于 toast / desktop.jsonl 对照 via=cloud。
+      // 命中缓存仍带回上次诊断，便于 desktop.jsonl 对照 via=cloud。
       return {
         healthy: false,
         probed: false,

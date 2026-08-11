@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def debate_act_payload(tool: DebateTool) -> dict[str, Any]:
-    """幕声明：独立辩论 = act-1；挂宿主生长 = 下一幕（anchor=汇总员）。"""
+    """幕声明：独立辩论 = act-1；链上一张 MLR = 下一幕（anchor=汇总员 + prev）。"""
     act_id = getattr(tool, "_debate_act_id", None) or "act-1"
     act: dict[str, Any] = {"act_id": act_id, "kind": "debate"}
     title = getattr(tool, "_debate_act_title", None)
@@ -36,12 +36,12 @@ def moderator_plan_event(
 ):
     """声明主持人节点（CEO 之下、辩手之上的编排角色）。
 
-    独立辩论：主持人 ``parent_run_id`` 引用 CEO captain（节点不在图）。
-    挂宿主新幕：``parent_run_id`` = 汇总员（图即因果：命题卡出自汇总员）。
+    独立辩论 / 新图+prev 第二幕：主持人 ``parent_run_id`` 引用本回合 CEO captain。
+    幕间因果经 ``act.anchor_run_id`` + ``prev_execution_id``（不再 divert 宿主图）。
     """
     label = FORM_LABELS.get(config.form, "辩论")
     parent = getattr(tool, "_debate_graph_parent_run_id", None) or tool._captain_run_id
-    host_message_id = getattr(tool, "_debate_host_message_id", None)
+    prev_execution_id = getattr(tool, "_debate_prev_execution_id", None)
     agents: list[dict[str, Any]] = [
         {
             "id": moderator_run_id,
@@ -66,7 +66,7 @@ def moderator_plan_event(
         task_summary=f"{label}：{config.motion[:60]}",
         agents=agents,
         runs=runs,
-        host_message_id=host_message_id,
+        prev_execution_id=prev_execution_id,
         act=debate_act_payload(tool),
     )
 

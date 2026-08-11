@@ -25,12 +25,12 @@ from agentcore.db.repositories import (
 )
 from agentcore.demo_tape.binding import TapeBinding
 from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
-from agentcore.runtime.suspension import persistence as persist_mod
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.journal.fold import runs_from_entries
 from agentcore.runtime.journal.writer import TurnJournalWriter
 from agentcore.runtime.pipeline.finalize import _build_runs_payload
+from agentcore.runtime.suspension import persistence as persist_mod
 
 TAPE = PROJECT_ROOT / "demos" / "tapes" / "lv-molihua-trademark.json"
 # Captain wrap-up heading after the collab graph (tape wording may change round count).

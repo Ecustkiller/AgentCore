@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * MemorySection —「记忆」under AgentCore convention tree:
- * GLOBAL lists 最近更新 / 偏好 / 画像 / 主题; project scope is 画像 + 主题.
+ * GLOBAL lists 最近更新 / 偏好 / 画像 / 主题; project scope is 画像 + 导航 + 主题.
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -27,6 +27,7 @@ vi.mock("@/lib/toast", () => ({
 import { listMemoryTopics, writeMemoryTopic } from "@/services/memory";
 import {
   GLOBAL_PREFERENCES_PATH,
+  memoryProjectNavigationPath,
   memoryProjectProfilePath,
   memoryTopicPath,
   parseProjectProfilePath,
@@ -90,13 +91,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("MemorySection (global)", () => {
-  it("lists GLOBAL core leaves without a 项目记忆 aggregator", () => {
+  it("lists GLOBAL core leaves without 导航 or a 项目记忆 aggregator", () => {
     const { onOpen } = renderGlobal();
 
     expect(screen.getByText("记忆")).toBeTruthy();
     expect(screen.getByText("最近更新")).toBeTruthy();
     expect(screen.getByText("画像")).toBeTruthy();
     expect(screen.getByText("主题")).toBeTruthy();
+    expect(screen.queryByText("导航")).toBeNull();
     expect(screen.queryByText("项目记忆")).toBeNull();
     expect(screen.queryByText("AI 记忆")).toBeNull();
 
@@ -123,6 +125,22 @@ describe("MemorySection (project)", () => {
     );
     const openedPath = onOpen.mock.calls[0][0] as string;
     expect(parseProjectProfilePath(openedPath)).toBe("F1");
+  });
+
+  it("lists 导航 as a peer leaf and opens it for edit (empty content is fine)", () => {
+    const { onOpen } = renderProject();
+
+    fireEvent.click(screen.getByText("记忆"));
+    expect(screen.getByText("导航")).toBeTruthy();
+    expect(
+      screen.getByTitle("项目短入口路由（always 注入；空则尚未探索写入）"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByText("导航"));
+    expect(onOpen).toHaveBeenCalledWith(
+      memoryProjectNavigationPath("F1"),
+      "项目甲·导航.md",
+    );
   });
 
   it("lists project topics without a list-tail 新建主题假行", async () => {
@@ -198,8 +216,9 @@ describe("MemorySection (project)", () => {
         </TooltipProvider>
       </QueryClientProvider>,
     );
-    // Expanded → 画像 visible without clicking 记忆.
+    // Expanded → 画像 + 导航 visible without clicking 记忆.
     expect(screen.getByText("画像")).toBeTruthy();
+    expect(screen.getByText("导航")).toBeTruthy();
   });
 
   it("forceOpen is one-shot — user can collapse after reveal", () => {

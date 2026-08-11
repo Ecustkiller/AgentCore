@@ -94,7 +94,6 @@ from agentcore.runtime.events.run import (
     turn_queue_cancelled,
     turn_queue_started,
     turn_queued,
-    turn_steer_accepted,
     user_interjection,
     workspace_lock_wait,
 )
@@ -184,7 +183,6 @@ __all__ = [
     "turn_queued",
     "turn_queue_started",
     "turn_queue_cancelled",
-    "turn_steer_accepted",
     "resume_deferred",
     "execution_detached",
     "execution_completed",

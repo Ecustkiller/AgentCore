@@ -174,6 +174,10 @@ async def execute_agent_node(
             e,
             messages=messages,
             streamed_content=streamed_content,
+            inflight=inflight,
+            run_usage=run_usage_box[0],
+            run_rounds=run_rounds_box[0],
+            priced_model=priced_model,
         )
         if salvaged is not None:
             return salvaged

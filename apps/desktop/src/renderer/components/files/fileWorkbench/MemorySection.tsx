@@ -6,13 +6,14 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { isFeatureUnavailable } from "@/lib/errors";
-import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { notifyActionError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { listMemoryTopics, writeMemoryTopic } from "@/services/memory";
 import {
   GLOBAL_PREFERENCES_PATH,
   GLOBAL_PROFILE_PATH,
   MEMORY_UPDATES_PATH,
+  memoryProjectNavigationPath,
   memoryProjectProfilePath,
   memoryTopicPath,
 } from "@/services/sources/memorySource";
@@ -26,6 +27,7 @@ import {
   FolderOpen,
   History,
   Loader2,
+  Map as MapIcon,
   SlidersHorizontal,
   Trash2,
   UserRound,
@@ -47,9 +49,10 @@ export type MemoryScope =
 
 /**
  * The folder-style「记忆」rail section (Agent记忆与知识系统 §1.6 / §5.0) — a collapsible
- * header over the always-injected core leaves (偏好 global-only / 画像) **plus** a lazy
- * 主题/ sub-folder of on-demand TOPIC notes. Mounted under {@link AgentCoreSection} as
- * `AgentCore/记忆/` (GLOBAL at rail root; per-project under each cloud project).
+ * header over the always-injected core leaves (偏好 global-only / 画像 / 导航 project-only)
+ * **plus** a lazy 主题/ sub-folder of on-demand TOPIC notes. Mounted under
+ * {@link AgentCoreSection} as `AgentCore/记忆/` (GLOBAL at rail root; per-project under
+ * each cloud project).
  *
  * Deliberately NOT the generic {@link FileTree}: memory is AI-maintained by fixed sections
  * (防漂移), so the rail offers **打开 + (主题)删除 + (项目)新建主题** — no 改名 / 移动 / 上传.
@@ -186,6 +189,10 @@ export function MemorySection({
     ? memoryProjectProfilePath(folderId)
     : GLOBAL_PROFILE_PATH;
   const profileName = projectName ? `${projectName}·画像.md` : "画像.md";
+  const navigationPath = folderId
+    ? memoryProjectNavigationPath(folderId)
+    : null;
+  const navigationName = projectName ? `${projectName}·导航.md` : "导航.md";
 
   const headerPad = indent + 8;
   const leafPad = indent + 26;
@@ -201,7 +208,6 @@ export function MemorySection({
       await queryClient.invalidateQueries({
         queryKey: ["memory-topics", scopeKey],
       });
-      notifySuccess("已删除记忆主题");
     } catch (e) {
       notifyActionError("删除失败", e);
     }
@@ -230,7 +236,6 @@ export function MemorySection({
         queryKey: ["memory-topics", scopeKey],
       });
       onOpen(memoryTopicPath(folderId, slug), `${slug}.md`);
-      notifySuccess("已新建主题");
     } catch (e) {
       notifyActionError("新建主题失败", e);
     }
@@ -299,6 +304,18 @@ export function MemorySection({
             active={activePath === profilePath}
             onClick={() => onOpen(profilePath, profileName)}
           />
+          {scope.kind === "project" && navigationPath && (
+            <MemoryLeafRow
+              paddingLeft={leafPad}
+              icon={
+                <MapIcon size={14} className="shrink-0 text-muted-foreground" />
+              }
+              label="导航"
+              title="项目短入口路由（always 注入；空则尚未探索写入）"
+              active={activePath === navigationPath}
+              onClick={() => onOpen(navigationPath, navigationName)}
+            />
+          )}
 
           {scope.kind === "project" ? (
             <ContextMenu>
@@ -482,7 +499,7 @@ export function MemorySection({
   );
 }
 
-/** A single memory leaf row (偏好 / 画像 / 主题 note) — a slim button styled like the rail. */
+/** A single memory leaf row (偏好 / 画像 / 导航 / 主题 note) — a slim button styled like the rail. */
 const MemoryLeafRow = forwardRef<
   HTMLButtonElement,
   {
@@ -491,9 +508,10 @@ const MemoryLeafRow = forwardRef<
     label: string;
     active: boolean;
     onClick: () => void;
+    title?: string;
   }
 >(function MemoryLeafRow(
-  { paddingLeft, icon, label, active, onClick, ...rest },
+  { paddingLeft, icon, label, active, onClick, title, ...rest },
   ref,
 ) {
   return (
@@ -501,6 +519,7 @@ const MemoryLeafRow = forwardRef<
       type="button"
       ref={ref}
       onClick={onClick}
+      title={title}
       {...rest}
       style={{ paddingLeft }}
       className={cn(

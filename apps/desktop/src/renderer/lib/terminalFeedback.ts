@@ -1,15 +1,11 @@
-import { notifyActionError, notifyError, notifyInfo } from "@/lib/toast";
+import { notifyActionError, notifyError } from "@/lib/toast";
 import { useRunConfirmStore } from "@/stores/runConfirm";
 import type { TerminalRunResult } from "@shared/terminal-contract";
 
-/** Surface `terminalApi` outcomes — cancel is info, failure is error. */
-export function handleTerminalResult(
-  result: TerminalRunResult,
-  opts?: { cancelMessage?: string },
-): void {
+/** Surface `terminalApi` outcomes — cancel is silent, failure is error. */
+export function handleTerminalResult(result: TerminalRunResult): void {
   if (result.ok) return;
   if (result.reason === "已取消") {
-    notifyInfo(opts?.cancelMessage ?? "已取消");
     return;
   }
   notifyError(result.reason);
@@ -30,7 +26,6 @@ export async function runTerminalBash(command: string): Promise<void> {
     .getState()
     .requestRunConfirm(command);
   if (decision === "cancel") {
-    notifyInfo("已取消在终端运行");
     return;
   }
 
@@ -39,7 +34,7 @@ export async function runTerminalBash(command: string): Promise<void> {
       command,
       rendererConfirmed: true,
     });
-    handleTerminalResult(result, { cancelMessage: "已取消在终端运行" });
+    handleTerminalResult(result);
   } catch (e) {
     notifyActionError("无法在终端运行", e);
   }

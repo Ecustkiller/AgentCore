@@ -68,6 +68,56 @@ describe("sidecarEventPump (per-turn single sink)", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
+  it("D9: distinct turnIds coexist — each receives only its own deltas", () => {
+    const live = vi.fn();
+    const resume = vi.fn();
+    const revoked = vi.fn();
+    claimSidecarTurnSink("c1", "live-1", live, { onRevoked: revoked });
+    claimSidecarTurnSink("c1", "msg-cold", resume);
+    expect(revoked).not.toHaveBeenCalled();
+    push("c1", "live-1", "live");
+    push("c1", "msg-cold", "cold");
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(live.mock.calls[0][0].event.payload).toEqual({ delta: "live" });
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(resume.mock.calls[0][0].event.payload).toEqual({ delta: "cold" });
+  });
+
+  it("resume_deferred fans out to every owner on the conversation", () => {
+    const live = vi.fn();
+    const resume = vi.fn();
+    claimSidecarTurnSink("c1", "live-1", live);
+    claimSidecarTurnSink("c1", "msg-cold", resume);
+    onEventCb?.({
+      conversationId: "c1",
+      turnId: "msg-cold",
+      event: {
+        type: "resume_deferred",
+        timestamp: "t",
+        payload: {
+          message_id: "msg-cold",
+          conversation_id: "c1",
+          busy_reason: "live_turn",
+        },
+      },
+    });
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(live.mock.calls[0][0].event.type).toBe("resume_deferred");
+  });
+
+  it("null turnId claim revokes concrete owners (attach takeover)", () => {
+    const live = vi.fn();
+    const revoked = vi.fn();
+    claimSidecarTurnSink("c1", "live-1", live, { onRevoked: revoked });
+    const attach = vi.fn();
+    claimSidecarTurnSink("c1", null, attach);
+    expect(revoked).toHaveBeenCalledTimes(1);
+    push("c1", "live-1", "x");
+    expect(live).not.toHaveBeenCalled();
+    expect(attach).toHaveBeenCalledTimes(1);
+  });
+
   it("null turnId accepts any turn until setTurnId narrows", () => {
     const sink = vi.fn();
     const claim = claimSidecarTurnSink("c1", null, sink);

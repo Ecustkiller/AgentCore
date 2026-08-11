@@ -26,13 +26,13 @@ export const ONBOARDING_PREVIEW_SCENES: readonly OnboardingPreviewScene[] = [
   {
     id: "composer-generating-bar",
     title: "生成中 · 底部条排队",
-    intent: "回合执行中：有草稿主色排队发送覆盖停止，旁路插队（bar）",
+    intent: "回合执行中：有草稿时插队/排队/停止并存（bar）",
     kind: "composer-generating-bar",
   },
   {
     id: "composer-generating-card",
     title: "生成中 · 画布栏排队",
-    intent: "回合执行中：画布命令栏同样有草稿主色排队、旁路插队（card）",
+    intent: "回合执行中：画布命令栏插队/排队/停止并存（card）",
     kind: "composer-generating-card",
   },
 ];

@@ -1,4 +1,3 @@
-import { notifyInfo } from "@/lib/toast";
 import { type HandoffJob, listHandoffJobs } from "@/services/handoff";
 import {
   type WorkspaceMode,
@@ -22,7 +21,7 @@ import { create } from "zustand";
  *
  * §7.6 心智：云端改的是拷贝；合回本机须用户点一下。徽章优先信后端
  * `applied` / `discarded`；`mergedJobIds` 仅作本会话合回后的乐观/兼容（勿与后端打架）。
- * 轮询到新 succeeded 时给一次 toast（按 job id 去重，不对历史已成功作业刷屏）。
+ * 成功态由对话内 BackgroundTaskCard 承载；本 store 仅在打开该对话时 load/轮询，故无 toast。
  */
 interface BackgroundTasksState {
   /** conversationId → 其后台云端任务（后端按时间倒序返回）。 */
@@ -41,8 +40,6 @@ interface BackgroundTasksState {
    * `applied`/`discarded` 为准；本表不覆盖后端 discarded。
    */
   mergedJobIds: Record<string, true>;
-  /** 本会话已 toast 过的 succeeded job id（禁止累计骚扰）。 */
-  toastedSucceededIds: Record<string, true>;
   /** 用服务端权威列表覆盖某对话的任务（`listHandoffJobs`）。 */
   load: (conversationId: string) => Promise<void>;
   /** 插入 / 替换单项（乐观派发的临时项，或轮询刷新）。 */
@@ -71,45 +68,11 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
     rootIdByConversation: {},
     armedHandoffByConversation: {},
     mergedJobIds: {},
-    toastedSucceededIds: {},
     load: async (conversationId) => {
-      const prev = get().byConversation[conversationId] ?? [];
       const jobs = await listHandoffJobs(conversationId);
-      const hadInFlight = prev.some(
-        (j) => j.status === "pending" || j.status === "running",
-      );
-      const toToast: string[] = [];
-      if (hadInFlight) {
-        const { mergedJobIds, toastedSucceededIds } = get();
-        for (const job of jobs) {
-          if (job.status !== "succeeded") continue;
-          if (mergedJobIds[job.id] || toastedSucceededIds[job.id]) continue;
-          toToast.push(job.id);
-        }
-      }
-      set((s) => {
-        const toastedSucceededIds =
-          toToast.length === 0
-            ? s.toastedSucceededIds
-            : {
-                ...s.toastedSucceededIds,
-                ...Object.fromEntries(toToast.map((id) => [id, true as const])),
-              };
-        return {
-          byConversation: { ...s.byConversation, [conversationId]: jobs },
-          toastedSucceededIds,
-        };
-      });
-      if (toToast.length === 1) {
-        notifyInfo("云端拷贝已改完", {
-          description: "点卡片可查看改动并合回本机（不会自动写入本机文件夹）",
-        });
-      } else if (toToast.length > 1) {
-        notifyInfo(`${toToast.length} 个云端拷贝已改完`, {
-          description:
-            "点对应卡片可查看改动并合回本机（不会自动写入本机文件夹）",
-        });
-      }
+      set((s) => ({
+        byConversation: { ...s.byConversation, [conversationId]: jobs },
+      }));
     },
     upsert: (conversationId, job) =>
       set((s) => {
@@ -197,18 +160,15 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           s.rootIdByConversation;
         const { [conversationId]: _armed, ...armedHandoffByConversation } =
           s.armedHandoffByConversation;
-        // Drop merged / toasted flags for jobs that belonged to this conversation.
+        // Drop merged flags for jobs that belonged to this conversation.
         const dropped = new Set(
           (s.byConversation[conversationId] ?? []).map((j) => j.id),
         );
         let mergedJobIds = s.mergedJobIds;
-        let toastedSucceededIds = s.toastedSucceededIds;
         if (dropped.size > 0) {
           mergedJobIds = { ...s.mergedJobIds };
-          toastedSucceededIds = { ...s.toastedSucceededIds };
           for (const id of dropped) {
             delete mergedJobIds[id];
-            delete toastedSucceededIds[id];
           }
         }
         return {
@@ -217,7 +177,6 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
           rootIdByConversation,
           armedHandoffByConversation,
           mergedJobIds,
-          toastedSucceededIds,
         };
       });
     },

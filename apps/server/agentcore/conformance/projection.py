@@ -181,6 +181,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     finish_reason: str | None = None
     cost: dict[str, Any] | None = None
     saw_error = False
+    # Latest SSE ``error`` payload (turn-level face authority when content empty).
+    turn_error: dict[str, str] | None = None
     # 跨回合流 vs 同回合 resume：仅 message_id 变化时清空气泡正文（见 message_start）。
     last_message_id: str | None = None
     # 辩论编排收场产物（debate_result）：整段 payload verbatim 折入，与 run_plan 的辩手
@@ -205,7 +207,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
     # replays on reload (unlike transport-only board ops). Deduped by noteId for replay safety.
     team_notes: list[dict[str, Any]] = []
-    # 协调中用户插话（user_interjection）：同 interjection_id 保最新 status。DURABLE。
+    # 运行中用户插话（user_interjection，经典+协调共用）：同 interjection_id 保最新 status
+    # （含 injected）。DURABLE。
     user_interjections: list[dict[str, Any]] = []
     _user_interjection_by_id: dict[str, int] = {}
     # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
@@ -248,6 +251,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 process = []
                 finish_reason = None
                 cost = None
+                turn_error = None
             if mid:
                 last_message_id = mid
 
@@ -606,10 +610,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 ag["toolProgress"] = None
 
         elif etype == "run_cancelled":
-            # 跑一半改方向 / 整轮停止: interrupt mid-flight (orthogonal to run_failed).
-            # reason=redirect → single-worker hard-stop (hot continue_run / cold _redir may
-            # follow); reason=stop → whole-turn abort. Clear currentRunId + toolProgress so
-            # the node leaves its live「正在生成」line (reload-safe).
+            # 跑一半改方向 / 整轮停止 / 只停这项工作: interrupt mid-flight (orthogonal to
+            # run_failed). reason=redirect → single-worker hard-stop (hot continue_run /
+            # cold _redir may follow); reason=stop → whole-turn abort; reason=user_stop →
+            # per-worker stop with no hot/cold follow-up. Clear currentRunId + toolProgress
+            # so the node leaves its live「正在生成」line (reload-safe).
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
                 run["status"] = "cancelled"
@@ -957,6 +962,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "error":
             saw_error = True
+            code = str(p.get("code") or "").strip() or "LLM_ERROR"
+            message = str(p.get("message") or "").strip()
+            turn_error = {"code": code, "message": message}
 
         elif etype == "message_end":
             finish_reason = p.get("finish_reason")
@@ -979,6 +987,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             iid = str(p.get("interjection_id") or "").strip()
             if not iid:
                 continue
+            # 零宽 positional marker（与 team/ask/checkpoint 同构）：同 id 首次出现时
+            # 按事件流顺序钉到 process 末尾；后续状态更新只改旁路，不重复落标记。
+            if not has_marker("user_interjection", "interjection_id", iid):
+                process.append({"kind": "user_interjection", "interjection_id": iid})
             leaf: dict[str, Any] = {
                 "interjectionId": iid,
                 "executionId": str(p.get("execution_id") or ""),
@@ -1067,6 +1079,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "status": status,
         "finishReason": finish_reason,
+        "error": turn_error,
         "content": content,
         "reasoning": reasoning,
         # 收到的上下文 · CEO 侧 (上下文传递可视化, 通道①): turn-level, present on every turn the
@@ -1075,7 +1088,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         # The CEO's inline timeline — carried for single-agent AND multi-agent turns
         # (统一团队时间线): besides reasoning/content/tool steps it carries zero-width
         # POSITIONAL MARKERS — `team` (the collaboration graph slot, dropped at run_plan),
-        # `checkpoint` / `ask` / `plan_review` (interaction cards) — fixing where each
+        # `checkpoint` / `ask` / `plan_review` (interaction cards), `user_interjection`
+        # (mid-turn steer / 协调插话，同 id 首次 received 钉位) — fixing where each
         # non-text element renders in chronological order, worker activity rides
         # `runs`/`agents`. A pure reasoning/content turn builds no structural step (the
         # live persist gate then stores no process, matching the fold).

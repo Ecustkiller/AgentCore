@@ -1,7 +1,7 @@
 import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
+import { GraphAppendAnchor } from "@/components/chat/GraphAppendAnchor";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
-import { UserInterjectionsPanel } from "@/components/chat/UserInterjectionsPanel";
 import {
   shouldHostPreviewInGraph,
   teamHasStartedRuns,
@@ -22,7 +22,6 @@ import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import {
   type ExecutionJournal,
   ExecutionScopeContext,
-  type UserInterjection,
   isDebate,
   projectRuntime,
   useExecutionStore,
@@ -37,8 +36,6 @@ import { useNavigate } from "react-router-dom";
 
 /** Re-export gate used by fixture tests and graph consumers. */
 export { teamHasStartedRuns } from "@/components/chat/debatePreviewPlacement";
-
-const EMPTY_INTERJECTIONS: readonly UserInterjection[] = [];
 
 /**
  * The multi-agent turn's primary surface, embedded in the assistant message
@@ -89,9 +86,6 @@ export function InlineTeamGraph({
     if (!conversationId) return;
     navigate(turnDetailPath(conversationId, messageId, "compare"));
   }, [conversationId, messageId, navigate]);
-  const userInterjections = useExecutionStore(
-    (s) => s.byId[messageId]?.userInterjections ?? EMPTY_INTERJECTIONS,
-  );
   const { teamPreviews } = useMessageInteractionCards(
     conversationId,
     messageId,
@@ -170,6 +164,15 @@ export function InlineTeamGraph({
           {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归画布放大态（统一辩论室 /
               统一「对比」视图），聊天正文只在状态条留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA
               （前端UX设计.md §4.1/§4.2/§6.4）。 */}
+          {execution.prevExecutionId ? (
+            <div className="border-b border-border/60 px-3 py-2">
+              <GraphAppendAnchor
+                prevExecutionId={execution.prevExecutionId}
+                actKind={execution.acts[0]?.kind}
+                authorizedBy={execution.acts[0]?.authorizedBy}
+              />
+            </div>
+          ) : null}
           <StatusStrip
             execution={execution}
             expanded={expanded}
@@ -203,10 +206,6 @@ export function InlineTeamGraph({
               disclosureKey={`${messageId}:debate-progress`}
             />
           )}
-          {/* S2：主叙事在主时间线用户气泡；团队块仅保留折叠追溯。 */}
-          <div className="px-3 pb-1">
-            <UserInterjectionsPanel items={userInterjections} />
-          </div>
           {/* 团队便签墙 (§2.2 通): collapsible; stays available when the graph is folded.
               Empty turns render nothing. */}
           <TeamNotesPanel

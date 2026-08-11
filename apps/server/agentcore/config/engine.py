@@ -12,6 +12,14 @@ class EngineSettings(BaseModel):
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3
     engine_unproductive_threshold: int = 3
+    # CEO 探路硬上限（team_gate，captain-only、每 run 一次）：达此 **探路轮** 数即收回
+    # 调查类工具，逼 delegate 或短答。同轮并行多工具只计 1 轮；一轮内所有调查调用
+    # 全失败（幻觉路径等）不计——那一轮没换到任何情报，不该扣广度预算。
+    # 数字唯一真源：提示词文案与文档都跟这里，禁止各处硬编码。
+    # 默认 7（原 5）：实测触发时模型每轮并行 2–3 次调用，5 轮≈10–16 次读，但 3/3 触发
+    # 都有整轮花在不存在的路径上；补上被幻觉路径吃掉的余量。抬得更高会放大 CEO
+    # 单干塌缩面（成规模审计恰恰该早派）。
+    engine_team_gate_investigation_rounds: int = 7
     # Absolute investigation-round ceiling (safety net). Progress-aware spinning detection
     # normally triggers earlier; this is the hard backstop. Must be ≤ worker agent
     # max_rounds (56) or the cap never fires before the loop exits.

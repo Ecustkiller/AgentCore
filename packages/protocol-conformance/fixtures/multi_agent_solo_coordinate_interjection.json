@@ -1,0 +1,310 @@
+{
+  "name": "multi_agent_solo_coordinate_interjection",
+  "description": "单 worker+协调：非阻塞 kickoff → 执行期插话 → cancel_worker 终止（无 team_synthesis_preview；钉 solo 进协调 + 插话可达）",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我派一名工程师去做。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "工程师",
+              "task": "实现功能"
+            }
+          ],
+          "coordinate": true
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "multi_agent",
+        "task_summary": "单人协调：实现功能",
+        "agents": [
+          {
+            "id": "w1",
+            "role": "工程师",
+            "thinking": true
+          }
+        ],
+        "runs": [
+          {
+            "id": "r1",
+            "agent_id": "w1",
+            "task": "实现功能",
+            "depends_on": []
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "status": "success",
+        "result": "【团队已启动·协调模式】已派出 1 名队员（工程师）。"
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "parent_run_id": null,
+        "kind": "agent"
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-solo-stop",
+        "execution_id": "exec1",
+        "content": "把它停止",
+        "status": "received"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-solo-stop",
+        "execution_id": "exec1",
+        "content": "把它停止",
+        "status": "injected"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "收到，正在停止这名工程师。"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "cw1",
+        "tool_name": "cancel_worker",
+        "arguments": {
+          "run_id": "r1",
+          "reason": "用户要求停止"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "cw1",
+        "tool_name": "cancel_worker",
+        "status": "success",
+        "result": "已请求取消队员 r1（工程师）。"
+      },
+      "timestamp": "2026-01-01T00:00:00.011Z"
+    },
+    {
+      "type": "run_cancelled",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "reason": "stop",
+        "execution_id": "exec1"
+      },
+      "timestamp": "2026-01-01T00:00:00.012Z"
+    },
+    {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-solo-stop",
+        "execution_id": "exec1",
+        "content": "把它停止",
+        "status": "addressed",
+        "note": "已在本回合停掉对应成员"
+      },
+      "timestamp": "2026-01-01T00:00:00.013Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "已按你的要求停下。"
+      },
+      "timestamp": "2026-01-01T00:00:00.014Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 1800,
+          "output_tokens": 320,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.015Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "error": null,
+    "content": "我派一名工程师去做。收到，正在停止这名工程师。已按你的要求停下。",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我派一名工程师去做。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      },
+      {
+        "kind": "user_interjection",
+        "interjection_id": "inj-solo-stop"
+      },
+      {
+        "kind": "content",
+        "text": "收到，正在停止这名工程师。"
+      },
+      {
+        "kind": "tool",
+        "id": "cw1",
+        "tool_name": "cancel_worker",
+        "arguments": {
+          "run_id": "r1",
+          "reason": "用户要求停止"
+        },
+        "result": "已请求取消队员 r1（工程师）。",
+        "status": "success"
+      },
+      {
+        "kind": "content",
+        "text": "已按你的要求停下。"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [
+      {
+        "id": "w1",
+        "role": "工程师",
+        "thinking": true,
+        "status": "cancelled",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "r1",
+        "agentId": "w1",
+        "task": "实现功能",
+        "status": "cancelled",
+        "dependsOn": [],
+        "outputSummary": null,
+        "debrief": null,
+        "durationMs": null,
+        "error": null,
+        "failureKind": null,
+        "productLanded": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": null,
+        "model": null,
+        "usage": null,
+        "cost": null,
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "continuesRunId": null,
+        "revised": null,
+        "replacesRunId": null,
+        "actId": "act-1",
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": [],
+        "process": []
+      }
+    ],
+    "acts": [
+      {
+        "actId": "act-1",
+        "kind": "multi_agent",
+        "title": null,
+        "anchorRunId": null,
+        "authorizedBy": null
+      }
+    ],
+    "progress": {
+      "completed": 0,
+      "total": 1
+    },
+    "interactions": [],
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "CNY",
+      "pricing_source": "curated"
+    },
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": null,
+    "turnWarning": null,
+    "teamNotes": [],
+    "userInterjections": [
+      {
+        "interjectionId": "inj-solo-stop",
+        "executionId": "exec1",
+        "content": "把它停止",
+        "status": "addressed",
+        "note": "已在本回合停掉对应成员"
+      }
+    ]
+  }
+}

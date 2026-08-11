@@ -110,4 +110,23 @@ describe("resume_deferred · live SSE（非 StreamError）", () => {
     ).toBe("live_turn");
     expect(notifyErrorMock).not.toHaveBeenCalled();
   });
+
+  it("sidecar 通道 source 同样 stamp markResumeDeferred（与云端同一套 handler）", () => {
+    dispatchSSEEvent(
+      {
+        type: "resume_deferred",
+        timestamp: "",
+        payload: {
+          message_id: MID,
+          conversation_id: CID,
+          busy_reason: "wrap_up",
+        },
+      },
+      { conversationId: CID, source: "sidecar" },
+    );
+    expect(
+      useInteractionStore.getState().byId.get(IX_ID)?.resumeDeferred,
+    ).toEqual({ busyReason: "wrap_up" });
+    expect(notifyErrorMock).not.toHaveBeenCalled();
+  });
 });

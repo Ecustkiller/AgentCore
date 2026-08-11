@@ -656,6 +656,158 @@ describe("ModelSettings (profiles + providers)", () => {
     expect(card.textContent).not.toContain("删除");
   });
 
+  it("shows 后台 / 识图 in the list summary when those slots are set", async () => {
+    const withSlots: LlmModelProfileView = {
+      ...USER_PROFILE,
+      background: {
+        origin: "byok",
+        model: "gpt-4o",
+        provider_id: "prov-openai",
+      },
+      vision: {
+        origin: "byok",
+        model: "gpt-4o",
+        provider_id: "prov-openai",
+      },
+    };
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, withSlots], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "DeepSeek V4 Pro · GPT-4o · 后台 GPT-4o · 识图 GPT-4o",
+        ),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("does not leak another profile's foreign SKU into DeepSeek suggestions", async () => {
+    const foreign: LlmModelProfileView = {
+      id: "prof-foreign",
+      name: "中转免费档",
+      kind: "user",
+      main: {
+        origin: "byok",
+        // Not a DeepSeek official SKU — must not appear under DeepSeek when editing USER_PROFILE.
+        model: "deepseek-v4-flash-free",
+        provider_id: "prov-openai",
+      },
+      worker: null,
+      background: null,
+      is_default: false,
+    };
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, USER_PROFILE, foreign], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`profile-card-${USER_PROFILE.id}`),
+      ).toBeTruthy(),
+    );
+    const card = screen.getByTestId(`profile-card-${USER_PROFILE.id}`);
+    fireEvent.click(
+      card.querySelector("button.btn-outline") as HTMLButtonElement,
+    );
+    await screen.findByTestId("profile-main-combobox");
+
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    const list = document.getElementById("profile-main-suggestions");
+    expect(list).toBeTruthy();
+    const values = [
+      ...((list as HTMLDataListElement).querySelectorAll("option") ?? []),
+    ].map((o) => (o as HTMLOptionElement).value);
+    expect(values).toContain("deepseek-v4-pro");
+    expect(values).not.toContain("deepseek-v4-flash-free");
+  });
+
+  it("clears a non-matching model id when switching providers (no silent mismatch save)", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52], SYSTEM_52.id);
+    mockCreateProfile.mockResolvedValue(USER_PROFILE);
+    render(<ModelSettings />);
+
+    await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("profile-new"));
+    await screen.findByTestId("profile-form");
+
+    fireEvent.change(screen.getByLabelText("名称"), {
+      target: { value: "错配拦截" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    fireEvent.change(screen.getByTestId("profile-main-model"), {
+      target: { value: "deepseek-v4-pro" },
+    });
+    expect(
+      (screen.getByTestId("profile-main-model") as HTMLInputElement).value,
+    ).toBe("deepseek-v4-pro");
+
+    // Switch channel: foreign id must not remain paired with OpenAI.
+    fireEvent.change(screen.getByTestId("profile-main-provider"), {
+      target: { value: "prov-openai" },
+    });
+    const modelAfter = (
+      screen.getByTestId("profile-main-model") as HTMLInputElement
+    ).value;
+    expect(modelAfter).not.toBe("deepseek-v4-pro");
+    expect(modelAfter).toBe("gpt-4o");
+
+    fireEvent.click(screen.getByText("保存"));
+    await waitFor(() =>
+      expect(mockCreateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          main: {
+            origin: "byok",
+            provider_id: "prov-openai",
+            model: "gpt-4o",
+          },
+        }),
+      ),
+    );
+    expect(mockCreateProfile).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        main: {
+          origin: "byok",
+          provider_id: "prov-openai",
+          model: "deepseek-v4-pro",
+        },
+      }),
+    );
+  });
+
+  it("clears optional slot model on provider switch instead of keeping a foreign id", async () => {
+    mockList.mockResolvedValue(makeProviders());
+    stubProfiles([SYSTEM_52, USER_PROFILE], SYSTEM_52.id);
+    render(<ModelSettings />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`profile-card-${USER_PROFILE.id}`),
+      ).toBeTruthy(),
+    );
+    const card = screen.getByTestId(`profile-card-${USER_PROFILE.id}`);
+    fireEvent.click(
+      card.querySelector("button.btn-outline") as HTMLButtonElement,
+    );
+    await screen.findByTestId("profile-worker-combobox");
+
+    expect(
+      (screen.getByTestId("profile-worker-model") as HTMLInputElement).value,
+    ).toBe("gpt-4o");
+    fireEvent.change(screen.getByTestId("profile-worker-provider"), {
+      target: { value: "prov-deepseek" },
+    });
+    expect(
+      (screen.getByTestId("profile-worker-model") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
   it("surfaces ADMIN_PRODUCT_FORBIDDEN instead of a generic load failure", async () => {
     mockList.mockRejectedValue(
       new Error("此账号为管理员账号，请使用管理后台登录"),

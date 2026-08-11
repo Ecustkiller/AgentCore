@@ -29,6 +29,8 @@ import {
   GLOBAL_PROFILE_PATH,
   createMemorySource,
   isMemoryTopicPath,
+  memoryLeafTabName,
+  memoryProjectNavigationPath,
   memoryProjectProfilePath,
   memoryTopicPath,
   parseProjectMemoryFolderId,
@@ -59,6 +61,11 @@ describe("memorySource leaf dispatch", () => {
   it("routes a project 画像 leaf to the file API with its folderId", async () => {
     await readForEdit?.(memoryProjectProfilePath("F1"));
     expect(getMemoryFile).toHaveBeenCalledWith("profile", "F1");
+  });
+
+  it("routes a project 导航 leaf to the file API with its folderId", async () => {
+    await readForEdit?.(memoryProjectNavigationPath("F1"));
+    expect(getMemoryFile).toHaveBeenCalledWith("navigation", "F1");
   });
 
   it("routes topic leaves (global + project) to the topic API", async () => {
@@ -108,8 +115,11 @@ describe("memorySource leaf dispatch", () => {
 });
 
 describe("parseProjectMemoryFolderId", () => {
-  it("extracts folderId from project profile and topic paths", () => {
+  it("extracts folderId from project profile, navigation, and topic paths", () => {
     expect(parseProjectMemoryFolderId(memoryProjectProfilePath("F1"))).toBe(
+      "F1",
+    );
+    expect(parseProjectMemoryFolderId(memoryProjectNavigationPath("F1"))).toBe(
       "F1",
     );
     expect(parseProjectMemoryFolderId(memoryTopicPath("F1", "部署"))).toBe(
@@ -124,11 +134,20 @@ describe("parseProjectMemoryFolderId", () => {
   });
 });
 
+describe("memoryLeafTabName", () => {
+  it("names navigation leaves 导航.md", () => {
+    expect(memoryLeafTabName(memoryProjectNavigationPath("F1"))).toBe(
+      "导航.md",
+    );
+  });
+});
+
 describe("isMemoryTopicPath", () => {
   it("detects global and project topic leaves", () => {
     expect(isMemoryTopicPath(memoryTopicPath(null, "习惯"))).toBe(true);
     expect(isMemoryTopicPath(memoryTopicPath("F1", "部署"))).toBe(true);
     expect(isMemoryTopicPath(GLOBAL_PROFILE_PATH)).toBe(false);
     expect(isMemoryTopicPath(memoryProjectProfilePath("F1"))).toBe(false);
+    expect(isMemoryTopicPath(memoryProjectNavigationPath("F1"))).toBe(false);
   });
 });

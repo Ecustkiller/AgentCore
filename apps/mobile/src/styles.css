@@ -687,8 +687,23 @@ button.link {
   text-align: right;
 }
 
+/* 五态克制区分：全文案已自证；色仅失败用 error，其余不假绿。 */
+.interjection-status.tone-received {
+  color: color-mix(in oklch, var(--muted) 88%, transparent);
+}
+.interjection-status.tone-injected {
+  color: var(--muted);
+}
+.interjection-status.tone-addressed {
+  color: color-mix(in oklch, var(--muted) 72%, var(--fg));
+}
+.interjection-status.tone-queued {
+  color: color-mix(in oklch, var(--muted) 80%, transparent);
+  font-style: italic;
+}
 .interjection-status.tone-failed {
   color: var(--error);
+  font-style: normal;
 }
 
 .interjection-note {
@@ -696,6 +711,30 @@ button.link {
   color: var(--muted);
   max-width: 85%;
   text-align: right;
+}
+
+/* queued：不出用户泡，一行低权重注记（五态文案 + 单行截断正文）。 */
+.interjection-queued-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 85%;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.interjection-queued-note .interjection-status {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.interjection-queued-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* AI = document stream (align desktop): no bubble fill/border/radius; column gutter from .messages */
@@ -1789,14 +1828,6 @@ button.link {
 /* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their concurrent
    siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat).
    Collapsible via the same <details> fold idiom as 思考 (.reasoning) / 工具组 (.tool-group). */
-/* 交付轻提示（partial / blocked）：一句 muted 文案；无验收卡。 */
-.delivery-shortfall-hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
 .team-notes {
   display: flex;
   flex-direction: column;
@@ -3038,18 +3069,6 @@ dialog.run-detail::backdrop {
   opacity: 0.45;
 }
 
-/* 经典软插入 ack：composer 上方轻条（手机无 toast 原语）。 */
-.steer-hint-bar {
-  margin: 0 12px 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: color-mix(in oklch, var(--muted) 12%, transparent);
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-}
-
 /* 排队 chip 内取消：Stop ≠ 取消排队。 */
 .turn-queued-chip {
   display: inline-flex;
@@ -4123,8 +4142,15 @@ dialog.dialog::backdrop {
   gap: 6px;
 }
 
+.pause-workspace-summary {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
 .pause-worker-cap,
-.pause-worker-dep {
+.pause-worker-dep,
+.pause-worker-desk {
   font-size: 11px;
   color: var(--muted);
 }

@@ -301,6 +301,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "安排调研。综合调研：官方指南 #r1 与弱源 #r3 支持该结论。",
     "reasoning": "",
     "captainContext": [],

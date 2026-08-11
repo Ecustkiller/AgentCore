@@ -567,6 +567,9 @@ class HandlerMixin:
         so a turn never resumes twice) then drive the rest of the turn on a fresh
         sink, replying with the same final-result shape as ``startTurn``. The
         message_id doubles as the event-routing turn id (one durable pause per turn).
+
+        Cold resume × live (D9)：宿主仍占 ``_turns`` 时不拒 ``turn already running``——
+        peek → settlement 预写 → ``resume_deferred`` → 槽空后再 claim 续跑。
         """
         if not self._initialized or self._root is None:
             await self._send(
@@ -586,14 +589,6 @@ class HandlerMixin:
                 )
             )
             return
-        if message_id in self._turns:
-            await self._reject_turn_already_running(
-                request_id,
-                op="resume",
-                turn_id=message_id,
-                conversation_id=conversation_id,
-            )
-            return
         if self._paused_store is None:
             await self._send(
                 protocol.make_error(
@@ -601,6 +596,18 @@ class HandlerMixin:
                 )
             )
             return
+
+        busy_reason = self.busy_reason_for_resume(conversation_id, message_id)
+        if busy_reason is not None:
+            await self._on_resume_when_busy(
+                request_id,
+                params,
+                message_id=message_id,
+                conversation_id=conversation_id,
+                busy_reason=busy_reason,
+            )
+            return
+
         suspension = await self._paused_store.claim(message_id, conversation_id=conversation_id)
         if suspension is None:
             await self._send(
@@ -610,6 +617,61 @@ class HandlerMixin:
             )
             return
 
+        parsed = self._parse_resume_params(params)
+        decision = parsed["decision"]
+        note = parsed["note"]
+        selected = parsed["selected"]
+        excluded_run_ids = parsed["excluded_run_ids"]
+        write_capability_overrides = parsed["write_capability_overrides"]
+        model_overrides = parsed["model_overrides"]
+        trace_id = parsed["trace_id"]
+        user_message_id = parsed["user_message_id"]
+        # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
+        self._refresh_creds(params)
+        self._refresh_permission_axes(params)
+        self._refresh_user_id(params)
+        # Per-turn account id wins over the freeze-in-frame value (probe may have
+        # initialized as local; login mid-session must not leave ToolContext on the
+        # alias UUID).
+        suspension.user_id = self._user_id
+        # Prefer resume RPC folderId / localRootId/localSubpath when the desktop
+        # re-sends them; else keep frame-stamped scope/bind from the pause card.
+        from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+
+        apply_rpc_folder_binding_to_suspension(suspension, params)
+
+        veto_err = self._validate_resume_team_veto(
+            suspension,
+            decision,
+            excluded_run_ids=excluded_run_ids,
+            write_capability_overrides=write_capability_overrides,
+            model_overrides=model_overrides,
+        )
+        if veto_err is not None:
+            await self._paused_store.rollback_claim(message_id)
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_PARAMS, veto_err)
+            )
+            return
+
+        task = asyncio.create_task(
+            self._run_resume(
+                request_id,
+                suspension,
+                decision,
+                note,
+                selected,
+                trace_id,
+                user_message_id,
+                params.get("externalMounts"),
+                excluded_run_ids=excluded_run_ids,
+                write_capability_overrides=write_capability_overrides,
+                model_overrides=model_overrides,
+            )
+        )
+        self._register_turn(message_id, task, conversation_id=conversation_id)
+
+    def _parse_resume_params(self, params: dict[str, Any]) -> dict[str, Any]:
         decision = parse_decision(params.get("decision"))
         note = str(params.get("note") or "")
         selected = [str(s) for s in (params.get("selected") or [])]
@@ -645,25 +707,27 @@ class HandlerMixin:
                 if provider_id:
                     entry["provider_id"] = provider_id
                 model_overrides[key] = entry
-        # Per-turn trace_id (mirrors startTurn): ties this continuation's proxied LLM
-        # calls to its write-back so the resumed reply is greppable as one trace.
-        trace_id = str(params.get("traceId") or "")
-        user_message_id = str(params.get("userMessageId") or "").strip()
-        # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
-        self._refresh_creds(params)
-        self._refresh_permission_axes(params)
-        self._refresh_user_id(params)
-        # Per-turn account id wins over the freeze-in-frame value (probe may have
-        # initialized as local; login mid-session must not leave ToolContext on the
-        # alias UUID).
-        suspension.user_id = self._user_id
-        # Prefer resume RPC folderId / localRootId/localSubpath when the desktop
-        # re-sends them; else keep frame-stamped scope/bind from the pause card.
-        from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+        return {
+            "decision": decision,
+            "note": note,
+            "selected": selected,
+            "excluded_run_ids": excluded_run_ids,
+            "write_capability_overrides": write_capability_overrides,
+            "model_overrides": model_overrides,
+            "trace_id": str(params.get("traceId") or ""),
+            "user_message_id": str(params.get("userMessageId") or "").strip(),
+        }
 
-        apply_rpc_folder_binding_to_suspension(suspension, params)
-
-        # Cold peek 无 plan blob → workers / debate sides 校验（同云端）；非法修正 rollback claim。
+    @staticmethod
+    def _validate_resume_team_veto(
+        suspension: Any,
+        decision: Any,
+        *,
+        excluded_run_ids: list[str],
+        write_capability_overrides: list[dict[str, str]],
+        model_overrides: dict[str, dict[str, str]],
+    ) -> str | None:
+        """Return an error message when team veto / debate overrides are illegal."""
         from agentcore.core.errors import ValidationError as CoreValidationError
         from agentcore.runtime.kickoff.team_veto import (
             should_apply_debate_model_overrides,
@@ -684,13 +748,7 @@ class HandlerMixin:
                     model_overrides=model_overrides,
                 )
             except CoreValidationError as e:
-                await self._paused_store.rollback_claim(message_id)
-                await self._send(
-                    protocol.make_error(
-                        request_id, protocol.INVALID_PARAMS, str(e)
-                    )
-                )
-                return
+                return str(e)
         elif isinstance(suspension, TeamPreviewSuspension) and should_apply_debate_model_overrides(
             suspension, decision
         ):
@@ -701,30 +759,236 @@ class HandlerMixin:
                     model_overrides=model_overrides,
                 )
             except CoreValidationError as e:
-                await self._paused_store.rollback_claim(message_id)
+                return str(e)
+        return None
+
+    async def _on_resume_when_busy(
+        self,
+        request_id: Any,
+        params: dict[str, Any],
+        *,
+        message_id: str,
+        conversation_id: str,
+        busy_reason: str,
+    ) -> None:
+        """Busy cold resume: prewrite → ``resume_deferred`` → wait → claim → run.
+
+        Settlement is durable before waiting so a long D1 hold cannot drop the click.
+        Same ``message_id`` re-submit joins the parked waiter (no second prewrite);
+        a different ``message_id`` supersedes (prior deferred Future cancelled).
+        RPC reply still deferred until the resume pipeline finishes (fan-out to joiners).
+        """
+        assert self._paused_store is not None
+        from agentcore.runtime.events import resume_deferred
+        from agentcore.sidecar.server_pkg.core import SidecarResumeDeferredWaiter
+        from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+
+        existing = self._resume_deferred.get(conversation_id)
+        if existing is not None and existing.message_id == message_id:
+            # Idempotent join: settlement already locked; do not cancel / re-prewrite.
+            if existing.slot_free.cancelled():
                 await self._send(
                     protocol.make_error(
-                        request_id, protocol.INVALID_PARAMS, str(e)
+                        request_id,
+                        protocol.INVALID_PARAMS,
+                        "resume superseded",
+                    )
+                )
+                return
+            if request_id not in existing.reply_ids:
+                existing.reply_ids.append(request_id)
+            logger.info(
+                "resume.deferred_joined",
+                conversation_id=conversation_id,
+                message_id=message_id,
+                busy_reason=existing.busy_reason,
+                reply_count=len(existing.reply_ids),
+            )
+            return
+
+        peeked = await self._paused_store.load(message_id, conversation_id=conversation_id)
+        if peeked is None:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.PAUSED_TURN_NOT_FOUND, "挂起的回合不存在或已处理"
+                )
+            )
+            return
+
+        parsed = self._parse_resume_params(params)
+        decision = parsed["decision"]
+        note = parsed["note"]
+        selected = parsed["selected"]
+        excluded_run_ids = parsed["excluded_run_ids"]
+        write_capability_overrides = parsed["write_capability_overrides"]
+        model_overrides = parsed["model_overrides"]
+        trace_id = parsed["trace_id"]
+        user_message_id = parsed["user_message_id"]
+
+        self._refresh_creds(params)
+        self._refresh_permission_axes(params)
+        self._refresh_user_id(params)
+        peeked.user_id = self._user_id
+        apply_rpc_folder_binding_to_suspension(peeked, params)
+
+        veto_err = self._validate_resume_team_veto(
+            peeked,
+            decision,
+            excluded_run_ids=excluded_run_ids,
+            write_capability_overrides=write_capability_overrides,
+            model_overrides=model_overrides,
+        )
+        if veto_err is not None:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_PARAMS, veto_err)
+            )
+            return
+
+        umid = (
+            user_message_id
+            or str(getattr(peeked, "user_message_id", None) or "").strip()
+            or f"resume-{message_id}"
+        )
+        decision_value = decision.value if hasattr(decision, "value") else str(decision)
+        outbox = self._outbox_store
+        if outbox is not None:
+            try:
+                from agentcore.sidecar.settlement_prewrite import (
+                    prewrite_sidecar_resume_settlement,
+                )
+
+                await prewrite_sidecar_resume_settlement(
+                    outbox,
+                    peeked,
+                    decision=decision_value,
+                    note=note,
+                    selected=selected,
+                    user_message_id=umid,
+                    trace_id=trace_id,
+                    excluded_run_ids=excluded_run_ids,
+                    write_capability_overrides=write_capability_overrides,
+                    model_overrides=model_overrides,
+                )
+            except Exception as e:
+                logger.warning(
+                    "sidecar.resume_settlement_prewrite_failed",
+                    turn_id=message_id,
+                    error=str(e),
+                )
+                await self._send(
+                    protocol.make_error(
+                        request_id,
+                        protocol.RESUME_RETRYABLE,
+                        f"settlement prewrite failed: {e}",
                     )
                 )
                 return
 
-        task = asyncio.create_task(
-            self._run_resume(
-                request_id,
-                suspension,
-                decision,
-                note,
-                selected,
-                trace_id,
-                user_message_id,
-                params.get("externalMounts"),
-                excluded_run_ids=excluded_run_ids,
-                write_capability_overrides=write_capability_overrides,
-                model_overrides=model_overrides,
+        ev = resume_deferred(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            busy_reason=busy_reason,  # type: ignore[arg-type]
+        )
+        await self._send(
+            protocol.make_notification(
+                "turn/event",
+                {
+                    "turnId": message_id,
+                    "event": {
+                        "type": ev.type.value,
+                        "timestamp": ev.timestamp,
+                        "payload": ev.payload,
+                    },
+                },
             )
         )
-        self._register_turn(message_id, task, conversation_id=conversation_id)
+
+        slot_free: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        waiter = SidecarResumeDeferredWaiter(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            busy_reason=busy_reason,  # type: ignore[arg-type]
+            slot_free=slot_free,
+            reply_ids=[request_id],
+        )
+        self.register_resume_deferred(waiter)
+
+        async def _wait_claim_and_run() -> None:
+            try:
+                while True:
+                    try:
+                        await waiter.slot_free
+                    except asyncio.CancelledError:
+                        await self._send_to_request_ids(
+                            waiter.reply_ids,
+                            request_id,
+                            lambda rid: protocol.make_error(
+                                rid,
+                                protocol.INVALID_PARAMS,
+                                "resume superseded",
+                            ),
+                        )
+                        return
+                    if self.busy_reason_for_resume(conversation_id, message_id) is None:
+                        break
+                    # Slot re-taken between wake and claim — re-park (same SSE posture).
+                    waiter.slot_free = asyncio.get_running_loop().create_future()
+                    self.register_resume_deferred(waiter)
+
+                claimed = await self._paused_store.claim(
+                    message_id, conversation_id=conversation_id
+                )
+                if claimed is None:
+                    await self._send_to_request_ids(
+                        waiter.reply_ids,
+                        request_id,
+                        lambda rid: protocol.make_error(
+                            rid,
+                            protocol.PAUSED_TURN_NOT_FOUND,
+                            "挂起的回合不存在或已处理",
+                        ),
+                    )
+                    return
+                # Peeked frame already carries settlement in journal_entries (prewrite);
+                # keep that stream for pipeline dedupe. Claim only consumed the file.
+                peeked.user_id = self._user_id
+                apply_rpc_folder_binding_to_suspension(peeked, params)
+                task = asyncio.create_task(
+                    self._run_resume(
+                        request_id,
+                        peeked,
+                        decision,
+                        note,
+                        selected,
+                        trace_id,
+                        umid,
+                        params.get("externalMounts"),
+                        excluded_run_ids=excluded_run_ids,
+                        write_capability_overrides=write_capability_overrides,
+                        model_overrides=model_overrides,
+                        settlement_prewritten=outbox is not None,
+                        reply_ids=waiter.reply_ids,
+                    )
+                )
+                self._register_turn(message_id, task, conversation_id=conversation_id)
+            except Exception as e:  # noqa: BLE001 — keep read-loop safe if wait task escapes
+                err_msg = str(e)
+                logger.error(
+                    "sidecar.resume_failed",
+                    message_id=message_id,
+                    error=err_msg,
+                    exc_info=True,
+                )
+                await self._send_to_request_ids(
+                    waiter.reply_ids,
+                    request_id,
+                    lambda rid: protocol.make_error(rid, protocol.INTERNAL_ERROR, err_msg),
+                )
+
+        wait_task = asyncio.create_task(_wait_claim_and_run())
+        # Keep the waiter alive until claim/run (or supersede) — not in ``_turns`` yet.
+        self._pending_sends.add(wait_task)
+        wait_task.add_done_callback(self._pending_sends.discard)
 
     async def _on_list_paused(self, request_id: Any, params: dict[str, Any]) -> None:
         """A conversation's pending durable pauses, as resume-card summaries.
@@ -816,6 +1080,31 @@ class HandlerMixin:
             conversation_id=conversation_id,
         )
         await self._reply(request_id, {"ok": True, "queued": peek_redirect_count(execution_id)})
+
+    async def _on_run_stop(self, request_id: Any, params: dict[str, Any]) -> None:
+        from agentcore.runtime.runs.stop_queue import enqueue_stop, peek_stop_count
+
+        execution_id = str(params.get("executionId") or "").strip()
+        conversation_id = str(params.get("conversationId") or "").strip()
+        raw_run = params.get("runId")
+        run_id = str(raw_run).strip() if raw_run is not None else None
+        if run_id == "":
+            run_id = None
+        if not execution_id or not conversation_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "runStop requires executionId, conversationId",
+                )
+            )
+            return
+        enqueue_stop(
+            execution_id=execution_id,
+            run_id=run_id,
+            conversation_id=conversation_id,
+        )
+        await self._reply(request_id, {"ok": True, "queued": peek_stop_count(execution_id)})
 
     async def _on_debate_steer(self, request_id: Any, params: dict[str, Any]) -> None:
         from agentcore.runtime.debate.steer_queue import enqueue_steer, peek_steer_count

@@ -1,8 +1,10 @@
-"""协调中用户插话生命周期（S1）：received → addressed / queued / failed。
+"""协调中用户插话生命周期（S1）：received → injected → addressed / queued / failed。
 
-- 活跃协调：进 CEO 队列；图内处置 → addressed；无关 → queue_user_message → queued。
+- 活跃协调：进 CEO 队列；注入模型上下文 → injected；图内处置 → addressed；无关 →
+  queue_user_message → queued。
 - 收口/已结束：未消化自动升格对话 FIFO（queued），禁止「仅协调可用」死路。
 - durable ``user_interjection`` 由调用方保证同 id 语义更新；发送方确认流勿重复落 journal。
+- ``injected`` = 内容真正写入 CEO 上下文（与经典 ReAct 步顶 drain 对齐）。
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from agentcore.workspace.attachments import interjection_attachment_meta
 
 logger = get_logger(__name__)
 
-InterjectionStatus = str  # received | addressed | queued | failed
+InterjectionStatus = str  # received | injected | addressed | queued | failed
 
 
 def _att_meta(stashed: dict[str, Any] | None) -> list[dict[str, Any]] | None:
@@ -53,16 +55,48 @@ def emit_interjection_status(
 
 
 def note_interjections_injected(session: Any, events: list[Any]) -> None:
-    """Mark USER_INTERJECTION ids as awaiting CEO disposition (图内 or queue)."""
+    """Emit ``injected`` and mark ids as awaiting CEO disposition (图内 or queue)."""
     from agentcore.runtime.coordination.session import CoordinationEventKind
 
+    sink = getattr(session, "event_sink", None)
     for ev in events:
         if getattr(ev, "kind", None) is not CoordinationEventKind.USER_INTERJECTION:
             continue
         payload = getattr(ev, "payload", None) or {}
         iid = str(payload.get("interjection_id") or "").strip()
-        if iid:
-            session.awaiting_disposition.add(iid)
+        if not iid:
+            continue
+        session.awaiting_disposition.add(iid)
+        stashed = session.get_interjection(iid)
+        content = str(
+            (stashed or {}).get("content") or payload.get("content") or ""
+        ).strip() or "（无正文）"
+        att = _att_meta(stashed)
+        if att is None:
+            raw = payload.get("attachments")
+            att = raw if isinstance(raw, list) and raw else None
+        emit_interjection_status(
+            sink,
+            session=session,
+            interjection_id=iid,
+            content=content,
+            status="injected",
+            attachments=att,
+        )
+
+
+# 提示词已定义的图内处置工具（inject.py）；编排循环统一标 addressed，勿在各工具里逐个补。
+# 同一步多工具时 note 按此优先级取一条。
+IN_GRAPH_DISPOSITION_TOOLS: tuple[str, ...] = (
+    "update_synthesis",
+    "cancel_worker",
+    "delegate",
+)
+IN_GRAPH_DISPOSITION_NOTES: dict[str, str] = {
+    "update_synthesis": "已在合成草稿中承接",
+    "cancel_worker": "已在本回合停掉对应成员",
+    "delegate": "已在本回合据此调整团队",
+}
 
 
 def address_awaiting_interjections(
@@ -102,6 +136,39 @@ def address_awaiting_interjections(
     return addressed
 
 
+def address_interjections_after_ceo_tools(
+    *,
+    role: str,
+    attempts: list[Any],
+    sink: Any | None = None,
+) -> list[str]:
+    """CEO 一步内成功调用过任一图内处置工具 → 清 awaiting pending 并标 addressed。
+
+    挂在编排工具执行汇合点（``execute_tools``），不在各工具实现里逐个补标。
+    「只发正文、不调工具」不算已处置——本函数仅看成功 tool attempts。
+    """
+    if role != "captain":
+        return []
+    used = {
+        str(getattr(a, "tool_name", "") or "")
+        for a in attempts
+        if getattr(a, "success", False)
+        and str(getattr(a, "tool_name", "") or "") in IN_GRAPH_DISPOSITION_NOTES
+    }
+    if not used:
+        return []
+    from agentcore.runtime.coordination.session import active_coordination
+
+    session = active_coordination()
+    if session is None or not getattr(session, "active", False):
+        return []
+    note = next(
+        (IN_GRAPH_DISPOSITION_NOTES[name] for name in IN_GRAPH_DISPOSITION_TOOLS if name in used),
+        "已在本回合消化",
+    )
+    return address_awaiting_interjections(session, sink, note=note)
+
+
 def enqueue_interjection_to_fifo(
     session: Any,
     interjection_id: str,
@@ -136,6 +203,7 @@ def enqueue_interjection_to_fifo(
                 x_client_platform=stashed.get("x_client_platform"),
                 llm_credentials=stashed.get("llm_credentials"),
                 llm_supports_tools=stashed.get("llm_supports_tools"),
+                interjection_id=interjection_id,
             ),
             emit_live_queued=True,
         )

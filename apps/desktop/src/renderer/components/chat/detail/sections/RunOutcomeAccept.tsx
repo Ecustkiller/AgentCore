@@ -105,7 +105,6 @@ export function RunOutcomeAcceptSection({
       });
       setOptimisticAccepted(true);
       invalidateTurnAudit(conversationId, messageId);
-      toast.success("已接受此结果");
     } catch {
       toast.error("提交失败，请稍后重试");
     } finally {

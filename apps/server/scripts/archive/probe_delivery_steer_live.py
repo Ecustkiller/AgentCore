@@ -1,7 +1,7 @@
 """真跑探针：同对话再发 P0+P1（平台 DeepSeek）。
 
 场景：
-1. 空闲开跑 + mid-flight steer → 期望 turn_steer_accepted
+1. 空闲开跑 + mid-flight steer → 期望 user_interjection
 2. mid-flight queue → 期望 turn_queued；再 cancel → 200
 3. 缺 delivery → 422
 4.（可选）长跑末段再 steer，观察是否 degraded 升队
@@ -125,14 +125,13 @@ async def _post_messages_sse(
             # short streams (steer ack / queue ack) end quickly; long turn we stop after key events
             t = ev.get("type")
             if t in {
-                "turn_steer_accepted",
-                "turn_queued",
                 "user_interjection",
+                "turn_queued",
                 "message_end",
                 "error",
             }:
                 # for long first turn keep going until message_end OR enough progress
-                if delivery == "steer" and t == "turn_steer_accepted":
+                if delivery == "steer" and t == "user_interjection":
                     break
                 if delivery == "queue" and t == "turn_queued":
                     break
@@ -281,9 +280,8 @@ async def case_steer_midflight(client: httpx.AsyncClient) -> CaseResult:
             content="补充：总结里请额外点明哪个朝代最晚建立。",
             delivery="steer",
             stop_types={
-                "turn_steer_accepted",
-                "turn_queued",
                 "user_interjection",
+                "turn_queued",
                 "message_end",
                 "error",
                 "_timeout",
@@ -293,7 +291,7 @@ async def case_steer_midflight(client: httpx.AsyncClient) -> CaseResult:
 
     await asyncio.gather(run_main(), run_steer_after_delay())
 
-    accepted = _find(steer_events, "turn_steer_accepted")
+    accepted = _find(steer_events, "user_interjection")
     queued = _find(steer_events, "turn_queued")
     degraded = None
     if queued:
@@ -302,7 +300,7 @@ async def case_steer_midflight(client: httpx.AsyncClient) -> CaseResult:
 
     if accepted:
         ok = True
-        detail = f"turn_steer_accepted steer_id={((accepted.get('payload') or accepted).get('steer_id'))}"
+        detail = f"user_interjection interjection_id={((accepted.get('payload') or accepted).get('interjection_id'))}"
     elif queued and degraded == "steer":
         ok = False
         detail = f"degraded_to_queue degraded_from={degraded}"
@@ -377,7 +375,7 @@ async def case_queue_and_cancel(client: httpx.AsyncClient) -> CaseResult:
             cid,
             content="这条应排队：稍后请只回复「排队项已到达」。",
             delivery="queue",
-            stop_types={"turn_queued", "turn_steer_accepted", "error", "_timeout"},
+            stop_types={"turn_queued", "user_interjection", "error", "_timeout"},
             max_seconds=45.0,
         )
         queued = _find(queue_events, "turn_queued")
@@ -469,7 +467,7 @@ async def case_steer_drains_after_tool(client: httpx.AsyncClient) -> CaseResult:
             content="【同回合注入标记】请在最终总结第一句原样写出：STEER_INJECT_OK",
             delivery="steer",
             stop_types={
-                "turn_steer_accepted",
+                "user_interjection",
                 "turn_queued",
                 "error",
                 "_timeout",
@@ -480,7 +478,7 @@ async def case_steer_drains_after_tool(client: httpx.AsyncClient) -> CaseResult:
 
     await asyncio.gather(run_main(), run_steer())
 
-    accepted = _find(steer_events, "turn_steer_accepted")
+    accepted = _find(steer_events, "user_interjection")
     if not accepted:
         return CaseResult(
             name="steer_drain_after_tool",
@@ -491,7 +489,7 @@ async def case_steer_drains_after_tool(client: httpx.AsyncClient) -> CaseResult:
             trace_hints=[f"main_types={_types(turn_events)[:15]}"],
         )
 
-    steer_id = str((accepted.get("payload") or accepted).get("steer_id") or "")
+    interjection_id = str((accepted.get("payload") or accepted).get("interjection_id") or "")
     # 等日志落盘
     await asyncio.sleep(1.0)
     from pathlib import Path
@@ -503,7 +501,7 @@ async def case_steer_drains_after_tool(client: httpx.AsyncClient) -> CaseResult:
     if log_path.is_file():
         with log_path.open(encoding="utf-8") as f:
             for line in f:
-                if cid not in line and steer_id not in line:
+                if cid not in line and interjection_id not in line:
                     continue
                 try:
                     o = json.loads(line)
@@ -513,19 +511,19 @@ async def case_steer_drains_after_tool(client: httpx.AsyncClient) -> CaseResult:
                 if ev == "engine.turn_steer_inject" and o.get("conversation_id") == cid:
                     injected = True
                 if ev == "turn_steer.drained" and (
-                    o.get("conversation_id") == cid or steer_id in line
+                    o.get("conversation_id") == cid or interjection_id in line
                 ):
                     drained = True
                 if (
                     ev == "turn_steer.promoted_to_queue"
-                    and o.get("steer_id") == steer_id
+                    and o.get("interjection_id") == interjection_id
                 ):
                     promoted = True
 
     # 成功：同回合注入；若无工具导致无法第二轮则 promoted 可接受但标失败（本 case 目标是 drain）
     ok = bool(accepted) and injected and not promoted
     detail = (
-        f"steer_id={steer_id} injected={injected} drained_log={drained} "
+        f"interjection_id={interjection_id} injected={injected} drained_log={drained} "
         f"promoted={promoted} tools={any(t.startswith('tool_') for t in _types(turn_events))}"
     )
     return CaseResult(

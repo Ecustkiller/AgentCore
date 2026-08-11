@@ -3,7 +3,7 @@ import {
   useExternalGrants,
   useRevokeExternalGrant,
 } from "@/hooks/useExternalGrants";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { externalGrantModeLabel } from "@/services/externalGrants";
 import { FolderOpen, Link2Off } from "lucide-react";
 
@@ -69,7 +69,6 @@ export function ExternalMountsSection({
               title="撤销"
               onClick={() =>
                 revoke.mutate(g.root_id, {
-                  onSuccess: () => notifySuccess(`已撤销「${g.label}」`),
                   onError: (err) => notifyError(err, "撤销失败"),
                 })
               }

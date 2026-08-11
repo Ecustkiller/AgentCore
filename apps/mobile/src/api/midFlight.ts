@@ -1,8 +1,9 @@
 /**
  * Mid-flight send（生成中再发）：POST 恒 SSE。
- * 协调 + steer → `user_interjection` 短确认；经典 + steer → `turn_steer_accepted` toast；
+ * 经典 + 协调 + steer → `user_interjection`（ack = status === "received"；DURABLE 进 fold）；
  * queue（或 steer 降级）→ 先 `turn_queued`（仅 QueuedTurnsBar 轻态，不插主时间线用户泡），
  * 缓冲后续帧直至主路空闲，再续流 turn2——对齐桌面 midFlight / 发送即有流。
+ * 经典降级可双发 `user_interjection(queued)` + `turn_queued.degraded_from=steer`。
  * 出队开跑首帧为 EPHEMERAL `turn_queue_started`（先于 `message_start`）；
  * live UI：插主时间线用户泡并清 queuedTurns 轻态；否决靠 `message_start` 猜出队。
  * ``delivery`` 必填（缺 → 422）。
@@ -14,16 +15,11 @@ import type { MessageDelivery } from "@/lib/messageDelivery";
 import type {
   SSEEvent,
   TurnQueuedPayload,
-  TurnSteerAcceptedPayload,
+  UserInterjectionPayload,
 } from "@agentcore/contract-types";
 
 export type MidFlightSendResult =
   | { kind: "received" }
-  | {
-      kind: "steered";
-      steerId: string;
-      pending: number;
-    }
   | {
       kind: "queued";
       position: number;
@@ -37,7 +33,7 @@ export type MidFlightSendResult =
 type DeliverMode = "open" | "buffering" | "live" | "aborted";
 
 export type MidFlightHooks = {
-  /** 立即 fold 到当前 live turn（user_interjection / turn_steer_accepted）。 */
+  /** 立即 fold 到当前 live turn（user_interjection）。 */
   onLiveEvent: (event: SSEEvent) => void;
   /**
    * ``turn_queued``：仅 QueuedTurnsBar 轻态（drain 前可取消；不插主时间线用户泡）。
@@ -187,21 +183,13 @@ export async function sendMidFlightMessage(
       if (gate.mode === "aborted" || signal?.aborted) return;
 
       if (event.type === "user_interjection") {
-        gate.mode = "live";
-        result = { kind: "received" };
+        const p = event.payload as UserInterjectionPayload;
+        // 同 id 后续态（injected / queued / …）仍 fold；ack 仅 received。
         hooks.onLiveEvent(event);
-        return;
-      }
-
-      if (event.type === "turn_steer_accepted") {
-        const p = event.payload as TurnSteerAcceptedPayload;
-        gate.mode = "live";
-        result = {
-          kind: "steered",
-          steerId: p.steer_id,
-          pending: p.pending,
-        };
-        hooks.onLiveEvent(event);
+        if (p.status === "received") {
+          gate.mode = "live";
+          result = { kind: "received" };
+        }
         return;
       }
 

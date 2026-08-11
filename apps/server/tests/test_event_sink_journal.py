@@ -299,6 +299,44 @@ def test_content_only_turn_persists_no_process():
     assert sink.process_timeline() is None
 
 
+def test_user_interjection_drops_positional_marker_once():
+    # Mid-turn steer: first received pins a zero-width marker; later status updates
+    # for the same id do not duplicate. Marker splits trailing content coalesce —
+    # causal order (pre / interjection / post) is the point.
+    from agentcore.runtime.events import user_interjection
+
+    sink = EventSink()
+    sink.emit(content_delta("收到，"))
+    sink.emit(
+        user_interjection(
+            interjection_id="ij-1",
+            execution_id="exec-1",
+            content="让他停止",
+            status="received",
+        )
+    )
+    sink.emit(
+        user_interjection(
+            interjection_id="ij-1",
+            execution_id="exec-1",
+            content="让他停止",
+            status="injected",
+        )
+    )
+    sink.emit(content_delta("这就让他停下。"))
+
+    timeline = sink.process_timeline()
+    assert timeline is not None
+    assert [s["kind"] for s in timeline] == [
+        "content",
+        "user_interjection",
+        "content",
+    ]
+    assert timeline[0]["text"] == "收到，"
+    assert timeline[1] == {"kind": "user_interjection", "interjection_id": "ij-1"}
+    assert timeline[2]["text"] == "这就让他停下。"
+
+
 def test_run_process_timelines_interleave_worker_steps():
     # Worker per-run process (对称 CEO): reasoning → tool → content stays ordered so
     # run-detail reload matches live (not message_final splice).

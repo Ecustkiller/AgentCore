@@ -180,7 +180,7 @@ class UpdateSynthesisTool:
                 tool_call_id="",
                 success=False,
                 output="",
-                error="当前不在协调模式——仅在协调模式启动团队后可用（≥2 worker 默认；"
+                error="当前不在协调模式——仅在协调模式启动团队后可用（≥1 worker 默认；"
                 "显式 coordinate=false 为阻塞路径）。",
             )
         if not session.active:
@@ -254,15 +254,8 @@ class UpdateSynthesisTool:
             completed=done,
             total=total,
         )
-        from agentcore.runtime.coordination.interjections import (
-            address_awaiting_interjections,
-        )
-
-        address_awaiting_interjections(
-            session,
-            self._sink,
-            note="已在合成草稿中承接",
-        )
+        # 插话 addressed 由编排循环在 CEO 工具步汇合点统一标记
+        # （update_synthesis / delegate / cancel_worker），勿在各工具里逐个补。
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -315,7 +308,7 @@ class CancelWorkerTool:
                 tool_call_id="",
                 success=False,
                 output="",
-                error="当前不在协调模式——仅在协调模式启动团队后可用（≥2 worker 默认；"
+                error="当前不在协调模式——仅在协调模式启动团队后可用（≥1 worker 默认；"
                 "显式 coordinate=false 为阻塞路径）。",
             )
         raw = str(arguments.get("run_id") or "").strip()
@@ -452,9 +445,10 @@ class ResolveEscalationTool:
         return ToolSchema(
             name="resolve_escalation",
             description=(
-                "【仅协调模式·≥2 worker】兑现队员的【阻塞升级】——把你的裁决回传给挂起的 worker，"
+                "【仅协调模式】兑现队员的【阻塞升级】——把你的裁决回传给挂起的 worker，"
                 "它经 escalate 恢复后继续。这是阻塞仲裁的【唯一兑现路径】。\n"
-                "单 worker / 非协调时不可用（那时升级直挂用户，你波内已停在 delegate 上）。\n"
+                "非协调时不可用（finalize / 嵌套 lead / coordinate=false / 把关闸开阻塞时"
+                "升级直挂用户，你波内已停在 delegate 上）。\n"
                 "直裁：对技术/范围类问题直接给 answer。\n"
                 "转交用户：偏好 / 授权 / 花钱类须先 ask_user 征询用户，拿到答复后再调本工具，"
                 "并设 via_user=true（你是过滤器不是墙）。\n"
@@ -510,7 +504,7 @@ class ResolveEscalationTool:
                 tool_call_id="",
                 success=False,
                 output="",
-                error="当前不在协调模式——仅在协调模式启动团队后可用（≥2 worker 默认；"
+                error="当前不在协调模式——仅在协调模式启动团队后可用（≥1 worker 默认；"
                 "显式 coordinate=false 为阻塞路径）。",
             )
         if not session.active:

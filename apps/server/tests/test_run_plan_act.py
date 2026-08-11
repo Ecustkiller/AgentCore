@@ -67,31 +67,27 @@ def test_delegate_plan_event_injects_captain_on_first_dispatch():
     assert ev.payload["agents"][0]["role"] == "CEO"
 
 
-def test_delegate_plan_event_skips_turn_captain_when_host_message_id_without_host_cap():
+def test_delegate_plan_event_carries_prev_execution_id():
     plan = RunPlan(nodes=[RunSpec(run_id="r1", task="调研", role="研究员")])
-    ev = plan_event(_StubDelegate(), "e1", plan, host_message_id="m-host")
-    runs = ev.payload["runs"]
-    assert not any(r.get("kind") == "captain" for r in runs)
-    assert not any(a.get("role") == "CEO" for a in ev.payload["agents"])
-    assert runs[0]["id"] == "r1"
+    ev = plan_event(_StubDelegate(), "e2", plan, prev_execution_id="e1")
+    assert ev.payload.get("prev_execution_id") == "e1"
+    assert "host_message_id" not in ev.payload
+    # 新图仍注入本回合 captain
+    assert ev.payload["runs"][0]["kind"] == "captain"
+    assert ev.payload["runs"][0]["id"] == "cap-1"
 
 
-def test_delegate_plan_event_reemits_host_captain_on_append_merge():
-    plan = RunPlan(nodes=[RunSpec(run_id="r1", task="调研", role="研究员")])
-    ev = plan_event(
-        _StubDelegate(),
-        "e1",
-        plan,
-        host_message_id="m-host",
-        host_captain_run_id="host-cap",
+def test_run_plan_payload_accepts_prev_execution_id():
+    ev = run_plan(
+        execution_id="e2",
+        plan_type="multi_agent",
+        task_summary="t",
+        agents=[],
+        runs=[],
+        prev_execution_id="e1",
     )
-    runs = ev.payload["runs"]
-    caps = [r for r in runs if r.get("kind") == "captain"]
-    assert len(caps) == 1
-    assert caps[0]["id"] == "host-cap"
-    assert caps[0]["id"] != "cap-1"
-    assert ev.payload["agents"][0]["role"] == "CEO"
-    assert ev.payload["agents"][0]["id"] == "host-cap"
+    model = RunPlanPayload.model_validate(ev.payload)
+    assert model.prev_execution_id == "e1"
 
 
 def test_debate_moderator_plan_event_emits_act_1_debate():

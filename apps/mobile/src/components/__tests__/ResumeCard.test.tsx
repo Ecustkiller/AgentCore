@@ -576,6 +576,108 @@ describe("ResumeCard · team_preview", () => {
     expect(amendments).toBeUndefined();
   });
 
+  it("全员同桌时只显示一行工作区汇总", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+              target_folder_name: "本会话工作区",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+              target_folder_name: "本会话工作区",
+            },
+          ],
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByText("工作区 · 本会话工作区")).toHaveLength(1);
+    expect(screen.getByTestId("team-workspace-summary")).toBeTruthy();
+    expect(screen.queryByTestId("team-worker-desk-r1")).toBeNull();
+  });
+
+  it("队员工作区不一致时逐人显示", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "甲",
+              task: "读甲",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+              target_folder_id: "f1",
+              target_folder_name: "云端甲",
+            },
+            {
+              run_id: "r2",
+              role: "乙",
+              task: "读乙",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+              target_folder_id: "f2",
+              target_folder_name: "云端乙",
+            },
+          ],
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("team-workspace-summary")).toBeNull();
+    expect(screen.getByTestId("team-worker-desk-r1").textContent).toBe(
+      "工作区 · 云端甲",
+    );
+    expect(screen.getByTestId("team-worker-desk-r2").textContent).toBe(
+      "工作区 · 云端乙",
+    );
+  });
+
+  it("旧帧无工作区字段时不画工作区", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          workers: [
+            {
+              run_id: "r1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+            {
+              run_id: "r2",
+              role: "写作",
+              task: "做B",
+              depends_on: [],
+              write_capability: "text_only",
+              write_capability_label: "仅文字报告",
+            },
+          ],
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
+    expect(screen.queryByTestId("team-workspace-summary")).toBeNull();
+  });
+
   it("已是仅文字无升权入口；stop 不带修正", () => {
     const onResume = vi.fn();
     render(

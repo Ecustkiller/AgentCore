@@ -1,6 +1,5 @@
 import { Button, Card, Input } from "@/components/ui";
 import { gitCredentialKeys } from "@/lib/queryKeys";
-import { notifySuccess } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import {
   deleteGitCredentials,
@@ -43,7 +42,6 @@ export function GitCredentialSettings() {
     onSuccess: () => {
       setToken("");
       setFormError(null);
-      notifySuccess("Git 凭据已保存");
       void queryClient.invalidateQueries({
         queryKey: gitCredentialKeys.detail,
       });
@@ -55,7 +53,6 @@ export function GitCredentialSettings() {
     mutationFn: deleteGitCredentials,
     onSuccess: () => {
       setFormError(null);
-      notifySuccess("已清除 Git 凭据");
       void queryClient.invalidateQueries({
         queryKey: gitCredentialKeys.detail,
       });

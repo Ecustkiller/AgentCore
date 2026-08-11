@@ -159,10 +159,10 @@ class LoopController(
         self._recent: deque[ToolAttempt] = deque(maxlen=window)
         self._nudged = False
         self._investigation_tools = investigation_tools
-        # ``investigation_calls`` = cumulative read-only calls (run-scoped); ``investigation
-        # _rounds`` = rounds with >=1 such call. The over-investigation safety net triggers
-        # on ROUNDS, not calls, so a parallel batch (several reads in one round) counts once
-        # and can't guillotine a worker after a single fan-out. Both feed the finalize log.
+        # ``investigation_calls`` = cumulative read-only calls (run-scoped, incl. failures);
+        # ``investigation_rounds`` = rounds with ≥1 *successful* investigation call (all-fail
+        # rounds gather no intel → do not spend breadth budget). Safety net / team_gate
+        # trigger on ROUNDS; a parallel batch still counts once. Calls still feed diagnostics.
         self._investigation_calls = 0
         self._investigation_rounds = 0
         # Local file peeks only (file_list / file_read / grep) — team_gate local-edit path.
@@ -241,6 +241,8 @@ class LoopController(
         self._post_delegate_investigation_count: int = 0
         # Soft team-gate nudge (协作优先阶段 3): at most once per run, captain-only.
         self._team_gate_fired: bool = False
+        # Names this gate newly added to disabled_tools (for post-delegate restore).
+        self._team_gate_stripped_tools: frozenset[str] = frozenset()
         # 闸后长文直答再催：每 run 一次。
         self._team_gate_direct_reject_fired: bool = False
         # Soft audit-gate nudge (协作优先阶段 3 返工环): at most once per run, captain-only.
@@ -320,6 +322,21 @@ class LoopController(
     def mark_team_gate_fired(self) -> None:
         """Latch the one-shot team-gate so it cannot fire again this run."""
         self._team_gate_fired = True
+
+    def record_team_gate_stripped(self, names: frozenset[str] | set[str]) -> None:
+        """Remember tools this team_gate newly stripped (not pre-disabled ones)."""
+        self._team_gate_stripped_tools = frozenset(names)
+
+    @property
+    def team_gate_stripped_tools(self) -> frozenset[str]:
+        """Tools recorded as newly stripped by the last team_gate fire."""
+        return self._team_gate_stripped_tools
+
+    def take_team_gate_stripped(self) -> frozenset[str]:
+        """Consume the team_gate strip set (post-delegate restore)."""
+        names = self._team_gate_stripped_tools
+        self._team_gate_stripped_tools = frozenset()
+        return names
 
     @property
     def team_gate_direct_reject_fired(self) -> bool:
@@ -455,6 +472,7 @@ class LoopController(
         clears), since "this tool keeps failing" is a whole-run signal.
         """
         round_investigated = False
+        round_investigation_success = False
         round_progress = any(
             attempt.success and attempt.tool_name in PROGRESS_TOOLS for attempt in attempts
         )
@@ -652,9 +670,12 @@ class LoopController(
                     self._validation_thrash_latched = True
                     self._pending_validation_hard_stop = True
                 else:
-                    summary = attempt.error_summary or ""
-                    landed_echo = tool in LANDING_TOOLS and (
-                        "已落盘摘要" in summary or "清理占位" in summary
+                    from agentcore.runtime.engine.write_args_clear import (
+                        is_landed_echo_rejection,
+                    )
+
+                    landed_echo = tool in LANDING_TOOLS and is_landed_echo_rejection(
+                        attempt.error_summary
                     )
                     # 摘要回灌：首次拒写即 path-stop（点名 file_read），少烧一轮空转；
                     # 其它 validation 仍按 validation_path_streak（默认 2）。
@@ -690,18 +711,22 @@ class LoopController(
             # dedicated early path for prose-append / code-integrity hard rejects.
             self._note_path_write_reject(attempt)
             # Over-investigation bookkeeping (收敛治理): tally read-only investigation
-            # breadth. Counts every call (incl. failures) — a wide scan is breadth
-            # regardless of per-call success.
+            # breadth. Calls count every attempt (incl. failures) for diagnostics;
+            # rounds only advance when ≥1 investigation call succeeded — an all-fail
+            # round (e.g. hallucinated paths) gathered no intel and must not spend budget.
             if attempt.tool_name in self._investigation_tools:
                 self._investigation_calls += 1
                 round_investigated = True
+                if attempt.success:
+                    round_investigation_success = True
                 inv_fps.add(attempt.fingerprint)
                 if attempt.tool_name in {"file_list", "file_read", "grep"}:
                     self._local_recon_calls += 1
         # Rounds, not raw calls, drive the safety net: a parallel batch of N reads in one
         # round bumps this once, so fanning out can't guillotine the worker.
         if round_investigated:
-            self._investigation_rounds += 1
+            if round_investigation_success:
+                self._investigation_rounds += 1
             if not round_progress:
                 current = frozenset(inv_fps)
                 if (

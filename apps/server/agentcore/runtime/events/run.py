@@ -43,6 +43,7 @@ def run_plan(
     agents: list[dict[str, Any]],
     runs: list[dict[str, Any]],
     host_message_id: str | None = None,
+    prev_execution_id: str | None = None,
     act: dict[str, Any] | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {
@@ -52,8 +53,11 @@ def run_plan(
         "agents": agents,
         "runs": runs,
     }
+    # host_message_id：仅兼容旧 journal / 测试回放；生产新路径不写。
     if host_message_id:
         payload["host_message_id"] = host_message_id
+    if prev_execution_id:
+        payload["prev_execution_id"] = prev_execution_id
     if act:
         payload["act"] = act
     return SSEEvent(
@@ -74,7 +78,7 @@ def graph_append(
     act_kind: str | None = None,
     authorized_by: str | None = None,
 ) -> SSEEvent:
-    """跨回合同图追加锚点（落追加回合 journal；前端渲染「已往上方协作图追加 N 名成员」）。"""
+    """已停发：旧跨回合同图追加锚点（兼容旧 journal / 测试回放）。新路径用 prev_execution_id。"""
     payload: dict[str, Any] = {
         "execution_id": execution_id,
         "host_message_id": host_message_id,
@@ -428,12 +432,14 @@ def run_cancelled(
     reason: str = "stop",
     execution_id: str = "",
 ) -> SSEEvent:
-    """A run was interrupted mid-flight (跑一半改方向 / 整轮停止).
+    """A run was interrupted mid-flight (跑一半改方向 / 整轮停止 / 只停这项工作).
 
     ``reason``:
     - ``redirect`` — user「立即改此人」hard-stopped this worker only; salvage may follow
       with a hot ``continue_run`` or cold ``_redir`` handoff.
     - ``stop`` — whole-turn abort (停止整轮); no per-worker redirect follow-up.
+    - ``user_stop`` — user「只停这项工作」; wave absorbs like redirect but **no** hot/cold
+      follow-up — drive converges so the CEO keeps the turn.
 
     Orthogonal to ``run_failed`` (error terminal). Durable so reload doesn't leave the
     node stuck ``running`` / agent ``working``.
@@ -603,12 +609,12 @@ def user_interjection(
     note: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
-    """协调中用户插话（单一输入框 → CEO 智能路由）。
+    """运行中用户插话（经典 steer + 协调插话共用契约）。
 
-    ``status=received`` on inject；图内处置 → ``addressed``；
-    ``queue_user_message`` / 收口升格 → ``queued``；真失败 → ``failed``
-    （同 ``interjection_id`` 保最新）。DURABLE——team 块时间线徽标重放。
-    ``attachments`` 为名字 + 工作区路径 + 二进制标记（无内联正文）。
+    ``status=received`` 入队确认；真正写入模型上下文 → ``injected``；
+    协调图内处置 → ``addressed``；转 FIFO / 收口升格 → ``queued``；真失败 → ``failed``
+    （同 ``interjection_id`` 保最新）。经典无 ``addressed``（``injected`` 即终态）。
+    DURABLE——落 journal，刷新可回看。``attachments`` 为名字 + 路径 + 二进制标记。
     """
     payload: dict[str, Any] = {
         "interjection_id": interjection_id,
@@ -669,28 +675,6 @@ def turn_queue_cancelled(*, queue_id: str, conversation_id: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.TURN_QUEUE_CANCELLED,
         payload={"queue_id": queue_id, "conversation_id": conversation_id},
-    )
-
-
-def turn_steer_accepted(
-    *,
-    steer_id: str,
-    conversation_id: str,
-    content: str,
-    pending: int,
-) -> SSEEvent:
-    """经典 in-flight 软插入 ack（同对话再发 P1）——客户端 toast「已插入，下一工具步生效」。
-
-    ``content`` should already be truncated for the toast (see ``turn_steer.content_preview``).
-    """
-    return SSEEvent(
-        type=EventType.TURN_STEER_ACCEPTED,
-        payload={
-            "steer_id": steer_id,
-            "conversation_id": conversation_id,
-            "content": content,
-            "pending": pending,
-        },
     )
 
 

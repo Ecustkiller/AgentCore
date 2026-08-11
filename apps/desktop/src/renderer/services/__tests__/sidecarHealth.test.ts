@@ -11,13 +11,11 @@ import type { SidecarTarget } from "@/services/sidecarRouting";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import {
   BAD_HEALTH_TTL_MS,
-  BRIDGE_TOAST_COOLDOWN_MS,
   clearSidecarHealth,
   getSidecarHealth,
   markSidecarUnhealthy,
   noteSidecarSpawned,
   probeSidecar,
-  takeCloudBridgeToastSlot,
 } from "../sidecarHealth";
 
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
@@ -181,26 +179,5 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     await probeSidecar(root);
     expect(getSidecarHealth(root)).toBe("ok");
     expect(getSidecarHealth(sub)).toBe("unknown"); // 独立 key（r-multi:: vs r-multi::pkg/app）
-  });
-});
-
-describe("sidecarHealth — 云端过桥 toast 节流", () => {
-  it("force 必占槽；同 key 冷却内非 force 被拒", () => {
-    expect(takeCloudBridgeToastSlot("k1", { force: true })).toBe(true);
-    expect(takeCloudBridgeToastSlot("k1")).toBe(false);
-    expect(takeCloudBridgeToastSlot("k2")).toBe(true);
-  });
-
-  it("冷却过后可再提示", () => {
-    vi.useFakeTimers();
-    expect(takeCloudBridgeToastSlot("cool")).toBe(true);
-    vi.advanceTimersByTime(BRIDGE_TOAST_COOLDOWN_MS);
-    expect(takeCloudBridgeToastSlot("cool")).toBe(true);
-  });
-
-  it("clearSidecarHealth 重置节流", () => {
-    expect(takeCloudBridgeToastSlot("clr")).toBe(true);
-    clearSidecarHealth();
-    expect(takeCloudBridgeToastSlot("clr")).toBe(true);
   });
 });

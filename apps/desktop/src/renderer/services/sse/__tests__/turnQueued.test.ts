@@ -1,5 +1,6 @@
 import { notifyInfo } from "@/lib/toast";
 import { handleMessageStreamEvent } from "@/services/sse/handlers/messageStream";
+import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,12 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
+vi.mock("@/services/turns/reconcileQueuedTurns", () => ({
+  reconcileQueuedTurns: vi.fn(() => Promise.resolve()),
+}));
+
 const notifyInfoMock = vi.mocked(notifyInfo);
+const reconcileMock = vi.mocked(reconcileQueuedTurns);
 const CID = "conv-turn-queued";
 
 beforeEach(() => {
@@ -26,8 +32,8 @@ afterEach(() => {
   useQueuedTurnsStore.setState({ byConversation: {} });
 });
 
-describe("turn_queued · live 对齐 fold（EPHEMERAL toast）", () => {
-  it("呈现既有「已排队」toast（单条）", () => {
+describe("turn_queued · live 对齐 fold（EPHEMERAL）", () => {
+  it("普通排队不弹 toast（QueuedTurnsBar 承载）", () => {
     handleMessageStreamEvent(
       {
         type: "turn_queued",
@@ -41,10 +47,51 @@ describe("turn_queued · live 对齐 fold（EPHEMERAL toast）", () => {
       },
       { conversationId: CID, source: "server" },
     );
-    expect(notifyInfoMock).toHaveBeenCalledWith("已排队，当前回合结束后处理");
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
-  it("多条排队时带位次", () => {
+  it("条上缺 queue_id → 触发 GET 对账（升队 / 多端）", () => {
+    handleMessageStreamEvent(
+      {
+        type: "turn_queued",
+        timestamp: "",
+        payload: {
+          queue_id: "q-remote",
+          position: 1,
+          queue_depth: 1,
+          conversation_id: CID,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(reconcileMock).toHaveBeenCalledWith(CID);
+  });
+
+  it("条上已有 queue_id（本端 midFlight upsert）→ 不对账", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-local",
+      conversationId: CID,
+      content: "本端已写入",
+      position: 1,
+      queueDepth: 1,
+    });
+    handleMessageStreamEvent(
+      {
+        type: "turn_queued",
+        timestamp: "",
+        payload: {
+          queue_id: "q-local",
+          position: 1,
+          queue_depth: 1,
+          conversation_id: CID,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(reconcileMock).not.toHaveBeenCalled();
+  });
+
+  it("多条普通排队亦不弹 toast", () => {
     handleMessageStreamEvent(
       {
         type: "turn_queued",
@@ -58,12 +105,10 @@ describe("turn_queued · live 对齐 fold（EPHEMERAL toast）", () => {
       },
       { conversationId: CID, source: "server" },
     );
-    expect(notifyInfoMock).toHaveBeenCalledWith(
-      expect.stringContaining("第 2/3 条"),
-    );
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
-  it("degraded_from=steer → 额外 toast 说明已改为排队", () => {
+  it("degraded_from=steer → toast 说明已改为排队（禁伪装已插入）", () => {
     handleMessageStreamEvent(
       {
         type: "turn_queued",
@@ -78,29 +123,9 @@ describe("turn_queued · live 对齐 fold（EPHEMERAL toast）", () => {
       },
       { conversationId: CID, source: "server" },
     );
-    expect(notifyInfoMock).toHaveBeenCalledWith("已排队，当前回合结束后处理");
     expect(notifyInfoMock).toHaveBeenCalledWith(
       "当前无法插入，已改为排队，将在本回合结束后发送",
     );
-  });
-});
-
-describe("turn_steer_accepted · live toast", () => {
-  it("呈现「已插入，下一工具步生效」", () => {
-    handleMessageStreamEvent(
-      {
-        type: "turn_steer_accepted",
-        timestamp: "",
-        payload: {
-          steer_id: "steer-1",
-          conversation_id: CID,
-          content: "改成中文",
-          pending: 1,
-        },
-      },
-      { conversationId: CID, source: "server" },
-    );
-    expect(notifyInfoMock).toHaveBeenCalledWith("已插入，下一工具步生效");
   });
 });
 

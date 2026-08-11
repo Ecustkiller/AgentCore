@@ -9,8 +9,10 @@ Acceptance window = captain ``react_loop`` lifetime for that conversation
 (``begin_accepting`` … ``end_accepting``). Outside the window the API falls
 back to FIFO ``turn_queue`` (may carry ``degraded_from=steer``).
 
-Parallel to coordination ``user_interjection`` / ``await_coordination_injection``
-— do **not** merge, fake a CoordinationSession, or reuse ``coord_inject``.
+Durable ack uses the shared ``user_interjection`` contract (经典:
+``received`` → ``injected`` | ``queued`` | ``failed``；无 ``addressed``).
+Process-local pending remains the inject buffer; the SSE/journal record is
+what survives refresh.
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.runtime.events import user_interjection
+from agentcore.workspace.attachments import interjection_attachment_meta
 
 logger = get_logger(__name__)
 
@@ -37,8 +41,9 @@ _CONTENT_PREVIEW_MAX = 200
 class PendingTurnSteer:
     """One classic mid-turn steer waiting for the next ReAct step boundary."""
 
-    steer_id: str
+    interjection_id: str
     conversation_id: str
+    execution_id: str
     content: str
     user_id: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
@@ -50,15 +55,23 @@ class PendingTurnSteer:
 
 
 _pending: dict[str, list[PendingTurnSteer]] = {}
-_accepting: set[str] = set()
+# conversation_id → execution_id while the captain loop is accepting.
+_accepting: dict[str, str] = {}
 
 
 def content_preview(content: str, *, max_len: int = _CONTENT_PREVIEW_MAX) -> str:
-    """Truncate steer body for EPHEMERAL SSE toast payloads."""
+    """Truncate steer body for log previews."""
     text = (content or "").strip()
     if len(text) <= max_len:
         return text
-    return text[:max_len] + "…"
+    return text[: max_len] + "…"
+
+
+def _att_meta(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    if not attachments:
+        return None
+    meta = interjection_attachment_meta(list(attachments))
+    return meta or None
 
 
 def _format_steer_attachment_lines(attachments: list[dict[str, Any]]) -> list[str]:
@@ -97,7 +110,15 @@ def is_accepting(conversation_id: str) -> bool:
     return bool(conversation_id.strip()) and conversation_id.strip() in _accepting
 
 
-def begin_accepting(conversation_id: str) -> None:
+def accepting_execution_id(conversation_id: str) -> str | None:
+    cid = conversation_id.strip()
+    if not cid:
+        return None
+    eid = _accepting.get(cid)
+    return eid if eid else None
+
+
+def begin_accepting(conversation_id: str, *, execution_id: str = "") -> None:
     """Open the classic-steer window for this conversation (captain loop enter).
 
     Drops any stale pending from a prior crashed loop so we never inject orphans.
@@ -112,7 +133,7 @@ def begin_accepting(conversation_id: str) -> None:
             conversation_id=cid,
             dropped=len(stale),
         )
-    _accepting.add(cid)
+    _accepting[cid] = (execution_id or "").strip()
     logger.debug("turn_steer.accepting_begin", conversation_id=cid)
 
 
@@ -121,7 +142,7 @@ def end_accepting(conversation_id: str) -> list[PendingTurnSteer]:
     cid = conversation_id.strip()
     if not cid:
         return []
-    _accepting.discard(cid)
+    _accepting.pop(cid, None)
     leftovers = _pending.pop(cid, [])
     if leftovers:
         logger.info(
@@ -151,8 +172,9 @@ def try_enqueue(
     if not cid or cid not in _accepting:
         return None
     item = PendingTurnSteer(
-        steer_id=new_id(),
+        interjection_id=new_id(),
         conversation_id=cid,
+        execution_id=_accepting[cid],
         content=content,
         user_id=user_id,
         attachments=list(attachments or []),
@@ -167,7 +189,7 @@ def try_enqueue(
     logger.info(
         "turn_steer.enqueued",
         conversation_id=cid,
-        steer_id=item.steer_id,
+        interjection_id=item.interjection_id,
         pending=len(bucket),
         preview=content_preview(content, max_len=80),
     )
@@ -189,15 +211,38 @@ def drain(conversation_id: str) -> list[PendingTurnSteer]:
     return items
 
 
-def drain_as_messages(conversation_id: str) -> list[LLMMessage]:
-    """Drain pending steers and map each to a user-role LLM message."""
-    return [
-        LLMMessage(
-            role="user",
-            content=format_steer_user_message(item.content, item.attachments),
+def drain_as_messages(
+    conversation_id: str,
+    *,
+    sink: Any | None = None,
+    execution_id: str | None = None,
+) -> list[LLMMessage]:
+    """Drain pending steers, map to user-role LLM messages, emit ``injected``.
+
+    ``injected`` is the classic terminal status (内容真正进模型上下文).
+    """
+    items = drain(conversation_id)
+    messages: list[LLMMessage] = []
+    for item in items:
+        messages.append(
+            LLMMessage(
+                role="user",
+                content=format_steer_user_message(item.content, item.attachments),
+            )
         )
-        for item in drain(conversation_id)
-    ]
+        if sink is None:
+            continue
+        eid = (execution_id or item.execution_id or "").strip()
+        sink.emit(
+            user_interjection(
+                interjection_id=item.interjection_id,
+                execution_id=eid,
+                content=item.content,
+                status="injected",
+                attachments=_att_meta(item.attachments),
+            )
+        )
+    return messages
 
 
 def peek_count(conversation_id: str) -> int:
@@ -210,13 +255,14 @@ def _emit_degraded_turn_queued(
     queue_id: str,
     position: int,
     queue_depth: int,
-    steer_id: str,
+    interjection_id: str,
 ) -> bool:
     """Honest signal: accepted steer could not soft-insert → now FIFO.
 
-    Clients that already toasted ``turn_steer_accepted`` must see
-    ``turn_queued.degraded_from=steer`` on the live host sink. Returns whether
-    a live sink received the event.
+    Clients that already saw ``user_interjection(received)`` must also see
+    ``user_interjection(queued)`` + ``turn_queued.degraded_from=steer`` (dual emit,
+    same posture as coordination enqueue). Returns whether a live sink received
+    ``turn_queued``.
     """
     from agentcore.runtime.events import turn_queued
 
@@ -227,7 +273,7 @@ def _emit_degraded_turn_queued(
         logger.info(
             "turn_steer.promoted_to_queue_no_sink",
             conversation_id=conversation_id,
-            steer_id=steer_id,
+            interjection_id=interjection_id,
             queue_id=queue_id,
             position=position,
             queue_depth=queue_depth,
@@ -246,15 +292,74 @@ def _emit_degraded_turn_queued(
     return True
 
 
+def _emit_interjection_status(
+    *,
+    conversation_id: str,
+    item: PendingTurnSteer,
+    status: str,
+    note: str | None = None,
+) -> None:
+    from .runs import turn_runs
+
+    run = turn_runs.get(conversation_id)
+    if run is None or run.task.done():
+        return
+    run.sink.emit(
+        user_interjection(
+            interjection_id=item.interjection_id,
+            execution_id=item.execution_id,
+            content=item.content,
+            status=status,
+            note=note,
+            attachments=_att_meta(item.attachments),
+        )
+    )
+
+
+# Wording must stay true for both explicit Stop and overlap-cancel (a newer turn
+# taking the slot also marks the run user_stopped) — do not claim "你按了停止".
+_USER_STOP_DISCARD_NOTE = "本回合已中止，这条插话未被主 Agent 读取，已丢弃"
+
+
+def discard_leftovers_on_user_stop(leftovers: list[PendingTurnSteer]) -> int:
+    """Drop undrained classic steers when the turn closed via user_stop.
+
+    Stop = silent: do **not** promote onto FIFO / auto-start a new turn.
+    Honest client signal reuses ``user_interjection(failed)`` + fixed note
+    (no new protocol enum). Does not touch user-initiated FIFO entries.
+
+    Returns how many leftovers were discarded. Caller should only invoke after
+    ``end_accepting``.
+    """
+    if not leftovers:
+        return 0
+    n = 0
+    for item in leftovers:
+        _emit_interjection_status(
+            conversation_id=item.conversation_id,
+            item=item,
+            status="failed",
+            note=_USER_STOP_DISCARD_NOTE,
+        )
+        n += 1
+        logger.info(
+            "turn_steer.discarded_on_user_stop",
+            conversation_id=item.conversation_id,
+            interjection_id=item.interjection_id,
+        )
+    return n
+
+
 def promote_leftovers_to_queue(leftovers: list[PendingTurnSteer]) -> int:
     """Re-home undrained steers onto the conversation FIFO (回合收口竞态).
 
-    Keeps user content (enqueue + drain unchanged). Emits
-    ``turn_queued.degraded_from=steer`` on a live ``turn_runs`` sink when present
-    so clients do not keep the false 「已插入」 toast. No live sink → clear log only.
+    Dual-emits ``user_interjection(queued)`` + ``turn_queued.degraded_from=steer``
+    on a live sink when present (协调升队先例). Enqueue failure → ``failed``.
 
     Returns how many items were enqueued. Caller should only invoke after
     ``end_accepting`` so a live loop cannot race-drain the same items.
+    Natural turn close only — user_stop leftovers use
+    :func:`discard_leftovers_on_user_stop` instead.
     """
     if not leftovers:
         return 0
@@ -262,31 +367,52 @@ def promote_leftovers_to_queue(leftovers: list[PendingTurnSteer]) -> int:
 
     n = 0
     for item in leftovers:
-        status = turn_queue.enqueue_and_ensure_drain(
-            item.conversation_id,
-            new_queued_turn(
-                content=item.content,
-                user_id=item.user_id,
-                attachments=item.attachments,
-                agent_mentions=item.agent_mentions,
-                requires_tools=item.requires_tools,
-                x_client_platform=item.x_client_platform,
-                llm_credentials=item.llm_credentials,
-                llm_supports_tools=item.llm_supports_tools,
-            ),
+        try:
+            status = turn_queue.enqueue_and_ensure_drain(
+                item.conversation_id,
+                new_queued_turn(
+                    content=item.content,
+                    user_id=item.user_id,
+                    attachments=item.attachments,
+                    agent_mentions=item.agent_mentions,
+                    requires_tools=item.requires_tools,
+                    x_client_platform=item.x_client_platform,
+                    llm_credentials=item.llm_credentials,
+                    llm_supports_tools=item.llm_supports_tools,
+                    interjection_id=item.interjection_id,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as failed, never raise into loop finally
+            logger.exception(
+                "turn_steer.promote_enqueue_failed",
+                conversation_id=item.conversation_id,
+                interjection_id=item.interjection_id,
+            )
+            _emit_interjection_status(
+                conversation_id=item.conversation_id,
+                item=item,
+                status="failed",
+                note=f"转入对话级排队失败：{exc}",
+            )
+            continue
+        _emit_interjection_status(
+            conversation_id=item.conversation_id,
+            item=item,
+            status="queued",
+            note="当前回合已收口，已自动转入下一回合",
         )
         emitted = _emit_degraded_turn_queued(
             conversation_id=item.conversation_id,
             queue_id=status.queue_id,
             position=status.position,
             queue_depth=status.queue_depth,
-            steer_id=item.steer_id,
+            interjection_id=item.interjection_id,
         )
         n += 1
         logger.info(
             "turn_steer.promoted_to_queue",
             conversation_id=item.conversation_id,
-            steer_id=item.steer_id,
+            interjection_id=item.interjection_id,
             queue_id=status.queue_id,
             position=status.position,
             queue_depth=status.queue_depth,

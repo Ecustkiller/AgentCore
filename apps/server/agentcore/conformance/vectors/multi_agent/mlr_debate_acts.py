@@ -1,8 +1,8 @@
-"""两幕同图：幕 1 MLR multi_agent + 幕 2 debate 生长（批 A2）。
+"""两幕链：幕 1 MLR multi_agent + 幕 2 debate 新图 + prev（批 A2）。
 
-跨回合：m1 完成四透镜+汇总 → m2 开辩挂同一 ``execution_id``，``graph_append`` 锚点，
-``run_plan.act`` = act-2 / debate / anchor=synthesizer。oracle 期望 ``acts`` 长度 2，
-辩手 runs 归 act-2。
+跨回合：m1 完成四透镜+汇总 → m2 开辩 mint 新 ``execution_id``，``prev_execution_id``
+链到幕 1；``run_plan.act`` = act-2 / debate / anchor=synthesizer。不再 divert /
+``graph_append`` / 同 eid。oracle 最终投影以 m2 图为准（新 eid 重置 slot）。
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from agentcore.runtime.events import (
     content_delta,
     debate_result,
     debate_round_started,
-    graph_append,
     message_end,
     message_start,
     run_completed,
@@ -32,11 +31,12 @@ from ..debate._builders import (
 )
 
 _TOPIC = "品牌是否应立即终止争议代言联名"
-_EXEC = "exec_mlr_debate"
+_EXEC_MLR = "exec_mlr_debate"
+_EXEC_DEBATE = "exec_mlr_debate_act2"
+_CAPTAIN_2 = "c2"
 _MOD = "debate_mod_act2"
 _PRO = f"{_MOD}_r1_pro"
 _CON = f"{_MOD}_r1_con"
-
 
 def _mlr_agents_runs() -> tuple[list[dict], list[dict]]:
     lenses = (
@@ -76,16 +76,16 @@ def _mlr_agents_runs() -> tuple[list[dict], list[dict]]:
 
 
 def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
-    """幕1 MLR 完成 → 幕2 辩论同图生长（act-2 / anchor=synthesizer）。"""
+    """幕1 MLR 完成 → 幕2 辩论新图 + prev（act-2 / anchor=synthesizer）。"""
     mlr_agents, mlr_runs = _mlr_agents_runs()
     mod_agents, mod_runs = _moderator_agents_runs(
-        _MOD, "synthesizer", f"主持正反辩论：{_TOPIC}"
+        _MOD, _CAPTAIN_2, f"主持正反辩论：{_TOPIC}"
     )
-    # parent = synthesizer（挂汇总员后），非 captain
+    # 新图：parent = 本回合 captain（幕因果经 act.anchor + prev）。
     mod_runs = [
         {
             **mod_runs[0],
-            "parent_run_id": "synthesizer",
+            "parent_run_id": _CAPTAIN_2,
         }
     ]
     debater_agents = _pro_con_debater_agents()
@@ -174,7 +174,7 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
             },
         ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_MLR,
             plan_type="multi_agent",
             task_summary=f"多视角深度调研：{_TOPIC}",
             agents=mlr_agents,
@@ -218,7 +218,7 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="多视角调研完成。"),
         content_delta("调研已呈报，建议开辩。"),
         message_end(FinishReason.END_TURN, input_tokens=5000, output_tokens=900, cost=_COST),
-        # ── 回合 2：幕 2 辩论同图生长 ──
+        # ── 回合 2：幕 2 辩论新图 + prev ──
         message_start("m2", conversation_id=_CONV),
         content_delta("按命题卡开辩。"),
         tool_use_start(
@@ -233,24 +233,13 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
                 ],
             },
         ),
-        graph_append(
-            execution_id=_EXEC,
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["主持人"],
-            added_run_ids=[_MOD],
-            act_id="act-2",
-            act_kind="debate",
-            authorized_by="preview",
-        ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary=f"正反辩论：{_TOPIC}",
             agents=mod_agents,
             runs=mod_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act={
                 "act_id": "act-2",
                 "kind": "debate",
@@ -259,9 +248,9 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
                 "authorized_by": "preview",
             },
         ),
-        run_started(_MOD, _MOD, parent_run_id="synthesizer"),
+        run_started(_MOD, _MOD, parent_run_id=_CAPTAIN_2),
         debate_round_started(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             round_no=1,
             focus="立即终止 vs 观望",
@@ -270,12 +259,12 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
             form="debate",
         ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=debater_agents,
             runs=debater_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act={
                 "act_id": "act-2",
                 "kind": "debate",
@@ -318,7 +307,7 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        debate_result(execution_id=_EXEC, moderator_run_id=_MOD, payload=debate_payload),
+        debate_result(execution_id=_EXEC_DEBATE, moderator_run_id=_MOD, payload=debate_payload),
         tool_use_end("db1", "debate", success=True, output="辩论完成。"),
         content_delta("辩论收束，决策简报已呈。"),
         message_end(FinishReason.END_TURN, input_tokens=6000, output_tokens=1100, cost=_COST),

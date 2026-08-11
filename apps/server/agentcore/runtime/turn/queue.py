@@ -44,6 +44,9 @@ class QueuedTurn:
     # Preflight credentials resolved at enqueue time (billing gate already passed).
     llm_credentials: Any = None
     llm_supports_tools: bool | None = None
+    # Set when this entry was promoted from a user interjection (协调升队 /
+    # 经典 steer leftover). Plain ``delivery=queue`` enqueues leave it None.
+    interjection_id: str | None = None
     # Set by the enqueueing SSE when it opens: drain resolves with the live turn sink
     # so the waiting connection can continue on the same stream. None → no waiter
     # (tests / detached-only start) → sink starts detached as before.
@@ -160,6 +163,13 @@ class TurnQueue:
 
     def depth(self, conversation_id: str) -> int:
         return len(self._queues.get(conversation_id) or ())
+
+    def list_pending(self, conversation_id: str) -> list[QueuedTurn]:
+        """FIFO snapshot of pending turns (process-local; empty after restart)."""
+        q = self._queues.get(conversation_id)
+        if not q:
+            return []
+        return list(q)
 
     def clear(self, conversation_id: str) -> int:
         """Drop all pending turns (e.g. conversation deleted). Returns count dropped.
@@ -325,6 +335,7 @@ def new_queued_turn(
     x_client_platform: str | None = None,
     llm_credentials: Any = None,
     llm_supports_tools: bool | None = None,
+    interjection_id: str | None = None,
     started: asyncio.Future[Any] | None = None,
 ) -> QueuedTurn:
     return QueuedTurn(
@@ -337,6 +348,7 @@ def new_queued_turn(
         user_id=user_id,
         llm_credentials=llm_credentials,
         llm_supports_tools=llm_supports_tools,
+        interjection_id=interjection_id,
         started=started,
     )
 

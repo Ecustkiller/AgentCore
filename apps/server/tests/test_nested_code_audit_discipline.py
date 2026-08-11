@@ -34,6 +34,11 @@ def test_apply_inherited_stamps_gate_json_and_supplement():
         "AgentCore/文档/reviews/code-audit-2-simulation-sub.audit.json",
     ]
     assert "嵌套审计·收工" in tasks[0]["system_prompt_supplement"]
+    supp = tasks[0]["system_prompt_supplement"]
+    assert "骨架先落 → 补全 → 成文" in supp
+    # artifacts 声明不变：仍为 [md, companion .audit.json]
+    assert d["artifacts"][0].endswith(".md")
+    assert d["artifacts"][1].endswith(".audit.json")
 
 
 def test_apply_inherited_preserves_explicit_gate_false():

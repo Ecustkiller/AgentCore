@@ -42,6 +42,7 @@
   "projected": {
     "status": "running",
     "finishReason": null,
+    "error": null,
     "content": "我需要运行代码。",
     "reasoning": "",
     "captainContext": [],

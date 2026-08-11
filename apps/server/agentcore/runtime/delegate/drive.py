@@ -144,7 +144,7 @@ async def drive(
 ) -> ToolResult:
     """Run ``plan`` through the WaveScheduler and fold workers' products into a CEO ToolResult.
 
-    When ``coordinate`` is true (default) and the gate passes (≥2 workers, root CEO,
+    When ``coordinate`` is true (default) and the gate passes (≥1 worker, root CEO,
     not finalize), starts a background scheduler and returns immediately. Pass
     ``coordinate=False`` for classic blocking. Pass ``session`` only from the
     background task (:func:`drive_coordinated`).
@@ -623,6 +623,7 @@ async def _drive_body(
             executor,
             seed_completed=seed_completed,
             cancel_run_ids=redirects.cancel_run_ids,
+            stop_run_ids=redirects.stop_run_ids,
             on_progress=redirects.on_progress,
             on_boundary=on_boundary,
             on_skipped=_on_skipped,

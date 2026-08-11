@@ -49,10 +49,11 @@ export function writeMemory(
 
 /**
  * A single memory *leaf* (Agent记忆与知识系统 §1.4). The always-injected core is split into
- * 偏好 (`preferences`, GLOBAL-only) + 画像 (`profile`, global or per-project), each its own
- * editable file. `profile` takes an optional `folderId` to address a project's layer.
+ * 偏好 (`preferences`, GLOBAL-only) + 画像 (`profile`, global or per-project) + 导航
+ * (`navigation`, PROJECT-only), each its own editable file. `profile` / `navigation` take
+ * an optional `folderId` to address a project's layer (`navigation` requires it).
  */
-export type MemoryKind = "preferences" | "profile";
+export type MemoryKind = "preferences" | "profile" | "navigation";
 
 export interface MemoryFileDoc {
   content: string;
@@ -65,7 +66,7 @@ const memoryFilePath = (kind: MemoryKind, folderId: string | null): string =>
     ? `/v1/users/me/memory/files/${kind}?folder_id=${encodeURIComponent(folderId)}`
     : `/v1/users/me/memory/files/${kind}`;
 
-/** Load one memory leaf — 偏好/画像 (global) or a project's 画像 (with `folderId`). */
+/** Load one memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航. */
 export function getMemoryFile(
   kind: MemoryKind,
   folderId: string | null = null,

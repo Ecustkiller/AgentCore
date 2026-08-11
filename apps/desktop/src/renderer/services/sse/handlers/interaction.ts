@@ -30,8 +30,8 @@ function wireIntoInteractionStore(
   conversationId: string,
   origin: DispatchContext["source"],
 ): void {
-  // Cold pause cards are CEO-lane: never bind via growth-graph divert
-  // (execMessageId sticky host), or ResumePrompt keys the wrong turn.
+  // Cold pause cards are CEO-lane: never bind via growth-graph host lookup
+  // alone when a same-turn stamp exists, or ResumePrompt keys the wrong turn.
   // Prefer same-turn stamped server id; never pin to an unstamped client UUID
   // (empty → bindEmptyMessageId on later message_start).
   const requiredKind = kindFromRequiredEvent(event.type);

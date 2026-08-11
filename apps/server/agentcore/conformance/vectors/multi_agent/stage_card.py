@@ -8,7 +8,6 @@ from agentcore.runtime.events import (
     content_delta,
     debate_result,
     debate_round_started,
-    graph_append,
     interaction_orphaned,
     message_end,
     message_start,
@@ -30,7 +29,11 @@ from ..debate._builders import (
 )
 
 _TOPIC = "品牌是否应立即终止争议代言联名"
-_EXEC = "exec_stage_card"
+_EXEC_MLR = "exec_stage_card"
+_EXEC_DEBATE = "exec_stage_card_act2"
+_CAPTAIN_2 = "c2"
+# Compat alias for MLR frames still using _EXEC in builders
+_EXEC = _EXEC_MLR
 _MOD = "debate_mod_sc"
 _PRO = f"{_MOD}_r1_pro"
 _CON = f"{_MOD}_r1_con"
@@ -73,7 +76,7 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
     mod_agents, mod_runs = _moderator_agents_runs(
         _MOD, "synthesizer", f"主持正反辩论：{_TOPIC}"
     )
-    mod_runs = [{**mod_runs[0], "parent_run_id": "synthesizer"}]
+    mod_runs = [{**mod_runs[0], "parent_run_id": _CAPTAIN_2}]
     debater_agents = _pro_con_debater_agents()
     debater_runs = _pro_con_debater_runs(
         _MOD,
@@ -183,29 +186,18 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
         message_start("m2", conversation_id=_CONV),
         stage_card_resolved(stage_card_id=_CARD, decision="start_debate", note=""),
         content_delta("按此开辩。"),
-        graph_append(
-            execution_id=_EXEC,
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["主持人"],
-            added_run_ids=[_MOD],
-            act_id="act-2",
-            act_kind="debate",
-            authorized_by="stage_card",
-        ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary=f"正反辩论：{_TOPIC}",
             agents=mod_agents,
             runs=mod_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act=act2,
         ),
-        run_started(_MOD, _MOD, parent_run_id="synthesizer"),
+        run_started(_MOD, _MOD, parent_run_id=_CAPTAIN_2),
         debate_round_started(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             round_no=1,
             focus="立即终止 vs 观望",
@@ -214,12 +206,12 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
             form="debate",
         ),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="debate",
             task_summary="",
             agents=debater_agents,
             runs=debater_runs,
-            host_message_id="m1",
+            prev_execution_id=_EXEC_MLR,
             act=act2,
         ),
         run_started(_PRO, _PRO, parent_run_id=_MOD, stance="pro", group="debate:debate", round_no=1),
@@ -247,7 +239,7 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
             cost=_COST,
         ),
         debate_result(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             moderator_run_id=_MOD,
             payload=debate_payload,
         ),
@@ -273,7 +265,7 @@ def _multi_agent_stage_card_orphaned() -> list[SSEEvent]:
         message_start("m1", conversation_id=_CONV),
         tool_use_start("dc1", "delegate", {"playbook": "multi_lens_research"}),
         run_plan(
-            execution_id=_EXEC,
+            execution_id=_EXEC_DEBATE,
             plan_type="multi_agent",
             task_summary=f"多视角调研：{_TOPIC}",
             agents=mlr_agents,

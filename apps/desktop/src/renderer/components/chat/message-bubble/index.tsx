@@ -1,10 +1,6 @@
-import { InterjectionTimeline } from "@/components/chat/InterjectionTimeline";
 import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
-import {
-  assistantProjectionId,
-  useActiveMessageFocus,
-} from "@/stores/conversation";
+import { useActiveMessageFocus } from "@/stores/conversation";
 import { memo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./AssistantMessage";
 import { UserMessage } from "./UserMessage";
@@ -44,21 +40,16 @@ export const MessageBubble = memo(function MessageBubble({
 
   const isAssistant = message.role === "assistant";
   return (
-    <>
-      <div
-        ref={ref}
-        className="scroll-mt-6 rounded-xl animate-message-enter motion-reduce:animate-none"
-      >
-        {isAssistant ? (
-          <AssistantMessage message={message} />
-        ) : (
-          <UserMessage message={message} />
-        )}
-      </div>
+    <div
+      ref={ref}
+      className="scroll-mt-6 rounded-xl animate-message-enter motion-reduce:animate-none"
+    >
       {isAssistant ? (
-        <InterjectionTimeline messageId={assistantProjectionId(message)} />
-      ) : null}
-    </>
+        <AssistantMessage message={message} />
+      ) : (
+        <UserMessage message={message} />
+      )}
+    </div>
   );
 });
 

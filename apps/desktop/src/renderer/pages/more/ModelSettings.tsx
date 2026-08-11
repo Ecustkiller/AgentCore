@@ -6,7 +6,6 @@ import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
 import {
   type DefaultProviderGroup,
-  PLATFORM_POINTER_ID,
   buildDefaultProviderGroups,
   decodePointer,
   encodePointer,
@@ -17,7 +16,6 @@ import {
   llmProviderKeys,
   modelKeys,
 } from "@/lib/queryKeys";
-import { notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   type CreateLlmModelProfileInput,
@@ -33,8 +31,9 @@ import type { LlmProviderView } from "@/services/llmProviders";
 import { type ModelCatalogItem, findCatalogItem } from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ProfileModelSelect, canChooseFromGroups } from "./ProfileModelSelect";
 import { SettingsHeader } from "./SettingsHeader";
 
 /** 草稿主模型是否在 curated 目录标有 vision（贴图可直送主模型）。 */
@@ -49,21 +48,6 @@ function mainHasCuratedVision(
     providerId: main.provider_id,
   });
   return (item?.capabilities ?? []).includes("vision");
-}
-
-/** groups 内所有 group.models 合计为空（有 provider 但 models 空也算）。 */
-function hasSelectableModels(groups: DefaultProviderGroup[]): boolean {
-  return groups.some((g) => g.models.length > 0);
-}
-
-/** 存在 BYOK 服务商分组时，即使目录为空也可手填 model id。 */
-function hasByokProviderGroups(groups: DefaultProviderGroup[]): boolean {
-  return groups.some((g) => g.providerId !== PLATFORM_POINTER_ID);
-}
-
-/** 目录项或 BYOK 自定义均可选。 */
-function canChooseModel(groups: DefaultProviderGroup[]): boolean {
-  return hasSelectableModels(groups) || hasByokProviderGroups(groups);
 }
 
 /** 从分组取第一个可选槽（平台或 BYOK），用于新建种子。 */
@@ -188,8 +172,8 @@ export function ModelSettings() {
         title="模型"
         description={
           platformAvailable
-            ? "选择账号默认组合（主模型 + 可选 Worker / 后台 / 识图）。可用平台额度直接对话，也可接入服务商。"
-            : "选择账号默认组合（主模型 + 可选 Worker / 后台 / 识图）。需自行在 jiurelay 免费配额度或接入服务商。"
+            ? "选择账号默认组合（主模型 + 可选组队队员 / 后台 / 识图）。可用平台额度直接对话，也可接入服务商。"
+            : "选择账号默认组合（主模型 + 可选组队队员 / 后台 / 识图）。需自行在 jiurelay 免费配额度或接入服务商。"
         }
       />
 
@@ -294,8 +278,8 @@ function PlatformStatusLine({
 }
 
 /**
- * 模型组合列表 + 编辑：主必填；Worker / 后台 / 识图收进「高级 · 分槽覆盖」
- * （有覆盖时默认展开）。Worker / 后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
+ * 模型组合列表 + 编辑：主必填；组队队员 / 后台 / 识图收进「高级 · 其他模型」
+ * （有覆盖时默认展开）。组队/后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
  * 系统预置不可删，可设默认 / 复制为用户组合；用户组合可新建 / 改名 / 删。
  */
 function ModelProfilesSection({
@@ -319,6 +303,7 @@ function ModelProfilesSection({
   const [creating, setCreating] = useState(false);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<ReactNode>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   const catalogModels = catalog?.models ?? [];
   const manageable = useMemo(
@@ -329,17 +314,8 @@ function ModelProfilesSection({
     [profileList],
   );
 
-  const groups = buildDefaultProviderGroups(
-    providers,
-    catalog,
-    ...manageable.flatMap((p) => [p.main, p.worker, p.background, p.vision]),
-  );
-  // 识图槽：过滤后若无 vision 模型则回退全目录（仍可 BYOK 手填）。
-  const visionGroups = buildVisionProviderGroups(
-    providers,
-    catalog,
-    ...manageable.map((p) => p.vision),
-  );
+  // 仅用于新建种子 / 空目录引导；编辑卡内按当前组合槽位 fold-in。
+  const seedGroups = buildDefaultProviderGroups(providers, catalog);
 
   const seedMain = (): ModelProfileSlot | null => {
     const cur = catalog?.current;
@@ -358,12 +334,13 @@ function ModelProfilesSection({
         model: first.id,
       };
     }
-    return firstSlotFromGroups(groups);
+    return firstSlotFromGroups(seedGroups);
   };
 
   const withPending = async (fn: () => Promise<void>) => {
     setPending(true);
     setActionError(null);
+    setSaveSuccess(null);
     try {
       await fn();
       onChanged();
@@ -377,7 +354,7 @@ function ModelProfilesSection({
   const onSetDefault = (profile: LlmModelProfileView) =>
     withPending(async () => {
       await setDefaultLlmModelProfile(profile.id);
-      notifySuccess(`已将「${profile.name}」设为默认组合`);
+      setSaveSuccess(`已将「${profile.name}」设为默认组合`);
     });
 
   const onDelete = (profile: LlmModelProfileView) => {
@@ -391,7 +368,7 @@ function ModelProfilesSection({
     void withPending(async () => {
       await deleteLlmModelProfile(profile.id);
       if (editingId === profile.id) setEditingId(null);
-      notifySuccess(`已删除「${profile.name}」`);
+      setSaveSuccess(`已删除「${profile.name}」`);
     });
   };
 
@@ -407,7 +384,7 @@ function ModelProfilesSection({
       });
       setEditingId(created.id);
       setCreating(false);
-      notifySuccess(`已复制为「${created.name}」`);
+      setSaveSuccess(`已复制为「${created.name}」`);
     });
 
   const onCreate = () => {
@@ -420,14 +397,16 @@ function ModelProfilesSection({
       return;
     }
     setActionError(null);
+    setSaveSuccess(null);
     setCreating(true);
     setEditingId(null);
   };
 
-  const onSaveCreate = (draft: ProfileDraft) =>
-    withPending(async () => {
-      if (!draft.main) throw new Error("主模型必填");
-      const created = await createLlmModelProfile({
+  const onSaveCreate = async (draft: ProfileDraft) => {
+    if (!draft.main) throw new Error("主模型必填");
+    setPending(true);
+    try {
+      await createLlmModelProfile({
         name: draft.name.trim() || "未命名组合",
         main: draft.main,
         worker: draft.worker,
@@ -437,13 +416,21 @@ function ModelProfilesSection({
       } satisfies CreateLlmModelProfileInput);
       setCreating(false);
       setEditingId(null);
-      notifySuccess(`已创建「${created.name}」`);
-    });
+      setSaveSuccess("组合已保存");
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  };
 
-  const onSaveEdit = (profile: LlmModelProfileView, draft: ProfileDraft) =>
-    withPending(async () => {
-      if (profile.kind !== "user") return;
-      if (!draft.main) throw new Error("主模型必填");
+  const onSaveEdit = async (
+    profile: LlmModelProfileView,
+    draft: ProfileDraft,
+  ) => {
+    if (profile.kind !== "user") return;
+    if (!draft.main) throw new Error("主模型必填");
+    setPending(true);
+    try {
       const name = draft.name.trim() || profile.name;
       await updateLlmModelProfile(profile.id, {
         name,
@@ -453,8 +440,12 @@ function ModelProfilesSection({
         vision: draft.vision,
       });
       setEditingId(null);
-      notifySuccess(`已保存「${name}」`);
-    });
+      setSaveSuccess(`「${name}」已保存`);
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <section>
@@ -462,7 +453,7 @@ function ModelProfilesSection({
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">模型组合</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            主模型必填；Worker /
+            主模型必填；组队队员 /
             后台可留空跟随；识图可留空不配置。改定义后下一回合生效。
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -495,20 +486,20 @@ function ModelProfilesSection({
           {creating && (
             <ProfileEditor
               title="新建组合"
-              groups={groups}
-              visionGroups={visionGroups}
+              providers={providers}
+              catalog={catalog}
               catalogModels={catalogModels}
               platformAvailable={platformAvailable}
               initial={{
                 name: "未命名组合",
-                main: seedMain(), // 可能为 null：BYOK 空目录时靠手填 model id
+                main: seedMain(),
                 worker: null,
                 background: null,
                 vision: null,
               }}
               pending={pending}
               onCancel={() => setCreating(false)}
-              onSave={(draft) => void onSaveCreate(draft)}
+              onSave={onSaveCreate}
             />
           )}
 
@@ -516,9 +507,9 @@ function ModelProfilesSection({
             editingId === profile.id && profile.kind === "user" ? (
               <ProfileEditor
                 key={profile.id}
-                title={`编辑「${profile.name}」`}
-                groups={groups}
-                visionGroups={visionGroups}
+                title="编辑组合"
+                providers={providers}
+                catalog={catalog}
                 catalogModels={catalogModels}
                 platformAvailable={platformAvailable}
                 initial={{
@@ -530,7 +521,7 @@ function ModelProfilesSection({
                 }}
                 pending={pending}
                 onCancel={() => setEditingId(null)}
-                onSave={(draft) => void onSaveEdit(profile, draft)}
+                onSave={(draft) => onSaveEdit(profile, draft)}
               />
             ) : (
               <ProfileListRow
@@ -541,6 +532,7 @@ function ModelProfilesSection({
                 onEdit={() => {
                   setCreating(false);
                   setEditingId(profile.id);
+                  setSaveSuccess(null);
                 }}
                 onSetDefault={() => void onSetDefault(profile)}
                 onCopy={() => void onCopy(profile)}
@@ -555,6 +547,12 @@ function ModelProfilesSection({
             </p>
           )}
         </div>
+      )}
+
+      {saveSuccess && (
+        <output className="mt-3 block text-xs text-success">
+          {saveSuccess}
+        </output>
       )}
 
       {actionError &&
@@ -588,12 +586,12 @@ function advancedSlotsSummary(
   vision: ModelProfileSlot | null,
 ): string {
   if (!worker && !background && !vision) {
-    return "Worker/后台：跟随主模型 · 识图：不配置";
+    return "组队/后台：跟随主模型 · 识图：不配置";
   }
   const workerLabel = worker?.model ?? "跟随主模型";
   const backgroundLabel = background?.model ?? "跟随主模型";
   const visionLabel = vision?.model ?? "不配置";
-  return `Worker：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
+  return `组队：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
 }
 
 function ProfileListRow({
@@ -691,10 +689,59 @@ function ProfileListRow({
   );
 }
 
+/**
+ * 槽位字段：标签与说明并排一行、清除动作靠右，控件紧随其下。
+ * 说明放在控件之前，选之前就能读到用途；`id` 同时用于 aria 关联。
+ */
+function SlotField({
+  id,
+  label,
+  hint,
+  clear,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  clear?: { label: string; disabled: boolean; onClear: () => void };
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span
+            id={`${id}-label`}
+            className="text-xs font-medium text-foreground"
+          >
+            {label}
+          </span>
+          {hint ? (
+            <span id={`${id}-hint`} className="text-xs text-muted-foreground">
+              {hint}
+            </span>
+          ) : null}
+        </span>
+        {clear ? (
+          <button
+            type="button"
+            disabled={clear.disabled}
+            onClick={clear.onClear}
+            className="shrink-0 text-xs text-primary underline-offset-2 hover:underline disabled:opacity-60"
+          >
+            {clear.label}
+          </button>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function ProfileEditor({
   title,
-  groups,
-  visionGroups,
+  providers,
+  catalog,
   catalogModels,
   platformAvailable,
   initial,
@@ -703,14 +750,14 @@ function ProfileEditor({
   onSave,
 }: {
   title: string;
-  groups: DefaultProviderGroup[];
-  visionGroups: DefaultProviderGroup[];
+  providers: LlmProviderView[];
+  catalog: ReturnType<typeof useModels>["data"];
   catalogModels: ModelCatalogItem[];
   platformAvailable: boolean;
   initial: ProfileDraft;
   pending: boolean;
   onCancel: () => void;
-  onSave: (draft: ProfileDraft) => void;
+  onSave: (draft: ProfileDraft) => Promise<void>;
 }) {
   const [name, setName] = useState(initial.name);
   const [main, setMain] = useState(initial.main);
@@ -720,59 +767,90 @@ function ProfileEditor({
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     hasAdvancedSlotOverrides(initial),
   );
-  const canChoose = canChooseModel(groups);
-  const canChooseVision = canChooseModel(visionGroups);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // 只 fold-in 当前编辑组合的槽位，避免跨组合污染建议。
+  const groups = useMemo(
+    () =>
+      buildDefaultProviderGroups(
+        providers,
+        catalog,
+        main,
+        worker,
+        background,
+        vision,
+      ),
+    [providers, catalog, main, worker, background, vision],
+  );
+  const visionGroups = useMemo(
+    () => buildVisionProviderGroups(providers, catalog, vision),
+    [providers, catalog, vision],
+  );
+
+  const canChoose = canChooseFromGroups(groups);
+  const canChooseVision = canChooseFromGroups(visionGroups);
   const showEmptyGuide = !canChoose;
   const mainVisionCapable = mainHasCuratedVision(main, catalogModels);
+  const busy = pending || saving;
+
+  const handleSave = async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await onSave({ name, main, worker, background, vision });
+    } catch (e) {
+      setSaveError(modelConfigApiErrorMessage(e, "保存失败，请重试"));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="space-y-3 rounded-lg border border-border bg-muted/20 px-3 py-3">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <label className="block" htmlFor="profile-name">
-        <span className="text-xs text-muted-foreground">名称</span>
-        <input
-          id="profile-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={pending}
-          className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-        />
-      </label>
-      <label className="block" htmlFor="profile-main">
-        <span className="text-xs text-muted-foreground">主模型（必填）</span>
-        <ProviderModelSelect
-          id="profile-main"
-          groups={groups}
-          value={pointerValue(main)}
-          disabled={pending}
-          onChange={(value) => setMain(decodePointer(value))}
-        />
-        {showEmptyGuide && (
-          <NoAvailableModelsGuide
-            className="mt-1"
-            platformAvailable={platformAvailable}
-          />
-        )}
-      </label>
+    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+      <p className="text-sm font-semibold text-foreground">{title}</p>
 
-      <div className="rounded-lg border border-border/60 bg-background/40">
+      <div className="max-w-md space-y-4">
+        <label className="block" htmlFor="profile-name">
+          <span className="text-xs font-medium text-foreground">名称</span>
+          <input
+            id="profile-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+            className="mt-1.5 h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          />
+        </label>
+        <SlotField id="profile-main" label="主模型" hint="必填">
+          <ProfileModelSelect
+            id="profile-main"
+            labelledBy="profile-main-label"
+            describedBy="profile-main-hint"
+            groups={groups}
+            value={pointerValue(main)}
+            disabled={busy}
+            onChange={(value) => setMain(decodePointer(value))}
+          />
+          {showEmptyGuide && (
+            <NoAvailableModelsGuide
+              className="mt-1.5"
+              platformAvailable={platformAvailable}
+            />
+          )}
+        </SlotField>
+      </div>
+
+      <div className="border-t border-border pt-3">
         <button
           type="button"
           aria-expanded={advancedOpen}
-          disabled={pending}
+          disabled={busy}
           onClick={() => setAdvancedOpen((open) => !open)}
-          className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left disabled:opacity-60"
+          className="flex w-full max-w-md items-center gap-2 py-1 pr-2.5 text-left disabled:opacity-60"
         >
-          <ChevronDown
-            size={14}
-            className={cn(
-              "shrink-0 text-muted-foreground transition-transform",
-              !advancedOpen && "-rotate-90",
-            )}
-          />
           <span className="min-w-0 flex-1">
-            <span className="block text-xs text-foreground">
-              高级 · 分槽覆盖
+            <span className="block text-sm font-medium text-foreground">
+              高级 · 其他模型
             </span>
             {!advancedOpen && (
               <span className="mt-0.5 block truncate text-xs text-muted-foreground">
@@ -780,288 +858,120 @@ function ProfileEditor({
               </span>
             )}
           </span>
+          <ChevronDown
+            size={14}
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform",
+              !advancedOpen && "-rotate-90",
+            )}
+          />
         </button>
         {advancedOpen && (
-          <div className="space-y-3 border-t border-border/60 px-2.5 py-2.5">
-            <label className="block" htmlFor="profile-worker">
-              <span className="text-xs text-muted-foreground">Worker 模型</span>
-              <ProviderModelSelect
+          <div className="mt-3 max-w-md space-y-4">
+            <SlotField
+              id="profile-worker"
+              label="组队队员"
+              hint="协作时队员使用；辩论仍用主模型"
+              clear={
+                worker
+                  ? {
+                      label: "恢复跟随",
+                      disabled: busy,
+                      onClear: () => setWorker(null),
+                    }
+                  : undefined
+              }
+            >
+              <ProfileModelSelect
                 id="profile-worker"
+                labelledBy="profile-worker-label"
+                describedBy="profile-worker-hint"
                 groups={groups}
                 value={pointerValue(worker)}
-                disabled={pending || !canChoose}
+                disabled={busy || !canChoose}
                 followLabel="跟随主模型"
                 onChange={(value) => setWorker(decodePointer(value))}
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                组队队员用；辩论用主模型。留空则跟随主模型。
-              </p>
-            </label>
-            <label className="block" htmlFor="profile-background">
-              <span className="text-xs text-muted-foreground">
-                后台任务模型
-              </span>
-              <ProviderModelSelect
+            </SlotField>
+            <SlotField
+              id="profile-background"
+              label="后台任务"
+              hint="标题、记忆等"
+              clear={
+                background
+                  ? {
+                      label: "恢复跟随",
+                      disabled: busy,
+                      onClear: () => setBackground(null),
+                    }
+                  : undefined
+              }
+            >
+              <ProfileModelSelect
                 id="profile-background"
+                labelledBy="profile-background-label"
+                describedBy="profile-background-hint"
                 groups={groups}
                 value={pointerValue(background)}
-                disabled={pending || !canChoose}
+                disabled={busy || !canChoose}
                 followLabel="跟随主模型"
                 onChange={(value) => setBackground(decodePointer(value))}
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                标题、记忆等后台任务；留空则跟随主模型。
-              </p>
-            </label>
-            <label className="block" htmlFor="profile-vision">
-              <span className="text-xs text-muted-foreground">
-                识图模型（可选）
-              </span>
-              <ProviderModelSelect
+            </SlotField>
+            <SlotField
+              id="profile-vision"
+              label="识图模型（可选）"
+              hint={
+                mainVisionCapable
+                  ? "主模型已可看图，本槽供白板等按需深读"
+                  : "主模型不能看图时再配；否则走平台识图或不可用"
+              }
+              clear={
+                vision
+                  ? {
+                      label: "清除",
+                      disabled: busy,
+                      onClear: () => setVision(null),
+                    }
+                  : undefined
+              }
+            >
+              <ProfileModelSelect
                 id="profile-vision"
+                labelledBy="profile-vision-label"
+                describedBy="profile-vision-hint"
                 groups={visionGroups}
                 value={pointerValue(vision)}
-                disabled={pending || !canChooseVision}
+                disabled={busy || !canChooseVision}
                 followLabel="不配置"
                 onChange={(value) => setVision(decodePointer(value))}
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                主模型不能看图时再配；留空用平台识图或不可用。
-              </p>
-              {mainVisionCapable && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  当前主模型标有视觉，贴图优先走主模型；本槽仍可供白板/按需深读。
-                </p>
-              )}
-            </label>
+            </SlotField>
           </div>
         )}
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
-        <Button
-          variant="neutral"
-          size="sm"
-          disabled={pending}
-          onClick={onCancel}
-        >
+      {saveError ? (
+        <p className="text-xs text-destructive" role="alert">
+          {saveError}
+        </p>
+      ) : null}
+
+      <div className="flex justify-end gap-2 border-t border-border pt-3">
+        <Button variant="neutral" size="md" disabled={busy} onClick={onCancel}>
           取消
         </Button>
         <Button
-          size="sm"
-          disabled={pending || !main}
+          size="md"
+          disabled={busy || !main}
           icon={
-            pending ? <Loader2 size={14} className="animate-spin" /> : undefined
+            busy ? <Loader2 size={14} className="animate-spin" /> : undefined
           }
-          onClick={() =>
-            onSave({
-              name,
-              main,
-              worker,
-              background,
-              vision,
-            })
-          }
+          onClick={() => void handleSave()}
         >
           保存
         </Button>
       </div>
-    </div>
-  );
-}
-
-function providerIdFromPointer(value: string): string | null {
-  const decoded = value ? decodePointer(value) : null;
-  if (!decoded) return null;
-  if (decoded.origin === "platform" || !decoded.provider_id) {
-    return PLATFORM_POINTER_ID;
-  }
-  return decoded.provider_id;
-}
-
-function ProviderModelSelect({
-  id,
-  groups,
-  value,
-  disabled,
-  followLabel,
-  onChange,
-}: {
-  id?: string;
-  groups: DefaultProviderGroup[];
-  value: string;
-  disabled?: boolean;
-  followLabel?: string;
-  onChange: (value: string) => void;
-}) {
-  const hasByok = useMemo(
-    () => groups.some((g) => g.providerId !== PLATFORM_POINTER_ID),
-    [groups],
-  );
-
-  // 仅平台、无 BYOK：纯目录 <select>，不提供手填。
-  if (!hasByok) {
-    return (
-      <select
-        id={id}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-      >
-        {followLabel !== undefined ? (
-          <option value="">{followLabel}</option>
-        ) : (
-          value === "" && (
-            <option value="" disabled>
-              选择模型
-            </option>
-          )
-        )}
-        {groups.map((group) => (
-          <optgroup key={group.providerId} label={group.providerLabel}>
-            {group.models.map((m) => (
-              <option
-                key={m.model}
-                value={encodePointer(group.providerId, m.model)}
-              >
-                {m.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    );
-  }
-
-  return (
-    <ByokProviderModelCombobox
-      id={id}
-      groups={groups}
-      value={value}
-      disabled={disabled}
-      followLabel={followLabel}
-      onChange={onChange}
-    />
-  );
-}
-
-/** 有 BYOK 时：服务商下拉 + model id 手填（目录进 datalist 建议）。 */
-function ByokProviderModelCombobox({
-  id,
-  groups,
-  value,
-  disabled,
-  followLabel,
-  onChange,
-}: {
-  id?: string;
-  groups: DefaultProviderGroup[];
-  value: string;
-  disabled?: boolean;
-  followLabel?: string;
-  onChange: (value: string) => void;
-}) {
-  const decoded = value ? decodePointer(value) : null;
-  const [providerId, setProviderId] = useState(
-    () => providerIdFromPointer(value) || groups[0]?.providerId || "",
-  );
-  const [model, setModel] = useState(() => decoded?.model ?? "");
-
-  useEffect(() => {
-    if (!value) {
-      setModel("");
-      return;
-    }
-    const d = decodePointer(value);
-    if (!d) return;
-    const pid = providerIdFromPointer(value);
-    if (pid) setProviderId(pid);
-    // 已有本地输入时勿用 decode 回写，避免 trim 后吞掉正在输入的空格。
-    setModel((prev) => (prev.trim() === d.model ? prev : d.model));
-  }, [value]);
-
-  const selectedGroup = groups.find((g) => g.providerId === providerId);
-  const listId = id ? `${id}-suggestions` : undefined;
-
-  const emit = (pid: string, nextModel: string) => {
-    const trimmed = nextModel.trim();
-    if (pid && trimmed) {
-      onChange(encodePointer(pid, trimmed));
-    } else {
-      onChange("");
-    }
-  };
-
-  const clearFollow = () => {
-    setModel("");
-    onChange("");
-  };
-
-  return (
-    <div>
-      <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-        <select
-          id={id ? `${id}-provider` : undefined}
-          value={providerId}
-          disabled={disabled}
-          aria-label="服务商"
-          onChange={(e) => {
-            const pid = e.target.value;
-            setProviderId(pid);
-            emit(pid, model);
-          }}
-          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 sm:max-w-[40%]"
-        >
-          {groups.map((g) => (
-            <option key={g.providerId} value={g.providerId}>
-              {g.providerLabel}
-            </option>
-          ))}
-        </select>
-        <input
-          id={id}
-          list={listId}
-          value={model}
-          disabled={disabled}
-          aria-label="model id"
-          placeholder="model id，如 ep-xxxx"
-          onChange={(e) => {
-            const next = e.target.value;
-            setModel(next);
-            emit(providerId, next);
-          }}
-          className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-        />
-        {listId ? (
-          <datalist id={listId}>
-            {(selectedGroup?.models ?? []).map((m) => (
-              <option key={m.model} value={m.model}>
-                {m.label}
-              </option>
-            ))}
-          </datalist>
-        ) : null}
-      </div>
-      {followLabel !== undefined ? (
-        value ? (
-          <button
-            type="button"
-            disabled={disabled}
-            className="mt-1 text-xs text-primary underline-offset-2 hover:underline disabled:opacity-60"
-            onClick={clearFollow}
-          >
-            {followLabel}
-          </button>
-        ) : (
-          <p className="mt-1 text-xs text-muted-foreground">{followLabel}</p>
-        )
-      ) : (
-        <p className="mt-1 text-xs text-muted-foreground">
-          可从建议中选择，或直接粘贴 / 手填 model id（火山 ep-、中转私有 id
-          等）。
-        </p>
-      )}
     </div>
   );
 }

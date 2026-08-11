@@ -378,6 +378,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "快速对碰。",
     "reasoning": "",
     "captainContext": [],

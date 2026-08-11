@@ -457,6 +457,8 @@ class TurnExecutionMixin:
         excluded_run_ids: list[str] | None = None,
         write_capability_overrides: list[dict[str, str]] | None = None,
         model_overrides: dict[str, dict[str, str]] | None = None,
+        settlement_prewritten: bool = False,
+        reply_ids: list[Any] | None = None,
     ) -> None:
         """Rebuild + finish a durably-paused turn; stream events; reply when done.
 
@@ -464,6 +466,12 @@ class TurnExecutionMixin:
         pipeline; on success the claimed frame is consumed immediately
         (:meth:`confirm_claim`). Pipeline failure after that does **not** restore
         the frame (decision card stays settled; user continues via a new message).
+
+        ``settlement_prewritten``: deferred busy path already durable-wrote settlement
+        before waiting for the slot — skip a second prewrite and confirm immediately.
+
+        ``reply_ids``: deferred same-id joiners share this live list so every RPC
+        receives the same final result/error (wire contract unchanged).
 
         ``excluded_run_ids`` / ``write_capability_overrides`` / ``model_overrides``
         mirror cloud POST resume (开工组队有限否决 + 人盖模型) through settlement
@@ -508,7 +516,12 @@ class TurnExecutionMixin:
             )
 
         # D1: prewrite settlement → confirm_claim before any pipeline work.
-        if outbox is not None:
+        # Deferred busy path may have already prewritten before the slot wait.
+        if settlement_prewritten and outbox is not None:
+            if self._paused_store is not None:
+                await self._paused_store.confirm_claim(turn_id)
+            settlement_durable = True
+        elif outbox is not None:
             try:
                 from agentcore.sidecar.settlement_prewrite import (
                     prewrite_sidecar_resume_settlement,
@@ -527,6 +540,7 @@ class TurnExecutionMixin:
                     model_overrides=models,
                 )
             except Exception as e:
+                err_msg = f"settlement prewrite failed: {e}"
                 if self._paused_store is not None:
                     await self._paused_store.rollback_claim(turn_id)
                 if outbox is not None:
@@ -537,12 +551,14 @@ class TurnExecutionMixin:
                     turn_id=turn_id,
                     error=str(e),
                 )
-                await self._send(
-                    protocol.make_error(
-                        request_id,
+                await self._send_to_request_ids(
+                    reply_ids,
+                    request_id,
+                    lambda rid: protocol.make_error(
+                        rid,
                         protocol.RESUME_RETRYABLE,
-                        f"settlement prewrite failed: {e}",
-                    )
+                        err_msg,
+                    ),
                 )
                 return
             if self._paused_store is not None:
@@ -622,11 +638,13 @@ class TurnExecutionMixin:
                 )
             # Same model signal as a start turn (see _run_turn): the resumed reply reports
             # the model it actually ran on so the badge stays honest across a resume.
-            await self._send(
-                protocol.make_result(
-                    request_id,
-                    trim_result(turn_id, result, model=resolve_turn_model(resume_creds)),
-                )
+            model = resolve_turn_model(resume_creds)
+            await self._send_to_request_ids(
+                reply_ids,
+                request_id,
+                lambda rid: protocol.make_result(
+                    rid, trim_result(turn_id, result, model=model)
+                ),
             )
         except asyncio.CancelledError:
             # Settlement already durable ⇒ do not restore the decision card.
@@ -666,8 +684,12 @@ class TurnExecutionMixin:
             )
             with contextlib.suppress(Exception):
                 await pump
-            self._send_soon(
-                protocol.make_error(request_id, protocol.TURN_CANCELLED, "turn cancelled")
+            self._send_soon_to_request_ids(
+                reply_ids,
+                request_id,
+                lambda rid: protocol.make_error(
+                    rid, protocol.TURN_CANCELLED, "turn cancelled"
+                ),
             )
             raise
         except Exception as e:
@@ -694,15 +716,14 @@ class TurnExecutionMixin:
                 )
             with contextlib.suppress(Exception):
                 await pump
-            logger.error("sidecar.resume_failed", turn_id=turn_id, error=str(e), exc_info=True)
+            err_msg = str(e)
+            logger.error("sidecar.resume_failed", turn_id=turn_id, error=err_msg, exc_info=True)
             # After settlement, failure does not restore the frame for retry.
             err_code = protocol.INTERNAL_ERROR if settlement_durable else protocol.RESUME_RETRYABLE
-            await self._send(
-                protocol.make_error(
-                    request_id,
-                    err_code,
-                    str(e),
-                )
+            await self._send_to_request_ids(
+                reply_ids,
+                request_id,
+                lambda rid: protocol.make_error(rid, err_code, err_msg),
             )
         else:
             if not settlement_durable and self._paused_store is not None:

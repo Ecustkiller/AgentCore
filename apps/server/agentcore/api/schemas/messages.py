@@ -207,7 +207,8 @@ class ResolveEscalationInteraction(BaseModel):
 
     Raised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended
     itself. Classic (non-coordination) path asks the user; coordination path awaits CEO
-    ``resolve_escalation`` (Invariant B: solo never uses that tool). The user either answers
+    ``resolve_escalation`` (Invariant B: available iff a coordination session is active —
+    classic blocking has no free CEO inside ``delegate``). The user either answers
     (``answer``) or chooses 按假设继续 (``use_assumption`` true → wire status ``assumed``).
     Write-lock conflicts may set ``transfer_ownership`` to path-handoff to the escalator.
     A wall-clock miss is ``timed_out``. A late resolve falls through as 404.
@@ -301,6 +302,27 @@ class SubmitRunRedirectRequest(BaseModel):
 class SubmitRunRedirectResponse(BaseModel):
     ok: bool = True
     queued: int = Field(..., description="Pending redirect count for this execution after enqueue.")
+
+
+class SubmitRunStopRequest(BaseModel):
+    """User mid-flight stop for one or all workers in a delegate batch (只停这项工作).
+
+    Queued while ``delegate`` drives; WaveScheduler drains via the same
+    ``cancel_run_ids`` channel as redirect / ``cancel_worker``, but **without** hot
+    revision or cold ``_redir`` follow-up. Does not abort the turn, kill the CEO, or
+    clear FIFO queued turns.
+
+    ``run_id`` omitted / null → stop every in-flight and queued worker for
+    ``execution_id``; otherwise only that run.
+    """
+
+    execution_id: str = Field(..., min_length=1, max_length=128)
+    run_id: str | None = Field(None, max_length=128)
+
+
+class SubmitRunStopResponse(BaseModel):
+    ok: bool = True
+    queued: int = Field(..., description="Pending stop count for this execution after enqueue.")
 
 
 class SubmitDebateSteerRequest(BaseModel):
@@ -665,20 +687,34 @@ class MessageDetail(BaseModel):
     @classmethod
     def _usage_from_row(cls, v: object) -> object:
         # The ORM ``usage`` column is a long-key snapshot ({input_tokens, …, rounds}).
-        # Project it to the short-key UsageBreakdown the client reads; show tokens only
-        # when the turn reported real spend (an errored / empty turn stored zeros, which
-        # the live bubble also omits). A value already in UsageBreakdown shape passes
-        # through unchanged (so model construction outside from_attributes still works).
+        # Project it to the short-key UsageBreakdown the client reads. Token fields show
+        # when the turn reported real spend; structured ``error`` always projects when
+        # present so a zero-token failure still reloads a face (空泡族根因重设计).
+        # A value already in UsageBreakdown shape passes through unchanged.
         if isinstance(v, dict):
-            if not (v.get("input_tokens") or v.get("output_tokens")):
+            err_raw = v.get("error")
+            usage_error: dict[str, str] | None = None
+            if isinstance(err_raw, dict):
+                code = str(err_raw.get("code") or "").strip() or "LLM_ERROR"
+                message = str(err_raw.get("message") or "").strip()
+                if message or err_raw.get("code"):
+                    usage_error = {
+                        "code": code,
+                        "message": message or "本轮未能完成，请重试。",
+                    }
+            has_tokens = bool(v.get("input_tokens") or v.get("output_tokens"))
+            if not has_tokens and usage_error is None:
                 return None
-            return {
-                "input": v.get("input_tokens", 0),
-                "output": v.get("output_tokens", 0),
-                "reasoning": v.get("reasoning_tokens", 0),
-                "cache_hit": v.get("cache_hit_tokens", 0),
-                "cache_miss": v.get("cache_miss_tokens", 0),
+            out: dict[str, object] = {
+                "input": v.get("input_tokens", 0) or 0,
+                "output": v.get("output_tokens", 0) or 0,
+                "reasoning": v.get("reasoning_tokens", 0) or 0,
+                "cache_hit": v.get("cache_hit_tokens", 0) or 0,
+                "cache_miss": v.get("cache_miss_tokens", 0) or 0,
             }
+            if usage_error is not None:
+                out["error"] = usage_error
+            return out
         return v
 
     @field_validator("cost", mode="before")
@@ -979,3 +1015,23 @@ class StopTurnResponse(BaseModel):
     """
 
     stopped: bool
+
+
+class QueuedTurnItem(BaseModel):
+    """One process-local FIFO queued turn (权威内容源；EPHEMERAL 事件只作变了信号).
+
+    ``interjection_id`` is set when the entry was promoted from a user interjection
+    (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
+    ``position`` is 1-based FIFO index.
+    """
+
+    queue_id: str
+    content: str
+    position: int = Field(..., ge=1)
+    interjection_id: str | None = None
+
+
+class QueuedTurnListResponse(BaseModel):
+    """Current conversation FIFO queue snapshot (进程内；重启后为空)."""
+
+    items: list[QueuedTurnItem] = Field(default_factory=list)

@@ -23,7 +23,7 @@ import {
   useRenameSharedSpace,
 } from "@/hooks/useSharedSpaces";
 import type { FileSource } from "@/lib/fileSource";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   type SharedSpaceSummary,
@@ -157,7 +157,6 @@ export function SharedSpaceSection({
         return;
       }
       del.mutate(space.id, {
-        onSuccess: () => notifySuccess("已删除共享空间"),
         onError: (err) => notifyError(err, "删除失败"),
       });
       return;
@@ -167,7 +166,6 @@ export function SharedSpaceSection({
     leave.mutate(
       { spaceId: space.id, memberUserId: meId },
       {
-        onSuccess: () => notifySuccess("已退出共享空间"),
         onError: (err) => notifyError(err, "退出失败"),
       },
     );

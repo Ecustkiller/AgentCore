@@ -16,6 +16,7 @@ skills they were externalised into.
 
 from pathlib import Path
 
+from agentcore.config import settings
 from agentcore.core.types import ToolCategory
 from agentcore.runtime.skills import (
     SkillRegistry,
@@ -567,11 +568,13 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "裸聊单目标" in body or "运行时继承" in body
     assert "能少则少" in body and "拿不准先少派" in body
     assert "不" in body and "覆盖" in body
-    # 只读跨桌工具摸底 + 写仍派工换桌（禁「云端读不到本地」当唯一路径）
+    # 跨项目读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
     assert "list_project_dir" in body and "read_project_file" in body
-    assert "只读跨桌" in body
+    assert "认桌" in body or "抽样" in body
     assert "出生桌" in body
-    assert "写仍派工换桌" in body
+    assert "读写通吃" in body or "只读摸底与改盘" in body or "只读摸底" in body
+    assert "写仍派工换桌" not in body
+    assert "只读跨桌摸底" not in body
     assert "云端读不到本地" in body and "禁止" in body
     # 空壳/双项目 kickoff：先问、同次两路、≠open/bind/挂载冒充
     assert "空壳" in body or "近空" in body
@@ -579,12 +582,12 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "同一次" in body or "同次" in body
     assert "external_mount_readonly" in body
     assert "开发双仓" in body or "区外挂载" in body or "冒充" in body
-    # 目录摘要须可触发 consult（多项目 / 只读跨桌 / target_folder / 先建齐再派）
+    # 目录摘要须可触发 consult（多项目 / 派工换桌 / target_folder / 先建齐再派）
     skill = build_system_skill_registry().get("team_orchestration_advanced")
     assert skill is not None
     assert "跨项目" in skill.summary
-    assert "list_project_dir" in skill.summary or "只读跨桌" in skill.summary
     assert "target_folder_id" in skill.summary
+    assert "派前认桌" in skill.summary or "list_project_dir" in skill.summary
     assert "空壳" in skill.summary or "mount" in skill.summary or "冒充" in skill.summary
     assert "先建齐再派" in skill.summary  # 显式多线先建齐再派
     assert "自动建云桌" in skill.summary or "勿催 create" in skill.summary
@@ -616,21 +619,22 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "禁止再平铺" in body
     # 协调补派失败节点须标 replaces_run_id，引擎改写下游 depends_on
     assert "replaces_run_id" in body and "补派" in body
+    # 对用户用人话；字段名只留工具通道
+    assert "重新安排人补上" in body or "谁没交齐" in body
+    assert "勿复述字段名" in body or "工具通道用语" in body
     # 纠正「一次只能一个 delegate / 同步阻塞到全队完成」误述：一回合一张图 + 同回合可再追加；
     # 禁止同构重派在跑任务。
     assert "一回合一张协作图" in body
     assert "再调" in body and "delegate" in body
     assert "同构" in body
     assert "不必" in body or "不是" in body  # 否定「必须等全队完成」
-    # 跨回合延续：默认新图、显式延续才 append（latest 主路径）+ 呈现一致的收尾口径。
-    assert "【跨回合延续】" in body
-    assert 'append_to_execution_id="latest"' in body
-    assert "默认新回合新建图" in body
-    assert "已往上方协作图追加" in body
-    assert "在同一回合的同一张图里" in body  # 禁令口径
-    # latest 未命中 → 自动降级新建（勿教硬失败再改口）
-    assert "自动降级" in body or "已自动" in body
-    assert "硬失败再改口" in body or "勿先硬失败" in body
+    # 新回合新图：系统记续自；禁教跨回合合旧图 / latest；同回合合图仍在。
+    assert "【新回合新图】" in body
+    assert "【跨回合延续】" not in body
+    assert 'append_to_execution_id="latest"' not in body
+    assert "append_to_execution_id" in body  # 禁令点名勿传
+    assert "已往上方协作图追加" not in body
+    assert "同回合再调" in body or "并入当前活跃图" in body
 
 
 def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_step():
@@ -647,6 +651,8 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
     assert "同字面" in body or "同一套原文" in body
     assert "近义" in body
     assert "裸报错" in body or "藏起契约" in body or "藏契约" in body
+    assert "面向用户·大白话" in body or "用人话概括" in body
+    assert "瞒报" in body or "改口称已过关" in body
     assert "提纲" in body
     assert "checkpoint_after" in body
     # 定案 A：调研驱动大型交付 — 各角 MD 笔记 files，禁三人 prose 只靠主笔落盘
@@ -926,11 +932,12 @@ def test_revise_skill_teaches_recall_and_delegate_fallback():
     assert "补派" in body or "接手" in body
     # 成篇未写完 → continue_from（短指针，细则在 long_form）。
     assert "成篇未写完" in body
-    # 真纯丙：不再教「声明超集 tools」；默认全开相关工具面。
+    # 真纯丙：不再教「声明超集 tools」；队员坐本任务桌相关工具面，不必填 tools。
     assert "只增不减" not in body
     assert "声明超集" not in body
-    assert "默认全开" in body
+    assert "相关工具" in body
     assert "tools" in body
+    assert "不要" in body or "不必" in body
     assert "test_run" in body
     # 修订落盘纪律：优先 str_replace / file_append；整盖允许但勿惰性省略。
     assert "str_replace" in body and "file_append" in body
@@ -1094,8 +1101,9 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "跨项目并行指挥" in body
     assert "开发双仓" in body
     assert "target_folder_id" in body
-    assert "只读跨桌" in body or "写仍派工换桌" in body
-    assert "写仍派工换桌" in body
+    assert "派前认桌" in body or "只读跨桌仅派前" in body or "读写通吃" in body
+    assert "写仍派工换桌" not in body
+    assert "跨项目须派工换桌" in body or "读写通吃" in body
     # 已绑/本机传统工程：跑当前；换工程优先导入/连 Git。
     assert "本机传统" in body or "已绑" in body or "跑" in body
     assert "跑" in body and "当前" in body
@@ -1263,7 +1271,8 @@ def test_deep_multi_lens_research_teaches_parallel_lenses_and_motion_card():
     assert "见分歧" in body  # 严禁见分歧就建议开辩
     assert "真对立轴" in body  # 存在真对立轴则必须产卡
     # CEO 禁止自搜替代四路；先调研后辩；探路 query 建议短查（工具会截断过长）
-    assert "5 轮" in body
+    # 探路轮上限跟 settings 真源，勿钉死字面「5 轮」
+    assert f"{settings.engine_team_gate_investigation_rounds} 轮" in body
     assert "禁止自搜" in body or ("禁止" in body and "替代四路" in body)
     assert "截断" in body or "规范化" in body
     assert "≤8 词" not in body

@@ -1,7 +1,15 @@
 /**
  * 引用即驻留：主进程占位检测 + 二进制驻留 + 暂存/finalize（纯逻辑，不碰真实 OneDrive）。
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +50,7 @@ import {
   isCloudPlaceholder,
   stageFromAbsPath,
   stageFromBytes,
+  sweepStagingOrphans,
 } from "../fs/stageAttachment";
 
 describe("stageAttachment", () => {
@@ -374,5 +383,37 @@ describe("stageAttachment", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.reason).toContain("空");
+  });
+
+  describe("sweepStagingOrphans", () => {
+    const stagingRoot = () => join(userData, "attach-staging");
+
+    /** `ageMs` backdates the dir so it looks like a previous session's leftover. */
+    async function seed(id: string, ageMs: number): Promise<void> {
+      const idDir = join(stagingRoot(), id);
+      await mkdir(idDir, { recursive: true });
+      await writeFile(join(idDir, "f.txt"), "x", "utf-8");
+      if (ageMs > 0) {
+        const when = new Date(Date.now() - ageMs);
+        await utimes(idDir, when, when);
+      }
+    }
+
+    it("reaps a leftover staging dir that no draft references", async () => {
+      await seed("orphan-1", 3_600_000);
+      await seed("live-1", 3_600_000);
+
+      await sweepStagingOrphans(["live-1"]);
+
+      expect(await readdir(stagingRoot())).toEqual(["live-1"]);
+    });
+
+    it("keeps dirs staged by the live session even when unreferenced", async () => {
+      await seed("fresh-1", 0);
+
+      await sweepStagingOrphans([]);
+
+      expect(await readdir(stagingRoot())).toEqual(["fresh-1"]);
+    });
   });
 });

@@ -128,11 +128,13 @@ def test_cloud_scratch_facts():
     # 一句短指针（HOW 在 skill）；先建仅显式新建/多线
     assert "先建齐再同次派" in out
     assert "拒后禁塌缩" in out
-    # 只读跨桌工具摸底 + 写仍派工换桌（禁「云端读不到本地」当唯一路径）
+    # 跨项目读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
     assert "list_project_dir" in out and "read_project_file" in out
-    assert "只读跨桌" in out
+    assert "认桌" in out or "抽样" in out
     assert "出生桌" in out
-    assert "写仍派工换桌" in out or ("delegate" in out and "target_folder_id" in out)
+    assert "写仍派工换桌" not in out
+    assert "delegate" in out and "target_folder_id" in out
+    assert "读写通吃" in out or "只读摸底" in out
     assert "云端读不到本地" in out and "禁止" in out
     # 空壳先问 + 开发双仓 ≠ open/bind/挂载冒充
     assert "空" in out and "ask_user" in out

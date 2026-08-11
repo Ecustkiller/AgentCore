@@ -116,7 +116,6 @@ export function MemoryProfileSplitEditor({
           targetApi?.reload();
           return;
         }
-        notifyInfo(direction === "to_project" ? "已移到本项目" : "已移到全局");
         sourceApi.reload();
         targetApi?.reload();
       } catch (e) {

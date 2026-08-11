@@ -168,6 +168,11 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       form?: string;
       write_capability?: "text_only" | "can_write_files";
       write_capability_label?: string;
+      model?: string;
+      origin?: "platform" | "byok";
+      provider_id?: string;
+      target_folder_id?: string;
+      target_folder_name?: string;
     }>(p.workers).map((w) => ({
       run_id: w.run_id,
       role: w.role,
@@ -181,6 +186,22 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
       ...(typeof w.write_capability_label === "string" &&
       w.write_capability_label
         ? { write_capability_label: w.write_capability_label }
+        : {}),
+      ...(typeof w.model === "string" && w.model.trim()
+        ? { model: w.model.trim() }
+        : {}),
+      ...(w.origin === "platform" || w.origin === "byok"
+        ? { origin: w.origin }
+        : {}),
+      ...(typeof w.provider_id === "string" && w.provider_id
+        ? { provider_id: w.provider_id }
+        : {}),
+      ...(typeof w.target_folder_id === "string" && w.target_folder_id.trim()
+        ? { target_folder_id: w.target_folder_id.trim() }
+        : {}),
+      ...(typeof w.target_folder_name === "string" &&
+      w.target_folder_name.trim()
+        ? { target_folder_name: w.target_folder_name.trim() }
         : {}),
     })),
     tools: arr<string>(p.tools),
@@ -449,6 +470,7 @@ export function entryToColdResume(
     workers: tp.workers,
     tools: tp.tools ?? [],
     primitive: tp.primitive,
+    ...(tp.headline ? { headline: tp.headline } : {}),
     motion: tp.motion,
     form: tp.form,
     sides: tp.sides,

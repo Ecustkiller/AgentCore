@@ -153,7 +153,14 @@ describe("sendMidFlightMessage", () => {
   it("POST body 带 delivery", async () => {
     fetchMock.mockResolvedValue(
       new Response(
-        sseBody([ev("user_interjection", { interjection_id: "ij1" })]),
+        sseBody([
+          ev("user_interjection", {
+            interjection_id: "ij1",
+            execution_id: "e1",
+            content: "插一句",
+            status: "received",
+          }),
+        ]),
         {
           status: 200,
           headers: { "content-type": "text/event-stream" },
@@ -228,10 +235,17 @@ describe("sendMidFlightMessage", () => {
     expect(queuedDegraded).toBe("steer");
   });
 
-  it("user_interjection：即时 received，不开 turn2", async () => {
+  it("user_interjection status=received：即时 ack，不开 turn2", async () => {
     fetchMock.mockResolvedValue(
       new Response(
-        sseBody([ev("user_interjection", { interjection_id: "ij1" })]),
+        sseBody([
+          ev("user_interjection", {
+            interjection_id: "ij1",
+            execution_id: "e1",
+            content: "插一句",
+            status: "received",
+          }),
+        ]),
         {
           status: 200,
           headers: { "content-type": "text/event-stream" },
@@ -261,15 +275,28 @@ describe("sendMidFlightMessage", () => {
     expect(began).toBe(0);
   });
 
-  it("turn_steer_accepted：即时 steered，不开 turn2", async () => {
+  it("经典降级：user_interjection(queued)+turn_queued 仍 fold 插话并排队", async () => {
     fetchMock.mockResolvedValue(
       new Response(
         sseBody([
-          ev("turn_steer_accepted", {
-            steer_id: "s1",
+          ev("user_interjection", {
+            interjection_id: "ij-q",
+            execution_id: "e1",
+            content: "晚到",
+            status: "received",
+          }),
+          ev("user_interjection", {
+            interjection_id: "ij-q",
+            execution_id: "e1",
+            content: "晚到",
+            status: "queued",
+          }),
+          ev("turn_queued", {
+            queue_id: "q-d",
+            position: 1,
+            queue_depth: 1,
             conversation_id: "c1",
-            content: "改成中文",
-            pending: 1,
+            degraded_from: "steer",
           }),
         ]),
         {
@@ -280,21 +307,17 @@ describe("sendMidFlightMessage", () => {
     );
 
     const live: string[] = [];
-    let began = 0;
+    let queuedDegraded: string | undefined;
     const result = await sendMidFlightMessage(
       "c1",
-      "改成中文",
+      "晚到",
       {
         onLiveEvent: (e) => live.push(e.type),
-        onQueued: () => {
-          throw new Error("should not queue");
+        onQueued: (info) => {
+          queuedDegraded = info.degradedFrom;
         },
-        beginTurn2: () => {
-          began += 1;
-        },
-        onTurn2Event: () => {
-          throw new Error("should not turn2");
-        },
+        beginTurn2: () => {},
+        onTurn2Event: () => {},
         isPrimaryIdle: () => true,
         waitPrimaryIdle: async () => {},
       },
@@ -304,12 +327,18 @@ describe("sendMidFlightMessage", () => {
     );
 
     expect(result).toEqual({
-      kind: "steered",
-      steerId: "s1",
-      pending: 1,
+      kind: "queued",
+      position: 1,
+      queueDepth: 1,
+      queueId: "q-d",
+      degradedFrom: "steer",
     });
-    expect(live).toEqual(["turn_steer_accepted"]);
-    expect(began).toBe(0);
+    expect(queuedDegraded).toBe("steer");
+    expect(live).toEqual([
+      "user_interjection",
+      "user_interjection",
+      "turn_queued",
+    ]);
   });
 
   it("HTTP 202 → error（退役受理）", async () => {

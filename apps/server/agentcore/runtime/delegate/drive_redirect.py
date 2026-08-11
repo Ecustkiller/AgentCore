@@ -10,6 +10,7 @@ from agentcore.core.logging import get_logger
 from agentcore.runtime.delegate.team_synthesis import maybe_emit_team_synthesis_preview
 from agentcore.runtime.events import run_progress
 from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
+from agentcore.runtime.runs.stop_queue import take_stops
 from agentcore.runtime.runs.types import RunSpec, RunState
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ class RedirectController:
     session: Any  # coordination session or None
     total: int
     cancel_ids: set[str] = field(default_factory=set)
+    stop_ids: set[str] = field(default_factory=set)
     redirect_feedback: dict[str, RunRedirectRequest] = field(default_factory=dict)
     hot_revision_states: dict[str, RunState] = field(default_factory=dict)
     author_sessions: dict[str, RunSession] = field(default_factory=dict)
@@ -41,16 +43,38 @@ class RedirectController:
         for redir in take_redirects(self.execution_id):
             self.cancel_ids.add(redir.run_id)
             self.redirect_feedback[redir.run_id] = redir
+            self.stop_ids.discard(redir.run_id)
             logger.info(
                 "delegate.run_redirect_accepted",
                 execution_id=self.execution_id,
                 run_id=redir.run_id,
                 feedback_preview=redir.feedback[:120],
             )
+        # User「只停这项工作」: same cancel set, never redirect_feedback (no hot/cold).
+        for stop in take_stops(self.execution_id):
+            if stop.run_id:
+                targets = (stop.run_id,)
+            else:
+                targets = tuple(n.run_id for n in self.plan.nodes)
+                self.redirect_feedback.clear()
+            for rid in targets:
+                self.cancel_ids.add(rid)
+                self.stop_ids.add(rid)
+                self.redirect_feedback.pop(rid, None)
+            logger.info(
+                "delegate.run_stop_accepted",
+                execution_id=self.execution_id,
+                run_id=stop.run_id,
+                target_count=len(targets),
+            )
         # Coordination cancel_worker merges into the same cancel set.
         if self.session is not None:
             self.cancel_ids.update(self.session.cancel_run_ids())
         return frozenset(self.cancel_ids)
+
+    def stop_run_ids(self) -> frozenset[str]:
+        """Subset of ``cancel_ids`` that came from user run-stop (not redirect)."""
+        return frozenset(self.stop_ids)
 
     def cold_fallback(self, original: RunSpec, redir: RunRedirectRequest) -> str:
         """Append a same-role handoff node (``_redir`` + replaces_run_id + steer)."""
@@ -340,6 +364,7 @@ class RedirectController:
                 executor,
                 seed_completed=results,
                 cancel_run_ids=self.cancel_run_ids,
+                stop_run_ids=self.stop_run_ids,
                 on_progress=self.on_progress,
                 on_boundary=None,
                 on_skipped=on_skipped,

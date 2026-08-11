@@ -58,6 +58,7 @@
   "projected": {
     "status": "cancelled",
     "finishReason": "cancelled",
+    "error": null,
     "content": "根据目前信息，建议分三步：",
     "reasoning": "先梳理要点。",
     "captainContext": [],

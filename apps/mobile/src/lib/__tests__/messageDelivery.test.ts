@@ -3,9 +3,10 @@ import type { ProjectedTurn } from "@agentcore/protocol-conformance";
 import { describe, expect, it } from "vitest";
 
 function bareTurn(over: Partial<ProjectedTurn> = {}): ProjectedTurn {
-  return {
+  const base: ProjectedTurn = {
     status: "running",
     finishReason: null,
+    error: null,
     content: "",
     reasoning: "",
     captainContext: [],
@@ -29,8 +30,8 @@ function bareTurn(over: Partial<ProjectedTurn> = {}): ProjectedTurn {
     turnWarning: null,
     teamNotes: [],
     userInterjections: [],
-    ...over,
   };
+  return { ...base, ...over, error: over.error ?? null };
 }
 
 describe("defaultDelivery", () => {

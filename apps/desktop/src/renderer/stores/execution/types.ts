@@ -448,6 +448,11 @@ export interface Execution {
   planType: "single_agent" | "multi_agent" | "debate";
   taskSummary: string;
   status: ExecutionStatus;
+  /**
+   * 上一张协作图（`run_plan.prev_execution_id`）。驱动内联图「续自」锚点；
+   * 不进 ProjectedTurn。
+   */
+  prevExecutionId?: string | null;
   agents: AgentState[];
   runs: RunNode[];
   /** 幕序列（批 A1）：旧 run_plan 无 act → fold 合成单幕 act-1。 */
@@ -485,10 +490,13 @@ export interface Execution {
   teamNotes: TeamNote[];
 }
 
-/** Mid-flight user interjection into live coordination (`user_interjection`).
- * Same interjectionId keeps latest status (received → addressed / queued / failed). */
+/** Mid-flight user interjection (`user_interjection` · 经典 steer + 协调共用).
+ * Same interjectionId keeps latest status
+ * (协调: received → injected → addressed / queued / failed;
+ *  经典: received → injected | queued | failed). */
 export type UserInterjectionStatus =
   | "received"
+  | "injected"
   | "addressed"
   | "queued"
   | "failed"
@@ -517,6 +525,12 @@ export interface ExecutionPlan {
   id: string;
   planType: "single_agent" | "multi_agent" | "debate";
   taskSummary: string;
+  /**
+   * 上一张协作图的 execution_id（`run_plan.prev_execution_id`）。
+   * 新回合开新图时的「续自」前向链接；同 execution merge 时保留首值。
+   * 旧 journal 无此字段 → null。
+   */
+  prevExecutionId?: string | null;
   /** 幕序列骨架（批 A1）：旧 run_plan 无 act → 合成单幕 act-1。手写 fixture 可缺省。 */
   acts?: ExecutionAct[];
   agents: {

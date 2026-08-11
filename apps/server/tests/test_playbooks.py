@@ -58,6 +58,14 @@ def test_code_audit_single_module_one_auditor():
     assert "收口口径" in t["task"]
     assert "全程只读" in t["task"]
     assert "未改业务源码" in t["task"]
+    # 分段交付：骨架先落 → 补全 → 成文；artifacts 声明仍为 [md, .audit.json]
+    assert "骨架先落 → 补全 → 成文" in t["task"]
+    assert "分段交付" in t["task"]
+    assert "Phase A 结束" in t["task"] and "骨架" in t["task"]
+    assert d["artifacts"] == [
+        f"{REVIEWS_DIR}/code-audit-0-main.md",
+        f"{REVIEWS_DIR}/code-audit-0-main.audit.json",
+    ]
     plan, plan_errs = build_run_plan(tasks)
     assert plan_errs == []
     assert len(plan.nodes) == 1

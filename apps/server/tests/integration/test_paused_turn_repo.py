@@ -16,13 +16,13 @@ from agentcore.config import settings
 from agentcore.db.models import PausedTurnRow
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-from agentcore.runtime.suspension import persistence as persist_mod
-from agentcore.runtime.suspension import retention as retention_mod
 from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
 from agentcore.runtime.journal import window_from_journal
 from agentcore.runtime.pipeline.resume.window import resumed_captain_window
 from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
 from agentcore.runtime.suspension import PlanReviewSuspension, suspension_from_json
+from agentcore.runtime.suspension import persistence as persist_mod
+from agentcore.runtime.suspension import retention as retention_mod
 
 
 def _pause_journal_entries() -> list[dict]:

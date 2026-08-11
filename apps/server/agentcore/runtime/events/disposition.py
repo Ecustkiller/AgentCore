@@ -52,7 +52,7 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.RUN_FAILED: (Disposition.DURABLE, "run 失败——重放失败态与原因"),
     EventType.RUN_CANCELLED: (
         Disposition.DURABLE,
-        "run 中途取消（redirect/stop）——重放停态，避免假 working",
+        "run 中途取消（redirect/user_stop/stop）——重放停态，避免假 working",
     ),
     EventType.RUN_SKIPPED: (
         Disposition.DURABLE,
@@ -136,8 +136,9 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     ),
     EventType.USER_INTERJECTION: (
         Disposition.DURABLE,
-        "协调中用户插话——同 interjection_id 保最新 status"
-        "（received→addressed/queued/failed）；team 块徽标重放",
+        "运行中用户插话（经典+协调共用）——同 interjection_id 保最新 status"
+        "（协调 received→injected→addressed|queued|failed；"
+        "经典 received→injected|queued|failed）；刷新可回看",
     ),
     EventType.TURN_QUEUED: (
         Disposition.EPHEMERAL,
@@ -150,10 +151,6 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.TURN_QUEUE_CANCELLED: (
         Disposition.EPHEMERAL,
         "同对话排队项取消 ack——传输态；多端清 UI，reload 无需重放",
-    ),
-    EventType.TURN_STEER_ACCEPTED: (
-        Disposition.EPHEMERAL,
-        "经典 in-flight 软插入 ack——传输态；toast「已插入，下一工具步生效」，reload 无需重放",
     ),
     EventType.RESUME_DEFERRED: (
         Disposition.EPHEMERAL,

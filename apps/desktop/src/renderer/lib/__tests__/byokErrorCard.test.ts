@@ -1,4 +1,4 @@
-import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
+﻿import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import {
   EMPTY_RESPONSE_CHIP_LABELS,
   StreamError,
@@ -10,6 +10,7 @@ import {
   isConnectivityErrorCode,
   isEmptyResponseUserSurface,
   resetSessionConnectivityFailures,
+  resolveAssistantFailureFace,
   syntheticErrorForEmptyFailure,
   syntheticErrorForHardFailure,
   visibleMessageText,
@@ -105,11 +106,59 @@ describe("syntheticErrorForEmptyFailure", () => {
     });
   });
 
+  it("flips default ON for degraded / paused empty finishes", () => {
+    expect(syntheticErrorForEmptyFailure("degraded")).toEqual({
+      code: "LLM_EMPTY_RESPONSE",
+      message: "模型返回空内容，请重试。",
+    });
+    expect(syntheticErrorForEmptyFailure("paused")).toEqual({
+      code: "TURN_INCOMPLETE",
+      message: "本轮未能完成，请重试。",
+    });
+  });
+
   it("returns null for non-failure finishes", () => {
     expect(syntheticErrorForEmptyFailure("end_turn")).toBeNull();
-    expect(syntheticErrorForEmptyFailure("degraded")).toBeNull();
     expect(syntheticErrorForEmptyFailure("max_rounds")).toBeNull();
     expect(syntheticErrorForEmptyFailure(undefined)).toBeNull();
+  });
+});
+
+describe("resolveAssistantFailureFace", () => {
+  it("surfaces any structured error source on empty content", () => {
+    expect(
+      resolveAssistantFailureFace({
+        content: "",
+        usageError: {
+          code: "LLM_INSUFFICIENT_BALANCE",
+          message: "上游账户余额不足，请充值或更换 Key。",
+        },
+        finishReason: "error",
+      }),
+    ).toEqual({
+      code: "LLM_INSUFFICIENT_BALANCE",
+      message: "上游账户余额不足，请充值或更换 Key。",
+    });
+  });
+
+  it("exempts paused when dedicated pause/ask UI owns the turn", () => {
+    expect(
+      resolveAssistantFailureFace({
+        content: "",
+        finishReason: "paused",
+        hasDedicatedPauseOrAskUi: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("still faces paused empty without a dedicated card", () => {
+    expect(
+      resolveAssistantFailureFace({
+        content: "",
+        finishReason: "paused",
+        hasDedicatedPauseOrAskUi: false,
+      })?.message,
+    ).toBe("本轮未能完成，请重试。");
   });
 });
 

@@ -100,6 +100,60 @@ describe("ProviderForm", () => {
     expect(onSaved).toHaveBeenCalledWith(SAVED);
   });
 
+  it("offers 腾讯 Hy (TokenHub) preset aligned with desktop", async () => {
+    mockCreate.mockResolvedValue({
+      id: "prov-hy",
+      label: "腾讯 Hy (TokenHub)",
+      base_url: "https://tokenhub.tencentmaas.com/v1",
+      default_model: "hy3",
+      status: "unchecked",
+    });
+    const onSaved = vi.fn();
+    render(<ProviderForm onSaved={onSaved} onCancel={vi.fn()} />);
+
+    const vendor = screen.getByLabelText("厂商") as HTMLSelectElement;
+    expect(
+      [...vendor.options].some((o) => o.textContent === "腾讯 Hy (TokenHub)"),
+    ).toBe(true);
+    fireEvent.change(vendor, { target: { value: "hy" } });
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
+      "腾讯 Hy (TokenHub)",
+    );
+    expect(modelDatalistValues()).toEqual(["hy3", "hy3-preview"]);
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-hy" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({
+        api_key: "sk-hy",
+        base_url: "https://tokenhub.tencentmaas.com/v1",
+        default_model: "hy3",
+        label: "腾讯 Hy (TokenHub)",
+      }),
+    );
+  });
+
+  it("resolves TokenHub alias base_urls back to the Hy preset", () => {
+    render(
+      <ProviderForm
+        provider={{
+          id: "prov-hy",
+          label: "腾讯 Hy (TokenHub)",
+          base_url: "https://tokenhub.tencentmaas.cn/v1",
+          default_model: "hy3",
+          status: "unchecked",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "hy",
+    );
+  });
+
   it("requires a key before the add form can be saved", () => {
     render(<ProviderForm onSaved={vi.fn()} onCancel={vi.fn()} />);
     expect((screen.getByText("保存") as HTMLButtonElement).disabled).toBe(true);

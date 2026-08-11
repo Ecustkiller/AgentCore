@@ -110,6 +110,20 @@ describe("HorizontalTabStrip / useSortableTabIds", () => {
     expect(screen.getByRole("navigation", { name: "标签页" })).toBeTruthy();
   });
 
+  // The app reserves a 10px scrollbar gutter on every scroller (globals.css). In a
+  // fixed-height tab header that gutter clips the tab row, so the scroller opts out
+  // via the unlayered `.scrollbar-hidden` class — Tailwind's `[scrollbar-width:none]`
+  // sits in @layer utilities and silently loses to the global `*` rule.
+  it("opts the scroll container out of the reserved scrollbar gutter", () => {
+    const { container } = render(
+      <HorizontalTabStrip>
+        <div>tab</div>
+      </HorizontalTabStrip>,
+    );
+    const scroller = container.querySelector(".overflow-x-auto");
+    expect(scroller?.classList.contains("scrollbar-hidden")).toBe(true);
+  });
+
   it("does not start a drag from data-no-tab-drag chrome", () => {
     const onReorder = vi.fn();
     render(<SortableHarness initial={["a", "b"]} onReorder={onReorder} />);

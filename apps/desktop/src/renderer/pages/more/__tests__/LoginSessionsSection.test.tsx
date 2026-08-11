@@ -21,10 +21,6 @@ vi.mock("@/services/auth", () => ({
   logout: (...args: unknown[]) => logout(...args),
 }));
 
-vi.mock("@/lib/toast", () => ({
-  notifySuccess: vi.fn(),
-}));
-
 vi.mock("@/stores/auth", () => ({
   useAuthStore: Object.assign(() => ({ user: null }), {
     getState: () => ({ setUnauthenticated: vi.fn() }),

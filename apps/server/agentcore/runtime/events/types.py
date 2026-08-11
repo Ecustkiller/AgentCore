@@ -95,7 +95,7 @@ class EventType(StrEnum):
     WORKSPACE_SNAPSHOT_FAILED = "workspace_snapshot_failed"
     RUN_PLAN = "run_plan"
     # 跨回合同图追加：新回合声明「已往上方协作图追加 N 名成员」锚点（落追加回合 journal）；
-    # 生长帧（run_plan/run_*）带 host_message_id 并续写宿主 turn_id journal。
+    # 已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 run_plan.prev_execution_id。
     GRAPH_APPEND = "graph_append"
     RUN_STARTED = "run_started"
     RUN_CONTEXT = "run_context"
@@ -105,7 +105,8 @@ class EventType(StrEnum):
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
     # 跑一半改方向 / 整轮停止：单 run 被中断（与 run_failed 正交）。
-    # reason=redirect → 用户「立即改此人」；reason=stop → 整轮 abort。
+    # reason=redirect → 用户「立即改此人」；reason=stop → 整轮 abort；
+    # reason=user_stop → 只停这项工作（无热/冷续派）。
     RUN_CANCELLED = "run_cancelled"
     # 级联跳过 / graceful abort / 终端 cancel：未运行尾部物化为 SKIPPED（与 run_cancelled 正交）。
     # reason=cascade → on_failure=skip 波及下游；reason=abort → 整波 ABORT / plan_review stop /
@@ -148,8 +149,10 @@ class EventType(StrEnum):
     # 最近一批委派的对账），供产物清单与 finish_guard；用户面无验收大卡（失败仅轻提示）。
     # 仅在有实质内容（有落盘文件或有缺口 / 行动项）时发射——纯 prose 成功批次保持无声。
     DELIVERY_STATUS = "delivery_status"
-    # 协调中用户插话：POST …/messages 在 live CoordinationSession 时注入；status 同 key
-    # 保最新（received → addressed / queued / failed）。DURABLE——team 块时间线重放徽标。
+    # 运行中用户插话（经典 steer + 协调插话共用）：POST …/messages delivery=steer 时注入；
+    # status 同 interjection_id 保最新。协调：received→injected→addressed|queued|failed；
+    # 经典：received→injected（终态）|queued|failed（无 addressed）。DURABLE——落 journal，
+    # 刷新可回看；injected = 内容真正进模型上下文。
     USER_INTERJECTION = "user_interjection"
     # 同对话 FIFO 排队（D9 · 发送即有流）：in-flight 时 POST …/messages 立即在响应 SSE 上
     # 发射；队列 drain 启动该回合后**同一连接**续流。EPHEMERAL——传输态排队提示，不落 journal。
@@ -161,10 +164,6 @@ class EventType(StrEnum):
     # 同对话排队项取消（同对话再发 P0）：POST …/queued-turns/{queue_id}/cancel 成功后发射；
     # 多端清 UI。EPHEMERAL——不落 journal。
     TURN_QUEUE_CANCELLED = "turn_queue_cancelled"
-    # 经典 in-flight 软插入确认（同对话再发 P1）：POST …/messages delivery=steer 挂到
-    # 当前 turn 的进程内 pending 后发射；下一 ReAct 步边界注入 LLM 窗。EPHEMERAL——
-    # 客户端 toast「已插入，下一工具步生效」；勿复用 user_interjection。
-    TURN_STEER_ACCEPTED = "turn_steer_accepted"
     # 冷 resume × live（deferred）：点继续时槽仍 busy → settlement 预写后同连接先发本帧，
     # 槽空后再 claim + 续跑。busy_reason=wrap_up|live_turn。EPHEMERAL——对齐 turn_queued。
     RESUME_DEFERRED = "resume_deferred"

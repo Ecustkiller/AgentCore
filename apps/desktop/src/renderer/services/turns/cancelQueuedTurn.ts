@@ -4,6 +4,10 @@ import {
   type QueuedTurnEntry,
   useQueuedTurnsStore,
 } from "@/stores/queuedTurns";
+import { sendMidFlightMessage } from "./midFlight";
+
+/** cancel HTTP 结果：成功才可 steer 重发；404 仅清条。 */
+export type CancelQueuedTurnOutcome = "cancelled" | "already_gone";
 
 /**
  * 本地清排队条（幂等）。有关联 messageId 时顺带删泡；无泡则只清条。
@@ -29,22 +33,48 @@ export function clearQueuedTurnLocally(
  * 成功或 404（已不在队）→ 立刻本地清条，不依赖 live ``turn_queue_cancelled``
  * （Stop 后常无该事件）。SSE 仍作多端同步（幂等清）。
  * Stop ≠ 取消排队。取消入口仅 QueuedTurnsBar。
+ *
+ * @returns ``cancelled`` = 服务端确认取消（可 steer 重发）；
+ *          ``already_gone`` = 404 竞态/已出队（只清条、勿重发）。
  */
 export async function cancelQueuedTurn(
   conversationId: string,
   queueId: string,
-): Promise<void> {
+): Promise<CancelQueuedTurnOutcome> {
   try {
     await api.post(
       `/v1/conversations/${conversationId}/queued-turns/${queueId}/cancel`,
       {},
     );
     clearQueuedTurnLocally(conversationId, queueId);
+    return "cancelled";
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       clearQueuedTurnLocally(conversationId, queueId);
-      return;
+      return "already_gone";
     }
     throw err;
   }
+}
+
+/**
+ * 排队项「立刻插队」：取消该项 + 同内容 ``delivery=steer`` 重发。
+ * 仅 cancel 确认为 ``cancelled`` 时重发；404/已出队只清条。
+ * steer 降级回排队由 midFlight + messageStream toast 呈现，此处不伪装「已插入」。
+ */
+export async function steerQueuedTurn(
+  conversationId: string,
+  queueId: string,
+): Promise<void> {
+  const entry = useQueuedTurnsStore
+    .getState()
+    .list(conversationId)
+    .find((e) => e.queueId === queueId);
+  if (!entry) return;
+
+  const { content } = entry;
+  const outcome = await cancelQueuedTurn(conversationId, queueId);
+  if (outcome !== "cancelled") return;
+
+  await sendMidFlightMessage(conversationId, content, undefined, "steer");
 }

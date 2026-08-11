@@ -196,6 +196,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排队员调研。 队员已给出结论。",
     "reasoning": "",
     "captainContext": [],

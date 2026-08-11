@@ -13,12 +13,18 @@ export type InterjectionItem = {
 };
 
 /**
- * S2：协调插话主时间线——普通用户气泡 + 轻量状态（fold → userInterjections）。
+ * S2：插话气泡 + 轻量五态（fold → userInterjections；经典+协调 DURABLE）。
+ * 主渲染落点在 ProcessTimeline 的 `user_interjection` marker 槽（按 id 查本组件）；
+ * 旧 journal 无 marker 时由 AssistantContent 尾部回退挂载。
+ * `queued`：不出用户泡（出队会补真实用户泡），改一行低权重注记；其余四态维持气泡。
+ * `turnClosed`：回合已收口时 `received` 派生态「未被主 Agent 读取」（不改协议枚举）。
  */
 export function InterjectionBubbles({
   items,
+  turnClosed = false,
 }: {
   items: readonly InterjectionItem[];
+  turnClosed?: boolean;
 }) {
   if (items.length === 0) return null;
   return (
@@ -26,6 +32,52 @@ export function InterjectionBubbles({
       {items.map((item) => {
         const tone = interjectionStatusTone(item.status);
         const atts = item.attachments ?? [];
+        const label = interjectionStatusLabel(item.status, { turnClosed });
+
+        if (item.status === "queued") {
+          return (
+            <div
+              key={item.interjectionId}
+              className="interjection-turn"
+              data-testid={`interjection-bubble-${item.interjectionId}`}
+            >
+              {atts.length > 0 ? (
+                <div className="attach-chips">
+                  {atts.map((a) => (
+                    <span
+                      key={`${item.interjectionId}:${a.name}`}
+                      className="attach-chip"
+                      title={a.workspacePath ?? a.name}
+                    >
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div
+                className="interjection-queued-note"
+                data-testid={`interjection-queued-note-${item.interjectionId}`}
+              >
+                <span
+                  className={`interjection-status tone-${tone}`}
+                  data-testid={`interjection-status-${item.interjectionId}`}
+                >
+                  {label}
+                </span>
+                <span
+                  className="interjection-queued-preview"
+                  title={item.content}
+                >
+                  {item.content}
+                </span>
+              </div>
+              {item.note ? (
+                <div className="interjection-note">{item.note}</div>
+              ) : null}
+            </div>
+          );
+        }
+
         return (
           <div
             key={item.interjectionId}
@@ -54,7 +106,7 @@ export function InterjectionBubbles({
               className={`interjection-status tone-${tone}`}
               data-testid={`interjection-status-${item.interjectionId}`}
             >
-              {interjectionStatusLabel(item.status)}
+              {label}
             </div>
             {item.note ? (
               <div className="interjection-note">{item.note}</div>

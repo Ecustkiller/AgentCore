@@ -83,7 +83,8 @@
             "task": "调研方案",
             "depends_on": [],
             "write_capability": "can_write_files",
-            "write_capability_label": "可改文件"
+            "write_capability_label": "可改文件",
+            "target_folder_name": "本会话工作区"
           },
           {
             "run_id": "r2",
@@ -91,7 +92,8 @@
             "task": "校对摘要",
             "depends_on": [],
             "write_capability": "text_only",
-            "write_capability_label": "仅文字报告"
+            "write_capability_label": "仅文字报告",
+            "target_folder_name": "本会话工作区"
           }
         ],
         "tools": [
@@ -201,6 +203,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队。已排除校对岗，调研交付。",
     "reasoning": "",
     "captainContext": [],

@@ -342,6 +342,21 @@ registerConversationUiClearer((conversationId) => {
   lastPersisted = next;
 });
 
+/**
+ * Every ``stagingId`` still referenced by a draft — the survivor set for the
+ * main-process ``attach-staging`` sweep. Read after {@link loadDrafts}, so it
+ * already reflects what survived the {@link PERSIST_LIMIT} eviction.
+ */
+export function liveStagingIds(): string[] {
+  const ids = new Set<string>();
+  for (const draft of Object.values(useComposerDraftStore.getState().drafts)) {
+    for (const att of draft.attachments ?? []) {
+      if (att.stagingId) ids.add(att.stagingId);
+    }
+  }
+  return [...ids];
+}
+
 /** @internal vitest — reload drafts from uiStorage without `vi.resetModules` (hangs on the conversation graph). */
 export function __reloadComposerDraftsForTests(): void {
   if (persistTimer !== null) {

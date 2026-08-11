@@ -10,11 +10,13 @@ import pytest
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.turn.queue import turn_queue
+from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
 from agentcore.runtime.turn.runs import turn_runs
 from agentcore.runtime.turn.steer import (
+    _USER_STOP_DISCARD_NOTE,
     _reset_for_tests,
     begin_accepting,
+    discard_leftovers_on_user_stop,
     drain_as_messages,
     end_accepting,
     format_steer_user_message,
@@ -93,7 +95,7 @@ async def _never() -> None:
 
 @pytest.mark.asyncio
 async def test_leftover_promote_emits_degraded_turn_queued_on_live_sink():
-    """accepted 后 leftover promote → live sink 收到 turn_queued.degraded_from=steer。"""
+    """accepted 后 leftover promote → user_interjection(queued) + turn_queued.degraded_from=steer。"""
     _reset_for_tests()
     cid = "c-leftover-promote"
     turn_queue.clear(cid)
@@ -101,17 +103,20 @@ async def test_leftover_promote_emits_degraded_turn_queued_on_live_sink():
     blocker = asyncio.create_task(_never())
     turn_runs.register(conversation_id=cid, task=blocker, sink=sink)
     try:
-        begin_accepting(cid)
+        begin_accepting(cid, execution_id="exec-leftover")
         item = try_enqueue(conversation_id=cid, content="晚到的纠偏")
         assert item is not None
-        # Simulate client already toasted turn_steer_accepted (process pending).
         leftovers = end_accepting(cid)
         assert len(leftovers) == 1
-        assert leftovers[0].steer_id == item.steer_id
+        assert leftovers[0].interjection_id == item.interjection_id
         n = promote_leftovers_to_queue(leftovers)
         assert n == 1
         assert turn_queue.depth(cid) == 1
 
+        interjections = [
+            e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
+        ]
+        assert any(e.payload.get("status") == "queued" for e in interjections)
         queued = [e for e in sink._history if e.type is EventType.TURN_QUEUED]  # noqa: SLF001
         assert len(queued) == 1
         payload = queued[0].payload
@@ -143,16 +148,152 @@ async def test_leftover_promote_without_live_sink_still_enqueues():
     popped = turn_queue.pop_next(cid)
     assert popped is not None
     assert popped.content == "keep me"
+    assert popped.interjection_id == leftovers[0].interjection_id
     turn_queue.clear(cid)
     _reset_for_tests()
 
 
 @pytest.mark.asyncio
+async def test_user_stop_discards_leftovers_without_enqueue():
+    """user_stop：未读插话 failed 丢弃，不入 FIFO、不自动开跑。"""
+    _reset_for_tests()
+    cid = "c-leftover-stop-discard"
+    turn_queue.clear(cid)
+    sink = EventSink()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id=cid, task=blocker, sink=sink)
+    try:
+        begin_accepting(cid, execution_id="exec-stop-discard")
+        item = try_enqueue(conversation_id=cid, content="把它停止")
+        assert item is not None
+        leftovers = end_accepting(cid)
+        assert len(leftovers) == 1
+        n = discard_leftovers_on_user_stop(leftovers)
+        assert n == 1
+        assert turn_queue.depth(cid) == 0
+
+        interjections = [
+            e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
+        ]
+        assert len(interjections) == 1
+        payload = interjections[0].payload
+        assert payload["status"] == "failed"
+        assert payload["note"] == _USER_STOP_DISCARD_NOTE
+        assert payload["interjection_id"] == item.interjection_id
+        assert not any(e.type is EventType.TURN_QUEUED for e in sink._history)  # noqa: SLF001
+    finally:
+        turn_queue.clear(cid)
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+        _reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_user_stop_discard_leaves_user_fifo_untouched():
+    """Stop ≠ 取消排队：丢弃 leftover 不得动用户主动排队的 FIFO 项。"""
+    _reset_for_tests()
+    cid = "c-leftover-stop-fifo"
+    turn_queue.clear(cid)
+    user_item = new_queued_turn(content="用户先排的下一句", user_id="u1")
+    turn_queue.enqueue(cid, user_item)
+    assert turn_queue.depth(cid) == 1
+
+    sink = EventSink()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id=cid, task=blocker, sink=sink)
+    try:
+        begin_accepting(cid, execution_id="exec-stop-fifo")
+        assert try_enqueue(conversation_id=cid, content="停止时的插话") is not None
+        leftovers = end_accepting(cid)
+        assert discard_leftovers_on_user_stop(leftovers) == 1
+        assert turn_queue.depth(cid) == 1
+        popped = turn_queue.pop_next(cid)
+        assert popped is user_item
+        assert popped.content == "用户先排的下一句"
+    finally:
+        turn_queue.clear(cid)
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+        _reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_react_loop_user_stop_discards_undrained_steer():
+    """react_loop finally：user_stop 时 leftover 走 discard，不 promote。"""
+    _reset_for_tests()
+    cid = "c-loop-stop-discard"
+    turn_queue.clear(cid)
+    ctx = replace(_context(), conversation_id=cid, execution_id="exec-loop-stop")
+
+    provider = _ScriptedProvider(
+        [
+            [
+                LLMChunk(delta_content="working"),
+                LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0, id="c1", function_name="search", arguments_delta="{}"
+                        )
+                    ]
+                ),
+            ],
+            [LLMChunk(delta_content="should not run")],
+        ]
+    )
+    tool = _StubTool()
+    stop_event = asyncio.Event()
+
+    async def _execute(arguments, context):  # noqa: ANN001
+        assert try_enqueue(conversation_id=cid, content="把它停止") is not None
+        stop_event.set()
+        await asyncio.Future()  # hang until cancelled
+
+    tool.execute = _execute  # type: ignore[method-assign]
+
+    sink = EventSink()
+    loop_task = asyncio.create_task(
+        react_loop(
+            messages=[LLMMessage(role="user", content="go")],
+            llm=provider,
+            tools=_registry(tool),
+            sink=sink,
+            tool_context=ctx,
+            profile=make_profile_params(max_rounds=4),
+            turn_model="m",
+            role="captain",
+        )
+    )
+    turn_runs.register(conversation_id=cid, task=loop_task, sink=sink)
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=2.0)
+        assert turn_runs.stop(cid) is True
+        with pytest.raises(asyncio.CancelledError):
+            await loop_task
+        assert turn_queue.depth(cid) == 0
+        interjections = [
+            e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
+        ]
+        failed = [e for e in interjections if e.payload.get("status") == "failed"]
+        assert len(failed) == 1
+        assert failed[0].payload.get("note") == _USER_STOP_DISCARD_NOTE
+        assert not any(e.payload.get("status") == "queued" for e in interjections)
+    finally:
+        turn_queue.clear(cid)
+        if not loop_task.done():
+            loop_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop_task
+        _reset_for_tests()
+
+
+@pytest.mark.asyncio
 async def test_react_loop_drains_steer_at_step_top():
-    """Captain loop：工具步后下一轮顶端把 pending steer 注入 messages。"""
+    """Captain loop：工具步后下一轮顶端把 pending steer 注入 messages 并发 injected。"""
     _reset_for_tests()
     cid = "c-loop-steer"
-    ctx = replace(_context(), conversation_id=cid)
+    ctx = replace(_context(), conversation_id=cid, execution_id="exec-loop-steer")
 
     seen_user_contents: list[str] = []
 
@@ -191,11 +332,12 @@ async def test_react_loop_drains_steer_at_step_top():
     tool.execute = _execute  # type: ignore[method-assign]
 
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    sink = EventSink()
     content, *_ = await react_loop(
         messages=messages,
         llm=provider,
         tools=_registry(tool),
-        sink=EventSink(),
+        sink=sink,
         tool_context=ctx,
         profile=make_profile_params(max_rounds=4),
         turn_model="m",
@@ -207,6 +349,10 @@ async def test_react_loop_drains_steer_at_step_top():
         m.role == "user" and m.content and "请改成要点列表" in m.content for m in messages
     )
     assert peek_count(cid) == 0
+    injected = [
+        e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
+    ]
+    assert any(e.payload.get("status") == "injected" for e in injected)
     _reset_for_tests()
 
 

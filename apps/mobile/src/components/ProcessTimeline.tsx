@@ -1,3 +1,7 @@
+import {
+  InterjectionBubbles,
+  type InterjectionItem,
+} from "@/components/InterjectionBubbles";
 import { Markdown } from "@/components/Markdown";
 import { NonBlockingAskCard } from "@/components/NonBlockingAskCard";
 import {
@@ -38,7 +42,8 @@ import "@/components/ProcessTimeline.css";
 
 type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
 
-/** 跨回合同图追加锚点文案（批 A4）：开辩论幕与同幕补派区分；手机列表语气，非桌面 ↑ 跳转条。 */
+/** 跨回合续接锚点文案：新契约「续自上一张图」；旧 journal `graph_append` 仍带追加人数。
+ * 手机无跨气泡跳转，仅文案行。 */
 export function graphAppendAnchorLabel(
   addedCount: number,
   actKind?: string | null,
@@ -47,10 +52,15 @@ export function graphAppendAnchorLabel(
   const n = Math.max(0, addedCount | 0);
   const base =
     actKind === "debate"
-      ? `已开辩论幕 · 追加 ${n} 名成员`
-      : `已往上方协作图追加 ${n} 名成员`;
+      ? `续自上一张图 · 已开辩论幕 · 追加 ${n} 名成员`
+      : `续自上一张图 · 追加 ${n} 名成员`;
   const auth = actAuthorizedByLabel(authorizedBy);
   return auth ? `${base} · ${auth}` : base;
+}
+
+/** 新契约：`prev_execution_id` 链上文案（本回合已有完整 TeamView）。 */
+export function prevGraphAnchorLabel(): string {
+  return "续自上一张图";
 }
 
 /**
@@ -88,11 +98,6 @@ export interface TeamProjection {
    *  (`team_note_posted`), in post order — rendered by {@link TeamView}. Optional so the promo
    *  still (which builds team from a truncated vector) and legacy callers keep compiling. */
   teamNotes?: ProjectedTeamNote[];
-  /** 交付状态（`delivery_status`，能力闸门与交付诚实性）：delegate 收尾的结构化交付对账，
-   *  由 {@link TeamView} 在 partial / blocked 时渲染。Optional（旧调用方 / promo 兼容）。 */
-  deliveryStatus?:
-    | import("@agentcore/contract-types").DeliveryStatusPayload
-    | null;
   /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
   status?: TurnStatus | null;
   /** 阻塞式求决策 (②): forwarded straight to {@link TeamView} via the `{...team}` spread so a
@@ -245,6 +250,8 @@ function timelineNodeKeys(nodes: TimelineNode[]): string[] {
         return `dauth-${node.authorization_id}`;
       case "stage_card":
         return `sc-${node.stage_card_id}`;
+      case "user_interjection":
+        return `uinj-${node.interjection_id}`;
       case "tool":
         return `tool-${node.step.id}`;
       case "tool-group":
@@ -409,6 +416,9 @@ export function ProcessTimeline({
   toolPhases,
   graphAppendActKinds,
   graphAppendAuthorizedBy,
+  prevExecutionIds,
+  userInterjections,
+  turnClosed = false,
   onFill,
   onOpenBrowserLive,
 }: {
@@ -430,6 +440,12 @@ export function ProcessTimeline({
   toolPhases?: Map<string, ToolPhase>;
   graphAppendActKinds?: Map<string, string>;
   graphAppendAuthorizedBy?: Map<string, string>;
+  /** execution_id → prev_execution_id（`extractPrevExecutionIds`）；新契约续自文案。 */
+  prevExecutionIds?: Map<string, string>;
+  /** 旁路插话叶（fold → userInterjections）；marker 只钉位置，按 id 查正文/五态。 */
+  userInterjections?: readonly InterjectionItem[];
+  /** 回合已收口 → received 派生态「未被主 Agent 读取」。 */
+  turnClosed?: boolean;
   onFill?: (text: string) => void;
   onOpenBrowserLive?: (opts?: { runId?: string }) => void;
 }) {
@@ -497,9 +513,16 @@ export function ProcessTimeline({
       return <Reasoning key={nodeKey} text={node.text} isStreaming={live} />;
     }
     if (node.kind === "team") {
-      return team && teamHasStartedRuns(team.runs) ? (
-        <TeamView key={nodeKey} {...team} />
-      ) : null;
+      if (!team || !teamHasStartedRuns(team.runs)) return null;
+      const hasPrev = Boolean(prevExecutionIds?.get(node.execution_id));
+      return (
+        <Fragment key={nodeKey}>
+          {hasPrev ? (
+            <div className="graph-append-anchor">{prevGraphAnchorLabel()}</div>
+          ) : null}
+          <TeamView {...team} />
+        </Fragment>
+      );
     }
     if (node.kind === "graph_append") {
       const actKind = graphAppendActKinds?.get(node.execution_id);
@@ -514,6 +537,18 @@ export function ProcessTimeline({
       const ask = asks?.find((a) => a.id === node.ask_id);
       return ask && onFill ? (
         <NonBlockingAskCard key={ask.id} ask={ask} onFill={onFill} />
+      ) : null;
+    }
+    if (node.kind === "user_interjection") {
+      const item = userInterjections?.find(
+        (u) => u.interjectionId === node.interjection_id,
+      );
+      return item ? (
+        <InterjectionBubbles
+          key={nodeKey}
+          items={[item]}
+          turnClosed={turnClosed}
+        />
       ) : null;
     }
     if (node.kind === "escalation") {

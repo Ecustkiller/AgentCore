@@ -5,7 +5,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { ApiError } from "@/services/api";
 import {
@@ -63,7 +63,6 @@ export function UseTemplateDialog({
         name: name.trim() || template.title,
         slots: slotValues,
       });
-      notifySuccess("已复制为我的工作流");
       onClose();
       navigate(APP_PATHS.toolbox.workflows.edit(created.id));
     } catch (e) {

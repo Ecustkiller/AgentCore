@@ -489,6 +489,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "附件已齐，按共享证据包开辩。",
     "reasoning": "",
     "captainContext": [],

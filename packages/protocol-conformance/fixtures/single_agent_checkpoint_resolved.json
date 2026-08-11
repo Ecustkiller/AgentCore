@@ -88,6 +88,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "好，按 A 推进。 已完成初稿。",
     "reasoning": "这个需求有歧义，先问清楚。",
     "captainContext": [],

@@ -709,12 +709,16 @@ async def run_contract_loop(
                 deliverable=deliverable,
             )
         # Full contract.retry: refill only within original retrieval cap, and
-        # never after wind_down（不得恢复全量检索）.
+        # never after wind_down（不得恢复全量检索）. 写盘形态返工缺的是定向补写而非检索；
+        # 引用类失败例外——它本就需要重读来源，且上面已发放 sticky reread。
         rb = tool_ctx.retrieval_budget
         original_rb = int(spec.retrieval_budget or (rb.limit if rb else 0) or 0)
         wind_down = budget_wind_down
+        write_disk_form = bool(files_expected) and not cite_fail_retry
         slice_n = rework_refill_slots(
-            original_limit=original_rb, wind_down_entered=wind_down
+            original_limit=original_rb,
+            wind_down_entered=wind_down,
+            write_disk_form=write_disk_form,
         )
         if rb is not None and slice_n > 0:
             new_remaining = await rb.refill_within_cap(slice_n, cap=original_rb)
@@ -727,11 +731,11 @@ async def run_contract_loop(
                 cap=original_rb,
                 wind_down=wind_down,
             )
-        elif wind_down:
+        elif wind_down or write_disk_form:
             logger.info(
                 "retrieval_budget.rework_refill_skipped",
                 run_id=spec.run_id,
-                reason="wind_down",
+                reason="wind_down" if wind_down else "write_disk_form",
                 original_limit=original_rb,
             )
         logger.info(

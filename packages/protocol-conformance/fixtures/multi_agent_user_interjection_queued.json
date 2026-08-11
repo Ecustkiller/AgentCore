@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_user_interjection_queued",
-  "description": "协调插话转排队：user_interjection received→queued（同 id 保最新）+ queue_user_message",
+  "description": "协调插话转排队：user_interjection received→injected→queued（同 id 保最新）+ queue_user_message",
   "events": [
     {
       "type": "message_start",
@@ -101,6 +101,16 @@
       "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj2",
+        "execution_id": "exec1",
+        "content": "另外帮我写一封生日贺卡，跟这个项目无关。",
+        "status": "injected"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
       "type": "tool_use_start",
       "payload": {
         "tool_call_id": "q1",
@@ -110,7 +120,7 @@
           "reason": "与当前团队任务无关，已排到下一回合"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "tool_use_end",
@@ -120,7 +130,7 @@
         "status": "success",
         "result": "已将插话转入对话级排队（位置 1/1）。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "user_interjection",
@@ -131,7 +141,7 @@
         "status": "queued",
         "note": "与当前团队任务无关，已排到下一回合"
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "run_completed",
@@ -231,6 +241,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队并行推进。当前任务已收口；你的贺卡请求已排队，下一回合处理。",
     "reasoning": "",
     "captainContext": [],
@@ -242,6 +253,10 @@
       {
         "kind": "team",
         "execution_id": "exec1"
+      },
+      {
+        "kind": "user_interjection",
+        "interjection_id": "inj2"
       },
       {
         "kind": "tool",

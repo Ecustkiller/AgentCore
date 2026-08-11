@@ -915,7 +915,8 @@ def test_append_batch_unknown_dep_lists_host_nodes():
     assert "bt_l2_a" in msg
     assert "调研A" in msg
     assert "下一步" in msg
-    assert 'append_to_execution_id="latest"' in msg
+    assert "append_to_execution_id" not in msg
+    assert "当前活跃图" in msg or "本批" in msg
 
 
 def test_depends_on_unknown_lists_available_run_ids():

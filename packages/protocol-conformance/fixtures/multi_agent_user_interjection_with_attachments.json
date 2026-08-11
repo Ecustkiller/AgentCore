@@ -113,6 +113,28 @@
       "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
+      "type": "user_interjection",
+      "payload": {
+        "interjection_id": "inj-att",
+        "execution_id": "exec1",
+        "content": "请对照附件里的成本表再核一遍。",
+        "status": "injected",
+        "attachments": [
+          {
+            "name": "成本表.xlsx",
+            "workspace_path": "attachments/成本表.xlsx",
+            "binary": true
+          },
+          {
+            "name": "补充说明.md",
+            "workspace_path": "attachments/补充说明.md",
+            "binary": false
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
       "type": "tool_use_start",
       "payload": {
         "tool_call_id": "syn1",
@@ -121,7 +143,7 @@
           "draft": "已收到附件补充：会对照成本表核验。"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "tool_use_end",
@@ -131,7 +153,7 @@
         "status": "success",
         "result": "已更新合成草稿，用户可见「进展中」预览。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "user_interjection",
@@ -154,7 +176,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "team_synthesis_preview",
@@ -167,7 +189,7 @@
         "workers": [],
         "in_progress": true
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "run_completed",
@@ -267,6 +289,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来安排团队并行推进。团队已按附件补充交稿。",
     "reasoning": "",
     "captainContext": [],
@@ -278,6 +301,10 @@
       {
         "kind": "team",
         "execution_id": "exec1"
+      },
+      {
+        "kind": "user_interjection",
+        "interjection_id": "inj-att"
       },
       {
         "kind": "tool",

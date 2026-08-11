@@ -1,17 +1,20 @@
 import { useConversations } from "@/hooks/useConversations";
-import { useFolders } from "@/hooks/useFolders";
-import { useConversationWorkspace } from "@/hooks/useWorkspaces";
+import { getFolders, useFolders } from "@/hooks/useFolders";
+import { useConversationWorkspace, useWorkspaces } from "@/hooks/useWorkspaces";
 import { hasInAppPreview, hasLocalFiles } from "@/lib/capabilities";
 import type { FileSource } from "@/lib/fileSource";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
+import type { FolderMeta } from "@/services/folders";
 import { asReadOnlyFileSource } from "@/services/sources/readOnlyFileSource";
 import {
+  createCloudWorkspaceSource,
   createWorkspaceSource,
   resolveConversationLocalFileSource,
   resolveWorkspaceSource,
 } from "@/services/sources/workspaceSource";
 import { openWorkspaceInBrowser } from "@/services/workspace";
+import type { WorkspaceInfo } from "@/services/workspaces";
 import { useEffect, useMemo, useState } from "react";
 
 type LocalFallback = "idle" | "pending" | FileSource | null;
@@ -148,5 +151,94 @@ export function useConversationFileSource(
     localFallback,
     folder,
     offline,
+  ]);
+}
+
+/**
+ * Look up / synthesize {@link WorkspaceInfo} for a desk id.
+ * Prefer the workspaces list; for `folder:` miss, synthesize from folders
+ * (本机传统 local root included — same as {@link useConversationWorkspace}).
+ */
+export function workspaceInfoForDesk(
+  wsId: string,
+  workspaces: readonly WorkspaceInfo[] | undefined,
+  folders: readonly FolderMeta[] = getFolders(),
+): WorkspaceInfo | null {
+  const listed = workspaces?.find((w) => w.wsId === wsId);
+  if (listed) return listed;
+  if (!wsId.startsWith("folder:")) return null;
+  const folderId = wsId.slice("folder:".length);
+  const folder = folders.find((f) => f.id === folderId);
+  if (!folder) return null;
+  if (folder.mode === "local" && folder.localRootId) {
+    return {
+      wsId,
+      name: folder.name,
+      location: "local",
+      rootId: folder.localRootId,
+      subpath: folder.localSubpath ?? "",
+      hasFiles: true,
+    };
+  }
+  return {
+    wsId,
+    name: folder.name,
+    location: "cloud",
+    rootId: null,
+    subpath: "",
+    hasFiles: true,
+  };
+}
+
+/**
+ * FileSource for a side-panel File content tab (主坞 + 浮窗共用).
+ *
+ * - 无 `workspaceId` → 会话出生桌（{@link useConversationFileSource}）。
+ * - 有 `workspaceId` → 该落地桌：复用 {@link resolveWorkspaceSource}；
+ *   查不到工作区行时回退云 REST（{@link createCloudWorkspaceSource}）。
+ * - 与会话桌同一 desk 时复用会话源（保留本地 fallback / 预览挂载）。
+ */
+export function useFileTabSource(
+  conversationId: string | null,
+  workspaceId?: string | null,
+): FileSource | null {
+  const sessionSource = useConversationFileSource(conversationId);
+  const sessionWs = useConversationWorkspace(conversationId);
+  const { data: workspaces } = useWorkspaces();
+  // folders 进依赖：本机传统合成随 folder cache 更新。
+  const folders = useFolders();
+  const offline = useReadOnlyOffline();
+  const fsAvailable = hasLocalFiles();
+  const desk = workspaceId?.trim() || null;
+
+  return useMemo(() => {
+    if (!desk) return sessionSource;
+    if (sessionWs?.wsId === desk) return sessionSource;
+
+    const info = workspaceInfoForDesk(desk, workspaces, folders);
+    if (info) {
+      if (offline && info.location === "cloud") return null;
+      const src = resolveWorkspaceSource(info, fsAvailable);
+      if (!src) return null;
+      if (offline && info.location === "local") {
+        return asReadOnlyFileSource(src);
+      }
+      return withCloudPreviewEntries(src, conversationId, desk);
+    }
+    if (offline) return null;
+    return withCloudPreviewEntries(
+      createCloudWorkspaceSource(desk),
+      conversationId,
+      desk,
+    );
+  }, [
+    desk,
+    sessionSource,
+    sessionWs?.wsId,
+    workspaces,
+    folders,
+    offline,
+    fsAvailable,
+    conversationId,
   ]);
 }

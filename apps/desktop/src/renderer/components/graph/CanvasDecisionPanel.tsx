@@ -5,7 +5,11 @@ import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { StageCardDock } from "@/components/chat/StageCardDock";
-import { isTurnRecoverable } from "@/lib/turnRecoverable";
+import {
+  isTurnRecoverable,
+  isUndismissedRecoverable,
+  useIsUndismissedRecoverable,
+} from "@/lib/turnRecoverable";
 import {
   useBackgroundTasks,
   useWorkspaceRootId,
@@ -31,7 +35,7 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 import { useEffect, useMemo, useRef } from "react";
 
 /** Re-export for canvas consumers that historically imported from this module. */
-export { isTurnRecoverable };
+export { isTurnRecoverable, isUndismissedRecoverable };
 
 /**
  * 画布「图上指挥」指挥台 (前端UX设计.md §6.2). The boss powers散落在聊天流里
@@ -201,7 +205,11 @@ export function useCommandRegion(): CommandRegionData {
     conversationId,
   });
   const pending = turnDecisions + approvalCount + resumeCount + stageCardCount;
-  const firefighting = !!convError || isTurnRecoverable(execution);
+  const recoverableHint = useIsUndismissedRecoverable(
+    focusedMessageId,
+    execution,
+  );
+  const firefighting = !!convError || recoverableHint;
   // 后台云端任务 是 非阻塞的「另一类」: it keeps the region present but never inflates the
   // 待你拍板 badge (`pending`); the tab-strip badge (`badge`) includes it so the user
   // can still discover background work without being yanked onto 指挥台.

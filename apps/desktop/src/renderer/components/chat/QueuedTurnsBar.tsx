@@ -1,12 +1,16 @@
 import { notifyError } from "@/lib/toast";
-import { cancelQueuedTurn } from "@/services/turns/cancelQueuedTurn";
+import {
+  cancelQueuedTurn,
+  steerQueuedTurn,
+} from "@/services/turns/cancelQueuedTurn";
 import { type QueuedTurnEntry, useQueuedTurns } from "@/stores/queuedTurns";
 import { Loader2, X } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 排队唯一 UI：drain 前展示 FIFO 项，可按项取消（Stop ≠ 取消排队）。
+ * 排队唯一 UI：drain 前展示 FIFO 项，可按项取消或立刻插队（Stop ≠ 取消排队）。
  * 挂在 composer 上方；排队期不插主时间线用户泡。
+ * 内容权威 = GET 对账；本端发送 ack 即时 upsert 为低延迟，条上可标插话升队来源。
  */
 export function QueuedTurnsBar({
   conversationId,
@@ -39,6 +43,7 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
   const [busy, setBusy] = useState(false);
   const preview =
     item.content.length > 48 ? `${item.content.slice(0, 48)}…` : item.content;
+  const fromInterjection = Boolean(item.interjectionId);
 
   const onCancel = async () => {
     if (busy) return;
@@ -53,11 +58,25 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
     }
   };
 
+  const onSteer = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await steerQueuedTurn(item.conversationId, item.queueId);
+      // toast：steer ack / 降级排队由 SSE → queuedNotify；勿本地伪装「已插入」。
+    } catch (err) {
+      notifyError(err, "插队失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
       data-testid="queued-turn-row"
       data-queue-id={item.queueId}
+      data-from-interjection={fromInterjection ? "true" : undefined}
     >
       <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden />
       <span className="min-w-0 flex-1 truncate">
@@ -65,14 +84,26 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
         {item.queueDepth > 1
           ? `（第 ${item.position}/${item.queueDepth}）`
           : ""}
-        ：{preview}
+        {fromInterjection ? " · 来自你的插话" : ""}：{preview}
       </span>
+      <button
+        type="button"
+        className="shrink-0 rounded-lg px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        aria-label="立刻插队"
+        title="取消排队并以插队重发；下一工具步生效，不会立刻打断当前输出"
+        disabled={busy}
+        data-testid="queued-turn-steer"
+        onClick={() => void onSteer()}
+      >
+        立刻插队
+      </button>
       <button
         type="button"
         className="shrink-0 rounded-lg p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
         aria-label="取消排队"
         title="取消排队"
         disabled={busy}
+        data-testid="queued-turn-cancel"
         onClick={() => void onCancel()}
       >
         <X size={12} />

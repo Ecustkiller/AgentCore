@@ -288,6 +288,10 @@ async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )
@@ -382,6 +386,10 @@ async def test_finalize_cloud_synthesizes_error_when_missing(monkeypatch):
 
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
     monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
@@ -541,6 +549,10 @@ async def test_finalize_cloud_merges_error_into_incomplete_progressive_journal(
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )
@@ -628,6 +640,10 @@ async def test_finalize_cloud_keeps_existing_partial_on_empty_error(monkeypatch)
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )
@@ -713,6 +729,10 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )
@@ -790,6 +810,10 @@ async def test_finalize_cloud_auto_snapshot_failure_emits_sse(monkeypatch):
 
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
     monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),

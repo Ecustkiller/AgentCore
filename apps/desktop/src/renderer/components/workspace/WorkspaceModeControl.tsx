@@ -8,7 +8,7 @@ import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import { WORKSPACE_BINDING_CHANGED } from "@/lib/bindLocalFolder";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { notifyActionError } from "@/lib/toast";
 import {
   type EffectiveWorkspace,
   formatWorkspaceChipLabel,
@@ -252,9 +252,7 @@ export function WorkspaceModeMenu({
     if (!conversationId) return;
     void runExit(async () => {
       const result = await registerMergeLanding(conversationId);
-      if (result.ok && result.root) {
-        notifySuccess(`已登记合回落点「${result.root.name}」`);
-      } else if (!result.ok && result.reason === "error") {
+      if (!result.ok && result.reason === "error") {
         notifyActionError(
           "登记合回落点失败",
           new Error(result.message ?? "登记失败"),

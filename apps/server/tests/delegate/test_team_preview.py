@@ -131,6 +131,58 @@ def test_worker_rows_shape():
     assert rows[0]["write_capability_label"] == "可改文件"
     # 无显式 model → 行上不透出（跟槽）
     assert "model" not in rows[0]
+    # 无 target / 无会话桌 → 仅显示名「本会话工作区」（勿留空）
+    assert "target_folder_id" not in rows[0]
+    assert rows[0]["target_folder_name"] == "本会话工作区"
+    assert rows[1]["target_folder_name"] == "本会话工作区"
+
+
+def test_worker_rows_desk_from_node_target():
+    plan = _plan(
+        RunSpec(run_id="r1", task="读 A", role="调研", target_folder_id="fold-a"),
+        RunSpec(run_id="r2", task="读 B", role="调研", target_folder_id="fold-b"),
+    )
+    rows = worker_rows(plan)
+    assert rows[0]["target_folder_id"] == "fold-a"
+    assert rows[1]["target_folder_id"] == "fold-b"
+    # enrich 前的占位；生产路径会换成名册名
+    assert rows[0]["target_folder_name"] == "未命名项目"
+
+
+def test_worker_rows_desk_falls_back_to_session():
+    plan = _plan(
+        RunSpec(run_id="r1", task="做", role="写手"),
+        RunSpec(run_id="r2", task="做", role="校对", target_folder_id="fold-x"),
+    )
+    rows = worker_rows(plan, session_folder_id="fold-session")
+    assert rows[0]["target_folder_id"] == "fold-session"
+    assert rows[1]["target_folder_id"] == "fold-x"
+
+
+async def test_enrich_worker_desk_names_resolves_and_scratch():
+    from unittest.mock import patch
+
+    from agentcore.runtime.kickoff.summary import enrich_worker_desk_names
+
+    rows = [
+        {"run_id": "r1", "target_folder_id": "fold-a", "target_folder_name": "未命名项目"},
+        {"run_id": "r2", "target_folder_name": "本会话工作区"},
+    ]
+
+    async def _fake_lookup(folder_ids, *, user_id):
+        assert user_id == "u1"
+        assert folder_ids == {"fold-a"}
+        return {"fold-a": "云项目甲"}
+
+    with patch(
+        "agentcore.runtime.delegate.target_desktop.lookup_folder_display_names",
+        _fake_lookup,
+    ):
+        await enrich_worker_desk_names(rows, user_id="u1")
+
+    assert rows[0]["target_folder_name"] == "云项目甲"
+    assert rows[1]["target_folder_name"] == "本会话工作区"
+    assert "target_folder_id" not in rows[1]
 
 
 def test_worker_rows_emits_model_identity():

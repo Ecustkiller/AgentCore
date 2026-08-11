@@ -18,6 +18,32 @@ import {
 } from "./helpers";
 
 /**
+ * Settle a live execution slot to cancelled so {@link finalizeFold} freezes
+ * in-flight nodes. No-op when there is no plan (avoids inventing empty slots).
+ */
+function finalizeRunningExecutionSlots(
+  messageId: string,
+  serverMessageId?: string | null,
+): void {
+  const exec = useExecutionStore.getState();
+  const settle = (id: string) => {
+    const rt = exec.byId[id];
+    if (!rt?.plan) return;
+    if (
+      rt.status === "running" ||
+      rt.status === "planning" ||
+      rt.status === "paused"
+    ) {
+      exec.setStatus("cancelled", id);
+    }
+  };
+  settle(messageId);
+  if (serverMessageId && serverMessageId !== messageId) {
+    settle(serverMessageId);
+  }
+}
+
+/**
  * Clear-then-fold prep: drop every assistant after ``userMessageId`` from the
  * conversation slice **and** wipe their process/execution slots so a full journal
  * replay cannot double-fold tools / team graph (流式回复持久化 §3.6).
@@ -149,11 +175,9 @@ export function markGhostInterrupted(conversationId: string): void {
     conversationId,
   );
   useConversationStore.getState().setGenerating(false, conversationId);
-  const exec = useExecutionStore.getState();
-  exec.clearExecution(last.id);
-  if (last.serverMessageId && last.serverMessageId !== last.id) {
-    exec.clearExecution(last.serverMessageId);
-  }
+  // Freeze the graph in place (cancelled → finalizeFold freezes in-flight nodes).
+  // Do not clearExecution — the inline team graph must stay until journal replay.
+  finalizeRunningExecutionSlots(last.id, last.serverMessageId);
   // Stale latch may have painted ResumePrompt via toMessage → surfaceResume; clear it.
   const resumeKey = last.serverMessageId ?? last.id;
   usePausedTurnStore.getState().remove(resumeKey);
@@ -206,11 +230,8 @@ export function settleOrphanEmptyAssistants(conversationId: string): void {
       },
       conversationId,
     );
-    const exec = useExecutionStore.getState();
-    exec.clearExecution(m.id);
-    if (m.serverMessageId && m.serverMessageId !== m.id) {
-      exec.clearExecution(m.serverMessageId);
-    }
+    // Freeze any live graph; do not wipe the projection (graph stays on screen).
+    finalizeRunningExecutionSlots(m.id, m.serverMessageId);
   }
 }
 

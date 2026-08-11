@@ -271,6 +271,7 @@ async def assemble_ceo_turn(
         ceo_tool_names=ceo_tool_names,
         memory_topics=prepared.memory_topics,
         on_demand_rules=prepared.on_demand_rules,
+        project_catalog=prepared.project_catalog,
         cold_start_explore=explore_reason or False,
         project_nav_stale=project_nav_stale,
         project_profile_empty_soft=project_profile_empty_soft,

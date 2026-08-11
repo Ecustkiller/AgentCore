@@ -27,19 +27,28 @@ from tests.delegate.conftest import Provider, ctx, tool
 
 
 def test_should_enter_coordination_gate():
-    # Default-on: coordinate=True (or omitted at tool layer) + ≥2 + root + not finalize.
+    # Default-on: coordinate=True (or omitted at tool layer) + ≥1 + root + not finalize.
     assert should_enter_coordination(
         coordinate=True, worker_count=2, finalize=False, depth=0
+    )
+    assert should_enter_coordination(
+        coordinate=True, worker_count=1, finalize=False, depth=0
     )
     # Explicit opt-out.
     assert not should_enter_coordination(
         coordinate=False, worker_count=2, finalize=False, depth=0
     )
     assert not should_enter_coordination(
-        coordinate=True, worker_count=1, finalize=False, depth=0
+        coordinate=False, worker_count=1, finalize=False, depth=0
+    )
+    assert not should_enter_coordination(
+        coordinate=True, worker_count=0, finalize=False, depth=0
     )
     assert not should_enter_coordination(
         coordinate=True, worker_count=2, finalize=True, depth=0
+    )
+    assert not should_enter_coordination(
+        coordinate=True, worker_count=1, finalize=True, depth=0
     )
     assert not should_enter_coordination(
         coordinate=True, worker_count=2, finalize=False, depth=1
@@ -276,13 +285,36 @@ def test_necessary_decision_points():
     )
 
 
-async def test_solo_worker_ignores_coordinate_flag():
-    """金线：单 worker + coordinate=true 仍走阻塞路径，返回完整产物。"""
+async def test_solo_worker_enters_coordination():
+    """金线：单 worker + coordinate=true（默认）进入协调，立即返回『团队已启动』。"""
+    clear_active_coordination()
     t = tool(Provider(["SOLO_OUT"]))
     result = await t.execute(
         {
             "tasks": [{"role": "工程师", "task": "做一件事"}],
             "coordinate": True,
+        },
+        ctx(),
+    )
+    assert result.success is True
+    assert result.is_terminal is False
+    assert "团队已启动" in result.output
+    assert "SOLO_OUT" not in result.output
+    session = active_coordination("e")
+    assert session is not None
+    assert session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    clear_active_coordination("e")
+
+
+async def test_solo_worker_explicit_coordinate_false_stays_blocking():
+    """金线：单 worker + coordinate=false → 经典阻塞，返回完整产物。"""
+    clear_active_coordination()
+    t = tool(Provider(["SOLO_OUT"]))
+    result = await t.execute(
+        {
+            "tasks": [{"role": "工程师", "task": "做一件事"}],
+            "coordinate": False,
         },
         ctx(),
     )
@@ -497,6 +529,23 @@ async def test_cancel_worker_requests_cancel():
     session.arm_worker_timeout("w1", role="研究员", timeout_s=60)
     cancel = CancelWorkerTool()
     result = await cancel.execute({"run_id": "w1", "reason": "重复"}, ctx())
+    assert result.success is True
+    assert "w1" in session.cancel_run_ids()
+    session.close()
+    await asyncio.sleep(0)
+    clear_active_coordination()
+
+
+async def test_solo_cancel_worker_requests_cancel():
+    """验收：单 worker 协调 session 上 cancel_worker 可达且生效。"""
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e", total_workers=1)
+    from agentcore.runtime.coordination.session import set_active_coordination
+
+    set_active_coordination(session)
+    session.arm_worker_timeout("w1", role="工程师", timeout_s=60)
+    cancel = CancelWorkerTool()
+    result = await cancel.execute({"run_id": "w1", "reason": "用户要求停止"}, ctx())
     assert result.success is True
     assert "w1" in session.cancel_run_ids()
     session.close()

@@ -80,14 +80,26 @@ let legacyPagesCleared = false;
 /** 测试接缝：show 落点 generation 检查前钩子（模拟 hide 竞态）。 */
 let beforeAttachCheckForTests: (() => void) | null = null;
 
-/** 与 sandbox driver 对齐的交互元素快照（data-acref）。 */
-const SNAPSHOT_JS = `(version) => {
+/**
+ * 与 sandbox driver 对齐的交互元素快照（data-acref）。
+ * 表单控件：placeholder / value 分列；禁用显式标注；尾部附可见非交互文本摘要。
+ * 导出供单测直接 eval（jsdom），勿在生产路径外改语义。
+ */
+export const SNAPSHOT_JS = `(version) => {
+  const NAME_MAX = 100;
+  const VALUE_MAX = 200;
+  const PLACEHOLDER_MAX = 100;
+  const TEXT_SUMMARY_MAX = 1200;
+  const MAX_ELEMENTS = 200;
   const sel = [
     'a', 'button', 'input', 'textarea', 'select',
+    '[contenteditable=""], [contenteditable="true"]',
     '[role=button]', '[role=link]', '[role=textbox]', '[role=checkbox]',
     '[role=tab]', '[role=menuitem]', '[onclick]'
   ].join(',');
+  const clip = (s, n) => s.trim().replace(/\\s+/g, ' ').slice(0, n);
   const out = [];
+  const interactive = new Set();
   let n = 0;
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
@@ -97,17 +109,78 @@ const SNAPSHOT_JS = `(version) => {
     n++;
     const ref = 'e' + n;
     el.setAttribute('data-acref', ref);
+    interactive.add(el);
     const type = (el.getAttribute('type') || '').toLowerCase();
     const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
     const isPassword = type === 'password' || ac.includes('password');
-    const role = isPassword ? 'password' : (el.getAttribute('role') || el.tagName.toLowerCase());
-    const nameSrc = isPassword
-      ? (el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
-      : (el.getAttribute('aria-label') || el.textContent
-        || el.getAttribute('placeholder') || el.value || '');
-    let name = nameSrc.trim().replace(/\\s+/g, ' ').slice(0, 100);
-    out.push('[' + ref + '] ' + role + (name ? ': ' + name : ''));
-    if (n >= 200) break;
+    const tag = el.tagName.toLowerCase();
+    const role = isPassword
+      ? 'password'
+      : (el.getAttribute('role') || (el.isContentEditable ? 'textbox' : tag));
+    const disabled = !!(el.disabled
+      || el.getAttribute('aria-disabled') === 'true'
+      || el.hasAttribute('disabled'));
+    const isFormControl = tag === 'input' || tag === 'textarea' || tag === 'select'
+      || el.isContentEditable || role === 'textbox';
+    // 表单控件：name 不含 placeholder/value（二者分列）；password 永不泄露 value。
+    let nameSrc = '';
+    if (isPassword) {
+      nameSrc = el.getAttribute('aria-label') || '';
+    } else if (isFormControl) {
+      nameSrc = el.getAttribute('aria-label') || el.getAttribute('name') || '';
+    } else {
+      nameSrc = el.getAttribute('aria-label') || el.textContent || '';
+    }
+    const name = clip(String(nameSrc || ''), NAME_MAX);
+    let line = '[' + ref + '] ' + role + (disabled ? ' disabled' : '')
+      + (name ? ': ' + name : '');
+    if (isFormControl) {
+      const ph = clip(el.getAttribute('placeholder') || '', PLACEHOLDER_MAX);
+      if (ph) line += ' | placeholder=' + JSON.stringify(ph);
+      if (isPassword) {
+        // 仅长度/掩码，绝不回明文
+        const len = typeof el.value === 'string' ? el.value.length : 0;
+        line += ' | value=' + (len > 0 ? '"***"' : '""') + ' (chars=' + len + ')';
+      } else {
+        let raw = '';
+        if (el.isContentEditable) raw = el.innerText || el.textContent || '';
+        else if ('value' in el) raw = String(el.value ?? '');
+        const full = String(raw);
+        const shown = clip(full, VALUE_MAX);
+        const truncated = full.trim().replace(/\\s+/g, ' ').length > VALUE_MAX;
+        line += ' | value=' + JSON.stringify(shown)
+          + (truncated ? '…' : '');
+      }
+    }
+    out.push(line);
+    if (n >= MAX_ELEMENTS) break;
+  }
+  // 可见非交互文本摘要（聊天气泡等）；尾部优先、硬上限。
+  const root = document.querySelector('main, [role=main], #root, body') || document.body;
+  const chunks = [];
+  if (root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent) continue;
+      if (interactive.has(parent) || parent.closest('[data-acref]')) continue;
+      const tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA') continue;
+      const st = window.getComputedStyle(parent);
+      if (st.visibility === 'hidden' || st.display === 'none') continue;
+      const t = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (!t) continue;
+      chunks.push(t);
+    }
+  }
+  const joined = chunks.join(' ').trim();
+  if (joined) {
+    const tail = joined.length > TEXT_SUMMARY_MAX
+      ? joined.slice(joined.length - TEXT_SUMMARY_MAX)
+      : joined;
+    out.push('---');
+    out.push('visible_text: ' + (joined.length > TEXT_SUMMARY_MAX ? '…' : '') + tail);
   }
   return out.join('\\n');
 }`;
@@ -117,6 +190,135 @@ const IS_PASSWORD_JS = `(el) => {
   const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
   return type === 'password' || ac.includes('password');
 }`;
+
+/** Focus + select-all，供 CDP Input.insertText 替换既有内容。 */
+const FOCUS_SELECT_JS = `(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  el.focus();
+  if (typeof el.select === 'function') {
+    try { el.select(); } catch (_) { /* type=number 等 */ }
+  } else if (el.isContentEditable
+      || el.getAttribute('contenteditable') === 'true'
+      || el.getAttribute('contenteditable') === '') {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+  } else if (typeof el.setSelectionRange === 'function') {
+    try {
+      const len = String(el.value ?? '').length;
+      el.setSelectionRange(0, len);
+    } catch (_) { /* 不可选 */ }
+  }
+  return true;
+}`;
+
+/** 回读元素实际内容；password 只给长度，绝不明文。 */
+const READ_TYPED_JS = `(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const isPassword = type === 'password' || ac.includes('password');
+  let raw = '';
+  if (el.isContentEditable
+      || el.getAttribute('contenteditable') === 'true'
+      || el.getAttribute('contenteditable') === '') {
+    raw = el.innerText || el.textContent || '';
+  } else if ('value' in el) {
+    raw = String(el.value ?? '');
+  } else {
+    raw = String(el.textContent ?? '');
+  }
+  if (isPassword) {
+    return { chars: raw.length, masked: true, text: null };
+  }
+  return { chars: Array.from(raw).length, masked: false, text: raw };
+}`;
+
+/** Click 前探针：disabled / role / name（事实回执，不改 click 行为）。 */
+const CLICK_PROBE_JS = `(ref) => {
+  const el = document.querySelector('[data-acref="' + ref + '"]');
+  if (!el) throw new Error('ref_not_found');
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const isPassword = type === 'password' || ac.includes('password');
+  const role = isPassword
+    ? 'password'
+    : (el.getAttribute('role') || (el.isContentEditable ? 'textbox' : el.tagName.toLowerCase()));
+  const was_disabled = !!(el.disabled
+    || el.getAttribute('aria-disabled') === 'true'
+    || el.hasAttribute('disabled'));
+  const nameSrc = el.getAttribute('aria-label') || el.textContent || el.getAttribute('placeholder') || '';
+  const name = String(nameSrc || '').trim().replace(/\\s+/g, ' ').slice(0, 100);
+  el.click();
+  return { was_disabled: was_disabled, role: role, name: name };
+}`;
+
+/** 每 WebContents 串行化 CDP attach，避免并发 type 互 detach。 */
+const cdpChains = new WeakMap<object, Promise<unknown>>();
+
+function enqueueCdp<T>(wc: WebContents, task: () => Promise<T>): Promise<T> {
+  const prev = cdpChains.get(wc) ?? Promise.resolve();
+  const run = prev.then(task, task);
+  // 吞掉后续链错误，避免永久卡死
+  cdpChains.set(
+    wc,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+/**
+ * 真实输入：CDP Input.insertText（CJK / emoji / 长文本 / contenteditable 均成立）。
+ * Electron 42+ debugger.sendCommand 返回 Promise；attach 仅本调用持有时 detach。
+ */
+async function typeViaCdpInsertText(
+  wc: WebContents,
+  text: string,
+): Promise<"cdp_insertText"> {
+  return enqueueCdp(wc, async () => {
+    const dbg = wc.debugger;
+    let attachedHere = false;
+    if (!dbg.isAttached()) {
+      dbg.attach("1.3");
+      attachedHere = true;
+    }
+    try {
+      // 替换语义：先清选区（Backspace 删选中），再插入。
+      await dbg.sendCommand("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+      await dbg.sendCommand("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+      if (text.length > 0) {
+        await dbg.sendCommand("Input.insertText", { text });
+      }
+      return "cdp_insertText" as const;
+    } finally {
+      if (attachedHere) {
+        try {
+          if (dbg.isAttached()) dbg.detach();
+        } catch {
+          /* 已脱离 / DevTools 接管 */
+        }
+      }
+    }
+  });
+}
 
 const hostsWithCleanup = new WeakSet<BrowserWindow>();
 
@@ -888,12 +1090,22 @@ export async function bridgeDispatchLocalBrowser(
             error: `ref 版本过期（快照 v${version} ≠ 当前 v${entry.snapshotVersion}）：页面已变化，请重新 browser_snapshot 获取最新 ref`,
           };
         }
-        await wc.executeJavaScript(
-          `(function(){ const el = document.querySelector('[data-acref="${ref.replace(/"/g, "")}"]'); if (!el) throw new Error('ref_not_found'); el.click(); })()`,
-        );
+        const probe = (await wc.executeJavaScript(
+          `(${CLICK_PROBE_JS})(${JSON.stringify(ref)})`,
+        )) as {
+          was_disabled?: boolean;
+          role?: string;
+          name?: string;
+        };
         const data = await bumpSnapshotAndState(entry, {
           capture: args.capture !== false,
         });
+        data.clicked = {
+          ref,
+          was_disabled: !!probe?.was_disabled,
+          role: typeof probe?.role === "string" ? probe.role : "",
+          name: typeof probe?.name === "string" ? probe.name : "",
+        };
         return { ok: true, data };
       }
       case "type": {
@@ -911,9 +1123,8 @@ export async function bridgeDispatchLocalBrowser(
             error: `ref 版本过期（快照 v${version} ≠ 当前 v${entry.snapshotVersion}）：页面已变化，请重新 browser_snapshot 获取最新 ref`,
           };
         }
-        const safeRef = ref.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
         const isPw = await wc.executeJavaScript(
-          `(function(){ const el = document.querySelector('[data-acref="${safeRef}"]'); if (!el) throw new Error('ref_not_found'); return (${IS_PASSWORD_JS})(el); })()`,
+          `(function(ref){ const el = document.querySelector('[data-acref="' + ref + '"]'); if (!el) throw new Error('ref_not_found'); return (${IS_PASSWORD_JS})(el); })(${JSON.stringify(ref)})`,
         );
         if (isPw) {
           return {
@@ -923,18 +1134,35 @@ export async function bridgeDispatchLocalBrowser(
           };
         }
         const text = String(args.text ?? "");
+        // 先聚焦并选中全部，再用 CDP 真实输入（替换契约）；禁 el.value= 直写。
         await wc.executeJavaScript(
-          `(function(){
-            const el = document.querySelector('[data-acref="${safeRef}"]');
-            if (!el) throw new Error('ref_not_found');
-            el.focus();
-            if ('value' in el) { el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); }
-            else { el.textContent = ${JSON.stringify(text)}; }
-          })()`,
+          `(${FOCUS_SELECT_JS})(${JSON.stringify(ref)})`,
         );
+        const method = await typeViaCdpInsertText(wc, text);
+        const readback = (await wc.executeJavaScript(
+          `(${READ_TYPED_JS})(${JSON.stringify(ref)})`,
+        )) as {
+          chars?: number;
+          masked?: boolean;
+          text?: string | null;
+        };
+        const requestedChars = Array.from(text).length;
+        const actualChars =
+          typeof readback?.chars === "number" ? readback.chars : 0;
+        const matched =
+          !readback?.masked &&
+          typeof readback?.text === "string" &&
+          readback.text === text;
         const data = await bumpSnapshotAndState(entry, {
           capture: args.capture !== false,
         });
+        data.typed = {
+          ref,
+          requested_chars: requestedChars,
+          actual_chars: actualChars,
+          matched,
+          method,
+        };
         return { ok: true, data };
       }
       case "scroll": {

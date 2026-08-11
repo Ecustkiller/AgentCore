@@ -158,6 +158,7 @@
   "projected": {
     "status": "running",
     "finishReason": null,
+    "error": null,
     "content": "我来分工。",
     "reasoning": "",
     "captainContext": [],

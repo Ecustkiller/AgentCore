@@ -6,6 +6,7 @@ import { applyTheme } from "./lib/theme";
 import { startOutboxReconcile } from "./services/outboxReconcile";
 import { installSidecarEventPump } from "./services/sidecarEventPump";
 import { installSidecarStatusListener } from "./services/sidecarStatus";
+import { liveStagingIds } from "./stores/composer";
 import { useUIStore } from "./stores/ui";
 import "./styles/globals.css";
 
@@ -19,6 +20,9 @@ installSidecarStatusListener();
 installSidecarEventPump();
 // Main-process outbox sync acks + exit flush (as-built: 前端技术 §7.2).
 startOutboxReconcile();
+// Reap attach-staging left by earlier sessions: drafts are capped, so an evicted
+// draft's staged bytes are unreachable and would otherwise never be freed.
+void window.fsApi?.sweepStagingOrphans?.(liveStagingIds());
 // Apply the persisted theme before the first paint to avoid a light→dark flash
 // (the store reads the saved choice from localStorage on creation).
 applyTheme(useUIStore.getState().theme);

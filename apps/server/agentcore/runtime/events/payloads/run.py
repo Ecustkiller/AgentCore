@@ -78,15 +78,18 @@ class RunPlanPayload(WirePayload):
     task_summary: str
     agents: list[PlanAgentPayload]
     runs: list[RunPlanRunEntry]
-    # 跨回合同图追加：生长帧归属的宿主助手消息（= 旧协作图所在 turn_id）。
-    # 缺省 = 本回合新建图（同回合二次 delegate 亦不带此字段，靠同 execution_id merge）。
+    # 已退役写入：旧 journal / 旧 divert 生长帧可能仍带；新路径不写。
+    # 缺省 = 本回合图（同回合二次 delegate 靠同 execution_id merge）。
     host_message_id: str | None = absent()
+    # 图间链（additive）：本回合新图的上一张协作图；旧客户端忽略即降级为独立图。
+    # 同回合合入 / adopt 热图 merge 不写此字段。
+    prev_execution_id: str | None = absent()
     # 幕声明（additive）：旧客户端 / 旧 journal 忽略；缺省时前端 fold 合成 act-1。
     act: RunPlanAct | None = absent()
 
 
 class GraphAppendPayload(WirePayload):
-    """跨回合同图追加锚点——落在【追加回合】journal；生长内容续写宿主 turn。"""
+    """已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 prev_execution_id。"""
 
     execution_id: str
     host_message_id: str
@@ -399,15 +402,18 @@ class UserInterjectionAttachment(WirePayload):
 
 
 class UserInterjectionPayload(WirePayload):
-    """Mid-flight user message into a live coordination turn (CEO routes).
+    """Mid-flight user interjection into a live turn (经典 steer + 协调插话共用).
 
-    Lifecycle (S1): ``received`` → ``addressed`` / ``queued`` / ``failed``.
+    Lifecycle:
+    - 协调: ``received`` → ``injected`` → ``addressed`` / ``queued`` / ``failed``
+    - 经典: ``received`` → ``injected`` (终态) / ``queued`` / ``failed``（无 ``addressed``）
+    ``injected`` = 内容真正写入模型上下文的那一刻。
     """
 
     interjection_id: str
     execution_id: str
     content: str
-    status: Literal["received", "addressed", "queued", "failed"]
+    status: Literal["received", "injected", "addressed", "queued", "failed"]
     note: str | None = absent()
     attachments: list[UserInterjectionAttachment] | None = absent()
 
@@ -446,20 +452,6 @@ class TurnQueueCancelledPayload(WirePayload):
 
     queue_id: str
     conversation_id: str
-
-
-class TurnSteerAcceptedPayload(WirePayload):
-    """Classic in-flight soft-insert ack (同对话再发 P1). EPHEMERAL — toast on live clients.
-
-    Emitted when ``delivery=steer`` was parked on the live turn's pending queue
-    (not FIFO). ``content`` may be truncated for the toast; injection uses the
-    full body at the next ReAct step boundary.
-    """
-
-    steer_id: str
-    conversation_id: str
-    content: str
-    pending: int
 
 
 class ResumeDeferredPayload(WirePayload):
@@ -533,7 +525,7 @@ class RunFailedPayload(WirePayload):
 class RunCancelledPayload(WirePayload):
     run_id: str
     agent_id: str
-    reason: Literal["redirect", "stop"]
+    reason: Literal["redirect", "stop", "user_stop"]
     execution_id: str | None = absent()
 
 

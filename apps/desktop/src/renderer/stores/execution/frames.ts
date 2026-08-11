@@ -146,7 +146,8 @@ export type RunFrame =
       kind: "run_cancelled";
       runId: string;
       agentId: string;
-      reason: "redirect" | "stop";
+      // 从契约派生：后端新增取值（如 user_stop）时编译期就逼消费方处理，避免帧类型漏跟。
+      reason: RunCancelledPayload["reason"];
     }
   | {
       // 级联跳过 / graceful abort: node never ran — materialised SKIPPED.

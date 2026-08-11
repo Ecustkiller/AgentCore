@@ -102,10 +102,86 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
       );
     });
 
+    it("可空标识缺省 / null / string 放行，数字与对象拒绝", () => {
+      expect(() =>
+        assertShape("c", { rootId: "r" }, ["rootId"], [], ["runId"]),
+      ).not.toThrow();
+      expect(() =>
+        assertShape(
+          "c",
+          { rootId: "r", runId: null },
+          ["rootId"],
+          [],
+          ["runId"],
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertShape(
+          "c",
+          { rootId: "r", runId: "member-1" },
+          ["rootId"],
+          [],
+          ["runId"],
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertShape("c", { rootId: "r", runId: 42 }, ["rootId"], [], ["runId"]),
+      ).toThrow(IpcInvalidArgsError);
+      expect(() =>
+        assertShape(
+          "c",
+          { rootId: "r", runId: { id: "x" } },
+          ["rootId"],
+          [],
+          ["runId"],
+        ),
+      ).toThrow(IpcInvalidArgsError);
+      try {
+        assertShape("c", { rootId: "r", runId: 42 }, ["rootId"], [], ["runId"]);
+      } catch (err) {
+        expect(err).toBeInstanceOf(IpcInvalidArgsError);
+        const e = err as IpcInvalidArgsError;
+        expect(e.field).toBe("runId");
+        expect(e.expected).toBe("string | null");
+      }
+    });
+
+    it("runStop：runId null（停整队）放行，脏值仍拒", () => {
+      const required = ["rootId", "conversationId", "executionId"] as const;
+      expect(() =>
+        assertShape(
+          "sidecar:runStop",
+          {
+            rootId: "r",
+            conversationId: "c",
+            executionId: "e",
+            runId: null,
+          },
+          required,
+          ["subpath"],
+          ["runId"],
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertShape(
+          "sidecar:runStop",
+          {
+            rootId: "r",
+            conversationId: "c",
+            executionId: "e",
+            runId: true,
+          },
+          required,
+          ["subpath"],
+          ["runId"],
+        ),
+      ).toThrow(IpcInvalidArgsError);
+    });
+
     it("未列入 optionalStrings 的对象载荷（permissionAxes）不拦合法 startTurn", () => {
       // 回归：权限轴迁到对象后，曾误把 permissionAxes 塞进 optionalStrings，
       // 导致每次本地回合 IPC 边界拒掉。寻址 string 校验 + 对象载荷透传才是正确姿态。
-      // folderId 可为 null（裸聊），同样勿列入 optionalStrings（否则 null 被拒）。
+      // folderId 等三态标识走 nullableIds（null=裸聊），勿塞进 optionalStrings。
       const startTurnRequired = [
         "rootId",
         "conversationId",
@@ -115,6 +191,11 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
         "userMessageId",
       ] as const;
       const startTurnOptionalStrings = ["subpath"] as const;
+      const startTurnNullableIds = [
+        "folderId",
+        "localRootId",
+        "localSubpath",
+      ] as const;
       expect(() =>
         assertShape(
           "sidecar:startTurn",
@@ -127,6 +208,8 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
             userMessageId: "u",
             subpath: "scratch",
             folderId: null,
+            localRootId: null,
+            localSubpath: null,
             permissionAxes: {
               file_write: "session",
               command: "kickoff",
@@ -136,6 +219,7 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
           },
           startTurnRequired,
           startTurnOptionalStrings,
+          startTurnNullableIds,
         ),
       ).not.toThrow();
     });
@@ -150,6 +234,11 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
         "note",
       ] as const;
       const resumeOptionalStrings = ["subpath", "userMessageId"] as const;
+      const resumeNullableIds = [
+        "folderId",
+        "localRootId",
+        "localSubpath",
+      ] as const;
       expect(() =>
         assertShape(
           "sidecar:resume",
@@ -171,6 +260,7 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
           },
           resumeRequired,
           resumeOptionalStrings,
+          resumeNullableIds,
         ),
       ).not.toThrow();
     });

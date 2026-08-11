@@ -9,8 +9,8 @@ plan_review machinery:
   ``decision=stop``). ``ADJUST`` is rejected (plan_review only).
 - :func:`_settle_resumed_suspension` applies the user's decision to a paused frame by
   kind: for ask_user it emits the journaled ``checkpoint_resolved``, drops off-menu
-  picks (same guard as the live tool), and never sets ``terminal_text`` (CEO always
-  resumes after settle).
+  picks (same guard as the live tool), and on a **first** STOP leaves ``terminal_text``
+  unset (CEO resumes). A second consecutive same-turn STOP upgrades to ``INTERACT``.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -167,8 +167,8 @@ def test_result_stop_feeds_ceo_with_cancel_guidance():
     assert res.final_text is None
     assert "取消了澄清" in res.output
     assert "先到这" in res.output
-    assert "勿用同一问句" in res.output
-
+    assert "默认据此收口" in res.output
+    assert "禁止】再弹 ask_user" in res.output or "再弹 ask_user" in res.output
 
 def test_result_stop_empty_note_still_feeds_ceo():
     res = ask_user_tool_result(

@@ -182,6 +182,19 @@ class LLMClientClosedError(LLMError):
         super().__init__(message, **kwargs)
 
 
+class LLMInvalidResponseError(LLMError):
+    """Upstream returned HTTP 2xx but the body is not usable JSON.
+
+    Typical BYOK/gateway cases: HTML login page, reverse-proxy interstitial, or
+    other non-OpenAI shells. Not retryable — the same endpoint will keep returning
+    the same shell. Side-path logs classify this as ``invalid_response`` so it
+    does not drown in the ``other`` bucket.
+    """
+
+    code = ErrorCode.LLM_ERROR
+    retryable = False
+
+
 def is_llm_client_closed_error(exc: BaseException) -> bool:
     """True for typed closed-client errors or httpx's RuntimeError wording."""
     if isinstance(exc, LLMClientClosedError):
@@ -388,6 +401,23 @@ class KeyStorageUnavailableError(AgentCoreError):
 
     code = ErrorCode.KEY_STORAGE_UNAVAILABLE
     status_code = 503
+
+
+class DatabaseUnavailableError(AgentCoreError):
+    """Primary DB pool exhausted or database unreachable for this request.
+
+    Maps to HTTP 503 with a stable product sentence (not a raw QueuePool /
+    driver traceback). Retryable: pool pressure and brief outages clear on
+    their own. Distinct from readiness: ``database_ready`` uses an isolated
+    probe connection so K8s does not confuse pool exhaustion with PG down.
+    """
+
+    code = ErrorCode.DATABASE_UNAVAILABLE
+    status_code = 503
+    retryable = True
+
+    def __init__(self, message: str = "AgentCore 服务暂时不可用，请稍后重试", **kwargs):
+        super().__init__(message, **kwargs)
 
 
 class ClientTooOldError(AgentCoreError):

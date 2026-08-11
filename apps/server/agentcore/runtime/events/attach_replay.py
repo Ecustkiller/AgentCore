@@ -40,6 +40,7 @@ _PROCESS_STRUCTURAL_SUFFIXES = frozenset(
         "escalation",
         "approval",
         "delegation_authorization",
+        "user_interjection",
     }
 )
 

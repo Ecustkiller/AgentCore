@@ -1183,6 +1183,10 @@ async def test_tape_followups_ignored_on_persist(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", FakeMetrics)
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: FakeSessionCM())
     monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.drain_cost_ledger_before_reconcile",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
         "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
         AsyncMock(return_value=[]),
     )

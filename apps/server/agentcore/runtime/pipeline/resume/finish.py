@@ -76,8 +76,10 @@ def finish_terminal_resume(
 ) -> dict:
     """Close a resumed turn whose settle returned terminal ``INTERACT`` (no CEO round).
 
-    Historically used for ask_user stop; that path now CONTINUE-feeds the CEO
-    (拒答可见). Kept for any settle that still sets ``terminal_text``. No CEO round
+    Historically used for ask_user stop; that path now CONTINUE-feeds the CEO on the
+    first stop (拒答可见). A second consecutive same-turn stop upgrades settle to
+    ``INTERACT`` again and lands here. Kept for any settle that still sets
+    ``terminal_text``. No CEO round
     runs — ``closing`` is the whole reply. The pre-pause CEO round that raised the
     checkpoint was never billed (the turn paused before persistence), and a
     terminal finish runs nothing new, so this turn bills nothing — consistent with

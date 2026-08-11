@@ -621,6 +621,24 @@ describe("showChanges / showFile / openTerminalTab（方案 B 顶栏 IA）", () 
     });
   });
 
+  it("showFile with workspaceId scopes tab identity to that desk", () => {
+    panel().showFile("notes.md", "notes.md", "folder:landed");
+    panel().showFile("notes.md", "notes.md", "folder:other");
+    panel().showFile("notes.md", "notes.md");
+    const fileTabs = panel().tabs.filter((t) => t.kind === "file");
+    expect(fileTabs).toHaveLength(3);
+    expect(fileTabs.map((t) => t.id)).toEqual([
+      fileTabId("notes.md", "folder:landed"),
+      fileTabId("notes.md", "folder:other"),
+      fileTabId("notes.md"),
+    ]);
+    expect(fileTabs[0]).toMatchObject({
+      kind: "file",
+      path: "notes.md",
+      workspaceId: "folder:landed",
+    });
+  });
+
   it("openFileTab without path creates an untitled empty file tab", () => {
     panel().openFileTab();
     const tab = panel().tabs[0];

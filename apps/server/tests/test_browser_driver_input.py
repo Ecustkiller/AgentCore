@@ -156,6 +156,38 @@ class _FakeLocator:
         self.filled = text
 
 
+class _FakePageForType:
+    """Page stub: evaluate routes FOCUS/READ JS; CDP insertText recorded on FakeCdp."""
+
+    def __init__(self, *, readback: dict) -> None:
+        self.url = "https://example.com/"
+        self._readback = readback
+        self.focus_refs: list[str] = []
+        self.evaluate_calls: list[tuple[object, object]] = []
+
+    async def title(self) -> str:
+        return "Example"
+
+    async def evaluate(self, js, arg=None):
+        self.evaluate_calls.append((js, arg))
+        src = str(js)
+        if "selectNodeContents" in src or "setSelectionRange" in src or "el.select" in src:
+            self.focus_refs.append(str(arg))
+            return True
+        if "masked" in src or "Array.from(raw)" in src:
+            return dict(self._readback)
+        if "querySelectorAll" in src:
+            return '[e1] textarea: composer | placeholder="…" | value="x"'
+        return None
+
+    def locator(self, _sel):
+        class _Body:
+            async def aria_snapshot(self):
+                return ""
+
+        return _Body()
+
+
 @pytest.mark.asyncio
 async def test_type_hard_rejects_password_without_fill():
     d = Driver()
@@ -171,19 +203,121 @@ async def test_type_hard_rejects_password_without_fill():
 
 
 @pytest.mark.asyncio
-async def test_type_fills_non_password():
+async def test_type_receipt_matched_true_via_cdp_insert_text():
+    """写入成功：typed.matched=true，method=cdp_insertText（与 Local 同形）。"""
     d = Driver()
     loc = _FakeLocator(is_password=False)
     d._resolve_ref = lambda _req: loc  # type: ignore[method-assign]
+    text = "你好👋"
+    page = _FakePageForType(
+        readback={"chars": len(text), "masked": False, "text": text},
+    )
+    d._page = page  # type: ignore[assignment]
+    cdp = FakeCdp()
+    d._cdp = cdp  # type: ignore[assignment]
 
-    async def _page_state(*, capture):
-        return {"final_url": "u", "title": "t"}
+    res = await d.type({"ref": "e1", "text": text, "capture": False})
+    assert page.focus_refs == ["e1"]
+    methods = [m for m, _ in cdp.calls]
+    assert "Input.insertText" in methods
+    assert methods.count("Input.dispatchKeyEvent") >= 2
+    insert = next(p for m, p in cdp.calls if m == "Input.insertText")
+    assert insert == {"text": text}
+    assert res["typed"] == {
+        "ref": "e1",
+        "requested_chars": len(text),
+        "actual_chars": len(text),
+        "matched": True,
+        "method": "cdp_insertText",
+    }
+    assert loc.filled is None  # 不再走 Playwright fill
 
-    d._page_state = _page_state  # type: ignore[method-assign]
 
-    res = await d.type({"ref": "e2", "text": "hello"})
-    assert loc.filled == "hello"
-    assert res["final_url"] == "u"
+@pytest.mark.asyncio
+async def test_type_receipt_matched_false_when_readback_diverges():
+    """写入未生效：回读与请求不一致 → matched=false（执行器只报事实）。"""
+    d = Driver()
+    loc = _FakeLocator(is_password=False)
+    d._resolve_ref = lambda _req: loc  # type: ignore[method-assign]
+    page = _FakePageForType(
+        readback={"chars": 0, "masked": False, "text": ""},
+    )
+    d._page = page  # type: ignore[assignment]
+    d._cdp = FakeCdp()  # type: ignore[assignment]
+
+    res = await d.type({"ref": "e2", "text": "hello draft", "capture": False})
+    assert res["typed"]["matched"] is False
+    assert res["typed"]["requested_chars"] == len("hello draft")
+    assert res["typed"]["actual_chars"] == 0
+    assert res["typed"]["method"] == "cdp_insertText"
+
+
+@pytest.mark.asyncio
+async def test_click_receipt_was_disabled_true():
+    """禁用元素（disabled / aria-disabled）→ clicked.was_disabled=true。"""
+    d = Driver()
+    d._resolve_ref = lambda _req: object()  # type: ignore[method-assign]
+
+    class _Page:
+        url = "https://example.com/"
+
+        async def title(self):
+            return "Example"
+
+        async def evaluate(self, js, arg=None):
+            src = str(js)
+            if "was_disabled" in src:
+                assert arg == "e2"
+                return {"was_disabled": True, "role": "button", "name": "Send"}
+            if "querySelectorAll" in src:
+                return "[e2] button disabled: Send"
+            return None
+
+        def locator(self, _sel):
+            class _Body:
+                async def aria_snapshot(self):
+                    return "- document"
+
+            return _Body()
+
+    d._page = _Page()  # type: ignore[assignment]
+    res = await d.click({"ref": "e2", "snapshot_version": 0, "capture": False})
+    assert res["clicked"] == {
+        "ref": "e2",
+        "was_disabled": True,
+        "role": "button",
+        "name": "Send",
+    }
+    assert "elements" in res
+    assert "aria" in res  # Sandbox 保留 Playwright aria_snapshot
+
+
+@pytest.mark.asyncio
+async def test_click_receipt_aria_disabled():
+    d = Driver()
+    d._resolve_ref = lambda _req: object()  # type: ignore[method-assign]
+
+    class _Page:
+        url = "u"
+
+        async def title(self):
+            return "t"
+
+        async def evaluate(self, js, arg=None):
+            if "was_disabled" in str(js):
+                return {"was_disabled": True, "role": "button", "name": "Go"}
+            return "[e1] button disabled: Go"
+
+        def locator(self, _sel):
+            class _Body:
+                async def aria_snapshot(self):
+                    return ""
+
+            return _Body()
+
+    d._page = _Page()  # type: ignore[assignment]
+    res = await d.click({"ref": "e1", "capture": False})
+    assert res["clicked"]["was_disabled"] is True
 
 
 @pytest.mark.asyncio

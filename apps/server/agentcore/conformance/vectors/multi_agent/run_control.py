@@ -370,3 +370,69 @@ def _multi_agent_run_redirect_cold_fallback() -> list[SSEEvent]:
         content_delta(" 团队已完成；调研由接手节点按新方向重跑。"),
         message_end(FinishReason.END_TURN, input_tokens=2200, output_tokens=450, cost=_COST),
     ]
+
+
+def _multi_agent_run_user_stop_worker() -> list[SSEEvent]:
+    """多 Agent · 用户只停一项工作：user「停这个 worker」cancels one in-flight run.
+
+    Emits ``run_cancelled(reason=user_stop)`` — not ``redirect`` (no hot/cold follow-up)
+    and not whole-turn ``stop``. Sibling completes; delegate returns successfully so the
+    CEO keeps the turn (``message_end`` end_turn, not cancelled). Pins: r1 cancelled with
+    user_stop, no ``_rev*`` / ``_redir`` nodes, r2 completed, turn continues."""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "thinking": True,
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "thinking": True,
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排两位并行推进。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        run_output_delta("r1", "w1", "调研进行中……"),
+        run_output_delta("r2", "w2", "撰写进行中……"),
+        # Per-worker stop: reason=user_stop, no hot/cold follow-up.
+        run_cancelled("r1", "w1", reason="user_stop"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_progress(1, 2),
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output="团队完成（用户停掉了调研员；撰写已完成）。",
+        ),
+        content_delta(" 撰写已完成；调研被用户中途停下，我继续收口。"),
+        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]

@@ -1,4 +1,4 @@
-// Conformance harness — runs a frontend `fold` against the backend-exported golden
+﻿// Conformance harness — runs a frontend `fold` against the backend-exported golden
 // vectors and reports ProjectedTurn drift (前端技术与架构 §十二).
 //
 // Vectors + golden are committed JSON under ./fixtures/, produced by the backend
@@ -10,6 +10,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SSEEvent } from "@agentcore/contract-types";
+import { hasProjectedFailureFace } from "./failureFace";
 import type { ProjectedTurn } from "./projectedTurn";
 import { isTurnFixture, type TurnFixtureWire } from "./fixtureKind";
 
@@ -104,10 +105,22 @@ export function runConformance(impl: { name: string; fold: Fold }): ConformanceR
   console.log(`\nconformance · ${impl.name} · ${fixtures.length} vectors`);
   for (const fx of fixtures) {
     let diffs: string[];
+    let actual: ProjectedTurn | null = null;
     try {
-      diffs = diffProjected(fx.projected, impl.fold(fx.events));
+      actual = impl.fold(fx.events);
+      diffs = diffProjected(fx.projected, actual);
     } catch (e) {
       diffs = [`(threw) ${e instanceof Error ? e.stack ?? e.message : String(e)}`];
+    }
+    // Empty-face redesign: empty_face_* vectors must fold to a non-empty face
+    // (structured error / failure finish; short exemptions in hasProjectedFailureFace).
+    if (fx.name.startsWith("empty_face_") && actual && diffs.length === 0) {
+      if (!hasProjectedFailureFace(fx.projected)) {
+        diffs.push("golden projected missing failure face (empty_face_*)");
+      }
+      if (!hasProjectedFailureFace(actual)) {
+        diffs.push("fold projected missing failure face (empty_face_*)");
+      }
     }
     if (diffs.length === 0) {
       passed++;

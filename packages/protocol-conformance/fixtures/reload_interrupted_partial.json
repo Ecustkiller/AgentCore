@@ -58,6 +58,7 @@
   "projected": {
     "status": "cancelled",
     "finishReason": "interrupted",
+    "error": null,
     "content": "根据现有信息，建议先做这一步",
     "reasoning": "先想一下方案。",
     "captainContext": [],

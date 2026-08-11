@@ -21,7 +21,7 @@ import { useArchiveConversation } from "@/hooks/useConversations";
 import { useDeleteFolder, usePermanentDeleteFolder } from "@/hooks/useFolders";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import { startNewConversation } from "@/lib/newConversation";
-import { notifyError, notifyInfo } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
@@ -112,9 +112,6 @@ export function WorkspaceGroupHeader({
       notifyError("批量归档失败");
       return;
     }
-    notifyInfo(`已归档 ${convs.length} 条对话`, {
-      description: folder.name,
-    });
   };
 
   const confirmDeleteFolder = async () => {

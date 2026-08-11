@@ -1522,6 +1522,33 @@ def test_safety_net_counts_rounds_not_calls_so_a_batch_is_one():
     assert c.convergence_action() is Intervention.CONTINUE  # 1 ≪ 6
 
 
+def test_all_fail_investigation_round_does_not_spend_budget():
+    """一轮内调查工具全失败：calls 照记，rounds 不扣；同目标 spin 仍推进。"""
+    c = _worker(finalize_rounds=6)
+    c.record([_fail("a", "web_search"), _fail("b", "file_read")])
+    assert c.investigation_calls == 2
+    assert c.investigation_rounds == 0
+    # Mix: one success in the batch → round counts once
+    c.record([_fail("c", "web_search"), _ok("d", "file_read")])
+    assert c.investigation_calls == 4
+    assert c.investigation_rounds == 1
+    # Same-target spin still advances on all-fail rounds (fingerprint bookkeeping)
+    spin = LoopController(
+        convergence_finalize_rounds=30,
+        convergence_spin_rounds=3,
+        investigation_tools=frozenset({"file_read"}),
+    )
+    fp = "same"
+    for _ in range(3):
+        spin.record(
+            [ToolAttempt(fingerprint=fp, tool_name="file_read", success=False)]
+        )
+        assert spin.convergence_action() is Intervention.CONTINUE
+    spin.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=False)])
+    assert spin.investigation_rounds == 0  # never succeeded
+    assert spin.convergence_action() is Intervention.FINALIZE  # spin still trips
+
+
 def test_safety_net_continues_below_the_bar_no_soft_nudge():
     # Below the high bar there is NO intervention at all (the old soft NUDGE is gone):
     # every round under finalize_rounds is a plain CONTINUE.

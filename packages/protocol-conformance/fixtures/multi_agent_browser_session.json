@@ -267,6 +267,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我安排调研员用浏览器实地看一下。 调研员已实地查看并记录关键帧。",
     "reasoning": "",
     "captainContext": [],

@@ -327,8 +327,9 @@ async def resume_chat_pipeline(
         if hydrated.from_turn_paused:
             controller_seed = mark_controller_after_settle(controller_seed, suspension)
 
-        # Terminal INTERACT settle (legacy / rare): closing text ends the turn
-        # without another CEO round. ask_user stop now CONTINUE-feeds the CEO.
+        # Terminal INTERACT settle: closing text ends the turn without another CEO
+        # round. First ask_user / kickoff stop CONTINUE-feeds the CEO; a second
+        # consecutive same-turn stop upgrades settle back to INTERACT.
         if settled.terminal_text is not None:
             if settled.terminal_text:
                 sink.emit(content_delta(settled.terminal_text))

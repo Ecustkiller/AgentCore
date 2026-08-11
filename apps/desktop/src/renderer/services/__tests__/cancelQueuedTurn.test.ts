@@ -2,7 +2,9 @@ import { ApiError, api } from "@/services/api";
 import {
   cancelQueuedTurn,
   clearQueuedTurnLocally,
+  steerQueuedTurn,
 } from "@/services/turns/cancelQueuedTurn";
+import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,16 +17,21 @@ vi.mock("@/services/api", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/turns/midFlight", () => ({
+  sendMidFlightMessage: vi.fn(),
+}));
+
 const post = vi.mocked(api.post);
+const sendMidFlight = vi.mocked(sendMidFlightMessage);
 const CID = "conv-cancel-q";
 
 /** Happy path：排队期无用户泡，仅条。 */
-function seedQueuedBarOnly() {
+function seedQueuedBarOnly(content = "queued") {
   useConversationStore.getState().switchConversation(CID);
   useQueuedTurnsStore.getState().upsert({
     queueId: "q1",
     conversationId: CID,
-    content: "queued",
+    content,
     position: 1,
     queueDepth: 1,
   });
@@ -56,6 +63,7 @@ function seedQueuedWithBubble() {
 
 beforeEach(() => {
   post.mockReset();
+  sendMidFlight.mockReset();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useQueuedTurnsStore.setState({ byConversation: {} });
 });
@@ -81,10 +89,10 @@ describe("clearQueuedTurnLocally", () => {
 });
 
 describe("cancelQueuedTurn", () => {
-  it("HTTP 成功 → 立刻本地清条（无泡）", async () => {
+  it("HTTP 成功 → 立刻本地清条（无泡）并返回 cancelled", async () => {
     seedQueuedBarOnly();
     post.mockResolvedValueOnce({});
-    await cancelQueuedTurn(CID, "q1");
+    await expect(cancelQueuedTurn(CID, "q1")).resolves.toBe("cancelled");
     expect(post).toHaveBeenCalledWith(
       `/v1/conversations/${CID}/queued-turns/q1/cancel`,
       {},
@@ -92,10 +100,10 @@ describe("cancelQueuedTurn", () => {
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });
 
-  it("404（已不在队）→ 同样本地清该项", async () => {
+  it("404（已不在队）→ 同样本地清该项并返回 already_gone", async () => {
     seedQueuedBarOnly();
     post.mockRejectedValueOnce(new ApiError(404, "{}"));
-    await expect(cancelQueuedTurn(CID, "q1")).resolves.toBeUndefined();
+    await expect(cancelQueuedTurn(CID, "q1")).resolves.toBe("already_gone");
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });
 
@@ -104,5 +112,75 @@ describe("cancelQueuedTurn", () => {
     post.mockRejectedValueOnce(new ApiError(500, "{}"));
     await expect(cancelQueuedTurn(CID, "q1")).rejects.toBeInstanceOf(ApiError);
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+  });
+
+  it("插话升队项亦可按 queue_id 取消", async () => {
+    useConversationStore.getState().switchConversation(CID);
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-ij",
+      conversationId: CID,
+      content: "来自插话",
+      position: 1,
+      queueDepth: 1,
+      interjectionId: "ij-1",
+    });
+    post.mockResolvedValueOnce({});
+    await expect(cancelQueuedTurn(CID, "q-ij")).resolves.toBe("cancelled");
+    expect(post).toHaveBeenCalledWith(
+      `/v1/conversations/${CID}/queued-turns/q-ij/cancel`,
+      {},
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+});
+
+describe("steerQueuedTurn", () => {
+  it("取消成功后以 delivery=steer 重发同内容", async () => {
+    seedQueuedBarOnly("please jump");
+    post.mockResolvedValueOnce({});
+    sendMidFlight.mockResolvedValueOnce({
+      kind: "received",
+      interjectionId: "ij1",
+    });
+
+    await steerQueuedTurn(CID, "q1");
+
+    expect(post).toHaveBeenCalledWith(
+      `/v1/conversations/${CID}/queued-turns/q1/cancel`,
+      {},
+    );
+    expect(sendMidFlight).toHaveBeenCalledTimes(1);
+    expect(sendMidFlight).toHaveBeenCalledWith(
+      CID,
+      "please jump",
+      undefined,
+      "steer",
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("404（已出队/竞态）→ 只清条、不重发", async () => {
+    seedQueuedBarOnly("already running");
+    post.mockRejectedValueOnce(new ApiError(404, "{}"));
+
+    await steerQueuedTurn(CID, "q1");
+
+    expect(sendMidFlight).not.toHaveBeenCalled();
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("取消失败 → 抛出、不重发、条仍在", async () => {
+    seedQueuedBarOnly("keep me");
+    post.mockRejectedValueOnce(new ApiError(500, "{}"));
+
+    await expect(steerQueuedTurn(CID, "q1")).rejects.toBeInstanceOf(ApiError);
+    expect(sendMidFlight).not.toHaveBeenCalled();
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+  });
+
+  it("本地已无该项 → no-op、不调 cancel/重发", async () => {
+    await steerQueuedTurn(CID, "missing");
+    expect(post).not.toHaveBeenCalled();
+    expect(sendMidFlight).not.toHaveBeenCalled();
   });
 });

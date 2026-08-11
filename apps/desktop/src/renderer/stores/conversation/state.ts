@@ -149,6 +149,10 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   stampAskMarker: (askId: string, conversationId?: string | null) => void;
+  stampUserInterjectionMarker: (
+    interjectionId: string,
+    conversationId?: string | null,
+  ) => void;
   stampPlanReviewMarker: (
     checkpointId: string,
     conversationId?: string | null,

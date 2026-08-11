@@ -11,7 +11,6 @@ import {
   sessionDeviceLabel,
   sessionLastActiveLabel,
 } from "@/lib/sessionDeviceLabel";
-import { notifySuccess } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import {
   type SessionSummary,
@@ -85,7 +84,6 @@ export function LoginSessionsSection() {
       setBusyId("others");
       try {
         await revokeOtherSessions();
-        notifySuccess("已退出其他所有设备");
         await refresh();
       } catch (e) {
         setActionError(errMsg(e, "操作失败，请重试"));
@@ -115,7 +113,6 @@ export function LoginSessionsSection() {
     setBusyId(session.id);
     try {
       await revokeSession(session.id);
-      notifySuccess("已退出该设备");
       await refresh();
     } catch (e) {
       setActionError(errMsg(e, "操作失败，请重试"));

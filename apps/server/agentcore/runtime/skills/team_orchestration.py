@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from agentcore.config import settings
 from agentcore.runtime.coordination.session import (
     DEFAULT_COORDINATION_BUDGET,
     MAX_COORDINATION_BUDGET,
 )
 from agentcore.runtime.runs.playbooks import available_playbooks
 from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
+
+# 探路轮上限唯一真源（局部拼接，与 RESEARCH_DIR / 协调预算同构）。
+_IR = str(settings.engine_team_gate_investigation_rounds)
 
 # playbook 降级为形状词汇教学示例（协作优先重设计阶段 2）：listing 仍嵌进 skill，口径改为对照学形状。
 _PLAYBOOK_LISTING = available_playbooks()
@@ -63,26 +67,29 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 组合：多对象+成篇 → 分组×流水线；构建+并行模块 → 契约共享面+独立验证；\
 审查要改 → 接有界返工环；结论真冲突 → 局部辩论；跨域合成一篇 → 少派串起，勿按工种堆人。
 
-【跨项目并行指挥】用户要多个项目同时推进时（例：「三项目并行…」「同时开发 A 和 B」）——整条用法：
+【跨项目并行指挥】用户要多个项目同时摸底/推进时（例：「摸底五个已登记项目」「同时开发 A 和 B」）——整条用法：
 1. **默认工作区=出生桌**：通用 `file_*` **只绑出生桌**（无换桌参数）。云端草稿身份 ≠「读不到已登记项目」。
-2. **只读跨桌摸底**：摸已登记项目 → `list_project_dir` / `read_project_file`\
-（`folder_id`+相对路径）；按次指定目标、**不**改会话挂载、**不**写目标桌记忆。\
+2. **跨项目一律派工换桌（读写通吃）**：对已登记项目的只读摸底与改盘/推进，一律同次 `delegate`，各 task 填\
+`target_folder_id=`已解析 id → 该 worker **坐那张桌**（`file_*` / 检索 / 记忆跟桌）；**不改**本会话 `folder_id`。\
+写不写盘由 write_scope/grant 正交（默认 none）。协作图不改（并行支线即表达）。\
+【禁止】派多人却不填 `target_folder_id`（会坐空 scratch 零产出）；\
+【禁止】指望队员持有跨桌 `list_project_dir`/`read_project_file`（仅 CEO 指挥面）。
+3. **CEO 认桌/抽样（非摸底主通道）**：派单前可用 `list_project_dir` / `read_project_file`\
+（`folder_id`+相对路径）轻量认桌或抽一眼；按次指定、**不**改挂载、**不**写目标桌记忆。\
+成规模跨项目摸底【禁止】用这两工具当主通道代替派工换桌。\
 【禁止】以「云端读不到本地」为由改绑 / `open_local_project` / `bind_local_folder` / \
 `external_mount_readonly` 冒充跨仓读。
-3. **指认（写/派工前）**：`list_projects` / `resolve_project`；唯一命中→用返回 id；0 命中或多名→\
+4. **指认**：`list_projects` / `resolve_project`；唯一命中→用返回 id；0 命中或多名→\
 `ask_user`（kind=choice；选项区分 name/mode 等）；**禁止**静默猜「最近」。
-4. **空壳/近空先问**：认到项目后，若 `<workspace_file_index>` 空或一眼近空 → **立刻** `ask_user`\
+5. **空壳/近空先问**：认到项目后，若 `<workspace_file_index>` 空或一眼近空 → **立刻** `ask_user`\
 钉各自目标 / 本轮交付 / 是否两线同开；【禁止】为确认空而连续 `file_list` 烧探路轮\
-（索引已空不必再付调查轮）。关键缺口未齐也可先短问，再动手翻仓。
-5. **写仍派工换桌**：用户确认后 → **同一次** `delegate` 扇出多 task（双项目常两路），各填\
-`target_folder_id=`已解析 id → 该 worker **换桌+记忆跟桌**；**不改**本会话 `folder_id`。\
-协作图不改（并行支线即表达）。【禁止】CEO 串行翻两空目录代替两路派工；\
-【禁止】指望只读跨桌工具写盘。
+（索引已空不必再付调查轮）。关键缺口未齐也可先短问，再动手翻仓。确认后 **同一次** `delegate` 扇出，各填 `target_folder_id`；\
+【禁止】CEO 串行翻多空目录代替派工。
 6. **默认桌（派工未点名）**：有出生、task 未点名 → 坐会话默认桌；**无出生且未点名**：\
-纯对话/只读（无写盘 deliverable）→ **可派**（worker 坐会话 scratch、`write_scope=none` 禁写）；\
+纯对话/只读（无写盘 deliverable、且**非**已登记名册目标）→ **可派**（worker 坐会话 scratch、`write_scope=none` 禁写）；\
 写盘任务（`form=files` / 非空 `artifacts`）→ 裸聊写盘缺桌由**运行时自动建云桌**，\
 【禁止】为过闸先 `create_project` / `ask_user` 建项；\
-多项目 / 已有名册目标 → 须点名 `target_folder_id` 或先 `list`/`resolve`/`ask_user` 再派\
+多项目 / 已有名册目标（含只读摸底）→ 须点名 `target_folder_id` 或先 `list`/`resolve`/`ask_user` 再派\
 （歧义才问，禁猜最近）。\
 【禁止】把「必须先建项目」当成唯一过闸路——已有项目列名点名即可；裸聊单目标写盘勿催建。
 7. **先建后派**（仅用户明确要求新建云项目 / 显式多线先建）：云→`create_project`\
@@ -101,10 +108,10 @@ Composer「导入到云 / 连接 Git」后再 `resolve`；\
 **不**覆盖一般「能少则少 / 拿不准先少派」。勿因拒闸把已声明多线塌成单线。
 9. **混部**：云+遗留 local 可同指挥面；多遗留 local 同回合可并行（每目标一桌）；\
 单线无法接通异根时诚实失败该线，勿因一失败拒整锅、勿硬装全成。
-10. **开发双仓 ≠ open/register/bind/挂载冒充**：同时**开发**两项目 = 名册指认 + \
-只读跨桌摸底（可选）+ `target_folder_id` 换桌写盘；\
+10. **开发双仓 ≠ open/register/bind/挂载冒充**：同时摸底/开发多项目 = 名册指认 + \
+`target_folder_id` 派工换桌（CEO 只读跨桌仅轻量认桌）；\
 【禁止】用 `external_mount_readonly` 乱挂文档/桌面/下载冒充跨项目开发桌\
-（挂载仅区外只读看目录，与写盘桌正交；看一眼再挂，勿当开工默认步）。
+（挂载仅区外只读看目录，与项目桌正交；看一眼再挂，勿当开工默认步）。
 
 三档：默认中档。轻=保底（构建类轻档也要「实现+独立验证」双人）；\
 重=任务规模大或用户点名才上。控税靠选档与按缝拆人，不靠默认单干、也不按工种凑满。
@@ -159,7 +166,7 @@ choice 服务下一步动作，【禁止】正文候选菜单再投卡催收敛�
 （如「打开 /app 白屏消失+snapshot 可见主内容」），【勿】默认全仓 tsc/pytest 冒充 UI 修好。\
 【已有多角调查/审查批、用户确认按结论修】→ **禁止**再套 \
 `repair_code` 冷开新三角色；手写 tasks + 对各调查 run 设 `continue_from_run_id`（可并行；\
-可改 task 正文/title，换马甲≠换职能；队员默认全开相关工具面，不必再填 tools）。\
+可改 task 正文/title，换马甲≠换职能；队员坐本任务桌用相关工具面，不必再填 tools 收窄）。\
 **禁止**把 `none` 当修码默认、禁止触顶后再派马甲从零读。\
 可用：""" + _PLAYBOOK_LISTING + """。槽位见 `delegate` 的 playbook_args。
 
@@ -182,7 +189,8 @@ task 正文不要再复述「输出 JSON / 必含章节」等格式条款。\
 结构细节留给 worker；勿把七维大纲整表塞进 `required_sections` 当蓝图（与下条「约束 vs 方案」同旨）。\
 **【同字面钉死】**`required_sections` 每个标题必须与 task/`team_brief` 验收口径、工人正文小标题\
 用**同一套原文**（引擎按小标题字面验收）；【禁止】brief 写「结论要点」而契约写「结论」、或工人改写成近义标题。\
-【禁止】为「少吓用户」而对用户藏起契约裸报错——缺章失败如实可见，靠上游钉字面少空转。
+【禁止】为「少吓用户」而瞒报失败/缺口——缺章失败须诚实可见；对用户用人话概括（见 CEO 核心【面向用户·大白话】），\
+勿改口称已过关。契约裸报错原文留在给模型看的通道（过程线/简报），靠上游钉字面少空转。
 - 审查类任务的统一契约（派【审查 / 质检 / 评审】worker 时【必设 deliverable】）：无论并行扇出\
 还是 `depends_on` 链下游，每个审查官 task 都必须带 `deliverable` 锁定统一输出形态——否则各审查官\
 各说各的、打分维度各异，你收工时难对齐。**【默认 prose】**（多路并行时各官 deliverable 完全一致，\
@@ -220,7 +228,8 @@ score（0–10））——`artifacts` 对账路径存在，`output_format=json` 
 `depends_on`，不能依赖 `file_read` 代替依赖声明。【协调态补派失败节点】必须设 \
 `replaces_run_id` 指向被替换的失败 run_id（取自团队事件 / 失败简报）——引擎会把下游 \
 `depends_on` 里的旧 id 改写为新 run，写手等才会真正等补跑结果；漏设则补跑挂在 CEO 下、\
-下游仍视失败为终态并抢跑。补跑按缺口点名、单次条数有硬闸（勿无缺口整团重开）。用 `result_handling`（`pass_through` 全文 / \
+下游仍视失败为终态并抢跑。补跑按缺口点名、单次条数有硬闸（勿无缺口整团重开）。\
+`replaces_run_id` / 补位等是工具通道用语；对用户只说「谁没交齐、我重新安排人补上」，勿复述字段名。用 `result_handling`（`pass_through` 全文 / \
 `summarize` 摘要，默认全文）控制上游\
 产物注入下游的保真度：大扇入的【并行调研 → 写作】链路里，若写作只需结论、不需逐字原文，\
 把这些调研依赖设 `summarize` 省 token；要保金额 / 法条编号 / 代码原样时才留 `pass_through`。\
@@ -245,7 +254,7 @@ lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `del
 禁止承诺 depth&gt;3。
 - 【编排自主·摸底波 / 专班 / 嵌套】（通用于审计、摸仓、大改、调研升档等；**非**某一 playbook 硬流程）——\
 由你（及拿到 `delegate` 的 lead）按证据自判，三选一或组合，**禁止**写死成「凡审计必两拨人 / 凡大活必嵌套」：\
-① **轻探即派**：范围缝已清（或探路 ≤5 轮已写出可并行子面）→ 一次扇出专班（如 `code_audit`+`modules`、\
+① **轻探即派**：范围缝已清（或探路 ≤""" + _IR + """ 轮已写出可并行子面）→ 一次扇出专班（如 `code_audit`+`modules`、\
 多角调研、多模块实现）；专班内部纪律（如审计员 A 宽扫→B 定案）≠ 根上再开一波摸底队。\
 ② **真两波摸底→专班**：范围大 / 不知怎么拆 / 怕 modules 扇错 → 先派摸底 worker（宜 ≥2 角并行、\
 `form=files` 落短笔记到约定文档或 prose 要点），再用 `depends_on` 同批串专班，或摸底后再 \
@@ -257,7 +266,7 @@ lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `del
 - 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
 该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只留给机械单步；只要可能要据结果\
 继续委派、或一次派了多个 worker，就别设。
-- 协调模式（默认开）：派【≥2 个】worker 时默认进入协调——`delegate` 立即返回『团队已启动』，\
+- 协调模式（默认开）：派【≥1 个】worker 时默认进入协调（含单 worker）——`delegate` 立即返回『团队已启动』，\
 团队后台跑，你边看边调（`cancel_worker` 中途终止 / `resolve_escalation` 仲裁阻塞升级 / \
 `update_synthesis` 仅在有语义增量——新中间结论、产出冲突、方向修正——时更新合成草稿；\
 完成进度与队员完成摘要系统已自动展示，勿为播报进度而更；无需处置的进展事件可短告知用户\
@@ -272,17 +281,16 @@ lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `del
     ) + """ 次、\
 随团队规模伸缩、上限 """ + str(MAX_COORDINATION_BUDGET) + """ 次；进度账耗尽后例行进展合并摘要，决策账专款专用不被挤占。\
 能一次派齐就派齐、放手让系统呈现进度；分批则把出手留给里程碑。\
-【跨回合延续】：默认新回合新建图；仅用户显式要求「往上个协作图 / 那支团队加人、接着干」时传 \
-`append_to_execution_id="latest"`（引擎解析本对话最近一张协作图；点名更早的图用回显 / \
-`<recent_team_graph>` 的精确 id）往旧图继续生长。未命中可追加图时引擎**自动降级**为不带 append \
-新建团队（回执写明「旧图已收口/未命中，已新开团队」），勿先硬失败再改口；同回合已有活跃协作图时\
-误传 latest 或显式同 execution_id 均并入当前图（等同不传 append），勿引导硬失败——直接再调 \
-delegate 追加即可。\
-追加成功的收尾口径 =「已往上方协作图追加 N 名成员」（生长在上方旧图，本回合只显示锚点），\
-勿说成新组建团队，也勿承诺「在同一回合的同一张图里」；追加且未 finalize 时可说「已追加、正在报到」。\
-**`resolve_escalation` 只在协调模式下可用**；单 worker 时阻塞升级直达用户，\
-你无法（也不应尝试）用本工具裁决。只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false`\
-显式退出。同步阻塞只出现在：单 worker、`finalize`、嵌套 lead、显式 `coordinate=false`、\
+【新回合新图】：新回合每次 `delegate`、每个辩论幕都锚一张当前回合的新协作图，\
+进度与节点【只计本图】、不混上一张的已完成节点。要接着上一支团队继续干时照旧传 \
+`append_to_execution_id`（`"latest"` 或精确 id）——它现在的语义是【新开一张图并链回那张】\
+（系统写 `prev_execution_id`），不再是把新人塞进上一回合的旧图；纯新任务不传。\
+向用户汇报用「新开一队、接续上一张图」口径，别说成同图追加。\
+同回合再调 `delegate` 并入当前活跃图见上。\
+**`resolve_escalation` 只在协调模式下可用**；无协调 session 时（`finalize` / 嵌套 lead / \
+`coordinate=false` / 把关闸开阻塞）升级直达用户，你无法（也不应尝试）用本工具裁决。\
+只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false` 显式退出。\
+同步阻塞只出现在：`finalize`、嵌套 lead、显式 `coordinate=false`、\
 含 `checkpoint_after` 把关节点且闸开（走阻塞等待，好让把关卡到点弹给用户）——这是预期，\
 别为进协调而去掉把关点。
 - 交付形态（`deliverable.form`，优先用）：产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / \
@@ -381,7 +389,8 @@ grep 全仓清单写进 task——细节靠 worker 自探。\
 - 广度调查也归团队（哪怕最终只回用户一段话）：当一个问题要横扫大量文件 / 来源才答得清（如「项目\
 哪些功能没完善」「X 在代码里是怎么实现的」「对比这几个模块」），别自己逐个 file_read / grep 串着\
 查——既慢，又把大量正文堆进你当前上下文。把调查按几个【独立角度】拆开（按模块 / 子系统 / 来源 / \
-对比维度），【一次 `delegate`】并行派出摸底 worker（它们同持检索工具）；在每个 task 里点明「回报\
+对比维度），【一次 `delegate`】并行派出摸底 worker（坐本任务桌用 `file_*`/检索；\
+跨已登记项目时各 task 须填 `target_folder_id`，队员拿不到跨桌 list/read_project）；在每个 task 里点明「回报\
 【精炼结论 + 关键证据指引（文件:行 / 链接）】，不要回贴整段文件正文」——回到你手里的便是 N 份短\
 摘要而非 N 份原文，你据此综述成给用户的答复。一起弄懂/多路摸清（未明示成文）【宜】\
 `parallel_brief`（少扇出，常 2 angles；【禁止】一上来 `research_report` 三路成文）；\

@@ -88,18 +88,32 @@ def test_turn_queue_started_payload():
     TurnQueueStartedPayload.model_validate(ev.payload)
 
 
-def test_turn_steer_accepted_payload():
-    from agentcore.runtime.events import turn_steer_accepted
-    from agentcore.runtime.events.payloads.run import TurnSteerAcceptedPayload
+def test_user_interjection_received_payload():
+    from agentcore.runtime.events import user_interjection
+    from agentcore.runtime.events.payloads.run import UserInterjectionPayload
 
-    ev = turn_steer_accepted(
-        steer_id="s1",
-        conversation_id="c1",
+    ev = user_interjection(
+        interjection_id="inj-1",
+        execution_id="exec-1",
         content="fix it",
-        pending=1,
+        status="received",
     )
-    assert ev.type is EventType.TURN_STEER_ACCEPTED
-    TurnSteerAcceptedPayload.model_validate(ev.payload)
+    assert ev.type is EventType.USER_INTERJECTION
+    assert ev.payload["status"] == "received"
+    UserInterjectionPayload.model_validate(ev.payload)
+
+
+def test_user_interjection_injected_status_accepted():
+    from agentcore.runtime.events import user_interjection
+    from agentcore.runtime.events.payloads.run import UserInterjectionPayload
+
+    ev = user_interjection(
+        interjection_id="inj-1",
+        execution_id="exec-1",
+        content="fix it",
+        status="injected",
+    )
+    UserInterjectionPayload.model_validate(ev.payload)
 
 
 async def _never() -> None:
@@ -227,7 +241,7 @@ async def test_coord_queue_skips_interjection(monkeypatch):
 
 
 async def test_classic_steer_parks_on_live_turn(monkeypatch):
-    """经典 in-flight + delivery=steer（accepting）→ 不入 turn_queue，发 turn_steer_accepted。"""
+    """经典 in-flight + delivery=steer（accepting）→ 不入 turn_queue，发 user_interjection(received)。"""
     from agentcore.api.routes.conversations import messages as messages_mod
     from agentcore.runtime.turn import steer as turn_steer_mod
 
@@ -237,7 +251,7 @@ async def test_classic_steer_parks_on_live_turn(monkeypatch):
     blocker = asyncio.create_task(_never())
     host_sink = EventSink()
     turn_runs.register(conversation_id=cid, task=blocker, sink=host_sink)
-    turn_steer_mod.begin_accepting(cid)
+    turn_steer_mod.begin_accepting(cid, execution_id="exec-classic")
 
     monkeypatch.setattr(
         "agentcore.runtime.coordination.session.active_coordination_for_conversation",
@@ -266,11 +280,12 @@ async def test_classic_steer_parks_on_live_turn(monkeypatch):
         )
         assert turn_queue.depth(cid) == 0
         assert turn_steer_mod.peek_count(cid) == 1
-        assert any(e.type is EventType.TURN_STEER_ACCEPTED for e in host_sink._history)  # noqa: SLF001
+        assert any(e.type is EventType.USER_INTERJECTION for e in host_sink._history)  # noqa: SLF001
         gen = resp.body_iterator
         first = await gen.__anext__()
-        assert "turn_steer_accepted" in first
+        assert "user_interjection" in first
         assert "wanted steer" in first
+        assert "received" in first
         await gen.aclose()
     finally:
         turn_steer_mod.end_accepting(cid)
@@ -374,6 +389,70 @@ async def test_cancel_queued_turn_route_404_and_success(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await blocker
         turn_queue.clear(cid)
+
+
+async def test_list_queued_turns_route_empty_interjection_and_isolation(monkeypatch):
+    """GET queued-turns: empty / interjection_id / cross-conversation isolation."""
+    from agentcore.api.routes.conversations import messages as messages_mod
+
+    cid_a = "c-list-queue-a"
+    cid_b = "c-list-queue-b"
+    turn_queue.clear(cid_a)
+    turn_queue.clear(cid_b)
+
+    monkeypatch.setattr(
+        messages_mod,
+        "_require_owned_conversation",
+        AsyncMock(return_value=None),
+    )
+
+    empty = await messages_mod.list_queued_turns(
+        conversation_id=cid_a,
+        user=SimpleNamespace(user_id="u1"),
+        conv_repo=MagicMock(),
+    )
+    assert empty.items == []
+
+    plain = new_queued_turn(content="普通排队", user_id="u")
+    from_inj = new_queued_turn(
+        content="插话升队",
+        user_id="u",
+        interjection_id="inj-list-1",
+    )
+    other = new_queued_turn(content="另一会话", user_id="u", interjection_id="inj-other")
+    turn_queue.enqueue(cid_a, plain)
+    turn_queue.enqueue(cid_a, from_inj)
+    turn_queue.enqueue(cid_b, other)
+
+    try:
+        resp_a = await messages_mod.list_queued_turns(
+            conversation_id=cid_a,
+            user=SimpleNamespace(user_id="u1"),
+            conv_repo=MagicMock(),
+        )
+        assert len(resp_a.items) == 2
+        assert resp_a.items[0].queue_id == plain.queue_id
+        assert resp_a.items[0].content == "普通排队"
+        assert resp_a.items[0].position == 1
+        assert resp_a.items[0].interjection_id is None
+        assert resp_a.items[1].queue_id == from_inj.queue_id
+        assert resp_a.items[1].content == "插话升队"
+        assert resp_a.items[1].position == 2
+        assert resp_a.items[1].interjection_id == "inj-list-1"
+
+        resp_b = await messages_mod.list_queued_turns(
+            conversation_id=cid_b,
+            user=SimpleNamespace(user_id="u1"),
+            conv_repo=MagicMock(),
+        )
+        assert len(resp_b.items) == 1
+        assert resp_b.items[0].queue_id == other.queue_id
+        assert resp_b.items[0].content == "另一会话"
+        assert resp_b.items[0].interjection_id == "inj-other"
+        assert resp_b.items[0].position == 1
+    finally:
+        turn_queue.clear(cid_a)
+        turn_queue.clear(cid_b)
 
 
 async def test_coord_steer_posts_interjection(monkeypatch):

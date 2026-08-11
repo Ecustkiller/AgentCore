@@ -54,6 +54,10 @@ class PersistenceSettings(BaseModel):
     # is far under, so it only trims abnormal bloat.
     max_instruction_docs: int = 32
     max_instruction_chars: int = 24_000
+    # CEO-only derived project catalog (跨项目找项目): max Folder rows injected as
+    # name＋画像首句. Separate from ``max_instruction_*`` so the list never evicts
+    # always memory / user rules from ``<rules>``. 0 = disable injection.
+    project_catalog_max_entries: int = 12
     # One-time file→document memory migration (§5.7 换底): copy file-backed memory into the
     # documents tree at startup. Idempotent + best-effort; safe to leave on (a no-op once done).
     memory_documents_migration_enabled: bool = True

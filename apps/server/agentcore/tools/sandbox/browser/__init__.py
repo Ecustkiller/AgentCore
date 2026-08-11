@@ -18,6 +18,8 @@ from agentcore.tools.sandbox.browser.protocol import (
     BrowserSessionProvider,
     BrowserSessionRequest,
     BrowserSessionsBusyError,
+    ClickedReceipt,
+    TypedReceipt,
 )
 
 __all__ = [
@@ -32,4 +34,6 @@ __all__ = [
     "BrowserSessionProvider",
     "BrowserSessionRequest",
     "BrowserSessionsBusyError",
+    "ClickedReceipt",
+    "TypedReceipt",
 ]

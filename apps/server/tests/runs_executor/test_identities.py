@@ -1,13 +1,15 @@
+import asyncio
 from dataclasses import replace
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.runtime.costing import WorkerResultAccumulator
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.executor.identities import LeadSubteam
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunPhase, RunSpec
+from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolResult, ToolSchema
@@ -16,6 +18,7 @@ from tests.runs_executor.conftest import (
     _ContentProvider,
     _ctx,
     _executor,
+    _flash_profiles,
     _ScriptedRounds,
 )
 
@@ -475,3 +478,115 @@ async def test_escalate_dep_kind_acks_with_replan_add_steer():
     assert ok.success is True and ok.is_terminal is False
     assert "replan" in ok.output
     assert "继续" in ok.output
+
+
+async def test_cancel_worker_keeps_escalations_and_member_usage():
+    """派 N 人、若干已 escalate、随后全部 cancel_worker → escalations / usage 不蒸发.
+
+    Pins the cancel-terminal honesty fix: CANCELLED RunState must still carry
+    transcript-harvested escalations and priced usage so BatchMetrics /
+    member ledger see the real failure mode instead of「从未派工」.
+    """
+
+    class _EscalateThenHang:
+        base_url = "http://test.invalid/v1"
+
+        def __init__(self, *, escalate_workers: int) -> None:
+            self._escalate_workers = escalate_workers
+            self.escalate_done = asyncio.Event()
+            self._escalated = 0
+            self._lock = asyncio.Lock()
+
+        async def stream(self, request):  # noqa: ANN001
+            already = any(m.role == "tool" for m in request.messages)
+            if already:
+                await asyncio.sleep(30)
+                yield LLMChunk(delta_content="unreachable")
+                return
+            async with self._lock:
+                idx = self._escalated
+                self._escalated += 1
+                done = self._escalated >= self._escalate_workers
+            # Every worker escalates then hangs on the next round so cancel_worker
+            # hits mid-flight AFTER escalate + usage are already on the transcript.
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id=f"e{idx}",
+                        function_name="escalate",
+                        arguments_delta=(
+                            f'{{"question": "Q{idx}?", '
+                            f'"assumption": "A{idx}", "blocking": false}}'
+                        ),
+                    )
+                ]
+            )
+            yield LLMChunk(
+                usage=TokenUsage(
+                    input_tokens=10_000 + idx,
+                    cache_miss_tokens=10_000 + idx,
+                    output_tokens=100,
+                )
+            )
+            if done:
+                self.escalate_done.set()
+            return
+
+    n = 3
+    plan, _ = build_run_plan(
+        [{"role": f"W{i}", "task": f"做{i}"} for i in range(n)],
+        id_prefix="c",
+    )
+    provider = _EscalateThenHang(escalate_workers=n)
+    reg = ToolRegistry()
+    reg.register(EscalateTool())
+    cancel_all = asyncio.Event()
+
+    async def _arm_cancel() -> None:
+        await provider.escalate_done.wait()
+        cancel_all.set()
+
+    arm = asyncio.create_task(_arm_cancel())
+    metrics: list[BatchMetrics] = []
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        profile_set=_flash_profiles(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    results = await WaveScheduler().run(
+        plan,
+        executor,
+        cancel_run_ids=lambda: frozenset(node.run_id for node in plan.nodes)
+        if cancel_all.is_set()
+        else frozenset(),
+        metrics_sink=metrics,
+    )
+    await arm
+
+    assert all(s.phase is RunPhase.CANCELLED for s in results.values())
+    assert all(len(s.escalations) == 1 for s in results.values())
+    assert {e["question"] for s in results.values() for e in s.escalations} == {
+        "Q0?",
+        "Q1?",
+        "Q2?",
+    }
+    assert all(s.usage.get("input", 0) > 0 for s in results.values())
+    assert all(s.cost for s in results.values())
+
+    m = metrics[0]
+    assert m.cancelled == n
+    assert m.completed == 0
+    assert m.escalations == n  # harvested off CANCELLED states, not evaporated
+
+    acc = WorkerResultAccumulator()
+    for node in plan.nodes:
+        acc.add_run(node, results[node.run_id], parent_run_id="ceo")
+    assert len(acc.run_ledger) == n
+    assert acc.usage["input"] == sum(s.usage["input"] for s in results.values())

@@ -164,6 +164,7 @@
   "projected": {
     "status": "cancelled",
     "finishReason": "cancelled",
+    "error": null,
     "content": "我来安排两位并行推进。",
     "reasoning": "",
     "captainContext": [],

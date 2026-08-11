@@ -6,6 +6,9 @@
 
 写盘通道不可用（``landing_failure_kind=channel_dead|write_failed``）时：缺/读不到
 配套 JSON 的**缺产物**失败不硬拒（归因走零写 soft tip）；已读到的 JSON 仍做字段语义校验。
+
+Markdown 报告已落盘、仅缺配套 ``*.audit.json`` 时：同样走缺产物降级（部分交付 /
+可补写修复），不判整节点 ``contract.failed``；已读到的 JSON 仍做字段语义校验。
 """
 
 from __future__ import annotations
@@ -117,6 +120,45 @@ def is_code_audit_landing_absence_failure(message: str) -> bool:
         return False
     body = text[len(STRUCTURE_FAILURE_PREFIX) :]
     return any(m in body for m in _LANDING_ABSENCE_MARKERS)
+
+
+def _path_matches_artifact(pattern: str, path: str) -> bool:
+    nk = path.replace("\\", "/").strip()
+    pat = pattern.replace("\\", "/").strip()
+    if not nk or not pat:
+        return False
+    return nk == pat or nk.endswith("/" + pat) or nk.endswith(pat)
+
+
+def code_audit_report_landed(
+    *,
+    artifacts: list[str],
+    workspace_paths: list[str] | None,
+    artifact_contents: dict[str, str] | None,
+) -> bool:
+    """True when a declared non-``*.audit.json`` artifact (typically Markdown) is on disk.
+
+    Used by :func:`~agentcore.runtime.runs.contract.check_contract` to demote
+    companion-JSON absence to partial delivery when the report body already landed.
+    """
+    report_pats = [
+        p.replace("\\", "/").strip()
+        for p in artifacts
+        if isinstance(p, str)
+        and p.replace("\\", "/").strip()
+        and not p.replace("\\", "/").endswith(".audit.json")
+    ]
+    if not report_pats:
+        return False
+    contents = artifact_contents or {}
+    paths = workspace_paths or []
+    for pat in report_pats:
+        for key, text in contents.items():
+            if _path_matches_artifact(pat, key) and (text or "").strip():
+                return True
+        if any(_path_matches_artifact(pat, wp) for wp in paths if isinstance(wp, str)):
+            return True
+    return False
 
 
 def _structure_fail(detail: str) -> str:
@@ -324,6 +366,7 @@ def _as_str(value: Any) -> str:
 __all__ = [
     "STRUCTURE_FAILURE_PREFIX",
     "code_audit_json_failures",
+    "code_audit_report_landed",
     "is_code_audit_landing_absence_failure",
     "is_code_audit_structure_failure",
     "normalize_audit_evidence",

@@ -8,37 +8,40 @@ import { useDisclosureStore } from "@/stores/disclosure";
 import type { ActKind } from "@/stores/execution";
 import { ArrowUp } from "lucide-react";
 
-/** 开新幕（辩论）锚点文案；同幕补派维持「追加 N 名成员」。 */
+/**
+ * 「续自上一张图」锚点文案。新路径（prev_execution_id）与旧 journal
+ *（graph_append）共用续自口径；辩论幕略作区分。
+ */
 export function graphAppendAnchorLabel(
-  addedCount: number,
   actKind?: ActKind | string | null,
 ): string {
-  const n = Math.max(0, addedCount | 0);
   if (actKind === "debate") {
-    return `↑ 开辩论幕·${n} 人进场`;
+    return "↑ 续自上一场辩论图";
   }
-  return `↑ 已往上方协作图追加 ${n} 名成员`;
+  return "↑ 续自上一张协作图";
 }
 
 /**
- * 跨回合同图追加锚点条——追加回合只挂这条「↑ 已往上方协作图追加 N 名成员」，
- * 点击平滑滚回宿主协作图卡片并展开。开辩论幕时文案区分；authorizedBy 作副文案。
+ * 协作图续自锚点——渲染在**当前**回合新图上，点击导航到上一张图。
+ *
+ * - 新路径：`prevExecutionId`（来自 `run_plan.prev_execution_id`）
+ * - 旧 journal：`hostMessageId`（来自 `graph_append` process 步）
  */
 export function GraphAppendAnchor({
+  prevExecutionId,
   hostMessageId,
-  addedCount,
   actKind,
   authorizedBy,
 }: {
-  hostMessageId: string;
-  addedCount: number;
+  prevExecutionId?: string | null;
+  hostMessageId?: string | null;
   actKind?: ActKind | string | null;
   authorizedBy?: string | null;
 }) {
   const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const label = graphAppendAnchorLabel(addedCount, actKind);
+  const label = graphAppendAnchorLabel(actKind);
   const authLabel = actAuthorizedByLabel(authorizedBy);
 
   return (
@@ -46,13 +49,28 @@ export function GraphAppendAnchor({
       type="button"
       data-testid="graph-append-anchor"
       onClick={() => {
-        const host = messages.find(
-          (m) => m.id === hostMessageId || m.serverMessageId === hostMessageId,
-        );
-        const focusId = host?.id ?? hostMessageId;
-        const slotId = host ? assistantProjectionId(host) : hostMessageId;
-        if (conversationId) {
-          // 展开宿主内联协作图（默认展开时清掉「已收起」偏离值）。
+        const prevId =
+          typeof prevExecutionId === "string" ? prevExecutionId.trim() : "";
+        const hostRef =
+          typeof hostMessageId === "string" ? hostMessageId.trim() : "";
+
+        const host = prevId
+          ? messages.find(
+              (m) =>
+                m.executionId === prevId ||
+                m.process?.some(
+                  (s) => s.kind === "team" && s.execution_id === prevId,
+                ),
+            )
+          : messages.find(
+              (m) => m.id === hostRef || m.serverMessageId === hostRef,
+            );
+
+        const focusId = host?.id ?? hostRef;
+        if (!focusId) return;
+        const slotId = host ? assistantProjectionId(host) : hostRef;
+        if (conversationId && slotId) {
+          // 展开目标内联协作图（默认展开时清掉「已收起」偏离值）。
           useDisclosureStore
             .getState()
             .setKey(`${conversationId}::${slotId}:inline-graph`, true, true);

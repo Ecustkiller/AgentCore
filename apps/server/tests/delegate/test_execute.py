@@ -1,5 +1,7 @@
 """Basic delegate execute, validation, events, and schema tests."""
 
+import asyncio
+
 import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import TokenUsage
@@ -537,9 +539,20 @@ async def test_worker_usage_accumulates_across_calls():
 
 
 async def test_emits_plan_and_lifecycle_events():
+    # 默认协调臂：lifecycle 在后台 drive；等 drive_task 后再读 sink。
+    from agentcore.runtime.coordination.session import (
+        active_coordination,
+        clear_active_coordination,
+    )
+
+    clear_active_coordination()
     sink = EventSink()
     t = tool(Provider(["X"]), sink=sink)
     await t.execute({"tasks": [{"role": "A", "task": "做A"}]}, ctx())
+    session = active_coordination("e")
+    assert session is not None and session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    clear_active_coordination("e")
     sink.close()
     types = [e.type async for e in sink]
     assert EventType.RUN_PLAN in types

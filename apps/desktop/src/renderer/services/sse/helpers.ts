@@ -5,14 +5,16 @@ import {
 } from "@/stores/conversation";
 import type { ProcessStep } from "@/types/events";
 
-/** Optional routing hint from an SSE payload (跨回合同图追加). */
+/** Optional routing hint from an SSE payload. */
 export type ExecRouteHint = {
+  /**
+   * Explicit host slot (`host_message_id` / `host_turn_id`).
+   * Kept for `execution_detached` / `execution_completed` and old-journal payloads —
+   * not a sticky cross-turn divert.
+   */
   host_message_id?: string;
   execution_id?: string;
 };
-
-/** Active divert: growth frames for this conversation land on the host slot. */
-const growthHostByConversation = new Map<string, string>();
 
 /** Resolve a server/client message id to the execution slot key (`serverMessageId ?? id`). */
 export function resolveExecSlotId(
@@ -46,30 +48,14 @@ export function findHostSlotForExecution(
   return null;
 }
 
-/** Begin diverting growth frames to the host graph (set on `graph_append` / append `run_plan`). */
-export function noteGraphAppendRedirect(
-  conversationId: string,
-  hostMessageId: string,
-): void {
-  const slot = resolveExecSlotId(conversationId, hostMessageId);
-  if (slot) growthHostByConversation.set(conversationId, slot);
-}
-
-/** Clear divert after the appending turn ends (message_end / error). */
-export function clearGraphAppendRedirect(conversationId: string): void {
-  growthHostByConversation.delete(conversationId);
-}
-
-/** Test helper. */
-export function clearAllGraphAppendRedirects(): void {
-  growthHostByConversation.clear();
-}
-
 /**
  * Resolve the execution slot for **growth** facts (run_plan / run_* / worker tools…).
  *
- * Priority: explicit `host_message_id` → `execution_id` host lookup → active divert
- * → latest assistant.
+ * Priority: explicit host slot (`host_message_id` / `host_turn_id`) → same
+ * `execution_id` host lookup (same-turn merge) → latest assistant.
+ *
+ * Cross-turn divert (sticky growth → previous bubble) was removed: new turns open
+ * their own graph; `prev_execution_id` is a UI back-link only.
  */
 export function execMessageId(
   conversationId: string,
@@ -87,9 +73,6 @@ export function execMessageId(
     const mapped = findHostSlotForExecution(conversationId, eid);
     if (mapped) return mapped;
   }
-
-  const sticky = growthHostByConversation.get(conversationId);
-  if (sticky) return sticky;
 
   return lastAssistantProjectionId(getRuntime(conversationId).messages);
 }

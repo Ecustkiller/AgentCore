@@ -88,8 +88,7 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
       };
       const share = await createShare(conversationId, options);
       setShares((prev) => [share, ...(prev ?? [])]);
-      const copied = await copyText(shareLink(share));
-      notifySuccess(copied ? "已创建链接并复制到剪贴板" : "已创建分享链接");
+      await copyText(shareLink(share));
     } catch (e) {
       notifyError(e, "创建分享链接失败");
     } finally {
@@ -108,7 +107,6 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
     setShares((prev) => prev?.filter((s) => s.id !== share.id) ?? null);
     try {
       await revokeShare(conversationId, share.id);
-      notifySuccess("已撤销分享链接");
     } catch (e) {
       notifyError(e, "撤销失败");
       setShares((prev) => [share, ...(prev ?? [])]);

@@ -131,6 +131,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "润色后的版本如下：……",
     "reasoning": "先理解用户的润色诉求。",
     "captainContext": [

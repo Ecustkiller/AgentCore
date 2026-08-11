@@ -199,7 +199,7 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
     expect(showFile).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTitle("在工作区预览 data.csv"));
-    expect(showFile).toHaveBeenCalledWith("data.csv", "data.csv");
+    expect(showFile).toHaveBeenCalledWith("data.csv", "data.csv", undefined);
     expect(openWorkspaceHtmlInBrowser).toHaveBeenCalledOnce();
   });
 
@@ -228,6 +228,35 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
     );
   });
 
+  it("非 HTML 产物带 workspaceId 时 showFile 跟落地桌；无则回退会话桌", () => {
+    vi.mocked(useConversationFileSource).mockReturnValue(sourceWithPreview);
+    vi.mocked(useConversationWorkspace).mockReturnValue(sessionWs);
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[
+          {
+            path: "notes.md",
+            name: "notes.md",
+            op: "write",
+            workspaceId: "folder:landed",
+          },
+          { path: "readme.md", name: "readme.md", op: "write" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("在工作区预览 notes.md"));
+    expect(showFile).toHaveBeenCalledWith(
+      "notes.md",
+      "notes.md",
+      "folder:landed",
+    );
+
+    fireEvent.click(screen.getByTitle("在工作区预览 readme.md"));
+    expect(showFile).toHaveBeenCalledWith("readme.md", "readme.md", undefined);
+  });
+
   it("无能力（本地会话 / web）：HTML 行回落 showFile 进文件视图", () => {
     renderCard(
       <FileArtifactsCard
@@ -239,7 +268,11 @@ describe("FileArtifactsCard — HTML 产物直达完整预览", () => {
     );
 
     fireEvent.click(screen.getByTitle("在工作区预览 site/index.html"));
-    expect(showFile).toHaveBeenCalledWith("site/index.html", "index.html");
+    expect(showFile).toHaveBeenCalledWith(
+      "site/index.html",
+      "index.html",
+      undefined,
+    );
     expect(openWorkspaceHtmlInBrowser).not.toHaveBeenCalled();
   });
 });

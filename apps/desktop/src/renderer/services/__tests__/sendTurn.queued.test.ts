@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// sendTurn × 发送即有流：POST 恒 SSE；排队态由 turn_queued → dispatch toast，
+// sendTurn × 发送即有流：POST 恒 SSE；排队态由 turn_queued → QueuedTurnsBar，
 // 同连接续流——不再有 SendOutcome.queued / watchQueuedTurn。
 vi.mock("@/hooks/useConversations", () => ({
   getConversations: vi.fn(() => []),
@@ -24,7 +24,6 @@ vi.mock("@/services/sidecarHealth", () => ({
   probeSidecar: vi.fn(),
   markSidecarUnhealthy: vi.fn(),
   clearSidecarHealth: vi.fn(),
-  takeCloudBridgeToastSlot: vi.fn(() => true),
 }));
 vi.mock("@/services/streamConversation", () => ({
   attachConversation: vi.fn(),

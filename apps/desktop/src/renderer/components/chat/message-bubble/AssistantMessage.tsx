@@ -22,8 +22,7 @@ import {
   errorActionForCode,
   formatAssistantErrorMessage,
   isEmptyResponseUserSurface,
-  syntheticErrorForEmptyFailure,
-  syntheticErrorForHardFailure,
+  resolveAssistantFailureFace,
   visibleMessageText,
 } from "@/lib/errors";
 import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
@@ -52,7 +51,6 @@ import { AlertTriangle, Check, Copy, KeyRound } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
-import { DeliveryStatusMount } from "./DeliveryStatusMount";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { SyncStatusHint } from "./SyncStatusHint";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
@@ -68,7 +66,7 @@ function SingleAgentDeliveryAndFiles({
   messageId: string;
   conversationId: string | null;
 }) {
-  // 可用性短问可在无 plan 的 CEO 回合复用 delivery_status——单 Agent 路径也要渲染对账提示/产物。
+  // 可用性短问可在无 plan 的 CEO 回合复用 delivery_status——单 Agent 路径也要渲染产物。
   const deliveryStatus = useExecutionStore(
     (s) => s.byId[messageId]?.deliveryStatus ?? null,
   );
@@ -78,7 +76,6 @@ function SingleAgentDeliveryAndFiles({
   );
   return (
     <>
-      <DeliveryStatusMount status={deliveryStatus} />
       {artifacts.length > 0 && (
         <FileArtifactsCard
           artifacts={artifacts}
@@ -92,7 +89,7 @@ function SingleAgentDeliveryAndFiles({
 
 function MultiAgentFileArtifacts({ messageId }: { messageId: string }) {
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  // 交付对账（同 execution_id 保最新）：partial/blocked 轻提示在产物清单上方。
+  // 交付对账（同 execution_id 保最新）→ 产物清单。
   const deliveryStatus = useExecutionStore(
     (s) => s.byId[messageId]?.deliveryStatus ?? null,
   );
@@ -101,14 +98,11 @@ function MultiAgentFileArtifacts({ messageId }: { messageId: string }) {
     [deliveryStatus],
   );
   return (
-    <>
-      <DeliveryStatusMount status={deliveryStatus} />
-      <FileArtifactsCard
-        artifacts={artifacts}
-        conversationId={conversationId}
-        turnKey={messageId}
-      />
-    </>
+    <FileArtifactsCard
+      artifacts={artifacts}
+      conversationId={conversationId}
+      turnKey={messageId}
+    />
   );
 }
 
@@ -125,16 +119,40 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const finishReason = !message.isStreaming
     ? (message.finishReason ?? message.runs?.finishReason)
     : undefined;
-  // Hard fail unique surface = red bar. Empty failures keep empty synthetic;
-  // body + finishReason=error without message.error must still synthesize
-  // (chip no longer paints「调用失败」).
+  // Execution / graph slot key = server turn id when stamped (pause/resume share it).
+  // ALSO the interaction lookup key: SSE / journal hydration writes interaction
+  // entries keyed by `serverMessageId ?? id` (execMessageId), so the query MUST use
+  // the same projection key — querying by the local client UUID silently missed
+  // every card (统一投影键, 时间线一期).
+  const projectionId = assistantProjectionId(message);
+  const { checkpoints, nonBlockingAsks, planReviews, teamPreviews } =
+    useMessageInteractionCards(conversationId, projectionId);
+  const hasDedicatedPauseOrAskUi =
+    checkpoints.length > 0 ||
+    nonBlockingAsks.length > 0 ||
+    planReviews.length > 0 ||
+    teamPreviews.length > 0;
+  // Empty-face redesign: single selector — structured error OR failure finish → face;
+  // short exemptions (user stop; paused/ask with dedicated card).
+  const resolvedFace = resolveAssistantFailureFace({
+    content: message.content,
+    isStreaming: message.isStreaming,
+    error: message.error,
+    runsError: message.runs?.error,
+    usageError: message.usage?.error,
+    finishReason,
+    hasDedicatedPauseOrAskUi,
+  });
+  // Prefer live message.error when it is the face source so context (diagnosis /
+  // upstream preview / credential_source) survives formatAssistantErrorMessage.
   const displayError =
-    message.error ??
-    (!message.isStreaming
-      ? !(message.content ?? "").trim()
-        ? syntheticErrorForEmptyFailure(finishReason, message.runs?.error?.code)
-        : syntheticErrorForHardFailure(finishReason, message.runs?.error)
-      : null);
+    resolvedFace == null
+      ? null
+      : message.error &&
+          (message.error.message?.trim() === resolvedFace.message ||
+            message.error.code === resolvedFace.code)
+        ? message.error
+        : resolvedFace;
   const errorAction = displayError
     ? errorActionForCode(displayError.code, {
         credentialSource: message.error?.context?.credential_source,
@@ -206,14 +224,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     prevDisplayRef.current = next.stableCited;
     return next;
   }, [message.content, citations]);
-  // Execution / graph slot key = server turn id when stamped (pause/resume share it).
-  // ALSO the interaction lookup key: SSE / journal hydration writes interaction
-  // entries keyed by `serverMessageId ?? id` (execMessageId), so the query MUST use
-  // the same projection key — querying by the local client UUID silently missed
-  // every card (统一投影键, 时间线一期).
-  const projectionId = assistantProjectionId(message);
-  const { checkpoints, nonBlockingAsks, planReviews, teamPreviews } =
-    useMessageInteractionCards(conversationId, projectionId);
   // 仅「仍会画存根」的 resolved 才藏正文；取消静默（stop / research_first）否则会空泡。
   const hideContentForCheckpoint = checkpoints.some(
     (c) => c.status === "resolved" && !isAskSilentResolvedDecision(c.decision),

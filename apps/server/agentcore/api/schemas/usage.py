@@ -23,14 +23,31 @@ class CostBreakdown(BaseModel):
     pricing_source: str = "curated"
 
 
+class UsageError(BaseModel):
+    """Structured turn error persisted on the messages.usage JSON column.
+
+    Pure-failure rows keep ``message.content`` empty and put the cause here (and on
+    journal ``turn_end.error``). REST must project this so reload can paint a face
+    even when the journal is sparse.
+    """
+
+    code: str
+    message: str
+
+
 class UsageBreakdown(BaseModel):
-    """Token counts (cache_hit + cache_miss == input; reasoning ⊆ output)."""
+    """Token counts (cache_hit + cache_miss == input; reasoning ⊆ output).
+
+    ``error`` is optional: present on failed / empty turns that stored a structured
+    cause on the usage column. Token fields may be zeros when only ``error`` is set.
+    """
 
     input: int
     output: int
     reasoning: int
     cache_hit: int
     cache_miss: int
+    error: UsageError | None = None
 
 
 class AgentCostLine(BaseModel):

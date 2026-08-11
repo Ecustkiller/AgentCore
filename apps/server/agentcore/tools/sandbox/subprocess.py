@@ -391,6 +391,15 @@ async def _cleanup_tempdir(path: str) -> None:
 class SubprocessSandbox:
     """Restricted subprocess sandbox for MVP code execution."""
 
+    # Set by ``health_check`` on failure so the caller can log a concrete reason
+    # instead of the opaque probe-fail marker (mirrors ``GVisorSandbox``).
+    _last_health_failure: tuple[str, str | None] | None = None
+
+    @property
+    def last_health_failure(self) -> tuple[str, str | None] | None:
+        """``(reason, detail)`` from the latest failed ``health_check``, else ``None``."""
+        return self._last_health_failure
+
     def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
             isolation="subprocess",
@@ -506,11 +515,20 @@ class SubprocessSandbox:
             await _cleanup_tempdir(tmpdir)
 
     async def health_check(self) -> bool:
-        """Verify the sandbox can execute code."""
+        """Verify the sandbox can execute code, recording why when it cannot."""
+        self._last_health_failure = None
         try:
             result = await self.execute(
                 ExecutionRequest(code="print('ok')", language="python", timeout_seconds=5)
             )
-            return result.success and "ok" in result.stdout
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - the probe must never raise into callers
+            self._last_health_failure = ("raised", f"{type(exc).__name__}: {exc}"[:200])
             return False
+        if result.success and "ok" in result.stdout:
+            return True
+        detail = (result.stderr or result.stdout or "").strip()[:200] or None
+        self._last_health_failure = (
+            f"exit={result.exit_code} duration_ms={result.duration_ms}",
+            detail,
+        )
+        return False

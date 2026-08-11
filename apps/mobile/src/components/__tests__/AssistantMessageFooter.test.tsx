@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import {
   AssistantMessageFooter,
-  DeliveryShortfallHint,
   FinishReasonChip,
 } from "@/components/AssistantMessageFooter";
 import type { ContextBlockWire } from "@agentcore/contract-types";
@@ -72,23 +71,6 @@ describe("FinishReasonChip", () => {
     const { container } = render(<FinishReasonChip reason="error" />);
     expect(container.textContent).toBe("");
     expect(screen.queryByTestId("finish-reason-chip")).toBeNull();
-  });
-});
-
-describe("DeliveryShortfallHint", () => {
-  it("shows partial/blocked only", () => {
-    const { rerender } = render(
-      <DeliveryShortfallHint
-        status={{ state: "partial", summary: "缺一份报告" }}
-      />,
-    );
-    expect(screen.getByTestId("delivery-shortfall-hint").textContent).toBe(
-      "缺一份报告",
-    );
-    rerender(
-      <DeliveryShortfallHint status={{ state: "delivered", summary: "ok" }} />,
-    );
-    expect(screen.queryByTestId("delivery-shortfall-hint")).toBeNull();
   });
 });
 

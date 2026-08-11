@@ -110,12 +110,32 @@ class KickoffSummary:
         return out
 
 
-def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
-    """Delegate card rows: role / task excerpt / depends_on / write capability / model."""
+# 无 Folder 时（裸聊 scratch / 未绑会话工作区）的人审可见落座文案——勿留空让前端猜。
+SESSION_DESK_LABEL = "本会话工作区"
+# Folder 行存在但名册未解析到显示名时的兜底（enrich 失败 / 空 name）。
+UNNAMED_DESK_LABEL = "未命名项目"
+
+
+def worker_rows(
+    plan: RunPlan,
+    *,
+    session_folder_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Delegate card rows: role / task / depends_on / write / model / desk seat.
+
+    Desk seat: ``RunSpec.target_folder_id`` else session birth folder; neither →
+    name-only ``本会话工作区`` (scratch). Call :func:`enrich_worker_desk_names`
+    before emit so Folder ids get real display names.
+    """
     from agentcore.runtime.debate.models import identity_from_route_key
     from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
 
     limit = PLAN_REVIEW_SUMMARY_CHARS
+    session_desk = (
+        session_folder_id.strip()
+        if isinstance(session_folder_id, str) and session_folder_id.strip()
+        else None
+    )
     rows: list[dict[str, Any]] = []
     for n in plan.nodes:
         task = (n.task or "").strip()
@@ -158,8 +178,51 @@ def worker_rows(plan: RunPlan) -> list[dict[str, Any]]:
                     row["origin"] = ident.origin
                 if ident.provider_id:
                     row["provider_id"] = ident.provider_id
+        # 落座桌：节点 target 优先，否则本会话工作区；皆无 → 仅显示名「本会话工作区」。
+        raw_target = getattr(n, "target_folder_id", None)
+        node_target = (
+            raw_target.strip()
+            if isinstance(raw_target, str) and raw_target.strip()
+            else None
+        )
+        desk_id = node_target or session_desk
+        if desk_id:
+            row["target_folder_id"] = desk_id
+            # Provisional until enrich; keeps new frames non-empty if enrich skipped.
+            row["target_folder_name"] = UNNAMED_DESK_LABEL
+        else:
+            row["target_folder_name"] = SESSION_DESK_LABEL
         rows.append(row)
     return rows
+
+
+async def enrich_worker_desk_names(
+    rows: list[dict[str, Any]],
+    *,
+    user_id: str,
+) -> None:
+    """Fill ``target_folder_name`` from the folder roster (in-place; soft on miss)."""
+    from agentcore.runtime.delegate.target_desktop import lookup_folder_display_names
+
+    ids = {
+        str(r["target_folder_id"]).strip()
+        for r in rows
+        if isinstance(r.get("target_folder_id"), str) and str(r["target_folder_id"]).strip()
+    }
+    names = await lookup_folder_display_names(ids, user_id=user_id) if ids else {}
+    for r in rows:
+        fid_raw = r.get("target_folder_id")
+        if not isinstance(fid_raw, str) or not fid_raw.strip():
+            r.pop("target_folder_id", None)
+            r["target_folder_name"] = SESSION_DESK_LABEL
+            continue
+        fid = fid_raw.strip()
+        r["target_folder_id"] = fid
+        resolved = names.get(fid)
+        if isinstance(resolved, str) and resolved.strip():
+            r["target_folder_name"] = resolved.strip()
+        else:
+            r["target_folder_name"] = UNNAMED_DESK_LABEL
 
 
 def delegate_kickoff_summary(
@@ -167,8 +230,9 @@ def delegate_kickoff_summary(
     *,
     tools: list[str] | None = None,
     intensity: str | None = None,
+    session_folder_id: str | None = None,
 ) -> KickoffSummary:
-    workers = worker_rows(plan)
+    workers = worker_rows(plan, session_folder_id=session_folder_id)
     return KickoffSummary(
         primitive="delegate",
         workers=workers,

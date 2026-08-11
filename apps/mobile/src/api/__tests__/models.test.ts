@@ -128,6 +128,33 @@ describe("profileSlotsSummary", () => {
     ).toBe("DeepSeek V4 Pro · GPT-4o");
   });
 
+  it("appends 后台 / 识图 only when configured (list rows stay compact)", () => {
+    expect(
+      profileSlotsSummary(CATALOG, {
+        id: "p3",
+        name: "分槽",
+        kind: "user",
+        main: {
+          origin: "byok",
+          model: "deepseek-v4-pro",
+          provider_id: "prov-deepseek",
+        },
+        worker: null,
+        background: {
+          origin: "byok",
+          model: "gpt-4o",
+          provider_id: "prov-openai",
+        },
+        vision: {
+          origin: "byok",
+          model: "gpt-4o",
+          provider_id: "prov-openai",
+        },
+        is_default: false,
+      }),
+    ).toBe("DeepSeek V4 Pro · 跟随主模型 · 后台 GPT-4o · 识图 GPT-4o");
+  });
+
   it("falls back to raw model id via slotDisplayName", () => {
     expect(
       slotDisplayName(CATALOG, {

@@ -1,6 +1,6 @@
 /**
  * 排队可见条：drain 前唯一排队 UI（不插主时间线用户泡），可按项取消（Stop ≠ 取消排队）。
- * 挂在 composer 上方。
+ * 挂在 composer 上方。插话升格项标「来自你的插话」；无「立刻插队」（手机维持现状）。
  */
 import { cancelQueuedTurn } from "@/api/turn";
 import {
@@ -54,6 +54,7 @@ function QueuedTurnRow({
   const [busy, setBusy] = useState(false);
   const preview =
     item.content.length > 48 ? `${item.content.slice(0, 48)}…` : item.content;
+  const fromInterjection = Boolean(item.interjectionId);
 
   const onCancel = async () => {
     if (busy) return;
@@ -76,6 +77,7 @@ function QueuedTurnRow({
       className="queued-turn-row"
       data-testid="queued-turn-row"
       data-queue-id={item.queueId}
+      data-from-interjection={fromInterjection ? "1" : undefined}
     >
       <Loader2 size={12} className="queued-turn-spinner" aria-hidden />
       <span className="queued-turn-preview">
@@ -83,7 +85,8 @@ function QueuedTurnRow({
         {item.queueDepth > 1
           ? `（第 ${item.position}/${item.queueDepth}）`
           : ""}
-        {item.degradedFrom === "steer" ? " · 插话暂不可用" : ""}：{preview}
+        {item.degradedFrom === "steer" ? " · 插话暂不可用" : ""}
+        {fromInterjection ? " · 来自你的插话" : ""}：{preview}
       </span>
       <button
         type="button"

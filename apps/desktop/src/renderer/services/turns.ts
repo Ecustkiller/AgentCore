@@ -17,6 +17,7 @@ export {
 export { runHydrateAttachSettle } from "./turns/hydrateAttachSettle";
 export { attachSidecarTurn } from "./turns/sidecarAttach";
 export { projectUnsyncedTurns } from "./turns/projectUnsynced";
+export { reconcileQueuedTurns } from "./turns/reconcileQueuedTurns";
 export { runRegenerate, runResume } from "./turns/regenerate";
 export {
   sendTurn,

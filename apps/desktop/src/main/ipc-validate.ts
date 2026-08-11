@@ -15,7 +15,7 @@
  * 「抛出式」两个入口。校验只覆盖**寻址 / 标识类字符串字段**（rootId / relPath / op 等——它们
  * 决定碰哪个根、哪条路径、哪种操作）；数据载荷（content / args / history / permissionAxes
  * 等）的语义仍由各自下游负责，本层不深校验，保持「薄」——**勿把对象载荷塞进
- * `optionalStrings`**，否则合法请求会被拒（见 permissionAxes 回归）。
+ * `optionalStrings` / `nullableIds`**，否则合法请求会被拒（见 permissionAxes 回归）。
  */
 
 /** 是否为非 null 对象（数组也算对象，留给后续键校验筛除）。 */
@@ -61,18 +61,21 @@ export class IpcInvalidArgsError extends Error {
 }
 
 /**
- * 校验 payload 含全部 `required` string 字段、且 `optionalStrings`（若出现）也为 string；
- * 不满足即抛 {@link IpcInvalidArgsError}。「抛出式」入口——给「契约即失败=reject」的句柄
- * （sidecar：startTurn/resume 等本就以 reject 让 renderer 降级，边界抛出语义与之一致）。
+ * 校验 payload 含全部 `required` string 字段、且 `optionalStrings`（若出现）也为 string、
+ * 且 `nullableIds`（若出现）为 `string | null`；不满足即抛 {@link IpcInvalidArgsError}。
+ * 「抛出式」入口——给「契约即失败=reject」的句柄（sidecar：startTurn/resume 等本就以
+ * reject 让 renderer 降级，边界抛出语义与之一致）。
  *
- * `optionalStrings` **只**列可选 string 寻址/标识字段；对象业务载荷（如
- * `permissionAxes`）不要放进来——本层刻意不校验它们。
+ * - `optionalStrings`：**可缺省**；一旦出现必须是 string（`null` 不合法）。
+ * - `nullableIds`：三态标识（`string | null | undefined`）——如 `runId`（null=停整队）、
+ *   `folderId`（null=裸聊）。对象业务载荷（如 `permissionAxes` / `accountAuth`）不要放进来。
  */
 export function assertShape(
   channel: string,
   payload: unknown,
   required: readonly string[],
   optionalStrings: readonly string[] = [],
+  nullableIds: readonly string[] = [],
 ): void {
   if (!isRecord(payload)) {
     throw new IpcInvalidArgsError(channel, "(payload)", "object");
@@ -86,6 +89,12 @@ export function assertShape(
     const value = payload[key];
     if (value !== undefined && typeof value !== "string") {
       throw new IpcInvalidArgsError(channel, key, "string");
+    }
+  }
+  for (const key of nullableIds) {
+    const value = payload[key];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new IpcInvalidArgsError(channel, key, "string | null");
     }
   }
 }

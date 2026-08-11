@@ -25,8 +25,7 @@ skip_if:
 - **`turn_queued`**（✅ EPHEMERAL）：同对话 FIFO 排队确认（`queue_id` / `position` / `queue_depth`；经典+steer 回落时带 `degraded_from: "steer"`）。协调插话升 FIFO 时亦向 live sink 发射（可进条、可取消）。
 - **`turn_queue_started`**（✅ EPHEMERAL）：FIFO 出队开跑（`queue_id` / `conversation_id` / `remaining_depth`）；`pop_next` 后、`stream_chat` 前作为**新回合 sink 首帧**（先于 `message_start`）。客户端据此清该 `queue_id` 轻态——**否决**靠 `message_start` 猜出队。
 - **`turn_queue_cancelled`**（✅ EPHEMERAL）：按项取消成功（`queue_id` / `conversation_id`）；多端清 UI。语义 → [运行时三模型 · 同对话再发](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)。
-- **`turn_steer_accepted`**（✅ EPHEMERAL）：经典 in-flight 软插入确认（`steer_id` / `conversation_id` / 截断 `content` / `pending`）；toast「已插入，下一工具步生效」。**勿**复用 `user_interjection`。→ 见代码：`runtime/events/run.py:turn_steer_accepted` · `runtime/turn/steer.py`
-- **`user_interjection`**（✅ DURABLE）：协调中 Steer 插话；同 `interjection_id` 保最新 `status`（received / addressed / queued / failed）。→ 见代码：`runtime/events/run.py:user_interjection`
+- **`user_interjection`**（✅ DURABLE）：运行中插话（经典 steer + 协调共用）；同 `interjection_id` 保最新 `status`。协调：`received` → `injected` → `addressed` / `queued` / `failed`；经典：`received` → `injected`（终态）/ `queued` / `failed`（无 `addressed`）。`injected` = 内容真正进模型上下文。POST 短流 ack 看 `received`。→ 见代码：`runtime/events/run.py:user_interjection` · `runtime/turn/steer.py` · `runtime/coordination/interjections.py`
 - **`workspace_lock_wait`**（✅ EPHEMERAL）：同 folder 写锁短等（A′ 后仅写路径争用）；`waiting` 进出。桌面空气泡「等待工作区…」——**不得静默等锁** / 禁空 Thinking… 冒充。与同对话 `turn_queued` 正交。→ 见代码：`workspace/locks.py` · `runtime/events/run.py:workspace_lock_wait`
 - **`run_failed.failure_kind`**（✅ additive）：协作图失败脸优先按此类贴文案——`quality`→「未达标」、`format`→「格式未过」（结构/格式闸：code_audit·缺章节·JSON）、`model`→「模型中断」、`call`→「调用失败」；缺省→「失败」/空 error「调用失败」。禁前端扫正文猜脸。→ 见代码：`RunFailureKind` · `runtime/events/payloads/run.py`
 

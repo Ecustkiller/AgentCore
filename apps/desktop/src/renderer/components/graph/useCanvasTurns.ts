@@ -1,6 +1,7 @@
 /** Turn spine: hydrate journal, fold messages → turns (LOD nodes built in useCanvasFlow). */
 
 import { visibleMessageText } from "@/lib/errors";
+import { isUndismissedRecoverable } from "@/lib/turnRecoverable";
 import {
   assistantProjectionId,
   useActiveMessages,
@@ -11,12 +12,10 @@ import {
   projectRuntime,
   useExecutionStore,
 } from "@/stores/execution";
+import { useRecoveryDismissedStore } from "@/stores/recoveryDismissed";
 import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-import {
-  countPendingDecisions,
-  isTurnRecoverable,
-} from "./CanvasDecisionPanel";
+import { countPendingDecisions } from "./CanvasDecisionPanel";
 import type { TurnRailItem } from "./CanvasTurnRail";
 
 export const TURN_NODE_WIDTH = 320;
@@ -87,6 +86,8 @@ export function useCanvasTurns({
   const teamRuntimes = useExecutionStore(
     useShallow((s) => teamTurnIds.map((id) => s.byId[id])),
   );
+  // Subscribe to the Set so dismiss flips recompute rail / fold chips same frame.
+  const dismissed = useRecoveryDismissedStore((s) => s.dismissed);
 
   useEffect(() => {
     const store = useExecutionStore.getState();
@@ -127,7 +128,7 @@ export function useCanvasTurns({
           pendingDecisions: countPendingDecisions(m, exec, {
             conversationId,
           }),
-          recoverable: isTurnRecoverable(exec),
+          recoverable: isUndismissedRecoverable(turnId, exec, dismissed),
         });
       } else {
         out.push({
@@ -145,7 +146,7 @@ export function useCanvasTurns({
       }
     }
     return out;
-  }, [messages, teamRuntimes, conversationId]);
+  }, [messages, teamRuntimes, conversationId, dismissed]);
 
   const latestTeamId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {

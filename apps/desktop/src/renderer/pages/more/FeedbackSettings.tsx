@@ -1,5 +1,4 @@
 import { Button, Card, Input, Textarea } from "@/components/ui";
-import { notifySuccess } from "@/lib/toast";
 import { ApiError, api } from "@/services/api";
 import { Loader2 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
@@ -129,7 +128,6 @@ export function FeedbackSettings() {
         description: trimmedDescription,
         page_context: window.location.hash || null,
       });
-      notifySuccess("反馈已提交，感谢你的意见！");
       setCategory("bug");
       setTitle("");
       setDescription("");

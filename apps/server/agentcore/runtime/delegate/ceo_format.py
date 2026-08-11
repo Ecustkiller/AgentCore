@@ -98,9 +98,7 @@ def _motion_card_guidance(*, auto_adopt: bool) -> str:
     )
 
 
-def motion_cards_block(
-    products: list[dict[str, Any]], *, auto_adopt: bool = False
-) -> str:
+def motion_cards_block(products: list[dict[str, Any]], *, auto_adopt: bool = False) -> str:
     """CEO-facing「建议开辩」section, or "" when no worker submitted a motion_card."""
     cards = [
         (wp["role"], wp["run_id"], wp["motion_card"])
@@ -115,9 +113,40 @@ def motion_cards_block(
     return (
         "\n### 建议开辩（队员提交的命题卡）\n"
         "以下是队员在完工交接中提交的结构化命题卡（发现【必须对抗交锋】的核心争议时才会出现）。"
-        f"{_motion_card_guidance(auto_adopt=auto_adopt)}\n\n"
-        + body
+        f"{_motion_card_guidance(auto_adopt=auto_adopt)}\n\n" + body
     )
+
+
+def _user_facing_file_locations(state: RunState) -> str:
+    """User-visible path footer from ``file_acceptance`` only (no ``files_touched``).
+
+    Single-worker ``direct_result`` has no CEO synthesis pass, so accepted paths must
+    be appended here or the turn ends without telling the user where files landed.
+    Wording is end-user facing (where / how to open), not the CEO-facing citation block.
+    """
+    if not state.file_acceptance:
+        return ""
+    from agentcore.runtime.runs.file_acceptance import accepted_paths
+
+    files = accepted_paths(state.file_acceptance)
+    rejected: list[tuple[str, str]] = []
+    for row in state.file_acceptance:
+        if not isinstance(row, dict) or row.get("status") != "rejected":
+            continue
+        path = str(row.get("path") or "").strip()
+        if not path:
+            continue
+        detail = str(row.get("detail") or row.get("reason") or "").strip()
+        rejected.append((path, detail))
+    parts: list[str] = []
+    if files:
+        listed = "、".join(f"`{p}`" for p in files)
+        parts.append(f"文件位置：{listed}（可在工作区文件页打开）")
+    if rejected:
+        bits = [f"`{p}`" + (f"（{detail}）" if detail else "") for p, detail in rejected[:8]]
+        # Honest residual: completed runs can still carry path-level rejections.
+        parts.append(f"以下文件未通过验收：{'、'.join(bits)}")
+    return "\n".join(parts)
 
 
 def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
@@ -127,6 +156,9 @@ def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
     # into ``content`` (that hard footer caused duplicate「建议下一步」with the structured card).
     # Optional motion_card still needs a user-visible cue when there is no CEO synthesis pass.
     text = state.content
+    file_footer = _user_facing_file_locations(state)
+    if file_footer:
+        text = f"{text}\n\n{file_footer}"
     debrief = state.debrief if isinstance(state.debrief, dict) else None
     card = (debrief or {}).get("motion_card") if debrief else None
     if isinstance(card, dict):
@@ -139,8 +171,7 @@ def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
             )
         else:
             footer = (
-                "**建议开辩**（系统登记阶段推进卡；【勿口头征求开辩同意】；"
-                "本回合勿直接开辩）\n"
+                "**建议开辩**（系统登记阶段推进卡；【勿口头征求开辩同意】；本回合勿直接开辩）\n"
             )
         text = f"{text}\n\n---\n{footer}" + _format_motion_card_block("队员", card)
     tool._sink.emit(content_delta(text))
@@ -257,7 +288,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         st = results.get(node.run_id)
         # Only COMPLETED products are pass_through / pointer. FAILED nodes often
         # still carry a body (contract miss after retries) — that must surface as
-        #「失败：…」via the error branch below, never as a fake delivered product.
+        # 「失败：…」via the error branch below, never as a fake delivered product.
         if not st or st.phase is not RunPhase.COMPLETED:
             return "none"
         # File producers: empty prose + files_touched still → pointer (brief / paths).
@@ -485,9 +516,7 @@ def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) 
 
     replaced_ids = {n.replaces_run_id for n in plan.nodes if n.replaces_run_id}
     replace_by: dict[str, str] = {
-        n.replaces_run_id: (n.role or n.run_id)
-        for n in plan.nodes
-        if n.replaces_run_id
+        n.replaces_run_id: (n.role or n.run_id) for n in plan.nodes if n.replaces_run_id
     }
     completed = failed = skipped = cancelled = other = 0
     failed_lines: list[str] = []
@@ -565,9 +594,7 @@ def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) 
     if failed_lines:
         lines.append("失败节点：\n" + "\n".join(failed_lines))
     if budget_skip_lines:
-        lines.append(
-            "因额度跳过、从未开跑（下一回合可续）：\n" + "\n".join(budget_skip_lines)
-        )
+        lines.append("因额度跳过、从未开跑（下一回合可续）：\n" + "\n".join(budget_skip_lines))
     if cancel_cascade_lines:
         lines.append(
             "上游取消导致下游未跑（仅严格 require_upstream 或零成功时）：\n"
@@ -624,9 +651,7 @@ def format_for_ceo(
             else:
                 gaps.append((role, rows))
     audit_off_token = _audit_off_with_token_budget_gap(plan, gaps)
-    gaps_block = format_worker_gaps_block(
-        gaps, audit_off_with_token_budget=audit_off_token
-    )
+    gaps_block = format_worker_gaps_block(gaps, audit_off_with_token_budget=audit_off_token)
     if gaps_block:
         lines.append(gaps_block)
 
@@ -671,8 +696,7 @@ def format_for_ceo(
     debate_tail = ""
     if cards_block:
         debate_tail = (
-            "有【建议开辩】卡：择优后可直接调 debate"
-            "（background 只汇编事实）。\n"
+            "有【建议开辩】卡：择优后可直接调 debate（background 只汇编事实）。\n"
             if auto_adopt
             else "有【建议开辩】卡：概览呈报命题+各方；勿口头征求、本回合勿直接 debate。\n"
         )

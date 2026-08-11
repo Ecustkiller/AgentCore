@@ -118,6 +118,15 @@ class ProcessStageCardStep(WirePayload):
     stage_card_id: str
 
 
+class ProcessUserInterjectionStep(WirePayload):
+    """用户运行中插话的时间线落点：插话真实发生在回合中途，marker 钉住它的发生位置，
+    避免气泡统一堆到回合末尾造成因果倒置。同 `interjection_id` 只落一次（首次 received），
+    正文与五态由旁路 `userInterjections` 按 id 查。"""
+
+    kind: Literal["user_interjection"]
+    interjection_id: str
+
+
 PROCESS_STEP_MEMBERS: tuple[type[WirePayload], ...] = (
     ProcessReasoningStep,
     ProcessContentStep,
@@ -133,4 +142,5 @@ PROCESS_STEP_MEMBERS: tuple[type[WirePayload], ...] = (
     ProcessApprovalStep,
     ProcessDelegationAuthorizationStep,
     ProcessStageCardStep,
+    ProcessUserInterjectionStep,
 )

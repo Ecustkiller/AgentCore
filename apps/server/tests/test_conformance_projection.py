@@ -45,6 +45,33 @@ def test_single_agent_text(projected):
     assert p["cost"]["total"] == 360_000
 
 
+def test_single_agent_user_interjection_steer_marker(projected):
+    # Mid-flight steer: received pins one zero-width marker; injected does not duplicate.
+    # Content splits around the marker (pre / post) — causal order, not trailing coalesce.
+    p = projected["single_agent_user_interjection_steer"]
+    assert [s["kind"] for s in p["process"]] == [
+        "reasoning",
+        "content",
+        "user_interjection",
+        "content",
+    ]
+    assert p["process"][1]["text"] == "你好"
+    assert p["process"][2] == {
+        "kind": "user_interjection",
+        "interjection_id": "inj-steer-1",
+    }
+    assert p["process"][3]["text"] == "，世界！"
+    assert p["userInterjections"] == [
+        {
+            "interjectionId": "inj-steer-1",
+            "executionId": "exec-classic-1",
+            "content": "改成用中文总结",
+            "status": "injected",
+            "note": None,
+        }
+    ]
+
+
 def test_single_agent_tool_timeline(projected):
     p = projected["single_agent_tool"]
     assert [s["kind"] for s in p["process"]] == ["reasoning", "tool", "content"]
@@ -861,23 +888,18 @@ def test_resume_content_continuity(projected):
 
 
 def test_multi_agent_mlr_debate_acts(projected):
-    """批 A2：幕1 MLR + 幕2 debate 同图；acts=2，辩手归 act-2。"""
+    """批 A2：幕1 MLR + 幕2 debate 新图+prev；最终投影以幕2 为准。"""
     p = projected["multi_agent_mlr_debate_acts"]
-    assert len(p["acts"]) == 2
-    assert p["acts"][0]["actId"] == "act-1"
-    assert p["acts"][0]["kind"] == "multi_agent"
-    assert p["acts"][0]["title"] == "多视角调研"
-    assert p["acts"][0]["anchorRunId"] is None
-    assert p["acts"][0].get("authorizedBy") in (None, "preview", "auto", "stage_card")
-    assert p["acts"][1]["actId"] == "act-2"
-    assert p["acts"][1]["kind"] == "debate"
-    assert p["acts"][1]["anchorRunId"] == "synthesizer"
+    assert len(p["acts"]) == 1
+    assert p["acts"][0]["actId"] == "act-2"
+    assert p["acts"][0]["kind"] == "debate"
+    assert p["acts"][0]["anchorRunId"] == "synthesizer"
     by_id = {r["id"]: r for r in p["runs"]}
-    assert by_id["synthesizer"]["actId"] == "act-1"
+    assert "synthesizer" not in by_id
     assert by_id["debate_mod_act2"]["actId"] == "act-2"
     assert by_id["debate_mod_act2_r1_pro"]["actId"] == "act-2"
     assert by_id["debate_mod_act2_r1_con"]["actId"] == "act-2"
-    assert by_id["debate_mod_act2"]["parentRunId"] == "synthesizer"
+    assert by_id["debate_mod_act2"]["parentRunId"] == "c2"
 
 
 def test_single_agent_content_reset_finish_guard_leaves_rework_chip(projected):

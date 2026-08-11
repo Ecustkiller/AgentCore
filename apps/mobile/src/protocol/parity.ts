@@ -69,11 +69,15 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
 
   // —— 多 Agent 团队 ——
-  run_plan: { verdict: "ported", surface: "TeamView" },
+  run_plan: {
+    verdict: "ported",
+    surface:
+      "TeamView · 本回合完整协作图；可选 prev_execution_id → ProcessTimeline「续自上一张图」文案行",
+  },
   graph_append: {
     verdict: "ported",
     surface:
-      "AssistantView · 跨回合同图追加锚点（fold → process.graph_append；宿主图仍 TeamView）",
+      "AssistantView · 旧 journal 跨回合同图追加锚点（fold → process.graph_append）；新路径用 run_plan.prev_execution_id + 本回合 TeamView",
   },
   coordination_wait: {
     verdict: "internal",
@@ -187,17 +191,17 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   delivery_status: {
     verdict: "ported",
     surface:
-      "TeamView · 交付轻提示（partial/blocked 一句；delivered/notes 静默；对齐桌面 DeliveryStatusMount）",
+      "FileArtifactsCard · 产物清单（artifacts 主清单；对账档位全静默，partial/blocked 轻提示已撤，两端一致）",
   },
   user_interjection: {
     verdict: "ported",
     surface:
-      "ChatPage · InterjectionBubbles 主时间线用户气泡 + 四态文案（fold → userInterjections）",
+      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles 五态（received/injected/addressed/queued/failed；经典+协调；fold → process 钉位 + userInterjections 同 id 保最新；旧 journal 无 marker 时 AssistantContent 尾部回退）",
   },
   turn_queued: {
     verdict: "ported",
     surface:
-      "ChatPage · turn_queued 仅 QueuedTurnsBar（queuedTurns 多项 FIFO；排队期不插主时间线用户泡）",
+      "ChatPage · turn_queued 为变了信号（发送路径本地即时写条；缺本地 queue_id 则 GET 对账；排队期不插主时间线用户泡；degraded_from=steer 保留「· 插话暂不可用」）",
   },
   turn_queue_started: {
     verdict: "ported",
@@ -208,11 +212,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "ported",
     surface:
       "ChatPage · 按 queue_id 只清条（cancel API 成功/404 本地清；fold no-op）",
-  },
-  turn_steer_accepted: {
-    verdict: "ported",
-    surface:
-      "ChatPage · toast「已插入，下一工具步生效」（fold no-op；midFlight steered）",
   },
   resume_deferred: {
     verdict: "ported",
@@ -283,7 +282,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   message_start: {
     verdict: "internal",
     reason:
-      "服务端 message_id 开泡；fold 清正文/process 并保留同 execution 的 runs/agents（跨回合同图追加）",
+      "服务端 message_id 开泡；fold 清正文/process；同 execution_id 暂留 runs/agents（旧 journal 生长）；换 eid 由 run_plan 重置（新 prev 链）",
   },
   message_end: { verdict: "ported", surface: "ChatPage · 收尾 + 回合总账" },
 
@@ -477,6 +476,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface:
       "TurnFileChangesReview（产物卡内展开；仅云 files/diff + restoreSnapshot，无 Local sidecar）",
   },
+  StoppedTurnFileChanges: {
+    verdict: "simplified",
+    reason:
+      "停止回合后的文件变更芯片/详情仅桌面 StatusStrip + RunDetail；手机本波不做停止态文件回顾入口",
+  },
   StageCard: { verdict: "ported", surface: "StageCard" },
   StageCardDock: {
     verdict: "ported",
@@ -495,20 +499,15 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface: "AssistantMessageFooter · 更多 → 收到的上下文（含 system）",
   },
   TeamNotesPanel: { verdict: "ported", surface: "TeamView · 团队便签" },
-  UserInterjectionsPanel: {
-    verdict: "ported",
-    surface:
-      "ChatPage · InterjectionBubbles（团队块内追溯；主叙事见 InterjectionTimeline）",
-  },
   InterjectionTimeline: {
     verdict: "ported",
     surface:
-      "ChatPage · InterjectionBubbles（主时间线用户气泡 + 四态文案；对齐桌面）",
+      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles（五态不变；经典 steer 亦进泡；旧 journal 无 marker 时 AssistantContent 尾部回退）",
   },
   QueuedTurnsBar: {
     verdict: "ported",
     surface:
-      "ChatPage · QueuedTurnsBar 为唯一排队 UI（queuedTurns 多 FIFO；按项取消；出队再进泡）",
+      "ChatPage · QueuedTurnsBar 为唯一排队 UI（GET /queued-turns 权威对账；queuedTurns 多 FIFO；插话升格项标「来自你的插话」；按项取消；出队再进泡；重启丢队轻提示）",
   },
   SourceCards: { verdict: "ported", surface: "AssistantView · 来源" },
   CitationTierBadge: {
@@ -536,7 +535,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   GraphAppendAnchor: {
     verdict: "simplified",
     reason:
-      "桌面跨回合同图追加锚点条（滚回宿主协作图）；手机 TeamView 无跨气泡图追加跳转，追加回合仍走常规进程时间线",
+      "桌面可滚回宿主图；手机仅「续自上一张图」文案行（旧 graph_append / 新 prev_execution_id）；新回合自带完整 TeamView，无跨气泡跳转",
   },
 
   // —— 提问 intent 专用卡（ask/；桌面 CheckpointCard 分支出；手机 ResumeCard 承接）——
@@ -744,6 +743,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   },
   "more/UsageSettings": { verdict: "ported", surface: "more/UsageSettings" },
   "more/ModelSettings": { verdict: "ported", surface: "more/ModelSettings" },
+  "more/ProfileModelSelect": {
+    verdict: "internal",
+    reason: "ModelSettings 内模型选择子控件，非独立页面",
+  },
   "more/MoreIndexRedirect": {
     verdict: "simplified",
     reason: "桌面 /more 入口按 billing/服务商分流；手机 more 直达模型页",

@@ -64,6 +64,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "error": null,
     "content": "",
     "reasoning": "这个需求有歧义，先问清楚。",
     "captainContext": [],

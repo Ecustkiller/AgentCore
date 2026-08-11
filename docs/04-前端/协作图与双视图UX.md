@@ -23,7 +23,7 @@ skip_if:
 |------|------|
 | 简单任务（无 plan） | **不出图** |
 | `delegate` | `run_plan` 到达自动内嵌 |
-| 跨回合同图追加 | 新回合只渲染锚点条；生长归旧图 |
+| 跨回合延续 | 新回合另起一张图、锚在**本**回合，自带完整内嵌图；「续自上一张」锚点挂在**当前**图上（`prev_execution_id`，桌面可点跳回上一张，手机仅文案行）。**否决**旧模型「生长 divert 回旧气泡、新回合只剩锚点条」——图锚错回合、进度分母吃上一轮已完成节点、journal 因宿主回合已死被丢 |
 | 开工挂起零 run | **不出图**（注意力归续跑卡） |
 | 完成 / 停止 | 战绩收缩 / 「已停止」（只陈述，无救火按钮） |
 
@@ -31,7 +31,9 @@ skip_if:
 
 默认展开，按对话持久化。多幕 LOD：≥2 幕恰好一幕展开 DAG；**否决**默认全展开。face 徽标 ≤2；行动条仅 ≥2 待决。**否决**「规划中」态（`run_plan` 同步到达）。
 
-**运行中再发（P0+P1 ✅）**：composer 不禁发；`delivery` 必填。三原语 Steer / Queue / Stop。空闲 Enter=Steer；生成中默认 Queue（Enter/主发送；协调绕过插话进 FIFO；经典 `turn_queued`）。显式「插队」/ Ctrl/Cmd+Enter（桌面）=Steer（协调→插话；经典→步边界软插入 + toast「已插入，下一工具步生效」）。失败才 `degraded_from` 排队提示。Queue → 仅 QueuedTurnsBar；出队开跑再进主时间线用户泡；Stop ≠ 取消排队（但 Stop 后队列会立刻 drain 开跑）。单轮散文可能先 ack 再升下一回合——见 [运行时三模型 · 已知行为](/docs/03-AI核心/运行时三模型与挂起.md#已知行为真跑--平台-deepseek--2026-08)。权威 → [同对话再发](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)。
+**运行中再发（P0+P1 ✅）**：composer 不禁发；`delivery` 必填。三原语 Steer / Queue / Stop。空闲 Enter=Steer；生成中默认 Queue（Enter/主发送；协调绕过插话进 FIFO；经典 `turn_queued`）。显式「插队」/ Ctrl/Cmd+Enter（桌面）=Steer；协调与经典共用 DURABLE `user_interjection` 五态气泡（`received`→`injected`→`addressed`\|`queued`\|`failed`；经典无 `addressed`），刷新与历史回看都在。失败才 `degraded_from` 排队提示。Queue → 仅 QueuedTurnsBar；出队开跑再进主时间线用户泡；Stop ≠ 取消排队（但 Stop 后队列会立刻 drain 开跑）。单轮散文可能先 ack 再升下一回合——见 [运行时三模型 · 已知行为](/docs/03-AI核心/运行时三模型与挂起.md#已知行为真跑--平台-deepseek--2026-08)。权威 → [同对话再发](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)。
+
+**插话不进图（定案 ✅）**：协作图只讲执行拓扑（谁做什么 · 依赖谁）与回合先后，**没有**「回合内时刻」这一维——spine 是回合间序、DAG 是执行依赖，都不是时间轴。用户插话是时刻性**对话事件**，主叙事定在聊天视图的过程时间线（零宽 marker 钉真实发生位置 → [运行时三模型 · 时间线落点](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)）。**否决**团队块底部「插话追溯」折叠列表（`UserInterjectionsPanel` 已删——与主时间线双写，正是它降级再删的原因）；**否决**回合级「本回合有 N 条插话」徽章（弱化版双写）；**否决**图内插话节点连向被影响 worker 的因果表达（图的母语确是因果，但需新增「插话→哪个 run」的后端因果契约，本切片不做）。代价：画布视图里用户干预无痕迹，**接受**。
 
 检查点 / 非阻塞发问 / plan_review / ResumePrompt / InteractionStore：语义 → [检查点与开工卡](/docs/03-AI核心/检查点与开工卡.md)。内联卡只留 resolved；可操作面统一 `ResumePrompt`。**否决**题目 accordion、Wizard、消息流再堆可操作入口。决策区 Chat/画布 `ConversationDecisionPrompts` 单挂载互斥。
 
@@ -57,6 +59,6 @@ skip_if:
 | 真持久团队实体化 | 暂不做 |
 | 跨对话公司级画布 | 不在范围 |
 
-对比透镜仅非辩论同人接续链；辩论对照归辩论室。图技术：**否决** D3、自研画布。性能：节点 ≤50、≥60fps。
+对比透镜仅非辩论同人接续链；辩论对照归辩论室。图技术：**否决** D3、自研画布。性能：节点 ≤50；帧率按**实测原生刷新率**验收——**否决**写死 ≥60fps（高刷屏下 16.7ms 预算过松，曾让主线程 ELK 阻塞全程漏检）。真机取证 `shoot:graph-perf-live`；离线 `shoot:graph-perf` 最多 9 节点且不触发 ELK，**不能**当性能证据。
 
 → 见代码 `components/graph/`、`pages/TurnDetailPage.tsx`、`stores/commandPanel.ts`。

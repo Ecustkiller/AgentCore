@@ -2,7 +2,7 @@
  * U3：用户 SCM 动作 —— 经 ``workspaceOp('git_scm')``；
  * push/pull/discard 在调用前恒确认（对等结构化 git 审批卡）；fetch 免确认。
  */
-import { notifyActionError, notifySuccess } from "@/lib/toast";
+import { notifyActionError } from "@/lib/toast";
 
 export const GIT_PUSH_CONFIRM =
   "将推送当前功能分支到 remote（禁止 force / 禁止从 main·master 直推）。确定继续？";
@@ -65,7 +65,7 @@ export async function runGitScm(
   }
 }
 
-/** stage 指定路径（空 = 全部）。成功后 toast。 */
+/** stage 指定路径（空 = 全部）。 */
 export async function gitStage(
   rootId: string,
   paths?: string[],
@@ -103,7 +103,6 @@ export async function gitCommit(
     notifyActionError("提交失败", r.detail);
     return false;
   }
-  notifySuccess("已提交");
   return true;
 }
 
@@ -123,7 +122,6 @@ export async function gitPush(
     notifyActionError("推送失败", r.detail);
     return false;
   }
-  notifySuccess(r.detail?.split("\n")[0] || "已推送");
   return true;
 }
 
@@ -140,7 +138,6 @@ export async function gitPull(
     notifyActionError("拉取失败", r.detail);
     return false;
   }
-  notifySuccess(r.detail?.split("\n")[0] || "已拉取");
   return true;
 }
 
@@ -154,7 +151,6 @@ export async function gitFetch(
     notifyActionError("获取失败", r.detail);
     return false;
   }
-  notifySuccess(r.detail?.split("\n")[0] || "已获取");
   return true;
 }
 

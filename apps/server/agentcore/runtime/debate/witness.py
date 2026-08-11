@@ -232,14 +232,14 @@ def witness_plan_event(
                 "group": WITNESS_GROUP,
             }
         )
-    host_message_id = getattr(tool, "_debate_host_message_id", None)
+    prev_execution_id = getattr(tool, "_debate_prev_execution_id", None)
     return run_plan(
         execution_id=execution_id,
         plan_type="debate",
         task_summary="",
         agents=agents,
         runs=runs,
-        host_message_id=host_message_id,
+        prev_execution_id=prev_execution_id,
         act=debate_act_payload(tool),
     )
 

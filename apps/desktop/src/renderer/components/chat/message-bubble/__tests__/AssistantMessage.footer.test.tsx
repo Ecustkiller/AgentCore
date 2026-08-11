@@ -234,6 +234,38 @@ describe("AssistantMessage empty-response single surface", () => {
     expect(screen.queryByText(/降级完成/)).toBeNull();
   });
 
+  it("空正文 + finishReason=degraded 无 error 载荷：仍合成非空脸", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        finishReason: "degraded",
+      }),
+    );
+    expect(screen.getByText("模型返回空内容，请重试。")).toBeTruthy();
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+  });
+
+  it("空正文 + usage.error（刷新 REST 路径）有脸", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        finishReason: "error",
+        usage: {
+          input: 0,
+          output: 0,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 0,
+          error: {
+            code: "LLM_INSUFFICIENT_BALANCE",
+            message: "上游账户余额不足，请充值或更换 Key。",
+          },
+        },
+      }),
+    );
+    expect(screen.getByText(/上游账户余额不足/)).toBeTruthy();
+  });
+
   it("有正文 + finishReason=error + 无 message.error：红条不静默，无灰标调用失败", () => {
     renderBubble(
       settledMessage({

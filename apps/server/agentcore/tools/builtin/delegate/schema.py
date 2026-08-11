@@ -45,7 +45,7 @@ DELEGATE_DESCRIPTION = (
     "具名 playbook 仅当走固化流水线时用（快捷进阶），且勿同时传 tasks。"
     "【看】→deliverable.form=prose；【用】→files。"
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
-    "≥2 worker 默认协调（立即返回、可同回合追加同一张图）。"
+    "≥1 worker 默认协调（立即返回、可同回合追加同一张图；含单 worker）。"
     "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
     "建站快捷套餐必填 playbook_args.topic；绿场必填 app。"
     "勿再填已删的 completion_criteria / requires_files / name / must_contain / min_length / objective / playbook_none_reason。"
@@ -112,7 +112,9 @@ DELEGATE_PARAMETERS = {
                     "target_folder_id": {
                         "type": "string",
                         "description": (
-                            "已解析项目 folder id。跨项目/换桌写盘点名用；"
+                            "已解析项目 folder id。指定该队员坐哪张桌（换桌+记忆跟桌；"
+                            "不改本会话 folder_id）。跨已登记项目（只读摸底与写盘通吃）须点名；"
+                            "写不写盘由 write_scope/grant 正交（默认 none）；"
                             "裸聊写盘缺桌由运行时自动建云桌，勿为过闸 create_project；"
                             "有出生省略=默认桌；子派默认继承。"
                         ),

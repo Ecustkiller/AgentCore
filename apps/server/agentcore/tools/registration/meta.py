@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from agentcore.tools.protocol import ToolSchema
-
+from agentcore.tools.protocol import Tool, ToolSchema
 
 # Audience tokens — same strings as ``tools.catalog.AVAILABLE_TO_*``.
 AUDIENCE_CEO = "ceo"
@@ -76,8 +75,8 @@ def tool_registration(cls: type) -> ToolRegistration:
 
 def read_static_schema(tool_cls: type) -> ToolSchema:
     """Read a pure-static ``schema`` without running heavy ``__init__``."""
-    instance = object.__new__(tool_cls)
-    return instance.schema  # type: ignore[attr-defined]
+    instance: Tool = cast(Tool, object.__new__(tool_cls))
+    return instance.schema
 
 
 def declared_tool_name(cls: type) -> str:

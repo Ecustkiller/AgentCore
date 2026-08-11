@@ -61,6 +61,14 @@ export interface TeamPreviewWorkerDisplay {
   write_capability?: "text_only" | "can_write_files";
   /** 写盘能力展示文案（可改文件 / 仅文字报告）。 */
   write_capability_label?: string;
+  /** CEO 提案模型 id（开工卡透出）。 */
+  model?: string;
+  origin?: "platform" | "byok";
+  provider_id?: string;
+  /** 该队员落座 Folder id；裸聊 scratch 缺省。 */
+  target_folder_id?: string;
+  /** 服务端解析的工作区显示名；旧帧 absent → 不展示。 */
+  target_folder_name?: string;
 }
 
 export interface TeamPreviewSideDisplay {
@@ -241,7 +249,9 @@ export interface Message {
   /** 回合调研台账（`evidence_ledger` SSE / Message.evidence_ledger）；缺省 []。 */
   evidenceLedger?: import("@/types/events").TurnEvidenceLedgerEntry[];
   cost?: CostBreakdown;
-  usage?: UsageBreakdown;
+  usage?: UsageBreakdown & {
+    error?: { code: string; message: string } | null;
+  };
   rounds?: number;
   /** 回合墙钟用时 (ms)：live 自 message_end.duration_ms；重载自 MessageDetail.duration_ms。 */
   durationMs?: number;

@@ -154,7 +154,10 @@ class DebateTool:
         self._debate_act_id: str = "act-1"
         self._debate_act_title: str | None = None
         self._debate_anchor_run_id: str | None = None
+        # 内部：解析宿主 journal 用；不再写入 run_plan.host_message_id。
         self._debate_host_message_id: str | None = None
+        self._debate_prev_execution_id: str | None = None
+        # 新图+prev：parent 用本回合 captain；act.anchor_run_id 仍指向上一图汇总员。
         self._debate_graph_parent_run_id: str | None = None
         # 批 B：幕授权来源 stage_card / auto / preview；缺省 = 开工卡路径补 preview。
         self._debate_authorized_by: str | None = None
@@ -593,10 +596,11 @@ class DebateTool:
         return None
 
     async def _resolve_host_attach(self, config: DebateConfig):
-        """开工决议后：尝试把辩论新幕挂到幕 1 MLR 宿主；失败则保持独立图。
+        """开工决议后：尝试把辩论新幕链到幕 1 MLR（prev）；失败则保持独立图。
 
         推进卡路径优先用卡上直传三元组（host_execution_id / synthesizer_run_id /
         host_message_id），找不到再回落 resolve_debate_host_attach。
+        命中后本回合 mint 新 execution_id + prev_execution_id（不 divert 宿主）。
         """
         from agentcore.runtime.debate.constants import FORM_LABELS
         from agentcore.runtime.debate.research_dossier import workspace_has_research_artifacts
@@ -630,12 +634,12 @@ class DebateTool:
         self._debate_act_title = f"{label}对抗"
         self._debate_anchor_run_id = attach.anchor_run_id
         self._debate_host_message_id = attach.host_message_id
-        self._debate_graph_parent_run_id = attach.anchor_run_id
+        self._debate_prev_execution_id = attach.execution_id
+        # 新图：parent 用本回合 captain；幕因果靠 act.anchor + prev。
+        self._debate_graph_parent_run_id = None
         return attach
 
     async def _run_moderator(self, config: DebateConfig, usage_metadata) -> ToolResult:
-        import contextlib
-
         if self._debate_authorized_by is None:
             self._debate_authorized_by = "preview"
 
@@ -688,34 +692,12 @@ class DebateTool:
                 logger.exception("debate.research_dossier_probe_failed")
                 config.research_dossier_index = ""
 
-        # 批 A2：决议机制携带宿主 → 新幕生长；找不到则独立成图（现状）。
+        # 批 A2：决议机制命中宿主 → 本回合新图 + prev；找不到则独立成图。
         host_attach = await self._resolve_host_attach(config)
-        graph_redirect = None
-        graph_redirect_token = None
         if host_attach is not None:
-            from agentcore.core.log_context import get_log_value
-            from agentcore.runtime.delegate.graph_append import (
-                GraphAppendRedirect,
-                bind_redirect,
-                open_host_journal_writer,
-            )
-            from agentcore.runtime.events import graph_append as graph_append_event
-
-            execution_id = host_attach.execution_id
+            # Mint 新图；prev = 宿主 MLR execution（不复用、不 divert）。
+            execution_id = new_id()
             self._base_tool_context.execution_id = execution_id
-            if not host_attach.same_turn:
-                host_writer = await open_host_journal_writer(
-                    host_message_id=host_attach.host_message_id,
-                    conversation_id=self._conversation_id or "",
-                    trace_id=get_log_value("trace_id"),
-                )
-                graph_redirect = GraphAppendRedirect(
-                    execution_id=execution_id,
-                    host_message_id=host_attach.host_message_id,
-                    append_message_id=self._message_id or "",
-                    host_writer=host_writer,
-                )
-                graph_redirect_token = bind_redirect(graph_redirect)
         else:
             execution_id = self._base_tool_context.execution_id or new_id()
 
@@ -731,22 +713,7 @@ class DebateTool:
         graph_parent = self._debate_graph_parent_run_id or self._captain_run_id
 
         try:
-            if host_attach is not None:
-                self._sink.emit(
-                    graph_append_event(
-                        execution_id=execution_id,
-                        host_message_id=host_attach.host_message_id,
-                        append_message_id=self._message_id or "",
-                        added_count=1,
-                        roles=["主持人"],
-                        added_run_ids=[moderator_run_id],
-                        act_id=host_attach.act_id,
-                        act_kind="debate",
-                        authorized_by=self._debate_authorized_by,
-                    )
-                )
-
-            # 先声明主持人节点（CEO 之下 / 汇总员之后），辩手节点逐轮声明。
+            # 先声明主持人节点（CEO 之下 / 汇总员锚点经 act），辩手节点逐轮声明。
             self._sink.emit(
                 moderator_plan_event(self, execution_id, moderator_run_id, config)
             )
@@ -765,11 +732,12 @@ class DebateTool:
                 "execution_id": execution_id,
                 "act_id": self._debate_act_id,
                 "host_attach": bool(host_attach),
+                "prev_execution_id": self._debate_prev_execution_id,
             }
             if host_attach is not None:
                 logger.info("debate.started", **started_fields)
             else:
-                # 独立图 = 未同图生长；warning 级可观测（禁止静默降级）。
+                # 独立图 = 未链到 MLR；warning 级可观测（禁止静默降级）。
                 logger.warning(
                     "debate.started",
                     **started_fields,
@@ -989,10 +957,4 @@ class DebateTool:
                 metadata=usage_metadata(self._acc.usage),
             )
         finally:
-            if graph_redirect_token is not None:
-                from agentcore.runtime.delegate.graph_append import reset_redirect
-
-                reset_redirect(graph_redirect_token)
-            if graph_redirect is not None:
-                with contextlib.suppress(Exception):
-                    await graph_redirect.host_writer.flush()
+            pass  # divert redirect 已退役；保留 try 体结构

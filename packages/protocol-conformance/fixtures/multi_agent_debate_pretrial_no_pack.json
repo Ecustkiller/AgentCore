@@ -417,6 +417,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "无共享证据包，直接开辩。辩论结束，简报如上。",
     "reasoning": "",
     "captainContext": [],

@@ -13,6 +13,11 @@ Idempotent: call ``call_id`` / run ``run_id`` unique keys + materialize DO UPDAT
 mean retries never double-bill. Captain + worker + debate spend land as separate
 rows with ``role`` / ``persona`` / ``run_id`` so payroll and ``log_stats`` can
 split by role without changing credential-source pricing semantics.
+
+Pool discipline: ``drain_cost_ledger_before_reconcile`` must run **before** opening
+any main-pool session. ``reconcile_turn_cost_ledger`` only materializes on the
+caller's session and requires a ``CostLedgerDrained`` proof so drain cannot be
+forgotten (and cannot run while a main-pool connection is held).
 """
 
 from __future__ import annotations
@@ -26,35 +31,41 @@ from agentcore.db.repositories.billing import CostEventRepository
 
 logger = get_logger(__name__)
 
+_DRAIN_PROOF = object()
 
-async def reconcile_turn_cost_ledger(
-    session: AsyncSession,
-    *,
-    user_id: str,
-    conversation_id: str,
-    message_id: str | None,
-    cost_runs: list[dict[str, Any]],
-    trace_id: str | None = None,
-) -> list[dict[str, Any]]:
-    """Persist the turn's full ledger and return the authoritative per-run rows.
 
-    Steps:
-    1. Drain pending ``cost_ledger_outbox`` (shared DB; at-least-once call details)
-       — also awaits this process's in-flight enqueues and legacy disk leftovers.
-    2. Upsert ``cost_events`` from all ``cost_calls`` for ``message_id``.
-    3. ``record_runs`` any ``cost_runs`` whose ``run_id`` has no call details yet
-       (vision / drain race) — DO NOTHING so metered runs stay call-authoritative.
-    4. Re-read ``cost_events`` for the message as the return value (payroll shape).
+class CostLedgerDrained:
+    """Proof that outbox drain already ran outside any main-pool session.
+
+    Construct only via ``drain_cost_ledger_before_reconcile`` — required by
+    ``reconcile_turn_cost_ledger`` so call sites cannot silently skip drain.
     """
-    if not cost_runs and not message_id:
-        return []
 
+    __slots__ = ()
+
+    def __init__(self, _proof: object = None) -> None:
+        if _proof is not _DRAIN_PROOF:
+            raise TypeError(
+                "Call drain_cost_ledger_before_reconcile() before opening a "
+                "main-pool session; do not construct CostLedgerDrained directly."
+            )
+
+
+async def drain_cost_ledger_before_reconcile(
+    *,
+    conversation_id: str | None = None,
+    message_id: str | None = None,
+) -> CostLedgerDrained:
+    """Drain shared ``cost_ledger_outbox`` before materialize (main-pool free).
+
+    Always drains pending rows — not gated on ``queue.running`` — so finalize
+    sees cross-worker outbox rows even if this process has not started its
+    background loop (tests / edge). Best-effort: failures are logged and the
+    proof is still returned so materialize can proceed.
+    """
     try:
         from agentcore.billing.cost_ledger_queue import get_cost_ledger_queue
 
-        # Always drain shared pending before materialize — not gated on
-        # ``queue.running`` so finalize sees cross-worker outbox rows even if
-        # this process has not started its background loop (tests / edge).
         await get_cost_ledger_queue().drain_once()
     except Exception:  # noqa: BLE001 — drain best-effort; materialize still runs
         logger.warning(
@@ -63,6 +74,36 @@ async def reconcile_turn_cost_ledger(
             message_id=message_id,
             exc_info=True,
         )
+    return CostLedgerDrained(_DRAIN_PROOF)
+
+
+async def reconcile_turn_cost_ledger(
+    session: AsyncSession,
+    *,
+    drained: CostLedgerDrained,
+    user_id: str,
+    conversation_id: str,
+    message_id: str | None,
+    cost_runs: list[dict[str, Any]],
+    trace_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Persist the turn's full ledger and return the authoritative per-run rows.
+
+    ``drained`` must come from ``drain_cost_ledger_before_reconcile`` called
+    **before** this session was opened (drain uses the telemetry pool).
+
+    Steps (after drain):
+    1. Upsert ``cost_events`` from all ``cost_calls`` for ``message_id``.
+    2. ``record_runs`` any ``cost_runs`` whose ``run_id`` has no call details yet
+       (vision / drain race) — DO NOTHING so metered runs stay call-authoritative.
+    3. Re-read ``cost_events`` for the message as the return value (payroll shape).
+    """
+    if not isinstance(drained, CostLedgerDrained):
+        raise TypeError(
+            "drained must be CostLedgerDrained from drain_cost_ledger_before_reconcile()"
+        )
+    if not cost_runs and not message_id:
+        return []
 
     repo = CostEventRepository(session)
     call_run_ids: set[str] = set()

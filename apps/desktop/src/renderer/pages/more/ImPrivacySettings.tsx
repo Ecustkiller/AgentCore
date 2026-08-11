@@ -1,7 +1,7 @@
 import { BlockedUsersDialog } from "@/components/messages/BlockedUsersDialog";
 import { Card } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   type DirectorySettings,
@@ -81,7 +81,6 @@ export function ImPrivacySettings() {
     try {
       const saved = await updateDirectory(next);
       setSettings(saved);
-      notifySuccess("已保存");
     } catch (e) {
       setSettings(prev);
       notifyError(e, "保存失败");

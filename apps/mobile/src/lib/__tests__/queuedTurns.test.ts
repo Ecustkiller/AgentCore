@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   __resetQueuedTurnsForTests,
+  applyQueuedTurnsSnapshot,
   clearQueuedTurns,
   listQueuedTurns,
   removeQueuedTurn,
+  replaceQueuedTurns,
   upsertQueuedTurn,
 } from "../queuedTurns";
+import {
+  QUEUE_DROPPED_HINT,
+  reconcileQueuedTurns,
+} from "../reconcileQueuedTurns";
 
 afterEach(() => {
   __resetQueuedTurnsForTests();
@@ -103,5 +109,160 @@ describe("queuedTurns store", () => {
     clearQueuedTurns("c1");
     expect(listQueuedTurns("c1")).toEqual([]);
     expect(listQueuedTurns("c2")).toHaveLength(1);
+  });
+});
+
+describe("queuedTurns reconcile snapshot", () => {
+  it("对账替换本地态：内容/顺序/深度以服务端为准", () => {
+    upsertQueuedTurn({
+      queueId: "q1",
+      conversationId: "c1",
+      content: "stale",
+      position: 1,
+      queueDepth: 1,
+    });
+
+    const { droppedLocalIds } = applyQueuedTurnsSnapshot("c1", [
+      {
+        queueId: "q2",
+        content: "from server",
+        position: 1,
+        interjectionId: null,
+      },
+      {
+        queueId: "q3",
+        content: "also server",
+        position: 2,
+      },
+    ]);
+
+    expect(droppedLocalIds).toEqual(["q1"]);
+    const list = listQueuedTurns("c1");
+    expect(list.map((e) => e.queueId)).toEqual(["q2", "q3"]);
+    expect(list[0]).toMatchObject({
+      content: "from server",
+      position: 1,
+      queueDepth: 2,
+    });
+    expect(list[1]?.queueDepth).toBe(2);
+  });
+
+  it("插话来源项：interjectionId 映射进条", () => {
+    applyQueuedTurnsSnapshot("c1", [
+      {
+        queueId: "q-inj",
+        content: "promoted from steer",
+        position: 1,
+        interjectionId: "inj-42",
+      },
+    ]);
+    const list = listQueuedTurns("c1");
+    expect(list).toHaveLength(1);
+    expect(list[0]?.interjectionId).toBe("inj-42");
+  });
+
+  it("服务端已空：清掉本地幽灵项并回报 droppedLocalIds", () => {
+    upsertQueuedTurn({
+      queueId: "ghost-1",
+      conversationId: "c1",
+      content: "was queued",
+      position: 1,
+      queueDepth: 2,
+    });
+    upsertQueuedTurn({
+      queueId: "ghost-2",
+      conversationId: "c1",
+      content: "also gone",
+      position: 2,
+      queueDepth: 2,
+    });
+
+    const { droppedLocalIds } = applyQueuedTurnsSnapshot("c1", []);
+    expect(droppedLocalIds).toEqual(["ghost-1", "ghost-2"]);
+    expect(listQueuedTurns("c1")).toEqual([]);
+  });
+
+  it("同 queue_id 对账保留本地 degradedFrom", () => {
+    upsertQueuedTurn({
+      queueId: "q1",
+      conversationId: "c1",
+      content: "old",
+      position: 1,
+      queueDepth: 1,
+      degradedFrom: "steer",
+    });
+    applyQueuedTurnsSnapshot("c1", [
+      { queueId: "q1", content: "fresh", position: 1 },
+    ]);
+    expect(listQueuedTurns("c1")[0]).toMatchObject({
+      content: "fresh",
+      degradedFrom: "steer",
+    });
+  });
+
+  it("replaceQueuedTurns 整表写入", () => {
+    replaceQueuedTurns("c1", [
+      {
+        queueId: "a",
+        conversationId: "c1",
+        content: "x",
+        position: 2,
+        queueDepth: 2,
+      },
+      {
+        queueId: "b",
+        conversationId: "c1",
+        content: "y",
+        position: 1,
+        queueDepth: 2,
+      },
+    ]);
+    expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("reconcileQueuedTurns", () => {
+  it("拉取快照后替换本地；服务端空 → dropped + 提示文案常量", async () => {
+    upsertQueuedTurn({
+      queueId: "local-only",
+      conversationId: "c1",
+      content: "ghost",
+      position: 1,
+      queueDepth: 1,
+    });
+    const result = await reconcileQueuedTurns("c1", async () => []);
+    expect(result.failed).toBeUndefined();
+    expect(result.droppedLocalIds).toEqual(["local-only"]);
+    expect(listQueuedTurns("c1")).toEqual([]);
+    expect(QUEUE_DROPPED_HINT).toMatch(/排队项已失效/);
+  });
+
+  it("fetch 失败不改本地", async () => {
+    upsertQueuedTurn({
+      queueId: "keep",
+      conversationId: "c1",
+      content: "still here",
+      position: 1,
+      queueDepth: 1,
+    });
+    const result = await reconcileQueuedTurns("c1", async () => {
+      throw new Error("network");
+    });
+    expect(result.failed).toBe(true);
+    expect(result.droppedLocalIds).toEqual([]);
+    expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual(["keep"]);
+  });
+
+  it("对账写入插话升格项", async () => {
+    const result = await reconcileQueuedTurns("c1", async () => [
+      {
+        queueId: "q-p",
+        content: "from interjection",
+        position: 1,
+        interjectionId: "inj-9",
+      },
+    ]);
+    expect(result.droppedLocalIds).toEqual([]);
+    expect(listQueuedTurns("c1")[0]?.interjectionId).toBe("inj-9");
   });
 });

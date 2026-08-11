@@ -4,6 +4,7 @@ import {
   type TimelineNode,
   appendStageCardStep,
   appendTeamPreviewStep,
+  appendUserInterjectionStep,
   dropTrailingContentSteps,
   groupToolRuns,
   isOrchestrationTool,
@@ -11,9 +12,37 @@ import {
   omitCoordinationIdleSteps,
   promoteScalarContentIntoProcess,
   reworkChipLabel,
+  timelineNodeKeys,
 } from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
+
+describe("appendUserInterjectionStep", () => {
+  it("appends once per interjection id and dedupes later calls", () => {
+    const once = appendUserInterjectionStep(
+      [{ kind: "content", text: "你好" }],
+      "inj-1",
+    );
+    expect(once).toEqual([
+      { kind: "content", text: "你好" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+    ]);
+    expect(appendUserInterjectionStep(once, "inj-1")).toBe(once);
+  });
+
+  it("keys timeline nodes by interjection id", () => {
+    const nodes = groupToolRuns([
+      { kind: "content", text: "a" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+      { kind: "content", text: "b" },
+    ]);
+    expect(timelineNodeKeys(nodes)).toEqual([
+      "content-1",
+      "inj-inj-1",
+      "content-2",
+    ]);
+  });
+});
 
 const reasoning = (text: string): ProcessStep => ({ kind: "reasoning", text });
 const content = (text: string): ProcessStep => ({ kind: "content", text });

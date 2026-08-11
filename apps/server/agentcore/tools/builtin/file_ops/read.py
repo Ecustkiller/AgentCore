@@ -22,6 +22,10 @@ from agentcore.workspace.attachment_parse import (
     extract_office_bytes,
     parsed_copy_path,
 )
+from agentcore.workspace.declared_dirs import (
+    LATENT_EMPTY_LIST_MESSAGE,
+    is_declared_latent_dir,
+)
 from agentcore.workspace.external_mounts import EXTERNAL_PREFIX, parse_external_path
 from agentcore.workspace.limits import OFFICE_EXTRACT_MAX_BYTES
 from agentcore.workspace.protocol import (
@@ -46,6 +50,14 @@ from .errors import (
 from .path_hints import enrich_missing_path_message
 
 _DEFAULT_READ_LINES = 500
+
+
+def _empty_list_message(directory: str) -> str:
+    """Empty ``file_list`` body — latent declared dirs get auto-create copy."""
+    if is_declared_latent_dir(directory):
+        return LATENT_EMPTY_LIST_MESSAGE
+    return "（空目录）"
+
 
 def _format_numbered_lines(lines: list[str], start_line: int) -> str:
     return "\n".join(
@@ -680,6 +692,8 @@ class FileListTool:
                             bare_entries=bare,
                             recursive=True,
                         )
+                if empty_message is None and not entries_tree:
+                    empty_message = _empty_list_message(str(directory))
                 # Dedupe soft warnings while preserving order.
                 uniq_warnings: list[str] = []
                 seen_w: set[str] = set()
@@ -738,9 +752,9 @@ class FileListTool:
                             recursive=False,
                         )
                     else:
-                        output = "（空目录）"
+                        output = _empty_list_message(str(directory))
                 else:
-                    output = "（空目录）"
+                    output = _empty_list_message(str(directory))
         except OutsideWorkspace:
             return _error(
                 _outside_workspace_msg(directory, location=context.backend.location),
@@ -752,6 +766,14 @@ class FileListTool:
                     f"不是可列的区外目录：{directory}。"
                     + _external_directory_hint(context.backend),
                     start,
+                )
+            # Local/channel backends may still raise for missing declared dirs.
+            if is_declared_latent_dir(str(directory)):
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=_empty_list_message(str(directory)),
+                    duration_ms=int((time.monotonic() - start) * 1000),
                 )
             # ServerWorkspace.list maps missing paths to NotADirectory (not PathNotFound).
             base = f"不是目录：{directory}"
@@ -765,6 +787,13 @@ class FileListTool:
                     f"区外路径不存在或未授权：{directory}。"
                     + _external_directory_hint(context.backend),
                     start,
+                )
+            if is_declared_latent_dir(str(directory)):
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=_empty_list_message(str(directory)),
+                    duration_ms=int((time.monotonic() - start) * 1000),
                 )
             base = f"列目录失败：路径不存在：{directory}"
             return _error(

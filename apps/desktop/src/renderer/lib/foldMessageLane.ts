@@ -32,6 +32,7 @@ import {
   appendTeamPreviewStep,
   appendTeamStep,
   appendToolStep,
+  appendUserInterjectionStep,
   dropTrailingContentSteps,
   promoteScalarContentIntoProcess,
   resolveToolStep,
@@ -283,6 +284,16 @@ export function foldTeamPreviewMarker(
   );
 }
 
+/** Fold a `user_interjection` into the timeline as a zero-width positional marker.
+ * Body / 五态 stay on the execution bypass; marker only pins chronology. Dedupes by id. */
+export function foldUserInterjectionMarker(
+  state: MessageLaneState,
+  interjectionId: string,
+): MessageLaneState {
+  const process = appendUserInterjectionStep(state.process, interjectionId);
+  return process === state.process ? state : { ...state, process };
+}
+
 /** Process steps that mirror journal content/reasoning/tool lanes (not markers). */
 function isSettledProcessStep(step: ProcessStep): boolean {
   return (
@@ -419,8 +430,8 @@ function journalMarkerInsertIndex(
  * content 是同回合被吞的草稿）；重载的 process 是终态，resolved 后 CEO 的收尾正文
  * 必须保留。全部 append* 自带 dedup no-op，后端已写标记时原样返回。
  *
- * `team` / `graph_append` 按 journal 相对时序插入（禁止一律尾部 append），避免队后
- * 进展/终稿 content 被挤到图上方。 */
+ * `team` / `graph_append` / `user_interjection` 按 journal 相对时序插入（禁止一律
+ * 尾部 append），避免队后进展/终稿 content 被挤到图/插话上方。 */
 export function ensureTimelineMarkersFromJournal(
   process: ProcessStep[] | undefined,
   events: ReadonlyArray<{ type: string; payload?: unknown }>,
@@ -461,7 +472,8 @@ export function ensureTimelineMarkersFromJournal(
       continue;
     }
     if (ev.type === "run_plan") {
-      // 跨回合同图追加：生长 run_plan 带 host_message_id，不在追加回合插 team。
+      // 旧 journal 跨回合同图追加：生长 run_plan 带 host_message_id，不在追加回合插 team。
+      // 新路径无此字段 → 正常补 team（本回合开图）。
       if (payload.host_message_id) continue;
       const executionId = payload.execution_id;
       if (typeof executionId === "string" && executionId) {
@@ -475,6 +487,16 @@ export function ensureTimelineMarkersFromJournal(
       const eid = payload.escalation_id;
       if (typeof eid === "string" && eid) {
         steps = appendEscalationStep(steps, eid);
+      }
+      continue;
+    }
+    // 用户运行中插话：同 id 首次出现钉位（后续 status 更新 dedup）；按 journal 槽插入，
+    // 避免队后 content 把插话挤到末尾造成因果倒置。
+    if (ev.type === "user_interjection") {
+      const iid = payload.interjection_id;
+      if (typeof iid === "string" && iid.trim()) {
+        const at = journalMarkerInsertIndex(steps, events, i, false);
+        steps = appendUserInterjectionStep(steps, iid.trim(), at);
       }
       continue;
     }

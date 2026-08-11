@@ -1,11 +1,4 @@
-/**
- * Sidebar list `lastMessagePreview` derivation — shared by the RQ conversation
- * cache sync and the offline opened-cache writer.
- */
-import {
-  syntheticErrorForEmptyFailure,
-  visibleMessageText,
-} from "@/lib/errors";
+import { resolveAssistantFailureFace, visibleMessageText } from "@/lib/errors";
 import type { Message } from "@/stores/conversation";
 
 const PREVIEW_SLICE = 80;
@@ -27,10 +20,13 @@ export function previewFromOpenedWindow(
     const text = visibleMessageText(row);
     if (text) return text.slice(0, PREVIEW_SLICE);
     const finishReason = row.finishReason ?? row.runs?.finishReason;
-    const synthetic = syntheticErrorForEmptyFailure(
+    const synthetic = resolveAssistantFailureFace({
+      content: row.content,
+      error: row.error,
+      runsError: row.runs?.error,
+      usageError: row.usage?.error,
       finishReason,
-      row.runs?.error?.code,
-    );
+    });
     if (synthetic?.code === "TURN_CANCELLED") continue;
     if (synthetic?.message) return synthetic.message.slice(0, PREVIEW_SLICE);
     // Empty non-failure on the last row: clear (do not keep stale listed preview).

@@ -10,12 +10,7 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
-import { notifyInfo } from "@/lib/toast";
-import {
-  markSidecarUnhealthy,
-  probeSidecar,
-  takeCloudBridgeToastSlot,
-} from "@/services/sidecarHealth";
+import { markSidecarUnhealthy, probeSidecar } from "@/services/sidecarHealth";
 import {
   buildSidecarHistory,
   isSidecarEnabled,
@@ -36,7 +31,7 @@ import {
   throwIfCannotOpenStream,
 } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
-import { dismissRecoverableExecutions } from "./dismissRecovery";
+import { dismissRecoverableHints } from "./dismissRecovery";
 import {
   finalizeGeneratingIfNeeded,
   finalizeHonestStopAbort,
@@ -65,17 +60,6 @@ function setExecutionVia(
   via: "sidecar" | "cloud_bridge" | null,
 ): void {
   useConversationStore.getState().setExecutionVia(via, conversationId);
-}
-
-/** 降云过桥提示：force=首探失败/阶段二；否则走节流（bad 缓存续云不再整会话静默）。 */
-function notifyCloudBridge(
-  toastKey: string,
-  message: string,
-  force: boolean,
-): void {
-  if (takeCloudBridgeToastSlot(toastKey, { force })) {
-    notifyInfo(message);
-  }
 }
 
 /** 云端分支原因——写入 turnTrace + desktop.jsonl，对照服务端 via=cloud。 */
@@ -145,9 +129,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   // away to another conversation.
   store.clearError(conversationId);
 
-  // Implicit「忽略」: a new turn closes any recoverable 救火 projection
-  // (audit + clearExecution) without an explicit abandon click.
-  dismissRecoverableExecutions(conversationId);
+  // Implicit「忽略」: a new turn dismisses recoverable 救火 hints
+  // (audit + session UI latch) without clearing the execution projection.
+  dismissRecoverableHints(conversationId);
 
   // Orphan empty placeholder (1a69f9dc): prior incomplete/streaming blank must
   // become「已中断」before we append the new user→assistant pair.
@@ -255,11 +239,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           sidecarErr.serverMessage?.trim() || "本地引擎未能启动";
         markSidecarUnhealthy(sidecarTarget, fallbackDetail);
         setExecutionVia(conversationId, "cloud_bridge");
-        notifyCloudBridge(
-          `${sidecarTarget.rootId}::${sidecarTarget.subpath}`,
-          "本地引擎未能启动，已自动用云端过桥完成这次对话",
-          true,
-        );
         store.truncateAfter(optimisticUserId, conversationId);
         store.createAssistantMessage(conversationId);
         beginTurnPreflight(conversationId);
@@ -280,7 +259,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       }
     } else {
       // 云链路：探活失败 / bad 缓存 / 显式强制关 / 附件·点名退云 / 纯云会话。
-      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia（Composer 弱状态）+ 探活/启动失败节流 toast。
+      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia（ComposerCloudBridgeHint 弱状态，无 toast）。
       const bridging =
         sidecarTarget !== null ||
         (await resolveConversationLocalTarget(conversationId)) !== null;
@@ -292,20 +271,6 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         probeHealthy: probe ? probe.healthy : null,
         probeProbed: probe ? probe.probed : null,
       });
-      // Toast：探活/启动失败降级可感知（节流）；纯云 / 显式强制关（switch_off）静默——
-      // 禁常态「本地引擎已关闭…」恐吓文案。弱状态见 ComposerCloudBridgeHint（非引擎切换器）。
-      if (sidecarTarget && probe && !probe.healthy) {
-        const toastKey = `${sidecarTarget.rootId}::${sidecarTarget.subpath}`;
-        notifyCloudBridge(
-          toastKey,
-          probe.detail
-            ? `${probe.detail}，已自动用云端过桥`
-            : probe.probed
-              ? "本地引擎未能在此环境启动，已自动用云端过桥"
-              : "本地引擎暂不可用，本轮走云端过桥",
-          /* force */ probe.probed,
-        );
-      }
       logStreamPath(conversationId, "cloud", reason, {
         bridging,
         root_id: sidecarTarget?.rootId ?? null,

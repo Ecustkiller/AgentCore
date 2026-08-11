@@ -531,6 +531,34 @@ describe("hydrateFromJournal (reload replay, §9.3)", () => {
     store().hydrateFromJournal(MID, { finishReason: "stop", events: [] });
     expect(rt().plan).toBeNull();
   });
+
+  it("restores user_interjections on classic journal (no run_plan)", () => {
+    store().hydrateFromJournal(MID, {
+      finishReason: "stop",
+      events: [
+        {
+          type: "user_interjection",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: {
+            interjection_id: "inj-1",
+            execution_id: "exec-classic",
+            content: "改成用中文总结",
+            status: "injected",
+          },
+        },
+      ],
+    });
+    expect(rt().plan).toBeNull();
+    expect(rt().userInterjections).toEqual([
+      {
+        interjectionId: "inj-1",
+        executionId: "exec-classic",
+        content: "改成用中文总结",
+        status: "injected",
+        note: null,
+      },
+    ]);
+  });
 });
 
 describe("ingestPlan (multi-batch delegate merge)", () => {

@@ -97,6 +97,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "根据搜索，答案如下。",
     "reasoning": "我先搜索。",
     "captainContext": [],

@@ -1,26 +1,42 @@
-/** S2 四态文案。心智：只对主 Agent 说话。 */
+/** S2 五态文案（经典 + 协调共用；两端 parity 逐字一致）。心智：只对主 Agent 说话。 */
 export function interjectionStatusLabel(
   status: string | null | undefined,
+  opts?: { turnClosed?: boolean },
 ): string {
   switch (status) {
     case "queued":
       return "将在下一条回复处理";
     case "failed":
-      return "未能排队，请重试或再说一次";
+      return "未被处理";
     case "addressed":
-      return "主 Agent 已回应";
+      return "已纳入本回合合成";
+    case "injected":
+      return "主 Agent 已看到";
     case "received":
-      return "主 Agent 已收到";
+      return opts?.turnClosed
+        ? "未被主 Agent 读取"
+        : "已送达，等待主 Agent 读取";
     default:
-      return "主 Agent 已收到";
+      return opts?.turnClosed
+        ? "未被主 Agent 读取"
+        : "已送达，等待主 Agent 读取";
   }
 }
 
+export type InterjectionStatusTone =
+  | "received"
+  | "injected"
+  | "queued"
+  | "failed"
+  | "addressed";
+
+/** Visual tone — 五态可区分但克制；addressed 勿假绿成功。 */
 export function interjectionStatusTone(
   status: string | null | undefined,
-): "received" | "queued" | "failed" | "addressed" {
+): InterjectionStatusTone {
   if (status === "queued") return "queued";
   if (status === "failed") return "failed";
   if (status === "addressed") return "addressed";
+  if (status === "injected") return "injected";
   return "received";
 }

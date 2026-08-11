@@ -40,10 +40,15 @@ export function actFromRunPlan(p: RunPlanPayload): ExecutionAct {
 /** Map a `run_plan` wire payload to the immutable plan skeleton. */
 export function planFromRunPlan(p: RunPlanPayload): ExecutionPlan {
   const act = actFromRunPlan(p);
+  const prev =
+    typeof p.prev_execution_id === "string" && p.prev_execution_id.trim()
+      ? p.prev_execution_id.trim()
+      : null;
   return {
     id: p.execution_id,
     planType: p.plan_type,
     taskSummary: p.task_summary,
+    prevExecutionId: prev,
     acts: [act],
     agents: p.agents.map((a) => ({
       id: a.id,
@@ -123,5 +128,7 @@ export function mergePlanInto(
     runs,
     // Prefer first/host summary so a later debate act cannot retitle the graph.
     taskSummary: normalized.taskSummary || next.taskSummary,
+    // First plan wins — later same-id batches must not overwrite the续自 link.
+    prevExecutionId: normalized.prevExecutionId ?? next.prevExecutionId ?? null,
   };
 }

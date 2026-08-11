@@ -29,6 +29,10 @@
   "projected": {
     "status": "failed",
     "finishReason": null,
+    "error": {
+      "code": "llm_error",
+      "message": "模型超时"
+    },
     "content": "开始处理",
     "reasoning": "",
     "captainContext": [],

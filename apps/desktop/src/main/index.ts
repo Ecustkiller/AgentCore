@@ -26,7 +26,10 @@ import {
 } from "./float-window";
 import { registerFsIpc } from "./fs-service";
 import { registerHostIpc } from "./host-service";
-import { registerLocalStoreIpc } from "./local-store";
+import {
+  registerLocalStoreIpc,
+  sweepOrphanLocalStoreFiles,
+} from "./local-store";
 import { registerLogIpc } from "./log-service";
 import { registerMcpIpc, shutdownAllMcpSessions } from "./mcp-service";
 import { registerNotificationIpc } from "./notification-service";
@@ -360,6 +363,9 @@ app.whenReady().then(async () => {
   // 自动更新随首个窗口创建后初始化一次（IPC 句柄全局唯一，不在 createWindow 内调用，
   // 以免 macOS 上 activate 重建窗口时重复注册）。
   initUpdater(mainWindow);
+  // 清理上次会话遗留的孤儿会话文件（写盘后 meta 未落即退出）。内部走 meta 锁，
+  // 与渲染进程的缓存写入串行，故不 await、不阻塞首屏。
+  void sweepOrphanLocalStoreFiles();
 
   app.on("activate", () => {
     // 只看主窗：真 OS 浮窗存活时仍应能重建主窗。

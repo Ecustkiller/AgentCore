@@ -265,10 +265,13 @@ export function appendTeamStep(
   return insertStepAt(steps, marker, at);
 }
 
-/** Drop a `graph_append` anchor on the **appending** turn (跨回合同图追加).
+/** Drop a `graph_append` anchor on the **appending** turn (旧 journal 兼容).
  * Dedupes by `execution_id` — one anchor per host graph per append turn.
  * `actId`/`actKind`/`authorizedBy` 为桌面呈现扩展（开新幕文案 / 授权角标）；
  * conformance 导出时剥离。
+ *
+ * 新路径改用 `run_plan.prev_execution_id`，由 InlineTeamGraph 渲染「续自」链接，
+ * 不再发 `graph_append`。
  *
  * Optional `at` mirrors {@link appendTeamStep}: hydrate journal-slot insert. */
 export function appendGraphAppendStep(
@@ -336,6 +339,29 @@ export function appendAskStep(
   if (!askId) return process ?? [];
   if (hasMarker(process, "ask", "ask_id", askId)) return process ?? [];
   return [...(process ?? []), { kind: "ask", ask_id: askId }];
+}
+
+/** Drop a `user_interjection` marker (mid-turn steer / 协调插话) at its chronological
+ * spot. Zero-width positional only — body + 五态 live in
+ * `execution.userInterjections` keyed by `interjectionId`. First appearance of an id
+ * appends (typically `status=received`); later status updates dedupe. Optional `at`
+ * mirrors {@link appendTeamStep} for journal-slot hydrate. */
+export function appendUserInterjectionStep(
+  process: ProcessStep[] | undefined,
+  interjectionId: string,
+  at?: number,
+): ProcessStep[] {
+  if (!interjectionId) return process ?? [];
+  if (
+    hasMarker(process, "user_interjection", "interjection_id", interjectionId)
+  )
+    return process ?? [];
+  const steps = process ?? [];
+  const marker: ProcessStep = {
+    kind: "user_interjection",
+    interjection_id: interjectionId,
+  };
+  return insertStepAt(steps, marker, at);
 }
 
 /** Drop a `plan_review` marker (plan-review gate) at its chronological spot; the card
@@ -571,6 +597,8 @@ export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
         return `cp-${node.checkpoint_id}`;
       case "ask":
         return `ask-${node.ask_id}`;
+      case "user_interjection":
+        return `inj-${node.interjection_id}`;
       case "plan_review":
         return `pr-${node.checkpoint_id}`;
       case "escalation":

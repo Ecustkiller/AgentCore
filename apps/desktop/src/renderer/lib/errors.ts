@@ -248,36 +248,157 @@ export const TURN_INTERRUPTED_EMPTY_MESSAGE =
 export const PLATFORM_AUTH_UNAVAILABLE_MESSAGE =
   "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。";
 
+/** Generic empty-failure fallback when no code/message product sentence exists. */
+export const GENERIC_EMPTY_FAILURE_MESSAGE = "本轮未能完成，请重试。";
+
+/** Code → product sentence (tier-1 face copy). Unknown codes fall through to generic. */
+const PRODUCT_COPY_BY_CODE: Record<string, string> = {
+  LLM_RATE_LIMIT: LLM_RATE_LIMIT_MESSAGE,
+  LLM_KEY_INVALID: PLATFORM_AUTH_UNAVAILABLE_MESSAGE,
+  LLM_UNPRODUCTIVE: LLM_UNPRODUCTIVE_MESSAGE,
+  LLM_INSUFFICIENT_BALANCE: "上游账户余额不足，请充值或更换 Key。",
+  LLM_TIMEOUT: "连接超时，请检查网络后重试。",
+  LLM_EMPTY_RESPONSE: "模型返回空内容，请重试。",
+  PIPELINE_ERROR: "管线执行失败，请重试。",
+  TURN_INTERRUPTED: TURN_INTERRUPTED_EMPTY_MESSAGE,
+  TURN_CANCELLED: TURN_CANCELLED_EMPTY_MESSAGE,
+  LLM_ERROR: "模型调用失败，请重试。",
+};
+
+export type AssistantFailureFace = { code: string; message: string };
+
+type StructuredErr =
+  | {
+      code?: string | null;
+      message?: string | null;
+    }
+  | null
+  | undefined;
+
 /**
- * Visible sentence for preview / export / canvas outlets that otherwise only
- * read `content`. Non-empty trimmed content wins (partial deliverable); pure
- * failure falls back to `error.message` then `runs.error.message`.
+ * Single authority for assistant failure face (空泡族根因重设计).
  *
- * Never hides content when it equals the error string — the bubble already
- * owns the error card; outlets just need a readable fallback when content is empty.
+ * Default ON: empty content + any structured error source, or empty + failure
+ * finishReason. Short silent exemption list:
+ * - user-initiated stop (cancelled / TURN_CANCELLED) — chat timeline omits face
+ * - paused / ask when a dedicated interaction card already owns the UI
+ *
+ * Copy tiers: structured message → code product sentence → generic fallback.
  */
-export function visibleMessageText(msg: {
+export function resolveAssistantFailureFace(input: {
   content?: string | null;
-  error?: { message?: string } | null;
-  runs?: { error?: { message?: string } | null } | null;
-}): string {
-  const content = (msg.content ?? "").trim();
-  if (content) return content;
-  const fromError = msg.error?.message?.trim();
-  if (fromError) return fromError;
-  const fromRuns = msg.runs?.error?.message?.trim();
-  if (fromRuns) return fromRuns;
-  return "";
+  isStreaming?: boolean;
+  error?: StructuredErr;
+  runsError?: StructuredErr;
+  usageError?: StructuredErr;
+  finishReason?: string | null;
+  /** True when pause/ask/checkpoint/plan_review/… card already carries the turn. */
+  hasDedicatedPauseOrAskUi?: boolean;
+}): AssistantFailureFace | null {
+  if (input.isStreaming) return null;
+
+  const structured =
+    coalesceStructured(input.error) ??
+    coalesceStructured(input.runsError) ??
+    coalesceStructured(input.usageError);
+
+  const fr = input.finishReason ?? undefined;
+  const empty = !(input.content ?? "").trim();
+
+  // Auth / key codes win even when local settle stamped cancelled.
+  if (structured?.code === "LLM_KEY_INVALID") {
+    return faceFromStructured(structured);
+  }
+  if (structured?.code === "LLM_RATE_LIMIT") {
+    return faceFromStructured(structured);
+  }
+
+  // User-stop exemption: still return TURN_CANCELLED so StatusStrip / preview
+  // can label; chat timeline hides via isUserStopped / isEmptyCancelledAssistant.
+  // Auth / rate-limit codes already returned above (win over cancelled).
+  if (structured?.code === "TURN_CANCELLED" || fr === "cancelled") {
+    return {
+      code: "TURN_CANCELLED",
+      message: TURN_CANCELLED_EMPTY_MESSAGE,
+    };
+  }
+
+  if (structured) {
+    return faceFromStructured(structured);
+  }
+
+  // No structured payload — synthesize from finishReason.
+  if (!empty && fr === "error") {
+    return { code: "LLM_ERROR", message: PRODUCT_COPY_BY_CODE.LLM_ERROR };
+  }
+  if (!empty) return null;
+
+  if (fr === "unproductive") {
+    return {
+      code: "LLM_UNPRODUCTIVE",
+      message: LLM_UNPRODUCTIVE_MESSAGE,
+    };
+  }
+  if (fr === "interrupted") {
+    return {
+      code: "TURN_INTERRUPTED",
+      message: TURN_INTERRUPTED_EMPTY_MESSAGE,
+    };
+  }
+  if (fr === "error") {
+    return { code: "LLM_ERROR", message: PRODUCT_COPY_BY_CODE.LLM_ERROR };
+  }
+  if (fr === "degraded") {
+    return {
+      code: "LLM_EMPTY_RESPONSE",
+      message: PRODUCT_COPY_BY_CODE.LLM_EMPTY_RESPONSE,
+    };
+  }
+  if (fr === "paused") {
+    if (input.hasDedicatedPauseOrAskUi) return null;
+    return {
+      code: "TURN_INCOMPLETE",
+      message: GENERIC_EMPTY_FAILURE_MESSAGE,
+    };
+  }
+  return null;
+}
+
+function coalesceStructured(
+  err: StructuredErr,
+): { code: string; message: string } | null {
+  if (!err) return null;
+  const code = (err.code ?? "").trim();
+  const message = (err.message ?? "").trim();
+  if (!code && !message) return null;
+  return { code: code || "LLM_ERROR", message };
+}
+
+function faceFromStructured(err: {
+  code: string;
+  message: string;
+}): AssistantFailureFace {
+  const code = err.code || "LLM_ERROR";
+  if (err.message.trim()) {
+    // Prefer upstream/product message; normalize known rate-limit English.
+    if (
+      code === "LLM_RATE_LIMIT" &&
+      (/rate limited/i.test(err.message) || !err.message.includes("上游限流"))
+    ) {
+      return { code, message: LLM_RATE_LIMIT_MESSAGE };
+    }
+    return { code, message: err.message.trim() };
+  }
+  return {
+    code,
+    message: PRODUCT_COPY_BY_CODE[code] ?? GENERIC_EMPTY_FAILURE_MESSAGE,
+  };
 }
 
 /**
- * When reload lost the error payload but left an empty failure-finished bubble
- * (`error` / `unproductive` / `cancelled` / `interrupted`), synthesize a minimal
- * card so the user still sees an explanation — same surface as a real
- * `message.error` card for true failures; ``cancelled`` keeps code
- * ``TURN_CANCELLED`` (chat timeline omits the face; team StatusStrip still labels).
- * Known ``LLM_RATE_LIMIT`` / ``LLM_KEY_INVALID`` keep upstream product copy
- * (auth face may align byok sentence).
+ * When reload lost the error payload but left an empty failure-finished bubble,
+ * synthesize a minimal card. Thin wrapper over {@link resolveAssistantFailureFace}
+ * (finishReason + optional code only).
  */
 export function syntheticErrorForEmptyFailure(
   finishReason: string | undefined,
@@ -286,42 +407,15 @@ export function syntheticErrorForEmptyFailure(
   code: string;
   message: string;
 } | null {
-  if (finishReason === "unproductive") {
-    return { code: "LLM_UNPRODUCTIVE", message: LLM_UNPRODUCTIVE_MESSAGE };
-  }
-  // Auth code wins even when local settle stamped cancelled (9b54940b).
-  if (code === "LLM_RATE_LIMIT") {
-    return { code: "LLM_RATE_LIMIT", message: LLM_RATE_LIMIT_MESSAGE };
-  }
-  if (code === "LLM_KEY_INVALID") {
-    return {
-      code: "LLM_KEY_INVALID",
-      message: PLATFORM_AUTH_UNAVAILABLE_MESSAGE,
-    };
-  }
-  if (finishReason === "interrupted") {
-    return {
-      code: "TURN_INTERRUPTED",
-      message: TURN_INTERRUPTED_EMPTY_MESSAGE,
-    };
-  }
-  if (finishReason === "cancelled") {
-    return {
-      code: "TURN_CANCELLED",
-      message: TURN_CANCELLED_EMPTY_MESSAGE,
-    };
-  }
-  if (finishReason !== "error") return null;
-  return {
-    code: "LLM_ERROR",
-    message: "模型调用失败，请重试。",
-  };
+  return resolveAssistantFailureFace({
+    content: "",
+    finishReason,
+    runsError: code ? { code, message: "" } : null,
+  });
 }
 
 /**
  * Hard-fail red card when `finishReason=error` but `message.error` is missing.
- * Covers the body-present seam formerly only signaled by FinishReasonChip
- * 「调用失败」— after the chip is removed, this must not stay silent.
  * Prefer `runs.error` copy when present; else the empty-failure synthetic.
  */
 export function syntheticErrorForHardFailure(
@@ -332,14 +426,34 @@ export function syntheticErrorForHardFailure(
   message: string;
 } | null {
   if (finishReason !== "error") return null;
-  const msg = runsError?.message?.trim();
-  if (msg) {
-    return {
-      code: (runsError?.code ?? "").trim() || "LLM_ERROR",
-      message: msg,
-    };
-  }
-  return syntheticErrorForEmptyFailure("error", runsError?.code);
+  return resolveAssistantFailureFace({
+    content: "",
+    finishReason,
+    runsError,
+  });
+}
+
+/**
+ * Visible sentence for preview / export / canvas outlets that otherwise only
+ * read `content`. Non-empty trimmed content wins (partial deliverable); pure
+ * failure falls back to `error.message` then `runs.error.message` then
+ * `usage.error.message`.
+ */
+export function visibleMessageText(msg: {
+  content?: string | null;
+  error?: { message?: string } | null;
+  runs?: { error?: { message?: string } | null } | null;
+  usage?: { error?: { message?: string } | null } | null;
+}): string {
+  const content = (msg.content ?? "").trim();
+  if (content) return content;
+  const fromError = msg.error?.message?.trim();
+  if (fromError) return fromError;
+  const fromRuns = msg.runs?.error?.message?.trim();
+  if (fromRuns) return fromRuns;
+  const fromUsage = msg.usage?.error?.message?.trim();
+  if (fromUsage) return fromUsage;
+  return "";
 }
 
 /**

@@ -172,7 +172,9 @@ class ListProjectDirTool:
             description=(
                 "只读跨桌：列出【已登记项目】某目录下的文件/子目录（参数含 folder_id）。"
                 "按次指定目标，不改本会话 conversation.folder_id / 出生桌，不写目标桌记忆。"
-                "通用 file_list 只绑出生桌；写盘/重活请 delegate(target_folder_id=…)。"
+                "通用 file_list 只绑出生桌。"
+                "用途：派单前轻量认桌/抽样；成规模跨项目摸底/推进请同次 "
+                "delegate 各填 target_folder_id（队员坐那张桌用 file_*；本工具队员拿不到）。"
                 "folder_id 来自 list_projects / resolve_project / create_project。"
                 "失败语义同目标桌绑定：无权/不存在、库不可达、本地通道问题。"
             ),
@@ -243,7 +245,9 @@ class ReadProjectFileTool:
             description=(
                 "只读跨桌：读取【已登记项目】内某文件（参数含 folder_id + path）。"
                 "按次指定目标，不改本会话归属/出生桌，不写目标桌记忆。"
-                "通用 file_read 只绑出生桌；写盘/重活请 delegate(target_folder_id=…)。"
+                "通用 file_read 只绑出生桌。"
+                "用途：派单前轻量认桌/抽样；成规模跨项目摸底/推进请同次 "
+                "delegate 各填 target_folder_id（队员坐那张桌用 file_*；本工具队员拿不到）。"
                 "支持 offset/limit 行窗；Office/PDF 透明抽文本规则同 file_read。"
                 "失败语义同目标桌绑定：无权/不存在、库不可达、本地通道问题。"
             ),

@@ -876,6 +876,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我发起一场可追问的正反辩论来定夺。",
     "reasoning": "",
     "captainContext": [],

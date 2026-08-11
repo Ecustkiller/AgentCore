@@ -10,9 +10,11 @@ from __future__ import annotations
 from typing import Literal
 
 # Soft guidance shared by delegate + debate kickoff cancel tool results.
+# 末句是接着拒答时的出口：本引导让 CEO 追问一次，若那一问也被取消，再问就是纠缠。
 KICKOFF_CANCEL_GUIDANCE = (
     "宜先问用户方案或分工哪里要调，再行动；"
     "勿未问清就重派同一套 / 再调 debate。"
+    "若用户接着拒答这一问，就直接收口，别再追问。"
 )
 
 _DELEGATE_HEAD = "用户取消了开工，团队未启动。"

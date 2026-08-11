@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_mlr_debate_witness",
-  "description": "批D1·证人模式：幕1 MLR + 幕2 辩论同图；证人席位 + witness_exam 答问进台账（答问 run 挂辩论幕席位下，continues=席位根）",
+  "description": "批D1·证人模式：幕1 MLR + 幕2 辩论新图+prev；证人席位 + witness_exam 答问进台账（答问 run 挂辩论幕席位下，continues=席位根）",
   "events": [
     {
       "type": "message_start",
@@ -420,28 +420,9 @@
       "timestamp": "2026-01-01T00:00:04.415Z"
     },
     {
-      "type": "graph_append",
-      "payload": {
-        "execution_id": "exec_mlr_debate_witness",
-        "host_message_id": "m1",
-        "append_message_id": "m2",
-        "added_count": 1,
-        "roles": [
-          "主持人"
-        ],
-        "added_run_ids": [
-          "debate_mod_wit"
-        ],
-        "act_id": "act-2",
-        "act_kind": "debate",
-        "authorized_by": "stage_card"
-      },
-      "timestamp": "2026-01-01T00:00:04.416Z"
-    },
-    {
       "type": "run_plan",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "plan_type": "debate",
         "task_summary": "正反辩论：品牌是否应立即终止争议代言联名",
         "agents": [
@@ -457,10 +438,10 @@
             "agent_id": "debate_mod_wit",
             "task": "主持正反辩论：品牌是否应立即终止争议代言联名",
             "depends_on": [],
-            "parent_run_id": "synthesizer"
+            "parent_run_id": "c2"
           }
         ],
-        "host_message_id": "m1",
+        "prev_execution_id": "exec_mlr_debate_witness",
         "act": {
           "act_id": "act-2",
           "kind": "debate",
@@ -469,22 +450,22 @@
           "authorized_by": "stage_card"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.417Z"
+      "timestamp": "2026-01-01T00:00:04.416Z"
     },
     {
       "type": "run_started",
       "payload": {
         "run_id": "debate_mod_wit",
         "agent_id": "debate_mod_wit",
-        "parent_run_id": "synthesizer",
+        "parent_run_id": "c2",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:04.418Z"
+      "timestamp": "2026-01-01T00:00:04.417Z"
     },
     {
       "type": "run_plan",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "plan_type": "debate",
         "task_summary": "",
         "agents": [
@@ -504,7 +485,7 @@
             "group": "debate:witness"
           }
         ],
-        "host_message_id": "m1",
+        "prev_execution_id": "exec_mlr_debate_witness",
         "act": {
           "act_id": "act-2",
           "kind": "debate",
@@ -513,7 +494,7 @@
           "authorized_by": "stage_card"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.419Z"
+      "timestamp": "2026-01-01T00:00:04.418Z"
     },
     {
       "type": "run_started",
@@ -524,12 +505,12 @@
         "kind": "agent",
         "group": "debate:witness"
       },
-      "timestamp": "2026-01-01T00:00:04.420Z"
+      "timestamp": "2026-01-01T00:00:04.419Z"
     },
     {
       "type": "debate_round_started",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "moderator_run_id": "debate_mod_wit",
         "round_no": 1,
         "focus": "解除条款是否成立",
@@ -537,12 +518,12 @@
         "opening": "先核清解除条款事实再谈立场。",
         "form": "debate"
       },
-      "timestamp": "2026-01-01T00:00:04.421Z"
+      "timestamp": "2026-01-01T00:00:04.420Z"
     },
     {
       "type": "run_plan",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "plan_type": "debate",
         "task_summary": "",
         "agents": [
@@ -579,7 +560,7 @@
             "round": 1
           }
         ],
-        "host_message_id": "m1",
+        "prev_execution_id": "exec_mlr_debate_witness",
         "act": {
           "act_id": "act-2",
           "kind": "debate",
@@ -588,7 +569,7 @@
           "authorized_by": "stage_card"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.422Z"
+      "timestamp": "2026-01-01T00:00:04.421Z"
     },
     {
       "type": "run_started",
@@ -601,7 +582,7 @@
         "group": "debate:debate",
         "round": 1
       },
-      "timestamp": "2026-01-01T00:00:04.423Z"
+      "timestamp": "2026-01-01T00:00:04.422Z"
     },
     {
       "type": "run_output_delta",
@@ -610,7 +591,7 @@
         "agent_id": "d_pro",
         "delta": "第十二条可解除【已核实·#e2】，应立即终止。"
       },
-      "timestamp": "2026-01-01T00:00:04.424Z"
+      "timestamp": "2026-01-01T00:00:04.423Z"
     },
     {
       "type": "run_completed",
@@ -637,7 +618,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:05.323Z"
+      "timestamp": "2026-01-01T00:00:05.322Z"
     },
     {
       "type": "run_started",
@@ -650,7 +631,7 @@
         "group": "debate:debate",
         "round": 1
       },
-      "timestamp": "2026-01-01T00:00:05.324Z"
+      "timestamp": "2026-01-01T00:00:05.323Z"
     },
     {
       "type": "run_output_delta",
@@ -659,7 +640,7 @@
         "agent_id": "d_con",
         "delta": "第十二条不适用本案。"
       },
-      "timestamp": "2026-01-01T00:00:05.325Z"
+      "timestamp": "2026-01-01T00:00:05.324Z"
     },
     {
       "type": "run_completed",
@@ -686,7 +667,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:06.274Z"
+      "timestamp": "2026-01-01T00:00:06.273Z"
     },
     {
       "type": "run_started",
@@ -701,7 +682,7 @@
         "round": 1,
         "side_key": "pro"
       },
-      "timestamp": "2026-01-01T00:00:06.275Z"
+      "timestamp": "2026-01-01T00:00:06.274Z"
     },
     {
       "type": "run_context",
@@ -733,7 +714,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:06.276Z"
+      "timestamp": "2026-01-01T00:00:06.275Z"
     },
     {
       "type": "run_output_delta",
@@ -742,7 +723,7 @@
         "agent_id": "debate_mod_wit_r1_cx_pro",
         "delta": "依据合同第十二条解除权。"
       },
-      "timestamp": "2026-01-01T00:00:06.277Z"
+      "timestamp": "2026-01-01T00:00:06.276Z"
     },
     {
       "type": "run_completed",
@@ -769,7 +750,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:06.675Z"
+      "timestamp": "2026-01-01T00:00:06.674Z"
     },
     {
       "type": "run_started",
@@ -783,7 +764,7 @@
         "round": 1,
         "side_key": "witness:lens_0"
       },
-      "timestamp": "2026-01-01T00:00:06.676Z"
+      "timestamp": "2026-01-01T00:00:06.675Z"
     },
     {
       "type": "run_context",
@@ -815,7 +796,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:06.677Z"
+      "timestamp": "2026-01-01T00:00:06.676Z"
     },
     {
       "type": "run_output_delta",
@@ -824,7 +805,7 @@
         "agent_id": "debate_mod_wit_r1_wit_lens_0",
         "delta": "### 质询一\n第十二条写明「严重损害品牌声誉时可单方解除」。"
       },
-      "timestamp": "2026-01-01T00:00:06.678Z"
+      "timestamp": "2026-01-01T00:00:06.677Z"
     },
     {
       "type": "run_completed",
@@ -851,12 +832,12 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:07.176Z"
+      "timestamp": "2026-01-01T00:00:07.175Z"
     },
     {
       "type": "debate_round",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "moderator_run_id": "debate_mod_wit",
         "round_no": 1,
         "focus": "解除条款是否成立",
@@ -939,7 +920,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:07.177Z"
+      "timestamp": "2026-01-01T00:00:07.176Z"
     },
     {
       "type": "run_completed",
@@ -966,7 +947,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:07.178Z"
+      "timestamp": "2026-01-01T00:00:07.177Z"
     },
     {
       "type": "run_completed",
@@ -993,12 +974,12 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:07.179Z"
+      "timestamp": "2026-01-01T00:00:07.178Z"
     },
     {
       "type": "debate_result",
       "payload": {
-        "execution_id": "exec_mlr_debate_witness",
+        "execution_id": "exec_mlr_debate_witness_act2",
         "moderator_run_id": "debate_mod_wit",
         "form": "debate",
         "motion": "品牌是否应立即终止争议代言联名",
@@ -1132,7 +1113,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:07.180Z"
+      "timestamp": "2026-01-01T00:00:07.179Z"
     },
     {
       "type": "tool_use_end",
@@ -1142,14 +1123,14 @@
         "status": "success",
         "result": "辩论完成。"
       },
-      "timestamp": "2026-01-01T00:00:07.181Z"
+      "timestamp": "2026-01-01T00:00:07.180Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "辩论收束；证人答问已进证据台账。"
       },
-      "timestamp": "2026-01-01T00:00:07.182Z"
+      "timestamp": "2026-01-01T00:00:07.181Z"
     },
     {
       "type": "message_end",
@@ -1172,12 +1153,13 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:07.183Z"
+      "timestamp": "2026-01-01T00:00:07.182Z"
     }
   ],
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "按命题卡开辩。辩论收束；证人答问已进证据台账。",
     "reasoning": "",
     "captainContext": [],
@@ -1187,10 +1169,8 @@
         "text": "按命题卡开辩。"
       },
       {
-        "kind": "graph_append",
-        "execution_id": "exec_mlr_debate_witness",
-        "host_message_id": "m1",
-        "added_count": 1
+        "kind": "team",
+        "execution_id": "exec_mlr_debate_witness_act2"
       },
       {
         "kind": "content",
@@ -1201,56 +1181,6 @@
     "evidenceLedger": [],
     "citedIds": [],
     "agents": [
-      {
-        "id": "lens_0",
-        "role": "法律视角",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "lens_0 要点就绪",
-        "reasoning": "",
-        "toolProgress": null
-      },
-      {
-        "id": "lens_1",
-        "role": "品牌商业视角",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "lens_1 要点就绪",
-        "reasoning": "",
-        "toolProgress": null
-      },
-      {
-        "id": "lens_2",
-        "role": "舆情公关视角",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "lens_2 要点就绪",
-        "reasoning": "",
-        "toolProgress": null
-      },
-      {
-        "id": "lens_3",
-        "role": "文化社会视角",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "lens_3 要点就绪",
-        "reasoning": "",
-        "toolProgress": null
-      },
-      {
-        "id": "synthesizer",
-        "role": "汇总分析师",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "交叉验证完成，建议开辩。",
-        "reasoning": "",
-        "toolProgress": null
-      },
       {
         "id": "debate_mod_wit",
         "role": "主持人",
@@ -1314,251 +1244,6 @@
     ],
     "runs": [
       {
-        "id": "lens_0",
-        "agentId": "lens_0",
-        "task": "梳理解约条款",
-        "status": "completed",
-        "dependsOn": [],
-        "outputSummary": "lens_0 完成",
-        "debrief": null,
-        "durationMs": 800,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": null,
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": null,
-        "round": 0,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "lens_0 要点就绪"
-          }
-        ]
-      },
-      {
-        "id": "lens_1",
-        "agentId": "lens_1",
-        "task": "评估营收冲击",
-        "status": "completed",
-        "dependsOn": [],
-        "outputSummary": "lens_1 完成",
-        "debrief": null,
-        "durationMs": 800,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": null,
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": null,
-        "round": 0,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "lens_1 要点就绪"
-          }
-        ]
-      },
-      {
-        "id": "lens_2",
-        "agentId": "lens_2",
-        "task": "盘点声量窗口",
-        "status": "completed",
-        "dependsOn": [],
-        "outputSummary": "lens_2 完成",
-        "debrief": null,
-        "durationMs": 800,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": null,
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": null,
-        "round": 0,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "lens_2 要点就绪"
-          }
-        ]
-      },
-      {
-        "id": "lens_3",
-        "agentId": "lens_3",
-        "task": "分析圈层冲突",
-        "status": "completed",
-        "dependsOn": [],
-        "outputSummary": "lens_3 完成",
-        "debrief": null,
-        "durationMs": 800,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": null,
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": null,
-        "round": 0,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "lens_3 要点就绪"
-          }
-        ]
-      },
-      {
-        "id": "synthesizer",
-        "agentId": "synthesizer",
-        "task": "交叉验证综述 · 品牌是否应立即终止争议代言联名",
-        "status": "completed",
-        "dependsOn": [
-          "lens_0",
-          "lens_1",
-          "lens_2",
-          "lens_3"
-        ],
-        "outputSummary": "汇总完成并附命题卡",
-        "debrief": null,
-        "durationMs": 1200,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": null,
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-pro",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": null,
-        "round": 0,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "交叉验证完成，建议开辩。"
-          }
-        ]
-      },
-      {
         "id": "debate_mod_wit",
         "agentId": "debate_mod_wit",
         "task": "主持正反辩论：品牌是否应立即终止争议代言联名",
@@ -1570,7 +1255,7 @@
         "error": null,
         "failureKind": null,
         "productLanded": null,
-        "parentRunId": "synthesizer",
+        "parentRunId": "c2",
         "kind": "agent",
         "role": "主持人",
         "model": "deepseek-v4-pro",
@@ -1885,13 +1570,6 @@
     ],
     "acts": [
       {
-        "actId": "act-1",
-        "kind": "multi_agent",
-        "title": "多视角调研",
-        "anchorRunId": null,
-        "authorizedBy": null
-      },
-      {
         "actId": "act-2",
         "kind": "debate",
         "title": "辩论对抗",
@@ -1900,8 +1578,8 @@
       }
     ],
     "progress": {
-      "completed": 11,
-      "total": 11
+      "completed": 6,
+      "total": 6
     },
     "interactions": [],
     "cost": {
@@ -1913,7 +1591,7 @@
       "pricing_source": "curated"
     },
     "debate": {
-      "execution_id": "exec_mlr_debate_witness",
+      "execution_id": "exec_mlr_debate_witness_act2",
       "moderator_run_id": "debate_mod_wit",
       "form": "debate",
       "motion": "品牌是否应立即终止争议代言联名",

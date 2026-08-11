@@ -125,12 +125,10 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
   const runMemberAction = async (
     targetId: string,
     action: () => Promise<void>,
-    okMessage: string,
   ) => {
     setBusyUserId(targetId);
     try {
       await action();
-      notifySuccess(okMessage);
       setKickConfirmId(null);
     } catch (err) {
       notifyError(err, messagingErrorMessage(err, "操作失败，请重试"));
@@ -188,11 +186,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
             disabled={busy}
             onClick={(e) => {
               e.stopPropagation();
-              void runMemberAction(
-                m.id,
-                () => kickMember(chatId, m.id),
-                "已踢出该成员",
-              );
+              void runMemberAction(m.id, () => kickMember(chatId, m.id));
             }}
           >
             {busy ? "处理中…" : "确认踢出"}
@@ -208,10 +202,8 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
           disabled={busy}
           onClick={(e) => {
             e.stopPropagation();
-            void runMemberAction(
-              m.id,
-              () => setAdminMute(chatId, m.id, !m.muted_by_admin),
-              m.muted_by_admin ? "已解除禁言" : "已禁言",
+            void runMemberAction(m.id, () =>
+              setAdminMute(chatId, m.id, !m.muted_by_admin),
             );
           }}
         >

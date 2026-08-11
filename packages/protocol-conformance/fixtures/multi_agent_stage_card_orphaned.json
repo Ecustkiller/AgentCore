@@ -24,7 +24,7 @@
     {
       "type": "run_plan",
       "payload": {
-        "execution_id": "exec_stage_card",
+        "execution_id": "exec_stage_card_act2",
         "plan_type": "multi_agent",
         "task_summary": "多视角调研：品牌是否应立即终止争议代言联名",
         "agents": [
@@ -258,6 +258,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "好的，我们换个话题。",
     "reasoning": "",
     "captainContext": [],

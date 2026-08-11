@@ -1,6 +1,10 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { TeamPreviewWorkerView } from "./types";
+import {
+  formatWorkspaceLabel,
+  resolveWorkspacePresentation,
+} from "./workspacePresentation";
 
 type ReadonlyProps = {
   mode?: "readonly";
@@ -21,6 +25,7 @@ export type WorkerPreviewRowsProps = ReadonlyProps | InteractiveProps;
  * Worker 分工表 — shared by hot TeamPreviewCard/Graph (readonly) and cold
  * TeamPreviewResumeCard (interactive: 写盘收紧 / 任务折叠).
  * CEO 提案模型只读展示；人改模型 / 排除岗 UI 已撤（后端契约仍保留）。
+ * 工作区：全员同桌一行汇总，不一致逐人；旧帧无显示名不画。
  */
 export function WorkerPreviewRows(props: WorkerPreviewRowsProps) {
   if (props.mode === "interactive") {
@@ -29,13 +34,31 @@ export function WorkerPreviewRows(props: WorkerPreviewRowsProps) {
   return <ReadonlyWorkerRows workers={props.workers} />;
 }
 
+function WorkspaceSummary({ name }: { name: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {formatWorkspaceLabel(name)}
+    </p>
+  );
+}
+
+function WorkspaceChip({ name }: { name: string }) {
+  return (
+    <span className="text-xs text-muted-foreground">
+      {formatWorkspaceLabel(name)}
+    </span>
+  );
+}
+
 function ReadonlyWorkerRows({
   workers,
 }: {
   workers: readonly TeamPreviewWorkerView[];
 }) {
+  const desk = resolveWorkspacePresentation(workers);
   return (
     <div className="mt-2 space-y-1.5">
+      {desk.mode === "summary" && <WorkspaceSummary name={desk.name} />}
       {workers.map((w) => (
         <div
           key={w.run_id}
@@ -56,6 +79,9 @@ function ReadonlyWorkerRows({
               >
                 {w.write_capability_label}
               </span>
+            )}
+            {desk.mode === "perWorker" && w.target_folder_name && (
+              <WorkspaceChip name={w.target_folder_name} />
             )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
@@ -83,6 +109,7 @@ function InteractiveWorkerRows({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const desk = resolveWorkspacePresentation(workers);
 
   const toggle = (runId: string) => {
     setExpanded((prev) => {
@@ -95,6 +122,7 @@ function InteractiveWorkerRows({
 
   return (
     <div className="mt-2 space-y-1.5">
+      {desk.mode === "summary" && <WorkspaceSummary name={desk.name} />}
       {workers.map((w) => {
         const open = expanded.has(w.run_id);
         const effectiveTextOnly =
@@ -157,6 +185,9 @@ function InteractiveWorkerRows({
                   撤销
                 </button>
               )}
+            {desk.mode === "perWorker" && w.target_folder_name && (
+              <WorkspaceChip name={w.target_folder_name} />
+            )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
                 依赖 {w.depends_on.length} 步

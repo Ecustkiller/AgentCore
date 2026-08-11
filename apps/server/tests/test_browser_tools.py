@@ -66,7 +66,7 @@ _BROWSER_NAMES = frozenset(
 
 def _fail_text(result) -> str:
     """Browser failures put the message in ``error`` only (avoid output+error double)."""
-    return (result.error or result.output or "")
+    return result.error or result.output or ""
 
 
 # -- governance (D11 五维) ------------------------------------------------------
@@ -124,12 +124,14 @@ def test_ceo_registry_holds_interactive_browser_when_include_browser():
     on = {s.name for s in build_ceo_tool_registry(include_browser=True).list_all()}
     assert (_BROWSER_NAMES & on) == (_BROWSER_NAMES - {"browser_screenshot"})
     assert "browser_screenshot" not in on
-    assert build_ceo_tool_registry(include_browser=True).get(
-        "browser_navigate"
-    ).schema.approval is ToolApproval.GRANTABLE
-    assert build_ceo_tool_registry(include_browser=True).get(
-        "browser_click"
-    ).schema.approval is ToolApproval.GRANTABLE
+    assert (
+        build_ceo_tool_registry(include_browser=True).get("browser_navigate").schema.approval
+        is ToolApproval.GRANTABLE
+    )
+    assert (
+        build_ceo_tool_registry(include_browser=True).get("browser_click").schema.approval
+        is ToolApproval.GRANTABLE
+    )
 
 
 # -- cloud / local gate --------------------------------------------------------
@@ -328,7 +330,11 @@ async def test_navigate_builds_display_contract_and_writes_keyframe(tmp_path):
     session = _FakeSession(
         BrowserCommandResult(
             ok=True,
-            data={"final_url": "https://example.com/", "title": "Example Domain", "http_status": 200},
+            data={
+                "final_url": "https://example.com/",
+                "title": "Example Domain",
+                "http_status": 200,
+            },
             frame=b"\xff\xd8\xff\xe0jpeg",
         )
     )
@@ -591,7 +597,9 @@ async def test_keyframe_count_cap_stops_capturing(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "browser_keyframe_max_per_turn", 1)
     kf = KeyframeTracker()
     session = _FakeSession(
-        BrowserCommandResult(ok=True, data={"final_url": "https://x/", "title": "T"}, frame=b"\xff\xd8x")
+        BrowserCommandResult(
+            ok=True, data={"final_url": "https://x/", "title": "T"}, frame=b"\xff\xd8x"
+        )
     )
     tool = BrowserNavigateTool(registry=_FakeRegistry(session=session, keyframes=kf))
     first = await tool.execute({"url": "https://x/"}, _ctx(tmp_path))
@@ -605,7 +613,9 @@ async def test_keyframe_count_cap_stops_capturing(tmp_path, monkeypatch):
 async def test_keyframe_size_cap_skips_oversized_frame(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "browser_keyframe_max_bytes", 4)
     session = _FakeSession(
-        BrowserCommandResult(ok=True, data={"final_url": "https://x/", "title": "T"}, frame=b"\xff\xd8oversized")
+        BrowserCommandResult(
+            ok=True, data={"final_url": "https://x/", "title": "T"}, frame=b"\xff\xd8oversized"
+        )
     )
     tool = BrowserNavigateTool(registry=_FakeRegistry(session=session))
     result = await tool.execute({"url": "https://x/"}, _ctx(tmp_path))
@@ -687,8 +697,8 @@ def test_browser_type_schema_guides_password_login():
     assert "M0 不支持登录" not in desc
 
 
-def test_mutation_schemas_mention_inline_ref_table():
-    """click/type/scroll/navigate success already carries elements — snapshot only if needed."""
+def test_mutation_schemas_require_receipt_verification():
+    """click/type/scroll/navigate: ref table + must verify typed/clicked; snapshot when needed."""
     from agentcore.tools.builtin.browser import BrowserClickTool, BrowserScrollTool
 
     for tool in (
@@ -699,8 +709,12 @@ def test_mutation_schemas_mention_inline_ref_table():
     ):
         desc = tool.schema.description
         assert "elements" in desc
-        assert "仅必要" in desc or "仅当" in desc
+        assert "visible_text" in desc
         assert "browser_snapshot" in desc
+        assert "验收" in desc or "matched" in desc or "was_disabled" in desc
+        # Old "only snapshot when needed / success already enough" framing is gone.
+        assert "仅必要" not in desc
+        assert "可直接用于下一步；仅当" not in desc
 
 
 # -- 甲/乙：本会话 HTML 相对路径 ------------------------------------------------
@@ -731,9 +745,7 @@ async def test_sandbox_workspace_url_fails_honestly(tmp_path):
         BrowserCommandResult(ok=True, data={"final_url": "https://x/", "title": "T"})
     )
     tool = BrowserNavigateTool(registry=_FakeRegistry(session=session))
-    result = await tool.execute(
-        {"url": "workspace://c1/site/index.html"}, _ctx(tmp_path)
-    )
+    result = await tool.execute({"url": "workspace://c1/site/index.html"}, _ctx(tmp_path))
     assert result.success is False
     assert "完整预览" in _fail_text(result)
     assert session.sent == []
@@ -845,7 +857,137 @@ def test_classify_and_rewrite_navigate_targets():
         rewrite_local_navigate_url("site/index.html", "Conv-ID")
         == "workspace://conv.conv-id/site/index.html"
     )
-    assert (
-        rewrite_local_navigate_url("https://example.com/", "c1")
-        == "https://example.com/"
+    assert rewrite_local_navigate_url("https://example.com/", "c1") == "https://example.com/"
+
+
+# -- Post-conditions (typed / clicked) + visible_text --------------------------
+@pytest.mark.asyncio
+async def test_type_matched_false_is_tool_failure(tmp_path):
+    """Executor reports matched=false → tool success=False with actionable error + evidence."""
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/chat",
+                "title": "Chat",
+                "snapshot_version": 4,
+                "elements": (
+                    '[e1] textarea: composer | placeholder="Type…" | value=""\n'
+                    "---\n"
+                    "visible_text: Alice: hi"
+                ),
+                "aria": "- document",
+                "typed": {
+                    "ref": "e1",
+                    "requested_chars": 5,
+                    "actual_chars": 0,
+                    "matched": False,
+                    "method": "cdp_insertText",
+                },
+            },
+            frame=b"\xff\xd8\xff\xe0jpeg",
+        )
     )
+    tool = BrowserTypeTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({"ref": "e1", "text": "hello"}, _ctx(tmp_path))
+    assert result.success is False
+    assert result.metadata.get("code") == "postcondition_failed"
+    err = _fail_text(result)
+    assert "写入未生效" in err
+    assert "不是「动作根本没发生」" in err
+    assert "matched=false" in err
+    payload = json.loads(result.output)
+    assert payload["typed"]["matched"] is False
+    assert payload["typed"]["actual_chars"] == 0
+    uw = payload["untrusted_web_content"]
+    assert uw["visible_text"] == "Alice: hi"
+    assert "visible_text:" not in (uw.get("elements") or "")
+    assert "[e1] textarea" in (uw.get("elements") or "")
+
+
+@pytest.mark.asyncio
+async def test_type_matched_true_remains_success(tmp_path):
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/",
+                "title": "Example",
+                "snapshot_version": 2,
+                "elements": '[e1] textarea: composer | value="hello"',
+                "typed": {
+                    "ref": "e1",
+                    "requested_chars": 5,
+                    "actual_chars": 5,
+                    "matched": True,
+                    "method": "cdp_insertText",
+                },
+            },
+            frame=b"\xff\xd8\xff\xe0jpeg",
+        )
+    )
+    tool = BrowserTypeTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({"ref": "e1", "text": "hello"}, _ctx(tmp_path))
+    assert result.success is True
+    payload = json.loads(result.output)
+    assert payload["typed"]["matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_click_was_disabled_is_tool_failure(tmp_path):
+    from agentcore.tools.builtin.browser import BrowserClickTool
+
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/",
+                "title": "Example",
+                "snapshot_version": 5,
+                "elements": "[e2] button disabled: Send",
+                "clicked": {
+                    "ref": "e2",
+                    "was_disabled": True,
+                    "role": "button",
+                    "name": "Send",
+                },
+            },
+            frame=b"\xff\xd8\xff\xe0jpeg",
+        )
+    )
+    tool = BrowserClickTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({"ref": "e2"}, _ctx(tmp_path))
+    assert result.success is False
+    assert result.metadata.get("code") == "postcondition_failed"
+    err = _fail_text(result)
+    assert "禁用" in err
+    assert "was_disabled=true" in err
+    assert "不是「动作根本没发生」" in err
+    payload = json.loads(result.output)
+    assert payload["clicked"]["was_disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_visible_text_capped_in_untrusted(tmp_path):
+    from agentcore.tools.builtin.browser import _VISIBLE_TEXT_MAX
+
+    huge = "x" * (_VISIBLE_TEXT_MAX + 500)
+    session = _FakeSession(
+        BrowserCommandResult(
+            ok=True,
+            data={
+                "final_url": "https://example.com/",
+                "title": "T",
+                "snapshot_version": 1,
+                "elements": f"[e1] button: Go\n---\nvisible_text: {huge}",
+            },
+        )
+    )
+    tool = BrowserSnapshotTool(registry=_FakeRegistry(session=session))
+    result = await tool.execute({}, _ctx(tmp_path))
+    assert result.success
+    uw = json.loads(result.output)["untrusted_web_content"]
+    assert len(uw["visible_text"]) <= _VISIBLE_TEXT_MAX
+    assert uw["visible_text"].endswith("x" * 20)
+    assert "visible_text:" not in (uw.get("elements") or "")
+    assert "[e1] button: Go" in uw["elements"]

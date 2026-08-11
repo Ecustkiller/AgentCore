@@ -104,7 +104,6 @@ function AvatarSection() {
     setError(null);
     try {
       setAuthenticated(await uploadAvatar(file));
-      notifySuccess("头像已更新");
     } catch (err) {
       setError(errMsg(err, "上传失败，请重试"));
     } finally {
@@ -117,7 +116,6 @@ function AvatarSection() {
     setError(null);
     try {
       setAuthenticated(await deleteAvatar());
-      notifySuccess("已恢复默认头像");
     } catch (err) {
       setError(errMsg(err, "操作失败，请重试"));
     } finally {
@@ -206,7 +204,6 @@ function ProfileSection() {
       setAuthenticated(updated);
       setDisplayName(updated.displayName);
       setEmail(updated.email ?? "");
-      notifySuccess("资料已更新");
     } catch (e) {
       setError(errMsg(e, "保存失败，请重试"));
     } finally {
@@ -309,7 +306,8 @@ function PasswordSection() {
     try {
       await changePassword(current, next);
       reset();
-      notifySuccess("密码已更新，其他设备需重新登录");
+      // 其他设备被登出这件事在本机不可见，静默会让用户无法确认是否生效。
+      notifySuccess("密码已更新", { description: "其他设备需要重新登录。" });
     } catch (e) {
       setError(errMsg(e, "修改失败，请重试"));
     } finally {

@@ -1,8 +1,10 @@
 """Episodic (session-summary) memory layer.
 
-Each settled conversation writes one ≤N-char summary into the user's memory folder
-under ``情景/<id>.md``. Summaries are append-only, never deduped, never injected into
-prompts — they only feed the later semantic consolidation pass.
+Each settled conversation writes one ≤N-char dialogue digest (plus optional verified
+project-fact bullets) into the user's memory folder under ``情景/<id>.md``. Digests are
+append-only, never deduped, never injected into prompts — they only feed the later
+semantic consolidation pass. When turn_journal shows real tool activity, the digest
+input includes a secret-redacted action inventory so verified paths/commands can land.
 """
 
 from __future__ import annotations
@@ -19,6 +21,11 @@ from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
 from agentcore.llm.provider.protocol import TokenUsage
+from agentcore.memory.action_inventory import (
+    TurnActionInventory,
+    inventory_from_json,
+    render_action_inventory_for_prompt,
+)
 from agentcore.memory.conversation_title import ChatMessage
 from agentcore.memory.store import (
     EPISODIC_DIR,
@@ -31,6 +38,9 @@ from agentcore.memory.store import (
 
 logger = get_logger(__name__)
 
+_FACTS_HEADING = "## 本场证实的项目事实"
+_MAX_VERIFIED_FACTS_CHARS = 600
+
 
 @dataclass(frozen=True)
 class EpisodeRecord:
@@ -40,6 +50,8 @@ class EpisodeRecord:
     conversation_id: str
     summary: str
     created_at: str  # ISO
+    # Secret-redacted action inventory JSON (files/commands/searches); empty when absent.
+    actions_json: str = ""
 
 
 @dataclass
@@ -109,18 +121,29 @@ def _parse_meta(raw: str) -> ScopeMemoryMeta:
     )
 
 
-def _render_episode_body(*, conversation_id: str, summary: str, created_at: str) -> str:
+def _render_episode_body(
+    *,
+    conversation_id: str,
+    summary: str,
+    created_at: str,
+    actions_json: str = "",
+) -> str:
     """Markdown body with a tiny machine header; human-readable summary below."""
-    return (
+    header = (
         f"<!-- conversation_id: {conversation_id} -->\n"
-        f"<!-- created_at: {created_at} -->\n\n"
-        f"{summary.strip()}\n"
+        f"<!-- created_at: {created_at} -->\n"
     )
+    if actions_json.strip():
+        # Single-line comment so parsers stay simple.
+        compact = " ".join(actions_json.split())
+        header += f"<!-- actions: {compact} -->\n"
+    return f"{header}\n{summary.strip()}\n"
 
 
 def _parse_episode_body(episode_id: str, body: str) -> EpisodeRecord | None:
     conversation_id = ""
     created_at = ""
+    actions_json = ""
     lines = body.splitlines()
     text_lines: list[str] = []
     for line in lines:
@@ -131,6 +154,9 @@ def _parse_episode_body(episode_id: str, body: str) -> EpisodeRecord | None:
         if stripped.startswith("<!-- created_at:") and stripped.endswith("-->"):
             created_at = stripped[len("<!-- created_at:") : -3].strip()
             continue
+        if stripped.startswith("<!-- actions:") and stripped.endswith("-->"):
+            actions_json = stripped[len("<!-- actions:") : -3].strip()
+            continue
         text_lines.append(line)
     summary = "\n".join(text_lines).strip()
     if not summary:
@@ -140,7 +166,55 @@ def _parse_episode_body(episode_id: str, body: str) -> EpisodeRecord | None:
         conversation_id=conversation_id,
         summary=summary,
         created_at=created_at or datetime.now(UTC).isoformat(),
+        actions_json=actions_json,
     )
+
+
+def episode_actions(ep: EpisodeRecord) -> TurnActionInventory:
+    """Parse the stored action inventory for one episode (empty if absent)."""
+    return inventory_from_json(ep.actions_json)
+
+
+def merge_episode_actions(episodes: Sequence[EpisodeRecord]) -> TurnActionInventory:
+    """Union action inventories across undigested episodes (semantic nav gate)."""
+    from agentcore.memory.action_inventory import merge_inventories
+
+    return merge_inventories([episode_actions(ep) for ep in episodes])
+
+
+def split_summary_and_facts(text: str) -> tuple[str, str]:
+    """Split episodic LLM output into dialogue summary + optional verified-facts block."""
+    raw = (text or "").strip()
+    if not raw:
+        return "", ""
+    marker = _FACTS_HEADING
+    idx = raw.find(marker)
+    if idx < 0:
+        return raw, ""
+    summary = raw[:idx].strip()
+    facts = raw[idx + len(marker) :].strip()
+    return summary, facts
+
+
+def compose_episode_summary(
+    summary: str, facts: str, *, max_chars: int
+) -> str:
+    """Clamp the dialogue digest; keep a bounded verified-facts section when present."""
+    clamped = clamp_summary(summary, max_chars)
+    bullets: list[str] = []
+    for ln in (facts or "").splitlines():
+        item = ln.strip()
+        if not item:
+            continue
+        item = item[2:].strip() if item.startswith("- ") else item.lstrip("- ").strip()
+        if item:
+            bullets.append(f"- {item}")
+    if not bullets:
+        return clamped
+    facts_md = "\n".join(bullets)
+    if len(facts_md) > _MAX_VERIFIED_FACTS_CHARS:
+        facts_md = facts_md[: _MAX_VERIFIED_FACTS_CHARS - 1].rstrip() + "…"
+    return f"{clamped}\n\n{_FACTS_HEADING}\n{facts_md}"
 
 
 async def load_scope_meta(
@@ -176,13 +250,25 @@ async def append_episode(
     summary: str,
     scope: MemoryScope = None,
     max_chars: int = 200,
+    actions: TurnActionInventory | None = None,
 ) -> EpisodeRecord:
-    """Append one session summary. Never dedups. Returns the stored record."""
+    """Append one session summary. Never dedups. Returns the stored record.
+
+    ``summary`` may already include a ``## 本场证实的项目事实`` section; only the
+    dialogue paragraph is hard-capped to ``max_chars``.
+    """
     episode_id = uuid.uuid4().hex
     created_at = datetime.now(UTC).isoformat()
-    clamped = clamp_summary(summary, max_chars)
+    dialogue, facts = split_summary_and_facts(summary)
+    stored = compose_episode_summary(dialogue, facts, max_chars=max_chars)
+    actions_json = ""
+    if actions is not None and not actions.is_empty():
+        actions_json = actions.to_json()
     body = _render_episode_body(
-        conversation_id=conversation_id, summary=clamped, created_at=created_at
+        conversation_id=conversation_id,
+        summary=stored,
+        created_at=created_at,
+        actions_json=actions_json,
     )
     await store.save(user_id, episodic_path(episode_id), body, scope=scope)
     logger.info(
@@ -190,14 +276,15 @@ async def append_episode(
         user_id=user_id,
         conversation_id=conversation_id,
         episode_id=episode_id,
-        chars=len(clamped),
+        chars=len(stored),
         scope=scope or "global",
     )
     return EpisodeRecord(
         id=episode_id,
         conversation_id=conversation_id,
-        summary=clamped,
+        summary=stored,
         created_at=created_at,
+        actions_json=actions_json,
     )
 
 
@@ -240,10 +327,25 @@ async def mark_episodes_digested(
 
 _EPISODIC_SYSTEM = """\
 Summarize this conversation for a later long-term-memory consolidation pass.
-Write ONE short paragraph (or a few short sentences) in the user's language covering:
-what the user wanted, durable facts/preferences that surfaced, and any correction the
-user made. Omit one-off task details and tool noise. Output ONLY the summary text —
-no JSON, no title, no bullet list. Keep it under the character budget given below.
+
+Output format (plain text, no JSON, no title):
+1) ONE short paragraph in the user's language covering: what the user wanted,
+   durable facts/preferences that surfaced, and any correction the user made.
+   Keep the paragraph under the character budget given below.
+2) OPTIONAL second block — only when the Turn action inventory lists real
+   tool activity that verified project ops knowledge. Start it exactly with:
+
+## 本场证实的项目事实
+
+Then 1–6 short bullets. Each bullet MUST be something actually verified by the
+action inventory (a real path that was read/written, a command that was run, a
+search query that hit, or a pitfall observed while doing those). No speculation.
+A fact is worth writing ⟺ the next session can skip one action because of it
+(less re-reading / re-asking / re-failing). If the inventory is empty or nothing
+meets that bar, OMIT the facts section entirely.
+
+Omit one-off chat trivia from the paragraph. Tool noise belongs ONLY in the
+verified-facts section (and only when verified).
 
 Preference / habit rule (strict):
 - User preferences and work habits may ONLY come from the user's explicit statements
@@ -260,7 +362,11 @@ _EPISODIC_TIMEOUT_SECONDS = 20.0
 
 class EpisodicSummarizer(Protocol):
     async def summarize(
-        self, messages: Sequence[ChatMessage], *, max_chars: int
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_chars: int,
+        actions: TurnActionInventory | None = None,
     ) -> str: ...
 
 
@@ -278,11 +384,20 @@ class LLMEpisodicSummarizer:
         self.last_model: str = ""
 
     async def summarize(
-        self, messages: Sequence[ChatMessage], *, max_chars: int
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_chars: int,
+        actions: TurnActionInventory | None = None,
     ) -> str:
         convo = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+        inv = actions or TurnActionInventory()
+        actions_block = render_action_inventory_for_prompt(inv)
         user_prompt = (
-            f"# Character budget\n{max_chars}\n\n# Conversation\n{convo}\n\n"
+            f"# Character budget (dialogue paragraph only)\n{max_chars}\n\n"
+            f"# Turn action inventory (verified tool activity; already secret-redacted)\n"
+            f"{actions_block}\n\n"
+            f"# Conversation\n{convo}\n\n"
             "Write the session summary now."
         )
         request = build_selected_request(
@@ -302,7 +417,11 @@ class LLMEpisodicSummarizer:
             return ""
         self.last_usage = response.usage
         self.last_model = response.model or self._selected.model or ""
-        return clamp_summary(response.content or "", max_chars)
+        dialogue, facts = split_summary_and_facts(response.content or "")
+        # Drop "verified" facts when there was no real tool activity (anti-hallucination).
+        if inv.is_empty():
+            facts = ""
+        return compose_episode_summary(dialogue, facts, max_chars=max_chars)
 
 
 def fallback_episode_summary(

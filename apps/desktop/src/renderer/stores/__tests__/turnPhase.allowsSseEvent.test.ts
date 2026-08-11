@@ -42,6 +42,14 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
     },
   );
 
+  it.each(TERMINAL_OR_STOPPING)(
+    "allows user_interjection and turn_queued in phase %s",
+    (phase) => {
+      expect(allowsSseEvent(phase, "user_interjection")).toBe(true);
+      expect(allowsSseEvent(phase, "turn_queued")).toBe(true);
+    },
+  );
+
   it("does not treat question_posted as a free-for-all required event", () => {
     // question_posted is in INTERACTION_KIND_WIRE but is not `*_required`.
     expect(allowsSseEvent("completed", "question_posted")).toBe(false);

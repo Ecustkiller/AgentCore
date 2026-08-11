@@ -137,10 +137,10 @@ _ASK_USER_MIDTASK = """\
   `register_local_project` / `bind_local_folder`，勿当默认推荐、勿与云平级主推。
 - 同指挥面新建云项目（**仅**用户明确要求新建 / 显式多线先建；禁止为过写盘闸而建；\
   裸聊写盘缺桌由运行时自动建云桌）→ `create_project`（只建云；禁改写本会话 folder_id）。
-  多项目整条（摸已登记→只读跨桌；写盘→同次 `delegate`+`target_folder_id`；\
-  先建齐再派；拒后禁塌缩窄例外）→
+  多项目整条（跨已登记→同次 `delegate`+`target_folder_id`，读写通吃；\
+  CEO 只读跨桌仅派前认桌；先建齐再派；拒后禁塌缩窄例外）→
   `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
-  【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；写仍派工换桌。
+  【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；跨项目须派工换桌。
 - 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
   勿再弹 `open_local_project` 建新；换工程优先导入/连 Git，或本机传统换开\
   （勿默认催 `create_project` 过写盘闸）。

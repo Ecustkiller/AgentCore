@@ -44,8 +44,7 @@ from agentcore.runtime.suspension.persistence import (
     list_paused_turns,
     load_paused_turn,
 )
-from agentcore.runtime.turn.runs import ResumeDeferredWaiter
-from agentcore.runtime.turn.runs import turn_runs
+from agentcore.runtime.turn.runs import ResumeDeferredWaiter, turn_runs
 
 from ._helpers import (
     _preflight_owned_chat_turn,

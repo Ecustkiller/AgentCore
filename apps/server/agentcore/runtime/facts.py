@@ -548,20 +548,7 @@ class TurnFactLog:
 current_fact_log: ContextVar[TurnFactLog | None] = ContextVar("current_fact_log", default=None)
 
 
-# Execution-level kinds that belong on the host graph journal during跨回合同图追加.
-# Display DURABLE growth events are diverted in EventSink via is_graph_growth_event;
-# here we only divert the §8.3 rebuild facts workers emit while the divert is bound.
-_HOST_DIVERT_FACT_KINDS: frozenset[str] = frozenset(
-    {
-        FactKind.PLAN_SNAPSHOT.value,
-        FactKind.RUN_HEAD.value,
-        FactKind.MESSAGE_FINAL.value,
-        FactKind.LLM_CALL.value,
-        FactKind.TOOL_CALL.value,
-        FactKind.NOTE.value,
-        FactKind.ROUND_BOUNDARY.value,
-    }
-)
+# (retired) 跨回合同图 divert 曾把 §8.3 rebuild facts 续写宿主 journal；现已拆除。
 
 
 def _settlement_key_in_fact_log(
@@ -606,9 +593,6 @@ def record_turn_fact(fact: Fact) -> asyncio.Future[int | None] | None:
     durable append and returns a Future that resolves to the journal seq (SSE barrier
     stamps ``id:`` from it before delivery).
 
-    跨回合同图追加：divert 绑定时，worker 侧 §8.3 重建 fact 续写宿主 ``turn_id``；
-    ``graph_append`` 等追加回合显示事实仍走当前 writer（由 EventSink 分流）。
-
     D8 settlement re-emit: when the writer would skip the durable write, do **not**
     append a second row to ``TurnFactLog`` if that settlement key is already present
     (cold resume: prewrite + claim put ``*_resolved`` in the inherited prefix). A
@@ -617,12 +601,7 @@ def record_turn_fact(fact: Fact) -> asyncio.Future[int | None] | None:
     ``prewrite_settlement`` (which bypasses the fact log) still records once so the
     log catches up with the durable row.
     """
-    from agentcore.runtime.delegate.graph_append import current_graph_append_redirect
     from agentcore.runtime.journal.writer import current_journal_writer
-
-    redirect = current_graph_append_redirect.get()
-    if redirect is not None and fact.kind in _HOST_DIVERT_FACT_KINDS:
-        return redirect.host_writer.schedule_append(fact.entry())
 
     entry = fact.entry()
     log = current_fact_log.get()

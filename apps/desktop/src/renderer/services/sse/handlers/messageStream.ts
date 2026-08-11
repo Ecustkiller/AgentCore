@@ -3,11 +3,8 @@ import { parseResumeDeferredPayload } from "@/lib/resumeDeferred";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
-import {
-  notifySteerAccepted,
-  notifySteerDegradedToQueue,
-  notifyTurnQueued,
-} from "@/services/turns/queuedNotify";
+import { notifySteerDegradedToQueue } from "@/services/turns/queuedNotify";
+import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import {
   completeTurnPhase,
   getRuntime,
@@ -49,7 +46,6 @@ import {
   queueReasoningDelta,
 } from "../contentBuffer";
 import { flushPendingFrames } from "../execFrameBuffer";
-import { clearGraphAppendRedirect } from "../helpers";
 import type { DispatchContext } from "../types";
 
 function finalizeTurnTrace(conversationId: string): void {
@@ -66,18 +62,21 @@ export function handleMessageStreamEvent(
 
   switch (event.type) {
     case "turn_queued": {
-      // EPHEMERAL（不进 journal / conformance ProjectedTurn）——与 fold 穷尽 no-op
-      // 对齐；live toast。条由 midFlight upsert QueuedTurnsBar（不插用户泡）。
+      // EPHEMERAL =「队列变了」信号；内容权威是 GET。
+      // 本端发送路径已在 midFlight ack 时 upsert（低延迟）；条上已有该
+      // queue_id 则不再 GET。缺 id = 协调升队 / 多端 / 他端排队 → 对账拉内容。
+      // 普通排队：条即反馈，不 toast。steer 降级须 toast（条 alone 看不出降级）。
       const p = event.payload as TurnQueuedPayload;
-      notifyTurnQueued(p.position ?? 1, p.queue_depth ?? 1);
       if (p.degraded_from === "steer") {
         notifySteerDegradedToQueue();
       }
-      return true;
-    }
-    case "turn_steer_accepted": {
-      // EPHEMERAL：经典+steer 软插入 ack → toast；fold 穷尽 no-op。
-      notifySteerAccepted();
+      const known = useQueuedTurnsStore
+        .getState()
+        .list(conversationId)
+        .some((e) => e.queueId === p.queue_id);
+      if (!known) {
+        void reconcileQueuedTurns(conversationId);
+      }
       return true;
     }
     case "turn_queue_started": {
@@ -300,7 +299,6 @@ export function handleMessageStreamEvent(
         finish_reason: payload.finish_reason ?? null,
       });
       finalizeTurnTrace(conversationId);
-      clearGraphAppendRedirect(conversationId);
       if (paused) surfaceResumeFromLiveTurn(conversationId, ctx.source);
       // 正常完成 / 停止确认：推进生命周期。stopping → stopped；其余 → completed。
       // 超时已进 terminal 则不覆盖（避免 stopped 被迟到 message_end 改成 completed）。
@@ -342,7 +340,6 @@ export function handleMessageStreamEvent(
       }
       // Same as message_end: keep the complete window; idle prune is LRU-only.
       finalizeTurnTrace(conversationId);
-      clearGraphAppendRedirect(conversationId);
       completeTurnPhase(
         conversationId,
         getTurnPhase(conversationId) === "stopping" ? "stopped" : "failed",

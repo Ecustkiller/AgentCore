@@ -51,6 +51,20 @@ pnpm -C apps/desktop dev
 | `pnpm -C apps/desktop dev:web` | 纯浏览器跑渲染层（无 Electron，便于 UI 迭代） |
 | `pnpm -C apps/desktop shoot` | 无头截图自检 |
 | `pnpm -C apps/desktop shoot:graph-probe` | 协作图视口探针 |
+| `pnpm -C apps/desktop shoot:graph-perf` | 协作图离线掉帧探针（`#/preview`） |
+| `pnpm -C apps/desktop shoot:graph-perf-live` | 协作图**实时**掉帧探针（CDP 连正在跑的 dev 应用） |
+
+实时探针需先带调试端口启动应用（测真实 ELK / 大图；离线探针造不出）：
+
+```bash
+pnpm -C apps/desktop exec electron-vite dev --remoteDebuggingPort=9222
+# 另开终端
+pnpm -C apps/desktop shoot:graph-perf-live
+# 可选：pnpm -C apps/desktop shoot:graph-perf-live -- 180
+# 可选：pnpm -C apps/desktop shoot:graph-perf-live -- --cid <conversationId>
+```
+
+报告写入 `shoot-out-graph-perf/live-*.json`（含实测刷新率；遮挡导致的 ~1Hz rAF 限流秒会剔除）。
 
 开发账号可与后端 `seed_dev_user.py` + `.env.local` 自动登录配合（见本地开发）。
 

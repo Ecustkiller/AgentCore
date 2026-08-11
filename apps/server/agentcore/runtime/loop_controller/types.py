@@ -55,12 +55,12 @@ _VALIDATION_PATH_STOP_STEER = (
     "同因参数/契约错误已连续出现：请停止原样重试该调用路径，"
     "修正参数或换策略后再试；工具保持可用。"
 )
-# Landing tools that echoed a landed-summary / cleared stub as write args.
+# Landing tools that echoed a landed status / cleared stub back as write args.
 _LANDED_SUMMARY_ECHO_STOP_STEER = (
-    "同因把已落盘摘要/清理占位当写盘参数："
+    "同因把请求窗里的已落盘状态/清理占位当写盘参数："
     "下一拍必须先 file_read 该 path 取盘上真文，"
     "再 str_replace（优先）或按真文重填 content/new_string；"
-    "禁止再次发送 `_landed_summary` 或清理条；工具保持可用。"
+    "禁止再次原样重发该只读状态条；工具保持可用。"
     "若同 path 再原样回灌将早停。"
 )
 # Consecutive *unproductive* rounds that trip an early stop (B2 无产出早停). An

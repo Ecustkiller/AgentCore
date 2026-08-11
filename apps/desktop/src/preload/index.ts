@@ -226,6 +226,8 @@ const fsApi: FsApi = {
     }),
   consumeStagedBytes: (stagingId) =>
     ipcRenderer.invoke(FS_CHANNELS.consumeStagedBytes, { stagingId }),
+  sweepStagingOrphans: (liveStagingIds) =>
+    ipcRenderer.invoke(FS_CHANNELS.sweepStagingOrphans, { liveStagingIds }),
 };
 
 const sidecarApi: SidecarApi = {
@@ -233,6 +235,7 @@ const sidecarApi: SidecarApi = {
   cancel: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.cancel, req),
   respond: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.respond, req),
   runRedirect: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.runRedirect, req),
+  runStop: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.runStop, req),
   debateSteer: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.debateSteer, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),

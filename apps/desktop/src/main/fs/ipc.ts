@@ -46,6 +46,7 @@ import {
   stageFromAbsPath,
   stageFromBytes,
   stageFromRoot,
+  sweepStagingOrphans,
 } from "./stageAttachment";
 import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
 import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
@@ -621,5 +622,12 @@ export function registerFsIpc(): void {
     const args = requireStringFields(p, ["stagingId"]);
     if (!args) return invalidFsResult();
     return consumeStagedBytes(args.stagingId);
+  });
+
+  ipcMain.handle(FS_CHANNELS.sweepStagingOrphans, async (_e, p: unknown) => {
+    if (!isRecord(p) || !Array.isArray(p.liveStagingIds)) return;
+    await sweepStagingOrphans(
+      p.liveStagingIds.filter((id): id is string => typeof id === "string"),
+    );
   });
 }

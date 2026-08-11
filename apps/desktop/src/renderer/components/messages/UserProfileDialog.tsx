@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { notifySuccess } from "@/lib/toast";
 import {
   type UserProfile,
   acceptFriendRequest,
@@ -89,12 +88,11 @@ export function UserProfileDialog({
     return unsub;
   }, [open, userId, reload]);
 
-  const run = async (action: () => Promise<void>, okMsg?: string) => {
+  const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
       await action();
-      if (okMsg) notifySuccess(okMsg);
       if (userId) await reload(userId);
       void useMessagingStore.getState().fetchFriendRequests();
       void useMessagingStore.getState().fetchFriends();
@@ -205,7 +203,7 @@ export function UserProfileDialog({
                     void run(async () => {
                       if (!profile) return;
                       await sendFriendRequest(profile.id, message);
-                    }, "已发送好友申请")
+                    })
                   }
                 >
                   发送申请
@@ -228,7 +226,7 @@ export function UserProfileDialog({
                     void run(async () => {
                       if (!profile.request_id) return;
                       await cancelFriendRequest(profile.request_id);
-                    }, "已取消申请")
+                    })
                   }
                 >
                   取消申请
@@ -247,7 +245,7 @@ export function UserProfileDialog({
                   void run(async () => {
                     if (!profile.request_id) return;
                     await rejectFriendRequest(profile.request_id);
-                  }, "已拒绝")
+                  })
                 }
               >
                 拒绝
@@ -259,7 +257,7 @@ export function UserProfileDialog({
                   void run(async () => {
                     if (!profile.request_id) return;
                     await acceptFriendRequest(profile.request_id);
-                  }, "已成为好友")
+                  })
                 }
               >
                 同意
@@ -294,7 +292,7 @@ export function UserProfileDialog({
                       void run(async () => {
                         if (!profile) return;
                         await removeFriend(profile.id);
-                      }, "已删除好友")
+                      })
                     }
                   >
                     确认删除
@@ -341,7 +339,7 @@ export function UserProfileDialog({
                         void run(async () => {
                           if (!profile) return;
                           await blockUser(profile.id);
-                        }, "已拉黑")
+                        })
                       }
                     >
                       确认拉黑

@@ -1,5 +1,6 @@
 import { GraphAppendAnchor } from "@/components/chat/GraphAppendAnchor";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
+import { InterjectionTimeline } from "@/components/chat/InterjectionTimeline";
 import { Markdown } from "@/components/chat/Markdown";
 import {
   ComposingToolLine,
@@ -285,11 +286,19 @@ export function ProcessTimeline({
         <GraphAppendAnchor
           key={nodeKey}
           hostMessageId={node.host_message_id}
-          addedCount={node.added_count}
           actKind={append.act_kind}
           authorizedBy={append.authorized_by}
         />
       );
+    }
+    if (node.kind === "user_interjection") {
+      return messageId ? (
+        <InterjectionTimeline
+          key={nodeKey}
+          messageId={messageId}
+          interjectionId={node.interjection_id}
+        />
+      ) : null;
     }
     if (
       node.kind === "checkpoint" ||

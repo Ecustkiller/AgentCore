@@ -1,6 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button, Card } from "@/components/ui";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { ApiError } from "@/services/api";
 import { emptyWorkflowDefinition } from "@/services/workflowDefinition";
@@ -103,7 +103,6 @@ export function WorkflowsPage() {
         name: "未命名工作流",
         definition: emptyWorkflowDefinition(),
       });
-      notifySuccess(created.localOnly ? "已建本地草稿" : "已创建");
       navigate(APP_PATHS.toolbox.workflows.edit(created.id));
     } catch (e) {
       notifyError(e, "创建失败");
@@ -118,7 +117,6 @@ export function WorkflowsPage() {
     try {
       await deleteWorkflow(w.id);
       setItems((prev) => (prev ?? []).filter((x) => x.id !== w.id));
-      notifySuccess("已删除");
     } catch (e) {
       notifyError(e, "删除失败");
     } finally {

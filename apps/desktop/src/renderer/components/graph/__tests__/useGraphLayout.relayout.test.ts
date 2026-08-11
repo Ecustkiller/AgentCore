@@ -18,6 +18,7 @@ vi.mock("@/lib/elk-layout", async (importOriginal) => {
   };
 });
 
+import { clearLayoutResultCache } from "../layoutResultCache";
 import { useGraphLayout } from "../useGraphLayout";
 
 function exec(runIds: string[]): Execution {
@@ -49,6 +50,7 @@ function exec(runIds: string[]): Execution {
 
 describe("useGraphLayout · keep graph during relayout", () => {
   beforeEach(() => {
+    clearLayoutResultCache();
     computeLayout.mockReset();
     let n = 0;
     computeLayout.mockImplementation(async (nodeIds: string[]) => {
@@ -95,6 +97,7 @@ describe("useGraphLayout · keep graph during relayout", () => {
 
 describe("useGraphLayout · measure does not secondary-ELK", () => {
   beforeEach(() => {
+    clearLayoutResultCache();
     computeLayout.mockReset();
     let n = 0;
     computeLayout.mockImplementation(

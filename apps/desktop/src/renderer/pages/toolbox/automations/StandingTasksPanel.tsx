@@ -106,7 +106,6 @@ export function StandingTasksPanel() {
           tpl.installedTaskId === task.id ? { ...tpl, enabled } : tpl,
         ),
       );
-      notifySuccess(enabled ? "已启用" : "已暂停");
     } catch (e) {
       notifyError(e, "更新失败");
     } finally {
@@ -140,7 +139,6 @@ export function StandingTasksPanel() {
             : tpl,
         ),
       );
-      notifySuccess("已删除");
     } catch (e) {
       notifyError(e, "删除失败");
     } finally {
@@ -173,7 +171,6 @@ export function StandingTasksPanel() {
         folderId,
         enabled: false,
       });
-      notifySuccess("已安装系统模板，请配置时间与作用域");
       setTasks((prev) => {
         const list = prev ?? [];
         if (list.some((t) => t.id === task.id)) {

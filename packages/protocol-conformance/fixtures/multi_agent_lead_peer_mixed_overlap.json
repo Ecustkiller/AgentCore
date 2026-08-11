@@ -279,6 +279,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我会组一支团队（含嵌套 lead 与平级同名角色）。 混合批次已跑完（引擎未拒单）。",
     "reasoning": "",
     "captainContext": [],

@@ -1,4 +1,4 @@
-import { StreamError } from "@/lib/errors";
+import { StreamError, describeStreamError } from "@/lib/errors";
 import type { OutboxFlushTurnResult } from "@shared/outbox-contract";
 import type { SidecarTurnResult } from "@shared/sidecar-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1033,6 +1033,32 @@ describe("resumeConversationViaSidecar", () => {
     expect((err as StreamError).serverMessage).toBe(
       "本地引擎出错：请求参数校验失败（permissionAxes 期望 string，sidecar:resume）",
     );
+  });
+
+  it("maps turn already running to concurrency copy (not 本地引擎出错)", async () => {
+    takeRecentSidecarFailureMock.mockReturnValue(
+      "找不到 Python，无法启动本地引擎",
+    );
+    resumeMock.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'sidecar:resume': Error: turn already running",
+      ),
+    );
+
+    const err = await resumeConversationViaSidecar(baseRequest).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(StreamError);
+    const se = err as StreamError;
+    expect(se.kind).toBe("sidecar");
+    expect(se.code).toBe("sidecar_turn_busy");
+    expect(se.recoverable).toBe(false);
+    expect(se.serverMessage).toContain("回合在进行");
+    expect(se.serverMessage).not.toContain("本地引擎出错");
+    // 不得被陈旧 onStatus 诊断盖住。
+    expect(se.serverMessage).not.toContain("找不到 Python");
+    // 横幅走 serverMessage（非 turn_in_progress 盖文案）。
+    expect(describeStreamError(se)).toBe(se.serverMessage);
   });
 
   it("prefers an onStatus lifecycle diagnostic over the rejection reason", async () => {

@@ -11,6 +11,10 @@ export type TeamPreviewWorkerView = {
   model?: string;
   origin?: "platform" | "byok";
   provider_id?: string;
+  /** 该队员落座 Folder id；裸聊 scratch 缺省。 */
+  target_folder_id?: string;
+  /** 服务端解析的工作区显示名；旧帧 absent → 不展示。 */
+  target_folder_name?: string;
 };
 
 export type TeamPreviewSideView = {

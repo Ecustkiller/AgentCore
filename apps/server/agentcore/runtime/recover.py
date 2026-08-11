@@ -49,8 +49,9 @@ class SettledSuspension(NamedTuple):
     path can honor re-entrant SUSPEND (downstream checkpoint while ``resume_plan``
     runs) the same way the live engine does — PAUSED, no CEO continuation.
     ``terminal_text`` is set only when settle returns a terminal ``INTERACT``
-    effect (in-band closing without another CEO round); ask_user stop no longer
-    uses that path — it feeds CONTINUE like timeout / kickoff cancel.
+    effect (in-band closing without another CEO round). First ask_user /
+    team_preview STOP feeds CONTINUE like timeout / kickoff cancel; a second
+    consecutive STOP in the same turn upgrades to ``INTERACT`` (no CEO round).
     """
 
     output: str
@@ -110,7 +111,7 @@ async def recover_turn(
         raise ValueError("recover_turn crash redrive requires a plan projection")
     eid = state.execution_id or execution_id
     seed = dict(state.completed)
-    # Crash mid-flight teams were typically wall-coordinated (≥2 workers). Align the
+    # Crash mid-flight teams were typically wall-coordinated (≥1 worker default). Align the
     # redrive with that product default — resume_plan's coordinate default is False
     # (classic / plan_review), which would silently strip note-wall semantics.
     logger.info(
@@ -151,6 +152,12 @@ async def _settle_resume(
     model_overrides: dict[str, dict[str, str]] | None = None,
 ) -> SettledSuspension:
     """Kind-specific resume settle, projecting exclusively via ``state``."""
+    from agentcore.runtime.checkpoint_stop_streak import (
+        compose_repeated_stop_closing,
+        consecutive_checkpoint_stops,
+        is_repeated_checkpoint_stop,
+    )
+
     # research_first 仅辩论开工卡合法；其它挂起点降级为 STOP，不得静默 continue。
     if decision is CheckpointDecision.RESEARCH_FIRST and not (
         isinstance(suspension, TeamPreviewSuspension) and suspension.primitive == "debate"
@@ -161,6 +168,25 @@ async def _settle_resume(
             primitive=getattr(suspension, "primitive", None),
         )
         decision = CheckpointDecision.STOP
+
+    # Same-turn consecutive STOP → terminal INTERACT (no further CEO round).
+    # Streak is journal-derived so it survives suspend/resume; first STOP unchanged.
+    force_close = is_repeated_checkpoint_stop(suspension.journal_entries, decision)
+    prior_stops = (
+        consecutive_checkpoint_stops(suspension.journal_entries) if force_close else 0
+    )
+
+    def _after_settle(settled: SettledSuspension) -> SettledSuspension:
+        if not force_close or settled.effect is not ToolEffect.CONTINUE:
+            return settled
+        closing = compose_repeated_stop_closing(note=note)
+        logger.info(
+            "checkpoint.repeated_stop_close",
+            checkpoint_id=suspension.checkpoint_id,
+            kind=getattr(suspension.kind, "value", suspension.kind),
+            prior_stops=prior_stops,
+        )
+        return SettledSuspension(settled.output, closing, ToolEffect.INTERACT)
 
     if isinstance(suspension, AskUserSuspension):
         response = CheckpointResponse(
@@ -287,7 +313,7 @@ async def _settle_resume(
             # 场面账（style / presentation_format / automation_delivery）已拆除：
             # resume 不再 record_*；DESIGN 默认风格由 design_prompt_block 软注入。
         terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
-        return SettledSuspension(result.output, terminal, result.effect)
+        return _after_settle(SettledSuspension(result.output, terminal, result.effect))
 
     if isinstance(suspension, PlanReviewSuspension):
         sink.emit(
@@ -319,7 +345,9 @@ async def _settle_resume(
             # CONTINUE 时读帧上 ceo_review → llm 压缩注入 gate_notes（deterministic 不下发）。
             ceo_review=suspension.ceo_review,
         )
-        return SettledSuspension(delegate_result.output, None, delegate_result.effect)
+        return _after_settle(
+            SettledSuspension(delegate_result.output, None, delegate_result.effect)
+        )
 
     if isinstance(suspension, TeamPreviewSuspension):
         from agentcore.runtime.kickoff.team_veto import (
@@ -426,12 +454,15 @@ async def _settle_resume(
                 note=note,
                 arguments=dict(suspension.debate_arguments),
             )
-            # STOP / RESEARCH_FIRST：tool result 回灌 CEO 续跑（terminal_text=None）。
-            return SettledSuspension(debate_result.output, None, debate_result.effect)
+            # STOP / RESEARCH_FIRST：tool result 回灌 CEO 续跑（terminal_text=None）；
+            # 同回合连续第二次 STOP 由 ``_after_settle`` 升格 INTERACT。
+            return _after_settle(
+                SettledSuspension(debate_result.output, None, debate_result.effect)
+            )
 
         eid = state.execution_id or execution_id
         # Preview hung before the coordinate fork; CONTINUE/ADJUST must arm the
-        # background scheduler (product default for ≥2 workers).
+        # background scheduler (product default for ≥1 worker).
         # RESEARCH_FIRST 已在入口降级为 STOP，不会静默开做。
         delegate_result = await delegate_tool.resume_plan(
             plan,
@@ -449,7 +480,9 @@ async def _settle_resume(
             team_brief=suspension.team_brief,
             seed_notes=list(suspension.seed_notes),
         )
-        return SettledSuspension(delegate_result.output, None, delegate_result.effect)
+        return _after_settle(
+            SettledSuspension(delegate_result.output, None, delegate_result.effect)
+        )
 
     raise ValueError(f"unknown suspension kind: {suspension.kind!r}")
 

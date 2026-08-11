@@ -330,3 +330,32 @@ def test_module_singleton_clear():
     assert turn_queue.depth("t-clear") == 1
     assert turn_queue.clear("t-clear") == 1
     assert turn_queue.depth("t-clear") == 0
+
+
+def test_list_pending_empty_and_fifo_order_with_interjection():
+    """Snapshot: empty queue / FIFO order / interjection_id preserved / cross-conv isolation."""
+    q = TurnQueue()
+    assert q.list_pending("c-a") == []
+
+    plain = new_queued_turn(content="plain queue", user_id="u")
+    from_inj = new_queued_turn(
+        content="from interjection",
+        user_id="u",
+        interjection_id="inj-1",
+    )
+    q.enqueue("c-a", plain)
+    q.enqueue("c-a", from_inj)
+    q.enqueue("c-b", new_queued_turn(content="other conv", user_id="u", interjection_id="inj-x"))
+
+    snap_a = q.list_pending("c-a")
+    assert len(snap_a) == 2
+    assert snap_a[0] is plain
+    assert snap_a[0].interjection_id is None
+    assert snap_a[1] is from_inj
+    assert snap_a[1].interjection_id == "inj-1"
+
+    snap_b = q.list_pending("c-b")
+    assert len(snap_b) == 1
+    assert snap_b[0].content == "other conv"
+    assert snap_b[0].interjection_id == "inj-x"
+    assert q.list_pending("c-missing") == []

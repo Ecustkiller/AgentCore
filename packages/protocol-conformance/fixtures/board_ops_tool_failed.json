@@ -88,6 +88,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "当前画布未打开，无法作画。",
     "reasoning": "",
     "captainContext": [],

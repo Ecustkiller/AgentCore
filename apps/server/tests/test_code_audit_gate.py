@@ -343,3 +343,79 @@ def test_check_contract_code_audit_still_validates_loaded_json_when_channel_dead
     assert not verdict.ok
     assert any("不得标中/高" in f for f in verdict.failures)
     assert contract_run_failure_kind(verdict) == "format"
+
+
+def test_check_contract_md_landed_missing_json_is_partial_not_failed():
+    """Markdown 已落盘、仅缺配套 .audit.json → 部分交付（ok + tip），不判 failed。"""
+    from agentcore.runtime.runs.contract import check_contract
+    from agentcore.runtime.runs.types import Deliverable
+
+    md = (
+        "## 〇、人审速览\n## 一、属实缺陷\n验证方式\n定案\n"
+        "## 二、已撤销\n## 三、观察与工程债\n"
+    )
+    json_path = "AgentCore/文档/reviews/x.audit.json"
+    md_path = "AgentCore/文档/reviews/x.md"
+    d = Deliverable(
+        form="files",
+        artifacts=[md_path, json_path],
+        required_sections=["〇、人审速览", "一、属实缺陷", "二、已撤销", "三、观察与工程债"],
+        strict=True,
+        code_audit_gate=True,
+    )
+    verdict = check_contract(
+        "简报",
+        d,
+        files_written=1,
+        workspace_paths=[md_path],
+        artifact_contents={md_path: md},
+    )
+    assert verdict.ok
+    assert not any("缺少 audit JSON" in f for f in verdict.failures)
+    assert any("仅缺配套" in w and "*.audit.json" in w for w in verdict.warnings)
+    assert any("部分交付" in w for w in verdict.warnings)
+
+
+def test_missing_audit_json_without_md_is_format_repairable_directed():
+    """写盘形态仅缺 audit JSON（报告未落）→ 定向修复（format_repairable），非全量调查。"""
+    from agentcore.runtime.runs.contract import (
+        check_contract,
+        format_light_repair_feedback,
+        is_format_repairable,
+    )
+    from agentcore.runtime.runs.types import Deliverable
+
+    json_path = "AgentCore/文档/reviews/x.audit.json"
+    md_path = "AgentCore/文档/reviews/x.md"
+    d = Deliverable(
+        form="files",
+        artifacts=[md_path, json_path],
+        required_sections=[],
+        strict=True,
+        code_audit_gate=True,
+    )
+    verdict = check_contract(
+        "尚未落盘",
+        d,
+        files_written=0,
+        workspace_paths=[],
+        artifact_contents={},
+    )
+    assert not verdict.ok
+    assert any("缺少 audit JSON" in f for f in verdict.failures)
+    assert is_format_repairable(verdict)
+    fb = format_light_repair_feedback(verdict, prior_content="")
+    assert "配套" in fb and "audit.json" in fb
+    assert "不要重新检索" in fb
+    assert "file_write" in fb
+
+
+def test_describe_deliverable_code_audit_skeleton_first_hint():
+    from agentcore.runtime.runs.contract import describe_deliverable
+    from agentcore.runtime.runs.types import Deliverable
+
+    desc = describe_deliverable(
+        Deliverable(form="files", code_audit_gate=True, artifacts=["a.md", "a.audit.json"])
+    )
+    assert "骨架" in desc
+    assert "补写修复" in desc or "可补写" in desc

@@ -473,6 +473,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "error": null,
     "content": "我来组织一场多方圆桌并收场。",
     "reasoning": "",
     "captainContext": [],

@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from agentcore.core.errors import LLMError, LLMRateLimitError, LLMTimeoutError, LLMUpstreamError
+from agentcore.core.errors import (
+    LLMError,
+    LLMInvalidResponseError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+    LLMUpstreamError,
+)
 from agentcore.llm.errors import is_non_retryable_client_status, is_retryable_upstream_status
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider.openai_compatible import (
@@ -134,8 +140,93 @@ async def test_complete_does_not_retry_400(monkeypatch):
         await provider.close()
 
 
+_TEMP_REJECT_BODY = b'{"error":{"message":"invalid temperature: only 1 is allowed for this model"}}'
+
+
+async def test_complete_omits_temperature_once_on_deprecated_400(monkeypatch):
+    """Known temperature-reject 400 → strip temperature, retry once, succeed."""
+    calls: list[dict] = []
+
+    async def fake_sleep(sec: float) -> None:
+        raise AssertionError("temperature omit retry must not sleep")
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        calls.append(body)
+        if "temperature" in body:
+            return httpx.Response(400, content=_TEMP_REJECT_BODY)
+        return httpx.Response(200, json=_ok_body())
+
+    provider = await _mock_provider(handler)
+    try:
+        result = await provider.complete(_req())
+        assert result.content == "ok"
+        assert len(calls) == 2
+        assert "temperature" in calls[0]
+        assert "temperature" not in calls[1]
+        assert calls[0]["model"] == calls[1]["model"]
+    finally:
+        await provider.close()
+
+
+async def test_stream_omits_temperature_once_on_deprecated_400(monkeypatch):
+    """Streaming path: same temperature-reject 400 → omit + one retry."""
+    calls: list[dict] = []
+
+    async def fake_sleep(sec: float) -> None:
+        raise AssertionError("temperature omit retry must not sleep")
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        calls.append(body)
+        if "temperature" in body:
+            return httpx.Response(400, content=_TEMP_REJECT_BODY)
+        sse = _sse_line("ok") + "data: [DONE]\n"
+        return httpx.Response(200, content=sse.encode())
+
+    provider = await _mock_provider(handler)
+    try:
+        chunks = [c async for c in provider.stream(_req())]
+        assert any(c.delta_content == "ok" for c in chunks)
+        assert len(calls) == 2
+        assert "temperature" in calls[0]
+        assert "temperature" not in calls[1]
+    finally:
+        await provider.close()
+
+
+async def test_complete_unrelated_400_still_no_retry(monkeypatch):
+    """Other 400 bodies must not trigger the temperature omit path."""
+    calls = {"n": 0}
+
+    async def fake_sleep(sec: float) -> None:
+        raise AssertionError("unrelated 400 must not sleep/retry")
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            400, content=b'{"error":{"message":"max_tokens must be positive"}}'
+        )
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert ei.value.retryable is False
+        assert calls["n"] == 1
+        assert "max_tokens must be positive" in ei.value.message
+    finally:
+        await provider.close()
+
+
 async def test_complete_2xx_non_json_is_typed_llm_error_no_retry(monkeypatch):
-    """LLM-01 A: 2xx HTML/non-JSON → LLMError(retryable=False), no empty retry spin."""
+    """LLM-01 A: 2xx HTML/non-JSON → LLMInvalidResponseError(retryable=False), no empty retry spin."""
     calls = {"n": 0}
 
     async def fake_sleep(sec: float) -> None:
@@ -153,14 +244,34 @@ async def test_complete_2xx_non_json_is_typed_llm_error_no_retry(monkeypatch):
 
     provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMError) as ei:
+        with pytest.raises(LLMInvalidResponseError) as ei:
             await provider.complete(_req())
         err = ei.value
-        assert type(err) is LLMError
         assert err.retryable is False
         assert "响应格式无效" in err.message
         assert isinstance(err.__cause__, json.JSONDecodeError)
         assert calls["n"] == 1
+    finally:
+        await provider.close()
+
+
+async def test_list_models_2xx_non_json_is_typed_llm_error():
+    """list_models mirrors complete: 2xx non-JSON → LLMInvalidResponseError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"<html>login</html>",
+            headers={"content-type": "text/html"},
+        )
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMInvalidResponseError) as ei:
+            await provider.list_models()
+        assert ei.value.retryable is False
+        assert "模型列表响应格式无效" in ei.value.message
+        assert isinstance(ei.value.__cause__, json.JSONDecodeError)
     finally:
         await provider.close()
 
